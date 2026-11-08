@@ -203,6 +203,15 @@ func (fc *fakeCluster) serve(w http.ResponseWriter, r *http.Request) {
 	fc.calls = append(fc.calls, key)
 	h := fc.routes[key]
 	fc.mu.Unlock()
+	if name, one := strings.CutPrefix(r.URL.Path, "/api/v1/namespaces/"); h == nil && r.Method == http.MethodGet && one && !strings.Contains(name, "/") {
+		for _, ns := range fc.namespaces {
+			if ns.Name == name {
+				ns.TypeMeta = metav1.TypeMeta{Kind: "Namespace", APIVersion: "v1"}
+				writeObj(w, ns)
+				return
+			}
+		}
+	}
 	if h == nil {
 		writeStatus(w, http.StatusNotFound, metav1.StatusReasonNotFound)
 		return
@@ -343,6 +352,8 @@ type planeDraft struct {
 	templates map[string][]model.Template // by library name
 
 	releaseStaged, releaseResidue []string
+
+	declared map[model.ObjectRef]string // what DeclaredFiles answers
 }
 
 var stagedView = model.DraftView{Base: "main", Count: 1}
@@ -410,17 +421,38 @@ func (d *planeDraft) StageUpdateTemplate(_ auth.Identity, commit project.Project
 	return stagedView, nil
 }
 
-func (d *planeDraft) StageCreateNamespace(_ auth.Identity, commit, join project.ProjectInfo, spec json.RawMessage, _ changeset.LiveNamespaces) (model.DraftView, error) {
+// The tenancy stagers read each namespace through live first, as the
+// coordinator does, so the claim gate the handler binds there runs.
+
+func (d *planeDraft) StageCreateNamespace(_ auth.Identity, commit, join project.ProjectInfo, spec json.RawMessage, live changeset.LiveNamespaces) (model.DraftView, error) {
+	var p struct{ Name string }
+	_ = json.Unmarshal(spec, &p)
+	if _, err := live(p.Name); err != nil {
+		return model.DraftView{}, err
+	}
 	d.record("StageCreateNamespace "+commit.Name+","+join.Name, spec)
 	return stagedView, nil
 }
 
-func (d *planeDraft) StageCreateProject(_ auth.Identity, commit project.ProjectInfo, spec json.RawMessage, _ changeset.LiveNamespaces) (model.DraftView, error) {
+func (d *planeDraft) StageCreateProject(_ auth.Identity, commit project.ProjectInfo, spec json.RawMessage, live changeset.LiveNamespaces) (model.DraftView, error) {
+	var p struct{ Name, Namespace string }
+	_ = json.Unmarshal(spec, &p)
+	if p.Namespace == "" {
+		p.Namespace = p.Name
+	}
+	if _, err := live(p.Namespace); err != nil {
+		return model.DraftView{}, err
+	}
 	d.record("StageCreateProject "+commit.Name, spec)
 	return stagedView, nil
 }
 
-func (d *planeDraft) AdoptProject(_ auth.Identity, commit, target project.ProjectInfo, owners []string, _ changeset.LiveNamespaces) (model.DraftView, error) {
+func (d *planeDraft) AdoptProject(_ auth.Identity, commit, target project.ProjectInfo, owners []string, live changeset.LiveNamespaces) (model.DraftView, error) {
+	for _, ns := range target.Namespaces {
+		if _, err := live(ns); err != nil {
+			return model.DraftView{}, err
+		}
+	}
 	d.record("AdoptProject "+commit.Name+","+target.Name+" "+strings.Join(owners, "+"), nil)
 	return stagedView, nil
 }
@@ -433,6 +465,10 @@ func (d *planeDraft) ReleaseDeclared(_ auth.Identity, commit, target project.Pro
 func (d *planeDraft) StageCreate(_ auth.Identity, p project.ProjectInfo, res draft.Resource, spec json.RawMessage) (model.DraftView, error) {
 	d.record("StageCreate "+p.Name+" "+string(res), spec)
 	return stagedView, nil
+}
+
+func (d *planeDraft) DeclaredFiles(project.ProjectInfo) (map[model.ObjectRef]string, error) {
+	return d.declared, nil
 }
 
 func (d *planeDraft) Get(auth.Identity, project.ProjectInfo) (model.DraftView, error) {

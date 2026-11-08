@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"net/http"
@@ -20,7 +21,7 @@ import (
 
 func (s *Server) handleEdit(w http.ResponseWriter, r *http.Request) {
 	sc, ns, name, ok := s.vmScope(w, r)
-	if !ok || !s.authorize(w, r, sc, verbUpdate, ssarVM, ns) {
+	if !ok || !s.gate(w, r, sc, vmAction(verbUpdate, ns)) {
 		return
 	}
 	req, ok := decode[model.EditRequest](w, r)
@@ -39,7 +40,7 @@ func (s *Server) handleEdit(w http.ResponseWriter, r *http.Request) {
 // it. Same gates as handleEdit: only someone who may stage asks.
 func (s *Server) handleEditPreview(w http.ResponseWriter, r *http.Request) {
 	sc, ns, name, ok := s.vmScope(w, r)
-	if !ok || !s.authorize(w, r, sc, verbUpdate, ssarVM, ns) {
+	if !ok || !s.gate(w, r, sc, vmAction(verbUpdate, ns)) {
 		return
 	}
 	edit, ok := decode[model.VMEdit](w, r)
@@ -62,7 +63,7 @@ func (s *Server) handleCreate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	sc, ok := s.resolveProject(w, r, byNamespace(p.Namespace))
-	if !ok || !s.authorize(w, r, sc, verbCreate, ssarVM, p.Namespace) {
+	if !ok || !s.gate(w, r, sc, vmAction(verbCreate, p.Namespace)) {
 		return
 	}
 	result, err := s.draft.StageCreateVM(sc.id, sc.proj, raw)
@@ -74,7 +75,7 @@ func (s *Server) handleCreate(w http.ResponseWriter, r *http.Request) {
 // under its own RBAC, so the gate is the caller's own delete right.
 func (s *Server) handleDelete(w http.ResponseWriter, r *http.Request) {
 	sc, ns, name, ok := s.vmScope(w, r)
-	if !ok || !s.authorize(w, r, sc, verbDelete, ssarVM, ns) {
+	if !ok || !s.gate(w, r, sc, vmAction(verbDelete, ns)) {
 		return
 	}
 	result, err := s.draft.StageDelete(sc.id, sc.proj, "", ns, name)
@@ -149,7 +150,7 @@ func (s *Server) handleDrift(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleAdopt(w http.ResponseWriter, r *http.Request) {
 	sc, ns, name, ok := s.vmScope(w, r)
-	if !ok || !s.authorize(w, r, sc, verbUpdate, ssarVM, ns) {
+	if !ok || !s.gate(w, r, sc, vmAction(verbUpdate, ns)) {
 		return
 	}
 	result, err := s.draft.Adopt(sc.id, sc.proj, ns, name)
@@ -159,18 +160,23 @@ func (s *Server) handleAdopt(w http.ResponseWriter, r *http.Request) {
 // handleAdoptNamespace brings a whole namespace under GitOps in one draft: everything
 // it runs that git does not describe, not only its VMs, so the namespace does not end
 // up half declared. The capture runs under the caller's own token, so a user adopts
-// exactly what their RBAC lets them read. One draft, proposed as one PR.
+// exactly what their RBAC lets them read, of the kinds it lets them create. One
+// draft, proposed as one PR.
 func (s *Server) handleAdoptNamespace(w http.ResponseWriter, r *http.Request) {
 	sc, ns, _, ok := s.vmScope(w, r)
-	if !ok || !s.authorize(w, r, sc, verbUpdate, ssarVM, ns) {
+	if !ok || !s.gate(w, r, sc, vmAction(verbUpdate, ns)) {
 		return
 	}
 	objs, unreadable, ok := s.captureAdoptable(w, r, sc, ns)
 	if !ok {
 		return
 	}
+	objs, denied, ok := s.adoptableByRight(w, r, sc, ns, objs)
+	if !ok {
+		return
+	}
 	result, err := s.draft.AdoptObjects(sc.id, sc.proj, ns, objs)
-	respond(w, withUnreadable(result, ns, unreadable), err)
+	respond(w, withUnreadable(result, ns, unreadable, denied), err)
 }
 
 // captureAdoptable runs the caller-token capture for one namespace ("" = the
@@ -219,12 +225,17 @@ func (s *Server) captureAdoptable(w http.ResponseWriter, r *http.Request, sc sco
 	return objs, unreadable, true
 }
 
-// withUnreadable appends the kinds the caller could not read to the view's
-// warning (appended, not assigned: the view may carry the derived prune warning).
-func withUnreadable(v model.DraftView, where string, unreadable []string) model.DraftView {
+// withUnreadable appends the kinds the caller could not read, and those they
+// may not create, to the view's warning (appended, not assigned: the view may
+// carry the derived prune warning).
+func withUnreadable(v model.DraftView, where string, unreadable, denied []string) model.DraftView {
 	if len(unreadable) > 0 {
 		v.Warning = changeset.JoinWarning(v.Warning, fmt.Sprintf("%s: you cannot read %s, so any of those stay outside git.",
 			where, strings.Join(unreadable, ", ")))
+	}
+	if len(denied) > 0 {
+		v.Warning = changeset.JoinWarning(v.Warning, fmt.Sprintf("%s: you may not create %s, so those stay outside git.",
+			where, strings.Join(denied, ", ")))
 	}
 	return v
 }
@@ -233,13 +244,20 @@ func (s *Server) handleResync(w http.ResponseWriter, r *http.Request) {
 	// Resync runs the reconcile with dotvirt's SA, gated on the caller's OWN
 	// authority over the VM (not just namespace read): they may trigger a sync only
 	// if they could update the VM themselves - otherwise read access would escalate
-	// into an SA-privileged Argo sync. The SSAR runs inside Resync, beside the
+	// into an SA-privileged Argo sync. The check runs inside Resync, beside the
 	// escalation, so no other caller can reach it unchecked.
 	sc, ns, name, ok := s.vmScope(w, r)
 	if !ok {
 		return
 	}
-	result, err := s.draft.Resync(r.Context(), sc.cluster.CanUpdateVM, sc.id.Username, ns, name)
+	mayResync := func(ctx context.Context, namespace, _ string) (bool, error) {
+		_, ok, err := s.allowed(ctx, sc.id, sc.cluster, vmAction(verbUpdate, namespace))
+		if err != nil {
+			return false, s.reviewFailed(ctx, sc.id, err)
+		}
+		return ok, nil
+	}
+	result, err := s.draft.Resync(r.Context(), mayResync, sc.id.Username, ns, name)
 	s.recordTask("Resync", ns, name, sc.id.Username, err == nil)
 	respond(w, result, err)
 }
@@ -286,7 +304,7 @@ func (s *Server) handleHistory(w http.ResponseWriter, r *http.Request) {
 // page's Restore, which lands in the draft and is proposed like any edit.
 func (s *Server) handleRestore(w http.ResponseWriter, r *http.Request) {
 	sc, ns, name, ok := s.vmScope(w, r)
-	if !ok || !s.authorize(w, r, sc, verbUpdate, ssarVM, ns) {
+	if !ok || !s.gate(w, r, sc, vmAction(verbUpdate, ns)) {
 		return
 	}
 	hash, ok := hashBody(w, r)

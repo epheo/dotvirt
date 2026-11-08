@@ -299,7 +299,7 @@ func TestPlatformNameIsNotABypass(t *testing.T) {
 	sc := scope{id: auth.Identity{Token: viewerToken}, cluster: c, proj: project.ProjectInfo{Name: platformProjectName, Namespaces: []string{"web"}}}
 	r := httptest.NewRequest(http.MethodPost, "/", nil)
 	for name, gate := range map[string]func(http.ResponseWriter) bool{
-		"authorize":      func(w http.ResponseWriter) bool { return s.authorize(w, r, sc, verbUpdate, ssarVM, "web") },
+		"gate":           func(w http.ResponseWriter) bool { return s.gate(w, r, sc, vmAction(verbUpdate, "web")) },
 		"authorizeDraft": func(w http.ResponseWriter) bool { return s.authorizeDraft(w, r, sc) },
 		"authorizeRepo":  func(w http.ResponseWriter) bool { return s.authorizeRepo(w, r, sc) },
 	} {
@@ -367,7 +367,7 @@ func TestCanCacheKey(t *testing.T) {
 	for _, q := range []struct{ verb, ns string }{
 		{verbUpdate, "a"}, {verbUpdate, "a"}, {verbUpdate, "b"}, {verbDelete, "a"},
 	} {
-		if ok, err := s.can(ctx, id, c, q.verb, ssarVM, q.ns); !ok || err != nil {
+		if ok, err := s.can(ctx, id, c, question{verb: q.verb, ref: ssarVM, ns: q.ns}); !ok || err != nil {
 			t.Fatalf("%s in %s = %v, %v", q.verb, q.ns, ok, err)
 		}
 	}

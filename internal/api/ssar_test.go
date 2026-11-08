@@ -10,7 +10,7 @@ import (
 // the gate and the apply-time AppProject boundary are spelled from one place.
 func TestEverySSARIsATableKind(t *testing.T) {
 	refs := map[string]ssarRef{
-		"cudn": ssarCUDN, "uplink": ssarUplink, "namespace": ssarNamespace, "egressip": ssarEgressIP,
+		"cudn": ssarCUDN, "namespace": ssarNamespace, "egressip": ssarEgressIP,
 		"externalroute": ssarExtRoute, "anp": ssarANP, "banp": ssarBANP, "descheduler": ssarDescheduler,
 		"machineconfig": ssarMachineCfg, "template": ssarVMTemplate,
 	}

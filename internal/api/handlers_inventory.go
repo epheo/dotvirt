@@ -103,10 +103,11 @@ func (s *Server) InventoryForIdentity(ctx context.Context, id auth.Identity) (mo
 		}
 	}
 	// Propose existing tenants (namespaces with VMs, no project label) to callers
-	// who could adopt them - the same namespace-create authority the create-project
-	// route enforces. Rides the frame, so the list drains as adoptions merge.
+	// who could claim them: updating namespaces cluster-wide, which answers for
+	// each one the create-project route gates on. Rides the frame, so the list
+	// drains as adoptions merge.
 	if s.cfg.PlatformRepo != "" {
-		if ok, _ := s.can(ctx, id, userCluster, verbCreate, ssarNamespace, ""); ok {
+		if s.capable(ctx, id, userCluster, action{{verb: verbUpdate, ref: ssarNamespace}}) {
 			inv.Adoptable = inventory.Adoptable(in.Live, s.state.Namespaces())
 		}
 	}
@@ -214,7 +215,7 @@ func (s *Server) handleOptions(w http.ResponseWriter, r *http.Request) {
 // ssarDataSources and ssarNADs are the list authorities over the namespaced
 // option kinds (cluster.ListOptions reads the same resources).
 var (
-	ssarDataSources = ssarRef{"cdi.kubevirt.io", "datasources"}
+	ssarDataSources = ssarRef{group: "cdi.kubevirt.io", resource: "datasources"}
 	ssarNADs        = ssarFor(model.KindNAD)
 )
 
@@ -228,8 +229,7 @@ func (s *Server) optionsFor(ctx context.Context, id auth.Identity, c *cluster.Cl
 		if visible[ns] {
 			return true
 		}
-		ok, _ := s.can(ctx, id, c, verbList, ref, ns)
-		return ok
+		return s.capable(ctx, id, c, ask(verbList, ref, ns))
 	}
 	out := all
 	out.OSImages = make([]model.OSImage, 0, len(all.OSImages))

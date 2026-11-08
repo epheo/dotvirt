@@ -63,7 +63,7 @@ func (s *Server) handleDeployTemplate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	sc, ok := s.resolveProject(w, r, byNamespace(req.Namespace))
-	if !ok || !s.authorize(w, r, sc, verbCreate, ssarVM, req.Namespace) {
+	if !ok || !s.gate(w, r, sc, vmAction(verbCreate, req.Namespace)) {
 		return
 	}
 	lib, ok := s.libraryFor(w, r, sc, req.Library)

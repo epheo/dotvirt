@@ -204,6 +204,11 @@ type Server struct {
 	// Open inventory streams per token key (see streams.go).
 	streamMu sync.Mutex
 	streams  map[string]int
+
+	// Access reviews in progress, by question, that concurrent askers share
+	// (see can).
+	flightMu sync.Mutex
+	flights  map[string]*flight
 }
 
 // Deps are the collaborators for NewServer. Reader and Draft are required:
@@ -264,6 +269,7 @@ func NewServer(d Deps) *Server {
 		propDirty:   map[string]struct{}{},
 		propSeen:    map[string]uint64{},
 		streams:     map[string]int{},
+		flights:     map[string]*flight{},
 	}
 }
 

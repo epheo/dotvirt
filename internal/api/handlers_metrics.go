@@ -62,7 +62,7 @@ func (s *Server) handleClusterSummary(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// The node-allocatable totals are node data, gated like handleHostLoad.
-	nodeTotals, _ := s.can(r.Context(), sc.id, sc.cluster, verbList, ssarNodes, "")
+	nodeTotals := s.capable(r.Context(), sc.id, sc.cluster, ask(verbList, ssarNodes, ""))
 	cs, err := s.metrics.ClusterSummary(r.Context(), sc.id.Token, nss, r.URL.Query().Get("node"), nodeTotals)
 	if err == nil && r.URL.Query().Get("node") == "" {
 		// The phase map comes from kubevirt_vmi_info, and a stopped VM has no
@@ -182,7 +182,7 @@ func (s *Server) nodeMetricsScope(w http.ResponseWriter, r *http.Request) (auth.
 		fail(w, unavailable(err))
 		return auth.Identity{}, false
 	}
-	ok, err := s.can(r.Context(), id, c, verbList, ssarNodes, "")
+	ok, err := s.can(r.Context(), id, c, question{verb: verbList, ref: ssarNodes})
 	if err != nil {
 		fail(w, s.reviewFailed(r.Context(), id, err))
 		return auth.Identity{}, false

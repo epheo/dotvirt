@@ -1,18 +1,19 @@
 package api
 
 import (
-	"fmt"
+	"context"
 	"net/http"
 	"sort"
 
+	"github.com/epheo/dotvirt/internal/auth"
+	"github.com/epheo/dotvirt/internal/cluster"
 	"github.com/epheo/dotvirt/internal/model"
 )
 
 // Node maintenance (the By-Node view): read a node's cordon/maintenance state,
 // toggle cordon, enter/exit maintenance mode. Nodes are cluster-scoped, so
-// these don't go through resolveProject - the user's own token is the gate (a
-// caller without node RBAC gets 403/404, and the UI hides the actions from
-// NodeInfo.CanCordon).
+// these don't go through resolveProject: the apiserver checks each patch under
+// the caller's own token, on the question NodeInfo.CanCordon asks for the UI.
 
 // handleNodes lists the virtualization hosts (KubeVirt-schedulable nodes) as
 // live-migration target candidates. A caller without node-list RBAC gets 403,
@@ -33,16 +34,18 @@ func (s *Server) handleNodes(w http.ResponseWriter, r *http.Request) {
 
 // handleNodeInfo returns a node's schedulability + whether the caller may cordon it.
 func (s *Server) handleNodeInfo(w http.ResponseWriter, r *http.Request) {
-	_, c, err := s.userCluster(r)
+	id, c, err := s.userCluster(r)
 	if err != nil {
 		fail(w, unavailable(err))
 		return
 	}
-	info, err := c.NodeInfo(r.Context(), r.PathValue("node"))
+	node := r.PathValue("node")
+	info, err := c.NodeInfo(r.Context(), node)
 	if err != nil {
 		fail(w, err)
 		return
 	}
+	info.CanCordon = s.capable(r.Context(), id, c, nodeAction(node))
 	writeJSON(w, info)
 }
 
@@ -106,8 +109,8 @@ func (s *Server) handleNodeMaintenance(w http.ResponseWriter, r *http.Request) {
 // how untracked VMs used to be stranded); each migrate still runs under the
 // caller's own token, so per-VM RBAC gates every move and failures surface as
 // rows instead of silent omissions. Gated on the node-patch authority that also
-// reveals the maintenance panel, so a token without it cannot enumerate a node's
-// VMs through the failure list.
+// reveals the maintenance panel; a failure names its VM only when the caller may
+// read VMs in its namespace, so the sweep never enumerates what RBAC hides.
 func (s *Server) handleNodeEvacuate(w http.ResponseWriter, r *http.Request) {
 	id, c, err := s.userCluster(r)
 	if err != nil {
@@ -115,13 +118,11 @@ func (s *Server) handleNodeEvacuate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	node := r.PathValue("node")
-	info, err := c.NodeInfo(r.Context(), node)
-	if err != nil {
-		fail(w, err)
+	if !s.gate(w, r, scope{id: id, cluster: c}, nodeAction(node)) {
 		return
 	}
-	if !info.CanCordon {
-		fail(w, fmt.Errorf("%w: node evacuation needs node-update authority", model.ErrForbidden))
+	if _, err := c.NodeInfo(r.Context(), node); err != nil {
+		fail(w, err)
 		return
 	}
 	out := model.Evacuation{Failures: []model.EvacuationFailure{}}
@@ -143,9 +144,32 @@ func (s *Server) handleNodeEvacuate(w http.ResponseWriter, r *http.Request) {
 			out.Requested++
 		}
 	}
+	out.Failures, out.Hidden = s.readableFailures(r.Context(), id, c, out.Failures)
 	sort.Slice(out.Failures, func(i, j int) bool {
 		a, b := out.Failures[i], out.Failures[j]
 		return a.Namespace+"/"+a.Name < b.Namespace+"/"+b.Name
 	})
 	writeJSON(w, out)
+}
+
+// readableFailures keeps the evacuation failures in namespaces whose VMs the
+// caller may read, and counts the rest: a sweep must not read as complete, nor
+// name a VM RBAC hides.
+func (s *Server) readableFailures(ctx context.Context, id auth.Identity, c *cluster.Client, failures []model.EvacuationFailure) ([]model.EvacuationFailure, int) {
+	readable := map[string]bool{}
+	kept := make([]model.EvacuationFailure, 0, len(failures))
+	hidden := 0
+	for _, f := range failures {
+		ok, asked := readable[f.Namespace]
+		if !asked {
+			ok = s.capable(ctx, id, c, vmAction(verbList, f.Namespace))
+			readable[f.Namespace] = ok
+		}
+		if ok {
+			kept = append(kept, f)
+		} else {
+			hidden++
+		}
+	}
+	return kept, hidden
 }

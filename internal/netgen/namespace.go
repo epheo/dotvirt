@@ -163,9 +163,13 @@ type RoleBindingSpec struct {
 	Role      string   `json:"role,omitempty"` // ClusterRole to bind; default "admin"
 }
 
+// OwnerRole is the ClusterRole a project's owners are bound to by default: the
+// built-in namespace-admin role.
+const OwnerRole = "admin"
+
 // RoleBindingManifest renders a namespace-scoped RoleBinding granting each owner the
-// given ClusterRole (default "admin" - the built-in namespace-admin role) on the
-// tenant namespace. One subject per owner (kind User).
+// given ClusterRole (default OwnerRole) on the tenant namespace. One subject per
+// owner (kind User).
 func RoleBindingManifest(s RoleBindingSpec) (path string, content []byte, err error) {
 	if err := validate.RequireDNS1123("namespace", s.Namespace); err != nil {
 		return "", nil, err
@@ -175,7 +179,7 @@ func RoleBindingManifest(s RoleBindingSpec) (path string, content []byte, err er
 	}
 	role := s.Role
 	if role == "" {
-		role = "admin" // the built-in namespace-admin ClusterRole
+		role = OwnerRole
 	}
 	subjects := make([]any, 0, len(s.Owners))
 	for _, o := range s.Owners {

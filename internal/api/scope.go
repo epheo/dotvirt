@@ -5,7 +5,10 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"strconv"
 	"strings"
+
+	authzv1 "k8s.io/api/authorization/v1"
 
 	"github.com/epheo/dotvirt/internal/auth"
 	"github.com/epheo/dotvirt/internal/cluster"
@@ -88,21 +91,59 @@ func (s *Server) visibleFor(ctx context.Context, id auth.Identity, c *cluster.Cl
 	return set, nil
 }
 
-// can answers verb on ref in ns ("" for cluster scope) under id's token,
-// behind a per-(token, question) cache stamped with rbacVersion, so a signal
-// read on a polled or broadcast path does not post an SSAR per request. A
-// RoleBinding/namespace move invalidates lazily via the stamp; the TTL
-// backstops the cluster-scoped RBAC changes the stamp doesn't observe (see
-// visibleTTL). Only a verdict is cached: a failed review is returned, so a
-// blip can never pin a denial. A gate answers the error with s.reviewFailed; a
-// UI signal or a filter reads it as no.
-func (s *Server) can(ctx context.Context, id auth.Identity, c *cluster.Client, verb string, ref ssarRef, ns string) (bool, error) {
+// can answers one question under id's token, behind a per-(token, question)
+// cache stamped with rbacVersion, so a signal read on a polled or broadcast
+// path does not post an SSAR per request. A RoleBinding/namespace move
+// invalidates lazily via the stamp; the TTL backstops the cluster-scoped RBAC
+// changes the stamp doesn't observe (see visibleTTL). Concurrent askers of one
+// question share one review. Only a verdict is cached: a failed review is
+// returned, so a blip can never pin a denial. A gate answers the error with
+// s.reviewFailed; a UI signal or a filter reads it as no.
+func (s *Server) can(ctx context.Context, id auth.Identity, c *cluster.Client, q question) (bool, error) {
 	ver := s.rbacVersion()
-	k := strings.Join([]string{restfactory.TokenKey(id.Token), verb, ref.group, ref.resource, ns}, "\x00")
+	k := strings.Join([]string{restfactory.TokenKey(id.Token), q.verb, q.ref.group, q.ref.resource, q.ref.sub, q.ns, q.name}, "\x00")
 	if e, ok := s.ssar.Get(k); ok && e.ver == ver {
 		return e.ok, nil
 	}
-	ok, err := c.Can(ctx, verb, ref.group, ref.resource, ns)
+	fk := k + "\x00" + strconv.FormatUint(ver, 10)
+	s.flightMu.Lock()
+	if f, ok := s.flights[fk]; ok {
+		s.flightMu.Unlock()
+		select {
+		case <-f.done:
+			if f.err == nil {
+				return f.ok, nil
+			}
+			// The shared review may have failed on its own request's deadline;
+			// this request asks for itself.
+			return s.review(ctx, c, k, q, ver)
+		case <-ctx.Done():
+			return false, ctx.Err()
+		}
+	}
+	f := &flight{done: make(chan struct{})}
+	s.flights[fk] = f
+	s.flightMu.Unlock()
+	f.ok, f.err = s.review(ctx, c, k, q, ver)
+	s.flightMu.Lock()
+	delete(s.flights, fk)
+	s.flightMu.Unlock()
+	close(f.done)
+	return f.ok, f.err
+}
+
+// flight is one review in progress that concurrent askers wait on.
+type flight struct {
+	done chan struct{}
+	ok   bool
+	err  error
+}
+
+// review posts q's SSAR and caches the verdict under k at ver.
+func (s *Server) review(ctx context.Context, c *cluster.Client, k string, q question, ver uint64) (bool, error) {
+	ok, err := c.Review(ctx, authzv1.ResourceAttributes{
+		Verb: q.verb, Group: q.ref.group, Resource: q.ref.resource, Subresource: q.ref.sub, Namespace: q.ns, Name: q.name,
+	})
 	if err != nil {
 		return false, err
 	}
@@ -137,15 +178,16 @@ func saCached[T any](s *Server, w http.ResponseWriter, r *http.Request, cache *t
 	return id, c, v, true
 }
 
-// ssarRef is one authority tuple (API group + plural resource).
-type ssarRef struct{ group, resource string }
+// ssarRef is one authority tuple: API group, plural resource, and the
+// subresource a call addresses, if any.
+type ssarRef struct{ group, resource, sub string }
 
 // ssarNodes is node read: the gate on node-level data (physical fabric, host
 // metrics, node ops in the task feed).
 var ssarNodes = ssarRef{resource: "nodes"}
 
-// ssarFor is the create authority over one managed kind.
-func ssarFor(k model.Kind) ssarRef { return ssarRef{k.Group, k.Plural} }
+// ssarFor is the authority over one managed kind.
+func ssarFor(k model.Kind) ssarRef { return ssarRef{group: k.Group, resource: k.Plural} }
 
 // platformProject is the synthetic platform-tier project over the platform repo.
 func (s *Server) platformProject() project.ProjectInfo {
@@ -161,13 +203,11 @@ func (s *Server) vmScope(w http.ResponseWriter, r *http.Request) (sc scope, ns, 
 	return sc, ns, name, ok
 }
 
-// The platform-tier create authorities, each named once and spelled by the
-// kind table: the create routes gate on them (platformScope), NetworkCaps
-// projects them to the UI, and the authoring signal ORs a subset - adding a
-// platform kind touches the table, this list and its routes.
+// The platform-tier authorities, each named once and spelled by the kind
+// table: the policy views and the remaining platformScope routes gate on
+// them, and the authoring signal ORs a subset.
 var (
 	ssarCUDN        = ssarFor(model.KindCUDN)
-	ssarUplink      = ssarFor(model.KindNNCP)
 	ssarNamespace   = ssarFor(model.KindNS)
 	ssarEgressIP    = ssarFor(model.KindEgressIP)
 	ssarExtRoute    = ssarFor(model.KindExtRoute)
@@ -197,17 +237,11 @@ func (s *Server) canAuthorPlatform(ctx context.Context, id auth.Identity, c *clu
 	if s.cfg.PlatformRepo == "" {
 		return false, nil
 	}
-	var failed error
+	acts := make([]action, 0, len(platformAuthorResources))
 	for _, r := range platformAuthorResources {
-		ok, err := s.can(ctx, id, c, verbCreate, r, "")
-		if ok {
-			return true, nil
-		}
-		if err != nil {
-			failed = err
-		}
+		acts = append(acts, ask(verbCreate, r, ""))
 	}
-	return false, failed
+	return s.anyAllowed(ctx, id, c, acts)
 }
 
 func namespaceNames(nss []project.Namespace) []string {
@@ -391,8 +425,18 @@ const platformProjectName = project.PlatformName
 // author-time check matches the apply-time AppProject boundary.
 func (s *Server) platformScope(w http.ResponseWriter, r *http.Request, ref ssarRef) (scope, bool) {
 	return s.platformScopeWith(w, r, func(ctx context.Context, id auth.Identity, c *cluster.Client) (bool, error) {
-		return s.can(ctx, id, c, verbCreate, ref, "")
+		_, ok, err := s.allowed(ctx, id, c, ask(verbCreate, ref, ""))
+		return ok, err
 	}, "not authorized to create "+ref.resource)
+}
+
+// platformScopeGated resolves the platform tier for a route that gates its
+// own verb or claim once it knows what it acts on (a namespace that exists or
+// not); the coordinator then checks each object the change writes.
+func (s *Server) platformScopeGated(w http.ResponseWriter, r *http.Request) (scope, bool) {
+	return s.platformScopeWith(w, r, func(context.Context, auth.Identity, *cluster.Client) (bool, error) {
+		return true, nil
+	}, "")
 }
 
 // platformScopeWith is the shared platform-tier preamble - the caller's identity
