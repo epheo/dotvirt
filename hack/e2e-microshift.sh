@@ -22,14 +22,14 @@ NAME="${NAME:-dotvirt-e2e-microshift}"
 # packaged in the MicroShift image.
 LVM_DISK="${LVM_DISK:-/var/lib/${NAME}/lvmdisk.image}"
 VG_NAME="myvg1"
-ARGOCD_VERSION="${ARGOCD_VERSION:-v3.5.6}"
-KUBEVIRT_VERSION="${KUBEVIRT_VERSION:-}" # empty = the published stable
 WORKDIR="${WORKDIR:-$(mktemp -d /tmp/dotvirt-e2e.XXXXXX)}"
 mkdir -p "${WORKDIR}" # an env-supplied WORKDIR (CI) arrives uncreated
 PROJECT="${PROJECT:-team-a}"
 TIMEOUT_INSTALL="${TIMEOUT_INSTALL:-900}" # per-phase ceiling, seconds
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+# ARGOCD_VERSION and KUBEVIRT_VERSION, each beside the digest of the manifest it installs.
+source "${REPO_ROOT}/hack/versions.env"
 export KUBECONFIG="${WORKDIR}/kubeconfig"
 
 log() { echo "=== [$(date +%H:%M:%S)] $*"; }
@@ -37,6 +37,11 @@ log() { echo "=== [$(date +%H:%M:%S)] $*"; }
 # retry ceiling (checked only BETWEEN attempts) and stall the job to its kill.
 pexec() { timeout 30 podman exec "${NAME}" "$@"; }
 kc() { kubectl --request-timeout=30s "$@"; }
+# fetch <url> <file> <sha256>: download <url> to <file>, failing unless it hashes to <sha256>.
+fetch() {
+	curl -fsSL -o "$2" "$1"
+	echo "$3  $2" | sha256sum --check --strict
+}
 
 clean() {
 	podman rm -f "${NAME}" 2>/dev/null || true
@@ -240,7 +245,9 @@ subjects:
   name: system:serviceaccounts:argocd
 SCC
 # The ApplicationSet CRD outgrows the client-side apply annotation limit (Argo CD >= 3.3).
-curl -fsSL "https://raw.githubusercontent.com/argoproj/argo-cd/${ARGOCD_VERSION}/manifests/install.yaml" | kc apply -n argocd --server-side --force-conflicts -f -
+fetch "https://raw.githubusercontent.com/argoproj/argo-cd/${ARGOCD_VERSION}/manifests/install.yaml" \
+	"${WORKDIR}/argocd-install.yaml" "${ARGOCD_INSTALL_SHA256}"
+kc apply -n argocd --server-side --force-conflicts -f "${WORKDIR}/argocd-install.yaml"
 # Plain-HTTP server so the forge can deliver webhooks to the in-cluster Service
 # without a trust store.
 kc -n argocd patch configmap argocd-cmd-params-cm --type merge -p '{"data":{"server.insecure":"true"}}'
@@ -254,11 +261,10 @@ appctrl_ready() {
 retry "argocd application-controller ready" "${TIMEOUT_INSTALL}" appctrl_ready
 
 # ── 3. KubeVirt (emulation: the loop applies VM objects, none needs to boot) ──
-if [ -z "${KUBEVIRT_VERSION}" ]; then
-	KUBEVIRT_VERSION="$(curl -fsSL https://storage.googleapis.com/kubevirt-prow/release/kubevirt/kubevirt/stable.txt)"
-fi
 log "installing KubeVirt ${KUBEVIRT_VERSION}"
-kc apply -f "https://github.com/kubevirt/kubevirt/releases/download/${KUBEVIRT_VERSION}/kubevirt-operator.yaml"
+fetch "https://github.com/kubevirt/kubevirt/releases/download/${KUBEVIRT_VERSION}/kubevirt-operator.yaml" \
+	"${WORKDIR}/kubevirt-operator.yaml" "${KUBEVIRT_OPERATOR_SHA256}"
+kc apply -f "${WORKDIR}/kubevirt-operator.yaml"
 kc apply -f - <<EOF
 apiVersion: kubevirt.io/v1
 kind: KubeVirt
