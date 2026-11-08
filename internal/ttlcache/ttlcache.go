@@ -11,6 +11,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log"
+	"runtime/debug"
 	"sync"
 	"time"
 )
@@ -95,6 +97,9 @@ func (c *Cache[V]) Do(ctx context.Context, key string, fill func(context.Context
 func (c *Cache[V]) run(ctx context.Context, key string, f *call[V], fill func(context.Context) (V, error)) {
 	defer func() {
 		if r := recover(); r != nil {
+			// The fill runs on its own goroutine, so this is the only trace of
+			// where it failed.
+			log.Printf("ttlcache: fill panicked: %v\n%s", r, debug.Stack())
 			f.err = fmt.Errorf("%w: %v", errFillAborted, r)
 		}
 		f.cancel()

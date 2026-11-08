@@ -3,6 +3,7 @@ package ttlcache
 import (
 	"context"
 	"errors"
+	"math/rand/v2"
 	"strconv"
 	"sync"
 	"sync/atomic"
@@ -203,6 +204,74 @@ func waitFor(t *testing.T, what string, cond func() bool) {
 	for deadline := time.Now().Add(5 * time.Second); !cond(); time.Sleep(time.Millisecond) {
 		if time.Now().After(deadline) {
 			t.Fatalf("timed out waiting for %s", what)
+		}
+	}
+}
+
+// Callers join and leave at random; each gets its own key's value or its own
+// deadline, never hangs, never sees another caller's cancellation, and no fill
+// outlives the storm.
+func TestDoStorm(t *testing.T) {
+	c := New[string](time.Minute)
+	var running atomic.Int64
+	var wg sync.WaitGroup
+	for i := range 4000 {
+		wg.Go(func() {
+			key := []string{"a", "b", "c"}[i%3]
+			ctx, cancel := context.WithTimeout(context.Background(), time.Duration(rand.IntN(400))*time.Microsecond)
+			defer cancel()
+			v, err := c.Do(ctx, key, func(fctx context.Context) (string, error) {
+				running.Add(1)
+				defer running.Add(-1)
+				select {
+				case <-time.After(time.Duration(rand.IntN(300)) * time.Microsecond):
+					return key, nil
+				case <-fctx.Done():
+					return "", fctx.Err()
+				}
+			})
+			switch {
+			case err == nil && v != key:
+				t.Errorf("a caller for %s got %q", key, v)
+			case err != nil && (!errors.Is(err, context.DeadlineExceeded) || ctx.Err() == nil):
+				t.Errorf("a caller for %s got %v with its context at %v", key, err, ctx.Err())
+			}
+		})
+	}
+	wg.Wait()
+	waitFor(t, "every fill to end", func() bool { return running.Load() == 0 })
+	waitFor(t, "the flight map to drain", func() bool {
+		c.mu.Lock()
+		defer c.mu.Unlock()
+		return len(c.flight) == 0
+	})
+}
+
+// A caller still waiting never receives the cancellation of a fill whose
+// other caller left.
+func TestDoLiveCallerNeverSeesCancel(t *testing.T) {
+	c := New[int](time.Minute)
+	for range 2000 {
+		gate := make(chan struct{})
+		fill := func(fctx context.Context) (int, error) {
+			select {
+			case <-gate:
+				return 1, nil
+			case <-fctx.Done():
+				return 0, fctx.Err()
+			}
+		}
+		short, cancel := context.WithCancel(context.Background())
+		go func() { _, _ = c.Do(short, "k", fill) }()
+		res := make(chan error, 1)
+		go func() {
+			_, err := c.Do(context.Background(), "k", fill)
+			res <- err
+		}()
+		cancel()
+		close(gate)
+		if err := <-res; err != nil {
+			t.Fatalf("a live caller got %v", err)
 		}
 	}
 }
