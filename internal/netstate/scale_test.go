@@ -3,6 +3,7 @@ package netstate
 import (
 	"fmt"
 	"maps"
+	"strconv"
 	"testing"
 
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -366,13 +367,18 @@ func BenchmarkCatalogAfterHostMove(b *testing.B) {
 	}
 }
 
-// One NetworkPolicy moves, then a caller re-pulls the policy plane.
+// One NetworkPolicy moves, as a watch delivers it (a new copy at a new
+// resourceVersion), then a caller re-pulls the policy plane.
 func BenchmarkPoliciesAfterMove(b *testing.B) {
 	s := scaleSnapshot(b)
 	np, _, _ := s.netpol.GetByKey(scaleNS(4) + "/allow-web")
+	rv := 1
 	b.ReportAllocs()
 	for b.Loop() {
-		_ = s.netpol.Update(np)
+		rv++
+		u := np.(*unstructured.Unstructured).DeepCopy()
+		u.SetResourceVersion(strconv.Itoa(rv))
+		_ = s.netpol.Update(u)
 		_ = s.Policies()
 	}
 }
