@@ -11,7 +11,7 @@
 //   POST /__fixture/ws-drop            close every live inventory socket
 //   POST /__fixture/ws-refuse/{n}      destroy the next n WS handshakes pre-open
 //   POST /__fixture/login-status/{s}   next POST /api/login answers status s
-//   POST /__fixture/fail/{plane}/{n}   the next n reads of a plane answer 503 (events)
+//   POST /__fixture/fail/{plane}/{n}   the next n calls of a plane answer 503 (events, logout)
 //   GET  /__fixture/scenario           current scenario name
 
 import { createReadStream, existsSync, statSync } from 'node:fs';
@@ -391,7 +391,8 @@ async function handleAPI(req, res, url) {
 	if (path === '/api/auth/methods')
 		return sendJSON(res, 200, s.authMethods ?? { sso: false, ssoPending: false });
 	if (path === '/api/logout') {
-		res.writeHead(200, { 'Set-Cookie': 'dv_fixture=; Path=/; Max-Age=0' });
+		if (failing('logout')) return sendText(res, 503, 'sign-out failed: fixture failure hook');
+		res.writeHead(204, { 'Set-Cookie': 'dv_fixture=; Path=/; Max-Age=0' });
 		return res.end();
 	}
 	if (path === '/api/me') {

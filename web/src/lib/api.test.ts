@@ -117,6 +117,17 @@ describe('HttpError', () => {
 		}
 	});
 
+	it('takes a 2xx without a body as a yes', async () => {
+		answer(new Response(null, { status: 200, headers: { 'Content-Length': '0' } }));
+		try {
+			await expect(api.logout()).resolves.toBeUndefined();
+			answer(new Response(null, { status: 204 }));
+			await expect(api.logout()).resolves.toBeUndefined();
+		} finally {
+			vi.unstubAllGlobals();
+		}
+	});
+
 	it('says the status when the answer has no message of its own', async () => {
 		answer(new Response('', { status: 502, statusText: 'Bad Gateway' }));
 		try {

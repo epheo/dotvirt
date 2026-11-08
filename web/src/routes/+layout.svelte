@@ -69,6 +69,7 @@
 	// across a reload and must survive the boot probe.
 	$effect(() => {
 		if (!session.user && !session.checking) {
+			session.logoutError = '';
 			inventory.reset();
 			drafts.reset();
 			reviewCache.reset();
@@ -207,6 +208,20 @@
 {:else}
 	<div class="flex h-screen flex-col">
 		<AppHeader />
+
+		{#if session.logoutError}
+			<Banner tone="danger" size="md">
+				<TriangleAlert size={16} class="shrink-0" />
+				<span>{session.logoutError}</span>
+				<Button
+					variant="link"
+					size="sm"
+					disabled={session.signingOut}
+					aria-label="Retry sign-out"
+					onclick={() => session.logout()}>{session.signingOut ? 'Signing out...' : 'Retry'}</Button
+				>
+			</Banner>
+		{/if}
 
 		{#if inventory.error}
 			<Banner tone={inventory.stream === 'down' ? 'danger' : 'warn'} size="md">

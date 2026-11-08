@@ -291,7 +291,8 @@ async function req<T>(path: string, init?: RequestInit): Promise<T> {
 		throw new Unauthorized();
 	}
 	if (!res.ok) throw await failure(path, res);
-	if (res.status === 204) return undefined as T;
+	// No content, by status or by length: a 2xx without a body is still a yes.
+	if (res.status === 204 || res.headers.get('Content-Length') === '0') return undefined as T;
 	return res.json() as Promise<T>;
 }
 
