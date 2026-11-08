@@ -67,23 +67,32 @@ func (s *Snapshot) Trace(view *TraceView, src TraceWorkload, dst *TraceWorkload,
 	// Both must pass: OVN-K runs the admin, project and baseline egress rules
 	// as from-lport ACLs in the source switch's ingress pipeline and the
 	// EgressFirewall as to-lport ACLs in its egress pipeline, each stage with
-	// its own tier walk, so an admin Allow never skips the gateway.
+	// its own tier walk, so an admin Allow never skips the gateway. The
+	// EgressFirewall excludes the cluster's pod subnets, and the egress planes
+	// act only on traffic leaving the cluster, so a pod address skips both.
 	eg := s.directionWalk("Egress", src, peerTarget{ip: dstIP}, protocol, port)
-	gw := s.gatewayWalk(src.Namespace, dstIP, protocol, port)
-	res.Steps = append(append(res.Steps, eg.steps...), gw.steps...)
-	res.Steps = append(res.Steps, s.egressPlaneSteps(src)...)
+	res.Steps = append(res.Steps, eg.steps...)
+	gw := walkResult{outcome: "Allow"}
+	if !path.place.inCluster() {
+		gw = s.gatewayWalk(src.Namespace, dstIP, protocol, port)
+		res.Steps = append(res.Steps, gw.steps...)
+		res.Steps = append(res.Steps, s.egressPlaneSteps(src)...)
+	}
 	res.Verdict = verdict(eg, gw)
 	if path.vlan && res.Verdict == "Deny" {
 		res.Verdict = "Conditional" // the guest may route the flow out its VLAN NIC
 	}
 	switch path.place {
-	case placeService, placeOverlay, placeUnknown:
+	case placePodMaybe, placeService, placeOverlay, placeUnknown:
 		if res.Verdict == "Allow" {
 			res.Verdict = "Conditional" // the address may be a workload or service no path reaches
 		}
-		if path.place != placeOverlay && res.Verdict == "Deny" && eg.outcome != "Deny" {
-			res.Verdict = "Conditional" // the outbound rules bind only a flow leaving the cluster
-		}
+	}
+	// A service flow is DNATed into the pod subnets the EgressFirewall
+	// excludes, unless its endpoints lie outside the cluster; an unplaced
+	// address may be a pod's.
+	if (path.service || path.place == placeUnknown) && res.Verdict == "Deny" && eg.outcome != "Deny" {
+		res.Verdict = "Conditional"
 	}
 	return res
 }
@@ -419,12 +428,14 @@ func (s *Snapshot) connectivity(src, dst TraceWorkload) (decided string, steps [
 
 // egressPath frames a flow to a bare address. decided is the verdict when no
 // policy walk applies; vlan reports a VLAN NIC, which leaves a cluster Deny
-// inconclusive; place is where the address lies, for a primary NIC.
+// inconclusive; place is where the address lies, for a primary NIC, and
+// service whether it is a service address.
 type egressPath struct {
 	steps   []model.TraceStep
 	decided string
 	vlan    bool
 	place   placement
+	service bool
 }
 
 // externalConnectivity frames the egress path. The cluster controls filter
@@ -449,6 +460,9 @@ func (s *Snapshot) externalConnectivity(src TraceWorkload, dstIP string, view *T
 	switch {
 	case cluster:
 		p.steps, p.decided, p.place = s.primaryPath(src, dstIP, p.vlan, view)
+		if a, err := netip.ParseAddr(dstIP); err == nil {
+			p.service = containsAddr(s.serviceRange(), a.Unmap())
+		}
 	case len(refs) > 0:
 		// A secondary network has no cluster egress, but a VLAN, or a router
 		// on the network, may still carry the flow.
@@ -496,6 +510,11 @@ func (s *Snapshot) primaryPath(src TraceWorkload, dstIP string, vlan bool, view 
 		}
 		cut.Decisive = true
 		return []model.TraceStep{cut}, "Unreachable", where
+	case placeSame:
+		reach.Note = dstIP + " is on " + name + ", the source's own network: evaluated against its egress rules; the outbound rules and egress planes bind only traffic leaving the cluster."
+	case placePodMaybe:
+		reach.Conditional = true
+		reach.Note = dstIP + " is a pod address on the cluster default network, but no VM visible here: a primary user-defined network's VMs keep one there, which OVN-Kubernetes isolates."
 	case placeService:
 		reach.Conditional = true
 		reach.Note = dstIP + " is a cluster service address, and which network serves it cannot be told here: a service of a network isolated from " +

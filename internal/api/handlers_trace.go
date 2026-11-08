@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/netip"
-	"sync"
+	"slices"
 
 	"github.com/epheo/dotvirt/internal/model"
 	"github.com/epheo/dotvirt/internal/netstate"
@@ -74,7 +74,11 @@ func (s *Server) handleTrace(w http.ResponseWriter, r *http.Request) {
 		dst = &d
 	}
 
-	res := s.netstate.Trace(s.traceView(r, sc), src, dst, req.Destination.IP, req.Protocol, req.Port)
+	var view *netstate.TraceView
+	if dst == nil {
+		view = s.traceView(r, sc)
+	}
+	res := s.netstate.Trace(view, src, dst, req.Destination.IP, req.Protocol, req.Port)
 	pr := s.policyRedactor(r.Context(), sc.id, sc.cluster)
 	for i := range res.Steps {
 		if p := res.Steps[i].Policy; p != nil {
@@ -102,15 +106,30 @@ func (s *Server) traceWorkload(ns, name string) (netstate.TraceWorkload, bool) {
 }
 
 // traceView is what the caller may read of the tenant-configured networks a
-// bare address is placed against: the namespaces they see, and every shared
-// network when their catalog lists them all (the cached reviews /api/networks
-// makes, asked only when a shared network's range would place an address). A
-// failed visibility read sees no namespace.
+// bare address is placed against: the namespaces they see, every shared
+// network when their catalog lists them all, and the VMs in those
+// namespaces. The shared-network reviews are the cached ones /api/networks
+// makes, asked for every bare-address trace alike. A failed visibility read
+// sees no namespace.
 func (s *Server) traceView(r *http.Request, sc scope) *netstate.TraceView {
 	ctx := r.Context()
 	visible, _ := s.visibleFor(ctx, sc.id, sc.cluster)
 	return &netstate.TraceView{
 		Namespace: func(ns string) bool { return visible[ns] },
-		Shared:    sync.OnceValue(func() bool { return s.seesAllNetworks(ctx, sc.id, sc.cluster) }),
+		Shared:    s.seesAllNetworks(ctx, sc.id, sc.cluster),
+		Workload: func(addr netip.Addr) (netstate.TraceWorkload, bool) {
+			live := s.state.Live()
+			for ns := range visible {
+				for name, vm := range live[ns] {
+					if slices.ContainsFunc(vm.IPs, func(ip string) bool {
+						a, err := netip.ParseAddr(ip)
+						return err == nil && a.Unmap() == addr
+					}) {
+						return s.traceWorkload(ns, name)
+					}
+				}
+			}
+			return netstate.TraceWorkload{}, false
+		},
 	}
 }

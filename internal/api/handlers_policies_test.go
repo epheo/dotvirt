@@ -219,14 +219,23 @@ func TestTraceViewIsTheCallers(t *testing.T) {
 	fc.readsVMs = tenantReadsTeamA
 	tmpl := &kubevirtcorev1.VirtualMachineInstanceTemplateSpec{}
 	tmpl.Spec.Networks = []kubevirtcorev1.Network{{Name: "default", NetworkSource: kubevirtcorev1.NetworkSource{Pod: &kubevirtcorev1.PodNetwork{}}}}
-	fc.vms = []kubevirtcorev1.VirtualMachine{{ObjectMeta: metav1.ObjectMeta{Namespace: "team-a-dev", Name: "web"}, Spec: kubevirtcorev1.VirtualMachineSpec{Template: tmpl}}}
-	fc.vmis = []kubevirtcorev1.VirtualMachineInstance{{
-		ObjectMeta: metav1.ObjectMeta{Namespace: "team-a-dev", Name: "web"},
-		Spec:       kubevirtcorev1.VirtualMachineInstanceSpec{Networks: tmpl.Spec.Networks},
-		Status: kubevirtcorev1.VirtualMachineInstanceStatus{Interfaces: []kubevirtcorev1.VirtualMachineInstanceNetworkInterface{
-			{Name: "default", IP: "10.100.0.5", IPs: []string{"10.100.0.5"}},
-		}},
-	}}
+	// web sits on team-a-dev's primary UDN; legacy and db on the default
+	// network of a namespace without one.
+	fc.namespaces = append(fc.namespaces, corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "plain-ns", Labels: map[string]string{"dotvirt.io/project": "plain"}}})
+	running := func(ns, name, ip string) (kubevirtcorev1.VirtualMachine, kubevirtcorev1.VirtualMachineInstance) {
+		return kubevirtcorev1.VirtualMachine{ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: name}, Spec: kubevirtcorev1.VirtualMachineSpec{Template: tmpl}},
+			kubevirtcorev1.VirtualMachineInstance{
+				ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: name},
+				Spec:       kubevirtcorev1.VirtualMachineInstanceSpec{Networks: tmpl.Spec.Networks},
+				Status: kubevirtcorev1.VirtualMachineInstanceStatus{Phase: kubevirtcorev1.Running, Interfaces: []kubevirtcorev1.VirtualMachineInstanceNetworkInterface{
+					{Name: "default", IP: ip, IPs: []string{ip}},
+				}},
+			}
+	}
+	for _, v := range [][3]string{{"team-a-dev", "web", "10.100.0.5"}, {"plain-ns", "legacy", "10.128.0.9"}, {"plain-ns", "db", "10.128.0.7"}} {
+		vm, vmi := running(v[0], v[1], v[2])
+		fc.vms, fc.vmis = append(fc.vms, vm), append(fc.vmis, vmi)
+	}
 	resources := func(gv string, names ...string) http.HandlerFunc {
 		return func(w http.ResponseWriter, _ *http.Request) {
 			list := metav1.APIResourceList{TypeMeta: metav1.TypeMeta{Kind: "APIResourceList", APIVersion: "v1"}, GroupVersion: gv}
@@ -309,5 +318,20 @@ func TestTraceViewIsTheCallers(t *testing.T) {
 	}
 	if admin := trace(adminToken, "10.200.0.7"); !strings.Contains(note(admin, "10.200.0.7"), "no in-cluster path") {
 		t.Errorf("a caller who sees the namespace reads the overlay answer: %+v", admin)
+	}
+
+	// Beside primary UDNs, a default-network pod address is certain only as a
+	// default-network VM the caller sees.
+	fromLegacy := func(ip string) model.TraceResult {
+		t.Helper()
+		rec := do(s, adminToken, http.MethodPost, "/api/networking/trace", `{"source":{"namespace":"plain-ns","vm":"legacy"},"destination":{"ip":"`+ip+`"},"port":443}`)
+		wantStatus(t, rec, http.StatusOK)
+		return decodeBody[model.TraceResult](t, rec)
+	}
+	if res := fromLegacy("10.128.0.7"); res.Verdict != "Allow" {
+		t.Errorf("a default-network VM the caller sees: %+v", res)
+	}
+	if res := fromLegacy("10.128.0.8"); res.Verdict != "Conditional" {
+		t.Errorf("a default-network address no VM holds: %+v", res)
 	}
 }

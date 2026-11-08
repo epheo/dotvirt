@@ -2,6 +2,7 @@ package netstate
 
 import (
 	"encoding/json"
+	"net/netip"
 	"slices"
 	"strings"
 	"testing"
@@ -145,11 +146,29 @@ func TestTraceOverlayRangeIsNeverUnreachable(t *testing.T) {
 	}
 }
 
+// seeing resolves the addresses of vms, as the caller's view does for the
+// VMs in namespaces they see.
+func seeing(vms ...TraceWorkload) *TraceView {
+	return &TraceView{
+		Namespace: func(string) bool { return true },
+		Workload: func(addr netip.Addr) (TraceWorkload, bool) {
+			for _, w := range vms {
+				if slices.Contains(w.IPs, addr.String()) {
+					return w, true
+				}
+			}
+			return TraceWorkload{}, false
+		},
+	}
+}
+
 // One network spanning namespaces is one network: an address in its range,
-// or in the source's own, takes the path it always did, and so does every
-// address in a cluster with the default network alone.
+// or in the source's own (a default-network VM the caller sees), takes the
+// path it always did, and so does every address in a cluster with the
+// default network alone.
 func TestTraceSameNetworkUnchanged(t *testing.T) {
 	s := isolated(t, true)
+	peer := wl("plain", "db", nil, nil, "10.128.0.7")
 	for name, c := range map[string]struct {
 		src TraceWorkload
 		ip  string
@@ -157,7 +176,7 @@ func TestTraceSameNetworkUnchanged(t *testing.T) {
 		"same CUDN, other namespace": {wl("tenant-c", "app", nil, nil, "10.50.0.4"), "10.50.0.9"},
 		"default network to itself":  {wl("plain", "legacy", nil, nil, "10.128.0.9"), "10.128.0.7"},
 	} {
-		res := s.Trace(nil, c.src, nil, c.ip, "TCP", 443)
+		res := s.Trace(seeing(peer), c.src, nil, c.ip, "TCP", 443)
 		if st := connectivityStep(t, res); res.Verdict != "Allow" || st.Action != "Reachable" || st.Conditional {
 			t.Errorf("%s: verdict %s, step %+v", name, res.Verdict, st)
 		}
@@ -239,7 +258,7 @@ func TestTraceServiceAddressFromIsolatedNetwork(t *testing.T) {
 func TestTraceForeignRangeReadsAsOutside(t *testing.T) {
 	s := isolated(t, true)
 	a := wl("tenant-a", "web", nil, nil, "10.100.0.5")
-	tenant := &TraceView{Namespace: func(ns string) bool { return ns == "tenant-a" }, Shared: func() bool { return false }}
+	tenant := &TraceView{Namespace: func(ns string) bool { return ns == "tenant-a" }, Shared: false}
 	bytesFor := func(view *TraceView, ip string) string {
 		t.Helper()
 		b, err := json.Marshal(s.Trace(view, a, nil, ip, "TCP", 443))
@@ -311,7 +330,7 @@ func TestTraceSourceOnItsNetwork(t *testing.T) {
 		"spec":     map[string]any{"topology": "Layer2", "layer2": map[string]any{"role": "Primary", "subnets": []any{"10.150.0.0/16"}}},
 	})
 	vm := wl("unlabeled", "vm", nil, nil, "10.128.0.20")
-	if res := s.Trace(nil, vm, nil, "10.128.1.5", "TCP", 443); res.Verdict != "Allow" {
+	if res := s.Trace(seeing(wl("plain", "db", nil, nil, "10.128.1.5")), vm, nil, "10.128.1.5", "TCP", 443); res.Verdict != "Allow" {
 		t.Errorf("unrealized UDN, default network peer: verdict = %s (%v)", res.Verdict, stepKinds(t, res))
 	}
 	peer := wl("plain", "legacy", nil, nil, "10.128.0.9")
@@ -392,9 +411,7 @@ func TestTraceViewOwnScope(t *testing.T) {
 	sees := func(nss ...string) func(string) bool {
 		return func(ns string) bool { return slices.Contains(nss, ns) }
 	}
-	no := func() bool { return false }
-	yes := func() bool { return true }
-	tenant := &TraceView{Namespace: sees("tenant-a"), Shared: no}
+	tenant := &TraceView{Namespace: sees("tenant-a"), Shared: false}
 	if res := s.Trace(tenant, a, nil, "10.100.0.7", "TCP", 443); res.Verdict != "Allow" {
 		t.Errorf("own network: verdict = %s (%v)", res.Verdict, stepKinds(t, res))
 	}
@@ -402,14 +419,95 @@ func TestTraceViewOwnScope(t *testing.T) {
 		t.Errorf("the default network, for any caller: verdict = %s (%v)", res.Verdict, stepKinds(t, res))
 	}
 	for name, view := range map[string]*TraceView{
-		"published to them": {Namespace: sees("tenant-a", "tenant-c"), Shared: no},
-		"every shared one":  {Namespace: sees("tenant-a"), Shared: yes},
+		"published to them": {Namespace: sees("tenant-a", "tenant-c"), Shared: false},
+		"every shared one":  {Namespace: sees("tenant-a"), Shared: true},
 	} {
 		res := s.Trace(view, a, nil, "10.50.0.9", "TCP", 443)
 		if st := connectivityStep(t, res); !strings.Contains(st.Note, "no in-cluster path") {
 			t.Errorf("shared network %s: %+v", name, st)
 		}
 	}
+}
+
+// Beside a primary UDN a default-network pod address may be a UDN VM's
+// infrastructure interface, which OVN-K isolates: certain only for a
+// default-network VM the caller sees. With no primary UDN it is as before.
+func TestTraceDefaultPodBesideUDN(t *testing.T) {
+	s := isolated(t, true)
+	plain := wl("plain", "legacy", nil, nil, "10.128.0.9")
+	res := s.Trace(nil, plain, nil, "10.128.1.77", "TCP", 443)
+	if st := connectivityStep(t, res); res.Verdict != "Conditional" || !st.Conditional || !strings.Contains(st.Note, "pod address on the cluster default network") {
+		t.Errorf("unseen default-range address: verdict %s, step %+v", res.Verdict, st)
+	}
+	onUDN := wl("tenant-a", "web", nil, nil, "10.128.1.77")
+	if res := s.Trace(seeing(onUDN), plain, nil, "10.128.1.77", "TCP", 443); res.Verdict != "Conditional" {
+		t.Errorf("an address a UDN VM holds: verdict = %s (%v)", res.Verdict, stepKinds(t, res))
+	}
+	if res := s.Trace(seeing(wl("plain", "db", nil, nil, "10.128.1.77")), plain, nil, "10.128.1.77", "TCP", 443); res.Verdict != "Allow" {
+		t.Errorf("a default-network VM the caller sees: verdict = %s (%v)", res.Verdict, stepKinds(t, res))
+	}
+
+	alone := New(nil, nil)
+	alone.podNet = parsePrefixes([]string{"10.128.0.0/23"})
+	if res := alone.Trace(nil, plain, nil, "10.128.1.77", "TCP", 443); res.Verdict != "Allow" {
+		t.Errorf("no primary UDN: verdict = %s (%v)", res.Verdict, stepKinds(t, res))
+	}
+}
+
+// The EgressFirewall excludes the cluster's pod subnets, so it never decides
+// a flow to a pod address: the walk skips it. A service flow is DNATed into
+// those subnets unless its endpoints lie outside, so an outbound rule's Deny
+// on a service address is not certain; a source egress rule's is.
+func TestTraceOutboundRulesBindOnlyLeavingTraffic(t *testing.T) {
+	fwDeny := func(s *Snapshot, ns, cidr string) {
+		add(t, s.egressfw, map[string]any{
+			"apiVersion": "k8s.ovn.org/v1", "kind": "EgressFirewall",
+			"metadata": map[string]any{"name": "default", "namespace": ns},
+			"spec":     map[string]any{"egress": []any{map[string]any{"type": "Deny", "to": map[string]any{"cidrSelector": cidr}}}},
+		})
+	}
+	alone := New(nil, nil)
+	alone.clusterNet, alone.svcNet = parsePrefixes([]string{"10.128.0.0/14"}), parsePrefixes([]string{"172.30.0.0/16"})
+	alone.podNet = parsePrefixes([]string{"10.128.0.0/23"})
+	fwDeny(alone, "plain", "0.0.0.0/0")
+	plain := wl("plain", "legacy", nil, nil, "10.128.0.9")
+	res := alone.Trace(nil, plain, nil, "10.128.1.77", "TCP", 443)
+	if res.Verdict != "Allow" || slices.ContainsFunc(res.Steps, func(st model.TraceStep) bool { return st.Stage == "gateway" || st.Stage == "snat" }) {
+		t.Errorf("pod address under an outbound deny: verdict %s (%v)", res.Verdict, stepKinds(t, res))
+	}
+	for _, ip := range []string{"172.30.12.7", "172.30.0.10"} {
+		if res := alone.Trace(nil, plain, nil, ip, "TCP", 443); res.Verdict != "Conditional" {
+			t.Errorf("service %s under an outbound deny: verdict = %s (%v)", ip, res.Verdict, stepKinds(t, res))
+		}
+	}
+	if res := alone.Trace(nil, plain, nil, "203.0.113.9", "TCP", 443); res.Verdict != "Deny" {
+		t.Errorf("outside address under an outbound deny: verdict = %s (%v)", res.Verdict, stepKinds(t, res))
+	}
+
+	s := isolated(t, true)
+	fwDeny(s, "tenant-a", "172.30.0.0/16")
+	a := wl("tenant-a", "web", nil, nil, "10.100.0.5")
+	if res := s.Trace(nil, a, nil, "172.30.0.10", "UDP", 53); res.Verdict != "Conditional" {
+		t.Errorf("DNS from a UDN under an outbound deny: verdict = %s (%v)", res.Verdict, stepKinds(t, res))
+	}
+	if res := s.Trace(nil, a, nil, "10.100.0.7", "TCP", 443); slices.ContainsFunc(res.Steps, func(st model.TraceStep) bool { return st.Stage == "gateway" }) {
+		t.Errorf("its own network's address runs the outbound rules: %v", stepKinds(t, res))
+	}
+}
+
+// A stopped default-network VM reports no address: it is on the default
+// network while its namespace declares no primary UDN.
+func TestTraceStoppedDefaultVM(t *testing.T) {
+	s := isolated(t, true)
+	if res := s.Trace(nil, wl("plain", "legacy", nil, nil), nil, "8.8.8.8", "TCP", 443); res.Verdict != "Allow" {
+		t.Errorf("stopped default VM: verdict = %s (%v)", res.Verdict, stepKinds(t, res))
+	}
+	add(t, s.udn, map[string]any{
+		"apiVersion": "k8s.ovn.org/v1", "kind": "UserDefinedNetwork",
+		"metadata": map[string]any{"name": "late", "namespace": "unlabeled"},
+		"spec":     map[string]any{"topology": "Layer2", "layer2": map[string]any{"role": "Primary", "subnets": []any{"10.150.0.0/16"}}},
+	})
+	unplaced(t, s, nil, wl("unlabeled", "vm", nil, nil), "8.8.8.8", "203.0.113.9")
 }
 
 // A NAD's owner reference proves its network only with the owner's UID: a
