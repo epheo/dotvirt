@@ -42,7 +42,9 @@
 	{/snippet}
 
 	<ReviewSection title="Changes in this pull request">
-		{#if review?.error}
+		{#if review?.denied}
+			<p class="text-ink-soft">{review.error}</p>
+		{:else if review?.error}
 			<ErrorNote error={review.error} />
 			<div>
 				<Button

@@ -82,8 +82,11 @@
 			: fold(ranked, TOP_GROUPS, (p) => inFlight(p) || p.name === scope.project || holdsVM(p)),
 	);
 	const untracked = $derived(projects.filter((p) => !p.repo && projectMatches(p)));
+	// A stager without platform read still reaches the PRs they opened there.
 	const showPlatform = $derived(
-		(clusterGate.platform().ok || clusterGate.platformRead().ok) &&
+		(clusterGate.platform().ok ||
+			clusterGate.platformRead().ok ||
+			inventory.proposals.some((p) => p.project === PLATFORM_PROJECT && p.mine)) &&
 			matches(query, PLATFORM_PROJECT),
 	);
 

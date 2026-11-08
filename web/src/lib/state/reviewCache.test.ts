@@ -8,6 +8,14 @@ import type { Inventory, ProposalDetail } from '#lib/api.js';
 const api = vi.hoisted(() => ({
 	api: { proposal: vi.fn(), commit: vi.fn() },
 	Unauthorized: class extends Error {},
+	HttpError: class extends Error {
+		constructor(
+			message: string,
+			readonly status: number,
+		) {
+			super(message);
+		}
+	},
 	withRetry: vi.fn(),
 	vmKey: (v: { namespace: string; name: string }) => `${v.namespace}/${v.name}`,
 }));
@@ -63,5 +71,21 @@ describe('reviewCache proposals', () => {
 		expect(inventory.proposalsKey).toBe(before);
 		inventory.apply(lane('bbb'));
 		expect(inventory.proposalsKey).not.toBe(before);
+	});
+
+	it('a 403 is the answer, not a failure to retry', async () => {
+		inventory.apply(lane('aaa'));
+		api.api.proposal.mockRejectedValueOnce(new api.HttpError('changed outside dotvirt', 403));
+		reviewCache.loadProposal('p', 4);
+		await settle();
+		expect(reviewCache.proposal('p', 4)).toMatchObject({
+			error: 'changed outside dotvirt',
+			denied: true,
+		});
+
+		api.api.proposal.mockRejectedValueOnce(new api.HttpError('forge down', 503));
+		reviewCache.loadProposal('p', 4, true);
+		await settle();
+		expect(reviewCache.proposal('p', 4)?.denied).toBe(false);
 	});
 });

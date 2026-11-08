@@ -23,7 +23,7 @@
 		sameReview,
 		type ReviewSel,
 	} from '#lib/review.js';
-	import { drafts } from '#lib/state/drafts.svelte.js';
+	import { drafts, PLATFORM_PROJECT } from '#lib/state/drafts.svelte.js';
 	import Button from '#lib/components/Button.svelte';
 	import Card from '#lib/components/Card.svelte';
 	import DiscardDraft from '#lib/components/DiscardDraft.svelte';
@@ -431,6 +431,13 @@
 		{#if repoProjects.includes(scopeProject)}
 			<div class={BODY}>
 				{@render laneBody(scopeProject, history[scopeProject], false)}
+			</div>
+		{:else if scopeProject === PLATFORM_PROJECT}
+			<div class="flex flex-col gap-1 px-card py-3 text-[13px]">
+				<p class="text-ink-soft">You cannot read the platform's history.</p>
+				<a href="{changesHref(PLATFORM_PROJECT)}?tab=review" class="text-accent-ink hover:underline"
+					>Your pull requests there are under In review</a
+				>
 			</div>
 		{:else}
 			<p class="px-card py-3 text-[13px] text-ink-faint">This project has no repository yet.</p>

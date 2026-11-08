@@ -1,7 +1,17 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { TaskEntry } from '#lib/api.js';
 
-const api = vi.hoisted(() => ({ api: { history: vi.fn() } }));
+const api = vi.hoisted(() => ({
+	api: { history: vi.fn() },
+	HttpError: class extends Error {
+		constructor(
+			message: string,
+			readonly status: number,
+		) {
+			super(message);
+		}
+	},
+}));
 vi.mock('#lib/api.js', () => api);
 
 import { tray } from './tray.svelte';
@@ -64,5 +74,19 @@ describe('tray history reads', () => {
 		tray.update([], mergedFeed);
 		await vi.advanceTimersByTimeAsync(120_000);
 		expect(api.api.history).toHaveBeenCalledTimes(1);
+	});
+
+	it('stops asking once the history answers 403', async () => {
+		vi.useFakeTimers();
+		tray.remember({ project: 'platform', prNumber: 6, title: 't', prURL: 'u' });
+		api.api.history.mockRejectedValue(new api.HttpError('not authorized', 403));
+		const feed = [{ ...mergedFeed[0], project: 'platform', prNumber: 6 }];
+		tray.update([], feed);
+		await vi.advanceTimersByTimeAsync(0);
+		tray.update([], feed);
+		tray.want('platform');
+		await vi.advanceTimersByTimeAsync(120_000);
+		expect(api.api.history).toHaveBeenCalledTimes(1);
+		expect(tray.followed[0].mergedAt).toBeDefined();
 	});
 });

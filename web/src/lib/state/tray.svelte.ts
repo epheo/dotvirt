@@ -1,4 +1,4 @@
-import { api, type Proposal, type TaskEntry } from '#lib/api.js';
+import { api, HttpError, type Proposal, type TaskEntry } from '#lib/api.js';
 import { follow, followKey, type Followed } from '#lib/tray.js';
 import { persisted } from './persisted.svelte';
 
@@ -20,6 +20,9 @@ class TrayStore {
 	#commits = $state<Record<string, string[]>>({});
 	#readAt = new Map<string, number>();
 	#timers = new Map<string, ReturnType<typeof setTimeout>>();
+	// Projects whose history answered 403 (a platform stager without platform
+	// read): no later read can find their merges, so none is made.
+	#denied = new Set<string>();
 
 	get open(): boolean {
 		return this.#open;
@@ -46,7 +49,7 @@ class TrayStore {
 	// Nothing else may ask again: the stream can stay quiet for as long as a
 	// merge waits, so a skipped read becomes a timer, never a drop.
 	want(project: string) {
-		if (this.#timers.has(project)) return;
+		if (this.#timers.has(project) || this.#denied.has(project)) return;
 		const wait = (this.#readAt.get(project) ?? -Infinity) + RESOLVE_EVERY_MS - Date.now();
 		if (wait <= 0) {
 			void this.#read(project);
@@ -82,8 +85,12 @@ class TrayStore {
 			});
 			if (found) this.#followed.value = next;
 			waiting = next.some((f) => f.project === project && f.mergedAt && !f.hash);
-		} catch {
+		} catch (e) {
 			// History unreadable for now: the lane stays applying and asks again.
+			if (e instanceof HttpError && e.status === 403) {
+				this.#denied.add(project);
+				waiting = false;
+			}
 		}
 		if (waiting) this.want(project);
 	}
@@ -110,6 +117,7 @@ class TrayStore {
 		this.#followed.value = [];
 		this.#commits = {};
 		this.#readAt.clear();
+		this.#denied.clear();
 		for (const t of this.#timers.values()) clearTimeout(t);
 		this.#timers.clear();
 	}

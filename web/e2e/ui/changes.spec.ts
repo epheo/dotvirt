@@ -162,3 +162,33 @@ test('a failed drafts read says so in the Staged card and retries', async ({ pag
 	await expect(main.getByRole('button', { name: 'Retry' })).toBeEnabled();
 	await expect(main.getByText('Nothing staged')).toHaveCount(0);
 });
+
+test('a platform stager without platform read reviews their own platform PRs', async ({ page }) => {
+	await setScenario(page, 'platstager');
+	await login(page);
+	await page.goto('/changes/platform?tab=review');
+	const main = page.locator('main');
+	// The tree reaches the platform through the caller's own PRs.
+	await expect(page.locator('aside a[href="/changes/platform"]')).toBeVisible();
+
+	await main.getByRole('button', { name: /PR #7/ }).click();
+	await expect(main.getByText('dc-vlan-120').first()).toBeVisible();
+	await expect(main.getByText('yours')).toBeVisible();
+
+	// Changed outside dotvirt: the server's answer is the review, with nothing to retry.
+	await main.getByRole('button', { name: /PR #8/ }).click();
+	await expect(
+		main.getByText(/pull request #8 changed outside dotvirt since you proposed it/),
+	).toBeVisible();
+	await expect(main.getByRole('button', { name: 'Retry' })).toHaveCount(0);
+	await expect(main.getByRole('link', { name: /Open PR to approve and merge/ })).toHaveAttribute(
+		'href',
+		/platform\/pulls\/8/,
+	);
+
+	// History stays the readers'; it says so and points back at the PRs.
+	await page.goto('/changes/platform?tab=history');
+	await expect(main.getByText("You cannot read the platform's history.")).toBeVisible();
+	await main.getByRole('link', { name: 'Your pull requests there are under In review' }).click();
+	await expect(main.getByRole('button', { name: /PR #7/ })).toBeVisible();
+});

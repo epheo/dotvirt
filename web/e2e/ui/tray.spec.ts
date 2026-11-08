@@ -101,3 +101,35 @@ test('a staged draft stays a pill that opens its review in one click', async ({ 
 	await tray.getByRole('button', { name: 'Review', exact: true }).click();
 	await expect(page.getByRole('dialog').getByText('Propose to team-web')).toBeVisible();
 });
+
+test('a platform merge the caller cannot read stops at merged, with no history polling', async ({
+	page,
+}) => {
+	await setScenario(page, 'platstager');
+	await login(page);
+	const reads: string[] = [];
+	page.on('request', (r) => {
+		if (r.url().includes('/api/projects/platform/history')) reads.push(r.url());
+	});
+	await following(page, [
+		{
+			project: 'platform',
+			prNumber: 6,
+			title: 'Add network dc-vlan-110',
+			prURL: 'https://forge.example/dotvirt/platform/pulls/6',
+			mergedAt: Date.now() - 60_000,
+		},
+	]);
+	const tray = trayOf(page);
+	await tray.getByRole('button', { name: 'Show' }).click();
+	const lane = tray.locator('section', { hasText: 'PR #6 merged' });
+	await expect(
+		lane.getByText("You cannot read the platform's history, so dotvirt cannot follow it"),
+	).toBeVisible();
+	await expect(lane.getByRole('button', { name: 'Dismiss' })).toBeVisible();
+	expect(reads.length).toBeLessThanOrEqual(1);
+
+	// Recent tasks carries the merge, linked to the forge only.
+	await page.getByRole('button', { name: /^Recent tasks/ }).click();
+	await expect(page.getByText('Add network dc-vlan-110').last()).toBeVisible();
+});
