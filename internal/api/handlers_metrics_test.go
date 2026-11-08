@@ -263,3 +263,34 @@ func TestClusterSummaryFoldLeavesCacheAlone(t *testing.T) {
 	}
 	wg.Wait()
 }
+
+// A partial summary still counts phases: its stopped VMs come from the
+// snapshot, not the failed query, so they are folded in like a whole one's.
+func TestPartialSummaryFoldsStoppedVMs(t *testing.T) {
+	fc := newFakeCluster(t)
+	fc.vms = []kubevirtcorev1.VirtualMachine{{ObjectMeta: metav1.ObjectMeta{Name: "off", Namespace: "team-a-dev"}}}
+	querier := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.Contains(r.URL.Query().Get("query"), "kube_node_status_allocatable") {
+			http.Error(w, "unavailable", http.StatusServiceUnavailable)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		if strings.HasSuffix(r.URL.Path, "query_range") {
+			fmt.Fprint(w, `{"status":"success","data":{"result":[{"metric":{},"values":[[100,"2"]]}]}}`)
+			return
+		}
+		fmt.Fprint(w, `{"status":"success","data":{"result":[{"metric":{"phase":"running"},"value":[100,"2"]}]}}`)
+	}))
+	t.Cleanup(querier.Close)
+	s := fc.server(nil, Config{})
+	var err error
+	if s.metrics, err = metrics.New(querier.URL, querier.URL, "", false); err != nil {
+		t.Fatal(err)
+	}
+	rec := do(s, adminToken, http.MethodGet, "/api/metrics/cluster", "")
+	wantStatus(t, rec, http.StatusOK)
+	cs := decodeBody[model.ClusterSummary](t, rec)
+	if cs.Unavailable != model.MetricsPartial || cs.VMs["running"] != 2 || cs.VMs["stopped"] != 1 {
+		t.Errorf("summary = %+v, want partial with running 2 and stopped 1", cs)
+	}
+}

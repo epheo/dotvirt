@@ -89,7 +89,8 @@ func (s *Server) handleClusterSummary(w http.ResponseWriter, r *http.Request) {
 	// The node-allocatable totals are node data, gated like handleHostLoad.
 	nodeTotals := s.capable(r.Context(), sc.id, sc.cluster, ask(verbList, ssarNodes, ""))
 	cs, err := s.metrics.ClusterSummary(r.Context(), who, nss, r.URL.Query().Get("node"), nodeTotals)
-	if err == nil && cs.Unavailable == "" && r.URL.Query().Get("node") == "" {
+	hasPhases := cs.Unavailable == "" || cs.Unavailable == model.MetricsPartial
+	if err == nil && hasPhases && r.URL.Query().Get("node") == "" {
 		// The phase map comes from kubevirt_vmi_info, and a stopped VM has no
 		// VMI - so a 3-VM project read "2 Running" with the third invisible.
 		// Fold the snapshot's VMI-less VMs in as stopped. Node scope keeps the
