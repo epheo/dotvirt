@@ -23,6 +23,15 @@ const PlatformProject = "platform"
 // dotvirt-tenants), so no project can claim one.
 const AppProjectPrefix = "dotvirt-p-"
 
+// PlatformSyncAccount is the ServiceAccount, in the ArgoCD namespace, Argo
+// impersonates to sync the platform tier once sync impersonation is on.
+const PlatformSyncAccount = "dotvirt-platform-sync"
+
+// TenantEgressRole is the ClusterRole granting EgressFirewall writes: a tenant
+// kind the built-in admin role lacks, bound to each project's sync account in
+// each of its namespaces (EgressBinding).
+const TenantEgressRole = "dotvirt-tenant-egress"
+
 var dnsLabel = regexp.MustCompile(`^[a-z0-9]([-a-z0-9]*[a-z0-9])?$`)
 
 // AppProjectName is the AppProject confining project's Application. ok=false
@@ -40,6 +49,22 @@ func AppProjectName(project string) (string, bool) {
 	}
 	return name, true
 }
+
+// SyncAccount is the ServiceAccount, in the ArgoCD namespace, Argo
+// impersonates to sync project's Application once sync impersonation is on.
+// Named like the AppProject whose destinationServiceAccounts name it, so the
+// two cannot disagree. Its rights are the RoleBindings the platform repo holds
+// in each project namespace (AdminBinding, EgressBinding): the project's repo
+// then applies only what the project itself may.
+func SyncAccount(project string) (string, bool) { return AppProjectName(project) }
+
+// AdminBinding is the platform repo's RoleBinding granting a project namespace's
+// owners, and its project's sync account, the admin role.
+func AdminBinding(ns string) string { return ns + "-admins" }
+
+// EgressBinding is the platform repo's RoleBinding granting a project
+// namespace's sync account TenantEgressRole.
+func EgressBinding(ns string) string { return ns + "-sync-egress" }
 
 // Reserved reports whether ns is platform space no tenant Application may
 // target: the openshift-* and kube-* system namespaces, and platform, the

@@ -23,6 +23,10 @@ func TestAppProjectName(t *testing.T) {
 		if name != AppProjectPrefix+project {
 			t.Errorf("%q: name = %q", project, name)
 		}
+		// The AppProject's destinationServiceAccounts name the account by this rule.
+		if sa, saOK := SyncAccount(project); sa != name || saOK != got {
+			t.Errorf("%q: SyncAccount = %q %v, want the AppProject's name", project, sa, saOK)
+		}
 	}
 }
 
