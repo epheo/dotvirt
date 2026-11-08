@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { Play } from '@lucide/svelte';
 	import { api, type TraceResult, type TraceStep } from '#lib/api.js';
+	import { traceStageLabel } from '#lib/labels.js';
 	import { action } from '#lib/resource.svelte.js';
 	import { inventory } from '#lib/state/inventory.svelte.js';
 	import { TONE_PILL, TONE_TEXT, type Tone } from '#lib/status.js';
@@ -63,17 +64,6 @@
 		Unreachable: 'Unreachable. No shared network carries this flow.',
 	};
 
-	const STAGE_LABEL: Record<string, string> = {
-		connectivity: 'Connectivity',
-		segment: 'Network',
-		admin: 'Cluster rule',
-		dfw: 'Project rule',
-		baseline: 'Cluster default rule',
-		default: 'Default',
-		gateway: 'Outbound rule',
-		snat: 'Fixed outbound IP',
-		route: 'External route',
-	};
 	// An unresolved answer says why, in the words of the step that could not
 	// be resolved, rather than a generic hedge.
 	function verdictText(r: TraceResult): string {
@@ -192,9 +182,7 @@
 								<span
 									class="rounded-full bg-accent-soft px-1.5 py-0.5 whitespace-nowrap text-accent-ink"
 								>
-									{STAGE_LABEL[s.stage] ?? s.stage}{s.direction
-										? ` · ${s.direction.toLowerCase()}`
-										: ''}
+									{traceStageLabel(s.stage)}{s.direction ? ` · ${s.direction.toLowerCase()}` : ''}
 								</span>
 								<span class="font-medium {TONE_TEXT[actionTone(s)]}">{s.action}</span>
 								{#if s.policy}

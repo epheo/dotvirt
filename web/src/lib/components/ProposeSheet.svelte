@@ -10,6 +10,7 @@
 	} from '@lucide/svelte';
 	import { api, HttpError, type DraftItem } from '#lib/api.js';
 	import { memoryHint } from '#lib/headroom.js';
+	import { draftResourceLabel } from '#lib/labels.js';
 	import { action } from '#lib/resource.svelte.js';
 	import { drafts } from '#lib/state/drafts.svelte.js';
 	import { memoryRoom } from '#lib/state/hosts.svelte.js';
@@ -56,8 +57,7 @@
 	let ack = $state(false);
 
 	const isVM = (it: DraftItem) => !it.resource || it.resource === 'vm';
-	const kindName = (it: DraftItem) =>
-		isVM(it) ? 'VirtualMachine' : (it.resource ?? '').replace(/^./, (x) => x.toUpperCase());
+	const kindName = (it: DraftItem) => draftResourceLabel(it.resource);
 	const blocked = $derived(prune.length > 0 && !ack);
 	const word = (f: string) => (f === f.toUpperCase() ? f : f.toLowerCase());
 	const list = (xs: string[]) =>

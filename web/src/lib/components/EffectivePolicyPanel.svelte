@@ -2,6 +2,7 @@
 	import { api, type EffectivePolicy, type PolicyBinding } from '#lib/api.js';
 	import { resource } from '#lib/resource.svelte.js';
 	import { friendlyError } from '#lib/format.js';
+	import { policyKindLabel } from '#lib/labels.js';
 	import PolicyRuleTable from './PolicyRuleTable.svelte';
 	import SyncBadge from './SyncBadge.svelte';
 
@@ -27,10 +28,8 @@
 
 	const tierLabel = (b: PolicyBinding) =>
 		b.policy.kind === 'admin'
-			? `Cluster rule, priority ${b.policy.priority ?? 0}`
-			: b.policy.kind === 'baseline'
-				? 'Cluster default rule'
-				: 'Project';
+			? `${policyKindLabel('admin')}, priority ${b.policy.priority ?? 0}`
+			: policyKindLabel(b.policy.kind);
 
 	const denyText = $derived.by(() => {
 		if (!eff) return '';
