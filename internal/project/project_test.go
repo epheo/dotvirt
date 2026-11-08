@@ -89,3 +89,17 @@ func TestResolveIgnoresReservedName(t *testing.T) {
 		t.Fatalf("Resolve = %+v, want only team", got)
 	}
 }
+
+// Owners names every labeled namespace's project, whoever asks, and never the
+// reserved platform name.
+func TestOwners(t *testing.T) {
+	r := NewResolver("dotvirt.io/project", "dotvirt.io/repo", "")
+	got := r.Owners([]Namespace{
+		{Name: "a", Labels: map[string]string{"dotvirt.io/project": "team-a"}},
+		{Name: "p", Labels: map[string]string{"dotvirt.io/project": PlatformName}},
+		{Name: "u"},
+	})
+	if len(got) != 1 || got["a"] != "team-a" {
+		t.Errorf("owners = %v", got)
+	}
+}

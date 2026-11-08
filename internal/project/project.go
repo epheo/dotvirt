@@ -9,8 +9,10 @@ import (
 	"log"
 	"sort"
 	"sync"
+	"time"
 
 	"github.com/epheo/dotvirt/pkg/forge"
+	"github.com/epheo/dotvirt/pkg/tenancy"
 )
 
 // ProjectInfo is one resolved tenant: its name, the repo backing it, the
@@ -26,11 +28,13 @@ type ProjectInfo struct {
 // Namespace is the input to resolution: a project-labeled namespace's name plus
 // the label/annotation maps the resolver reads. It is supplied from the SA-owned
 // cluster snapshot (clusterstate), not fetched per request - the resolver is a
-// pure function over this set.
+// pure function over this set. Created weighs it as an Application destination
+// (tenancy.Destination).
 type Namespace struct {
 	Name        string
 	Labels      map[string]string
 	Annotations map[string]string
+	Created     time.Time
 }
 
 // Resolver maps namespaces to projects using a label (project name) and an
@@ -49,7 +53,7 @@ type Resolver struct {
 // PlatformName is the synthetic platform tier's project name. It is reserved:
 // a tenant by that name would share the platform draft and its route gates, so
 // Resolve never emits one and the tenancy flows refuse it.
-const PlatformName = "platform"
+const PlatformName = tenancy.PlatformProject
 
 // NewResolver builds a Resolver for the given label/annotation keys. forgeBase is
 // the effective forge URL relative repo refs resolve against; empty leaves them
@@ -127,5 +131,17 @@ func (r *Resolver) Resolve(namespaces []Namespace, visible map[string]bool) []Pr
 		out = append(out, info)
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
+	return out
+}
+
+// Owners maps every project-labeled namespace to its project, unfiltered: what
+// a repo-declared object's namespace belongs to, whoever is asking.
+func (r *Resolver) Owners(namespaces []Namespace) map[string]string {
+	out := make(map[string]string, len(namespaces))
+	for _, ns := range namespaces {
+		if name := ns.Labels[r.projectLabel]; name != "" && name != PlatformName {
+			out[ns.Name] = name
+		}
+	}
 	return out
 }
