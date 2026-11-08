@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	authzv1 "k8s.io/api/authorization/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	"github.com/epheo/dotvirt/internal/model"
@@ -182,6 +183,12 @@ func TestCreateAdminNetworkPolicyRefusesTakenPriority(t *testing.T) {
 func TestNetworksTenantSeesOwnScope(t *testing.T) {
 	fc := newFakeCluster(t)
 	fc.readsVMs = tenantReadsTeamA
+	// cudn-lister may only list shared networks cluster-wide: kubectl already
+	// shows it every one, so its catalog does too.
+	fc.ssar = func(token string, attrs *authzv1.ResourceAttributes) bool {
+		return token == adminToken ||
+			token == "cudn-lister" && attrs.Verb == "list" && attrs.Resource == "clusteruserdefinednetworks"
+	}
 	resources := func(gv string, names ...string) http.HandlerFunc {
 		return func(w http.ResponseWriter, _ *http.Request) {
 			list := metav1.APIResourceList{TypeMeta: metav1.TypeMeta{Kind: "APIResourceList", APIVersion: "v1"}, GroupVersion: gv}
@@ -251,6 +258,9 @@ func TestNetworksTenantSeesOwnScope(t *testing.T) {
 	}
 	if got := names(adminToken); strings.Join(got, ",") != "blue-secondary,green-secondary,mt-b" {
 		t.Errorf("platform caller sees %v, want every shared network", got)
+	}
+	if got := names("cudn-lister"); strings.Join(got, ",") != "blue-secondary,green-secondary,mt-b" {
+		t.Errorf("a cluster-wide CUDN lister sees %v, want the unpublished green-secondary too", got)
 	}
 	// A network the tenant cannot list is not found by key either.
 	wantStatus(t, do(s, tenantToken, http.MethodGet, "/api/networks/rules?network=mt-b", ""), http.StatusNotFound)

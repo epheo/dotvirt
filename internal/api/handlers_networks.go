@@ -174,9 +174,8 @@ func (s *Server) handleNetworks(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	can := func(k model.Kind) bool { return s.capable(ctx, id, c, kindAction(verbCreate, k, "")) }
 	cudn := can(model.KindCUDN)
-	platformRead, _ := s.canReadPlatform(ctx, id, c)
 	out := model.NetworkInventory{
-		Networks:         scopeNetworks(full.Networks, visible, cudn || platformRead),
+		Networks:         scopeNetworks(full.Networks, visible, s.seesAllNetworks(ctx, id, c)),
 		Uplinks:          []model.Uplink{},
 		PhysicalAdapters: []model.PhysicalAdapter{},
 		NMStatePresent:   full.NMStatePresent,
@@ -200,7 +199,7 @@ func (s *Server) handleNetworks(w http.ResponseWriter, r *http.Request) {
 			AdminNetworkPolicy:         can(model.KindANP),
 			BaselineAdminNetworkPolicy: can(model.KindBANP),
 		}
-		out.Caps.Platform = platformRead
+		out.Caps.Platform, _ = s.canReadPlatform(ctx, id, c)
 	}
 	// Which file declares each segment: the edit/delete affordance. A shared
 	// segment's platform file shows only to callers who may author that tier.
@@ -255,11 +254,20 @@ func (s *Server) callerNetworks(ctx context.Context, id auth.Identity, c *cluste
 	if s.netstate == nil {
 		return nil
 	}
-	all := s.capable(ctx, id, c, kindAction(verbCreate, model.KindCUDN, ""))
-	if !all {
-		all, _ = s.canReadPlatform(ctx, id, c)
+	return scopeNetworks(s.netstate.Catalog().Networks, visible, s.seesAllNetworks(ctx, id, c))
+}
+
+// seesAllNetworks reports whether the caller's catalog holds every shared
+// network, published to them or not: they may create shared networks, read
+// the platform tier, or list shared networks cluster-wide (which kubectl
+// would show them anyway). Every review goes through the cached layer.
+func (s *Server) seesAllNetworks(ctx context.Context, id auth.Identity, c *cluster.Client) bool {
+	if s.capable(ctx, id, c, kindAction(verbCreate, model.KindCUDN, "")) ||
+		s.capable(ctx, id, c, kindAction(verbList, model.KindCUDN, "")) {
+		return true
 	}
-	return scopeNetworks(s.netstate.Catalog().Networks, visible, all)
+	ok, _ := s.canReadPlatform(ctx, id, c)
+	return ok
 }
 
 // redactSharedErrors replaces a shared network's apply error with a generic
