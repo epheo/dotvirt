@@ -452,30 +452,35 @@ var (
 	ssarVMTemplate  = ssarFor(model.KindTemplate)
 )
 
-// platformReaders are the cluster-wide signals that open the platform tier's
-// shared reads - its history, commit and proposal diffs, revert, its merges
-// in the task feed and its rollup detail: listing namespaces cluster-wide, or
-// creating CUDNs, KubeDeschedulers or templates in every namespace. The
-// platform repo names every project, namespace and owner, so a right scoped
-// to one namespace (an operator namespace's admin role) never opens them.
-func platformReaders() []action {
-	return []action{
-		ask(verbList, ssarNamespace, ""),
-		ask(verbCreate, ssarCUDN, ""),
-		ask(verbCreate, ssarDescheduler, ""),
-		ask(verbCreate, ssarVMTemplate, ""),
+// platformListing is listing, cluster-wide, every cluster-scoped kind the
+// kinds table holds: it opens the platform tier's shared reads - its history,
+// commit and proposal diffs, revert, its merges in the task feed and its
+// rollup detail. The platform repo declares those objects, so a caller the
+// apiserver would refuse one of them is refused the repo. Namespaces are one
+// of them, and the repo names every project, namespace and owner, so a right
+// scoped to one namespace (an operator namespace's admin role) never opens it.
+func platformListing() action {
+	var act action
+	for _, r := range model.Resources() {
+		for _, k := range r.Kinds {
+			if k.ClusterScoped {
+				act = append(act, kindAction(verbList, k, "")...)
+			}
+		}
 	}
+	return act
 }
 
-// canReadPlatform reports whether id may read the platform tier: any of
-// platformReaders, each a review cached per token. False when no platform
-// repo is configured. An error means none allowed and at least one review
-// failed.
+// canReadPlatform reports whether id may read the platform tier:
+// platformListing, each question a review cached per token, asked until one
+// is denied. False when no platform repo is configured. An error means a
+// review the answer needed failed.
 func (s *Server) canReadPlatform(ctx context.Context, id auth.Identity, c *cluster.Client) (bool, error) {
 	if s.cfg.PlatformRepo == "" {
 		return false, nil
 	}
-	return s.anyAllowed(ctx, id, c, platformReaders())
+	_, ok, err := s.allowed(ctx, id, c, platformListing())
+	return ok, err
 }
 
 // scope is the per-request context every draft/VM handler resolves up front: the
@@ -635,10 +640,10 @@ func (s *Server) pickDraft(w http.ResponseWriter, r *http.Request, want string) 
 
 // pickProject resolves a project named by a ?project= query or {project} path
 // segment (the whole-project routes: history, revert, and through pickDraft
-// the draft routes). The platform tier resolves ONLY for callers holding a
-// cluster-wide platform signal (platformReaders), so neither a plain tenant
-// nor a namespace-scoped right reaches the platform repo's history or
-// revert. Any other name resolves from the caller's visible projects.
+// the draft routes). The platform tier resolves ONLY for platform readers
+// (canReadPlatform), so neither a plain tenant nor a namespace-scoped right
+// reaches the platform repo's history or revert. Any other name resolves
+// from the caller's visible projects.
 func (s *Server) pickProject(w http.ResponseWriter, r *http.Request, want string) (scope, bool) {
 	if want == platformProjectName {
 		return s.platformScopeAny(w, r)
@@ -647,8 +652,7 @@ func (s *Server) pickProject(w http.ResponseWriter, r *http.Request, want string
 }
 
 // platformScopeAny resolves the platform tier for the whole-project routes:
-// any of platformReaders suffices. The per-kind create routes keep their own
-// gate.
+// canReadPlatform. The per-kind create routes keep their own gate.
 func (s *Server) platformScopeAny(w http.ResponseWriter, r *http.Request) (scope, bool) {
 	return s.platformScopeWith(w, r, s.canReadPlatform, "not authorized to read the platform repo")
 }

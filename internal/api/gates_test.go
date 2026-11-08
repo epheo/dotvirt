@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -356,10 +357,11 @@ func TestGatesAreExactAndCapabilitiesMatch(t *testing.T) {
 }
 
 // The platform tier's shared reads (its history, a commit's diff, a proposal,
-// the platform draft without one of one's own) open on a cluster-wide signal
-// alone, and cluster.platformRead says the same. A right to stage one
-// platform kind, or a DRS right inside the operator namespace (which OLM
-// folds into that namespace's admin role), stages but reads nothing.
+// the platform draft without one of one's own) open on listing every
+// cluster-scoped kind the repo declares, and cluster.platformRead says the
+// same. Listing namespaces alone, or a right to stage one platform kind, or a
+// DRS right inside the operator namespace (which OLM folds into that
+// namespace's admin role), reads nothing.
 func TestPlatformReadsNeedAClusterWideSignal(t *testing.T) {
 	g := newGateRig(t)
 	passes := func(tok, path string) (ok bool) {
@@ -373,14 +375,29 @@ func TestPlatformReadsNeedAClusterWideSignal(t *testing.T) {
 	desched := func(verb, name string) grant {
 		return grant{verb: verb, group: "operator.openshift.io", resource: "kubedeschedulers", ns: descheduler, name: name}
 	}
+	var listing, butANP []grant
+	for _, r := range model.Resources() {
+		for _, k := range r.Kinds {
+			if k.ClusterScoped {
+				listing = append(listing, kind(verbList, k, ""))
+				if k != model.KindANP {
+					butANP = append(butANP, kind(verbList, k, ""))
+				}
+			}
+		}
+	}
+	reads := func(gs ...grant) []grant { return append(slices.Clone(listing), gs...) }
 	for _, c := range []struct {
 		gs            []grant
 		read, staging bool
 	}{
-		{[]grant{{verb: verbList, resource: "namespaces"}}, true, false},
-		{[]grant{kind(verbCreate, model.KindCUDN, "")}, true, true},
-		{[]grant{{verb: verbCreate, group: "operator.openshift.io", resource: "kubedeschedulers"}}, true, true},
-		{[]grant{kind(verbCreate, model.KindTemplate, "")}, true, true},
+		{listing, true, false},
+		{butANP, false, false},
+		{[]grant{{verb: verbList, resource: "namespaces"}}, false, false},
+		{reads(kind(verbCreate, model.KindCUDN, "")), true, true},
+		{[]grant{kind(verbCreate, model.KindCUDN, "")}, false, true},
+		{reads(grant{verb: verbCreate, group: "operator.openshift.io", resource: "kubedeschedulers"}), true, true},
+		{reads(kind(verbCreate, model.KindTemplate, "")), true, true},
 		{[]grant{kind(verbCreate, model.KindEgressIP, "")}, false, true},
 		{[]grant{kind(verbDelete, model.KindNNCP, "")}, false, true},
 		{[]grant{desched(verbCreate, ""), desched(verbUpdate, "cluster"), desched(verbDelete, "cluster")}, false, true},
@@ -571,9 +588,10 @@ func TestFrameAsksThePlatformLaneOnlyWhenBusy(t *testing.T) {
 	var mu sync.Mutex
 	asked := map[string]int{}
 	inner := g.fc.ssar
+	lane := platformListing()[0] // the platform lane's first question
 	g.fc.ssar = func(token string, a *authzv1.ResourceAttributes) bool {
 		mu.Lock()
-		if a.Resource == "kubedeschedulers" || a.Resource == "virtualmachinetemplates" || a.Verb == verbDelete {
+		if a.Verb == lane.Verb && a.Group == lane.Group && a.Resource == lane.Resource {
 			asked[token]++
 		}
 		mu.Unlock()
