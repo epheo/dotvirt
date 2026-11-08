@@ -1,9 +1,9 @@
 // Package auth authenticates dotvirt users by their Kubernetes bearer token.
 // A user pastes a token (oc whoami -t / kubectl create token); dotvirt validates
 // it with a TokenReview (as its own ServiceAccount) and, on success, hands back
-// the token in an AES-GCM sealed httpOnly cookie. There is no server-side session store:
-// the cookie *is* the token, and every downstream cluster call re-presents it so
-// cluster RBAC remains the sole authority.
+// the token in an AES-GCM sealed httpOnly cookie. The cookie *is* the token, and
+// every downstream cluster call re-presents it so cluster RBAC remains the sole
+// authority; the only server-side session state is the logout record (sessions).
 package auth
 
 import (
@@ -29,6 +29,9 @@ type Identity struct {
 	Token    string
 	Username string
 	Groups   []string
+	// Issued is when the session cookie carrying Token was issued; zero when
+	// the token came in a bearer header.
+	Issued time.Time
 }
 
 type ctxKey struct{}
@@ -49,8 +52,9 @@ func FromContext(ctx context.Context) (Identity, bool) {
 // the user's). Results are cached briefly by token hash so a request burst
 // doesn't issue a TokenReview each time.
 type Authenticator struct {
-	saKube kubernetes.Interface
-	sealer cipher.AEAD // seals the session cookie (newSealer)
+	saKube   kubernetes.Interface
+	sealer   cipher.AEAD // seals the session cookie (newSealer)
+	sessions *sessions
 
 	cache   *ttlcache.Cache[cachedIdentity] // keyed by sha256(token)
 	reviews *rate.Limiter                   // TokenReview budget for uncached tokens (reviewRate)
@@ -69,11 +73,20 @@ const authCacheTTL = time.Minute
 // cluster.Factory.SAKube). secret keys the session cookie.
 func New(saKube kubernetes.Interface, secret []byte) *Authenticator {
 	return &Authenticator{
-		saKube:  saKube,
-		sealer:  newSealer(secret),
-		cache:   ttlcache.New[cachedIdentity](authCacheTTL),
-		reviews: rate.NewLimiter(reviewRate, reviewBurst),
+		saKube:   saKube,
+		sealer:   newSealer(secret),
+		sessions: newSessions(),
+		cache:    ttlcache.New[cachedIdentity](authCacheTTL),
+		reviews:  rate.NewLimiter(reviewRate, reviewBurst),
 	}
+}
+
+// SessionLive reports whether the session issued at issued may still
+// authenticate: not signed out, and younger than sessionMaxAge. tokenKey is
+// restfactory.TokenKey of its token. A zero issued (a bearer header) is always
+// live; only the cluster can revoke a raw token.
+func (a *Authenticator) SessionLive(tokenKey string, issued time.Time) bool {
+	return a.sessions.live(tokenKey, issued)
 }
 
 // reviewRate bounds the TokenReviews this process opens for tokens it has not
@@ -113,10 +126,14 @@ func (a *Authenticator) Recheck(ctx context.Context, token string) error {
 // Validate checks token via TokenReview and returns the attributed Identity.
 // Cached by token hash (positive and negative) for ttl.
 func (a *Authenticator) Validate(ctx context.Context, token string) (Identity, error) {
+	return a.validate(ctx, token, restfactory.TokenKey(token))
+}
+
+// validate is Validate for a token whose key the caller already holds.
+func (a *Authenticator) validate(ctx context.Context, token, key string) (Identity, error) {
 	if token == "" {
 		return Identity{}, fmt.Errorf("%w: empty token", ErrRejected)
 	}
-	key := restfactory.TokenKey(token)
 
 	if c, ok := a.cache.Get(key); ok {
 		if c.err {

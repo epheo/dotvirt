@@ -6,6 +6,9 @@ import (
 	"errors"
 	"net/http"
 	"strings"
+	"time"
+
+	"github.com/epheo/dotvirt/internal/restfactory"
 )
 
 // userResponse is the public shape of an Identity (the token is never returned).
@@ -45,10 +48,20 @@ func (a *Authenticator) Login(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, userResponse{Username: id.Username, Groups: id.Groups})
 }
 
-// Logout clears the session cookie. Always 204 (idempotent).
-func (a *Authenticator) Logout(w http.ResponseWriter, r *http.Request) {
+// Logout ends the caller's cookie session, with every older session of its
+// token, and clears the cookie. Always 204 (idempotent). It reports whether a
+// session ended, so the caller can close that session's streams. A bearer
+// header has no session to end: its holder keeps the raw token, which only the
+// cluster can revoke.
+func (a *Authenticator) Logout(w http.ResponseWriter, r *http.Request) bool {
+	id, ok := FromContext(r.Context())
+	ended := ok && !id.Issued.IsZero()
+	if ended {
+		a.sessions.end(restfactory.TokenKey(id.Token), id.Issued)
+	}
 	clearCookie(w, r)
 	w.WriteHeader(http.StatusNoContent)
+	return ended
 }
 
 // Me returns the current Identity from context (set by Middleware).
@@ -71,12 +84,18 @@ func (a *Authenticator) Middleware(next http.Handler) http.Handler {
 			next.ServeHTTP(w, r)
 			return
 		}
-		token, ok := tokenFromRequest(r, a.sealer)
+		token, issued, ok := tokenFromRequest(r, a.sealer)
 		if !ok {
 			http.Error(w, "authentication required", http.StatusUnauthorized)
 			return
 		}
-		id, err := a.Validate(r.Context(), token)
+		key := restfactory.TokenKey(token)
+		// Ahead of the verdict cache: a signed-out session's token still validates.
+		if !a.sessions.live(key, issued) {
+			http.Error(w, "session ended", http.StatusUnauthorized)
+			return
+		}
+		id, err := a.validate(r.Context(), token, key)
 		if err != nil {
 			// Only a definitive rejection signs the user out (401); a transient
 			// inability to validate (API server down/throttled) is 503, so a blip
@@ -91,6 +110,7 @@ func (a *Authenticator) Middleware(next http.Handler) http.Handler {
 			}
 			return
 		}
+		id.Issued = issued
 		next.ServeHTTP(w, r.WithContext(NewContext(r.Context(), id)))
 	})
 }
@@ -126,18 +146,18 @@ func isOpenPath(path string) bool {
 	return false
 }
 
-// tokenFromRequest pulls the bearer token from the session cookie, falling back
-// to an Authorization: Bearer header.
-func tokenFromRequest(r *http.Request, sealer cipher.AEAD) (string, bool) {
-	if token, ok := readCookie(r, sealer); ok {
-		return token, true
+// tokenFromRequest pulls the bearer token and its session's issue time from the
+// session cookie, falling back to an Authorization: Bearer header (zero issued).
+func tokenFromRequest(r *http.Request, sealer cipher.AEAD) (string, time.Time, bool) {
+	if token, issued, ok := readCookie(r, sealer); ok {
+		return token, issued, true
 	}
 	if h := r.Header.Get("Authorization"); h != "" {
 		if token, ok := strings.CutPrefix(h, "Bearer "); ok {
-			return strings.TrimSpace(token), token != ""
+			return strings.TrimSpace(token), time.Time{}, token != ""
 		}
 	}
-	return "", false
+	return "", time.Time{}, false
 }
 
 func writeJSON(w http.ResponseWriter, status int, v any) {
