@@ -4,6 +4,7 @@
 	import { page } from '$app/state';
 	import { api, Unauthorized, type Proposal, type ProposeResult } from '#lib/api.js';
 	import { friendlyError } from '#lib/format.js';
+	import { clusterGate } from '#lib/gates.js';
 	import { changesHref } from '#lib/nav.js';
 	import {
 		commitKey,
@@ -55,10 +56,10 @@
 			? inventory.proposals.filter((p) => p.project === scopeProject)
 			: inventory.proposals,
 	);
-	// Repo-backed projects, for History (platform included for authors); one
-	// project under a scope.
+	// Repo-backed projects, for History (platform included for its readers);
+	// one project under a scope.
 	const repoProjects = $derived.by(() => {
-		const all = inventory.canManage
+		const all = clusterGate.platformRead().ok
 			? [...inventory.repoProjects, PLATFORM_PROJECT]
 			: inventory.repoProjects;
 		return scopeProject ? all.filter((p) => p === scopeProject) : all;

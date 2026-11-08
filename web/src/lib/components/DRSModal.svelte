@@ -7,6 +7,7 @@
 		type DRSMode,
 		type DRSView,
 	} from '#lib/api.js';
+	import { clusterGate } from '#lib/gates.js';
 	import ChoiceCards from './ChoiceCards.svelte';
 	import Button from './Button.svelte';
 	import StageModal from './StageModal.svelte';
@@ -40,6 +41,7 @@
 	// svelte-ignore state_referenced_locally
 	let installPSI = $state(view.draft?.psi ?? false);
 	let showAdvanced = $state(false);
+	const psi = $derived(clusterGate.drsPSI());
 
 	const inBounds = (v: number, b: { min: number; max: number }) => v >= b.min && v <= b.max;
 	const missing = $derived.by(() => {
@@ -160,17 +162,15 @@
 
 	{#if !view.psiConfigured}
 		<label class="flex items-start gap-2 rounded border border-warn-soft bg-warn-soft/60 p-3">
-			<input type="checkbox" bind:checked={installPSI} disabled={!view.canPSI} class="mt-0.5" />
-			<span class:opacity-50={!view.canPSI}>
+			<input type="checkbox" bind:checked={installPSI} disabled={!psi.ok} class="mt-0.5" />
+			<span class:opacity-50={!psi.ok}>
 				Enable PSI on worker nodes (required for load-aware rebalancing)
 				<span class="block text-xs text-warn-ink">
 					Stages a MachineConfig that <strong>reboots every worker node</strong> when the PR merges. Skip
 					if PSI (psi=1) is already enabled out-of-band.
 				</span>
-				{#if !view.canPSI}
-					<span class="block text-xs text-ink-faint">
-						Requires MachineConfig authoring permission.
-					</span>
+				{#if !psi.ok}
+					<span class="block text-xs text-ink-faint">{psi.why}</span>
 				{/if}
 			</span>
 		</label>

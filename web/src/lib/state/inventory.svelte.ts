@@ -13,6 +13,7 @@ import {
 } from '#lib/api.js';
 import type { Authoring } from '#lib/authoring.js';
 import { friendlyError } from '#lib/format.js';
+import { clusterGate, repoGate } from '#lib/gates.js';
 import { deriveIssues, deriveSuggestions } from '#lib/issues.js';
 import { membership, networkProblems } from '#lib/netmap.js';
 import { prKey } from '#lib/review.js';
@@ -52,19 +53,6 @@ class InventoryStore {
 	readonly uplinks = $derived(this.netInv?.uplinks ?? []);
 	readonly physicalAdapters = $derived(this.netInv?.physicalAdapters ?? []);
 	readonly nmstatePresent = $derived(this.netInv?.nmstatePresent ?? false);
-	// May the caller author platform-tier networking (cluster-scoped CUDN/uplink +
-	// namespaces)? Matches the backend platformScope SSAR gate.
-	readonly canManage = $derived(this.netInv?.canManage ?? false);
-	// Per-action authoring authority (each the same SSAR the backend create
-	// enforces). Undefined caps (older backend) read as false.
-	readonly caps = $derived(this.netInv?.caps);
-	// The creation gates every surface (header menu, context menus, Security
-	// page) shares - one predicate per verb, never re-derived locally.
-	readonly canNamespace = $derived(!!this.netInv?.caps?.namespace);
-	readonly canEgress = $derived(
-		!!(this.netInv?.caps?.egressIP || this.netInv?.caps?.externalRoute),
-	);
-	readonly canAdminFw = $derived(!!this.netInv?.caps?.adminNetworkPolicy);
 
 	// All VMs across the 3-level tree (project -> namespace -> vm).
 	readonly allVMs = $derived(this.projects.flatMap((p) => p.namespaces.flatMap((n) => n.vms)));
@@ -81,7 +69,7 @@ class InventoryStore {
 	readonly issues = $derived(
 		deriveIssues(this.inventory, {
 			alerts: this.alerts ?? [],
-			canRepair: this.canNamespace,
+			canRepair: (p) => repoGate(p).ok,
 			network: this.netProblems,
 		}),
 	);
@@ -261,7 +249,7 @@ class InventoryStore {
 	// Revert rewrites any file of the project, so the backend wants authoring
 	// rights in every namespace of it.
 	canRevert(project: string): boolean {
-		if (project === 'platform') return !!this.caps?.platform;
+		if (project === 'platform') return clusterGate.platformRead().ok;
 		const p = this.projects.find((x) => x.name === project);
 		return !!p?.namespaces.length && p.namespaces.every(authorable);
 	}

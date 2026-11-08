@@ -2,6 +2,7 @@
 	import { page } from '$app/state';
 	import { Folder, GitPullRequest, Layers, LayoutGrid, Network, Pencil } from '@lucide/svelte';
 	import type { Project } from '#lib/api.js';
+	import { clusterGate } from '#lib/gates.js';
 	import { changesHref } from '#lib/nav.js';
 	import { drafts, PLATFORM_PROJECT } from '#lib/state/drafts.svelte.js';
 	import { inventory } from '#lib/state/inventory.svelte.js';
@@ -100,7 +101,8 @@
 		{@render projectRow(p)}
 	{/each}
 
-	{#if inventory.canManage}
+	<!-- A stager reaches their own draft here; a reader the tier's PRs and history. -->
+	{#if clusterGate.platform().ok || clusterGate.platformRead().ok}
 		<TreeRow
 			active={scope.project === PLATFORM_PROJECT}
 			alignChevron

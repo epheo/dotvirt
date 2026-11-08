@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { GitPullRequest } from '@lucide/svelte';
 	import { api } from '#lib/api.js';
+	import { canAdoptNetwork, canAdoptPolicy } from '#lib/objects.js';
 	import { action } from '#lib/resource.svelte.js';
 	import { inventory } from '#lib/state/inventory.svelte.js';
 	import { ui } from '#lib/state/ui.svelte.js';
@@ -8,11 +9,11 @@
 	import Button from './Button.svelte';
 
 	// The platform tier's AdoptBanner: shared segments and cluster-wide policies
-	// running with no manifest in the platform repo. Shown only to callers who may
-	// author that tier, where they already are (the Networking root).
+	// running with no manifest in the platform repo, counted where the caller
+	// may adopt them (the route skips the rest), on the Networking root.
 	const untracked = $derived(
-		inventory.networks.filter((n) => n.scope === 'shared' && !n.sourceFile).length +
-			inventory.policies.filter((p) => !p.namespace && !p.sourceFile).length,
+		inventory.networks.filter((n) => n.scope === 'shared' && canAdoptNetwork(n)).length +
+			inventory.policies.filter((p) => !p.namespace && canAdoptPolicy(p)).length,
 	);
 	const op = action({ toast: ui.toastError });
 	function adopt() {
@@ -27,7 +28,7 @@
 	}
 </script>
 
-{#if inventory.canManage && untracked > 0}
+{#if untracked > 0}
 	<Banner tone="accent">
 		<GitPullRequest size={14} class="shrink-0" />
 		<span class="min-w-0 truncate">

@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { TriangleAlert } from '@lucide/svelte';
+	import { repoGate } from '#lib/gates.js';
 	import { opFailed, repoError } from '#lib/gitops.js';
 	import { inventory } from '#lib/state/inventory.svelte.js';
 	import { ui } from '#lib/state/ui.svelte.js';
@@ -19,6 +20,7 @@
 	const syncFailed = $derived(opFailed(p?.gitOps));
 	const recover = $derived(!!p && !!p.repo && (!!p.error || !!repoError(p?.gitOps)));
 	const note = $derived(p?.error || p?.gitOps?.syncError || '');
+	const may = $derived(!!p && repoGate(p).ok);
 
 	function open(rec: boolean) {
 		if (!p) return;
@@ -31,7 +33,7 @@
 	}
 </script>
 
-{#if (attach || recover) && inventory.canNamespace}
+{#if (attach || recover) && may}
 	<Banner tone="warn">
 		<TriangleAlert size={14} class="shrink-0" />
 		<span class="truncate" title={note}>

@@ -2,10 +2,12 @@
 	import { CircleX, Plug, Plus } from '@lucide/svelte';
 	import type { Uplink } from '#lib/api.js';
 	import { uplinkLabel } from '#lib/netmap.js';
+	import { clusterObjectGate } from '#lib/gates.js';
 	import { networkHref } from '#lib/nav.js';
 	import { networkKey } from '#lib/networks.js';
 	import {
 		canAdoptUplink,
+		canDeleteUplink,
 		canEditUplink,
 		openAdopt,
 		openDelete,
@@ -30,7 +32,7 @@
 </script>
 
 <div class="flex flex-col gap-4">
-	{#if inventory.caps?.uplink}
+	{#if clusterObjectGate('uplink', 'create').ok}
 		<div class="flex">
 			<Button variant="outline" class="ml-auto" onclick={() => (ui.modal = { kind: 'uplink' })}
 				><Plus size={16} />New uplink</Button
@@ -62,17 +64,21 @@
 						class="text-accent-ink hover:underline"
 						onclick={() => openAdopt(uplinkRef(u))}>Adopt into git</button
 					>
-				{:else if canEditUplink(u)}
-					<button
-						type="button"
-						class="text-accent-ink hover:underline"
-						onclick={() => openEdit(uplinkRef(u))}>Edit</button
-					>
-					<button
-						type="button"
-						class="text-danger-ink hover:underline"
-						onclick={() => openDelete(uplinkRef(u), u.sourceFile!)}>Delete</button
-					>
+				{:else}
+					{#if canEditUplink(u)}
+						<button
+							type="button"
+							class="text-accent-ink hover:underline"
+							onclick={() => openEdit(uplinkRef(u))}>Edit</button
+						>
+					{/if}
+					{#if canDeleteUplink(u)}
+						<button
+							type="button"
+							class="text-danger-ink hover:underline"
+							onclick={() => openDelete(uplinkRef(u), u.sourceFile!)}>Delete</button
+						>
+					{/if}
 				{/if}
 			{/snippet}
 			<div class="flex flex-col gap-3">

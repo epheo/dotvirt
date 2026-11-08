@@ -1,8 +1,8 @@
 <script lang="ts">
 	import { TriangleAlert } from '@lucide/svelte';
 	import { api } from '#lib/api.js';
+	import { clusterGate } from '#lib/gates.js';
 	import { action } from '#lib/resource.svelte.js';
-	import { inventory } from '#lib/state/inventory.svelte.js';
 	import { authMethods } from '#lib/state/session.svelte.js';
 	import { ui } from '#lib/state/ui.svelte.js';
 	import Banner from './Banner.svelte';
@@ -25,7 +25,7 @@
 	}
 </script>
 
-{#if pending && inventory.canManage}
+{#if pending && clusterGate.oauthClient().ok}
 	<Banner tone="warn" size="md">
 		<TriangleAlert size={16} class="shrink-0" />
 		<span>OpenShift SSO is not ready: its OAuthClient is missing or holds an outdated secret.</span>

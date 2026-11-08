@@ -1,5 +1,6 @@
 <script lang="ts">
 	import type { VM } from '#lib/api.js';
+	import { clusterObjectGate } from '#lib/gates.js';
 	import { inventory } from '#lib/state/inventory.svelte.js';
 	import { ui } from '#lib/state/ui.svelte.js';
 	import InfoCard from '#lib/components/InfoCard.svelte';
@@ -13,6 +14,7 @@
 
 	const nodeUplinks = $derived(inventory.uplinks.filter((u) => !u.nodes || u.nodes.includes(node)));
 	const nics = $derived(inventory.physicalAdapters.filter((a) => a.node === node));
+	const addUplink = $derived(clusterObjectGate('uplink', 'create'));
 </script>
 
 <div class="min-h-0 flex-1 overflow-y-auto p-4">
@@ -37,9 +39,8 @@
 						variant="link"
 						size="sm"
 						onclick={() => (ui.modal = { kind: 'uplink' })}
-						disabled={!inventory.canManage}
-						title={inventory.canManage ? '' : 'Requires platform-network authoring permission'}
-						>+ Add uplink</Button
+						disabled={!addUplink.ok}
+						title={addUplink.why}>+ Add uplink</Button
 					>
 				{/snippet}
 				<ul class="divide-y divide-line-soft px-card text-[13px]">
