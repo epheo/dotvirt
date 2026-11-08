@@ -15,10 +15,13 @@
 // model the argo drift snapshot also follows - fed by watches, not polled.
 //
 // Signal-only watches follow what a token's authorization derives from -
-// RoleBindings and Roles in project namespaces, ClusterRoleBindings, the
-// ClusterRoles those bind, and OpenShift Groups - and publish RBACChanged when
-// a grant moves, so the per-token visibility and review caches are invalidated
-// promptly instead of on their TTL. dotvirt never reads them (rbacSignal).
+// RoleBindings, the Roles and ClusterRoles bindings bind, ClusterRoleBindings,
+// and OpenShift Groups - and publish RBACChanged when a grant moves, keyed by
+// the namespace a RoleBinding or Role grants in, so the per-token visibility
+// and review caches are invalidated promptly instead of on their TTL, and
+// only where the move reaches. dotvirt never reads them (rbacSignal). The
+// one Namespace watch is of every namespace: it selects the project ones in
+// memory and keeps the others' names for the tokens that may list them.
 //
 // The VM and VMI stores keep a derived live view current as they move and
 // publish LiveChanged only when it changes; the namespace store publishes on any
@@ -42,6 +45,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/util/validation"
 	"k8s.io/client-go/tools/cache"
@@ -115,25 +119,31 @@ type State struct {
 	specs   []reflectorSpec // reflector wiring, built in New, started in Run
 	healthy []atomic.Bool   // one reflect.TrackHealth flag per specs entry
 	signals []*signalWatch  // RBAC watches gated on their grant, started in Run
+	names   *namespaceSink  // every namespace's name, for AllNamespaces
+	nssGen  atomic.Uint64   // moves on every project-namespace store write
 
 	// The RoleBinding watch runs among specs; RBACWatched reads its sink and its
 	// health flag (healthy[rbHealth]) beside the gated ones.
 	rbSink   *rbacSignal
 	rbHealth int
 
-	grantMoved atomic.Int64 // unix nanos of the last RBACChanged the RBAC sinks published
+	grants grantMoves // when the RBAC sinks last published RBACChanged, by namespace
+
+	allMu  sync.Mutex
+	all    map[string]bool // AllNamespaces, built at allGen
+	allGen [2]uint64       // names.gen and nssGen when all was built
 
 	// Per-store readiness: each reflector's initial LIST (first Replace) landing.
 	// Tracked per store (not a single counter) so a consumer gates on exactly the
 	// stores it reads: drift must not stall on a failing VMI reflector, and
 	// nobody waits on the RBAC signal watches.
-	vmsReady, vmisReady, nssReady reflect.Ready
+	vmsReady, vmisReady, nssReady, namesReady reflect.Ready
 
 	bus *eventbus.Bus // reflectors publish their kind here on every mutation
 }
 
 // New builds the snapshot's reflectors over sa (dotvirt's ServiceAccount client),
-// watching the namespaces labeled projectLabel. Each reflector publishes its kind to
+// holding as projects the namespaces projectLabel selects. Each reflector publishes its kind to
 // bus whenever the snapshot moves, so the inventory hub rebuilds; bus is optional
 // (nil disables signalling, e.g. in tests).
 func New(sa *cluster.Client, projectLabel string, bus *eventbus.Bus) *State {
@@ -143,22 +153,49 @@ func New(sa *cluster.Client, projectLabel string, bus *eventbus.Bus) *State {
 	s.nss = reflect.NewIndexer()
 	s.live = newLiveIndex(s.vms, s.vmis, s.publishLive)
 
-	namespace := func() { bus.Publish(eventbus.NamespaceChanged) }
-	rbac := func() {
-		s.grantMoved.Store(time.Now().UnixNano())
-		bus.Publish(eventbus.RBACChanged)
+	namespace := func() {
+		s.nssGen.Add(1)
+		bus.Publish(eventbus.NamespaceChanged)
+	}
+	// A move in a namespace that is no project's goes out as OtherRBACChanged,
+	// which no frame depends on: churn there wakes no stream. The move is
+	// recorded before it publishes, so a review that sees the publish also
+	// sees it as recent (LastGrantMoveFor).
+	rbac := func(ns string) {
+		now := time.Now()
+		switch {
+		case ns == "":
+			s.grants.record(ns, now, true)
+			bus.Publish(eventbus.RBACChanged)
+		case s.inProject(ns):
+			s.grants.record(ns, now, true)
+			bus.PublishKey(eventbus.RBACChanged, ns)
+		default:
+			s.grants.record(ns, now, false)
+			bus.PublishKey(eventbus.OtherRBACChanged, ns)
+		}
+	}
+	forget := func(ns string) {
+		bus.Forget(eventbus.RBACChanged, ns)
+		bus.Forget(eventbus.OtherRBACChanged, ns)
+	}
+	project, err := labels.Parse(projectLabel)
+	if err != nil {
+		log.Printf("clusterstate: project label %q is no selector (%v); no namespace is a project", projectLabel, err)
+		project = labels.Nothing()
 	}
 	refs := newRoleRefs()
+	// A namespace move is both a topology change (inventory) and a change of
+	// the candidates each token's visibility is reviewed over.
+	s.names = newNamespaceSink(project, reflect.NewStore(s.nss, namespace, s.nssReady.Mark), forget, s.namesReady.Mark)
 	s.specs = []reflectorSpec{
 		{s.live.store(s.vms, s.vmsReady.Mark), &kubevirtcorev1.VirtualMachine{}, sa.VMListWatch()},
 		{s.live.store(s.vmis, s.vmisReady.Mark), &kubevirtcorev1.VirtualMachineInstance{}, sa.VMIListWatch()},
-		// A namespace move is both a topology change (inventory) and a visibility
-		// change; NamespaceChanged is summed into both the inventory and RBAC versions.
-		{reflect.NewStore(s.nss, namespace, s.nssReady.Mark), &corev1.Namespace{}, sa.NamespaceListWatch(projectLabel)},
+		{s.names, &corev1.Namespace{}, sa.NamespaceListWatch()},
 	}
 	// Every operand role grants RoleBindings, so their signal watch starts with
 	// the snapshot; the other RBAC kinds wait for their grant (signals).
-	s.rbSink, s.rbHealth = newRBACSignal(rbac, refs, roleBindingDigest(s.inProject)), len(s.specs)
+	s.rbSink, s.rbHealth = newRBACSignal(rbac, refs, roleBindingDigest), len(s.specs)
 	s.specs = append(s.specs, reflectorSpec{s.rbSink, &rbacv1.RoleBinding{}, sa.RoleBindingListWatch()})
 	s.healthy = make([]atomic.Bool, len(s.specs))
 	sources := map[schema.GroupVersionResource]*cache.ListWatch{
@@ -167,7 +204,7 @@ func New(sa *cluster.Client, projectLabel string, bus *eventbus.Bus) *State {
 		gvrClusterRoles:        sa.ClusterRoleListWatch(),
 		gvrGroups:              sa.DynamicListWatch(gvrGroups),
 	}
-	s.signals = s.signalWatches(func(gvr schema.GroupVersionResource) *cache.ListWatch { return sources[gvr] }, rbac, refs)
+	s.signals = signalWatches(func(gvr schema.GroupVersionResource) *cache.ListWatch { return sources[gvr] }, rbac, refs)
 	return s
 }
 
@@ -192,14 +229,13 @@ type signalWatch struct {
 }
 
 // signalWatches wires the gated RBAC watches; refs is shared with the
-// RoleBinding sink, so a ClusterRole signals while any relevant binding of
-// either kind binds it.
-func (s *State) signalWatches(lw func(schema.GroupVersionResource) *cache.ListWatch, onChange func(), refs *roleRefs) []*signalWatch {
+// RoleBinding sink, so a role signals while any relevant binding binds it.
+func signalWatches(lw func(schema.GroupVersionResource) *cache.ListWatch, onChange func(string), refs *roleRefs) []*signalWatch {
 	watch := func(gvr schema.GroupVersionResource, expected any, binds *roleRefs, digest func(any) (grant, bool)) *signalWatch {
 		return &signalWatch{gvr: gvr, expected: expected, lw: lw(gvr), sink: newRBACSignal(onChange, binds, digest)}
 	}
 	return []*signalWatch{
-		watch(gvrRoles, &rbacv1.Role{}, nil, roleDigest(s.inProject)),
+		watch(gvrRoles, &rbacv1.Role{}, nil, roleDigest(refs)),
 		watch(gvrClusterRoleBindings, &rbacv1.ClusterRoleBinding{}, refs, clusterRoleBindingDigest),
 		watch(gvrClusterRoles, &rbacv1.ClusterRole{}, nil, clusterRoleDigest(refs)),
 		watch(gvrGroups, &unstructured.Unstructured{}, nil, groupDigest),
@@ -280,13 +316,72 @@ func listable(ctx context.Context, sa *cluster.Client) func(schema.GroupVersionR
 	}
 }
 
-// LastGrantMove is when an RBAC watch last reported a grant move, zero before
-// any.
-func (s *State) LastGrantMove() time.Time {
-	if n := s.grantMoved.Load(); n != 0 {
-		return time.Unix(0, n)
+// LastGrantMove is when an RBAC watch last reported a grant move a frame can
+// read, zero before any: one cluster-wide or in a project namespace. A move
+// published as OtherRBACChanged in a namespace becoming a project at that
+// moment is left out; its frame reviews then wait for the long backstop.
+func (s *State) LastGrantMove() time.Time { return unixTime(s.grants.framed.Load()) }
+
+// LastGrantMoveFor is when an RBAC watch last reported a grant move a review
+// in ns can read: a cluster-wide one, or for a namespace one in it. A move in
+// a namespace is forgotten after grantMoveHorizon.
+func (s *State) LastGrantMoveFor(ns string) time.Time { return unixTime(s.grants.last(ns)) }
+
+func unixTime(nanos int64) time.Time {
+	if nanos == 0 {
+		return time.Time{}
 	}
-	return time.Time{}
+	return time.Unix(0, nanos)
+}
+
+// grantMoves is when the RBAC sinks last reported a grant move: one a frame
+// can read, a cluster-wide one, and one per namespace.
+type grantMoves struct {
+	framed, cluster atomic.Int64 // unix nanos
+
+	mu     sync.Mutex
+	ns     map[string]int64
+	pruned int64
+}
+
+// grantMoveHorizon is how long a namespace's last move is kept: longer than
+// any window a reader weighs one by (api.grantSettle), short enough that
+// namespaces deleted since do not pile up.
+const grantMoveHorizon = time.Minute
+
+func (g *grantMoves) record(ns string, at time.Time, framed bool) {
+	n := at.UnixNano()
+	if framed {
+		g.framed.Store(n)
+	}
+	if ns == "" {
+		g.cluster.Store(n)
+		return
+	}
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if g.ns == nil {
+		g.ns = map[string]int64{}
+	}
+	g.ns[ns] = n
+	if n-g.pruned >= int64(grantMoveHorizon) {
+		for k, m := range g.ns {
+			if n-m >= int64(grantMoveHorizon) {
+				delete(g.ns, k)
+			}
+		}
+		g.pruned = n
+	}
+}
+
+func (g *grantMoves) last(ns string) int64 {
+	n := g.cluster.Load()
+	if ns == "" {
+		return n
+	}
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	return max(n, g.ns[ns])
 }
 
 // RBACWatched reports whether every RBAC signal watch has listed and is
@@ -321,7 +416,7 @@ func (s *State) Healthy() bool { return reflect.AllHealthy(s.healthy) }
 // VM, VMI and namespace stores - not the RBAC signal watches), or ctx is done.
 // Returns ctx.Err() on cancellation, nil once synced.
 func (s *State) WaitForSync(ctx context.Context) error {
-	for _, r := range []*reflect.Ready{&s.vmsReady, &s.vmisReady, &s.nssReady} {
+	for _, r := range []*reflect.Ready{&s.vmsReady, &s.vmisReady, &s.nssReady, &s.namesReady} {
 		if err := r.Wait(ctx); err != nil {
 			return err
 		}

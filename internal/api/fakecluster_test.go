@@ -155,12 +155,15 @@ func (fc *fakeCluster) serve(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		allow := bearer(r) == adminToken
+		fc.mu.Lock()
+		readsVMs, ssar := fc.readsVMs, fc.ssar
+		fc.mu.Unlock()
 		switch {
-		case fc.readsVMs != nil && fc.readsVMs(bearer(r), attrs.Namespace) &&
+		case readsVMs != nil && readsVMs(bearer(r), attrs.Namespace) &&
 			attrs.Verb == "list" && attrs.Resource == "virtualmachines":
 			allow = true
-		case fc.ssar != nil:
-			allow = fc.ssar(bearer(r), attrs)
+		case ssar != nil:
+			allow = ssar(bearer(r), attrs)
 		}
 		writeObj(w, authzv1.SelfSubjectAccessReview{
 			TypeMeta: metav1.TypeMeta{Kind: "SelfSubjectAccessReview", APIVersion: "authorization.k8s.io/v1"},
