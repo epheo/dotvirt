@@ -232,6 +232,13 @@ spec:
             - apiGroups:
                 - ""
               resources:
+                - namespaces
+              verbs:
+                - list
+                - watch
+            - apiGroups:
+                - ""
+              resources:
                 - persistentvolumeclaims
               verbs:
                 - create
@@ -306,7 +313,6 @@ spec:
               resources:
                 - applications
                 - applicationsets
-                - appprojects
               verbs:
                 - create
                 - list
@@ -321,13 +327,13 @@ spec:
                 - delete
             - apiGroups:
                 - argoproj.io
-              resourceNames:
-                - dotvirt-platform
-                - dotvirt-tenants
               resources:
                 - appprojects
               verbs:
+                - create
                 - delete
+                - list
+                - patch
             - apiGroups:
                 - dotvirt.io
               resources:

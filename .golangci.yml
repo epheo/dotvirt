@@ -1,7 +1,7 @@
 # Minimal, curated gate: the v2 defaults (errcheck, govet, ineffassign,
 # staticcheck, unused) plus misspell. No style linters — gofmt and review own
 # style. One config for every module: golangci-lint resolves it by walking up
-# from operator/ and pkg/forge/.
+# from operator/ and the pkg/ modules.
 version: "2"
 linters:
   enable:

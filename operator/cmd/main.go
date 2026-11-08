@@ -15,39 +15,16 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 
-	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
-	"k8s.io/apimachinery/pkg/labels"
-	"k8s.io/apimachinery/pkg/selection"
 	"sigs.k8s.io/controller-runtime/pkg/cache"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	dotvirtv1alpha1 "github.com/epheo/dotvirt/operator/api/v1alpha1"
 	"github.com/epheo/dotvirt/operator/internal/controller"
-	"github.com/epheo/dotvirt/operator/internal/install"
 	"github.com/epheo/dotvirt/operator/internal/platform"
 )
 
 var scheme = runtime.NewScheme()
-
-// cacheByObject caches the watched kinds only where they carry the instance
-// label, so the operator never holds every Secret in the cluster in memory.
-func cacheByObject(plat platform.Platform) map[client.Object]cache.ByObject {
-	hasInstance, _ := labels.NewRequirement(install.InstanceLabel, selection.Exists, nil)
-	instanceOnly := cache.ByObject{Label: labels.NewSelector().Add(*hasInstance)}
-	byObject := map[client.Object]cache.ByObject{
-		&corev1.Secret{}:     instanceOnly,
-		&appsv1.Deployment{}: instanceOnly,
-	}
-	// Registering the Route kind on vanilla Kubernetes fails the cache's REST lookup.
-	if plat == platform.OpenShift {
-		route := &unstructured.Unstructured{}
-		route.SetGroupVersionKind(install.RouteGVK)
-		byObject[route] = instanceOnly
-	}
-	return byObject
-}
 
 // operatorNamespace is the namespace the manager pod runs in, "" out of cluster.
 func operatorNamespace() string {
@@ -95,7 +72,7 @@ func main() {
 		HealthProbeBindAddress: probeAddr,
 		LeaderElection:         enableLeaderElection,
 		LeaderElectionID:       "dotvirt-operator.dotvirt.io",
-		Cache:                  cache.Options{ByObject: cacheByObject(plat)},
+		Cache:                  cache.Options{ByObject: controller.CacheByObject(plat)},
 		// ConfigMaps are read point-wise, never watched: the cached client would
 		// spin a CLUSTER-WIDE informer on first Get, exceeding the narrow RBAC
 		// (get, no list/watch) and blocking that Get forever, wedging reconcile
