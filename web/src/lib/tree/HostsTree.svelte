@@ -75,7 +75,7 @@
 	<RailFilter bind:value={query} label="Filter hosts" placeholder="Filter {hostCount} hosts" />
 
 	<TreeRow active={page.url.pathname === '/hosts'} href="/hosts">
-		<span class="truncate text-side-ink">All Nodes</span>
+		<span class="truncate text-side-ink">All hosts</span>
 		{#snippet trailing()}<span class="text-xs text-side-dim">{fmt(hostCount)}</span>{/snippet}
 	</TreeRow>
 

@@ -25,7 +25,8 @@
 	} = $props();
 
 	const pct = (v: number, total: number) => (total > 0 ? Math.min(100, (v / total) * 100) : 0);
-	const trim = (v: number) => (Number.isInteger(v) ? String(v) : v.toFixed(1));
+	const trim = (v: number) =>
+		v.toLocaleString('en-US', { maximumFractionDigits: Number.isInteger(v) ? 0 : 1 });
 
 	// Capacity of the hosts left out of the headroom count, as a share of each total.
 	const outside = $derived.by(() => {
@@ -91,9 +92,9 @@
 		{#if room}
 			<div>
 				<p class="text-xl font-semibold text-balance text-ink">
-					Room for {room.count} more {room.size.name ? `${room.size.name} ` : ''}VM{room.count === 1
-						? ''
-						: 's'}
+					Room for {room.count.toLocaleString('en-US')} more {room.size.name
+						? `${room.size.name} `
+						: ''}VM{room.count === 1 ? '' : 's'}
 				</p>
 				<p class="mt-1 text-xs text-ink-soft">
 					{room.size.cpu} vCPU and {quantity(room.size.memory)} each. Memory is the limit; vCPU is shared,

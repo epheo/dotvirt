@@ -1,12 +1,12 @@
 <script lang="ts">
-	import { api, type HostLoad, type HostWorker } from '#lib/api.js';
+	import { Ban } from '@lucide/svelte';
+	import type { HostLoad, HostWorker } from '#lib/api.js';
 	import { densityPath, layoutStrip } from '#lib/dotstrip.js';
-	import { relativeAge } from '#lib/format.js';
+	import { plural, relativeAge } from '#lib/format.js';
 	import { metricsGap } from '#lib/metrics.js';
-	import { resource } from '#lib/resource.svelte.js';
+	import type { Resource } from '#lib/resource.svelte.js';
 	import { inventory } from '#lib/state/inventory.svelte.js';
-	import InfoCard from './InfoCard.svelte';
-	import Button from './Button.svelte';
+	import Card from './Card.svelte';
 	import MetricsGap from './MetricsGap.svelte';
 
 	// Worker utilization with the rebalancing band. A small fleet is a labeled
@@ -15,17 +15,15 @@
 	// the 0-100% strip take over, reading as a distribution - dots first, then
 	// the geometric hand-off to a density silhouette with only out-of-band
 	// workers individually drawn (see dotstrip.ts).
-	// The host page already lists the fleet, so it turns the roster off and
-	// keeps the band, the strip, and the migration line.
-	// metrics off or no worker series: the card simply absents itself
-	let { roster = true }: { roster?: boolean } = $props();
-	const hl = resource<HostLoad>(
-		() => '',
-		() => api.hostLoad(),
-		{ poll: 30000 },
-	);
+	// The hosts table beside it already lists the fleet, so roster is off
+	// there, keeping the band, the strip, and the migration line. load is the
+	// page's own host-load read. Metrics off or no worker series: the card
+	// simply absents itself.
+	let { load, roster = false }: { load: Resource<HostLoad | null>; roster?: boolean } = $props();
 	// A read with no numbers absents the card too: the hosts table above says why.
-	const data = $derived(hl.failed || !hl.data || metricsGap(hl.data.unavailable) ? null : hl.data);
+	const data = $derived(
+		load.failed || !load.data || metricsGap(load.data.unavailable) ? null : load.data,
+	);
 	// Rows list everyone up to 10 workers (see rows below); the strip starts
 	// once the roster alone can no longer show the whole fleet.
 	const strip = $derived(!!data && data.workers > 10);
@@ -67,9 +65,9 @@
 	const memColor = (n: HostWorker): string =>
 		(n.mem ?? 0) > 90 ? 'var(--color-warn)' : 'var(--chart-axis)';
 	const title = (n: HostWorker): string =>
-		`${n.node} · CPU ${Math.round(n.pct)}%` +
-		(n.mem ? ` · mem ${Math.round(n.mem)}%` : '') +
-		(n.unschedulable ? ' · cordoned' : '');
+		`${n.node}, CPU ${Math.round(n.pct)}%` +
+		(n.mem ? `, memory ${Math.round(n.mem)}%` : '') +
+		(n.unschedulable ? ', cordoned' : '');
 
 	// Density mode keeps individual dots only for out-of-band workers, worst
 	// first, capped so a pathological fleet cannot flood the strip.
@@ -104,7 +102,7 @@
 		for (const c of [...cols.values()].sort((a, b) => a.x - b.x)) {
 			const name = nodes[c.i].node;
 			const text =
-				(name.length > 16 ? name.slice(0, 15) + '…' : name) + (c.extra ? ` +${c.extra}` : '');
+				(name.length > 16 ? name.slice(0, 15) + '...' : name) + (c.extra ? ` +${c.extra}` : '');
 			const half = (text.length * 5.5) / 2;
 			const x = Math.min(W - half, Math.max(half, c.x));
 			const lvl = x - half > ends[0] + 6 ? 0 : x - half > ends[1] + 6 ? 1 : -1;
@@ -151,14 +149,15 @@
 </script>
 
 {#if data}
-	<InfoCard title="Host balance">
-		{#snippet action()}
-			<Button variant="link" size="sm" href="?tab=configure">
-				{band ? 'Rescheduling settings' : 'Enable Dynamic Rescheduling'}
-			</Button>
-		{/snippet}
-
-		<div class="px-card py-3">
+	<Card
+		title="Host balance"
+		link={{
+			label: band ? 'Rescheduling settings' : 'Enable Dynamic Rescheduling',
+			href: '?tab=configure',
+		}}
+		flush
+	>
+		<div class="px-card py-4">
 			<MetricsGap reason={data.unavailable} class="mb-2" />
 			{#if strip}
 				<svg
@@ -292,9 +291,7 @@
 			{/if}
 
 			<div class="{strip ? 'mt-2' : ''} flex flex-wrap items-center gap-2 text-xs">
-				<span class="text-ink-soft">
-					{data.workers} worker{data.workers === 1 ? '' : 's'}
-				</span>
+				<span class="text-ink-soft">{plural(data.workers, 'host')}</span>
 				{#if band}
 					{#if band.above === 0 && band.below === 0}
 						<span class="rounded bg-ok-soft px-1.5 py-0.5 font-medium text-ok-ink">balanced</span>
@@ -316,10 +313,10 @@
 						class="text-ink-faint"
 						title="the configured rescheduling deviation window around the mean"
 					>
-						band {Math.round(band.low)}–{Math.round(band.high)}%
+						band {Math.round(band.low)}-{Math.round(band.high)}%
 					</span>
 				{:else}
-					<span class="text-ink-faint">Rescheduling not configured - no action band.</span>
+					<span class="text-ink-muted">Rescheduling is not configured: no action band.</span>
 				{/if}
 				{#if !strip}
 					<!-- The strip's mean line is absent in roster mode; keep the number. -->
@@ -335,13 +332,16 @@
 
 			{#if moves.length}
 				{@const latest = moves[0]}
-				<p class="mt-1 text-xs text-ink-faint">
-					{moves.length} live migration{moves.length === 1 ? '' : 's'} in the last 24h · latest
-					{latest.name}: {latest.migration?.sourceNode} → {latest.migration?.targetNode}
-					({relativeAge(latest.migration?.endedAt)})
+				<p class="mt-1 text-xs text-ink-muted">
+					{plural(moves.length, 'live migration')} in the last 24h. Latest:
+					<span class="font-mono">{latest.name}</span> from
+					<span class="font-mono">{latest.migration?.sourceNode}</span> to
+					<span class="font-mono">{latest.migration?.targetNode}</span>, {relativeAge(
+						latest.migration?.endedAt,
+					)}.
 				</p>
 			{:else if band}
-				<p class="mt-1 text-xs text-ink-faint">No live migrations in the last 24h.</p>
+				<p class="mt-1 text-xs text-ink-muted">No live migrations in the last 24h.</p>
 			{/if}
 
 			{#if rows.length}
@@ -367,7 +367,7 @@
 								>{n.node}</a
 							>
 							{#if n.unschedulable}
-								<span class="shrink-0 text-ink-faint" title="cordoned">⊘</span>
+								<Ban size={12} class="shrink-0 text-ink-muted" aria-label="cordoned" />
 							{/if}
 							<span class="relative h-1.5 flex-1 overflow-hidden rounded bg-inset-strong">
 								<span
@@ -399,12 +399,11 @@
 					{/each}
 				</ul>
 				{#if unlisted > 0}
-					<p class="mt-1 text-xs text-ink-faint">
-						{unlisted} more worker{unlisted === 1 ? '' : 's'}
-						{band ? 'within the band' : ''}
+					<p class="mt-1 text-xs text-ink-muted">
+						{plural(unlisted, 'more host', 'more hosts')}{band ? ' within the band' : ''}
 					</p>
 				{/if}
 			{/if}
 		</div>
-	</InfoCard>
+	</Card>
 {/if}

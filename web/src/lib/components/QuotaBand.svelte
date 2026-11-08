@@ -3,16 +3,20 @@
 	import { bytes, cores } from '#lib/format.js';
 	import { resource } from '#lib/resource.svelte.js';
 	import { usageLevelColor } from '#lib/status.js';
+	import Card from './Card.svelte';
 
 	// ResourceQuota usage bars for a container scope (project / namespace) -
 	// the quota-aware capacity band. Self-contained: fetches its own data, so
-	// the cluster Summary and the container Configure both just mount it.
+	// the cluster Summary and the container Configure both just mount it. card
+	// frames it as its own Summary card, absent when the scope has no quota.
 	let {
 		scope,
 		showEmpty = false,
+		card = false,
 	}: {
 		scope: { project?: string; namespace?: string };
 		showEmpty?: boolean; // render a note when no quotas exist (Configure)
+		card?: boolean;
 	} = $props();
 
 	// Parents pass an inline scope literal (recreated each render); key on its
@@ -32,13 +36,13 @@
 	const pct = (used: number, hard: number) => (hard > 0 ? Math.min(100, (used / hard) * 100) : 0);
 </script>
 
-{#if quotas && quotas.length}
+{#snippet bars(list: NamespaceQuota[])}
 	<div class="flex flex-wrap gap-x-10 gap-y-3">
-		{#each quotas as q (q.namespace + '/' + q.name)}
+		{#each list as q (q.namespace + '/' + q.name)}
 			<div class="min-w-[16rem]">
-				<div class="text-xs font-semibold tracking-wide text-ink-muted uppercase">
-					Quota — {q.namespace}
-					<span class="font-normal normal-case text-ink-faint">({q.name})</span>
+				<div class="text-xs font-semibold text-ink-muted">
+					<span class="font-mono">{q.namespace}</span>
+					<span class="font-normal text-ink-faint">quota {q.name}</span>
 				</div>
 				<div class="mt-1.5 space-y-1.5">
 					{#each q.items as it (it.resource)}
@@ -48,7 +52,7 @@
 								<span class="font-mono text-[11px] text-ink-muted">{it.resource}</span>
 								<span class="text-ink-soft"
 									>{fmt(it.unit, it.used)}
-									<span class="text-ink-faint">of {fmt(it.unit, it.hard)}</span></span
+									<span class="text-ink-muted">of {fmt(it.unit, it.hard)}</span></span
 								>
 							</div>
 							<div class="mt-0.5 h-1.5 overflow-hidden rounded-full bg-inset-strong">
@@ -63,6 +67,16 @@
 			</div>
 		{/each}
 	</div>
+{/snippet}
+
+{#if quotas && quotas.length}
+	{#if card}
+		<Card title="Quota" meta={quotas.length > 1 ? `${quotas.length} quotas` : undefined}>
+			{@render bars(quotas)}
+		</Card>
+	{:else}
+		{@render bars(quotas)}
+	{/if}
 {:else if showEmpty && quotas}
-	<p class="text-xs text-ink-faint">No ResourceQuotas in scope — capacity is unbounded.</p>
+	<p class="text-xs text-ink-muted">No ResourceQuotas in scope: capacity is unbounded.</p>
 {/if}

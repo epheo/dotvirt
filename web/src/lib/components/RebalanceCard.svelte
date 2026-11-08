@@ -3,9 +3,11 @@
 	import { clusterGate } from '#lib/gates.js';
 	import { action, resource } from '#lib/resource.svelte.js';
 	import { ui } from '#lib/state/ui.svelte.js';
-	import InfoCard from './InfoCard.svelte';
 	import Button from './Button.svelte';
+	import Card from './Card.svelte';
+	import Consequence from './Consequence.svelte';
 	import Row from './Row.svelte';
+	import StageChip from './StageChip.svelte';
 	import RebalanceModal from './RebalanceModal.svelte';
 
 	// The cluster's rescheduling panel:
@@ -30,9 +32,9 @@
 		if (!view?.configured) return 'Not configured';
 		switch (view.config?.mode) {
 			case 'Predictive':
-				return 'Predictive — recommendations only, no VM moves';
+				return 'Predictive: recommendations only, no VM moves';
 			case 'Automatic':
-				return 'Fully automated — VMs live-migrate off hot nodes';
+				return 'Fully automated: VMs live-migrate off hot hosts';
 			default:
 				return 'Configured (hand-edited manifest)';
 		}
@@ -42,8 +44,8 @@
 	const pending = $derived.by(() => {
 		const d = view?.draft;
 		if (!d) return '';
-		if (d.disableStaged) return 'Disable staged — propose it from "Changes"';
-		return 'Change staged — propose it from "Changes"';
+		if (d.disableStaged) return 'Disable staged; propose it from Changes';
+		return 'Change staged; propose it from Changes';
 	});
 
 	// The live plane, relative to what's committed: installing / running /
@@ -54,7 +56,7 @@
 		if (l.stale) return 'Status unavailable: dotvirt cannot read the descheduler state right now';
 		if (l.degraded) return `Operator degraded: ${l.degraded}`;
 		if (l.deployed) return l.available ? 'Operator running' : 'Operator starting';
-		if (l.apiPresent && !l.synced) return 'Reading descheduler state…';
+		if (l.apiPresent && !l.synced) return 'Reading descheduler state...';
 		if (view.configured) {
 			return l.apiPresent ? 'Waiting for the configuration to sync' : 'Operator installing (OLM)';
 		}
@@ -70,43 +72,19 @@
 	}
 </script>
 
-<InfoCard title="Dynamic Rescheduling - automatic VM rebalancing">
-	{#snippet action()}
-		{#if view}
-			<span class="flex items-center gap-3">
-				{#if view.configured}
-					<button
-						onclick={disable}
-						disabled={disableOp.busy || !off.ok}
-						title={off.why}
-						class="text-xs text-danger hover:underline disabled:text-ink-faint disabled:no-underline"
-						>Disable...</button
-					>
-				{/if}
-				<Button
-					variant="link"
-					size="sm"
-					disabled={!enable.ok}
-					title={enable.why}
-					onclick={() => (configuring = true)}
-					>{view.configured ? 'Configure' : 'Enable Dynamic Rescheduling'}</Button
-				>
-			</span>
-		{/if}
-	{/snippet}
-
+<Card title="Rebalancing" meta="Dynamic Rescheduling" flush>
 	{#if !view}
-		<p class="px-card py-3 text-xs text-ink-faint">{error || 'Loading…'}</p>
+		<p class="px-card py-3 text-[13px] text-ink-muted">{error || 'Loading...'}</p>
 	{:else}
 		<dl class="divide-y divide-line-soft text-[13px]">
 			<Row label="Status" value={status} />
 			{#if view.config}
 				<Row label="Aggressiveness" value={rebalanceThresholdLabel(view.config.threshold)} />
 				<Row label="Interval" value={`${view.config.intervalSeconds}s`} />
-				<Row label="Soft-taint hot nodes" value={view.config.softTainter ? 'Yes' : 'No'} />
+				<Row label="Soft-taint hot hosts" value={view.config.softTainter ? 'Yes' : 'No'} />
 				<Row
 					label="Migration limits"
-					value={`${view.config.evictionNodeLimit} per node · ${view.config.evictionTotalLimit} cluster-wide`}
+					value={`${view.config.evictionNodeLimit} per host, ${view.config.evictionTotalLimit} cluster-wide`}
 				/>
 			{/if}
 			<Row
@@ -128,20 +106,51 @@
 				{view.live.degraded}
 			</p>
 		{/if}
-		{#if !view.configured}
-			<p class="border-t border-line-soft px-card py-2 text-xs text-ink-faint">
-				Without dynamic rescheduling, VMs are placed once at start and stay put. Enabling stages the
-				descheduler operator + configuration into the platform repository — applied when the PR
-				merges.
-			</p>
-		{/if}
+		<div class="flex flex-col gap-1.5 border-t border-line-soft px-card py-3">
+			{#if view.configured || enable.ok}
+				<div class="flex flex-wrap items-center gap-2">
+					<Button
+						variant="outline"
+						size="sm"
+						disabled={!enable.ok}
+						title={enable.why}
+						onclick={() => (configuring = true)}
+						>{view.configured ? 'Configure' : 'Enable Dynamic Rescheduling'}</Button
+					>
+					{#if view.configured}
+						<Button
+							variant="danger-secondary"
+							size="sm"
+							onclick={disable}
+							disabled={disableOp.busy || !off.ok}
+							title={off.why}>Disable...</Button
+						>
+					{/if}
+					<StageChip kind="pr" />
+				</div>
+			{/if}
+			{#if view.configured}
+				<Consequence size="sm"
+					>Changes stage into the platform repository and apply when the PR merges.</Consequence
+				>
+			{:else if enable.ok}
+				<Consequence size="sm" tone="info"
+					>VMs are placed once at start and stay put. Enabling stages the descheduler operator and
+					its configuration into the platform repository; it applies when the PR merges.</Consequence
+				>
+			{:else}
+				<p class="text-xs leading-4 text-ink-muted">
+					VMs are placed once at start and stay put. {enable.why}
+				</p>
+			{/if}
+		</div>
 		{#if error}
 			<p class="border-t border-danger-soft bg-danger-soft/60 px-card py-2 text-xs text-danger-ink">
 				{error}
 			</p>
 		{/if}
 	{/if}
-</InfoCard>
+</Card>
 
 {#if configuring && view}
 	<RebalanceModal

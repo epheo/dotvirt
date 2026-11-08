@@ -195,7 +195,7 @@ export function trailForScope(s: Scope): { label: string; href?: string }[] {
 				{ label: s.namespace },
 			];
 		case 'node':
-			return [{ label: 'All Nodes', href: '/hosts' }, { label: `Node: ${s.node}` }];
+			return [{ label: 'Hosts', href: '/hosts' }, { label: s.node }];
 		case 'network':
 			return [{ label: 'Networking', href: '/networking' }, { label: s.network }];
 		case 'storage':

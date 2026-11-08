@@ -49,6 +49,12 @@ describe('storage routes', () => {
 		expect(storageTab('images')).toBe('images');
 		expect(storageTab('summary')).toBe('library');
 	});
+	it('trails a host under Hosts', () => {
+		expect(trailForScope({ kind: 'node', node: 'host-07' })).toEqual([
+			{ label: 'Hosts', href: '/hosts' },
+			{ label: 'host-07' },
+		]);
+	});
 	it('trails a class under Storage and Classes', () => {
 		expect(trailForScope({ kind: 'storage', storageClass: 'bulk-hdd' })).toEqual([
 			{ label: 'Storage', href: '/storage?tab=library' },
