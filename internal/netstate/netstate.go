@@ -166,45 +166,31 @@ func (s *Snapshot) Healthy() bool { return reflect.AllHealthy(s.healthy) }
 // is rare and this cache is off the request path, so a coarse poll is enough.
 const nodeRefreshInterval = 2 * time.Minute
 
-// Run starts one discovery-gated reflector per CRD, the node-cache refresher and the
-// route-advertisement probe, and returns immediately; everything stops when ctx is
-// cancelled. Network and policy kinds signal NetworkChanged; NNS is watched silently.
+// Run starts one discovery-gated reflector per CRD plus the node-cache refresher, and
+// returns immediately; everything stops when ctx is cancelled. Network and policy
+// kinds signal NetworkChanged; NNS is watched silently.
 func (s *Snapshot) Run(ctx context.Context) {
 	for i := range s.watches {
 		s.watch(ctx, s.watches[i], &s.healthy[i])
 	}
 	go s.refreshNodes(ctx)
-	go s.watchRouteAds(ctx)
 }
 
-// watchRouteAds probes discovery for the RouteAdvertisements API on the
-// watches' pace until it is served, as the gated watches do: CRD removal is
-// not re-probed.
-func (s *Snapshot) watchRouteAds(ctx context.Context) {
-	t := time.NewTicker(reflect.DiscoveryInterval)
-	defer t.Stop()
-	for !s.probeRouteAds() {
-		select {
-		case <-ctx.Done():
-			return
-		case <-t.C:
-		}
-	}
-}
-
-// probeRouteAds records what discovery says of the RouteAdvertisements API
-// and reports whether it is served. A failed probe keeps the last answer.
-func (s *Snapshot) probeRouteAds() bool {
-	served, err := s.sa.ServesAPIResource(gvrRouteAds)
-	switch {
-	case err != nil:
+// ovnServed gates the k8s.ovn.org watches, and from the same discovery read
+// records whether the RouteAdvertisements API is served: no request of its
+// own. It is read again only while one of those watches still waits for its
+// kind. A failed read keeps the last answer.
+func (s *Snapshot) ovnServed(gvr schema.GroupVersionResource) bool {
+	served, err := s.sa.ServedResources(gvr.GroupVersion())
+	if err != nil {
 		return false
-	case served:
-		s.routeAds.Store(routeAdsServed)
-		return true
 	}
-	s.routeAds.Store(routeAdsAbsent)
-	return false
+	if served[gvrRouteAds.Resource] {
+		s.routeAds.Store(routeAdsServed)
+	} else {
+		s.routeAds.Store(routeAdsAbsent)
+	}
+	return served[gvr.Resource]
 }
 
 // mayJoin reports whether route advertisement may join primary networks
@@ -215,6 +201,9 @@ func (s *Snapshot) mayJoin() bool { return s.routeAds.Load() != routeAdsAbsent }
 // nmstatePresent, which gates the fabric UI.
 func (s *Snapshot) watch(ctx context.Context, w watchSpec, healthy *atomic.Bool) {
 	served := s.sa.HasAPIResource
+	if w.gvr.GroupVersion() == gvrRouteAds.GroupVersion() {
+		served = s.ovnServed
+	}
 	if w.gvr == gvrNNS {
 		served = reflect.Served(served, &s.nmstatePresent)
 	}

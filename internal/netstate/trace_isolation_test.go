@@ -1,15 +1,8 @@
 package netstate
 
 import (
-	"errors"
 	"strings"
 	"testing"
-
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/runtime"
-	fakediscovery "k8s.io/client-go/discovery/fake"
-	"k8s.io/client-go/kubernetes/fake"
-	k8stesting "k8s.io/client-go/testing"
 
 	"github.com/epheo/dotvirt/internal/cluster"
 	"github.com/epheo/dotvirt/internal/model"
@@ -238,31 +231,5 @@ func TestTraceIsolationRouteAdvertisement(t *testing.T) {
 		if res := s.Trace(a, nil, "203.0.113.9", "TCP", 443); res.Verdict != "Allow" {
 			t.Errorf("state %d, outside address: verdict = %s (%v)", state, res.Verdict, stepKinds(t, res))
 		}
-	}
-}
-
-// Discovery alone decides the route-advertisement state, off the request
-// path: served sticks, absent re-probes, a failed probe keeps the last answer.
-func TestProbeRouteAds(t *testing.T) {
-	kube := fake.NewSimpleClientset()
-	disc := kube.Discovery().(*fakediscovery.FakeDiscovery)
-	s := New(cluster.NewClient(kube, nil, nil), nil)
-
-	if s.probeRouteAds() || s.routeAds.Load() != routeAdsAbsent {
-		t.Fatalf("unserved API: state %d", s.routeAds.Load())
-	}
-	kube.PrependReactor("get", "resource", func(k8stesting.Action) (bool, runtime.Object, error) {
-		return true, nil, errors.New("discovery down")
-	})
-	if s.probeRouteAds() || s.routeAds.Load() != routeAdsAbsent {
-		t.Fatalf("a failed probe must keep the last answer: state %d", s.routeAds.Load())
-	}
-	kube.ReactionChain = kube.ReactionChain[1:]
-	disc.Resources = []*metav1.APIResourceList{{
-		GroupVersion: gvrRouteAds.GroupVersion().String(),
-		APIResources: []metav1.APIResource{{Name: gvrRouteAds.Resource}},
-	}}
-	if !s.probeRouteAds() || s.routeAds.Load() != routeAdsServed {
-		t.Fatalf("served API: state %d", s.routeAds.Load())
 	}
 }

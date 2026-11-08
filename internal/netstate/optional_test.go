@@ -2,6 +2,7 @@ package netstate
 
 import (
 	"context"
+	"errors"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -103,5 +104,43 @@ func TestEnactmentListFailureIsNotStaleness(t *testing.T) {
 	}
 	if !s.Healthy() {
 		t.Error("a refused optional LIST must not mark the catalog stale")
+	}
+}
+
+// The k8s.ovn.org discovery read that admits a watch also records whether
+// route advertisement is served: no request of its own, and a failed read
+// keeps the last answer.
+func TestOVNServedRecordsRouteAds(t *testing.T) {
+	kube := fake.NewSimpleClientset()
+	disc := kube.Discovery().(*fakediscovery.FakeDiscovery)
+	var reads, failing atomic.Int64
+	kube.PrependReactor("get", "resource", func(k8stesting.Action) (bool, runtime.Object, error) {
+		reads.Add(1)
+		if failing.Load() > 0 {
+			return true, nil, errors.New("discovery down")
+		}
+		return false, nil, nil
+	})
+	s := New(cluster.NewClient(kube, nil, nil), nil)
+	ovn := func(names ...string) {
+		list := &metav1.APIResourceList{GroupVersion: gvrUDN.GroupVersion().String()}
+		for _, n := range names {
+			list.APIResources = append(list.APIResources, metav1.APIResource{Name: n})
+		}
+		disc.Resources = []*metav1.APIResourceList{list}
+	}
+
+	ovn(gvrUDN.Resource)
+	if !s.ovnServed(gvrUDN) || s.routeAds.Load() != routeAdsAbsent || reads.Load() != 1 {
+		t.Fatalf("served UDNs, no route advertisement: state %d after %d reads", s.routeAds.Load(), reads.Load())
+	}
+	failing.Store(1)
+	if s.ovnServed(gvrCUDN) || s.routeAds.Load() != routeAdsAbsent {
+		t.Fatalf("a failed read must keep the last answer: state %d", s.routeAds.Load())
+	}
+	failing.Store(0)
+	ovn(gvrUDN.Resource, gvrRouteAds.Resource)
+	if !s.ovnServed(gvrUDN) || s.routeAds.Load() != routeAdsServed {
+		t.Fatalf("route advertisement served: state %d", s.routeAds.Load())
 	}
 }

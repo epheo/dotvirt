@@ -36,11 +36,11 @@ type listThenWatch struct{}
 
 func (listThenWatch) IsWatchListSemanticsUnSupported() bool { return true }
 
-// DiscoveryInterval paces the API probe while a CRD is absent - one lightweight
+// discoveryInterval paces the API probe while a CRD is absent - one lightweight
 // discovery GET per tick, ending once the reflector owns a watch connection.
 // CRD removal afterwards is not re-probed: the watch goes quiet on a last-known
 // state, and uninstalling an operator is outside dotvirt's flow anyway.
-const DiscoveryInterval = time.Minute
+const discoveryInterval = time.Minute
 
 // RunWhenServed starts a discovery-gated reflector and returns immediately: it
 // re-probes has(gvr) slowly until the API is served, then runs lw (health
@@ -55,7 +55,7 @@ func RunWhenServed(ctx context.Context, has func(schema.GroupVersionResource) bo
 // RunTypedWhenServed is RunWhenServed for a source that yields typed objects
 // (see RunTyped).
 func RunTypedWhenServed(ctx context.Context, has func(schema.GroupVersionResource) bool, gvr schema.GroupVersionResource, lw *cache.ListWatch, expected any, store cache.Store, healthy *atomic.Bool, onFlip func()) {
-	go runWhenServed(ctx, DiscoveryInterval, has, gvr, lw, expected, store, healthy, onFlip)
+	go runWhenServed(ctx, discoveryInterval, has, gvr, lw, expected, store, healthy, onFlip)
 }
 
 // Served returns has with one side effect: a positive probe also sets flag,

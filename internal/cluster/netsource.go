@@ -41,19 +41,25 @@ func (c *Client) HasAPIResource(gvr schema.GroupVersionResource) bool {
 // version or the resource is not served) from a failed discovery read, which
 // returns its error.
 func (c *Client) ServesAPIResource(gvr schema.GroupVersionResource) (bool, error) {
-	rls, err := c.kube.Discovery().ServerResourcesForGroupVersion(gvr.GroupVersion().String())
+	served, err := c.ServedResources(gvr.GroupVersion())
+	return served[gvr.Resource], err
+}
+
+// ServedResources is the set of resources one discovery read finds gv
+// serving: empty when gv is not served, the error of a failed read.
+func (c *Client) ServedResources(gv schema.GroupVersion) (map[string]bool, error) {
+	rls, err := c.kube.Discovery().ServerResourcesForGroupVersion(gv.String())
 	if apierrors.IsNotFound(err) {
-		return false, nil
+		return map[string]bool{}, nil
 	}
 	if err != nil {
-		return false, err
+		return nil, err
 	}
+	out := make(map[string]bool, len(rls.APIResources))
 	for _, r := range rls.APIResources {
-		if r.Name == gvr.Resource {
-			return true, nil
-		}
+		out[r.Name] = true
 	}
-	return false, nil
+	return out, nil
 }
 
 // NodeLabels is a node's name + labels - enough for netstate to compute which nodes
