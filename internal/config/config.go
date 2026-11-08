@@ -9,7 +9,10 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"strings"
 	"time"
+
+	"k8s.io/apimachinery/pkg/util/validation"
 
 	"github.com/epheo/dotvirt/pkg/forge"
 )
@@ -158,6 +161,11 @@ func Load(args []string) (*Config, error) {
 
 	if err := fs.Parse(args); err != nil {
 		return nil, err
+	}
+	// The snapshot selects project namespaces by this key: a malformed one
+	// would select none and look like an empty cluster, so it fails here.
+	if errs := validation.IsQualifiedName(c.ProjectLabel); len(errs) > 0 {
+		return nil, fmt.Errorf("-project-label (DOTVIRT_PROJECT_LABEL) %q is not a label key: %s", c.ProjectLabel, strings.Join(errs, "; "))
 	}
 	// The same rule the API's cross-origin check applies: an origin it would
 	// reject fails here instead of 403ing every UI write.

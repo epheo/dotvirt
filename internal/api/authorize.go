@@ -574,10 +574,15 @@ func (s *Server) allows(ctx context.Context, id auth.Identity, c *cluster.Client
 // dryRun caches weigh's verdict on a like a review, keyed by the object's
 // content, for the short unwatchedTTL alone: a dry run answers for the object
 // as it stands, which a delete or a create can change with no watch to say
-// so.
+// so. Its stamp is the grant version of every namespace weigh asks in: a's,
+// and for a Namespace object the namespace itself, where the update it may
+// be weighed as is asked (ask).
 func (s *Server) dryRun(ctx context.Context, id auth.Identity, c *cluster.Client, a changeset.Access, weigh func(context.Context, auth.Identity, *cluster.Client, changeset.Access) (bool, error)) (bool, error) {
 	sum := sha256.Sum256([]byte(a.Object))
-	ver := s.rbacVersion()
+	ver := grantStamps{ns: s.grantVersion(a.Namespace)}
+	if a.Group == ssarNamespace.group && a.Resource == ssarNamespace.resource && a.Name != "" {
+		ver.obj = s.grantVersion(a.Name)
+	}
 	k := strings.Join([]string{restfactory.TokenKey(id.Token), "dry-run", a.Verb, a.Group, a.Resource, a.Namespace, a.Name, hex.EncodeToString(sum[:])}, "\x00")
 	if e, age, ok := s.ssar.GetAge(k); ok && e.ver == ver && age < s.maxAge(e.unsettled) {
 		return e.ok, nil
