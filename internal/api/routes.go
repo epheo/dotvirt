@@ -4,7 +4,6 @@ import (
 	"net/http"
 
 	"github.com/epheo/dotvirt/internal/draft"
-	"github.com/epheo/dotvirt/internal/eventbus"
 )
 
 // routes mounts every /api route on mux; Handler wraps it in auth and the
@@ -16,11 +15,7 @@ func (s *Server) routes(mux *http.ServeMux) {
 
 	if s.auth != nil {
 		mux.HandleFunc("POST /api/login", s.auth.Login)
-		mux.HandleFunc("POST /api/logout", func(w http.ResponseWriter, r *http.Request) {
-			if s.auth.Logout(w, r) {
-				s.bus.Publish(eventbus.SessionEnded) // the hub closes the ended session's streams
-			}
-		})
+		mux.HandleFunc("POST /api/logout", s.handleLogout)
 		mux.HandleFunc("GET /api/me", s.auth.Me)
 		// The login screen asks which sign-in paths exist before any session.
 		// ssoPending says SSO is configured but its OAuthClient isn't registered yet,

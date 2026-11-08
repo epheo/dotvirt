@@ -32,6 +32,8 @@ type Identity struct {
 	// Issued is when the session cookie carrying Token was issued; zero when
 	// the token came in a bearer header.
 	Issued time.Time
+	// SSO marks a session whose token dotvirt's own OAuth client minted.
+	SSO bool
 }
 
 type ctxKey struct{}

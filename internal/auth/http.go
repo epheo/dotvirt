@@ -6,7 +6,6 @@ import (
 	"errors"
 	"net/http"
 	"strings"
-	"time"
 
 	"github.com/epheo/dotvirt/internal/restfactory"
 )
@@ -44,7 +43,7 @@ func (a *Authenticator) Login(w http.ResponseWriter, r *http.Request) {
 		}
 		return
 	}
-	setCookie(w, r, token, a.sealer)
+	setCookie(w, r, token, false, a.sealer)
 	writeJSON(w, http.StatusOK, userResponse{Username: id.Username, Groups: id.Groups})
 }
 
@@ -84,18 +83,18 @@ func (a *Authenticator) Middleware(next http.Handler) http.Handler {
 			next.ServeHTTP(w, r)
 			return
 		}
-		token, issued, ok := tokenFromRequest(r, a.sealer)
+		s, ok := tokenFromRequest(r, a.sealer)
 		if !ok {
 			http.Error(w, "authentication required", http.StatusUnauthorized)
 			return
 		}
-		key := restfactory.TokenKey(token)
+		key := restfactory.TokenKey(s.token)
 		// Ahead of the verdict cache: a signed-out session's token still validates.
-		if !a.sessions.live(key, issued) {
+		if !a.sessions.live(key, s.issued) {
 			http.Error(w, "session ended", http.StatusUnauthorized)
 			return
 		}
-		id, err := a.validate(r.Context(), token, key)
+		id, err := a.validate(r.Context(), s.token, key)
 		if err != nil {
 			// Only a definitive rejection signs the user out (401); a transient
 			// inability to validate (API server down/throttled) is 503, so a blip
@@ -110,7 +109,7 @@ func (a *Authenticator) Middleware(next http.Handler) http.Handler {
 			}
 			return
 		}
-		id.Issued = issued
+		id.Issued, id.SSO = s.issued, s.sso
 		next.ServeHTTP(w, r.WithContext(NewContext(r.Context(), id)))
 	})
 }
@@ -146,18 +145,18 @@ func isOpenPath(path string) bool {
 	return false
 }
 
-// tokenFromRequest pulls the bearer token and its session's issue time from the
-// session cookie, falling back to an Authorization: Bearer header (zero issued).
-func tokenFromRequest(r *http.Request, sealer cipher.AEAD) (string, time.Time, bool) {
-	if token, issued, ok := readCookie(r, sealer); ok {
-		return token, issued, true
+// tokenFromRequest pulls the bearer token from the session cookie, falling back
+// to an Authorization: Bearer header (a session with no issue time).
+func tokenFromRequest(r *http.Request, sealer cipher.AEAD) (session, bool) {
+	if s, ok := readCookie(r, sealer); ok {
+		return s, true
 	}
 	if h := r.Header.Get("Authorization"); h != "" {
 		if token, ok := strings.CutPrefix(h, "Bearer "); ok {
-			return strings.TrimSpace(token), time.Time{}, token != ""
+			return session{token: strings.TrimSpace(token)}, token != ""
 		}
 	}
-	return "", time.Time{}, false
+	return session{}, false
 }
 
 func writeJSON(w http.ResponseWriter, status int, v any) {

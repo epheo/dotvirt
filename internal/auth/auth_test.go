@@ -28,22 +28,24 @@ var (
 
 func TestCookieRoundTrip(t *testing.T) {
 	const token = "sha256~abc.def-ghi"
-	issued := time.Unix(1700000000, 123)
-	value := cookieValue(token, issued, testSealer)
-
-	got, gotIssued, ok := parseCookieValue(value, testSealer)
-	if !ok {
-		t.Fatal("parseCookieValue rejected a value it just signed")
-	}
-	if got != token || !gotIssued.Equal(issued) {
-		t.Errorf("round-trip changed the session: got %q at %v, want %q at %v", got, gotIssued, token, issued)
+	for _, want := range []session{
+		{token: token, issued: time.Unix(1700000000, 123)},
+		{token: token, issued: time.Unix(1700000000, 123), sso: true},
+	} {
+		got, ok := parseCookieValue(cookieValue(want, testSealer), testSealer)
+		if !ok {
+			t.Fatal("parseCookieValue rejected a value it just signed")
+		}
+		if got.token != want.token || !got.issued.Equal(want.issued) || got.sso != want.sso {
+			t.Errorf("round-trip changed the session: got %+v, want %+v", got, want)
+		}
 	}
 }
 
 func TestCookieTamperRejected(t *testing.T) {
-	value := cookieValue("real-token", time.Now(), testSealer)
+	value := cookieValue(session{token: "real-token", issued: time.Now()}, testSealer)
 
-	if _, _, ok := parseCookieValue(value, newSealer([]byte("other-secret"))); ok {
+	if _, ok := parseCookieValue(value, newSealer([]byte("other-secret"))); ok {
 		t.Error("accepted a cookie sealed with a different secret")
 	}
 	enc := strings.TrimPrefix(value, cookiePrefix)
@@ -54,24 +56,24 @@ func TestCookieTamperRejected(t *testing.T) {
 	} else {
 		flipped[i] = 'A'
 	}
-	if _, _, ok := parseCookieValue(cookiePrefix+string(flipped), testSealer); ok {
+	if _, ok := parseCookieValue(cookiePrefix+string(flipped), testSealer); ok {
 		t.Error("accepted tampered ciphertext")
 	}
-	if _, _, ok := parseCookieValue(cookiePrefix+"AAAA", testSealer); ok {
+	if _, ok := parseCookieValue(cookiePrefix+"AAAA", testSealer); ok {
 		t.Error("accepted a value shorter than the nonce")
 	}
-	if _, _, ok := parseCookieValue(legacyPrefix+strings.TrimPrefix(value, cookiePrefix), testSealer); ok {
+	if _, ok := parseCookieValue(legacyPrefix+strings.TrimPrefix(value, cookiePrefix), testSealer); ok {
 		t.Error("accepted a sealed value under the other format's prefix")
 	}
-	if _, _, ok := parseCookieValue("garbage", testSealer); ok {
+	if _, ok := parseCookieValue("garbage", testSealer); ok {
 		t.Error("accepted a malformed cookie value")
 	}
 }
 
 func TestCookieHidesToken(t *testing.T) {
 	const token = "sha256~visible-token"
-	now := time.Now()
-	a, b := cookieValue(token, now, testSealer), cookieValue(token, now, testSealer)
+	s := session{token: token, issued: time.Now()}
+	a, b := cookieValue(s, testSealer), cookieValue(s, testSealer)
 	if strings.Contains(a, token) || strings.Contains(a, base64.RawURLEncoding.EncodeToString([]byte(token))) {
 		t.Error("sealed cookie carries the token in clear")
 	}
@@ -84,7 +86,7 @@ func TestCookieHidesToken(t *testing.T) {
 // the 4 KiB browser cookie cap.
 func TestCookieSizeForJWT(t *testing.T) {
 	jwt := strings.Repeat("x", 1400)
-	if n := len(cookieName) + 1 + len(cookieValue(jwt, time.Now(), testSealer)); n > 4096 {
+	if n := len(cookieName) + 1 + len(cookieValue(session{token: jwt, issued: time.Now(), sso: true}, testSealer)); n > 4096 {
 		t.Errorf("sealed cookie is %d bytes, over the 4 KiB cap", n)
 	}
 }
@@ -99,7 +101,7 @@ func TestOldFormatCookieReadsLoggedOut(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodGet, "/api/inventory", nil)
 	req.AddCookie(&http.Cookie{Name: cookieName, Value: old})
-	if _, _, ok := readCookie(req, testSealer); ok {
+	if _, ok := readCookie(req, testSealer); ok {
 		t.Fatal("old-format cookie still opens")
 	}
 	a, _ := fakeAuth(map[string]authnv1.UserInfo{token: {Username: "alice"}})

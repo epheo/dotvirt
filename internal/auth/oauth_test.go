@@ -125,9 +125,9 @@ func TestOAuthFlow(t *testing.T) {
 	if session == "" {
 		t.Fatal("no session cookie set")
 	}
-	tok, _, ok := parseCookieValue(session, testSealer)
-	if !ok || tok != "sha256~sso-token" {
-		t.Errorf("session carries %q, want the exchanged access token", tok)
+	got, ok := parseCookieValue(session, testSealer)
+	if !ok || got.token != "sha256~sso-token" || !got.sso {
+		t.Errorf("session carries %q (sso %v), want the exchanged access token marked SSO", got.token, got.sso)
 	}
 }
 

@@ -13,12 +13,14 @@ import (
 
 	"github.com/gorilla/websocket"
 	authnv1 "k8s.io/api/authentication/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/kubernetes/fake"
 	k8stesting "k8s.io/client-go/testing"
 
 	"github.com/epheo/dotvirt/internal/auth"
 	"github.com/epheo/dotvirt/internal/eventbus"
+	"github.com/epheo/dotvirt/internal/restfactory"
 	"github.com/epheo/dotvirt/internal/stream"
 )
 
@@ -129,5 +131,60 @@ func TestLogoutEndsStreamsAndCookie(t *testing.T) {
 	_, resp, err = websocket.DefaultDialer.Dial(wsURL, header)
 	if err == nil || resp == nil || resp.StatusCode != http.StatusUnauthorized {
 		t.Errorf("signed-out cookie on the stream upgrade: %v (%v), want 401", err, resp)
+	}
+}
+
+// An SSO session's logout deletes its OAuth access token cluster-wide, under
+// the caller's own token, by the name the oauth-apiserver stores it under. A
+// pasted token is never deleted, and a failed delete still ends the session.
+func TestSSOLogoutRevokesToken(t *testing.T) {
+	// The oauth-apiserver's derivation: sha256~ plus the unpadded base64url
+	// SHA-256 of the token after its prefix; sha256("abc") is the FIPS 180-2 vector.
+	const token = "sha256~abc"
+	const object = "/apis/oauth.openshift.io/v1/useroauthaccesstokens/sha256~ungWv48Bz-pBQUDeXa4iI7ADYaOWF3qctBD_YfIAFa0"
+	cases := []struct {
+		name       string
+		sso        bool
+		status     int
+		wantDelete bool
+	}{
+		{"sso", true, http.StatusOK, true},
+		{"pasted", false, http.StatusOK, false},
+		{"delete fails", true, http.StatusInternalServerError, true},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			fc := newFakeCluster(t)
+			var by string
+			fc.on(http.MethodDelete, object, func(w http.ResponseWriter, r *http.Request) {
+				by = bearer(r)
+				if c.status != http.StatusOK {
+					writeStatus(w, c.status, metav1.StatusReasonInternalError)
+					return
+				}
+				writeObj(w, metav1.Status{TypeMeta: metav1.TypeMeta{Kind: "Status", APIVersion: "v1"}, Status: metav1.StatusSuccess})
+			})
+			s := fc.server(nil, Config{})
+			s.auth = auth.New(fake.NewSimpleClientset(), []byte("0123456789abcdef0123456789abcdef"))
+			mux := http.NewServeMux()
+			s.routes(mux)
+			id := auth.Identity{Token: token, Username: "alice", Issued: time.Now(), SSO: c.sso}
+			r := httptest.NewRequest(http.MethodPost, "/api/logout", nil)
+			rec := httptest.NewRecorder()
+			mux.ServeHTTP(rec, r.WithContext(auth.NewContext(r.Context(), id)))
+
+			if rec.Code != http.StatusNoContent {
+				t.Fatalf("logout: %d, want 204", rec.Code)
+			}
+			if s.auth.SessionLive(restfactory.TokenKey(token), id.Issued) {
+				t.Error("the session outlived its logout")
+			}
+			if deleted := fc.called(http.MethodDelete, object); deleted != c.wantDelete {
+				t.Fatalf("token delete sent = %v, want %v (calls %v)", deleted, c.wantDelete, fc.seen())
+			}
+			if c.wantDelete && by != token {
+				t.Errorf("delete ran as %q, want the caller's own token", by)
+			}
+		})
 	}
 }

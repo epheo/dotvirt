@@ -54,7 +54,7 @@ func (rig *sessionRig) login(t *testing.T) *http.Cookie {
 }
 
 func sealedAt(issued time.Time) *http.Cookie {
-	return &http.Cookie{Name: cookieName, Value: cookieValue("good", issued, testSealer)}
+	return &http.Cookie{Name: cookieName, Value: cookieValue(session{token: "good", issued: issued}, testSealer)}
 }
 
 // do sends one request carrying c (or the bearer token when c is nil).
@@ -169,8 +169,8 @@ func TestLegacyCookieSurvivesUpgrade(t *testing.T) {
 	rig := newSessionRig(t)
 	sealed := testSealer.Seal(nil, nil, []byte("good"), []byte(legacyPrefix))
 	c := &http.Cookie{Name: cookieName, Value: legacyPrefix + base64.RawURLEncoding.EncodeToString(sealed)}
-	if tok, issued, ok := parseCookieValue(c.Value, testSealer); !ok || tok != "good" || !issued.Equal(legacyIssued) {
-		t.Fatalf("legacy cookie opened as %q at %v (%v), want the token at process start", tok, issued, ok)
+	if s, ok := parseCookieValue(c.Value, testSealer); !ok || s.token != "good" || !s.issued.Equal(legacyIssued) || s.sso {
+		t.Fatalf("legacy cookie opened as %+v (%v), want the token at process start, not SSO", s, ok)
 	}
 	if code := rig.do(http.MethodGet, "/api/inventory", c); code != http.StatusOK {
 		t.Fatalf("legacy session: %d, want 200", code)
@@ -219,6 +219,31 @@ func TestSessionsConcurrent(t *testing.T) {
 	}
 }
 
+// The middleware hands the session's origin and issue time to the handler: an
+// SSO cookie is marked, a pasted sign-in and a bearer header are not.
+func TestSessionOriginReachesIdentity(t *testing.T) {
+	a, _ := fakeAuth(map[string]authnv1.UserInfo{"good": {Username: "alice"}})
+	var seen Identity
+	h := a.Middleware(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) { seen, _ = FromContext(r.Context()) }))
+	rig := &sessionRig{a: a, h: h}
+	sso := &http.Cookie{Name: cookieName, Value: cookieValue(session{token: "good", issued: time.Now(), sso: true}, testSealer)}
+	for _, c := range []struct {
+		name       string
+		cookie     *http.Cookie
+		sso, issue bool
+	}{
+		{"pasted sign-in", rig.login(t), false, true},
+		{"sso", sso, true, true},
+		{"bearer", nil, false, false},
+	} {
+		seen = Identity{}
+		rig.do(http.MethodGet, "/api/inventory", c.cookie)
+		if seen.Username != "alice" || seen.SSO != c.sso || seen.Issued.IsZero() == c.issue {
+			t.Errorf("%s: identity %+v, want SSO %v and an issue time %v", c.name, seen, c.sso, c.issue)
+		}
+	}
+}
+
 // A token a TokenReview rejected ends every session of it, bearer included,
 // so its open streams and consoles close on the next sweep.
 func TestRejectedTokenEndsSessions(t *testing.T) {
@@ -234,5 +259,17 @@ func TestRejectedTokenEndsSessions(t *testing.T) {
 	}
 	if a.SessionLive(key, now) || a.SessionLive(key, time.Time{}) {
 		t.Error("a rejected token's session or bearer use is still live")
+	}
+}
+
+// The object name is the oauth-apiserver's: sha256~ plus the unpadded base64url
+// SHA-256 of the token after its prefix (sha256("abc") is the FIPS 180-2
+// vector). A token without the prefix is no OAuth access token.
+func TestOAuthTokenName(t *testing.T) {
+	if name, ok := OAuthTokenName("sha256~abc"); !ok || name != "sha256~ungWv48Bz-pBQUDeXa4iI7ADYaOWF3qctBD_YfIAFa0" {
+		t.Errorf("OAuthTokenName = %q, %v", name, ok)
+	}
+	if _, ok := OAuthTokenName("eyJhbGciOi.sa-jwt"); ok {
+		t.Error("named an object for a token without the sha256~ prefix")
 	}
 }

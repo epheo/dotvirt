@@ -11,6 +11,7 @@ import (
 	"context"
 	"crypto/hmac"
 	"crypto/rand"
+	"crypto/sha256"
 	"crypto/tls"
 	"encoding/base64"
 	"encoding/json"
@@ -200,7 +201,7 @@ func (o *OAuth) LoginRedirect(w http.ResponseWriter, r *http.Request) {
 	state := base64.RawURLEncoding.EncodeToString(b)
 	http.SetCookie(w, &http.Cookie{
 		Name:     stateCookie,
-		Value:    cookieValue(state, time.Now(), o.auth.sealer),
+		Value:    cookieValue(session{token: state, issued: time.Now()}, o.auth.sealer),
 		Path:     "/api/auth",
 		HttpOnly: true,
 		Secure:   isTLS(r),
@@ -226,9 +227,9 @@ func (o *OAuth) Callback(w http.ResponseWriter, r *http.Request) {
 		failLogin("state cookie missing", err)
 		return
 	}
-	want, _, ok := parseCookieValue(c.Value, o.auth.sealer)
+	want, ok := parseCookieValue(c.Value, o.auth.sealer)
 	state := r.URL.Query().Get("state")
-	if !ok || state == "" || !hmac.Equal([]byte(state), []byte(want)) {
+	if !ok || state == "" || !hmac.Equal([]byte(state), []byte(want.token)) {
 		failLogin("state mismatch", nil)
 		return
 	}
@@ -264,8 +265,25 @@ func (o *OAuth) Callback(w http.ResponseWriter, r *http.Request) {
 	}
 	log.Printf("oauth: %s signed in via OpenShift SSO", id.Username)
 	clearStateCookie(w, r)
-	setCookie(w, r, tok.AccessToken, o.auth.sealer)
+	setCookie(w, r, tok.AccessToken, true, o.auth.sealer)
 	http.Redirect(w, r, "/", http.StatusFound)
+}
+
+// oauthTokenPrefix starts every OpenShift OAuth access token and the name of
+// the object storing it.
+const oauthTokenPrefix = "sha256~"
+
+// OAuthTokenName names the OAuthAccessToken object behind an OpenShift access
+// token. The token itself is never stored: the oauth-apiserver looks it up by
+// the unpadded base64url SHA-256 of what follows its prefix. False for a token
+// without the prefix, which no OAuth server has issued since OpenShift 4.6.
+func OAuthTokenName(token string) (string, bool) {
+	secret, ok := strings.CutPrefix(token, oauthTokenPrefix)
+	if !ok {
+		return "", false
+	}
+	sum := sha256.Sum256([]byte(secret))
+	return oauthTokenPrefix + base64.RawURLEncoding.EncodeToString(sum[:]), true
 }
 
 func clearStateCookie(w http.ResponseWriter, r *http.Request) {
