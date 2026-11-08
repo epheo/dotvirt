@@ -216,7 +216,8 @@
 		const picked = changesTab(q.get('tab')) ?? tabOf(sel);
 		if (picked) return picked;
 		if (q.get('project')) return 'history';
-		if (!drafts.loaded || lanes.length > 0 || failedLanes.length > 0) return 'staged';
+		if (!drafts.loaded || drafts.error || lanes.length > 0 || failedLanes.length > 0)
+			return 'staged';
 		if (proposedLane.length > 0 || pushed > 0) return 'review';
 		return scopeProject ? 'history' : 'staged';
 	});
@@ -356,7 +357,7 @@
 	// card that says what the tab holds and where to go instead.
 	const empty = $derived(
 		tab === 'staged'
-			? drafts.loaded && lanes.length === 0 && failedLanes.length === 0
+			? drafts.loaded && !drafts.error && lanes.length === 0 && failedLanes.length === 0
 			: tab === 'review'
 				? proposedLane.length === 0 && pushed === 0
 				: !scopeProject && repoProjects.length === 0,

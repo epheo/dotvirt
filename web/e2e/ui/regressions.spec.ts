@@ -211,7 +211,7 @@ test('a drafts refresh keeps the half-typed PR title', async ({ page }) => {
 	await title.fill('web-1: raise memory to 8Gi');
 	// The dock's Refresh re-pulls every draft. The propose form was keyed on the
 	// selection object, rebuilt by that pull, and emptied itself mid-typing.
-	const refreshed = page.waitForResponse((r) => r.url().includes('/api/draft?project='));
+	const refreshed = page.waitForResponse((r) => r.url().includes('/api/drafts'));
 	await page.getByTitle('Refresh').click();
 	await refreshed;
 	await expect(main.getByText('web-prod/web-1')).toBeVisible();
