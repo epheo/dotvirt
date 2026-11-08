@@ -7,7 +7,6 @@ import (
 	"strings"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/client-go/tools/cache"
 
 	"github.com/epheo/dotvirt/internal/model"
 	"github.com/epheo/dotvirt/internal/netgen"
@@ -20,20 +19,25 @@ import (
 // summaries, not spec mirrors: the view reads them, edits go through git. The
 // handler scopes namespace-tier rows to visible namespaces and gates the
 // cluster-tier rows on authoring authority.
+//
+// The rows are the caller's to modify; the slices inside them are the
+// snapshot's, read-only.
 func (s *Snapshot) Policies() []model.Policy {
+	stores := [...]*policyStore{s.netpols, s.anps, s.banps, s.firewalls, s.egressIPs, s.extRoutes}
+	key := func() (planes [len(stores)]*plane) {
+		for i, st := range stores {
+			planes[i] = st.plane()
+		}
+		return planes
+	}
+	return slices.Clone(s.policyRows.get(key, rowsFrom))
+}
+
+// rowsFrom is the policy plane's rows from the decoded planes.
+func rowsFrom(planes [6]*plane) []model.Policy {
 	out := []model.Policy{}
-	for _, src := range []struct {
-		idx cache.Indexer
-		dec decoder
-	}{
-		{s.netpol, decodeNetpol},
-		{s.anp, decodeANP},
-		{s.banp, decodeBANP},
-		{s.egressfw, decodeGateway},
-		{s.egressip, decodeEgressIP},
-		{s.extroute, decodeExtRoute},
-	} {
-		for _, p := range decoded(src.idx, src.dec) {
+	for _, pl := range planes {
+		for _, p := range pl.all {
 			out = append(out, p.view)
 		}
 	}

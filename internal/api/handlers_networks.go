@@ -156,7 +156,7 @@ func (s *Server) handleNetworks(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// The full catalog is a lock-free scan of the SA-maintained netstate snapshot
+	// The full catalog is an in-memory read of the SA-maintained netstate snapshot
 	// (watch-fed, identical for everyone) - no per-request cluster LIST. Per-tenant
 	// scoping and per-object drift happen below, off this copy. Nil netstate (a
 	// stripped-down wiring) degrades to an empty catalog, per the Deps contract.

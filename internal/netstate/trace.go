@@ -384,7 +384,8 @@ func planeStep(b bound, stage, action, note string) model.TraceStep {
 	pol := b.pol.view
 	var rv *model.PolicyRuleView
 	if len(pol.Rules) > 0 {
-		rv = &pol.Rules[0]
+		r := pol.Rules[0] // the caller's redactor rewrites it, never the snapshot's row
+		rv = &r
 	}
 	pol.Rules = nil
 	return model.TraceStep{Stage: stage, Policy: &pol, Rule: rv, Action: action,

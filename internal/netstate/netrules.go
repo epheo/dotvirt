@@ -56,7 +56,7 @@ func (s *Snapshot) NetworkRules(namespaces []string, nsLabels func(string) map[s
 
 	var peers []*policy
 	peers = append(peers, s.sortedANPs()...)
-	peers = append(peers, decoded(s.netpol, decodeNetpol)...)
+	peers = append(peers, s.netpols.plane().all...)
 	peers = append(peers, s.baselines()...)
 	for _, p := range peers {
 		if _, seen := bound[policyKey(p.view)]; seen {

@@ -5,11 +5,9 @@ import (
 	"strings"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/client-go/tools/cache"
 
 	"github.com/epheo/dotvirt/internal/model"
 	"github.com/epheo/dotvirt/internal/netgen"
-	"github.com/epheo/dotvirt/internal/reflect"
 )
 
 // Redaction is what a cluster policy's text may tell one caller: only what
@@ -356,6 +354,7 @@ func hideAll(p *model.Policy, rule *model.PolicyRuleView) {
 		if p.Applies != "" {
 			p.Applies = otherNamespaces
 		}
+		p.Rules = slices.Clone(p.Rules) // the rows are the snapshot's
 		for i := range p.Rules {
 			hideAll(nil, &p.Rules[i])
 		}
@@ -366,25 +365,21 @@ func hideAll(p *model.Policy, rule *model.PolicyRuleView) {
 	}
 }
 
-// clusterPolicy decodes the cluster-scoped policy backing/name from its store.
+// clusterPolicy is the cluster-scoped policy backing/name as the snapshot
+// holds it; nil when it holds none.
 func (s *Snapshot) clusterPolicy(backing, name string) *policy {
-	var idx cache.Indexer
-	var dec decoder
+	var st *policyStore
 	switch backing {
 	case model.KindANP.Kind:
-		idx, dec = s.anp, decodeANP
+		st = s.anps
 	case model.KindBANP.Kind:
-		idx, dec = s.banp, decodeBANP
+		st = s.banps
 	case model.KindEgressIP.Kind:
-		idx, dec = s.egressip, decodeEgressIP
+		st = s.egressIPs
 	case model.KindExtRoute.Kind:
-		idx, dec = s.extroute, decodeExtRoute
+		st = s.extRoutes
 	default:
 		return nil
 	}
-	u, ok := reflect.Get(idx, name)
-	if !ok {
-		return nil
-	}
-	return dec(u)
+	return st.plane().byKey[name]
 }

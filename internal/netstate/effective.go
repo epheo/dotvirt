@@ -89,15 +89,15 @@ func bind(policies []*policy, nsLabels, podLabels map[string]string, podScoped b
 // walk. Selection alone isolates the declared directions; whether a rule then
 // allows a given flow is the trace's question.
 func (s *Snapshot) selectingNetpols(ns string, podLabels map[string]string, podScoped bool) []bound {
-	return bind(inNamespace(s.netpol, ns, decodeNetpol), nil, podLabels, podScoped)
+	return bind(s.netpols.plane().byNS[ns], nil, podLabels, podScoped)
 }
 
 // egressBindings resolves which SNAT pools (EgressIP: namespaceSelector plus an
 // optional podSelector narrowing within it) and external routes bind a workload
 // - the one query behind the Effective view and the trace's egress planes.
 func (s *Snapshot) egressBindings(nsLabels, podLabels map[string]string, podScoped bool) (snat, routes []bound) {
-	return bind(decoded(s.egressip, decodeEgressIP), nsLabels, podLabels, podScoped),
-		bind(decoded(s.extroute, decodeExtRoute), nsLabels, podLabels, podScoped)
+	return bind(s.egressIPs.plane().all, nsLabels, podLabels, podScoped),
+		bind(s.extRoutes.plane().all, nsLabels, podLabels, podScoped)
 }
 
 // match is a selector's verdict against known labels. matchCond means the

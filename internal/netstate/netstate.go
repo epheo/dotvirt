@@ -1,7 +1,9 @@
 // Package netstate is dotvirt's networking read plane: an SA-maintained, watch-fed
 // snapshot of the network CRDs (UDN/CUDN/NAD) and the physical fabric (nmstate
 // NNS/NNCP), following the clusterstate/argo/drs reflector model - Catalog() is a
-// pure in-memory scan, never a per-request cluster call.
+// pure in-memory read, never a per-request cluster call. Each read path
+// decodes the stores it needs once per store generation, shared by every
+// caller; only redaction runs per caller.
 //
 // Network moves publish NetworkChanged so the hub re-broadcasts and the client
 // re-pulls the out-of-band catalog; NNS (node-state) signals once at initial sync,
@@ -71,9 +73,17 @@ type Snapshot struct {
 
 	udn, cudn, nad, nns, nncp, nnce cache.Indexer
 	nmstatePresent                  atomic.Bool // the NNS CRD is served (nmstate installed)
+	// The same stores decoded once per generation.
+	nets        memo[[3]uint64, *netView]
+	uplinkMemo  memo[[3]uint64, []model.Uplink]
+	adapterMemo memo[uint64, []model.PhysicalAdapter]
 
 	// Policy-plane stores; each empty until its CRD/API is discovered.
 	netpol, anp, banp, egressfw, egressip, extroute cache.Indexer
+	// The same stores decoded once per generation, and the Policies rows
+	// built from those planes.
+	netpols, anps, banps, firewalls, egressIPs, extRoutes *policyStore
+	policyRows                                            memo[[6]*plane, []model.Policy]
 
 	// watches pairs each store with its GVR, built once in New so Run and the
 	// health flags cannot drift out of step when a kind is added.
@@ -84,6 +94,7 @@ type Snapshot struct {
 	// is unknown.
 	nodesMu    sync.RWMutex
 	nodes      []cluster.NodeLabels
+	nodesGen   uint64         // moves when nodes does
 	podNet     []netip.Prefix // the default network's node subnets
 	clusterNet []netip.Prefix // the pod network CIDRs the cluster config declares
 	svcNet     []netip.Prefix // the service network CIDRs
@@ -100,6 +111,15 @@ func New(sa *cluster.Client, bus *eventbus.Bus) *Snapshot {
 		udn: idx(), cudn: idx(), nad: idx(), nns: idx(), nncp: idx(), nnce: idx(),
 		netpol: idx(), anp: idx(), banp: idx(), egressfw: idx(), egressip: idx(), extroute: idx(),
 	}
+	for _, idx := range []cache.Indexer{s.udn, s.cudn, s.nad, s.nns, s.nncp, s.nnce} {
+		mustCount(idx) // the network view, uplinks and adapters memoize on them
+	}
+	s.netpols = newPolicyStore(s.netpol, decodeNetpol, nil)
+	s.anps = newPolicyStore(s.anp, decodeANP, byPrecedence)
+	s.banps = newPolicyStore(s.banp, decodeBANP, nil)
+	s.firewalls = newPolicyStore(s.egressfw, decodeGateway, nil)
+	s.egressIPs = newPolicyStore(s.egressip, decodeEgressIP, nil)
+	s.extRoutes = newPolicyStore(s.extroute, decodeExtRoute, nil)
 	s.watches = []watchSpec{
 		{gvrUDN, s.udn, true, false},
 		{gvrCUDN, s.cudn, true, false},
@@ -261,15 +281,8 @@ func (s *Snapshot) refreshNodes(ctx context.Context) {
 	t := time.NewTicker(nodeRefreshInterval)
 	defer t.Stop()
 	for {
-		if infos, err := s.sa.ListNodeLabels(ctx); err == nil {
-			podNet := defaultPodSubnets(infos)
-			s.nodesMu.Lock()
-			changed := !nodesEqual(s.nodes, infos)
-			s.nodes, s.podNet = infos, podNet
-			s.nodesMu.Unlock()
-			if changed && s.bus != nil {
-				s.bus.Publish(eventbus.NetworkChanged)
-			}
+		if infos, err := s.sa.ListNodeLabels(ctx); err == nil && s.setNodes(infos) && s.bus != nil {
+			s.bus.Publish(eventbus.NetworkChanged)
 		}
 		s.refreshClusterNetworks(ctx)
 		s.probeRouteAds()
@@ -296,6 +309,20 @@ func (s *Snapshot) refreshClusterNetworks(ctx context.Context) {
 	s.nodesMu.Lock()
 	s.clusterNet, s.svcNet = clusterNet, svcNet
 	s.nodesMu.Unlock()
+}
+
+// setNodes records a node LIST and its default network subnets, and reports
+// whether the node set moved.
+func (s *Snapshot) setNodes(infos []cluster.NodeLabels) bool {
+	podNet := defaultPodSubnets(infos)
+	s.nodesMu.Lock()
+	defer s.nodesMu.Unlock()
+	changed := !nodesEqual(s.nodes, infos)
+	s.nodes, s.podNet = infos, podNet
+	if changed {
+		s.nodesGen++
+	}
+	return changed
 }
 
 func nodesEqual(a, b []cluster.NodeLabels) bool {
