@@ -585,6 +585,9 @@ func (c *Coordinator) combine(read *git.Repo, pr int, carried, staged []draft.En
 				continue
 			}
 			e.Edit = &edit
+			if e.Instancetype == nil {
+				e.Instancetype = prev.Instancetype
+			}
 			byKey[k] = e
 		case e.Kind == draft.KindDelete && prev.Kind == draft.KindEdit:
 			byKey[k] = e

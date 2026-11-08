@@ -363,13 +363,18 @@ func TestAdoptProject(t *testing.T) {
 
 func TestProjectSyncAccess(t *testing.T) {
 	fc := newFakeCluster(t)
+	fc.readsVMs = tenantReadsTeamA
 	d := &planeDraft{}
 	s := fc.server(d, Config{PlatformRepo: platformRepo})
 
-	wantStatus(t, do(s, tenantToken, http.MethodPost, "/api/projects/team-a/sync-access", ""), http.StatusForbidden)
+	wantStatus(t, do(s, tenantToken, http.MethodPost, "/api/projects/orphans/sync-access", ""), http.StatusNotFound)
 	wantStatus(t, do(s, adminToken, http.MethodPost, "/api/projects/ghost/sync-access", ""), http.StatusNotFound)
 	d.none(t)
 	wantStatus(t, do(s, adminToken, http.MethodPost, "/api/projects/team-a/sync-access", ""), http.StatusOK)
+	d.only(t, "StageSyncAccess platform,team-a")
+	// The coordinator weighs each grant: the route asks nothing of a tenant
+	// who sees the whole project.
+	wantStatus(t, do(s, tenantToken, http.MethodPost, "/api/projects/team-a/sync-access", ""), http.StatusOK)
 	d.only(t, "StageSyncAccess platform,team-a")
 }
 

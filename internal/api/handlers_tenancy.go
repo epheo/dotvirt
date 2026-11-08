@@ -181,10 +181,10 @@ func (s *Server) handleAdoptProject(w http.ResponseWriter, r *http.Request) {
 // handleProjectSyncAccess stages the platform-repo grants a project made before
 // sync impersonation needs: each of its namespaces' admin RoleBinding gains
 // the project's Argo sync account, beside that account's EgressFirewall grant.
-// A platform-admin act like adopting a project: it lands RBAC in the platform
-// tier.
+// It lands only RoleBindings, which the coordinator weighs as the caller: a
+// route gate on namespaces would refuse what RBAC allows.
 func (s *Server) handleProjectSyncAccess(w http.ResponseWriter, r *http.Request) {
-	plat, ok := s.platformScope(w, r, ssarNamespace)
+	plat, ok := s.platformScopeGated(w, r)
 	if !ok {
 		return
 	}
