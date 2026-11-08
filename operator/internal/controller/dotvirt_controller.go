@@ -61,6 +61,7 @@ type DotvirtReconciler struct {
 	forgeAPIBase func(*dotvirtv1alpha1.Dotvirt) string
 
 	pruneState
+	syncCache
 }
 
 // driftResync bounds how long out-of-band drift on an unwatched kind (Services,
@@ -163,6 +164,8 @@ func (r *DotvirtReconciler) provision(ctx context.Context, key types.NamespacedN
 		{dotvirtv1alpha1.ConditionSecretsReady, r.reconcileSecrets, "secret generation"},
 		{dotvirtv1alpha1.ConditionWorkloadReady, r.reconcileWorkload, ""},
 		{dotvirtv1alpha1.ConditionArgoReady, r.reconcileArgo, ""},
+		// It writes the shared ArgoCD instance, outside the render.
+		{dotvirtv1alpha1.ConditionSyncImpersonationReady, r.reconcileSyncImpersonation, "sync impersonation"},
 		// Before the org webhooks, which need the managed forge's org it ensures;
 		// after the rest, so a slow forge only delays phases that call it anyway.
 		{dotvirtv1alpha1.ConditionForgeRepoReady, r.reconcilePlatformRepo, "platform-repo bootstrap"},
@@ -268,6 +271,9 @@ type reconcileCtx struct {
 	// anchors degrade to the system pool, the managed forge's Argo trust blocks.
 	ingressCA    string
 	ingressCAErr error
+	// sync is what the Argo phase rendered for sync impersonation, read by the
+	// phase after it.
+	sync syncTier
 }
 
 func (r *DotvirtReconciler) newReconcileCtx(ctx context.Context, dv *dotvirtv1alpha1.Dotvirt) *reconcileCtx {

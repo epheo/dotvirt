@@ -5,7 +5,7 @@ package controller
 // create+patch (never update); only the kinds it watches (dotvirts, secrets,
 // deployments, routes, namespaces) get watch; prune's label-selected sweep is list on
 // each rendered kind plus delete BY NAME (below). The operator does NOT author ClusterRoles - it only
-// `bind`s the three static operand roles - so it needs no `escalate` and no
+// `bind`s the static operand roles - so it needs no `escalate` and no
 // ClusterRole/RoleBinding writes.
 // +kubebuilder:rbac:groups=dotvirt.io,resources=dotvirts,verbs=get;list;watch;update
 // +kubebuilder:rbac:groups=dotvirt.io,resources=dotvirts/status,verbs=get;update;patch
@@ -35,9 +35,14 @@ package controller
 // clusterrolebindings: the operator creates the bindings that wire the static operand roles
 // to the dotvirt SA / Argo controller / platform-admins.
 // +kubebuilder:rbac:groups=rbac.authorization.k8s.io,resources=clusterrolebindings,verbs=list;create;patch
-// clusterroles `bind`: the operator's ONLY rbac-authoring right - bind these three named
+// clusterroles `bind`: the operator's ONLY rbac-authoring right - bind these named
 // static roles into the bindings above. No escalate, no role create/update/delete.
-// +kubebuilder:rbac:groups=rbac.authorization.k8s.io,resources=clusterroles,resourceNames=dotvirt;dotvirt-argocd-apply;dotvirt-platform-network-admin,verbs=bind
+// +kubebuilder:rbac:groups=rbac.authorization.k8s.io,resources=clusterroles,resourceNames=dotvirt;dotvirt-argocd-apply;dotvirt-platform-network-admin;dotvirt-platform-sync,verbs=bind
+// Sync impersonation: SubjectAccessReviews ask what each sync account may do before
+// the operator turns it on, and the operator sets that one key on the ArgoCD
+// instance (get + patch on its two conventional names only).
+// +kubebuilder:rbac:groups=authorization.k8s.io,resources=subjectaccessreviews,verbs=create
+// +kubebuilder:rbac:groups=argoproj.io,resources=argocds,resourceNames=openshift-gitops;argocd,verbs=get;patch
 //
 // delete, scoped to the fixed names the install renders (prune and the finalizer
 // delete one object at a time, never a collection): a cluster-wide grant would let
@@ -47,13 +52,15 @@ package controller
 // resourceNames list can cover them. The unscoped grant is bounded by what it reaches
 // (ArgoCD permission sets, which Argo-admin RBAC guards and Argo itself needs to apply
 // anything) and by prune, which deletes only AppProjects carrying this install's labels.
+// The sync ServiceAccounts, also named after projects, need no delete grant: each is
+// owner-referenced to its AppProject, and the garbage collector removes it with it.
 // +kubebuilder:rbac:groups=apps,resources=deployments,resourceNames=dotvirt;dotvirt-forgejo,verbs=delete
 // +kubebuilder:rbac:groups="",resources=services;serviceaccounts,resourceNames=dotvirt;dotvirt-forgejo,verbs=delete
 // +kubebuilder:rbac:groups=networking.k8s.io,resources=networkpolicies;ingresses,resourceNames=dotvirt;dotvirt-forgejo,verbs=delete
 // +kubebuilder:rbac:groups=route.openshift.io,resources=routes,resourceNames=dotvirt;dotvirt-forgejo,verbs=delete
 // +kubebuilder:rbac:groups="",resources=secrets,resourceNames=dotvirt-appset-plugin;dotvirt-repo-creds,verbs=delete
 // +kubebuilder:rbac:groups="",resources=configmaps,resourceNames=dotvirt-appset-plugin,verbs=delete
-// +kubebuilder:rbac:groups=rbac.authorization.k8s.io,resources=clusterrolebindings,resourceNames=dotvirt;dotvirt-argocd-apply;dotvirt-platform-network-admin,verbs=delete
+// +kubebuilder:rbac:groups=rbac.authorization.k8s.io,resources=clusterrolebindings,resourceNames=dotvirt;dotvirt-argocd-apply;dotvirt-platform-network-admin;dotvirt-platform-sync,verbs=delete
 // +kubebuilder:rbac:groups=argoproj.io,resources=appprojects,verbs=delete
 // +kubebuilder:rbac:groups=argoproj.io,resources=applications,resourceNames=dotvirt-platform,verbs=delete
 // +kubebuilder:rbac:groups=argoproj.io,resources=applicationsets,resourceNames=dotvirt-projects,verbs=delete

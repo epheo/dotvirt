@@ -5,6 +5,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	dotvirtv1alpha1 "github.com/epheo/dotvirt/operator/api/v1alpha1"
+	"github.com/epheo/dotvirt/pkg/tenancy"
 )
 
 // The ClusterRoles these bindings reference are shipped as STATIC manifests
@@ -35,11 +36,27 @@ func DotvirtClusterRoleBinding(dv *dotvirtv1alpha1.Dotvirt) *rbacv1.ClusterRoleB
 	})
 }
 
-// ArgocdApplyClusterRoleBinding binds the "dotvirt-argocd-apply" role to the shared Argo
-// controller SA. The AppProjects (not the role) scope which app may use cluster-scoped kinds.
-func ArgocdApplyClusterRoleBinding(dv *dotvirtv1alpha1.Dotvirt, argoNS, argoSA string) *rbacv1.ClusterRoleBinding {
-	return crb("dotvirt-argocd-apply", "dotvirt-argocd-apply", dv, []rbacv1.Subject{
-		{Kind: "ServiceAccount", Name: argoSA, Namespace: argoNS},
+// ArgocdApplyClusterRoleBinding binds the "dotvirt-argocd-apply" role to the
+// platform tier's sync account, which Argo applies the platform repo as once
+// sync impersonation is on, and to the shared Argo controller SA, which
+// applies every tier while it is off. The AppProjects (not the role) scope
+// which app may use cluster-scoped kinds. platform=false (no platform tier)
+// leaves the sync account out.
+func ArgocdApplyClusterRoleBinding(dv *dotvirtv1alpha1.Dotvirt, argoNS, argoSA string, platform bool) *rbacv1.ClusterRoleBinding {
+	subjects := []rbacv1.Subject{{Kind: "ServiceAccount", Name: argoSA, Namespace: argoNS}}
+	if platform {
+		subjects = append(subjects, rbacv1.Subject{Kind: "ServiceAccount", Name: tenancy.PlatformSyncAccount, Namespace: argoNS})
+	}
+	return crb("dotvirt-argocd-apply", "dotvirt-argocd-apply", dv, subjects)
+}
+
+// PlatformSyncClusterRoleBinding binds the "dotvirt-platform-sync" role to the
+// platform tier's sync account: the Namespaces the platform repo declares, and
+// bind on the roles its project grants name, which is what lets that account
+// apply them without the controller's blanket RBAC rights.
+func PlatformSyncClusterRoleBinding(dv *dotvirtv1alpha1.Dotvirt, argoNS string) *rbacv1.ClusterRoleBinding {
+	return crb(tenancy.PlatformSyncAccount, tenancy.PlatformSyncAccount, dv, []rbacv1.Subject{
+		{Kind: "ServiceAccount", Name: tenancy.PlatformSyncAccount, Namespace: argoNS},
 	})
 }
 

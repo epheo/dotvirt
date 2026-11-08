@@ -9,6 +9,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
@@ -50,7 +51,7 @@ func (r *DotvirtReconciler) reconcileArgo(ctx context.Context, dv *dotvirtv1alph
 	appset := install.ApplicationSet(dv, argoNS, platformNS, tenants.unconfined)
 	objs := []client.Object{
 		install.DotvirtClusterRoleBinding(dv),
-		install.ArgocdApplyClusterRoleBinding(dv, argoNS, argoSA),
+		install.ArgocdApplyClusterRoleBinding(dv, argoNS, argoSA, platformRepo != ""),
 		install.PlatformNetworkAdminBinding(dv),
 	}
 	// The tenant AppProjects precede the ApplicationSet whose template names
@@ -62,6 +63,7 @@ func (r *DotvirtReconciler) reconcileArgo(ctx context.Context, dv *dotvirtv1alph
 	// platform repo is configured.
 	if platformRepo != "" {
 		objs = append(objs,
+			install.PlatformSyncClusterRoleBinding(dv, argoNS),
 			install.PlatformAppProject(dv, argoNS, platformRepo),
 			install.PlatformApplication(dv, argoNS, platformRepo),
 		)
@@ -76,9 +78,22 @@ func (r *DotvirtReconciler) reconcileArgo(ctx context.Context, dv *dotvirtv1alph
 	if creds != nil {
 		objs = append(objs, creds)
 	}
+	rc.sync = syncTier{accounts: tenants.accounts, platform: platformRepo != "", sharedInUse: tenants.sharedInUse, appProjects: map[string]bool{}}
 	for _, obj := range objs {
 		if err := r.apply(ctx, obj); err != nil {
 			return nil, applyFailed(err)
+		}
+		ap, ok := obj.(*unstructured.Unstructured)
+		if !ok || ap.GroupVersionKind() != install.ArgoGVK("AppProject") {
+			continue
+		}
+		rc.sync.appProjects[ap.GetName()] = true
+		// After its AppProject: the apply answered with the UID the account's
+		// owner reference needs.
+		if sa := install.SyncServiceAccount(dv, ap); sa != nil {
+			if err := r.apply(ctx, sa); err != nil {
+				return nil, applyFailed(err)
+			}
 		}
 	}
 	if r.DryRun {

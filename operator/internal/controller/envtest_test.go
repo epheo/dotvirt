@@ -35,6 +35,7 @@ import (
 	"github.com/epheo/dotvirt/operator/internal/deps"
 	"github.com/epheo/dotvirt/operator/internal/install"
 	"github.com/epheo/dotvirt/operator/internal/platform"
+	"github.com/epheo/dotvirt/pkg/tenancy"
 )
 
 // operatorUser is the identity the generated ClusterRole is bound to; the
@@ -118,6 +119,19 @@ func TestEnvtest(t *testing.T) {
 			{authzv1.ResourceAttributes{Verb: "deletecollection", Group: "argoproj.io", Resource: "appprojects", Namespace: "argocd"}, false},
 			{authzv1.ResourceAttributes{Verb: "watch", Resource: "namespaces"}, true},
 			{authzv1.ResourceAttributes{Verb: "patch", Resource: "namespaces", Name: "team-a"}, false},
+			// Sync impersonation: the reviews, the one key on the instance, the
+			// platform account's binding; never the accounts' delete (the GC
+			// removes them with their AppProjects) or the roles they are granted.
+			{authzv1.ResourceAttributes{Verb: "create", Group: "authorization.k8s.io", Resource: "subjectaccessreviews"}, true},
+			{authzv1.ResourceAttributes{Verb: "patch", Group: "argoproj.io", Resource: "argocds", Namespace: "openshift-gitops", Name: "openshift-gitops"}, true},
+			{authzv1.ResourceAttributes{Verb: "get", Group: "argoproj.io", Resource: "argocds", Namespace: "argocd", Name: "argocd"}, true},
+			{authzv1.ResourceAttributes{Verb: "patch", Group: "argoproj.io", Resource: "argocds", Namespace: "argocd", Name: "other"}, false},
+			{authzv1.ResourceAttributes{Verb: "create", Group: "argoproj.io", Resource: "argocds", Namespace: "argocd"}, false},
+			{authzv1.ResourceAttributes{Verb: "bind", Group: "rbac.authorization.k8s.io", Resource: "clusterroles", Name: tenancy.PlatformSyncAccount}, true},
+			{authzv1.ResourceAttributes{Verb: "bind", Group: "rbac.authorization.k8s.io", Resource: "clusterroles", Name: "admin"}, false},
+			{authzv1.ResourceAttributes{Verb: "bind", Group: "rbac.authorization.k8s.io", Resource: "clusterroles", Name: tenancy.TenantEgressRole}, false},
+			{authzv1.ResourceAttributes{Verb: "delete", Group: "rbac.authorization.k8s.io", Resource: "clusterrolebindings", Name: tenancy.PlatformSyncAccount}, true},
+			{authzv1.ResourceAttributes{Verb: "delete", Resource: "serviceaccounts", Namespace: "argocd", Name: "dotvirt-p-team-a"}, false},
 		} {
 			res, err := kube.AuthorizationV1().SelfSubjectAccessReviews().Create(ctx,
 				&authzv1.SelfSubjectAccessReview{Spec: authzv1.SelfSubjectAccessReviewSpec{ResourceAttributes: &c.attrs}}, metav1.CreateOptions{})
@@ -276,6 +290,151 @@ func TestEnvtest(t *testing.T) {
 		}
 	})
 
+	// envtest runs no aggregation controller, so admin holds what OpenShift
+	// aggregates into it from KubeVirt, CDI and OVN-Kubernetes, in short:
+	// VirtualMachines, DataVolumes, UserDefinedNetworks and NetworkPolicies to
+	// write, NetworkAttachmentDefinitions to read, no EgressFirewalls.
+	adminRole := &rbacv1.ClusterRole{}
+	if err := admin.Get(ctx, types.NamespacedName{Name: "admin"}, adminRole); err != nil {
+		t.Fatal(err)
+	}
+	write := []string{"get", "list", "watch", "create", "update", "patch", "delete"}
+	adminRole.Rules = []rbacv1.PolicyRule{
+		{APIGroups: []string{"kubevirt.io"}, Resources: []string{"virtualmachines"}, Verbs: write},
+		{APIGroups: []string{"cdi.kubevirt.io"}, Resources: []string{"datavolumes"}, Verbs: write},
+		{APIGroups: []string{"k8s.ovn.org"}, Resources: []string{"userdefinednetworks"}, Verbs: write},
+		{APIGroups: []string{"networking.k8s.io"}, Resources: []string{"networkpolicies"}, Verbs: write},
+		{APIGroups: []string{"k8s.cni.cncf.io"}, Resources: []string{"network-attachment-definitions"}, Verbs: []string{"get", "list", "watch"}},
+	}
+	adminRole.AggregationRule = nil
+	if err := admin.Update(ctx, adminRole); err != nil {
+		t.Fatal(err)
+	}
+	// syncGrants are the platform repo's grants of ns to project's sync
+	// account, as the app renders them (netgen.RoleBindingManifest).
+	syncGrants := func(ns, project string) {
+		account, _ := tenancy.SyncAccount(project)
+		sa := []rbacv1.Subject{{Kind: rbacv1.ServiceAccountKind, Name: account, Namespace: "argocd"}}
+		for name, role := range map[string]string{tenancy.AdminBinding(ns): "admin", tenancy.EgressBinding(ns): tenancy.TenantEgressRole} {
+			mustCreate(t, admin, &rbacv1.RoleBinding{
+				ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: ns},
+				RoleRef:    rbacv1.RoleRef{APIGroup: rbacv1.GroupName, Kind: "ClusterRole", Name: role},
+				Subjects:   sa,
+			})
+		}
+	}
+
+	t.Run("a project's sync account holds its project's rights only", func(t *testing.T) {
+		mustCreate(t, admin, projectNS("team-c", "team-c", "https://forge.example/dotvirt/team-c.git"))
+		syncGrants("team-a", "team-a")
+		syncGrants("team-c", "team-c")
+		kube := kubernetes.NewForConfigOrDie(adminCfg)
+		user := "system:serviceaccount:argocd:dotvirt-p-team-a"
+		for _, c := range []struct {
+			group, resource, ns string
+			want                bool
+		}{
+			{"kubevirt.io", "virtualmachines", "team-a", true},
+			{"cdi.kubevirt.io", "datavolumes", "team-a", true},
+			{"k8s.ovn.org", "userdefinednetworks", "team-a", true},
+			{"networking.k8s.io", "networkpolicies", "team-a", true},
+			{"k8s.ovn.org", "egressfirewalls", "team-a", true},
+			// Platform tier: a raw NAD can join another project's VLAN.
+			{"k8s.cni.cncf.io", "network-attachment-definitions", "team-a", false},
+			// Platform tier: a project's repo cannot grant access.
+			{"rbac.authorization.k8s.io", "rolebindings", "team-a", false},
+			{"kubevirt.io", "virtualmachines", "team-c", false},
+			{"k8s.ovn.org", "egressfirewalls", "team-c", false},
+			{"kubevirt.io", "virtualmachines", "", false},
+		} {
+			res, err := kube.AuthorizationV1().SubjectAccessReviews().Create(ctx, &authzv1.SubjectAccessReview{Spec: authzv1.SubjectAccessReviewSpec{
+				User:               user,
+				Groups:             []string{"system:serviceaccounts", "system:serviceaccounts:argocd", "system:authenticated"},
+				ResourceAttributes: &authzv1.ResourceAttributes{Verb: "create", Group: c.group, Resource: c.resource, Namespace: c.ns},
+			}}, metav1.CreateOptions{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if res.Status.Allowed != c.want {
+				t.Errorf("team-a's sync account create %s/%s in %q: allowed=%v, want %v", c.group, c.resource, c.ns, res.Status.Allowed, c.want)
+			}
+		}
+		// The account is the AppProject's, for the garbage collector.
+		var sa corev1.ServiceAccount
+		ap := argoObj("AppProject", "", "", nil)
+		eventually(t, "team-c sync account", func() bool {
+			return admin.Get(ctx, types.NamespacedName{Namespace: "argocd", Name: "dotvirt-p-team-c"}, &sa) == nil &&
+				admin.Get(ctx, types.NamespacedName{Namespace: "argocd", Name: "dotvirt-p-team-c"}, ap) == nil
+		})
+		if len(sa.OwnerReferences) != 1 || sa.OwnerReferences[0].UID != ap.GetUID() {
+			t.Errorf("sync account owners = %+v, want AppProject %s", sa.OwnerReferences, ap.GetUID())
+		}
+	})
+
+	t.Run("sync impersonation flips once every project is ready", func(t *testing.T) {
+		dv := &dotvirtv1alpha1.Dotvirt{}
+		if err := admin.Get(ctx, types.NamespacedName{Namespace: "dotvirt", Name: "x"}, dv); err != nil {
+			t.Fatal(err)
+		}
+		inst := &unstructured.Unstructured{Object: map[string]any{"spec": map[string]any{"server": map[string]any{"insecure": true}}}}
+		inst.SetGroupVersionKind(install.ArgoCDGVK)
+		inst.SetNamespace("argocd")
+		inst.SetName("argocd")
+		mustCreate(t, admin, inst)
+		dv.Spec.ArgoCD.SyncImpersonation.Enabled = true
+		if err := admin.Update(ctx, dv); err != nil {
+			t.Fatal(err)
+		}
+		reason := func() string {
+			got := &dotvirtv1alpha1.Dotvirt{}
+			if admin.Get(ctx, client.ObjectKeyFromObject(dv), got) != nil {
+				return ""
+			}
+			if c := apimeta.FindStatusCondition(got.Status.Conditions, dotvirtv1alpha1.ConditionSyncImpersonationReady); c != nil && c.ObservedGeneration == got.Generation {
+				return c.Reason + ": " + c.Message
+			}
+			return ""
+		}
+		// team-z (namespace team-b) holds no grant yet.
+		eventually(t, "held back for team-z", func() bool { return strings.Contains(reason(), "project team-z cannot sync") })
+		key := func() any {
+			if admin.Get(ctx, client.ObjectKeyFromObject(inst), inst) != nil {
+				return nil
+			}
+			extra, _, _ := unstructured.NestedMap(inst.Object, "spec", "extraConfig")
+			return extra[install.SyncImpersonationKey]
+		}
+		if key() != nil {
+			t.Fatal("set while a project lacks its grants")
+		}
+		// The merged grant is seen once the verdict ages out; a spec change
+		// re-asks at once.
+		syncGrants("team-b", "team-z")
+		if err := admin.Get(ctx, client.ObjectKeyFromObject(dv), dv); err != nil {
+			t.Fatal(err)
+		}
+		dv.Spec.ArgoCD.SyncImpersonation.IgnoreForeignApplications = true
+		if err := admin.Update(ctx, dv); err != nil {
+			t.Fatal(err)
+		}
+		eventually(t, "impersonation set", func() bool { return key() == "true" })
+		if !strings.HasPrefix(reason(), "Enabled") {
+			t.Errorf("condition = %s", reason())
+		}
+		if _, ok, _ := unstructured.NestedMap(inst.Object, "spec", "server"); !ok {
+			t.Errorf("the flip dropped a field it does not own: %v", inst.Object["spec"])
+		}
+
+		if err := admin.Get(ctx, client.ObjectKeyFromObject(dv), dv); err != nil {
+			t.Fatal(err)
+		}
+		dv.Spec.ArgoCD.SyncImpersonation.Enabled = false
+		if err := admin.Update(ctx, dv); err != nil {
+			t.Fatal(err)
+		}
+		eventually(t, "impersonation removed", func() bool { return key() == nil })
+	})
+
 	t.Run("deletion cleans up as the operator", func(t *testing.T) {
 		dv := &dotvirtv1alpha1.Dotvirt{ObjectMeta: metav1.ObjectMeta{Name: "x", Namespace: "dotvirt"}}
 		// A name only an older version rendered: the name-scoped delete grant
@@ -316,8 +475,9 @@ func TestEnvtest(t *testing.T) {
 			}
 			for _, item := range items {
 				obj := item.(client.Object)
-				// The install namespace's state is ownerRef-GC'd, and envtest runs no GC.
-				if _, isSecret := obj.(*corev1.Secret); isSecret && obj.GetNamespace() == dv.Namespace {
+				// Owner-referenced objects are the garbage collector's (the install
+				// namespace's state, the sync accounts), and envtest runs no GC.
+				if len(obj.GetOwnerReferences()) > 0 {
 					continue
 				}
 				left[obj.GetNamespace()+"/"+obj.GetName()] = true
@@ -375,7 +535,13 @@ func runManager(t *testing.T, cfg *rest.Config, scheme *runtime.Scheme) *atomic.
 func argoStubCRDs() []*apiextensionsv1.CustomResourceDefinition {
 	preserve := true
 	var out []*apiextensionsv1.CustomResourceDefinition
-	for kind, plural := range map[string]string{"AppProject": "appprojects", "Application": "applications", "ApplicationSet": "applicationsets"} {
+	for _, gvk := range []struct{ kind, plural, version string }{
+		{"AppProject", "appprojects", "v1alpha1"},
+		{"Application", "applications", "v1alpha1"},
+		{"ApplicationSet", "applicationsets", "v1alpha1"},
+		{"ArgoCD", "argocds", "v1beta1"},
+	} {
+		kind, plural := gvk.kind, gvk.plural
 		out = append(out, &apiextensionsv1.CustomResourceDefinition{
 			ObjectMeta: metav1.ObjectMeta{Name: plural + ".argoproj.io"},
 			Spec: apiextensionsv1.CustomResourceDefinitionSpec{
@@ -383,7 +549,7 @@ func argoStubCRDs() []*apiextensionsv1.CustomResourceDefinition {
 				Names: apiextensionsv1.CustomResourceDefinitionNames{Kind: kind, ListKind: kind + "List", Plural: plural, Singular: strings.ToLower(kind)},
 				Scope: apiextensionsv1.NamespaceScoped,
 				Versions: []apiextensionsv1.CustomResourceDefinitionVersion{{
-					Name: "v1alpha1", Served: true, Storage: true,
+					Name: gvk.version, Served: true, Storage: true,
 					Schema: &apiextensionsv1.CustomResourceValidation{OpenAPIV3Schema: &apiextensionsv1.JSONSchemaProps{
 						Type: "object", XPreserveUnknownFields: &preserve,
 					}},

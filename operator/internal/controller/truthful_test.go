@@ -542,7 +542,10 @@ func TestDeleteGrantCoversEveryRenderedName(t *testing.T) {
 		reconcileOnce(t, r, pass.dv)
 		for _, k := range applied {
 			sc, prunable := scopes[k.gk]
-			if !prunable || (sc.where == writtenNS && k.namespace == pass.dv.Namespace) {
+			// Prune lists an installNS kind in the install namespace only: the
+			// sync ServiceAccounts in the ArgoCD namespace go with their
+			// AppProjects instead (owner references).
+			if !prunable || (sc.where == writtenNS && k.namespace == pass.dv.Namespace) || (sc.where == installNS && k.namespace != pass.dv.Namespace) {
 				continue
 			}
 			resource, _ := apimeta.UnsafeGuessKindToResource(k.gk.WithVersion(""))

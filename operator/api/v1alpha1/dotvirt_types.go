@@ -29,6 +29,12 @@ const (
 	// ConditionDotvirtWebhook is True when the forge-to-dotvirt instant-feedback webhook is
 	// registered (org-level); Unknown when no delivery URL is resolvable (git-poll fallback).
 	ConditionDotvirtWebhook = "DotvirtWebhook"
+	// ConditionSyncImpersonationReady is True when ArgoCD syncs each dotvirt
+	// Application as its project's own ServiceAccount (spec.argocd.syncImpersonation);
+	// Unknown while not asked; False says what holds it back, or that the
+	// controller's own rights let a tenant DataVolume clone from any namespace
+	// (CloneAnywhere). It never gates Available.
+	ConditionSyncImpersonationReady = "SyncImpersonationReady"
 	// ConditionAvailable is the roll-up: the full install is reconciled and serving.
 	ConditionAvailable = "Available"
 )
@@ -95,6 +101,26 @@ type ArgoCDSpec struct {
 	// server Route; if neither resolves, the webhook is skipped (Argo falls back to
 	// its poll).
 	ServerURL string `json:"serverURL,omitempty"`
+	// SyncImpersonation makes ArgoCD sync each dotvirt Application as its
+	// project's own ServiceAccount, which holds exactly the project's grants,
+	// instead of the shared controller's account. Off by default.
+	SyncImpersonation SyncImpersonationSpec `json:"syncImpersonation,omitempty"`
+}
+
+// SyncImpersonationSpec opts the ArgoCD instance into Argo CD's sync
+// impersonation (application.sync.impersonation.enabled).
+type SyncImpersonationSpec struct {
+	// Enabled turns impersonation on once every project's sync account holds its
+	// grants and nothing else on the instance would stop syncing; the
+	// SyncImpersonationReady condition says what is missing. The setting is
+	// instance-wide: every Application on that ArgoCD then syncs as the
+	// ServiceAccount its AppProject names, or not at all. Turning it off removes
+	// the setting.
+	Enabled bool `json:"enabled,omitempty"`
+	// IgnoreForeignApplications turns impersonation on although the instance
+	// also syncs Applications outside dotvirt's AppProjects. Those fail to sync
+	// until their AppProjects name a ServiceAccount (destinationServiceAccounts).
+	IgnoreForeignApplications bool `json:"ignoreForeignApplications,omitempty"`
 }
 
 // IngressSpec controls how the UI is exposed.

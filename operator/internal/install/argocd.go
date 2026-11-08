@@ -1,6 +1,9 @@
 package install
 
 import (
+	"encoding/json"
+	"strings"
+
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -139,6 +142,10 @@ const (
 // whose namespaces are gone while its Application is still being removed, or
 // whose repo does not resolve. Labeled with the project, which is how a pass
 // finds the ones it no longer derives.
+//
+// Its sync account (tenancy.SyncAccount, named like the AppProject) is the
+// ServiceAccount Argo syncs the project's Application as once sync
+// impersonation is on (SyncServiceAccount).
 func TenantAppProject(dv *dotvirtv1alpha1.Dotvirt, argoNS, name, project string, namespaces, sourceRepos []string) *unstructured.Unstructured {
 	destinations := make([]any, 0, len(namespaces))
 	for _, ns := range namespaces {
@@ -146,14 +153,64 @@ func TenantAppProject(dv *dotvirtv1alpha1.Dotvirt, argoNS, name, project string,
 	}
 	repos := toAny(sourceRepos)
 	u := argoObject("AppProject", name, argoNS, dv, tenantWhitelist(map[string]any{
-		"description":  "dotvirt project " + project + ": its own namespaces and repo only.",
-		"sourceRepos":  repos,
-		"destinations": destinations,
+		"description":                "dotvirt project " + project + ": its own namespaces and repo only.",
+		"sourceRepos":                repos,
+		"destinations":               destinations,
+		"destinationServiceAccounts": syncAccounts(argoNS, name),
 	}))
 	labels := u.GetLabels()
 	labels[ProjectLabel] = project
 	u.SetLabels(labels)
 	return u
+}
+
+// syncAccounts names the one ServiceAccount, in argoNS, Argo syncs an
+// AppProject's Applications as while sync impersonation is on: any
+// destination, since the AppProject's destinations already bound where they
+// go. Inert while it is off, so it is rendered either way: the setting can
+// then flip with no window in which an Application names no account, and an
+// instance switched on by hand syncs dotvirt's tiers as their own accounts.
+func syncAccounts(argoNS, account string) []any {
+	return []any{map[string]any{
+		"server":                inClusterServer,
+		"namespace":             "*",
+		"defaultServiceAccount": argoNS + ":" + account,
+	}}
+}
+
+// SyncServiceAccount is the ServiceAccount an AppProject's
+// destinationServiceAccounts name (syncAccounts), nil when it names none.
+// Owner-referenced to that AppProject, so the garbage collector removes the
+// two together and the operator needs no delete grant on ServiceAccounts,
+// whose tenant names it cannot list in advance. The account holds no rights
+// of its own: the platform repo's grants give it the project's.
+func SyncServiceAccount(dv *dotvirtv1alpha1.Dotvirt, appProject *unstructured.Unstructured) *corev1.ServiceAccount {
+	entries, _, _ := unstructured.NestedSlice(appProject.Object, "spec", "destinationServiceAccounts")
+	if len(entries) == 0 {
+		return nil
+	}
+	entry, _ := entries[0].(map[string]any)
+	ref, _ := entry["defaultServiceAccount"].(string)
+	ns, name, ok := strings.Cut(ref, ":")
+	if !ok {
+		return nil
+	}
+	labels := Labels(dv)
+	if project := appProject.GetLabels()[ProjectLabel]; project != "" {
+		labels[ProjectLabel] = project
+	}
+	return &corev1.ServiceAccount{
+		TypeMeta: metav1.TypeMeta{APIVersion: "v1", Kind: "ServiceAccount"},
+		ObjectMeta: metav1.ObjectMeta{
+			Name: name, Namespace: ns, Labels: labels,
+			OwnerReferences: []metav1.OwnerReference{{
+				APIVersion: appProject.GetAPIVersion(), Kind: appProject.GetKind(),
+				Name: appProject.GetName(), UID: appProject.GetUID(),
+			}},
+		},
+		// Argo impersonates it; nothing runs as it.
+		AutomountServiceAccountToken: new(false),
+	}
 }
 
 // PlatformAppProject is the only tier allowed cluster-scoped + tenancy objects.
@@ -164,6 +221,7 @@ func PlatformAppProject(dv *dotvirtv1alpha1.Dotvirt, argoNS, platformRepo string
 		"destinations": []any{
 			map[string]any{"server": inClusterServer, "namespace": "*"},
 		},
+		"destinationServiceAccounts": syncAccounts(argoNS, tenancy.PlatformSyncAccount),
 		"clusterResourceWhitelist": []any{
 			map[string]any{"group": "", "kind": "Namespace"},
 			map[string]any{"group": "k8s.ovn.org", "kind": "ClusterUserDefinedNetwork"},
@@ -223,4 +281,47 @@ func argoAppSpec(project, repoURL, namespace string) map[string]any {
 // privileged app's existence never flows through dotvirt's dynamic project list).
 func PlatformApplication(dv *dotvirtv1alpha1.Dotvirt, argoNS, platformRepo string) *unstructured.Unstructured {
 	return argoObject("Application", "dotvirt-platform", argoNS, dv, argoAppSpec(projectPlatform, platformRepo, "default"))
+}
+
+// SyncImpersonationKey is the argocd-cm setting that makes Argo sync each
+// Application as the ServiceAccount its AppProject names.
+const SyncImpersonationKey = "application.sync.impersonation.enabled"
+
+// ArgoCDGVK is the argocd-operator's instance kind; its spec.extraConfig is
+// copied into argocd-cm, which the argocd-operator rewrites from the CR.
+var ArgoCDGVK = schema.GroupVersionKind{Group: argoGroup, Version: "v1beta1", Kind: "ArgoCD"}
+
+// ArgoCDSyncImpersonation is the operator's whole apply on the shared ArgoCD
+// instance: SyncImpersonationKey alone, or nothing, which releases the key.
+// extraConfig is a granular map, so the operator owns that one key and no
+// other field; unlabeled, since the instance is not the install's.
+func ArgoCDSyncImpersonation(name, namespace string, on bool) *unstructured.Unstructured {
+	u := &unstructured.Unstructured{Object: map[string]any{}}
+	u.SetGroupVersionKind(ArgoCDGVK)
+	u.SetName(name)
+	u.SetNamespace(namespace)
+	if on {
+		u.Object["spec"] = map[string]any{"extraConfig": map[string]any{SyncImpersonationKey: "true"}}
+	}
+	return u
+}
+
+// OwnsSyncImpersonation reports whether the operator's apply holds
+// SyncImpersonationKey on inst: only then is removing it the operator's call.
+func OwnsSyncImpersonation(inst *unstructured.Unstructured) bool {
+	for _, mf := range inst.GetManagedFields() {
+		if mf.Manager != fieldManager || mf.Operation != metav1.ManagedFieldsOperationApply || mf.FieldsV1 == nil {
+			continue
+		}
+		var fields map[string]any
+		if json.Unmarshal(mf.FieldsV1.Raw, &fields) != nil {
+			continue
+		}
+		spec, _ := fields["f:spec"].(map[string]any)
+		extra, _ := spec["f:extraConfig"].(map[string]any)
+		if _, ok := extra["f:"+SyncImpersonationKey]; ok {
+			return true
+		}
+	}
+	return false
 }
