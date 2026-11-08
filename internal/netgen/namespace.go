@@ -1,12 +1,18 @@
 package netgen
 
 import (
+	"bytes"
+	"errors"
 	"fmt"
+	"io"
+	"slices"
 
+	utilyaml "k8s.io/apimachinery/pkg/util/yaml"
 	"sigs.k8s.io/yaml"
 
 	"github.com/epheo/dotvirt/internal/model"
 	"github.com/epheo/dotvirt/internal/validate"
+	"github.com/epheo/dotvirt/pkg/tenancy"
 )
 
 // The tenancy keys dotvirt stamps on a namespace; everything else on it belongs
@@ -161,47 +167,125 @@ type RoleBindingSpec struct {
 	Project   string   `json:"project"`        // dotvirt.io/project label
 	Owners    []string `json:"owners"`         // usernames granted the role
 	Role      string   `json:"role,omitempty"` // ClusterRole to bind; default "admin"
+	// Kept are the subjects the declared binding already names, granted beside
+	// Owners: re-rendering a grant never revokes access it did not ask to.
+	Kept []Subject `json:"-"`
+	// SyncAccount is the project's Argo sync ServiceAccount
+	// (tenancy.SyncAccount), nil for none. It joins the same binding as the
+	// owners, so it holds exactly the project's role, plus EgressFirewall writes
+	// (tenancy.TenantEgressRole), a tenant kind admin lacks.
+	SyncAccount *Subject `json:"-"`
 }
 
-// RoleBindingManifest renders a namespace-scoped RoleBinding granting each owner the
-// given ClusterRole (default "admin" - the built-in namespace-admin role) on the
-// tenant namespace. One subject per owner (kind User).
+// Subject is a RoleBinding subject.
+type Subject struct {
+	Kind      string `json:"kind"`
+	APIGroup  string `json:"apiGroup,omitempty"`
+	Name      string `json:"name"`
+	Namespace string `json:"namespace,omitempty"`
+}
+
+// ServiceAccountSubject is the subject naming ServiceAccount namespace/name.
+func ServiceAccountSubject(namespace, name string) *Subject {
+	return &Subject{Kind: "ServiceAccount", Name: name, Namespace: namespace}
+}
+
+// RoleBindingManifest renders a project namespace's grant file: the
+// RoleBinding granting the given ClusterRole (default "admin", the built-in
+// namespace-admin role) to the kept subjects, each owner (kind User) and the
+// sync account, and with a sync account the RoleBinding granting it
+// EgressFirewall writes. With a sync account the file is rendered even
+// without owners: the project's repo syncs as that account.
 func RoleBindingManifest(s RoleBindingSpec) (path string, content []byte, err error) {
 	if err := validate.RequireDNS1123("namespace", s.Namespace); err != nil {
 		return "", nil, err
-	}
-	if len(s.Owners) == 0 {
-		return "", nil, fmt.Errorf("at least one owner is required")
 	}
 	role := s.Role
 	if role == "" {
 		role = "admin" // the built-in namespace-admin ClusterRole
 	}
-	subjects := make([]any, 0, len(s.Owners))
+	var subjects []Subject
+	add := func(sub Subject) {
+		if !slices.Contains(subjects, sub) {
+			subjects = append(subjects, sub)
+		}
+	}
+	for _, sub := range s.Kept {
+		add(sub)
+	}
 	for _, o := range s.Owners {
 		if o == "" {
 			return "", nil, fmt.Errorf("an owner name cannot be empty")
 		}
-		subjects = append(subjects, map[string]any{
-			"kind": "User", "apiGroup": "rbac.authorization.k8s.io", "name": o,
-		})
+		add(Subject{Kind: "User", APIGroup: rbacGroup, Name: o})
 	}
-	name := s.Namespace + "-admins"
-	meta := map[string]any{"name": name, "namespace": s.Namespace}
-	if s.Project != "" {
-		meta["labels"] = map[string]any{projectLabel: s.Project}
+	if s.SyncAccount != nil {
+		add(*s.SyncAccount)
 	}
-	rb, err := yaml.Marshal(map[string]any{
-		"apiVersion": model.KindRB.APIVersion(),
-		"kind":       model.KindRB.Kind,
-		"metadata":   meta,
-		"roleRef": map[string]any{
-			"apiGroup": "rbac.authorization.k8s.io", "kind": "ClusterRole", "name": role,
-		},
-		"subjects": subjects,
-	})
+	if len(subjects) == 0 {
+		return "", nil, fmt.Errorf("at least one owner is required")
+	}
+	name := tenancy.AdminBinding(s.Namespace)
+	admins, err := roleBinding(name, s.Namespace, s.Project, role, subjects)
 	if err != nil {
 		return "", nil, err
 	}
-	return model.KindRB.RepoPath(s.Namespace, name), rb, nil
+	if s.SyncAccount != nil {
+		egress, err := roleBinding(tenancy.EgressBinding(s.Namespace), s.Namespace, s.Project, tenancy.TenantEgressRole, []Subject{*s.SyncAccount})
+		if err != nil {
+			return "", nil, err
+		}
+		admins = append(admins, append([]byte("---\n"), egress...)...)
+	}
+	return model.KindRB.RepoPath(s.Namespace, name), admins, nil
+}
+
+const rbacGroup = "rbac.authorization.k8s.io"
+
+func roleBinding(name, namespace, project, role string, subjects []Subject) ([]byte, error) {
+	meta := map[string]any{"name": name, "namespace": namespace}
+	if project != "" {
+		meta["labels"] = map[string]any{projectLabel: project}
+	}
+	return yaml.Marshal(map[string]any{
+		"apiVersion": model.KindRB.APIVersion(),
+		"kind":       model.KindRB.Kind,
+		"metadata":   meta,
+		"roleRef":    map[string]any{"apiGroup": rbacGroup, "kind": "ClusterRole", "name": role},
+		"subjects":   subjects,
+	})
+}
+
+// DeclaredGrant reads the admin RoleBinding (tenancy.AdminBinding) a grant
+// file declares for namespace: the ClusterRole it binds and its subjects.
+// ok=false when the file declares none.
+func DeclaredGrant(content []byte, namespace string) (role string, subjects []Subject, ok bool, err error) {
+	dec := utilyaml.NewYAMLOrJSONDecoder(bytes.NewReader(content), 4096)
+	for {
+		var rb struct {
+			Kind     string `json:"kind"`
+			Metadata struct {
+				Name      string `json:"name"`
+				Namespace string `json:"namespace"`
+			} `json:"metadata"`
+			RoleRef struct {
+				Kind string `json:"kind"`
+				Name string `json:"name"`
+			} `json:"roleRef"`
+			Subjects []Subject `json:"subjects"`
+		}
+		if err := dec.Decode(&rb); errors.Is(err, io.EOF) {
+			return "", nil, false, nil
+		} else if err != nil {
+			return "", nil, false, fmt.Errorf("declared grant: %w", err)
+		}
+		if rb.Kind != model.KindRB.Kind || rb.Metadata.Name != tenancy.AdminBinding(namespace) {
+			continue
+		}
+		// A namespaced Role cannot be re-rendered as the ClusterRole RoleBindingManifest binds.
+		if rb.RoleRef.Kind != "ClusterRole" {
+			return "", nil, false, fmt.Errorf("%s binds a %s, not a ClusterRole", rb.Metadata.Name, rb.RoleRef.Kind)
+		}
+		return rb.RoleRef.Name, rb.Subjects, true, nil
+	}
 }

@@ -181,7 +181,7 @@ func run() error {
 		pruneSource = argoSnapshot
 	}
 	coordinator := changeset.New(draftStore, repos, forgeFactory, resyncer,
-		liveVMs{clusterSnapshot}, pruneSource, cfg.BaseBranch, cfg.ProposedBranch)
+		liveVMs{clusterSnapshot}, pruneSource, cfg.BaseBranch, cfg.ProposedBranch).WithSyncNamespace(cfg.ArgoNamespace)
 
 	metricsClient, err := metrics.New(cfg.MetricsURL, cfg.MetricsCA, cfg.InsecureTLS)
 	if err != nil {

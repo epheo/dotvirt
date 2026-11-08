@@ -109,6 +109,7 @@ func (s *Server) routes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/projects/{project}/revert", s.handleRevert)
 	mux.HandleFunc("POST /api/projects/{project}/adopt", s.handleAdoptProject)
 	mux.HandleFunc("POST /api/projects/{project}/release", s.handleReleaseProject)
+	mux.HandleFunc("POST /api/projects/{project}/sync-access", s.handleProjectSyncAccess)
 
 	if s.stream != nil {
 		mux.HandleFunc("GET /api/inventory/stream", s.streaming(s.stream.Handler))

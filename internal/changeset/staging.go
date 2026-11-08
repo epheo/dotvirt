@@ -122,28 +122,37 @@ func (c *Coordinator) requireUndeclaredVM(read *git.Repo, namespace, name string
 // and an edit - the same rendering replacing the declaring file - when it does:
 // one path for the form that creates an object and the form that changes it.
 func (c *Coordinator) stageRendered(id auth.Identity, proj project.ProjectInfo, render func() (draft.Entry, error)) (model.DraftView, error) {
-	read, err := c.read(proj)
+	entry, err := c.renderedEntry(proj, render)
 	if err != nil {
 		return model.DraftView{}, err
+	}
+	return c.stage(id, proj, entry)
+}
+
+// renderedEntry is stageRendered's entry, unstaged.
+func (c *Coordinator) renderedEntry(proj project.ProjectInfo, render func() (draft.Entry, error)) (draft.Entry, error) {
+	read, err := c.read(proj)
+	if err != nil {
+		return draft.Entry{}, err
 	}
 	entry, err := render()
 	if err != nil {
-		return model.DraftView{}, invalid(err)
+		return draft.Entry{}, invalid(err)
 	}
 	if err := requirePlacement(proj, entry.SourceFile, []byte(entry.Manifest)); err != nil {
-		return model.DraftView{}, err
+		return draft.Entry{}, err
 	}
 	entry.Kind = draft.KindCreate
 	idx, err := indexDeclared(read, c.baseBranch)
 	if err != nil {
-		return model.DraftView{}, err
+		return draft.Entry{}, err
 	}
 	if path, err := soleDeclarer(idx, declaredRefs(entry.SourceFile, []byte(entry.Manifest))); err != nil {
-		return model.DraftView{}, err
+		return draft.Entry{}, err
 	} else if path != "" {
 		entry.Kind, entry.SourceFile = draft.KindEdit, path
 	}
-	return c.stage(id, proj, entry)
+	return entry, nil
 }
 
 // soleDeclarer is the base-branch file declaring exactly refs, or "" when git
@@ -266,7 +275,9 @@ func (c *Coordinator) StageCreate(id auth.Identity, proj project.ProjectInfo, re
 // platform repo) and applied by the platform Argo app - but it is labeled/annotated
 // to joinProj, the tenant project it JOINS, so that project's per-project app syncs
 // workloads into it once it exists. The namespace + primary UDN land as one
-// multi-doc manifest.
+// multi-doc manifest, beside its grant to the joining project's sync account
+// (grantSource.entry) when one is configured: the project syncs into every
+// namespace it holds.
 func (c *Coordinator) StageCreateNamespace(id auth.Identity, commitProj, joinProj project.ProjectInfo, rawSpec json.RawMessage, live LiveNamespaces) (model.DraftView, error) {
 	var spec netgen.NamespaceSpec
 	if err := json.Unmarshal(rawSpec, &spec); err != nil {
@@ -281,7 +292,7 @@ func (c *Coordinator) StageCreateNamespace(id auth.Identity, commitProj, joinPro
 		return model.DraftView{}, err
 	}
 	spec.Live = ln
-	return c.stageRendered(id, commitProj, func() (draft.Entry, error) {
+	entry, err := c.renderedEntry(commitProj, func() (draft.Entry, error) {
 		if joinProj.Repo == "" {
 			return draft.Entry{}, fmt.Errorf("the joining project has no repo")
 		}
@@ -302,6 +313,21 @@ func (c *Coordinator) StageCreateNamespace(id auth.Identity, commitProj, joinPro
 			Manifest:   string(content),
 		}, err
 	})
+	if err != nil {
+		return model.DraftView{}, err
+	}
+	grants, err := c.grantSource(commitProj)
+	if err != nil {
+		return model.DraftView{}, err
+	}
+	grant, ok, err := grants.entry(spec.Name, joinProj.Name, nil)
+	if err != nil {
+		return model.DraftView{}, err
+	}
+	if !ok {
+		return c.stage(id, commitProj, entry)
+	}
+	return c.stage(id, commitProj, entry, grant)
 }
 
 // StageDelete records the removal of an existing object (a VM when resource is

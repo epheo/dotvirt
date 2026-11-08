@@ -226,7 +226,7 @@ func TestProjectAdoptionStampsRepoOnEveryNamespace(t *testing.T) {
 	if err != nil {
 		t.Fatalf("tenantNamespaces: %v", err)
 	}
-	entries, err := projectAdoption(specs, []string{"alice", "bob"})
+	entries, err := projectAdoption(specs, []string{"alice", "bob"}, grantSource{})
 	if err != nil {
 		t.Fatalf("projectAdoption: %v", err)
 	}
