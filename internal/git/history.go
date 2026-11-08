@@ -58,6 +58,30 @@ func (r *Repo) FileAt(hash, path string) ([]byte, error) {
 	return []byte(s), nil
 }
 
+// OnBranch reports whether hash is one of branch's first-parent commits within
+// historyScan of its head: a state the branch itself held, as the history
+// views list it. A commit only another branch carries, or the inside of a
+// merged PR, is not one.
+func (r *Repo) OnBranch(branch, hash string) (bool, error) {
+	c, err := branchCommit(r.repo.Load(), branch)
+	if err != nil {
+		return false, err
+	}
+	want := plumbing.NewHash(hash)
+	for seen := 0; seen < historyScan; seen++ {
+		if c.Hash == want {
+			return true, nil
+		}
+		if c.NumParents() == 0 {
+			return false, nil
+		}
+		if c, err = c.Parent(0); err != nil {
+			return false, err
+		}
+	}
+	return false, nil
+}
+
 // historyScan bounds one walk: a file untouched for this many commits reads as
 // having no older history rather than costing a walk of the whole branch.
 const historyScan = 1000

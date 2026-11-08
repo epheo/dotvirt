@@ -221,6 +221,8 @@ func run() error {
 		},
 	})
 
+	coordinator.UseAuthorizer(server)
+
 	// Live inventory hub: each connection's frame is built under its identity (same
 	// path as GET /api/inventory). It wakes on every kind that can alter a frame and
 	// reconciles each identity to the version of those kinds - GitChanged only for

@@ -25,7 +25,9 @@ func newTestCoordinator(t *testing.T, push bool) *Coordinator {
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
 	repos := git.NewRepoSet(ctx, "", "", nil, push, nil, time.Hour)
-	return New(store, repos, nil, nil, nil, nil, "main", "dotvirt/proposed")
+	c := New(store, repos, nil, nil, nil, nil, "main", "dotvirt/proposed")
+	c.UseAuthorizer(allowAll{})
+	return c
 }
 
 func TestStageDeleteStagesRemoval(t *testing.T) {
