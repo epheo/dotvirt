@@ -143,7 +143,7 @@ const CONTAINER_TABS = [
 ];
 
 // The tab set of a container: compute containers carry the full set, hosts
-// drop Permissions (nodes aren't namespaced) and configure DRS at the root,
+// drop Permissions (nodes aren't namespaced) and configure rebalancing at the root,
 // Networking has its own (map and firewall at the root, a network's rules and
 // history on its page). Storage has its own tabs (STORAGE_TABS).
 export function containerTabs(scope: Scope, section: Section): typeof CONTAINER_TABS {

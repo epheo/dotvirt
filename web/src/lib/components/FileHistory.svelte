@@ -16,7 +16,7 @@
 	import Skeleton from './Skeleton.svelte';
 
 	// One object's manifest history in git, each version restorable: the VM
-	// page's History card, shared with segments, rules and uplinks. Restore is
+	// page's History card, shared with networks, rules and uplinks. Restore is
 	// the object-level undo: it stages one file as a past commit held it and
 	// goes through Propose like any edit. Undo of a whole pull request stays in
 	// the Changes section, at the project.

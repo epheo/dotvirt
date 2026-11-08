@@ -87,7 +87,7 @@
 
 	<label class="flex items-center gap-2">
 		<input type="checkbox" bind:checked={withNetwork} />
-		<span class="text-ink-soft">Add a VM Network — the namespace's primary Segment (Tier-1)</span>
+		<span class="text-ink-soft">Add a VM Network: the namespace's primary network</span>
 	</label>
 
 	{#if withNetwork}

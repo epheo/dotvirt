@@ -191,7 +191,7 @@ func TestVMIIDLongName(t *testing.T) {
 
 // Workload must mirror KubeVirt's VMI-creation defaulting for stopped VMs (a
 // template naming no networks gets the pod network autoattached) and must
-// report a default multus binding as a substituted segment, never as the
+// report a default multus binding as a substituted network, never as the
 // namespace primary.
 func TestWorkloadNetworks(t *testing.T) {
 	s := stateWithIndexers()

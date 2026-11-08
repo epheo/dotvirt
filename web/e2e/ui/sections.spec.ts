@@ -16,7 +16,7 @@ test('hosts root is a fleet table, not the compute cards', async ({ page }) => {
 	await expect(main.getByRole('columnheader', { name: 'vCPU committed' })).toBeVisible();
 	const row = main.locator('tbody tr', { hasText: 'worker-3' });
 	await expect(row).toContainText('Maintenance');
-	// The host balance card lives here; its DRS link lands on this root's Configure.
+	// The host balance card lives here; its rebalancing link lands on this root's Configure.
 	await expect(main.getByText('Host balance').first()).toBeVisible();
 	await main.getByRole('link', { name: 'Configure', exact: true }).click();
 	await expect(main.getByText('Dynamic Rescheduling').first()).toBeVisible();

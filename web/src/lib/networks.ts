@@ -1,5 +1,5 @@
-// Port-group presentation helpers: turn a VM NIC's raw OVN-K network ref into the
-// port-group object a virt admin recognizes. Shared by the VM detail's Network
+// Network presentation helpers: turn a VM NIC's raw OVN-K network ref into the
+// network object a virt admin recognizes. Shared by the VM detail's Network
 // adapters and the Networks lens panel so they label networks identically.
 import type { Network, NIC } from '#lib/api.js';
 
@@ -18,7 +18,7 @@ export function networkKind(n: Network): 'Project network' | 'Shared network' | 
 	return n.scope === 'shared' ? 'Shared network' : 'Project network';
 }
 
-/** The display label for a port-group kind. */
+/** The display label for a network kind. */
 export function kindLabel(kind: Network['kind']): string {
 	switch (kind) {
 		case 'default':
@@ -32,7 +32,7 @@ export function kindLabel(kind: Network['kind']): string {
 
 /**
  * networkByRef matches a multus networkName ref ("namespace/nad" or a bare name)
- * to a port group. Returns undefined for the pod default / no match.
+ * to a network. Returns undefined for the pod default / no match.
  */
 export function networkByRef(ref: string | undefined, networks: Network[]): Network | undefined {
 	if (!ref || ref === 'pod') return undefined;
@@ -41,7 +41,7 @@ export function networkByRef(ref: string | undefined, networks: Network[]): Netw
 }
 
 /**
- * resolveNIC resolves a VM's NIC to its port group. The default interface
+ * resolveNIC resolves a VM's NIC to its network. The default interface
  * (network "" or "pod") is transparently backed by a primary ("VM Network") UDN
  * in the VM's namespace when one exists — so an admin sees "network-a (VM
  * Network)" rather than the bare "pod".
@@ -58,7 +58,7 @@ export function resolveNIC(
 }
 
 /**
- * attachableNetworks are the secondary port groups a VM in `namespace` may add as
+ * attachableNetworks are the secondary networks a VM in `namespace` may add as
  * a NIC: shared (CUDN) networks published to that namespace plus the namespace's
  * own non-default networks. The primary ("VM Network") backs the default NIC, so
  * it's never an addable adapter. Shared by NewVMWizard + EditSettings so the two
@@ -72,7 +72,7 @@ export function attachableNetworks(networks: Network[], namespace: string): Netw
 	);
 }
 
-/** attachRef is how a VM attaches to a port group: its attachRef, else the bare name. */
+/** attachRef is how a VM attaches to a network: its attachRef, else the bare name. */
 export function attachRef(n: Network): string {
 	return n.attachRef ?? n.name;
 }

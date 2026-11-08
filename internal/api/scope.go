@@ -650,7 +650,7 @@ func (s *Server) pickProject(w http.ResponseWriter, r *http.Request, want string
 // any of platformReaders suffices. The per-kind create routes keep their own
 // gate.
 func (s *Server) platformScopeAny(w http.ResponseWriter, r *http.Request) (scope, bool) {
-	return s.platformScopeWith(w, r, s.canReadPlatform, "not authorized to read the platform tier")
+	return s.platformScopeWith(w, r, s.canReadPlatform, "not authorized to read the platform repo")
 }
 
 // platformProjectName is the synthetic project name for the platform tier - the

@@ -35,8 +35,8 @@ class InventoryStore {
 	// The live stream's health; the snapshot above is stale unless 'live'.
 	stream = $state<StreamStatus>('connecting');
 	readonly projects = $derived(this.inventory?.projects ?? []);
-	// The networking read layer: the port-group catalog (so raw OVN-K refs render
-	// as catalog port groups) plus the physical fabric (uplinks + node NICs).
+	// The networking read layer: the network catalog (so raw OVN-K refs render
+	// as catalog networks) plus the physical fabric (uplinks + node NICs).
 	// Changes rarely; backend caches 60s.
 	netInv = $state<NetworkInventory | null>(null);
 	// The policy plane behind the Security view; fetched beside netInv (both ride
@@ -184,7 +184,7 @@ class InventoryStore {
 		return pull;
 	}
 
-	// loadNet pulls the port-group catalog and the policy plane together; they
+	// loadNet pulls the network catalog and the policy plane together; they
 	// are fetched out-of-band, not on the frame. A new pull supersedes the one
 	// in flight, so a burst of version bumps writes only the newest answer.
 	// signal is the caller's lifetime: once it aborts, the retries stop and

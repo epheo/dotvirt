@@ -195,7 +195,7 @@ func TestEffectiveANPPodSubject(t *testing.T) {
 	}
 }
 
-// The egress planes: gateway firewall binds by namespace; EgressIP and
+// The egress planes: outbound rules bind by namespace; EgressIP and
 // external routes bind by namespace selector, with EgressIP's optional
 // podSelector narrowing conditionally at namespace scope.
 func TestEffectiveEgressPlanes(t *testing.T) {

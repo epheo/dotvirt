@@ -12,8 +12,8 @@ import (
 	"github.com/epheo/dotvirt/internal/reflect"
 )
 
-// Catalog gathers the whole networking picture as the UI's port-group objects from the
-// watch-fed stores - a pure in-memory scan, never a cluster call: the port groups
+// Catalog gathers the whole networking picture as the UI's network objects from the
+// watch-fed stores - a pure in-memory scan, never a cluster call: the networks
 // (UDN/CUDN/raw NAD), the physical fabric (Uplinks + node NICs), and whether nmstate is
 // present. The handler filters project networks to the caller's visible namespaces and
 // enriches each with ArgoCD drift; empty (pre-sync) stores yield an empty picture the
@@ -300,9 +300,9 @@ func networkFromNAD(u *unstructured.Unstructured) model.Network {
 	return n
 }
 
-// kindFor maps an OVN-K topology + role to the port-group kind: localnet
-// is a VLAN/physical port group; a primary Layer2/3 network is the project's
-// "VM Network"; any other Layer2/3 network is an isolated internal port group.
+// kindFor maps an OVN-K topology + role to the network kind: localnet
+// is a VLAN/physical network; a primary Layer2/3 network is the project's
+// "VM Network"; any other Layer2/3 network is an isolated internal network.
 func kindFor(topology, role string) model.NetworkKind {
 	if strings.EqualFold(topology, "Localnet") {
 		return model.NetworkVLAN
@@ -315,7 +315,7 @@ func kindFor(topology, role string) model.NetworkKind {
 
 // isSystemNamespace reports whether a namespace holds platform plumbing rather
 // than tenant networks - e.g. the openshift-ovn-kubernetes/default NAD that backs
-// the cluster's own pod network, which is not a port group a user attaches to.
+// the cluster's own pod network, which is not a network a user attaches to.
 func isSystemNamespace(ns string) bool {
 	return strings.HasPrefix(ns, "openshift-") || ns == "kube-system"
 }

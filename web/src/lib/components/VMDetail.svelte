@@ -68,8 +68,8 @@
 		tab?: VMTab;
 		ontab?: (t: VMTab) => void;
 		stagedItem?: DraftItem | null;
-		// The port-group catalog (GET /api/networks), to resolve each NIC's raw
-		// network ref into the port group the admin recognizes.
+		// The network catalog (GET /api/networks), to resolve each NIC's raw
+		// network ref into the network the admin recognizes.
 		networks?: Network[];
 	} = $props();
 

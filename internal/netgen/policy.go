@@ -9,7 +9,7 @@ import (
 	"github.com/epheo/dotvirt/internal/validate"
 )
 
-// NetworkPolicySpec describes a NetworkPolicy - the east-west Distributed Firewall.
+// NetworkPolicySpec describes a NetworkPolicy - a project rule.
 // It protects a Group (AppliedTo: a podSelector) inside one namespace, allowing
 // ingress only from the peer Groups named in its rules (a NetworkPolicy that selects
 // pods default-denies all other ingress). Namespace-scoped, so it rides the tenant's
@@ -96,7 +96,7 @@ func NetworkPolicyManifest(s NetworkPolicySpec) (path string, content []byte, er
 // ANPWithUnsupportedPriority event and never enforces it.
 const MaxANPPriority = 99
 
-// AdminNetworkPolicySpec describes the cluster-wide admin DFW tier -
+// AdminNetworkPolicySpec describes the cluster rule tier -
 // AdminNetworkPolicy (priority-ordered, actions Allow/Deny/Pass) or, when Baseline,
 // BaselineAdminNetworkPolicy (the cluster default: a singleton named "default", no
 // priority, actions Allow/Deny only). Both override or backstop tenant

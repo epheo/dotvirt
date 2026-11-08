@@ -31,7 +31,7 @@ type ClusterCaps struct {
 	// detail in the frame. A cluster-wide signal: the platform repo names
 	// every project, namespace and owner.
 	PlatformRead bool `json:"platformRead"`
-	// Network is the shared segments (ClusterUserDefinedNetwork).
+	// Network is the shared networks (ClusterUserDefinedNetwork).
 	Network                    ObjectCaps `json:"network"`
 	Uplink                     ObjectCaps `json:"uplink"`
 	EgressIP                   ObjectCaps `json:"egressIP"`
@@ -45,7 +45,7 @@ type ClusterCaps struct {
 	GrantAdmin      bool `json:"grantAdmin"`
 	// SharedLibrary writes the shared template library.
 	SharedLibrary bool `json:"sharedLibrary"`
-	// DRSEnable stages the DRS file set, DRSPSI with the PSI MachineConfig;
+	// DRSEnable stages the rebalancing file set, DRSPSI with the PSI MachineConfig;
 	// DRSDisable removes the KubeDescheduler.
 	DRSEnable  bool `json:"drsEnable"`
 	DRSPSI     bool `json:"drsPSI"`
@@ -79,7 +79,7 @@ type NamespaceCaps struct {
 	// image): the upload plus a DataSource over it.
 	BootImageCreate bool `json:"bootImageCreate"`
 	// The namespaced network family, staged through git. Network is the
-	// project segments (UserDefinedNetwork).
+	// project networks (UserDefinedNetwork).
 	Network ObjectCaps `json:"network"`
 	// NetworkAttachment is a NetworkAttachmentDefinition git still declares
 	// under the network routes (update, delete): no form creates one.

@@ -3,6 +3,7 @@
 // order. The order is the evaluator's, never re-ranked: a cluster rule is met
 // before a project rule, and the list must not suggest otherwise.
 import type { EffectivePolicy, NetworkRules, Policy, PolicyBinding } from '#lib/api.js';
+import { policyKindLabel } from '#lib/labels.js';
 
 // How a rule relates to what is described: it binds its own VMs, it names
 // them from elsewhere, or it merely matches them from elsewhere ("any
@@ -19,21 +20,7 @@ export interface RuleLine {
 	note?: string; // "Priority 10", "For VMs labeled app=db in db-prod"
 }
 
-export function tierOf(p: Policy): string {
-	switch (p.kind) {
-		case 'admin':
-			return 'Cluster rule';
-		case 'baseline':
-			return 'Cluster default rule';
-		case 'gateway':
-			return 'Outbound rule';
-		case 'egressip':
-			return 'Fixed outbound IP';
-		case 'route':
-			return 'External route';
-	}
-	return 'Project rule';
-}
+export const tierOf = (p: Policy): string => policyKindLabel(p.kind);
 
 function iconOf(direction: string, action: string): RuleLine['icon'] {
 	if (action === 'Deny') return 'deny';
@@ -75,7 +62,7 @@ function linesOf(b: PolicyBinding): RuleLine[] {
 }
 
 /**
- * The lines for one VM: the east-west chain, then outbound. With no outbound
+ * The lines for one VM: the incoming chain, then outbound. With no outbound
  * rule the VM reaches anything outside, which is worth saying.
  */
 export function vmRuleLines(eff: EffectivePolicy, project: string): RuleLine[] {

@@ -180,11 +180,11 @@ func requirePlacement(proj project.ProjectInfo, path string, content []byte) err
 }
 
 // tenantDeclarable refuses a kind a tenant repo may not declare, naming the
-// tier that may.
+// repo that may.
 func tenantDeclarable(proj project.ProjectInfo, kind, name string) error {
 	if proj.Name == project.PlatformName || tenancy.TenantKind(kind) {
 		return nil
 	}
-	return fmt.Errorf("%w: %s %s is platform tier: only the platform repo may declare it, not project %s",
+	return fmt.Errorf("%w: only the platform repo may declare %s %s, not project %s",
 		model.ErrInvalid, kind, name, proj.Name)
 }

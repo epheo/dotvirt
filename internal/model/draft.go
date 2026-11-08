@@ -39,7 +39,7 @@ type VMEdit struct {
 
 	// DRSExclude toggles the descheduler's prefer-no-eviction annotation on the
 	// VM template: true keeps the VM live-migratable for maintenance while the
-	// automatic load balancer (DRS) leaves it alone; false removes the
+	// automatic rebalancer leaves it alone; false removes the
 	// annotation. Nil leaves it untouched.
 	DRSExclude *bool `json:"drsExclude,omitempty"`
 

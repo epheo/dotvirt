@@ -46,18 +46,18 @@ func (s *Server) routes(mux *http.ServeMux) {
 	// an Uplink (nmstate NNCP) is always cluster-scoped, so always the platform
 	// tier, gated on the caller's authority to create NNCPs.
 	mux.HandleFunc("POST /api/uplinks", s.platformCreate(model.KindNNCP, draft.ResourceUplink))
-	// An egress firewall (the Tier-1 gateway firewall) is namespace-scoped, so it
+	// An egress firewall (a project's outbound rules) is namespace-scoped, so it
 	// routes to the tenant project owning the namespace, the same path as a
 	// project-scoped UDN; the tenant's Argo app applies it on merge (its AppProject
 	// must permit k8s.ovn.org/EgressFirewall).
 	mux.HandleFunc("POST /api/egressfirewalls", s.namespacedCreate("an egress firewall", draft.ResourceEgressFirewall, model.KindEgressFW))
-	// An EgressIP (the Tier-0 source-NAT pool) is always platform-tier, gated on
+	// An EgressIP (a fixed outbound IP pool) is always platform-tier, gated on
 	// the caller's authority to create EgressIPs.
 	mux.HandleFunc("POST /api/egressips", s.platformCreate(model.KindEgressIP, draft.ResourceEgressIP))
-	// An AdminPolicyBasedExternalRoute (the Tier-0 external next-hop route) is
+	// An AdminPolicyBasedExternalRoute (an external next-hop route) is
 	// always platform-tier, gated on the caller's authority to create them.
 	mux.HandleFunc("POST /api/externalroutes", s.platformCreate(model.KindExtRoute, draft.ResourceExternalRoute))
-	// A NetworkPolicy (the east-west Distributed Firewall) is namespace-scoped, so
+	// A NetworkPolicy (a project rule) is namespace-scoped, so
 	// it routes to the tenant project owning the namespace; the tenant's Argo app
 	// applies it on merge.
 	mux.HandleFunc("POST /api/networkpolicies", s.namespacedCreate("a network policy", draft.ResourceNetworkPolicy, model.KindNetpol))

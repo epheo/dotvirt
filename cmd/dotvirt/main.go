@@ -125,7 +125,7 @@ func run() error {
 	drsSnapshot := drs.NewSnapshot(saCluster)
 	drsSnapshot.Run(ctx)
 
-	// Networking read plane: the SA-watched port-group + fabric snapshot behind GET
+	// Networking read plane: the SA-watched network + fabric snapshot behind GET
 	// /api/networks. Reflectors publish NetworkChanged so the catalog refreshes live;
 	// discovery-gated like drs, so a cluster without OVN-K UDN or nmstate degrades
 	// to empty rather than error-looping.

@@ -1,8 +1,8 @@
 package model
 
-// DRS: the descheduler-backed balance plane.
+// Rebalancing: the descheduler-backed balance plane.
 
-// DRSConfig is the committed DRS configuration, parsed back from the platform
+// DRSConfig is the committed rebalancing configuration, parsed back from the platform
 // repo's KubeDescheduler manifest (defaults resolved).
 type DRSConfig struct {
 	Mode               string `json:"mode"`      // Predictive | Automatic
@@ -13,14 +13,14 @@ type DRSConfig struct {
 	EvictionTotalLimit int    `json:"evictionTotalLimit"`
 }
 
-// DRSGitState is the platform repo's committed DRS state on the base branch.
+// DRSGitState is the platform repo's committed rebalancing state on the base branch.
 type DRSGitState struct {
 	Configured    bool       `json:"configured"`       // the KubeDescheduler CR is committed
 	Config        *DRSConfig `json:"config,omitempty"` // nil when the committed CR doesn't parse (hand-edited)
 	PSIConfigured bool       `json:"psiConfigured"`    // the PSI MachineConfig is committed
 }
 
-// DRSDraftState is the caller's pending (staged, not yet proposed) DRS change
+// DRSDraftState is the caller's pending (staged, not yet proposed) rebalancing change
 // - the plane between committed and live that the panel's dialog edits.
 type DRSDraftState struct {
 	Config        *DRSConfig `json:"config,omitempty"` // the staged KubeDescheduler spec
@@ -51,7 +51,7 @@ type DRSLive struct {
 	Degraded  string `json:"degraded,omitempty"`
 }
 
-// DRSView is GET /api/drs: the DRS tier across its planes - the committed git
+// DRSView is GET /api/drs: the rebalancing tier across its planes - the committed git
 // state (flattened), the caller's staged draft, the live operator state - plus
 // the caller's authoring capability, the same SSARs the POST/DELETE handlers
 // enforce. Warning carries a non-fatal degradation (e.g. the platform repo is
@@ -66,7 +66,7 @@ type DRSView struct {
 	Draft      *DRSDraftState `json:"draft,omitempty"`
 	Live       DRSLive        `json:"live"`
 	Warning    string         `json:"warning,omitempty"`
-	CanManage  bool           `json:"canManage"`  // enable: creating the DRS file set
+	CanManage  bool           `json:"canManage"`  // enable: creating the rebalancing file set
 	CanPSI     bool           `json:"canPSI"`     // enable with the PSI MachineConfig
 	CanDisable bool           `json:"canDisable"` // removing the KubeDescheduler
 }

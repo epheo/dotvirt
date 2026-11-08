@@ -142,9 +142,9 @@ spec:
       actions
     - Every change staged as a reviewable pull request
     - Per-object GitOps drift and sync status, with one-click resync
-    - Host capacity and balance with DRS-style predictive and automatic
+    - Host capacity and balance with predictive and automatic
       rebalancing
-    - Network segments (UDN/CUDN), distributed firewall, and topology views
+    - Project and shared networks (UDN/CUDN), firewall rules, and topology views
     - VM template library, storage, events, issues, and Prometheus-backed
       metrics
 

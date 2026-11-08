@@ -116,9 +116,9 @@
 		};
 	});
 
-	// The port-group catalog and the policy plane: re-pulled on sign-in AND
+	// The network catalog and the policy plane: re-pulled on sign-in AND
 	// whenever networksVersion bumps (GitOps/git moved, or a policy reflector
-	// fired NetworkChanged), so a merged segment or firewall rule appears
+	// fired NetworkChanged), so a merged network or firewall rule appears
 	// without a reload. Keyed on the stable derived primitive, so it fires only
 	// when networking may have changed, not every VM-state frame. The pull
 	// retries with backoff (its only fetch: a transient boot error would

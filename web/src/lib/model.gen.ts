@@ -43,7 +43,7 @@ export interface ClusterCaps {
    */
   platformRead: boolean;
   /**
-   * Network is the shared segments (ClusterUserDefinedNetwork).
+   * Network is the shared networks (ClusterUserDefinedNetwork).
    */
   network: ObjectCaps;
   uplink: ObjectCaps;
@@ -63,7 +63,7 @@ export interface ClusterCaps {
    */
   sharedLibrary: boolean;
   /**
-   * DRSEnable stages the DRS file set, DRSPSI with the PSI MachineConfig;
+   * DRSEnable stages the rebalancing file set, DRSPSI with the PSI MachineConfig;
    * DRSDisable removes the KubeDescheduler.
    */
   drsEnable: boolean;
@@ -110,7 +110,7 @@ export interface NamespaceCaps {
   bootImageCreate: boolean;
   /**
    * The namespaced network family, staged through git. Network is the
-   * project segments (UserDefinedNetwork).
+   * project networks (UserDefinedNetwork).
    */
   network: ObjectCaps;
   /**
@@ -198,7 +198,7 @@ export interface VMEdit {
   /**
    * DRSExclude toggles the descheduler's prefer-no-eviction annotation on the
    * VM template: true keeps the VM live-migratable for maintenance while the
-   * automatic load balancer (DRS) leaves it alone; false removes the
+   * automatic rebalancer leaves it alone; false removes the
    * annotation. Nil leaves it untouched.
    */
   drsExclude?: boolean;
@@ -542,7 +542,7 @@ export interface CommitDetail {
 // source: drs.go
 
 /**
- * DRSConfig is the committed DRS configuration, parsed back from the platform
+ * DRSConfig is the committed rebalancing configuration, parsed back from the platform
  * repo's KubeDescheduler manifest (defaults resolved).
  */
 export interface DRSConfig {
@@ -554,7 +554,7 @@ export interface DRSConfig {
   evictionTotalLimit: number /* int */;
 }
 /**
- * DRSGitState is the platform repo's committed DRS state on the base branch.
+ * DRSGitState is the platform repo's committed rebalancing state on the base branch.
  */
 export interface DRSGitState {
   configured: boolean; // the KubeDescheduler CR is committed
@@ -562,7 +562,7 @@ export interface DRSGitState {
   psiConfigured: boolean; // the PSI MachineConfig is committed
 }
 /**
- * DRSDraftState is the caller's pending (staged, not yet proposed) DRS change
+ * DRSDraftState is the caller's pending (staged, not yet proposed) rebalancing change
  * - the plane between committed and live that the panel's dialog edits.
  */
 export interface DRSDraftState {
@@ -603,7 +603,7 @@ export interface DRSLive {
   degraded?: string;
 }
 /**
- * DRSView is GET /api/drs: the DRS tier across its planes - the committed git
+ * DRSView is GET /api/drs: the rebalancing tier across its planes - the committed git
  * state (flattened), the caller's staged draft, the live operator state - plus
  * the caller's authoring capability, the same SSARs the POST/DELETE handlers
  * enforce. Warning carries a non-fatal degradation (e.g. the platform repo is
@@ -620,7 +620,7 @@ export interface DRSView {
   draft?: DRSDraftState;
   live: DRSLive;
   warning?: string;
-  canManage: boolean; // enable: creating the DRS file set
+  canManage: boolean; // enable: creating the rebalancing file set
   canPSI: boolean; // enable with the PSI MachineConfig
   canDisable: boolean; // removing the KubeDescheduler
 }
@@ -739,7 +739,7 @@ export interface HostWorker {
   unschedulable?: boolean;
 }
 /**
- * HostBand is the DRS action band around the mean utilization - the deviation
+ * HostBand is the rebalancing band around the mean utilization - the deviation
  * window KubeVirtRelieveAndMigrate actually triggers on. Workers above it are
  * migration sources, workers below it are targets.
  */
@@ -751,8 +751,8 @@ export interface HostBand {
 }
 /**
  * HostLoad is GET /api/metrics/hosts: the worker utilization distribution
- * behind the DRS balance card - every worker with CPU and memory percent,
- * hottest first. Band is set only when a DRS configuration is committed.
+ * behind the rebalancing card - every worker with CPU and memory percent,
+ * hottest first. Band is set only when a rebalancing configuration is committed.
  */
 export interface HostLoad {
   updated: number /* int64 */;
@@ -830,24 +830,24 @@ export const SyncUnknown: SyncStatus = "Unknown";
 // source: network.go
 
 /**
- * NetworkKind classifies a port group by how a virt admin reads it.
+ * NetworkKind classifies a network by how a virt admin reads it.
  */
 export type NetworkKind = string;
 export const NetworkDefault: NetworkKind = "default"; // primary network - the project's "VM Network"
-export const NetworkInternal: NetworkKind = "internal"; // Layer2, no uplink - an isolated port group
+export const NetworkInternal: NetworkKind = "internal"; // Layer2, no uplink - an isolated network
 export const NetworkVLAN: NetworkKind = "vlan"; // localnet - VLAN-backed, bridged to an uplink
 /**
- * NetworkScope is a port group's reach: one project or shared across many.
+ * NetworkScope is a network's reach: one project or shared across many.
  */
 export type NetworkScope = string;
 export const ScopeProject: NetworkScope = "project"; // namespace-scoped (UDN/NAD) - one project
 export const ScopeShared: NetworkScope = "shared"; // cluster-scoped (CUDN) - selected projects
 /**
- * Network is one Distributed Port Group: a network a VM attaches a NIC to,
- * abstracting a UDN, CUDN, or raw NAD behind port-group vocabulary.
+ * Network is one network a VM attaches a NIC to, abstracting a UDN, CUDN,
+ * or raw NAD behind one vocabulary.
  */
 export interface Network {
-  name: string; // the port-group name shown to the user
+  name: string; // the network name shown to the user
   kind: NetworkKind; // default | internal | vlan
   scope: NetworkScope; // project | shared
   namespace?: string; // for project-scoped (UDN/NAD)
@@ -874,7 +874,7 @@ export interface Network {
    */
   sourceFile?: string;
   /**
-   * From ArgoCD, when enabled - the same per-object drift VMs carry, so a segment
+   * From ArgoCD, when enabled - the same per-object drift VMs carry, so a network
    * that failed to apply (or is mid-sync) shows its own badge, not just its project's.
    * Empty when Argo isn't wired or no Application manages this object.
    */
@@ -883,7 +883,7 @@ export interface Network {
   syncError?: string;
 }
 /**
- * Uplink is a physical-network attachment point - the vDS uplink analog: an OVN-K
+ * Uplink is a physical-network attachment point - an OVN-K
  * physical-network name mapped to an OVS bridge across a set of nodes. Builtin is
  * the always-present br-ex default (no NNCP required).
  */
@@ -910,7 +910,7 @@ export interface Uplink {
    */
   failures?: UplinkFailure[];
   /**
-   * The policy's own ArgoCD drift, as segments and rules carry it.
+   * The policy's own ArgoCD drift, as networks and rules carry it.
    */
   sync?: SyncStatus;
   health?: string;
@@ -938,7 +938,7 @@ export interface PhysicalAdapter {
   role?: string; // cluster-uplink | enslaved | available
 }
 /**
- * NetworkInventory is GET /api/networks: the port groups the caller may attach to,
+ * NetworkInventory is GET /api/networks: the networks the caller may attach to,
  * plus (for node-readers) the physical fabric. NMStatePresent=false means the
  * NMState operator isn't installed, so uplink/adapter discovery is unavailable -
  * the UI hides those affordances rather than showing empty panels.
@@ -970,9 +970,9 @@ export interface NetworkInventory {
 export interface NetworkCaps {
   uplink: boolean; // nmstate NNCP
   namespace: boolean; // namespaces (New Project / Namespace)
-  egressIP: boolean; // Tier-0 SNAT
-  externalRoute: boolean; // Tier-0 external route
-  adminNetworkPolicy: boolean; // cluster-wide admin DFW (AdminNetworkPolicy)
+  egressIP: boolean; // fixed outbound IP
+  externalRoute: boolean; // external route
+  adminNetworkPolicy: boolean; // cluster rules (AdminNetworkPolicy)
   /**
    * BaselineAdminNetworkPolicy is the cluster's baseline default policy.
    */
@@ -1182,18 +1182,17 @@ export interface StorageClass {
 
 /**
  * PolicyKind classifies a firewall/routing policy by the tier the UI
- * presents: the east-west Distributed Firewall (per-project NetworkPolicy and
- * its cluster-wide admin/baseline overrides), the per-project Gateway Firewall
- * (EgressFirewall on the Tier-1), and the Tier-0 planes (EgressIP SNAT,
- * policy-based external routes).
+ * presents: project rules (per-project NetworkPolicy) and the cluster rules
+ * over them (admin/baseline), per-project outbound rules (EgressFirewall), and
+ * the cluster edge (EgressIP fixed outbound IPs, policy-based external routes).
  */
 export type PolicyKind = string;
-export const PolicyDFW: PolicyKind = "dfw"; // NetworkPolicy - project east-west rules
+export const PolicyProjectRule: PolicyKind = "dfw"; // NetworkPolicy - project rules
 export const PolicyAdmin: PolicyKind = "admin"; // AdminNetworkPolicy - cluster-wide, priority-ordered
 export const PolicyBaseline: PolicyKind = "baseline"; // BaselineAdminNetworkPolicy - the cluster default
-export const PolicyGateway: PolicyKind = "gateway"; // EgressFirewall - project north-south egress
-export const PolicyEgressIP: PolicyKind = "egressip"; // EgressIP - Tier-0 source-NAT pool
-export const PolicyRoute: PolicyKind = "route"; // AdminPolicyBasedExternalRoute - Tier-0 next hop
+export const PolicyGateway: PolicyKind = "gateway"; // EgressFirewall - project outbound rules
+export const PolicyEgressIP: PolicyKind = "egressip"; // EgressIP - fixed outbound IP pool
+export const PolicyRoute: PolicyKind = "route"; // AdminPolicyBasedExternalRoute - external route next hop
 /**
  * PolicyRuleView is one rule row as the Security view shows it: direction,
  * action, a human peer summary, and a compact port list. Summaries, not the
@@ -1274,8 +1273,8 @@ export interface PolicyBinding {
 }
 /**
  * EffectivePolicy answers "what governs this workload, in evaluation order":
- * the east-west chain (admin tiers by precedence, then the project rules that
- * select it, then baseline) and the egress planes (gateway firewall, SNAT,
+ * the incoming chain (admin tiers by precedence, then the project rules that
+ * select it, then baseline) and the egress planes (outbound rules, fixed outbound IPs,
  * external routes). Control-plane binding, not flow simulation: it shows which
  * policies bind and in what order, it does not verdict a specific connection.
  */
@@ -1698,7 +1697,7 @@ export interface Project {
   error?: string;
   /**
    * GitOps is the project's ArgoCD Application rollup - the sync/health Argo already
-   * computes across every object the repo declares, so it reflects segments, network
+   * computes across every object the repo declares, so it reflects networks, network
    * policies and tenancy, not just VMs. Nil when Argo isn't wired or no Application
    * tracks this repo.
    */
@@ -1737,7 +1736,7 @@ export interface AdoptableNamespace {
  * ProjectSync is a project's overall GitOps state, read straight from its managing
  * ArgoCD Application. Operation is the last sync's phase ("Running" = applying,
  * "Failed"/"Error" = apply failed), the cue for a "pending apply" or an alarm that a
- * per-VM view can't give - a merged segment or policy PR that fails to apply shows
+ * per-VM view can't give - a merged network or policy PR that fails to apply shows
  * here even though no VM moved.
  */
 export interface ProjectSync {
@@ -1779,7 +1778,7 @@ export interface Inventory {
    * network and policy pulls (GET /api/networks, /api/policies) read: the
    * catalog objects and their drift in its visible namespaces, the
    * cluster-scoped ones, and the visible set itself. The frontend re-pulls
-   * when it changes, so a merged segment PR and its sync badge appear live,
+   * when it changes, so a merged network PR and its sync badge appear live,
    * and another tenant's change never moves it. Equality-only: not monotonic,
    * and a server restart changes it. Fits a JavaScript number.
    */

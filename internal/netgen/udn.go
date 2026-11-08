@@ -9,16 +9,16 @@ import (
 	"github.com/epheo/dotvirt/internal/validate"
 )
 
-// Scope of a port group create. Project/shared are the read plane's
+// Scope of a network create. Project/shared are the read plane's
 // model.NetworkScope values; vlan exists only at create time (a localnet CUDN
 // reads back as shared).
 const (
-	ScopeProject = string(model.ScopeProject) // namespace-scoped Layer2 UDN: an "Internal" port group
-	ScopeShared  = string(model.ScopeShared)  // cluster-scoped Layer2 CUDN: an isolated port group shared across namespaces
-	ScopeVLAN    = "vlan"                     // cluster-scoped localnet CUDN: a "VLAN" port group
+	ScopeProject = string(model.ScopeProject) // namespace-scoped Layer2 UDN: an "Internal" network
+	ScopeShared  = string(model.ScopeShared)  // cluster-scoped Layer2 CUDN: an isolated network shared across namespaces
+	ScopeVLAN    = "vlan"                     // cluster-scoped localnet CUDN: a "VLAN" network
 )
 
-// Spec describes a port group to create. Project scope emits a namespace-scoped
+// Spec describes a network to create. Project scope emits a namespace-scoped
 // Layer2 UserDefinedNetwork; VLAN scope emits a cluster-scoped localnet
 // ClusterUserDefinedNetwork bound to an uplink (physical network) and a VLAN id.
 type Spec struct {
@@ -33,7 +33,7 @@ type Spec struct {
 	Namespaces      []string `json:"namespaces,omitempty"`      // namespaces the CUDN publishes to
 }
 
-// Manifest renders the port group YAML plus its repo-relative path. Project
+// Manifest renders the network YAML plus its repo-relative path. Project
 // networks land in the owning namespace's tree; VLAN (CUDN) networks are
 // cluster-scoped and land under the (platform) repo's networks/ dir.
 func Manifest(s Spec) (path string, content []byte, err error) {
@@ -49,7 +49,7 @@ func Manifest(s Spec) (path string, content []byte, err error) {
 	}
 }
 
-// projectUDN is an internal (Layer2, secondary) namespace-scoped port group.
+// projectUDN is an internal (Layer2, secondary) namespace-scoped network.
 func projectUDN(s Spec) (string, []byte, error) {
 	if err := validate.RequireDNS1123("network name", s.Name); err != nil {
 		return "", nil, err
@@ -72,8 +72,8 @@ func projectUDN(s Spec) (string, []byte, error) {
 	return model.KindUDN.RepoPath(s.Namespace, s.Name), out, nil
 }
 
-// sharedCUDN is an isolated (Layer2, secondary) cluster-scoped port group spanning
-// the selected namespaces - like vlanCUDN but a plain L2 segment with no uplink or
+// sharedCUDN is an isolated (Layer2, secondary) cluster-scoped network spanning
+// the selected namespaces - like vlanCUDN but a plain L2 network with no uplink or
 // VLAN. Cluster-scoped, so it lands under the (platform) repo's networks/ dir.
 func sharedCUDN(s Spec) (string, []byte, error) {
 	if err := validate.RequireDNS1123("network name", s.Name); err != nil {
@@ -103,7 +103,7 @@ func sharedCUDN(s Spec) (string, []byte, error) {
 	return model.KindCUDN.RepoPath("", s.Name), out, nil
 }
 
-// vlanCUDN is a VLAN-backed (localnet, secondary) cluster-scoped port group: it
+// vlanCUDN is a VLAN-backed (localnet, secondary) cluster-scoped network: it
 // rides an uplink (physicalNetworkName) on an access VLAN, published to the
 // selected namespaces.
 func vlanCUDN(s Spec) (string, []byte, error) {

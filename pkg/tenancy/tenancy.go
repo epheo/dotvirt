@@ -92,9 +92,9 @@ var TenantKinds = []GroupKind{
 	{Group: "kubevirt.io", Kind: "VirtualMachine", Resource: "virtualmachines"},
 	{Group: "cdi.kubevirt.io", Kind: "DataVolume", Resource: "datavolumes"},
 	{Group: "k8s.ovn.org", Kind: "UserDefinedNetwork", Resource: "userdefinednetworks"},
-	// The Tier-1 gateway firewall: it narrows its own namespace's egress only.
+	// Outbound rules: they narrow their own namespace's egress only.
 	{Group: "k8s.ovn.org", Kind: "EgressFirewall", Resource: "egressfirewalls"},
-	// The east-west Distributed Firewall.
+	// Project rules.
 	{Group: "networking.k8s.io", Kind: "NetworkPolicy", Resource: "networkpolicies"},
 }
 

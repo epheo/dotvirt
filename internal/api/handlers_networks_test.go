@@ -94,8 +94,8 @@ func TestScopeNetworkRules(t *testing.T) {
 	in := model.NetworkRules{
 		Applies: []model.PolicyBinding{{Policy: model.Policy{Name: "deny-lateral", Kind: model.PolicyAdmin}}},
 		Reaches: []model.PeerRule{
-			{Policy: model.Policy{Name: "mine", Kind: model.PolicyDFW, Namespace: "a"}},
-			{Policy: model.Policy{Name: "foreign", Kind: model.PolicyDFW, Namespace: "b"}},
+			{Policy: model.Policy{Name: "mine", Kind: model.PolicyProjectRule, Namespace: "a"}},
+			{Policy: model.Policy{Name: "foreign", Kind: model.PolicyProjectRule, Namespace: "b"}},
 			{Policy: model.Policy{Name: "cluster", Kind: model.PolicyAdmin}},
 		},
 	}

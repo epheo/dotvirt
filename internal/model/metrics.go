@@ -101,7 +101,7 @@ type HostWorker struct {
 	Unschedulable bool    `json:"unschedulable,omitempty"`
 }
 
-// HostBand is the DRS action band around the mean utilization - the deviation
+// HostBand is the rebalancing band around the mean utilization - the deviation
 // window KubeVirtRelieveAndMigrate actually triggers on. Workers above it are
 // migration sources, workers below it are targets.
 type HostBand struct {
@@ -112,8 +112,8 @@ type HostBand struct {
 }
 
 // HostLoad is GET /api/metrics/hosts: the worker utilization distribution
-// behind the DRS balance card - every worker with CPU and memory percent,
-// hottest first. Band is set only when a DRS configuration is committed.
+// behind the rebalancing card - every worker with CPU and memory percent,
+// hottest first. Band is set only when a rebalancing configuration is committed.
 type HostLoad struct {
 	Updated int64        `json:"updated"`
 	Workers int          `json:"workers"`

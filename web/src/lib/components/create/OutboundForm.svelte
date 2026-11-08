@@ -4,7 +4,7 @@
 	import { action } from '#lib/resource.svelte.js';
 	import { CLUSTER_NS, objectGate } from '#lib/gates.js';
 	import { inventory } from '#lib/state/inventory.svelte.js';
-	import { ui, type Tier0Initial } from '#lib/state/ui.svelte.js';
+	import { ui, type EdgeInitial } from '#lib/state/ui.svelte.js';
 	import { NAME_HINT, validIP, validName } from '#lib/validate.js';
 	import Consequence from '../Consequence.svelte';
 	import PickList from './PickList.svelte';
@@ -21,7 +21,7 @@
 		namespace = $bindable(),
 		initial,
 		onclose,
-	}: { namespace: string; initial?: Tier0Initial; onclose: () => void } = $props();
+	}: { namespace: string; initial?: EdgeInitial; onclose: () => void } = $props();
 
 	const sheet = useSheet();
 	// svelte-ignore state_referenced_locally

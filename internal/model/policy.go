@@ -1,21 +1,20 @@
 package model
 
-// The security plane: DFW tiers, gateway/Tier-0 policies, and the trace.
+// The security plane: rule tiers, outbound and cluster edge policies, and the trace.
 
 // PolicyKind classifies a firewall/routing policy by the tier the UI
-// presents: the east-west Distributed Firewall (per-project NetworkPolicy and
-// its cluster-wide admin/baseline overrides), the per-project Gateway Firewall
-// (EgressFirewall on the Tier-1), and the Tier-0 planes (EgressIP SNAT,
-// policy-based external routes).
+// presents: project rules (per-project NetworkPolicy) and the cluster rules
+// over them (admin/baseline), per-project outbound rules (EgressFirewall), and
+// the cluster edge (EgressIP fixed outbound IPs, policy-based external routes).
 type PolicyKind string
 
 const (
-	PolicyDFW      PolicyKind = "dfw"      // NetworkPolicy - project east-west rules
-	PolicyAdmin    PolicyKind = "admin"    // AdminNetworkPolicy - cluster-wide, priority-ordered
-	PolicyBaseline PolicyKind = "baseline" // BaselineAdminNetworkPolicy - the cluster default
-	PolicyGateway  PolicyKind = "gateway"  // EgressFirewall - project north-south egress
-	PolicyEgressIP PolicyKind = "egressip" // EgressIP - Tier-0 source-NAT pool
-	PolicyRoute    PolicyKind = "route"    // AdminPolicyBasedExternalRoute - Tier-0 next hop
+	PolicyProjectRule PolicyKind = "dfw"      // NetworkPolicy - project rules
+	PolicyAdmin       PolicyKind = "admin"    // AdminNetworkPolicy - cluster-wide, priority-ordered
+	PolicyBaseline    PolicyKind = "baseline" // BaselineAdminNetworkPolicy - the cluster default
+	PolicyGateway     PolicyKind = "gateway"  // EgressFirewall - project outbound rules
+	PolicyEgressIP    PolicyKind = "egressip" // EgressIP - fixed outbound IP pool
+	PolicyRoute       PolicyKind = "route"    // AdminPolicyBasedExternalRoute - external route next hop
 )
 
 // PolicyRuleView is one rule row as the Security view shows it: direction,
@@ -80,8 +79,8 @@ type PolicyBinding struct {
 }
 
 // EffectivePolicy answers "what governs this workload, in evaluation order":
-// the east-west chain (admin tiers by precedence, then the project rules that
-// select it, then baseline) and the egress planes (gateway firewall, SNAT,
+// the incoming chain (admin tiers by precedence, then the project rules that
+// select it, then baseline) and the egress planes (outbound rules, fixed outbound IPs,
 // external routes). Control-plane binding, not flow simulation: it shows which
 // policies bind and in what order, it does not verdict a specific connection.
 type EffectivePolicy struct {

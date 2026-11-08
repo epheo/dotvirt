@@ -33,7 +33,7 @@ export type Issue = {
 	action: IssueAction;
 };
 
-// The platform tier (tenancy, uplinks, shared segments, cluster policies) has no
+// The platform tier (tenancy, uplinks, shared networks, cluster policies) has no
 // project row; its Application's rollup rides the frame under this name.
 const PLATFORM = 'platform';
 
@@ -202,7 +202,7 @@ function objectIssue(inv: Inventory, project: string, o: ObjectHealth): Issue | 
 	};
 }
 
-// Where each kind is shown: segments have a route of their own (a NAD by its
+// Where each kind is shown: networks have a route of their own (a NAD by its
 // attach ref), uplinks and policies on the networking root's Uplinks and
 // Firewall tabs, tenancy objects on the project that owns the namespace.
 function objectHref(inv: Inventory, o: ObjectHealth): string {

@@ -148,7 +148,7 @@ type Project struct {
 	Namespaces []ProjectNamespace `json:"namespaces"`
 	Error      string             `json:"error,omitempty"`
 	// GitOps is the project's ArgoCD Application rollup - the sync/health Argo already
-	// computes across every object the repo declares, so it reflects segments, network
+	// computes across every object the repo declares, so it reflects networks, network
 	// policies and tenancy, not just VMs. Nil when Argo isn't wired or no Application
 	// tracks this repo.
 	GitOps *ProjectSync `json:"gitOps,omitempty"`
@@ -179,7 +179,7 @@ type AdoptableNamespace struct {
 // ProjectSync is a project's overall GitOps state, read straight from its managing
 // ArgoCD Application. Operation is the last sync's phase ("Running" = applying,
 // "Failed"/"Error" = apply failed), the cue for a "pending apply" or an alarm that a
-// per-VM view can't give - a merged segment or policy PR that fails to apply shows
+// per-VM view can't give - a merged network or policy PR that fails to apply shows
 // here even though no VM moved.
 type ProjectSync struct {
 	Sync      SyncStatus `json:"sync,omitempty"`
@@ -215,7 +215,7 @@ type Inventory struct {
 	// network and policy pulls (GET /api/networks, /api/policies) read: the
 	// catalog objects and their drift in its visible namespaces, the
 	// cluster-scoped ones, and the visible set itself. The frontend re-pulls
-	// when it changes, so a merged segment PR and its sync badge appear live,
+	// when it changes, so a merged network PR and its sync badge appear live,
 	// and another tenant's change never moves it. Equality-only: not monotonic,
 	// and a server restart changes it. Fits a JavaScript number.
 	NetworksVersion uint64 `json:"networksVersion,omitempty"`

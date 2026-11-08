@@ -134,8 +134,8 @@ export const clusterGate = {
 	vmNetwork: () => cluster((c) => c.vmNetwork, 'give a namespace a VM network'),
 	grantAdmin: () => cluster((c) => c.grantAdmin, 'grant project access'),
 	sharedLibrary: () => cluster((c) => c.sharedLibrary, 'change the shared template library'),
-	drsEnable: () => cluster((c) => c.drsEnable, 'turn on rebalancing'),
-	drsPSI: () => cluster((c) => c.drsPSI, 'turn on host pressure readings'),
-	drsDisable: () => cluster((c) => c.drsDisable, 'turn off rebalancing'),
+	rebalanceOn: () => cluster((c) => c.drsEnable, 'turn on rebalancing'),
+	rebalancePSI: () => cluster((c) => c.drsPSI, 'turn on host pressure readings'),
+	rebalanceOff: () => cluster((c) => c.drsDisable, 'turn off rebalancing'),
 	oauthClient: () => cluster((c) => c.oauthClient, 'finish single sign-on'),
 };

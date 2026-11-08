@@ -50,7 +50,7 @@ func (c *Coordinator) enableDRSEntries(proj project.ProjectInfo, rawSpec json.Ra
 	}
 	var spec drs.Spec
 	if err := json.Unmarshal(rawSpec, &spec); err != nil {
-		return nil, fmt.Errorf("%w: invalid DRS spec: %v", model.ErrInvalid, err)
+		return nil, fmt.Errorf("%w: invalid rebalancing spec: %v", model.ErrInvalid, err)
 	}
 	files, err := drs.Manifests(spec)
 	if err != nil {
@@ -95,7 +95,7 @@ func (c *Coordinator) StageDisableDRS(id auth.Identity, proj project.ProjectInfo
 		return model.DraftView{}, err
 	}
 	if !configured && pending == 0 {
-		return model.DraftView{}, fmt.Errorf("%w: DRS is not configured on %s", model.ErrNotFound, c.baseBranch)
+		return model.DraftView{}, fmt.Errorf("%w: rebalancing is not configured on %s", model.ErrNotFound, c.baseBranch)
 	}
 	return c.Get(id, proj)
 }

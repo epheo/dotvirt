@@ -72,7 +72,7 @@ func TestTraceEastWestNetpol(t *testing.T) {
 }
 
 // ANP precedence: a higher-priority (lower number) Deny wins before the
-// project tier is ever consulted; a Pass delegates down to the netpol allow.
+// project rule is ever consulted; a Pass delegates down to the netpol allow.
 func TestTraceANPPrecedenceAndPass(t *testing.T) {
 	s := New(nil, nil)
 	add(t, s.anp, map[string]any{
@@ -104,7 +104,7 @@ func TestTraceANPPrecedenceAndPass(t *testing.T) {
 		t.Fatalf("admin deny must win over netpol allow: verdict = %s (%v)", res.Verdict, stepKinds(t, res))
 	}
 
-	// Pass at higher precedence delegates to the project tier instead.
+	// Pass at higher precedence delegates to the project rules instead.
 	add(t, s.anp, map[string]any{
 		"apiVersion": "policy.networking.k8s.io/v1alpha1", "kind": "AdminNetworkPolicy",
 		"metadata": map[string]any{"name": "delegate"},
@@ -124,7 +124,7 @@ func TestTraceANPPrecedenceAndPass(t *testing.T) {
 	var sawPass bool
 	for _, st := range res.Steps {
 		if st.Stage == "admin" && st.Action == "Pass" && st.Decisive {
-			sawPass = true
+			sawPass = st.Note == "Delegates this flow to the project rules."
 		}
 	}
 	if !sawPass {
@@ -171,7 +171,7 @@ func TestTraceBaselineAndDefault(t *testing.T) {
 }
 
 // Isolated primary networks carry nothing, so no policy runs; a shared
-// CUDN-generated secondary segment is then the only path, unfiltered: the
+// CUDN-generated secondary network is then the only path, unfiltered: the
 // answer is Conditional with the bypass as its reason, never a certain
 // Unreachable. Without one, Unreachable is certain.
 func TestTraceUnreachableAndSegmentBypass(t *testing.T) {
@@ -203,7 +203,7 @@ func TestTraceUnreachableAndSegmentBypass(t *testing.T) {
 
 	res := s.Trace(src, &dst, "", "TCP", 5432)
 	if res.Verdict != "Conditional" {
-		t.Fatalf("isolated primaries sharing a segment: verdict = %s (%v)", res.Verdict, stepKinds(t, res))
+		t.Fatalf("isolated primaries sharing a network: verdict = %s (%v)", res.Verdict, stepKinds(t, res))
 	}
 	var bypass bool
 	for _, st := range res.Steps {
@@ -215,7 +215,7 @@ func TestTraceUnreachableAndSegmentBypass(t *testing.T) {
 		}
 	}
 	if !bypass {
-		t.Fatalf("shared segment must surface as a flagged bypass, got %v", stepKinds(t, res))
+		t.Fatalf("shared network must surface as a flagged bypass, got %v", stepKinds(t, res))
 	}
 
 	dst.Nets = nil
@@ -224,8 +224,8 @@ func TestTraceUnreachableAndSegmentBypass(t *testing.T) {
 	}
 }
 
-// External flow: the gateway firewall is first-match with default allow, the
-// SNAT pool reports informationally, and an ANP networks-peer deny is final.
+// External flow: the outbound rules are first-match with default allow, the
+// fixed outbound IP pool reports informationally, and an ANP networks-peer deny is final.
 func TestTraceExternal(t *testing.T) {
 	s := New(nil, nil)
 	add(t, s.egressfw, map[string]any{
@@ -458,9 +458,9 @@ func TestTracePassConvergence(t *testing.T) {
 	}
 }
 
-// A default multus binding substitutes the NAD's segment for the pod network:
+// A default multus binding substitutes the NAD's network for the pod network:
 // it never rides the namespace primary, and two such bindings meet only on
-// the same segment identity.
+// the same network identity.
 func TestTraceDefaultMultusSegment(t *testing.T) {
 	s := New(nil, nil)
 	for _, ns := range []string{"team-a", "team-b"} {
@@ -489,7 +489,7 @@ func TestTraceDefaultMultusSegment(t *testing.T) {
 	b := wl("team-b", "db", nil, nil)
 	b.PodNet, b.DefaultNet = false, "team-b/shared-vlan"
 	if res := s.Trace(a, &b, "", "TCP", 5432); res.Verdict != "Allow" {
-		t.Fatalf("same CUDN segment as default: verdict = %s (%v)", res.Verdict, stepKinds(t, res))
+		t.Fatalf("same CUDN network as default: verdict = %s (%v)", res.Verdict, stepKinds(t, res))
 	}
 }
 
@@ -520,7 +520,7 @@ func TestTraceNetpolSameNamespacePeer(t *testing.T) {
 	}
 }
 
-// Localnet segments meet on the fabric: different objects mapping one physical
+// Localnet networks meet on the fabric: different objects mapping one physical
 // network and VLAN are one layer-2 domain, so the trace must surface the
 // bypass; another VLAN on the same physical network is not.
 func TestTraceLocalnetSegmentByPhysnetVLAN(t *testing.T) {
@@ -552,7 +552,7 @@ func TestTraceLocalnetSegmentByPhysnetVLAN(t *testing.T) {
 		}
 	}
 	if bypass != 1 {
-		t.Fatalf("same physnet+VLAN must be one shared segment, got %v", stepKinds(t, res))
+		t.Fatalf("same physnet+VLAN must be one shared network, got %v", stepKinds(t, res))
 	}
 
 	dst.Nets = []string{"team-b/other-vlan"}
@@ -685,7 +685,7 @@ func TestTraceExternalVLAN(t *testing.T) {
 	}
 
 	internal := wl("team-a", "backend", nil, nil)
-	internal.PodNet, internal.Nets = false, []string{"team-a/db-segment"}
+	internal.PodNet, internal.Nets = false, []string{"team-a/db-net"}
 	if res := s.Trace(internal, nil, "203.0.113.9", "TCP", 443); res.Verdict != "Conditional" {
 		t.Fatalf("secondary-only source, a router may carry it: verdict = %s (%v)", res.Verdict, stepKinds(t, res))
 	}

@@ -857,7 +857,7 @@ let base = {
 			],
 		},
 	],
-	drs: {
+	rebalancing: {
 		configured: false,
 		psiConfigured: false,
 		live: { apiPresent: false, synced: true, deployed: false, available: false },
@@ -1392,8 +1392,8 @@ const none = { create: false, update: false, delete: false };
 const capsDenied = {
 	...base,
 	name: 'caps',
-	drs: {
-		...base.drs,
+	rebalancing: {
+		...base.rebalancing,
 		configured: true,
 		config: {
 			mode: 'Predictive',

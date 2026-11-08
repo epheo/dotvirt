@@ -1,5 +1,5 @@
-// Edit and delete for the git-declared network-family objects (segments,
-// firewall rules, Tier-0 services). One entry point for every surface that
+// Edit and delete for the git-declared network-family objects (networks,
+// firewall rules, cluster edge objects). One entry point for every surface that
 // lists them: the object read back from git feeds the same modal that created
 // it, and a delete stages the file's removal like a VM delete.
 import {
@@ -125,8 +125,8 @@ export async function openAdopt(ref: ObjectRef, drifted = false) {
 	}
 }
 
-// A segment's subnet, topology, VLAN and uplink are frozen by OVN-K once
-// created, so only a shared segment's publication list is editable. A primary
+// A network's subnet, topology, VLAN and uplink are frozen by OVN-K once
+// created, so only a shared network's publication list is editable. A primary
 // network is born and dies with its namespace (one file), so it has no delete.
 export const canEditNetwork = (n: Network) =>
 	!!n.sourceFile && n.scope === 'shared' && networkGate(n, 'update').ok;
@@ -188,7 +188,7 @@ function modalFor(resource: string, spec: unknown): typeof ui.modal {
 				(s.ingress ?? []).every(
 					(r) => (r.from?.length ?? 0) <= 1 && one(r.from?.[0]) && (r.ports?.length ?? 0) <= 1,
 				);
-			return fits ? { kind: 'dfw', namespaces, initial: s } : null;
+			return fits ? { kind: 'projectRule', namespaces, initial: s } : null;
 		}
 		case 'egressfirewall': {
 			const s = spec as EgressFirewallCreate;
@@ -207,9 +207,9 @@ function modalFor(resource: string, spec: unknown): typeof ui.modal {
 			return fits ? { kind: 'adminFw', initial: s } : null;
 		}
 		case 'egressip':
-			return { kind: 'tier0', initial: { kind: 'snat', spec: spec as EgressIPCreate } };
+			return { kind: 'clusterEdge', initial: { kind: 'snat', spec: spec as EgressIPCreate } };
 		case 'externalroute':
-			return { kind: 'tier0', initial: { kind: 'route', spec: spec as ExternalRouteCreate } };
+			return { kind: 'clusterEdge', initial: { kind: 'route', spec: spec as ExternalRouteCreate } };
 	}
 	return null;
 }

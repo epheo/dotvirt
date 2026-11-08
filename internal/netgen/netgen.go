@@ -1,10 +1,10 @@
 // Package netgen renders OVN-K user-defined networks and nmstate uplink policies
-// - the manifests behind dotvirt's "Distributed Port Group" and "Uplink" creates
+// - the manifests behind dotvirt's network and uplink creates
 // - from small specs, the way vmgen renders VirtualMachines. Owns-nothing: the
 // output is proposed via PR and applied by Argo, never written to the cluster.
-// One file per kind family: udn.go (port groups), namespace.go (namespace +
-// tenant RBAC), uplink.go (NNCP), egress.go (Tier-0/Tier-1 egress), policy.go
-// (DFW policies); this file holds the validation and marshalling shared by all.
+// One file per kind family: udn.go (networks), namespace.go (namespace +
+// tenant RBAC), uplink.go (NNCP), egress.go (outbound rules and the cluster
+// edge), policy.go (project and cluster rules); this file holds the validation and marshalling shared by all.
 package netgen
 
 import (

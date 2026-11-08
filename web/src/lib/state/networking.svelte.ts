@@ -18,7 +18,7 @@ class NetworkingState {
 	);
 	readonly vlanNets = $derived(inventory.networks.filter((n) => n.kind === 'vlan'));
 
-	// Firewall objects: cluster rules, project rules (east-west and outbound),
+	// Firewall objects: cluster rules, project rules (incoming and outbound),
 	// and the outbound planes at the cluster edge.
 	// In the order traffic meets them: admin rules by priority, the baseline last.
 	readonly clusterRules = $derived(

@@ -87,8 +87,8 @@ describe('the fields the audit named', () => {
 
 	it('turning rebalancing off is its own field', async () => {
 		await answer({ cluster: { drsEnable: true, drsDisable: false } });
-		expect(clusterGate.drsEnable().ok).toBe(true);
-		expect(clusterGate.drsDisable().why).toBe('You may not turn off rebalancing.');
+		expect(clusterGate.rebalanceOn().ok).toBe(true);
+		expect(clusterGate.rebalanceOff().why).toBe('You may not turn off rebalancing.');
 	});
 
 	it('sync access reads the project field', async () => {

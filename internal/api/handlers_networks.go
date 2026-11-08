@@ -80,7 +80,7 @@ func (s *Server) namespacedCreate(what string, resource draft.Resource, kind mod
 	}
 }
 
-// handleCreateNetwork stages a new Distributed Port Group, proposed as a PR (the
+// handleCreateNetwork stages a new network, proposed as a PR (the
 // same owns-nothing path as a VM create). A "project"-scoped Layer2 secondary UDN
 // lands in the tenant repo owning its namespace; a shared/VLAN CUDN is
 // cluster-scoped, so it routes to the platform tier.
@@ -110,7 +110,7 @@ func (s *Server) handleCreateNetwork(w http.ResponseWriter, r *http.Request) {
 	s.stageCreate(w, r, sc, draft.ResourceNetwork, raw)
 }
 
-// handleCreateAdminNetworkPolicy stages a cluster-wide admin DFW policy
+// handleCreateAdminNetworkPolicy stages a cluster rule
 // (AdminNetworkPolicy or the baseline default) - always platform-tier and admin-only,
 // gated like platformCreate on the matching kind. A priority a live policy
 // already holds is refused: OVN-K would order the two arbitrarily.
@@ -143,9 +143,9 @@ func (s *Server) handleCreateAdminNetworkPolicy(w http.ResponseWriter, r *http.R
 	s.stageCreate(w, r, sc, draft.ResourceAdminNetworkPolicy, raw)
 }
 
-// handleNetworks lists the networks (Distributed Port Groups) the caller may
+// handleNetworks lists the networks the caller may
 // attach a VM to, plus the physical fabric (Uplinks + Physical adapters) for
-// callers who can read nodes. The port-group catalog is read with dotvirt's SA -
+// callers who can read nodes. The network catalog is read with dotvirt's SA -
 // a scoped tenant usually can't list these cluster CRDs, which would yield a
 // silently-empty picker - then project-scoped networks are filtered to the
 // caller's visible namespaces so nothing leaks across tenants.
@@ -180,7 +180,7 @@ func (s *Server) handleNetworks(w http.ResponseWriter, r *http.Request) {
 		PhysicalAdapters: []model.PhysicalAdapter{},
 		NMStatePresent:   full.NMStatePresent,
 	}
-	// Per-object drift: attach each segment's own ArgoCD sync/health at serve time
+	// Per-object drift: attach each network's own ArgoCD sync/health at serve time
 	// (always fresh, off the cached catalog) - the same surface VMs carry.
 	s.enrichNetworkDrift(out.Networks)
 	if !cudn {
@@ -201,8 +201,8 @@ func (s *Server) handleNetworks(w http.ResponseWriter, r *http.Request) {
 		}
 		out.Caps.Platform, _ = s.canReadPlatform(ctx, id, c)
 	}
-	// Which file declares each segment: the edit/delete affordance. A shared
-	// segment's platform file shows only to callers who may author that tier.
+	// Which file declares each network: the edit/delete affordance. A shared
+	// network's platform file shows only to callers who may author that tier.
 	declared := s.sourceFiles(r.Context(), id, c, out.CanManage)
 	for i := range out.Networks {
 		n := &out.Networks[i]
@@ -283,7 +283,7 @@ func redactSharedErrors(nets []model.Network) {
 
 const sharedNetworkErrorForTenants = "the platform could not apply this network"
 
-// enrichNetworkDrift attaches each segment's own ArgoCD sync/health/apply-error
+// enrichNetworkDrift attaches each network's own ArgoCD sync/health/apply-error
 // - the same per-object drift plane VMs use. Mutates the scoped copies in place
 // (never the cached catalog, which scopeNetworks already copied).
 func (s *Server) enrichNetworkDrift(nets []model.Network) {

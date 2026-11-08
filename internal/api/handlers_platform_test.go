@@ -69,7 +69,7 @@ func TestDRSView(t *testing.T) {
 	d.drsErr = errors.New("forge down")
 	rec = do(s, adminToken, http.MethodGet, "/api/drs", "")
 	wantStatus(t, rec, http.StatusOK)
-	if v := decodeBody[model.DRSView](t, rec); v.Warning == "" || v.Configured {
+	if v := decodeBody[model.DRSView](t, rec); v.Warning != "platform repo unavailable - committed rebalancing state unknown" || v.Configured {
 		t.Errorf("degraded view = %+v", v)
 	}
 }

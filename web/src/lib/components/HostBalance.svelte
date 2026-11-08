@@ -7,7 +7,7 @@
 	import InfoCard from './InfoCard.svelte';
 	import Button from './Button.svelte';
 
-	// Worker utilization with the DRS action band. A small fleet is a labeled
+	// Worker utilization with the rebalancing band. A small fleet is a labeled
 	// per-host comparison: the roster rows ARE the chart (a strip with three
 	// dots is whitespace duplicating them). Only past what rows can carry does
 	// the 0-100% strip take over, reading as a distribution - dots first, then
@@ -60,7 +60,7 @@
 		if (n.pct < band.low) return 'var(--chart-cold)';
 		return 'var(--chart-axis)';
 	};
-	// Memory has no DRS band; >90% is worth flagging on any host regardless.
+	// Memory has no rebalancing band; >90% is worth flagging on any host regardless.
 	const memColor = (n: HostWorker): string =>
 		(n.mem ?? 0) > 90 ? 'var(--color-warn)' : 'var(--chart-axis)';
 	const title = (n: HostWorker): string =>
@@ -132,7 +132,7 @@
 	};
 
 	// Live migrations from the inventory stream: each VM carries its last move,
-	// so recent activity (DRS, maintenance, or manual) needs no extra endpoint.
+	// so recent activity (rebalancing, maintenance, or manual) needs no extra endpoint.
 	const DAY = 24 * 3600 * 1000;
 	const moves = $derived.by(() => {
 		const now = Date.now();

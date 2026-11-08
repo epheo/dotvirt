@@ -317,7 +317,7 @@ func (s *Snapshot) PrunePending(repo string, namespaces []string) []model.Object
 
 // ResourceDrift returns one Argo-managed object's sync/health by identity; ok=false if
 // no Application manages it or the snapshot hasn't synced. General across kinds - the
-// per-object surface VMs and segments (and any future rendered object) share. group/kind
+// per-object surface VMs and networks (and any future rendered object) share. group/kind
 // are the ArgoCD resource's own (e.g. "k8s.ovn.org","UserDefinedNetwork"); namespace is
 // "" for cluster-scoped kinds.
 func (s *Snapshot) ResourceDrift(group, kind, namespace, name string) (Drift, bool) {

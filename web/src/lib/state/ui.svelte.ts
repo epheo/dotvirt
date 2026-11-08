@@ -17,7 +17,7 @@ import { reviewURL, type ReviewTarget } from '#lib/review.js';
 import { drafts } from './drafts.svelte';
 import { tray } from './tray.svelte';
 
-export type Tier0Initial =
+export type EdgeInitial =
 	{ kind: 'snat'; spec: EgressIPCreate } | { kind: 'route'; spec: ExternalRouteCreate };
 
 // Every modal the shell can show, as one discriminated union - the shell
@@ -52,11 +52,11 @@ export type AppModal =
 	| { kind: 'releaseProject'; project: string; namespaces: string[] }
 	| { kind: 'syncAccess'; project: string }
 	| { kind: 'egressFw'; namespaces: string[]; namespace?: string; initial?: EgressFirewallCreate }
-	| { kind: 'dfw'; namespaces: string[]; namespace?: string; initial?: NetworkPolicyCreate }
-	| { kind: 'tier0'; initial?: Tier0Initial }
+	| { kind: 'projectRule'; namespaces: string[]; namespace?: string; initial?: NetworkPolicyCreate }
+	| { kind: 'clusterEdge'; initial?: EdgeInitial }
 	| { kind: 'adminFw'; initial?: AdminNetworkPolicyCreate }
-	// Stage the removal of a git-declared object (segment, firewall rule, Tier-0
-	// service) - the VM delete's confirm, for the rest of the inventory.
+	// Stage the removal of a git-declared object (network, firewall rule, cluster
+	// edge object) - the VM delete's confirm, for the rest of the inventory.
 	| { kind: 'deleteObject'; resource: string; namespace: string; name: string; sourceFile: string }
 	| { kind: 'upload'; namespace?: string; file?: File; bootImage?: boolean }
 	| { kind: 'deployTemplate'; library?: string; template?: string; namespace?: string } // Deploy from Template (Catalog / New ▾)

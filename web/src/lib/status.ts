@@ -123,7 +123,7 @@ export function usageLevelColor(pct: number, base = 'var(--chart-1)'): string {
 // null for a clean (Synced + Healthy) or not-yet-known project, so a dense tree shows a
 // badge only when something needs attention or is in flight - green stays implicit.
 // pulse marks the actively-applying state (the "pending apply" feedback a merged
-// segment/policy PR produces before it settles).
+// network/policy PR produces before it settles).
 export function projectSyncView(
 	g?: ProjectSync,
 ): { tone: Tone; label: string; pulse: boolean } | null {

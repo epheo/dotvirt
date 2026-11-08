@@ -27,7 +27,7 @@
 		initialSection,
 	}: {
 		vm: VM;
-		networks?: Network[]; // port-group catalog (from the page), for the adapter picker
+		networks?: Network[]; // network catalog (from the page), for the adapter picker
 		onclose: () => void;
 		// Opened from a Configure section: start the wizard on that step.
 		initialSection?: EditSection;

@@ -1,10 +1,10 @@
 <script lang="ts">
 	import {
 		api,
-		DRS_BOUNDS,
-		DRS_THRESHOLDS,
-		type DRSEnableRequest,
-		type DRSMode,
+		REBALANCE_BOUNDS,
+		REBALANCE_THRESHOLDS,
+		type RebalanceRequest,
+		type RebalanceMode,
 		type DRSView,
 	} from '#lib/api.js';
 	import { clusterGate } from '#lib/gates.js';
@@ -32,7 +32,7 @@
 	// change continues it (PSI opt-in included) - else the committed config.
 	// svelte-ignore state_referenced_locally
 	const cfg = view.draft?.config ?? view.config;
-	let mode = $state<DRSMode>((cfg?.mode as DRSMode) ?? 'Automatic');
+	let mode = $state<RebalanceMode>((cfg?.mode as RebalanceMode) ?? 'Automatic');
 	let threshold = $state(cfg?.threshold ?? 'AsymmetricLow');
 	let intervalSeconds = $state(cfg?.intervalSeconds ?? 60);
 	let softTainter = $state(cfg?.softTainter ?? true);
@@ -41,12 +41,12 @@
 	// svelte-ignore state_referenced_locally
 	let installPSI = $state(view.draft?.psi ?? false);
 	let showAdvanced = $state(false);
-	const psi = $derived(clusterGate.drsPSI());
+	const psi = $derived(clusterGate.rebalancePSI());
 
 	const inBounds = (v: number, b: { min: number; max: number }) => v >= b.min && v <= b.max;
 	const missing = $derived.by(() => {
 		const m: string[] = [];
-		const b = DRS_BOUNDS;
+		const b = REBALANCE_BOUNDS;
 		if (!inBounds(intervalSeconds, b.intervalSeconds))
 			m.push(`Interval must be ${b.intervalSeconds.min}-${b.intervalSeconds.max}s`);
 		if (!inBounds(evictionNodeLimit, b.evictionNodeLimit))
@@ -63,7 +63,7 @@
 	);
 
 	async function stage() {
-		const req: DRSEnableRequest = {
+		const req: RebalanceRequest = {
 			mode,
 			threshold,
 			intervalSeconds,
@@ -72,7 +72,7 @@
 			evictionTotalLimit,
 		};
 		if (installPSI) req.installPSI = true;
-		await api.enableDRS(req);
+		await api.enableRebalancing(req);
 	}
 </script>
 
@@ -107,7 +107,8 @@
 
 	<FormField label="Migration aggressiveness">
 		<SelectInput bind:value={threshold}>
-			{#each DRS_THRESHOLDS as t (t.value)}<option value={t.value}>{t.label} — {t.detail}</option
+			{#each REBALANCE_THRESHOLDS as t (t.value)}<option value={t.value}
+					>{t.label}: {t.detail}</option
 				>{/each}
 		</SelectInput>
 	</FormField>
@@ -115,8 +116,8 @@
 	<FormField label="Evaluation interval (seconds)">
 		<TextInput
 			type="number"
-			min={DRS_BOUNDS.intervalSeconds.min}
-			max={DRS_BOUNDS.intervalSeconds.max}
+			min={REBALANCE_BOUNDS.intervalSeconds.min}
+			max={REBALANCE_BOUNDS.intervalSeconds.max}
 			bind:value={intervalSeconds}
 		/>
 	</FormField>
@@ -139,16 +140,16 @@
 				<FormField label="Max migrations per node">
 					<TextInput
 						type="number"
-						min={DRS_BOUNDS.evictionNodeLimit.min}
-						max={DRS_BOUNDS.evictionNodeLimit.max}
+						min={REBALANCE_BOUNDS.evictionNodeLimit.min}
+						max={REBALANCE_BOUNDS.evictionNodeLimit.max}
 						bind:value={evictionNodeLimit}
 					/>
 				</FormField>
 				<FormField label="Max migrations cluster-wide">
 					<TextInput
 						type="number"
-						min={DRS_BOUNDS.evictionTotalLimit.min}
-						max={DRS_BOUNDS.evictionTotalLimit.max}
+						min={REBALANCE_BOUNDS.evictionTotalLimit.min}
+						max={REBALANCE_BOUNDS.evictionTotalLimit.max}
 						bind:value={evictionTotalLimit}
 					/>
 				</FormField>

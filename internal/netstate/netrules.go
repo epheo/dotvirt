@@ -154,7 +154,7 @@ func evalRank(k model.PolicyKind) int {
 	switch k {
 	case model.PolicyAdmin:
 		return 0
-	case model.PolicyDFW:
+	case model.PolicyProjectRule:
 		return 1
 	case model.PolicyBaseline:
 		return 2

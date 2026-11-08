@@ -110,7 +110,7 @@ func verifyEdit(out []byte, defaultNS, namespace, name string, edit VMEdit) erro
 		want(!ok, "label "+k+" removal")
 	}
 	if edit.DRSExclude != nil {
-		want(vm.DRSExclude == *edit.DRSExclude, "DRS exclusion")
+		want(vm.DRSExclude == *edit.DRSExclude, "rebalancing exclusion")
 	}
 	if edit.EvictionStrategy != nil {
 		want(vm.EvictionStrategy == *edit.EvictionStrategy, "eviction strategy")

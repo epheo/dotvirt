@@ -35,7 +35,7 @@
 	// Summary shows (cluster capacity, the host fleet, the network topology, the
 	// storage classes). The tab SET follows the object kind: compute containers
 	// carry the full set, hosts drop Permissions (nodes aren't namespaced),
-	// segments and storage classes are fact sheets (Summary + their VMs).
+	// networks and storage classes are fact sheets (Summary + their VMs).
 	let {
 		scope,
 		section,

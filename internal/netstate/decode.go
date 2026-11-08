@@ -87,14 +87,14 @@ func (s subject) summary(red *Redaction) string {
 	return strings.TrimSpace(orAny(selectorSummary(s.ns, red), "all namespaces") + " " + prefixed("pods ", selectorSummary(s.pod, nil)))
 }
 
-// decodeNetpol reads a NetworkPolicy: the project east-west DFW rules. A
+// decodeNetpol reads a NetworkPolicy: the project rules. A
 // policy with no rules for a declared direction default-denies it - the view
 // derives that hint from kind + empty rules, so nothing is synthesized here.
 func decodeNetpol(u *unstructured.Unstructured) *policy {
 	doc := decode[netgen.NetworkPolicyDoc](u)
 	ns := u.GetNamespace()
 	p := &policy{
-		view:    model.Policy{Name: u.GetName(), Kind: model.PolicyDFW, Namespace: ns, Backing: "NetworkPolicy"},
+		view:    model.Policy{Name: u.GetName(), Kind: model.PolicyProjectRule, Namespace: ns, Backing: "NetworkPolicy"},
 		subject: subject{pod: &doc.Spec.PodSelector},
 	}
 	p.denyIngress, p.denyEgress = netpolTypes(doc)
@@ -125,7 +125,7 @@ func decodeANP(u *unstructured.Unstructured) *policy  { return decodeAdmin(u, fa
 func decodeBANP(u *unstructured.Unstructured) *policy { return decodeAdmin(u, true) }
 
 // decodeAdmin reads an AdminNetworkPolicy or (baseline) the
-// BaselineAdminNetworkPolicy - the cluster-wide DFW tiers above/below tenant
+// BaselineAdminNetworkPolicy - the cluster rule tiers above/below tenant
 // NetworkPolicies.
 func decodeAdmin(u *unstructured.Unstructured, baseline bool) *policy {
 	doc := decode[netgen.AdminNetworkPolicyDoc](u)
@@ -153,8 +153,8 @@ func decodeAdmin(u *unstructured.Unstructured, baseline bool) *policy {
 	return p.finish()
 }
 
-// decodeGateway reads a namespace's EgressFirewall - the Tier-1 gateway
-// firewall: ordered first-match allow/deny against external destinations.
+// decodeGateway reads a namespace's EgressFirewall - its outbound
+// rules: ordered first-match allow/deny against external destinations.
 func decodeGateway(u *unstructured.Unstructured) *policy {
 	doc := decode[netgen.EgressFirewallDoc](u)
 	p := &policy{view: model.Policy{Name: u.GetName(), Kind: model.PolicyGateway, Namespace: u.GetNamespace(), Backing: "EgressFirewall"}}
@@ -164,7 +164,7 @@ func decodeGateway(u *unstructured.Unstructured) *policy {
 	return p.finish()
 }
 
-// decodeEgressIP reads a cluster-scoped EgressIP - the Tier-0 SNAT pool. The
+// decodeEgressIP reads a cluster-scoped EgressIP - a fixed outbound IP pool. The
 // one rule row carries the pool; the subject is the namespaces it pins.
 func decodeEgressIP(u *unstructured.Unstructured) *policy {
 	doc := decode[netgen.EgressIPDoc](u)
@@ -183,7 +183,7 @@ func decodeEgressIP(u *unstructured.Unstructured) *policy {
 }
 
 // decodeExtRoute reads a cluster-scoped AdminPolicyBasedExternalRoute - the
-// Tier-0 static next-hop route for the selected projects' egress.
+// cluster edge static next-hop route for the selected projects' egress.
 func decodeExtRoute(u *unstructured.Unstructured) *policy {
 	doc := decode[netgen.ExternalRouteDoc](u)
 	p := &policy{

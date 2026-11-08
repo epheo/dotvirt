@@ -166,7 +166,9 @@
 					onclick={() => {
 						const c = ctx.kind === 'container' ? ctx : null;
 						ui.ctx = null;
-						ui.modal = c ? { kind: 'dfw', namespaces: authorNS, namespace: authorHere } : null;
+						ui.modal = c
+							? { kind: 'projectRule', namespaces: authorNS, namespace: authorHere }
+							: null;
 					}}
 					disabled={!!ruleOff}
 					title={ruleOff || 'Limit which traffic reaches VMs here (NetworkPolicy)'}
