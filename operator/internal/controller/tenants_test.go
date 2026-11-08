@@ -8,6 +8,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/meta"
@@ -289,17 +290,67 @@ func TestCacheByObjectScope(t *testing.T) {
 
 // An ApplicationSet that reports an error freezes every tenant Application
 // where it is (an app image without the namespace parameter, say): ArgoReady
-// says so instead of reading Ready.
+// says so instead of reading Ready, and since nothing watches the
+// ApplicationSet, the pass polls it on settleRetry until it clears.
 func TestArgoReadyCarriesApplicationSetError(t *testing.T) {
 	dv := testCR()
-	appset := argoObj("ApplicationSet", "argocd", "dotvirt-projects", install.Labels(dv))
-	appset.Object["status"] = map[string]any{"conditions": []any{
-		map[string]any{"type": "ErrorOccurred", "status": "True", "message": `map has no entry for key "namespace"`},
-	}}
+	appset := erroredAppSet(dv, `map has no entry for key "namespace"`)
 	c := testBuilder(t).WithObjects(dv, appset).Build()
-	reconcileOnce(t, newReconciler(c, depsOK), dv)
+	r := newReconciler(c, depsOK)
+	res := reconcileOnce(t, r, dv)
 	cond := meta.FindStatusCondition(getCR(t, c, dv).Status.Conditions, dotvirtv1alpha1.ConditionArgoReady)
 	if cond == nil || cond.Status != metav1.ConditionFalse || !strings.Contains(cond.Message, `no entry for key "namespace"`) {
 		t.Errorf("ArgoReady = %+v", cond)
 	}
+	if res.RequeueAfter <= 0 || res.RequeueAfter > settleRetry {
+		t.Errorf("RequeueAfter = %v, want at most %v while ArgoReady is not True", res.RequeueAfter, settleRetry)
+	}
+
+	if err := c.Get(context.Background(), client.ObjectKeyFromObject(appset), appset); err != nil {
+		t.Fatal(err)
+	}
+	delete(appset.Object, "status")
+	if err := c.Update(context.Background(), appset); err != nil {
+		t.Fatal(err)
+	}
+	res = reconcileOnce(t, r, dv)
+	if cond := meta.FindStatusCondition(getCR(t, c, dv).Status.Conditions, dotvirtv1alpha1.ConditionArgoReady); cond == nil || cond.Status != metav1.ConditionTrue {
+		t.Errorf("ArgoReady once the error clears = %+v, want True", cond)
+	}
+	if res.RequeueAfter != driftResync {
+		t.Errorf("RequeueAfter = %v, want the drift resync %v once Argo is ready", res.RequeueAfter, driftResync)
+	}
+}
+
+// An ApplicationSet error that outlasts driftResync is not Argo recovering on
+// its own: the pass falls back to the drift timer instead of polling forever.
+func TestArgoNotReadyPollsOnlyWhileRecovering(t *testing.T) {
+	dv := testCR()
+	c := testBuilder(t).WithObjects(dv, erroredAppSet(dv, "connection refused")).Build()
+	r := newReconciler(c, depsOK)
+	if res := reconcileOnce(t, r, dv); res.RequeueAfter != settleRetry {
+		t.Fatalf("RequeueAfter = %v, want %v as ArgoReady turns False", res.RequeueAfter, settleRetry)
+	}
+	cond := meta.FindStatusCondition(getCR(t, c, dv).Status.Conditions, dotvirtv1alpha1.ConditionArgoReady)
+	if cond == nil || cond.Status != metav1.ConditionFalse {
+		t.Fatalf("ArgoReady = %+v, want False", cond)
+	}
+	since := cond.LastTransitionTime.Time
+
+	r.now = func() time.Time { return since.Add(driftResync - time.Second) }
+	if res := reconcileOnce(t, r, dv); res.RequeueAfter != settleRetry {
+		t.Errorf("RequeueAfter = %v, want %v inside the recovery window", res.RequeueAfter, settleRetry)
+	}
+	r.now = func() time.Time { return since.Add(driftResync) }
+	if res := reconcileOnce(t, r, dv); res.RequeueAfter != driftResync {
+		t.Errorf("RequeueAfter = %v, want the drift resync %v past the recovery window", res.RequeueAfter, driftResync)
+	}
+}
+
+func erroredAppSet(dv *dotvirtv1alpha1.Dotvirt, msg string) *unstructured.Unstructured {
+	appset := argoObj("ApplicationSet", "argocd", "dotvirt-projects", install.Labels(dv))
+	appset.Object["status"] = map[string]any{"conditions": []any{
+		map[string]any{"type": "ErrorOccurred", "status": "True", "message": msg},
+	}}
+	return appset
 }
