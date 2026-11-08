@@ -152,23 +152,20 @@ func foldDRSBand(load *model.HostLoad, threshold string) {
 }
 
 // handleHostLoad returns the worker utilization distribution behind the DRS
-// balance card. Node-level data: the distribution is cached once for all
-// callers, so a node-read SSAR must gate it here - on a cache hit the
-// caller's token never reaches Thanos, and without the gate a hit would hand
-// a tenant the node data an admin's token fetched. The band reflects the
-// platform repo's committed DRS threshold - the configuration merges have
+// balance card. Node-level data, gated by nodeMetricsScope. The band reflects
+// the platform repo's committed DRS threshold - the configuration merges have
 // made real - and is absent until DRS is configured.
 func (s *Server) handleHostLoad(w http.ResponseWriter, r *http.Request) {
-	id, ok := s.nodeMetricsScope(w, r)
+	who, ok := s.nodeMetricsScope(w, r)
 	if !ok {
 		return
 	}
-	load, err := s.metrics.HostLoad(r.Context(), id.Token)
+	load, err := s.metrics.HostLoad(r.Context(), who)
 	if err != nil {
 		fail(w, err)
 		return
 	}
-	if s.cfg.PlatformRepo != "" {
+	if s.cfg.PlatformRepo != "" && load.Unavailable == "" {
 		platform := s.platformProject()
 		if st, err := s.reader.DRSState(platform); err == nil && st.Configured && st.Config != nil {
 			foldDRSBand(&load, st.Config.Threshold)
@@ -178,14 +175,13 @@ func (s *Server) handleHostLoad(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleHostCapacity returns each worker's committed-vs-allocatable picture.
-// Node-level data cached once for all callers, so the same node-read SSAR
-// gate as handleHostLoad applies, for the same reason.
+// Node-level data, gated by nodeMetricsScope.
 func (s *Server) handleHostCapacity(w http.ResponseWriter, r *http.Request) {
-	id, ok := s.nodeMetricsScope(w, r)
+	who, ok := s.nodeMetricsScope(w, r)
 	if !ok {
 		return
 	}
-	hc, err := s.metrics.Capacity(r.Context(), id.Token)
+	hc, err := s.metrics.Capacity(r.Context(), who)
 	if err != nil {
 		fail(w, err)
 		return
@@ -194,28 +190,29 @@ func (s *Server) handleHostCapacity(w http.ResponseWriter, r *http.Request) {
 }
 
 // nodeMetricsScope is the shared gate of the node-data handlers: metrics wired,
-// caller resolvable, and a node-read SSAR - required because these responses are
-// cached once for ALL callers, so on a cache hit the caller's token never
-// reaches Thanos and RBAC must be enforced here.
-func (s *Server) nodeMetricsScope(w http.ResponseWriter, r *http.Request) (auth.Identity, bool) {
+// caller resolvable, a node-read SSAR, and the caller's metrics reach. The
+// responses are cached for every wide caller, so on a cache hit the caller's
+// token never reaches Thanos: node read decides who sees node data here, and
+// only a wide caller is served it (metrics.HostLoad).
+func (s *Server) nodeMetricsScope(w http.ResponseWriter, r *http.Request) (metrics.Caller, bool) {
 	if !s.metricsReady(w) {
-		return auth.Identity{}, false
+		return metrics.Caller{}, false
 	}
 	id, c, err := s.userCluster(r)
 	if err != nil {
 		fail(w, unavailable(err))
-		return auth.Identity{}, false
+		return metrics.Caller{}, false
 	}
 	ok, err := s.can(r.Context(), id, c, refQ(verbList, ssarNodes, ""))
 	if err != nil {
 		fail(w, s.reviewFailed(r.Context(), id, err))
-		return auth.Identity{}, false
+		return metrics.Caller{}, false
 	}
 	if !ok {
 		fail(w, fmt.Errorf("%w: node metrics require node read access", model.ErrForbidden))
-		return auth.Identity{}, false
+		return metrics.Caller{}, false
 	}
-	return id, true
+	return s.metricsCaller(r.Context(), id, c), true
 }
 
 // handleScopeMetrics returns the per-VM top-consumer time-series for a container

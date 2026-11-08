@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -369,6 +370,41 @@ func TestCacheKeepsCallersApart(t *testing.T) {
 	}
 	if cs, _ := c.ClusterSummary(ctx, other, []string{"a", "b"}, "", false); cs.Unavailable != model.MetricsForbidden {
 		t.Errorf("one tenant's fill reached another: %+v", cs)
+	}
+}
+
+// Node views come only from the cluster-wide port: an admin's fill never
+// reaches a node reader without that port's right, who is told forbidden
+// and sends no query.
+func TestNodeViewsServeOnlyWideCallers(t *testing.T) {
+	var hits atomic.Int64
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits.Add(1)
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprint(w, `{"status":"success","data":{"result":[{"metric":{"node":"w1","instance":"w1"},"value":[100,"0.5"]}]}}`)
+	}))
+	defer srv.Close()
+	c, err := New(srv.URL, srv.URL, "", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	admin, reader := Caller{Token: adminTok, Wide: true}, Caller{Token: "node-reader"}
+	if load, err := c.HostLoad(ctx, admin); err != nil || len(load.Nodes) != 1 {
+		t.Fatalf("admin host load = %+v, %v", load, err)
+	}
+	if hc, err := c.Capacity(ctx, admin); err != nil || len(hc.Nodes) != 1 {
+		t.Fatalf("admin capacity = %+v, %v", hc, err)
+	}
+	filled := hits.Load()
+	if load, err := c.HostLoad(ctx, reader); err != nil || load.Unavailable != model.MetricsForbidden || len(load.Nodes) != 0 {
+		t.Errorf("node reader host load = %+v, %v, want forbidden and no nodes", load, err)
+	}
+	if hc, err := c.Capacity(ctx, reader); err != nil || hc.Unavailable != model.MetricsForbidden || len(hc.Nodes) != 0 {
+		t.Errorf("node reader capacity = %+v, %v, want forbidden and no nodes", hc, err)
+	}
+	if hits.Load() != filled {
+		t.Error("a caller who is not wide sent a node query")
 	}
 }
 

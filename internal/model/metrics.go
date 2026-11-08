@@ -25,8 +25,9 @@ type HostCapacityNode struct {
 // HostCapacity is the per-worker allocation/overcommit breakdown behind the
 // host capacity card - the cluster overcommit ratios, per host.
 type HostCapacity struct {
-	Updated int64              `json:"updated"`
-	Nodes   []HostCapacityNode `json:"nodes"`
+	Updated     int64              `json:"updated"`
+	Nodes       []HostCapacityNode `json:"nodes"`
+	Unavailable MetricsReason      `json:"unavailable,omitempty"`
 }
 
 // MetricSeries is one line in a chart: a value per timestamp in the parent
@@ -135,6 +136,8 @@ type HostLoad struct {
 	Mean    float64      `json:"mean"` // CPU percent
 	Nodes   []HostWorker `json:"nodes"`
 	Band    *HostBand    `json:"band,omitempty"`
+
+	Unavailable MetricsReason `json:"unavailable,omitempty"`
 }
 
 // QuotaItem is one resource row of a ResourceQuota: current usage against the

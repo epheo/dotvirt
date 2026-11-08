@@ -660,6 +660,7 @@ export interface HostCapacityNode {
 export interface HostCapacity {
   updated: number /* int64 */;
   nodes: HostCapacityNode[];
+  unavailable?: MetricsReason;
 }
 /**
  * MetricSeries is one line in a chart: a value per timestamp in the parent
@@ -777,6 +778,7 @@ export interface HostLoad {
   mean: number /* float64 */; // CPU percent
   nodes: HostWorker[];
   band?: HostBand;
+  unavailable?: MetricsReason;
 }
 /**
  * QuotaItem is one resource row of a ResourceQuota: current usage against the

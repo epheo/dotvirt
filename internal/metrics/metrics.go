@@ -303,12 +303,17 @@ func byLabel(vec []labeledValue, label string) map[string]float64 {
 // cordon state - are joined here rather than in PromQL (node-exporter labels
 // nodes `instance`, kube-state-metrics labels them `node`; a Go join beats a
 // label_replace). Node-level data, same sensitivity class as the
-// node-allocatable totals ClusterSummary serves; cached once for all users.
-func (c *Client) HostLoad(ctx context.Context, token string) (model.HostLoad, error) {
-	if v, ok := c.hosts.Get("hosts"); ok {
+// node-allocatable totals ClusterSummary serves: only the cluster-wide port
+// has it, so only a wide caller reads it, and wide callers share one entry.
+func (c *Client) HostLoad(ctx context.Context, who Caller) (model.HostLoad, error) {
+	if !who.Wide {
+		return model.HostLoad{Updated: time.Now().Unix(), Nodes: []model.HostWorker{}, Unavailable: model.MetricsForbidden}, nil
+	}
+	key := who.key("hosts")
+	if v, ok := c.hosts.Get(key); ok {
 		return v, nil
 	}
-	r := c.read(token)
+	r := c.read(who.Token)
 	util := byLabel(r.vector(ctx, "", `1 - avg by(instance) (rate(node_cpu_seconds_total{mode="idle"}[2m]))`), "instance")
 	mem := byLabel(r.vector(ctx, "", `1 - node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes`), "instance")
 	unsched := byLabel(r.vector(ctx, "", `kube_node_spec_unschedulable`), "node")
@@ -337,7 +342,7 @@ func (c *Client) HostLoad(ctx context.Context, token string) (model.HostLoad, er
 	}
 	load.Mean = sum / float64(len(nodes))
 	if _, whole := r.outcome(); whole {
-		c.hosts.Put("hosts", load)
+		c.hosts.Put(key, load)
 	}
 	return load, nil
 }
@@ -346,12 +351,16 @@ func (c *Client) HostLoad(ctx context.Context, token string) (model.HostLoad, er
 // against its allocatable capacity - the per-host breakdown of the cluster
 // overcommit ratios ClusterSummary serves. kube-state-metrics and the KubeVirt
 // VMI series both label nodes `node`, so the join is direct. Node-level data,
-// same sensitivity class as HostLoad; cached once for all users.
-func (c *Client) Capacity(ctx context.Context, token string) (model.HostCapacity, error) {
-	if v, ok := c.capacity.Get("capacity"); ok {
+// served and cached like HostLoad.
+func (c *Client) Capacity(ctx context.Context, who Caller) (model.HostCapacity, error) {
+	if !who.Wide {
+		return model.HostCapacity{Updated: time.Now().Unix(), Nodes: []model.HostCapacityNode{}, Unavailable: model.MetricsForbidden}, nil
+	}
+	key := who.key("capacity")
+	if v, ok := c.capacity.Get(key); ok {
 		return v, nil
 	}
-	r := c.read(token)
+	r := c.read(who.Token)
 	cpuAlloc := byLabel(r.vector(ctx, "", `kube_node_status_allocatable{resource="cpu"}`), "node")
 	memAlloc := byLabel(r.vector(ctx, "", `kube_node_status_allocatable{resource="memory"}`), "node")
 	vcpu := byLabel(r.vector(ctx, "", nodeVCPUs()), "node")
@@ -387,7 +396,7 @@ func (c *Client) Capacity(ctx context.Context, token string) (model.HostCapacity
 
 	out := model.HostCapacity{Updated: time.Now().Unix(), Nodes: nodes}
 	if _, whole := r.outcome(); whole {
-		c.capacity.Put("capacity", out)
+		c.capacity.Put(key, out)
 	}
 	return out, nil
 }

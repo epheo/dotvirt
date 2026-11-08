@@ -286,7 +286,7 @@ func TestHostLoadDistribution(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	load, err := mustNew(t, srv.URL).HostLoad(context.Background(), "tok")
+	load, err := mustNew(t, srv.URL).HostLoad(context.Background(), wide)
 	if err != nil {
 		t.Fatalf("HostLoad: %v", err)
 	}
@@ -315,7 +315,7 @@ func TestHostLoadNoWorkers(t *testing.T) {
 		fmt.Fprint(w, `{"status":"success","data":{"resultType":"vector","result":[]}}`)
 	}))
 	defer srv.Close()
-	if _, err := mustNew(t, srv.URL).HostLoad(context.Background(), "tok"); err == nil {
+	if _, err := mustNew(t, srv.URL).HostLoad(context.Background(), wide); err == nil {
 		t.Fatal("want an error for an empty worker set")
 	}
 }
@@ -357,7 +357,7 @@ func TestCapacity(t *testing.T) {
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
-	cap, err := c.Capacity(context.Background(), "tok")
+	cap, err := c.Capacity(context.Background(), wide)
 	if err != nil {
 		t.Fatalf("Capacity: %v", err)
 	}
@@ -477,11 +477,11 @@ func TestHostLoadNotCachedOnQueryError(t *testing.T) {
 	}))
 	defer srv.Close()
 	c := mustNew(t, srv.URL)
-	if _, err := c.HostLoad(context.Background(), "tok"); err != nil {
+	if _, err := c.HostLoad(context.Background(), wide); err != nil {
 		t.Fatal(err)
 	}
 	first := hits.Load()
-	if _, err := c.HostLoad(context.Background(), "tok"); err != nil {
+	if _, err := c.HostLoad(context.Background(), wide); err != nil {
 		t.Fatal(err)
 	}
 	if hits.Load() == first {
