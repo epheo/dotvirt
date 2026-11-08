@@ -169,7 +169,7 @@ test('a platform stager without platform read reviews their own platform PRs', a
 	await page.goto('/changes/platform?tab=review');
 	const main = page.locator('main');
 	// The tree reaches the platform through the caller's own PRs.
-	await expect(page.locator('aside a[href="/changes/platform"]')).toBeVisible();
+	await expect(page.locator('aside').getByRole('link', { name: /^platform/ })).toBeVisible();
 
 	await main.getByRole('button', { name: /PR #7/ }).click();
 	await expect(main.getByText('dc-vlan-120').first()).toBeVisible();
