@@ -2,8 +2,11 @@ package manifest
 
 import (
 	"fmt"
+	"slices"
 	"sort"
 	"strings"
+
+	"go.yaml.in/yaml/v3"
 
 	"github.com/epheo/dotvirt/internal/model"
 )
@@ -150,7 +153,8 @@ func groupDesc(g model.PlacementGroup) string {
 // instancetype<->inline mutual exclusion that applySizing enforces - so the preview
 // never shows an inline cpu/memory change that will actually be stripped, nor
 // hides the removal of the representation being replaced (e.g. a heal that only
-// strips a stray inline block, or a mode switch). Mirrors applySizing's outcome.
+// strips a stray inline block, or a mode switch). Mirrors applySizing's outcome
+// as far as model.VM shows it; StripChanges adds the rest.
 func sizingChanges(current model.VM, edit VMEdit) []model.Change {
 	mode := ""
 	if edit.Sizing != nil {
@@ -193,6 +197,56 @@ func sizingChanges(current model.VM, edit VMEdit) []model.Change {
 		}
 	}
 	return out
+}
+
+// StripChanges lists what an edit leaving VM (namespace, name) in content
+// sized by an instancetype deletes beyond sizingChanges' CPU and Memory rows:
+// requests and limits, and on a switch the shared fields the instancetype
+// sets. A switch to one target was not read for removes every shared field
+// the VM holds, and each such row says so.
+func StripChanges(content []byte, defaultNS, namespace, name string, edit VMEdit, target Target) []model.Change {
+	vm, err := findVM(content, defaultNS, namespace, name)
+	if err != nil || vm == nil {
+		return nil
+	}
+	plan := planSizing(vm, edit, target)
+	domain := domainNode(vm)
+	unread := plan.switched && !target.answers(plan.ref)
+	var out []model.Change
+	for _, f := range sizingFields {
+		n := at(domain, f.path)
+		if f.label == "" || n == nil || !slices.Contains(plan.strip, f.path) {
+			continue
+		}
+		if f.path == "resources.requests.memory" && at(domain, "memory.guest") == nil {
+			continue // sizingChanges' Memory row reads it there
+		}
+		from := oneLine(n)
+		if unread && !f.always {
+			from += " (could not read " + plan.ref.Name + ")"
+		}
+		out = append(out, model.Change{Field: f.label, Action: "remove", From: from, Restart: true})
+	}
+	return out
+}
+
+// oneLine renders a removed value for a preview row.
+func oneLine(n *yaml.Node) string {
+	if n.Kind != yaml.MappingNode {
+		return n.Value
+	}
+	parts := []string{}
+	for i := 0; i+1 < len(n.Content); i += 2 {
+		k, v := n.Content[i].Value, n.Content[i+1]
+		if v.Kind == yaml.ScalarNode {
+			k += ": " + v.Value
+		}
+		parts = append(parts, k)
+	}
+	if len(parts) == 0 {
+		return "{}"
+	}
+	return strings.Join(parts, ", ")
 }
 
 // DiffVMs renders the difference between two parsed VMs (e.g. running vs main)

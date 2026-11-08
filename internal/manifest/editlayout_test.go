@@ -237,17 +237,17 @@ func TestVerifyScopeRefusesCollateralDamage(t *testing.T) {
 		"a label's type":             strings.Replace(string(out), "    app: web\n", "    app: true\n", 1),
 		"a disk beside no disk edit": strings.Replace(string(out), "              bus: virtio\n", "              bus: sata\n", 1),
 	} {
-		if err := verifyScope([]byte(guardVM), []byte(damaged), "alpha", "alpha", "web", edit); !errors.Is(err, model.ErrConflict) {
+		if err := verifyScope([]byte(guardVM), []byte(damaged), "alpha", "alpha", "web", edit, nil); !errors.Is(err, model.ErrConflict) {
 			t.Errorf("%s: want ErrConflict, got %v", name, err)
 		}
 	}
 	other := "apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: c\ndata:\n  k: v\n"
 	before := guardVM + "---\n" + other
 	after := string(out) + "---\n" + strings.Replace(other, "k: v", "k: w", 1)
-	if err := verifyScope([]byte(before), []byte(after), "alpha", "alpha", "web", edit); !errors.Is(err, model.ErrConflict) || !strings.Contains(err.Error(), "document 2") {
+	if err := verifyScope([]byte(before), []byte(after), "alpha", "alpha", "web", edit, nil); !errors.Is(err, model.ErrConflict) || !strings.Contains(err.Error(), "document 2") {
 		t.Errorf("another document: want ErrConflict naming it, got %v", err)
 	}
-	if err := verifyScope([]byte(before), []byte(string(out)+"---\n"+other), "alpha", "alpha", "web", edit); err != nil {
+	if err := verifyScope([]byte(before), []byte(string(out)+"---\n"+other), "alpha", "alpha", "web", edit, nil); err != nil {
 		t.Errorf("the edit alone must pass: %v", err)
 	}
 }
@@ -329,7 +329,7 @@ func TestVerifyScopeSeesEmptyValuesAndOrder(t *testing.T) {
 		if c.after == c.before {
 			t.Fatalf("%s: the damage did not apply", name)
 		}
-		if err := verifyScope([]byte(c.before), []byte(c.after), "alpha", "alpha", "web", c.edit); !errors.Is(err, model.ErrConflict) {
+		if err := verifyScope([]byte(c.before), []byte(c.after), "alpha", "alpha", "web", c.edit, nil); !errors.Is(err, model.ErrConflict) {
 			t.Errorf("%s: want ErrConflict, got %v", name, err)
 		}
 	}
