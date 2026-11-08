@@ -48,8 +48,8 @@ type Target struct {
 	Sets []string `json:"sets,omitempty"`
 }
 
-// answers reports whether t was read for ref.
-func (t Target) answers(ref Target) bool {
+// Answers reports whether t was read for ref.
+func (t Target) Answers(ref Target) bool {
 	return t.Read && t.Kind == ref.Kind && t.Name == ref.Name
 }
 
@@ -104,7 +104,7 @@ func planSizing(vm *yaml.Node, edit VMEdit, target Target) sizing {
 		s.ref.Name = *edit.Instancetype
 	}
 	s.switched = cur == nil || s.ref.Name != nodeValue(get(cur, "name"))
-	known := target.answers(s.ref)
+	known := target.Answers(s.ref)
 	for _, f := range sizingFields {
 		if f.always || s.switched && (!known || slices.Contains(target.Sets, f.path)) {
 			s.strip = append(s.strip, f.path)

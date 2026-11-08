@@ -211,7 +211,7 @@ func StripChanges(content []byte, defaultNS, namespace, name string, edit VMEdit
 	}
 	plan := planSizing(vm, edit, target)
 	domain := domainNode(vm)
-	unread := plan.switched && !target.answers(plan.ref)
+	unread := plan.switched && !target.Answers(plan.ref)
 	var out []model.Change
 	for _, f := range sizingFields {
 		n := at(domain, f.path)

@@ -77,7 +77,7 @@ func (c *Coordinator) toChangesetItems(proj project.ProjectInfo, entries []draft
 					if err := namedVM(e.SourceFile, current, e.Namespace, e.Name); err != nil {
 						return nil, err
 					}
-					out, err := manifest.ApplyEdit(current, defaultNamespace(e.SourceFile), e.Namespace, e.Name, edit)
+					out, err := manifest.ApplyEditFor(current, defaultNamespace(e.SourceFile), e.Namespace, e.Name, edit, targetOf(e))
 					if err != nil {
 						return nil, &staleEdit{entry: e, base: c.baseBranch, err: err}
 					}
