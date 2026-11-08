@@ -15,6 +15,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"sort"
+	"strings"
 	"sync"
 
 	"github.com/epheo/dotvirt/internal/manifest"
@@ -336,6 +337,38 @@ func (s *Store) List(user, project string) ([]Entry, error) {
 		return nil, err
 	}
 	return sortedEntries(d), nil
+}
+
+// Projects lists the projects user's drafts hold an entry in. The directory
+// is the index: every write lands on disk before memory moves, and an emptied
+// draft's file is removed. Each file is loaded all the same, as a draft
+// holding only stale creates reads as empty.
+func (s *Store) Projects(user string) ([]string, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	files, err := os.ReadDir(filepath.Join(s.dir, safeSegment(user)))
+	if err != nil && !os.IsNotExist(err) {
+		return nil, fmt.Errorf("list drafts of %s: %w", user, err)
+	}
+	var out []string
+	for _, f := range files {
+		seg, ok := strings.CutSuffix(f.Name(), ".json")
+		if !ok || f.IsDir() {
+			continue
+		}
+		project, err := url.PathUnescape(seg)
+		if err != nil {
+			continue
+		}
+		d, err := s.loadLocked(user, project)
+		if err != nil {
+			return nil, err
+		}
+		if len(d) > 0 {
+			out = append(out, project)
+		}
+	}
+	return out, nil
 }
 
 func sortedEntries(d map[string]Entry) []Entry {
