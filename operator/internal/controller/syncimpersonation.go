@@ -6,7 +6,6 @@ import (
 	"encoding/hex"
 	"fmt"
 	"maps"
-	"path"
 	"slices"
 	"strings"
 	"sync"
@@ -15,12 +14,14 @@ import (
 	"golang.org/x/sync/errgroup"
 	authzv1 "k8s.io/api/authorization/v1"
 	corev1 "k8s.io/api/core/v1"
+	rbacv1 "k8s.io/api/rbac/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	dotvirtv1alpha1 "github.com/epheo/dotvirt/operator/api/v1alpha1"
 	"github.com/epheo/dotvirt/operator/internal/install"
@@ -42,17 +43,16 @@ type syncTier struct {
 	// any other is not dotvirt's.
 	appProjects map[string]bool
 	// appNamespaces are the namespace patterns the instance reads
-	// Applications from: its own namespace and its sourceNamespaces.
+	// Applications from (instanceAppNamespaces).
 	appNamespaces []string
 }
 
 // syncProbeAccount is no project's sync account (tenancy.SyncAccount names
-// carry its prefix). Asking what it may do in a project namespace asks what
-// that namespace grants every ServiceAccount of the ArgoCD namespace, so every
-// project's sync account.
+// carry its prefix). Asking what it may do asks what is granted to every
+// ServiceAccount of the ArgoCD namespace, so to every project's sync account.
 const syncProbeAccount = "dotvirt-sync-probe"
 
-// accessProbeLimit bounds the SubjectAccessReviews in flight at once.
+// accessProbeLimit bounds the API calls one verdict has in flight at once.
 const accessProbeLimit = 8
 
 // argoInstance names the ArgoCD resource the operator sets
@@ -82,21 +82,34 @@ func (r *DotvirtReconciler) syncImpersonation(ctx context.Context, dv *dotvirtv1
 	failed := func(err error) (metav1.ConditionStatus, string, string) {
 		return metav1.ConditionFalse, "Error", err.Error()
 	}
+	target := rc.argoNS + "/" + r.argoInstance()
+	// The setting stays with the instance it was set on: one spec.argocd no
+	// longer names gets it back off.
+	if prev := dv.Status.SyncImpersonationInstance; prev != "" && prev != target {
+		if err := r.releaseSyncImpersonation(ctx, prev); err != nil {
+			return failed(err)
+		}
+		dv.Status.SyncImpersonationInstance = ""
+	}
 	inConfig, err := r.impersonationConfigured(ctx, rc.argoNS)
 	if err != nil {
 		return failed(err)
 	}
-	inst, owned, err := r.argoInstanceState(ctx, rc.argoNS)
+	inst, owned, err := r.argoInstanceState(ctx, target)
 	if err != nil {
 		return failed(err)
 	}
-	where := fmt.Sprintf("ArgoCD %s/%s", rc.argoNS, r.argoInstance())
+	if owned {
+		dv.Status.SyncImpersonationInstance = target
+	}
+	where := "ArgoCD " + target
 	opt := dv.Spec.ArgoCD.SyncImpersonation
 	if !opt.Enabled {
 		if owned {
-			if err := r.apply(ctx, install.ArgoCDSyncImpersonation(inst.GetName(), inst.GetNamespace(), false)); err != nil {
+			if err := r.applyShared(ctx, install.ArgoCDSyncImpersonation(inst.GetName(), inst.GetNamespace(), false)); err != nil {
 				return failed(fmt.Errorf("remove %s from %s: %w", install.SyncImpersonationKey, where, err))
 			}
+			dv.Status.SyncImpersonationInstance = ""
 			return metav1.ConditionUnknown, "Disabled", fmt.Sprintf("removed %s from %s; Applications sync as the ArgoCD controller's ServiceAccount again", install.SyncImpersonationKey, where)
 		}
 		if inConfig {
@@ -107,44 +120,88 @@ func (r *DotvirtReconciler) syncImpersonation(ctx context.Context, dv *dotvirtv1
 			return failed(err)
 		}
 		if v.cloneAnywhere {
-			return metav1.ConditionFalse, "CloneAnywhere", fmt.Sprintf("off, and Applications sync as %s, which may create datavolumes/source in every namespace: a DataVolume a tenant repo declares can clone a disk out of any namespace; spec.argocd.syncImpersonation.enabled confines each repo to its project's rights", rc.argoSA)
+			return metav1.ConditionFalse, "CloneAnywhere", "off, and " + cloneWarning(rc)
 		}
 		return metav1.ConditionUnknown, "Disabled", "off: Applications sync as the ArgoCD controller's ServiceAccount"
 	}
 
-	if inConfig || owned {
-		v, err := r.syncVerdict(ctx, dv, rc, scopeOn)
-		if err != nil {
-			return failed(err)
-		}
-		if problems := slices.Concat(v.missing, v.leaks); len(problems) > 0 {
+	if rc.sync.appNamespaces, err = r.instanceAppNamespaces(ctx, rc.argoNS, inst); err != nil {
+		return failed(err)
+	}
+	v, err := r.syncVerdict(ctx, dv, rc, scopeFull)
+	if err != nil {
+		return failed(err)
+	}
+	if inConfig {
+		if problems := slices.Concat(v.missing, v.leaks, foreignProblem(v.foreign)); len(problems) > 0 {
 			return metav1.ConditionFalse, "Degraded", "on; " + strings.Join(problems, "; ")
 		}
 		return metav1.ConditionTrue, "Enabled", fmt.Sprintf("on (%s); each Application syncs as its tier's own ServiceAccount", where)
 	}
-	rc.sync.appNamespaces = instanceAppNamespaces(rc.argoNS, inst)
-	v, err := r.syncVerdict(ctx, dv, rc, scopeGate)
-	if err != nil {
-		return failed(err)
+	// Until argocd-cm carries the setting, the controller's account is still
+	// the one syncing.
+	meanwhile := ""
+	if v.cloneAnywhere {
+		meanwhile = "; meanwhile " + cloneWarning(rc)
+	}
+	pending := fmt.Sprintf("set %s on %s; waiting for %s/argocd-cm to carry it%s", install.SyncImpersonationKey, where, rc.argoNS, meanwhile)
+	if owned {
+		return metav1.ConditionFalse, "Pending", pending
 	}
 	var blockers []string
 	if rc.sync.sharedInUse {
 		blockers = append(blockers, fmt.Sprintf("Applications still use the shared %s AppProject, which names no sync account", install.TenantsProjectName))
 	}
-	if len(v.foreign) > 0 && !opt.IgnoreForeignApplications {
-		blockers = append(blockers, fmt.Sprintf("the instance also syncs Applications outside dotvirt's AppProjects (%s), which would stop syncing; set spec.argocd.syncImpersonation.ignoreForeignApplications to proceed", listSome(v.foreign)))
+	if !opt.IgnoreForeignApplications {
+		blockers = append(blockers, foreignProblem(v.foreign)...)
 	}
 	blockers = append(append(blockers, v.missing...), v.leaks...)
 	if len(blockers) > 0 {
-		return metav1.ConditionFalse, "NotReady", strings.Join(blockers, "; ")
+		return metav1.ConditionFalse, "NotReady", strings.Join(blockers, "; ") + meanwhile
 	}
 	if inst == nil {
-		return metav1.ConditionFalse, "ManualStep", fmt.Sprintf("ready, but there is no %s to set it on: set %s: \"true\" in %s/argocd-cm", where, install.SyncImpersonationKey, rc.argoNS)
+		return metav1.ConditionFalse, "ManualStep", fmt.Sprintf("ready, but there is no %s to set it on: set %s: \"true\" in %s/argocd-cm%s", where, install.SyncImpersonationKey, rc.argoNS, meanwhile)
 	}
-	if err := r.apply(ctx, install.ArgoCDSyncImpersonation(inst.GetName(), inst.GetNamespace(), true)); err != nil {
+	if err := r.applyShared(ctx, install.ArgoCDSyncImpersonation(inst.GetName(), inst.GetNamespace(), true)); apierrors.IsConflict(err) {
+		return metav1.ConditionFalse, "Conflict", fmt.Sprintf("%s on %s is held by %s; dotvirt never takes it: set it to \"true\" there, or release it",
+			install.SyncImpersonationKey, where, strings.Join(install.SyncImpersonationManagers(inst), ", "))
+	} else if err != nil {
 		return failed(fmt.Errorf("set %s on %s: %w", install.SyncImpersonationKey, where, err))
 	}
-	return metav1.ConditionTrue, "Enabled", fmt.Sprintf("set %s on %s; each Application syncs as its tier's own ServiceAccount", install.SyncImpersonationKey, where)
+	dv.Status.SyncImpersonationInstance = target
+	return metav1.ConditionFalse, "Pending", pending
+}
+
+func cloneWarning(rc *reconcileCtx) string {
+	return fmt.Sprintf("Applications sync as %s, which may create datavolumes/source in every namespace: a DataVolume a tenant repo declares can clone a disk out of any namespace; spec.argocd.syncImpersonation.enabled confines each repo to its project's rights", rc.argoSA)
+}
+
+func foreignProblem(foreign []string) []string {
+	if len(foreign) == 0 {
+		return nil
+	}
+	return []string{fmt.Sprintf("Applications outside dotvirt's AppProjects whose AppProject maps no ServiceAccount for them stop syncing (%s); map one in its destinationServiceAccounts, the controller's own account to keep its rights, or set spec.argocd.syncImpersonation.ignoreForeignApplications",
+		listSome(foreign))}
+}
+
+// releaseSyncImpersonation removes the setting from the ArgoCD resource
+// instance (namespace/name) if the operator's apply holds it there. Nothing
+// to do when the resource or its kind is gone.
+func (r *DotvirtReconciler) releaseSyncImpersonation(ctx context.Context, instance string) error {
+	inst, owned, err := r.argoInstanceState(ctx, instance)
+	if err != nil || !owned {
+		return err
+	}
+	if err := r.applyShared(ctx, install.ArgoCDSyncImpersonation(inst.GetName(), inst.GetNamespace(), false)); err != nil {
+		return fmt.Errorf("remove %s from ArgoCD %s: %w", install.SyncImpersonationKey, instance, err)
+	}
+	return nil
+}
+
+// applyShared applies the operator's one field on the shared ArgoCD resource:
+// never forced, and outside the render, which prune must never act on.
+func (r *DotvirtReconciler) applyShared(ctx context.Context, obj client.Object) error {
+	return install.ApplyShared(ctx, r.Client, obj, r.DryRun)
 }
 
 // impersonationConfigured reports whether argocd-cm, what Argo reads, turns
@@ -161,47 +218,92 @@ func (r *DotvirtReconciler) impersonationConfigured(ctx context.Context, argoNS 
 	return cm.Data[install.SyncImpersonationKey] == "true", nil
 }
 
-// argoInstanceState reads the ArgoCD resource the setting goes on, nil when
-// there is none (an instance the argocd-operator does not run), and whether
-// the operator's apply holds the setting there.
-func (r *DotvirtReconciler) argoInstanceState(ctx context.Context, argoNS string) (*unstructured.Unstructured, bool, error) {
+// argoInstanceState reads the ArgoCD resource instance (namespace/name), nil
+// when there is none (an instance the argocd-operator does not run), and
+// whether the operator's apply holds the setting there.
+func (r *DotvirtReconciler) argoInstanceState(ctx context.Context, instance string) (*unstructured.Unstructured, bool, error) {
+	ns, name, _ := strings.Cut(instance, "/")
 	inst := &unstructured.Unstructured{}
 	inst.SetGroupVersionKind(install.ArgoCDGVK)
-	err := r.reader().Get(ctx, types.NamespacedName{Namespace: argoNS, Name: r.argoInstance()}, inst)
+	err := r.reader().Get(ctx, types.NamespacedName{Namespace: ns, Name: name}, inst)
 	if apierrors.IsNotFound(err) || meta.IsNoMatchError(err) {
 		return nil, false, nil
 	}
 	if err != nil {
-		return nil, false, fmt.Errorf("read ArgoCD %s/%s: %w", argoNS, r.argoInstance(), err)
+		return nil, false, fmt.Errorf("read ArgoCD %s: %w", instance, err)
 	}
 	return inst, install.OwnsSyncImpersonation(inst), nil
 }
 
+// instanceAppNamespaces are the namespace patterns the instance reads
+// Applications from: argoNS, and its Applications-in-any-namespace list, from
+// the ArgoCD resource's sourceNamespaces or, without one, argocd-cmd-params-cm.
+// Applications elsewhere are another instance's, which the setting does not
+// reach.
+func (r *DotvirtReconciler) instanceAppNamespaces(ctx context.Context, argoNS string, inst *unstructured.Unstructured) ([]string, error) {
+	out := []string{argoNS}
+	if inst != nil {
+		more, _, _ := unstructured.NestedStringSlice(inst.Object, "spec", "sourceNamespaces")
+		return append(out, more...), nil
+	}
+	var cm corev1.ConfigMap
+	err := r.Get(ctx, types.NamespacedName{Namespace: argoNS, Name: "argocd-cmd-params-cm"}, &cm)
+	if apierrors.IsNotFound(err) {
+		return out, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("read %s/argocd-cmd-params-cm: %w", argoNS, err)
+	}
+	for _, ns := range strings.Split(cm.Data["application.namespaces"], ",") {
+		if ns = strings.TrimSpace(ns); ns != "" {
+			out = append(out, ns)
+		}
+	}
+	return out, nil
+}
+
 // syncVerdict is what stands between the instance and sync impersonation.
 type syncVerdict struct {
-	// missing are grants a sync account lacks: its tier's Applications fail
-	// to sync under impersonation.
+	// missing are grants an account lacks: its tier's Applications fail to
+	// sync under impersonation.
 	missing []string
 	// leaks are grants reaching a project's sync account outside its own
 	// namespaces.
 	leaks []string
-	// foreign are the Applications outside dotvirt's AppProjects, as ns/name.
+	// foreign are the instance's Applications, as ns/name, outside dotvirt's
+	// AppProjects and with no ServiceAccount their AppProject maps.
 	foreign []string
 	// cloneAnywhere says the controller's own account may create
 	// datavolumes/source cluster-wide.
 	cloneAnywhere bool
 }
 
-// syncCache memoizes the verdict: it costs SubjectAccessReviews in proportion
-// to the project namespaces plus a list of every Application, while passes
-// come in bursts (a rollout's Deployment events). One verdict serves until its
-// inputs or the CR's spec change, or driftResync/2 elapses; RBAC moves are not
-// watched, so that timer, or a spec edit, is how a merged grant is seen.
+func (v syncVerdict) clean() bool {
+	return len(v.missing)+len(v.leaks)+len(v.foreign) == 0
+}
+
+// syncCache memoizes the verdict: it costs SubjectAccessReviews and reads in
+// proportion to the project namespaces, while passes come in bursts (a
+// rollout's Deployment events). A clean verdict serves until its inputs or
+// the CR's spec change, or driftResync/2 elapses; one naming a problem only
+// for recheck, since RBAC moves are not watched and a grant merged since, or
+// still reaching the authorizer, must be seen soon.
 type syncCache struct {
 	syncMu      sync.Mutex
 	syncKey     string
 	syncAt      time.Time
 	syncResults syncVerdict
+	// syncRecheck is a test seam; 0 = time.Minute.
+	syncRecheck time.Duration
+}
+
+// recheck is how long a verdict naming a problem serves, and how soon a pass
+// waiting on sync impersonation comes back.
+func (c *syncCache) recheck() time.Duration {
+	if c.syncRecheck > 0 {
+		return c.syncRecheck
+	}
+	return time.Minute
 }
 
 // syncScope is what a verdict covers.
@@ -210,10 +312,8 @@ type syncScope int
 const (
 	// scopeOff: the controller's clone rights, all that matters while not asked.
 	scopeOff syncScope = iota
-	// scopeOn: the sync accounts' grants, all that matters once on.
-	scopeOn
-	// scopeGate: the grants and the foreign Applications, before turning it on.
-	scopeGate
+	// scopeFull: those, every account's grants and the foreign Applications.
+	scopeFull
 )
 
 // syncVerdict evaluates, or reuses, scope's verdict for rc's tier.
@@ -221,7 +321,11 @@ func (r *DotvirtReconciler) syncVerdict(ctx context.Context, dv *dotvirtv1alpha1
 	key := syncInputs(dv.Generation, rc, scope)
 	r.syncMu.Lock()
 	defer r.syncMu.Unlock()
-	if key == r.syncKey && r.clock().Sub(r.syncAt) < driftResync/2 {
+	ttl := driftResync / 2
+	if !r.syncResults.clean() {
+		ttl = r.recheck()
+	}
+	if key == r.syncKey && r.clock().Sub(r.syncAt) < ttl {
 		return r.syncResults, nil
 	}
 	v, err := r.evaluateSync(ctx, rc, scope)
@@ -258,35 +362,46 @@ func createAttrs(group, resource, ns string) authzv1.ResourceAttributes {
 	return authzv1.ResourceAttributes{Verb: "create", Group: group, Resource: resource, Namespace: ns}
 }
 
-// evaluateSync runs the checks. Per project: its sync account may create
-// VirtualMachines and EgressFirewalls in each of its namespaces, and holds no
-// cluster-wide VirtualMachine grant. Per project namespace: it grants nothing
-// to every ServiceAccount of the ArgoCD namespace, so no other project's sync
-// account. A grant naming one project's account in another's namespace is
-// left to that namespace's own admins, who may grant anyone anything there.
-// The platform account may create Namespaces, ClusterUserDefinedNetworks and
-// RoleBindings, and bind the roles project grants name. That is 3 reviews per
-// project namespace plus one per project and 5, bounded to accessProbeLimit in
-// flight; before turning it on, plus one list of every Application. While not
-// asked, the one review of the controller's clone rights.
+func bindAttrs(kind, name, ns string) authzv1.ResourceAttributes {
+	resource := "clusterroles"
+	if kind == "Role" {
+		resource = "roles"
+	}
+	return authzv1.ResourceAttributes{Verb: "bind", Group: rbacv1.GroupName, Resource: resource, Name: name, Namespace: ns}
+}
+
+// cloneSource is creating datavolumes/source cluster-wide: cloning a disk out
+// of any namespace, what CDI authorizes a DataVolume's source against.
+var cloneSource = authzv1.ResourceAttributes{Verb: "create", Group: "cdi.kubevirt.io", Resource: "datavolumes", Subresource: "source"}
+
+// evaluateSync runs the checks (syncChecks, platformRoleChecks) and, for the
+// full scope, finds the unmapped foreign Applications: 3 reviews per project
+// namespace, 2 per project, 3 more, 5 for the platform tier and one per
+// further role its RoleBindings bind, at most accessProbeLimit in flight, plus
+// a list of the Applications and AppProjects and a read of each platform
+// RoleBinding. While not asked, the one review of the controller's clone
+// rights.
 func (r *DotvirtReconciler) evaluateSync(ctx context.Context, rc *reconcileCtx, scope syncScope) (syncVerdict, error) {
 	var v syncVerdict
-	var checks []accessCheck
-	if scope == scopeOff {
-		checks = []accessCheck{{
-			account: rc.argoSA,
-			attrs:   authzv1.ResourceAttributes{Verb: "create", Group: "cdi.kubevirt.io", Resource: "datavolumes", Subresource: "source"},
-			set:     &v.cloneAnywhere,
-		}}
-	} else {
-		checks = syncChecks(rc)
-	}
-	if scope == scopeGate {
-		foreign, err := r.foreignApplications(ctx, rc.sync)
+	checks := []accessCheck{{account: rc.argoSA, attrs: cloneSource, set: &v.cloneAnywhere}}
+	if scope == scopeFull {
+		apps := unstructuredList(install.ArgoGVK("Application"))().(*unstructured.UnstructuredList)
+		if err := r.reader().List(ctx, apps); err != nil {
+			return v, fmt.Errorf("list Applications: %w", err)
+		}
+		foreign, err := r.unmappedApplications(ctx, rc, apps.Items)
 		if err != nil {
 			return v, err
 		}
 		v.foreign = foreign
+		checks = append(checks, syncChecks(rc)...)
+		if rc.sync.platform {
+			roles, err := r.platformRoleChecks(ctx, rc, apps.Items)
+			if err != nil {
+				return v, err
+			}
+			checks = append(checks, roles...)
+		}
 	}
 	verdicts := make([]bool, len(checks))
 	g, gctx := errgroup.WithContext(ctx)
@@ -314,9 +429,25 @@ func (r *DotvirtReconciler) evaluateSync(ctx context.Context, rc *reconcileCtx, 
 	return v, nil
 }
 
-// syncChecks are the grant checks for rc's tier, in a stable order.
+// syncChecks are the grant checks for rc's tier, in a stable order:
+//   - the controller may impersonate the accounts;
+//   - per project, its sync account may create VirtualMachines and
+//     EgressFirewalls in each of its namespaces, and may neither create
+//     VirtualMachines nor clone disks cluster-wide;
+//   - every ServiceAccount of the ArgoCD namespace, so every other project's
+//     sync account, may neither write VirtualMachines in a project namespace
+//     nor clone disks cluster-wide. A grant naming one project's account in
+//     another's namespace is left to that namespace's own admins, who may
+//     grant anyone anything there;
+//   - the platform account may create Namespaces, ClusterUserDefinedNetworks
+//     and RoleBindings, and bind the roles project grants name.
 func syncChecks(rc *reconcileCtx) []accessCheck {
-	var checks []accessCheck
+	checks := []accessCheck{
+		{account: rc.argoSA, attrs: authzv1.ResourceAttributes{Verb: "impersonate", Resource: "serviceaccounts", Namespace: rc.argoNS}, want: true,
+			problem: fmt.Sprintf("the ArgoCD controller %s cannot impersonate ServiceAccounts in %s", rc.argoSA, rc.argoNS)},
+		{account: syncProbeAccount, attrs: cloneSource,
+			problem: fmt.Sprintf("every ServiceAccount of %s may clone disks out of any namespace (datavolumes/source cluster-wide), every project's sync account included", rc.argoNS)},
+	}
 	projectNS := map[string]bool{}
 	for _, account := range slices.Sorted(maps.Keys(rc.sync.accounts)) {
 		project := strings.TrimPrefix(account, tenancy.AppProjectPrefix)
@@ -330,31 +461,94 @@ func syncChecks(rc *reconcileCtx) []accessCheck {
 					problem: fmt.Sprintf("project %s cannot sync EgressFirewalls into %s: %s", project, ns, grant)},
 			)
 		}
-		checks = append(checks, accessCheck{account: account, attrs: createAttrs("kubevirt.io", "virtualmachines", ""),
-			problem: fmt.Sprintf("project %s's sync account %s may create VirtualMachines in every namespace", project, account)})
+		checks = append(checks,
+			accessCheck{account: account, attrs: createAttrs("kubevirt.io", "virtualmachines", ""),
+				problem: fmt.Sprintf("project %s's sync account %s may create VirtualMachines in every namespace", project, account)},
+			accessCheck{account: account, attrs: cloneSource,
+				problem: fmt.Sprintf("project %s's sync account %s may clone disks out of any namespace (datavolumes/source cluster-wide)", project, account)},
+		)
 	}
 	for _, ns := range slices.Sorted(maps.Keys(projectNS)) {
 		checks = append(checks, accessCheck{account: syncProbeAccount, attrs: createAttrs("kubevirt.io", "virtualmachines", ns),
 			problem: fmt.Sprintf("namespace %s lets every ServiceAccount of %s create VirtualMachines, other projects' sync accounts included", ns, rc.argoNS)})
 	}
 	if rc.sync.platform {
-		missing := func(what string) string {
-			return fmt.Sprintf("the platform sync account %s cannot %s (its operand ClusterRoles are not bound)", tenancy.PlatformSyncAccount, what)
-		}
 		for _, c := range []struct {
 			attrs authzv1.ResourceAttributes
 			what  string
 		}{
 			{createAttrs("", "namespaces", ""), "create Namespaces"},
 			{createAttrs("k8s.ovn.org", "clusteruserdefinednetworks", ""), "create ClusterUserDefinedNetworks"},
-			{createAttrs("rbac.authorization.k8s.io", "rolebindings", ""), "create RoleBindings"},
-			{authzv1.ResourceAttributes{Verb: "bind", Group: "rbac.authorization.k8s.io", Resource: "clusterroles", Name: "admin"}, "bind the admin role"},
-			{authzv1.ResourceAttributes{Verb: "bind", Group: "rbac.authorization.k8s.io", Resource: "clusterroles", Name: tenancy.TenantEgressRole}, "bind " + tenancy.TenantEgressRole},
+			{createAttrs(rbacv1.GroupName, "rolebindings", ""), "create RoleBindings"},
+			{bindAttrs("ClusterRole", "admin", ""), "bind the admin role"},
+			{bindAttrs("ClusterRole", tenancy.TenantEgressRole, ""), "bind " + tenancy.TenantEgressRole},
 		} {
-			checks = append(checks, accessCheck{account: tenancy.PlatformSyncAccount, attrs: c.attrs, want: true, problem: missing(c.what)})
+			checks = append(checks, accessCheck{account: tenancy.PlatformSyncAccount, attrs: c.attrs, want: true,
+				problem: fmt.Sprintf("the platform sync account %s cannot %s (its operand ClusterRoles are not bound)", tenancy.PlatformSyncAccount, c.what)})
 		}
 	}
 	return checks
+}
+
+// platformRoleChecks ask that the platform account may bind every role the
+// platform tier's RoleBindings bind beyond the ones project grants name, as
+// the platform Application reports managing them: once impersonation is on,
+// Argo applies a RoleBinding as that account, and the apiserver refuses one
+// binding a role the account may neither bind nor wholly hold. An account
+// holding every right of such a role reads as missing here: a review can only
+// ask for bind.
+func (r *DotvirtReconciler) platformRoleChecks(ctx context.Context, rc *reconcileCtx, apps []unstructured.Unstructured) ([]accessCheck, error) {
+	var refs []types.NamespacedName
+	for _, a := range apps {
+		if a.GetNamespace() != rc.argoNS || a.GetName() != install.PlatformApplicationName {
+			continue
+		}
+		resources, _, _ := unstructured.NestedSlice(a.Object, "status", "resources")
+		for _, res := range resources {
+			m, _ := res.(map[string]any)
+			if m["group"] == rbacv1.GroupName && m["kind"] == "RoleBinding" {
+				ns, _ := m["namespace"].(string)
+				name, _ := m["name"].(string)
+				refs = append(refs, types.NamespacedName{Namespace: ns, Name: name})
+			}
+		}
+	}
+	bindings := make([]*rbacv1.RoleBinding, len(refs))
+	g, gctx := errgroup.WithContext(ctx)
+	g.SetLimit(accessProbeLimit)
+	for i, ref := range refs {
+		g.Go(func() error {
+			rb := &rbacv1.RoleBinding{}
+			// Uncached: a cached read would start a cluster-wide RoleBinding informer.
+			err := r.reader().Get(gctx, ref, rb)
+			if apierrors.IsNotFound(err) {
+				return nil
+			}
+			bindings[i] = rb
+			return err
+		})
+	}
+	if err := g.Wait(); err != nil {
+		return nil, fmt.Errorf("read the platform tier's RoleBindings: %w", err)
+	}
+	seen := map[string]bool{"ClusterRole//admin": true, "ClusterRole//" + tenancy.TenantEgressRole: true}
+	var checks []accessCheck
+	for _, rb := range bindings {
+		if rb == nil {
+			continue
+		}
+		ns := ""
+		if rb.RoleRef.Kind == "Role" {
+			ns = rb.Namespace
+		}
+		if key := rb.RoleRef.Kind + "/" + ns + "/" + rb.RoleRef.Name; !seen[key] {
+			seen[key] = true
+			checks = append(checks, accessCheck{account: tenancy.PlatformSyncAccount, attrs: bindAttrs(rb.RoleRef.Kind, rb.RoleRef.Name, ns), want: true,
+				problem: fmt.Sprintf("the platform sync account %s cannot bind %s %s, which RoleBinding %s/%s in the platform repo binds: grant it bind on that role, or that RoleBinding stops syncing",
+					tenancy.PlatformSyncAccount, rb.RoleRef.Kind, rb.RoleRef.Name, rb.Namespace, rb.Name)})
+		}
+	}
+	return checks, nil
 }
 
 // allowed asks whether account, a ServiceAccount of saNS, may do attrs. Its
@@ -371,33 +565,36 @@ func (r *DotvirtReconciler) allowed(ctx context.Context, saNS, account string, a
 	return sar.Status.Allowed, nil
 }
 
-// instanceAppNamespaces are the namespace patterns the instance reads
-// Applications from: argoNS, and the ArgoCD resource's sourceNamespaces
-// (Applications in any namespace). Applications elsewhere are another
-// instance's, which the setting does not reach.
-func instanceAppNamespaces(argoNS string, inst *unstructured.Unstructured) []string {
-	out := []string{argoNS}
-	if inst != nil {
-		more, _, _ := unstructured.NestedStringSlice(inst.Object, "spec", "sourceNamespaces")
-		out = append(out, more...)
+// unmappedApplications are the instance's Applications (rc's appNamespaces)
+// outside dotvirt's AppProjects whose AppProject maps no ServiceAccount for
+// their destination, as ns/name in name order: the ones impersonation stops.
+func (r *DotvirtReconciler) unmappedApplications(ctx context.Context, rc *reconcileCtx, apps []unstructured.Unstructured) ([]string, error) {
+	projects := unstructuredList(install.ArgoGVK("AppProject"))().(*unstructured.UnstructuredList)
+	if err := r.reader().List(ctx, projects, client.InNamespace(rc.argoNS)); err != nil {
+		return nil, fmt.Errorf("list AppProjects: %w", err)
 	}
-	return out
-}
-
-// foreignApplications are the instance's Applications (tier.appNamespaces)
-// whose AppProject the pass did not render, as ns/name in name order.
-func (r *DotvirtReconciler) foreignApplications(ctx context.Context, tier syncTier) ([]string, error) {
-	apps := unstructuredList(install.ArgoGVK("Application"))().(*unstructured.UnstructuredList)
-	if err := r.reader().List(ctx, apps); err != nil {
-		return nil, fmt.Errorf("list Applications: %w", err)
+	mapped := map[string][]any{}
+	for _, p := range projects.Items {
+		mapped[p.GetName()], _, _ = unstructured.NestedSlice(p.Object, "spec", "destinationServiceAccounts")
 	}
 	var out []string
-	for _, a := range apps.Items {
-		ours := slices.ContainsFunc(tier.appNamespaces, func(pattern string) bool {
-			ok, _ := path.Match(pattern, a.GetNamespace())
-			return ok
-		})
-		if p, _, _ := unstructured.NestedString(a.Object, "spec", "project"); ours && !tier.appProjects[p] {
+	for _, a := range apps {
+		ours := slices.ContainsFunc(rc.sync.appNamespaces, func(pattern string) bool { return argoMatch(pattern, a.GetNamespace(), true) })
+		project, _, _ := unstructured.NestedString(a.Object, "spec", "project")
+		if !ours || rc.sync.appProjects[project] {
+			continue
+		}
+		server, _, _ := unstructured.NestedString(a.Object, "spec", "destination", "server")
+		if name, _, _ := unstructured.NestedString(a.Object, "spec", "destination", "name"); server == "" && name == "in-cluster" {
+			server = install.InClusterServer
+		}
+		ns, _, _ := unstructured.NestedString(a.Object, "spec", "destination", "namespace")
+		if !slices.ContainsFunc(mapped[project], func(e any) bool {
+			entry, _ := e.(map[string]any)
+			s, _ := entry["server"].(string)
+			n, _ := entry["namespace"].(string)
+			return argoMatch(s, server, false) && argoMatch(n, ns, false)
+		}) {
 			out = append(out, a.GetNamespace()+"/"+a.GetName())
 		}
 	}

@@ -2,7 +2,7 @@ package install
 
 import (
 	"encoding/json"
-	"strings"
+	"slices"
 
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -25,13 +25,18 @@ const (
 	// projectPlatform is the privileged tier. Per-project AppProjects are named
 	// by tenancy.AppProjectName.
 	TenantsProjectName = "dotvirt-tenants"
-	projectPlatform    = "dotvirt-platform"
+	projectPlatform    = PlatformApplicationName
 
 	// appTargetRevision is the branch every dotvirt Application syncs, spelled once so
 	// the tenant template and the platform app cannot drift apart.
 	appTargetRevision = "main"
 
-	inClusterServer = "https://kubernetes.default.svc"
+	// InClusterServer is the cluster every dotvirt Application deploys to.
+	InClusterServer = "https://kubernetes.default.svc"
+
+	// PlatformApplicationName names the platform tier's Application and
+	// AppProject.
+	PlatformApplicationName = "dotvirt-platform"
 )
 
 // ArgoGVK is the GroupVersionKind for an argoproj.io resource (used by the builders
@@ -117,11 +122,11 @@ func TenantsAppProject(dv *dotvirtv1alpha1.Dotvirt, argoNS, platformRepo, operat
 		"description": "dotvirt tenant projects — namespaced workloads only.",
 		"sourceRepos": []any{repoPrefix(platformRepo)},
 		"destinations": []any{
-			map[string]any{"server": inClusterServer, "namespace": "*"},
-			map[string]any{"server": inClusterServer, "namespace": "!openshift-*"},
-			map[string]any{"server": inClusterServer, "namespace": "!kube-*"},
-			map[string]any{"server": inClusterServer, "namespace": "!" + operatorNS},
-			map[string]any{"server": inClusterServer, "namespace": "!" + argoNS},
+			map[string]any{"server": InClusterServer, "namespace": "*"},
+			map[string]any{"server": InClusterServer, "namespace": "!openshift-*"},
+			map[string]any{"server": InClusterServer, "namespace": "!kube-*"},
+			map[string]any{"server": InClusterServer, "namespace": "!" + operatorNS},
+			map[string]any{"server": InClusterServer, "namespace": "!" + argoNS},
 		},
 	}))
 }
@@ -145,11 +150,11 @@ const (
 //
 // Its sync account (tenancy.SyncAccount, named like the AppProject) is the
 // ServiceAccount Argo syncs the project's Application as once sync
-// impersonation is on (SyncServiceAccount).
+// impersonation is on (syncAccounts).
 func TenantAppProject(dv *dotvirtv1alpha1.Dotvirt, argoNS, name, project string, namespaces, sourceRepos []string) *unstructured.Unstructured {
 	destinations := make([]any, 0, len(namespaces))
 	for _, ns := range namespaces {
-		destinations = append(destinations, map[string]any{"server": inClusterServer, "namespace": ns})
+		destinations = append(destinations, map[string]any{"server": InClusterServer, "namespace": ns})
 	}
 	repos := toAny(sourceRepos)
 	u := argoObject("AppProject", name, argoNS, dv, tenantWhitelist(map[string]any{
@@ -170,47 +175,14 @@ func TenantAppProject(dv *dotvirtv1alpha1.Dotvirt, argoNS, name, project string,
 // go. Inert while it is off, so it is rendered either way: the setting can
 // then flip with no window in which an Application names no account, and an
 // instance switched on by hand syncs dotvirt's tiers as their own accounts.
+// The account is a name only, never created: Argo impersonates it by username
+// and RBAC binds it by name, so the platform repo's grants are all it is.
 func syncAccounts(argoNS, account string) []any {
 	return []any{map[string]any{
-		"server":                inClusterServer,
+		"server":                InClusterServer,
 		"namespace":             "*",
 		"defaultServiceAccount": argoNS + ":" + account,
 	}}
-}
-
-// SyncServiceAccount is the ServiceAccount an AppProject's
-// destinationServiceAccounts name (syncAccounts), nil when it names none.
-// Owner-referenced to that AppProject, so the garbage collector removes the
-// two together and the operator needs no delete grant on ServiceAccounts,
-// whose tenant names it cannot list in advance. The account holds no rights
-// of its own: the platform repo's grants give it the project's.
-func SyncServiceAccount(dv *dotvirtv1alpha1.Dotvirt, appProject *unstructured.Unstructured) *corev1.ServiceAccount {
-	entries, _, _ := unstructured.NestedSlice(appProject.Object, "spec", "destinationServiceAccounts")
-	if len(entries) == 0 {
-		return nil
-	}
-	entry, _ := entries[0].(map[string]any)
-	ref, _ := entry["defaultServiceAccount"].(string)
-	ns, name, ok := strings.Cut(ref, ":")
-	if !ok {
-		return nil
-	}
-	labels := Labels(dv)
-	if project := appProject.GetLabels()[ProjectLabel]; project != "" {
-		labels[ProjectLabel] = project
-	}
-	return &corev1.ServiceAccount{
-		TypeMeta: metav1.TypeMeta{APIVersion: "v1", Kind: "ServiceAccount"},
-		ObjectMeta: metav1.ObjectMeta{
-			Name: name, Namespace: ns, Labels: labels,
-			OwnerReferences: []metav1.OwnerReference{{
-				APIVersion: appProject.GetAPIVersion(), Kind: appProject.GetKind(),
-				Name: appProject.GetName(), UID: appProject.GetUID(),
-			}},
-		},
-		// Argo impersonates it; nothing runs as it.
-		AutomountServiceAccountToken: new(false),
-	}
 }
 
 // PlatformAppProject is the only tier allowed cluster-scoped + tenancy objects.
@@ -219,7 +191,7 @@ func PlatformAppProject(dv *dotvirtv1alpha1.Dotvirt, argoNS, platformRepo string
 		"description": "dotvirt platform tier — tenancy + cluster-scoped network infrastructure.",
 		"sourceRepos": []any{platformRepo},
 		"destinations": []any{
-			map[string]any{"server": inClusterServer, "namespace": "*"},
+			map[string]any{"server": InClusterServer, "namespace": "*"},
 		},
 		"destinationServiceAccounts": syncAccounts(argoNS, tenancy.PlatformSyncAccount),
 		"clusterResourceWhitelist": []any{
@@ -268,7 +240,7 @@ func argoAppSpec(project, repoURL, namespace string) map[string]any {
 			// nested <ns>/<vm>.yaml).
 			"directory": map[string]any{"recurse": true, "include": "*.yaml", "exclude": "templates/*"},
 		},
-		"destination": map[string]any{"server": inClusterServer, "namespace": namespace},
+		"destination": map[string]any{"server": InClusterServer, "namespace": namespace},
 		"syncPolicy": map[string]any{
 			"automated":   map[string]any{"prune": true, "selfHeal": true},
 			"syncOptions": []any{"CreateNamespace=false"},
@@ -280,7 +252,7 @@ func argoAppSpec(project, repoURL, namespace string) map[string]any {
 // privileged tier, deliberately NOT generated by the ApplicationSet (so the
 // privileged app's existence never flows through dotvirt's dynamic project list).
 func PlatformApplication(dv *dotvirtv1alpha1.Dotvirt, argoNS, platformRepo string) *unstructured.Unstructured {
-	return argoObject("Application", "dotvirt-platform", argoNS, dv, argoAppSpec(projectPlatform, platformRepo, "default"))
+	return argoObject("Application", PlatformApplicationName, argoNS, dv, argoAppSpec(projectPlatform, platformRepo, "default"))
 }
 
 // SyncImpersonationKey is the argocd-cm setting that makes Argo sync each
@@ -309,8 +281,15 @@ func ArgoCDSyncImpersonation(name, namespace string, on bool) *unstructured.Unst
 // OwnsSyncImpersonation reports whether the operator's apply holds
 // SyncImpersonationKey on inst: only then is removing it the operator's call.
 func OwnsSyncImpersonation(inst *unstructured.Unstructured) bool {
+	return slices.Contains(SyncImpersonationManagers(inst), fieldManager)
+}
+
+// SyncImpersonationManagers are the field managers holding
+// SyncImpersonationKey on inst, the operator's apply as fieldManager.
+func SyncImpersonationManagers(inst *unstructured.Unstructured) []string {
+	var out []string
 	for _, mf := range inst.GetManagedFields() {
-		if mf.Manager != fieldManager || mf.Operation != metav1.ManagedFieldsOperationApply || mf.FieldsV1 == nil {
+		if mf.FieldsV1 == nil || (mf.Manager == fieldManager && mf.Operation != metav1.ManagedFieldsOperationApply) {
 			continue
 		}
 		var fields map[string]any
@@ -319,9 +298,9 @@ func OwnsSyncImpersonation(inst *unstructured.Unstructured) bool {
 		}
 		spec, _ := fields["f:spec"].(map[string]any)
 		extra, _ := spec["f:extraConfig"].(map[string]any)
-		if _, ok := extra["f:"+SyncImpersonationKey]; ok {
-			return true
+		if _, ok := extra["f:"+SyncImpersonationKey]; ok && !slices.Contains(out, mf.Manager) {
+			out = append(out, mf.Manager)
 		}
 	}
-	return false
+	return out
 }

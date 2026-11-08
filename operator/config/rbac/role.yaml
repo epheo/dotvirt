@@ -215,6 +215,12 @@ rules:
   verbs:
   - bind
 - apiGroups:
+  - rbac.authorization.k8s.io
+  resources:
+  - rolebindings
+  verbs:
+  - get
+- apiGroups:
   - route.openshift.io
   resources:
   - routes

@@ -25,7 +25,10 @@ import (
 	"github.com/epheo/dotvirt/pkg/tenancy"
 )
 
-const argoSAUser = "system:serviceaccount:argocd:"
+const (
+	argoSAUser   = "system:serviceaccount:argocd:"
+	controllerSA = "argocd-application-controller"
+)
 
 // reviews answers SubjectAccessReviews with allow and counts them; every
 // other Create reaches the fake.
@@ -46,11 +49,14 @@ func reviews(allow func(account string, a *authzv1.ResourceAttributes) bool, n *
 
 // granted is the cluster the platform repo's grants make: each project's sync
 // account may write in its own namespaces only, the platform account holds its
-// operand roles, and nothing else is granted.
+// operand roles, the controller may impersonate them, nothing else.
 func granted(projects map[string][]string) func(string, *authzv1.ResourceAttributes) bool {
 	return func(account string, a *authzv1.ResourceAttributes) bool {
-		if account == tenancy.PlatformSyncAccount {
+		switch account {
+		case tenancy.PlatformSyncAccount:
 			return true
+		case controllerSA:
+			return a.Verb == "impersonate"
 		}
 		return a.Namespace != "" && slices.Contains(projects[account], a.Namespace)
 	}
@@ -65,6 +71,14 @@ func argoCDInstance(extra map[string]any) *unstructured.Unstructured {
 		u.Object["spec"].(map[string]any)["extraConfig"] = extra
 	}
 	return u
+}
+
+func argoCM(on bool) *corev1.ConfigMap {
+	cm := &corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Name: "argocd-cm", Namespace: "argocd"}}
+	if on {
+		cm.Data = map[string]string{install.SyncImpersonationKey: "true"}
+	}
+	return cm
 }
 
 func extraConfig(t *testing.T, c client.Client) map[string]any {
@@ -89,10 +103,40 @@ func syncCond(t *testing.T, c client.Client, dv *dotvirtv1alpha1.Dotvirt) *metav
 	return got
 }
 
-// Every tier names its sync account: each tenant AppProject its project's,
-// the platform AppProject the platform's. The accounts exist beside them,
-// owned by their AppProjects for the garbage collector, and the platform
-// account holds the apply role and its own.
+func optIn(dv *dotvirtv1alpha1.Dotvirt, ignoreForeign bool) *dotvirtv1alpha1.Dotvirt {
+	dv.Spec.ArgoCD.SyncImpersonation = dotvirtv1alpha1.SyncImpersonationSpec{Enabled: true, IgnoreForeignApplications: ignoreForeign}
+	return dv
+}
+
+func foreignApp(ns, name, project, destNS string) *unstructured.Unstructured {
+	app := argoObj("Application", ns, name, nil)
+	app.Object["spec"] = map[string]any{"project": project, "destination": map[string]any{"server": install.InClusterServer, "namespace": destNS}}
+	return app
+}
+
+func appProject(name string, accounts ...map[string]any) *unstructured.Unstructured {
+	ap := argoObj("AppProject", "argocd", name, nil)
+	entries := make([]any, 0, len(accounts))
+	for _, a := range accounts {
+		entries = append(entries, a)
+	}
+	ap.Object["spec"] = map[string]any{"destinationServiceAccounts": entries}
+	return ap
+}
+
+func setSpec(t *testing.T, c client.Client, dv *dotvirtv1alpha1.Dotvirt, edit func(*dotvirtv1alpha1.Dotvirt)) *dotvirtv1alpha1.Dotvirt {
+	t.Helper()
+	stored := getCR(t, c, dv)
+	edit(stored)
+	if err := c.Update(context.Background(), stored); err != nil {
+		t.Fatal(err)
+	}
+	return stored
+}
+
+// Every tier names its sync account, by name only: each tenant AppProject its
+// project's, the platform AppProject the platform's. No ServiceAccount object
+// is made; the platform account holds the apply role and its own.
 func TestSyncAccountsRendered(t *testing.T) {
 	forgeDown := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusServiceUnavailable)
@@ -113,16 +157,10 @@ func TestSyncAccountsRendered(t *testing.T) {
 		if len(entries) != 1 || entries[0].(map[string]any)["defaultServiceAccount"] != "argocd:"+account || entries[0].(map[string]any)["namespace"] != "*" {
 			t.Errorf("%s destinationServiceAccounts = %v, want argocd:%s", appProject, entries, account)
 		}
-		var sa corev1.ServiceAccount
-		if !exists(t, c, &sa, "argocd", account) {
-			t.Fatalf("sync account %s missing", account)
-		}
-		if len(sa.OwnerReferences) != 1 || sa.OwnerReferences[0].Kind != "AppProject" || sa.OwnerReferences[0].Name != appProject {
-			t.Errorf("%s owners = %+v, want its AppProject", account, sa.OwnerReferences)
-		}
-		if !install.OwnedBy(sa.Labels, dv) {
-			t.Errorf("%s labels = %v, want the install's", account, sa.Labels)
-		}
+	}
+	var sas corev1.ServiceAccountList
+	if err := c.List(context.Background(), &sas, client.InNamespace("argocd")); err != nil || len(sas.Items) != 0 {
+		t.Errorf("ServiceAccounts in argocd = %d (%v), want none: the accounts are names", len(sas.Items), err)
 	}
 	var apply rbacv1.ClusterRoleBinding
 	exists(t, c, &apply, "", "dotvirt-argocd-apply")
@@ -130,7 +168,7 @@ func TestSyncAccountsRendered(t *testing.T) {
 	for _, s := range apply.Subjects {
 		names = append(names, s.Namespace+"/"+s.Name)
 	}
-	if !slices.Equal(names, []string{"argocd/argocd-application-controller", "argocd/" + tenancy.PlatformSyncAccount}) {
+	if !slices.Equal(names, []string{"argocd/" + controllerSA, "argocd/" + tenancy.PlatformSyncAccount}) {
 		t.Errorf("dotvirt-argocd-apply subjects = %v, want the controller and the platform account", names)
 	}
 	var platformSync rbacv1.ClusterRoleBinding
@@ -142,7 +180,6 @@ func TestSyncAccountsRendered(t *testing.T) {
 	if v, ok := envValue(dep.Spec.Template.Spec.Containers[0].Env, "DOTVIRT_ARGO_NAMESPACE"); !ok || v != "argocd" {
 		t.Errorf("DOTVIRT_ARGO_NAMESPACE = %q, %v", v, ok)
 	}
-	// Not asked: nothing is touched on the instance, and the condition says so.
 	if got := syncCond(t, c, dv); got.Status != metav1.ConditionUnknown || got.Reason != "Disabled" {
 		t.Errorf("condition = %+v", got)
 	}
@@ -185,12 +222,11 @@ func TestSyncOperandRoles(t *testing.T) {
 	}
 }
 
-// Asked, and every project's account holds its grants and no more: the
-// operator sets the one key on the instance and leaves the rest of its spec
-// alone. Asked no longer: the key goes.
+// Asked, and every account holds its grants and no more: the operator sets
+// the one key on the instance, leaving the rest of its spec alone, and says
+// Pending until argocd-cm carries it. Asked no longer: the key goes.
 func TestSyncImpersonationFlipAndRollback(t *testing.T) {
-	dv := testCR()
-	dv.Spec.ArgoCD.SyncImpersonation.Enabled = true
+	dv := optIn(testCR(), false)
 	var n atomic.Int64
 	c := testBuilder(t).WithObjects(dv, argoCDInstance(nil),
 		projectNS("a-prod", "team-a", "dotvirt/team-a.git"), projectNS("a-dev", "team-a", "dotvirt/team-a.git"),
@@ -200,83 +236,113 @@ func TestSyncImpersonationFlipAndRollback(t *testing.T) {
 	r := newReconciler(c, depsOK)
 	now := time.Now()
 	r.now = func() time.Time { return now }
-	reconcileOnce(t, r, dv)
+	res := reconcileOnce(t, r, dv)
 
 	if got := extraConfig(t, c)[install.SyncImpersonationKey]; got != "true" {
 		t.Fatalf("%s = %v, want true", install.SyncImpersonationKey, got)
 	}
-	if got := syncCond(t, c, dv); got.Status != metav1.ConditionTrue || got.Reason != "Enabled" {
-		t.Errorf("condition = %+v", got)
+	if got := syncCond(t, c, dv); got.Status != metav1.ConditionFalse || got.Reason != "Pending" {
+		t.Errorf("condition = %+v, want Pending until argocd-cm carries it", got)
 	}
-	// 3 per project namespace, 1 per project.
-	if got := n.Load(); got != 3*3+2 {
-		t.Errorf("%d reviews, want 11", got)
+	if got := getCR(t, c, dv).Status.SyncImpersonationInstance; got != "argocd/argocd" {
+		t.Errorf("status instance = %q", got)
 	}
-	// Once on, the grants are asked again, and that verdict serves the passes
-	// that follow until its inputs change.
-	reconcileOnce(t, r, dv)
-	reconcileOnce(t, r, dv)
-	if got := n.Load(); got != 22 {
-		t.Errorf("%d reviews after three passes, want 22", got)
+	if res.RequeueAfter != time.Minute {
+		t.Errorf("requeue = %v, want a recheck while Pending", res.RequeueAfter)
 	}
-	// RBAC moves are not watched: an aged verdict is asked again, which is how
-	// a merged grant is seen.
-	now = now.Add(driftResync / 2)
-	reconcileOnce(t, r, dv)
-	if got := n.Load(); got != 33 {
-		t.Errorf("%d reviews once the verdict aged out, want 33", got)
+	// 3 per project namespace, 2 per project, the controller's clone and
+	// impersonation rights, and every account's clone rights.
+	if got := n.Load(); got != 3*3+2*2+3 {
+		t.Errorf("%d reviews, want 16", got)
 	}
-
-	stored := getCR(t, c, dv)
-	stored.Spec.ArgoCD.SyncImpersonation.Enabled = false
-	if err := c.Update(context.Background(), stored); err != nil {
+	// The argocd-operator copies the key into argocd-cm: on.
+	if err := c.Create(context.Background(), argoCM(true)); err != nil {
 		t.Fatal(err)
 	}
+	res = reconcileOnce(t, r, dv)
+	if got := syncCond(t, c, dv); got.Status != metav1.ConditionTrue || got.Reason != "Enabled" {
+		t.Errorf("condition = %+v, want Enabled", got)
+	}
+	if res.RequeueAfter != driftResync {
+		t.Errorf("requeue = %v once on", res.RequeueAfter)
+	}
+	// A clean verdict serves the passes that follow until its inputs change.
+	if got := n.Load(); got != 16 {
+		t.Errorf("%d reviews after a second pass, want the cached 16", got)
+	}
+	// RBAC moves are not watched: an aged verdict is asked again.
+	now = now.Add(driftResync / 2)
+	reconcileOnce(t, r, dv)
+	if got := n.Load(); got != 32 {
+		t.Errorf("%d reviews once the verdict aged out, want 32", got)
+	}
+
+	stored := setSpec(t, c, dv, func(d *dotvirtv1alpha1.Dotvirt) { d.Spec.ArgoCD.SyncImpersonation.Enabled = false })
 	reconcileOnce(t, r, stored)
 	if extra := extraConfig(t, c); extra[install.SyncImpersonationKey] != nil {
 		t.Errorf("opted out, extraConfig = %v", extra)
 	}
-	if got := syncCond(t, c, dv); got.Status != metav1.ConditionUnknown || got.Reason != "Disabled" {
-		t.Errorf("opted out, condition = %+v", got)
+	if got := getCR(t, c, dv); got.Status.SyncImpersonationInstance != "" {
+		t.Errorf("opted out, status instance = %q", got.Status.SyncImpersonationInstance)
 	}
 }
 
 // Held back: a missing grant, a grant reaching past a project's namespaces,
-// another team's Application on the instance, or Applications still in the
-// shared tier. Each is said; nothing is set.
+// another team's Application with no account mapped, Applications still in
+// the shared tier, a controller that cannot impersonate. Each is said, the
+// pass comes back within a minute, and nothing is set.
 func TestSyncImpersonationRefusals(t *testing.T) {
-	foreignApp := argoObj("Application", "argocd", "billing", nil)
-	foreignApp.Object["spec"] = map[string]any{"project": "default"}
-	// Another instance's Application, which the setting does not reach.
-	otherInstance := argoObj("Application", "team-argo", "web", nil)
-	otherInstance.Object["spec"] = map[string]any{"project": "default"}
-	sharedApp := application("dotvirt-team-a", install.TenantsProjectName)
-	sharedTier := argoObj("AppProject", "argocd", install.TenantsProjectName, install.Labels(testCR()))
 	own := map[string][]string{"dotvirt-p-team-a": {"team-a"}}
+	or := func(extra func(string, *authzv1.ResourceAttributes) bool) func(string, *authzv1.ResourceAttributes) bool {
+		return func(account string, a *authzv1.ResourceAttributes) bool {
+			return granted(own)(account, a) || extra(account, a)
+		}
+	}
 	for _, tc := range []struct {
-		name   string
-		allow  func(string, *authzv1.ResourceAttributes) bool
-		objs   []client.Object
-		ignore bool
-		want   string
+		name  string
+		allow func(string, *authzv1.ResourceAttributes) bool
+		objs  []client.Object
+		inst  *unstructured.Unstructured
+		want  string
 	}{
-		{"missing grant", granted(nil), nil, false, "project team-a cannot sync VirtualMachines into team-a"},
-		{"cluster-wide grant", func(account string, a *authzv1.ResourceAttributes) bool {
-			return granted(own)(account, a) || account == "dotvirt-p-team-a"
-		}, nil, false, "may create VirtualMachines in every namespace"},
-		{"namespace open to every account", func(account string, a *authzv1.ResourceAttributes) bool {
-			return granted(own)(account, a) || account == syncProbeAccount
-		}, nil, false, "namespace team-a lets every ServiceAccount of argocd create VirtualMachines"},
-		{"foreign Application", granted(own), []client.Object{foreignApp}, false, "argocd/billing"},
-		{"shared tier in use", granted(own), []client.Object{sharedApp, sharedTier}, true, "shared dotvirt-tenants AppProject"},
+		{"missing grant", granted(nil), nil, nil, "project team-a cannot sync VirtualMachines into team-a"},
+		{"cluster-wide grant", or(func(account string, _ *authzv1.ResourceAttributes) bool { return account == "dotvirt-p-team-a" }),
+			nil, nil, "may create VirtualMachines in every namespace"},
+		{"namespace open to every account", or(func(account string, a *authzv1.ResourceAttributes) bool {
+			return account == syncProbeAccount && a.Resource == "virtualmachines"
+		}), nil, nil, "namespace team-a lets every ServiceAccount of argocd create VirtualMachines"},
+		{"project account clones anywhere", or(func(account string, a *authzv1.ResourceAttributes) bool {
+			return account == "dotvirt-p-team-a" && a.Subresource == "source"
+		}), nil, nil, "may clone disks out of any namespace"},
+		{"every account clones anywhere", or(func(account string, a *authzv1.ResourceAttributes) bool {
+			return account == syncProbeAccount && a.Subresource == "source"
+		}), nil, nil, "every ServiceAccount of argocd may clone disks"},
+		{"controller cannot impersonate", func(account string, a *authzv1.ResourceAttributes) bool {
+			return account != controllerSA && granted(own)(account, a)
+		}, nil, nil, "cannot impersonate ServiceAccounts in argocd"},
+		{"unmapped foreign Application", granted(own),
+			[]client.Object{foreignApp("argocd", "billing", "default", "billing"), appProject("default")}, nil, "argocd/billing"},
+		{"foreign Application in a source namespace", granted(own),
+			[]client.Object{foreignApp("team-apps", "web", "default", "web")},
+			func() *unstructured.Unstructured {
+				u := argoCDInstance(nil)
+				u.Object["spec"].(map[string]any)["sourceNamespaces"] = []any{"/^team-/"}
+				return u
+			}(), "team-apps/web"},
+		{"shared tier in use", granted(own),
+			[]client.Object{application("dotvirt-team-a", install.TenantsProjectName), argoObj("AppProject", "argocd", install.TenantsProjectName, install.Labels(testCR()))},
+			nil, "shared dotvirt-tenants AppProject"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			dv := testCR()
-			dv.Spec.ArgoCD.SyncImpersonation = dotvirtv1alpha1.SyncImpersonationSpec{Enabled: true, IgnoreForeignApplications: tc.ignore}
+			dv := optIn(testCR(), false)
+			inst := tc.inst
+			if inst == nil {
+				inst = argoCDInstance(nil)
+			}
 			var n atomic.Int64
-			c := testBuilder(t).WithObjects(append(tc.objs, dv, argoCDInstance(nil), projectNS("team-a", "team-a", "dotvirt/team-a.git"))...).
+			c := testBuilder(t).WithObjects(append(tc.objs, dv, inst, projectNS("team-a", "team-a", "dotvirt/team-a.git"))...).
 				WithInterceptorFuncs(reviews(tc.allow, &n)).Build()
-			reconcileOnce(t, newReconciler(c, depsOK), dv)
+			res := reconcileOnce(t, newReconciler(c, depsOK), dv)
 			if extra := extraConfig(t, c); extra[install.SyncImpersonationKey] != nil {
 				t.Errorf("set while held back: %v", extra)
 			}
@@ -284,60 +350,182 @@ func TestSyncImpersonationRefusals(t *testing.T) {
 			if got.Status != metav1.ConditionFalse || got.Reason != "NotReady" || !strings.Contains(got.Message, tc.want) {
 				t.Errorf("condition = %+v, want NotReady saying %q", got, tc.want)
 			}
+			if res.RequeueAfter != time.Minute {
+				t.Errorf("requeue = %v, want the one-minute recheck", res.RequeueAfter)
+			}
 		})
 	}
 
-	// Told to proceed past another team's Application, it does.
-	dv := testCR()
-	dv.Spec.ArgoCD.SyncImpersonation = dotvirtv1alpha1.SyncImpersonationSpec{Enabled: true, IgnoreForeignApplications: true}
+	// Not held back: told to proceed past an unmapped Application, an
+	// Application whose AppProject maps an account, another instance's.
+	for name, objs := range map[string][]client.Object{
+		"mapped AppProject": {foreignApp("argocd", "billing", "default", "billing"),
+			appProject("default", map[string]any{"server": "https://kubernetes.*", "namespace": "{billing,payroll}", "defaultServiceAccount": "argocd:" + controllerSA})},
+		"another instance": {foreignApp("team-argo", "web", "default", "web")},
+	} {
+		dv := optIn(testCR(), false)
+		var n atomic.Int64
+		c := testBuilder(t).WithObjects(append(objs, dv, argoCDInstance(nil), projectNS("team-a", "team-a", "dotvirt/team-a.git"))...).
+			WithInterceptorFuncs(reviews(granted(own), &n)).Build()
+		reconcileOnce(t, newReconciler(c, depsOK), dv)
+		if extraConfig(t, c)[install.SyncImpersonationKey] != "true" {
+			t.Errorf("%s: held back: %+v", name, syncCond(t, c, dv))
+		}
+	}
+	dv := optIn(testCR(), true)
 	var n atomic.Int64
-	c := testBuilder(t).WithObjects(dv, foreignApp, argoCDInstance(nil), projectNS("team-a", "team-a", "dotvirt/team-a.git")).
+	c := testBuilder(t).WithObjects(dv, foreignApp("argocd", "billing", "default", "billing"), argoCDInstance(nil), projectNS("team-a", "team-a", "dotvirt/team-a.git")).
 		WithInterceptorFuncs(reviews(granted(own), &n)).Build()
 	reconcileOnce(t, newReconciler(c, depsOK), dv)
 	if extraConfig(t, c)[install.SyncImpersonationKey] != "true" {
 		t.Error("ignoreForeignApplications did not proceed")
 	}
+}
 
-	// Another instance's Applications do not hold this one back.
-	dv = testCR()
-	dv.Spec.ArgoCD.SyncImpersonation.Enabled = true
-	c = testBuilder(t).WithObjects(dv, otherInstance, argoCDInstance(nil), projectNS("team-a", "team-a", "dotvirt/team-a.git")).
-		WithInterceptorFuncs(reviews(granted(own), &n)).Build()
+// A platform repo RoleBinding binding a role the platform account may not
+// bind fails once Argo applies it as that account: it holds the flip back.
+func TestSyncImpersonationPlatformRoles(t *testing.T) {
+	forgeDown := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusServiceUnavailable)
+	}))
+	defer forgeDown.Close()
+	dv, creds := byoForgeCR(forgeDown.URL)
+	optIn(dv, false)
+	platformApp := argoObj("Application", "argocd", install.PlatformApplicationName, nil)
+	platformApp.Object["status"] = map[string]any{"resources": []any{
+		map[string]any{"group": "rbac.authorization.k8s.io", "kind": "RoleBinding", "namespace": "team-a", "name": "team-a-admins"},
+		map[string]any{"group": "rbac.authorization.k8s.io", "kind": "RoleBinding", "namespace": "team-a", "name": "team-a-viewers"},
+	}}
+	rb := func(name, role string) *rbacv1.RoleBinding {
+		return &rbacv1.RoleBinding{ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: "team-a"},
+			RoleRef: rbacv1.RoleRef{APIGroup: rbacv1.GroupName, Kind: "ClusterRole", Name: role}}
+	}
+	var n atomic.Int64
+	c := testBuilder(t).WithObjects(dv, creds, platformApp, rb("team-a-admins", "admin"), rb("team-a-viewers", "view"),
+		argoCDInstance(nil), projectNS("team-a", "team-a", "dotvirt/team-a.git")).
+		WithInterceptorFuncs(reviews(func(account string, a *authzv1.ResourceAttributes) bool {
+			if account == tenancy.PlatformSyncAccount && a.Verb == "bind" {
+				return a.Name != "view"
+			}
+			return granted(map[string][]string{"dotvirt-p-team-a": {"team-a"}})(account, a)
+		}, &n)).Build()
 	reconcileOnce(t, newReconciler(c, depsOK), dv)
-	if extraConfig(t, c)[install.SyncImpersonationKey] != "true" {
-		t.Errorf("held back by another instance's Application: %+v", syncCond(t, c, dv))
+	if got := syncCond(t, c, dv); got.Reason != "NotReady" || !strings.Contains(got.Message, "cannot bind ClusterRole view, which RoleBinding team-a/team-a-viewers") {
+		t.Errorf("condition = %+v, want the view binding named", got)
 	}
 }
 
-// Once on, a project that loses its grants is reported, never a reason to
-// turn impersonation off: it fails to sync rather than falling back to the
-// controller's rights. A key set by hand is not the operator's to remove.
+// Once on, a project that loses its grants, or an Application newly synced
+// with no account mapped, is reported, never a reason to turn impersonation
+// off. A key set by hand is not the operator's to remove.
 func TestSyncImpersonationStaysOn(t *testing.T) {
-	dv := testCR()
-	dv.Spec.ArgoCD.SyncImpersonation.Enabled = true
+	dv := optIn(testCR(), true)
 	byHand := argoCDInstance(map[string]any{install.SyncImpersonationKey: "true"})
-	cm := &corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Name: "argocd-cm", Namespace: "argocd"}, Data: map[string]string{install.SyncImpersonationKey: "true"}}
 	var n atomic.Int64
-	c := testBuilder(t).WithObjects(dv, byHand, cm, projectNS("team-a", "team-a", "dotvirt/team-a.git")).
+	c := testBuilder(t).WithObjects(dv, byHand, argoCM(true), projectNS("team-a", "team-a", "dotvirt/team-a.git"),
+		foreignApp("argocd", "billing", "default", "billing"), appProject("default")).
 		WithInterceptorFuncs(reviews(granted(nil), &n)).WithReturnManagedFields().Build()
 	r := newReconciler(c, depsOK)
-	reconcileOnce(t, r, dv)
+	res := reconcileOnce(t, r, dv)
 	got := syncCond(t, c, dv)
-	if got.Status != metav1.ConditionFalse || got.Reason != "Degraded" || !strings.Contains(got.Message, "project team-a") {
-		t.Errorf("condition = %+v, want Degraded naming team-a", got)
+	if got.Status != metav1.ConditionFalse || got.Reason != "Degraded" || !strings.Contains(got.Message, "project team-a") || !strings.Contains(got.Message, "argocd/billing") {
+		t.Errorf("condition = %+v, want Degraded naming team-a and argocd/billing", got)
+	}
+	if res.RequeueAfter != driftResync {
+		t.Errorf("requeue = %v; Degraded waits for the drift timer", res.RequeueAfter)
 	}
 
-	stored := getCR(t, c, dv)
-	stored.Spec.ArgoCD.SyncImpersonation.Enabled = false
-	if err := c.Update(context.Background(), stored); err != nil {
-		t.Fatal(err)
-	}
+	stored := setSpec(t, c, dv, func(d *dotvirtv1alpha1.Dotvirt) { d.Spec.ArgoCD.SyncImpersonation.Enabled = false })
 	reconcileOnce(t, r, stored)
 	if extraConfig(t, c)[install.SyncImpersonationKey] != "true" {
 		t.Error("removed a key the operator did not set")
 	}
 	if got := syncCond(t, c, dv); got.Status != metav1.ConditionTrue || !strings.Contains(got.Message, "outside dotvirt") {
 		t.Errorf("condition = %+v, want Enabled outside dotvirt", got)
+	}
+}
+
+// A key another manager holds is that manager's: the operator reports the
+// conflict and never takes it.
+func TestSyncImpersonationConflict(t *testing.T) {
+	dv := optIn(testCR(), false)
+	var n atomic.Int64
+	c := testBuilder(t).WithObjects(dv, argoCDInstance(nil), projectNS("team-a", "team-a", "dotvirt/team-a.git")).
+		WithInterceptorFuncs(reviews(granted(map[string][]string{"dotvirt-p-team-a": {"team-a"}}), &n)).WithReturnManagedFields().Build()
+	held := install.ArgoCDSyncImpersonation("argocd", "argocd", true)
+	unstructured.SetNestedField(held.Object, "false", "spec", "extraConfig", install.SyncImpersonationKey)                               //nolint:errcheck // a literal path
+	if err := c.Patch(context.Background(), held, client.Apply, client.FieldOwner("platform-team"), client.ForceOwnership); err != nil { //nolint:staticcheck // SA1019, as install.Apply
+		t.Fatal(err)
+	}
+	reconcileOnce(t, newReconciler(c, depsOK), dv)
+	if got := syncCond(t, c, dv); got.Reason != "Conflict" || !strings.Contains(got.Message, "platform-team") {
+		t.Errorf("condition = %+v, want Conflict naming platform-team", got)
+	}
+	if got := extraConfig(t, c)[install.SyncImpersonationKey]; got != "false" {
+		t.Errorf("%s = %v, want the other manager's false kept", install.SyncImpersonationKey, got)
+	}
+}
+
+// Until argocd-cm carries the key, the controller still syncs: Pending keeps
+// the clone warning visible.
+func TestSyncImpersonationPendingKeepsCloneWarning(t *testing.T) {
+	dv := optIn(testCR(), false)
+	own := map[string][]string{"dotvirt-p-team-a": {"team-a"}}
+	var n atomic.Int64
+	c := testBuilder(t).WithObjects(dv, argoCDInstance(nil), projectNS("team-a", "team-a", "dotvirt/team-a.git")).
+		WithInterceptorFuncs(reviews(func(account string, a *authzv1.ResourceAttributes) bool {
+			return granted(own)(account, a) || (account == controllerSA && a.Subresource == "source")
+		}, &n)).WithReturnManagedFields().Build()
+	reconcileOnce(t, newReconciler(c, depsOK), dv)
+	if got := syncCond(t, c, dv); got.Reason != "Pending" || !strings.Contains(got.Message, "datavolumes/source") {
+		t.Errorf("condition = %+v, want Pending with the clone warning", got)
+	}
+}
+
+// Uninstalling takes the key off the instance before prune takes dotvirt's
+// AppProjects: left on, every Application there naming no other account would
+// stop syncing.
+func TestSyncImpersonationReleasedOnUninstall(t *testing.T) {
+	dv := optIn(testCR(), false)
+	var n atomic.Int64
+	c := testBuilder(t).WithObjects(dv, argoCDInstance(nil), projectNS("team-a", "team-a", "dotvirt/team-a.git")).
+		WithInterceptorFuncs(reviews(granted(map[string][]string{"dotvirt-p-team-a": {"team-a"}}), &n)).WithReturnManagedFields().Build()
+	r := newReconciler(c, depsOK)
+	reconcileOnce(t, r, dv)
+	if extraConfig(t, c)[install.SyncImpersonationKey] != "true" {
+		t.Fatal("not set")
+	}
+	if err := c.Delete(context.Background(), getCR(t, c, dv)); err != nil {
+		t.Fatal(err)
+	}
+	reconcileOnce(t, r, dv)
+	if exists(t, c, &dotvirtv1alpha1.Dotvirt{}, dv.Namespace, dv.Name) {
+		t.Error("CR still present")
+	}
+	if extra := extraConfig(t, c); extra[install.SyncImpersonationKey] != nil {
+		t.Errorf("uninstalled, extraConfig = %v", extra)
+	}
+}
+
+// The key stays with the instance it was set on: pointing spec.argocd at
+// another ArgoCD takes it off the first.
+func TestSyncImpersonationFollowsInstance(t *testing.T) {
+	dv := optIn(testCR(), false)
+	var n atomic.Int64
+	c := testBuilder(t).WithObjects(dv, argoCDInstance(nil), projectNS("team-a", "team-a", "dotvirt/team-a.git")).
+		WithInterceptorFuncs(reviews(granted(map[string][]string{"dotvirt-p-team-a": {"team-a"}}), &n)).WithReturnManagedFields().Build()
+	r := newReconciler(c, depsOK)
+	reconcileOnce(t, r, dv)
+	if extraConfig(t, c)[install.SyncImpersonationKey] != "true" {
+		t.Fatal("not set")
+	}
+	stored := setSpec(t, c, dv, func(d *dotvirtv1alpha1.Dotvirt) { d.Spec.ArgoCD.Namespace = "argo-two" })
+	reconcileOnce(t, r, stored)
+	if extra := extraConfig(t, c); extra[install.SyncImpersonationKey] != nil {
+		t.Errorf("moved, the first instance keeps %v", extra)
+	}
+	if got := getCR(t, c, dv).Status.SyncImpersonationInstance; got != "" {
+		t.Errorf("status instance = %q, want none: argo-two has no ArgoCD resource", got)
 	}
 }
 
@@ -349,7 +537,7 @@ func TestSyncImpersonationWarnsCloneAnywhere(t *testing.T) {
 	var n atomic.Int64
 	c := testBuilder(t).WithObjects(dv, projectNS("team-a", "team-a", "dotvirt/team-a.git")).
 		WithInterceptorFuncs(reviews(func(account string, a *authzv1.ResourceAttributes) bool {
-			return account == "argocd-application-controller" && a.Resource == "datavolumes" && a.Subresource == "source" && a.Namespace == ""
+			return account == controllerSA && a.Resource == "datavolumes" && a.Subresource == "source" && a.Namespace == ""
 		}, &n)).Build()
 	reconcileOnce(t, newReconciler(c, depsOK), dv)
 	if got := syncCond(t, c, dv); got.Status != metav1.ConditionFalse || got.Reason != "CloneAnywhere" {
@@ -361,15 +549,49 @@ func TestSyncImpersonationWarnsCloneAnywhere(t *testing.T) {
 }
 
 // Ready, but no ArgoCD resource to set it on: the condition hands the admin
-// the setting instead.
+// the setting instead, and argocd-cmd-params-cm says which namespaces'
+// Applications the instance reads.
 func TestSyncImpersonationManualStep(t *testing.T) {
-	dv := testCR()
-	dv.Spec.ArgoCD.SyncImpersonation.Enabled = true
-	var n atomic.Int64
-	c := testBuilder(t).WithObjects(dv, projectNS("team-a", "team-a", "dotvirt/team-a.git")).
-		WithInterceptorFuncs(reviews(granted(map[string][]string{"dotvirt-p-team-a": {"team-a"}}), &n)).Build()
-	reconcileOnce(t, newReconciler(c, depsOK), dv)
-	if got := syncCond(t, c, dv); got.Reason != "ManualStep" || !strings.Contains(got.Message, "argocd/argocd-cm") {
-		t.Errorf("condition = %+v", got)
+	own := map[string][]string{"dotvirt-p-team-a": {"team-a"}}
+	params := &corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Name: "argocd-cmd-params-cm", Namespace: "argocd"},
+		Data: map[string]string{"application.namespaces": "apps-*, other"}}
+	for name, tc := range map[string]struct {
+		objs []client.Object
+		want string
+	}{
+		"ready":                         {nil, "ManualStep"},
+		"Applications in any namespace": {[]client.Object{params, foreignApp("apps-x", "web", "default", "web")}, "NotReady"},
+	} {
+		dv := optIn(testCR(), false)
+		var n atomic.Int64
+		c := testBuilder(t).WithObjects(append(tc.objs, dv, projectNS("team-a", "team-a", "dotvirt/team-a.git"))...).
+			WithInterceptorFuncs(reviews(granted(own), &n)).Build()
+		reconcileOnce(t, newReconciler(c, depsOK), dv)
+		if got := syncCond(t, c, dv); got.Reason != tc.want || (tc.want == "ManualStep" && !strings.Contains(got.Message, "argocd/argocd-cm")) {
+			t.Errorf("%s: condition = %+v, want %s", name, got, tc.want)
+		}
+	}
+}
+
+func TestArgoMatch(t *testing.T) {
+	for _, c := range []struct {
+		pattern, s  string
+		regex, want bool
+	}{
+		{"*", "", false, true},
+		{"https://kubernetes.*", "https://kubernetes.default.svc", false, true},
+		{"team-?", "team-a", false, true},
+		{"team-[ab]", "team-c", false, false},
+		{"team-[!ab]", "team-c", false, true},
+		{"{billing,payroll}", "payroll", false, true},
+		{"{billing,payroll}", "pay", false, false},
+		{"a.b", "axb", false, false},
+		{"/^team-/", "team-x", true, true},
+		{"/^team-/", "team-x", false, false},
+		{"/[/", "x", true, false},
+	} {
+		if got := argoMatch(c.pattern, c.s, c.regex); got != c.want {
+			t.Errorf("argoMatch(%q, %q, %v) = %v", c.pattern, c.s, c.regex, got)
+		}
 	}
 }

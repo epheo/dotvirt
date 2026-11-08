@@ -39,9 +39,12 @@ package controller
 // static roles into the bindings above. No escalate, no role create/update/delete.
 // +kubebuilder:rbac:groups=rbac.authorization.k8s.io,resources=clusterroles,resourceNames=dotvirt;dotvirt-argocd-apply;dotvirt-platform-network-admin;dotvirt-platform-sync,verbs=bind
 // Sync impersonation: SubjectAccessReviews ask what each sync account may do before
-// the operator turns it on, and the operator sets that one key on the ArgoCD
-// instance (get + patch on its two conventional names only).
+// the operator turns it on, the RoleBindings the platform Application manages say
+// which roles the platform account must bind (read point-wise, never listed or
+// watched), and the operator sets that one key on the ArgoCD instance (get + patch on
+// its two conventional names only).
 // +kubebuilder:rbac:groups=authorization.k8s.io,resources=subjectaccessreviews,verbs=create
+// +kubebuilder:rbac:groups=rbac.authorization.k8s.io,resources=rolebindings,verbs=get
 // +kubebuilder:rbac:groups=argoproj.io,resources=argocds,resourceNames=openshift-gitops;argocd,verbs=get;patch
 //
 // delete, scoped to the fixed names the install renders (prune and the finalizer
@@ -52,8 +55,6 @@ package controller
 // resourceNames list can cover them. The unscoped grant is bounded by what it reaches
 // (ArgoCD permission sets, which Argo-admin RBAC guards and Argo itself needs to apply
 // anything) and by prune, which deletes only AppProjects carrying this install's labels.
-// The sync ServiceAccounts, also named after projects, need no delete grant: each is
-// owner-referenced to its AppProject, and the garbage collector removes it with it.
 // +kubebuilder:rbac:groups=apps,resources=deployments,resourceNames=dotvirt;dotvirt-forgejo,verbs=delete
 // +kubebuilder:rbac:groups="",resources=services;serviceaccounts,resourceNames=dotvirt;dotvirt-forgejo,verbs=delete
 // +kubebuilder:rbac:groups=networking.k8s.io,resources=networkpolicies;ingresses,resourceNames=dotvirt;dotvirt-forgejo,verbs=delete

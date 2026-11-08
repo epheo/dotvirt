@@ -29,11 +29,12 @@ const (
 	// ConditionDotvirtWebhook is True when the forge-to-dotvirt instant-feedback webhook is
 	// registered (org-level); Unknown when no delivery URL is resolvable (git-poll fallback).
 	ConditionDotvirtWebhook = "DotvirtWebhook"
-	// ConditionSyncImpersonationReady is True when ArgoCD syncs each dotvirt
-	// Application as its project's own ServiceAccount (spec.argocd.syncImpersonation);
-	// Unknown while not asked; False says what holds it back, or that the
-	// controller's own rights let a tenant DataVolume clone from any namespace
-	// (CloneAnywhere). It never gates Available.
+	// ConditionSyncImpersonationReady is True once argocd-cm turns on sync
+	// impersonation (spec.argocd.syncImpersonation), so ArgoCD syncs each dotvirt
+	// Application as its tier's own ServiceAccount; Unknown while not asked;
+	// False says what holds it back, that it waits for argocd-cm (Pending), or
+	// that the controller's own rights let a tenant DataVolume clone from any
+	// namespace (CloneAnywhere). It never gates Available.
 	ConditionSyncImpersonationReady = "SyncImpersonationReady"
 	// ConditionAvailable is the roll-up: the full install is reconciled and serving.
 	ConditionAvailable = "Available"
@@ -182,6 +183,12 @@ type DotvirtStatus struct {
 	// OAuthClient SSO needs, with the redirect URI filled from the assigned console host.
 	// Set only while auth.openShiftSSO is on; run it once to finish SSO.
 	SSOOAuthClient string `json:"ssoOAuthClient,omitempty"`
+	// SyncImpersonationInstance is the ArgoCD resource, as namespace/name, the
+	// operator set application.sync.impersonation.enabled on: it removes the
+	// setting there when spec.argocd moves to another instance and before the
+	// install is deleted, so no Application is left needing an account dotvirt
+	// no longer maps.
+	SyncImpersonationInstance string `json:"syncImpersonationInstance,omitempty"`
 	// ForgeAdminHint is the command that reveals the managed Forgejo bootstrap admin
 	// password (user dotvirt-bot); the value stays in the Secret, never in status.
 	// Set only for a managed forge.

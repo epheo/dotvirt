@@ -9,7 +9,6 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
@@ -83,17 +82,8 @@ func (r *DotvirtReconciler) reconcileArgo(ctx context.Context, dv *dotvirtv1alph
 		if err := r.apply(ctx, obj); err != nil {
 			return nil, applyFailed(err)
 		}
-		ap, ok := obj.(*unstructured.Unstructured)
-		if !ok || ap.GroupVersionKind() != install.ArgoGVK("AppProject") {
-			continue
-		}
-		rc.sync.appProjects[ap.GetName()] = true
-		// After its AppProject: the apply answered with the UID the account's
-		// owner reference needs.
-		if sa := install.SyncServiceAccount(dv, ap); sa != nil {
-			if err := r.apply(ctx, sa); err != nil {
-				return nil, applyFailed(err)
-			}
+		if obj.GetObjectKind().GroupVersionKind() == install.ArgoGVK("AppProject") {
+			rc.sync.appProjects[obj.GetName()] = true
 		}
 	}
 	if r.DryRun {

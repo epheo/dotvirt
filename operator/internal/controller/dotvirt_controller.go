@@ -209,11 +209,26 @@ func (r *DotvirtReconciler) provision(ctx context.Context, key types.NamespacedN
 		r.markPruned(key, digest)
 	}
 	if repo := meta.FindStatusCondition(dv.Status.Conditions, dotvirtv1alpha1.ConditionForgeRepoReady); repo != nil && repo.Status == metav1.ConditionFalse {
-		return ctrl.Result{RequeueAfter: platformRepoRetry}, nil
+		return ctrl.Result{RequeueAfter: min(platformRepoRetry, r.syncWait(dv))}, nil
+	}
+	if wait := r.syncWait(dv); wait < driftResync {
+		return ctrl.Result{RequeueAfter: wait}, nil
 	}
 	// The watches cover the CR, Deployments, Secrets and Routes; this timer heals
 	// drift on the rest.
 	return ctrl.Result{RequeueAfter: driftResync}, nil
+}
+
+// syncWait is when a pass waiting on sync impersonation comes back: asked for
+// and not yet on, a merged grant or argocd-cm catching up is seen within
+// recheck, since neither RBAC nor argocd-cm is watched. Once on, a Degraded
+// project waits for the drift timer like any other drift.
+func (r *DotvirtReconciler) syncWait(dv *dotvirtv1alpha1.Dotvirt) time.Duration {
+	c := meta.FindStatusCondition(dv.Status.Conditions, dotvirtv1alpha1.ConditionSyncImpersonationReady)
+	if dv.Spec.ArgoCD.SyncImpersonation.Enabled && c != nil && c.Status == metav1.ConditionFalse && c.Reason != "Degraded" {
+		return r.recheck()
+	}
+	return driftResync
 }
 
 // olderInstall returns the Dotvirt CR that precedes dv, if any: by creation time,
