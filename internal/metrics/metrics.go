@@ -30,35 +30,45 @@ import (
 // port's check, not the API's VM visibility gate, decides what it sees.
 // Every input that changes what a caller may see (namespace set, node-read
 // access) is part of the key too. Concurrent misses on one key share one
-// fill. A whole result serves the TTL, short (well under the UI's 30s poll)
-// to stay fresh while absorbing bursts; a failed or partial one serves
-// negativeTTL, so an outage or a forbidden namespace costs one fan-out per
-// key per negativeTTL, not one per request.
+// fill. A whole wide result serves vmTTL or clusterTTL, well under the UI's
+// 30s poll, since wide callers share it; a whole tenancy result serves
+// tenancyTTL, since each tenant user fans out on their own; a failed or
+// partial one serves negativeTTL, so an outage or a forbidden namespace
+// costs one fan-out per key per negativeTTL. Cached values are shared:
+// callers must not mutate them.
 const (
 	vmTTL       = 15 * time.Second
 	clusterTTL  = 20 * time.Second
+	tenancyTTL  = 60 * time.Second
 	negativeTTL = 5 * time.Second
 	// viewTimeout bounds one view's whole fan-out: the queries still waiting
 	// past it fail, and the view answers with what it has.
 	viewTimeout = 20 * time.Second
+	// maxTenancyNamespaces caps one tenancy view's fan-out. The summary's 9
+	// queries over 50 namespaces are 450 tenancy queries: at the shared 8 in
+	// flight and tens of milliseconds each, a few seconds, well inside
+	// viewTimeout. A wider tenancy view would hold the tenancy slots every
+	// other tenant waits on for most of viewTimeout.
+	maxTenancyNamespaces = 50
 )
 
 // Client talks to a Prometheus query API: OpenShift's Thanos querier, its
 // cluster-wide port and its tenancy port. A nil Client is metrics switched
 // off: every view taking a Caller answers model.MetricsUnconfigured.
 type Client struct {
-	base      string
-	tenancy   string // "" when no tenancy endpoint is configured
-	http      *http.Client
-	negTTL    time.Duration // negativeTTL; a field so tests can expire it
-	vmMetrics *ttlcache.Cache[result[model.VMMetrics]]
-	vmUsage   *ttlcache.Cache[result[model.VMUsage]]
-	cluster   *ttlcache.Cache[result[model.ClusterSummary]]
-	scope     *ttlcache.Cache[result[model.VMMetrics]]
-	alerts    *ttlcache.Cache[result[alertRows]]
-	hosts     *ttlcache.Cache[model.HostLoad]
-	capacity  *ttlcache.Cache[model.HostCapacity]
-	traffic   *ttlcache.Cache[result[model.NetworkTraffic]]
+	base       string
+	tenancy    string // "" when no tenancy endpoint is configured
+	http       *http.Client
+	negTTL     time.Duration // negativeTTL; a field so tests can expire it
+	tenancySem chan struct{} // tenancyConcurrency slots, shared by every view
+	vmMetrics  *ttlcache.Cache[result[model.VMMetrics]]
+	vmUsage    *ttlcache.Cache[result[model.VMUsage]]
+	cluster    *ttlcache.Cache[result[model.ClusterSummary]]
+	scope      *ttlcache.Cache[result[model.VMMetrics]]
+	alerts     *ttlcache.Cache[result[alertRows]]
+	hosts      *ttlcache.Cache[result[model.HostLoad]]
+	capacity   *ttlcache.Cache[result[model.HostCapacity]]
+	traffic    *ttlcache.Cache[result[model.NetworkTraffic]]
 }
 
 // result is one cached view answer and whether it is whole.
@@ -66,6 +76,9 @@ type result[V any] struct {
 	v     V
 	whole bool
 }
+
+// newCache holds results for up to the longest life one may have.
+func newCache[V any]() *ttlcache.Cache[result[V]] { return ttlcache.New[result[V]](tenancyTTL) }
 
 // New builds a Client for the cluster-wide query API at baseURL and the
 // tenancy one at tenancyURL (the thanos-querier service's ports 9091 and
@@ -88,36 +101,54 @@ func New(baseURL, tenancyURL, caPath string, insecure bool) (*Client, error) {
 		tr.TLSClientConfig = &tls.Config{InsecureSkipVerify: true}
 	}
 	return &Client{
-		base:      strings.TrimRight(baseURL, "/"),
-		tenancy:   strings.TrimRight(tenancyURL, "/"),
-		http:      &http.Client{Timeout: 20 * time.Second, Transport: tr},
-		negTTL:    negativeTTL,
-		vmMetrics: ttlcache.New[result[model.VMMetrics]](vmTTL),
-		vmUsage:   ttlcache.New[result[model.VMUsage]](vmTTL),
-		cluster:   ttlcache.New[result[model.ClusterSummary]](clusterTTL),
-		scope:     ttlcache.New[result[model.VMMetrics]](clusterTTL),
-		alerts:    ttlcache.New[result[alertRows]](clusterTTL),
-		hosts:     ttlcache.New[model.HostLoad](clusterTTL),
-		capacity:  ttlcache.New[model.HostCapacity](clusterTTL),
-		traffic:   ttlcache.New[result[model.NetworkTraffic]](clusterTTL),
+		base:       strings.TrimRight(baseURL, "/"),
+		tenancy:    strings.TrimRight(tenancyURL, "/"),
+		http:       &http.Client{Timeout: 20 * time.Second, Transport: tr},
+		negTTL:     negativeTTL,
+		tenancySem: make(chan struct{}, tenancyConcurrency),
+		vmMetrics:  newCache[model.VMMetrics](),
+		vmUsage:    newCache[model.VMUsage](),
+		cluster:    newCache[model.ClusterSummary](),
+		scope:      newCache[model.VMMetrics](),
+		alerts:     newCache[alertRows](),
+		hosts:      newCache[model.HostLoad](),
+		capacity:   newCache[model.HostCapacity](),
+		traffic:    newCache[model.NetworkTraffic](),
 	}, nil
 }
 
-// unserved is why who gets no metrics before any query is sent: no backend,
-// or no tenancy endpoint for a caller who may not query cluster-wide.
-func (c *Client) unserved(who Caller) model.MetricsReason {
-	if c == nil || !who.Wide && c.tenancy == "" {
+// unserved is why who gets no metrics over nss namespaces before any query
+// is sent: no backend, no tenancy endpoint for a caller who may not query
+// cluster-wide, or more namespaces than one tenancy view may query.
+func (c *Client) unserved(who Caller, nss int) model.MetricsReason {
+	switch {
+	case c == nil || !who.Wide && c.tenancy == "":
 		return model.MetricsUnconfigured
+	case !who.Wide && nss > maxTenancyNamespaces:
+		return model.MetricsScope
 	}
 	return ""
 }
 
-// cached serves key from cache, else fills it once for every concurrent
-// caller of key under viewTimeout. A result that is not whole serves negTTL.
-func cached[V any](ctx context.Context, cache *ttlcache.Cache[result[V]], negTTL time.Duration, key string, fill func(context.Context) (V, bool)) (V, error) {
+// life is how long a result of who's view serves: wideTTL when whole and
+// wide, tenancyTTL when whole otherwise, negTTL when not whole.
+func (c *Client) life(who Caller, wideTTL time.Duration, whole bool) time.Duration {
+	switch {
+	case !whole:
+		return c.negTTL
+	case who.Wide:
+		return wideTTL
+	}
+	return tenancyTTL
+}
+
+// cached serves who's view from cache, else fills it once for every
+// concurrent caller of its key under viewTimeout and keeps it for its life.
+func cached[V any](ctx context.Context, c *Client, cache *ttlcache.Cache[result[V]], who Caller, wideTTL time.Duration, view string, fill func(context.Context) (V, outcome)) (V, error) {
+	key := who.key(view)
 	hit := func() (result[V], bool) {
 		e, age, ok := cache.GetAge(key)
-		return e, ok && (e.whole || age < negTTL)
+		return e, ok && age < c.life(who, wideTTL, e.whole)
 	}
 	if e, ok := hit(); ok {
 		return e.v, nil
@@ -126,11 +157,15 @@ func cached[V any](ctx context.Context, cache *ttlcache.Cache[result[V]], negTTL
 		if e, ok := hit(); ok {
 			return e, nil
 		}
-		ctx, cancel := context.WithTimeout(ctx, viewTimeout)
+		fctx, cancel := context.WithTimeout(ctx, viewTimeout)
 		defer cancel()
-		v, whole := fill(ctx)
-		e := result[V]{v: v, whole: whole}
-		cache.Put(key, e)
+		v, o := fill(fctx)
+		e := result[V]{v: v, whole: o.whole()}
+		// A fill cut short because every caller left answers nobody. A
+		// refusal is the token's own, never every wide caller's.
+		if ctx.Err() == nil && (!who.Wide || !o.refused) {
+			cache.Put(key, e)
+		}
 		return e, nil
 	})
 	if err != nil {
@@ -162,10 +197,10 @@ func scopeKey(namespaces []string, extra ...string) string {
 // % of allocated, memory used of allocated, guest-FS used of provisioned - each
 // with a short sparkline.
 func (c *Client) VMUsage(ctx context.Context, who Caller, ns, name string) (model.VMUsage, error) {
-	if gap := c.unserved(who); gap != "" {
+	if gap := c.unserved(who, 1); gap != "" {
 		return model.VMUsage{Updated: time.Now().Unix(), Unavailable: gap}, nil
 	}
-	return cached(ctx, c.vmUsage, c.negTTL, who.key(ns+"/"+name), func(ctx context.Context) (model.VMUsage, bool) {
+	return cached(ctx, c, c.vmUsage, who, vmTTL, ns+"/"+name, func(ctx context.Context) (model.VMUsage, outcome) {
 		r, at, w := c.read(who.Token), who.in(ns), lastHour()
 		s := fmt.Sprintf("{namespace=%q,name=%q}", ns, name)
 		var cpu, mem, stor sparkResult
@@ -181,16 +216,17 @@ func (c *Client) VMUsage(ctx context.Context, who Caller, ns, name string) (mode
 				storTotal = first(r.vector(ctx, at, fmt.Sprintf("sum(kubevirt_vmi_filesystem_capacity_bytes%s)", s)))
 			},
 		)
-		gap, whole := r.outcome()
-		if gap != "" {
-			return model.VMUsage{Updated: time.Now().Unix(), Unavailable: gap}, false
+		o := r.outcome()
+		if o.empty() {
+			return model.VMUsage{Updated: time.Now().Unix(), Unavailable: o.gap}, o
 		}
 		return model.VMUsage{
-			Updated: time.Now().Unix(),
-			CPU:     model.UsageMetric{Used: cpu.last, Total: 100, Spark: cpu.vals},
-			Memory:  model.UsageMetric{Used: mem.last, Total: memTotal, Spark: mem.vals},
-			Storage: model.UsageMetric{Used: stor.last, Total: storTotal, Spark: stor.vals},
-		}, whole
+			Updated:     time.Now().Unix(),
+			CPU:         model.UsageMetric{Used: cpu.last, Total: 100, Spark: cpu.vals},
+			Memory:      model.UsageMetric{Used: mem.last, Total: memTotal, Spark: mem.vals},
+			Storage:     model.UsageMetric{Used: stor.last, Total: storTotal, Spark: stor.vals},
+			Unavailable: o.gap,
+		}, o
 	})
 }
 
@@ -201,15 +237,15 @@ func (c *Client) VMUsage(ctx context.Context, who Caller, ns, name string) (mode
 // heaviest VMs by CPU + memory. nodeTotals gates the node-allocatable totals:
 // they are node data, served only to a caller who may read nodes.
 func (c *Client) ClusterSummary(ctx context.Context, who Caller, namespaces []string, node string, nodeTotals bool) (model.ClusterSummary, error) {
-	if gap := c.unserved(who); gap != "" {
+	if gap := c.unserved(who, len(namespaces)); gap != "" {
 		return unavailableSummary(gap), nil
 	}
 	// Node series carry no namespace label, so the tenancy port answers them
 	// empty: only a wide caller has node totals to read.
 	nodeTotals = nodeTotals && who.Wide
 	key := scopeKey(namespaces, node, fmt.Sprintf("nodes=%t", nodeTotals))
-	return cached(ctx, c.cluster, c.negTTL, who.key(key), func(ctx context.Context) (model.ClusterSummary, bool) {
-		r, o, w := c.read(who.Token), over{wide: who.Wide, nss: namespaces}, lastHour()
+	return cached(ctx, c, c.cluster, who, clusterTTL, key, func(ctx context.Context) (model.ClusterSummary, outcome) {
+		r, ov, w := c.read(who.Token), over{wide: who.Wide, nss: namespaces}, lastHour()
 		// q is one VM query, format's %s the caller's selector.
 		q := func(format string) func([]string) string {
 			return func(nss []string) string { return fmt.Sprintf(format, vmSelector(nss, node)) }
@@ -229,21 +265,21 @@ func (c *Client) ClusterSummary(ctx context.Context, who Caller, namespaces []st
 		var phases, topCPU, topMem []labeledValue
 		fns := []func(){
 			func() {
-				cpu = sparkOf(r.seriesOver(ctx, o, w, q("sum(rate(kubevirt_vmi_cpu_usage_seconds_total%s[2m]))")))
+				cpu = sparkOf(r.seriesOver(ctx, ov, w, q("sum(rate(kubevirt_vmi_cpu_usage_seconds_total%s[2m]))")))
 			},
-			func() { mem = sparkOf(r.seriesOver(ctx, o, w, q("sum(kubevirt_vmi_memory_used_bytes%s)"))) },
-			func() { stor = sparkOf(r.seriesOver(ctx, o, w, q("sum(kubevirt_vmi_filesystem_used_bytes%s)"))) },
+			func() { mem = sparkOf(r.seriesOver(ctx, ov, w, q("sum(kubevirt_vmi_memory_used_bytes%s)"))) },
+			func() { stor = sparkOf(r.seriesOver(ctx, ov, w, q("sum(kubevirt_vmi_filesystem_used_bytes%s)"))) },
 			func() {
-				cpuAlloc = first(r.vectorOver(ctx, o, func(nss []string) string { return vcpuTotal(vmSelector(nss, node)) }))
+				cpuAlloc = first(r.vectorOver(ctx, ov, func(nss []string) string { return vcpuTotal(vmSelector(nss, node)) }))
 			},
-			func() { memAlloc = first(r.vectorOver(ctx, o, q("sum(kubevirt_vmi_memory_domain_bytes%s)"))) },
-			func() { storTotal = first(r.vectorOver(ctx, o, q("sum(kubevirt_vmi_filesystem_capacity_bytes%s)"))) },
+			func() { memAlloc = first(r.vectorOver(ctx, ov, q("sum(kubevirt_vmi_memory_domain_bytes%s)"))) },
+			func() { storTotal = first(r.vectorOver(ctx, ov, q("sum(kubevirt_vmi_filesystem_capacity_bytes%s)"))) },
 			// kubevirt_vmi_phase_count has no namespace label; kubevirt_vmi_info
 			// does (one series per VMI, with a phase label), so it counts per
 			// namespace.
-			func() { phases = r.vectorOver(ctx, o, q("sum by(phase)(kubevirt_vmi_info%s)")) },
-			func() { topCPU = r.vectorOver(ctx, o, top("rate(kubevirt_vmi_cpu_usage_seconds_total%s[2m])")) },
-			func() { topMem = r.vectorOver(ctx, o, top("kubevirt_vmi_memory_used_bytes%s")) },
+			func() { phases = r.vectorOver(ctx, ov, q("sum by(phase)(kubevirt_vmi_info%s)")) },
+			func() { topCPU = r.vectorOver(ctx, ov, top("rate(kubevirt_vmi_cpu_usage_seconds_total%s[2m])")) },
+			func() { topMem = r.vectorOver(ctx, ov, top("kubevirt_vmi_memory_used_bytes%s")) },
 		}
 		if nodeTotals {
 			fns = append(fns,
@@ -256,9 +292,9 @@ func (c *Client) ClusterSummary(ctx context.Context, who Caller, namespaces []st
 			)
 		}
 		parallel(fns...)
-		gap, whole := r.outcome()
-		if gap != "" {
-			return unavailableSummary(gap), false
+		o := r.outcome()
+		if o.empty() {
+			return unavailableSummary(o.gap), o
 		}
 		vms := map[string]int{}
 		for _, lv := range phases {
@@ -267,14 +303,15 @@ func (c *Client) ClusterSummary(ctx context.Context, who Caller, namespaces []st
 			}
 		}
 		return model.ClusterSummary{
-			Updated:   time.Now().Unix(),
-			CPU:       model.ClusterMetric{Used: cpu.last, Allocated: cpuAlloc, Total: cpuTotal, Spark: cpu.vals},
-			Memory:    model.ClusterMetric{Used: mem.last, Allocated: memAlloc, Total: memTotal, Spark: mem.vals},
-			Storage:   model.ClusterMetric{Used: stor.last, Total: storTotal, Spark: stor.vals},
-			VMs:       vms,
-			TopCPU:    consumers(topCPU),
-			TopMemory: consumers(topMem),
-		}, whole
+			Updated:     time.Now().Unix(),
+			CPU:         model.ClusterMetric{Used: cpu.last, Allocated: cpuAlloc, Total: cpuTotal, Spark: cpu.vals},
+			Memory:      model.ClusterMetric{Used: mem.last, Allocated: memAlloc, Total: memTotal, Spark: mem.vals},
+			Storage:     model.ClusterMetric{Used: stor.last, Total: storTotal, Spark: stor.vals},
+			VMs:         vms,
+			TopCPU:      consumers(topCPU),
+			TopMemory:   consumers(topMem),
+			Unavailable: o.gap,
+		}, o
 	})
 }
 
@@ -305,46 +342,42 @@ func byLabel(vec []labeledValue, label string) map[string]float64 {
 // label_replace). Node-level data, same sensitivity class as the
 // node-allocatable totals ClusterSummary serves: only the cluster-wide port
 // has it, so only a wide caller reads it, and wide callers share one entry.
+// No worker at all is ErrUnavailable, never a balanced empty cluster.
 func (c *Client) HostLoad(ctx context.Context, who Caller) (model.HostLoad, error) {
 	if !who.Wide {
 		return model.HostLoad{Updated: time.Now().Unix(), Nodes: []model.HostWorker{}, Unavailable: model.MetricsForbidden}, nil
 	}
-	key := who.key("hosts")
-	if v, ok := c.hosts.Get(key); ok {
-		return v, nil
-	}
-	r := c.read(who.Token)
-	util := byLabel(r.vector(ctx, "", `1 - avg by(instance) (rate(node_cpu_seconds_total{mode="idle"}[2m]))`), "instance")
-	mem := byLabel(r.vector(ctx, "", `1 - node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes`), "instance")
-	unsched := byLabel(r.vector(ctx, "", `kube_node_spec_unschedulable`), "node")
-	var nodes []model.HostWorker
-	for _, lv := range r.vector(ctx, "", `kube_node_role{role="worker"}`) {
-		n := lv.labels["node"]
-		u, ok := util[n]
-		if n == "" || !ok {
-			continue // no exporter series: absent from the distribution, not a fake 0%
+	load, err := cached(ctx, c, c.hosts, who, clusterTTL, "hosts", func(ctx context.Context) (model.HostLoad, outcome) {
+		r := c.read(who.Token)
+		util := byLabel(r.vector(ctx, "", `1 - avg by(instance) (rate(node_cpu_seconds_total{mode="idle"}[2m]))`), "instance")
+		mem := byLabel(r.vector(ctx, "", `1 - node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes`), "instance")
+		unsched := byLabel(r.vector(ctx, "", `kube_node_spec_unschedulable`), "node")
+		nodes := []model.HostWorker{}
+		for _, lv := range r.vector(ctx, "", `kube_node_role{role="worker"}`) {
+			n := lv.labels["node"]
+			u, ok := util[n]
+			if n == "" || !ok {
+				continue // no exporter series: absent from the distribution, not a fake 0%
+			}
+			nodes = append(nodes, model.HostWorker{Node: n, Pct: u * 100, Mem: mem[n] * 100, Unschedulable: unsched[n] > 0})
 		}
-		nodes = append(nodes, model.HostWorker{Node: n, Pct: u * 100, Mem: mem[n] * 100, Unschedulable: unsched[n] > 0})
+		o := r.outcome()
+		load := model.HostLoad{Updated: time.Now().Unix(), Workers: len(nodes), Nodes: nodes, Unavailable: o.gap}
+		if len(nodes) == 0 {
+			return load, o
+		}
+		sort.Slice(nodes, func(i, j int) bool { return nodes[i].Pct > nodes[j].Pct }) // hottest first
+		var sum float64
+		for _, n := range nodes {
+			sum += n.Pct
+		}
+		load.Mean = sum / float64(len(nodes))
+		return load, o
+	})
+	if err == nil && load.Unavailable == "" && len(load.Nodes) == 0 {
+		err = fmt.Errorf("%w: no worker utilization series", model.ErrUnavailable)
 	}
-	if len(nodes) == 0 {
-		return model.HostLoad{}, fmt.Errorf("%w: no worker utilization series", model.ErrUnavailable)
-	}
-	sort.Slice(nodes, func(i, j int) bool { return nodes[i].Pct > nodes[j].Pct }) // hottest first
-
-	load := model.HostLoad{
-		Updated: time.Now().Unix(),
-		Workers: len(nodes),
-		Nodes:   nodes,
-	}
-	var sum float64
-	for _, n := range nodes {
-		sum += n.Pct
-	}
-	load.Mean = sum / float64(len(nodes))
-	if _, whole := r.outcome(); whole {
-		c.hosts.Put(key, load)
-	}
-	return load, nil
+	return load, err
 }
 
 // Capacity returns each worker's committed-to-VMs vCPU and guest memory
@@ -356,49 +389,44 @@ func (c *Client) Capacity(ctx context.Context, who Caller) (model.HostCapacity, 
 	if !who.Wide {
 		return model.HostCapacity{Updated: time.Now().Unix(), Nodes: []model.HostCapacityNode{}, Unavailable: model.MetricsForbidden}, nil
 	}
-	key := who.key("capacity")
-	if v, ok := c.capacity.Get(key); ok {
-		return v, nil
-	}
-	r := c.read(who.Token)
-	cpuAlloc := byLabel(r.vector(ctx, "", `kube_node_status_allocatable{resource="cpu"}`), "node")
-	memAlloc := byLabel(r.vector(ctx, "", `kube_node_status_allocatable{resource="memory"}`), "node")
-	vcpu := byLabel(r.vector(ctx, "", nodeVCPUs()), "node")
-	memVM := byLabel(r.vector(ctx, "", `sum by(node)(kubevirt_vmi_memory_domain_bytes)`), "node")
+	hc, err := cached(ctx, c, c.capacity, who, clusterTTL, "capacity", func(ctx context.Context) (model.HostCapacity, outcome) {
+		r := c.read(who.Token)
+		cpuAlloc := byLabel(r.vector(ctx, "", `kube_node_status_allocatable{resource="cpu"}`), "node")
+		memAlloc := byLabel(r.vector(ctx, "", `kube_node_status_allocatable{resource="memory"}`), "node")
+		vcpu := byLabel(r.vector(ctx, "", nodeVCPUs()), "node")
+		memVM := byLabel(r.vector(ctx, "", `sum by(node)(kubevirt_vmi_memory_domain_bytes)`), "node")
 
-	var nodes []model.HostCapacityNode
-	for _, lv := range r.vector(ctx, "", `kube_node_role{role="worker"}`) {
-		n := lv.labels["node"]
-		alloc, ok := cpuAlloc[n]
-		if n == "" || !ok {
-			continue // no allocatable series: absent from the list, not a fake zero-capacity row
+		nodes := []model.HostCapacityNode{}
+		for _, lv := range r.vector(ctx, "", `kube_node_role{role="worker"}`) {
+			n := lv.labels["node"]
+			alloc, ok := cpuAlloc[n]
+			if n == "" || !ok {
+				continue // no allocatable series: absent from the list, not a fake zero-capacity row
+			}
+			nodes = append(nodes, model.HostCapacityNode{
+				Node:           n,
+				CPUAllocatable: alloc,
+				VCPUAllocated:  vcpu[n],
+				MemAllocatable: memAlloc[n],
+				MemAllocated:   memVM[n],
+			})
 		}
-		nodes = append(nodes, model.HostCapacityNode{
-			Node:           n,
-			CPUAllocatable: alloc,
-			VCPUAllocated:  vcpu[n],
-			MemAllocatable: memAlloc[n],
-			MemAllocated:   memVM[n],
-		})
-	}
-	if len(nodes) == 0 {
-		return model.HostCapacity{}, fmt.Errorf("%w: no worker capacity series", model.ErrUnavailable)
-	}
-	// Most-committed memory first: overcommit risk leads, and memory (unlike
-	// time-shared CPU) is the ratio that hurts.
-	ratio := func(n model.HostCapacityNode) float64 {
-		if n.MemAllocatable <= 0 {
-			return 0
+		// Most-committed memory first: overcommit risk leads, and memory
+		// (unlike time-shared CPU) is the ratio that hurts.
+		ratio := func(n model.HostCapacityNode) float64 {
+			if n.MemAllocatable <= 0 {
+				return 0
+			}
+			return n.MemAllocated / n.MemAllocatable
 		}
-		return n.MemAllocated / n.MemAllocatable
+		sort.Slice(nodes, func(i, j int) bool { return ratio(nodes[i]) > ratio(nodes[j]) })
+		o := r.outcome()
+		return model.HostCapacity{Updated: time.Now().Unix(), Nodes: nodes, Unavailable: o.gap}, o
+	})
+	if err == nil && hc.Unavailable == "" && len(hc.Nodes) == 0 {
+		err = fmt.Errorf("%w: no worker capacity series", model.ErrUnavailable)
 	}
-	sort.Slice(nodes, func(i, j int) bool { return ratio(nodes[i]) > ratio(nodes[j]) })
-
-	out := model.HostCapacity{Updated: time.Now().Unix(), Nodes: nodes}
-	if _, whole := r.outcome(); whole {
-		c.capacity.Put(key, out)
-	}
-	return out, nil
+	return hc, err
 }
 
 // unavailableMetrics is a chart set with no charts and the reason why.
@@ -412,35 +440,35 @@ func unavailableMetrics(rng string, gap model.MetricsReason) model.VMMetrics {
 // like ClusterSummary.
 func (c *Client) ScopeMetrics(ctx context.Context, who Caller, namespaces []string, node, rng string) (model.VMMetrics, error) {
 	rng, spec := resolveRange(rng)
-	if gap := c.unserved(who); gap != "" {
+	if gap := c.unserved(who, len(namespaces)); gap != "" {
 		return unavailableMetrics(rng, gap), nil
 	}
-	return cached(ctx, c.scope, c.negTTL, who.key(scopeKey(namespaces, node, rng)), func(ctx context.Context) (model.VMMetrics, bool) {
-		r, o, w := c.read(who.Token), over{wide: who.Wide, nss: namespaces}, spec.span()
+	return cached(ctx, c, c.scope, who, clusterTTL, scopeKey(namespaces, node, rng), func(ctx context.Context) (model.VMMetrics, outcome) {
+		r, ov, w := c.read(who.Token), over{wide: who.Wide, nss: namespaces}, spec.span()
 		charts := scopeChartSpecs(promDur(rateWindow(spec.step)))
 		results := make([][]labeledSeries, len(charts))
 		fns := make([]func(), len(charts))
 		for ci, ch := range charts {
 			fns[ci] = func() {
-				results[ci] = topKSeries(r.seriesOver(ctx, o, w, func(nss []string) string {
+				results[ci] = topKSeries(r.seriesOver(ctx, ov, w, func(nss []string) string {
 					return ch.query(vmSelector(nss, node))
 				}), topK)
 			}
 		}
 		parallel(fns...)
-		gap, whole := r.outcome()
-		if gap != "" {
-			return unavailableMetrics(rng, gap), false
+		o := r.outcome()
+		if o.empty() {
+			return unavailableMetrics(rng, o.gap), o
 		}
-		out := model.VMMetrics{Range: rng, Charts: make([]model.MetricChart, len(charts))}
+		out := model.VMMetrics{Range: rng, Charts: make([]model.MetricChart, len(charts)), Unavailable: o.gap}
 		for ci, ch := range charts {
 			out.Charts[ci] = buildChart(ch.chartSpec, namedFromLabeled(results[ci]))
 		}
-		return out, whole
+		return out, o
 	})
 }
 
-// alertRows is one Alerts answer and, when every query failed, why.
+// alertRows is one Alerts answer and, when a query failed, why.
 type alertRows struct {
 	rows []model.Alert
 	gap  model.MetricsReason
@@ -451,22 +479,22 @@ type alertRows struct {
 // Alertmanager dependency); identical (name, severity, namespace, vm) series
 // collapse into one row with a count. Cached by scope like ClusterSummary.
 // Alarm definitions (PrometheusRules) are platform config, out of scope. An
-// unavailable read is ErrUnavailable, never an empty list that reads as none
-// firing.
+// unavailable or partial read is ErrUnavailable: the answer is a bare list,
+// and a list missing a namespace would read as every alert firing.
 func (c *Client) Alerts(ctx context.Context, who Caller, namespaces []string) ([]model.Alert, error) {
-	if gap := c.unserved(who); gap != "" {
+	if gap := c.unserved(who, len(namespaces)); gap != "" {
 		return nil, fmt.Errorf("%w: alerts %s", model.ErrUnavailable, gap)
 	}
 	if len(namespaces) == 0 {
 		return []model.Alert{}, nil
 	}
-	got, err := cached(ctx, c.alerts, c.negTTL, who.key(scopeKey(namespaces)), func(ctx context.Context) (alertRows, bool) {
+	got, err := cached(ctx, c, c.alerts, who, clusterTTL, scopeKey(namespaces), func(ctx context.Context) (alertRows, outcome) {
 		r := c.read(who.Token)
 		vec := r.vectorOver(ctx, over{wide: who.Wide, nss: namespaces}, func(nss []string) string {
 			return fmt.Sprintf(`ALERTS{alertstate="firing",%s}`, nsMatch(nss))
 		})
-		gap, whole := r.outcome()
-		return alertRows{rows: collapseAlerts(vec), gap: gap}, whole
+		o := r.outcome()
+		return alertRows{rows: collapseAlerts(vec), gap: o.gap}, o
 	})
 	switch {
 	case err != nil:
@@ -545,10 +573,10 @@ func consumers(vec []labeledValue) []model.ConsumerVM {
 // answers the reason instead of charts.
 func (c *Client) VMMetrics(ctx context.Context, who Caller, ns, name, rng string) (model.VMMetrics, error) {
 	rng, spec := resolveRange(rng)
-	if gap := c.unserved(who); gap != "" {
+	if gap := c.unserved(who, 1); gap != "" {
 		return unavailableMetrics(rng, gap), nil
 	}
-	return cached(ctx, c.vmMetrics, c.negTTL, who.key(ns+"/"+name+"|"+rng), func(ctx context.Context) (model.VMMetrics, bool) {
+	return cached(ctx, c, c.vmMetrics, who, vmTTL, ns+"/"+name+"|"+rng, func(ctx context.Context) (model.VMMetrics, outcome) {
 		r, at, w := c.read(who.Token), who.in(ns), spec.span()
 		specs := chartSpecs(ns, name, promDur(rateWindow(spec.step)))
 		results := make([][][]namedSeries, len(specs)) // results[chart][spec] = its series
@@ -573,11 +601,11 @@ func (c *Client) VMMetrics(ctx context.Context, who Caller, ns, name, rng string
 			}
 		}
 		parallel(fns...)
-		gap, whole := r.outcome()
-		if gap != "" {
-			return unavailableMetrics(rng, gap), false
+		o := r.outcome()
+		if o.empty() {
+			return unavailableMetrics(rng, o.gap), o
 		}
-		out := model.VMMetrics{Range: rng, Charts: make([]model.MetricChart, len(specs))}
+		out := model.VMMetrics{Range: rng, Charts: make([]model.MetricChart, len(specs)), Unavailable: o.gap}
 		for ci, cs := range specs {
 			var series []namedSeries
 			for _, got := range results[ci] {
@@ -585,7 +613,7 @@ func (c *Client) VMMetrics(ctx context.Context, who Caller, ns, name, rng string
 			}
 			out.Charts[ci] = buildChart(cs, series)
 		}
-		return out, whole
+		return out, o
 	})
 }
 
@@ -606,13 +634,6 @@ const trafficWindow = "1h"
 // caller names the network.
 func (c *Client) NetworkTraffic(ctx context.Context, who Caller, attached []Attachment, limit int) (model.NetworkTraffic, error) {
 	none := model.NetworkTraffic{Window: trafficWindow, VMs: []model.TrafficVM{}}
-	if gap := c.unserved(who); gap != "" {
-		none.Unavailable = gap
-		return none, nil
-	}
-	if len(attached) == 0 {
-		return none, nil
-	}
 	want := make(map[Attachment]bool, len(attached))
 	ifaces := map[string]map[string]bool{} // namespace -> interface names
 	keys := make([]string, 0, len(attached))
@@ -624,10 +645,17 @@ func (c *Client) NetworkTraffic(ctx context.Context, who Caller, attached []Atta
 		ifaces[a.Namespace][a.Interface] = true
 		keys = append(keys, a.Namespace+"/"+a.Name+"/"+a.Interface)
 	}
-	return cached(ctx, c.traffic, c.negTTL, who.key(scopeKey(keys, fmt.Sprint(limit))), func(ctx context.Context) (model.NetworkTraffic, bool) {
+	if gap := c.unserved(who, len(ifaces)); gap != "" {
+		none.Unavailable = gap
+		return none, nil
+	}
+	if len(attached) == 0 {
+		return none, nil
+	}
+	return cached(ctx, c, c.traffic, who, clusterTTL, scopeKey(keys, fmt.Sprint(limit)), func(ctx context.Context) (model.NetworkTraffic, outcome) {
 		r := c.read(who.Token)
-		o := over{wide: who.Wide, nss: slices.Sorted(maps.Keys(ifaces))}
-		vec := r.vectorOver(ctx, o, func(nss []string) string {
+		ov := over{wide: who.Wide, nss: slices.Sorted(maps.Keys(ifaces))}
+		vec := r.vectorOver(ctx, ov, func(nss []string) string {
 			ifs := map[string]bool{}
 			for _, ns := range nss {
 				maps.Copy(ifs, ifaces[ns])
@@ -638,11 +666,11 @@ func (c *Client) NetworkTraffic(ctx context.Context, who Caller, attached []Atta
 			}
 			return sum("kubevirt_vmi_network_receive_bytes_total") + " + " + sum("kubevirt_vmi_network_transmit_bytes_total")
 		})
-		gap, whole := r.outcome()
-		if gap != "" {
+		o := r.outcome()
+		if o.empty() {
 			out := none
-			out.Unavailable = gap
-			return out, false
+			out.Unavailable = o.gap
+			return out, o
 		}
 		perVM := map[[2]string]float64{}
 		for _, lv := range vec {
@@ -665,8 +693,8 @@ func (c *Client) NetworkTraffic(ctx context.Context, who Caller, attached []Atta
 			vms = vms[:limit]
 		}
 		out := none
-		out.VMs = vms
-		return out, whole
+		out.VMs, out.Unavailable = vms, o.gap
+		return out, o
 	})
 }
 

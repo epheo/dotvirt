@@ -408,6 +408,88 @@ func TestNodeViewsServeOnlyWideCallers(t *testing.T) {
 	}
 }
 
+// A fill every caller left is cut short: it is never kept, so the next caller
+// fills afresh instead of reading the remains as data.
+func TestCancelledFillIsNotKept(t *testing.T) {
+	cache := newCache[int]()
+	c := &Client{negTTL: negativeTTL}
+	ctx, leave := context.WithCancel(context.Background())
+	returned := make(chan struct{})
+	_, err := cached(ctx, c, cache, Caller{Token: adminTok, Wide: true}, clusterTTL, "v", func(fctx context.Context) (int, outcome) {
+		defer close(returned)
+		leave()
+		<-fctx.Done()
+		return 1, outcome{}
+	})
+	if err == nil {
+		t.Fatal("the caller who left got no error")
+	}
+	<-returned
+	time.Sleep(20 * time.Millisecond) // the fill's Put, if any, follows its return
+	if _, _, ok := cache.GetAge(Caller{Token: adminTok, Wide: true}.key("v")); ok {
+		t.Error("a fill cut short by every caller leaving was kept")
+	}
+}
+
+// The querier refusing one wide token is that token's answer: the next wide
+// caller is not served it.
+func TestWideRefusalIsNotShared(t *testing.T) {
+	ctx := context.Background()
+	q := newQuerier(t)
+	c := q.client()
+	revoked, admin := Caller{Token: "revoked-admin", Wide: true}, Caller{Token: adminTok, Wide: true}
+	if cs, _ := c.ClusterSummary(ctx, revoked, []string{"a", "b"}, "", false); cs.Unavailable != model.MetricsForbidden {
+		t.Fatalf("refused admin summary = %+v, want forbidden", cs)
+	}
+	if cs, _ := c.ClusterSummary(ctx, admin, []string{"a", "b"}, "", false); cs.Unavailable != "" || cs.VMs["running"] != 3 {
+		t.Errorf("one admin's refusal reached another: %+v", cs)
+	}
+}
+
+// Some namespaces failing still shows the rest, marked partial.
+func TestPartialSaysSo(t *testing.T) {
+	ctx := context.Background()
+	q := newQuerier(t)
+	q.setAllow(func(tok, ns string) bool { return ns == "a" })
+	c := q.client()
+	if cs, _ := c.ClusterSummary(ctx, tenant, []string{"a", "b"}, "", false); cs.Unavailable != model.MetricsPartial || cs.Memory.Allocated != 1 {
+		t.Errorf("summary = %+v, want namespace a's sums marked partial", cs)
+	}
+	if sm, _ := c.ScopeMetrics(ctx, tenant, []string{"a", "b"}, "", "1h"); sm.Unavailable != model.MetricsPartial || len(sm.Charts[0].Series) != 1 {
+		t.Errorf("scope = %+v, want a's VM marked partial", sm)
+	}
+	if nt, _ := c.NetworkTraffic(ctx, tenant, []Attachment{{"a", "vm-a", "eth0"}, {"b", "vm-b", "eth0"}}, 5); nt.Unavailable != model.MetricsPartial || len(nt.VMs) != 1 {
+		t.Errorf("traffic = %+v, want a's VM marked partial", nt)
+	}
+	if _, err := c.Alerts(ctx, tenant, []string{"a", "b"}); !errors.Is(err, model.ErrUnavailable) {
+		t.Errorf("partial alerts err = %v, want ErrUnavailable", err)
+	}
+}
+
+// A tenancy view wider than maxTenancyNamespaces answers scope and sends
+// nothing; a wide caller is not capped.
+func TestTenancyScopeCap(t *testing.T) {
+	ctx := context.Background()
+	q := newQuerier(t)
+	c := q.client()
+	nss := make([]string, maxTenancyNamespaces+1)
+	for i := range nss {
+		nss[i] = fmt.Sprintf("ns-%02d", i)
+	}
+	if cs, _ := c.ClusterSummary(ctx, tenant, nss, "", false); cs.Unavailable != model.MetricsScope {
+		t.Errorf("wide tenant scope = %+v, want scope", cs)
+	}
+	if _, err := c.Alerts(ctx, tenant, nss); !errors.Is(err, model.ErrUnavailable) {
+		t.Errorf("wide tenant alerts err = %v, want ErrUnavailable", err)
+	}
+	if _, perNS := q.seen(); len(perNS) != 0 {
+		t.Errorf("a capped view sent tenancy queries: %d namespaces", len(perNS))
+	}
+	if cs, _ := c.ClusterSummary(ctx, Caller{Token: adminTok, Wide: true}, nss, "", false); cs.Unavailable == model.MetricsScope {
+		t.Error("a wide caller was capped")
+	}
+}
+
 // One view's namespace fan-out keeps at most viewConcurrency queries in
 // flight, and concurrent callers of one view share one fan-out.
 func TestTenantFanOutBounded(t *testing.T) {
@@ -436,6 +518,24 @@ func TestTenantFanOutBounded(t *testing.T) {
 	}
 	if peak := q.peakInFlight(); peak > viewConcurrency {
 		t.Errorf("peak in flight = %d, want at most %d", peak, viewConcurrency)
+	}
+
+	// Four users' views at once still share the process-wide tenancy bound.
+	q.mu.Lock()
+	q.peak = 0
+	q.mu.Unlock()
+	q.setAllow(func(string, string) bool { return true })
+	for i := range 4 {
+		wg.Go(func() {
+			who := Caller{Token: fmt.Sprintf("user-%d", i)}
+			if _, err := c.ScopeMetrics(context.Background(), who, nss, "", "1h"); err != nil {
+				t.Error(err)
+			}
+		})
+	}
+	wg.Wait()
+	if peak := q.peakInFlight(); peak > tenancyConcurrency {
+		t.Errorf("peak in flight across users = %d, want at most %d", peak, tenancyConcurrency)
 	}
 }
 

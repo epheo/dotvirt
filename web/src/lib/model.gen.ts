@@ -635,13 +635,16 @@ export interface DRSView {
 // source: metrics.go
 
 /**
- * MetricsReason says why a metrics read carries no data; empty means it does.
- * A view that has it set holds no numbers to show: its zeros are not zeros.
+ * MetricsReason says why a metrics read carries no data, or not all of it;
+ * empty means it is whole. Any reason but partial holds no numbers to show:
+ * its zeros are not zeros.
  */
 export type MetricsReason = string;
 export const MetricsForbidden: MetricsReason = "forbidden"; // the metrics backend refused the caller
 export const MetricsUnreachable: MetricsReason = "unreachable"; // the metrics backend is down or failing
 export const MetricsUnconfigured: MetricsReason = "unconfigured"; // no metrics endpoint serves this caller
+export const MetricsScope: MetricsReason = "scope"; // too many namespaces for one per-namespace read: narrow to a project
+export const MetricsPartial: MetricsReason = "partial"; // some queries failed: the numbers leave something out
 /**
  * HostCapacityNode is one worker's commitment picture: what is promised to
  * VMs (vCPUs, guest memory) against what the node can offer.

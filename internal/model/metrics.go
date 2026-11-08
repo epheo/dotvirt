@@ -2,14 +2,17 @@ package model
 
 // Performance and capacity: the Performance tab, summary widgets, host planes.
 
-// MetricsReason says why a metrics read carries no data; empty means it does.
-// A view that has it set holds no numbers to show: its zeros are not zeros.
+// MetricsReason says why a metrics read carries no data, or not all of it;
+// empty means it is whole. Any reason but partial holds no numbers to show:
+// its zeros are not zeros.
 type MetricsReason string
 
 const (
 	MetricsForbidden    MetricsReason = "forbidden"    // the metrics backend refused the caller
 	MetricsUnreachable  MetricsReason = "unreachable"  // the metrics backend is down or failing
 	MetricsUnconfigured MetricsReason = "unconfigured" // no metrics endpoint serves this caller
+	MetricsScope        MetricsReason = "scope"        // too many namespaces for one per-namespace read: narrow to a project
+	MetricsPartial      MetricsReason = "partial"      // some queries failed: the numbers leave something out
 )
 
 // HostCapacityNode is one worker's commitment picture: what is promised to

@@ -24,11 +24,16 @@ type statusError struct{ code int }
 
 func (e *statusError) Error() string { return fmt.Sprintf("query API status %d", e.code) }
 
+// refused reports the backend refusing the token (401 or 403).
+func refused(err error) bool {
+	var se *statusError
+	return errors.As(err, &se) && (se.code == http.StatusUnauthorized || se.code == http.StatusForbidden)
+}
+
 // reasonFor names a failed read for the UI: the backend refusing the token,
 // or anything else going wrong on the way.
 func reasonFor(err error) model.MetricsReason {
-	var se *statusError
-	if errors.As(err, &se) && (se.code == http.StatusUnauthorized || se.code == http.StatusForbidden) {
+	if refused(err) {
 		return model.MetricsForbidden
 	}
 	return model.MetricsUnreachable
@@ -38,6 +43,12 @@ func reasonFor(err error) model.MetricsReason {
 // namespace fan-out.
 const viewConcurrency = 8
 
+// tenancyConcurrency bounds the tenancy-port queries in flight across every
+// view and caller: well under the querier's 20 concurrent queries (Thanos
+// --query.max-concurrent default, which 4.22 leaves unset), so tenants
+// never take more than 8 of its slots.
+const tenancyConcurrency = 8
+
 // read is one view's queries: who they run as, the bound on how many are in
 // flight, and how they went. Its methods return no error: a failed query
 // reads as no series, and outcome says what the view may claim.
@@ -46,9 +57,10 @@ type read struct {
 	token string
 	sem   chan struct{}
 
-	mu   sync.Mutex
-	data bool  // some query returned a series
-	err  error // the first failure
+	mu      sync.Mutex
+	data    bool  // some query returned a series
+	err     error // the first failure
+	refused bool  // some query was refused the token
 }
 
 func (c *Client) read(token string) *read {
@@ -62,27 +74,39 @@ func (r *read) note(data bool, err error) {
 		if r.err == nil {
 			r.err = err
 		}
+		r.refused = r.refused || refused(err)
 		return
 	}
 	r.data = r.data || data
 }
 
-// outcome reports, once every query returned, why the view has nothing to
-// show ("" when a query returned data or none failed) and whether it is
-// whole: only a whole view is cached, so one caller's failure never serves
-// another.
-func (r *read) outcome() (model.MetricsReason, bool) {
+// outcome is how a view's queries went, once every one returned.
+type outcome struct {
+	// gap is why the view has nothing, or not everything, to show: "" when
+	// no query failed, MetricsPartial when one failed but others returned
+	// data, else the first failure's reason.
+	gap     model.MetricsReason
+	refused bool // some query was refused the token
+}
+
+// whole reports that no query failed.
+func (o outcome) whole() bool { return o.gap == "" }
+
+// empty reports that the view has no data to show at all.
+func (o outcome) empty() bool { return o.gap != "" && o.gap != model.MetricsPartial }
+
+func (r *read) outcome() outcome {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if r.err == nil {
-		return "", true
-	}
-	if r.data {
-		return "", false
+	switch {
+	case r.err == nil:
+		return outcome{}
+	case r.data:
+		return outcome{gap: model.MetricsPartial, refused: r.refused}
 	}
 	// The backend's text can carry the querier's URL: logged, never answered.
 	log.Printf("metrics: query failed: %v", r.err)
-	return reasonFor(r.err), false
+	return outcome{gap: reasonFor(r.err), refused: r.refused}
 }
 
 // get performs one query-API GET under the view's token and decodes the
@@ -97,6 +121,12 @@ func (r *read) get(ctx context.Context, ns, apiPath string, params url.Values, o
 	}
 	base := r.c.base
 	if ns != "" {
+		select {
+		case r.c.tenancySem <- struct{}{}:
+			defer func() { <-r.c.tenancySem }()
+		case <-ctx.Done():
+			return ctx.Err()
+		}
 		base = r.c.tenancy
 		params.Set("namespace", ns)
 	}

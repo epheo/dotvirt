@@ -378,14 +378,14 @@ func TestCapacity(t *testing.T) {
 }
 
 // promStub answers every query with one series of value v; a query containing
-// fail answers 403 instead. It counts the requests it serves.
+// fail answers 503 instead. It counts the requests it serves.
 func promStub(t *testing.T, fail string, hits *atomic.Int64) *httptest.Server {
 	t.Helper()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		hits.Add(1)
 		q := r.URL.Query().Get("query")
 		if fail != "" && strings.Contains(q, fail) {
-			http.Error(w, "forbidden", http.StatusForbidden)
+			http.Error(w, "unavailable", http.StatusServiceUnavailable)
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
@@ -408,8 +408,8 @@ func TestClusterSummaryPartialServesNegativeTTL(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cs.CPU.Total != 0 || cs.CPU.Used != 7 {
-		t.Errorf("degraded summary = %+v, want used 7, total 0", cs.CPU)
+	if cs.CPU.Total != 0 || cs.CPU.Used != 7 || cs.Unavailable != model.MetricsPartial {
+		t.Errorf("degraded summary = %+v, want used 7, total 0, partial", cs)
 	}
 	first := hits.Load()
 	if _, err := c.ClusterSummary(context.Background(), wide, []string{"a"}, "", true); err != nil {
@@ -463,7 +463,9 @@ func TestClusterSummaryNodeTotalsGated(t *testing.T) {
 	}
 }
 
-func TestHostLoadNotCachedOnQueryError(t *testing.T) {
+// A host load with a failed query says partial and serves only the negative
+// TTL.
+func TestHostLoadPartialServesNegativeTTL(t *testing.T) {
 	var hits atomic.Int64
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		hits.Add(1)
@@ -477,15 +479,22 @@ func TestHostLoadNotCachedOnQueryError(t *testing.T) {
 	}))
 	defer srv.Close()
 	c := mustNew(t, srv.URL)
-	if _, err := c.HostLoad(context.Background(), wide); err != nil {
-		t.Fatal(err)
+	if load, err := c.HostLoad(context.Background(), wide); err != nil || load.Unavailable != model.MetricsPartial {
+		t.Fatalf("host load = %+v, %v, want partial", load, err)
 	}
 	first := hits.Load()
 	if _, err := c.HostLoad(context.Background(), wide); err != nil {
 		t.Fatal(err)
 	}
+	if hits.Load() != first {
+		t.Error("a partial host load within the negative TTL was re-queried")
+	}
+	c.negTTL = 0
+	if _, err := c.HostLoad(context.Background(), wide); err != nil {
+		t.Fatal(err)
+	}
 	if hits.Load() == first {
-		t.Error("a host load with a failed query was served from cache")
+		t.Error("a partial host load served past the negative TTL")
 	}
 }
 
