@@ -53,6 +53,32 @@ func TestRepoSetCachesByURL(t *testing.T) {
 	}
 }
 
+// Peek reads only what is open: it never opens a repo, and finds one by any
+// spelling Get opened it under.
+func TestRepoSetPeekNeverOpens(t *testing.T) {
+	bare := seedRepo(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	rs := NewRepoSet(ctx, "", "", nil, false, nil, time.Hour)
+
+	if r, ok := rs.Peek(bare); ok || r != nil {
+		t.Fatal("Peek found a repo nothing opened")
+	}
+	if r, ok := rs.Peek(bare); ok || r != nil {
+		t.Fatal("Peek opened the repo")
+	}
+	read, _, err := rs.Get(bare)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r, ok := rs.Peek(bare + "/"); !ok || r != read {
+		t.Error("Peek missed the open mirror")
+	}
+	if r, ok := (*RepoSet)(nil).Peek(bare); ok || r != nil {
+		t.Error("a nil RepoSet has nothing open")
+	}
+}
+
 func TestRepoSetGetBadURLErrors(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()

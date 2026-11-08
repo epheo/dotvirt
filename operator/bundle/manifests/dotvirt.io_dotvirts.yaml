@@ -80,6 +80,28 @@ spec:
                       server Route; if neither resolves, the webhook is skipped (Argo falls back to
                       its poll).
                     type: string
+                  syncImpersonation:
+                    description: |-
+                      SyncImpersonation makes ArgoCD sync each dotvirt Application as its
+                      project's own ServiceAccount, which holds exactly the project's grants,
+                      instead of the shared controller's account. Off by default.
+                    properties:
+                      enabled:
+                        description: |-
+                          Enabled turns impersonation on once every project's sync account holds its
+                          grants and nothing else on the instance would stop syncing; the
+                          SyncImpersonationReady condition says what is missing. The setting is
+                          instance-wide: every Application on that ArgoCD then syncs as the
+                          ServiceAccount its AppProject names, or not at all. Turning it off removes
+                          the setting.
+                        type: boolean
+                      ignoreForeignApplications:
+                        description: |-
+                          IgnoreForeignApplications turns impersonation on although the instance
+                          also syncs Applications outside dotvirt's AppProjects. Those fail to sync
+                          until their AppProjects name a ServiceAccount (destinationServiceAccounts).
+                        type: boolean
+                    type: object
                 type: object
               auth:
                 description: AuthSpec enables OpenShift SSO beside the always-present
@@ -260,6 +282,14 @@ spec:
                   SSOOAuthClient is a ready-to-apply command that registers the cluster-scoped
                   OAuthClient SSO needs, with the redirect URI filled from the assigned console host.
                   Set only while auth.openShiftSSO is on; run it once to finish SSO.
+                type: string
+              syncImpersonationInstance:
+                description: |-
+                  SyncImpersonationInstance is the ArgoCD resource, as namespace/name, the
+                  operator set application.sync.impersonation.enabled on: it removes the
+                  setting there when spec.argocd moves to another instance and before the
+                  install is deleted, so no Application is left needing an account dotvirt
+                  no longer maps.
                 type: string
             type: object
         type: object

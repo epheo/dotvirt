@@ -409,9 +409,19 @@ export const api = {
 		post<DraftView>(`/api/objects/${enc(resource)}/${enc(namespace)}/${enc(name)}/adopt`, {}),
 	adoptPlatform: () => post<DraftView>('/api/platform/adopt', {}),
 	// Replace a declared object's manifest verbatim: the edit for what its form
-	// has no field for.
-	updateObjectManifest: (resource: string, namespace: string, name: string, yaml: string) =>
-		put<DraftView>(`/api/objects/${enc(resource)}/${enc(namespace)}/${enc(name)}`, { yaml }),
+	// has no field for. baseBlob is the version the editor loaded
+	// (ObjectSpec.baseBlob); the server refuses the edit once git moved past it.
+	updateObjectManifest: (
+		resource: string,
+		namespace: string,
+		name: string,
+		yaml: string,
+		baseBlob?: string,
+	) =>
+		put<DraftView>(`/api/objects/${enc(resource)}/${enc(namespace)}/${enc(name)}`, {
+			yaml,
+			baseBlob,
+		}),
 	// The VM page's history and restore, for every other declared object.
 	objectHistory: (resource: string, namespace: string, name: string) =>
 		get<gen.Commit[]>(`/api/objects/${enc(resource)}/${enc(namespace)}/${enc(name)}/history`),

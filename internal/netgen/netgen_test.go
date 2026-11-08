@@ -1,6 +1,7 @@
 package netgen
 
 import (
+	"slices"
 	"strings"
 	"testing"
 )
@@ -204,6 +205,83 @@ func TestRoleBindingManifest(t *testing.T) {
 	}
 	if _, _, err := RoleBindingManifest(RoleBindingSpec{Namespace: "ns"}); err == nil {
 		t.Error("expected error when no owners are given")
+	}
+}
+
+// A project's sync account joins the owners in both grants, so the project's
+// repo and its people hold the same rights, and without owners the grants
+// still render: the project's repo syncs as that account.
+func TestRoleBindingManifestSyncAccount(t *testing.T) {
+	sa := ServiceAccountSubject("openshift-gitops", "dotvirt-p-team-a")
+	for name, owners := range map[string][]string{"owners": {"alice"}, "no owners": nil} {
+		spec := RoleBindingSpec{Namespace: "tenant-a", Project: "team-a", Owners: owners, SyncAccount: sa}
+		path, admin, err := RoleBindingManifest(spec)
+		if err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		role, subjects, ok, err := DeclaredGrant(admin, "tenant-a-admins")
+		if err != nil || !ok || role != "admin" || path != "rbac/tenant-a.yaml" {
+			t.Fatalf("%s: DeclaredGrant = %q %v %v at %s", name, role, ok, err, path)
+		}
+		if !slices.Contains(subjects, *sa) || len(subjects) != len(owners)+1 {
+			t.Errorf("%s: admin subjects %+v, want the owners and the sync account", name, subjects)
+		}
+		path, egress, err := EgressManifest(spec)
+		if err != nil {
+			t.Fatal(err)
+		}
+		role, egressSubjects, ok, err := DeclaredGrant(egress, "tenant-a-egress")
+		if err != nil || !ok || role != "dotvirt-tenant-egress" || path != "rbac/tenant-a/tenant-a-egress.yaml" {
+			t.Fatalf("%s: egress grant = %q %v %v at %s", name, role, ok, err, path)
+		}
+		if !slices.Equal(egressSubjects, subjects) {
+			t.Errorf("%s: egress subjects %+v, want the admin grant's %+v", name, egressSubjects, subjects)
+		}
+	}
+	// Another project's sync account never survives a re-render: a namespace
+	// grants one project's repo.
+	other := *ServiceAccountSubject("openshift-gitops", "dotvirt-p-team-b")
+	_, joined, err := RoleBindingManifest(RoleBindingSpec{Namespace: "ns", Kept: []Subject{other, {Kind: "User", APIGroup: rbacGroup, Name: "bob"}}, SyncAccount: sa})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, subjects, _, _ := DeclaredGrant(joined, "ns-admins"); slices.Contains(subjects, other) || len(subjects) != 2 {
+		t.Errorf("joined grant subjects %+v, want bob and this project's account", subjects)
+	}
+	// Kept subjects survive a re-render, each subject once.
+	kept := []Subject{{Kind: "Group", APIGroup: rbacGroup, Name: "ops"}, *sa}
+	_, content, err := RoleBindingManifest(RoleBindingSpec{Namespace: "ns", Kept: kept, SyncAccount: sa, Role: "edit"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	role, subjects, _, _ := DeclaredGrant(content, "ns-admins")
+	if role != "edit" || !slices.Equal(subjects, kept) {
+		t.Errorf("re-render = %q %+v, want edit %+v", role, subjects, kept)
+	}
+	// A grant naming no one is refused.
+	if _, _, err := RoleBindingManifest(RoleBindingSpec{Namespace: "ns"}); err == nil {
+		t.Error("a grant with no subject rendered")
+	}
+	if _, _, err := EgressManifest(RoleBindingSpec{Namespace: "ns"}); err == nil {
+		t.Error("an egress grant with no subject rendered")
+	}
+}
+
+func TestDeclaredGrant(t *testing.T) {
+	file := []byte("apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: ns-admins\n---\n" +
+		"apiVersion: rbac.authorization.k8s.io/v1\nkind: RoleBinding\nmetadata:\n  name: ns-admins\n  namespace: ns\n" +
+		"roleRef:\n  apiGroup: rbac.authorization.k8s.io\n  kind: ClusterRole\n  name: admin\n" +
+		"subjects:\n- kind: User\n  apiGroup: rbac.authorization.k8s.io\n  name: alice\n")
+	role, subjects, ok, err := DeclaredGrant(file, "ns-admins")
+	if err != nil || !ok || role != "admin" || len(subjects) != 1 || subjects[0].Name != "alice" {
+		t.Fatalf("DeclaredGrant = %q %+v %v %v", role, subjects, ok, err)
+	}
+	if _, _, ok, err := DeclaredGrant(file, "other-admins"); ok || err != nil {
+		t.Errorf("another grant: ok=%v err=%v", ok, err)
+	}
+	roleKind := []byte(strings.Replace(string(file), "kind: ClusterRole", "kind: Role", 1))
+	if _, _, _, err := DeclaredGrant(roleKind, "ns-admins"); err == nil {
+		t.Error("a binding of a namespaced Role read as a ClusterRole grant")
 	}
 }
 
