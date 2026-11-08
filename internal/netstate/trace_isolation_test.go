@@ -584,3 +584,23 @@ func TestTracePodAddressWalksIngress(t *testing.T) {
 		}
 	}
 }
+
+// With the cluster's pod range unknown any address may be a pod's, which
+// the outbound rules never bind: their Deny is not certain.
+func TestTraceOutboundDenyWithPodRangeUnknown(t *testing.T) {
+	s := New(nil, nil)
+	s.routeAds.Store(routeAdsAbsent)
+	add(t, s.egressfw, map[string]any{
+		"apiVersion": "k8s.ovn.org/v1", "kind": "EgressFirewall",
+		"metadata": map[string]any{"name": "default", "namespace": "plain"},
+		"spec":     map[string]any{"egress": []any{map[string]any{"type": "Deny", "to": map[string]any{"cidrSelector": "10.128.0.0/14"}}}},
+	})
+	plain := wl("plain", "legacy", nil, nil, "10.128.0.9")
+	if res := s.Trace(nil, plain, nil, "10.128.1.5", "TCP", 443); res.Verdict != "Conditional" {
+		t.Errorf("outbound deny, pod range unknown: verdict = %s (%v)", res.Verdict, stepKinds(t, res))
+	}
+	s.clusterNet = parsePrefixes([]string{"10.128.0.0/14"})
+	if res := s.Trace(nil, plain, nil, "10.129.0.5", "TCP", 443); res.Verdict == "Deny" {
+		t.Errorf("a pod address skips the outbound rules once the pod range is known: %v", stepKinds(t, res))
+	}
+}

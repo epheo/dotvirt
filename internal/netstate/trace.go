@@ -96,8 +96,8 @@ func (s *Snapshot) Trace(view *TraceView, src TraceWorkload, dst *TraceWorkload,
 	}
 	// A service flow is DNATed into the pod subnets the EgressFirewall
 	// excludes, unless its endpoints lie outside the cluster; an unplaced
-	// address may be a pod's.
-	if (path.service || path.place == placeUnknown) && res.Verdict == "Deny" && eg.outcome != "Deny" {
+	// address, or any address while the pod range is unknown, may be a pod's.
+	if (path.service || path.podsUnknown || path.place == placeUnknown) && res.Verdict == "Deny" && eg.outcome != "Deny" {
 		res.Verdict = "Conditional"
 	}
 	return res
@@ -435,15 +435,15 @@ func (s *Snapshot) connectivity(src, dst TraceWorkload) (decided string, steps [
 // egressPath frames a flow to a bare address. decided is the verdict when no
 // policy walk applies; vlan reports a VLAN NIC, which leaves a cluster Deny
 // inconclusive; place is where the address lies, for a primary NIC, peer the
-// visible VM a pod address resolves to, and service whether it is a service
-// address.
+// visible VM a pod address resolves to, service whether it is a service
+// address, and podsUnknown whether the cluster's pod range is.
 type egressPath struct {
-	steps   []model.TraceStep
-	decided string
-	vlan    bool
-	place   placement
-	peer    *TraceWorkload
-	service bool
+	steps                []model.TraceStep
+	decided              string
+	vlan                 bool
+	place                placement
+	peer                 *TraceWorkload
+	service, podsUnknown bool
 }
 
 // externalConnectivity frames the egress path. The cluster controls filter
@@ -471,6 +471,7 @@ func (s *Snapshot) externalConnectivity(src TraceWorkload, dstIP string, view *T
 		if a, err := netip.ParseAddr(dstIP); err == nil {
 			p.service = containsAddr(s.serviceRange(), a.Unmap())
 		}
+		p.podsUnknown = len(s.defaultRange()) == 0 && len(s.clusterRange()) == 0
 	case len(refs) > 0:
 		// A secondary network has no cluster egress, but a VLAN, or a router
 		// on the network, may still carry the flow.

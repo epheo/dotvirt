@@ -223,6 +223,7 @@ func TestTraceUnreachableAndSegmentBypass(t *testing.T) {
 // fixed outbound IP pool reports informationally, and an ANP networks-peer deny is final.
 func TestTraceExternal(t *testing.T) {
 	s := New(nil, nil)
+	s.clusterNet = parsePrefixes([]string{"10.128.0.0/14"}) // the pod range the outbound rules exclude
 	add(t, s.egressfw, map[string]any{
 		"apiVersion": "k8s.ovn.org/v1", "kind": "EgressFirewall",
 		"metadata": map[string]any{"name": "default", "namespace": "team-a"},
@@ -699,6 +700,7 @@ func TestTraceExternalVLAN(t *testing.T) {
 // tiers but never skips the EgressFirewall.
 func TestTraceExternalAdminAllowMeetsGateway(t *testing.T) {
 	s := New(nil, nil)
+	s.clusterNet = parsePrefixes([]string{"10.128.0.0/14"}) // the pod range the outbound rules exclude
 	anp(t, s, "allow-partner", 1, map[string]any{
 		"action": "Allow", "to": []any{map[string]any{"networks": []any{"198.51.100.0/24"}}},
 	})
