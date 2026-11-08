@@ -48,7 +48,7 @@ type LiveNamespace struct {
 }
 
 // PrimaryNet is the namespace's default "VM Network" - a primary Layer2 UDN. It's
-// always Layer2 on purpose: a flat L2 segment follows a VM across nodes on live
+// always Layer2 on purpose: a flat L2 network follows a VM across nodes on live
 // migration (the VM keeps its IP), whereas Layer3's per-node subnets don't suit
 // VMs - so topology isn't a user choice here.
 type PrimaryNet struct {

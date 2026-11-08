@@ -7,7 +7,7 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 )
 
-// benchApp is one project Application managing 40 VMs and 10 segments, with a
+// benchApp is one project Application managing 40 VMs and 10 networks, with a
 // failed sync result over the same objects.
 func benchApp(i int) *unstructured.Unstructured {
 	ns := fmt.Sprintf("ns-%d", i)

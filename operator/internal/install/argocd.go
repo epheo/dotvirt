@@ -197,10 +197,10 @@ func PlatformAppProject(dv *dotvirtv1alpha1.Dotvirt, argoNS, platformRepo string
 		"clusterResourceWhitelist": []any{
 			map[string]any{"group": "", "kind": "Namespace"},
 			map[string]any{"group": "k8s.ovn.org", "kind": "ClusterUserDefinedNetwork"},
-			// Tier-0 provider-edge services - cluster-scoped SNAT + external routes.
+			// The cluster edge - cluster-scoped fixed outbound IPs + external routes.
 			map[string]any{"group": "k8s.ovn.org", "kind": "EgressIP"},
 			map[string]any{"group": "k8s.ovn.org", "kind": "AdminPolicyBasedExternalRoute"},
-			// The cluster-wide admin Distributed Firewall tiers.
+			// The cluster rule tiers.
 			map[string]any{"group": "policy.networking.k8s.io", "kind": "AdminNetworkPolicy"},
 			map[string]any{"group": "policy.networking.k8s.io", "kind": "BaselineAdminNetworkPolicy"},
 			map[string]any{"group": "nmstate.io", "kind": "NodeNetworkConfigurationPolicy"},

@@ -19,8 +19,8 @@ import (
 // an admin policy's rules name namespaces across tenants.
 func TestScopePolicies(t *testing.T) {
 	all := []model.Policy{
-		{Name: "mine", Kind: model.PolicyDFW, Namespace: "team-a"},
-		{Name: "theirs", Kind: model.PolicyDFW, Namespace: "team-b"},
+		{Name: "mine", Kind: model.PolicyProjectRule, Namespace: "team-a"},
+		{Name: "theirs", Kind: model.PolicyProjectRule, Namespace: "team-b"},
 		{Name: "block-dev", Kind: model.PolicyAdmin},
 		{Name: "prod-egress", Kind: model.PolicyEgressIP},
 	}
@@ -56,7 +56,7 @@ func TestPolicyRedactor(t *testing.T) {
 		t.Errorf("admin policy without authority = %+v", anp)
 	}
 
-	dfw := model.Policy{Name: "allow-web", Kind: model.PolicyDFW, Namespace: "team-a", Namespaces: []string{"team-a"}}
+	dfw := model.Policy{Name: "allow-web", Kind: model.PolicyProjectRule, Namespace: "team-a", Namespaces: []string{"team-a"}}
 	none.apply(&dfw, nil)
 	if dfw.Namespaces == nil {
 		t.Error("namespace-tier policies are not admin-tier: must keep their namespaces")

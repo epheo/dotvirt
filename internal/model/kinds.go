@@ -97,7 +97,7 @@ func (k Kind) RepoPath(namespace, name string) string {
 type Resource struct {
 	Name string
 	// Kinds a manifest of this resource declares. A network is one of three
-	// backings, DRS a file set of several kinds, the rest a single kind.
+	// backings, rebalancing a file set of several kinds, the rest a single kind.
 	Kinds []Kind
 	// CreateLabel and EditLabel name a create and an in-place rewrite of the
 	// resource in the Changes pane.
@@ -105,7 +105,7 @@ type Resource struct {
 	EditLabel   string
 	// NetworkFamily marks the resources one form renders and reads back: the
 	// object routes address them by draft identity and adoption captures them.
-	// The others (VM, namespace, role binding, template, DRS) have routes of
+	// The others (VM, namespace, role binding, template, rebalancing) have routes of
 	// their own.
 	NetworkFamily bool
 }
@@ -173,15 +173,15 @@ var resources = []Resource{
 	{Name: "uplink", Kinds: []Kind{KindNNCP}, CreateLabel: "Create uplink", EditLabel: "Edit uplink", NetworkFamily: true},
 	{Name: "namespace", Kinds: []Kind{KindNS}, CreateLabel: "Create namespace", EditLabel: "Edit namespace"},
 	{Name: "rolebinding", Kinds: []Kind{KindRB}, CreateLabel: "Grant tenant access", EditLabel: "Edit tenant access"},
-	{Name: "egressfirewall", Kinds: []Kind{KindEgressFW}, CreateLabel: "Create gateway firewall", EditLabel: "Edit gateway firewall", NetworkFamily: true},
-	{Name: "egressip", Kinds: []Kind{KindEgressIP}, CreateLabel: "Create SNAT pool", EditLabel: "Edit SNAT pool", NetworkFamily: true},
+	{Name: "egressfirewall", Kinds: []Kind{KindEgressFW}, CreateLabel: "Create outbound rules", EditLabel: "Edit outbound rules", NetworkFamily: true},
+	{Name: "egressip", Kinds: []Kind{KindEgressIP}, CreateLabel: "Create fixed outbound IP", EditLabel: "Edit fixed outbound IP", NetworkFamily: true},
 	{Name: "externalroute", Kinds: []Kind{KindExtRoute}, CreateLabel: "Create external route", EditLabel: "Edit external route", NetworkFamily: true},
-	{Name: "networkpolicy", Kinds: []Kind{KindNetpol}, CreateLabel: "Create distributed firewall policy", EditLabel: "Edit distributed firewall policy", NetworkFamily: true},
-	{Name: "adminnetworkpolicy", Kinds: []Kind{KindANP}, CreateLabel: "Create admin firewall policy", EditLabel: "Edit admin firewall policy", NetworkFamily: true},
-	{Name: "baselineadminnetworkpolicy", Kinds: []Kind{KindBANP}, CreateLabel: "Create baseline firewall policy", EditLabel: "Edit baseline firewall policy", NetworkFamily: true},
-	// The DRS file set: the descheduler operator install, its CR and the PSI
+	{Name: "networkpolicy", Kinds: []Kind{KindNetpol}, CreateLabel: "Create project rule", EditLabel: "Edit project rule", NetworkFamily: true},
+	{Name: "adminnetworkpolicy", Kinds: []Kind{KindANP}, CreateLabel: "Create cluster rule", EditLabel: "Edit cluster rule", NetworkFamily: true},
+	{Name: "baselineadminnetworkpolicy", Kinds: []Kind{KindBANP}, CreateLabel: "Create baseline cluster rule", EditLabel: "Edit baseline cluster rule", NetworkFamily: true},
+	// The rebalancing file set: the descheduler operator install, its CR and the PSI
 	// kernel-arg MachineConfig. Its Namespace document is the namespace resource.
-	{Name: "drs", Kinds: []Kind{KindOpGroup, KindSub, KindDesched, KindMachCfg}, CreateLabel: "Configure DRS", EditLabel: "Edit DRS"},
+	{Name: "drs", Kinds: []Kind{KindOpGroup, KindSub, KindDesched, KindMachCfg}, CreateLabel: "Configure rebalancing", EditLabel: "Edit rebalancing"},
 	{Name: "template", Kinds: []Kind{KindTemplate}, CreateLabel: "Save as template", EditLabel: "Edit template"},
 }
 

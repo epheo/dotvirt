@@ -1,9 +1,9 @@
 // Package netstate is dotvirt's networking read plane: an SA-maintained, watch-fed
-// snapshot of the port-group CRDs (UDN/CUDN/NAD) and the physical fabric (nmstate
+// snapshot of the network CRDs (UDN/CUDN/NAD) and the physical fabric (nmstate
 // NNS/NNCP), following the clusterstate/argo/drs reflector model - Catalog() is a
 // pure in-memory scan, never a per-request cluster call.
 //
-// Port-group moves publish NetworkChanged so the hub re-broadcasts and the client
+// Network moves publish NetworkChanged so the hub re-broadcasts and the client
 // re-pulls the out-of-band catalog; NNS (node-state) signals once at initial sync,
 // then stays silent - its status churns and adapters need no live repaint, but a
 // client that pulled before the sync must still learn the adapters exist. Each
@@ -40,8 +40,8 @@ var (
 	// One enactment per (node, policy): where an uplink policy failed to apply.
 	gvrNNCE = schema.GroupVersionResource{Group: gvrNNCP.Group, Version: "v1beta1", Resource: "nodenetworkconfigurationenactments"}
 
-	// The policy plane (see policies.go): the DFW tiers and the Tier-0/Tier-1
-	// firewall + routing objects the Security view reads.
+	// The policy plane (see policies.go): the rule tiers, outbound rules and
+	// cluster edge objects the Security view reads.
 	gvrNetpol   = cluster.GVR(model.KindNetpol)
 	gvrANP      = cluster.GVR(model.KindANP)
 	gvrBANP     = cluster.GVR(model.KindBANP)
@@ -152,7 +152,7 @@ func (s *Snapshot) Healthy() bool { return reflect.AllHealthy(s.healthy) }
 const nodeRefreshInterval = 2 * time.Minute
 
 // Run starts one discovery-gated reflector per CRD plus the node-cache refresher, and
-// returns immediately; everything stops when ctx is cancelled. Port-group and policy
+// returns immediately; everything stops when ctx is cancelled. Network and policy
 // kinds signal NetworkChanged; NNS is watched silently.
 func (s *Snapshot) Run(ctx context.Context) {
 	for i := range s.watches {

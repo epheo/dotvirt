@@ -30,7 +30,7 @@ type TraceWorkload struct {
 // destination, each through admin (by precedence, Pass delegating down), then
 // the selecting NetworkPolicies (selection alone isolates: no allowing rule
 // means default-deny), then baseline. An external destination runs the egress
-// side plus the gateway firewall, and reports the SNAT/route planes; a VLAN
+// side plus the outbound rules, and reports the SNAT/route planes; a VLAN
 // NIC is a path none of them filter.
 //
 // Deny is only ever certain. A rule that cannot be resolved here (named port,
@@ -367,14 +367,14 @@ func planeStep(b bound, stage, action, note string) model.TraceStep {
 
 // connectivity decides whether an east-west path exists: both ends must sit
 // on the same primary network, or isolated primaries drop the flow before any
-// policy runs. A shared secondary segment is an unfiltered layer-2 bypass;
+// policy runs. A shared secondary network is an unfiltered layer-2 bypass;
 // without a shared primary it is the only path, so the answer is Conditional,
 // never a certain Unreachable. decided is "" when the policy walk decides.
 func (s *Snapshot) connectivity(src, dst TraceWorkload) (decided string, steps []model.TraceStep) {
 	srcKey, srcName := s.primaryOf(src)
 	dstKey, dstName := s.primaryOf(dst)
 	reachable := srcKey != "" && srcKey == dstKey
-	shared := s.sharedSegments(src.Nets, dst.Nets)
+	shared := s.sharedNetworks(src.Nets, dst.Nets)
 	if !reachable {
 		decided = "Unreachable"
 		if len(shared) > 0 {
@@ -398,7 +398,7 @@ func (s *Snapshot) connectivity(src, dst TraceWorkload) (decided string, steps [
 	}
 	for _, name := range shared {
 		steps = append(steps, model.TraceStep{Stage: "segment", Action: "Bypass", Conditional: !reachable,
-			Note: "Both attach segment " + name + " - an unfiltered layer-2 path; east-west policy does not apply on secondary segments."})
+			Note: "Both attach network " + name + " - an unfiltered layer-2 path; workload policy does not apply on secondary networks."})
 	}
 	return decided, steps
 }
@@ -414,29 +414,29 @@ func (s *Snapshot) externalConnectivity(src TraceWorkload, dstIP string) (steps 
 	if src.DefaultNet != "" && !cluster {
 		refs = append([]string{src.DefaultNet}, src.Nets...)
 	}
-	var segments []model.TraceStep
+	var bypasses []model.TraceStep
 	for _, ref := range refs {
 		if s.isLocalnet(ref) {
-			_, name := s.segmentKey(ref)
-			segments = append(segments, model.TraceStep{Stage: "segment", Action: "Bypass", Conditional: true,
-				Note: "NIC on VLAN segment " + name + " - the guest can route this flow out of it, around every control evaluated here."})
+			_, name := s.networkIdentity(ref)
+			bypasses = append(bypasses, model.TraceStep{Stage: "segment", Action: "Bypass", Conditional: true,
+				Note: "NIC on VLAN network " + name + " - the guest can route this flow out of it, around every control evaluated here."})
 		}
 	}
-	vlan = len(segments) > 0
+	vlan = len(bypasses) > 0
 	switch {
 	case cluster:
 		steps = append(steps, model.TraceStep{Stage: "connectivity", Action: "Reachable",
 			Note: "Cluster egress path to " + dstIP + ", evaluated against the source's egress controls."})
 	case len(refs) > 0:
-		// A secondary segment has no cluster egress, but a VLAN, or a router
-		// on the segment, may still carry the flow.
+		// A secondary network has no cluster egress, but a VLAN, or a router
+		// on the network, may still carry the flow.
 		decided = "Conditional"
 		steps = append(steps, model.TraceStep{Stage: "connectivity", Action: "Bypass", Conditional: true,
-			Note: src.Name + " has no primary network: traffic to " + dstIP + " can leave only through a secondary segment, which no cluster control filters. The network behind it decides."})
+			Note: src.Name + " has no primary network: traffic to " + dstIP + " can leave only through a secondary network, which no cluster control filters. The network behind it decides."})
 	default:
 		decided = "Unreachable"
 		steps = append(steps, model.TraceStep{Stage: "connectivity", Action: "Unreachable", Decisive: true,
 			Note: src.Name + " has no network attachment."})
 	}
-	return append(steps, segments...), decided, vlan
+	return append(steps, bypasses...), decided, vlan
 }

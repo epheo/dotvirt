@@ -275,7 +275,7 @@ func TestObjectDriftGen(t *testing.T) {
 
 	prod, dev := s.ObjectDriftGen("prod"), s.ObjectDriftGen("dev")
 	if prod == 0 || dev == 0 {
-		t.Fatal("the first view holding a segment must move its scope's gen off zero")
+		t.Fatal("the first view holding a network must move its scope's gen off zero")
 	}
 	want := func(what string, wantProd, wantDev uint64) {
 		t.Helper()
@@ -291,10 +291,10 @@ func TestObjectDriftGen(t *testing.T) {
 	want("VM-only drift", prod, dev)
 
 	set(resources("OutOfSync", "Synced", "OutOfSync"))
-	want("a prod segment moved", prod+1, dev)
+	want("a prod network moved", prod+1, dev)
 
 	set(resources("OutOfSync", "OutOfSync", "OutOfSync"))
-	want("a dev segment moved", prod+1, dev+1)
+	want("a dev network moved", prod+1, dev+1)
 
 	// A Namespace object is its own scope; another cluster-scoped kind scopes
 	// by its kind alone.

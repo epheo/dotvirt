@@ -30,7 +30,7 @@ func TestNetworkFromUDN(t *testing.T) {
 	}
 	assertNetwork(t, got, want)
 
-	// A secondary Layer2 UDN is an isolated internal port group.
+	// A secondary Layer2 UDN is an isolated internal network.
 	secondary := &unstructured.Unstructured{Object: map[string]any{
 		"metadata": map[string]any{"name": "db-isolated", "namespace": "tenant-a"},
 		"spec":     map[string]any{"topology": "Layer2", "layer2": map[string]any{"role": "Secondary"}},
@@ -41,7 +41,7 @@ func TestNetworkFromUDN(t *testing.T) {
 }
 
 func TestNetworkFromCUDN_Localnet(t *testing.T) {
-	// A localnet CUDN is a VLAN-backed shared port group; its config nests under
+	// A localnet CUDN is a VLAN-backed shared network; its config nests under
 	// spec.network (not spec, as UDN does).
 	cudn := &unstructured.Unstructured{Object: map[string]any{
 		"metadata": map[string]any{"name": "prod-vlan-200"},

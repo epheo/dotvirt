@@ -43,7 +43,7 @@ func ChangesForEdit(current model.VM, edit VMEdit) []model.Change {
 		if !*edit.DRSExclude {
 			from, to = to, from
 		}
-		out = append(out, model.Change{Field: "DRS", Action: "change", From: from, To: to})
+		out = append(out, model.Change{Field: "Rebalancing", Action: "change", From: from, To: to})
 	}
 	if edit.EvictionStrategy != nil && *edit.EvictionStrategy != current.EvictionStrategy {
 		out = append(out, model.Change{Field: "Eviction strategy", Action: "change",
@@ -217,7 +217,7 @@ func DiffVMs(a, b model.VM) []model.Change {
 	cmp("Instance type", a.Instancetype, b.Instancetype)
 	cmp("Preference", a.Preference, b.Preference)
 	if a.DRSExclude != b.DRSExclude {
-		cmp("DRS", drsLabel(a.DRSExclude), drsLabel(b.DRSExclude))
+		cmp("Rebalancing", drsLabel(a.DRSExclude), drsLabel(b.DRSExclude))
 	}
 	if a.EvictionStrategy != b.EvictionStrategy {
 		cmp("Eviction strategy", orClusterDefault(a.EvictionStrategy), orClusterDefault(b.EvictionStrategy))
@@ -307,7 +307,7 @@ func toSet(s []string) map[string]bool {
 	return m
 }
 
-// drsLabel names a VM's DRS participation for the preview.
+// drsLabel names a VM's rebalancing participation for the preview.
 func drsLabel(excluded bool) string {
 	if excluded {
 		return "excluded"

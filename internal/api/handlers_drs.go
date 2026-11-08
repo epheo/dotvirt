@@ -34,7 +34,7 @@ func (s *Server) handleDRS(w http.ResponseWriter, r *http.Request) {
 		platform := s.platformProject()
 		if git, err := s.reader.DRSState(platform); err != nil {
 			log.Printf("api: drs: read platform repo: %v", err)
-			view.Warning = "platform repo unavailable - committed DRS state unknown"
+			view.Warning = "platform repo unavailable - committed rebalancing state unknown"
 		} else {
 			view.Configured, view.Config, view.PSIConfigured = git.Configured, git.Config, git.PSIConfigured
 		}

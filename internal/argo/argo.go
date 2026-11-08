@@ -82,7 +82,7 @@ func (c *Client) applicationsListWatch() *cache.ListWatch {
 }
 
 // resKey identifies one ArgoCD-managed object across kinds - the key of the general
-// per-object drift map that VMs, segments, and any future rendered object share.
+// per-object drift map that VMs, networks, and any future rendered object share.
 // namespace is "" for cluster-scoped kinds (a CUDN, an EgressIP).
 type resKey struct{ group, kind, namespace, name string }
 
@@ -109,7 +109,7 @@ func ClusterScope(group, kind string) string { return group + "/" + kind }
 
 // resourceDriftFromApps builds per-object drift keyed by identity from a set of ArgoCD
 // Application objects (the reflector store's *unstructured.Unstructured). Un-scoped:
-// EVERY kind an Application manages is kept, so a non-VM object (a segment, a policy)
+// EVERY kind an Application manages is kept, so a non-VM object (a network, a policy)
 // carries the same sync/health VMs always had - the per-VM view (vmView) and the
 // per-segment enrichment both read this one map. Objects absent from the result are
 // managed by no Application. Only scalar fields are read, so nothing escapes the store
@@ -201,7 +201,7 @@ func scrubSyncMessage(msg string) string {
 // appSyncFromApps builds each project's overall sync/health keyed by canonical
 // repoURL, read straight from the managing Application's own rollup
 // (status.sync/health/operationState). Unlike vmView, which keeps only VMs,
-// this rollup is exactly what covers every kind the Application manages - segments,
+// this rollup is exactly what covers every kind the Application manages - networks,
 // network policies, tenancy - so a merged PR that fails to apply for a non-VM object
 // still surfaces. One repo maps to one Application in dotvirt's model; on the rare
 // collision the more severe status wins, so a rollup never hides a degraded app behind

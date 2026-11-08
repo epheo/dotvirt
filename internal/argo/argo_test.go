@@ -69,7 +69,7 @@ func udnResource(ns, name, status, health string) any {
 	}
 }
 
-// TestResourceDriftAllKinds: the general per-object map keeps every kind (so a segment
+// TestResourceDriftAllKinds: the general per-object map keeps every kind (so a network
 // has drift), while the VM view still filters to VirtualMachine only.
 func TestResourceDriftAllKinds(t *testing.T) {
 	objs := []*unstructured.Unstructured{app("openshift-gitops", "drs-lab", []any{
@@ -80,20 +80,20 @@ func TestResourceDriftAllKinds(t *testing.T) {
 	all := resourceDriftFromApps(objs)
 	udn, ok := all[resKey{"k8s.ovn.org", "UserDefinedNetwork", "drs-lab", "db-net"}]
 	if !ok || udn.Sync != model.SyncOutOfSync || udn.Health != "Progressing" {
-		t.Errorf("segment drift missing from general map: %+v ok=%v", udn, ok)
+		t.Errorf("network drift missing from general map: %+v ok=%v", udn, ok)
 	}
 
-	// The VM view carries the VM and drops the segment (it's keyed ns/name, VM-only).
+	// The VM view carries the VM and drops the network (it's keyed ns/name, VM-only).
 	vms := vmView(all)
 	if _, ok := vms["drs-lab/web"]; !ok {
 		t.Error("VM missing from vmView")
 	}
 	if _, ok := vms["drs-lab/db-net"]; ok {
-		t.Error("segment leaked into the VM-only view")
+		t.Error("network leaked into the VM-only view")
 	}
 }
 
-// A segment apply error (from syncResult) attaches to the general map just like a VM's.
+// A network apply error (from syncResult) attaches to the general map just like a VM's.
 func TestResourceDriftSegmentSyncMessage(t *testing.T) {
 	all := resourceDriftFromApps([]*unstructured.Unstructured{appWithSyncResult("openshift-gitops", "net",
 		[]any{udnResource("drs-lab", "db-net", "OutOfSync", "Degraded")},
@@ -102,7 +102,7 @@ func TestResourceDriftSegmentSyncMessage(t *testing.T) {
 			"message": "spec.topology immutable"}},
 	)})
 	if got := all[resKey{"k8s.ovn.org", "UserDefinedNetwork", "drs-lab", "db-net"}].Message; got != "spec.topology immutable" {
-		t.Errorf("segment apply error not surfaced: %q", got)
+		t.Errorf("network apply error not surfaced: %q", got)
 	}
 }
 
@@ -153,7 +153,7 @@ func TestAppSyncFromApps(t *testing.T) {
 }
 
 // TestAppSyncRollupCoversNonVMKinds is the whole point: an app whose only OutOfSync
-// object is a segment (no VM anywhere) is still reported degraded at the project level,
+// object is a network (no VM anywhere) is still reported degraded at the project level,
 // where the per-VM driftFromApps would report nothing.
 func TestAppSyncRollupCoversNonVMKinds(t *testing.T) {
 	a := appWithSync("net", "https://forge.example/dotvirt/net.git",
@@ -170,7 +170,7 @@ func TestAppSyncRollupCoversNonVMKinds(t *testing.T) {
 	sync := appSyncFromApps([]*unstructured.Unstructured{a})
 	got := sync[forge.NormalizeRepoURL("https://forge.example/dotvirt/net.git")]
 	if got.Sync != model.SyncOutOfSync || got.Operation != "Running" {
-		t.Errorf("segment-only app must roll up OutOfSync/Running at the project level, got %+v", got)
+		t.Errorf("network-only app must roll up OutOfSync/Running at the project level, got %+v", got)
 	}
 }
 

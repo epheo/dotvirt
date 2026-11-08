@@ -46,7 +46,7 @@ func declaredRef(idx declaredIndex, resource draft.Resource, namespace, name str
 
 // AdoptObject makes git say what the cluster runs for one object: a create when
 // git declares nothing, an edit of the declaring file when the running state
-// differs from it (the segment and rule counterpart of a VM's drift adoption).
+// differs from it (the network and rule counterpart of a VM's drift adoption).
 // Rejected when git already matches, so the draft never carries a no-op.
 func (c *Coordinator) AdoptObject(id auth.Identity, proj project.ProjectInfo, o model.Adoptable) (model.DraftView, error) {
 	read, err := c.read(proj)

@@ -51,7 +51,7 @@ func (s *Snapshot) Effective(ns string, nsLabels, podLabels map[string]string, p
 		eff.Gateway = append(eff.Gateway, model.PolicyBinding{Policy: p.view})
 	}
 
-	// Tier-0: the SNAT pools and external routes binding this namespace.
+	// The cluster edge: the fixed outbound IP pools and external routes binding this namespace.
 	snat, routes := s.egressBindings(nsLabels, podLabels, podScoped)
 	for _, b := range snat {
 		eff.SNAT = append(eff.SNAT, b.binding(""))

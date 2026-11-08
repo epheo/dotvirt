@@ -32,7 +32,7 @@ var Required = []Dependency{
 	{Label: "OpenShift GitOps / Argo CD", Group: "argoproj.io", Resource: "applications", Hard: true},
 	{Label: "KubeVirt / OpenShift Virtualization", Group: "kubevirt.io", Resource: "virtualmachines", Hard: true},
 	{Label: "CDI", Group: "cdi.kubevirt.io", Resource: "datavolumes", Enables: "disk import + image upload"},
-	{Label: "OVN-Kubernetes UDN", Group: "k8s.ovn.org", Resource: "userdefinednetworks", Enables: "the networking tier (port groups)"},
+	{Label: "OVN-Kubernetes UDN", Group: "k8s.ovn.org", Resource: "userdefinednetworks", Enables: "the networking tier (networks)"},
 	{Label: "NMState", Group: "nmstate.io", Resource: "nodenetworkconfigurationpolicies", Enables: "uplinks / physical adapters"},
 }
 

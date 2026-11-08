@@ -193,7 +193,7 @@ type Server struct {
 	state     *clusterstate.State // SA-owned live+topology snapshot; the read path's source
 	drift     *argo.Snapshot      // nil when Argo disabled; SA-owned, watch-fed Application snapshot
 	drs       *drs.Snapshot       // nil disables the DRS live plane; SA-owned KubeDescheduler snapshot
-	netstate  *netstate.Snapshot  // SA-owned, watch-fed networking catalog (port groups + fabric)
+	netstate  *netstate.Snapshot  // SA-owned, watch-fed networking catalog (networks + fabric)
 	bus       *eventbus.Bus       // change-version source for the version-stamped auth caches
 	resolver  *project.Resolver
 	repos     *git.RepoSet

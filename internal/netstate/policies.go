@@ -14,9 +14,9 @@ import (
 )
 
 // Policies renders the policy plane from the watch-fed stores - the same pure
-// in-memory scan Catalog does for port groups: the DFW tiers (NetworkPolicy,
-// AdminNetworkPolicy/Baseline), the per-project Gateway Firewall (EgressFirewall)
-// and the Tier-0 planes (EgressIP, external routes). Rules come out as display
+// in-memory scan Catalog does for networks: the rule tiers (NetworkPolicy,
+// AdminNetworkPolicy/Baseline), the per-project outbound rules (EgressFirewall)
+// and the cluster edge (EgressIP, external routes). Rules come out as display
 // summaries, not spec mirrors: the view reads them, edits go through git. The
 // handler scopes namespace-tier rows to visible namespaces and gates the
 // cluster-tier rows on authoring authority.
@@ -62,7 +62,7 @@ func kindRank(k model.PolicyKind) int {
 		return 0
 	case model.PolicyBaseline:
 		return 1
-	case model.PolicyDFW:
+	case model.PolicyProjectRule:
 		return 2
 	case model.PolicyGateway:
 		return 3

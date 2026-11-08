@@ -50,7 +50,7 @@ const (
 	GitChanged
 	// ProposalsChanged: a token's open-PR lane changed (the refresher found a diff).
 	ProposalsChanged
-	// NetworkChanged: a port-group CRD (UDN/CUDN/NAD/NNCP) moved - the network catalog,
+	// NetworkChanged: a network CRD (UDN/CUDN/NAD/NNCP) moved - the network catalog,
 	// fetched out-of-band from the inventory frame, needs re-pulling.
 	NetworkChanged
 	// TaskChanged: the recent-tasks feed moved - an imperative op was recorded or a

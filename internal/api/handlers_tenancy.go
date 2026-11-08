@@ -3,7 +3,7 @@ package api
 // Tenancy: creating namespaces, bootstrapping tenant projects, and adopting
 // repoless ones. Each lands Namespace + RBAC objects in the platform tier: the
 // route gates its claim on each namespace (claimNamespaces), the coordinator
-// each object the change writes. Kept apart from the port-group handlers next
+// each object the change writes. Kept apart from the network handlers next
 // door.
 
 import (

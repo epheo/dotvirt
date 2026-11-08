@@ -75,7 +75,7 @@ func TestPolicies(t *testing.T) {
 	}
 
 	// Tier order: admin, dfw, gateway, egressip, route.
-	wantKinds := []model.PolicyKind{model.PolicyAdmin, model.PolicyDFW, model.PolicyGateway, model.PolicyEgressIP, model.PolicyRoute}
+	wantKinds := []model.PolicyKind{model.PolicyAdmin, model.PolicyProjectRule, model.PolicyGateway, model.PolicyEgressIP, model.PolicyRoute}
 	for i, k := range wantKinds {
 		if got[i].Kind != k {
 			t.Fatalf("policy %d kind = %s, want %s", i, got[i].Kind, k)

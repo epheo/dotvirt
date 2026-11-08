@@ -1,20 +1,20 @@
 package model
 
-// dotvirt presents OVN-K networking in port-group terms: a Network is a port group
+// dotvirt presents OVN-K networking in plain network terms: a Network is a network
 // a VM NIC attaches to, an Uplink is the physical-adapter binding, and a
 // PhysicalAdapter is one node NIC. The OVN-K objects behind them (UDN, CUDN,
 // localnet, NAD) and nmstate (NNCP, NNS) never surface to the user.
 
-// NetworkKind classifies a port group by how a virt admin reads it.
+// NetworkKind classifies a network by how a virt admin reads it.
 type NetworkKind string
 
 const (
 	NetworkDefault  NetworkKind = "default"  // primary network - the project's "VM Network"
-	NetworkInternal NetworkKind = "internal" // Layer2, no uplink - an isolated port group
+	NetworkInternal NetworkKind = "internal" // Layer2, no uplink - an isolated network
 	NetworkVLAN     NetworkKind = "vlan"     // localnet - VLAN-backed, bridged to an uplink
 )
 
-// NetworkScope is a port group's reach: one project or shared across many.
+// NetworkScope is a network's reach: one project or shared across many.
 type NetworkScope string
 
 const (
@@ -22,10 +22,10 @@ const (
 	ScopeShared  NetworkScope = "shared"  // cluster-scoped (CUDN) - selected projects
 )
 
-// Network is one Distributed Port Group: a network a VM attaches a NIC to,
-// abstracting a UDN, CUDN, or raw NAD behind port-group vocabulary.
+// Network is one network a VM attaches a NIC to, abstracting a UDN, CUDN,
+// or raw NAD behind one vocabulary.
 type Network struct {
-	Name      string       `json:"name"`                // the port-group name shown to the user
+	Name      string       `json:"name"`                // the network name shown to the user
 	Kind      NetworkKind  `json:"kind"`                // default | internal | vlan
 	Scope     NetworkScope `json:"scope"`               // project | shared
 	Namespace string       `json:"namespace,omitempty"` // for project-scoped (UDN/NAD)
@@ -47,7 +47,7 @@ type Network struct {
 	// which is what makes it editable and deletable from the UI.
 	SourceFile string `json:"sourceFile,omitempty"`
 
-	// From ArgoCD, when enabled - the same per-object drift VMs carry, so a segment
+	// From ArgoCD, when enabled - the same per-object drift VMs carry, so a network
 	// that failed to apply (or is mid-sync) shows its own badge, not just its project's.
 	// Empty when Argo isn't wired or no Application manages this object.
 	Sync      SyncStatus `json:"sync,omitempty"`
@@ -55,7 +55,7 @@ type Network struct {
 	SyncError string     `json:"syncError,omitempty"`
 }
 
-// Uplink is a physical-network attachment point - the vDS uplink analog: an OVN-K
+// Uplink is a physical-network attachment point - an OVN-K
 // physical-network name mapped to an OVS bridge across a set of nodes. Builtin is
 // the always-present br-ex default (no NNCP required).
 type Uplink struct {
@@ -74,7 +74,7 @@ type Uplink struct {
 	// Failures are the hosts where the policy did not apply, from nmstate's
 	// per-host enactments: the uplink is missing there.
 	Failures []UplinkFailure `json:"failures,omitempty"`
-	// The policy's own ArgoCD drift, as segments and rules carry it.
+	// The policy's own ArgoCD drift, as networks and rules carry it.
 	Sync      SyncStatus `json:"sync,omitempty"`
 	Health    string     `json:"health,omitempty"`
 	SyncError string     `json:"syncError,omitempty"`
@@ -99,7 +99,7 @@ type PhysicalAdapter struct {
 	Role  string `json:"role,omitempty"` // cluster-uplink | enslaved | available
 }
 
-// NetworkInventory is GET /api/networks: the port groups the caller may attach to,
+// NetworkInventory is GET /api/networks: the networks the caller may attach to,
 // plus (for node-readers) the physical fabric. NMStatePresent=false means the
 // NMState operator isn't installed, so uplink/adapter discovery is unavailable -
 // the UI hides those affordances rather than showing empty panels.
@@ -125,9 +125,9 @@ type NetworkInventory struct {
 type NetworkCaps struct {
 	Uplink             bool `json:"uplink"`             // nmstate NNCP
 	Namespace          bool `json:"namespace"`          // namespaces (New Project / Namespace)
-	EgressIP           bool `json:"egressIP"`           // Tier-0 SNAT
-	ExternalRoute      bool `json:"externalRoute"`      // Tier-0 external route
-	AdminNetworkPolicy bool `json:"adminNetworkPolicy"` // cluster-wide admin DFW (AdminNetworkPolicy)
+	EgressIP           bool `json:"egressIP"`           // fixed outbound IP
+	ExternalRoute      bool `json:"externalRoute"`      // external route
+	AdminNetworkPolicy bool `json:"adminNetworkPolicy"` // cluster rules (AdminNetworkPolicy)
 	// BaselineAdminNetworkPolicy is the cluster's baseline default policy.
 	BaselineAdminNetworkPolicy bool `json:"baselineAdminNetworkPolicy"`
 	// Platform is ClusterCaps.PlatformRead: the platform tier's shared reads
