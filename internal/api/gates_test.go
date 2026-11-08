@@ -430,10 +430,14 @@ func TestPlatformReadsNeedAClusterWideSignal(t *testing.T) {
 			t.Errorf("with %v: platformRead = %v, platform = %v; want %v, %v", c.gs, cl.PlatformRead, cl.Platform, c.read, c.staging)
 		}
 		for _, path := range []string{"/api/projects/platform/history", "/api/projects/platform/history/" + hash40,
-			"/api/projects/platform/proposals/1", "/api/draft?project=platform"} {
+			"/api/projects/platform/proposals/1"} {
 			if got := passes(tok, path); got != c.read {
 				t.Errorf("with %v: %s passes = %v, want %v", c.gs, path, got, c.read)
 			}
+		}
+		// The platform draft opens to the same readers; discarding an empty one changes nothing.
+		if got := do(g.s, tok, http.MethodDelete, "/api/draft?project=platform", "").Code != http.StatusForbidden; got != c.read {
+			t.Errorf("with %v: platform draft discard passes = %v, want %v", c.gs, got, c.read)
 		}
 	}
 	// The refusal names the repo in the UI's words.
@@ -453,15 +457,10 @@ func TestPlatformReadsNeedAClusterWideSignal(t *testing.T) {
 func TestOwnPlatformDraftIsReachable(t *testing.T) {
 	g := newGateRig(t)
 	tok := g.token([]grant{{verb: verbGet, resource: "namespaces", name: "orphans-ns"}, {verb: verbUpdate, resource: "namespaces", name: "orphans-ns"}})
-	wantStatus(t, do(g.s, tok, http.MethodGet, "/api/draft?project=platform", ""), http.StatusForbidden)
+	wantStatus(t, do(g.s, tok, http.MethodDelete, "/api/draft?project=platform", ""), http.StatusForbidden)
 	wantStatus(t, do(g.s, tok, http.MethodPost, "/api/projects/orphans/adopt", ""), http.StatusOK)
-	for _, c := range []struct{ method, path, body string }{
-		{http.MethodGet, "/api/draft?project=platform", ""},
-		{http.MethodDelete, "/api/draft?project=platform", ""},
-	} {
-		if rec := do(g.s, tok, c.method, c.path, c.body); rec.Code == http.StatusForbidden {
-			t.Errorf("%s %s = %d %q, want the own draft reached", c.method, c.path, rec.Code, rec.Body.String())
-		}
+	if rec := do(g.s, tok, http.MethodDelete, "/api/draft?project=platform", ""); rec.Code == http.StatusForbidden {
+		t.Errorf("platform draft discard = %d %q, want the own draft reached", rec.Code, rec.Body.String())
 	}
 	if rec := do(g.s, tok, http.MethodGet, "/api/projects/platform/history", ""); rec.Code != http.StatusForbidden {
 		t.Errorf("platform history = %d, want refused: a draft opens only the draft", rec.Code)

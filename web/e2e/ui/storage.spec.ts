@@ -45,7 +45,8 @@ test('a bulk move stages one edit per running VM, into each project draft', asyn
 	await main.getByRole('button', { name: 'Move 3 disks to bulk-hdd' }).click();
 	await expect(page.getByText('Moves to bulk-hdd staged for 3 of 3.')).toBeVisible();
 
-	const draft = await (await page.request.get('/api/draft?project=team-db')).json();
+	const all = await (await page.request.get('/api/drafts')).json();
+	const draft = all.drafts.find((d: { project: string }) => d.project === 'team-db').draft;
 	expect(draft.items).toEqual([
 		expect.objectContaining({
 			name: 'db-1',

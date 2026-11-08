@@ -83,15 +83,6 @@ func (s *Server) handleDelete(w http.ResponseWriter, r *http.Request) {
 	respond(w, result, err)
 }
 
-func (s *Server) handleDraftGet(w http.ResponseWriter, r *http.Request) {
-	sc, ok := s.draftScope(w, r)
-	if !ok {
-		return
-	}
-	view, err := s.draft.Get(sc.id, sc.proj)
-	respond(w, view, err)
-}
-
 // handleDrafts answers, in one call, each draft of the caller's the draft
 // route would: their visible projects', and the platform tier's past
 // canDraftPlatform. A review failure there leaves the platform out rather

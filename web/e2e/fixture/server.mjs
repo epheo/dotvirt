@@ -443,8 +443,16 @@ async function handleAPI(req, res, url) {
 	await handleStorage(req, res, url);
 	if (res.headersSent) return;
 
-	if (path === '/api/draft' && req.method === 'GET') {
-		return sendJSON(res, 200, draftFor(url.searchParams.get('project')));
+	if (path === '/api/drafts' && req.method === 'GET') {
+		if (state.scenario.draftsDown) return sendText(res, 503, 'drafts unavailable: forge down');
+		// The visible projects, and the platform tier for its authors; a lane
+		// shows when it holds an entry or warns.
+		const names = (state.scenario.inventory?.projects ?? []).map((p) => p.name);
+		if (clusterCaps(state.scenario).platform) names.push('platform');
+		const drafts = names
+			.map((project) => ({ project, draft: draftFor(project) }))
+			.filter(({ draft }) => draft.count > 0 || draft.warning);
+		return sendJSON(res, 200, { drafts, failed: [] });
 	}
 	if (path === '/api/draft' && req.method === 'DELETE') {
 		state.staged.delete(url.searchParams.get('project'));

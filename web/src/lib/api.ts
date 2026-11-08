@@ -13,7 +13,6 @@
 // rides cross-origin in dev (Vite proxy) and same-origin in production.
 
 import type * as gen from './model.gen';
-import { friendlyError } from './format';
 
 export type * from './model.gen';
 export type { Event as VMEvent, Node as NodeTarget } from './model.gen';
@@ -502,7 +501,12 @@ export const api = {
 
 	// Whole-draft ops are scoped to a project (?project=), since they aren't tied
 	// to one VM namespace.
-	getDraft: (project: string) => get<DraftView>(`/api/draft?project=${enc(project)}`),
+	// Every draft of the caller's holding an entry or a warning, and every one
+	// that could not be read; projects the caller may not see never appear.
+	drafts: () =>
+		get<{ drafts: { project: string; draft: DraftView }[]; failed: gen.ProjectError[] }>(
+			'/api/drafts',
+		),
 	discardDraft: (project: string) => del(`/api/draft?project=${enc(project)}`),
 	propose: (project: string, title: string, message: string) =>
 		post<gen.ProposeResult>(`/api/draft/propose?project=${enc(project)}`, { title, message }),
@@ -618,38 +622,6 @@ export const api = {
 	unpause: (namespace: string, name: string) =>
 		post<void>(`${vmPath(namespace, name)}/unpause`, {}),
 };
-
-// draftsByProject fetches the draft for each named project: the non-empty
-// ones for the Changes panel + header badge, and the projects whose fetch
-// failed, so a lane shows its error instead of silently reading as empty. A
-// 403 is an answer (no draft authority, e.g. the platform tier for
-// non-authors), not a failure.
-export async function draftsByProject(projects: string[]): Promise<{
-	drafts: { project: string; draft: DraftView }[];
-	failed: { project: string; error: string }[];
-}> {
-	const results = await Promise.all(
-		projects.map(async (project) => {
-			try {
-				return { project, draft: await api.getDraft(project) };
-			} catch (e) {
-				if (e instanceof Unauthorized) throw e;
-				if (e instanceof HttpError && e.status === 403) return null;
-				return { project, error: friendlyError(e) };
-			}
-		}),
-	);
-	const drafts: { project: string; draft: DraftView }[] = [];
-	const failed: { project: string; error: string }[] = [];
-	for (const r of results) {
-		if (!r) continue;
-		if (r.error !== undefined) failed.push({ project: r.project, error: r.error });
-		// Warning-only drafts render too: prune risk must warn BEFORE anything merges.
-		else if (r.draft.count > 0 || r.draft.warning)
-			drafts.push({ project: r.project, draft: r.draft });
-	}
-	return { drafts, failed };
-}
 
 // Reconnect backoff for streamInventory: 0.5s doubling to a 16s cap.
 // retry is the 1-based attempt count since the last successful open.

@@ -1530,6 +1530,10 @@ const hosttrouble = {
 };
 // --- end hosts ---
 
+// --- draftsdown: the drafts read fails as a whole ---
+const draftsdown = { ...base, name: 'draftsdown', draftsDown: true };
+// --- end draftsdown ---
+
 // --- withheld: cluster rules the caller may not read ---
 // The server names them by tier and priority alone, with no file and no
 // specific sync error: nothing on the page may point at the object.
@@ -1576,4 +1580,5 @@ export const scenarios = {
 	caps: capsDenied,
 	hosttrouble,
 	withheld,
+	draftsdown,
 };
