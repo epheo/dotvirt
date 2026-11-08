@@ -348,14 +348,7 @@ func (s *Server) handleNetworkRules(w http.ResponseWriter, r *http.Request) {
 	}
 	out := s.netstate.NetworkRules(nss, s.state.NamespaceLabels, red, s.cfg.ProjectLabel)
 	out.Network = key
-	out = scopeNetworkRules(out, visible, pr.apply)
-	for i := range out.Applies {
-		s.policyDrift(&out.Applies[i].Policy)
-	}
-	for i := range out.Reaches {
-		s.policyDrift(&out.Reaches[i].Policy)
-	}
-	writeJSON(w, out)
+	writeJSON(w, scopeNetworkRules(out, visible, s.policyDrift, pr.apply))
 }
 
 // findNetwork resolves a network key the way the UI routes it: a project
@@ -379,9 +372,11 @@ func findNetwork(nets []model.Network, key string) (model.Network, bool) {
 // rules. A binding governs the caller's own VMs, so it stays, redacted like
 // the effective view. A peer rule in another namespace shows only where the
 // caller sees that namespace; a cluster rule naming these VMs governs them
-// too, so it stays, redacted.
-func scopeNetworkRules(in model.NetworkRules, visible map[string]bool, redact func(*model.Policy, *model.PolicyRuleView)) model.NetworkRules {
+// too, so it stays, redacted. drift attaches each kept policy's apply state
+// first, so the redactor sees, and hides, a cluster rule's apply error.
+func scopeNetworkRules(in model.NetworkRules, visible map[string]bool, drift func(*model.Policy), redact func(*model.Policy, *model.PolicyRuleView)) model.NetworkRules {
 	for i := range in.Applies {
+		drift(&in.Applies[i].Policy)
 		redact(&in.Applies[i].Policy, nil)
 	}
 	reaches := make([]model.PeerRule, 0, len(in.Reaches))
@@ -389,6 +384,7 @@ func scopeNetworkRules(in model.NetworkRules, visible map[string]bool, redact fu
 		if pr.Policy.Namespace != "" && !visible[pr.Policy.Namespace] {
 			continue
 		}
+		drift(&pr.Policy)
 		redact(&pr.Policy, &pr.Rule)
 		reaches = append(reaches, pr)
 	}
