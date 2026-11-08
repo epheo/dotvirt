@@ -43,7 +43,7 @@ func (s *Server) handleEditPreview(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	changes, err := s.draft.PreviewEdit(sc.proj, ns, name, edit)
+	changes, err := s.draft.PreviewEdit(sc.id, sc.proj, ns, name, edit)
 	respond(w, changes, err)
 }
 

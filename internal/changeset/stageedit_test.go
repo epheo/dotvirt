@@ -137,7 +137,7 @@ func TestPreviewEditRefusesInvalidValues(t *testing.T) {
 	c := newTestCoordinator(t, false)
 	proj := project.ProjectInfo{Name: "p", Repo: seedBare(t)}
 	bad := model.VMEdit{SetLabels: map[string]string{"env": "true\nkind: RoleBinding"}}
-	if _, err := c.PreviewEdit(proj, "alpha", "web", bad); !errors.Is(err, model.ErrInvalid) {
+	if _, err := c.PreviewEdit(auth.Identity{Username: "alice"}, proj, "alpha", "web", bad); !errors.Is(err, model.ErrInvalid) {
 		t.Fatalf("want ErrInvalid, got %v", err)
 	}
 }

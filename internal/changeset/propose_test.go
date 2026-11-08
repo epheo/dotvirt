@@ -623,7 +623,7 @@ func TestCreateProjectRefusesVMNetworkOnExistingNamespace(t *testing.T) {
 func TestPreviewEditStagesNothing(t *testing.T) {
 	f := newProposeFixture(t)
 	cpu := 64
-	changes, err := f.c.PreviewEdit(f.proj, "alpha", "web", model.VMEdit{CPUCores: &cpu, SetLabels: map[string]string{"env": "prod"}})
+	changes, err := f.c.PreviewEdit(f.id, f.proj, "alpha", "web", model.VMEdit{CPUCores: &cpu, SetLabels: map[string]string{"env": "prod"}})
 	if err != nil {
 		t.Fatalf("PreviewEdit: %v", err)
 	}
@@ -637,7 +637,7 @@ func TestPreviewEditStagesNothing(t *testing.T) {
 	if n := f.draftCount(t); n != 0 {
 		t.Fatalf("preview staged %d entries", n)
 	}
-	if _, err := f.c.PreviewEdit(f.proj, "alpha", "ghost", model.VMEdit{CPUCores: &cpu}); !errors.Is(err, model.ErrNotFound) {
+	if _, err := f.c.PreviewEdit(f.id, f.proj, "alpha", "ghost", model.VMEdit{CPUCores: &cpu}); !errors.Is(err, model.ErrNotFound) {
 		t.Fatalf("a VM git does not declare: want ErrNotFound, got %v", err)
 	}
 

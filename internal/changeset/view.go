@@ -56,10 +56,11 @@ func (c *Coordinator) render(id auth.Identity, proj project.ProjectInfo, entries
 			if err != nil {
 				return model.DraftView{}, err
 			}
-			item.Changes = manifest.ChangesForEdit(current, *e.Edit)
-			if content, ok, err := read.LookupOnBranch(c.baseBranch, e.SourceFile); err == nil && ok {
-				item.Changes = append(item.Changes, manifest.StripChanges(content, defaultNamespace(e.SourceFile), e.Namespace, e.Name, *e.Edit, targetOf(e))...)
+			var content []byte
+			if b, ok, err := read.LookupOnBranch(c.baseBranch, e.SourceFile); err == nil && ok {
+				content = b
 			}
+			item.Changes = fieldChanges(current, content, e)
 			item.Edit = e.Edit
 		case draft.KindCreate:
 			// The manifest IS the change; the rows only explain it.
@@ -80,6 +81,16 @@ func (c *Coordinator) render(id auth.Identity, proj project.ProjectInfo, entries
 	view.DefaultTitle = defaultTitle(view)
 	view.DefaultBody = prBody(view, "", id.Username)
 	return view, nil
+}
+
+// fieldChanges lists what field edit e changes on current, declared in
+// content: a staged edit's rows, and its preview's.
+func fieldChanges(current model.VM, content []byte, e draft.Entry) []model.Change {
+	out := manifest.ChangesForEdit(current, *e.Edit)
+	if content != nil {
+		out = append(out, manifest.StripChanges(content, defaultNamespace(e.SourceFile), e.Namespace, e.Name, *e.Edit, targetOf(e))...)
+	}
+	return out
 }
 
 // objectLabel names an entry's object; a namespace's entry is keyed under its
