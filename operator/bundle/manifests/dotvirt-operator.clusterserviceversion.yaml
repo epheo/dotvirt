@@ -335,6 +335,22 @@ spec:
                 - list
                 - patch
             - apiGroups:
+                - argoproj.io
+              resourceNames:
+                - argocd
+                - openshift-gitops
+              resources:
+                - argocds
+              verbs:
+                - get
+                - patch
+            - apiGroups:
+                - authorization.k8s.io
+              resources:
+                - subjectaccessreviews
+              verbs:
+                - create
+            - apiGroups:
                 - dotvirt.io
               resources:
                 - dotvirts
@@ -390,6 +406,7 @@ spec:
                 - dotvirt
                 - dotvirt-argocd-apply
                 - dotvirt-platform-network-admin
+                - dotvirt-platform-sync
               resources:
                 - clusterrolebindings
               verbs:
@@ -400,6 +417,7 @@ spec:
                 - dotvirt
                 - dotvirt-argocd-apply
                 - dotvirt-platform-network-admin
+                - dotvirt-platform-sync
               resources:
                 - clusterroles
               verbs:
