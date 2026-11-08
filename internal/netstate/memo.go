@@ -5,6 +5,7 @@ import (
 	"sort"
 	"sync"
 
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/client-go/tools/cache"
 
 	"github.com/epheo/dotvirt/internal/reflect"
@@ -44,6 +45,11 @@ type policyStore struct {
 	dec   decoder
 	order func([]*policy) // reorders all, when the kind is read in another order
 	memo  memo[uint64, *plane]
+	// last is each object of the last build with its decode, which the next
+	// build reuses: a stored object is replaced on update, never written, so
+	// only what moved decodes again. Touched only inside a build, under
+	// memo's lock.
+	last map[*unstructured.Unstructured]*policy
 }
 
 func newPolicyStore(idx cache.Indexer, dec decoder, order func([]*policy)) *policyStore {
@@ -54,8 +60,13 @@ func (p *policyStore) plane() *plane {
 	return p.memo.get(func() uint64 { return reflect.StoreGeneration(p.idx) }, func(uint64) *plane {
 		objs := sortedList(p.idx)
 		pl := &plane{all: make([]*policy, 0, len(objs)), byNS: map[string][]*policy{}, byKey: make(map[string]*policy, len(objs))}
+		decoded := make(map[*unstructured.Unstructured]*policy, len(objs))
 		for _, u := range objs {
-			pol := p.dec(u)
+			pol, ok := p.last[u]
+			if !ok {
+				pol = p.dec(u)
+			}
+			decoded[u] = pol
 			ns, key := u.GetNamespace(), u.GetName()
 			if ns != "" {
 				key = ns + "/" + key
@@ -71,6 +82,7 @@ func (p *policyStore) plane() *plane {
 		if p.order != nil {
 			p.order(pl.all)
 		}
+		p.last = decoded
 		return pl
 	})
 }
