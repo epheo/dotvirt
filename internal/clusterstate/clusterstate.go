@@ -44,6 +44,7 @@ import (
 
 	"github.com/epheo/dotvirt/internal/cluster"
 	"github.com/epheo/dotvirt/internal/eventbus"
+	"github.com/epheo/dotvirt/internal/model"
 	"github.com/epheo/dotvirt/internal/project"
 	"github.com/epheo/dotvirt/internal/reflect"
 )
@@ -368,6 +369,20 @@ func vmiID(name string) string {
 	const hashLen = 8
 	sum := sha1.Sum([]byte(name)) // KubeVirt's derivation, not a security use
 	return name[:validation.DNS1035LabelMaxLength-hashLen-1] + "-" + hex.EncodeToString(sum[:])[:hashLen]
+}
+
+// Holds reports whether the snapshot holds the object of resource (group,
+// plural) named namespace/name: a VM, or a project namespace, the only
+// namespaces it watches. A kind it does not watch reads as absent.
+func (s *State) Holds(group, resource, namespace, name string) bool {
+	var ok bool
+	switch {
+	case group == model.KindVM.Group && resource == model.KindVM.Plural:
+		_, ok, _ = s.vms.GetByKey(namespace + "/" + name)
+	case group == model.KindNS.Group && resource == model.KindNS.Plural:
+		_, ok, _ = s.nss.GetByKey(name)
+	}
+	return ok
 }
 
 // NamespaceLabels returns one namespace's labels by name, nil when the
