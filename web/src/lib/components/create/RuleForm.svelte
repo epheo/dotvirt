@@ -4,6 +4,7 @@
 		EgressFirewallCreate,
 		NetworkPolicyCreate,
 	} from '#lib/api.js';
+	import { clusterObjectGate } from '#lib/gates.js';
 	import { inventory } from '#lib/state/inventory.svelte.js';
 	import ClusterRuleForm from './ClusterRuleForm.svelte';
 	import OutboundRuleForm from './OutboundRuleForm.svelte';
@@ -36,8 +37,12 @@
 		},
 		{ id: 'outbound', label: 'Outbound rule', text: "Where a project's VMs may go outside." },
 	];
+	const clusterRules = $derived(
+		clusterObjectGate('adminnetworkpolicy', 'create').ok ||
+			clusterObjectGate('baselineadminnetworkpolicy', 'create').ok,
+	);
 	const kinds = $derived(
-		KINDS.filter((k) => k.id === kind || (k.id === 'cluster' ? inventory.canAdminFw : canProject)),
+		KINDS.filter((k) => k.id === kind || (k.id === 'cluster' ? clusterRules : canProject)),
 	);
 </script>
 

@@ -6,7 +6,7 @@
 	import { cutOffHosts } from '#lib/netmap.js';
 	import { NETWORK_TABS } from '#lib/nav.js';
 	import { networkByRef, networkKey, networkKind } from '#lib/networks.js';
-	import { canAuthorRef, networkRef } from '#lib/objects.js';
+	import { canAuthorNetwork, networkRef } from '#lib/objects.js';
 	import { resource } from '#lib/resource.svelte.js';
 	import { hasOwnRule, networkRuleLines } from '#lib/rulelines.js';
 	import { inventory } from '#lib/state/inventory.svelte.js';
@@ -228,7 +228,7 @@
 					{project}
 					name={net.name}
 					load={() => api.objectHistory(ref.resource, ref.namespace, ref.name)}
-					restore={canAuthorRef(ref)
+					restore={canAuthorNetwork(net)
 						? (hash) => api.restoreObjectVersion(ref.resource, ref.namespace, ref.name, hash)
 						: undefined}
 					mine={(it) => it.resource === ref.resource && it.name === ref.name}

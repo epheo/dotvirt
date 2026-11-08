@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { Camera, RotateCcw, Trash2 } from '@lucide/svelte';
 	import { api, vmKey, type Snapshot, type VM } from '#lib/api.js';
+	import { vmGate } from '#lib/gates.js';
 	import { relativeAge } from '#lib/format.js';
 	import { action, resource, type Resource } from '#lib/resource.svelte.js';
 	import { TBODY, TH, TH_LAST, THEAD, THEAD_TR } from '#lib/table.js';
@@ -11,6 +12,11 @@
 	import TextInput from './TextInput.svelte';
 
 	let { vm }: { vm: VM } = $props();
+
+	// Each runs under the caller's token: its own capability field.
+	const takeGate = $derived(vmGate.snapshotTake(vm.namespace));
+	const restoreGate = $derived(vmGate.snapshotRestore(vm.namespace));
+	const deleteGate = $derived(vmGate.snapshotDelete(vm.namespace));
 
 	// Two actions because two busy displays run independently: the Take button's
 	// label and the per-row "working..." (identified by busyName).
@@ -77,7 +83,7 @@
 			placeholder="snapshot name (auto-generated if blank)"
 			width="w-72"
 		/>
-		<Button onclick={take} disabled={takeOp.busy}>
+		<Button onclick={take} disabled={takeOp.busy || !takeGate.ok} title={takeGate.why}>
 			<Camera size={14} />
 			{takeOp.busy ? 'Taking…' : 'Take snapshot'}
 		</Button>
@@ -140,8 +146,9 @@
 							{:else}
 								<button
 									onclick={() => (armedRestore = armedRestore === s.name ? null : s.name)}
-									disabled={!s.readyToUse || running}
-									title={running ? 'Stop the VM to restore' : 'Roll the VM back to this snapshot'}
+									disabled={!s.readyToUse || running || !restoreGate.ok}
+									title={restoreGate.why ||
+										(running ? 'Stop the VM to restore' : 'Roll the VM back to this snapshot')}
 									class="mr-2 inline-flex items-center gap-1 text-xs text-warn-ink hover:underline disabled:text-ink-faint disabled:no-underline"
 								>
 									<RotateCcw size={12} />
@@ -156,7 +163,9 @@
 								{/if}
 								<button
 									onclick={() => (armedDelete = armedDelete === s.name ? null : s.name)}
-									class="inline-flex items-center gap-1 text-xs text-danger hover:underline"
+									disabled={!deleteGate.ok}
+									title={deleteGate.why}
+									class="inline-flex items-center gap-1 text-xs text-danger hover:underline disabled:text-ink-faint disabled:no-underline"
 								>
 									<Trash2 size={12} />
 									{armedDelete === s.name ? 'Confirm delete' : 'Delete'}

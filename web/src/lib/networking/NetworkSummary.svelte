@@ -8,6 +8,7 @@
 		type NetworkTraffic,
 		type VM,
 	} from '#lib/api.js';
+	import { vmGate, type Gate } from '#lib/gates.js';
 	import { relativeAge } from '#lib/format.js';
 	import { POD_NETWORK, vmNetworkKeys } from '#lib/lenses.js';
 	import { uplinkLabel } from '#lib/netmap.js';
@@ -15,7 +16,7 @@
 	import { attachRef, networkKey } from '#lib/networks.js';
 	import {
 		canAdoptNetwork,
-		canAuthorRef,
+		canAuthorNetwork,
 		canDeleteNetwork,
 		canEditNetwork,
 		networkRef,
@@ -204,12 +205,20 @@
 	const secondary = $derived(!!net && net.kind !== 'default');
 	let attaching = $state(false);
 	let deleting = $state(false);
-	const canStage = $derived(
-		!!net &&
-			(net.scope === 'shared'
-				? inventory.canManage
-				: !!net.namespace && inventory.namespaces.includes(net.namespace)),
-	);
+	// Attaching edits VMs: offered where some namespace it reaches lets the
+	// caller change them.
+	const attach = $derived.by((): Gate => {
+		const reach = net
+			? (net.scope === 'shared' ? (net.namespaces ?? []) : [net.namespace ?? '']).filter((n) =>
+					inventory.namespaces.includes(n),
+				)
+			: [];
+		const gates = reach.map((n) => vmGate.update(n));
+		return (
+			gates.find((g) => g.ok) ??
+			gates[0] ?? { ok: false, why: 'No namespace it reaches is open to your changes.' }
+		);
+	});
 </script>
 
 {#snippet node(cls: string, children: import('svelte').Snippet)}
@@ -557,7 +566,8 @@
 								<Button
 									variant="outline"
 									size="sm"
-									disabled={!canStage}
+									disabled={!attach.ok}
+									title={attach.why}
 									onclick={() => (attaching = true)}><Plus size={14} />Attach VMs</Button
 								>
 								<StageChip kind="pr" />
@@ -644,7 +654,7 @@
 								>Stages its running manifest in {project}; then it changes here like any other.</Consequence
 							>
 						</div>
-					{:else if net.sourceFile && net.sync === 'OutOfSync' && canAuthorRef(networkRef(net))}
+					{:else if net.sync === 'OutOfSync' && canAuthorNetwork(net)}
 						<div class="flex flex-col gap-1.5 py-3">
 							<div class="flex flex-wrap items-center gap-2">
 								<Button variant="outline" size="sm" onclick={() => openAdopt(networkRef(net), true)}

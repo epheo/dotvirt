@@ -207,7 +207,7 @@ describe('next steps', () => {
 		const i = inv([
 			{ name: 'p1', error: 'no usable repo', namespaces: [{ namespace: 'ns-a', vms: [] }] },
 		]);
-		const [repair] = deriveIssues(i, { canRepair: true });
+		const [repair] = deriveIssues(i, { canRepair: () => true });
 		expect(repair.action).toEqual({
 			label: 'Attach repo',
 			modal: { kind: 'adoptProject', project: 'p1', namespaces: ['ns-a'], recover: false },
@@ -224,7 +224,7 @@ describe('next steps', () => {
 				namespaces: [],
 			},
 		]);
-		expect(deriveIssues(lost, { canRepair: true })[0].action.label).toBe('Recover repo');
+		expect(deriveIssues(lost, { canRepair: () => true })[0].action.label).toBe('Recover repo');
 		const converged = inv([
 			{
 				name: 'p1',
@@ -233,7 +233,7 @@ describe('next steps', () => {
 				namespaces: [],
 			},
 		]);
-		expect(deriveIssues(converged, { canRepair: true })).toEqual([]);
+		expect(deriveIssues(converged, { canRepair: () => true })).toEqual([]);
 	});
 });
 

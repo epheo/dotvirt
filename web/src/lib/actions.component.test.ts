@@ -7,6 +7,7 @@ import {
 	toastStageResult,
 	vmActions,
 } from './actions';
+import { caps } from './state/caps.svelte';
 import { inventory } from './state/inventory.svelte';
 import { ui } from './state/ui.svelte';
 import { navigations } from '../test/app-navigation';
@@ -29,24 +30,53 @@ const enabledIds = (v: VM) => vmActions.filter((a) => a.enabled(v)).map((a) => a
 
 let fetchMock: ReturnType<typeof vi.fn>;
 
-// The staging verbs also need the caller's edit right in the VM's namespace.
-const grant = (canAuthor: boolean) =>
+// Each verb reads its own capability field in the VM's namespace
+// (GET /api/capabilities?namespace=team-a).
+const all = { create: true, update: true, delete: true };
+const everything = {
+	namespace: 'team-a',
+	vm: all,
+	restart: true,
+	pause: true,
+	unpause: true,
+	migrate: true,
+	console: true,
+	clone: true,
+	snapshotTake: true,
+	snapshotRestore: true,
+	snapshotDelete: true,
+	project: { name: 'p', templateEdit: true },
+};
+let nsCaps: Record<string, unknown> = everything;
+const flush = () => new Promise((r) => setTimeout(r, 0));
+async function grant(over: Record<string, unknown> = {}) {
+	nsCaps = { ...everything, ...over };
+	caps.invalidate();
+	caps.ns('team-a');
+	await flush();
+}
+
+beforeEach(async () => {
+	ui.reset();
 	inventory.apply({
 		projects: [
 			{
 				name: 'p',
 				repo: 'https://forge/p.git',
-				namespaces: [{ namespace: 'team-a', vms: [], canAuthor }],
+				namespaces: [{ namespace: 'team-a', vms: [], canAuthor: true }],
 			},
 		],
 	} as unknown as Inventory);
-
-beforeEach(() => {
-	ui.reset();
-	grant(true);
 	navigations.length = 0;
-	fetchMock = vi.fn(async () => new Response(null, { status: 204 }));
+	fetchMock = vi.fn(async (url: string) =>
+		String(url).startsWith('/api/capabilities')
+			? Response.json({ namespace: nsCaps })
+			: new Response(null, { status: 204 }),
+	);
 	vi.stubGlobal('fetch', fetchMock);
+	await grant();
+	// The capability read is setup; each test counts its own calls.
+	fetchMock.mockClear();
 });
 
 afterEach(() => {
@@ -54,13 +84,24 @@ afterEach(() => {
 });
 
 describe('vmActions gates', () => {
-	it('a viewer gets no staging verbs', () => {
-		grant(false);
+	it('a viewer gets no staging verbs', async () => {
+		await grant({
+			vm: { create: false, update: false, delete: false },
+			project: { name: 'p', templateEdit: false },
+		});
 		const ids = enabledIds(vm({ disks: [{ name: 'root', type: 'dataVolume' }] } as Partial<VM>));
 		for (const id of ['edit', 'delete', 'template', 'migrate-storage'])
 			expect(ids).not.toContain(id);
 		expect(enabledIds(vm({ sync: 'NotTracked', sourceFile: undefined }))).not.toContain('adopt');
 		expect(ids).toContain('restart');
+	});
+
+	it('a verb the caller may not run is held back with its reason', async () => {
+		await grant({ restart: false });
+		expect(action('restart').enabled(vm())).toBe(false);
+		expect(action('restart').why?.(vm())).toBe('You may not restart VMs in team-a.');
+		// A stopped VM is held back by its state, which needs no reason.
+		expect(action('restart').why?.(vm({ phase: undefined, power: 'Off' }))).toBe('');
 	});
 
 	it('ids are unique', () => {

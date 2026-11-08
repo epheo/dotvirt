@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { api, Unauthorized, type Network, type VM } from '#lib/api.js';
 	import { bulkOutcome } from '#lib/bulk.js';
+	import { vmGate } from '#lib/gates.js';
 	import { networkKey, resolveNIC } from '#lib/networks.js';
 	import { networkRef } from '#lib/objects.js';
 	import { action } from '#lib/resource.svelte.js';
@@ -28,6 +29,11 @@
 		}),
 	);
 	const projects = $derived(new Set(nics.map((x) => inventory.projectOf(x.vm.namespace))));
+	// The network stays until every detach stages, so one VM the caller may not
+	// change holds the whole delete.
+	const blocked = $derived(
+		nics.map((x) => vmGate.update(x.vm.namespace)).find((g) => !g.ok)?.why ?? '',
+	);
 	const op = action({ toast: ui.toastError });
 
 	async function stage() {
@@ -81,6 +87,9 @@
 				in the platform repository.</Consequence
 			>
 		{/if}
+		{#if blocked}
+			<p class="text-[13px] text-warn-ink">{blocked}</p>
+		{/if}
 		{#if nics.length < vms.length}
 			<Consequence tone="warn"
 				>{vms.length - nics.length} VM{vms.length - nics.length === 1 ? '' : 's'} on it are not in git:
@@ -91,6 +100,8 @@
 	{#snippet footer()}
 		<span class="mr-auto"><StageChip kind="pr" /></span>
 		<Button variant="ghost" onclick={onclose}>Cancel</Button>
-		<Button variant="danger" disabled={op.busy} onclick={stage}>Stage the delete</Button>
+		<Button variant="danger" disabled={op.busy || !!blocked} title={blocked} onclick={stage}
+			>Stage the delete</Button
+		>
 	{/snippet}
 </Modal>

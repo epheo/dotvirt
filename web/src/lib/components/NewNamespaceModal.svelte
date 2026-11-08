@@ -1,5 +1,7 @@
 <script lang="ts">
 	import { api, type NamespaceCreate } from '#lib/api.js';
+	import { clusterGate, projectGate, projectNS } from '#lib/gates.js';
+	import { inventory } from '#lib/state/inventory.svelte.js';
 	import { validName, NAME_HINT, validCIDR } from '#lib/validate.js';
 	import StageModal from './StageModal.svelte';
 	import FormField from './FormField.svelte';
@@ -28,11 +30,20 @@
 	});
 	let netTouched = $state(false);
 
+	const join = $derived(
+		projectGate.newNamespace(
+			projectNS(inventory.projects.find((p) => p.name === project) ?? { namespaces: [] }),
+		),
+	);
+	const net = $derived(clusterGate.vmNetwork());
+
 	const missing = $derived.by(() => {
 		const m: string[] = [];
 		if (!name) m.push('Name is required');
 		else if (!validName(name)) m.push(NAME_HINT);
 		if (!project) m.push('Project is required');
+		else if (!join.ok) m.push(join.why);
+		if (withNetwork && !net.ok) m.push(net.why);
 		if (withNetwork) {
 			if (!netName) m.push('VM Network name is required');
 			if (!subnet.trim()) m.push('Subnet is required for a primary network');

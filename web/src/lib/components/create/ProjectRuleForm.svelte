@@ -4,6 +4,7 @@
 	import { api, type NetworkPolicyCreate, type PolicyRule } from '#lib/api.js';
 	import { action } from '#lib/resource.svelte.js';
 	import { rowList } from '#lib/rowlist.svelte.js';
+	import { objectGate } from '#lib/gates.js';
 	import { inventory } from '#lib/state/inventory.svelte.js';
 	import { ui } from '#lib/state/ui.svelte.js';
 	import { NAME_HINT, validName } from '#lib/validate.js';
@@ -86,12 +87,16 @@
 			),
 	);
 
+	const gate = $derived(
+		objectGate({ resource: 'networkpolicy', namespace }, editing ? 'update' : 'create'),
+	);
 	const missing = $derived.by(() => {
 		const m: string[] = [];
 		if (!name) m.push('Name the rule');
 		else if (!validName(name)) m.push('The name needs lowercase letters, digits and -');
 		else if (nameTaken) m.push(`${name} is taken in ${namespace}`);
 		if (!namespace) m.push('Pick a project and namespace');
+		else if (!gate.ok) m.push(gate.why);
 		return m;
 	});
 	const request = $derived.by((): NetworkPolicyCreate => {

@@ -5,6 +5,7 @@
 	import { libraryLabel } from '#lib/catalog.js';
 	import { action } from '#lib/resource.svelte.js';
 	import { catalog } from '#lib/state/catalog.svelte.js';
+	import { vmGate } from '#lib/gates.js';
 	import { inventory } from '#lib/state/inventory.svelte.js';
 	import { ui } from '#lib/state/ui.svelte.js';
 	import { NAME_HINT, validName } from '#lib/validate.js';
@@ -113,6 +114,7 @@
 		const m: string[] = [];
 		if (!tpl) m.push('Pick a template');
 		if (!namespace) m.push('Pick a project and namespace');
+		else if (!vmGate.create(namespace).ok) m.push(vmGate.create(namespace).why);
 		if (!nameOK) m.push(name ? `${name} cannot be used here` : 'Name the VM');
 		for (const p of unset) m.push(`Fill in ${p.displayName || p.name}`);
 		return m;

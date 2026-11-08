@@ -527,6 +527,25 @@ async function handleAPI(req, res, url) {
 		return sendJSON(res, 200, { released });
 	}
 
+	// Each namespace's admin grant gains the project's sync account, staged in
+	// the platform draft; refused on the capability the UI gates it by.
+	m = path.match(/^\/api\/projects\/([^/]+)\/sync-access$/);
+	if (m && req.method === 'POST') {
+		const p = state.scenario.inventory.projects.find((x) => x.name === m[1]);
+		if (!p) return sendText(res, 404, 'project not found');
+		if (!clusterCaps(s).grantAdmin)
+			return sendText(res, 403, 'not authorized to create namespaces');
+		for (const n of p.namespaces)
+			stageInto('platform', {
+				kind: 'edit',
+				resource: 'rolebinding',
+				namespace: n.namespace,
+				name: 'admin',
+				changes: [{ field: 'Subjects', action: 'add', to: `dotvirt-sync-${p.name}` }],
+			});
+		return sendJSON(res, 200, draftFor('platform'));
+	}
+
 	m = path.match(/^\/api\/projects\/([^/]+)\/history$/);
 	if (m) {
 		// ?namespace= narrows to the commits under that directory: the merge
@@ -711,11 +730,17 @@ const newestFirst = (a, b) => (b.created ?? '').localeCompare(a.created ?? '');
 
 // The caller's verdicts (GET /api/capabilities): everything allowed, unless
 // the scenario's `capabilities` narrows a namespace (by name, or `default`).
+// A namespace the frame denies authoring denies every staged change; one the
+// frame carries no verdict for answers 503, a review that did not complete.
 const allowAll = { create: true, update: true, delete: true };
+const denyAll = { create: false, update: false, delete: false };
 function namespaceCaps(s, project, ns) {
+	const author = project.namespaces.find((n) => n.namespace === ns)?.canAuthor !== false;
+	const objects = author ? allowAll : denyAll;
+	const override = s.capabilities?.[ns] ?? s.capabilities?.default;
 	return {
 		namespace: ns,
-		vm: allowAll,
+		vm: objects,
 		resync: true,
 		restart: true,
 		migrate: true,
@@ -728,39 +753,46 @@ function namespaceCaps(s, project, ns) {
 		clone: true,
 		dataVolumeCreate: true,
 		bootImageCreate: true,
-		network: allowAll,
-		networkAttachment: allowAll,
-		networkPolicy: allowAll,
-		egressFirewall: allowAll,
+		network: objects,
+		networkAttachment: objects,
+		networkPolicy: objects,
+		egressFirewall: objects,
+		...override,
 		project: {
 			name: project.name,
-			templateEdit: true,
+			templateEdit: author,
 			newNamespace: true,
-			adopt: !project.repo,
-			grantAdmin: false,
+			adopt: author,
+			grantAdmin: author,
 			release: !project.repo,
+			syncAccess: author && !!project.repo,
+			...override?.project,
 		},
-		...(s.capabilities?.[ns] ?? s.capabilities?.default),
 	};
 }
+// The cluster verdicts follow the scenario's /api/networks signals, which the
+// server derives from the same checks, so a scenario narrows both at once.
 function clusterCaps(s) {
+	const n = s.networks ?? {};
+	const c = n.caps ?? {};
+	const objects = (on) => (on ? allowAll : denyAll);
 	return {
-		platform: true,
-		platformRead: true,
-		network: allowAll,
-		uplink: allowAll,
-		egressIP: allowAll,
-		externalRoute: allowAll,
-		adminNetworkPolicy: allowAll,
-		baselineAdminNetworkPolicy: allowAll,
-		namespaceCreate: true,
-		vmNetwork: true,
-		grantAdmin: true,
-		sharedLibrary: true,
-		drsEnable: true,
-		drsPSI: true,
-		drsDisable: true,
-		oauthClient: true,
+		platform: !!n.canManage,
+		platformRead: !!c.platform,
+		network: objects(n.canManage),
+		uplink: objects(c.uplink),
+		egressIP: objects(c.egressIP),
+		externalRoute: objects(c.externalRoute),
+		adminNetworkPolicy: objects(c.adminNetworkPolicy),
+		baselineAdminNetworkPolicy: objects(c.adminNetworkPolicy),
+		namespaceCreate: !!c.namespace,
+		vmNetwork: !!c.namespace,
+		grantAdmin: !!c.namespace,
+		sharedLibrary: !!n.canManage,
+		drsEnable: !!s.drs?.canManage,
+		drsPSI: !!s.drs?.canPSI,
+		drsDisable: !!s.drs?.canManage,
+		oauthClient: !!n.canManage,
 		...s.capabilities?.cluster,
 	};
 }
@@ -776,6 +808,8 @@ async function handleStorage(req, res, url) {
 		if (!ns) return sendJSON(res, 200, { cluster: clusterCaps(s) });
 		const p = projectOf(ns);
 		if (!p) return sendText(res, 404, 'namespace not found in any visible project');
+		if (p.repo && !('canAuthor' in p.namespaces.find((n) => n.namespace === ns)))
+			return sendText(res, 503, 'access review failed');
 		return sendJSON(res, 200, { namespace: namespaceCaps(s, p, ns) });
 	}
 	if (path === '/api/storage/claims') return listing(s.storageClaims);

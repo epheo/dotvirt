@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { Plus } from '@lucide/svelte';
 	import { page } from '$app/state';
+	import { clusterObjectGate } from '#lib/gates.js';
 	import { NETWORKING_TABS, networkingTab } from '#lib/nav.js';
 	import { attachRef } from '#lib/networks.js';
 	import { inventory } from '#lib/state/inventory.svelte.js';
@@ -38,7 +39,9 @@
 			.filter(Boolean)
 			.join(', '),
 	);
-	const canCreate = $derived(inventory.namespaces.length > 0 || inventory.canManage);
+	const canCreate = $derived(
+		inventory.namespaces.length > 0 || clusterObjectGate('network', 'create').ok,
+	);
 
 	// New network fills in from what the map has selected: a network's project
 	// and range, or a VM's namespace.

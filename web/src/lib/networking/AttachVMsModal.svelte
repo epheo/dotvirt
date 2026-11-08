@@ -3,6 +3,7 @@
 	import { api, Unauthorized, vmKey, type Network } from '#lib/api.js';
 	import { bulkOutcome } from '#lib/bulk.js';
 	import { networkAdds } from '#lib/devices.js';
+	import { vmEditGate } from '#lib/gates.js';
 	import { attachRef, networkKey } from '#lib/networks.js';
 	import { action } from '#lib/resource.svelte.js';
 	import { inventory } from '#lib/state/inventory.svelte.js';
@@ -23,13 +24,7 @@
 	);
 	const on = $derived(new Set(networking.vmsOn(networkKey(net)).map(vmKey)));
 	const candidates = $derived(
-		inventory.allVMs.filter(
-			(v) =>
-				where.has(v.namespace) &&
-				!on.has(vmKey(v)) &&
-				v.sourceFile &&
-				inventory.canAuthor(v.namespace),
-		),
+		inventory.allVMs.filter((v) => where.has(v.namespace) && !on.has(vmKey(v)) && vmEditGate(v).ok),
 	);
 	let query = $state('');
 	const q = $derived(query.trim().toLowerCase());

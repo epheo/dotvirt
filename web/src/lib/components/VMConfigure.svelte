@@ -2,7 +2,7 @@
 	import { Pencil } from '@lucide/svelte';
 	import type { Network, VM } from '#lib/api.js';
 	import { manifestURL } from '#lib/actions.js';
-	import { editBlock } from '#lib/authoring.js';
+	import { vmEditGate } from '#lib/gates.js';
 	import type { EditSection } from '#lib/editform.js';
 	import { resolveNIC, kindLabel } from '#lib/networks.js';
 	import { vmSizing } from '#lib/sizing.js';
@@ -37,7 +37,7 @@
 	// manifest's own, and Edit changes them by picking another flavor.
 	const sizing = $derived(vmSizing(vm, inventory.options));
 	// An Edit that staging would refuse is not offered; the reason shows once.
-	const block = $derived(editBlock(vm, inventory.authoring(vm.namespace)));
+	const block = $derived(vmEditGate(vm).why);
 	const sized = (v: number | string | undefined) =>
 		v === undefined ? '' : sizing.from ? `${v} (from ${sizing.from})` : String(v);
 </script>

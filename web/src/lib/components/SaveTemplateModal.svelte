@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { BookCopy } from '@lucide/svelte';
 	import { api, type VM } from '#lib/api.js';
+	import { templateGate } from '#lib/gates.js';
 	import { inventory } from '#lib/state/inventory.svelte.js';
 	import { validName, NAME_HINT } from '#lib/validate.js';
 	import FormField from './FormField.svelte';
@@ -23,11 +24,18 @@
 	// svelte-ignore state_referenced_locally
 	let name = $state(vm.name + '-template');
 	let description = $state('');
-	let library = $state(''); // '' = the VM's own project
+	const own = $derived(templateGate('', vm.namespace));
+	const shared = $derived(templateGate('platform', vm.namespace));
+	// svelte-ignore state_referenced_locally
+	let library = $state(!own.ok && shared.ok ? 'platform' : ''); // '' = the VM's own project
 
 	const project = $derived(inventory.projectOf(vm.namespace));
 	const valid = $derived(validName(name));
-	const missing = $derived(valid ? [] : ['A valid template name is required']);
+	const gate = $derived(library === 'platform' ? shared : own);
+	const missing = $derived([
+		...(valid ? [] : ['A valid template name is required']),
+		...(gate.ok ? [] : [gate.why]),
+	]);
 	const summary = $derived(
 		valid
 			? `Stages templates/${name.trim()}.yaml → ${library === 'platform' ? 'shared library' : `project library${project ? ` (${project})` : ''}`}`
@@ -62,8 +70,10 @@
 	</FormField>
 	<FormField label="Library">
 		<SelectInput bind:value={library}>
-			<option value="">{project ? `Project library (${project})` : 'Project library'}</option>
-			<option value="platform">Shared library — needs template-curation permission</option>
+			<option value="" disabled={!own.ok}
+				>{project ? `Project library (${project})` : 'Project library'}</option
+			>
+			<option value="platform" disabled={!shared.ok}>Shared library</option>
 		</SelectInput>
 	</FormField>
 	<p class="text-xs text-ink-faint">

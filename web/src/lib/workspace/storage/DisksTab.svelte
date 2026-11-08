@@ -2,6 +2,7 @@
 	import { page } from '$app/state';
 	import { ArrowLeftRight, Camera, ChevronDown, ChevronUp, Funnel, Plus, X } from '@lucide/svelte';
 	import { api, Unauthorized, type VM } from '#lib/api.js';
+	import { vmGate } from '#lib/gates.js';
 	import { bulkOutcome } from '#lib/bulk.js';
 	import { vmHref } from '#lib/nav.js';
 	import { action } from '#lib/resource.svelte.js';
@@ -150,14 +151,24 @@
 	// a move to a shared class ---
 	const mode = $derived(filters.flags.includes('nosnap') ? 'snapshot' : 'move');
 	const target = $derived(suggestTarget(storage.classes ?? []));
+	// Each VM's own right: a move stages a VM change, a snapshot runs under the
+	// caller's token. The rest of the selection acts; none allowed holds it back.
+	const movable = $derived(picked.filter((r) => vmGate.update(r.vm.namespace).ok));
+	const snappable = $derived(picked.filter((r) => vmGate.snapshotTake(r.vm.namespace).ok));
+	const moveWhy = $derived(
+		picked.length && !movable.length ? vmGate.update(picked[0].vm.namespace).why : '',
+	);
+	const snapWhy = $derived(
+		picked.length && !snappable.length ? vmGate.snapshotTake(picked[0].vm.namespace).why : '',
+	);
 	const move = $derived(
-		planBulkMove(picked, target, {
+		planBulkMove(movable, target, {
 			classes: storage.classes ?? [],
 			staged: drafts.stagedByKey,
 			rows: storage.rows,
 		}),
 	);
-	const snap = $derived(planBulkSnapshot(picked, storage.classes ?? []));
+	const snap = $derived(planBulkSnapshot(snappable, storage.classes ?? []));
 
 	const bulkOp = action({ toast: ui.toastError });
 
@@ -354,7 +365,7 @@
 								<StageChip kind="pr" />
 								<Button
 									disabled={bulkOp.busy || !move.edits.length || !target}
-									title={!target ? 'No shared class to move to' : ''}
+									title={moveWhy || (!target ? 'No shared class to move to' : '')}
 									onclick={stageMove}
 								>
 									<ArrowLeftRight size={16} />Move {num(move.moving)}
@@ -362,7 +373,11 @@
 								</Button>
 							{:else}
 								<StageChip kind="now" />
-								<Button disabled={bulkOp.busy || !snap.vms.length} onclick={snapshotNow}>
+								<Button
+									disabled={bulkOp.busy || !snap.vms.length}
+									title={snapWhy}
+									onclick={snapshotNow}
+								>
 									<Camera size={16} />Snapshot {num(snap.vms.length)}
 									{snap.vms.length === 1 ? 'VM' : 'VMs'} now
 								</Button>
@@ -370,9 +385,9 @@
 						</div>
 						<span class="text-xs leading-4 text-ink-faint">
 							{#if mode === 'move'}
-								{moveNote(move) || 'Nothing here can move.'}
+								{moveWhy || moveNote(move) || 'Nothing here can move.'}
 							{:else}
-								One snapshot per VM covers its disks. No pull request.
+								{snapWhy || 'One snapshot per VM covers its disks. No pull request.'}
 							{/if}
 						</span>
 					</div>

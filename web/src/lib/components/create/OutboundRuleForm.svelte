@@ -4,6 +4,7 @@
 	import { api, type EgressFirewallCreate, type EgressFirewallRule } from '#lib/api.js';
 	import { action } from '#lib/resource.svelte.js';
 	import { rowList } from '#lib/rowlist.svelte.js';
+	import { objectGate } from '#lib/gates.js';
 	import { inventory } from '#lib/state/inventory.svelte.js';
 	import { ui } from '#lib/state/ui.svelte.js';
 	import Button from '../Button.svelte';
@@ -70,9 +71,17 @@
 		inventory.policies.find((p) => p.kind === 'gateway' && p.namespace === namespace),
 	);
 
+	// A namespace holds one set: adding where one exists changes it.
+	const gate = $derived(
+		objectGate(
+			{ resource: 'egressfirewall', namespace },
+			editing || existing ? 'update' : 'create',
+		),
+	);
 	const missing = $derived.by(() => {
 		const m: string[] = [];
 		if (!namespace) m.push('Pick a project and namespace');
+		else if (!gate.ok) m.push(gate.why);
 		if (!rules.rows.length) m.push('Add a rule');
 		else if (rules.rows.some((r) => !r.value.trim())) m.push('Every rule needs a destination');
 		return m;

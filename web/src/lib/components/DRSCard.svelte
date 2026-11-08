@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { api, drsThresholdLabel, type DRSView } from '#lib/api.js';
+	import { clusterGate } from '#lib/gates.js';
 	import { action, resource } from '#lib/resource.svelte.js';
 	import { ui } from '#lib/state/ui.svelte.js';
 	import InfoCard from './InfoCard.svelte';
@@ -21,6 +22,8 @@
 	);
 	const view = $derived(drs.data);
 	const error = $derived(disableOp.error || drs.error);
+	const enable = $derived(clusterGate.drsEnable());
+	const off = $derived(clusterGate.drsDisable());
 
 	// One status line for the committed state.
 	const status = $derived.by(() => {
@@ -69,16 +72,23 @@
 
 <InfoCard title="Dynamic Rescheduling - automatic VM rebalancing">
 	{#snippet action()}
-		{#if view?.canManage}
+		{#if view}
 			<span class="flex items-center gap-3">
 				{#if view.configured}
 					<button
 						onclick={disable}
-						disabled={disableOp.busy}
-						class="text-xs text-danger hover:underline disabled:text-ink-faint">Disable…</button
+						disabled={disableOp.busy || !off.ok}
+						title={off.why}
+						class="text-xs text-danger hover:underline disabled:text-ink-faint disabled:no-underline"
+						>Disable...</button
 					>
 				{/if}
-				<Button variant="link" size="sm" onclick={() => (configuring = true)}
+				<Button
+					variant="link"
+					size="sm"
+					disabled={!enable.ok}
+					title={enable.why}
+					onclick={() => (configuring = true)}
 					>{view.configured ? 'Configure' : 'Enable Dynamic Rescheduling'}</Button
 				>
 			</span>

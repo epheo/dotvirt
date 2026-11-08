@@ -4,6 +4,7 @@
 	import { isStaged, toastStageResult } from '#lib/actions.js';
 	import { api, Unauthorized, vmKey, vmRef, type DraftView, type VM } from '#lib/api.js';
 	import { bulkOutcome } from '#lib/bulk.js';
+	import { vmEditGate, vmGate, type Gate } from '#lib/gates.js';
 	import { vmNetworkKeys, vmStorageKeys, type Scope } from '#lib/lenses.js';
 	import { containerTabs, vmHref, type Section } from '#lib/nav.js';
 	import { action } from '#lib/resource.svelte.js';
@@ -189,20 +190,31 @@
 		runBulk(
 			pickedVMs,
 			(vm) => api.stageEdit(vm.namespace, vm.name, { sourceFile: vm.sourceFile, power: target }),
-			// Already headed there (a staged power change counts), or not in git
-			// (cluster-only): nothing to stage.
+			// Already headed there (a staged power change counts), not in git
+			// (cluster-only), or not the caller's to change: nothing to stage.
 			(vm) =>
-				(drafts.stagedByKey.get(vmKey(vm))?.edit?.power ?? vm.power) === target || !vm.sourceFile,
+				(drafts.stagedByKey.get(vmKey(vm))?.edit?.power ?? vm.power) === target ||
+				!vmEditGate(vm).ok,
 			`Powered ${target.toLowerCase()}: staged`,
 		);
 	}
+
+	// A bulk action runs on the picked VMs the caller may act on; it is held
+	// back only when none may, with the first one's reason.
+	const bulkWhy = (gate: (vm: VM) => Gate) => {
+		const gates = pickedVMs.map(gate);
+		return gates.some((g) => g.ok) ? '' : (gates[0]?.why ?? '');
+	};
+	const powerWhy = $derived(bulkWhy(vmEditGate));
+	const deleteWhy = $derived(bulkWhy((vm) => vmGate.delete(vm.namespace)));
 
 	async function bulkDelete() {
 		confirmingBulkDelete = false;
 		await runBulk(
 			pickedVMs,
 			(vm) => api.stageDelete(vm.namespace, vm.name),
-			(vm) => !vm.sourceFile, // not in git -> nothing to stage a removal of
+			// Not in git (nothing to remove), or not the caller's to delete.
+			(vm) => !vm.sourceFile || !vmGate.delete(vm.namespace).ok,
 			'Deletion staged for',
 		);
 	}
@@ -266,6 +278,8 @@
 		<BulkActionsBar
 			count={picked.size}
 			busy={bulkOp.busy}
+			{powerWhy}
+			{deleteWhy}
 			onpower={bulkPower}
 			ondelete={() => (confirmingBulkDelete = true)}
 			onclear={() => (picked = new Set())}
@@ -294,6 +308,8 @@
 		x={bulkCtx.x}
 		y={bulkCtx.y}
 		count={picked.size}
+		{powerWhy}
+		{deleteWhy}
 		onclose={() => (bulkCtx = null)}
 		onpower={bulkPower}
 		ondelete={() => (confirmingBulkDelete = true)}

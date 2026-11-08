@@ -16,7 +16,7 @@ import { vmPath, vmRef } from './api';
 import { api, Unauthorized, type DraftView, type VM } from '#lib/api.js';
 import { friendlyError } from '#lib/format.js';
 import { drafts } from '#lib/state/drafts.svelte.js';
-import { inventory } from '#lib/state/inventory.svelte.js';
+import { templateSaveGate, vmGate, type Gate } from '#lib/gates.js';
 import { ui, type AppModal } from '#lib/state/ui.svelte.js';
 import { vmHref } from '#lib/nav.js';
 
@@ -45,7 +45,10 @@ export interface VMAction {
 	/** Draw a separator above this entry. */
 	sep?: boolean;
 	title?: string;
+	// Offered now: the VM's state allows it and so does the caller's right.
 	enabled: (vm: VM) => boolean;
+	// Why the caller may not, when that is what holds it back; '' otherwise.
+	why?: (vm: VM) => string;
 	run?: (vm: VM) => Promise<void>;
 	/** The modal a dialog-backed host action opens. */
 	open?: (vm: VM) => AppModal;
@@ -176,16 +179,28 @@ const always = () => true;
 // Git-backed verbs need a manifest on the base branch; a cluster-only VM (e.g.
 // a fresh clone target) has none until adopted.
 const inGit = (vm: VM) => !!vm.sourceFile;
-// Staging verbs also need the caller's own edit right there; read access alone 403s.
-const author = (vm: VM) => inventory.canAuthor(vm.namespace);
 
-export const vmActions: VMAction[] = [
+// gated folds the caller's right, read from the action's own capability field,
+// into enabled, and keeps its reason for the host to show.
+type Entry = VMAction & { gate?: (namespace: string) => Gate };
+function gated({ gate, ...a }: Entry): VMAction {
+	if (!gate) return a;
+	const state = a.enabled;
+	return {
+		...a,
+		enabled: (vm) => state(vm) && gate(vm.namespace).ok,
+		why: (vm) => (state(vm) ? gate(vm.namespace).why : ''),
+	};
+}
+
+const entries: Entry[] = [
 	{
 		id: 'restart',
 		label: 'Restart',
 		kind: 'runtime',
 		verb: 'Restart',
 		enabled: running,
+		gate: vmGate.restart,
 		run: (vm) => api.restart(vm.namespace, vm.name),
 	},
 	{
@@ -194,6 +209,7 @@ export const vmActions: VMAction[] = [
 		kind: 'runtime',
 		verb: 'Pause',
 		enabled: (vm) => running(vm) && !paused(vm),
+		gate: vmGate.pause,
 		run: (vm) => api.pause(vm.namespace, vm.name),
 	},
 	{
@@ -202,6 +218,7 @@ export const vmActions: VMAction[] = [
 		kind: 'runtime',
 		verb: 'Unpause',
 		enabled: paused,
+		gate: vmGate.unpause,
 		run: (vm) => api.unpause(vm.namespace, vm.name),
 	},
 	{
@@ -210,6 +227,7 @@ export const vmActions: VMAction[] = [
 		kind: 'host',
 		title: 'Move the running VM to another host — pick a target or let the scheduler choose',
 		enabled: running,
+		gate: vmGate.migrate,
 		open: (vm) => ({ kind: 'migrateVM', vm: vmRef(vm) }),
 	},
 	{
@@ -219,11 +237,18 @@ export const vmActions: VMAction[] = [
 		title: 'Live-copy disks to another storage class — staged as a PR',
 		// Needs a live VMI to copy from, a git manifest to edit, and at least
 		// one DataVolume-backed disk to move.
-		enabled: (vm) =>
-			running(vm) && inGit(vm) && author(vm) && !!vm.disks?.some((d) => d.type === 'dataVolume'),
+		enabled: (vm) => running(vm) && inGit(vm) && !!vm.disks?.some((d) => d.type === 'dataVolume'),
+		gate: vmGate.update,
 		open: (vm) => ({ kind: 'migrateStorage', vm: vmRef(vm) }),
 	},
-	{ id: 'console', label: 'Open console', kind: 'host', sep: true, enabled: running },
+	{
+		id: 'console',
+		label: 'Open console',
+		kind: 'host',
+		sep: true,
+		enabled: running,
+		gate: vmGate.console,
+	},
 	{ id: 'snapshot', label: 'Snapshots', kind: 'host', enabled: always },
 	{
 		id: 'clone',
@@ -231,6 +256,7 @@ export const vmActions: VMAction[] = [
 		kind: 'host',
 		title: 'Copy this VM via snapshot + restore; adopt the result into git after',
 		enabled: always,
+		gate: vmGate.clone,
 		open: (vm) => ({ kind: 'cloneVM', vm: vmRef(vm) }),
 	},
 	{
@@ -238,7 +264,8 @@ export const vmActions: VMAction[] = [
 		label: 'Clone to Template…',
 		kind: 'host',
 		title: 'Derive a reusable template from this VM’s git manifest — staged as a PR',
-		enabled: (vm) => inGit(vm) && author(vm),
+		enabled: inGit,
+		gate: templateSaveGate,
 		open: (vm) => ({ kind: 'saveTemplate', vm: vmRef(vm) }),
 	},
 	{
@@ -248,14 +275,16 @@ export const vmActions: VMAction[] = [
 		sep: true,
 		title: 'Stage this cluster-only VM into a PR to bring it under GitOps',
 		// The complement of inGit: only a NotTracked (live-but-ungitted) VM can be adopted.
-		enabled: (vm) => vm.sync === 'NotTracked' && author(vm),
+		enabled: (vm) => vm.sync === 'NotTracked',
+		gate: vmGate.update,
 	},
 	{
 		id: 'edit',
 		label: 'Edit settings',
 		kind: 'host',
 		title: 'Stages a config change into a PR',
-		enabled: (vm) => inGit(vm) && author(vm),
+		enabled: inGit,
+		gate: vmGate.update,
 		open: (vm) => ({ kind: 'editVM', vm: vmRef(vm) }),
 	},
 	{
@@ -272,10 +301,13 @@ export const vmActions: VMAction[] = [
 		danger: true,
 		sep: true,
 		title: 'Stages a removal into a PR',
-		enabled: (vm) => inGit(vm) && author(vm),
+		enabled: inGit,
+		gate: vmGate.delete,
 		open: (vm) => ({ kind: 'deleteVM', vm: vmRef(vm) }),
 	},
 ];
+
+export const vmActions: VMAction[] = entries.map(gated);
 
 /** The URL of a VM's manifest on the base branch — navigable (cookie-auth'd). */
 export function manifestURL(vm: VM): string {

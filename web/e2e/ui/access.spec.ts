@@ -5,7 +5,7 @@ import { expect, login, setScenario, test } from './fx';
 // whether to wait or to ask for access.
 
 const UNKNOWN = 'Your access could not be checked. Try again in a moment.';
-const DENIED = 'Read-only: you may not edit VMs in this namespace';
+const DENIED = 'You may not change VMs in db-prod.';
 
 test.beforeEach(async ({ page }) => {
 	await setScenario(page, 'access');

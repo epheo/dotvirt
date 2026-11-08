@@ -3,6 +3,7 @@
 	import type { VM } from '#lib/api.js';
 	import { adoptNamespaces, dispatchVMAction, type VMAction } from '#lib/actions.js';
 	import { ACCESS_UNKNOWN, READ_ONLY } from '#lib/authoring.js';
+	import { objectAdoptGate, objectGate, projectGate, repoGate, vmGate } from '#lib/gates.js';
 	import { repoError } from '#lib/gitops.js';
 	import { inventory } from '#lib/state/inventory.svelte.js';
 	import { ui } from '#lib/state/ui.svelte.js';
@@ -64,11 +65,28 @@
 					: ctx.namespaces.some((ns) => inventory.authoring(ns) === 'unknown')
 						? ACCESS_UNKNOWN
 						: READ_ONLY}
+			{@const project = {
+				repo: ctx.repo,
+				namespaces: ctx.namespaces.map((namespace) => ({ namespace })),
+			}}
+			{@const rep = ctx.namespace ?? ctx.namespaces[0] ?? ''}
+			{@const repo = repoGate(project)}
+			{@const release = projectGate.release(rep)}
+			{@const newNS = projectGate.newNamespace(rep)}
+			{@const sync = projectGate.syncAccess(rep)}
+			{@const here = (g: { why: string }) => createOff || (ctx.namespace ? g.why : '')}
+			{@const vmOff = here(vmGate.create(ctx.namespace ?? ''))}
+			{@const fwOff = here(
+				objectAdoptGate({ resource: 'egressfirewall', namespace: ctx.namespace ?? '' }),
+			)}
+			{@const ruleOff = here(
+				objectGate({ resource: 'networkpolicy', namespace: ctx.namespace ?? '' }, 'create'),
+			)}
 			<div class="w-48 rounded border border-line bg-panel py-1 text-xs shadow-lg">
 				<div class="truncate px-3 py-1 text-[10px] tracking-wide text-ink-faint uppercase">
 					{ctx.namespace ?? ctx.project}
 				</div>
-				{#if !ctx.repo && inventory.canNamespace}
+				{#if !ctx.repo}
 					<MenuItem
 						onclick={() => {
 							ui.modal =
@@ -77,7 +95,9 @@
 									: null;
 							ui.ctx = null;
 						}}
-						title="Create a repo for this project and bring it under GitOps">Attach repo…</MenuItem
+						disabled={!repo.ok}
+						title={repo.why || 'Create a repo for this project and bring it under GitOps'}
+						>Attach repo…</MenuItem
 					>
 					<MenuItem
 						onclick={() => {
@@ -87,14 +107,16 @@
 									: null;
 							ui.ctx = null;
 						}}
-						title="Dissolve this project: remove the project label so its namespaces go back to plain (or adoptable) namespaces"
+						disabled={!release.ok}
+						title={release.why ||
+							'Dissolve this project: remove the project label so its namespaces go back to plain (or adoptable) namespaces'}
 						>Release project…</MenuItem
 					>
 					<div class="my-1 border-t border-line-soft"></div>
 				{/if}
 				<!-- A dead repo annotation is a different dead end from repoless. Gated on
 				     the GitOps error; the backend refuses when the repo resolves. -->
-				{#if ctx.kind === 'container' && ctx.repo && projectSyncError(ctx.project) && inventory.canNamespace}
+				{#if ctx.kind === 'container' && ctx.repo && projectSyncError(ctx.project) && repo.ok}
 					<MenuItem
 						onclick={() => {
 							ui.modal = {
@@ -127,8 +149,8 @@
 						ui.ctx = null;
 						ui.modal = { kind: 'newVM', namespaces: ns };
 					}}
-					disabled={!!createOff}
-					title={createOff}>New VM here…</MenuItem
+					disabled={!!vmOff}
+					title={vmOff}>New VM here…</MenuItem
 				>
 				<MenuItem
 					onclick={() => {
@@ -136,8 +158,8 @@
 						ui.ctx = null;
 						ui.modal = c ? { kind: 'egressFw', namespaces: authorNS, namespace: authorHere } : null;
 					}}
-					disabled={!!createOff}
-					title={createOff || 'Add a north-south egress firewall (the Tier-1 gateway firewall)'}
+					disabled={!!fwOff}
+					title={fwOff || 'Limit where VMs in this namespace may connect out'}
 					>New Egress Firewall…</MenuItem
 				>
 				<MenuItem
@@ -146,19 +168,29 @@
 						ui.ctx = null;
 						ui.modal = c ? { kind: 'dfw', namespaces: authorNS, namespace: authorHere } : null;
 					}}
-					disabled={!!createOff}
-					title={createOff || 'Add an east-west Distributed Firewall policy (NetworkPolicy)'}
+					disabled={!!ruleOff}
+					title={ruleOff || 'Limit which traffic reaches VMs here (NetworkPolicy)'}
 					>New Security Policy…</MenuItem
 				>
-				{#if inventory.canNamespace}
+				<MenuItem
+					onclick={() => {
+						const project = ctx.kind === 'container' ? ctx.project : null;
+						ui.ctx = null;
+						ui.modal = { kind: 'namespace', project };
+					}}
+					disabled={!ctx.repo || !newNS.ok}
+					title={ctx.repo ? newNS.why : 'Project has no backing repo'}>New Namespace here…</MenuItem
+				>
+				{#if ctx.repo}
 					<MenuItem
 						onclick={() => {
 							const project = ctx.kind === 'container' ? ctx.project : null;
 							ui.ctx = null;
-							ui.modal = { kind: 'namespace', project };
+							if (project) ui.modal = { kind: 'syncAccess', project };
 						}}
-						disabled={!ctx.repo}
-						title={ctx.repo ? '' : 'Project has no backing repo'}>New Namespace here…</MenuItem
+						disabled={!sync.ok}
+						title={sync.why || "Let ArgoCD sync this project as the project's own account"}
+						>Grant sync access...</MenuItem
 					>
 				{/if}
 				<div class="my-1 border-t border-line-soft"></div>

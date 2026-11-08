@@ -1,4 +1,5 @@
 import { draftsByProject, vmKey, type DraftItem, type DraftView } from '#lib/api.js';
+import { clusterGate } from '#lib/gates.js';
 import { inventory } from './inventory.svelte';
 
 // The synthetic platform-tier project (matches the backend's platformProjectName);
@@ -35,9 +36,9 @@ class DraftsStore {
 
 	async refresh() {
 		const gen = ++this.#gen;
-		// Platform authors also carry a platform-tier draft (cluster-scoped network +
-		// namespace changes); draftsByProject drops it for non-authors (403 -> skipped).
-		const names = inventory.canManage
+		// A caller who may stage a platform change reads their own platform draft,
+		// with or without the platform tier's shared reads.
+		const names = clusterGate.platform().ok
 			? [...inventory.projectNames, PLATFORM_PROJECT]
 			: inventory.projectNames;
 		if (!names.length) {

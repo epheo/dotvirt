@@ -1,7 +1,9 @@
 <script lang="ts">
 	import { goto } from '$app/navigation';
 	import { page } from '$app/state';
+	import type { Template } from '#lib/api.js';
 	import { CATALOG_KINDS, catalogHref, catalogKind, catalogRows } from '#lib/catalog.js';
+	import { projectNS, templateGate } from '#lib/gates.js';
 	import { catalog } from '#lib/state/catalog.svelte.js';
 	import { inventory } from '#lib/state/inventory.svelte.js';
 	import { ui } from '#lib/state/ui.svelte.js';
@@ -31,6 +33,12 @@
 
 	const rows = $derived(catalogRows(kind, catalog.templates, inventory.options));
 	const pickedRow = $derived(rows?.find((r) => r.key === picked) ?? null);
+
+	const editGate = (t: Template) =>
+		templateGate(
+			t.library,
+			projectNS(inventory.projects.find((p) => p.name === t.library) ?? { namespaces: [] }),
+		);
 
 	// Selection is replaceState, like tabs: back never walks item picks.
 	function setPicked(key: string | null) {
@@ -97,6 +105,7 @@
 			</dl>
 			{#if pickedRow.template}
 				{@const t = pickedRow.template}
+				{@const edit = editGate(t)}
 				{#if t.parameters?.length}
 					<h4
 						class="border-y border-line bg-inset px-3 py-1.5 text-xs font-semibold tracking-wide text-ink-muted uppercase"
@@ -136,7 +145,9 @@
 					{/if}
 					<button
 						onclick={() => (ui.modal = { kind: 'editTemplate', template: t })}
-						class="flex-1 rounded border border-line px-3 py-1.5 text-xs font-medium text-ink hover:bg-inset"
+						disabled={!edit.ok}
+						title={edit.why}
+						class="flex-1 rounded border border-line px-3 py-1.5 text-xs font-medium text-ink hover:bg-inset disabled:text-ink-faint disabled:hover:bg-transparent"
 					>
 						Edit…
 					</button>

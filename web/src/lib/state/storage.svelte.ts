@@ -8,6 +8,7 @@ import {
 } from '#lib/api.js';
 import { friendlyError } from '#lib/format.js';
 import { diskRows, imageUsage, uploadAbility, type UploadAbility } from '#lib/storage.js';
+import { caps } from './caps.svelte';
 import { catalog } from './catalog.svelte';
 import { inventory } from './inventory.svelte';
 
@@ -100,10 +101,10 @@ class StorageStore {
 		this.#uploadKey = key;
 		this.upload = null;
 		const gen = this.#gen;
-		const found = await uploadAbility(namespaces, async (ns) => {
-			const caps = await api.capabilities(ns);
-			return caps.namespace;
-		});
+		const found = await uploadAbility(
+			namespaces,
+			async (ns) => (await caps.nsRead(ns)) ?? undefined,
+		);
 		if (gen === this.#gen && key === this.#uploadKey) this.upload = found;
 	}
 

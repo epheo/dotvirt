@@ -6,12 +6,14 @@
 	import {
 		canAdoptPolicy,
 		canAuthorRef,
+		canDeletePolicy,
 		canEditPolicy,
 		openAdopt,
 		openDelete,
 		openEdit,
 		policyRef,
 	} from '#lib/objects.js';
+	import { clusterObjectGate } from '#lib/gates.js';
 	import { tierOf } from '#lib/rulelines.js';
 	import { inventory } from '#lib/state/inventory.svelte.js';
 	import { networking } from '#lib/state/networking.svelte.js';
@@ -74,6 +76,14 @@
 	const projectOf = (p: Policy) => (p.namespace ? inventory.projectOf(p.namespace) : 'platform');
 	let history = $state<Record<string, boolean>>({});
 	const canProjectRules = $derived(inventory.namespaces.length > 0);
+	// The cluster rule form writes either kind; each answers for itself there.
+	const canClusterRules = $derived(
+		clusterObjectGate('adminnetworkpolicy', 'create').ok ||
+			clusterObjectGate('baselineadminnetworkpolicy', 'create').ok,
+	);
+	const canEdge = $derived(
+		clusterObjectGate('egressip', 'create').ok || clusterObjectGate('externalroute', 'create').ok,
+	);
 </script>
 
 {#snippet policyRow(p: Policy)}
@@ -106,7 +116,7 @@
 						onclick={() => (history[k] = !history[k])}
 						>{history[k] ? 'Hide history' : 'History'}</button
 					>
-					{#if canEditPolicy(p)}
+					{#if canDeletePolicy(p)}
 						<button
 							type="button"
 							class="text-danger-ink hover:underline"
@@ -209,7 +219,7 @@
 
 	<Card title="Cluster rules" meta="Met first, lowest priority first" flush>
 		{#snippet actions()}
-			{#if inventory.canAdminFw}
+			{#if canClusterRules}
 				<Button variant="secondary" size="sm" onclick={() => (ui.modal = { kind: 'adminFw' })}
 					><Plus size={14} />New cluster rule</Button
 				>
@@ -220,9 +230,7 @@
 				{#each cluster as p (keyOf(p))}{@render policyRow(p)}{/each}
 			</ul>
 		{:else}
-			{@render empty(
-				inventory.canAdminFw ? 'No cluster rules.' : 'No cluster rules visible to you.',
-			)}
+			{@render empty(canClusterRules ? 'No cluster rules.' : 'No cluster rules visible to you.')}
 		{/if}
 	</Card>
 
@@ -260,7 +268,7 @@
 
 	<Card title="Leaving the cluster" meta="Fixed outbound IPs and external routes" flush>
 		{#snippet actions()}
-			{#if inventory.canEgress}
+			{#if canEdge}
 				<Button variant="secondary" size="sm" onclick={() => (ui.modal = { kind: 'tier0' })}
 					><Plus size={14} />New fixed outbound IP or route</Button
 				>

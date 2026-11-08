@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { api } from '#lib/api.js';
 	import { splitList } from '#lib/format.js';
+	import { projectGate, repoGate } from '#lib/gates.js';
 	import FormField from './FormField.svelte';
 	import StageModal from './StageModal.svelte';
 	import TextInput from './TextInput.svelte';
@@ -22,11 +23,24 @@
 	} = $props();
 
 	let owners = $state(''); // space/comma-separated usernames
+
+	const adopt = $derived(
+		repoGate({
+			repo: recover ? project : undefined,
+			namespaces: namespaces.map((namespace) => ({ namespace })),
+		}),
+	);
+	const naming = $derived(projectGate.grantAdmin(namespaces[0] ?? ''));
+	const missing = $derived([
+		...(adopt.ok ? [] : [adopt.why]),
+		...(owners.trim() && !naming.ok ? [naming.why] : []),
+	]);
 </script>
 
 <StageModal
 	title={recover ? `Recover repo for "${project}"` : `Attach repo to "${project}"`}
 	label="Attach repo"
+	{missing}
 	summary={`Creates repo “${project}”; stages ${namespaces.length} namespace annotation${namespaces.length === 1 ? '' : 's'} → platform repo`}
 	onsubmit={() => api.adoptProject(project, splitList(owners))}
 	{onclose}

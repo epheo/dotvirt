@@ -42,10 +42,10 @@ const badPhase = /Err|CrashLoop|Unschedulable|Failed/;
 
 // The issues plane: standing problems from the live stream plus firing cluster
 // alerts, one list behind the header count, the tree badges and the Summary
-// card. canRepair is the namespace-create authority the repo dialogs need.
+// card. canRepair is whether the caller may attach or re-create p's repo.
 export function deriveIssues(
 	inv: Inventory | null,
-	opts: { alerts?: Alert[]; canRepair?: boolean; network?: NetProblem[] } = {},
+	opts: { alerts?: Alert[]; canRepair?: (p: Project) => boolean; network?: NetProblem[] } = {},
 ): Issue[] {
 	if (!inv) return [];
 	const out: Issue[] = [];
@@ -69,7 +69,7 @@ export function deriveIssues(
 				detail: repoProblem,
 				href: phref,
 				project: p.name,
-				action: opts.canRepair
+				action: opts.canRepair?.(p)
 					? {
 							label: p.repo ? 'Recover repo' : 'Attach repo',
 							modal: {

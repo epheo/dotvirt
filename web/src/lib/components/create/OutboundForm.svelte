@@ -2,6 +2,7 @@
 	import { api, type EgressIPCreate, type ExternalRouteCreate } from '#lib/api.js';
 	import { splitList } from '#lib/format.js';
 	import { action } from '#lib/resource.svelte.js';
+	import { CLUSTER_NS, objectGate } from '#lib/gates.js';
 	import { inventory } from '#lib/state/inventory.svelte.js';
 	import { ui, type Tier0Initial } from '#lib/state/ui.svelte.js';
 	import { NAME_HINT, validIP, validName } from '#lib/validate.js';
@@ -49,6 +50,12 @@
 	const bad = $derived(list.filter((ip) => !validIP(ip)));
 	const projects = $derived(new Set(selectedNs.map((ns) => inventory.projectOf(ns))).size);
 
+	const gate = $derived(
+		objectGate(
+			{ resource: kind === 'snat' ? 'egressip' : 'externalroute', namespace: CLUSTER_NS },
+			editing ? 'update' : 'create',
+		),
+	);
 	const missing = $derived.by(() => {
 		const m: string[] = [];
 		if (!name) m.push('Name it');
@@ -56,6 +63,7 @@
 		if (!list.length) m.push(kind === 'snat' ? 'Add an outbound IP' : 'Add a next hop');
 		else if (bad.length) m.push(`${bad[0]} is not an IP address`);
 		if (!selectedNs.length) m.push('Pick the projects it serves');
+		if (!gate.ok) m.push(gate.why);
 		return m;
 	});
 	const egressBody = $derived<EgressIPCreate>({ name, egressIPs: list, namespaces: selectedNs });
