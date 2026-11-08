@@ -66,10 +66,23 @@ export const canEditUplink = (u: Uplink) =>
 // one the platform capability the create forms gate on.
 export function canAdoptNetwork(n: Network): boolean {
 	if (n.sourceFile) return false;
-	return n.scope === 'shared'
-		? inventory.canManage
-		: inventory.namespaces.includes(n.namespace ?? '');
+	if (n.scope === 'shared') return inventory.canManage;
+	return !platformTier(n) && inventory.namespaces.includes(n.namespace ?? '');
 }
+
+// The kinds a tenant repo may hold (pkg/tenancy TenantKinds, which its
+// AppProject whitelists). Anything else in a project's namespace, a raw
+// network attachment say, is platform tier: the tenant repo refuses it, and
+// no adopt route takes a namespaced object into the platform repo.
+const TENANT_KINDS = new Set([
+	'VirtualMachine',
+	'DataVolume',
+	'UserDefinedNetwork',
+	'EgressFirewall',
+	'NetworkPolicy',
+]);
+export const platformTier = (n: Network): boolean =>
+	n.scope !== 'shared' && !TENANT_KINDS.has(n.backing);
 export function canAdoptPolicy(p: Policy): boolean {
 	if (p.sourceFile) return false;
 	if (p.namespace) return inventory.namespaces.includes(p.namespace);

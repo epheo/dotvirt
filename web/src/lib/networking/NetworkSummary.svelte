@@ -22,6 +22,7 @@
 		openAdopt,
 		openDelete,
 		openEdit,
+		platformTier,
 	} from '#lib/objects.js';
 	import { resource } from '#lib/resource.svelte.js';
 	import { hasOwnRule, topLines, wildcardSummary, type RuleLine } from '#lib/rulelines.js';
@@ -195,6 +196,11 @@
 		`${b >= 1e9 ? (b / 1e9).toFixed(1) + ' Gbit/s' : Math.round(b / 1e6) + ' Mbit/s'}`;
 
 	// --- change ---
+	const misplaced = $derived(
+		net
+			? `${project}'s repo declares it, but network attachments belong to the platform repo: ${project}'s sync fails until its repo no longer does.${canDeleteNetwork(net) ? ' Delete below removes it from there.' : ''}`
+			: '',
+	);
 	const secondary = $derived(!!net && net.kind !== 'default');
 	let attaching = $state(false);
 	let deleting = $state(false);
@@ -537,6 +543,13 @@
 				{#snippet actions()}
 					<span class="text-ink-faint">Stages in {project}</span>
 				{/snippet}
+				{#if platformTier(net) && net.sourceFile && project !== 'platform'}
+					<div
+						class="mb-6 rounded-md border border-warn/60 bg-warn-soft px-3 py-2 text-[13px] text-warn-ink"
+					>
+						{misplaced}
+					</div>
+				{/if}
 				<div class="-my-3 flex flex-col">
 					{#if secondary}
 						<div class="flex flex-col gap-1.5 border-b border-line-soft py-3">
@@ -614,6 +627,11 @@
 						</div>
 						<Consequence size="sm">Same project and size, on the next free range.</Consequence>
 					</div>
+					{#if platformTier(net) && !net.sourceFile}
+						<p class="border-t border-line-soft py-3 text-[13px] text-ink-faint">
+							Network attachments belong to the platform repo.
+						</p>
+					{/if}
 					{#if canAdoptNetwork(net)}
 						<div class="flex flex-col gap-1.5 py-3">
 							<div class="flex flex-wrap items-center gap-2">

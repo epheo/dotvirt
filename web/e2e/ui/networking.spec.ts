@@ -97,12 +97,39 @@ test('a tenant counts and draws only the networks it can see', async ({ page }) 
 	await page.goto('/networking');
 	const main = page.locator('main');
 	const aside = page.locator('aside');
-	await expect(main.getByText('2 VMs, 6 networks')).toBeVisible();
-	await expect(main.getByRole('link', { name: /^Networks\s*6$/ })).toBeVisible();
-	await expect(aside.getByText('Networks', { exact: true }).locator('..')).toContainText('6');
+	await expect(main.getByText('2 VMs, 7 networks')).toBeVisible();
+	await expect(main.getByRole('link', { name: /^Networks\s*7$/ })).toBeVisible();
+	await expect(aside.getByText('Networks', { exact: true }).locator('..')).toContainText('7');
 	for (const foreign of ['dc-vlan-net', 'internal-l2', 'udn-tcp-frontend', 'team-db'])
 		await expect(page.getByText(foreign)).toHaveCount(0);
 	await main.getByRole('link', { name: /^Networks/ }).click();
-	await expect(main.getByText('6 of 6', { exact: true })).toBeVisible();
+	await expect(main.getByText('7 of 7', { exact: true })).toBeVisible();
 	await expect(page.getByText('dc-vlan-net')).toHaveCount(0);
+});
+
+test('a raw network attachment belongs to the platform repo', async ({ page }) => {
+	// A project's repo may not hold one, so the page never offers to adopt it
+	// there, and says why.
+	await setScenario(page, 'base');
+	await login(page);
+	await page.goto('/networking/web-prod/legacy-l2');
+	const main = page.locator('main');
+	await expect(main.getByText('Network attachments belong to the platform repo.')).toBeVisible();
+	await expect(main.getByRole('button', { name: 'Adopt into git' })).toHaveCount(0);
+});
+
+test("objects a project's repo cannot keep are issues with their next step", async ({ page }) => {
+	await setScenario(page, 'drift');
+	await login(page);
+	await page.locator('button[title^="Issues"]').click();
+	const bell = page.getByRole('banner');
+	await expect(
+		bell.getByRole('button', { name: /allow-https.*no namespace in git/ }),
+	).toBeVisible();
+	await expect(bell.getByRole('button', { name: /web-9.*outside team-web/ })).toBeVisible();
+	await bell.getByRole('button', { name: /legacy-l2.*only the platform repo may hold/ }).click();
+	await expect(page).toHaveURL(/\/networking\/web-prod\/legacy-l2$/);
+	await expect(
+		page.locator('main').getByText(/team-web's repo declares it, but network attachments/),
+	).toBeVisible();
 });

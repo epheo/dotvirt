@@ -345,3 +345,43 @@ describe('network problems in the issues plane', () => {
 		]);
 	});
 });
+
+describe('objects a project repo cannot keep', () => {
+	it('names each by object, with its next action', () => {
+		const inv: Inventory = {
+			projects: [
+				{
+					name: 'team-web',
+					namespaces: [{ namespace: 'web-prod', vms: [] }],
+					unnamespaced: [{ kind: 'NetworkPolicy', namespace: 'web-prod', name: 'allow-https' }],
+					outOfProject: [{ kind: 'VirtualMachine', namespace: 'db-prod', name: 'web-9' }],
+					platformKinds: [
+						{ kind: 'NetworkAttachmentDefinition', namespace: 'web-prod', name: 'legacy-l2' },
+					],
+				},
+			],
+		};
+		const issues = deriveIssues(inv);
+		expect(issues.map((i) => [i.scope, i.label, i.severity, i.action.label])).toEqual([
+			['db-prod/web-9', 'VirtualMachine outside team-web', 'danger', "Open the project's changes"],
+			[
+				'web-prod/legacy-l2',
+				'NetworkAttachmentDefinition only the platform repo may hold',
+				'danger',
+				'Open the network',
+			],
+			[
+				'web-prod/allow-https',
+				'NetworkPolicy has no namespace in git',
+				'warn',
+				'Set its namespace',
+			],
+		]);
+		const unns = issues.find((i) => i.label.includes('no namespace'))!;
+		expect(unns.action).toEqual({
+			label: 'Set its namespace',
+			edit: { resource: 'networkpolicy', namespace: 'web-prod', name: 'allow-https' },
+		});
+		expect(issues[1].href).toBe('/networking/web-prod/legacy-l2');
+	});
+});

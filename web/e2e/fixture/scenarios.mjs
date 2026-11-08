@@ -350,6 +350,17 @@ const netCatalog = {
 		// The create sheet's networks: an overlapping pair in two namespaces
 		// (isolated, so never an issue) and one with no range.
 		...createNetworks,
+		// A raw attachment in a tenant namespace: platform tier, never adoptable
+		// into the project's repo.
+		{
+			name: 'legacy-l2',
+			kind: 'internal',
+			scope: 'project',
+			namespace: 'web-prod',
+			attachRef: 'web-prod/legacy-l2',
+			backing: 'NetworkAttachmentDefinition',
+			topology: 'layer2',
+		},
 		{
 			name: 'dc-vlan-net',
 			kind: 'vlan',
@@ -393,9 +404,13 @@ const netCatalog = {
 	],
 };
 
-// The same catalog in trouble: the dc-vlan uplink failing on one host.
+// The same catalog in trouble: the dc-vlan uplink failing on one host, and
+// team-web's repo declaring the raw attachment only the platform may hold.
 const netTrouble = {
 	...netCatalog,
+	networks: netCatalog.networks.map((n) =>
+		n.name === 'legacy-l2' ? { ...n, sourceFile: 'networks/legacy-l2.yaml' } : n,
+	),
 	uplinks: netCatalog.uplinks.map((u) =>
 		u.name === 'dc-vlan'
 			? {
@@ -1138,6 +1153,12 @@ const drift = {
 			{
 				name: 'team-web',
 				repo: 'https://forge.example/dotvirt/team-web.git',
+				// Where team-web's repo declares what its Application cannot keep.
+				unnamespaced: [{ kind: 'NetworkPolicy', namespace: 'web-prod', name: 'allow-https' }],
+				outOfProject: [{ kind: 'VirtualMachine', namespace: 'db-prod', name: 'web-9' }],
+				platformKinds: [
+					{ kind: 'NetworkAttachmentDefinition', namespace: 'web-prod', name: 'legacy-l2' },
+				],
 				gitOps: {
 					sync: 'OutOfSync',
 					health: 'Degraded',

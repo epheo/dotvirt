@@ -1,15 +1,25 @@
-import { vmKey, type Alert, type Inventory, type ObjectHealth, type VM } from '#lib/api.js';
+import {
+	vmKey,
+	type Alert,
+	type Inventory,
+	type ObjectHealth,
+	type ObjectRef as GitObject,
+	type Project,
+	type VM,
+} from '#lib/api.js';
 import { opStands, repoError } from '#lib/gitops.js';
 import type { NetProblem } from '#lib/netmap.js';
-import { hrefForScope, networkHref, vmHref } from '#lib/nav.js';
+import { changesHref, hrefForScope, networkHref, vmHref } from '#lib/nav.js';
+import type { ObjectRef } from '#lib/objects.js';
 import type { AppModal } from '#lib/state/ui.svelte.js';
 
 // What fixes an issue, one click from wherever it is listed: a view to open, a
-// dialog to start, or the adopt verb.
+// dialog to start, the adopt verb, or an object's git file to edit.
 export type IssueAction =
 	| { label: string; href: string }
 	| { label: string; modal: AppModal }
-	| { label: string; adopt: { namespace: string; name: string } };
+	| { label: string; adopt: { namespace: string; name: string } }
+	| { label: string; edit: ObjectRef };
 
 export type Issue = {
 	// info marks a suggestion: worth doing, never counted as a problem.
@@ -90,6 +100,7 @@ export function deriveIssues(
 				const issue = vmIssue(p.name, vm);
 				if (issue) out.push(issue);
 			}
+		out.push(...placementIssues(inv, p));
 	}
 	// A refused apply or an unreachable repo on the platform tier stands like a
 	// project's; the Changes lane is where the merged PR behind it lives.
@@ -251,6 +262,66 @@ function networkIssue(inv: Inventory, p: NetProblem): Issue {
 		project: (ns && projectOf(inv, ns)) || PLATFORM,
 		action: { label: 'Open the network', href },
 	};
+}
+
+// The kinds whose git file dotvirt can open for editing, by its object route.
+const EDITABLE: Record<string, string> = {
+	UserDefinedNetwork: 'network',
+	NetworkPolicy: 'networkpolicy',
+	EgressFirewall: 'egressfirewall',
+};
+
+// Objects a project's repo declares where its Application cannot keep them:
+// without a namespace (Argo applies them to the project's default namespace
+// instead), in a namespace outside the project, or of a kind only the
+// platform repo may hold (both refuse the project's whole sync).
+function placementIssues(inv: Inventory, p: Project): Issue[] {
+	const at = (o: GitObject) => (o.namespace ? `${o.namespace}/${o.name}` : o.name);
+	const view = (o: GitObject) =>
+		objectHref(inv, { kind: o.kind, namespace: o.namespace, name: o.name });
+	const fixIn = (o: GitObject, label: string): IssueAction =>
+		o.kind === 'VirtualMachine' && o.namespace
+			? { label: 'Open the VM', href: vmHref(o.namespace, o.name) }
+			: EDITABLE[o.kind] && o.namespace
+				? { label, edit: { resource: EDITABLE[o.kind], namespace: o.namespace, name: o.name } }
+				: open(view(o));
+	const out: Issue[] = [];
+	for (const o of p.unnamespaced ?? [])
+		out.push({
+			severity: 'warn',
+			scope: at(o),
+			label: `${o.kind} has no namespace in git`,
+			detail: `Argo applies it to ${p.name}'s default namespace${o.namespace ? `, not ${o.namespace}` : ''}.`,
+			href: view(o),
+			project: p.name,
+			action: fixIn(o, 'Set its namespace'),
+		});
+	for (const o of p.outOfProject ?? []) {
+		const href = changesHref(p.name);
+		out.push({
+			severity: 'danger',
+			scope: at(o),
+			label: `${o.kind} outside ${p.name}`,
+			detail: `${o.namespace} is not one of ${p.name}'s namespaces: the project's sync fails until git moves it into one or removes it.`,
+			href,
+			project: p.name,
+			action: { label: "Open the project's changes", href },
+		});
+	}
+	for (const o of p.platformKinds ?? [])
+		out.push({
+			severity: 'danger',
+			scope: at(o),
+			label: `${o.kind} only the platform repo may hold`,
+			detail: `${p.name}'s sync fails until its repo no longer declares it.`,
+			href: view(o),
+			project: p.name,
+			action:
+				o.kind === 'NetworkAttachmentDefinition'
+					? { label: 'Open the network', href: view(o) }
+					: open(view(o)),
+		});
+	return out;
 }
 
 function projectOf(inv: Inventory, namespace: string): string | undefined {

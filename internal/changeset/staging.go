@@ -173,6 +173,9 @@ func (c *Coordinator) resolveRendered(proj project.ProjectInfo, render func() (d
 	if err != nil {
 		return draft.Entry{}, invalid(err)
 	}
+	if err := requirePlacement(proj, entry.SourceFile, []byte(entry.Manifest)); err != nil {
+		return draft.Entry{}, err
+	}
 	entry.Kind = draft.KindCreate
 	idx, err := indexDeclared(read, c.baseBranch)
 	if err != nil {
