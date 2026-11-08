@@ -133,3 +133,28 @@ test("objects a project's repo cannot keep are issues with their next step", asy
 		page.locator('main').getByText(/team-web's repo declares it, but network attachments/),
 	).toBeVisible();
 });
+
+test('a rule on another project reads its subject in the words the caller may see', async ({
+	page,
+}) => {
+	await setScenario(page, 'scale');
+	await login(page);
+	const main = page.locator('main');
+	await page.goto('/networking/web-prod/web-net');
+	await expect(main.getByText('TCP 5432 to VMs labeled app=db-1 in db-prod')).toBeVisible();
+
+	// A tenant's view of the same rule: the target comes back redacted. The page
+	// says what the server's applies line says, never the target.
+	await page.route('**/api/networks/rules?*', async (route) => {
+		const body = await (await route.fetch()).json();
+		for (const r of body.reaches ?? [])
+			if (r.policy.namespace === 'db-prod') {
+				r.policy.target = 'tenant-a, other namespaces';
+				r.policy.applies = 'other namespaces';
+			}
+		await route.fulfill({ json: body });
+	});
+	await page.reload();
+	await expect(main.getByText('TCP 5432 to other namespaces')).toBeVisible();
+	await expect(main.getByText(/VMs labeled tenant-a/)).toHaveCount(0);
+});

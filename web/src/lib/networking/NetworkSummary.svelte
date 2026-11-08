@@ -78,13 +78,16 @@
 	// --- what it reaches ---
 	type Reach = { tone: 'allow' | 'shared' | 'blocked'; title: string; sub: string; href?: string };
 	const portsWords = (p?: string) => (p ? p.replaceAll('/', ' ') : 'All traffic');
-	function subjectWords(ns: string | undefined, target: string | undefined): string {
-		if (!target || target === 'all pods') return `every VM${ns ? ` in ${ns}` : ''}`;
-		const m = /^([^=,\s]+)=([^,\s]+)$/.exec(target);
+	// The subject in the server's own words: the target may be redacted for
+	// the caller, so it is never shown. A plain "key=value" target that picks
+	// one VM the caller already sees reads as that VM.
+	function subjectWords(p: { namespace?: string; target?: string; applies?: string }): string {
+		const m = /^([^=,\s]+)=([^,\s]+)$/.exec(p.target ?? '');
 		const picked = m
-			? inventory.allVMs.filter((v) => v.namespace === ns && v.labels?.[m[1]] === m[2])
+			? inventory.allVMs.filter((v) => v.namespace === p.namespace && v.labels?.[m[1]] === m[2])
 			: [];
-		return picked.length === 1 ? `${picked[0].name} only` : `VMs labeled ${target}`;
+		if (picked.length === 1) return `${picked[0].name} only`;
+		return p.applies || `every VM${p.namespace ? ` in ${p.namespace}` : ''}`;
 	}
 	const reaches = $derived.by((): Reach[] => {
 		const out: Reach[] = [];
@@ -97,7 +100,7 @@
 				byProject.set(title, {
 					tone: 'allow',
 					title,
-					sub: `${portsWords(r.rule.ports)} to ${subjectWords(ns, r.policy.target)}`,
+					sub: `${portsWords(r.rule.ports)} to ${subjectWords(r.policy)}`,
 				});
 		}
 		out.push(...[...byProject.values()].slice(0, 1));
