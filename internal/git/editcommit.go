@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 
 	"github.com/go-git/go-git/v5"
 	"github.com/go-git/go-git/v5/config"
@@ -173,6 +174,9 @@ func applyItem(wt *git.Worktree, it ChangesetItem) error {
 		return nil
 	case it.Transform != nil:
 		current, err := readWorktree(wt, it.Path)
+		if errors.Is(err, fs.ErrNotExist) {
+			return fmt.Errorf("%w: %s is no longer on the base branch; unstage the change to it", model.ErrConflict, it.Path)
+		}
 		if err != nil {
 			return fmt.Errorf("read %s: %w", it.Path, err)
 		}

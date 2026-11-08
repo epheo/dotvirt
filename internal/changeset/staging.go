@@ -3,6 +3,8 @@ package changeset
 import (
 	"encoding/json"
 	"fmt"
+	"slices"
+	"strings"
 
 	"github.com/epheo/dotvirt/internal/auth"
 	"github.com/epheo/dotvirt/internal/draft"
@@ -11,7 +13,6 @@ import (
 	"github.com/epheo/dotvirt/internal/model"
 	"github.com/epheo/dotvirt/internal/netgen"
 	"github.com/epheo/dotvirt/internal/project"
-	"github.com/epheo/dotvirt/internal/validate"
 	"github.com/epheo/dotvirt/internal/vmgen"
 	"github.com/epheo/dotvirt/pkg/forge"
 )
@@ -26,25 +27,86 @@ func (c *Coordinator) StageEdit(id auth.Identity, proj project.ProjectInfo, name
 	if edit.Empty() {
 		return model.DraftView{}, fmt.Errorf("%w: no fields to edit", model.ErrInvalid)
 	}
-	// SourceFile addresses a file in the proposal diff - the one repo path a
-	// client supplies directly, so it passes the same gate created names do.
-	if err := validate.RequireRepoPath("source file", req.SourceFile); err != nil {
-		return model.DraftView{}, err
-	}
+	// req.SourceFile is ignored: stageEdit resolves the file from git.
 	return c.stageEdit(id, proj, draft.Entry{
-		Kind:       draft.KindEdit,
-		Namespace:  namespace,
-		Name:       name,
-		SourceFile: req.SourceFile,
-		Edit:       &edit,
+		Kind:      draft.KindEdit,
+		Namespace: namespace,
+		Name:      name,
+		Edit:      &edit,
 	})
+}
+
+// vmFile is the base-branch file declaring a VM, read once: the edit merged
+// over what is staged, its dry run and the entry all work from these bytes.
+type vmFile struct {
+	path    string
+	content []byte
+	vm      model.VM
+}
+
+// editTarget resolves the file declaring VM (namespace, name) from git's
+// declared index, never from the client, so an edit cannot be aimed at
+// another namespace's manifest. It runs before the draft store's lock: the
+// index walk on a memo miss must not hold every user's staging. The index
+// and the read may see different heads; a file that moved in between is a
+// conflict to retry, never an internal error.
+func (c *Coordinator) editTarget(read *git.Repo, namespace, name string) (vmFile, error) {
+	idx, err := indexDeclared(read, c.baseBranch)
+	if err != nil {
+		return vmFile{}, err
+	}
+	ref, ok := declaredRef(idx, draft.ResourceVM, namespace, name)
+	if !ok {
+		return vmFile{}, fmt.Errorf("%w: %s/%s is not in git", model.ErrNotFound, namespace, name)
+	}
+	path := idx.Files[ref]
+	if files := idx.Repeated[ref]; len(files) > 0 {
+		return vmFile{}, fmt.Errorf("%w: %s/%s is declared in %s; keep one declaration in git", model.ErrConflict, namespace, name, strings.Join(files, " and "))
+	}
+	content, ok, err := read.LookupOnBranch(c.baseBranch, path)
+	if err != nil {
+		return vmFile{}, err
+	}
+	retry := fmt.Errorf("%w: %s changed while this was staged; try again", model.ErrConflict, path)
+	if !ok {
+		return vmFile{}, retry
+	}
+	if err := namedVM(path, content, namespace, name); err != nil {
+		return vmFile{}, err
+	}
+	vms, err := manifest.ParseVMs(path, content, defaultNamespace(path))
+	if err != nil {
+		return vmFile{}, fmt.Errorf("%w: %s does not parse; fix it in git: %v", model.ErrConflict, path, err)
+	}
+	i := slices.IndexFunc(vms, func(vm model.VM) bool { return vm.Namespace == namespace && vm.Name == name })
+	switch {
+	case i < 0:
+		return vmFile{}, retry
+	case slices.ContainsFunc(vms[i+1:], func(vm model.VM) bool { return vm.Namespace == namespace && vm.Name == name }):
+		return vmFile{}, fmt.Errorf("%w: %s declares %s/%s twice; keep one declaration in git", model.ErrConflict, path, namespace, name)
+	}
+	return vmFile{path: path, content: content, vm: vms[i]}, nil
+}
+
+// namedVM refuses a VM document that leaves its namespace to the directory:
+// dotvirt reads it there, but Argo applies it to its Application's namespace,
+// which the edit's authorization never checked.
+func namedVM(path string, content []byte, namespace, name string) error {
+	ref := model.ObjectRef{Kind: model.KindVM.Kind, Namespace: namespace, Name: name}
+	if _, implied, _ := declared(path, content); slices.Contains(implied, ref) {
+		return fmt.Errorf("%w: %s does not set metadata.namespace for VM %s/%s; set it in git", model.ErrConflict, path, namespace, name)
+	}
+	return nil
 }
 
 // PreviewEdit renders an edit as the changes staging it would list, restart
 // flags included, without touching the draft: an inline editor states the
-// consequence before the user stages.
+// consequence, or the value staging would refuse, before the user stages.
 func (c *Coordinator) PreviewEdit(proj project.ProjectInfo, namespace, name string, edit model.VMEdit) ([]model.Change, error) {
 	if err := requireRepo(proj); err != nil {
+		return nil, err
+	}
+	if err := manifest.ValidateEdit(edit); err != nil {
 		return nil, err
 	}
 	read, err := c.read(proj)

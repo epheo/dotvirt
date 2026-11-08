@@ -85,8 +85,10 @@ export interface VMEdit {
   removeGroups?: string[];
 }
 /**
- * EditRequest is the body of an edit: which VM source file, and which fields to
- * change. Embedding flattens VMEdit's fields into the request body.
+ * EditRequest is the body of an edit: which fields to change. Embedding
+ * flattens VMEdit's fields into the request body. SourceFile is accepted and
+ * ignored: the server resolves the VM's file from git, since a client-named
+ * file could aim the edit at another namespace's manifest.
  */
 export interface EditRequest {
   sourceFile: string;
@@ -100,8 +102,14 @@ export interface DiskAdd {
   size: string;
   storageClass?: string; // blank DataVolume class; empty = cluster default
 }
+/**
+ * NetworkAdd's Name is a NetworkAttachmentDefinition (<namespace>/<name> or
+ * <name>), or PodNetwork. Interface names the VM interface; empty derives it
+ * from Name, and adoption sets it so the file matches the live NIC.
+ */
 export interface NetworkAdd {
   name: string;
+  interface?: string;
 }
 /**
  * VolumeMigration moves one disk to another storage class (storage live
@@ -1466,12 +1474,17 @@ export interface Disk {
   image?: string;
 }
 /**
+ * PodNetwork is the Network of a NIC on the pod network, where any other value
+ * is a multus networkName.
+ */
+export const PodNetwork = "pod";
+/**
  * NIC is a network interface on the VM. Name/Network come from the manifest;
  * MAC/IP are merged from the live VMI status when running.
  */
 export interface NIC {
   name: string;
-  network?: string; // "pod" or the multus networkName
+  network?: string; // PodNetwork or the multus networkName
   mac?: string; // live, from VMI status
   ip?: string; // live, from VMI status
   /**
@@ -1584,16 +1597,18 @@ export interface Inventory {
   warnings?: string[];
   proposals?: Proposal[];
   /**
-   * NetworksVersion is a monotonic watermark that moves when a port group changes
-   * (NetworkChanged) or a non-VM object's drift content changes (the argo snapshot's
-   * ObjectDriftGen). The network catalog is fetched out-of-band (GET /api/networks,
-   * not on this frame), so the frontend re-pulls it when this bumps: a merged segment
-   * PR - and its sync badge - then appear live instead of only on reload.
+   * NetworksVersion fingerprints, for this caller only, what its out-of-band
+   * network and policy pulls (GET /api/networks, /api/policies) read: the
+   * catalog objects and their drift in its visible namespaces, the
+   * cluster-scoped ones, and the visible set itself. The frontend re-pulls
+   * when it changes, so a merged segment PR and its sync badge appear live,
+   * and another tenant's change never moves it. Equality-only: not monotonic,
+   * and a server restart changes it. Fits a JavaScript number.
    */
   networksVersion?: number /* uint64 */;
   /**
-   * TasksVersion is the same contract for the recent-tasks feed (GET /api/tasks,
-   * fetched out-of-band): bumps when an op is recorded or a merged PR lands.
+   * TasksVersion is the same contract for the recent-tasks feed (GET
+   * /api/tasks): the entries this caller's pull returns.
    */
   tasksVersion?: number /* uint64 */;
   /**

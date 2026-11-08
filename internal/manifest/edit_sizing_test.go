@@ -72,7 +72,7 @@ func assertNotBoth(t *testing.T, out []byte) {
 // Switching an instancetype VM to custom sizing drops the instancetype and writes
 // inline cpu/memory - never leaving both. Preference is independent and stays.
 func TestSizingInstancetypeToCustom(t *testing.T) {
-	out, err := ApplyEdit([]byte(vmWithDevices), "alpha", "web", VMEdit{
+	out, err := ApplyEdit([]byte(vmWithDevices), "alpha", "alpha", "web", VMEdit{
 		Sizing:   ptr("custom"),
 		CPUCores: ptr(4),
 		Memory:   ptr("8Gi"),
@@ -98,7 +98,7 @@ func TestSizingInstancetypeToCustom(t *testing.T) {
 // Switching a custom-sized VM to an instancetype writes the ref and strips the
 // inline cpu/memory the instancetype now owns.
 func TestSizingCustomToInstancetype(t *testing.T) {
-	out, err := ApplyEdit([]byte(realisticVM), "vm-health-gitops", "vm-health", VMEdit{
+	out, err := ApplyEdit([]byte(realisticVM), "vm-health-gitops", "vm-health-gitops", "vm-health", VMEdit{
 		Sizing:       ptr("instancetype"),
 		Instancetype: ptr("u1.medium"),
 	})
@@ -118,7 +118,7 @@ func TestSizingCustomToInstancetype(t *testing.T) {
 // Re-staging the sizing of a broken VM (instancetype mode, name unchanged so no
 // Instancetype field) strips the stray inline block - healing shdg in place.
 func TestSizingHealsConflictingVM(t *testing.T) {
-	out, err := ApplyEdit([]byte(shdgVM), "tenant-a", "shdg", VMEdit{
+	out, err := ApplyEdit([]byte(shdgVM), "tenant-a", "tenant-a", "shdg", VMEdit{
 		Sizing: ptr("instancetype"),
 	})
 	if err != nil {
@@ -142,7 +142,7 @@ func TestSizingHealsConflictingVM(t *testing.T) {
 // never apply inline cpu/memory and should normalize away any stray inline block.
 func TestSizingDefaultBranchNeverWritesBoth(t *testing.T) {
 	// Power-only edit heals the conflicting shdg as a side effect.
-	out, err := ApplyEdit([]byte(shdgVM), "tenant-a", "shdg", VMEdit{Power: ptr("Off")})
+	out, err := ApplyEdit([]byte(shdgVM), "tenant-a", "tenant-a", "shdg", VMEdit{Power: ptr("Off")})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -156,7 +156,7 @@ func TestSizingDefaultBranchNeverWritesBoth(t *testing.T) {
 	assertNotBoth(t, out)
 
 	// A stray CPUCores on an instancetype VM (no Sizing) is ignored, not spliced in.
-	out2, err := ApplyEdit([]byte(vmWithDevices), "alpha", "web", VMEdit{CPUCores: ptr(8)})
+	out2, err := ApplyEdit([]byte(vmWithDevices), "alpha", "alpha", "web", VMEdit{CPUCores: ptr(8)})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -191,7 +191,7 @@ spec:
             disk:
               bus: virtio
 `
-	out, err := ApplyEdit([]byte(itLegacy), "alpha", "legacy-it", VMEdit{Sizing: ptr("instancetype")})
+	out, err := ApplyEdit([]byte(itLegacy), "alpha", "alpha", "legacy-it", VMEdit{Sizing: ptr("instancetype")})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -226,7 +226,7 @@ spec:
         memory:
           guest: 1Gi
 `
-	out, err := ApplyEdit([]byte(vmCpuMemLast), "alpha", "tail", VMEdit{
+	out, err := ApplyEdit([]byte(vmCpuMemLast), "alpha", "alpha", "tail", VMEdit{
 		Sizing:       ptr("instancetype"),
 		Instancetype: ptr("u1.medium"),
 	})
@@ -271,7 +271,7 @@ spec:
             disk:
               bus: virtio
 `
-	out, err := ApplyEdit([]byte(vmFlowAndExtras), "alpha", "flow", VMEdit{Sizing: ptr("instancetype")})
+	out, err := ApplyEdit([]byte(vmFlowAndExtras), "alpha", "alpha", "flow", VMEdit{Sizing: ptr("instancetype")})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -312,7 +312,7 @@ spec:
             disk:
               bus: virtio
 `
-	out, err := ApplyEdit([]byte(vmTopo), "alpha", "topo", VMEdit{CPUCores: ptr(6)})
+	out, err := ApplyEdit([]byte(vmTopo), "alpha", "alpha", "topo", VMEdit{CPUCores: ptr(6)})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -392,7 +392,7 @@ spec:
             disk:
               bus: virtio
 `
-	out, err := ApplyEdit([]byte(vmPinned), "alpha", "pinned", VMEdit{
+	out, err := ApplyEdit([]byte(vmPinned), "alpha", "alpha", "pinned", VMEdit{
 		Sizing:       ptr("instancetype"),
 		Instancetype: ptr("u1.medium"),
 	})

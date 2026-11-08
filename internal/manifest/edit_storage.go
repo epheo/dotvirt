@@ -17,8 +17,7 @@ import (
 // as a migration cancel - the GitOps rollback IS the cancellation.
 //
 // Only DataVolume-backed volumes with a dataVolumeTemplates entry qualify;
-// anything else is left untouched (same silent-no-op convention as the other
-// appliers - the UI only offers eligible disks).
+// verifyEdit refuses a migration asked of any other.
 func applyVolumeMigrations(ed *lineEditor, vmRoot *yaml.Node, migrations []model.VolumeMigration) {
 	if len(migrations) == 0 {
 		return
@@ -39,15 +38,12 @@ func applyVolumeMigrations(ed *lineEditor, vmRoot *yaml.Node, migrations []model
 	if !applied {
 		return
 	}
-	if uvs := get(spec, "updateVolumesStrategy"); uvs != nil {
-		ed.setScalarAt(uvs, "Migration")
-	} else {
-		ed.insertChild(spec, "updateVolumesStrategy", "Migration")
-	}
+	ed.upsertChild(spec, "updateVolumesStrategy", "Migration")
 }
 
 func migrateOneVolume(ed *lineEditor, templates, volumes *yaml.Node, m model.VolumeMigration) bool {
-	dvName := get(get(namedItem(volumes, m.Name), "dataVolume"), "name")
+	dv := get(namedItem(volumes, m.Name), "dataVolume")
+	dvName := get(dv, "name")
 	if dvName == nil {
 		return false // not DataVolume-backed
 	}
@@ -61,15 +57,10 @@ func migrateOneVolume(ed *lineEditor, templates, volumes *yaml.Node, m model.Vol
 		return false
 	}
 
-	newName := nextDVName(dvName.Value, templates)
-	ed.setScalarAt(get(get(tmpl, "metadata"), "name"), newName)
-	ed.setScalarAt(dvName, newName)
-
-	if sc := get(storage, "storageClassName"); sc != nil {
-		ed.setScalarAt(sc, m.StorageClass)
-	} else {
-		ed.insertChild(storage, "storageClassName", m.StorageClass)
-	}
+	newName := ed.str(nextDVName(dvName.Value, templates))
+	ed.setChild(get(tmpl, "metadata"), "name", newName)
+	ed.setChild(dv, "name", newName)
+	ed.upsertChild(storage, "storageClassName", ed.str(m.StorageClass))
 
 	keepImage(ed, tmpl)
 
