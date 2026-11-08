@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { api, Unauthorized, type Network, type VM } from '#lib/api.js';
 	import { bulkOutcome } from '#lib/bulk.js';
+	import { plural } from '#lib/format.js';
 	import { vmGate } from '#lib/gates.js';
 	import { networkKey, resolveNIC } from '#lib/networks.js';
 	import { networkRef } from '#lib/objects.js';
@@ -65,7 +66,7 @@
 			const ref = networkRef(net);
 			await api.deleteObject(ref.resource, ref.namespace, ref.name);
 			ui.toastStaged(
-				`Delete of ${net.name} staged${nics.length ? `, ${nics.length} VMs detached` : ''}.`,
+				`Delete of ${net.name} staged${nics.length ? `, ${plural(nics.length, 'VM')} detached` : ''}.`,
 			);
 			onclose();
 		});

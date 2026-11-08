@@ -269,7 +269,7 @@
 		{/if}
 
 		<div class="flex min-h-0 flex-1" data-workspace>
-			<aside class="flex w-72 flex-col border-r border-side-line bg-side">
+			<aside class="flex w-64 flex-col border-r border-side-line bg-side">
 				<SectionSwitcher active={treeSection} />
 				<div class="min-h-0 flex-1 overflow-y-auto">
 					{#if !inventory.inventory}
@@ -300,7 +300,6 @@
 			</aside>
 			<main class="relative flex min-w-0 flex-1 flex-col overflow-hidden bg-panel">
 				{@render children()}
-				<ChangeTray />
 			</main>
 		</div>
 
@@ -316,7 +315,9 @@
 				drafts.refresh();
 				tasksRetry++;
 			}}
-		/>
+		>
+			{#snippet trailing()}<ChangeTray />{/snippet}
+		</TaskDock>
 
 		<AppModals />
 		<AppContextMenus />

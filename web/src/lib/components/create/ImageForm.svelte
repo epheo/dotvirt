@@ -3,7 +3,7 @@
 	import { Check, Upload } from '@lucide/svelte';
 	import { api, Unauthorized, type StorageClassInfo } from '#lib/api.js';
 	import { liveMigrates } from '#lib/create.js';
-	import { friendlyError } from '#lib/format.js';
+	import { friendlyError, plural } from '#lib/format.js';
 	import { resource } from '#lib/resource.svelte.js';
 	import { caps } from '#lib/state/caps.svelte.js';
 	import { inventory } from '#lib/state/inventory.svelte.js';
@@ -16,7 +16,7 @@
 	import SheetBody from './SheetBody.svelte';
 	import SheetFooter from './SheetFooter.svelte';
 	import StagesPanel from './StagesPanel.svelte';
-	import { FIELD, HELP, LABEL, plural, useSheet } from './sheet.svelte.js';
+	import { FIELD, HELP, LABEL, useSheet } from './sheet.svelte.js';
 
 	// A boot image: dotvirt creates the upload target (and, for a boot image,
 	// registers it so New VM offers it) and mints a token, then the browser
@@ -59,7 +59,13 @@
 	// boot-image choice shows only where the route would take it.
 	const canImage = $derived(!!(namespace && caps.ns(namespace)?.bootImageCreate));
 	const upload = $derived(
-		caps.nsGate(namespace, (n) => n.dataVolumeCreate, `You may not upload images in ${namespace}.`),
+		caps.cluster?.imageUpload === false
+			? { ok: false, why: "Image upload is off: this cluster's CDI publishes no upload proxy." }
+			: caps.nsGate(
+					namespace,
+					(n) => n.dataVolumeCreate,
+					`You may not upload images in ${namespace}.`,
+				),
 	);
 	// svelte-ignore state_referenced_locally
 	let offerImage = $state(bootImage ?? true);

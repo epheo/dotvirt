@@ -2,19 +2,16 @@
 	import type { Snippet } from 'svelte';
 
 	// The title row of a page: the object's name, how it stands (a dot and a
-	// short line), muted context, and the page's verbs on the right. mono for
-	// object names (VMs, disks, networks). Breadcrumb above and TabBar below are
-	// the caller's, in a flex column with gap-2.
+	// short line), muted context, and the page's verbs on the right. Breadcrumb
+	// above and TabBar below are the caller's, in a flex column with gap-2.
 	type Tone = 'ok' | 'warn' | 'danger' | 'info' | 'off';
 	let {
 		title,
-		mono = false,
 		status,
 		context,
 		actions,
 	}: {
 		title: string;
-		mono?: boolean;
 		// text is a snippet when the line carries a link ("Project network of <a>").
 		status?: { tone: Tone; text: string | Snippet };
 		context?: string | Snippet;
@@ -31,8 +28,7 @@
 </script>
 
 <div class="flex flex-wrap items-center gap-x-4 gap-y-2">
-	<!-- Red Hat Mono ships 400 and 500 only; a synthesized bold smears. -->
-	<h1 class="min-w-0 text-2xl leading-8 text-ink {mono ? 'font-mono font-medium' : 'font-bold'}">
+	<h1 class="min-w-0 text-2xl leading-8 font-bold text-ink">
 		{title}
 	</h1>
 	{#if status}

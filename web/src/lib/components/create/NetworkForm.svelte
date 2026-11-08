@@ -2,6 +2,7 @@
 	import { untrack } from 'svelte';
 	import { Check, TriangleAlert } from '@lucide/svelte';
 	import { api, type NetworkCreate } from '#lib/api.js';
+	import { plural } from '#lib/format.js';
 	import { attachRef } from '#lib/networks.js';
 	import { action } from '#lib/resource.svelte.js';
 	import { nodeTargets } from '#lib/state/hosts.svelte.js';
@@ -18,7 +19,7 @@
 	import SheetBody from './SheetBody.svelte';
 	import SheetFooter from './SheetFooter.svelte';
 	import StagesPanel from './StagesPanel.svelte';
-	import { FIELD, HELP, LABEL, plural, stagePath, useSheet } from './sheet.svelte.js';
+	import { FIELD, HELP, LABEL, stagePath, useSheet } from './sheet.svelte.js';
 
 	// New network: who can attach in plain words, a name, and a subnet that
 	// comes suggested with its reason. A range already in use names its
@@ -307,8 +308,8 @@
 											{failing(u)
 												? `failing${failingOn(u) ? ` on ${failingOn(u)}` : ''}`
 												: hostCount
-													? `on ${u.nodeCount} of ${hostCount} hosts`
-													: `on ${u.nodeCount} hosts`}
+													? `on ${u.nodeCount} of ${plural(hostCount, 'host')}`
+													: `on ${plural(u.nodeCount, 'host')}`}
 										</span>
 									{/each}
 									{#if carriers.length > 2}<span class="text-ink-faint"

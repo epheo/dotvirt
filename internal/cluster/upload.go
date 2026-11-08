@@ -3,6 +3,7 @@ package cluster
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -19,7 +20,27 @@ import (
 var (
 	gvrDataVolumes  = schema.GroupVersionResource{Group: "cdi.kubevirt.io", Version: "v1beta1", Resource: "datavolumes"}
 	gvrUploadTokens = schema.GroupVersionResource{Group: "upload.cdi.kubevirt.io", Version: "v1beta1", Resource: "uploadtokenrequests"}
+	gvrCDIConfigs   = schema.GroupVersionResource{Group: "cdi.kubevirt.io", Version: "v1beta1", Resource: "cdiconfigs"}
 )
+
+// UploadProxyURL is the cdi-uploadproxy base CDI publishes for clients outside
+// the cluster: an admin's override, else the route CDI found. CDI reports a
+// bare host, which browsers reach over https. Empty when CDI has none.
+func (c *Client) UploadProxyURL(ctx context.Context) (string, error) {
+	dyn, err := c.dynamic()
+	if err != nil {
+		return "", err
+	}
+	cfg, err := dyn.Resource(gvrCDIConfigs).Get(ctx, "config", metav1.GetOptions{})
+	if err != nil {
+		return "", err
+	}
+	url, _, _ := unstructured.NestedString(cfg.Object, "status", "uploadProxyURL")
+	if url != "" && !strings.Contains(url, "://") {
+		url = "https://" + url
+	}
+	return url, nil
+}
 
 // CreateUploadDataVolume creates the upload-target DataVolume (source: upload)
 // in namespace under the caller's token. The browser streams into the PVC this

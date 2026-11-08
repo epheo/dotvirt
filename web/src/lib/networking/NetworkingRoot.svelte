@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { Plus } from '@lucide/svelte';
 	import { page } from '$app/state';
+	import { plural } from '#lib/format.js';
 	import { clusterObjectGate } from '#lib/gates.js';
 	import { NETWORKING_TABS, networkingTab } from '#lib/nav.js';
 	import { attachRef } from '#lib/networks.js';
@@ -21,7 +22,6 @@
 	// The Networking section's root: one header, five tabs. The map answers
 	// what connects to what; the other tabs list everything at scale.
 	const tab = $derived(networkingTab(page.url.searchParams.get('tab')));
-	const fmt = (n: number) => n.toLocaleString('en-US');
 	const counts: Record<string, number> = $derived({
 		networks: inventory.networks.length,
 		firewall: networking.clusterRules.length + networking.projectRules.length,
@@ -32,9 +32,9 @@
 	const problems = $derived(networking.problems);
 	const context = $derived(
 		[
-			`${fmt(inventory.vmCount)} VMs`,
-			`${fmt(inventory.networks.length)} networks`,
-			inventory.uplinks.length ? `${fmt(inventory.uplinks.length)} uplinks` : '',
+			plural(inventory.vmCount, 'VM'),
+			plural(inventory.networks.length, 'network'),
+			inventory.uplinks.length ? plural(inventory.uplinks.length, 'uplink') : '',
 		]
 			.filter(Boolean)
 			.join(', '),

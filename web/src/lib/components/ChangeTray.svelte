@@ -168,12 +168,12 @@
 </script>
 
 {#if !hidden}
-	<aside
-		aria-label="Changes in flight"
-		class="pointer-events-none absolute right-4 bottom-4 z-20 flex w-[25rem] max-w-[calc(100%-2rem)] flex-col items-end gap-2"
-	>
+	<!-- Lives at the dock bar's right end; unfolded lanes float above the bar. -->
+	<aside aria-label="Changes in flight" class="relative flex items-center">
 		{#if expanded}
-			<div class="pointer-events-auto flex max-h-[65vh] w-full flex-col gap-2 overflow-y-auto">
+			<div
+				class="absolute right-0 bottom-full z-20 mb-2 flex max-h-[65vh] w-[25rem] max-w-[calc(100vw-2rem)] flex-col gap-2 overflow-y-auto"
+			>
 				{#each lanes as lane (lane.key)}
 					<section
 						aria-label={lane.kind === 'live' ? `PR #${lane.pr.prNumber} is live` : undefined}
@@ -415,7 +415,7 @@
 				{/each}
 			</div>
 			<button
-				class="pointer-events-auto flex items-center gap-1 rounded-full border border-line-strong bg-panel px-3 py-1 text-xs text-ink-soft shadow hover:bg-inset"
+				class="flex h-7 items-center gap-1 rounded-full border border-line-strong bg-panel px-3 text-xs text-ink-soft hover:bg-inset"
 				onclick={() => {
 					tray.open = false;
 				}}
@@ -425,7 +425,7 @@
 		{:else}
 			<!-- A staged draft never hides: its pill opens the review sheet in one click. -->
 			<div
-				class="pointer-events-auto flex items-center gap-2 rounded-full border bg-panel py-1.5 pr-1.5 pl-3 text-xs font-medium text-ink shadow-lg {worst.kind ===
+				class="flex h-7 items-center gap-2 rounded-full border bg-panel pr-1 pl-2.5 text-xs font-medium text-ink shadow-[0_2px_8px_rgba(0,0,0,.12)] {worst.kind ===
 				'refused'
 					? 'border-danger/50'
 					: 'border-accent'}"
@@ -440,12 +440,13 @@
 				{#if worst.kind === 'staged'}
 					{@const project = worst.project}
 					<button
-						class="rounded-full bg-accent px-2.5 py-0.5 text-white"
+						class="inline-flex h-5 items-center rounded-full bg-accent px-2.5 font-bold text-white"
 						onclick={() => (ui.modal = { kind: 'propose', project })}>Review</button
 					>
 				{:else}
-					<button class="rounded-full bg-accent px-2.5 py-0.5 text-white" onclick={unfold}
-						>Show</button
+					<button
+						class="inline-flex h-5 items-center rounded-full bg-accent px-2.5 font-bold text-white"
+						onclick={unfold}>Show</button
 					>
 				{/if}
 			</div>

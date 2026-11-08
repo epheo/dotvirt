@@ -2,6 +2,7 @@
 	import { Activity, GitBranch, Map as MapIcon } from '@lucide/svelte';
 	import { page } from '$app/state';
 	import { api, type NetworkRules } from '#lib/api.js';
+	import { plural } from '#lib/format.js';
 	import { POD_NETWORK } from '#lib/lenses.js';
 	import { cutOffHosts } from '#lib/netmap.js';
 	import { NETWORK_TABS } from '#lib/nav.js';
@@ -122,7 +123,9 @@
 			<PageHeader
 				title="Pod network"
 				status={{ tone: 'ok', text: 'Built in, every project' }}
-				context="{networking.members.podOnly.toLocaleString('en-US')} VMs use only this"
+				context="{plural(networking.members.podOnly, 'VM')} {networking.members.podOnly === 1
+					? 'uses'
+					: 'use'} only this"
 			>
 				{#snippet actions()}
 					<Button variant="secondary" href="/networking?sel=pod"
@@ -134,7 +137,7 @@
 				{/snippet}
 			</PageHeader>
 		{:else if net}
-			<PageHeader title={net.name} mono status={{ tone, text: status }} {context}>
+			<PageHeader title={net.name} status={{ tone, text: status }} {context}>
 				{#snippet actions()}
 					<Button variant="secondary" href={mapHref}><MapIcon size={16} />Show on map</Button>
 					<Button variant="outline" onclick={() => (ui.modal = { kind: 'trace' })}
@@ -143,7 +146,7 @@
 				{/snippet}
 			</PageHeader>
 		{:else}
-			<PageHeader title={key} mono status={{ tone: 'off', text: 'Not found' }} />
+			<PageHeader title={key} status={{ tone: 'off', text: 'Not found' }} />
 		{/if}
 		<TabBar {tabs} active={tab} href={(t) => `?tab=${t}`} />
 	</div>

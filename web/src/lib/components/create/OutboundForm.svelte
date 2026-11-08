@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { api, type EgressIPCreate, type ExternalRouteCreate } from '#lib/api.js';
-	import { splitList } from '#lib/format.js';
+	import { plural, splitList } from '#lib/format.js';
 	import { action } from '#lib/resource.svelte.js';
 	import { CLUSTER_NS, objectGate } from '#lib/gates.js';
 	import { inventory } from '#lib/state/inventory.svelte.js';
@@ -11,7 +11,7 @@
 	import SheetBody from './SheetBody.svelte';
 	import SheetFooter from './SheetFooter.svelte';
 	import StagesPanel from './StagesPanel.svelte';
-	import { FIELD, HELP, LABEL, plural, stagePath, useSheet } from './sheet.svelte.js';
+	import { FIELD, HELP, LABEL, stagePath, useSheet } from './sheet.svelte.js';
 
 	// How a project's traffic leaves the cluster: a fixed outbound IP pins
 	// the source address it leaves from; an external route sends it through

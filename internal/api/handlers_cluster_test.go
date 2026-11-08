@@ -343,6 +343,18 @@ func TestUploadsDisabled(t *testing.T) {
 	}
 }
 
+// The cluster signal is the routes' first check: no proxy, no upload anywhere.
+func TestImageUploadCapabilityFollowsTheProxy(t *testing.T) {
+	for proxy, want := range map[string]bool{"": false, "https://cdi-uploadproxy.example": true} {
+		s := newFakeCluster(t).server(nil, Config{UploadProxyURL: proxy})
+		rec := do(s, adminToken, http.MethodGet, "/api/capabilities", "")
+		wantStatus(t, rec, http.StatusOK)
+		if cl := decodeBody[model.Capabilities](t, rec).Cluster; cl == nil || cl.ImageUpload != want {
+			t.Errorf("proxy %q: imageUpload %+v, want %v", proxy, cl, want)
+		}
+	}
+}
+
 // The class sheet is read with the SA once and shared; a later caller is a
 // cache hit, and optional sources that 404 never fail the list.
 func TestStorageClasses(t *testing.T) {

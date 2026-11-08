@@ -96,3 +96,7 @@ export const splitList = (s: string): string[] => s.split(/[\s,]+/).filter(Boole
 export function friendlyError(e: unknown): string {
 	return (e instanceof Error ? e.message : String(e)).replace(/^Error:\s*/, '');
 }
+
+export function plural(n: number, one: string, many = `${one}s`): string {
+	return `${n.toLocaleString('en-US')} ${n === 1 ? one : many}`;
+}

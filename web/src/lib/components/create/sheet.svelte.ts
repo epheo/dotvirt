@@ -128,9 +128,6 @@ const KEY = Symbol('create-sheet');
 export const provideSheet = (c: SheetCtl) => setContext(KEY, c);
 export const useSheet = () => getContext<SheetCtl>(KEY);
 
-export const plural = (n: number, word: string) =>
-	`${n.toLocaleString()} ${word}${n === 1 ? '' : 's'}`;
-
 // The board's form controls: 36px fields, radius 6, the strong hairline.
 export const FIELD =
 	'h-9 w-full min-w-0 rounded-md border border-line-strong bg-panel px-2.5 text-sm text-ink placeholder:text-ink-faint focus:border-accent focus:outline-none focus:ring-1 focus:ring-accent disabled:bg-inset-strong disabled:text-ink-faint';

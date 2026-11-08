@@ -9,7 +9,7 @@
 		type VM,
 	} from '#lib/api.js';
 	import { vmGate, type Gate } from '#lib/gates.js';
-	import { relativeAge } from '#lib/format.js';
+	import { plural, relativeAge } from '#lib/format.js';
 	import { POD_NETWORK, vmNetworkKeys } from '#lib/lenses.js';
 	import { uplinkLabel } from '#lib/netmap.js';
 	import { networkHref, vmHref } from '#lib/nav.js';
@@ -311,7 +311,7 @@
 							>
 							<span class="text-xs leading-4 text-ink-muted"
 								><span class="font-mono">{builtin?.bridge || 'br-ex'}</span>{builtin?.nodeCount
-									? `, ${fmt(builtin.nodeCount)} hosts`
+									? `, ${plural(builtin.nodeCount, 'host')}`
 									: ''}</span
 							>
 						{/snippet}
@@ -339,7 +339,7 @@
 								>{vlanUplink?.failures?.length
 									? `Fails on ${vlanUplink.failures.map((f) => f.node).join(', ')}`
 									: vlanUplink
-										? `${vlanUplink.bridge}, ${fmt(vlanUplink.nodeCount)} hosts`
+										? `${vlanUplink.bridge}, ${plural(vlanUplink.nodeCount, 'host')}`
 										: ''}</span
 							>
 						{/snippet}
@@ -512,7 +512,7 @@
 								? 'bg-danger'
 								: used / capacity > 0.75
 									? 'bg-warn'
-									: 'bg-present'}"
+									: 'bg-glyph'}"
 							style="width: {Math.min(100, (used / capacity) * 100)}%"
 						></div>
 					</div>
@@ -741,7 +741,7 @@
 									<td class="py-2 pr-card text-right whitespace-nowrap">
 										<span class="mr-2 inline-block h-1.5 w-14 rounded bg-inset-strong align-middle"
 											><span
-												class="block h-1.5 rounded bg-present"
+												class="block h-1.5 rounded bg-glyph"
 												style="width: {(t.bitsPerSecond / maxBits) * 100}%"
 											></span></span
 										>{mbit(t.bitsPerSecond)}

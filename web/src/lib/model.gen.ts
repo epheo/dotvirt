@@ -73,6 +73,12 @@ export interface ClusterCaps {
    * OAuthClient registers the SSO OAuthClient (finish SSO).
    */
   oauthClient: boolean;
+  /**
+   * ImageUpload is this dotvirt knowing an upload proxy: without one every
+   * upload is refused whatever the caller's rights, and the namespace
+   * fields DataVolumeCreate and BootImageCreate read false.
+   */
+  imageUpload: boolean;
 }
 /**
  * NamespaceCaps are the actions in one namespace and on its project.

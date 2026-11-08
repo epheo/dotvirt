@@ -214,7 +214,7 @@ func run() error {
 			AppSetPluginToken: cfg.AppSetPluginToken,
 			StaticDir:         cfg.StaticDir,
 			WebhookSecret:     cfg.WebhookSecret,
-			UploadProxyURL:    cfg.UploadProxyURL,
+			UploadProxyURL:    uploadProxyURL(ctx, cfg.UploadProxyURL, saCluster),
 			PlatformRepo:      cfg.PlatformRepo,
 			ProjectLabel:      cfg.ProjectLabel,
 			RepoAnnotation:    cfg.RepoAnnotation,
@@ -394,4 +394,19 @@ func ensureWebhooks(ctx context.Context, state *clusterstate.State, projects fun
 			sweep()
 		}
 	}
+}
+
+// uploadProxyURL is the flag's value, else the proxy CDI publishes. A cluster
+// without CDI, or a read that fails, leaves image upload off.
+func uploadProxyURL(ctx context.Context, flag string, sa *cluster.Client) string {
+	if flag != "" {
+		return flag
+	}
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	url, err := sa.UploadProxyURL(ctx)
+	if err != nil {
+		log.Printf("upload: CDI's upload proxy is unknown, image upload stays off: %v", err)
+	}
+	return url
 }
