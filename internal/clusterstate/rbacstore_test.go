@@ -3,6 +3,7 @@ package clusterstate
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -201,6 +202,84 @@ func TestClusterRoleSignalsOnlyWhileBound(t *testing.T) {
 	_ = roles.Update(role("get"))
 	if *n != 1 {
 		t.Fatalf("an unbound role published %d times after its last binding went, want 1", *n)
+	}
+}
+
+// A RoleBinding observed before its namespace becomes a project holds its
+// ClusterRole all along: once the namespace is a project, revoking that role's
+// rules publishes. Before then the binding itself publishes nothing.
+func TestRoleBoundBeforeItsNamespaceIsAProject(t *testing.T) {
+	s := stateWithIndexers()
+	n := new(int)
+	count := func() { *n++ }
+	refs := newRoleRefs()
+	rb := newRBACSignal(count, refs, roleBindingDigest(s.inProject))
+	var cr cache.Store
+	for _, w := range s.signalWatches(func(schema.GroupVersionResource) *cache.ListWatch { return nil }, count, refs) {
+		if w.gvr == gvrClusterRoles {
+			cr = w.sink
+		}
+	}
+	_ = rb.Replace([]any{roleBinding("proj", "alice-vm", "vm-admin", user("alice"))}, "1")
+	_ = cr.Replace([]any{&rbacv1.ClusterRole{ObjectMeta: meta("", "vm-admin"), Rules: vmRules("get", "list", "update")}}, "1")
+	*n = 0
+	_ = rb.Update(roleBinding("proj", "alice-vm", "vm-admin", user("bob")))
+	if *n != 0 {
+		t.Fatalf("a binding outside any project published %d times, want 0", *n)
+	}
+
+	_ = s.nss.Add(&corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "proj"}}) // NamespaceChanged covers this move
+	_ = cr.Update(&rbacv1.ClusterRole{ObjectMeta: meta("", "vm-admin")})
+	if *n != 1 {
+		t.Fatalf("revoking a role a project binding binds published %d times, want 1", *n)
+	}
+	_ = rb.Update(roleBinding("proj", "alice-vm", "vm-admin", user("carol")))
+	if *n != 2 {
+		t.Fatalf("a binding in a project published %d times in all, want 2", *n)
+	}
+}
+
+// A binding moving within one role never leaves that role unbound, even for
+// an instant the ClusterRole sink could observe from its own reflector.
+func TestRoleStaysBoundAcrossABindingUpdate(t *testing.T) {
+	refs := newRoleRefs()
+	rb := newRBACSignal(func() {}, refs, roleBindingDigest(withProject(t).inProject))
+	_ = rb.Add(roleBinding("proj", "b", "vm-admin", user("alice")))
+	done := make(chan struct{})
+	var unbound atomic.Bool
+	go func() {
+		for {
+			select {
+			case <-done:
+				return
+			default:
+				if !refs.bound("vm-admin") {
+					unbound.Store(true)
+				}
+			}
+		}
+	}()
+	for i := range 20000 {
+		_ = rb.Update(roleBinding("proj", "b", "vm-admin", user(fmt.Sprint("user-", i))))
+	}
+	close(done)
+	if unbound.Load() {
+		t.Fatal("the role read unbound while its binding only moved")
+	}
+}
+
+// A namespace's ServiceAccount group is the platform's when the namespace is.
+func TestPlatformGroupBindingsAreNoise(t *testing.T) {
+	stores, n := signalStores(t)
+	_ = stores["clusterrolebindings"].Add(clusterRoleBinding("pullers", "view",
+		rbacv1.Subject{Kind: rbacv1.GroupKind, Name: "system:serviceaccounts:openshift-monitoring"}))
+	if *n != 0 {
+		t.Fatalf("a platform group binding published %d times, want 0", *n)
+	}
+	_ = stores["clusterrolebindings"].Add(clusterRoleBinding("tenants", "view",
+		rbacv1.Subject{Kind: rbacv1.GroupKind, Name: "system:serviceaccounts:proj"}))
+	if *n != 1 {
+		t.Fatalf("a tenant group binding published %d times, want 1", *n)
 	}
 }
 

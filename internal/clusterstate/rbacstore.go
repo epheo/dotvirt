@@ -15,27 +15,33 @@ import (
 
 // rbacSignal is the sink of one signal-only RBAC watch: dotvirt never reads
 // these objects, only learns when one can change what a token may see or do.
-// It keeps a hashed key and a grant per relevant object, never the object, so
-// it publishes only when an object's grant moves, including the update or
-// delete that ends its relevance (a revocation), and a relist that changed
+// It keeps a hashed key and a grant per tracked object, never the object, so
+// it publishes only when a relevant object's grant moves, including the update
+// or delete that ends its relevance (a revocation), and a relist that changed
 // nothing stays silent. Only its reflector writes it, so seen takes no lock.
 type rbacSignal struct {
-	// digest reads obj's grant; relevant=false is churn no caller's
+	// digest reads obj's grant; tracked=false is churn no caller's
 	// authorization can see. A false positive only costs a cache
 	// invalidation; what it drops waits for the TTL backstop.
-	digest   func(obj any) (g grant, relevant bool)
+	digest   func(obj any) (g grant, tracked bool)
 	onChange func()
-	refs     *roleRefs // counts the ClusterRoles relevant objects bind; nil for kinds that bind none
+	refs     *roleRefs // counts the ClusterRoles tracked objects bind; nil for kinds that bind none
 	seen     map[uint64]grant
 	listed   atomic.Bool // a list has landed; read by State.RBACWatched
 }
 
-// grant is what a signal keeps of a relevant object: a fingerprint of what
-// it grants and, for a binding, the ClusterRole it binds.
+// grant is what a signal keeps of a tracked object: a fingerprint of what it
+// grants, the ClusterRole it binds, and whether it is quiet: tracked only to
+// hold that role, as a binding in a namespace that is not a project yet, so
+// the role signals the moment the namespace becomes one.
 type grant struct {
-	fp   uint64
-	role string
+	fp    uint64
+	role  string
+	quiet bool
 }
+
+// loud reports whether a move into or out of g publishes.
+func (g grant) loud(tracked bool) bool { return tracked && !g.quiet }
 
 func newRBACSignal(onChange func(), refs *roleRefs, digest func(any) (grant, bool)) *rbacSignal {
 	return &rbacSignal{digest: digest, onChange: onChange, refs: refs, seen: map[uint64]grant{}}
@@ -55,22 +61,25 @@ func (s *rbacSignal) observe(obj any) error {
 		return nil
 	}
 	k := maphash.String(fingerprintSeed, key)
-	g, relevant := s.digest(obj)
+	g, tracked := s.digest(obj)
 	old, had := s.seen[k]
-	switch {
-	case relevant && (!had || old != g):
-		if had {
-			s.refs.release(old.role)
-		}
-		s.refs.hold(g.role)
-		s.seen[k] = g
-	case !relevant && had:
-		s.refs.release(old.role)
-		delete(s.seen, k)
-	default:
+	if tracked == had && g == old {
 		return nil
 	}
-	s.onChange()
+	// Hold the new role before releasing the old: a binding moving within
+	// one role must never read unbound to the ClusterRole sink.
+	if tracked {
+		s.refs.hold(g.role)
+		s.seen[k] = g
+	} else {
+		delete(s.seen, k)
+	}
+	if had {
+		s.refs.release(old.role)
+	}
+	if old.loud(had) || g.loud(tracked) {
+		s.onChange()
+	}
 	return nil
 }
 
@@ -83,22 +92,22 @@ func (s *rbacSignal) Delete(obj any) error {
 	k := maphash.String(fingerprintSeed, key)
 	old, had := s.seen[k]
 	if had {
-		s.refs.release(old.role)
 		delete(s.seen, k)
+		s.refs.release(old.role)
 	}
 	if d, ok := obj.(cache.DeletedFinalStateUnknown); ok {
 		obj = d.Obj
 	}
 	// An object never seen as relevant can be now: its namespace became a
 	// project, or a binding came to reference it, after it was last observed.
-	if _, relevant := s.digest(obj); had || relevant {
+	if g, tracked := s.digest(obj); old.loud(had) || g.loud(tracked) {
 		s.onChange()
 	}
 	return nil
 }
 
 // Replace publishes on the first list whatever it holds: a verdict cached
-// before this watch began is not covered by it.
+// before this watch began is not covered by it. Later, only a loud move does.
 func (s *rbacSignal) Replace(list []any, _ string) error {
 	next := make(map[uint64]grant, len(s.seen))
 	changed := !s.listed.Load()
@@ -108,23 +117,42 @@ func (s *rbacSignal) Replace(list []any, _ string) error {
 			changed = true
 			continue
 		}
-		if g, relevant := s.digest(obj); relevant {
+		if g, tracked := s.digest(obj); tracked {
 			next[maphash.String(fingerprintSeed, key)] = g
 		}
 	}
 	s.listed.Store(true)
-	if !changed && maps.Equal(s.seen, next) {
+	if maps.Equal(s.seen, next) {
+		if changed {
+			s.onChange()
+		}
 		return nil
+	}
+	changed = changed || loudMoves(s.seen, next) || loudMoves(next, s.seen)
+	for _, g := range next {
+		s.refs.hold(g.role)
 	}
 	for _, g := range s.seen {
 		s.refs.release(g.role)
 	}
-	for _, g := range next {
-		s.refs.hold(g.role)
-	}
 	s.seen = next
-	s.onChange()
+	if changed {
+		s.onChange()
+	}
 	return nil
+}
+
+// loudMoves reports whether a loud entry of a is missing or different in b.
+func loudMoves(a, b map[uint64]grant) bool {
+	for k, g := range a {
+		if g.quiet {
+			continue
+		}
+		if o, ok := b[k]; !ok || o != g {
+			return true
+		}
+	}
+	return false
 }
 
 func (s *rbacSignal) List() []any                        { return nil }
@@ -133,7 +161,7 @@ func (s *rbacSignal) Get(any) (any, bool, error)         { return nil, false, ni
 func (s *rbacSignal) GetByKey(string) (any, bool, error) { return nil, false, nil }
 func (s *rbacSignal) Resync() error                      { return nil }
 
-// roleRefs counts the relevant bindings that bind each ClusterRole. A
+// roleRefs counts the tracked bindings that bind each ClusterRole. A
 // ClusterRole moves a token's grants only through a binding, so its signal
 // fires only while one binds it: the roles an operator install or upgrade
 // rewrites for its own ServiceAccount stay silent. An aggregated role (admin,
@@ -195,16 +223,18 @@ func fingerprint(parts ...any) uint64 {
 // before its namespace is labelled is still covered: the label change fires
 // NamespaceChanged, which the RBAC version sums in.
 
+// A RoleBinding outside a project is tracked quiet: it publishes nothing, yet
+// holds its ClusterRole, so once the namespace becomes a project (which
+// NamespaceChanged covers) that role's edits publish.
 func roleBindingDigest(inProject func(string) bool) func(any) (grant, bool) {
 	return func(obj any) (grant, bool) {
 		rb, ok := obj.(*rbacv1.RoleBinding)
 		if !ok {
 			return grant{}, true
 		}
-		if !inProject(rb.Namespace) {
-			return grant{}, false
-		}
-		return bindingDigest(rb.RoleRef, rb.Subjects)
+		g, tracked := bindingDigest(rb.RoleRef, rb.Subjects)
+		g.quiet = tracked && !inProject(rb.Namespace)
+		return g, tracked
 	}
 }
 
@@ -217,11 +247,12 @@ func clusterRoleBindingDigest(obj any) (grant, bool) {
 }
 
 // bindingDigest drops bindings that grant only ServiceAccounts of the
-// platform's own namespaces: the cluster's components, not dotvirt callers,
-// and the bulk of binding churn on an operator install or upgrade.
+// platform's own namespaces, one by one or as their namespace's group: the
+// cluster's components, not dotvirt callers, and the bulk of binding churn on
+// an operator install or upgrade.
 func bindingDigest(ref rbacv1.RoleRef, subjects []rbacv1.Subject) (grant, bool) {
 	for _, sub := range subjects {
-		if sub.Kind != rbacv1.ServiceAccountKind || !platformNamespace(sub.Namespace) {
+		if !platformSubject(sub) {
 			g := grant{fp: fingerprint(ref, subjects)}
 			if ref.Kind == "ClusterRole" {
 				g.role = ref.Name
@@ -267,6 +298,17 @@ func groupDigest(obj any) (grant, bool) {
 		return grant{}, true
 	}
 	return grant{fp: fingerprint(u.Object["users"])}, true
+}
+
+func platformSubject(sub rbacv1.Subject) bool {
+	switch sub.Kind {
+	case rbacv1.ServiceAccountKind:
+		return platformNamespace(sub.Namespace)
+	case rbacv1.GroupKind:
+		ns, ok := strings.CutPrefix(sub.Name, "system:serviceaccounts:")
+		return ok && platformNamespace(ns)
+	}
+	return false
 }
 
 // platformNamespace names the cluster's own namespaces.
