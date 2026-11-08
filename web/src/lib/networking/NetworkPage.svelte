@@ -164,7 +164,7 @@
 			</Card>
 		</div>
 	{:else if tab === 'vms'}
-		<NetworkVMs {vms} />
+		<NetworkVMs {vms} label="{net?.name ?? key}, VMs" />
 	{:else}
 		<!-- svelte-ignore a11y_no_noninteractive_tabindex -->
 		<div

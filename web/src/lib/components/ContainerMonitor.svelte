@@ -58,7 +58,7 @@
 	</div>
 {/snippet}
 
-<Card title={view === 'events' ? 'Events' : 'Performance'} actions={views}>
+<Card title="Monitor" actions={views}>
 	{#if view === 'performance'}
 		{#key `${scope.project ?? ''}|${scope.namespace ?? ''}|${scope.node ?? ''}`}
 			<MetricsPanel

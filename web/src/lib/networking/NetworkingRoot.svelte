@@ -93,7 +93,7 @@
 	</div>
 
 	{#if tab === 'vms'}
-		<NetworkVMs vms={inventory.allVMs} />
+		<NetworkVMs vms={inventory.allVMs} label="Networking, VMs" />
 	{:else}
 		<!-- svelte-ignore a11y_no_noninteractive_tabindex -->
 		<div
