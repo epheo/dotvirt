@@ -263,30 +263,30 @@ func TestUploads(t *testing.T) {
 	}
 }
 
-// "Add a boot image" registers the upload as a DataSource over its claim; a
-// caller who may not create DataSources is refused before anything exists.
+// "Add a boot image" registers the upload as a DataSource over its claim. A
+// token without datasources create reads bootImageCreate false and the route
+// refuses it before anything is made, so the field and the gate agree.
 func TestUploadBootImage(t *testing.T) {
-	fc := newFakeCluster(t)
+	g := newGateRig(t)
 	var dv, ds map[string]any
-	fc.on(http.MethodPost, "/apis/cdi.kubevirt.io/v1beta1/namespaces/team-a-dev/datavolumes", echoCreate(&dv, nil))
-	fc.on(http.MethodPost, "/apis/cdi.kubevirt.io/v1beta1/namespaces/team-a-dev/datasources", echoCreate(&ds, nil))
-	allowDS := false
-	fc.ssar = func(token string, a *authzv1.ResourceAttributes) bool {
-		if a.Resource == "datasources" {
-			return allowDS && a.Verb == "create" && a.Namespace == "team-a-dev"
-		}
-		return token == adminToken
-	}
-	s := fc.server(nil, Config{UploadProxyURL: "https://cdi-uploadproxy.example"})
+	g.fc.on(http.MethodPost, "/apis/cdi.kubevirt.io/v1beta1/namespaces/team-a-dev/datavolumes", echoCreate(&dv, nil))
+	g.fc.on(http.MethodPost, "/apis/cdi.kubevirt.io/v1beta1/namespaces/team-a-dev/datasources", echoCreate(&ds, nil))
 	body := `{"namespace":"team-a-dev","name":"rhel-10","size":"20Gi","bootImage":true}`
 
-	wantStatus(t, do(s, adminToken, http.MethodPost, "/api/uploads", body), http.StatusForbidden)
+	noDS := g.token(bootImageGrants[:2])
+	if _, nc := g.caps(noDS, "team-a-dev"); nc.BootImageCreate || !nc.DataVolumeCreate {
+		t.Errorf("without datasources create: bootImageCreate=%v dataVolumeCreate=%v", nc.BootImageCreate, nc.DataVolumeCreate)
+	}
+	wantStatus(t, do(g.s, noDS, http.MethodPost, "/api/uploads", body), http.StatusForbidden)
 	if dv != nil || ds != nil {
 		t.Fatalf("a refused boot image left objects behind: dv=%v ds=%v", dv, ds)
 	}
 
-	allowDS = true
-	rec := do(s, adminToken, http.MethodPost, "/api/uploads", body)
+	all := g.token(bootImageGrants)
+	if _, nc := g.caps(all, "team-a-dev"); !nc.BootImageCreate {
+		t.Error("with every right: bootImageCreate false")
+	}
+	rec := do(g.s, all, http.MethodPost, "/api/uploads", body)
 	wantStatus(t, rec, http.StatusOK)
 	if got := decodeBody[model.UploadTarget](t, rec); got.Image != "team-a-dev/rhel-10" {
 		t.Errorf("target = %+v", got)
