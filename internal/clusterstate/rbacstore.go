@@ -33,15 +33,21 @@ type rbacSignal struct {
 // grant is what a signal keeps of a tracked object: a fingerprint of what it
 // grants, the ClusterRole it binds, and whether it is quiet: tracked only to
 // hold that role, as a binding in a namespace that is not a project yet, so
-// the role signals the moment the namespace becomes one.
+// the role signals the moment the namespace becomes one. A digest reports
+// quiet for an untracked object too, so a stored quiet flag is always judged
+// against the namespace as it is now.
 type grant struct {
 	fp    uint64
 	role  string
 	quiet bool
 }
 
-// loud reports whether a move into or out of g publishes.
-func (g grant) loud(tracked bool) bool { return tracked && !g.quiet }
+// moves reports whether replacing old (when had) with cur (when tracked)
+// publishes: either side counts while its namespace is a project now, cur's
+// quiet flag saying so for both, since one object never changes namespace.
+func moves(old grant, had bool, cur grant, tracked bool) bool {
+	return (had && (!old.quiet || !cur.quiet)) || (tracked && !cur.quiet)
+}
 
 func newRBACSignal(onChange func(), refs *roleRefs, digest func(any) (grant, bool)) *rbacSignal {
 	return &rbacSignal{digest: digest, onChange: onChange, refs: refs, seen: map[uint64]grant{}}
@@ -63,7 +69,7 @@ func (s *rbacSignal) observe(obj any) error {
 	k := maphash.String(fingerprintSeed, key)
 	g, tracked := s.digest(obj)
 	old, had := s.seen[k]
-	if tracked == had && g == old {
+	if !tracked && !had || tracked && had && g == old {
 		return nil
 	}
 	// Hold the new role before releasing the old: a binding moving within
@@ -77,7 +83,7 @@ func (s *rbacSignal) observe(obj any) error {
 	if had {
 		s.refs.release(old.role)
 	}
-	if old.loud(had) || g.loud(tracked) {
+	if moves(old, had, g, tracked) {
 		s.onChange()
 	}
 	return nil
@@ -100,14 +106,14 @@ func (s *rbacSignal) Delete(obj any) error {
 	}
 	// An object never seen as relevant can be now: its namespace became a
 	// project, or a binding came to reference it, after it was last observed.
-	if g, tracked := s.digest(obj); old.loud(had) || g.loud(tracked) {
+	if g, tracked := s.digest(obj); moves(old, had, g, tracked) {
 		s.onChange()
 	}
 	return nil
 }
 
 // Replace publishes on the first list whatever it holds: a verdict cached
-// before this watch began is not covered by it. Later, only a loud move does.
+// before this watch began is not covered by it. Later, only a move does.
 func (s *rbacSignal) Replace(list []any, _ string) error {
 	next := make(map[uint64]grant, len(s.seen))
 	changed := !s.listed.Load()
@@ -128,7 +134,7 @@ func (s *rbacSignal) Replace(list []any, _ string) error {
 		}
 		return nil
 	}
-	changed = changed || loudMoves(s.seen, next) || loudMoves(next, s.seen)
+	changed = changed || relistMoves(s.seen, next)
 	for _, g := range next {
 		s.refs.hold(g.role)
 	}
@@ -142,13 +148,17 @@ func (s *rbacSignal) Replace(list []any, _ string) error {
 	return nil
 }
 
-// loudMoves reports whether a loud entry of a is missing or different in b.
-func loudMoves(a, b map[uint64]grant) bool {
-	for k, g := range a {
-		if g.quiet {
-			continue
+// relistMoves reports whether a relist moved a grant. An entry the relist no
+// longer holds counts even if it was quiet: only its hashed key remains, so
+// whether its namespace is a project now cannot be told, and relists are rare.
+func relistMoves(seen, next map[uint64]grant) bool {
+	for k, g := range next {
+		if o, had := seen[k]; o != g && moves(o, had, g, true) {
+			return true
 		}
-		if o, ok := b[k]; !ok || o != g {
+	}
+	for k := range seen {
+		if _, ok := next[k]; !ok {
 			return true
 		}
 	}
@@ -164,9 +174,10 @@ func (s *rbacSignal) Resync() error                      { return nil }
 // roleRefs counts the tracked bindings that bind each ClusterRole. A
 // ClusterRole moves a token's grants only through a binding, so its signal
 // fires only while one binds it: the roles an operator install or upgrade
-// rewrites for its own ServiceAccount stay silent. An aggregated role (admin,
-// edit, view) is bound like any other, and the aggregation controller rewrites
-// it when a source role moves. The binding sinks write it from their own
+// rewrites stay silent while only platform ServiceAccounts are bound to them,
+// as for an operator living in an openshift-* or kube-* namespace. An
+// aggregated role (admin, edit, view) is bound like any other, and the
+// aggregation controller rewrites it when a source role moves. The binding sinks write it from their own
 // reflectors, so it locks. Nil-safe: a kind that binds nothing holds none.
 type roleRefs struct {
 	mu sync.Mutex
@@ -233,7 +244,7 @@ func roleBindingDigest(inProject func(string) bool) func(any) (grant, bool) {
 			return grant{}, true
 		}
 		g, tracked := bindingDigest(rb.RoleRef, rb.Subjects)
-		g.quiet = tracked && !inProject(rb.Namespace)
+		g.quiet = !inProject(rb.Namespace)
 		return g, tracked
 	}
 }

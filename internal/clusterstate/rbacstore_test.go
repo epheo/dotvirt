@@ -239,6 +239,33 @@ func TestRoleBoundBeforeItsNamespaceIsAProject(t *testing.T) {
 	}
 }
 
+// A binding first seen while its namespace was not a project is judged by the
+// namespace as it is now: once it is a project, editing the binding down to
+// no caller, or deleting it, is a revocation and publishes.
+func TestQuietBindingRevokedAfterPromotion(t *testing.T) {
+	for name, edit := range map[string]func(*rbacSignal) error{
+		"no subjects": func(rb *rbacSignal) error { return rb.Update(roleBinding("proj", "b", "vm-admin")) },
+		"platform only": func(rb *rbacSignal) error {
+			return rb.Update(roleBinding("proj", "b", "vm-admin", serviceAccount("openshift-cnv", "op")))
+		},
+		"deleted":       func(rb *rbacSignal) error { return rb.Delete(roleBinding("proj", "b", "vm-admin", user("alice"))) },
+		"relisted away": func(rb *rbacSignal) error { return rb.Replace(nil, "2") },
+	} {
+		t.Run(name, func(t *testing.T) {
+			s := stateWithIndexers()
+			n := 0
+			rb := newRBACSignal(func() { n++ }, newRoleRefs(), roleBindingDigest(s.inProject))
+			_ = rb.Replace([]any{roleBinding("proj", "b", "vm-admin", user("alice"))}, "1")
+			_ = s.nss.Add(&corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "proj"}})
+			n = 0
+			_ = edit(rb)
+			if n == 0 {
+				t.Error("the revocation published nothing")
+			}
+		})
+	}
+}
+
 // A binding moving within one role never leaves that role unbound, even for
 // an instant the ClusterRole sink could observe from its own reflector.
 func TestRoleStaysBoundAcrossABindingUpdate(t *testing.T) {
@@ -261,6 +288,9 @@ func TestRoleStaysBoundAcrossABindingUpdate(t *testing.T) {
 	}()
 	for i := range 20000 {
 		_ = rb.Update(roleBinding("proj", "b", "vm-admin", user(fmt.Sprint("user-", i))))
+		if i%1000 == 0 {
+			_ = rb.Replace([]any{roleBinding("proj", "b", "vm-admin", user("carol"))}, "x")
+		}
 	}
 	close(done)
 	if unbound.Load() {
