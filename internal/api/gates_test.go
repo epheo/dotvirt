@@ -468,7 +468,9 @@ func TestProjectRefusesANamespaceOfAnotherProject(t *testing.T) {
 	g.d.none(t)
 
 	// A caller who sees only team-a-dev learns no other project's name.
+	g.fc.mu.Lock()
 	g.fc.readsVMs = func(token, ns string) bool { return ns == "team-a-dev" }
+	g.fc.mu.Unlock()
 	rec = do(g.s, g.token(claim), http.MethodPost, "/api/namespaces", `{"project":"team-a","name":"orphans-ns"}`)
 	if rec.Code != http.StatusConflict || strings.Contains(rec.Body.String(), "project orphans") {
 		t.Errorf("hidden holder = %d %q, want an unnamed 409", rec.Code, rec.Body.String())
@@ -485,7 +487,10 @@ func TestProjectRefusesANamespaceOfAnotherProject(t *testing.T) {
 // Whether a project exists is told only past the gate.
 func TestTenancyRoutesHideProjects(t *testing.T) {
 	g := newGateRig(t)
+	// The SA's startup reviews may still be in flight: swap the fake's verdicts under its lock.
+	g.fc.mu.Lock()
 	g.fc.readsVMs = func(token, ns string) bool { return ns == "team-a-dev" }
+	g.fc.mu.Unlock()
 	nobody := g.token(nil)
 	for _, path := range []string{"/api/projects/orphans/adopt", "/api/projects/orphans/release"} {
 		hidden := do(g.s, nobody, http.MethodPost, path, "")
