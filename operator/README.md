@@ -94,8 +94,8 @@ owns one status condition; a phase that fails or waits records why there, so
    ApplicationSet itself reports.
    Each AppProject names the ServiceAccount its Applications sync as once sync
    impersonation is on (below): `<argoNS>/dotvirt-p-<project>` for a tenant,
-   `<argoNS>/dotvirt-platform-sync` for the platform tier. The operator creates
-   them owner-referenced to their AppProjects.
+   `<argoNS>/dotvirt-platform-sync` for the platform tier. Names only: Argo
+   impersonates by username and RBAC binds by name, so no object is created.
 6. **Sync impersonation** (`SyncImpersonationReady`): opt-in, see
    [Sync impersonation](#sync-impersonation-optional). Best-effort: never a halt,
    never `Available`.
@@ -136,11 +136,8 @@ labelled copy an admin made elsewhere survives.
 Never pruned: anything without the labels, and Secrets, PersistentVolumeClaims and
 the CA ConfigMaps in the install namespace (generated keys, the minted forge token
 and the forge's git data are state, not render). A pass that halts prunes nothing.
-Deleting the CR runs the same prune with nothing rendered.
-
-The sync ServiceAccounts in the ArgoCD namespace are not pruned: each is
-owner-referenced to its AppProject, so the garbage collector removes it with it, and
-the operator holds no delete grant on ServiceAccounts there.
+Deleting the CR runs the same prune with nothing rendered, after taking sync
+impersonation off the ArgoCD instance if the operator set it there (below).
 
 The operator's delete grant names each object it renders (`rbac_markers.go`), so it
 cannot delete any other Secret, binding or Application in the cluster. AppProjects
@@ -212,52 +209,81 @@ them Argo writes with the controller's rights, not the project's.
 impersonation, so each Application syncs as its tier's ServiceAccount:
 
 - `dotvirt-p-<project>` holds what the platform repo grants the project in each
-  of its namespaces, beside the project's owners: `<ns>-admins` (the `admin` role)
-  and `<ns>-egress` (`dotvirt-tenant-egress`, EgressFirewall writes, which `admin`
-  lacks), both to the same subjects. A project's repo can then apply only what its
-  people may: no NetworkAttachmentDefinition, nothing in another project's
-  namespace, and a DataVolume clones only from namespaces the project can read.
-  The owners' EgressFirewall right is also what the UI checks before staging one.
+  of its namespaces, beside the project's people: `<ns>-admins` (the `admin` role,
+  or whatever narrower role it names) and, for an `admin` grant, `<ns>-egress`
+  (`dotvirt-tenant-egress`, EgressFirewall writes, which `admin` lacks), both to the
+  same subjects. A project's repo can then apply only what its people may: no
+  NetworkAttachmentDefinition, nothing in another project's namespace, and a
+  DataVolume clones only from namespaces the project can read. The people's
+  EgressFirewall right is also what the UI checks before staging one.
 - `dotvirt-platform-sync` holds `dotvirt-argocd-apply` and `dotvirt-platform-sync`.
 
-dotvirt stages both grants with every project, namespace and adoption it creates.
+Both are names only: Argo impersonates by username and RBAC binds by name, so the
+platform repo's grants are all they are.
+
+dotvirt stages the grants with every project, adoption and namespace it creates. A
+namespace joining a project is granted to the people the project's other grants
+name, never to its account alone. A grant it rewrites keeps every person it names
+but drops any other project's account. Releasing a project takes its account out of
+its grants, so a later project of that name inherits nothing.
 
 The setting (`application.sync.impersonation.enabled` in `argocd-cm`) is
-instance-wide, and Argo enforces it: an Application whose AppProject names no
-ServiceAccount stops syncing. So the operator turns it on only when:
+instance-wide, and Argo enforces it: an Application whose AppProject maps no
+ServiceAccount for it stops syncing. So the operator turns it on only when:
 
+- the ArgoCD controller may impersonate ServiceAccounts in its namespace;
 - each project's account may create VirtualMachines and EgressFirewalls in each of
   its namespaces;
-- no project's account may create VirtualMachines cluster-wide, and no project
-  namespace lets every ServiceAccount of the ArgoCD namespace do so;
+- no project's account may create VirtualMachines or clone disks
+  (`datavolumes/source`) cluster-wide;
+- no project namespace lets every ServiceAccount of the ArgoCD namespace create
+  VirtualMachines, and no grant lets them all clone disks cluster-wide;
 - the platform account may create Namespaces, ClusterUserDefinedNetworks and
-  RoleBindings, and bind `admin` and `dotvirt-tenant-egress`;
+  RoleBindings, and bind every role the platform repo's RoleBindings bind (as the
+  platform Application reports managing them). A role it may not bind holds the
+  flip back with its name: grant the account `bind` on it. An account holding every
+  right of such a role would be allowed by the apiserver, but reads as missing here;
 - no Application still uses the shared `dotvirt-tenants` AppProject;
-- the instance syncs no Application outside dotvirt's AppProjects (in its namespace
-  or its `sourceNamespaces`), unless
-  `spec.argocd.syncImpersonation.ignoreForeignApplications: true` accepts that
-  those stop syncing until their AppProjects name a ServiceAccount.
+- every other Application on the instance (in its namespace, or its
+  `sourceNamespaces` or `application.namespaces`, globs and `/regex/` alike) has an
+  AppProject whose `destinationServiceAccounts` map its destination, unless
+  `spec.argocd.syncImpersonation.ignoreForeignApplications: true` accepts that the
+  others stop syncing. An instance owner keeps an AppProject's old behaviour by
+  mapping it to the controller's own account, e.g.
+  `{server: "*", namespace: "*", defaultServiceAccount: "<argoNS>:<controller SA>"}`.
 
 It then server-side-applies that one key into the ArgoCD resource's
 `spec.extraConfig` (`openshift-gitops` on OpenShift, `argocd` elsewhere), owning
-nothing else there. The GitOps operator's own reconcile keeps fields it does not
-manage, and the argocd-operator copies `extraConfig` into `argocd-cm`. Without an
-ArgoCD resource, `SyncImpersonationReady` says `ManualStep`: set the key in
+nothing else there and never forcing: a key another manager holds is reported as
+`Conflict`, never taken. The GitOps operator's own reconcile keeps fields it does
+not manage, and the argocd-operator copies `extraConfig` into `argocd-cm`.
+`SyncImpersonationReady` says `Pending` until `argocd-cm` carries it, then
+`Enabled`. Without an ArgoCD resource it says `ManualStep`: set the key in
 `argocd-cm` by hand.
 
-Once on, it stays on while asked: a project whose grants go missing fails to sync
-(`Degraded` names it) instead of falling back to the controller's rights. Setting
-`enabled: false` removes the key, if the operator set it.
+`status.syncImpersonationInstance` records the resource the operator set it on. The
+operator takes the key off there when `enabled` turns false, when `spec.argocd`
+moves to another instance, and when the CR is deleted, before prune removes
+dotvirt's AppProjects.
+
+Once on, it stays on while asked: a project whose grants go missing, or an
+Application newly synced with no account mapped, is reported (`Degraded` names
+them) instead of falling back to the controller's rights.
 
 While off, `SyncImpersonationReady` is `Unknown`, or `False` with `CloneAnywhere`
 when the controller's account may create `datavolumes/source` cluster-wide: a
 DataVolume in any tenant repo could then clone a disk out of any namespace.
+`Pending`, `NotReady` and `ManualStep` keep that warning, since the controller still
+syncs until `argocd-cm` changes.
 
-Checks run as SubjectAccessReviews: three per project namespace, one per project
-and five for the platform tier, at most eight in flight; before turning it on, plus
-one list of every Application. The verdict is reused until a project, namespace or the CR's spec
-changes, or for 5 minutes; RBAC is not watched, so a merged grant is seen within
-that, or at once after any spec edit. While off, one review per 5 minutes.
+Checks run as SubjectAccessReviews: three per project namespace, two per project,
+three for the controller and the ArgoCD namespace, five for the platform tier and
+one per further role its RoleBindings bind, at most eight in flight. They come with
+a list of the Applications and AppProjects and a read of each platform RoleBinding.
+A clean verdict is reused until a project, namespace or the CR's spec changes, or
+for 5 minutes; one naming a problem for 1 minute, and a pass waiting to turn it on
+comes back each minute, so a merged grant is seen within that. While off, one
+review per 5 minutes.
 
 ### Turning it on
 
@@ -265,16 +291,17 @@ that, or at once after any spec edit. While off, one review per 5 minutes.
    only once the operator hands it the ArgoCD namespace.
 2. For each project made before, stage its grants: `POST
    /api/projects/<project>/sync-access` as a platform admin, then merge the
-   platform PR. Each namespace's `<ns>-admins` keeps its role and subjects and gains
-   the project's account; `<ns>-egress` grants those same subjects EgressFirewall
-   writes, so the owners gain them too. A grant file holding other objects is
-   refused: edit it in git.
+   platform PR. Each namespace's `<ns>-admins` keeps its role and people and gains
+   the project's account; for an `admin` grant, `<ns>-egress` grants those same
+   subjects EgressFirewall writes, so the people gain them too. A grant file holding
+   other objects is refused: edit it in git.
 3. Move Applications off the shared `dotvirt-tenants` AppProject (the upgrade does
-   this) and decide on any non-dotvirt Applications on the instance.
+   this), and map an account for every other Application on the instance.
 4. Set `spec.argocd.syncImpersonation.enabled: true` and read
-   `SyncImpersonationReady`: `NotReady` lists what is missing, `Enabled` means set.
+   `SyncImpersonationReady`: `NotReady` lists what is missing, `Pending` means set,
+   `Enabled` means on.
 
-To roll back, set `enabled: false`.
+To roll back, set `enabled: false`, or delete the CR.
 
 ### Real-loop scenario (not enabled in the nightly)
 
@@ -290,7 +317,7 @@ controller holds every right, and no ArgoCD resource):
 5. Commit a DataVolume cloning a PVC from a namespace outside the project: CDI
    refuses it, since it authorizes `datavolumes/source` as the project's account.
 6. Delete the project's `<ns>-admins` RoleBinding: the next VM sync fails and
-   `SyncImpersonationReady` turns `Degraded` naming the project (within 5 minutes,
+   `SyncImpersonationReady` turns `Degraded` naming the project (within 10 minutes,
    or at once after a CR spec edit).
 
 ## Trust anchors
