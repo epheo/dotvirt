@@ -525,6 +525,25 @@ func TestPublish(t *testing.T) {
 // CI finishes without a push, and the next refresh shows both. Once the PR is
 // settled (head, activity and a finished CI all unchanged) a refresh reads the
 // list alone.
+// The merge poll names a merged PR by its branch even once the branch is
+// deleted: Forgejo then reports the PR's own ref, and the branch only in the
+// label.
+func TestRecentlyMergedKeepsADeletedBranch(t *testing.T) {
+	head := proposedBranchFor("alice", "p")
+	at := time.Now().UTC().Format(time.RFC3339)
+	f := newProposeFixture(t,
+		when("GET", "/pulls", http.StatusOK, `[{"number":9,"state":"closed","merged":true,"merged_at":"`+at+
+			`","html_url":"http://forge/pulls/9","title":"edit web","user":{"login":"dotvirt-bot"},`+
+			`"base":{"ref":"main"},"head":{"ref":"refs/pull/9/head","label":"`+head+`"}}]`))
+	ms, err := f.c.RecentlyMerged(f.proj, time.Now().Add(-time.Hour))
+	if err != nil || len(ms) != 1 {
+		t.Fatalf("RecentlyMerged: %v %+v", err, ms)
+	}
+	if ms[0].Branch != head || ms[0].By != "alice" {
+		t.Fatalf("merge = %+v, want branch %s by alice", ms[0], head)
+	}
+}
+
 func TestOpenProposalsRefreshesUnchangedHead(t *testing.T) {
 	head := proposedBranchFor("alice", "p")
 	var reviews, status, updated string

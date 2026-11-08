@@ -46,24 +46,9 @@ func (s *Server) handleForgeWebhook(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var event struct {
-		Action      string `json:"action"`
-		PullRequest struct {
-			Number   int       `json:"number"`
-			Title    string    `json:"title"`
-			HTMLURL  string    `json:"html_url"`
-			Merged   bool      `json:"merged"`
-			MergedAt time.Time `json:"merged_at"`
-			User     struct {
-				Login string `json:"login"`
-			} `json:"user"`
-			Head struct {
-				Ref string `json:"ref"`
-			} `json:"head"`
-			Base struct {
-				Ref string `json:"ref"`
-			} `json:"base"`
-		} `json:"pull_request"`
-		Repository struct {
+		Action      string   `json:"action"`
+		PullRequest forge.PR `json:"pull_request"`
+		Repository  struct {
 			CloneURL string `json:"clone_url"`
 			HTMLURL  string `json:"html_url"`
 		} `json:"repository"`
@@ -90,8 +75,8 @@ func (s *Server) handleForgeWebhook(w http.ResponseWriter, r *http.Request) {
 				Number:  pr.Number,
 				URL:     pr.HTMLURL,
 				Title:   pr.Title,
-				By:      tasks.MergeAuthor(pr.Head.Ref, s.cfg.ProposedBranch, pr.User.Login),
-				Branch:  pr.Head.Ref,
+				By:      tasks.MergeAuthor(pr.HeadBranch(), s.cfg.ProposedBranch, pr.User.Login),
+				Branch:  pr.HeadBranch(),
 				At:      pr.MergedAt,
 			})
 		}

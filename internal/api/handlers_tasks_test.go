@@ -90,13 +90,38 @@ func TestWebhookRecordsMerge(t *testing.T) {
 		t.Fatalf("merge = %+v", m)
 	}
 
+	// Merged with its branch deleted: Forgejo reports the PR's own ref, and
+	// the branch only in the label.
+	body = []byte(`{
+		"action": "closed",
+		"pull_request": {
+			"number": 14, "title": "resize db", "html_url": "https://forge/o/r/pulls/14",
+			"merged": true, "merged_at": "` + time.Now().UTC().Format(time.RFC3339) + `",
+			"user": {"login": "dotvirt-bot"},
+			"head": {"ref": "refs/pull/14/head", "label": "dotvirt/proposed/bob/team-a-4d5e6f"},
+			"base": {"ref": "main"}
+		},
+		"repository": {"clone_url": "https://forge/o/r.git", "html_url": "https://forge/o/r"}
+	}`)
+	if w := deliver(t, s, body, sign(body, "hooksecret")); w.Code != http.StatusNoContent {
+		t.Fatalf("delivery: got %d, want 204", w.Code)
+	}
+	if ms = feed.Merges(); len(ms) != 2 {
+		t.Fatalf("merges = %+v", ms)
+	}
+	for _, m := range ms {
+		if m.Number == 14 && (m.By != "bob" || m.Branch != "dotvirt/proposed/bob/team-a-4d5e6f") {
+			t.Fatalf("deleted-branch merge = %+v", m)
+		}
+	}
+
 	// A close without merge records nothing.
 	body = []byte(`{"action":"closed","pull_request":{"number":13,"merged":false,"base":{"ref":"main"}},
 		"repository":{"clone_url":"https://forge/o/r.git"}}`)
 	if w := deliver(t, s, body, sign(body, "hooksecret")); w.Code != http.StatusNoContent {
 		t.Fatalf("delivery: got %d, want 204", w.Code)
 	}
-	if got := feed.Merges(); len(got) != 1 {
+	if got := feed.Merges(); len(got) != 2 {
 		t.Fatalf("unmerged close recorded: %+v", got)
 	}
 }

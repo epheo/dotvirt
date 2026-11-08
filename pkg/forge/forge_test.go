@@ -132,6 +132,29 @@ func listedPR(number int, state, head, base string, merged bool) PR {
 	return p
 }
 
+func TestHeadBranch(t *testing.T) {
+	const head = "dotvirt/proposed/alice/team-a-abc123"
+	deleted := listedPR(7, "closed", "refs/pull/7/head", "main", true)
+	deleted.Head.Label = head
+	other := listedPR(7, "closed", "refs/pull/8/head", "main", true)
+	other.Head.Label = head
+	bare := listedPR(7, "closed", "refs/pull/7/head", "main", true)
+	for _, c := range []struct {
+		name string
+		pr   PR
+		want string
+	}{
+		{"live branch", listedPR(3, "open", head, "main", false), head},
+		{"deleted branch keeps its name in the label", deleted, head},
+		{"another PR's ref is no deletion", other, "refs/pull/8/head"},
+		{"no label to fall back on", bare, "refs/pull/7/head"},
+	} {
+		if got := c.pr.HeadBranch(); got != c.want {
+			t.Errorf("%s: HeadBranch = %q, want %q", c.name, got, c.want)
+		}
+	}
+}
+
 func TestFindPR(t *testing.T) {
 	const head = "dotvirt/proposed/alice/team-a-abc123"
 	fork := listedPR(3, "open", head, "main", false)
