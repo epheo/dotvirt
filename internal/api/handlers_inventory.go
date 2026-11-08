@@ -11,6 +11,7 @@ import (
 	"github.com/epheo/dotvirt/internal/eventbus"
 	"github.com/epheo/dotvirt/internal/inventory"
 	"github.com/epheo/dotvirt/internal/model"
+	"github.com/epheo/dotvirt/internal/tasks"
 	"github.com/epheo/dotvirt/pkg/forge"
 )
 
@@ -112,13 +113,20 @@ func (s *Server) InventoryForIdentity(ctx context.Context, id auth.Identity) (mo
 			}
 		}
 	}
-	platformAuthor, platformErr := s.canAuthorPlatform(ctx, id, userCluster)
 	// The platform tier has no project row; its Application rollup rides the frame
 	// on its own so the issues plane names what it failed to apply or keeps
 	// unhealthy. Every user sees its verdict (a user scoped to no project must not
-	// mask a broken platform sync); only platform authors see its detail.
+	// mask a broken platform sync); only platform authors see its detail, its
+	// open proposals and its merges. The platform lane (up to one review per
+	// platform action) is asked only when the frame holds one of those: a quiet
+	// platform costs a caller with no platform right nothing.
+	var platformAuthor bool
+	var platformErr error
 	if s.cfg.PlatformRepo != "" {
 		inv.Platform = platformRollup(in.ProjectDrift, s.cfg.PlatformRepo)
+		if s.platformBusy() || rollupDetail(inv.Platform) {
+			platformAuthor, platformErr = s.canAuthorPlatform(ctx, id, userCluster)
+		}
 		if !platformAuthor {
 			inv.Platform = tenantPlatformView(inv.Platform, visible)
 		}
@@ -167,6 +175,27 @@ func platformRollup(drift map[string]model.ProjectSync, platformRepo string) *mo
 		Operation: "Error",
 		SyncError: "no ArgoCD Application sources the platform repo - the dotvirt-platform Application is missing, so tenancy changes cannot apply",
 	}
+}
+
+// platformBusy reports whether the platform tier holds something a frame
+// shows only to its authors beyond its rollup: open proposals (the refresher
+// watches the platform repo whenever anyone looks) or merges in the task feed.
+func (s *Server) platformBusy() bool {
+	if rows, ok := s.proposals.Get(platformProjectName); ok && len(rows) > 0 {
+		return true
+	}
+	if s.tasks == nil {
+		return false
+	}
+	repo, busy := forge.NormalizeRepoURL(s.cfg.PlatformRepo), false
+	s.tasks.Visit(func(tasks.Op) {}, func(m tasks.Merge) { busy = busy || m.RepoURL == repo })
+	return busy
+}
+
+// rollupDetail reports whether the platform rollup carries detail beyond its
+// verdict, which only platform authors read.
+func rollupDetail(ps *model.ProjectSync) bool {
+	return ps != nil && (ps.SyncError != "" || len(ps.Unhealthy) > 0)
 }
 
 // tenantPlatformView is the platform rollup for a caller without platform

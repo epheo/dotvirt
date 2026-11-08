@@ -504,3 +504,41 @@ func TestEvacuateHidesUnreadableFailures(t *testing.T) {
 		t.Errorf("evacuation = %+v, want web listed and one hidden", ev)
 	}
 }
+
+// A frame asks the platform lane only when the platform tier holds what only
+// its authors see: on a quiet platform a caller with no platform right asks
+// none of its questions; an open platform proposal brings them back, each
+// asked once and then cached.
+func TestFrameAsksThePlatformLaneOnlyWhenBusy(t *testing.T) {
+	g := newGateRig(t)
+	// A caller who sees no project: the frame reads no repo.
+	g.fc.readsVMs = func(string, string) bool { return false }
+	var mu sync.Mutex
+	asked := map[string]int{}
+	inner := g.fc.ssar
+	g.fc.ssar = func(token string, a *authzv1.ResourceAttributes) bool {
+		mu.Lock()
+		if a.Resource == "kubedeschedulers" || a.Resource == "virtualmachinetemplates" || a.Verb == verbDelete {
+			asked[token]++
+		}
+		mu.Unlock()
+		return inner(token, a)
+	}
+	frame := func(token string) {
+		t.Helper()
+		if _, err := g.s.InventoryForIdentity(context.Background(), auth.Identity{Token: token, Username: "u"}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	quiet := g.token(nil)
+	frame(quiet)
+	g.s.proposals.Put(platformProjectName, []model.Proposal{{PRNumber: 1}})
+	busy := g.token(nil)
+	frame(busy)
+	frame(busy)
+	mu.Lock()
+	defer mu.Unlock()
+	if asked[quiet] != 0 || asked[busy] == 0 {
+		t.Errorf("lane questions: quiet frame %d, busy frames %d; want none, then some", asked[quiet], asked[busy])
+	}
+}
