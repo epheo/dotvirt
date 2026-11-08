@@ -14,7 +14,7 @@ import (
 	"strconv"
 	"strings"
 
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 
 	"github.com/epheo/dotvirt/internal/cluster"
 	"github.com/epheo/dotvirt/internal/reflect"
@@ -48,18 +48,13 @@ func (s *Snapshot) primaryDomain(ns string) (key, display string) {
 			return "udn:" + ns + "/" + u.GetName(), "network " + u.GetName()
 		}
 	}
-	for _, u := range reflect.List(s.cudn) {
-		if !strings.EqualFold(cudnConfig(u).Role(), "Primary") {
+	for _, nad := range reflect.List(s.nad) {
+		if nad.GetNamespace() != ns {
 			continue
 		}
-		for _, nad := range reflect.List(s.nad) {
-			if nad.GetNamespace() != ns {
-				continue
-			}
-			for _, ref := range nad.GetOwnerReferences() {
-				if ref.Kind == "ClusterUserDefinedNetwork" && ref.Name == u.GetName() {
-					return "cudn:" + u.GetName(), "shared network " + u.GetName()
-				}
+		if kind, name := s.owner(nad); kind == "ClusterUserDefinedNetwork" {
+			if u, ok := reflect.Get(s.cudn, name); ok && strings.EqualFold(cudnConfig(u).Role(), "Primary") {
+				return "cudn:" + name, "shared network " + name
 			}
 		}
 	}
@@ -71,9 +66,33 @@ func (s *Snapshot) primaryDomain(ns string) (key, display string) {
 // then stay on the default network.
 func (s *Snapshot) realized(ns, name string) bool {
 	u, ok := reflect.Get(s.nad, ns+"/"+name)
-	return ok && slices.ContainsFunc(u.GetOwnerReferences(), func(r metav1.OwnerReference) bool {
-		return r.Kind == "UserDefinedNetwork" && r.Name == name
-	})
+	if !ok {
+		return false
+	}
+	kind, owner := s.owner(u)
+	return kind == "UserDefinedNetwork" && owner == name
+}
+
+// owner names the UDN or CUDN that generated nad: an owner reference whose
+// UID is the live object's. A tenant may write any reference into a NAD of
+// its own namespace, so a name alone proves nothing.
+func (s *Snapshot) owner(nad *unstructured.Unstructured) (kind, name string) {
+	for _, r := range nad.GetOwnerReferences() {
+		var u *unstructured.Unstructured
+		var ok bool
+		switch r.Kind {
+		case "ClusterUserDefinedNetwork":
+			u, ok = reflect.Get(s.cudn, r.Name)
+		case "UserDefinedNetwork":
+			u, ok = reflect.Get(s.udn, nad.GetNamespace()+"/"+r.Name)
+		default:
+			continue
+		}
+		if ok && r.UID != "" && u.GetUID() == r.UID {
+			return r.Kind, r.Name
+		}
+	}
+	return "", ""
 }
 
 // sharedNetworks returns the display names of secondary networks both NIC
@@ -109,13 +128,11 @@ func (s *Snapshot) networkIdentity(ref string) (key, display string) {
 	}
 	display = ref
 	key = "nad:" + ref
-	for _, r := range u.GetOwnerReferences() {
-		switch r.Kind {
-		case "ClusterUserDefinedNetwork":
-			key, display = "cudn:"+r.Name, r.Name
-		case "UserDefinedNetwork":
-			key, display = "udn:"+ref, r.Name
-		}
+	switch kind, name := s.owner(u); kind {
+	case "ClusterUserDefinedNetwork":
+		key, display = "cudn:"+name, name
+	case "UserDefinedNetwork":
+		key, display = "udn:"+ref, name
 	}
 	if c, ok := nadConfig(u); ok && strings.EqualFold(c.Topology, "localnet") {
 		// OVN-K maps a localnet without physicalNetworkName under its network name.
@@ -192,10 +209,8 @@ func (s *Snapshot) primaryRanges() []primaryRange {
 	out := []primaryRange{{key: "default", prefixes: s.defaultRange()}}
 	cudnNS := map[string][]string{}
 	for _, nad := range reflect.List(s.nad) {
-		for _, ref := range nad.GetOwnerReferences() {
-			if ref.Kind == "ClusterUserDefinedNetwork" {
-				cudnNS[ref.Name] = append(cudnNS[ref.Name], nad.GetNamespace())
-			}
+		if kind, name := s.owner(nad); kind == "ClusterUserDefinedNetwork" {
+			cudnNS[name] = append(cudnNS[name], nad.GetNamespace())
 		}
 	}
 	for _, u := range reflect.List(s.udn) {
@@ -316,19 +331,13 @@ func (s *Snapshot) nadPrefixes(ref string) []netip.Prefix {
 	if !ok {
 		return nil
 	}
-	for _, o := range u.GetOwnerReferences() {
-		switch o.Kind {
-		case "ClusterUserDefinedNetwork":
-			if n, ok := reflect.Get(s.cudn, o.Name); ok {
-				return parsePrefixes(cudnConfig(n).Subnets())
-			}
-			return nil
-		case "UserDefinedNetwork":
-			if n, ok := reflect.Get(s.udn, u.GetNamespace()+"/"+o.Name); ok {
-				return parsePrefixes(udnConfig(n).Subnets())
-			}
-			return nil
-		}
+	switch kind, name := s.owner(u); kind {
+	case "ClusterUserDefinedNetwork":
+		n, _ := reflect.Get(s.cudn, name)
+		return parsePrefixes(cudnConfig(n).Subnets())
+	case "UserDefinedNetwork":
+		n, _ := reflect.Get(s.udn, u.GetNamespace()+"/"+name)
+		return parsePrefixes(udnConfig(n).Subnets())
 	}
 	if c, ok := nadConfig(u); ok {
 		return parsePrefixes(strings.Split(c.Subnets, ","))

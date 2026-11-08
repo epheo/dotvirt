@@ -239,7 +239,7 @@ func TestTraceViewIsTheCallers(t *testing.T) {
 	udn := func(ns, name, cidr string) map[string]any {
 		return map[string]any{
 			"apiVersion": "k8s.ovn.org/v1", "kind": "UserDefinedNetwork",
-			"metadata": map[string]any{"name": name, "namespace": ns, "resourceVersion": "1"},
+			"metadata": map[string]any{"name": name, "namespace": ns, "uid": name, "resourceVersion": "1"},
 			"spec":     map[string]any{"topology": "Layer2", "layer2": map[string]any{"role": "Primary", "subnets": []any{cidr}}},
 		}
 	}

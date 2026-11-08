@@ -32,7 +32,7 @@ func isolated(t *testing.T, podNet bool) *Snapshot {
 	}}})
 	add(t, s.cudn, map[string]any{
 		"apiVersion": "k8s.ovn.org/v1", "kind": "ClusterUserDefinedNetwork",
-		"metadata": map[string]any{"name": "shared"},
+		"metadata": map[string]any{"name": "shared", "uid": "x"},
 		"spec": map[string]any{
 			"namespaceSelector": nameInSelector("tenant-c", "tenant-d"),
 			"network":           map[string]any{"topology": "Layer2", "layer2": map[string]any{"role": "Primary", "subnets": []any{"10.50.0.0/16"}}},
@@ -55,14 +55,14 @@ func primaryUDN(t *testing.T, s *Snapshot, ns, name string, spec map[string]any)
 	t.Helper()
 	add(t, s.udn, map[string]any{
 		"apiVersion": "k8s.ovn.org/v1", "kind": "UserDefinedNetwork",
-		"metadata": map[string]any{"name": name, "namespace": ns},
+		"metadata": map[string]any{"name": name, "namespace": ns, "uid": ns + "/" + name},
 		"spec":     spec,
 	})
 	add(t, s.nad, map[string]any{
 		"apiVersion": "k8s.cni.cncf.io/v1", "kind": "NetworkAttachmentDefinition",
 		"metadata": map[string]any{
 			"name": name, "namespace": ns,
-			"ownerReferences": []any{map[string]any{"apiVersion": "k8s.ovn.org/v1", "kind": "UserDefinedNetwork", "name": name, "uid": "y"}},
+			"ownerReferences": []any{map[string]any{"apiVersion": "k8s.ovn.org/v1", "kind": "UserDefinedNetwork", "name": name, "uid": ns + "/" + name}},
 		},
 	})
 }
@@ -409,5 +409,41 @@ func TestTraceViewOwnScope(t *testing.T) {
 		if st := connectivityStep(t, res); !strings.Contains(st.Note, "no in-cluster path") {
 			t.Errorf("shared network %s: %+v", name, st)
 		}
+	}
+}
+
+// A NAD's owner reference proves its network only with the owner's UID: a
+// tenant may write any reference into its own namespace's NAD, and a forged
+// one neither realizes a UDN nor publishes a shared network.
+func TestTraceForgedOwnerReference(t *testing.T) {
+	s := isolated(t, true)
+	add(t, s.nad, map[string]any{
+		"apiVersion": "k8s.cni.cncf.io/v1", "kind": "NetworkAttachmentDefinition",
+		"metadata": map[string]any{"name": "shared", "namespace": "tenant-x",
+			"ownerReferences": []any{map[string]any{"apiVersion": "k8s.ovn.org/v1", "kind": "ClusterUserDefinedNetwork", "name": "shared", "uid": "forged"}}},
+	})
+	add(t, s.udn, map[string]any{
+		"apiVersion": "k8s.ovn.org/v1", "kind": "UserDefinedNetwork",
+		"metadata": map[string]any{"name": "net-y", "namespace": "tenant-y", "uid": "real"},
+		"spec":     map[string]any{"topology": "Layer2", "layer2": map[string]any{"role": "Primary", "subnets": []any{"10.160.0.0/16"}}},
+	})
+	add(t, s.nad, map[string]any{
+		"apiVersion": "k8s.cni.cncf.io/v1", "kind": "NetworkAttachmentDefinition",
+		"metadata": map[string]any{"name": "net-y", "namespace": "tenant-y",
+			"ownerReferences": []any{map[string]any{"apiVersion": "k8s.ovn.org/v1", "kind": "UserDefinedNetwork", "name": "net-y", "uid": "forged"}}},
+	})
+	for _, n := range s.Catalog().Networks {
+		if n.Name == "shared" && slices.Contains(n.Namespaces, "tenant-x") {
+			t.Errorf("a forged reference published %s to tenant-x: %v", n.Name, n.Namespaces)
+		}
+	}
+	if key, _ := s.primaryDomain("tenant-x"); key != "default" {
+		t.Errorf("tenant-x on %s through a forged reference", key)
+	}
+	if s.realized("tenant-y", "net-y") {
+		t.Error("a forged reference realized net-y")
+	}
+	if key, _ := s.primaryDomain("tenant-c"); key != "cudn:shared" {
+		t.Errorf("a proven reference must still publish: tenant-c on %s", key)
 	}
 }

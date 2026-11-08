@@ -218,7 +218,7 @@ func TestNetworksTenantSeesOwnScope(t *testing.T) {
 	cudn := func(name string) map[string]any {
 		return map[string]any{
 			"apiVersion": "k8s.ovn.org/v1", "kind": "ClusterUserDefinedNetwork",
-			"metadata": map[string]any{"name": name, "resourceVersion": "1"},
+			"metadata": map[string]any{"name": name, "uid": name, "resourceVersion": "1"},
 			"spec":     map[string]any{"network": map[string]any{"topology": "Layer2", "layer2": map[string]any{"role": "Secondary", "subnets": []any{"10.0.0.0/24"}}}},
 		}
 	}

@@ -178,6 +178,7 @@ func TestTraceUnreachableAndSegmentBypass(t *testing.T) {
 	s := New(nil, nil)
 	s.routeAds.Store(routeAdsAbsent)
 	primaryUDN(t, s, "team-a", "isolated", map[string]any{"topology": "Layer2", "layer2": map[string]any{"role": "Primary"}})
+	secondaryCUDN(t, s, "shared-vlan", "x")
 	for _, ns := range []string{"team-a", "team-b"} {
 		add(t, s.nad, map[string]any{
 			"apiVersion": "k8s.cni.cncf.io/v1", "kind": "NetworkAttachmentDefinition",
@@ -458,6 +459,7 @@ func TestTracePassConvergence(t *testing.T) {
 func TestTraceDefaultMultusSegment(t *testing.T) {
 	s := New(nil, nil)
 	s.routeAds.Store(routeAdsAbsent)
+	secondaryCUDN(t, s, "shared-vlan", "x")
 	for _, ns := range []string{"team-a", "team-b"} {
 		add(t, s.nad, map[string]any{
 			"apiVersion": "k8s.cni.cncf.io/v1", "kind": "NetworkAttachmentDefinition",
@@ -530,6 +532,7 @@ func TestTraceLocalnetSegmentByPhysnetVLAN(t *testing.T) {
 			"metadata": meta, "spec": map[string]any{"config": config},
 		})
 	}
+	secondaryCUDN(t, s, "dc-100", "x")
 	nad("team-a", "dc-100", `{"name":"cluster_udn_dc-100","topology":"localnet","physicalNetworkName":"datacenter","vlanID":100}`,
 		map[string]any{"apiVersion": "k8s.ovn.org/v1", "kind": "ClusterUserDefinedNetwork", "name": "dc-100", "uid": "x"})
 	nad("team-b", "legacy", `{"name":"datacenter","topology":"localnet","vlanID":100}`)
@@ -748,4 +751,14 @@ func TestTraceUnenforcedANPPriority(t *testing.T) {
 	if res := s.Trace(nil, src, &dst, "", "TCP", 443); res.Verdict != "Deny" {
 		t.Fatalf("enforced deny agreeing with the unenforced one: verdict = %s (%v)", res.Verdict, stepKinds(t, res))
 	}
+}
+
+// secondaryCUDN adds a secondary CUDN whose generated NADs reference uid.
+func secondaryCUDN(t *testing.T, s *Snapshot, name, uid string) {
+	t.Helper()
+	add(t, s.cudn, map[string]any{
+		"apiVersion": "k8s.ovn.org/v1", "kind": "ClusterUserDefinedNetwork",
+		"metadata": map[string]any{"name": name, "uid": uid},
+		"spec":     map[string]any{"network": map[string]any{"topology": "Layer2", "layer2": map[string]any{"role": "Secondary"}}},
+	})
 }
