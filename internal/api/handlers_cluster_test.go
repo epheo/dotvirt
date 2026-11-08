@@ -208,7 +208,9 @@ func TestRedactEffective(t *testing.T) {
 		if (e.Gateway[0].Policy.Namespaces != nil) != wantANP {
 			t.Errorf("%s: admin policy namespaces = %v", token, e.Gateway[0].Policy.Namespaces)
 		}
-		if e.Gateway[0].Policy.Name != "anp" || e.SNAT[0].Policy.Namespaces == nil {
+		// The rule stays, named only to who may list its kind.
+		name := map[bool]string{true: "anp", false: "cluster rule, priority 0"}[wantANP]
+		if e.Gateway[0].Policy.Name != name || e.SNAT[0].Policy.Name != "eip" || e.SNAT[0].Policy.Namespaces == nil {
 			t.Errorf("%s: redaction dropped a rule or an authorized kind: %+v", token, e)
 		}
 	}
