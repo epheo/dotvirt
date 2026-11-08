@@ -248,10 +248,14 @@ func run() error {
 	// entry is re-evaluated within 45s (identical frames are not resent).
 	go server.RunTTLBackstop(ctx)
 
-	// VNC dials as the requesting user (KubeVirt RBAC gates the console).
-	server.UseVNC(stream.NewVNCProxy(func(token string) (stream.VNCDialer, error) {
+	// VNC dials as the requesting user (KubeVirt RBAC gates the console); a
+	// console closes when its session ends.
+	vncWake, _ := bus.Subscribe(eventbus.SessionEnded)
+	vnc := stream.NewVNCProxy(func(token string) (stream.VNCDialer, error) {
 		return clusterFactory.For(token)
-	}, cfg.UIOrigin))
+	}, authenticator.SessionLive, vncWake, cfg.UIOrigin)
+	go vnc.Run(ctx)
+	server.UseVNC(vnc)
 
 	// Webhook auto-registration: one ORG-level hook so the forge delivers push/PR events
 	// for every repo (the platform repo + all projects, present + future) to dotvirt, so

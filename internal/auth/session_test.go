@@ -1,7 +1,9 @@
 package auth
 
 import (
+	"context"
 	"encoding/base64"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -10,6 +12,8 @@ import (
 	"time"
 
 	authnv1 "k8s.io/api/authentication/v1"
+
+	"github.com/epheo/dotvirt/internal/restfactory"
 )
 
 // sessionRig serves an authenticated REST route, the stream route and logout
@@ -212,5 +216,23 @@ func TestSessionsConcurrent(t *testing.T) {
 	wg.Wait()
 	if want := base.Add(63 * time.Second); !s.ended["tok"].Equal(want) {
 		t.Fatalf("mark = %v, want the newest ended session %v", s.ended["tok"], want)
+	}
+}
+
+// A token a TokenReview rejected ends every session of it, bearer included,
+// so its open streams and consoles close on the next sweep.
+func TestRejectedTokenEndsSessions(t *testing.T) {
+	valid := map[string]authnv1.UserInfo{"good": {Username: "alice"}}
+	a, _ := fakeAuth(valid)
+	key, now := restfactory.TokenKey("good"), time.Now()
+	if _, err := a.Validate(context.Background(), "good"); err != nil || !a.SessionLive(key, now) {
+		t.Fatalf("live token: err %v, live %v", err, a.SessionLive(key, now))
+	}
+	delete(valid, "good")
+	if err := a.Recheck(context.Background(), "good"); !errors.Is(err, ErrRejected) {
+		t.Fatalf("recheck: %v, want a rejection", err)
+	}
+	if a.SessionLive(key, now) || a.SessionLive(key, time.Time{}) {
+		t.Error("a rejected token's session or bearer use is still live")
 	}
 }

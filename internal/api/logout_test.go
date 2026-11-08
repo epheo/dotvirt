@@ -3,6 +3,8 @@ package api
 import (
 	"context"
 	"errors"
+	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -20,10 +22,34 @@ import (
 	"github.com/epheo/dotvirt/internal/stream"
 )
 
+// pipeDialer opens a console onto an in-memory VM side that swallows input.
+type pipeDialer struct{}
+
+func (pipeDialer) VNCConn(string, string) (net.Conn, error) {
+	vmSide, proxySide := net.Pipe()
+	go func() { _, _ = io.Copy(io.Discard, vmSide) }()
+	return proxySide, nil
+}
+
+// wantSessionClose reads ws until it closes and requires the session close.
+func wantSessionClose(t *testing.T, what string, ws *websocket.Conn) {
+	t.Helper()
+	for {
+		_, _, err := ws.ReadMessage()
+		if err == nil {
+			continue // a frame already in flight
+		}
+		if ce := (*websocket.CloseError)(nil); !errors.As(err, &ce) || ce.Code != websocket.ClosePolicyViolation {
+			t.Fatalf("open %s after logout ended with %v, want the session close", what, err)
+		}
+		return
+	}
+}
+
 // A logout ends the session server-side, wired as main wires it: the open
-// inventory stream closes, and the same cookie is refused on REST and on the
-// stream upgrade.
-func TestLogoutEndsStreamAndCookie(t *testing.T) {
+// inventory stream and console close, and the same cookie is refused on REST
+// and on the stream upgrade.
+func TestLogoutEndsStreamsAndCookie(t *testing.T) {
 	fc := newFakeCluster(t)
 	s := fc.server(nil, Config{})
 	kube := fake.NewSimpleClientset()
@@ -40,6 +66,10 @@ func TestLogoutEndsStreamAndCookie(t *testing.T) {
 	t.Cleanup(cancel)
 	go hub.Run(ctx)
 	s.UseStream(hub)
+	vncWake, _ := s.bus.Subscribe(eventbus.SessionEnded)
+	vnc := stream.NewVNCProxy(func(string) (stream.VNCDialer, error) { return pipeDialer{}, nil }, s.auth.SessionLive, vncWake, "")
+	go vnc.Run(ctx)
+	s.UseVNC(vnc)
 	srv := httptest.NewServer(s.Handler())
 	t.Cleanup(srv.Close)
 
@@ -70,6 +100,12 @@ func TestLogoutEndsStreamAndCookie(t *testing.T) {
 	}
 	wsURL := "ws" + strings.TrimPrefix(srv.URL, "http") + "/api/inventory/stream"
 	header := http.Header{"Cookie": {session.String()}}
+	console, _, err := websocket.DefaultDialer.Dial("ws"+strings.TrimPrefix(srv.URL, "http")+"/api/vms/team-a-dev/web/vnc", header)
+	if err != nil {
+		t.Fatalf("console before logout: %v", err)
+	}
+	defer func() { _ = console.Close() }()
+	_ = console.SetReadDeadline(time.Now().Add(10 * time.Second))
 
 	ws, _, err := websocket.DefaultDialer.Dial(wsURL, header)
 	if err != nil {
@@ -84,16 +120,8 @@ func TestLogoutEndsStreamAndCookie(t *testing.T) {
 	if code := send(http.MethodPost, "/api/logout"); code != http.StatusNoContent {
 		t.Fatalf("logout: %d, want 204", code)
 	}
-	for {
-		_, _, err := ws.ReadMessage()
-		if err == nil {
-			continue // a frame already in flight
-		}
-		if ce := (*websocket.CloseError)(nil); !errors.As(err, &ce) || ce.Code != websocket.ClosePolicyViolation {
-			t.Fatalf("open stream after logout ended with %v, want the session-rejected close", err)
-		}
-		break
-	}
+	wantSessionClose(t, "stream", ws)
+	wantSessionClose(t, "console", console)
 
 	if code := send(http.MethodGet, "/api/inventory"); code != http.StatusUnauthorized {
 		t.Errorf("signed-out cookie on REST: %d, want 401", code)

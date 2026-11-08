@@ -82,10 +82,14 @@ func New(saKube kubernetes.Interface, secret []byte) *Authenticator {
 }
 
 // SessionLive reports whether the session issued at issued may still
-// authenticate: not signed out, and younger than sessionMaxAge. tokenKey is
-// restfactory.TokenKey of its token. A zero issued (a bearer header) is always
-// live; only the cluster can revoke a raw token.
+// authenticate: its token not rejected by the last TokenReview, the session
+// not signed out, and younger than sessionMaxAge. tokenKey is
+// restfactory.TokenKey of its token. A zero issued (a bearer header) has no
+// session to end, only a token to reject.
 func (a *Authenticator) SessionLive(tokenKey string, issued time.Time) bool {
+	if c, ok := a.cache.Get(tokenKey); ok && c.err {
+		return false
+	}
 	return a.sessions.live(tokenKey, issued)
 }
 

@@ -10,6 +10,15 @@ import (
 // default access token lifetime: an SSO session already ends on its token.
 const sessionMaxAge = 24 * time.Hour
 
+// SessionExpiry is when a session issued at issued reaches sessionMaxAge; zero
+// for a bearer header, which has no session.
+func SessionExpiry(issued time.Time) time.Time {
+	if issued.IsZero() {
+		return time.Time{}
+	}
+	return issued.Add(sessionMaxAge)
+}
+
 // sessions is the logout record. A logout ends its session and every older one
 // of the same token, so one entry per token holds the newest issue time a logout
 // ended: a login/logout loop cannot grow the map, and a dead cookie replayed at

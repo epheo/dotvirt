@@ -1,11 +1,14 @@
 package stream
 
 import (
+	"context"
 	"errors"
+	"io"
 	"net"
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -14,6 +17,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime/schema"
 
 	"github.com/epheo/dotvirt/internal/auth"
+	"github.com/epheo/dotvirt/internal/restfactory"
 )
 
 type fakeDialer struct {
@@ -29,7 +33,7 @@ func (f *fakeDialer) VNCConn(namespace, name string) (net.Conn, error) {
 
 func vncServer(t *testing.T, d *fakeDialer) *httptest.Server {
 	t.Helper()
-	p := NewVNCProxy(func(string) (VNCDialer, error) { return d, nil }, "")
+	p := NewVNCProxy(func(string) (VNCDialer, error) { return d, nil }, nil, nil, "")
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /vnc/{namespace}/{name}", func(w http.ResponseWriter, r *http.Request) {
 		p.Handler(w, r.WithContext(auth.NewContext(r.Context(), auth.Identity{Token: "tok"})))
@@ -178,7 +182,7 @@ func TestVNCDialAsCaller(t *testing.T) {
 			p := NewVNCProxy(func(token string) (VNCDialer, error) {
 				gotToken = token
 				return d, c.dialer
-			}, "")
+			}, nil, nil, "")
 			mux := http.NewServeMux()
 			mux.HandleFunc("GET /vnc/{namespace}/{name}", func(w http.ResponseWriter, r *http.Request) {
 				p.Handler(w, r.WithContext(auth.NewContext(r.Context(), auth.Identity{Token: "alice-token"})))
@@ -206,7 +210,7 @@ func TestVNCDialAsCaller(t *testing.T) {
 
 func TestVNCWithoutIdentity(t *testing.T) {
 	d := &fakeDialer{}
-	p := NewVNCProxy(func(string) (VNCDialer, error) { return d, nil }, "")
+	p := NewVNCProxy(func(string) (VNCDialer, error) { return d, nil }, nil, nil, "")
 	rec := httptest.NewRecorder()
 	p.Handler(rec, httptest.NewRequest(http.MethodGet, "/vnc/ns/vm", nil))
 	if rec.Code != http.StatusUnauthorized || d.dials != 0 {
@@ -222,4 +226,78 @@ type recordingDialer struct {
 func (r *recordingDialer) VNCConn(namespace, name string) (net.Conn, error) {
 	*r.ns, *r.name = namespace, name
 	return nil, r.err
+}
+
+// openConsole serves one console for id over p and returns the browser side.
+func openConsole(t *testing.T, p *VNCProxy, id auth.Identity) *websocket.Conn {
+	t.Helper()
+	vmSide, proxySide := net.Pipe()
+	t.Cleanup(func() { _ = vmSide.Close() })
+	go func() { _, _ = io.Copy(io.Discard, vmSide) }()
+	p.dialerFor = func(string) (VNCDialer, error) { return &fakeDialer{conn: proxySide}, nil }
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /vnc/{namespace}/{name}", func(w http.ResponseWriter, r *http.Request) {
+		p.Handler(w, r.WithContext(auth.NewContext(r.Context(), id)))
+	})
+	srv := httptest.NewServer(mux)
+	t.Cleanup(srv.Close)
+	ws, _, err := websocket.DefaultDialer.Dial(wsURL(srv, "/vnc/ns/vm"), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = ws.Close() })
+	_ = ws.SetReadDeadline(time.Now().Add(5 * time.Second))
+	return ws
+}
+
+func wantSessionClose(t *testing.T, ws *websocket.Conn) {
+	t.Helper()
+	_, _, err := ws.ReadMessage()
+	if ce := (*websocket.CloseError)(nil); !errors.As(err, &ce) || ce.Code != websocket.ClosePolicyViolation {
+		t.Fatalf("console ended with %v, want the session close", err)
+	}
+}
+
+// A console closes when its session ends and the session-ended signal fires;
+// a console of a live session stays open.
+func TestVNCClosesEndedSession(t *testing.T) {
+	var ended atomic.Bool
+	live := func(key string, issued time.Time) bool { return !ended.Load() || key != restfactory.TokenKey("alice") }
+	wake := make(chan struct{}, 1)
+	p := NewVNCProxy(nil, live, wake, "")
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go p.Run(ctx)
+	alice := openConsole(t, p, auth.Identity{Token: "alice", Issued: time.Now()})
+	bob := openConsole(t, p, auth.Identity{Token: "bob", Issued: time.Now()})
+	for deadline := time.Now().Add(5 * time.Second); ; time.Sleep(time.Millisecond) {
+		p.mu.Lock()
+		n := len(p.consoles)
+		p.mu.Unlock()
+		if n == 2 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("%d consoles tracked, want 2", n)
+		}
+	}
+
+	ended.Store(true)
+	wake <- struct{}{}
+	wantSessionClose(t, alice)
+	_ = bob.SetReadDeadline(time.Now().Add(100 * time.Millisecond))
+	if _, _, err := bob.ReadMessage(); err == nil {
+		t.Fatal("unexpected frame")
+	} else if ne, ok := err.(net.Error); !ok || !ne.Timeout() {
+		t.Fatalf("a live session's console ended: %v", err)
+	}
+}
+
+// A console ends at its session's lifetime, with no signal at all.
+func TestVNCClosesAtSessionLifetime(t *testing.T) {
+	now := time.Now()
+	maxAge := auth.SessionExpiry(now).Sub(now)
+	p := NewVNCProxy(nil, nil, nil, "")
+	ws := openConsole(t, p, auth.Identity{Token: "alice", Issued: now.Add(100*time.Millisecond - maxAge)})
+	wantSessionClose(t, ws)
 }
