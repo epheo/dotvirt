@@ -2,6 +2,7 @@ package netstate
 
 import (
 	"fmt"
+	"maps"
 	"testing"
 
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -315,12 +316,14 @@ func scaleTenant(all []NamespaceLabels) *Redaction {
 	}
 }
 
-func scaleNSLabelsOf(ns string) map[string]string {
-	var i int
-	if _, err := fmt.Sscanf(ns, "ns-%04d", &i); err != nil {
-		return nil
+// scaleLabelsOf answers a namespace's labels as clusterstate does: a lookup
+// and a copy.
+func scaleLabelsOf() func(string) map[string]string {
+	held := make(map[string]map[string]string, scaleNamespaces)
+	for i := range scaleNamespaces {
+		held[scaleNS(i)] = scaleNSLabels(i)
 	}
-	return scaleNSLabels(i)
+	return func(ns string) map[string]string { return maps.Clone(held[ns]) }
 }
 
 func scaleWorkload(i int, ip string, nets ...string) TraceWorkload {
@@ -377,9 +380,10 @@ func BenchmarkNetworkRules(b *testing.B) {
 	for k := range scaleCUDNSpan {
 		nss = append(nss, scaleNS(k))
 	}
+	labelsOf := scaleLabelsOf()
 	b.ReportAllocs()
 	for b.Loop() {
-		_ = s.NetworkRules(nss, scaleNSLabelsOf, scaleTenant(all), "dotvirt.io/project")
+		_ = s.NetworkRules(nss, labelsOf, scaleTenant(all), "dotvirt.io/project")
 	}
 }
 

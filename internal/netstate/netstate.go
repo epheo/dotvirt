@@ -74,6 +74,10 @@ type Snapshot struct {
 
 	// Policy-plane stores; each empty until its CRD/API is discovered.
 	netpol, anp, banp, egressfw, egressip, extroute cache.Indexer
+	// The same stores decoded once per generation, and the Policies rows
+	// built from those planes.
+	netpols, anps, banps, firewalls, egressIPs, extRoutes *policyStore
+	policyRows                                            memo[[6]*plane, []model.Policy]
 
 	// watches pairs each store with its GVR, built once in New so Run and the
 	// health flags cannot drift out of step when a kind is added.
@@ -100,6 +104,12 @@ func New(sa *cluster.Client, bus *eventbus.Bus) *Snapshot {
 		udn: idx(), cudn: idx(), nad: idx(), nns: idx(), nncp: idx(), nnce: idx(),
 		netpol: idx(), anp: idx(), banp: idx(), egressfw: idx(), egressip: idx(), extroute: idx(),
 	}
+	s.netpols = newPolicyStore(s.netpol, decodeNetpol, nil)
+	s.anps = newPolicyStore(s.anp, decodeANP, byPrecedence)
+	s.banps = newPolicyStore(s.banp, decodeBANP, nil)
+	s.firewalls = newPolicyStore(s.egressfw, decodeGateway, nil)
+	s.egressIPs = newPolicyStore(s.egressip, decodeEgressIP, nil)
+	s.extRoutes = newPolicyStore(s.extroute, decodeExtRoute, nil)
 	s.watches = []watchSpec{
 		{gvrUDN, s.udn, true, false},
 		{gvrCUDN, s.cudn, true, false},
