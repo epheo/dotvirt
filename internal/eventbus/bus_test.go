@@ -1,6 +1,9 @@
 package eventbus
 
-import "testing"
+import (
+	"slices"
+	"testing"
+)
 
 // drained reports whether ch has a pending wake (and consumes it).
 func drained(ch <-chan struct{}) bool {
@@ -165,7 +168,60 @@ func TestPublishKeyConcurrent(t *testing.T) {
 	}
 	<-done
 	<-done
-	if got := b.KeyVersion(GitChanged, "a") + b.KeyVersion(GitChanged, "b"); got != 2000 {
-		t.Errorf("keyed versions sum = %d, want 2000", got)
+	if got := b.KeySeq(GitChanged); got != 2000 {
+		t.Errorf("KeySeq = %d after 2000 keyed publishes", got)
+	}
+	if last := max(b.KeyVersion(GitChanged, "a"), b.KeyVersion(GitChanged, "b")); last != 2000 {
+		t.Errorf("the last key published reads %d, want the count it reached (2000)", last)
+	}
+}
+
+// A key published after a KeySeq reading is reported by MovedSince with that
+// reading, one published before it is not, and an unkeyed publish moves
+// BroadVersion and every key but no mark.
+func TestMovedSince(t *testing.T) {
+	b := New()
+	b.PublishKey(RBACChanged, "x")
+	since, broad := b.KeySeq(RBACChanged), b.BroadVersion(RBACChanged)
+	b.PublishKey(RBACChanged, "y")
+	b.PublishKey(RBACChanged, "y")
+	if got := b.MovedSince(RBACChanged, since, []string{"x", "y", "z"}); !slices.Equal(got, []string{"y"}) {
+		t.Errorf("MovedSince = %v, want [y]", got)
+	}
+	if b.BroadVersion(RBACChanged) != broad {
+		t.Error("a keyed publish moved BroadVersion")
+	}
+	x := b.KeyVersion(RBACChanged, "x")
+	b.Publish(RBACChanged)
+	if b.BroadVersion(RBACChanged) == broad || b.KeyVersion(RBACChanged, "x") == x {
+		t.Error("an unkeyed publish must move BroadVersion and every key")
+	}
+	if got := b.MovedSince(RBACChanged, b.KeySeq(RBACChanged), []string{"x", "y"}); got != nil {
+		t.Errorf("MovedSince the current reading = %v, want none", got)
+	}
+}
+
+// A reader that sees KeySeq move sees the key that moved it: the mark lands
+// first. Version would not do: it moves before the key.
+func TestKeySeqTrailsTheMark(t *testing.T) {
+	b := New()
+	stop := make(chan struct{})
+	go func() {
+		defer close(stop)
+		for range 20000 {
+			b.PublishKey(RBACChanged, "x")
+		}
+	}()
+	for since := uint64(0); ; {
+		select {
+		case <-stop:
+			return
+		default:
+		}
+		now := b.KeySeq(RBACChanged)
+		if now > since && b.MovedSince(RBACChanged, since, []string{"x"}) == nil {
+			t.Fatalf("KeySeq moved to %d, but x reads unmoved since %d", now, since)
+		}
+		since = now
 	}
 }

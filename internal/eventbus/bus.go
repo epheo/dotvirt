@@ -15,6 +15,8 @@
 // A kind can also be published per key (PublishKey): GitChanged is keyed by repo,
 // so a consumer scoped to some repos reconciles against KeyVersion of those alone
 // and a push to one tenant's repo leaves every other tenant's work untouched.
+// RBACChanged is keyed by the namespace whose grants moved, so a review in one
+// namespace survives a move in another.
 package eventbus
 
 import (
@@ -33,12 +35,15 @@ const (
 	// that move none of it are not published.
 	LiveChanged Kind = iota
 	// NamespaceChanged: a project namespace was added, removed, or relabeled - both an
-	// inventory topology change AND a visibility (RBAC) change.
+	// inventory topology change AND a change of the namespaces a token's
+	// visibility is reviewed over.
 	NamespaceChanged
-	// RBACChanged: a grant moved - a RoleBinding or Role in a project namespace, a
+	// RBACChanged: a grant moved - a RoleBinding or a Role one binds, a
 	// ClusterRoleBinding, a ClusterRole one of those binds, or an OpenShift
 	// Group's members - so a token's visible namespaces and review verdicts may
 	// have changed: the cue to revalidate the per-token authorization caches.
+	// A RoleBinding or Role grants only in its namespace, so it publishes keyed
+	// by that namespace; the cluster-scoped kinds publish unkeyed.
 	RBACChanged
 	// DriftChanged: the drift Argo reports moved - an object's sync/health/apply
 	// error or a project's rollup - or the Applications watch's health flipped.
@@ -83,8 +88,12 @@ type Bus struct {
 	// broad[k] counts unkeyed Publish(k) calls; it is part of every key's version,
 	// so an unkeyed publish moves every key of that kind.
 	broad [kindCount]atomic.Uint64
+	// seq[k] counts keyed PublishKey(k) calls, and marks[k][key] is the count the
+	// key's last one reached: a key's version is its mark plus broad[k]. Both
+	// move under keyMu, so a mark is readable once seq counts it (see KeySeq).
 	keyMu sync.Mutex
-	keyed [kindCount]map[string]uint64
+	seq   [kindCount]atomic.Uint64
+	marks [kindCount]map[string]uint64
 
 	mu   sync.RWMutex
 	subs map[*subscription]struct{}
@@ -123,10 +132,12 @@ func (b *Bus) PublishKey(k Kind, key string) {
 	}
 	b.versions[k].Add(1)
 	b.keyMu.Lock()
-	if b.keyed[k] == nil {
-		b.keyed[k] = map[string]uint64{}
+	if b.marks[k] == nil {
+		b.marks[k] = map[string]uint64{}
 	}
-	b.keyed[k][key]++
+	n := b.seq[k].Load() + 1
+	b.marks[k][key] = n
+	b.seq[k].Store(n)
 	b.keyMu.Unlock()
 	b.wake(k)
 }
@@ -138,9 +149,47 @@ func (b *Bus) KeyVersion(k Kind, key string) uint64 {
 		return 0
 	}
 	b.keyMu.Lock()
-	v := b.keyed[k][key]
+	v := b.marks[k][key]
 	b.keyMu.Unlock()
 	return v + b.broad[k].Load()
+}
+
+// BroadVersion is the level of k's unkeyed publishes alone, which move every
+// key of k: what a consumer depends on when no key of k concerns it.
+// Equality-only. Nil-safe (returns 0).
+func (b *Bus) BroadVersion(k Kind) uint64 {
+	if b == nil {
+		return 0
+	}
+	return b.broad[k].Load()
+}
+
+// KeySeq counts k's keyed publishes. Each moves its key before the count, so
+// a consumer that reads KeySeq, works, then asks MovedSince with that reading
+// learns every key published after it, and none it already saw. Version
+// cannot stand in: it moves before the key does. Nil-safe (returns 0).
+func (b *Bus) KeySeq(k Kind) uint64 {
+	if b == nil {
+		return 0
+	}
+	return b.seq[k].Load()
+}
+
+// MovedSince reports which of keys k published after since, a KeySeq reading.
+// Nil-safe (none).
+func (b *Bus) MovedSince(k Kind, since uint64, keys []string) []string {
+	if b == nil {
+		return nil
+	}
+	b.keyMu.Lock()
+	defer b.keyMu.Unlock()
+	var out []string
+	for _, key := range keys {
+		if b.marks[k][key] > since {
+			out = append(out, key)
+		}
+	}
+	return out
 }
 
 func (b *Bus) wake(k Kind) {
