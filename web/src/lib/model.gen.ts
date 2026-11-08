@@ -122,6 +122,11 @@ export interface NamespaceCaps {
    */
   bootImageImport: boolean;
   /**
+   * BootImageDelete removes a boot image that never finished: its
+   * DataSource and DataVolume, whose claim goes with it.
+   */
+  bootImageDelete: boolean;
+  /**
    * The namespaced network family, staged through git. Network is the
    * project networks (UserDefinedNetwork).
    */
@@ -1128,6 +1133,14 @@ export interface UploadStatus {
   error?: string;
 }
 /**
+ * BootImageRemoval is what DELETE /api/images did. Note says what it left
+ * alone: a claim of the boot image's name, when the DataVolume that would
+ * vouch for it was already gone.
+ */
+export interface BootImageRemoval {
+  note?: string;
+}
+/**
  * UploadToken is the bearer + endpoint the browser POSTs the image to, streaming
  * directly to cdi-uploadproxy (which ships open CORS).
  */
@@ -1230,6 +1243,12 @@ export interface OSImage {
    * made it from a registry or a URL.
    */
   import?: DiskImport;
+  /**
+   * Removable is the shape a boot image dotvirt adds has: a DataSource over
+   * the claim of its own name, that no scheduled import keeps. Until it is
+   * Ready, DELETE /api/images removes it.
+   */
+  removable?: boolean;
 }
 export interface NetworkOption {
   name: string;

@@ -316,8 +316,8 @@ function put<T>(path: string, body: unknown): Promise<T> {
 	return send<T>('PUT', path, body);
 }
 
-function del(path: string): Promise<void> {
-	return req<void>(path, { method: 'DELETE' });
+function del<T = void>(path: string): Promise<T> {
+	return req<T>(path, { method: 'DELETE' });
 }
 
 const enc = encodeURIComponent;
@@ -561,6 +561,10 @@ export const api = {
 		get<gen.UploadStatus>(`/api/uploads/${enc(namespace)}/${enc(name)}`),
 	uploadToken: (namespace: string, name: string) =>
 		post<gen.UploadToken>(`/api/uploads/${enc(namespace)}/${enc(name)}/token`, {}),
+	// Removes a boot image that never finished: its DataSource and its disk.
+	// The server refuses a ready one, or one whose disk is not its own.
+	deleteImage: (namespace: string, name: string) =>
+		del<gen.BootImageRemoval>(`/api/images/${enc(namespace)}/${enc(name)}`),
 	quotas: (scope: ScopeQuery) => get<gen.NamespaceQuota[]>(`/api/quotas${scopeQS(scope)}`),
 	adopt: (namespace: string, name: string) =>
 		post<DraftView>(`${vmPath(namespace, name)}/adopt`, {}),

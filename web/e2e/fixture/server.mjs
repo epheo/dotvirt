@@ -799,6 +799,7 @@ function namespaceCaps(s, project, ns) {
 		dataVolumeCreate: true,
 		bootImageCreate: true,
 		bootImageImport: true,
+		bootImageDelete: true,
 		network: objects,
 		networkAttachment: objects,
 		networkPolicy: objects,
@@ -951,7 +952,7 @@ async function handleStorage(req, res, url) {
 				...s.options,
 				osImages: [
 					...s.options.osImages,
-					{ name: body.name, namespace: body.namespace, ready: true },
+					{ name: body.name, namespace: body.namespace, ready: true, removable: true },
 				],
 			};
 		return sendJSON(res, 200, {
@@ -985,14 +986,20 @@ async function handleStorage(req, res, url) {
 		if (state.uploads.has(key))
 			return sendText(res, 409, `datavolumes "${body.name}" already exists`);
 		const unreachable = src.includes('unreachable');
+		// A source naming "corrupt" downloads, then fails for good.
+		const corrupt = src.includes('corrupt');
 		state.uploads.set(key, {
 			phases: unreachable
 				? ['ImportScheduled', 'ImportInProgress']
-				: ['ImportScheduled', 'ImportInProgress', 'ImportInProgress', 'Succeeded'],
+				: corrupt
+					? ['ImportScheduled', 'ImportInProgress', 'Failed']
+					: ['ImportScheduled', 'ImportInProgress', 'ImportInProgress', 'Succeeded'],
 			at: 0,
 			error: unreachable
 				? `Unable to connect to http data source: Get "${src.split('?')[0]}": dial tcp: lookup unreachable.example: no such host`
-				: '',
+				: corrupt
+					? 'Unable to process data: qemu-img: Could not open the image: not in a known disk format'
+					: '',
 		});
 		const shown = src.replace(/^docker:\/\//i, '').split(/[?#]/)[0];
 		s.options = {
@@ -1002,7 +1009,8 @@ async function handleStorage(req, res, url) {
 				{
 					name: body.name,
 					namespace: body.namespace,
-					ready: !unreachable,
+					ready: !unreachable && !corrupt,
+					removable: true,
 					import: { kind: body.kind, source: shown },
 				},
 			],
@@ -1014,10 +1022,44 @@ async function handleStorage(req, res, url) {
 		});
 	}
 
+	// ── boot image delete: one that never finished ──
+	// Refuses as the server does: a caller without the right, one it cannot
+	// find, one dotvirt did not add, a ready one. Else the catalog and the
+	// status read drop it.
+	m = path.match(/^\/api\/images\/([^/]+)\/([^/]+)$/);
+	if (m && req.method === 'DELETE') {
+		const [ns, name] = [decodeURIComponent(m[1]), decodeURIComponent(m[2])];
+		const p = projectOf(ns);
+		if (!p) return sendText(res, 404, 'namespace not found in any visible project');
+		if (!namespaceCaps(s, p, ns).bootImageDelete)
+			return sendText(res, 403, `forbidden: you may not delete boot images in ${ns}`);
+		const img = s.options.osImages.find((i) => i.namespace === ns && i.name === name);
+		if (!img) return sendText(res, 404, `datasources.cdi.kubevirt.io "${name}" not found`);
+		if (!img.removable)
+			return sendText(
+				res,
+				409,
+				`conflict: ${name} is not a boot image dotvirt added (it points at another disk); nothing was removed`,
+			);
+		if (img.ready)
+			return sendText(
+				res,
+				409,
+				`conflict: ${name} is ready, and only an unfinished boot image is deleted here; nothing was removed`,
+			);
+		const key = `${ns}/${name}`;
+		s.options = { ...s.options, osImages: s.options.osImages.filter((i) => i !== img) };
+		state.uploads.delete(key);
+		if (s.imageStatus?.[key]) s.imageStatus = { ...s.imageStatus, [key]: undefined };
+		return sendJSON(res, 200, {});
+	}
+
 	m = path.match(/^\/api\/uploads\/([^/]+)\/([^/]+)(\/token)?$/);
 	if (m) {
 		const key = `${m[1]}/${m[2]}`;
 		const entry = state.uploads.get(key);
+		// A scenario's own unfinished boot images answer one fixed status.
+		if (!entry && !m[3] && s.imageStatus?.[key]) return sendJSON(res, 200, s.imageStatus[key]);
 		if (!entry) return sendText(res, 404, 'not found: upload');
 		if (typeof entry === 'object' && !m[3]) {
 			const phase = entry.phases[Math.min(entry.at++, entry.phases.length - 1)];
@@ -1025,7 +1067,7 @@ async function handleStorage(req, res, url) {
 				phase,
 				ready: false,
 				progress: phase === 'ImportInProgress' ? '42.0%' : phase === 'Succeeded' ? '100.0%' : 'N/A',
-				...(entry.error && phase === 'ImportInProgress' ? { error: entry.error } : {}),
+				...(entry.error && phase !== 'ImportScheduled' ? { error: entry.error } : {}),
 			});
 		}
 		const phase = entry;

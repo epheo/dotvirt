@@ -618,7 +618,7 @@
 											<span class="font-mono text-sm font-medium text-ink"
 												>{@render marked(i.name, imageQuery)}</span
 											>
-											{#if !i.ready}<span class="text-xs text-ink-faint">importing</span
+											{#if !i.ready}<span class="text-xs text-ink-faint">not ready</span
 												>{:else if usedBy(i)}<span
 													class="text-[13px] whitespace-nowrap text-ink-soft tabular-nums"
 													>{plural(usedBy(i), 'disk')}</span

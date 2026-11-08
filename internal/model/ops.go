@@ -79,6 +79,13 @@ type UploadStatus struct {
 	Error    string `json:"error,omitempty"`
 }
 
+// BootImageRemoval is what DELETE /api/images did. Note says what it left
+// alone: a claim of the boot image's name, when the DataVolume that would
+// vouch for it was already gone.
+type BootImageRemoval struct {
+	Note string `json:"note,omitempty"`
+}
+
 // UploadToken is the bearer + endpoint the browser POSTs the image to, streaming
 // directly to cdi-uploadproxy (which ships open CORS).
 type UploadToken struct {
@@ -172,6 +179,10 @@ type OSImage struct {
 	// Import is the source dotvirt downloaded the boot image from, when it
 	// made it from a registry or a URL.
 	Import *DiskImport `json:"import,omitempty"`
+	// Removable is the shape a boot image dotvirt adds has: a DataSource over
+	// the claim of its own name, that no scheduled import keeps. Until it is
+	// Ready, DELETE /api/images removes it.
+	Removable bool `json:"removable,omitempty"`
 }
 
 type NetworkOption struct {

@@ -1,13 +1,19 @@
 <script lang="ts">
+	import { untrack } from 'svelte';
 	import { page } from '$app/state';
 	import { CircleDot, X } from '@lucide/svelte';
+	import { api, type UploadStatus } from '#lib/api.js';
+	import { imageGate } from '#lib/gates.js';
 	import { storageHref } from '#lib/nav.js';
+	import { action, resource } from '#lib/resource.svelte.js';
 	import { catalog } from '#lib/state/catalog.svelte.js';
 	import { inventory } from '#lib/state/inventory.svelte.js';
 	import { storage } from '#lib/state/storage.svelte.js';
 	import { ui } from '#lib/state/ui.svelte.js';
 	import {
 		FRESH_DAYS,
+		imageDeleteConsequence,
+		imageProgress,
 		imageUsage,
 		num,
 		shortName,
@@ -15,6 +21,9 @@
 		type ImageUse,
 	} from '#lib/storage.js';
 	import Button from '#lib/components/Button.svelte';
+	import Consequence from '#lib/components/Consequence.svelte';
+	import ErrorNote from '#lib/components/ErrorNote.svelte';
+	import StageChip from '#lib/components/StageChip.svelte';
 	import LocalSharedBar from './LocalSharedBar.svelte';
 	import Pager from '#lib/components/Pager.svelte';
 	import { DEFAULT_PAGE_SIZE, pageSlice } from '#lib/paging.js';
@@ -46,7 +55,55 @@
 	const open = $derived(openKey ? (images.find((u) => u.image === openKey) ?? null) : null);
 
 	const imageState = (u: ImageUse) =>
-		!u.catalog ? 'Not in the catalog' : u.catalog.ready ? 'Ready' : 'Importing';
+		!u.catalog ? 'Not in the catalog' : u.catalog.ready ? 'Ready' : 'Not ready';
+	const nsOf = (image: string) => image.slice(0, image.indexOf('/'));
+
+	// A boot image dotvirt added that is not ready says where it stands once
+	// opened: one status read per open (or per Check again), never one per
+	// row. Its DataVolume shares its name; one added outside dotvirt may not.
+	const pending = $derived(
+		open?.catalog && !open.catalog.ready && open.catalog.removable ? open.image : '',
+	);
+	const status = resource<UploadStatus | null>(
+		() => pending,
+		(k) => (k ? api.uploadStatus(nsOf(k), shortName(k)) : Promise.resolve(null)),
+		{ reset: true },
+	);
+	const sentence = (t: string) => (/[.!?]$/.test(t) ? t : `${t}.`);
+	// VMs git declares from it: never cloned, they wait for it to be ready.
+	const waiting = $derived(
+		pending ? new Set(rows.filter((r) => r.image === pending).map((r) => r.vmKey)).size : 0,
+	);
+	const progress = $derived(
+		pending && status.data ? imageProgress(status.data, !!open?.catalog?.import) : null,
+	);
+
+	// Deleting one that never finished: the DataSource, its disk and claim.
+	const removal = action();
+	let armed = $state('');
+	$effect(() => {
+		void openKey;
+		untrack(() => {
+			armed = '';
+			removal.clear();
+		});
+	});
+	async function remove(u: ImageUse) {
+		if (armed !== u.image) {
+			armed = u.image;
+			return;
+		}
+		const name = shortName(u.image);
+		let note = '';
+		const del = async () => {
+			note = (await api.deleteImage(nsOf(u.image), name)).note ?? '';
+		};
+		if (!(await removal.run(del))) return;
+		armed = '';
+		ui.showToast(`Boot image ${name} deleted.${note ? ` ${note}` : ''}`, { kind: 'success' });
+		go({ image: undefined }, { replace: true });
+		await inventory.loadOptions(true);
+	}
 	const createVM = (u: ImageUse) =>
 		(ui.modal = { kind: 'newVM', namespaces: null, image: u.image });
 	const TH =
@@ -191,6 +248,57 @@
 					onclick={() => go({ image: undefined }, { replace: true })}><X size={16} /></button
 				>
 			</div>
+			{#if pending && open.catalog}
+				{@const gate = imageGate.delete(nsOf(open.image))}
+				{@const moving = progress?.tone === 'info'}
+				<div class="flex flex-col gap-2.5 border-b border-line-soft px-card py-3.5">
+					{#if progress}
+						<Consequence tone={progress.tone}
+							>{sentence(progress.text)}
+							<button
+								class="text-accent-ink underline underline-offset-2"
+								onclick={() => status.refresh()}>Check again</button
+							></Consequence
+						>
+					{:else if status.error}
+						<Consequence tone="warn"
+							>{sentence(`Cannot read where it stands: ${status.error}`)}
+							<button
+								class="text-accent-ink underline underline-offset-2"
+								onclick={() => status.refresh()}>Try again</button
+							></Consequence
+						>
+					{:else}
+						<p class="text-[13px] text-ink-faint">Reading where it stands.</p>
+					{/if}
+					<div class="flex flex-col gap-1.5">
+						<div class="flex flex-wrap items-center gap-2">
+							<Button
+								variant={armed === open.image ? 'danger' : 'danger-secondary'}
+								size="sm"
+								disabled={removal.busy || !gate.ok}
+								title={gate.why || undefined}
+								onclick={() => open && remove(open)}
+								>{armed === open.image ? 'Confirm delete' : 'Delete'}</Button
+							>
+							<StageChip kind="now" />
+						</div>
+						{#if !gate.ok}<p class="text-xs leading-4 text-ink-faint">{gate.why}</p>{/if}
+						<Consequence tone="danger" size="sm"
+							>{imageDeleteConsequence(
+								shortName(open.image),
+								waiting,
+								moving ? (open.catalog.import ? 'download' : 'import') : '',
+							)}</Consequence
+						>
+						<ErrorNote error={removal.error} />
+					</div>
+				</div>
+			{:else if open.catalog && !open.catalog.ready}
+				<p class="border-b border-line-soft px-card py-3.5 text-xs leading-4 text-ink-faint">
+					Added outside dotvirt, so it is not deleted here.
+				</p>
+			{/if}
 			<dl class="grid grid-cols-[auto_1fr] gap-x-4 gap-y-2 px-card py-3.5 text-[13px]">
 				<dt class="text-ink-muted">Disks made from it</dt>
 				<dd>{num(open.disks)}</dd>

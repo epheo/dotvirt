@@ -338,8 +338,112 @@ test('a download the cluster cannot reach says why and what next', async ({ page
 	await expect(dialog.getByText(/The cluster cannot download it: Unable to connect/)).toBeVisible({
 		timeout: 10_000,
 	});
-	await expect(dialog.getByText(/If the address is wrong, add it again/)).toBeVisible();
+	await expect(
+		dialog.getByText(/If the address is wrong, delete it and add it again/),
+	).toBeVisible();
 	await expect(dialog).not.toContainText('s3cret');
+});
+
+test('a download the cluster cannot reach is deleted, then added again as typed', async ({
+	page,
+}) => {
+	await page.goto('/storage');
+	await page
+		.locator('main')
+		.getByRole('button', { name: 'add one from a URL or registry' })
+		.click();
+	const dialog = page.getByRole('dialog', { name: 'New image' });
+	await dialog.locator('#img-address').fill('https://unreachable.example/noble.img');
+	await dialog.getByRole('button', { name: 'Add boot image' }).click();
+	await expect(dialog.getByText(/The cluster cannot download it/)).toBeVisible({ timeout: 10_000 });
+	await expect(
+		dialog.getByText('Removes noble and its disk. It never finished, so no VM was made from it.'),
+	).toBeVisible();
+	await dialog.getByRole('button', { name: 'Delete it' }).click();
+	await dialog.getByRole('button', { name: 'Confirm delete' }).click();
+
+	await expect(
+		dialog.getByText(/Deleted\s*noble\s*and its disk\.\s*Fix what was wrong/),
+	).toBeVisible();
+	await expect(dialog.locator('#img-address')).toHaveValue('https://unreachable.example/noble.img');
+	await expect(dialog.getByRole('textbox', { name: 'Name', exact: true })).toHaveValue('noble');
+	await dialog.locator('#img-address').fill('https://images.example.org/noble.img');
+	await expect(dialog.getByRole('button', { name: 'Add boot image' })).toBeEnabled();
+	await dialog.getByRole('button', { name: 'Add boot image' }).click();
+	await expect(dialog.getByText('is a boot image in')).toBeVisible({ timeout: 15_000 });
+});
+
+test('a download that fails for good offers the delete beside the failure', async ({ page }) => {
+	await page.goto('/storage');
+	await page
+		.locator('main')
+		.getByRole('button', { name: 'add one from a URL or registry' })
+		.click();
+	const dialog = page.getByRole('dialog', { name: 'New image' });
+	await dialog.locator('#img-address').fill('https://images.example.org/corrupt.img');
+	await dialog.getByRole('button', { name: 'Add boot image' }).click();
+	const failed = dialog.getByRole('region', { name: 'What failed' });
+	await expect(failed).toContainText('The cluster reported the download failed', {
+		timeout: 15_000,
+	});
+	await expect(failed).toContainText(/corrupt\s*stays in/);
+	// Its name is taken until it goes: the retry says so instead of failing.
+	await expect(dialog.getByRole('button', { name: 'Try again' })).toBeDisabled();
+	await expect(dialog.getByRole('status')).toContainText('corrupt is already a boot image');
+	await failed.getByRole('button', { name: 'Delete it' }).click();
+	await failed.getByRole('button', { name: 'Confirm delete' }).click();
+	await expect(dialog.getByText(/Deleted\s*corrupt\s*and its disk/)).toBeVisible();
+	await expect(dialog.getByRole('button', { name: 'Add boot image' })).toBeEnabled();
+});
+
+test('the images tab says where an unfinished boot image stands and deletes it', async ({
+	page,
+}) => {
+	await setScenario(page, 'unfinished');
+	await page.goto('/storage?tab=images');
+	const main = page.locator('main');
+	await expect(main.locator('tbody tr', { hasText: 'noble-nightly' })).toContainText('Not ready');
+
+	// Downloading: its progress, and a delete that cancels it.
+	await main.getByRole('button', { name: 'fedora-43-beta', exact: true }).click();
+	let panel = main.getByRole('complementary', { name: 'fedora-43-beta' });
+	await expect(panel).toContainText('Downloading, 63.5%');
+	await expect(panel).toContainText('Stops the download and removes fedora-43-beta and its disk.');
+	await expect(panel.getByRole('button', { name: 'Delete' })).toBeEnabled();
+
+	// Failed: the reason, then the delete.
+	await main.getByRole('button', { name: 'noble-nightly', exact: true }).click();
+	panel = main.getByRole('complementary', { name: 'noble-nightly' });
+	await expect(panel).toContainText('Failed: Unable to connect to http data source');
+	await expect(panel).toContainText(
+		'Removes noble-nightly and its disk. It never finished, so no VM was made from it.',
+	);
+	await panel.getByRole('button', { name: 'Delete' }).click();
+	await panel.getByRole('button', { name: 'Confirm delete' }).click();
+	await expect(page.getByText('Boot image noble-nightly deleted.')).toBeVisible();
+	await expect(main.getByRole('button', { name: 'noble-nightly', exact: true })).toHaveCount(0);
+	await expect(page).not.toHaveURL(/image=/);
+});
+
+test('a boot image delete the caller may not do, or one never offered', async ({ page }) => {
+	await setScenario(page, 'nodelete');
+	await page.goto('/storage?tab=images&image=batch-prod%2Fnoble-nightly');
+	const main = page.locator('main');
+	let panel = main.getByRole('complementary', { name: 'noble-nightly' });
+	await expect(panel).toContainText('Failed: Unable to connect');
+	await expect(panel.getByRole('button', { name: 'Delete' })).toBeDisabled();
+	await expect(panel).toContainText('You may not delete boot images in batch-prod.');
+
+	// Ready: nothing to delete here. Not ready, added outside dotvirt: said so.
+	await setScenario(page, 'unfinished');
+	await page.goto('/storage?tab=images&image=dotvirt-images%2Ffedora-42');
+	panel = main.getByRole('complementary', { name: 'fedora-42' });
+	await expect(panel.getByRole('button', { name: 'Create VM' })).toBeEnabled();
+	await expect(panel.getByRole('button', { name: 'Delete' })).toHaveCount(0);
+	await page.goto('/storage?tab=images&image=dotvirt-images%2Fdebian-13');
+	panel = main.getByRole('complementary', { name: 'debian-13' });
+	await expect(panel).toContainText('Added outside dotvirt, so it is not deleted here.');
+	await expect(panel.getByRole('button', { name: 'Delete' })).toHaveCount(0);
 });
 
 test('with upload off, a boot image still comes from a URL or a registry', async ({ page }) => {

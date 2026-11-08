@@ -133,8 +133,8 @@ export function catalogRows(
 			return (o.osImages ?? []).map((i) => ({
 				key: `${i.namespace}/${i.name}`,
 				title: i.name,
-				fact: i.ready ? 'Ready' : 'Importing',
-				about: `Boot image in ${i.namespace}. ${i.ready ? 'Ready' : 'Importing'}`,
+				fact: i.ready ? 'Ready' : 'Not ready',
+				about: `Boot image in ${i.namespace}. ${i.ready ? 'Ready' : 'Not ready'}`,
 				detail: [
 					named('Kind', 'DataSource'),
 					named('Namespace', i.namespace),

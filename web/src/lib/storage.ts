@@ -14,6 +14,7 @@ import type {
 	Snapshot,
 	StorageClassInfo,
 	Template,
+	UploadStatus,
 	VM,
 	VolumeMigration,
 } from '#lib/api.js';
@@ -919,4 +920,49 @@ export function suggestImageName(kind: string, source: string): string {
 		.replace(/^-+|-+$/g, '')
 		.slice(0, 63)
 		.replace(/-+$/, '');
+}
+
+// --- a boot image that never finished ---
+
+// Where a boot image that is not ready stands, from one read of its disk's
+// status. CDI retries an importer that cannot reach its source and keeps the
+// phase, so the error, not the phase, says it failed. download is a source
+// the cluster fetches; else a file from the browser.
+export function imageProgress(st: UploadStatus, download: boolean): { tone: Tone; text: string } {
+	if (st.error) return { tone: 'danger', text: `Failed: ${st.error}` };
+	switch (st.phase) {
+		case 'Failed':
+			return { tone: 'danger', text: 'Failed' };
+		case 'UploadScheduled':
+		case 'UploadReady':
+			return { tone: 'warn', text: 'Waiting for its file to upload' };
+		case 'ImportInProgress': {
+			const pct = st.progress && st.progress !== 'N/A' ? `, ${st.progress}` : '';
+			return { tone: 'info', text: `${download ? 'Downloading' : 'Importing'}${pct}` };
+		}
+		case 'Succeeded':
+			return { tone: 'info', text: 'Finishing' };
+		case '':
+		case 'Pending':
+		case 'PVCBound':
+		case 'ImportScheduled':
+			return { tone: 'info', text: 'Preparing storage' };
+		default:
+			return { tone: 'none', text: st.phase };
+	}
+}
+
+// What deleting a boot image that is not ready takes, said before it runs;
+// stops names the download or import it cuts short. New VM offers only ready
+// images, so a VM counted from it is one git declares, its disk not cloned
+// yet: it waits for a boot image of that name.
+export function imageDeleteConsequence(
+	name: string,
+	vms: number,
+	stops: '' | 'download' | 'import' = '',
+): string {
+	const what = `${stops ? `Stops the ${stops} and removes` : 'Removes'} ${name} and its disk.`;
+	if (!vms) return `${what} It ${stops ? 'has not' : 'never'} finished, so no VM was made from it.`;
+	const [wait, disks] = vms === 1 ? ['waits', 'its disk stays'] : ['wait', 'their disks stay'];
+	return `${what} ${plural(vms, 'VM')} in git ${wait} on it; ${disks} pending until a boot image named ${name} is ready.`;
 }

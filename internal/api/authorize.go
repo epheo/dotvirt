@@ -245,6 +245,12 @@ var (
 	bootImageImportAction = func(ns string) action {
 		return action{refQ(verbCreate, ssarDataVolumes, ns), refQ(verbCreate, ssarDataSources, ns)}
 	}
+	// bootImageDeleteAction removes an unfinished boot image: its DataSource
+	// and its DataVolume (the claim goes with it), asked whole before the
+	// first delete.
+	bootImageDeleteAction = func(ns string) action {
+		return action{refQ(verbDelete, ssarDataSources, ns), refQ(verbDelete, ssarDataVolumes, ns)}
+	}
 )
 
 // claimAction is relabelling the existing namespace ns: what joining it to a

@@ -5,14 +5,16 @@
 	import { liveMigrates } from '#lib/create.js';
 	import { friendlyError, plural } from '#lib/format.js';
 	import { imageGate } from '#lib/gates.js';
-	import { resource } from '#lib/resource.svelte.js';
+	import { action, resource } from '#lib/resource.svelte.js';
 	import { caps } from '#lib/state/caps.svelte.js';
 	import { inventory } from '#lib/state/inventory.svelte.js';
 	import { ui, type ImageDownload } from '#lib/state/ui.svelte.js';
-	import { suggestImageName } from '#lib/storage.js';
+	import { imageDeleteConsequence, suggestImageName } from '#lib/storage.js';
 	import { NAME_HINT, validName } from '#lib/validate.js';
 	import Button from '../Button.svelte';
 	import Consequence from '../Consequence.svelte';
+	import ErrorNote from '../ErrorNote.svelte';
+	import StageChip from '../StageChip.svelte';
 	import ClassPick from './ClassPick.svelte';
 	import PlacePicker from './PlacePicker.svelte';
 	import SheetBody from './SheetBody.svelte';
@@ -67,7 +69,6 @@
 	let pct = $state(0);
 	let importInfo = $state('');
 	let importError = $state(''); // the importer's last failure while the cluster retries it
-	let created = $state(false); // a download that fails after this leaves its disk behind
 	let still = $state(false); // stopped watching a download that carries on
 
 	let file = $state<File | null>(null);
@@ -95,6 +96,14 @@
 	let offerImage = $state(bootImage ?? true);
 	const asBoot = $derived(downloads || (offerImage && canImage));
 	let image = $state(''); // the boot image registered, "namespace/name"
+	// Where the one this run registered lives: the fields stay editable after
+	// a failure, so a delete names what was made, not what is typed now.
+	const made = $derived.by(() => {
+		const at = image.indexOf('/');
+		return { namespace: image.slice(0, at), name: image.slice(at + 1) };
+	});
+	let gone = $state(''); // a boot image deleted here, so the form offers to add it again
+	let goneNote = $state(''); // what that delete left alone, said by the server
 	// svelte-ignore state_referenced_locally
 	let address = $state(given?.source ?? '');
 	// svelte-ignore state_referenced_locally
@@ -182,26 +191,30 @@
 		sheet.pinned = running && !downloads;
 	});
 
-	// Torn down (sign-out, navigation): stop the stream and the polls.
+	// Torn down (sign-out, navigation): stop the stream and the polls. A
+	// delete stops the polls of the run it removes (watch).
 	const teardown = new AbortController();
 	$effect(() => () => teardown.abort());
+	let watch = new AbortController();
 	const sleep = (ms: number) =>
 		new Promise<void>((resolve, reject) => {
+			const signal = AbortSignal.any([teardown.signal, watch.signal]);
 			const abort = () => {
 				clearTimeout(id);
-				reject(teardown.signal.reason);
+				reject(signal.reason);
 			};
 			const id = setTimeout(() => {
-				teardown.signal.removeEventListener('abort', abort);
+				signal.removeEventListener('abort', abort);
 				resolve();
 			}, ms);
-			teardown.signal.addEventListener('abort', abort, { once: true });
+			signal.addEventListener('abort', abort, { once: true });
 		});
 
 	// Polls the DataVolume until pred holds; false when the watch ran out first.
 	async function until(pred: (phase: string) => boolean): Promise<boolean> {
 		for (let i = 0; i < 600; i++) {
 			teardown.signal.throwIfAborted();
+			watch.signal.throwIfAborted();
 			const st = await api.uploadStatus(namespace, name);
 			if (st.progress) importInfo = st.progress;
 			importError = st.error ?? '';
@@ -279,7 +292,6 @@
 			source: address.trim(),
 		});
 		image = target.image ?? '';
-		created = true;
 		phase = 'preparing';
 		if (!(await until((p) => p === 'ImportInProgress' || p === 'Succeeded'))) return false;
 		phase = 'importing';
@@ -290,7 +302,11 @@
 		if (missing.length || running) return;
 		error = '';
 		importError = '';
-		created = false;
+		image = '';
+		gone = '';
+		goneNote = '';
+		armed = false;
+		watch = new AbortController();
 		try {
 			phase = 'creating';
 			if (downloads) still = !(await fetchSource());
@@ -299,14 +315,44 @@
 			// The catalog New VM reads gains the image now, not at the next sign-in.
 			if (image) void inventory.loadOptions(true);
 		} catch (e) {
-			if (e instanceof Unauthorized || teardown.signal.aborted) return;
+			if (e instanceof Unauthorized || teardown.signal.aborted || watch.signal.aborted) return;
 			error = friendlyError(e);
-			if (created)
-				error += ` The disk ${name} stays in ${namespace}: add it again under another name.`;
 			phase = 'error';
+			// Its name stays taken until it is deleted: the form says so.
+			if (image) void inventory.loadOptions(true);
 		}
 	}
 	sheet.submit = start;
+
+	// A boot image this sheet registered that never finished: one that failed,
+	// or one the cluster keeps retrying. Deleting it frees its name and keeps
+	// the form as typed, so a fix is one edit away.
+	const leftover = $derived(!!image && (phase === 'error' || (running && !!importError)));
+	const removal = action();
+	const delGate = $derived(imageGate.delete(made.namespace));
+	let armed = $state(false);
+	async function remove() {
+		if (!armed) {
+			armed = true;
+			return;
+		}
+		const { namespace: ns, name: n } = made;
+		let note = '';
+		const del = async () => {
+			note = (await api.deleteImage(ns, n)).note ?? '';
+		};
+		if (!(await removal.run(del))) return;
+		watch.abort();
+		armed = false;
+		gone = n;
+		goneNote = note;
+		image = '';
+		error = '';
+		importError = '';
+		importInfo = '';
+		phase = 'form';
+		void inventory.loadOptions(true);
+	}
 
 	const STEPS = $derived<{ at: number; label: () => string }[]>(
 		downloads
@@ -338,9 +384,47 @@
 	const choices = $derived(CHOICES.filter((c) => c.id === 'file' || fetchOffered));
 </script>
 
-<SheetBody {error}>
+{#snippet deleteIt()}
+	<div class="flex flex-col gap-1.5">
+		<div class="flex flex-wrap items-center gap-2">
+			<Button
+				variant={armed ? 'danger' : 'danger-secondary'}
+				size="sm"
+				disabled={removal.busy || !delGate.ok}
+				title={delGate.why || undefined}
+				onclick={remove}>{armed ? 'Confirm delete' : 'Delete it'}</Button
+			>
+			<StageChip kind="now" />
+		</div>
+		{#if !delGate.ok}<p class="text-xs leading-4 text-ink-faint">{delGate.why}</p>{/if}
+		<Consequence tone="danger" size="sm">{imageDeleteConsequence(made.name, 0)}</Consequence>
+		<ErrorNote error={removal.error} />
+	</div>
+{/snippet}
+
+<SheetBody error={leftover ? '' : error}>
 	{#snippet form()}
 		{#if phase === 'form' || phase === 'error'}
+			{#if leftover}
+				<section
+					aria-label="What failed"
+					class="flex flex-col gap-2.5 rounded-lg border border-line px-3.5 py-3"
+				>
+					<ErrorNote {error} />
+					<p class="text-[13px] text-ink-soft">
+						<span class="font-mono font-medium text-ink">{made.name}</span> stays in
+						<span class="font-mono">{made.namespace}</span> until you delete it.
+					</p>
+					{@render deleteIt()}
+				</section>
+			{:else if gone}
+				<p class="rounded-lg border border-ok/40 bg-ok-soft px-3.5 py-2.5 text-[13px] text-ok-ink">
+					Deleted <span class="font-mono font-medium">{gone}</span>{goneNote
+						? `. ${goneNote}`
+						: ' and its disk.'}
+					{downloads ? 'Fix what was wrong and add it again.' : 'Upload it again.'}
+				</p>
+			{/if}
 			{#if choices.length > 1}
 				<fieldset class="min-w-0">
 					<legend class="mb-2 {LABEL}">Where it comes from</legend>
@@ -517,9 +601,12 @@
 							>
 							<Consequence tone="info"
 								>It retries on its own.{downloads
-									? ' If the address is wrong, add it again with the right one under another name.'
+									? ' If the address is wrong, delete it and add it again.'
 									: ''}</Consequence
 							>
+							{#if leftover}
+								<div class="mt-1.5">{@render deleteIt()}</div>
+							{/if}
 						</div>
 					{/if}
 				{/each}
@@ -595,7 +682,11 @@
 				<Button class="h-9! px-4!" onclick={onclose}>Done</Button>
 			{/if}
 		{:else if running && downloads}
-			<span class="flex-1 text-ink-muted">The cluster is downloading it. You can close this.</span>
+			<span class="flex-1 text-ink-muted"
+				>{importError
+					? 'The cluster retries it on its own. You can close this.'
+					: 'The cluster is downloading it. You can close this.'}</span
+			>
 			<Button variant="secondary" class="h-9! px-3!" onclick={onclose}>Close</Button>
 		{:else if running}
 			<span class="flex-1 text-ink-muted">Working. Keep this tab open.</span>
