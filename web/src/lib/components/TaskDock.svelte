@@ -1,5 +1,6 @@
 <script lang="ts">
-	import { ChevronDown, ChevronUp, ListChecks, RefreshCw } from '@lucide/svelte';
+	import { Bell, ChevronDown, ListChecks, RefreshCw } from '@lucide/svelte';
+	import type { Snippet } from 'svelte';
 	import {
 		api,
 		type DraftView,
@@ -18,7 +19,6 @@
 	import GitOpsStepper from './GitOpsStepper.svelte';
 	import Note from './Note.svelte';
 	import StatusDot from './StatusDot.svelte';
-	import TabBar from './TabBar.svelte';
 
 	let {
 		drafts,
@@ -29,6 +29,7 @@
 		username,
 		onselect,
 		onrefresh,
+		trailing,
 	}: {
 		drafts: { project: string; draft: DraftView }[];
 		proposals: Proposal[];
@@ -38,6 +39,8 @@
 		username: string;
 		onselect: (namespace: string, name: string) => void;
 		onrefresh?: () => void;
+		// Sits at the bar's right end: the change tray's pill.
+		trailing?: Snippet;
 	} = $props();
 
 	type DockTab = 'tasks' | 'events';
@@ -82,9 +85,10 @@
 		dock.value = { height: dockHeight };
 	}
 
+	// The bar's two buttons open their pane; pressing the open one folds it.
 	function selectTab(t: DockTab) {
+		openPane = !(openPane && tab === t);
 		tab = t;
-		openPane = true;
 	}
 
 	const tasks = $derived(buildTasks({ inventory, feed, drafts, proposals, username }));
@@ -116,7 +120,7 @@
 	</thead>
 {/snippet}
 
-<section class="border-t border-line-strong bg-panel text-xs">
+<section class="border-t border-line bg-panel text-xs">
 	{#if openPane}
 		<!-- Drag the top edge to resize the dock. -->
 		<div
@@ -126,50 +130,64 @@
 			onpointerup={onResizeEnd}
 			role="separator"
 			aria-orientation="horizontal"
-			aria-label="Resize Recent Tasks"
+			aria-label="Resize Recent tasks"
 		></div>
 	{/if}
-	<!-- Tabbed header: Recent Tasks | Events + collapse. -->
-	<div class="flex items-center gap-1 bg-inset-strong px-2 py-1 text-ink-soft">
-		<ListChecks size={14} class="mx-1 text-ink-muted" />
-		<TabBar
-			tabs={[
-				{ id: 'tasks', label: 'Recent Tasks', count: tasks.length },
-				{ id: 'events', label: 'Events' },
-			]}
-			active={openPane ? tab : ''}
-			variant="chips"
-			onchange={(t) => selectTab(t as DockTab)}
-		/>
+	<div class="flex min-h-9 flex-wrap items-center gap-x-5 px-4 py-1 text-[13px] text-ink-soft">
+		{#each [{ id: 'tasks', label: 'Recent tasks', count: tasks.length }, { id: 'events', label: 'Events', count: 0 }] as b (b.id)}
+			{@const on = openPane && tab === b.id}
+			<button
+				type="button"
+				aria-pressed={on}
+				onclick={() => selectTab(b.id as DockTab)}
+				class="inline-flex h-7 items-center gap-1.5 {on
+					? 'font-medium text-ink'
+					: 'hover:text-ink'}"
+			>
+				{#if b.id === 'tasks'}<ListChecks size={16} />{:else}<Bell size={16} />{/if}
+				{b.label}
+				{#if b.count}
+					<span
+						class="inline-flex h-[18px] min-w-[18px] items-center justify-center rounded-full bg-inset-strong px-[5px] text-[11px] leading-[18px] font-bold text-ink"
+						>{b.count}</span
+					>
+				{/if}
+			</button>
+		{/each}
 		{#if !openPane && tasks[0]}
 			{@const t = tasks[0]}
 			<button
 				onclick={() => selectTab('tasks')}
-				class="flex min-w-0 items-center gap-1.5 px-2 text-ink-muted hover:text-ink-soft"
-				title="Open Recent Tasks"
+				class="flex min-w-0 items-center gap-1.5 text-xs text-ink-muted hover:text-ink-soft"
+				title="Open Recent tasks"
 			>
 				<StatusDot tone={taskTone(t)} size="xs" pulse={t.kind === 'migration' && t.active} />
 				<span class="truncate">{t.verb} {t.name || t.prTitle || t.project}</span>
 				<span class="shrink-0">{t.status}</span>
 			</button>
 		{/if}
-		<button
-			onclick={() => {
-				onrefresh?.();
-				if (tab === 'events') eventsRes.refresh();
-			}}
-			class="ml-auto p-1 text-ink-faint hover:text-ink-soft"
-			title="Refresh"
-		>
-			<RefreshCw size={13} />
-		</button>
-		<button
-			onclick={() => (openPane = !openPane)}
-			class="p-1 text-ink-faint hover:text-ink-soft"
-			title="Collapse/expand"
-		>
-			{#if openPane}<ChevronDown size={14} />{:else}<ChevronUp size={14} />{/if}
-		</button>
+		<div class="ml-auto flex items-center gap-2">
+			<button
+				onclick={() => {
+					onrefresh?.();
+					if (tab === 'events') eventsRes.refresh();
+				}}
+				class="p-1 text-ink-faint hover:text-ink-soft"
+				title="Refresh"
+			>
+				<RefreshCw size={13} />
+			</button>
+			{#if openPane}
+				<button
+					onclick={() => (openPane = false)}
+					class="p-1 text-ink-faint hover:text-ink-soft"
+					title="Fold the pane"
+				>
+					<ChevronDown size={14} />
+				</button>
+			{/if}
+			{@render trailing?.()}
+		</div>
 	</div>
 
 	{#if openPane}

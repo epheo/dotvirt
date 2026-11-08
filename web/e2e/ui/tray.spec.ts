@@ -91,6 +91,13 @@ test('a staged draft stays a pill that opens its review in one click', async ({ 
 	const tray = trayOf(page);
 	await expect(tray.getByText(/1 staged in team-web/)).toBeVisible();
 	await expect(tray.getByRole('button', { name: 'Fold' })).toHaveCount(0);
+	// The pill rides the dock bar, so it never covers the workspace's last rows.
+	await expect(
+		page.locator('main').getByRole('complementary', { name: 'Changes in flight' }),
+	).toHaveCount(0);
+	const bar = page.getByRole('button', { name: /^Recent tasks/ });
+	const [pill, dock] = [await tray.boundingBox(), await bar.boundingBox()];
+	expect(Math.abs(pill!.y + pill!.height / 2 - (dock!.y + dock!.height / 2))).toBeLessThan(4);
 	await tray.getByRole('button', { name: 'Review', exact: true }).click();
 	await expect(page.getByRole('dialog').getByText('Propose to team-web')).toBeVisible();
 });
