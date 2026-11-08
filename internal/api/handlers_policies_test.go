@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"net/http"
+	"net/http/httptest"
 	"slices"
 	"strings"
 	"sync/atomic"
@@ -552,14 +553,12 @@ func TestClusterRuleIdentityFollowsTheCallersRBAC(t *testing.T) {
 	}
 }
 
-// A caller who may create cluster rules but not list them is refused a held
-// priority without the name of the rule holding it.
-func TestHeldPriorityNamesTheHolderToListersOnly(t *testing.T) {
+// lockdownServer serves one live AdminNetworkPolicy, lockdown at priority 5,
+// to callers ssar answers for, over the platform tier backed by d.
+func lockdownServer(t *testing.T, ssar func(token string, a *authzv1.ResourceAttributes) bool, d coordinator) *Server {
+	t.Helper()
 	fc := newFakeCluster(t)
-	var lists atomic.Bool
-	fc.ssar = func(token string, a *authzv1.ResourceAttributes) bool {
-		return token == adminToken && (a.Verb != verbList || a.Resource != "adminnetworkpolicies" || lists.Load())
-	}
+	fc.ssar = ssar
 	gv := "policy.networking.k8s.io/v1alpha1"
 	fc.on(http.MethodGet, "/apis/"+gv, func(w http.ResponseWriter, _ *http.Request) {
 		writeObj(w, metav1.APIResourceList{
@@ -573,7 +572,7 @@ func TestHeldPriorityNamesTheHolderToListersOnly(t *testing.T) {
 		"metadata": map[string]any{"name": "lockdown", "resourceVersion": "1"},
 		"spec":     map[string]any{"priority": int64(5), "subject": map[string]any{"namespaces": map[string]any{}}},
 	}))
-	s := fc.server(&planeDraft{}, Config{PlatformRepo: platformRepo})
+	s := fc.server(d, Config{PlatformRepo: platformRepo})
 	ns := netstate.New(fc.sa, nil)
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
@@ -584,19 +583,34 @@ func TestHeldPriorityNamesTheHolderToListersOnly(t *testing.T) {
 			t.Fatal("netstate never synced the live ANP")
 		}
 	}
+	return s
+}
 
-	refusal := func() string {
-		t.Helper()
-		rec := do(s, adminToken, http.MethodPost, "/api/adminnetworkpolicies", `{"name":"other","priority":5}`)
-		wantStatus(t, rec, http.StatusConflict)
-		return rec.Body.String()
+// A caller who may create cluster rules but not list them is refused a held
+// priority without the name of the rule holding it, and alike whatever name
+// they send: a guess at the holder's name tells nothing.
+func TestHeldPriorityNamesTheHolderToListersOnly(t *testing.T) {
+	var lists atomic.Bool
+	s := lockdownServer(t, func(token string, a *authzv1.ResourceAttributes) bool {
+		return token == adminToken && (a.Verb != verbList || a.Resource != "adminnetworkpolicies" || lists.Load())
+	}, &planeDraft{})
+	post := func(name string) *httptest.ResponseRecorder {
+		return do(s, adminToken, http.MethodPost, "/api/adminnetworkpolicies?dryRun=true", `{"name":"`+name+`","priority":5}`)
 	}
-	if body := refusal(); strings.Contains(body, "lockdown") || !strings.Contains(body, "another cluster rule") {
+	guess, holder := post("guess"), post("lockdown")
+	wantStatus(t, guess, http.StatusConflict)
+	if body := guess.Body.String(); strings.Contains(body, "lockdown") || !strings.Contains(body, "another cluster rule") {
 		t.Errorf("a caller who may not list cluster rules reads = %s", body)
+	}
+	if holder.Code != guess.Code || holder.Body.String() != guess.Body.String() {
+		t.Errorf("the holder's name answers %d %q, a guess %d %q", holder.Code, holder.Body.String(), guess.Code, guess.Body.String())
 	}
 	lists.Store(true)
 	s.bus.Publish(eventbus.RBACChanged)
-	if body := refusal(); !strings.Contains(body, `"lockdown"`) {
-		t.Errorf("a caller who may list cluster rules reads = %s", body)
+	if rec := post("guess"); rec.Code != http.StatusConflict || !strings.Contains(rec.Body.String(), `"lockdown"`) {
+		t.Errorf("a caller who may list cluster rules reads = %d %s", rec.Code, rec.Body.String())
+	}
+	if rec := post("lockdown"); rec.Code != http.StatusOK {
+		t.Errorf("a lister re-staging the holder at its own priority = %d %s", rec.Code, rec.Body.String())
 	}
 }
