@@ -559,6 +559,9 @@ export const api = {
 	// label residue is stripped imperatively under the caller's token.
 	releaseProject: (project: string) =>
 		post<gen.ReleaseResult>(`/api/projects/${enc(project)}/release`, {}),
+	// Grant the project's sync account its namespaces' admin binding, in the
+	// platform repo, so ArgoCD may sync the project as that account.
+	syncAccess: (project: string) => post<DraftView>(`/api/projects/${enc(project)}/sync-access`, {}),
 
 	// The template library. Deploy renders server-side
 	// and stages the VM into the draft; save derives a template from a VM's git

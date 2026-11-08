@@ -13,6 +13,7 @@
 	import AdoptProjectModal from './AdoptProjectModal.svelte';
 	import CloneModal from './CloneModal.svelte';
 	import ReleaseProjectModal from './ReleaseProjectModal.svelte';
+	import SyncAccessModal from './SyncAccessModal.svelte';
 	import DeleteObjectModal from './DeleteObjectModal.svelte';
 	import DeleteVMModal from './DeleteVMModal.svelte';
 	import EditManifestModal from './EditManifestModal.svelte';
@@ -80,6 +81,8 @@
 	/>
 {:else if m?.kind === 'releaseProject'}
 	<ReleaseProjectModal project={m.project} namespaces={m.namespaces} onclose={close} />
+{:else if m?.kind === 'syncAccess'}
+	<SyncAccessModal project={m.project} onclose={close} />
 {:else if m?.kind === 'deleteObject'}
 	<DeleteObjectModal
 		resource={m.resource}

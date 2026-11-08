@@ -50,6 +50,7 @@ export type AppModal =
 	| { kind: 'newProject'; adopt?: string } // adopt = existing namespace to bring in as a project
 	| { kind: 'adoptProject'; project: string; namespaces: string[]; recover?: boolean }
 	| { kind: 'releaseProject'; project: string; namespaces: string[] }
+	| { kind: 'syncAccess'; project: string }
 	| { kind: 'egressFw'; namespaces: string[]; namespace?: string; initial?: EgressFirewallCreate }
 	| { kind: 'dfw'; namespaces: string[]; namespace?: string; initial?: NetworkPolicyCreate }
 	| { kind: 'tier0'; initial?: Tier0Initial }
