@@ -81,6 +81,9 @@ type declaredIndex struct {
 	Files     map[model.ObjectRef]string
 	Opaque    map[string]bool
 	Placement Placement
+	// Repeated lists every file of an object more than one file declares;
+	// Files keeps the last of them.
+	Repeated map[model.ObjectRef][]string
 }
 
 // Placement is where a branch's objects are declared, each list in tree order:
@@ -107,13 +110,19 @@ type Placement struct {
 // per branch head; the index is shared with later callers: read only.
 func indexDeclared(read *git.Repo, branch string) (declaredIndex, error) {
 	return git.Memoized(read, "declared", branch, func() (declaredIndex, error) {
-		idx := declaredIndex{Files: map[model.ObjectRef]string{}, Opaque: map[string]bool{}}
+		idx := declaredIndex{Files: map[model.ObjectRef]string{}, Opaque: map[string]bool{}, Repeated: map[model.ObjectRef][]string{}}
 		named := map[string][]model.ObjectRef{}
 		err := read.WalkYAML(branch,
 			func(path string) bool { return !git.InTemplatesDir(path) },
 			func(path string, content []byte) error {
 				refs, implied, docs := declared(path, content)
 				for _, ref := range refs {
+					if prev, ok := idx.Files[ref]; ok && prev != path {
+						if len(idx.Repeated[ref]) == 0 {
+							idx.Repeated[ref] = []string{prev}
+						}
+						idx.Repeated[ref] = append(idx.Repeated[ref], path)
+					}
 					idx.Files[ref] = path
 					if ref.Namespace != "" && !slices.Contains(implied, ref) {
 						named[ref.Namespace] = append(named[ref.Namespace], ref)

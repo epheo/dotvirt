@@ -631,3 +631,98 @@ metadata:
 		t.Errorf("an emptied labels map must go:\n%s", out)
 	}
 }
+
+// Selector labels, namespace lists and DNS names all reach the API server
+// verbatim: a value it rejects must fail here, not after merge at Argo apply.
+func TestSelectorAndNamespaceValidation(t *testing.T) {
+	badLabels := []map[string]string{{"bad key": "x"}, {"app": "has space"}, {"app": "a\nb"}}
+	for _, l := range badLabels {
+		if _, _, err := NetworkPolicyManifest(NetworkPolicySpec{Name: "p", Namespace: "n", AppliedTo: l}); err == nil {
+			t.Errorf("NetworkPolicy accepted appliedTo %q", l)
+		}
+		if _, _, err := NetworkPolicyManifest(NetworkPolicySpec{Name: "p", Namespace: "n",
+			Ingress: []PolicyRule{{From: []map[string]string{l}}}}); err == nil {
+			t.Errorf("NetworkPolicy accepted peer %q", l)
+		}
+		if _, _, err := AdminNetworkPolicyManifest(AdminNetworkPolicySpec{Name: "a", Priority: 1, Subject: l}); err == nil {
+			t.Errorf("ANP accepted subject %q", l)
+		}
+		if _, _, err := AdminNetworkPolicyManifest(AdminNetworkPolicySpec{Name: "a", Priority: 1,
+			Egress: []AdminPolicyRule{{Action: "Deny", Peers: []map[string]string{l}}}}); err == nil {
+			t.Errorf("ANP accepted peer %q", l)
+		}
+		if _, _, err := UplinkManifest(UplinkSpec{Name: "u", NIC: "eth1", NodeSelector: l}); err == nil {
+			t.Errorf("uplink accepted node selector %q", l)
+		}
+	}
+
+	for _, ns := range [][]string{{"ok", "Bad"}, {"a/b"}, {""}} {
+		if _, _, err := Manifest(Spec{Name: "s", Scope: ScopeShared, Namespaces: ns}); err == nil {
+			t.Errorf("shared network accepted namespaces %q", ns)
+		}
+		if _, _, err := Manifest(Spec{Name: "v", Scope: ScopeVLAN, VLAN: 10, PhysicalNetwork: "p", Namespaces: ns}); err == nil {
+			t.Errorf("VLAN network accepted namespaces %q", ns)
+		}
+		if _, _, err := EgressIPManifest(EgressIPSpec{Name: "e", EgressIPs: []string{"1.1.1.1"}, Namespaces: ns}); err == nil {
+			t.Errorf("EgressIP accepted namespaces %q", ns)
+		}
+		if _, _, err := ExternalRouteManifest(ExternalRouteSpec{Name: "r", NextHops: []string{"1.1.1.1"}, Namespaces: ns}); err == nil {
+			t.Errorf("external route accepted namespaces %q", ns)
+		}
+	}
+
+	for _, dns := range []string{"example.com", "*.example.com", "Example.COM.", "host"} {
+		if _, _, err := EgressFirewallManifest(EgressFirewallSpec{Namespace: "n", Rules: []EgressRule{{Action: "Allow", DNSName: dns}}}); err != nil {
+			t.Errorf("egress firewall refused dnsName %q: %v", dns, err)
+		}
+	}
+	for _, dns := range []string{"a b.com", "a.*.com", "**.com", "x.com\n- to: {}", "http://x.com"} {
+		if _, _, err := EgressFirewallManifest(EgressFirewallSpec{Namespace: "n", Rules: []EgressRule{{Action: "Allow", DNSName: dns}}}); err == nil {
+			t.Errorf("egress firewall accepted dnsName %q", dns)
+		}
+	}
+}
+
+// The physical network is checked by the CUDN CRD's own rule (1..253 chars, no
+// ',' or ':'), so a hand-made bridge mapping like physnet_1 stays usable. The
+// NIC is a Linux interface name (at most 15 bytes, no '/', ':' or space); the
+// OVS bridge is not, since nmstate accepts a longer name for a bridge with
+// ports, so an uplink name past 12 characters stays usable.
+func TestUplinkAndPhysicalNetworkNames(t *testing.T) {
+	vlan := func(p string) error {
+		_, _, err := Manifest(Spec{Name: "v", Scope: ScopeVLAN, VLAN: 10, PhysicalNetwork: p, Namespaces: []string{"n"}})
+		return err
+	}
+	for _, ok := range []string{"physnet", "physnet_1", "Phys.Net-2", strings.Repeat("p", 253)} {
+		if err := vlan(ok); err != nil {
+			t.Errorf("physical network %q refused: %v", ok, err)
+		}
+	}
+	for _, bad := range []string{"a,b", "a:b", strings.Repeat("p", 254)} {
+		if err := vlan(bad); err == nil {
+			t.Errorf("physical network %q accepted", bad)
+		}
+	}
+
+	for _, ok := range []UplinkSpec{
+		{Name: "physnet-prod", NIC: "eno2"},
+		{Name: "u", NIC: "enp1s0f0.100"},
+		{Name: "a-very-long-uplink", NIC: "bond0", Bridge: "br-long"},
+		{Name: "a-very-long-uplink", NIC: "eth1"},
+	} {
+		if _, _, err := UplinkManifest(ok); err != nil {
+			t.Errorf("uplink %+v refused: %v", ok, err)
+		}
+	}
+	for _, bad := range []UplinkSpec{
+		{Name: "u", NIC: "eth 1"},
+		{Name: "u", NIC: "eth0:1"},
+		{Name: "u", NIC: "a/b"},
+		{Name: "u", NIC: "averyveryverylongnic"},
+		{Name: "u", NIC: ".."},
+	} {
+		if _, _, err := UplinkManifest(bad); err == nil {
+			t.Errorf("uplink %+v accepted", bad)
+		}
+	}
+}
