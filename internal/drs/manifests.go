@@ -19,6 +19,10 @@ import (
 // Operator (its CSV only supports own-namespace install there).
 const Namespace = "openshift-kube-descheduler-operator"
 
+// SchedulerName is the KubeDescheduler's name: the operator reconciles only
+// the CR by this name.
+const SchedulerName = "cluster"
+
 // Platform-repo paths. CRPath is the KubeDescheduler CR: its presence on the
 // base branch is what "DRS is configured" means, and it is the one file a
 // disable removes (the operator install stays). PSIPath is the worker PSI
@@ -224,7 +228,7 @@ func kubeDescheduler(s Spec) map[string]any {
 		"apiVersion": "operator.openshift.io/v1",
 		"kind":       "KubeDescheduler",
 		"metadata": map[string]any{
-			"name":      "cluster",
+			"name":      SchedulerName,
 			"namespace": Namespace,
 			"annotations": map[string]any{
 				"argocd.argoproj.io/sync-options": "SkipDryRunOnMissingResource=true",

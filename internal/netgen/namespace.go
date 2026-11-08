@@ -180,6 +180,10 @@ type RoleBindingSpec struct {
 	SyncAccount *Subject `json:"-"`
 }
 
+// OwnerRole is the ClusterRole a project's owners are bound to by default: the
+// built-in namespace-admin role.
+const OwnerRole = "admin"
+
 // Subject is a RoleBinding subject.
 type Subject struct {
 	Kind      string `json:"kind"`
@@ -194,14 +198,13 @@ func ServiceAccountSubject(namespace, name string) *Subject {
 }
 
 // RoleBindingManifest renders a project namespace's grant: the RoleBinding
-// granting the given ClusterRole (default "admin", the built-in
-// namespace-admin role) to the kept subjects, each owner (kind User) and the
-// sync account. With a sync account it is rendered even without owners: the
-// project's repo syncs as that account.
+// granting the given ClusterRole (default OwnerRole) to the kept subjects,
+// each owner (kind User) and the sync account. With a sync account it is
+// rendered even without owners: the project's repo syncs as that account.
 func RoleBindingManifest(s RoleBindingSpec) (path string, content []byte, err error) {
 	role := s.Role
 	if role == "" {
-		role = "admin" // the built-in namespace-admin ClusterRole
+		role = OwnerRole
 	}
 	return grantManifest(s, tenancy.AdminBinding(s.Namespace), role)
 }

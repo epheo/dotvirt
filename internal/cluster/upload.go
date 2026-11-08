@@ -103,7 +103,7 @@ func (c *Client) CreateUploadToken(ctx context.Context, namespace, name string) 
 // (DataSources) in namespace. Checked before an upload starts, so a refusal
 // leaves no half-made image behind.
 func (c *Client) CanCreateBootImages(ctx context.Context, namespace string) (bool, error) {
-	return c.allowed(ctx, &authzv1.ResourceAttributes{Namespace: namespace, Verb: "create", Group: gvrDataSources.Group, Resource: gvrDataSources.Resource})
+	return c.Review(ctx, authzv1.ResourceAttributes{Namespace: namespace, Verb: "create", Group: gvrDataSources.Group, Resource: gvrDataSources.Resource})
 }
 
 // CreateBootImage registers the upload's claim as a boot image: a DataSource

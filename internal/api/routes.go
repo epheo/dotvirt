@@ -4,6 +4,7 @@ import (
 	"net/http"
 
 	"github.com/epheo/dotvirt/internal/draft"
+	"github.com/epheo/dotvirt/internal/model"
 )
 
 // routes mounts every /api route on mux; Handler wraps it in auth and the
@@ -43,22 +44,22 @@ func (s *Server) routes(mux *http.ServeMux) {
 	// The single-scope network-family creates, by tier (see handlers_networks.go):
 	// an Uplink (nmstate NNCP) is always cluster-scoped, so always the platform
 	// tier, gated on the caller's authority to create NNCPs.
-	mux.HandleFunc("POST /api/uplinks", s.platformCreate(ssarUplink, draft.ResourceUplink))
+	mux.HandleFunc("POST /api/uplinks", s.platformCreate(model.KindNNCP, draft.ResourceUplink))
 	// An egress firewall (the Tier-1 gateway firewall) is namespace-scoped, so it
 	// routes to the tenant project owning the namespace, the same path as a
 	// project-scoped UDN; the tenant's Argo app applies it on merge (its AppProject
 	// must permit k8s.ovn.org/EgressFirewall).
-	mux.HandleFunc("POST /api/egressfirewalls", s.namespacedCreate("an egress firewall", draft.ResourceEgressFirewall))
+	mux.HandleFunc("POST /api/egressfirewalls", s.namespacedCreate("an egress firewall", draft.ResourceEgressFirewall, model.KindEgressFW))
 	// An EgressIP (the Tier-0 source-NAT pool) is always platform-tier, gated on
 	// the caller's authority to create EgressIPs.
-	mux.HandleFunc("POST /api/egressips", s.platformCreate(ssarEgressIP, draft.ResourceEgressIP))
+	mux.HandleFunc("POST /api/egressips", s.platformCreate(model.KindEgressIP, draft.ResourceEgressIP))
 	// An AdminPolicyBasedExternalRoute (the Tier-0 external next-hop route) is
 	// always platform-tier, gated on the caller's authority to create them.
-	mux.HandleFunc("POST /api/externalroutes", s.platformCreate(ssarExtRoute, draft.ResourceExternalRoute))
+	mux.HandleFunc("POST /api/externalroutes", s.platformCreate(model.KindExtRoute, draft.ResourceExternalRoute))
 	// A NetworkPolicy (the east-west Distributed Firewall) is namespace-scoped, so
 	// it routes to the tenant project owning the namespace; the tenant's Argo app
 	// applies it on merge.
-	mux.HandleFunc("POST /api/networkpolicies", s.namespacedCreate("a network policy", draft.ResourceNetworkPolicy))
+	mux.HandleFunc("POST /api/networkpolicies", s.namespacedCreate("a network policy", draft.ResourceNetworkPolicy, model.KindNetpol))
 	mux.HandleFunc("POST /api/adminnetworkpolicies", s.handleCreateAdminNetworkPolicy)
 	// Every create above stages an EDIT when git already declares the object, so
 	// the same form and route change one. Read-back for that form, and delete,
@@ -91,6 +92,7 @@ func (s *Server) routes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/webhooks/forge", s.handleForgeWebhook)
 	mux.HandleFunc("GET /api/events", s.handleAllEvents)
 	mux.HandleFunc("GET /api/permissions", s.handlePermissions)
+	mux.HandleFunc("GET /api/capabilities", s.handleCapabilities)
 	mux.HandleFunc("GET /api/metrics/cluster", s.handleClusterSummary)
 	mux.HandleFunc("GET /api/metrics/scope", s.handleScopeMetrics)
 	mux.HandleFunc("GET /api/metrics/hosts", s.handleHostLoad)

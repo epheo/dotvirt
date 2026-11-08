@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/epheo/dotvirt/internal/changeset"
+	"github.com/epheo/dotvirt/internal/draft"
 	"github.com/epheo/dotvirt/internal/model"
 	"github.com/epheo/dotvirt/internal/validate"
 )
@@ -20,7 +21,7 @@ import (
 
 func (s *Server) handleEdit(w http.ResponseWriter, r *http.Request) {
 	sc, ns, name, ok := s.vmScope(w, r)
-	if !ok || !s.authorize(w, r, sc, verbUpdate, ssarVM, ns) {
+	if !ok || !s.gate(w, r, sc, vmAction(verbUpdate, ns)) {
 		return
 	}
 	req, ok := decode[model.EditRequest](w, r)
@@ -35,7 +36,7 @@ func (s *Server) handleEdit(w http.ResponseWriter, r *http.Request) {
 // it. Same gates as handleEdit: only someone who may stage asks.
 func (s *Server) handleEditPreview(w http.ResponseWriter, r *http.Request) {
 	sc, ns, name, ok := s.vmScope(w, r)
-	if !ok || !s.authorize(w, r, sc, verbUpdate, ssarVM, ns) {
+	if !ok || !s.gate(w, r, sc, vmAction(verbUpdate, ns)) {
 		return
 	}
 	edit, ok := decode[model.VMEdit](w, r)
@@ -58,10 +59,10 @@ func (s *Server) handleCreate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	sc, ok := s.resolveProject(w, r, byNamespace(p.Namespace))
-	if !ok || !s.authorize(w, r, sc, verbCreate, ssarVM, p.Namespace) {
+	if !ok || !s.gate(w, r, sc, vmAction(verbCreate, p.Namespace)) {
 		return
 	}
-	if dryRun(r) {
+	if isDryRun(r) {
 		p, err := s.draft.PreviewCreateVM(sc.id, sc.proj, raw)
 		respond(w, p, err)
 		return
@@ -75,7 +76,7 @@ func (s *Server) handleCreate(w http.ResponseWriter, r *http.Request) {
 // under its own RBAC, so the gate is the caller's own delete right.
 func (s *Server) handleDelete(w http.ResponseWriter, r *http.Request) {
 	sc, ns, name, ok := s.vmScope(w, r)
-	if !ok || !s.authorize(w, r, sc, verbDelete, ssarVM, ns) {
+	if !ok || !s.gate(w, r, sc, vmAction(verbDelete, ns)) {
 		return
 	}
 	result, err := s.draft.StageDelete(sc.id, sc.proj, "", ns, name)
@@ -109,7 +110,7 @@ func (s *Server) handleUnstage(w http.ResponseWriter, r *http.Request) {
 	var sc scope
 	var ok bool
 	if p := r.URL.Query().Get("project"); p != "" {
-		sc, ok = s.pickProject(w, r, p) // platform tier is gated; tenants resolve by name
+		sc, ok = s.pickDraft(w, r, p) // platform tier is gated; tenants resolve by name
 	} else {
 		sc, ok = s.resolveProject(w, r, byNamespace(r.PathValue("namespace")))
 	}
@@ -123,10 +124,23 @@ func (s *Server) handleUnstage(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
+// handlePropose opens a PR from the caller's draft of a project they see. The
+// coordinator weighs every entry again under the caller's token; a project
+// library entry, which no gate weighs, is weighed again here.
 func (s *Server) handlePropose(w http.ResponseWriter, r *http.Request) {
 	sc, ok := s.draftScope(w, r)
-	if !ok || !s.authorizeDraft(w, r, sc) {
+	if !ok {
 		return
+	}
+	if sc.proj.Name != platformProjectName {
+		view, err := s.draft.Get(sc.id, sc.proj)
+		if err != nil {
+			fail(w, err)
+			return
+		}
+		if touchesLibrary(view.Items) && !s.authorizeLibrary(w, r, sc) {
+			return
+		}
 	}
 	req, ok := decode[model.ProposeRequest](w, r)
 	if !ok {
@@ -139,18 +153,24 @@ func (s *Server) handlePropose(w http.ResponseWriter, r *http.Request) {
 	respond(w, result, err)
 }
 
+// handleDrift answers the VM detail's drift, with the caller's verdict on
+// resyncing the VM, weighed on the resync route's own path.
 func (s *Server) handleDrift(w http.ResponseWriter, r *http.Request) {
 	sc, ns, name, ok := s.vmScope(w, r)
 	if !ok {
 		return
 	}
 	result, err := s.reader.VMDrift(sc.proj, ns, name)
+	if err == nil && s.drift != nil {
+		need, nerr := s.draft.ResyncNeeds(sc.proj, ns, name)
+		result.CanResync = s.needsAllowed(r.Context(), sc.id, sc.cluster, need, nerr)
+	}
 	respond(w, result, err)
 }
 
 func (s *Server) handleAdopt(w http.ResponseWriter, r *http.Request) {
 	sc, ns, name, ok := s.vmScope(w, r)
-	if !ok || !s.authorize(w, r, sc, verbUpdate, ssarVM, ns) {
+	if !ok || !s.gate(w, r, sc, vmAction(verbUpdate, ns)) {
 		return
 	}
 	result, err := s.draft.Adopt(sc.id, sc.proj, ns, name)
@@ -160,18 +180,23 @@ func (s *Server) handleAdopt(w http.ResponseWriter, r *http.Request) {
 // handleAdoptNamespace brings a whole namespace under GitOps in one draft: everything
 // it runs that git does not describe, not only its VMs, so the namespace does not end
 // up half declared. The capture runs under the caller's own token, so a user adopts
-// exactly what their RBAC lets them read. One draft, proposed as one PR.
+// exactly what their RBAC lets them read, of the objects the gate would let
+// them bring under git (adoptableByRight). One draft, proposed as one PR.
 func (s *Server) handleAdoptNamespace(w http.ResponseWriter, r *http.Request) {
 	sc, ns, _, ok := s.vmScope(w, r)
-	if !ok || !s.authorize(w, r, sc, verbUpdate, ssarVM, ns) {
+	if !ok {
 		return
 	}
 	objs, unreadable, ok := s.captureAdoptable(w, r, sc, ns)
 	if !ok {
 		return
 	}
+	objs, denied, ok := s.adoptableByRight(w, r, sc, ns, objs)
+	if !ok {
+		return
+	}
 	result, err := s.draft.AdoptObjects(sc.id, sc.proj, ns, objs)
-	respond(w, withUnreadable(result, ns, unreadable), err)
+	respond(w, withUnreadable(result, ns, unreadable, denied), err)
 }
 
 // captureAdoptable runs the caller-token capture for one namespace ("" = the
@@ -220,27 +245,31 @@ func (s *Server) captureAdoptable(w http.ResponseWriter, r *http.Request, sc sco
 	return objs, unreadable, true
 }
 
-// withUnreadable appends the kinds the caller could not read to the view's
-// warning (appended, not assigned: the view may carry the derived prune warning).
-func withUnreadable(v model.DraftView, where string, unreadable []string) model.DraftView {
+// withUnreadable appends the kinds the caller could not read, and those they
+// may not create, to the view's warning (appended, not assigned: the view may
+// carry the derived prune warning).
+func withUnreadable(v model.DraftView, where string, unreadable, denied []string) model.DraftView {
 	if len(unreadable) > 0 {
 		v.Warning = changeset.JoinWarning(v.Warning, fmt.Sprintf("%s: you cannot read %s, so any of those stay outside git.",
 			where, strings.Join(unreadable, ", ")))
+	}
+	if len(denied) > 0 {
+		v.Warning = changeset.JoinWarning(v.Warning, fmt.Sprintf("%s: you may not create %s, so those stay outside git.",
+			where, strings.Join(denied, ", ")))
 	}
 	return v
 }
 
 func (s *Server) handleResync(w http.ResponseWriter, r *http.Request) {
 	// Resync runs the reconcile with dotvirt's SA, gated on the caller's OWN
-	// authority over the VM (not just namespace read): they may trigger a sync only
-	// if they could update the VM themselves - otherwise read access would escalate
-	// into an SA-privileged Argo sync. The SSAR runs inside Resync, beside the
-	// escalation, so no other caller can reach it unchecked.
+	// authority over what the sync applies (not just namespace read), weighed
+	// inside Resync beside the escalation, so no other caller can reach it
+	// unchecked.
 	sc, ns, name, ok := s.vmScope(w, r)
 	if !ok {
 		return
 	}
-	result, err := s.draft.Resync(r.Context(), sc.cluster.CanUpdateVM, sc.id.Username, ns, name)
+	result, err := s.draft.Resync(r.Context(), sc.id, sc.proj, ns, name)
 	s.recordTask("Resync", ns, name, sc.id.Username, err == nil)
 	respond(w, result, err)
 }
@@ -287,7 +316,7 @@ func (s *Server) handleHistory(w http.ResponseWriter, r *http.Request) {
 // page's Restore, which lands in the draft and is proposed like any edit.
 func (s *Server) handleRestore(w http.ResponseWriter, r *http.Request) {
 	sc, ns, name, ok := s.vmScope(w, r)
-	if !ok || !s.authorize(w, r, sc, verbUpdate, ssarVM, ns) {
+	if !ok || !s.gate(w, r, sc, vmAction(verbUpdate, ns)) {
 		return
 	}
 	hash, ok := hashBody(w, r)
@@ -296,6 +325,16 @@ func (s *Server) handleRestore(w http.ResponseWriter, r *http.Request) {
 	}
 	result, err := s.draft.RestoreVersion(sc.id, sc.proj, "", ns, name, hash)
 	respond(w, result, err)
+}
+
+// touchesLibrary reports whether items write a template library.
+func touchesLibrary(items []model.DraftItem) bool {
+	for _, it := range items {
+		if it.Resource == string(draft.ResourceTemplate) {
+			return true
+		}
+	}
+	return false
 }
 
 // hashBody reads the commit hash a restore or revert body names; ok=false means
@@ -365,7 +404,8 @@ func (s *Server) handleProposal(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleRevert proposes a forward commit reverting one commit in the project's
-// repo - a new PR, never a history rewrite.
+// repo - a new PR, never a history rewrite. The coordinator weighs each object
+// it changes; a project library file, which no gate weighs, is weighed here.
 func (s *Server) handleRevert(w http.ResponseWriter, r *http.Request) {
 	sc, ok := s.pickProject(w, r, r.PathValue("project"))
 	if !ok || !s.authorizeRepo(w, r, sc) {
@@ -374,6 +414,16 @@ func (s *Server) handleRevert(w http.ResponseWriter, r *http.Request) {
 	hash, ok := hashBody(w, r)
 	if !ok {
 		return
+	}
+	if sc.proj.Name != platformProjectName {
+		detail, err := s.reader.Commit(sc.proj, hash)
+		if err != nil {
+			fail(w, err)
+			return
+		}
+		if touchesLibrary(detail.Items) && !s.authorizeLibrary(w, r, sc) {
+			return
+		}
 	}
 	result, err := s.draft.Revert(sc.id, sc.proj, hash)
 	if err == nil {

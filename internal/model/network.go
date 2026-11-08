@@ -117,8 +117,10 @@ type NetworkCaps struct {
 	Namespace          bool `json:"namespace"`          // namespaces (New Project / Namespace)
 	EgressIP           bool `json:"egressIP"`           // Tier-0 SNAT
 	ExternalRoute      bool `json:"externalRoute"`      // Tier-0 external route
-	AdminNetworkPolicy bool `json:"adminNetworkPolicy"` // cluster-wide admin DFW (ANP/BANP)
-	// Platform is any platform authoring signal: the gate on the platform
-	// tier's whole-draft routes and its revert.
+	AdminNetworkPolicy bool `json:"adminNetworkPolicy"` // cluster-wide admin DFW (AdminNetworkPolicy)
+	// BaselineAdminNetworkPolicy is the cluster's baseline default policy.
+	BaselineAdminNetworkPolicy bool `json:"baselineAdminNetworkPolicy"`
+	// Platform is ClusterCaps.PlatformRead: the platform tier's shared reads
+	// (its history, proposals and revert).
 	Platform bool `json:"platform"`
 }
