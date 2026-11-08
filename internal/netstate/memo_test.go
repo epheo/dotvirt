@@ -379,7 +379,10 @@ func TestMemoConcurrentReaders(t *testing.T) {
 						s.Redact(st.Policy, st.Rule, scaleTenant(all))
 					}
 				}
-				_ = asJSON(t, []any{inv, pols, eff, res, networkViews(t, s)})
+				dst := scaleWorkload(151, "10.128.0.11")
+				ew := s.Trace(nil, scaleWorkload(150, "10.128.0.10"), &dst, "", "TCP", 443)
+				rules := s.NetworkRules([]string{scaleNS(0), scaleNS(1)}, scaleLabelsOf(), scaleTenant(all), "dotvirt.io/project")
+				_ = asJSON(t, []any{inv, pols, eff, res, ew, rules, networkViews(t, s)})
 			}
 		})
 	}

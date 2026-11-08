@@ -5,6 +5,9 @@ import (
 	"strings"
 	"testing"
 
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/labels"
+
 	"github.com/epheo/dotvirt/internal/model"
 )
 
@@ -296,5 +299,225 @@ func TestEffectiveANPPriorityNotes(t *testing.T) {
 	}
 	if !strings.Contains(notes["too-low"], "does not enforce priority 500") {
 		t.Errorf("too-low note = %q, want the unenforced flag", notes["too-low"])
+	}
+}
+
+func expr(key string, op metav1.LabelSelectorOperator, values ...string) *metav1.LabelSelector {
+	return &metav1.LabelSelector{MatchExpressions: []metav1.LabelSelectorRequirement{{Key: key, Operator: op, Values: values}}}
+}
+
+// A selector parsed at decode keeps its raw form for rendering and answers as
+// the library does: absent or empty selects everything, and one the library
+// rejects stays conditional, never a miss.
+func TestSelectorMatch(t *testing.T) {
+	web := map[string]string{"app": "web", "tier": "front"}
+	both := &metav1.LabelSelector{
+		MatchLabels:      map[string]string{"app": "web"},
+		MatchExpressions: []metav1.LabelSelectorRequirement{{Key: "tier", Operator: metav1.LabelSelectorOpNotIn, Values: []string{"back"}}},
+	}
+	cases := []struct {
+		name string
+		sel  *metav1.LabelSelector
+		lbls map[string]string
+		want match
+	}{
+		{"nil", nil, web, matchYes},
+		{"nil against no labels", nil, nil, matchYes},
+		{"empty", &metav1.LabelSelector{}, nil, matchYes},
+		{"empty, non-nil fields", &metav1.LabelSelector{MatchLabels: map[string]string{}, MatchExpressions: []metav1.LabelSelectorRequirement{}}, web, matchYes},
+		{"labels hit", &metav1.LabelSelector{MatchLabels: map[string]string{"app": "web"}}, web, matchYes},
+		{"labels miss", &metav1.LabelSelector{MatchLabels: map[string]string{"app": "db"}}, web, matchNo},
+		{"labels against no labels", &metav1.LabelSelector{MatchLabels: map[string]string{"app": "web"}}, nil, matchNo},
+		{"in", expr("tier", metav1.LabelSelectorOpIn, "front", "back"), web, matchYes},
+		{"in miss", expr("tier", metav1.LabelSelectorOpIn, "back"), web, matchNo},
+		{"notin", expr("tier", metav1.LabelSelectorOpNotIn, "front"), web, matchNo},
+		{"notin absent key", expr("zone", metav1.LabelSelectorOpNotIn, "a"), web, matchYes},
+		{"exists", expr("app", metav1.LabelSelectorOpExists), web, matchYes},
+		{"does not exist", expr("app", metav1.LabelSelectorOpDoesNotExist), web, matchNo},
+		{"labels and expressions", both, web, matchYes},
+		{"labels and expressions miss", both, map[string]string{"app": "web", "tier": "back"}, matchNo},
+		{"unknown operator", expr("app", "Bogus"), web, matchCond},
+		{"in without values", expr("app", metav1.LabelSelectorOpIn), web, matchCond},
+		{"invalid key", &metav1.LabelSelector{MatchLabels: map[string]string{"bad key": "x"}}, web, matchCond},
+		{"rejected against no labels", expr("app", "Bogus"), nil, matchCond},
+	}
+	for _, c := range cases {
+		sel := parseSelector(c.sel)
+		if sel.raw != c.sel {
+			t.Errorf("%s: raw selector not kept", c.name)
+		}
+		if got := sel.match(c.lbls); got != c.want {
+			t.Errorf("%s: match = %d, want %d", c.name, got, c.want)
+		}
+		if got := libraryMatch(c.sel, c.lbls); got != c.want {
+			t.Errorf("%s: library answers %d, want %d", c.name, got, c.want)
+		}
+	}
+	unparsed := selector{raw: &metav1.LabelSelector{MatchLabels: map[string]string{"app": "db"}}}
+	if got := unparsed.match(web); got != matchCond {
+		t.Errorf("a selector never parsed: match = %d, want conditional", got)
+	}
+}
+
+// A pod selector that selects every pod is definite even for a
+// namespace-level query; any other is conditional there.
+func TestPodMatch(t *testing.T) {
+	web := map[string]string{"app": "web"}
+	cases := []struct {
+		name      string
+		sel       *metav1.LabelSelector
+		podScoped bool
+		want      match
+	}{
+		{"nil, namespace-level", nil, false, matchYes},
+		{"empty, namespace-level", &metav1.LabelSelector{}, false, matchYes},
+		{"labels, namespace-level", &metav1.LabelSelector{MatchLabels: web}, false, matchCond},
+		{"labels hit", &metav1.LabelSelector{MatchLabels: web}, true, matchYes},
+		{"labels miss", &metav1.LabelSelector{MatchLabels: map[string]string{"app": "db"}}, true, matchNo},
+		{"rejected, namespace-level", expr("app", "Bogus"), false, matchCond},
+		{"rejected", expr("app", "Bogus"), true, matchCond},
+	}
+	for _, c := range cases {
+		if got := podMatch(parseSelector(c.sel), web, c.podScoped); got != c.want {
+			t.Errorf("%s: podMatch = %d, want %d", c.name, got, c.want)
+		}
+	}
+}
+
+// libraryMatch is the library's answer for a raw selector, parsed at the call.
+func libraryMatch(raw *metav1.LabelSelector, lbls map[string]string) match {
+	if emptySelector(raw) {
+		return matchYes
+	}
+	sl, err := metav1.LabelSelectorAsSelector(raw)
+	if err != nil {
+		return matchCond
+	}
+	if sl.Matches(labels.Set(lbls)) {
+		return matchYes
+	}
+	return matchNo
+}
+
+// Every selector a decoded policy matches with, subject and peer alike,
+// answers as the library does for its raw selector, and a policy whose
+// subject the library rejects still binds, conditionally.
+func TestDecodedSelectorsMatchLibrary(t *testing.T) {
+	s := New(nil, nil)
+	bogus := map[string]any{"matchExpressions": []any{map[string]any{"key": "env", "operator": "Bogus"}}}
+	add(t, s.netpol, map[string]any{
+		"apiVersion": "networking.k8s.io/v1", "kind": "NetworkPolicy",
+		"metadata": map[string]any{"name": "web", "namespace": "team-a"},
+		"spec": map[string]any{
+			"podSelector": map[string]any{"matchLabels": map[string]any{"app": "web"}},
+			"ingress": []any{map[string]any{"from": []any{
+				map[string]any{"namespaceSelector": map[string]any{"matchLabels": map[string]any{"env": "prod"}}, "podSelector": map[string]any{"matchLabels": map[string]any{"app": "db"}}},
+				map[string]any{"podSelector": map[string]any{"matchExpressions": []any{map[string]any{"key": "app", "operator": "NotIn", "values": []any{"web"}}}}},
+				map[string]any{"namespaceSelector": bogus},
+			}}},
+		},
+	})
+	add(t, s.anp, map[string]any{
+		"apiVersion": "policy.networking.k8s.io/v1alpha1", "kind": "AdminNetworkPolicy",
+		"metadata": map[string]any{"name": "ns-subject"},
+		"spec": map[string]any{
+			"priority": int64(10),
+			"subject": map[string]any{"namespaces": map[string]any{"matchExpressions": []any{
+				map[string]any{"key": "env", "operator": "In", "values": []any{"prod", "stage"}},
+			}}},
+			"ingress": []any{map[string]any{"action": "Allow", "from": []any{
+				map[string]any{"namespaces": map[string]any{"matchLabels": map[string]any{"env": "dev"}}},
+				map[string]any{"pods": map[string]any{
+					"namespaceSelector": map[string]any{"matchExpressions": []any{map[string]any{"key": "env", "operator": "Exists"}}},
+					"podSelector":       map[string]any{"matchLabels": map[string]any{"app": "monitor"}},
+				}},
+			}}},
+		},
+	})
+	add(t, s.anp, map[string]any{
+		"apiVersion": "policy.networking.k8s.io/v1alpha1", "kind": "AdminNetworkPolicy",
+		"metadata": map[string]any{"name": "pods-subject"},
+		"spec": map[string]any{
+			"priority": int64(20),
+			"subject": map[string]any{"pods": map[string]any{
+				"namespaceSelector": map[string]any{"matchLabels": map[string]any{"env": "prod"}},
+				"podSelector":       map[string]any{"matchExpressions": []any{map[string]any{"key": "app", "operator": "DoesNotExist"}}},
+			}},
+		},
+	})
+	add(t, s.anp, map[string]any{
+		"apiVersion": "policy.networking.k8s.io/v1alpha1", "kind": "AdminNetworkPolicy",
+		"metadata": map[string]any{"name": "unreadable"},
+		"spec":     map[string]any{"priority": int64(30), "subject": map[string]any{"namespaces": bogus}},
+	})
+	add(t, s.banp, map[string]any{
+		"apiVersion": "policy.networking.k8s.io/v1alpha1", "kind": "BaselineAdminNetworkPolicy",
+		"metadata": map[string]any{"name": "default"},
+		"spec": map[string]any{
+			"subject": map[string]any{"namespaces": map[string]any{}},
+			"ingress": []any{map[string]any{"action": "Deny", "from": []any{map[string]any{"namespaces": map[string]any{}}}}},
+		},
+	})
+	add(t, s.egressip, map[string]any{
+		"apiVersion": "k8s.ovn.org/v1", "kind": "EgressIP",
+		"metadata": map[string]any{"name": "pool"},
+		"spec": map[string]any{
+			"egressIPs":         []any{"192.0.2.10"},
+			"namespaceSelector": map[string]any{"matchLabels": map[string]any{"env": "prod"}},
+			"podSelector":       map[string]any{"matchLabels": map[string]any{"app": "web"}},
+		},
+	})
+	add(t, s.extroute, map[string]any{
+		"apiVersion": "k8s.ovn.org/v1", "kind": "AdminPolicyBasedExternalRoute",
+		"metadata": map[string]any{"name": "route"},
+		"spec": map[string]any{
+			"from":     map[string]any{"namespaceSelector": map[string]any{"matchLabels": map[string]any{"env": "dev"}}},
+			"nextHops": map[string]any{"static": []any{map[string]any{"ip": "198.51.100.1"}}},
+		},
+	})
+
+	var sels []selector
+	for _, p := range slices.Concat(s.sortedANPs(), s.baselines(), s.netpols.plane().all, s.egressIPs.plane().all, s.extRoutes.plane().all) {
+		sels = append(sels, p.subject.ns, p.subject.pod)
+		for _, r := range slices.Concat(p.ingress, p.egress) {
+			for _, pe := range r.peers {
+				sels = append(sels, pe.ns, pe.pod)
+			}
+		}
+	}
+	sets := []map[string]string{
+		nil,
+		{"env": "prod", "app": "web"},
+		{"env": "prod", "app": "db"},
+		{"env": "dev", "app": "monitor"},
+		{"env": "stage"},
+	}
+	seen := map[match]bool{}
+	for _, sel := range sels {
+		for _, lbls := range sets {
+			got, want := sel.match(lbls), libraryMatch(sel.raw, lbls)
+			if got != want {
+				t.Errorf("selector %s against %v: match = %d, library answers %d", metav1.FormatLabelSelector(sel.raw), lbls, got, want)
+			}
+			seen[got] = true
+		}
+	}
+	if !seen[matchYes] || !seen[matchNo] || !seen[matchCond] {
+		t.Errorf("verdicts covered: %v, want yes, no and conditional", seen)
+	}
+
+	eff := s.Effective("team-b", map[string]string{"env": "prod"}, map[string]string{"app": "web"}, true)
+	got := map[string]bool{}
+	for _, b := range eff.EastWest {
+		got[b.Policy.Name] = b.Conditional
+	}
+	if c, ok := got["unreadable"]; !ok || !c {
+		t.Errorf("a rejected subject must bind conditionally: %v", got)
+	}
+	if c, ok := got["ns-subject"]; !ok || c {
+		t.Errorf("a matching subject must bind definitely: %v", got)
+	}
+	if _, ok := got["pods-subject"]; ok {
+		t.Errorf("a pod subject that misses must not bind: %v", got)
 	}
 }

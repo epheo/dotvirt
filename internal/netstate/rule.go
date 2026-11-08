@@ -39,8 +39,8 @@ const (
 // without a namespaceSelector, which means the policy's own namespace.
 type peer struct {
 	kind      peerKind
-	ns, pod   *metav1.LabelSelector
-	nodes     *metav1.LabelSelector
+	ns, pod   selector
+	nodes     *metav1.LabelSelector // never matched, so never parsed
 	namespace string
 	cidrs     []string
 	except    []string
@@ -68,7 +68,7 @@ func netpolRule(peers []netgen.NetworkPolicyPeer, ports []netgen.PortDoc, ns str
 		case p.IPBlock != nil:
 			r.peers = append(r.peers, peer{kind: peerNetworks, cidrs: []string{p.IPBlock.CIDR}, except: p.IPBlock.Except})
 		case p.NamespaceSelector != nil || p.PodSelector != nil:
-			sel := peer{kind: peerSelector, ns: p.NamespaceSelector, pod: p.PodSelector}
+			sel := peer{kind: peerSelector, ns: parseSelector(p.NamespaceSelector), pod: parseSelector(p.PodSelector)}
 			if p.NamespaceSelector == nil {
 				sel.namespace = ns
 			}
@@ -85,13 +85,13 @@ func adminRule(action string, peers []netgen.AdminPeerDoc, ports []netgen.PortDo
 	for _, p := range peers {
 		switch {
 		case p.Namespaces != nil:
-			r.peers = append(r.peers, peer{kind: peerSelector, ns: p.Namespaces})
+			r.peers = append(r.peers, peer{kind: peerSelector, ns: parseSelector(p.Namespaces)})
 		case p.Pods != nil:
 			// The API requires both selectors, so an empty podSelector is no
 			// narrowing at all and reads as unconstrained, not as "pods any".
-			sel := peer{kind: peerSelector, ns: &p.Pods.NamespaceSelector}
+			sel := peer{kind: peerSelector, ns: parseSelector(&p.Pods.NamespaceSelector)}
 			if !emptySelector(&p.Pods.PodSelector) {
-				sel.pod = &p.Pods.PodSelector
+				sel.pod = parseSelector(&p.Pods.PodSelector)
 			}
 			r.peers = append(r.peers, sel)
 		case p.Networks != nil:
@@ -183,11 +183,11 @@ func (p peer) summary(red *Redaction) string {
 	switch p.kind {
 	case peerSelector:
 		var parts []string
-		if p.ns != nil {
-			parts = append(parts, "ns "+orAny(selectorSummary(p.ns, red), "any"))
+		if p.ns.raw != nil {
+			parts = append(parts, "ns "+orAny(selectorSummary(p.ns.raw, red), "any"))
 		}
-		if p.pod != nil {
-			parts = append(parts, "pods "+orAny(podSummary(p.pod, p.ns, red), "any"))
+		if p.pod.raw != nil {
+			parts = append(parts, "pods "+orAny(podSummary(p.pod.raw, p.ns.raw, red), "any"))
 		}
 		return strings.Join(parts, " ")
 	case peerNetworks:

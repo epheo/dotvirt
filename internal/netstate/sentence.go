@@ -86,7 +86,7 @@ func (p peer) phrase(red *Redaction) string {
 	case peerAny:
 		return "anywhere"
 	case peerSelector:
-		return vmsPhrase(p.ns, p.pod, p.namespace, red)
+		return vmsPhrase(p.ns.raw, p.pod.raw, p.namespace, red)
 	case peerNetworks:
 		s := addressesPhrase(p.cidrs)
 		if len(p.except) > 0 {
@@ -153,22 +153,22 @@ func (s subject) applies(ns string, red *Redaction) string {
 	if s.none {
 		return "nothing"
 	}
-	if s.ns == nil && ns != "" {
-		if emptySelector(s.pod) {
+	if s.ns.raw == nil && ns != "" {
+		if emptySelector(s.pod.raw) {
 			return "every VM in " + ns
 		}
-		return vmsPhrase(nil, s.pod, ns, red)
+		return vmsPhrase(nil, s.pod.raw, ns, red)
 	}
-	if emptySelector(s.pod) {
+	if emptySelector(s.pod.raw) {
 		switch {
-		case emptySelector(s.ns):
+		case emptySelector(s.ns.raw):
 			return "every namespace"
-		case netgen.NamespaceNames(s.ns) != nil || !red.confined(s.ns):
-			return "every VM in " + namespacesPhrase(s.ns, red)
+		case netgen.NamespaceNames(s.ns.raw) != nil || !red.confined(s.ns.raw):
+			return "every VM in " + namespacesPhrase(s.ns.raw, red)
 		}
-		return "namespaces labeled " + selectorSummary(s.ns, red)
+		return "namespaces labeled " + selectorSummary(s.ns.raw, red)
 	}
-	return vmsPhrase(s.ns, s.pod, "", red)
+	return vmsPhrase(s.ns.raw, s.pod.raw, "", red)
 }
 
 // isolation states what selecting VMs with a NetworkPolicy does beyond its

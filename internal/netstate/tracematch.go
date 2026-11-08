@@ -9,8 +9,6 @@ import (
 	"net/netip"
 	"strings"
 
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-
 	"github.com/epheo/dotvirt/internal/netgen"
 )
 
@@ -132,8 +130,8 @@ func (p peer) match(t peerTarget) matched {
 	return matched{m: matchCond, reason: reasonUnresolved}
 }
 
-func selMatch(sel *metav1.LabelSelector, lbls map[string]string) matched {
-	m := matchSelector(sel, lbls)
+func selMatch(sel selector, lbls map[string]string) matched {
+	m := sel.match(lbls)
 	if m == matchCond {
 		return matched{m: matchCond, reason: reasonSelector}
 	}
