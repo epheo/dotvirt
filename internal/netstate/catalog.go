@@ -150,7 +150,7 @@ func (s *Snapshot) failures(policy string) []model.UplinkFailure {
 		if node == "" {
 			node = strings.TrimSuffix(u.GetName(), "."+policy)
 		}
-		conds, _, _ := unstructured.NestedSlice(u.Object, "status", "conditions")
+		conds, _ := nestedSlice(u.Object, "status", "conditions")
 		for _, c := range conds {
 			m, _ := c.(map[string]any)
 			if (m["type"] != "Failing" && m["type"] != "Aborted") || m["status"] != "True" {
@@ -301,7 +301,7 @@ func isSystemNamespace(ns string) bool {
 // NodeNetworkState. The NNS name is the node name; interfaces live under
 // status.currentState in nmstate's own schema.
 func adaptersFromNNS(u *unstructured.Unstructured) []model.PhysicalAdapter {
-	ifaces, found, _ := unstructured.NestedSlice(u.Object, "status", "currentState", "interfaces")
+	ifaces, found := nestedSlice(u.Object, "status", "currentState", "interfaces")
 	if !found {
 		return nil
 	}
@@ -344,6 +344,17 @@ func nicRole(m map[string]any) string {
 	default:
 		return "enslaved"
 	}
+}
+
+// nestedSlice reads a list field in place; found is false when it is absent
+// or not a list. unstructured.NestedSlice deep-copies every entry, and a
+// host's interface list runs to hundreds of them; callers only read scalars
+// out of the entries and must never write through them (they are the
+// reflector store's objects).
+func nestedSlice(m map[string]any, keys ...string) (s []any, found bool) {
+	v, _, _ := unstructured.NestedFieldNoCopy(m, keys...)
+	s, found = v.([]any)
+	return s, found
 }
 
 func str(v any) string { s, _ := v.(string); return s }
