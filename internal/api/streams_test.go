@@ -43,6 +43,26 @@ func TestTTLBackstopBound(t *testing.T) {
 	}
 }
 
+// An entry reviewed right after a grant move serves the short TTL even while
+// every watch runs, so the backstop keeps the short period until no such
+// entry can still be serving: its expiry is noticed within seconds, not at
+// the next long tick.
+func TestTTLBackstopShortWhileReviewsSettle(t *testing.T) {
+	bus := eventbus.New()
+	st, _ := watchedState(t, bus) // its initial lists are grant moves
+	s := NewServer(Deps{State: st, Bus: bus, Reader: &fakeDraft{}, Draft: &fakeDraft{}})
+	if s.authTTL() != visibleTTL {
+		t.Fatal("every watch runs, yet entries do not serve the long TTL")
+	}
+	if got := s.backstopTTL(); got != unwatchedTTL {
+		t.Errorf("right after a grant move the backstop follows %s, want the short %s", got, unwatchedTTL)
+	}
+	last := grantSettle + unwatchedTTL // the newest unsettled entry expires here
+	if !unsettledMayServe(last) || unsettledMayServe(last+backstopTick) {
+		t.Error("the short period does not end one tick after the last unsettled entry expires")
+	}
+}
+
 // A watch failing puts the backstop on the short period at the next tick, so
 // a revocation the watches miss waits seconds, not the rest of a long period.
 func TestTTLBackstopSwitchesAtTheNextTick(t *testing.T) {
