@@ -21,7 +21,10 @@ test('base views, light and dark', async ({ page }) => {
 	await login(page);
 	await shot(page, 'compute-summary');
 
-	await page.locator('main').getByRole('link', { name: 'VMs', exact: true }).click();
+	await page
+		.locator('main')
+		.getByRole('link', { name: /^VMs [\d,]+$/ })
+		.click();
 	await shot(page, 'vm-table');
 
 	await page.locator('main tbody tr', { hasText: 'web-1' }).first().click();

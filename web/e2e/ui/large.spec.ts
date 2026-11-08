@@ -44,7 +44,7 @@ test('the tree and the all-VMs table render a 300-VM fleet', async ({ page }) =>
 	// The table pages: one page renders, the footer says where it sits.
 	await page.goto('/compute');
 	const main = page.locator('main');
-	await main.getByRole('link', { name: 'VMs', exact: true }).click();
+	await main.getByRole('link', { name: /^VMs [\d,]+$/ }).click();
 	const grid = main.getByRole('grid', { name: 'VMs' });
 	await expect(grid.locator('tbody tr')).toHaveCount(50);
 	const pages = main.getByRole('navigation', { name: 'Pages' });
@@ -56,7 +56,7 @@ test('the tree and the all-VMs table render a 300-VM fleet', async ({ page }) =>
 
 test('selection reaches past the page; a filter starts over at page 1', async ({ page }) => {
 	const main = page.locator('main');
-	await main.getByRole('link', { name: 'VMs', exact: true }).click();
+	await main.getByRole('link', { name: /^VMs [\d,]+$/ }).click();
 	const pages = main.getByRole('navigation', { name: 'Pages' });
 	await pages.getByRole('button', { name: 'Next page' }).click();
 	await main.getByLabel('Select this page').check();

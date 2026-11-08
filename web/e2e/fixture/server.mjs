@@ -719,6 +719,31 @@ async function handleAPI(req, res, url) {
 	if (m)
 		return sendJSON(res, 200, { ...effectiveFor(s, m[1], ''), vm: undefined, labels: undefined });
 
+	// --- hosts: the maintenance verbs ---
+	// Cordon and maintenance flip the scenario's node, so the next read (the
+	// host's own, the list) says what changed; evacuate counts the running VMs
+	// placed there as requested.
+	m = path.match(/^\/api\/nodes\/([^/]+)\/(cordon|maintenance|evacuate)$/);
+	if (m && req.method === 'POST') {
+		const n = s.nodes.find((x) => x.name === m[1]);
+		if (!n) return sendText(res, 404, `node ${m[1]} not found`);
+		if (m[2] === 'evacuate') {
+			const here = s.inventory.projects
+				.flatMap((p) => p.namespaces.flatMap((ns) => ns.vms))
+				.filter((v) => v.nodeName === n.name && v.phase === 'Running');
+			return sendJSON(res, 200, { requested: here.length, failures: [] });
+		}
+		const body = await readBody(req);
+		if (m[2] === 'cordon') n.unschedulable = !!body?.unschedulable;
+		else {
+			n.maintenance = !!body?.enter;
+			n.unschedulable = !!body?.enter;
+		}
+		res.writeHead(204);
+		return res.end();
+	}
+	// --- end hosts ---
+
 	m = path.match(/^\/api\/nodes\/([^/]+)$/);
 	if (m) {
 		const n = s.nodes.find((x) => x.name === m[1]);

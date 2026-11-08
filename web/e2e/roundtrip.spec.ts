@@ -61,7 +61,7 @@ test('create → Synced → delete → gone, observed in the inventory', async (
 		// through dotvirt's watch. Scoped to main: the TaskDock's transient "Proposed" and
 		// "Configuration drift" rows carry the same VM name.
 		const main = page.locator('main');
-		await main.getByRole('link', { name: 'VMs', exact: true }).click();
+		await main.getByRole('link', { name: /^VMs [\d,]+$/ }).click();
 		const row = main.getByRole('row', { name: new RegExp(vm) });
 		await expect(row).toBeVisible({ timeout: SYNC_TIMEOUT });
 		await expect(row.locator('td[title="In sync with git"]')).toBeVisible({
@@ -78,7 +78,7 @@ test('create → Synced → delete → gone, observed in the inventory', async (
 		await expect(page.getByRole('button', { name: /^New$/ })).toBeVisible();
 		await proposeAndMerge(page, PROJECT, `e2e: delete ${vm}`);
 
-		await main.getByRole('link', { name: 'VMs', exact: true }).click();
+		await main.getByRole('link', { name: /^VMs [\d,]+$/ }).click();
 		await expect(main.getByRole('row', { name: new RegExp(vm) })).toHaveCount(0, {
 			timeout: SYNC_TIMEOUT,
 		});

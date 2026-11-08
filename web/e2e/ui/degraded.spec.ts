@@ -14,7 +14,7 @@ test('live-plane outage is a banner, not silently stopped VMs', async ({ page })
 	await expect(page.getByText(/live VM state unavailable/)).toBeVisible();
 	// The git plane still renders: the VM exists, without invented live facts.
 	const main = page.locator('main');
-	await main.getByRole('link', { name: 'VMs', exact: true }).click();
+	await main.getByRole('link', { name: /^VMs [\d,]+$/ }).click();
 	await expect(main.getByText('db-1')).toBeVisible();
 });
 

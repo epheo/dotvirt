@@ -1425,6 +1425,25 @@ const capsDenied = {
 	},
 };
 
+// --- hosts: hosts that need a person ---
+// worker-2 is not ready and worker-1 runs above 90% memory: the Hosts root
+// counts both, each with the host to open.
+const hosttrouble = {
+	...base,
+	name: 'hosttrouble',
+	nodes: base.nodes.map((n) => (n.name === 'worker-2' ? { ...n, ready: false } : n)),
+	metrics: {
+		...base.metrics,
+		hostLoad: {
+			...base.metrics.hostLoad,
+			nodes: base.metrics.hostLoad.nodes.map((n) =>
+				n.node === 'worker-1' ? { ...n, mem: 94 } : n,
+			),
+		},
+	},
+};
+// --- end hosts ---
+
 export const scenarios = {
 	residue,
 	sso,
@@ -1445,4 +1464,5 @@ export const scenarios = {
 	uploadoff,
 	metricsoff,
 	caps: capsDenied,
+	hosttrouble,
 };

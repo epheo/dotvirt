@@ -12,7 +12,7 @@ test('base: shell, tree and VM table render from the stream', async ({ page }) =
 	await expect(aside.getByText('team-db')).toBeVisible();
 
 	const main = page.locator('main');
-	await main.getByRole('link', { name: 'VMs', exact: true }).click();
+	await main.getByRole('link', { name: /^VMs [\d,]+$/ }).click();
 	await expect(main.getByRole('link', { name: 'web-1', exact: true })).toBeVisible();
 	await expect(main.getByRole('link', { name: 'web-2', exact: true })).toBeVisible();
 
@@ -40,7 +40,10 @@ test('base: shell, tree and VM table render from the stream', async ({ page }) =
 test('base: VM detail opens with live facts and tabs', async ({ page }) => {
 	await setScenario(page, 'base');
 	await login(page);
-	await page.locator('main').getByRole('link', { name: 'VMs', exact: true }).click();
+	await page
+		.locator('main')
+		.getByRole('link', { name: /^VMs [\d,]+$/ })
+		.click();
 	await page
 		.locator('tbody tr', { hasText: 'web-1' })
 		.first()
@@ -113,7 +116,7 @@ test('base: the summary shows changes in scope; the table names open PRs per VM'
 	// The merge feed's PR #40 is the applied revision, so it reads live.
 	await expect(card.locator('li', { hasText: 'PR #40' })).toContainText('Live');
 
-	await main.getByRole('link', { name: 'VMs', exact: true }).click();
+	await main.getByRole('link', { name: /^VMs [\d,]+$/ }).click();
 	const web1 = main.locator('tbody tr', { hasText: 'web-1' }).first();
 	await expect(web1.getByRole('link', { name: /PR #42 by bob: balancer/ })).toBeVisible();
 	const db1 = main.locator('tbody tr', { hasText: 'db-1' }).first();

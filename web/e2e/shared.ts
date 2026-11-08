@@ -17,7 +17,10 @@ export async function signIn(page: Page, token: string) {
 // name link (a plain row click opens the side peek); the first row when no
 // name is given.
 export async function openVM(page: Page, name?: string) {
-	await page.locator('main').getByRole('link', { name: 'VMs', exact: true }).click();
+	await page
+		.locator('main')
+		.getByRole('link', { name: /^VMs [\d,]+$/ })
+		.click();
 	const rows = page.locator('main tbody tr', name ? { hasText: name } : undefined);
 	const row = rows.first();
 	await expect(row).toBeVisible();

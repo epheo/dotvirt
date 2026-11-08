@@ -155,7 +155,10 @@ test('#146: SSO pending guides instead of offering a failing button', async ({ p
 test('bulk selection stages a power change per VM', async ({ page }) => {
 	await setScenario(page, 'base');
 	await login(page);
-	await page.locator('main').getByRole('link', { name: 'VMs', exact: true }).click();
+	await page
+		.locator('main')
+		.getByRole('link', { name: /^VMs [\d,]+$/ })
+		.click();
 	await page.getByLabel('Select web-1').check();
 	await page.getByLabel('Select web-2').check();
 	await page.locator('main tbody tr', { hasText: 'web-1' }).click({ button: 'right' });
@@ -231,7 +234,10 @@ test('context-menu Edit settings on another VM opens on that VM', async ({ page 
 test('the click that closes a context menu does not select the row under it', async ({ page }) => {
 	await setScenario(page, 'base');
 	await login(page);
-	await page.locator('main').getByRole('link', { name: 'VMs', exact: true }).click();
+	await page
+		.locator('main')
+		.getByRole('link', { name: /^VMs [\d,]+$/ })
+		.click();
 	const rows = page.locator('main tbody tr');
 	// Open from the row's last cell so the menu hangs clear of the name cells.
 	await rows.filter({ hasText: 'web-1' }).locator('td').last().click({ button: 'right' });
