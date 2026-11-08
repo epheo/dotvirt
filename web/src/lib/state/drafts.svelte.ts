@@ -41,6 +41,9 @@ class DraftsStore {
 			? [...inventory.projectNames, PLATFORM_PROJECT]
 			: inventory.projectNames;
 		if (!names.length) {
+			// The gen bump above orphans any refresh in flight, so its finally
+			// will not clear the flag: this answer must.
+			this.refreshing = false;
 			this.drafts = [];
 			this.failed = [];
 			// An empty project set is a real answer once the inventory has landed -

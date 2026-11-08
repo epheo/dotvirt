@@ -52,6 +52,8 @@ func testScheme(t *testing.T) *runtime.Scheme {
 		s.AddKnownTypeWithName(gvk, &unstructured.Unstructured{})
 		s.AddKnownTypeWithName(gvk.GroupVersion().WithKind(kind+"List"), &unstructured.UnstructuredList{})
 	}
+	s.AddKnownTypeWithName(install.ArgoCDGVK, &unstructured.Unstructured{})
+	s.AddKnownTypeWithName(install.ArgoCDGVK.GroupVersion().WithKind("ArgoCDList"), &unstructured.UnstructuredList{})
 	s.AddKnownTypeWithName(install.RouteGVK, &unstructured.Unstructured{})
 	s.AddKnownTypeWithName(install.RouteGVK.GroupVersion().WithKind("RouteList"), &unstructured.UnstructuredList{})
 	return s

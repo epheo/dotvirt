@@ -1,5 +1,13 @@
 <script lang="ts">
-	import { Check, Power, RotateCw, Server, Trash2, TriangleAlert } from '@lucide/svelte';
+	import {
+		Check,
+		GitPullRequest,
+		Power,
+		RotateCw,
+		Server,
+		Trash2,
+		TriangleAlert,
+	} from '@lucide/svelte';
 	import { api, type DraftItem } from '#lib/api.js';
 	import { memoryHint } from '#lib/headroom.js';
 	import { action } from '#lib/resource.svelte.js';
@@ -25,6 +33,14 @@
 	const lane = $derived(drafts.drafts.find((d) => d.project === project)?.draft);
 	const prune = $derived(lane?.prune ?? []);
 
+	// This user's open PR for the project's draft. A propose rebuilds it with
+	// what it carries plus this draft: an empty title retitles it for the
+	// whole, and its description keeps its own text unless new text is given,
+	// so the draft-only defaults are not the PR's.
+	const openPR = $derived(
+		inventory.proposals.find((p) => p.project === project && p.mine && !p.revert),
+	);
+
 	// Prefilled once, never reset by a drafts refresh mid-typing.
 	let title = $state('');
 	let message = $state('');
@@ -32,7 +48,7 @@
 	let filled = false;
 	$effect(() => {
 		if (!filled && lane) {
-			title = lane.defaultTitle ?? '';
+			title = openPR ? '' : (lane.defaultTitle ?? '');
 			filled = true;
 		}
 	});
@@ -51,7 +67,10 @@
 		const items = lane?.items ?? [];
 		const n = items.reduce((t, it) => t + (it.kind === 'edit' ? it.changes.length : 1), 0);
 		const noun = items.every(isVM) ? 'VM' : 'object';
-		return `${n} change${n === 1 ? '' : 's'} to ${items.length} ${noun}${items.length === 1 ? '' : 's'}. Opens one pull request on ${lane?.base ?? 'main'}.`;
+		const where = openPR
+			? `Adds to PR #${openPR.prNumber}`
+			: `Opens one pull request on ${lane?.base ?? 'main'}`;
+		return `${n} change${n === 1 ? '' : 's'} to ${items.length} ${noun}${items.length === 1 ? '' : 's'}. ${where}.`;
 	});
 
 	// What merging does to each object, worst first: deletes, restarts, power
@@ -132,7 +151,7 @@
 		if (op.busy || (prune.length && !ack)) return;
 		// Read before the refresh empties the lane.
 		const declared = changeSummary(lane?.items ?? []);
-		const prTitle = title.trim() || lane?.defaultTitle || '';
+		const prTitle = title.trim() || (openPR ? openPR.title : lane?.defaultTitle) || '';
 		const ok = await op.run(async () => {
 			const r = await api.propose(project, title.trim(), editingText ? message : '');
 			if (r.prNumber)
@@ -145,9 +164,28 @@
 				});
 			drafts.refresh();
 			ui.toastProposed(project, r);
+			if (r.warning) ui.showToast(r.warning, { kind: 'warning' });
 		});
 		if (ok) onclose();
 	}
+
+	// A refused propose, said where the button is: the server's sentence
+	// names the way forward, and a PR it names is one click away. The
+	// transport prefix and the error kind are not for the reader.
+	const refused = $derived.by(() => {
+		const m = /^\S+: (\d{3}) (.*)$/s.exec(op.error);
+		if (!m) return op.error ? { status: 0, text: op.error, pr: undefined } : null;
+		const text = m[2].replace(
+			/^(conflict|temporarily unavailable|invalid request|not found|forbidden): /,
+			'',
+		);
+		const n = Number(/#(\d+)/.exec(text)?.[1]);
+		return {
+			status: Number(m[1]),
+			text,
+			pr: inventory.proposals.find((p) => p.project === project && p.prNumber === n),
+		};
+	});
 </script>
 
 <Modal title="Propose to {project}" subtitle={lane ? scale : undefined} size="3xl" drawer {onclose}>
@@ -161,6 +199,21 @@
 			{/each}
 		</ol>
 
+		{#if lane && openPR}
+			<p class="flex items-start gap-2 rounded border border-line bg-inset px-3 py-2 text-ink-soft">
+				<GitPullRequest size={14} class="mt-0.5 shrink-0 text-accent-ink" />
+				<span
+					>This adds to <a
+						class="text-accent-ink hover:underline"
+						href={openPR.prURL}
+						target="_blank"
+						rel="noopener">PR #{openPR.prNumber}</a
+					>{openPR.title ? `, ${openPR.title}` : ''}. The PR is rebuilt on {lane.base} with what it already
+					carries and these changes.</span
+				>
+			</p>
+		{/if}
+
 		{#if !lane}
 			<p class="text-ink-muted">Nothing staged in {project}.</p>
 		{:else}
@@ -168,8 +221,17 @@
 				<span class="text-xs font-semibold tracking-wide text-ink-muted uppercase"
 					>Pull request title</span
 				>
-				<TextInput bind:value={title} suggest={lane.defaultTitle} data-autofocus />
-				<span class="block text-xs text-ink-muted">Written from the changes. Edit freely.</span>
+				<TextInput
+					bind:value={title}
+					suggest={openPR ? undefined : lane.defaultTitle}
+					placeholder={openPR ? 'Leave empty to title it for everything it carries' : undefined}
+					data-autofocus
+				/>
+				<span class="block text-xs text-ink-muted"
+					>{openPR
+						? `Leave empty and PR #${openPR.prNumber} is retitled for everything it carries.`
+						: 'Written from the changes. Edit freely.'}</span
+				>
 			</label>
 
 			<section class="space-y-2">
@@ -273,21 +335,63 @@
 							variant="link"
 							size="sm"
 							onclick={() => {
-								message = lane.defaultBody ?? '';
+								message = openPR ? '' : (lane.defaultBody ?? '');
 								editingText = true;
-							}}>Edit text</Button
+							}}>{openPR ? 'Write new text' : 'Edit text'}</Button
 						>
 					{/if}
 				</div>
 				{#if editingText}
 					<TextArea bind:value={message} rows={8} mono aria-label="Pull request description" />
+				{:else if openPR}
+					<p class="rounded border border-line bg-inset px-3 py-2 text-xs text-ink-soft">
+						PR #{openPR.prNumber} keeps its own text, and its list of changes is rewritten to cover everything
+						it carries.
+					</p>
 				{:else}
 					<pre
 						class="rounded border border-line bg-inset px-3 py-2 font-sans text-xs whitespace-pre-wrap text-ink-soft">{lane.defaultBody}</pre>
 				{/if}
 			</section>
 
-			<ErrorNote error={op.error} />
+			{#if refused}
+				<div
+					role="alert"
+					class="space-y-2 rounded border border-danger/40 bg-danger-soft px-3 py-2.5"
+				>
+					<p class="flex items-start gap-2 text-danger-ink">
+						<TriangleAlert size={14} class="mt-0.5 shrink-0" />
+						<span
+							><strong
+								>{refused.status === 503
+									? 'Not proposed yet.'
+									: refused.status === 409
+										? 'Not proposed: this needs a decision first.'
+										: 'Not proposed.'}</strong
+							>
+							{refused.text}</span
+						>
+					</p>
+					{#if refused.pr || refused.status === 503}
+						<div class="flex gap-2 pl-6">
+							{#if refused.pr}
+								<Button
+									size="sm"
+									variant="secondary"
+									href={refused.pr.prURL}
+									target="_blank"
+									rel="noopener">Open PR #{refused.pr.prNumber}</Button
+								>
+							{/if}
+							{#if refused.status === 503}
+								<Button size="sm" variant="secondary" disabled={op.busy} onclick={propose}
+									>Try again</Button
+								>
+							{/if}
+						</div>
+					{/if}
+				</div>
+			{/if}
 		{/if}
 	</div>
 
@@ -298,7 +402,8 @@
 		<Button variant="ghost" onclick={onclose}>Keep editing</Button>
 		<div class="flex flex-col items-end gap-1">
 			<Button onclick={propose} disabled={!lane || op.busy || blocked}>
-				{op.busy ? 'Opening...' : 'Open pull request'}
+				{#if openPR}{op.busy ? 'Updating...' : `Add to PR #${openPR.prNumber}`}
+				{:else}{op.busy ? 'Opening...' : 'Open pull request'}{/if}
 			</Button>
 			{#if blocked}<span class="text-xs text-danger-ink">Tick the deletion box to continue</span
 				>{/if}

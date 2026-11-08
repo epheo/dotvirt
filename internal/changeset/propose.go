@@ -153,11 +153,15 @@ func (r *Reader) OpenProposals(proj project.ProjectInfo) ([]model.Proposal, erro
 	if req, found, rerr := fc.RequiredApprovals(r.baseBranch); rerr == nil && found {
 		required = req
 	}
+	// The heads come from the mirror the reviews render from, read only when
+	// it is open: a clone must not stall the refresher. A head left empty is
+	// filled by a later pass (a GitChanged or the backstop).
+	read, _ := r.repos.Peek(proj.Repo)
 	prev := r.getReviewed(key)
 	next := make(map[int]reviewed, len(open))
 	out := make([]model.Proposal, 0, len(open))
 	for _, pr := range open {
-		p := r.proposalRow(proj, pr)
+		p := r.proposalRow(proj, pr, read)
 		p.RequiredApprovals = required
 		rv, ok := prev[pr.Number]
 		if !ok || !rv.settled(pr) {
@@ -202,11 +206,16 @@ func (r *Reader) setReviewed(repo string, prs map[int]reviewed) {
 
 // proposalRow is a PR's identity as the lane carries it. By comes from the
 // head branch the way the task feed attributes merges, since dotvirt's bot
-// posts every proposal.
-func (r *Reader) proposalRow(proj project.ProjectInfo, pr forge.PR) model.Proposal {
+// posts every proposal. read is the project's mirror, nil when it is
+// unavailable.
+func (r *Reader) proposalRow(proj project.ProjectInfo, pr forge.PR, read *git.Repo) model.Proposal {
+	head := ""
+	if read != nil {
+		head = read.BranchHash(pr.Head.Ref)
+	}
 	return model.Proposal{
 		Project: proj.Name, PRNumber: pr.Number, PRURL: pr.HTMLURL, Title: pr.Title,
-		Branch: pr.Head.Ref,
+		Branch: pr.Head.Ref, Head: head,
 		By:     tasks.MergeAuthor(pr.Head.Ref, r.proposed, pr.User.Login),
 		Revert: strings.HasPrefix(pr.Head.Ref, r.proposed+"/"+tasks.RevertSegment+"/"),
 	}

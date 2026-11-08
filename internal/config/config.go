@@ -108,6 +108,10 @@ type Config struct {
 	OAuthCA           string
 
 	ArgoEnabled bool // enable ArgoCD drift reads + re-sync
+	// ArgoNamespace holds the per-project sync ServiceAccounts Argo impersonates
+	// (tenancy.SyncAccount); the project grants dotvirt stages name them. Empty
+	// stages owner grants only.
+	ArgoNamespace string
 }
 
 // Load builds a Config from flags, with env-var fallbacks for secrets.
@@ -150,6 +154,7 @@ func Load(args []string) (*Config, error) {
 	// Default on: ArgoCD is the normal deployment shape. The off switch stays for
 	// dev/BYO runs without Argo, whose Application reflector would error-loop.
 	fs.BoolVar(&c.ArgoEnabled, "argo", envBool("DOTVIRT_ARGO", true), "enable ArgoCD drift reads (set -argo=false on clusters without ArgoCD)")
+	fs.StringVar(&c.ArgoNamespace, "argo-namespace", os.Getenv("DOTVIRT_ARGO_NAMESPACE"), "ArgoCD namespace holding the per-project sync ServiceAccounts the project grants name (empty: owner grants only)")
 
 	if err := fs.Parse(args); err != nil {
 		return nil, err

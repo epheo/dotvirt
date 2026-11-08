@@ -162,6 +162,27 @@ func TestProposalsLaneIsProjectScoped(t *testing.T) {
 	}
 }
 
+// TestProposalsHeadMoveWakesHub pins the review caches' invalidation: a PR
+// whose head moves under the same number is a lane change, so the clients
+// keyed on the head re-read its review.
+func TestProposalsHeadMoveWakesHub(t *testing.T) {
+	fd := &fakeDraft{prs: map[string]model.Proposal{
+		"team-a": {Project: "team-a", PRNumber: 7, Head: "aaa"},
+	}}
+	s := NewServer(Deps{Reader: fd, Draft: fd})
+	id := auth.Identity{Token: "tok-alice", Username: "alice"}
+	s.proposalsFor(id, []project.ProjectInfo{{Name: "team-a", Repo: "http://x/r.git"}}, false)
+	if !s.refreshProposals(true) {
+		t.Fatal("a PR should wake the hub")
+	}
+	fd.mu.Lock()
+	fd.prs["team-a"] = model.Proposal{Project: "team-a", PRNumber: 7, Head: "bbb"}
+	fd.mu.Unlock()
+	if !s.refreshProposals(true) {
+		t.Fatal("a moved head should wake the hub")
+	}
+}
+
 // TestProposalsPlatformProjectSticky pins the platform lane's lifecycle: the
 // synthetic "platform" project is config-only and never in discovery, so a
 // propose into it tracks it explicitly; a build whose platform review failed

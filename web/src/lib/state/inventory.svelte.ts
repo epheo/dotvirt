@@ -88,7 +88,7 @@ class InventoryStore {
 	// into a PR and a merge/close clears the lane - possibly from another tab.
 	readonly proposalsKey = $derived(
 		this.proposals
-			.map((p) => prKey(p.project, p.prNumber))
+			.map((p) => `${prKey(p.project, p.prNumber)}#${p.head ?? ''}`)
 			.sort()
 			.join('\0'),
 	);

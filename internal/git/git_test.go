@@ -86,7 +86,7 @@ func TestMirrorTracksBranchesOnly(t *testing.T) {
 		}
 		return nil
 	})
-	if r.branchHash("feature") == "" {
+	if r.BranchHash("feature") == "" {
 		t.Fatal("clone missed a branch")
 	}
 
@@ -94,10 +94,10 @@ func TestMirrorTracksBranchesOnly(t *testing.T) {
 	if err := r.refresh(); err != nil {
 		t.Fatalf("refresh: %v", err)
 	}
-	if r.branchHash("feature") != "" {
+	if r.BranchHash("feature") != "" {
 		t.Error("a branch deleted on the remote survived the refresh")
 	}
-	if r.branchHash("main") == "" {
+	if r.BranchHash("main") == "" {
 		t.Error("refresh lost main")
 	}
 }
@@ -128,7 +128,7 @@ func TestLongReadDoesNotBlockReads(t *testing.T) {
 
 	done := make(chan error, 1)
 	go func() {
-		if r.branchHash("main") == "" {
+		if r.BranchHash("main") == "" {
 			done <- errors.New("main did not resolve")
 			return
 		}
