@@ -77,10 +77,14 @@ func (c *Cache[V]) Do(ctx context.Context, key string, fill func() (V, error)) (
 }
 
 // Get returns the cached value for key if present and unexpired.
-func (c *Cache[V]) Get(key string) (V, bool) {
+func (c *Cache[V]) Get(key string) (V, bool) { return c.GetWithin(key, c.ttl) }
+
+// GetWithin is Get for a caller whose own bound on an entry's age, maxAge, may
+// be shorter than the cache's TTL right now.
+func (c *Cache[V]) GetWithin(key string, maxAge time.Duration) (V, bool) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	if e, ok := c.m[key]; ok && time.Since(e.at) < c.ttl {
+	if e, ok := c.m[key]; ok && time.Since(e.at) < min(c.ttl, maxAge) {
 		return e.val, true
 	}
 	var zero V
@@ -93,7 +97,11 @@ func (c *Cache[V]) Get(key string) (V, bool) {
 // would be a token-spray memory leak; evict-on-write closes that. The sweep runs
 // at most once per TTL: per write, a spray would make every write scan the map
 // under the lock every request takes.
-func (c *Cache[V]) Put(key string, val V) {
+func (c *Cache[V]) Put(key string, val V) { c.PutAt(key, val, time.Now()) }
+
+// PutAt is Put for a value as of at: one derived from a read that began then
+// ages from then, not from when the read returned.
+func (c *Cache[V]) PutAt(key string, val V, at time.Time) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	now := time.Now()
@@ -105,7 +113,7 @@ func (c *Cache[V]) Put(key string, val V) {
 		}
 		c.swept = now
 	}
-	c.m[key] = entry[V]{val: val, at: now}
+	c.m[key] = entry[V]{val: val, at: at}
 }
 
 // Delete drops key.

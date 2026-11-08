@@ -215,7 +215,7 @@ func TestVisibleForTTLFollowsTheWatches(t *testing.T) {
 	probes := func(s *Server) int {
 		t.Helper()
 		// The entry a review left a minute ago.
-		s.visible.Put(restfactory.TokenKey(id.Token), visibleSet{ns: map[string]bool{"tenant-a": true}, ver: s.rbacVersion(), at: time.Now().Add(-time.Minute)})
+		s.visible.PutAt(restfactory.TokenKey(id.Token), visibleSet{ns: map[string]bool{"tenant-a": true}, ver: s.rbacVersion()}, time.Now().Add(-time.Minute))
 		c, lists := listCountingClient("tenant-a")
 		if got, err := s.visibleFor(context.Background(), id, c); err != nil || !got["tenant-a"] {
 			t.Fatalf("visibleFor: %v, %v", got, err)

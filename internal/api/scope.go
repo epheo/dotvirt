@@ -19,19 +19,17 @@ import (
 )
 
 // visibleSet is a token's visible-namespace set stamped with the RBAC version it was
-// derived at and when; the read is valid only while that version still matches the
-// bus and the entry is younger than authTTL.
+// derived at; the read is valid only while that version still matches the bus and
+// the entry is younger than authTTL.
 type visibleSet struct {
 	ns  map[string]bool
 	ver uint64
-	at  time.Time
 }
 
 // ssarVerdict is one (token, question) SSAR verdict, stamped the same way.
 type ssarVerdict struct {
 	ok  bool
 	ver uint64
-	at  time.Time
 }
 
 // unwatchedTTL is how long a cached visible set or verdict serves while some
@@ -49,9 +47,6 @@ func (s *Server) authTTL() time.Duration {
 	}
 	return unwatchedTTL
 }
-
-// fresh reports whether an entry cached at at still serves.
-func (s *Server) fresh(at time.Time) bool { return time.Since(at) < s.authTTL() }
 
 // rbacVersion is the change-version a token's derived authorization depends on: a
 // watched grant move OR a namespace add/remove/relabel can change what it may see.
@@ -112,19 +107,20 @@ func review[V any](ctx context.Context, cache *ttlcache.Cache[V], key string, ve
 func (s *Server) visibleFor(ctx context.Context, id auth.Identity, c *cluster.Client) (map[string]bool, error) {
 	ver := s.rbacVersion()
 	key := restfactory.TokenKey(id.Token)
-	if e, ok := s.visible.Get(key); ok && e.ver == ver && s.fresh(e.at) {
+	if e, ok := s.visible.GetWithin(key, s.authTTL()); ok && e.ver == ver {
 		return e.ns, nil
 	}
 	e, err := review(ctx, s.visible, key, ver, func(ctx context.Context) (visibleSet, error) {
+		start := time.Now()
 		names, err := c.VisibleNamespaces(ctx, namespaceNames(s.state.Namespaces()))
 		if err != nil {
 			return visibleSet{}, err
 		}
-		e := visibleSet{ns: make(map[string]bool, len(names)), ver: ver, at: time.Now()}
+		e := visibleSet{ns: make(map[string]bool, len(names)), ver: ver}
 		for _, n := range names {
 			e.ns[n] = true
 		}
-		s.visible.Put(key, e)
+		s.visible.PutAt(key, e, start)
 		return e, nil
 	})
 	if err != nil {
@@ -138,21 +134,23 @@ func (s *Server) visibleFor(ctx context.Context, id auth.Identity, c *cluster.Cl
 // read on a polled or broadcast path does not post an SSAR per request. A
 // watched grant or namespace move invalidates lazily via the stamp; authTTL
 // backstops what no watch observes (see RunTTLBackstop). Only a verdict is
-// cached: a failed review is returned, so a blip can never pin a denial. A gate answers the error with s.reviewFailed; a
-// UI signal or a filter reads it as no.
+// cached: a failed review is returned, so a blip can never pin a denial. A
+// gate answers the error with s.reviewFailed; a UI signal or a filter reads it
+// as no.
 func (s *Server) can(ctx context.Context, id auth.Identity, c *cluster.Client, verb string, ref ssarRef, ns string) (bool, error) {
 	ver := s.rbacVersion()
 	k := strings.Join([]string{restfactory.TokenKey(id.Token), verb, ref.group, ref.resource, ns}, "\x00")
-	if e, ok := s.ssar.Get(k); ok && e.ver == ver && s.fresh(e.at) {
+	if e, ok := s.ssar.GetWithin(k, s.authTTL()); ok && e.ver == ver {
 		return e.ok, nil
 	}
 	e, err := review(ctx, s.ssar, k, ver, func(ctx context.Context) (ssarVerdict, error) {
+		start := time.Now()
 		ok, err := c.Can(ctx, verb, ref.group, ref.resource, ns)
 		if err != nil {
 			return ssarVerdict{}, err
 		}
-		e := ssarVerdict{ok: ok, ver: ver, at: time.Now()}
-		s.ssar.Put(k, e)
+		e := ssarVerdict{ok: ok, ver: ver}
+		s.ssar.PutAt(k, e, start)
 		return e, nil
 	})
 	return e.ok, err

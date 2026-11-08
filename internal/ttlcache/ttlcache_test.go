@@ -169,3 +169,24 @@ func TestDoAbortedFill(t *testing.T) {
 		t.Errorf("a waiter on a panicked fill got %v, want errFillAborted", err)
 	}
 }
+
+// An entry serves within the tighter of the cache's TTL and the caller's
+// bound, aging from the time it was stored as of.
+func TestGetWithinAndPutAt(t *testing.T) {
+	c := New[int](time.Hour)
+	c.PutAt("old", 1, time.Now().Add(-time.Minute))
+	c.Put("new", 2)
+	if _, ok := c.GetWithin("old", 30*time.Second); ok {
+		t.Error("a minute-old entry served a 30s bound")
+	}
+	if v, ok := c.GetWithin("old", 5*time.Minute); !ok || v != 1 {
+		t.Error("a minute-old entry missed a 5m bound")
+	}
+	if _, ok := c.GetWithin("new", 2*time.Hour); !ok {
+		t.Error("a fresh entry missed")
+	}
+	c.PutAt("ancient", 3, time.Now().Add(-2*time.Hour))
+	if _, ok := c.GetWithin("ancient", 3*time.Hour); ok {
+		t.Error("a bound past the TTL extended an entry")
+	}
+}
