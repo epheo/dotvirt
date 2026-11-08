@@ -49,17 +49,28 @@ func RequireDNS1123List(field string, names []string) error {
 }
 
 // RequireNetworkRef refuses ref unless it names a NetworkAttachmentDefinition
-// as <namespace>/<name> or <name>, both DNS-1123 labels: the name also becomes
-// a VM interface name.
+// as <namespace>/<name> or <name>: a namespace and an object name.
 func RequireNetworkRef(field, ref string) error {
 	ns, name, qualified := strings.Cut(ref, "/")
 	if !qualified {
-		return RequireDNS1123(field, ns)
+		return RequireObjectName(field, ns)
 	}
 	if err := RequireDNS1123(field+" namespace", ns); err != nil {
 		return err
 	}
-	return RequireDNS1123(field, name)
+	return RequireObjectName(field, name)
+}
+
+// vmInterfaceName is KubeVirt's own rule for a VM interface name.
+var vmInterfaceName = regexp.MustCompile(`^[A-Za-z0-9_-]+$`)
+
+// RequireInterfaceName refuses s unless KubeVirt accepts it as a VM interface
+// name: letters, digits, '-' and '_'.
+func RequireInterfaceName(field, s string) error {
+	if !vmInterfaceName.MatchString(s) {
+		return fmt.Errorf("%w: %s %q may hold only letters, digits, '-' and '_'", model.ErrInvalid, field, s)
+	}
+	return nil
 }
 
 // RequireObjectName refuses s unless it is a DNS-1123 subdomain: the

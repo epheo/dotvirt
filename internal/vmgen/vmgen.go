@@ -141,7 +141,8 @@ func validateSpec(s Spec) error {
 		}
 	}
 	for _, n := range s.Networks {
-		errs = append(errs, validate.RequireNetworkRef("network", n.Name))
+		errs = append(errs, validate.RequireNetworkRef("network", n.Name),
+			validate.RequireInterfaceName("network interface name", model.InterfaceName(n.Name)))
 	}
 	return errors.Join(errs...)
 }
