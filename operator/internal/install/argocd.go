@@ -8,6 +8,7 @@ import (
 
 	dotvirtv1alpha1 "github.com/epheo/dotvirt/operator/api/v1alpha1"
 	"github.com/epheo/dotvirt/pkg/forge"
+	"github.com/epheo/dotvirt/pkg/tenancy"
 )
 
 // repoCredsName is the Argo repo-credentials template secret (in the ArgoCD ns).
@@ -17,9 +18,11 @@ const (
 	argoGroup   = "argoproj.io"
 	argoVersion = "v1alpha1"
 
-	// projectTenants / projectPlatform are the two AppProject tiers.
-	projectTenants  = "dotvirt-tenants"
-	projectPlatform = "dotvirt-platform"
+	// TenantsProjectName is the shared tenant tier (TenantsAppProject);
+	// projectPlatform is the privileged tier. Per-project AppProjects are named
+	// by tenancy.AppProjectName.
+	TenantsProjectName = "dotvirt-tenants"
+	projectPlatform    = "dotvirt-platform"
 
 	// appTargetRevision is the branch every dotvirt Application syncs, spelled once so
 	// the tenant template and the platform app cannot drift apart.
@@ -87,12 +90,27 @@ func RepoCredsSecret(dv *dotvirtv1alpha1.Dotvirt, argoNS, urlPrefix, username, t
 	}
 }
 
-// TenantsAppProject permits namespaced workloads ONLY - clusterResourceWhitelist is
-// empty, so a tenant repo cannot reconcile a CUDN/NNCP/Namespace even though the
-// shared Argo controller SA could. This is the enforcement boundary. operatorNS +
-// argoNS are denied as destinations so a tenant can't target platform space.
+// tenantWhitelist is what a tenant repo may hold: tenancy.TenantKinds, the
+// list dotvirt stages by, so neither side admits what the other refuses.
+// clusterResourceWhitelist stays empty, so a tenant repo cannot reconcile a
+// CUDN/NNCP/Namespace even though the shared Argo controller SA could.
+func tenantWhitelist(spec map[string]any) map[string]any {
+	kinds := make([]any, 0, len(tenancy.TenantKinds))
+	for _, k := range tenancy.TenantKinds {
+		kinds = append(kinds, map[string]any{"group": k.Group, "kind": k.Kind})
+	}
+	spec["clusterResourceWhitelist"] = []any{}
+	spec["namespaceResourceWhitelist"] = kinds
+	return spec
+}
+
+// TenantsAppProject is the shared tenant tier: any namespace outside platform
+// space, any repo of the forge owner. That is wide enough for one tenant's repo
+// to write into another's namespace, so it is rendered only while an
+// Application still references it, which keeps those Applications syncing
+// until the ApplicationSet moves them to their own TenantAppProject.
 func TenantsAppProject(dv *dotvirtv1alpha1.Dotvirt, argoNS, platformRepo, operatorNS string) *unstructured.Unstructured {
-	return argoObject("AppProject", projectTenants, argoNS, dv, map[string]any{
+	return argoObject("AppProject", TenantsProjectName, argoNS, dv, tenantWhitelist(map[string]any{
 		"description": "dotvirt tenant projects — namespaced workloads only.",
 		"sourceRepos": []any{repoPrefix(platformRepo)},
 		"destinations": []any{
@@ -102,18 +120,40 @@ func TenantsAppProject(dv *dotvirtv1alpha1.Dotvirt, argoNS, platformRepo, operat
 			map[string]any{"server": inClusterServer, "namespace": "!" + operatorNS},
 			map[string]any{"server": inClusterServer, "namespace": "!" + argoNS},
 		},
-		"clusterResourceWhitelist": []any{},
-		"namespaceResourceWhitelist": []any{
-			map[string]any{"group": "kubevirt.io", "kind": "VirtualMachine"},
-			map[string]any{"group": "cdi.kubevirt.io", "kind": "DataVolume"},
-			map[string]any{"group": "k8s.ovn.org", "kind": "UserDefinedNetwork"},
-			map[string]any{"group": "k8s.cni.cncf.io", "kind": "NetworkAttachmentDefinition"},
-			// The Tier-1 gateway firewall - namespace-scoped, authored into the tenant repo.
-			map[string]any{"group": "k8s.ovn.org", "kind": "EgressFirewall"},
-			// The east-west Distributed Firewall.
-			map[string]any{"group": "networking.k8s.io", "kind": "NetworkPolicy"},
-		},
-	})
+	}))
+}
+
+// ProjectLabel and RepoAnnotation are the namespace keys naming a project and
+// its repo. The app is started with them and the tenant AppProjects derive
+// from them, so both read the same tenancy.
+const (
+	ProjectLabel   = "dotvirt.io/project"
+	RepoAnnotation = "dotvirt.io/repo"
+)
+
+// TenantAppProject, named name (tenancy.AppProjectName), confines one project's
+// Application to exactly its own namespaces and repos. Argo checks the
+// Application's destination and every object's namespace against
+// destinations, so a manifest merged into this project's repo cannot land in
+// another tenant's namespace. No namespaces or repos permit nothing: a project
+// whose namespaces are gone while its Application is still being removed, or
+// whose repo does not resolve. Labeled with the project, which is how a pass
+// finds the ones it no longer derives.
+func TenantAppProject(dv *dotvirtv1alpha1.Dotvirt, argoNS, name, project string, namespaces, sourceRepos []string) *unstructured.Unstructured {
+	destinations := make([]any, 0, len(namespaces))
+	for _, ns := range namespaces {
+		destinations = append(destinations, map[string]any{"server": inClusterServer, "namespace": ns})
+	}
+	repos := toAny(sourceRepos)
+	u := argoObject("AppProject", name, argoNS, dv, tenantWhitelist(map[string]any{
+		"description":  "dotvirt project " + project + ": its own namespaces and repo only.",
+		"sourceRepos":  repos,
+		"destinations": destinations,
+	}))
+	labels := u.GetLabels()
+	labels[ProjectLabel] = project
+	u.SetLabels(labels)
+	return u
 }
 
 // PlatformAppProject is the only tier allowed cluster-scoped + tenancy objects.
@@ -156,7 +196,7 @@ func PlatformAppProject(dv *dotvirtv1alpha1.Dotvirt, argoNS, platformRepo string
 // prune+selfHeal is safe against a repo that lost its content because ArgoCD's
 // automated.allowEmpty defaults to false: a source that yields zero resources is
 // refused rather than applied, so an emptied or unclonable repo cannot wipe a tier.
-func argoAppSpec(project, repoURL string) map[string]any {
+func argoAppSpec(project, repoURL, namespace string) map[string]any {
 	return map[string]any{
 		"project": project,
 		"source": map[string]any{
@@ -170,7 +210,7 @@ func argoAppSpec(project, repoURL string) map[string]any {
 			// nested <ns>/<vm>.yaml).
 			"directory": map[string]any{"recurse": true, "include": "*.yaml", "exclude": "templates/*"},
 		},
-		"destination": map[string]any{"server": inClusterServer, "namespace": "default"},
+		"destination": map[string]any{"server": inClusterServer, "namespace": namespace},
 		"syncPolicy": map[string]any{
 			"automated":   map[string]any{"prune": true, "selfHeal": true},
 			"syncOptions": []any{"CreateNamespace=false"},
@@ -182,5 +222,5 @@ func argoAppSpec(project, repoURL string) map[string]any {
 // privileged tier, deliberately NOT generated by the ApplicationSet (so the
 // privileged app's existence never flows through dotvirt's dynamic project list).
 func PlatformApplication(dv *dotvirtv1alpha1.Dotvirt, argoNS, platformRepo string) *unstructured.Unstructured {
-	return argoObject("Application", "dotvirt-platform", argoNS, dv, argoAppSpec(projectPlatform, platformRepo))
+	return argoObject("Application", "dotvirt-platform", argoNS, dv, argoAppSpec(projectPlatform, platformRepo, "default"))
 }

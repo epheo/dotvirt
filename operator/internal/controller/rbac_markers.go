@@ -3,8 +3,8 @@ package controller
 // The operator's OWN least-privilege RBAC (generated into config/rbac/role.yaml). Verbs
 // are exactly what the controller's client does: install.Apply is server-side-apply, i.e.
 // create+patch (never update); only the kinds it watches (dotvirts, secrets,
-// deployments, routes) get watch; prune's label-selected sweep is list on each rendered
-// kind plus delete BY NAME (below). The operator does NOT author ClusterRoles - it only
+// deployments, routes, namespaces) get watch; prune's label-selected sweep is list on
+// each rendered kind plus delete BY NAME (below). The operator does NOT author ClusterRoles - it only
 // `bind`s the three static operand roles - so it needs no `escalate` and no
 // ClusterRole/RoleBinding writes.
 // +kubebuilder:rbac:groups=dotvirt.io,resources=dotvirts,verbs=get;list;watch;update
@@ -29,6 +29,9 @@ package controller
 // +kubebuilder:rbac:groups=route.openshift.io,resources=routes/custom-host,verbs=create;update
 // +kubebuilder:rbac:groups=networking.k8s.io,resources=ingresses,verbs=list;create;patch
 // +kubebuilder:rbac:groups=argoproj.io,resources=appprojects;applications;applicationsets,verbs=list;create;patch
+// namespaces list/watch: the project-labeled namespaces the tenant AppProjects are
+// derived from (the cache selects on the project label; CacheByObject).
+// +kubebuilder:rbac:groups="",resources=namespaces,verbs=list;watch
 // clusterrolebindings: the operator creates the bindings that wire the static operand roles
 // to the dotvirt SA / Argo controller / platform-admins.
 // +kubebuilder:rbac:groups=rbac.authorization.k8s.io,resources=clusterrolebindings,verbs=list;create;patch
@@ -40,6 +43,10 @@ package controller
 // delete one object at a time, never a collection): a cluster-wide grant would let
 // the operator delete any Secret or binding in the cluster. A name missing here is
 // skipped by prune and left behind; TestDeleteGrantCoversEveryRenderedName fails first.
+// AppProjects are the one exception: one per tenant project, named after it, so no
+// resourceNames list can cover them. The unscoped grant is bounded by what it reaches
+// (ArgoCD permission sets, which Argo-admin RBAC guards and Argo itself needs to apply
+// anything) and by prune, which deletes only AppProjects carrying this install's labels.
 // +kubebuilder:rbac:groups=apps,resources=deployments,resourceNames=dotvirt;dotvirt-forgejo,verbs=delete
 // +kubebuilder:rbac:groups="",resources=services;serviceaccounts,resourceNames=dotvirt;dotvirt-forgejo,verbs=delete
 // +kubebuilder:rbac:groups=networking.k8s.io,resources=networkpolicies;ingresses,resourceNames=dotvirt;dotvirt-forgejo,verbs=delete
@@ -47,6 +54,6 @@ package controller
 // +kubebuilder:rbac:groups="",resources=secrets,resourceNames=dotvirt-appset-plugin;dotvirt-repo-creds,verbs=delete
 // +kubebuilder:rbac:groups="",resources=configmaps,resourceNames=dotvirt-appset-plugin,verbs=delete
 // +kubebuilder:rbac:groups=rbac.authorization.k8s.io,resources=clusterrolebindings,resourceNames=dotvirt;dotvirt-argocd-apply;dotvirt-platform-network-admin,verbs=delete
-// +kubebuilder:rbac:groups=argoproj.io,resources=appprojects,resourceNames=dotvirt-tenants;dotvirt-platform,verbs=delete
+// +kubebuilder:rbac:groups=argoproj.io,resources=appprojects,verbs=delete
 // +kubebuilder:rbac:groups=argoproj.io,resources=applications,resourceNames=dotvirt-platform,verbs=delete
 // +kubebuilder:rbac:groups=argoproj.io,resources=applicationsets,resourceNames=dotvirt-projects,verbs=delete
