@@ -551,3 +551,52 @@ func TestClusterRuleIdentityFollowsTheCallersRBAC(t *testing.T) {
 		t.Errorf("a failed review lists a cluster rule: %s", body)
 	}
 }
+
+// A caller who may create cluster rules but not list them is refused a held
+// priority without the name of the rule holding it.
+func TestHeldPriorityNamesTheHolderToListersOnly(t *testing.T) {
+	fc := newFakeCluster(t)
+	var lists atomic.Bool
+	fc.ssar = func(token string, a *authzv1.ResourceAttributes) bool {
+		return token == adminToken && (a.Verb != verbList || a.Resource != "adminnetworkpolicies" || lists.Load())
+	}
+	gv := "policy.networking.k8s.io/v1alpha1"
+	fc.on(http.MethodGet, "/apis/"+gv, func(w http.ResponseWriter, _ *http.Request) {
+		writeObj(w, metav1.APIResourceList{
+			TypeMeta:     metav1.TypeMeta{Kind: "APIResourceList", APIVersion: "v1"},
+			GroupVersion: gv,
+			APIResources: []metav1.APIResource{{Name: "adminnetworkpolicies", Kind: "AdminNetworkPolicy", Verbs: []string{"list", "watch"}}},
+		})
+	})
+	fc.on(http.MethodGet, "/apis/"+gv+"/adminnetworkpolicies", unstructuredList(gv, "AdminNetworkPolicy", map[string]any{
+		"apiVersion": gv, "kind": "AdminNetworkPolicy",
+		"metadata": map[string]any{"name": "lockdown", "resourceVersion": "1"},
+		"spec":     map[string]any{"priority": int64(5), "subject": map[string]any{"namespaces": map[string]any{}}},
+	}))
+	s := fc.server(&planeDraft{}, Config{PlatformRepo: platformRepo})
+	ns := netstate.New(fc.sa, nil)
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	ns.Run(ctx)
+	s.netstate = ns
+	for deadline := time.Now().Add(10 * time.Second); len(ns.Policies()) == 0; time.Sleep(10 * time.Millisecond) {
+		if time.Now().After(deadline) {
+			t.Fatal("netstate never synced the live ANP")
+		}
+	}
+
+	refusal := func() string {
+		t.Helper()
+		rec := do(s, adminToken, http.MethodPost, "/api/adminnetworkpolicies", `{"name":"other","priority":5}`)
+		wantStatus(t, rec, http.StatusConflict)
+		return rec.Body.String()
+	}
+	if body := refusal(); strings.Contains(body, "lockdown") || !strings.Contains(body, "another cluster rule") {
+		t.Errorf("a caller who may not list cluster rules reads = %s", body)
+	}
+	lists.Store(true)
+	s.bus.Publish(eventbus.RBACChanged)
+	if body := refusal(); !strings.Contains(body, `"lockdown"`) {
+		t.Errorf("a caller who may list cluster rules reads = %s", body)
+	}
+}
