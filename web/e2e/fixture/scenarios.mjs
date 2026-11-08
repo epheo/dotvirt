@@ -1084,6 +1084,54 @@ const uploadoff = {
 	},
 };
 
+// --- unfinished boot images ---
+// Two boot images a user added in batch-prod that never became ready: a
+// download the cluster cannot reach (CDI retries it, so its error says it
+// failed) and one still downloading. GET /api/uploads answers their status
+// from imageStatus; DELETE /api/images removes either. unfinished is base
+// with them, nodelete the same for a caller who may not delete boot images;
+// scale carries them too.
+const UNFINISHED = [
+	{
+		name: 'noble-nightly',
+		namespace: 'batch-prod',
+		ready: false,
+		removable: true,
+		import: { kind: 'url', source: 'https://mirror.lab.example/noble/nightly.img' },
+	},
+	{
+		name: 'fedora-43-beta',
+		namespace: 'batch-prod',
+		ready: false,
+		removable: true,
+		import: { kind: 'registry', source: 'quay.io/containerdisks/fedora:43' },
+	},
+];
+const UNFINISHED_STATUS = {
+	'batch-prod/noble-nightly': {
+		phase: 'ImportInProgress',
+		ready: false,
+		progress: 'N/A',
+		error:
+			'Unable to connect to http data source: Get "https://mirror.lab.example/noble/nightly.img": dial tcp: lookup mirror.lab.example: no such host',
+	},
+	'batch-prod/fedora-43-beta': { phase: 'ImportInProgress', ready: false, progress: '63.5%' },
+};
+function withUnfinishedImages(s, over = {}) {
+	return {
+		...s,
+		options: { ...s.options, osImages: [...s.options.osImages, ...UNFINISHED] },
+		imageStatus: UNFINISHED_STATUS,
+		...over,
+	};
+}
+const unfinished = withUnfinishedImages(base, { name: 'unfinished' });
+const nodelete = withUnfinishedImages(base, {
+	name: 'nodelete',
+	capabilities: { default: { bootImageDelete: false } },
+});
+// --- end unfinished boot images ---
+
 // metricsoff: every metrics view answers with a reason and no numbers.
 const metricsoff = { ...base, name: 'metricsoff', metricsUnavailable: 'forbidden' };
 
@@ -1516,12 +1564,14 @@ export const scenarios = {
 	access: accessScenario(),
 	// A full platform at the boards' numbers (2,846 VMs, 131 networks, 3,412
 	// disks); see scale.mjs.
-	scale: withScaleAttachments(withScaleNetworking(scaleScenario(base))),
+	scale: withUnfinishedImages(withScaleAttachments(withScaleNetworking(scaleScenario(base)))),
 	dupnames,
 	tenant: tenantView(base, 'team-web'),
 	noboot,
 	noupload,
 	uploadoff,
+	unfinished,
+	nodelete,
 	metricsoff,
 	caps: capsDenied,
 	hosttrouble,

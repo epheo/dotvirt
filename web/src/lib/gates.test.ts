@@ -10,6 +10,7 @@ import { ACCESS_UNKNOWN, NOT_IN_GIT } from './authoring';
 import {
 	clusterGate,
 	hostGate,
+	imageGate,
 	objectGate,
 	projectGate,
 	repoGate,
@@ -37,6 +38,18 @@ async function answer(body: unknown) {
 	caps.ns('web');
 	await flush();
 }
+
+describe('imageGate', () => {
+	it('offers deleting a boot image on its own field', async () => {
+		await answer({
+			namespace: { namespace: 'web', bootImageImport: true, bootImageDelete: false },
+		});
+		expect(imageGate.import('web').ok).toBe(true);
+		expect(imageGate.delete('web').why).toBe('You may not delete boot images in web.');
+		await answer({ namespace: { namespace: 'web', bootImageDelete: true } });
+		expect(imageGate.delete('web').ok).toBe(true);
+	});
+});
 
 describe('vmEditGate', () => {
 	it('names git first, then the right to change VMs there', async () => {

@@ -40,6 +40,7 @@ export const vmGate = {
 export const imageGate = {
 	upload: (n: string) => ns(n, (c) => c.bootImageCreate, 'add boot images'),
 	import: (n: string) => ns(n, (c) => c.bootImageImport, 'add boot images'),
+	delete: (n: string) => ns(n, (c) => c.bootImageDelete, 'delete boot images'),
 };
 
 // An edit to a VM needs git to hold it, then the right to change VMs there.

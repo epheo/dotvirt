@@ -9,6 +9,8 @@ import {
 	diskShared,
 	filtersFromQuery,
 	filtersToQuery,
+	imageDeleteConsequence,
+	imageProgress,
 	imageUsage,
 	importUsage,
 	libraryTiles,
@@ -727,5 +729,56 @@ describe('suggestImageName', () => {
 		);
 		expect(suggestImageName('url', 'https://images.example.org/')).toBe('');
 		expect(suggestImageName('url', '')).toBe('');
+	});
+});
+
+describe('an unfinished boot image', () => {
+	const st = (phase: string, more: { progress?: string; error?: string } = {}) => ({
+		phase,
+		ready: phase === 'UploadReady',
+		...more,
+	});
+
+	it('says failed from the error CDI keeps while it retries, whatever the phase', () => {
+		expect(
+			imageProgress(st('ImportInProgress', { progress: 'N/A', error: 'no such host' }), true),
+		).toEqual({ tone: 'danger', text: 'Failed: no such host' });
+		expect(imageProgress(st('Failed'), true)).toEqual({ tone: 'danger', text: 'Failed' });
+	});
+
+	it('tells a download moving from an upload waiting for its file', () => {
+		expect(imageProgress(st('ImportInProgress', { progress: '42.0%' }), true).text).toBe(
+			'Downloading, 42.0%',
+		);
+		expect(imageProgress(st('ImportInProgress', { progress: 'N/A' }), true).text).toBe(
+			'Downloading',
+		);
+		expect(imageProgress(st('ImportInProgress', { progress: '10.0%' }), false).text).toBe(
+			'Importing, 10.0%',
+		);
+		expect(imageProgress(st('UploadReady'), false)).toEqual({
+			tone: 'warn',
+			text: 'Waiting for its file to upload',
+		});
+		expect(imageProgress(st('ImportScheduled'), true).text).toBe('Preparing storage');
+		expect(imageProgress(st('CloneInProgress'), true)).toEqual({
+			tone: 'none',
+			text: 'CloneInProgress',
+		});
+	});
+
+	it('says what a delete takes, and that disks made from it stay', () => {
+		expect(imageDeleteConsequence('noble', 0)).toBe(
+			'Removes noble and its disk. It never finished, so no VM was made from it.',
+		);
+		expect(imageDeleteConsequence('noble', 0, 'download')).toBe(
+			'Stops the download and removes noble and its disk. It has not finished, so no VM was made from it.',
+		);
+		expect(imageDeleteConsequence('noble', 1)).toBe(
+			'Removes noble and its disk. The disk made from it stays.',
+		);
+		expect(imageDeleteConsequence('noble', 1200)).toBe(
+			'Removes noble and its disk. The 1,200 disks made from it stay.',
+		);
 	});
 });

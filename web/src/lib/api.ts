@@ -557,6 +557,10 @@ export const api = {
 		get<gen.UploadStatus>(`/api/uploads/${enc(namespace)}/${enc(name)}`),
 	uploadToken: (namespace: string, name: string) =>
 		post<gen.UploadToken>(`/api/uploads/${enc(namespace)}/${enc(name)}/token`, {}),
+	// Removes a boot image that never finished: its DataSource, its disk and
+	// claim. The server refuses a ready one.
+	deleteImage: (namespace: string, name: string) =>
+		del(`/api/images/${enc(namespace)}/${enc(name)}`),
 	quotas: (scope: ScopeQuery) => get<gen.NamespaceQuota[]>(`/api/quotas${scopeQS(scope)}`),
 	adopt: (namespace: string, name: string) =>
 		post<DraftView>(`${vmPath(namespace, name)}/adopt`, {}),
