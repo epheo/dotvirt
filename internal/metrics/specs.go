@@ -24,6 +24,12 @@ var ranges = map[string]rangeSpec{
 
 const defaultRange = "1h"
 
+// span is the spec's window ending now.
+func (s rangeSpec) span() span {
+	end := time.Now().Unix()
+	return span{start: end - int64(s.window.Seconds()), end: end, step: int(s.step.Seconds())}
+}
+
 // resolveRange maps a UI range to its spec, defaulting unknown ranges.
 func resolveRange(rng string) (string, rangeSpec) {
 	if spec, ok := ranges[rng]; ok {
@@ -111,25 +117,38 @@ func chartSpecs(ns, name, rw string) []chartSpec {
 	}
 }
 
+// topK is how many of the heaviest VMs a top-consumer query ranks.
+const topK = 5
+
+// topVMs ranks the topK heaviest VMs of expr.
+func topVMs(expr string) string {
+	return fmt.Sprintf("topk(%d, sum by(namespace,name)(%s))", topK, expr)
+}
+
+// scopeChart is one top-consumer chart: ONE topk query over a scope
+// selector, whose result series are the heaviest VMs, labeled namespace/name.
+type scopeChart struct {
+	chartSpec
+	query func(sel string) string
+}
+
 // scopeChartSpecs builds the per-VM top-consumer charts for a container scope
-// (the whole inventory, a project, a namespace, or a node). Each chart is ONE
-// topk query whose result series are the heaviest VMs, labeled namespace/name.
-// sel is the namespace(+node) selector, rw the rate() window.
-func scopeChartSpecs(sel, rw string) []chartSpec {
-	topk := func(expr string) string { return fmt.Sprintf("topk(5, sum by(namespace,name)(%s))", expr) }
-	rate := func(metric string) string { return fmt.Sprintf("rate(%s%s[%s])", metric, sel, rw) }
-	return []chartSpec{
-		{"cpu", "CPU - top VMs", "cores", false, []seriesSpec{
-			{"", topk(rate("kubevirt_vmi_cpu_usage_seconds_total")), ""},
+// (the whole inventory, a project, a namespace, or a node). rw is the rate()
+// window.
+func scopeChartSpecs(rw string) []scopeChart {
+	rate := func(metric, sel string) string { return fmt.Sprintf("rate(%s%s[%s])", metric, sel, rw) }
+	return []scopeChart{
+		{chartSpec{key: "cpu", title: "CPU - top VMs", unit: "cores"}, func(sel string) string {
+			return topVMs(rate("kubevirt_vmi_cpu_usage_seconds_total", sel))
 		}},
-		{"memory", "Memory - top VMs", "bytes", false, []seriesSpec{
-			{"", topk(fmt.Sprintf("kubevirt_vmi_memory_used_bytes%s", sel)), ""},
+		{chartSpec{key: "memory", title: "Memory - top VMs", unit: "bytes"}, func(sel string) string {
+			return topVMs("kubevirt_vmi_memory_used_bytes" + sel)
 		}},
-		{"network", "Network - top VMs", "Bps", false, []seriesSpec{
-			{"", topk(rate("kubevirt_vmi_network_receive_bytes_total") + " + " + rate("kubevirt_vmi_network_transmit_bytes_total")), ""},
+		{chartSpec{key: "network", title: "Network - top VMs", unit: "Bps"}, func(sel string) string {
+			return topVMs(rate("kubevirt_vmi_network_receive_bytes_total", sel) + " + " + rate("kubevirt_vmi_network_transmit_bytes_total", sel))
 		}},
-		{"disk", "Disk throughput - top VMs", "Bps", false, []seriesSpec{
-			{"", topk(rate("kubevirt_vmi_storage_read_traffic_bytes_total") + " + " + rate("kubevirt_vmi_storage_write_traffic_bytes_total")), ""},
+		{chartSpec{key: "disk", title: "Disk throughput - top VMs", unit: "Bps"}, func(sel string) string {
+			return topVMs(rate("kubevirt_vmi_storage_read_traffic_bytes_total", sel) + " + " + rate("kubevirt_vmi_storage_write_traffic_bytes_total", sel))
 		}},
 	}
 }

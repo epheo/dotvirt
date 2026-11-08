@@ -13,10 +13,13 @@ import (
 	"github.com/epheo/dotvirt/internal/model"
 )
 
+// wide is a caller whose queries span every namespace at once.
+var wide = Caller{Token: "tok", Wide: true}
+
 // mustNew builds a metrics client for tests (no CA, no insecure).
 func mustNew(t *testing.T, url string) *Client {
 	t.Helper()
-	c, err := New(url, "", false)
+	c, err := New(url, "", "", false)
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -63,7 +66,7 @@ func TestVMMetricsAlignsSeries(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	m, err := mustNew(t, srv.URL).VMMetrics(context.Background(), "tok", "ns", "vm", "1h")
+	m, err := mustNew(t, srv.URL).VMMetrics(context.Background(), wide, "ns", "vm", "1h")
 	if err != nil {
 		t.Fatalf("VMMetrics: %v", err)
 	}
@@ -118,7 +121,7 @@ func TestVMMetricsFansOutPerLabel(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	m, err := mustNew(t, srv.URL).VMMetrics(context.Background(), "tok", "ns", "vm", "1h")
+	m, err := mustNew(t, srv.URL).VMMetrics(context.Background(), wide, "ns", "vm", "1h")
 	if err != nil {
 		t.Fatalf("VMMetrics: %v", err)
 	}
@@ -167,7 +170,7 @@ func TestScopeMetricsNamesAndAlignsSeries(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	m, err := mustNew(t, srv.URL).ScopeMetrics(context.Background(), "tok", []string{"a", "b"}, "", "1h")
+	m, err := mustNew(t, srv.URL).ScopeMetrics(context.Background(), wide, []string{"a", "b"}, "", "1h")
 	if err != nil {
 		t.Fatalf("ScopeMetrics: %v", err)
 	}
@@ -212,7 +215,7 @@ func TestAlertsCollapsesAndSorts(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	alerts, err := mustNew(t, srv.URL).Alerts(context.Background(), "tok", []string{"a", "b"})
+	alerts, err := mustNew(t, srv.URL).Alerts(context.Background(), wide, []string{"a", "b"})
 	if err != nil {
 		t.Fatalf("Alerts: %v", err)
 	}
@@ -238,10 +241,7 @@ func TestVectorAndConsumers(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	vec, err := mustNew(t, srv.URL).vector(context.Background(), "tok", "q")
-	if err != nil {
-		t.Fatal(err)
-	}
+	vec := mustNew(t, srv.URL).read("tok").vector(context.Background(), "", "q")
 	if len(vec) != 2 {
 		t.Fatalf("vector parsed %d series, want 2", len(vec))
 	}
@@ -353,7 +353,7 @@ func TestCapacity(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	c, err := New(srv.URL, "", false)
+	c, err := New(srv.URL, "", "", false)
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -404,7 +404,7 @@ func promStub(t *testing.T, fail string, hits *atomic.Int64) *httptest.Server {
 func TestClusterSummaryNotCachedOnQueryError(t *testing.T) {
 	var hits atomic.Int64
 	c := mustNew(t, promStub(t, "kube_node_status_allocatable", &hits).URL)
-	cs, err := c.ClusterSummary(context.Background(), "tok", []string{"a"}, "", true)
+	cs, err := c.ClusterSummary(context.Background(), wide, []string{"a"}, "", true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -412,7 +412,7 @@ func TestClusterSummaryNotCachedOnQueryError(t *testing.T) {
 		t.Errorf("degraded summary = %+v, want used 7, total 0", cs.CPU)
 	}
 	first := hits.Load()
-	if _, err := c.ClusterSummary(context.Background(), "tok", []string{"a"}, "", true); err != nil {
+	if _, err := c.ClusterSummary(context.Background(), wide, []string{"a"}, "", true); err != nil {
 		t.Fatal(err)
 	}
 	if hits.Load() == first {
@@ -423,11 +423,11 @@ func TestClusterSummaryNotCachedOnQueryError(t *testing.T) {
 func TestClusterSummaryCachedWhenClean(t *testing.T) {
 	var hits atomic.Int64
 	c := mustNew(t, promStub(t, "", &hits).URL)
-	if _, err := c.ClusterSummary(context.Background(), "tok", []string{"a"}, "", true); err != nil {
+	if _, err := c.ClusterSummary(context.Background(), wide, []string{"a"}, "", true); err != nil {
 		t.Fatal(err)
 	}
 	first := hits.Load()
-	if _, err := c.ClusterSummary(context.Background(), "tok", []string{"a"}, "", true); err != nil {
+	if _, err := c.ClusterSummary(context.Background(), wide, []string{"a"}, "", true); err != nil {
 		t.Fatal(err)
 	}
 	if hits.Load() != first {
@@ -440,14 +440,14 @@ func TestClusterSummaryCachedWhenClean(t *testing.T) {
 func TestClusterSummaryNodeTotalsGated(t *testing.T) {
 	var hits atomic.Int64
 	c := mustNew(t, promStub(t, "", &hits).URL)
-	admin, err := c.ClusterSummary(context.Background(), "admin", []string{"a"}, "", true)
+	admin, err := c.ClusterSummary(context.Background(), Caller{Token: "admin", Wide: true}, []string{"a"}, "", true)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if admin.CPU.Total != 7 || admin.Memory.Total != 7 {
 		t.Fatalf("node reader totals = %v/%v, want 7/7", admin.CPU.Total, admin.Memory.Total)
 	}
-	tenant, err := c.ClusterSummary(context.Background(), "tenant", []string{"a"}, "", false)
+	tenant, err := c.ClusterSummary(context.Background(), Caller{Token: "tenant", Wide: true}, []string{"a"}, "", false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -482,19 +482,19 @@ func TestHostLoadNotCachedOnQueryError(t *testing.T) {
 	}
 }
 
-// A total failure surfaces as a fixed 503 message: the backend's error text
-// can carry its URL.
-func TestScopeMetricsErrorHidesBackendDetail(t *testing.T) {
+// A total failure answers its reason and no charts, never the backend's
+// text, which can carry its URL.
+func TestScopeMetricsFailureAnswersReason(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		http.Error(w, "nope", http.StatusForbidden)
+		http.Error(w, "nope "+r.Host, http.StatusForbidden)
 	}))
 	defer srv.Close()
-	_, err := mustNew(t, srv.URL).ScopeMetrics(context.Background(), "tok", []string{"a"}, "", "")
-	if err == nil {
-		t.Fatal("want an error")
+	m, err := mustNew(t, srv.URL).ScopeMetrics(context.Background(), wide, []string{"a"}, "", "")
+	if err != nil {
+		t.Fatal(err)
 	}
-	if strings.Contains(err.Error(), srv.URL) || strings.Contains(err.Error(), "403") {
-		t.Errorf("error leaks backend detail: %v", err)
+	if m.Unavailable != model.MetricsForbidden || len(m.Charts) != 0 {
+		t.Errorf("metrics = %+v, want forbidden with no charts", m)
 	}
 }
 
@@ -513,7 +513,7 @@ func TestNetworkTraffic(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	got, err := mustNew(t, srv.URL).NetworkTraffic(context.Background(), "tok", []Attachment{
+	got, err := mustNew(t, srv.URL).NetworkTraffic(context.Background(), wide, []Attachment{
 		{"web-prod", "web-1", "web-net"},
 		{"web-prod", "web-2", "web-net"},
 		{"web-prod", "web-2", "web-net-b"},
@@ -521,13 +521,13 @@ func TestNetworkTraffic(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{`namespace=~"web-prod"`, `interface=~"web-net|web-net-b"`, "[1h]", "receive", "transmit"} {
+	for _, want := range []string{`namespace="web-prod"`, `interface=~"web-net|web-net-b"`, "[1h]", "receive", "transmit"} {
 		if !strings.Contains(query, want) {
 			t.Errorf("query %q lacks %q", query, want)
 		}
 	}
-	if len(got) != 2 || got[0].Name != "web-2" || got[0].BitsPerSecond != 44000 || got[1].Name != "web-1" || got[1].BitsPerSecond != 8000 {
-		t.Errorf("traffic = %+v, want web-2 44000 then web-1 8000", got)
+	if vms := got.VMs; len(vms) != 2 || vms[0].Name != "web-2" || vms[0].BitsPerSecond != 44000 || vms[1].Name != "web-1" || vms[1].BitsPerSecond != 8000 {
+		t.Errorf("traffic = %+v, want web-2 44000 then web-1 8000", vms)
 	}
 }
 

@@ -69,6 +69,10 @@ type Config struct {
 	// MetricsURL is the Prometheus/Thanos query API base URL backing the per-VM
 	// Performance tab; empty disables the tab. InsecureTLS also covers this client.
 	MetricsURL string
+	// MetricsTenancyURL is the same querier's tenancy API (thanos-querier port
+	// 9092): the per-namespace path for a caller who may not query
+	// MetricsURL. Empty leaves such callers without metrics. MetricsCA covers it.
+	MetricsTenancyURL string
 	// MetricsCA is a PEM bundle to trust for MetricsURL - in-cluster, the mounted
 	// service-CA that signs thanos-querier's serving cert (so no -insecure-tls).
 	MetricsCA string
@@ -143,6 +147,7 @@ func Load(args []string) (*Config, error) {
 	fs.StringVar(&c.ForgeTokenFile, "forge-token-file", os.Getenv("DOTVIRT_FORGE_TOKEN_FILE"), "path to a mounted secret holding the forge token, re-read per call (rotation-safe; overrides -forge-token)")
 	fs.BoolVar(&c.InsecureTLS, "insecure-tls", envBool("DOTVIRT_INSECURE_TLS", false), "skip TLS verification for git+forge (dev only)")
 	fs.StringVar(&c.MetricsURL, "metrics-url", os.Getenv("DOTVIRT_METRICS_URL"), "Prometheus/Thanos query API base URL for the Performance tab (empty disables)")
+	fs.StringVar(&c.MetricsTenancyURL, "metrics-tenancy-url", os.Getenv("DOTVIRT_METRICS_TENANCY_URL"), "per-namespace (tenancy) query API of the same querier, for callers who may not query -metrics-url (empty leaves them without metrics)")
 	fs.StringVar(&c.MetricsCA, "metrics-ca", os.Getenv("DOTVIRT_METRICS_CA"), "PEM CA bundle path to trust for -metrics-url (e.g. the mounted service-CA)")
 	fs.StringVar(&c.UploadProxyURL, "upload-proxy-url", os.Getenv("DOTVIRT_UPLOAD_PROXY_URL"), "cdi-uploadproxy base URL for image uploads (empty: the one CDI publishes)")
 	fs.StringVar(&c.WebhookSecret, "webhook-secret", os.Getenv("DOTVIRT_WEBHOOK_SECRET"), "HMAC secret for the Forgejo webhook endpoint (empty disables it)")

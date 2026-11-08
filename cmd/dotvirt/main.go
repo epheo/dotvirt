@@ -183,7 +183,7 @@ func run() error {
 	coordinator := changeset.New(draftStore, repos, forgeFactory, resyncer,
 		liveVMs{clusterSnapshot}, pruneSource, cfg.BaseBranch, cfg.ProposedBranch).WithSyncNamespace(cfg.ArgoNamespace)
 
-	metricsClient, err := metrics.New(cfg.MetricsURL, cfg.MetricsCA, cfg.InsecureTLS)
+	metricsClient, err := metrics.New(cfg.MetricsURL, cfg.MetricsTenancyURL, cfg.MetricsCA, cfg.InsecureTLS)
 	if err != nil {
 		return err
 	}
