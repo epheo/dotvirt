@@ -5,8 +5,10 @@ import (
 	"fmt"
 	"maps"
 	"slices"
+	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	authzv1 "k8s.io/api/authorization/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
@@ -18,6 +20,7 @@ import (
 	"github.com/epheo/dotvirt/internal/changeset"
 	"github.com/epheo/dotvirt/internal/cluster"
 	"github.com/epheo/dotvirt/internal/eventbus"
+	"github.com/epheo/dotvirt/internal/restfactory"
 )
 
 // grantRig is a server over a snapshot whose RBAC watches run on a fake
@@ -53,7 +56,7 @@ func userBinding(ns, name, user string) *rbacv1.RoleBinding {
 func (g *grantRig) bind(ns, name string) {
 	g.t.Helper()
 	ctx := context.Background()
-	seq, broad := g.bus.KeySeq(eventbus.RBACChanged), g.bus.BroadVersion(eventbus.RBACChanged)
+	seen := g.grantLevels()
 	var err error
 	if ns == "" {
 		_, err = g.kube.RbacV1().ClusterRoleBindings().Create(ctx, &rbacv1.ClusterRoleBinding{
@@ -67,9 +70,15 @@ func (g *grantRig) bind(ns, name string) {
 	if err != nil {
 		g.t.Fatal(err)
 	}
-	waitUntil(g.t, "the binding's publish", func() bool {
-		return g.bus.KeySeq(eventbus.RBACChanged) != seq || g.bus.BroadVersion(eventbus.RBACChanged) != broad
-	})
+	waitUntil(g.t, "the binding's publish", func() bool { return g.grantLevels() != seen })
+}
+
+func (g *grantRig) grantLevels() [3]uint64 {
+	return [3]uint64{
+		g.bus.KeySeq(eventbus.RBACChanged),
+		g.bus.KeySeq(eventbus.OtherRBACChanged),
+		g.bus.BroadVersion(eventbus.RBACChanged),
+	}
 }
 
 // vmUpdate is the per-namespace question a frame asks of each namespace.
@@ -314,4 +323,141 @@ func TestNamespaceObjectQuestionFollowsItsNamespace(t *testing.T) {
 	step("after a move in y")
 	bus.PublishKey(eventbus.RBACChanged, "x")
 	step("after a move in x", "x")
+}
+
+// hubKinds are the kinds the inventory hub wakes on and stamps frames with
+// (cmd/dotvirt).
+var hubKinds = []eventbus.Kind{
+	eventbus.LiveChanged, eventbus.NamespaceChanged,
+	eventbus.RBACChanged, eventbus.DriftChanged, eventbus.GitChanged, eventbus.ProposalsChanged,
+	eventbus.NetworkChanged, eventbus.TaskChanged, eventbus.TTLBackstop,
+}
+
+// A grant move outside every project namespace wakes no stream and moves no
+// frame's stamp, nor the backstop's period: a frame asks only of project
+// namespaces and cluster scope. One in a project namespace wakes the hub.
+func TestGrantMoveOutsideProjectsWakesNoFrame(t *testing.T) {
+	g := newGrantRig(t, []string{"p0"})
+	wake, cancel := g.bus.Subscribe(hubKinds...)
+	defer cancel()
+	select {
+	case <-wake:
+	default:
+	}
+	stamp, moved := g.bus.Version(hubKinds...), g.s.state.LastGrantMove()
+
+	g.bind("ci-builds", "rb")
+	select {
+	case <-wake:
+		t.Error("a grant move outside the projects woke the hub")
+	default:
+	}
+	if g.bus.Version(hubKinds...) != stamp {
+		t.Error("a grant move outside the projects moved the frames' stamp")
+	}
+	if !g.s.state.LastGrantMove().Equal(moved) {
+		t.Error("a grant move outside the projects shortened the backstop period")
+	}
+
+	g.bind("p0", "rb")
+	select {
+	case <-wake:
+	default:
+		t.Error("a grant move in a project namespace did not wake the hub")
+	}
+}
+
+// A token that may list VMs everywhere sees a new project namespace with no
+// review, and stops seeing a removed one.
+func TestWideReaderFollowsTheProjects(t *testing.T) {
+	g := newGrantRig(t, []string{"a"})
+	wide := newAsking(func(a *authzv1.ResourceAttributes) bool { return a.Resource == "virtualmachines" })
+	visibleOf(t, g.s, "tok", wide.c)
+	wide.take()
+	if _, err := g.kube.CoreV1().Namespaces().Create(context.Background(), projectNS("b"), metav1.CreateOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	waitUntil(t, "b to become a candidate", func() bool { return len(g.s.state.Namespaces()) == 2 })
+	if got := visibleOf(t, g.s, "tok", wide.c); !maps.Equal(got, map[string]bool{"a": true, "b": true}) {
+		t.Fatalf("after b was added: visible = %v", got)
+	}
+	if got := wide.take(); len(got) != 0 {
+		t.Fatalf("adding b asked %q of a cluster-wide reader", got)
+	}
+}
+
+// A review right after a grant move in its namespace serves the short TTL,
+// and one in another namespace the long one: the visible set marks the moved
+// namespace alone, re-asks it once that TTL ran out, and a verdict in it is
+// cached unsettled while one elsewhere is not. It waits out the settle window
+// of the snapshot's own first lists, which move every grant.
+func TestUnsettledIsPerNamespace(t *testing.T) {
+	t.Parallel()
+	g := newGrantRig(t, []string{"x", "y"})
+	waitFor := grantSettle - time.Since(g.s.state.LastGrantMoveFor(""))
+	time.Sleep(waitFor + 100*time.Millisecond)
+	tenant := newAsking(readsVMsIn("x", "y"))
+	visibleOf(t, g.s, "tok", tenant.c)
+	key := restfactory.TokenKey("tok")
+	if e, _ := g.s.visible.Get(key); e.sweptUnsettled || len(e.unsettled) != 0 {
+		t.Fatalf("a sweep long after any move cached unsettled=%v %v", e.sweptUnsettled, e.unsettled)
+	}
+
+	g.bind("x", "rb")
+	tenant.take()
+	visibleOf(t, g.s, "tok", tenant.c)
+	if got := tenant.take(); !slices.Equal(got, []string{"x"}) {
+		t.Fatalf("a move in x asked %q", got)
+	}
+	e, _ := g.s.visible.Get(key)
+	if _, ok := e.unsettled["x"]; !ok || len(e.unsettled) != 1 || e.sweptUnsettled {
+		t.Fatalf("after a move in x the set marks %v (swept %v), want x alone", e.unsettled, e.sweptUnsettled)
+	}
+
+	e.unsettled = map[string]time.Time{"x": time.Now().Add(-unwatchedTTL)}
+	g.s.visible.Put(key, e)
+	visibleOf(t, g.s, "tok", tenant.c)
+	if got := tenant.take(); !slices.Equal(got, []string{"x"}) {
+		t.Fatalf("x's short TTL ran out, yet the read asked %q", got)
+	}
+
+	for ns, want := range map[string]bool{"x": true, "y": false} {
+		q := vmUpdate(ns)
+		g.ask("tok", tenant, q)
+		k := strings.Join([]string{key, q.Verb, q.Group, q.Resource, q.Subresource, q.Namespace, q.Name}, "\x00")
+		if v, ok := g.s.ssar.Get(k); !ok || v.unsettled != want {
+			t.Errorf("a verdict in %s cached unsettled=%v (ok=%v), want %v", ns, v.unsettled, ok, want)
+		}
+	}
+}
+
+// A stamp survives no move of its namespace, forgotten between or not: the
+// verdict cached after a move in X is re-asked once X is forgotten (its
+// namespace deleted) and moves again, and once a cluster-wide move follows a
+// forget, which a summed stamp could re-equal.
+func TestForgottenNamespaceNeverRevalidates(t *testing.T) {
+	for name, after := range map[string]func(*eventbus.Bus){
+		"recreated and moved":      func(b *eventbus.Bus) { b.PublishKey(eventbus.RBACChanged, "x") },
+		"then a cluster-wide move": func(b *eventbus.Bus) { b.Publish(eventbus.RBACChanged) },
+	} {
+		t.Run(name, func(t *testing.T) {
+			bus := eventbus.New()
+			s := scopeServer(bus)
+			var granted atomic.Bool
+			granted.Store(true)
+			alice := newAsking(func(*authzv1.ResourceAttributes) bool { return granted.Load() })
+			bus.PublishKey(eventbus.RBACChanged, "x")
+			q := vmUpdate("x")
+			if !(&grantRig{t: t, s: s}).ask("tok", alice, q) {
+				t.Fatal("the grant reads denied")
+			}
+			granted.Store(false)
+			bus.Forget(eventbus.RBACChanged, "x")
+			bus.Forget(eventbus.OtherRBACChanged, "x")
+			after(bus)
+			if (&grantRig{t: t, s: s}).ask("tok", alice, q) {
+				t.Fatal("the cached allow revalidated across the forget")
+			}
+		})
+	}
 }

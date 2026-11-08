@@ -19,8 +19,9 @@
 // and OpenShift Groups - and publish RBACChanged when a grant moves, keyed by
 // the namespace a RoleBinding or Role grants in, so the per-token visibility
 // and review caches are invalidated promptly instead of on their TTL, and
-// only where the move reaches. dotvirt never reads them (rbacSignal). A
-// names-only watch of every namespace serves the tokens that may list them.
+// only where the move reaches. dotvirt never reads them (rbacSignal). The
+// one Namespace watch is of every namespace: it selects the project ones in
+// memory and keeps the others' names for the tokens that may list them.
 //
 // The VM and VMI stores keep a derived live view current as they move and
 // publish LiveChanged only when it changes; the namespace store publishes on any
@@ -44,6 +45,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/util/validation"
 	"k8s.io/client-go/tools/cache"
@@ -117,7 +119,7 @@ type State struct {
 	specs   []reflectorSpec // reflector wiring, built in New, started in Run
 	healthy []atomic.Bool   // one reflect.TrackHealth flag per specs entry
 	signals []*signalWatch  // RBAC watches gated on their grant, started in Run
-	names   *nameSet        // every namespace's name, for AllNamespaces
+	names   *namespaceSink  // every namespace's name, for AllNamespaces
 	nssGen  atomic.Uint64   // moves on every project-namespace store write
 
 	// The RoleBinding watch runs among specs; RBACWatched reads its sink and its
@@ -141,7 +143,7 @@ type State struct {
 }
 
 // New builds the snapshot's reflectors over sa (dotvirt's ServiceAccount client),
-// watching the namespaces labeled projectLabel. Each reflector publishes its kind to
+// holding as projects the namespaces projectLabel selects. Each reflector publishes its kind to
 // bus whenever the snapshot moves, so the inventory hub rebuilds; bus is optional
 // (nil disables signalling, e.g. in tests).
 func New(sa *cluster.Client, projectLabel string, bus *eventbus.Bus) *State {
@@ -155,25 +157,41 @@ func New(sa *cluster.Client, projectLabel string, bus *eventbus.Bus) *State {
 		s.nssGen.Add(1)
 		bus.Publish(eventbus.NamespaceChanged)
 	}
-	// The move is recorded before it publishes, so a review that sees the
-	// publish also sees it as recent (LastGrantMoveFor).
+	// A move in a namespace that is no project's goes out as OtherRBACChanged,
+	// which no frame depends on: churn there wakes no stream. The move is
+	// recorded before it publishes, so a review that sees the publish also
+	// sees it as recent (LastGrantMoveFor).
 	rbac := func(ns string) {
-		s.grants.record(ns, time.Now())
-		if ns == "" {
+		now := time.Now()
+		switch {
+		case ns == "":
+			s.grants.record(ns, now, true)
 			bus.Publish(eventbus.RBACChanged)
-			return
+		case s.inProject(ns):
+			s.grants.record(ns, now, true)
+			bus.PublishKey(eventbus.RBACChanged, ns)
+		default:
+			s.grants.record(ns, now, false)
+			bus.PublishKey(eventbus.OtherRBACChanged, ns)
 		}
-		bus.PublishKey(eventbus.RBACChanged, ns)
+	}
+	forget := func(ns string) {
+		bus.Forget(eventbus.RBACChanged, ns)
+		bus.Forget(eventbus.OtherRBACChanged, ns)
+	}
+	project, err := labels.Parse(projectLabel)
+	if err != nil {
+		log.Printf("clusterstate: project label %q is no selector (%v); no namespace is a project", projectLabel, err)
+		project = labels.Nothing()
 	}
 	refs := newRoleRefs()
-	s.names = newNameSet(s.namesReady.Mark)
+	// A namespace move is both a topology change (inventory) and a change of
+	// the candidates each token's visibility is reviewed over.
+	s.names = newNamespaceSink(project, reflect.NewStore(s.nss, namespace, s.nssReady.Mark), forget, s.namesReady.Mark)
 	s.specs = []reflectorSpec{
 		{s.live.store(s.vms, s.vmsReady.Mark), &kubevirtcorev1.VirtualMachine{}, sa.VMListWatch()},
 		{s.live.store(s.vmis, s.vmisReady.Mark), &kubevirtcorev1.VirtualMachineInstance{}, sa.VMIListWatch()},
-		// A namespace move is both a topology change (inventory) and a change of
-		// the candidates each token's visibility is reviewed over.
-		{reflect.NewStore(s.nss, namespace, s.nssReady.Mark), &corev1.Namespace{}, sa.NamespaceListWatch(projectLabel)},
-		{s.names, &corev1.Namespace{}, sa.NamespaceListWatch("")},
+		{s.names, &corev1.Namespace{}, sa.NamespaceListWatch()},
 	}
 	// Every operand role grants RoleBindings, so their signal watch starts with
 	// the snapshot; the other RBAC kinds wait for their grant (signals).
@@ -222,6 +240,11 @@ func signalWatches(lw func(schema.GroupVersionResource) *cache.ListWatch, onChan
 		watch(gvrClusterRoles, &rbacv1.ClusterRole{}, nil, clusterRoleDigest(refs)),
 		watch(gvrGroups, &unstructured.Unstructured{}, nil, groupDigest),
 	}
+}
+
+func (s *State) inProject(ns string) bool {
+	_, ok, _ := s.nss.GetByKey(ns)
+	return ok
 }
 
 type reflectorSpec struct {
@@ -293,9 +316,11 @@ func listable(ctx context.Context, sa *cluster.Client) func(schema.GroupVersionR
 	}
 }
 
-// LastGrantMove is when an RBAC watch last reported a grant move anywhere,
-// zero before any.
-func (s *State) LastGrantMove() time.Time { return unixTime(s.grants.any.Load()) }
+// LastGrantMove is when an RBAC watch last reported a grant move a frame can
+// read, zero before any: one cluster-wide or in a project namespace. A move
+// published as OtherRBACChanged in a namespace becoming a project at that
+// moment is left out; its frame reviews then wait for the long backstop.
+func (s *State) LastGrantMove() time.Time { return unixTime(s.grants.framed.Load()) }
 
 // LastGrantMoveFor is when an RBAC watch last reported a grant move a review
 // in ns can read: a cluster-wide one, or for a namespace one in it. A move in
@@ -309,10 +334,10 @@ func unixTime(nanos int64) time.Time {
 	return time.Unix(0, nanos)
 }
 
-// grantMoves is when the RBAC sinks last reported a grant move: anywhere,
-// cluster-wide, and per namespace.
+// grantMoves is when the RBAC sinks last reported a grant move: one a frame
+// can read, a cluster-wide one, and one per namespace.
 type grantMoves struct {
-	any, cluster atomic.Int64 // unix nanos
+	framed, cluster atomic.Int64 // unix nanos
 
 	mu     sync.Mutex
 	ns     map[string]int64
@@ -324,9 +349,11 @@ type grantMoves struct {
 // namespaces deleted since do not pile up.
 const grantMoveHorizon = time.Minute
 
-func (g *grantMoves) record(ns string, at time.Time) {
+func (g *grantMoves) record(ns string, at time.Time, framed bool) {
 	n := at.UnixNano()
-	g.any.Store(n)
+	if framed {
+		g.framed.Store(n)
+	}
 	if ns == "" {
 		g.cluster.Store(n)
 		return

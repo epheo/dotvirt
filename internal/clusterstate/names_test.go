@@ -2,62 +2,131 @@ package clusterstate
 
 import (
 	"maps"
-	"reflect"
+	stdreflect "reflect"
+	"slices"
 	"testing"
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/client-go/tools/cache"
+	"k8s.io/apimachinery/pkg/labels"
+
+	"github.com/epheo/dotvirt/internal/reflect"
 )
 
-func namespace(name string) *corev1.Namespace {
-	return &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: name}}
+const projectKey = "dotvirt.io/project"
+
+func namespace(name string, lbls ...string) *corev1.Namespace {
+	ns := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: name, Labels: map[string]string{}}}
+	for _, l := range lbls {
+		ns.Labels[l] = name
+	}
+	return ns
 }
 
-// AllNamespaces is every namespace the all-namespaces watch reports plus the
-// project ones, which may land first; one shared map until either moves.
-func TestAllNamespaces(t *testing.T) {
+// sinkState is a State whose namespace sink feeds its project store as New
+// wires it, minus the bus, recording what it forgets.
+func sinkState(t *testing.T) (*State, *[]string) {
+	t.Helper()
 	s := stateWithIndexers()
-	s.names = newNameSet(nil)
-	if err := s.nss.Add(namespace("proj")); err != nil {
+	sel, err := labels.Parse(projectKey)
+	if err != nil {
 		t.Fatal(err)
 	}
-	s.nssGen.Add(1)
-	if got := s.AllNamespaces(); !maps.Equal(got, map[string]bool{"proj": true}) {
-		t.Fatalf("before the watch listed: %v, want the project namespaces", got)
+	forgot := &[]string{}
+	store := reflect.NewStore(s.nss, func() { s.nssGen.Add(1) }, nil)
+	s.names = newNamespaceSink(sel, store, func(ns string) { *forgot = append(*forgot, ns) }, nil)
+	return s, forgot
+}
+
+func projects(s *State) []string {
+	keys := s.nss.ListKeys()
+	slices.Sort(keys)
+	return keys
+}
+
+// One watch of every namespace holds what a watch filtered by the project
+// label would: a namespace losing the label leaves the project store, and
+// every name stays in AllNamespaces.
+func TestNamespaceSinkSelectsProjectsInMemory(t *testing.T) {
+	s, _ := sinkState(t)
+	_ = s.names.Replace([]any{namespace("a", projectKey), namespace("default")}, "1")
+	if got := projects(s); !slices.Equal(got, []string{"a"}) {
+		t.Fatalf("projects after the list: %v", got)
 	}
-	_ = s.names.Replace([]any{namespace("default"), namespace("openshift-cnv")}, "1")
+	_ = s.names.Add(namespace("b", projectKey))
+	_ = s.names.Update(namespace("a"))
+	_ = s.names.Update(namespace("default"))
+	if got := projects(s); !slices.Equal(got, []string{"b"}) {
+		t.Fatalf("projects after a label came and went: %v", got)
+	}
+	_ = s.names.Delete(namespace("b", projectKey))
+	if got := projects(s); len(got) != 0 {
+		t.Fatalf("projects after a delete: %v", got)
+	}
+	if got := s.AllNamespaces(); !maps.Equal(got, map[string]bool{"a": true, "default": true}) {
+		t.Errorf("AllNamespaces = %v", got)
+	}
+}
+
+// AllNamespaces is every namespace the watch reports plus the project ones;
+// one shared map until either moves.
+func TestAllNamespaces(t *testing.T) {
+	s, _ := sinkState(t)
+	_ = s.names.Replace([]any{namespace("proj", projectKey), namespace("default"), namespace("openshift-cnv")}, "1")
 	want := map[string]bool{"proj": true, "default": true, "openshift-cnv": true}
 	first := s.AllNamespaces()
 	if !maps.Equal(first, want) {
 		t.Fatalf("got %v, want %v", first, want)
 	}
-	if reflect.ValueOf(s.AllNamespaces()).Pointer() != reflect.ValueOf(first).Pointer() {
+	if stdreflect.ValueOf(s.AllNamespaces()).Pointer() != stdreflect.ValueOf(first).Pointer() {
 		t.Error("an unmoved read rebuilt the map")
 	}
 	_ = s.names.Add(namespace("ci-1"))
-	_ = s.names.Delete(cache.DeletedFinalStateUnknown{Key: "default", Obj: namespace("default")})
+	_ = s.names.Delete(namespace("default"))
 	if got := s.AllNamespaces(); got["default"] || !got["ci-1"] || !got["proj"] {
 		t.Errorf("after an add and a delete: %v", got)
 	}
 }
 
+// A deleted namespace's grant levels are forgotten once forgetAfter passed,
+// at the next sweep; one recreated in between keeps them.
+func TestDeletedNamespacesAreForgotten(t *testing.T) {
+	s, forgot := sinkState(t)
+	now := time.Unix(1000, 0)
+	s.names.now = func() time.Time { return now }
+	_ = s.names.Replace([]any{namespace("gone"), namespace("back"), namespace("ci")}, "1")
+	_ = s.names.Delete(namespace("gone"))
+	_ = s.names.Delete(namespace("back"))
+	now = now.Add(time.Minute)
+	_ = s.names.Add(namespace("back"))
+	now = now.Add(forgetAfter)
+	_ = s.names.Delete(namespace("ci"))
+	if !slices.Equal(*forgot, []string{"gone"}) {
+		t.Fatalf("forgot %v, want [gone]", *forgot)
+	}
+}
+
 // A move in a namespace is recent for that namespace alone, a cluster-wide
-// one for every namespace; moves older than the horizon are dropped.
+// one for every namespace; moves older than the horizon are dropped. Only a
+// move a frame can read counts for LastGrantMove.
 func TestGrantMovesByNamespace(t *testing.T) {
 	var g grantMoves
 	t0 := time.Unix(1000, 0)
-	g.record("x", t0)
-	if g.last("x") != t0.UnixNano() || g.last("y") != 0 || g.last("") != 0 || g.any.Load() != t0.UnixNano() {
+	g.record("x", t0, true)
+	if g.last("x") != t0.UnixNano() || g.last("y") != 0 || g.last("") != 0 || g.framed.Load() != t0.UnixNano() {
 		t.Fatalf("after a move in x: x=%d y=%d cluster=%d", g.last("x"), g.last("y"), g.last(""))
 	}
-	t1 := t0.Add(time.Second)
-	g.record("", t1)
+	g.record("ci", t0.Add(time.Second), false)
+	if g.framed.Load() != t0.UnixNano() || g.last("ci") != t0.Add(time.Second).UnixNano() {
+		t.Fatal("a move no frame reads moved LastGrantMove, or was not recorded for its namespace")
+	}
+	t1 := t0.Add(2 * time.Second)
+	g.record("", t1, true)
 	if g.last("x") != t1.UnixNano() || g.last("y") != t1.UnixNano() {
 		t.Fatal("a cluster-wide move is not the latest for every namespace")
 	}
-	g.record("y", t0.Add(2*grantMoveHorizon))
+	g.record("y", t0.Add(2*grantMoveHorizon), true)
 	g.mu.Lock()
 	_, kept := g.ns["x"]
 	g.mu.Unlock()

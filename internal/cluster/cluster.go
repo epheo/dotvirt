@@ -172,22 +172,12 @@ func (c *Client) VMIListWatch() *cache.ListWatch {
 	}
 }
 
-// NamespaceListWatch is the List+Watch source for a project-namespace reflector,
-// restricted to namespaces carrying label (dotvirt's project label). It feeds the
-// topology half of the snapshot so the read path never GETs namespaces per build.
-func (c *Client) NamespaceListWatch(label string) *cache.ListWatch {
-	withLabel := func(o metav1.ListOptions) metav1.ListOptions {
-		o.LabelSelector = label
-		return o
-	}
-	return &cache.ListWatch{
-		ListWithContextFunc: func(ctx context.Context, o metav1.ListOptions) (runtime.Object, error) {
-			return c.kube.CoreV1().Namespaces().List(ctx, withLabel(o))
-		},
-		WatchFuncWithContext: func(ctx context.Context, o metav1.ListOptions) (watch.Interface, error) {
-			return c.kube.CoreV1().Namespaces().Watch(ctx, withLabel(o))
-		},
-	}
+// NamespaceListWatch is the List+Watch source for the namespace reflector, of
+// every namespace: the snapshot selects the project ones in memory, so one
+// watch serves both them and the names of the rest.
+func (c *Client) NamespaceListWatch() *cache.ListWatch {
+	r := c.kube.CoreV1().Namespaces()
+	return typedListWatch(r.List, r.Watch)
 }
 
 // The RBAC sources are cluster-wide reflectors (run on the SA client) over

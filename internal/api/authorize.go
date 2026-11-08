@@ -574,9 +574,9 @@ func (s *Server) allows(ctx context.Context, id auth.Identity, c *cluster.Client
 // be weighed as is asked (ask).
 func (s *Server) dryRun(ctx context.Context, id auth.Identity, c *cluster.Client, a changeset.Access, weigh func(context.Context, auth.Identity, *cluster.Client, changeset.Access) (bool, error)) (bool, error) {
 	sum := sha256.Sum256([]byte(a.Object))
-	ver := s.grantVersion(a.Namespace)
+	ver := grantStamps{ns: s.grantVersion(a.Namespace)}
 	if a.Group == ssarNamespace.group && a.Resource == ssarNamespace.resource && a.Name != "" {
-		ver += s.grantVersion(a.Name)
+		ver.obj = s.grantVersion(a.Name)
 	}
 	k := strings.Join([]string{restfactory.TokenKey(id.Token), "dry-run", a.Verb, a.Group, a.Resource, a.Namespace, a.Name, hex.EncodeToString(sum[:])}, "\x00")
 	if e, age, ok := s.ssar.GetAge(k); ok && e.ver == ver && age < s.maxAge(e.unsettled) {

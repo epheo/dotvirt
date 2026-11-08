@@ -7,7 +7,6 @@ import (
 	"maps"
 	"net/http"
 	"slices"
-	"strconv"
 	"strings"
 	"time"
 
@@ -45,26 +44,37 @@ type visibleSet struct {
 }
 
 // visLevels are the bus levels a visible set depends on: cluster-wide grant
-// moves, the keyed grant sequence (which namespaces moved comes from it), and
-// the project namespaces. Each is read before what it covers, so a set
-// stamped with them never misses a move they count.
-type visLevels struct{ cluster, seq, ns uint64 }
+// moves, the keyed grant sequences of both RBAC kinds (which namespaces moved
+// comes from them), and the project namespaces. Each is read before what it
+// covers, so a set stamped with them never misses a move they count.
+type visLevels struct{ cluster, seq, other, ns uint64 }
 
 func (s *Server) visLevels() visLevels {
 	return visLevels{
 		cluster: s.bus.BroadVersion(eventbus.RBACChanged),
 		seq:     s.bus.KeySeq(eventbus.RBACChanged),
+		other:   s.bus.KeySeq(eventbus.OtherRBACChanged),
 		ns:      s.bus.Version(eventbus.NamespaceChanged),
 	}
 }
 
 // ssarVerdict is one (token, question) SSAR verdict, stamped with the grant
-// version of the question's namespace (grantVersion).
+// versions of the namespaces it was asked in (grantVersion).
 type ssarVerdict struct {
 	ok        bool
-	ver       uint64
+	ver       grantStamps
 	unsettled bool
 }
+
+// grantStamp is the grant levels a review in one namespace depends on, kept
+// apart rather than summed: a namespace's marks drop to 0 once it is
+// forgotten (eventbus.Forget), and a sum could then re-equal an old stamp as
+// the cluster-wide level moves.
+type grantStamp struct{ cluster, mark, other uint64 }
+
+// grantStamps is a verdict's stamp: its namespace's, and for a dry run of a
+// Namespace object the namespace itself's (dryRun).
+type grantStamps struct{ ns, obj grantStamp }
 
 // unwatchedTTL is how long a cached visible set or verdict serves while some
 // RBAC watch is not running: a grant move may then publish nothing, and this
@@ -109,11 +119,15 @@ func (s *Server) maxAge(unsettled bool) time.Duration {
 // the RoleBindings in that namespace, and a request in none by the
 // cluster-wide grants alone, so a move in one namespace leaves every other
 // namespace's verdicts standing. A Namespace object is asked in itself (ask).
-func (s *Server) grantVersion(ns string) uint64 {
-	if ns == "" {
-		return s.bus.BroadVersion(eventbus.RBACChanged)
+// A namespace's moves go out as RBACChanged or OtherRBACChanged by whether
+// it was a project's then, so both marks count.
+func (s *Server) grantVersion(ns string) grantStamp {
+	g := grantStamp{cluster: s.bus.BroadVersion(eventbus.RBACChanged)}
+	if ns != "" {
+		g.mark = s.bus.KeyMark(eventbus.RBACChanged, ns)
+		g.other = s.bus.KeyMark(eventbus.OtherRBACChanged, ns)
 	}
-	return s.bus.KeyVersion(eventbus.RBACChanged, ns)
+	return g
 }
 
 // This file is every handler's shared preamble: who is calling (identity ->
@@ -153,9 +167,10 @@ const reviewTimeout = 15 * time.Second
 // review runs fill once per key and version, however many frame builds
 // and pulls of one token miss at once (ttlcache.Do): each caller leaves on its
 // own deadline, and the review stops once none waits. A caller with a newer
-// version never joins an older review.
-func review[V any](ctx context.Context, cache *ttlcache.Cache[V], key string, ver uint64, fill func(context.Context) (V, error)) (V, error) {
-	return cache.Do(ctx, key+"\x00"+strconv.FormatUint(ver, 10), func(ctx context.Context) (V, error) {
+// version never joins an older review. ver is a comparable stamp, keyed by
+// every field it holds.
+func review[V any](ctx context.Context, cache *ttlcache.Cache[V], key string, ver any, fill func(context.Context) (V, error)) (V, error) {
+	return cache.Do(ctx, key+"\x00"+fmt.Sprintf("%+v", ver), func(ctx context.Context) (V, error) {
 		ctx, cancel := context.WithTimeout(ctx, reviewTimeout)
 		defer cancel()
 		return fill(ctx)
@@ -174,7 +189,7 @@ func (s *Server) visibleFor(ctx context.Context, id auth.Identity, c *cluster.Cl
 	if e, ok := s.visible.Get(key); ok && e.lv == lv && s.fresh(e, time.Now()) {
 		return s.visibleNames(e), nil
 	}
-	e, err := review(ctx, s.visible, key, lv.cluster+lv.seq+lv.ns, func(ctx context.Context) (visibleSet, error) {
+	e, err := review(ctx, s.visible, key, lv, func(ctx context.Context) (visibleSet, error) {
 		prev, had := s.visible.Get(key)
 		e, err := s.reconcile(ctx, c, prev, had, lv)
 		if err != nil {
@@ -228,6 +243,9 @@ func (s *Server) reconcile(ctx context.Context, c *cluster.Client, prev visibleS
 	}
 	due := map[string]bool{}
 	for _, ns := range s.bus.MovedSince(eventbus.RBACChanged, prev.lv.seq, cands.list) {
+		due[ns] = true
+	}
+	for _, ns := range s.bus.MovedSince(eventbus.OtherRBACChanged, prev.lv.other, cands.list) {
 		due[ns] = true
 	}
 	if cands != prev.cands {
@@ -343,7 +361,7 @@ func (s *Server) candidates(ver uint64) *candidates {
 // review is returned, so a blip can never pin a denial. A gate answers the
 // error with s.reviewFailed; a UI signal or a filter reads it as no.
 func (s *Server) can(ctx context.Context, id auth.Identity, c *cluster.Client, q question) (bool, error) {
-	ver := s.grantVersion(q.Namespace)
+	ver := grantStamps{ns: s.grantVersion(q.Namespace)}
 	k := strings.Join([]string{restfactory.TokenKey(id.Token), q.Verb, q.Group, q.Resource, q.Subresource, q.Namespace, q.Name}, "\x00")
 	if e, age, ok := s.ssar.GetAge(k); ok && e.ver == ver && age < s.maxAge(e.unsettled) {
 		return e.ok, nil
