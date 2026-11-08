@@ -12,6 +12,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	dynamicfake "k8s.io/client-go/dynamic/fake"
 	k8stesting "k8s.io/client-go/testing"
 
@@ -50,7 +51,7 @@ func TestSnapshotDriftNilUntilSynced(t *testing.T) {
 
 func TestSnapshotmanagingApp(t *testing.T) {
 	s := NewSnapshot(&Client{}, nil)
-	_ = s.apps.Add(appWithSource("argocd", "team-a", "https://forge/team-a.git",
+	_ = s.apps.Add(dotvirtApp("argocd", "team-a", "https://forge/team-a.git",
 		[]any{vmResource("prod", "vm-a", "Synced", "Healthy")}))
 	s.synced.Mark()
 
@@ -365,8 +366,15 @@ func TestPrunePendingRelaysArgoComparison(t *testing.T) {
 	}
 }
 
+// dotvirtApp is a project Application as the ApplicationSet generates it.
+func dotvirtApp(ns, name, repoURL string, resources []any) *unstructured.Unstructured {
+	a := appWithSource(ns, name, repoURL, resources)
+	a.SetLabels(map[string]string{projectAppLabel: name})
+	return a
+}
+
 func TestResyncRecordsCallerAndMissesAsNotFound(t *testing.T) {
-	a := appWithSource("argocd", "team-a", "https://forge/team-a.git",
+	a := dotvirtApp("argocd", "team-a", "https://forge/team-a.git",
 		[]any{vmResource("prod", "vm-a", "Synced", "Healthy")})
 	dyn := dynamicfake.NewSimpleDynamicClient(runtime.NewScheme(), a)
 	s := NewSnapshot(&Client{dyn: dyn}, nil)
@@ -392,13 +400,45 @@ func TestResyncRecordsCallerAndMissesAsNotFound(t *testing.T) {
 	if user != `al"ice` {
 		t.Errorf("initiatedBy.username = %q, want the caller", user)
 	}
+	// The caller's right covers the VM, so the sync names it and nothing else.
+	res2, _, _ := unstructured.NestedSlice(got.Object, "operation", "sync", "resources")
+	want := map[string]any{"group": "kubevirt.io", "kind": "VirtualMachine", "namespace": "prod", "name": "vm-a"}
+	if len(res2) != 1 || !reflect.DeepEqual(res2[0], want) {
+		t.Errorf("sync.resources = %v, want only %v", res2, want)
+	}
+}
+
+// An Application dotvirt did not generate is never synced on a user's behalf,
+// from the snapshot or from the live fallback.
+func TestResyncSkipsForeignApplications(t *testing.T) {
+	foreign := appWithSource("argocd", "cluster-config", "https://forge/admin.git",
+		[]any{vmResource("prod", "vm-a", "Synced", "Healthy")})
+	for _, synced := range []bool{true, false} {
+		dyn := dynamicfake.NewSimpleDynamicClientWithCustomListKinds(runtime.NewScheme(),
+			map[schema.GroupVersionResource]string{applicationsGVR: "ApplicationList"}, foreign.DeepCopy())
+		s := NewSnapshot(&Client{dyn: dyn}, nil)
+		if synced {
+			_ = s.apps.Add(foreign)
+			s.synced.Mark()
+		}
+		if _, err := s.Resync(context.Background(), "alice", "prod", "vm-a"); !errors.Is(err, model.ErrNotFound) {
+			t.Errorf("synced=%v: err = %v, want ErrNotFound", synced, err)
+		}
+		got, err := dyn.Resource(applicationsGVR).Namespace("argocd").Get(context.Background(), "cluster-config", metav1.GetOptions{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, patched := got.Object["operation"]; patched {
+			t.Errorf("synced=%v: a foreign Application was patched", synced)
+		}
+	}
 }
 
 // TestResyncHidesTheSAStatus pins that the SA patch's own apiserver verdict
 // never reaches the caller as theirs: a 401 there would end the caller's
 // session, a 403 would read as the caller's RBAC.
 func TestResyncHidesTheSAStatus(t *testing.T) {
-	a := appWithSource("argocd", "team-a", "https://forge/team-a.git",
+	a := dotvirtApp("argocd", "team-a", "https://forge/team-a.git",
 		[]any{vmResource("prod", "vm-a", "Synced", "Healthy")})
 	dyn := dynamicfake.NewSimpleDynamicClient(runtime.NewScheme(), a)
 	dyn.PrependReactor("patch", "applications", func(k8stesting.Action) (bool, runtime.Object, error) {

@@ -380,31 +380,38 @@ type AppRef struct {
 	TargetRevision string
 }
 
-// managingApp returns the Application whose status.resources[] includes the
-// VirtualMachine namespace/name, read from the in-memory store (no cluster call).
-// ok=false if the snapshot hasn't synced or no Application manages the VM - the
-// caller (Resync) then falls back to a live lookup.
+// projectAppLabel marks the Applications dotvirt's ApplicationSet generates,
+// one per tenant project: the only ones a user's resync may drive. An
+// Application an administrator wired by hand stays theirs to sync.
+const projectAppLabel = "dotvirt.io/project"
+
+// managingApp returns the dotvirt Application whose status.resources[] includes
+// the VirtualMachine namespace/name, read from the in-memory store (no cluster
+// call). ok=false if the snapshot hasn't synced or no such Application manages
+// the VM - the caller (Resync) then falls back to a live lookup.
 func (s *Snapshot) managingApp(namespace, name string) (AppRef, bool) {
 	if !s.synced.Done() {
 		return AppRef{}, false
 	}
 	for _, app := range reflect.List(s.apps) {
-		if appManagesVM(app.Object, namespace, name) {
+		if resyncable(app, namespace, name) {
 			return appRefOf(app), true
 		}
 	}
 	return AppRef{}, false
 }
 
-// Resync triggers an ArgoCD sync of the Application managing the given VM, so the
-// cluster is reconciled back to git. It finds the managing Application from the
-// in-memory snapshot (falling back to a live LIST when the snapshot hasn't synced,
-// so a resync right after startup doesn't spuriously 404), then requests a sync via
-// the Application's operation field - the k8s API dotvirt already has, no separate
-// Argo API token. (Distinct from RefreshForRepo: this is the user's explicit
-// per-VM "sync now", which must work even when auto-sync is off.) username is
-// the caller, recorded as the operation's initiator so Argo's history names the
-// person, not dotvirt's SA.
+// Resync triggers an ArgoCD sync of the given VM alone, from the dotvirt
+// Application managing it, so the VM is reconciled back to git. It finds the
+// managing Application from the in-memory snapshot (falling back to a live LIST
+// when the snapshot hasn't synced, so a resync right after startup doesn't
+// spuriously 404), then requests a sync via the Application's operation field -
+// the k8s API dotvirt already has, no separate Argo API token. (Distinct from
+// RefreshForRepo: this is the user's explicit per-VM "sync now", which must work
+// even when auto-sync is off.) The operation names the VM as its only resource:
+// the caller's right covers that VM, never the rest of the Application. username
+// is the caller, recorded as the operation's initiator so Argo's history names
+// the person, not dotvirt's SA.
 func (s *Snapshot) Resync(ctx context.Context, username, namespace, name string) (model.ResyncResult, error) {
 	ref, ok := s.managingApp(namespace, name)
 	if !ok {
@@ -417,7 +424,7 @@ func (s *Snapshot) Resync(ctx context.Context, username, namespace, name string)
 	if revision == "" {
 		revision = "HEAD"
 	}
-	patch, err := resyncPatch(username, revision)
+	patch, err := resyncPatch(username, revision, namespace, name)
 	if err != nil {
 		return model.ResyncResult{}, err
 	}
@@ -430,12 +437,19 @@ func (s *Snapshot) Resync(ctx context.Context, username, namespace, name string)
 	return model.ResyncResult{Application: ref.Name, Revision: revision}, nil
 }
 
-// resyncPatch is the Application operation requesting a sync to revision. It
-// is marshalled, not formatted: username is caller-controlled text.
-func resyncPatch(username, revision string) ([]byte, error) {
+// resyncPatch is the Application operation requesting a sync of the VM
+// namespace/name alone, to revision. It is marshalled, not formatted: username
+// is caller-controlled text.
+func resyncPatch(username, revision, namespace, name string) ([]byte, error) {
 	type kv struct {
 		Name  string `json:"name"`
 		Value string `json:"value"`
+	}
+	type resource struct {
+		Group     string `json:"group"`
+		Kind      string `json:"kind"`
+		Namespace string `json:"namespace"`
+		Name      string `json:"name"`
 	}
 	var op struct {
 		Operation struct {
@@ -443,13 +457,15 @@ func resyncPatch(username, revision string) ([]byte, error) {
 				Username string `json:"username"`
 			} `json:"initiatedBy"`
 			Sync struct {
-				Revision string `json:"revision"`
+				Revision  string     `json:"revision"`
+				Resources []resource `json:"resources"`
 			} `json:"sync"`
 			Info []kv `json:"info"`
 		} `json:"operation"`
 	}
 	op.Operation.InitiatedBy.Username = username
 	op.Operation.Sync.Revision = revision
+	op.Operation.Sync.Resources = []resource{{Group: "kubevirt.io", Kind: "VirtualMachine", Namespace: namespace, Name: name}}
 	op.Operation.Info = []kv{{"reason", "dotvirt re-sync from git"}}
 	return json.Marshal(op)
 }
@@ -500,11 +516,17 @@ func (c *Client) findmanagingAppLive(ctx context.Context, namespace, name string
 		return AppRef{}, false
 	}
 	for i := range apps.Items {
-		if appManagesVM(apps.Items[i].Object, namespace, name) {
+		if resyncable(&apps.Items[i], namespace, name) {
 			return appRefOf(&apps.Items[i]), true
 		}
 	}
 	return AppRef{}, false
+}
+
+// resyncable reports whether app is a dotvirt Application managing the VM
+// namespace/name.
+func resyncable(app *unstructured.Unstructured, namespace, name string) bool {
+	return app.GetLabels()[projectAppLabel] != "" && appManagesVM(app.Object, namespace, name)
 }
 
 // appRefOf reads the AppRef (name/namespace/sync revision) from an Application.
