@@ -322,6 +322,25 @@ func TestDeploymentVerifiedTLSByDefault(t *testing.T) {
 	}
 }
 
+// The thanos-querier's cluster-wide port brings its tenancy port beside it, for
+// callers who may only query their own namespaces; any other metrics endpoint
+// has no known tenancy port.
+func TestDeploymentMetricsTenancyURL(t *testing.T) {
+	for url, want := range map[string]string{
+		"https://thanos-querier.openshift-monitoring.svc.cluster.local:9091": "https://thanos-querier.openshift-monitoring.svc.cluster.local:9092",
+		"https://thanos-querier.openshift-monitoring.svc:9091/":              "https://thanos-querier.openshift-monitoring.svc:9092/",
+		"https://thanos-querier-openshift-monitoring.apps.example.com":       "",
+		"http://prometheus-operated.monitoring.svc.cluster.local:9090":       "",
+	} {
+		dv := testDotvirt()
+		dv.Spec.Metrics.URL = url
+		got, ok := envValue(Deployment(dv, "argocd").Spec.Template.Spec.Containers[0].Env, "DOTVIRT_METRICS_TENANCY_URL")
+		if got != want || ok != (want != "") {
+			t.Errorf("%s: tenancy URL = %q (set %t), want %q", url, got, ok, want)
+		}
+	}
+}
+
 // Webhook TLS stays verified; the global SKIP_TLS_VERIFY (which also unverified
 // tenant webhooks) must never come back.
 func TestForgejoVerifiesWebhookTLS(t *testing.T) {
