@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"fmt"
+	"maps"
 	"net/http"
 	"slices"
 	"strconv"
@@ -99,11 +100,13 @@ func (s *Server) handleClusterSummary(w http.ResponseWriter, r *http.Request) {
 }
 
 // foldStoppedVMs adds the VMs without a running instance to the phase map,
-// under the lowercase key the kubevirt_vmi_info-derived entries use.
+// under the lowercase key the kubevirt_vmi_info-derived entries use. The map
+// is cloned first: cs came from the metrics cache, which every caller shares.
 func foldStoppedVMs(cs *model.ClusterSummary, stopped int) {
 	if stopped == 0 {
 		return
 	}
+	cs.VMs = maps.Clone(cs.VMs)
 	if cs.VMs == nil {
 		cs.VMs = map[string]int{}
 	}
@@ -165,7 +168,7 @@ func (s *Server) handleHostLoad(w http.ResponseWriter, r *http.Request) {
 		fail(w, err)
 		return
 	}
-	if s.cfg.PlatformRepo != "" && load.Unavailable == "" {
+	if s.cfg.PlatformRepo != "" && len(load.Nodes) > 0 {
 		platform := s.platformProject()
 		if st, err := s.reader.DRSState(platform); err == nil && st.Configured && st.Config != nil {
 			foldDRSBand(&load, st.Config.Threshold)

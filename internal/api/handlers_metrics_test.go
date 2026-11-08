@@ -223,3 +223,43 @@ func TestMetricsCallerPicksThePort(t *testing.T) {
 		t.Errorf("metrics off: summary = %+v, want unconfigured", cs)
 	}
 }
+
+// The summary served from the metrics cache is shared by every caller: the
+// stopped-VM fold must not write into it. Writing grew the count on every
+// hit, and two concurrent hits wrote one map at once (fatal under load).
+func TestClusterSummaryFoldLeavesCacheAlone(t *testing.T) {
+	fc := newFakeCluster(t)
+	fc.vms = []kubevirtcorev1.VirtualMachine{{ObjectMeta: metav1.ObjectMeta{Name: "off", Namespace: "team-a-dev"}}}
+	querier := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if strings.HasSuffix(r.URL.Path, "query_range") {
+			fmt.Fprint(w, `{"status":"success","data":{"result":[{"metric":{},"values":[[100,"2"]]}]}}`)
+			return
+		}
+		fmt.Fprint(w, `{"status":"success","data":{"result":[{"metric":{"phase":"running"},"value":[100,"2"]}]}}`)
+	}))
+	t.Cleanup(querier.Close)
+	s := fc.server(nil, Config{})
+	var err error
+	if s.metrics, err = metrics.New(querier.URL, querier.URL, "", false); err != nil {
+		t.Fatal(err)
+	}
+	check := func() {
+		rec := do(s, adminToken, http.MethodGet, "/api/metrics/cluster", "")
+		if rec.Code != http.StatusOK {
+			t.Errorf("status = %d", rec.Code)
+			return
+		}
+		if cs := decodeBody[model.ClusterSummary](t, rec); cs.VMs["stopped"] != 1 || cs.VMs["running"] != 2 {
+			t.Errorf("vms = %v, want running 2, stopped 1 on every hit", cs.VMs)
+		}
+	}
+	for range 3 {
+		check()
+	}
+	var wg sync.WaitGroup
+	for range 8 {
+		wg.Go(check)
+	}
+	wg.Wait()
+}
