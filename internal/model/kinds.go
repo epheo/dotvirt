@@ -158,6 +158,10 @@ var (
 	KindTemplate = Kind{Kind: "VirtualMachineTemplate", Group: "template.kubevirt.io", Version: "v1beta1", Plural: "virtualmachinetemplates"}
 )
 
+// KindDV is a VM's disk, declared beside it in a tenant repo. It has no row:
+// adoption stages one under the VM resource.
+var KindDV = Kind{Kind: "DataVolume", Group: "cdi.kubevirt.io", Version: "v1beta1", Plural: "datavolumes"}
+
 // resources is the table; names are the draft's on-disk vocabulary.
 var resources = []Resource{
 	{Name: "vm", Kinds: []Kind{KindVM}, CreateLabel: "Adopt VM from cluster", EditLabel: "Edit VM"},

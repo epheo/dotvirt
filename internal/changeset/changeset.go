@@ -77,6 +77,7 @@ type Coordinator struct {
 	resyncer Resyncer            // may be nil -> re-sync unavailable
 	renderer vmtemplate.Renderer // processes library templates into VM manifests
 	prune    PruneSource         // may be nil -> the draft view carries no prune warning
+	authz    Authorizer          // nil refuses every write (see UseAuthorizer)
 
 	proposing keyedMutex // one Propose per (user, project)
 }

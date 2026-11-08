@@ -165,14 +165,19 @@ func (s *Server) visibleFor(ctx context.Context, id auth.Identity, c *cluster.Cl
 // gate answers the error with s.reviewFailed; a UI signal or a filter reads it
 // as no.
 func (s *Server) can(ctx context.Context, id auth.Identity, c *cluster.Client, verb string, ref ssarRef, ns string) (bool, error) {
+	return s.canNamed(ctx, id, c, verb, ref, ns, "")
+}
+
+// canNamed is can for the one object name names, cached as its own question.
+func (s *Server) canNamed(ctx context.Context, id auth.Identity, c *cluster.Client, verb string, ref ssarRef, ns, name string) (bool, error) {
 	ver := s.rbacVersion()
-	k := strings.Join([]string{restfactory.TokenKey(id.Token), verb, ref.group, ref.resource, ns}, "\x00")
+	k := strings.Join([]string{restfactory.TokenKey(id.Token), verb, ref.group, ref.resource, ns, name}, "\x00")
 	if e, age, ok := s.ssar.GetAge(k); ok && e.ver == ver && age < s.maxAge(e.unsettled) {
 		return e.ok, nil
 	}
 	e, err := review(ctx, s.ssar, k, ver, func(ctx context.Context) (ssarVerdict, error) {
 		start := time.Now()
-		ok, err := c.Can(ctx, verb, ref.group, ref.resource, ns)
+		ok, err := c.CanNamed(ctx, verb, ref.group, ref.resource, ns, name)
 		if err != nil {
 			return ssarVerdict{}, err
 		}
