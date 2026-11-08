@@ -616,23 +616,27 @@ func (s *Server) draftScope(w http.ResponseWriter, r *http.Request) (scope, bool
 }
 
 // pickDraft resolves the project whose draft a route acts on: pickProject,
-// and for the platform tier also any caller holding a draft there, whatever
-// right staged it (a claim on one namespace), so nothing staged is stranded,
-// even while platform read cannot be told (a forge or review outage).
+// and for the platform tier canDraftPlatform.
 func (s *Server) pickDraft(w http.ResponseWriter, r *http.Request, want string) (scope, bool) {
 	if want != platformProjectName {
 		return s.pickProject(w, r, want)
 	}
-	return s.platformScopeWith(w, r, func(ctx context.Context, id auth.Identity, c *cluster.Client) (bool, error) {
-		ok, err := s.canReadPlatform(ctx, id, c)
-		if ok {
-			return true, nil
-		}
-		if v, derr := s.draft.Get(id, s.platformProject()); derr == nil && v.Count > 0 {
-			return true, nil
-		}
-		return false, err
-	}, "not authorized to author platform changes")
+	return s.platformScopeWith(w, r, s.canDraftPlatform, "not authorized to author platform changes")
+}
+
+// canDraftPlatform reports whether id reaches their platform draft: a
+// platform reader, or any caller holding a draft there, whatever right staged
+// it (a claim on one namespace), so nothing staged is stranded, even while
+// platform read cannot be told or the repo read (a forge or review outage).
+func (s *Server) canDraftPlatform(ctx context.Context, id auth.Identity, c *cluster.Client) (bool, error) {
+	ok, err := s.canReadPlatform(ctx, id, c)
+	if ok {
+		return true, nil
+	}
+	if held, herr := s.draft.Holds(id, s.platformProject()); herr == nil && held {
+		return true, nil
+	}
+	return false, err
 }
 
 // pickProject resolves a project named by a ?project= query or {project} path

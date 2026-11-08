@@ -109,6 +109,12 @@ type Draft interface {
 	StageUpdateManifest(id auth.Identity, proj project.ProjectInfo, resource, namespace, name string, req model.UpdateManifestRequest) (model.DraftView, error)
 	Unstage(id auth.Identity, proj project.ProjectInfo, resource, namespace, name string) error
 	Get(id auth.Identity, proj project.ProjectInfo) (model.DraftView, error)
+	// Drafts renders id's draft of each of projs, in order, that holds an
+	// entry or carries a warning; a failed render is its project's Err.
+	Drafts(id auth.Identity, projs []project.ProjectInfo) ([]changeset.DraftResult, error)
+	// Holds reports whether id's draft of proj holds an entry, without
+	// rendering it.
+	Holds(id auth.Identity, proj project.ProjectInfo) (bool, error)
 	Discard(id auth.Identity, proj project.ProjectInfo) error
 	Propose(id auth.Identity, proj project.ProjectInfo, req model.ProposeRequest) (model.ProposeResult, error)
 	Adopt(id auth.Identity, proj project.ProjectInfo, namespace, name string) (model.DraftView, error)
@@ -477,19 +483,22 @@ func respond(w http.ResponseWriter, v any, err error) {
 	writeJSON(w, v)
 }
 
-// fail writes err mapped to a status by statusFor. A classified error (a
+// fail writes err mapped to a status by statusFor, worded by publicMessage.
+func fail(w http.ResponseWriter, err error) {
+	http.Error(w, publicMessage(err), statusFor(err))
+}
+
+// publicMessage is what the caller reads of err. A classified error (a
 // model.Err* kind or the apiserver's verdict on the caller's object) echoes its
 // message; an unclassified one is internal: the detail is logged, never echoed -
 // it can carry k8s, git, or forge internals (URLs, credentials, object paths)
 // the caller must not see.
-func fail(w http.ResponseWriter, err error) {
-	status := statusFor(err)
-	msg := err.Error()
-	if status == http.StatusInternalServerError {
+func publicMessage(err error) string {
+	if statusFor(err) == http.StatusInternalServerError {
 		log.Printf("api: internal error: %v", err)
-		msg = "internal error"
+		return "internal error"
 	}
-	http.Error(w, msg, status)
+	return err.Error()
 }
 
 // invalid wraps a request-parsing error as a 400. The detail is the caller's own

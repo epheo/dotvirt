@@ -92,6 +92,36 @@ func (s *Server) handleDraftGet(w http.ResponseWriter, r *http.Request) {
 	respond(w, view, err)
 }
 
+// handleDrafts answers, in one call, each draft of the caller's the draft
+// route would: their visible projects', and the platform tier's past
+// canDraftPlatform. A review failure there leaves the platform out rather
+// than failing every lane: it denies only a caller holding nothing there.
+func (s *Server) handleDrafts(w http.ResponseWriter, r *http.Request) {
+	sc, projects, ok := s.callerProjects(w, r)
+	if !ok {
+		return
+	}
+	if s.cfg.PlatformRepo != "" {
+		if ok, _ := s.canDraftPlatform(r.Context(), sc.id, sc.cluster); ok {
+			projects = append(projects, s.platformProject())
+		}
+	}
+	rendered, err := s.draft.Drafts(sc.id, projects)
+	if err != nil {
+		fail(w, err)
+		return
+	}
+	out := model.DraftsView{Drafts: []model.ProjectDraft{}, Failed: []model.ProjectError{}}
+	for _, d := range rendered {
+		if d.Err != nil {
+			out.Failed = append(out.Failed, model.ProjectError{Project: d.Project, Error: publicMessage(d.Err)})
+			continue
+		}
+		out.Drafts = append(out.Drafts, model.ProjectDraft{Project: d.Project, Draft: d.View})
+	}
+	writeJSON(w, out)
+}
+
 func (s *Server) handleDraftDiscard(w http.ResponseWriter, r *http.Request) {
 	sc, ok := s.draftScope(w, r)
 	if !ok {

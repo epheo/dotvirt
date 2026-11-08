@@ -690,3 +690,9 @@ func (d *planeDraft) Get(auth.Identity, project.ProjectInfo) (model.DraftView, e
 	}
 	return stagedView, nil
 }
+
+func (d *planeDraft) Holds(auth.Identity, project.ProjectInfo) (bool, error) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return d.staged, nil
+}

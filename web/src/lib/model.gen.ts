@@ -394,6 +394,30 @@ export interface DraftView {
   defaultBody?: string;
 }
 /**
+ * DraftsView is every draft of the caller's that the per-project draft route
+ * would answer, holding an entry or carrying a warning, and every one whose
+ * render failed.
+ */
+export interface DraftsView {
+  drafts: ProjectDraft[];
+  failed: ProjectError[];
+}
+/**
+ * ProjectDraft is one project's draft.
+ */
+export interface ProjectDraft {
+  project: string;
+  draft: DraftView;
+}
+/**
+ * ProjectError is why one project's draft could not be read, worded for the
+ * caller.
+ */
+export interface ProjectError {
+  project: string;
+  error: string;
+}
+/**
  * StagePreview is what a create form would stage, rendered by the staging
  * path itself but never recorded: the files its pull request would carry.
  * Answered by a create route called with ?dryRun=true.
