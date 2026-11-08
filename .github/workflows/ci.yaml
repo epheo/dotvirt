@@ -25,9 +25,9 @@ jobs:
           cache-dependency-path: |
             go.sum
             operator/go.sum
-      # ./... stops at nested modules, so pkg/forge and the operator are named.
+      # ./... stops at nested modules, so the pkg modules and the operator are named.
       # go vet runs in lint, as golangci-lint's govet.
-      - run: go test ./... ./pkg/forge/... ./operator/...
+      - run: go test ./... ./pkg/forge/... ./pkg/tenancy/... ./operator/...
       - name: Operator envtest (server-side apply + RBAC on a real apiserver)
         run: make -C operator test-envtest
 
@@ -51,6 +51,10 @@ jobs:
         with:
           version: ${{ env.GOLANGCI_LINT_VERSION }}
           working-directory: pkg/forge
+      - uses: golangci/golangci-lint-action@v9
+        with:
+          version: ${{ env.GOLANGCI_LINT_VERSION }}
+          working-directory: pkg/tenancy
 
   web:
     runs-on: ubuntu-latest
@@ -184,7 +188,7 @@ jobs:
           use: false
       - name: Build the operator image from this tree
         # Reads the layer cache image-build writes on main, so a PR that leaves the
-        # operator and pkg/forge alone skips the compile.
+        # operator and the pkg modules alone skips the compile.
         uses: docker/bake-action@v7
         with:
           builder: ${{ steps.buildx.outputs.name }}

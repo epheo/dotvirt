@@ -178,6 +178,9 @@ func (c *Coordinator) stageRendered(id auth.Identity, proj project.ProjectInfo, 
 	if err != nil {
 		return model.DraftView{}, invalid(err)
 	}
+	if err := requirePlacement(proj, entry.SourceFile, []byte(entry.Manifest)); err != nil {
+		return model.DraftView{}, err
+	}
 	entry.Kind = draft.KindCreate
 	idx, err := indexDeclared(read, c.baseBranch)
 	if err != nil {
