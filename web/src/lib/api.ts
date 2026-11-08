@@ -4,8 +4,8 @@
 // `make types`). The overlays below shadow the star re-export only where the
 // generated shape is too loose (string where the wire carries a closed union)
 // or wrong (Go []*float64 marshals null, not undefined). Request types with no
-// internal/model counterpart (decoded server-side into netgen/vmgen/drs
-// specs) stay hand-written.
+// internal/model counterpart (decoded server-side into the backend's own
+// spec types) stay hand-written.
 //
 // Every request is identity-scoped: a signed session cookie (set by login) is
 // sent with each fetch + on the WebSocket handshake, and the backend resolves the
@@ -22,7 +22,7 @@ export type { Event as VMEvent, Node as NodeTarget } from './model.gen';
 
 export type Power = 'On' | 'Off' | 'Unknown';
 export type SyncStatus = 'Synced' | 'OutOfSync' | 'NotTracked' | 'Pending' | 'Unknown';
-export type DRSMode = 'Predictive' | 'Automatic';
+export type RebalanceMode = 'Predictive' | 'Automatic';
 
 export interface PlacementGroup extends Omit<gen.PlacementGroup, 'mode'> {
 	mode: 'together' | 'apart';
@@ -137,8 +137,8 @@ export interface UplinkCreate {
 	bridge?: string; // OVS bridge; default br-<name>
 	nodeSelector?: Record<string, string>; // node labels; omit = all workers, or {kubernetes.io/hostname: <node>}
 }
-// EgressFirewall - a namespace's north-south egress rules (the Tier-1 gateway
-// firewall). One per namespace (named "default" server-side); rules are first-match.
+// EgressFirewall - a namespace's outbound rules. One per namespace (named
+// "default" server-side); rules are first-match.
 export interface EgressFirewallRule {
 	action: 'Allow' | 'Deny';
 	cidr?: string; // set exactly one of cidr / dnsName
@@ -149,7 +149,8 @@ export interface EgressFirewallCreate {
 	namespace: string;
 	rules: EgressFirewallRule[];
 }
-// Tier-0 (provider-edge) services - cluster-scoped, platform-routed.
+// The cluster edge: fixed outbound IPs and external routes, cluster-scoped and
+// platform-routed.
 export interface EgressIPCreate {
 	name: string;
 	egressIPs: string[]; // the source-NAT pool
@@ -160,8 +161,8 @@ export interface ExternalRouteCreate {
 	namespaces: string[]; // projects whose egress is steered
 	nextHops: string[]; // static external next-hop IPs
 }
-// Distributed Firewall (east-west) - a NetworkPolicy protecting a Group (a label
-// selector) inside one namespace, allowing ingress only from the named peer Groups.
+// Project rules - a NetworkPolicy protecting a Group (a label selector) inside
+// one namespace, allowing ingress only from the named peer Groups.
 export interface PolicyPort {
 	protocol: 'TCP' | 'UDP' | 'SCTP';
 	port: number;
@@ -176,8 +177,8 @@ export interface NetworkPolicyCreate {
 	appliedTo?: Record<string, string>; // the Group this protects; empty = whole namespace
 	ingress?: PolicyRule[];
 }
-// Cluster-wide admin Distributed Firewall - AdminNetworkPolicy (priority + Pass) or
-// the BaselineAdminNetworkPolicy default (Allow/Deny only). Platform-tier, admin-only.
+// Cluster rules - AdminNetworkPolicy (priority + Pass) or the
+// BaselineAdminNetworkPolicy default (Allow/Deny only). Platform-tier, admin-only.
 export interface AdminPolicyRule {
 	action: 'Allow' | 'Deny' | 'Pass';
 	peers: Record<string, string>[]; // peer Groups (namespaceSelector matchLabels; {} = all)
@@ -203,8 +204,8 @@ export interface ProjectCreate {
 	vmNetwork?: { name: string; subnet?: string }; // optional primary (Layer2) UDN on that namespace
 }
 
-export interface DRSEnableRequest {
-	mode: DRSMode;
+export interface RebalanceRequest {
+	mode: RebalanceMode;
 	threshold?: string;
 	intervalSeconds?: number;
 	softTainter?: boolean;
@@ -213,22 +214,22 @@ export interface DRSEnableRequest {
 	installPSI?: boolean; // also stage the worker PSI MachineConfig (reboots workers on merge)
 }
 
-// --- DRS vocabulary (mirrored from internal/drs, the backend validator) ---
+// --- Rebalancing vocabulary (mirrored from the backend's validator) ---
 
-export const DRS_THRESHOLDS = [
+export const REBALANCE_THRESHOLDS = [
 	{ value: 'AsymmetricLow', label: 'Conservative', detail: 'move only off clearly hot nodes' },
 	{ value: 'Low', label: 'Moderate', detail: '10% deviation from average' },
 	{ value: 'Medium', label: 'Eager', detail: '20% deviation from average' },
 	{ value: 'High', label: 'Aggressive', detail: '30% deviation from average' },
 ] as const;
-export const DRS_BOUNDS = {
+export const REBALANCE_BOUNDS = {
 	intervalSeconds: { min: 10, max: 86400 },
 	evictionNodeLimit: { min: 1, max: 100 },
 	evictionTotalLimit: { min: 1, max: 1000 },
 } as const;
 
-export function drsThresholdLabel(value: string): string {
-	return DRS_THRESHOLDS.find((t) => t.value === value)?.label ?? value;
+export function rebalanceThresholdLabel(value: string): string {
+	return REBALANCE_THRESHOLDS.find((t) => t.value === value)?.label ?? value;
 }
 
 // The Performance views' range tiers (real-time/day/week/month).
@@ -453,11 +454,11 @@ export const api = {
 	previewCreate: <K extends CreateKind>(kind: K, body: CreateBodies[K]) =>
 		post<gen.StagePreview>(`${createRoutes[kind]}?dryRun=true`, body),
 
-	// DRS (platform tier): read the merged git/live view; enable/reconfigure and
+	// Rebalancing (platform tier): read the merged git/live view; enable/reconfigure and
 	// disable stage into the platform draft like every other cluster-scoped kind.
-	drs: () => get<gen.DRSView>('/api/drs'),
-	enableDRS: (r: DRSEnableRequest) => post<DraftView>('/api/drs', r),
-	disableDRS: () => req<DraftView>('/api/drs', { method: 'DELETE' }),
+	rebalancing: () => get<gen.DRSView>('/api/drs'),
+	enableRebalancing: (r: RebalanceRequest) => post<DraftView>('/api/drs', r),
+	disableRebalancing: () => req<DraftView>('/api/drs', { method: 'DELETE' }),
 	stageDelete: (namespace: string, name: string) =>
 		post<DraftView>(`${vmPath(namespace, name)}/delete`, {}),
 	// A git-declared network-family object by its draft identity (namespace

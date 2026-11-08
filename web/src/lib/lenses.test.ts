@@ -50,12 +50,12 @@ describe('vmNetworkKeys', () => {
 		]);
 	});
 
-	it('resolves the default NIC to the primary port group of its namespace', () => {
+	it('resolves the default NIC to the primary network of its namespace', () => {
 		const v = vm({ networks: [{ name: 'default', network: 'pod' }] });
 		expect(vmNetworkKeys(v, catalog)).toEqual(['ns-a/network-a']);
 	});
 
-	it('resolves a multus ref through the catalog to the port-group name', () => {
+	it('resolves a multus ref through the catalog to the network name', () => {
 		const v = vm({ networks: [{ name: 'net1', network: 'ns-a/vlan-100' }] });
 		expect(vmNetworkKeys(v, catalog)).toEqual(['vlan-100']);
 	});
@@ -73,7 +73,7 @@ describe('vmNetworkKeys', () => {
 		expect(vmNetworkKeys(a, catalog)).not.toEqual(vmNetworkKeys(c, catalog));
 	});
 
-	it('dedupes NICs on the same port group', () => {
+	it('dedupes NICs on the same network', () => {
 		const v = vm({
 			networks: [
 				{ name: 'net1', network: 'ns-a/vlan-100' },

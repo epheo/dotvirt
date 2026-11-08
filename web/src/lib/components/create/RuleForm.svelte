@@ -80,7 +80,9 @@
 	{#if kind === 'project'}
 		<ProjectRuleForm
 			bind:namespace
-			initial={modal?.kind === 'dfw' ? (initial as NetworkPolicyCreate | undefined) : undefined}
+			initial={modal?.kind === 'projectRule'
+				? (initial as NetworkPolicyCreate | undefined)
+				: undefined}
 			{chooser}
 			{onclose}
 		/>

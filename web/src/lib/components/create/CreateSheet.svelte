@@ -263,7 +263,7 @@
 			{:else if type === 'outbound'}
 				<OutboundForm
 					bind:namespace
-					initial={own?.kind === 'tier0' ? own.initial : undefined}
+					initial={own?.kind === 'clusterEdge' ? own.initial : undefined}
 					{onclose}
 				/>
 			{:else}

@@ -98,7 +98,7 @@ test('storage summary shows platform facts beside the VM footprint', async ({ pa
 	await expect(main.getByRole('heading', { name: 'Disks' })).toBeVisible();
 });
 
-test('#123: global search reaches segments and storage classes', async ({ page }) => {
+test('#123: global search reaches networks and storage classes', async ({ page }) => {
 	await setScenario(page, 'base');
 	await login(page);
 	await page.keyboard.press('/');

@@ -23,10 +23,10 @@ export type CreateModal = Extract<
 			| 'deployTemplate'
 			| 'upload'
 			| 'newNetwork'
-			| 'dfw'
+			| 'projectRule'
 			| 'adminFw'
 			| 'egressFw'
-			| 'tier0'
+			| 'clusterEdge'
 			| 'newProject';
 	}
 >;
@@ -36,10 +36,10 @@ const CREATE_KINDS = new Set<AppModal['kind']>([
 	'deployTemplate',
 	'upload',
 	'newNetwork',
-	'dfw',
+	'projectRule',
 	'adminFw',
 	'egressFw',
-	'tier0',
+	'clusterEdge',
 	'newProject',
 ]);
 
@@ -55,11 +55,11 @@ export function typeOf(m: CreateModal): SheetType {
 			return 'image';
 		case 'newNetwork':
 			return 'network';
-		case 'dfw':
+		case 'projectRule':
 		case 'adminFw':
 		case 'egressFw':
 			return 'rule';
-		case 'tier0':
+		case 'clusterEdge':
 			return 'outbound';
 		case 'newProject':
 			return 'project';
@@ -76,7 +76,7 @@ export function newFromHere(
 	const ns = namespace || undefined;
 	if (path.startsWith('/networking')) {
 		if (/[?&]tab=(security|firewall)/.test(path))
-			return { kind: 'dfw', namespaces: [], namespace: ns };
+			return { kind: 'projectRule', namespaces: [], namespace: ns };
 		return { kind: 'newNetwork', namespace: ns };
 	}
 	if (path.startsWith('/storage')) return { kind: 'upload', namespace: ns };

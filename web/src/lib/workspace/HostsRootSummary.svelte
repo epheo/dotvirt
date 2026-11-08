@@ -10,7 +10,7 @@
 
 	// The Hosts root's Summary: the fleet as one table - state, placement,
 	// live utilization, and what is committed to VMs against what the node can
-	// give - then the DRS balance strip. Each feed absents its columns when the
+	// give - then the rebalancing strip. Each feed absents its columns when the
 	// caller's token can't read it (nodes) or metrics are off; VM placement
 	// alone still yields a row per host, like the tree.
 	let { vms }: { vms: VM[] } = $props();

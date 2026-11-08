@@ -21,7 +21,7 @@
 		onedit,
 	}: {
 		vm: VM;
-		// The port-group catalog, to resolve raw NIC refs into port groups.
+		// The network catalog, to resolve raw NIC refs into networks.
 		networks?: Network[];
 		// Opens the edit modal jumped to the given section.
 		onedit: (section: EditSection) => void;

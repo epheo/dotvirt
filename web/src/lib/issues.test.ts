@@ -160,7 +160,7 @@ describe('scope helpers', () => {
 			},
 		};
 		const issues = deriveIssues(i);
-		// The VM is vmIssue's to report, so only the segment and the policy remain.
+		// The VM is vmIssue's to report, so only the network and the policy remain.
 		expect(issues.map((x) => [x.scope, x.label, x.href, x.project, x.severity])).toEqual([
 			[
 				'dc-vlan-bridge',

@@ -1,6 +1,6 @@
 <script lang="ts">
 	// The masthead search: one box over the whole streamed inventory - VMs
-	// (name, IP, labels), projects, namespaces, nodes, segments, storage
+	// (name, IP, labels), projects, namespaces, nodes, networks, storage
 	// classes. Pure frontend: everything searched is already client-side (which
 	// is why templates, a fetch away, are not here). `label:key=value` (or
 	// `label:key`) narrows to VM labels - the tags-parity affordance; label
@@ -246,7 +246,7 @@
 		project: 'Project',
 		namespace: 'Namespace',
 		node: 'Node',
-		network: 'Segment',
+		network: 'Network',
 		storage: 'Storage',
 	};
 </script>

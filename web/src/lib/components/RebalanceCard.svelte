@@ -1,12 +1,12 @@
 <script lang="ts">
-	import { api, drsThresholdLabel, type DRSView } from '#lib/api.js';
+	import { api, rebalanceThresholdLabel, type DRSView } from '#lib/api.js';
 	import { clusterGate } from '#lib/gates.js';
 	import { action, resource } from '#lib/resource.svelte.js';
 	import { ui } from '#lib/state/ui.svelte.js';
 	import InfoCard from './InfoCard.svelte';
 	import Button from './Button.svelte';
 	import Row from './Row.svelte';
-	import DRSModal from './DRSModal.svelte';
+	import RebalanceModal from './RebalanceModal.svelte';
 
 	// The cluster's rescheduling panel:
 	// committed configuration from the platform repo, live operator state from
@@ -15,15 +15,15 @@
 	let configuring = $state(false);
 	const disableOp = action(); // a failed disable, distinct from the read's failure
 
-	const drs = resource<DRSView>(
+	const rebalance = resource<DRSView>(
 		() => '',
-		() => api.drs(),
+		() => api.rebalancing(),
 		{ poll: 30_000 },
 	);
-	const view = $derived(drs.data);
-	const error = $derived(disableOp.error || drs.error);
-	const enable = $derived(clusterGate.drsEnable());
-	const off = $derived(clusterGate.drsDisable());
+	const view = $derived(rebalance.data);
+	const error = $derived(disableOp.error || rebalance.error);
+	const enable = $derived(clusterGate.rebalanceOn());
+	const off = $derived(clusterGate.rebalanceOff());
 
 	// One status line for the committed state.
 	const status = $derived.by(() => {
@@ -63,9 +63,9 @@
 
 	function disable() {
 		return disableOp.run(async () => {
-			await api.disableDRS();
+			await api.disableRebalancing();
 			ui.toastStaged();
-			await drs.refresh();
+			await rebalance.refresh();
 		});
 	}
 </script>
@@ -101,7 +101,7 @@
 		<dl class="divide-y divide-line-soft text-[13px]">
 			<Row label="Status" value={status} />
 			{#if view.config}
-				<Row label="Aggressiveness" value={drsThresholdLabel(view.config.threshold)} />
+				<Row label="Aggressiveness" value={rebalanceThresholdLabel(view.config.threshold)} />
 				<Row label="Interval" value={`${view.config.intervalSeconds}s`} />
 				<Row label="Soft-taint hot nodes" value={view.config.softTainter ? 'Yes' : 'No'} />
 				<Row
@@ -144,5 +144,9 @@
 </InfoCard>
 
 {#if configuring && view}
-	<DRSModal {view} onclose={() => (configuring = false)} onstaged={() => drs.refresh()} />
+	<RebalanceModal
+		{view}
+		onclose={() => (configuring = false)}
+		onstaged={() => rebalance.refresh()}
+	/>
 {/if}

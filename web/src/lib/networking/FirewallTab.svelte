@@ -240,7 +240,7 @@
 				<Button
 					variant="secondary"
 					size="sm"
-					onclick={() => (ui.modal = { kind: 'dfw', namespaces: inventory.namespaces })}
+					onclick={() => (ui.modal = { kind: 'projectRule', namespaces: inventory.namespaces })}
 					><Plus size={14} />New project rule</Button
 				>
 				<Button
@@ -269,7 +269,7 @@
 	<Card title="Leaving the cluster" meta="Fixed outbound IPs and external routes" flush>
 		{#snippet actions()}
 			{#if canEdge}
-				<Button variant="secondary" size="sm" onclick={() => (ui.modal = { kind: 'tier0' })}
+				<Button variant="secondary" size="sm" onclick={() => (ui.modal = { kind: 'clusterEdge' })}
 					><Plus size={14} />New fixed outbound IP or route</Button
 				>
 			{/if}

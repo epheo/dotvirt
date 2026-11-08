@@ -4,15 +4,15 @@
 	import { ui } from '#lib/state/ui.svelte.js';
 	import Button from './Button.svelte';
 	import Consequence from './Consequence.svelte';
-	import DRSCard from './DRSCard.svelte';
+	import RebalanceCard from './RebalanceCard.svelte';
 	import InfoCard from './InfoCard.svelte';
 	import QuotaBand from './QuotaBand.svelte';
 	import Row from './Row.svelte';
 	import StageChip from './StageChip.svelte';
 
 	// The container Configure tab: read-only project settings for compute
-	// containers, cluster services (DRS) at the Hosts root. dotvirt owns nothing
-	// here - projects are namespace labels, config is the repo. Node and segment
+	// containers, cluster services (rebalancing) at the Hosts root. dotvirt owns nothing
+	// here - projects are namespace labels, config is the repo. Node and network
 	// facts live on their own object pages.
 	let {
 		projects,
@@ -28,7 +28,7 @@
 <div class="min-h-0 flex-1 overflow-y-auto p-4">
 	<div class="max-w-2xl space-y-4">
 		{#if cluster}
-			<DRSCard />
+			<RebalanceCard />
 		{/if}
 		{#each projects as p (p.name)}
 			<InfoCard title="Project: {p.name}">

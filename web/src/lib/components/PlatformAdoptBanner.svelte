@@ -8,7 +8,7 @@
 	import Banner from './Banner.svelte';
 	import Button from './Button.svelte';
 
-	// The platform tier's AdoptBanner: shared segments and cluster-wide policies
+	// The platform tier's AdoptBanner: shared networks and cluster-wide policies
 	// running with no manifest in the platform repo, counted where the caller
 	// may adopt them (the route skips the rest), on the Networking root.
 	const untracked = $derived(
@@ -35,8 +35,8 @@
 			<strong>{untracked} shared {untracked === 1 ? 'object runs' : 'objects run'}</strong>
 			with no manifest in the platform repository, so GitOps does not manage {untracked === 1
 				? 'it'
-				: 'them'}. Adopting captures every untracked shared segment, VLAN, admin policy, egress IP,
-			external route and uplink into one pull request; nothing changes until it merges.
+				: 'them'}. Adopting captures every untracked shared network, VLAN, cluster rule, fixed
+			outbound IP, external route and uplink into one pull request; nothing changes until it merges.
 		</span>
 		<Button variant="link" class="ml-auto shrink-0 font-medium" onclick={adopt} disabled={op.busy}>
 			{op.busy ? 'Capturing…' : 'Adopt into git'}

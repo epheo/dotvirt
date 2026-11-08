@@ -35,7 +35,7 @@ export interface EditForm {
 	// is sized today; the dialog's toggle lets the user convert between them.
 	mode: 'instancetype' | 'custom';
 	labelRows: { key: string; value: string }[];
-	// Scheduling: the DRS opt-out annotation + the template's eviction strategy.
+	// Scheduling: the rebalancing opt-out annotation + the template's eviction strategy.
 	drsExclude: boolean;
 	evictionStrategy: string;
 	// Placement: groups (with a removed flag) + the pinned-host list.

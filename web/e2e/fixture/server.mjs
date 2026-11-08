@@ -417,7 +417,7 @@ async function handleAPI(req, res, url) {
 	if (path === '/api/nodes') return sendJSON(res, 200, s.nodes);
 	if (path === '/api/quotas') return sendJSON(res, 200, s.quotas ?? []);
 	if (path === '/api/templates') return sendJSON(res, 200, s.templates ?? { templates: [] });
-	if (path === '/api/drs') return sendJSON(res, 200, s.drs);
+	if (path === '/api/drs') return sendJSON(res, 200, s.rebalancing);
 	if (path === '/api/alarms') {
 		return s.alarms ? sendJSON(res, 200, s.alarms) : sendText(res, 503, 'alerts feed unavailable');
 	}
@@ -593,7 +593,7 @@ async function handleAPI(req, res, url) {
 				namespace: 'web-prod',
 				name: 'web-1',
 				changes: [{ field: 'Balancer', action: 'change', from: 'Automatic', to: 'Excluded' }],
-				yaml: 'kind: VirtualMachine\nmetadata:\n  name: web-1\n  annotations:\n    drs: exclude\n',
+				yaml: 'kind: VirtualMachine\nmetadata:\n  name: web-1\n  annotations:\n    descheduler.alpha.kubernetes.io/prefer-no-eviction: "true"\n',
 				baseYAML: 'kind: VirtualMachine\nmetadata:\n  name: web-1\n',
 			},
 		}[pr.prNumber];
@@ -786,9 +786,9 @@ function clusterCaps(s) {
 		vmNetwork: !!c.namespace,
 		grantAdmin: !!c.namespace,
 		sharedLibrary: !!n.canManage,
-		drsEnable: !!s.drs?.canManage,
-		drsPSI: !!s.drs?.canPSI,
-		drsDisable: !!s.drs?.canManage,
+		drsEnable: !!s.rebalancing?.canManage,
+		drsPSI: !!s.rebalancing?.canPSI,
+		drsDisable: !!s.rebalancing?.canManage,
 		oauthClient: !!n.canManage,
 		...s.capabilities?.cluster,
 	};

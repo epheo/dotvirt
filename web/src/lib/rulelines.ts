@@ -75,7 +75,7 @@ function linesOf(b: PolicyBinding): RuleLine[] {
 }
 
 /**
- * The lines for one VM: the east-west chain, then outbound. With no outbound
+ * The lines for one VM: the incoming chain, then outbound. With no outbound
  * rule the VM reaches anything outside, which is worth saying.
  */
 export function vmRuleLines(eff: EffectivePolicy, project: string): RuleLine[] {
