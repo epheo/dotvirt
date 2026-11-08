@@ -178,15 +178,23 @@ func (n *namespaceSink) copyInto(into map[string]bool) {
 	}
 }
 
-// AllNamespaces is every namespace's name, the project namespaces included,
-// as one map shared by every caller, which must not modify it. It is rebuilt
-// only once the names or the project store moved.
-func (s *State) AllNamespaces() map[string]bool {
+// NamespacesGeneration moves whenever Namespaces or AllNamespaces may answer
+// differently: a view built from them stays current while it holds still.
+// Equality-only.
+func (s *State) NamespacesGeneration() [2]uint64 {
 	var gen [2]uint64
 	if s.names != nil {
 		gen[0] = s.names.generation()
 	}
 	gen[1] = s.nssGen.Load()
+	return gen
+}
+
+// AllNamespaces is every namespace's name, the project namespaces included,
+// as one map shared by every caller, which must not modify it. It is rebuilt
+// only once the names or the project store moved.
+func (s *State) AllNamespaces() map[string]bool {
+	gen := s.NamespacesGeneration()
 	s.allMu.Lock()
 	defer s.allMu.Unlock()
 	if s.all != nil && s.allGen == gen {

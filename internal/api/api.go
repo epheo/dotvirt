@@ -229,6 +229,11 @@ type Server struct {
 	// Open inventory streams per token key (see streams.go).
 	streamMu sync.Mutex
 	streams  map[string]int
+
+	// namespaceLabels, built at nsListGen (see handlers_effective.go).
+	nsListMu  sync.Mutex
+	nsList    []netstate.NamespaceLabels
+	nsListGen [2]uint64
 }
 
 // Deps are the collaborators for NewServer. Reader and Draft are required:
