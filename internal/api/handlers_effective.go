@@ -55,7 +55,7 @@ func (s *Server) clusterAuthority(ctx context.Context, id auth.Identity, c *clus
 		if !ok {
 			return false
 		}
-		allowed, _ := s.can(ctx, id, c, verbCreate, ref, "")
+		allowed := s.capable(ctx, id, c, ask(verbCreate, ref, ""))
 		return allowed
 	}
 }

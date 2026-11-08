@@ -218,15 +218,15 @@ func TestProposalsPlatformProjectSticky(t *testing.T) {
 	}
 }
 
-// TestCanAuthorPlatformNoRepo pins the safety gate: with no platform repo
+// TestCanReadPlatformNoRepo pins the safety gate: with no platform repo
 // configured, the inventory never seeds (or SSAR-checks) the platform tier.
-func TestCanAuthorPlatformNoRepo(t *testing.T) {
+func TestCanReadPlatformNoRepo(t *testing.T) {
 	s := NewServer(Deps{Reader: &fakeDraft{}, Draft: &fakeDraft{}}) // no PlatformRepo
 	id := auth.Identity{Token: "tok", Username: "u"}
 	// A nil cluster client is safe here: the repo-empty guard returns before any
 	// SSAR, so it must not be dereferenced.
-	if ok, err := s.canAuthorPlatform(context.TODO(), id, nil); ok || err != nil {
-		t.Fatal("canAuthorPlatform must be false when no platform repo is configured")
+	if ok, err := s.canReadPlatform(context.TODO(), id, nil); ok || err != nil {
+		t.Fatal("canReadPlatform must be false when no platform repo is configured")
 	}
 }
 
@@ -448,4 +448,18 @@ func TestMergedLaneReadsOnHeadMoves(t *testing.T) {
 	set(func() { fd.mergedFail = false })
 	pass("retried on the next tick", true, 1)
 	pass("settled after recovery", true, 0)
+}
+
+// The platform lane is read whenever anyone looks, a caller who sees no
+// tenant project included, so the first platform PR shows after a restart.
+func TestPlatformLaneReadWithNoTenantWatched(t *testing.T) {
+	fd := &fakeDraft{prs: map[string]model.Proposal{platformProjectName: {Project: platformProjectName, PRNumber: 1}}}
+	s := NewServer(Deps{Reader: fd, Draft: fd, Config: Config{PlatformRepo: "https://forge/dotvirt/platform.git"}})
+	s.proposalsFor(auth.Identity{Token: "tok", Username: "u"}, nil, false)
+	if !s.refreshProposals(true) {
+		t.Fatal("an open platform PR read with no tenant watched should wake the hub")
+	}
+	if !s.platformBusy() {
+		t.Fatal("the frame should see the platform busy")
+	}
 }

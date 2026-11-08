@@ -256,7 +256,7 @@ func TestReviewsHonorTheCallerDeadline(t *testing.T) {
 	id := auth.Identity{Token: "tok-alice", Username: "alice"}
 	gone, cancel := context.WithCancel(context.Background())
 	cancel()
-	if _, err := s.can(gone, id, c, verbList, ssarNodes, ""); err == nil || *reviews != 0 {
+	if _, err := s.can(gone, id, c, refQ(verbList, ssarNodes, "")); err == nil || *reviews != 0 {
 		t.Fatalf("an expired caller: err %v after %d reviews, want an error and none", err, *reviews)
 	}
 
@@ -465,7 +465,7 @@ func TestCanCachesVerdicts(t *testing.T) {
 	id := auth.Identity{Token: "tok-admin", Username: "admin"}
 	can := func(id auth.Identity, ref ssarRef) bool {
 		t.Helper()
-		ok, err := s.can(ctx, id, c, verbCreate, ref, "")
+		ok, err := s.can(ctx, id, c, refQ(verbCreate, ref, ""))
 		if err != nil {
 			t.Fatalf("can: %v", err)
 		}
@@ -502,35 +502,36 @@ func TestCanCachesVerdicts(t *testing.T) {
 }
 
 // TestCanKeyIsolation pins that every part of the question keys the cache:
-// verb, group, resource and namespace each make a distinct review, so a
-// crafted ref can neither read nor overwrite another question's verdict.
+// verb, group, resource, subresource, namespace and name each make a distinct
+// review, so a crafted ref can neither read nor overwrite another question's
+// verdict.
 func TestCanKeyIsolation(t *testing.T) {
 	s := scopeServer(eventbus.New())
 	c, reviews := ssarCountingClient(func(a *authzv1.ResourceAttributes) bool {
-		return a.Verb == "list" && a.Resource == "nodes" && a.Group == "" && a.Namespace == ""
+		return a.Verb == "list" && a.Resource == "nodes" && a.Group == "" && a.Namespace == "" && a.Subresource == "" && a.Name == ""
 	})
 	ctx := context.Background()
 	id := auth.Identity{Token: "tok-net", Username: "net"}
 
 	for i, q := range []struct {
-		verb string
-		ref  ssarRef
-		ns   string
+		q    question
 		want bool
 	}{
-		{verbList, ssarNodes, "", true},
-		{verbList, ssarNodes, "", true},
-		{verbCreate, ssarNodes, "", false},
-		{verbList, ssarRef{"read", "nodes"}, "", false},
-		{verbList, ssarRef{"", "nodes"}, "ns", false},
-		{verbList, ssarNodes, "", true},
+		{question{Verb: verbList, Resource: "nodes"}, true},
+		{question{Verb: verbList, Resource: "nodes"}, true},
+		{question{Verb: verbCreate, Resource: "nodes"}, false},
+		{question{Verb: verbList, Group: "read", Resource: "nodes"}, false},
+		{question{Verb: verbList, Resource: "nodes", Namespace: "ns"}, false},
+		{question{Verb: verbList, Resource: "nodes", Subresource: "proxy"}, false},
+		{question{Verb: verbList, Resource: "nodes", Name: "w1"}, false},
+		{question{Verb: verbList, Resource: "nodes"}, true},
 	} {
-		if ok, err := s.can(ctx, id, c, q.verb, q.ref, q.ns); ok != q.want || err != nil {
+		if ok, err := s.can(ctx, id, c, q.q); ok != q.want || err != nil {
 			t.Fatalf("question %d = %v, %v; want %v", i, ok, err, q.want)
 		}
 	}
-	if *reviews != 4 {
-		t.Fatalf("reviews = %d, want 4 (one per distinct question)", *reviews)
+	if *reviews != 6 {
+		t.Fatalf("reviews = %d, want 6 (one per distinct question)", *reviews)
 	}
 }
 

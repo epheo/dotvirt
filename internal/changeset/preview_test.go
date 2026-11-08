@@ -140,7 +140,7 @@ func TestPreviewCreateProjectIsWhatStageRecords(t *testing.T) {
 		return 0, "", false
 	})
 	raw := json.RawMessage(`{"name":"team-a","owners":["bob"],"vmNetwork":{"name":"team-a-net","subnet":"10.60.0.0/16"}}`)
-	p, err := f.c.PreviewCreateProject(f.id, f.platform(), raw, nil)
+	p, err := f.c.PreviewCreateProject(f.id, f.platform(), raw, nil, nil)
 	if err != nil {
 		t.Fatalf("PreviewCreateProject: %v", err)
 	}
@@ -162,7 +162,7 @@ func TestPreviewCreateProjectIsWhatStageRecords(t *testing.T) {
 		t.Fatalf("the owners grant must name bob: %+v", p.Files)
 	}
 
-	if _, err := f.c.StageCreateProject(f.id, f.platform(), raw, nil); err != nil {
+	if _, err := f.c.StageCreateProject(f.id, f.platform(), raw, nil, nil); err != nil {
 		t.Fatalf("StageCreateProject: %v", err)
 	}
 	entries, err := f.c.store.List(f.id.Username, f.platform().Name)
@@ -181,7 +181,7 @@ func TestPreviewCreateProjectIsWhatStageRecords(t *testing.T) {
 		t.Fatalf("the stage recorded other files than the preview showed:\nstaged %v\npreviewed %v", staged, previewed)
 	}
 
-	if _, err := f.c.PreviewCreateProject(f.id, f.platform(), json.RawMessage(`{"name":"platform"}`), nil); !errors.Is(err, model.ErrInvalid) {
+	if _, err := f.c.PreviewCreateProject(f.id, f.platform(), json.RawMessage(`{"name":"platform"}`), nil, nil); !errors.Is(err, model.ErrInvalid) {
 		t.Errorf("the reserved name must refuse as ErrInvalid, got %v", err)
 	}
 }
@@ -190,7 +190,7 @@ func TestPreviewCreateProjectIsWhatStageRecords(t *testing.T) {
 func TestPreviewCreateProjectNeedsForge(t *testing.T) {
 	c := newTestCoordinator(t, false)
 	_, err := c.PreviewCreateProject(auth.Identity{Username: "alice"}, project.ProjectInfo{Name: "platform", Repo: seedBare(t)},
-		json.RawMessage(`{"name":"team-a"}`), nil)
+		json.RawMessage(`{"name":"team-a"}`), nil, nil)
 	if !errors.Is(err, model.ErrInvalid) || !strings.Contains(err.Error(), "forge not configured") {
 		t.Fatalf("want the stage's forge refusal, got %v", err)
 	}
@@ -278,7 +278,7 @@ func TestPreviewIsGatedLikeStage(t *testing.T) {
 
 	f := newProposeFixture(t)
 	f.c.UseAuthorizer(&rbac{deny: verbOn("create", "namespaces")})
-	if _, err := f.c.PreviewCreateProject(f.id, f.platform(), json.RawMessage(`{"name":"team-a"}`), nil); !errors.Is(err, model.ErrForbidden) {
+	if _, err := f.c.PreviewCreateProject(f.id, f.platform(), json.RawMessage(`{"name":"team-a"}`), nil, nil); !errors.Is(err, model.ErrForbidden) {
 		t.Errorf("a project the caller may not create: preview err = %v", err)
 	}
 }
@@ -331,5 +331,20 @@ func TestPreviewCreateNamespaceShowsItsGrants(t *testing.T) {
 	c.UseAuthorizer(&rbac{deny: verbOn("create", "rolebindings")})
 	if _, err := c.PreviewCreateNamespace(id, plat, join, json.RawMessage(`{"name":"team-a-web"}`), nil); !errors.Is(err, model.ErrForbidden) {
 		t.Errorf("a grant the caller may not make: preview err = %v", err)
+	}
+}
+
+// An existing project is refused after the gate, as the stage refuses it: a
+// caller the gate refuses learns nothing of which projects exist.
+func TestPreviewCreateProjectAsksExistsAfterTheGate(t *testing.T) {
+	f := newProposeFixture(t)
+	exists := func(name string) bool { return name == "team-a" }
+	raw := json.RawMessage(`{"name":"team-a"}`)
+	if _, err := f.c.PreviewCreateProject(f.id, f.platform(), raw, nil, exists); !errors.Is(err, model.ErrConflict) {
+		t.Errorf("an existing project: preview err = %v, want ErrConflict", err)
+	}
+	f.c.UseAuthorizer(&rbac{deny: verbOn("create", "namespaces")})
+	if _, err := f.c.PreviewCreateProject(f.id, f.platform(), raw, nil, exists); !errors.Is(err, model.ErrForbidden) {
+		t.Errorf("a refused caller: preview err = %v, want the gate's ErrForbidden", err)
 	}
 }

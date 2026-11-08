@@ -77,14 +77,14 @@ var (
 
 func (s *Server) netGrants(ctx context.Context, id auth.Identity, c *cluster.Client, platform bool) netGrants {
 	g := netGrants{create: map[ssarRef]bool{}}
-	g.nodes, _ = s.can(ctx, id, c, verbList, ssarNodes, "")
+	g.nodes, _ = s.can(ctx, id, c, refQ(verbList, ssarNodes, ""))
 	verdicts := []bool{g.nodes, platform}
 	refs := netGrantRefs
 	if s.cfg.PlatformRepo != "" {
 		refs = append(refs[:len(refs):len(refs)], netCapRefs...)
 	}
 	for _, r := range refs {
-		g.create[r], _ = s.can(ctx, id, c, verbCreate, r, "")
+		g.create[r], _ = s.can(ctx, id, c, refQ(verbCreate, r, ""))
 		verdicts = append(verdicts, g.create[r])
 	}
 	for i, v := range verdicts {

@@ -120,6 +120,9 @@ type Evacuation struct {
 	Requested int                 `json:"requested"`
 	Skipped   int                 `json:"skipped,omitempty"` // already mid-migration
 	Failures  []EvacuationFailure `json:"failures"`
+	// Hidden counts the failures in namespaces whose VMs the caller may not
+	// read: never named, never silently dropped.
+	Hidden int `json:"hidden,omitempty"`
 }
 
 type EvacuationFailure struct {

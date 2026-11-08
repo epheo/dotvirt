@@ -38,6 +38,7 @@ type reachedDraft struct {
 	Draft
 	mu      sync.Mutex
 	reached []string
+	items   []model.DraftItem // what the draft, or a reverted commit, holds
 }
 
 func (d *reachedDraft) hit(name string) {
@@ -123,6 +124,14 @@ func (d *reachedDraft) Adopt(auth.Identity, project.ProjectInfo, string, string)
 func (d *reachedDraft) RestoreVersion(auth.Identity, project.ProjectInfo, string, string, string, string) (model.DraftView, error) {
 	d.hit("RestoreVersion")
 	return view, nil
+}
+func (d *reachedDraft) Get(auth.Identity, project.ProjectInfo) (model.DraftView, error) {
+	v := view
+	v.Items = d.items
+	return v, nil
+}
+func (d *reachedDraft) Commit(project.ProjectInfo, string) (model.CommitDetail, error) {
+	return model.CommitDetail{Items: d.items}, nil
 }
 func (d *reachedDraft) Revert(auth.Identity, project.ProjectInfo, string) (model.ProposeResult, error) {
 	d.hit("Revert")
@@ -222,8 +231,6 @@ var authorRoutes = []struct {
 	{http.MethodPost, "/api/vms/web/vm1/delete", ``, "StageDelete"},
 	{http.MethodPost, "/api/vms/web/vm1/adopt", ``, "Adopt"},
 	{http.MethodPost, "/api/vms/web/vm1/restore", `{"hash":"` + hash40 + `"}`, "RestoreVersion"},
-	{http.MethodPost, "/api/draft/propose?project=team", `{"title":"t"}`, "Propose"},
-	{http.MethodPost, "/api/projects/team/revert", `{"hash":"` + hash40 + `"}`, "Revert"},
 	{http.MethodPost, "/api/networks", `{"scope":"project","namespace":"web"}`, "StageCreate"},
 	{http.MethodPost, "/api/egressfirewalls", `{"namespace":"web"}`, "StageCreate"},
 	{http.MethodPost, "/api/networkpolicies", `{"namespace":"web"}`, "StageCreate"},
@@ -242,8 +249,17 @@ var authorRoutes = []struct {
 	{http.MethodPost, "/api/templates", `{"sourceNamespace":"web","sourceName":"vm1"}`, "StageSaveTemplate"},
 	// The adoption captures read the cluster before staging, so passing the
 	// gate is all these assert for the editor.
-	{http.MethodPost, "/api/namespaces/web/adopt", ``, ""},
 	{http.MethodPost, "/api/objects/networkpolicy/web/p1/adopt", ``, ""},
+}
+
+// The routes no stand-in right gates: propose and revert reach the
+// coordinator, whose gate weighs every entry under the caller's token, and a
+// namespace adoption keeps only what that gate would allow.
+var coordinatorGated = []struct {
+	method, path, body, reaches string
+}{
+	{http.MethodPost, "/api/draft/propose?project=team", `{"title":"t"}`, "Propose"},
+	{http.MethodPost, "/api/projects/team/revert", `{"hash":"` + hash40 + `"}`, "Revert"},
 }
 
 func serve(s *Server, method, path, body, token string) *httptest.ResponseRecorder {
@@ -283,6 +299,35 @@ func TestAuthorGateViewerForbiddenEditorPasses(t *testing.T) {
 	}
 }
 
+// A viewer reaches the coordinator on the routes it gates itself.
+func TestCoordinatorGatedRoutesReachIt(t *testing.T) {
+	d := &reachedDraft{}
+	s := tenantServer(t, d, []string{"web"}, []string{"web"})
+	for _, rt := range coordinatorGated {
+		rec := serve(s, rt.method, rt.path, rt.body, viewerToken)
+		if got := d.take(); len(got) != 1 || got[0] != rt.reaches {
+			t.Errorf("viewer %s %s = %d %q, reached %v", rt.method, rt.path, rec.Code, rec.Body.String(), got)
+		}
+	}
+}
+
+// A project library file, which no gate weighs, is weighed at propose and at
+// revert as its own routes weigh it: the project's authoring right.
+func TestLibraryWritesWeighedAtProposeAndRevert(t *testing.T) {
+	d := &reachedDraft{items: []model.DraftItem{{Kind: "create", Resource: "template", Name: "t"}}}
+	s := tenantServer(t, d, []string{"web"}, []string{"web"})
+	for _, rt := range coordinatorGated {
+		rec := serve(s, rt.method, rt.path, rt.body, viewerToken)
+		if !gateDenied(rec) || len(d.take()) != 0 {
+			t.Errorf("viewer %s %s = %d %q, want the library's 403", rt.method, rt.path, rec.Code, rec.Body.String())
+		}
+		serve(s, rt.method, rt.path, rt.body, editorToken)
+		if got := d.take(); len(got) != 1 || got[0] != rt.reaches {
+			t.Errorf("editor %s %s reached %v", rt.method, rt.path, got)
+		}
+	}
+}
+
 // The read paths keep serving a viewer, and discard and unstage only clear
 // the caller's own draft, so a demoted user can still drop leftovers.
 func TestAuthorGateLeavesReadsAndCleanupOpen(t *testing.T) {
@@ -303,8 +348,8 @@ func TestAuthorGateLeavesReadsAndCleanupOpen(t *testing.T) {
 	}
 }
 
-// A project name never stands for the platform tier: only platformScope sets
-// the bypass, and a namespace labelled with the reserved name resolves nowhere.
+// A project name never stands for the platform tier: no scope field grants
+// anything, and a namespace labelled with the reserved name resolves nowhere.
 func TestPlatformNameIsNotABypass(t *testing.T) {
 	d := &reachedDraft{}
 	s := tenantServer(t, d, []string{"web", "sneaky"}, []string{"web", "sneaky"})
@@ -320,9 +365,8 @@ func TestPlatformNameIsNotABypass(t *testing.T) {
 	sc := scope{id: auth.Identity{Token: viewerToken}, cluster: c, proj: project.ProjectInfo{Name: platformProjectName, Namespaces: []string{"web"}}}
 	r := httptest.NewRequest(http.MethodPost, "/", nil)
 	for name, gate := range map[string]func(http.ResponseWriter) bool{
-		"authorize":      func(w http.ResponseWriter) bool { return s.authorize(w, r, sc, verbUpdate, ssarVM, "web") },
-		"authorizeDraft": func(w http.ResponseWriter) bool { return s.authorizeDraft(w, r, sc) },
-		"authorizeRepo":  func(w http.ResponseWriter) bool { return s.authorizeRepo(w, r, sc) },
+		"gate":             func(w http.ResponseWriter) bool { return s.gate(w, r, sc, vmAction(verbUpdate, "web")) },
+		"authorizeLibrary": func(w http.ResponseWriter) bool { return s.authorizeLibrary(w, r, sc) },
 	} {
 		if gate(httptest.NewRecorder()) {
 			t.Errorf("%s let a project named %q through on its name", name, platformProjectName)
@@ -388,7 +432,7 @@ func TestCanCacheKey(t *testing.T) {
 	for _, q := range []struct{ verb, ns string }{
 		{verbUpdate, "a"}, {verbUpdate, "a"}, {verbUpdate, "b"}, {verbDelete, "a"},
 	} {
-		if ok, err := s.can(ctx, id, c, q.verb, ssarVM, q.ns); !ok || err != nil {
+		if ok, err := s.can(ctx, id, c, refQ(q.verb, ssarVM, q.ns)); !ok || err != nil {
 			t.Fatalf("%s in %s = %v, %v", q.verb, q.ns, ok, err)
 		}
 	}
@@ -399,8 +443,9 @@ func TestCanCacheKey(t *testing.T) {
 
 // The coordinator's accesses are reviews under the caller's own token: the
 // whole resource first, the question the route gates cache, and the named
-// object only when that is denied; each distinct question once; a denial
-// names every access refused, and a failed review is not a denial.
+// object only when that is denied, a bind by its role's name alone; each
+// distinct question once; a denial names every access refused, and a failed
+// review is not a denial.
 func TestAuthorizeAsksEachAccessOnce(t *testing.T) {
 	fc := newFakeCluster(t)
 	var mu sync.Mutex
@@ -448,7 +493,7 @@ func TestAuthorizeAsksEachAccessOnce(t *testing.T) {
 		asked = nil
 		return out
 	}
-	want := map[string]int{"create virtualmachines ": 1, "update virtualmachines ": 1, "bind clusterroles ": 1, "bind clusterroles admin": 1}
+	want := map[string]int{"create virtualmachines ": 1, "update virtualmachines ": 1, "bind clusterroles admin": 1}
 	if got := taken(); !maps.Equal(got, want) {
 		t.Fatalf("asked %v, want %v", got, want)
 	}

@@ -28,23 +28,39 @@ import (
 // draft, not an error. That empty case is also how a pending change is
 // cancelled: re-submitting the committed configuration.
 func (c *Coordinator) StageEnableDRS(id auth.Identity, proj project.ProjectInfo, rawSpec json.RawMessage) (model.DraftView, error) {
-	read, err := c.read(proj)
+	entries, err := c.enableDRSEntries(proj, rawSpec)
 	if err != nil {
 		return model.DraftView{}, err
 	}
+	if err := c.gate(id, proj, entries); err != nil {
+		return model.DraftView{}, err
+	}
+	if _, err := c.store.ReplaceResource(id.Username, proj.Name, draft.ResourceDRS, entries...); err != nil {
+		return model.DraftView{}, err
+	}
+	return c.Get(id, proj)
+}
+
+// enableDRSEntries is what enabling DRS as rawSpec stages into proj: each
+// file of the set the base branch does not already hold as rendered.
+func (c *Coordinator) enableDRSEntries(proj project.ProjectInfo, rawSpec json.RawMessage) ([]draft.Entry, error) {
+	read, err := c.read(proj)
+	if err != nil {
+		return nil, err
+	}
 	var spec drs.Spec
 	if err := json.Unmarshal(rawSpec, &spec); err != nil {
-		return model.DraftView{}, fmt.Errorf("%w: invalid DRS spec: %v", model.ErrInvalid, err)
+		return nil, fmt.Errorf("%w: invalid DRS spec: %v", model.ErrInvalid, err)
 	}
 	files, err := drs.Manifests(spec)
 	if err != nil {
-		return model.DraftView{}, invalid(err)
+		return nil, invalid(err)
 	}
 	var entries []draft.Entry
 	for _, f := range files {
 		current, ok, err := read.LookupOnBranch(c.baseBranch, f.Path)
 		if err != nil {
-			return model.DraftView{}, err
+			return nil, err
 		}
 		if ok && bytes.Equal(current, f.Content) {
 			continue // already live in git; nothing to propose for this file
@@ -59,13 +75,7 @@ func (c *Coordinator) StageEnableDRS(id auth.Identity, proj project.ProjectInfo,
 			BaseBlob:   pinOf(current, ok),
 		})
 	}
-	if err := c.gate(id, proj, entries); err != nil {
-		return model.DraftView{}, err
-	}
-	if _, err := c.store.ReplaceResource(id.Username, proj.Name, draft.ResourceDRS, entries...); err != nil {
-		return model.DraftView{}, err
-	}
-	return c.Get(id, proj)
+	return entries, nil
 }
 
 // StageDisableDRS stages the removal of the KubeDescheduler CR: rebalancing
@@ -73,24 +83,9 @@ func (c *Coordinator) StageEnableDRS(id auth.Identity, proj project.ProjectInfo,
 // When the CR was never committed, a pending enable in the draft is cleared
 // instead - a cancel, not a delete.
 func (c *Coordinator) StageDisableDRS(id auth.Identity, proj project.ProjectInfo) (model.DraftView, error) {
-	read, err := c.read(proj)
+	entries, configured, err := c.disableDRSEntries(proj)
 	if err != nil {
 		return model.DraftView{}, err
-	}
-	cr, configured, err := read.LookupOnBranch(c.baseBranch, drs.CRPath)
-	if err != nil {
-		return model.DraftView{}, err
-	}
-	var entries []draft.Entry
-	if configured {
-		entries = append(entries, draft.Entry{
-			Kind:       draft.KindDelete,
-			Resource:   draft.ResourceDRS,
-			Namespace:  model.ClusterScopeNS,
-			Name:       "kubedescheduler",
-			SourceFile: drs.CRPath,
-			BaseBlob:   git.BlobID(cr),
-		})
 	}
 	if err := c.gate(id, proj, entries); err != nil {
 		return model.DraftView{}, err
@@ -103,6 +98,30 @@ func (c *Coordinator) StageDisableDRS(id auth.Identity, proj project.ProjectInfo
 		return model.DraftView{}, fmt.Errorf("%w: DRS is not configured on %s", model.ErrNotFound, c.baseBranch)
 	}
 	return c.Get(id, proj)
+}
+
+// disableDRSEntries is what disabling DRS stages into proj: the CR's removal
+// when the base branch declares it (configured).
+func (c *Coordinator) disableDRSEntries(proj project.ProjectInfo) (entries []draft.Entry, configured bool, err error) {
+	read, err := c.read(proj)
+	if err != nil {
+		return nil, false, err
+	}
+	cr, configured, err := read.LookupOnBranch(c.baseBranch, drs.CRPath)
+	if err != nil {
+		return nil, false, err
+	}
+	if configured {
+		entries = append(entries, draft.Entry{
+			Kind:       draft.KindDelete,
+			Resource:   draft.ResourceDRS,
+			Namespace:  model.ClusterScopeNS,
+			Name:       "kubedescheduler",
+			SourceFile: drs.CRPath,
+			BaseBlob:   git.BlobID(cr),
+		})
+	}
+	return entries, configured, nil
 }
 
 // DRSState reads the platform repo's committed DRS configuration off the base
