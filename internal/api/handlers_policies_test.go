@@ -210,9 +210,10 @@ func TestTenantReadsOwnScopeOnEveryPolicySurface(t *testing.T) {
 }
 
 // Through the route: a tenant on a primary UDN tracing to an address in
-// another tenant's network range reads exactly what it reads for any address
-// it cannot place, so the trace is no oracle for that range; a caller who
-// sees that namespace reads the overlay answer.
+// another tenant's network range reads exactly what it reads for an outside
+// address, certain once the cluster's pod and service networks are known, so
+// the trace is no oracle for that range; a caller who sees that namespace
+// reads the overlay answer.
 func TestTraceViewIsTheCallers(t *testing.T) {
 	fc := newFakeCluster(t)
 	fc.readsVMs = tenantReadsTeamA
@@ -255,6 +256,17 @@ func TestTraceViewIsTheCallers(t *testing.T) {
 		udn("team-a-dev", "net-a", "10.100.0.0/16"), udn("orphans-ns", "net-o", "10.200.0.0/16")))
 	fc.on(http.MethodGet, "/apis/k8s.cni.cncf.io/v1/network-attachment-definitions", unstructuredList("k8s.cni.cncf.io/v1", "NetworkAttachmentDefinition",
 		nad("team-a-dev", "net-a"), nad("orphans-ns", "net-o")))
+	fc.on(http.MethodGet, "/api/v1/nodes", func(w http.ResponseWriter, _ *http.Request) {
+		writeObj(w, corev1.NodeList{TypeMeta: metav1.TypeMeta{Kind: "NodeList", APIVersion: "v1"}, Items: []corev1.Node{{
+			ObjectMeta: metav1.ObjectMeta{Name: "w1", Annotations: map[string]string{"k8s.ovn.org/node-subnets": `{"default":["10.128.0.0/23"]}`}},
+		}}})
+	})
+	fc.on(http.MethodGet, "/apis/config.openshift.io/v1/networks/cluster", func(w http.ResponseWriter, _ *http.Request) {
+		writeObj(w, map[string]any{
+			"apiVersion": "config.openshift.io/v1", "kind": "Network", "metadata": map[string]any{"name": "cluster"},
+			"status": map[string]any{"clusterNetwork": []any{map[string]any{"cidr": "10.128.0.0/14"}}, "serviceNetwork": []any{"172.30.0.0/16"}},
+		})
+	})
 	s := fc.server(nil, Config{})
 	ns := netstate.New(fc.sa, nil)
 	ctx, cancel := context.WithCancel(context.Background())
@@ -281,10 +293,19 @@ func TestTraceViewIsTheCallers(t *testing.T) {
 		}
 		return ""
 	}
-	inRange, outside := trace(tenantToken, "10.200.0.7"), trace(tenantToken, "10.201.0.7")
-	if inRange.Verdict != outside.Verdict || note(inRange, "10.200.0.7") != note(outside, "10.201.0.7") {
-		t.Errorf("a tenant tells another tenant's range apart: %s %q vs %s %q",
-			inRange.Verdict, note(inRange, "10.200.0.7"), outside.Verdict, note(outside, "10.201.0.7"))
+	raw := func(token, ip string) string {
+		t.Helper()
+		rec := do(s, token, http.MethodPost, "/api/networking/trace", `{"source":{"namespace":"team-a-dev","vm":"web"},"destination":{"ip":"`+ip+`"},"port":443}`)
+		wantStatus(t, rec, http.StatusOK)
+		return strings.ReplaceAll(rec.Body.String(), ip, "<ip>")
+	}
+	for deadline := time.Now().Add(10 * time.Second); trace(tenantToken, "203.0.113.9").Verdict != "Allow"; time.Sleep(10 * time.Millisecond) {
+		if time.Now().After(deadline) {
+			t.Fatal("the cluster's pod and service networks never placed an outside address")
+		}
+	}
+	if inRange, outside := raw(tenantToken, "10.200.0.7"), raw(tenantToken, "203.0.113.9"); inRange != outside {
+		t.Errorf("a tenant tells another tenant's range apart:\n%s\nwant\n%s", inRange, outside)
 	}
 	if admin := trace(adminToken, "10.200.0.7"); !strings.Contains(note(admin, "10.200.0.7"), "no in-cluster path") {
 		t.Errorf("a caller who sees the namespace reads the overlay answer: %+v", admin)

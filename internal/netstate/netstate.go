@@ -21,6 +21,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/client-go/tools/cache"
 
@@ -79,9 +80,13 @@ type Snapshot struct {
 	watches []watchSpec
 	healthy []atomic.Bool // one reflect.TrackHealth flag per watches entry
 
-	nodesMu sync.RWMutex
-	nodes   []cluster.NodeLabels
-	podNet  []netip.Prefix // the cluster default network's node subnets; nil: unknown
+	// The cluster's infrastructure ranges, refreshed off the request path; nil
+	// is unknown.
+	nodesMu    sync.RWMutex
+	nodes      []cluster.NodeLabels
+	podNet     []netip.Prefix // the default network's node subnets
+	clusterNet []netip.Prefix // the pod network CIDRs the cluster config declares
+	svcNet     []netip.Prefix // the service network CIDRs
 
 	routeAds atomic.Int32 // routeAdsUnknown, routeAdsAbsent or routeAdsServed
 }
@@ -234,7 +239,8 @@ func (s *Snapshot) watch(ctx context.Context, w watchSpec, healthy *atomic.Bool)
 // on start, then every nodeRefreshInterval). A changed node set signals NetworkChanged:
 // uplink membership derives from it, and the first LIST usually lands after clients
 // already pulled the catalog. The same LIST carries the default network's node
-// subnets, which only the trace reads, so their moves signal nothing.
+// subnets, and the same tick reads the cluster's pod and service networks:
+// only the trace reads those, so their moves signal nothing.
 func (s *Snapshot) refreshNodes(ctx context.Context) {
 	t := time.NewTicker(nodeRefreshInterval)
 	defer t.Stop()
@@ -249,12 +255,30 @@ func (s *Snapshot) refreshNodes(ctx context.Context) {
 				s.bus.Publish(eventbus.NetworkChanged)
 			}
 		}
+		s.refreshClusterNetworks(ctx)
 		select {
 		case <-ctx.Done():
 			return
 		case <-t.C:
 		}
 	}
+}
+
+// refreshClusterNetworks reads the cluster's declared pod and service
+// networks. A cluster without OpenShift's Network config, or one the SA may
+// not read, leaves them unknown; a failed read keeps the last one.
+func (s *Snapshot) refreshClusterNetworks(ctx context.Context) {
+	pod, svc, err := s.sa.ClusterNetworks(ctx)
+	switch {
+	case apierrors.IsNotFound(err), apierrors.IsForbidden(err):
+		pod, svc = nil, nil
+	case err != nil:
+		return
+	}
+	clusterNet, svcNet := parsePrefixes(pod), parsePrefixes(svc)
+	s.nodesMu.Lock()
+	s.clusterNet, s.svcNet = clusterNet, svcNet
+	s.nodesMu.Unlock()
 }
 
 func nodesEqual(a, b []cluster.NodeLabels) bool {

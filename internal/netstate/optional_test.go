@@ -10,6 +10,7 @@ import (
 	authzv1 "k8s.io/api/authorization/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	fakediscovery "k8s.io/client-go/discovery/fake"
@@ -142,5 +143,49 @@ func TestOVNServedRecordsRouteAds(t *testing.T) {
 	ovn(gvrUDN.Resource, gvrRouteAds.Resource)
 	if !s.ovnServed(gvrUDN) || s.routeAds.Load() != routeAdsServed {
 		t.Fatalf("route advertisement served: state %d", s.routeAds.Load())
+	}
+}
+
+// The node tick reads the cluster's pod and service networks: a cluster
+// without OpenShift's Network config, or one the SA may not read, leaves them
+// unknown, and a failed read keeps the last answer.
+func TestRefreshClusterNetworks(t *testing.T) {
+	gvr := schema.GroupVersionResource{Group: "config.openshift.io", Version: "v1", Resource: "networks"}
+	network := &unstructured.Unstructured{Object: map[string]any{
+		"apiVersion": "config.openshift.io/v1", "kind": "Network",
+		"metadata": map[string]any{"name": "cluster"},
+		"status": map[string]any{
+			"clusterNetwork": []any{map[string]any{"cidr": "10.128.0.0/14", "hostPrefix": int64(23)}},
+			"serviceNetwork": []any{"172.30.0.0/16"},
+		},
+	}}
+	var fail error // the read's failure; nil reads the object
+	dyn := dynamicfake.NewSimpleDynamicClientWithCustomListKinds(runtime.NewScheme(), map[schema.GroupVersionResource]string{gvr: "NetworkList"}, network)
+	dyn.PrependReactor("get", "networks", func(k8stesting.Action) (bool, runtime.Object, error) {
+		if fail != nil {
+			return true, nil, fail
+		}
+		return false, nil, nil
+	})
+	s := New(cluster.NewClient(fake.NewSimpleClientset(), nil, dyn), nil)
+	ctx := context.Background()
+	known := func() bool { return s.serviceRange() != nil && s.clusterNet != nil }
+
+	s.refreshClusterNetworks(ctx)
+	if !known() || s.svcNet[0].String() != "172.30.0.0/16" || s.clusterNet[0].String() != "10.128.0.0/14" {
+		t.Fatalf("read: cluster %v, service %v", s.clusterNet, s.svcNet)
+	}
+	fail = errors.New("connection reset")
+	if s.refreshClusterNetworks(ctx); !known() {
+		t.Error("a failed read must keep the last answer")
+	}
+	for name, err := range map[string]error{
+		"not served":   apierrors.NewNotFound(gvr.GroupResource(), "cluster"),
+		"not readable": apierrors.NewForbidden(gvr.GroupResource(), "cluster", nil),
+	} {
+		fail = err
+		if s.refreshClusterNetworks(ctx); known() {
+			t.Errorf("%s: the ranges must read unknown", name)
+		}
 	}
 }

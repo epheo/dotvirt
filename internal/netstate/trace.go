@@ -77,11 +77,11 @@ func (s *Snapshot) Trace(view *TraceView, src TraceWorkload, dst *TraceWorkload,
 		res.Verdict = "Conditional" // the guest may route the flow out its VLAN NIC
 	}
 	switch path.place {
-	case placeOverlay, placeUnknown:
+	case placeService, placeOverlay, placeUnknown:
 		if res.Verdict == "Allow" {
-			res.Verdict = "Conditional" // the address may be a workload no path reaches
+			res.Verdict = "Conditional" // the address may be a workload or service no path reaches
 		}
-		if path.place == placeUnknown && res.Verdict == "Deny" && eg.outcome != "Deny" {
+		if path.place != placeOverlay && res.Verdict == "Deny" && eg.outcome != "Deny" {
 			res.Verdict = "Conditional" // the outbound rules bind only a flow leaving the cluster
 		}
 	}
@@ -469,9 +469,9 @@ func (s *Snapshot) externalConnectivity(src TraceWorkload, dstIP string, view *T
 // egress controls decide. In the default network's range, the source on
 // another, there is no path; route advertisement that may join the networks,
 // a VLAN NIC, or a secondary NIC whose range may hold the address leaves that
-// inconclusive. In another UDN or CUDN's range, or wherever the caller's view
-// cannot place it, the address may be a workload no path reaches, worded
-// alike for every address the view cannot place.
+// inconclusive. A service address another network may serve, an address in
+// another network's range the caller reads, or one an unknown range leaves
+// unplaced may be a workload or service no path reaches.
 func (s *Snapshot) primaryPath(src TraceWorkload, dstIP string, vlan bool, view *TraceView) (steps []model.TraceStep, decided string, where placement) {
 	reach := model.TraceStep{Stage: "connectivity", Action: "Reachable",
 		Note: "Cluster egress path to " + dstIP + ", evaluated against the source's egress controls."}
@@ -496,6 +496,10 @@ func (s *Snapshot) primaryPath(src TraceWorkload, dstIP string, vlan bool, view 
 		}
 		cut.Decisive = true
 		return []model.TraceStep{cut}, "Unreachable", where
+	case placeService:
+		reach.Conditional = true
+		reach.Note = dstIP + " is a cluster service address: from " + name +
+			" only the Kubernetes API and DNS services of other networks answer, and which network serves it cannot be told here."
 	case placeOverlay:
 		reach.Conditional = true
 		reach.Note = dstIP + " lies in the range of a network isolated from " + name +

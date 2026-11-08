@@ -136,40 +136,42 @@ func (s *Snapshot) isLocalnet(ref string) bool {
 	return ok && strings.EqualFold(c.Topology, "localnet")
 }
 
-// placement is where a bare destination address lies for a source, by the
-// primary networks' address ranges the caller may read. OVN-Kubernetes
+// placement is where a bare destination address lies for a source. OVN-K
 // isolates every primary network (the cluster default one, each Primary UDN
-// and CUDN) from the others: only the Kubernetes API and DNS services of the
-// default network cross, through service addresses no range here holds. A
-// UDN or CUDN range is overlay only: an address in it that also exists
-// outside the cluster is reached there, through the gateway.
+// and CUDN) from the others; only the Kubernetes API and DNS services of the
+// default network cross. Two kinds of range place an address:
+//   - the cluster's infrastructure ranges, the default pod network and the
+//     service network: cluster constants, so they may make any caller's
+//     verdict certain (Kubernetes discloses the service range to whoever may
+//     create a Service);
+//   - UDN and CUDN ranges, configured per tenant and overlay only: only the
+//     ones the caller may read count. An address in another's range leaves
+//     through the gateway like any outside address, and reads as one.
 type placement int
 
 const (
-	placeOutside  placement = iota // nothing in the cluster isolates it
+	placeOutside  placement = iota // nothing isolates it: the egress controls decide
 	placeSame                      // in the source's own network's range
 	placeIsolated                  // in the default network's range, the source on another
-	placeOverlay                   // in another UDN or CUDN's range: no in-cluster path
-	placeUnknown                   // what the caller may read cannot place it
+	placeService                   // a service address another network may serve
+	placeOverlay                   // in a range of another network the caller reads: no in-cluster path
+	placeUnknown                   // an infrastructure range, or the source's own, is unknown
 )
 
-// TraceView is what the caller may read of the networks a bare address is
-// placed against; a certain verdict rests on nothing else. nil reads every
-// network.
+// TraceView is what the caller may read of the tenant-configured networks a
+// bare address is placed against. nil reads every network.
 type TraceView struct {
 	Namespace func(name string) bool // the caller sees this namespace
 	Shared    func() bool            // the caller sees every shared network, published to them or not
-	Nodes     func() bool            // the caller may list nodes, and so read the default network's range
 }
 
-// reads reports whether the caller may read r: the default network's range
-// with nodes, a UDN in a namespace they see, a CUDN published to one.
+// reads reports whether the caller may read a UDN or CUDN range: a UDN in a
+// namespace they see, a CUDN published to one, or every CUDN where their
+// catalog lists them all.
 func (v *TraceView) reads(r primaryRange) bool {
 	switch {
 	case v == nil:
 		return true
-	case r.key == "default":
-		return v.Nodes != nil && v.Nodes()
 	case v.Namespace != nil && slices.ContainsFunc(r.namespaces, v.Namespace):
 		return true
 	}
@@ -185,11 +187,9 @@ type primaryRange struct {
 }
 
 // primaryRanges lists every realized primary network's range: the default
-// network's node subnets, then each Primary UDN and CUDN's declared subnets.
+// network's first, then each Primary UDN and CUDN's declared subnets.
 func (s *Snapshot) primaryRanges() []primaryRange {
-	s.nodesMu.RLock()
-	out := []primaryRange{{key: "default", prefixes: s.podNet}}
-	s.nodesMu.RUnlock()
+	out := []primaryRange{{key: "default", prefixes: s.defaultRange()}}
 	cudnNS := map[string][]string{}
 	for _, nad := range reflect.List(s.nad) {
 		for _, ref := range nad.GetOwnerReferences() {
@@ -212,41 +212,83 @@ func (s *Snapshot) primaryRanges() []primaryRange {
 	return out
 }
 
-// place classifies addr for src, on primary network key, by the ranges view
-// reads. With the default network alone nothing isolates an address. The
-// source's own range counts only when one of its addresses lies in it. An
-// address in no range read is unknown, the same for every address: it may lie
-// in a range the caller cannot read, or be a service of another primary
-// network, whose service range no snapshot holds.
+// defaultRange is the default network's range: every node's subnet, unknown
+// when one lies outside the pod networks the cluster config declares.
+func (s *Snapshot) defaultRange() []netip.Prefix {
+	s.nodesMu.RLock()
+	defer s.nodesMu.RUnlock()
+	if s.clusterNet != nil && slices.ContainsFunc(s.podNet, func(p netip.Prefix) bool { return !within(p, s.clusterNet) }) {
+		return nil
+	}
+	return s.podNet
+}
+
+// serviceRange is the service network's range; nil when unknown.
+func (s *Snapshot) serviceRange() []netip.Prefix {
+	s.nodesMu.RLock()
+	defer s.nodesMu.RUnlock()
+	return s.svcNet
+}
+
+// place classifies addr for src, on primary network key. The source's own
+// range counts only when one of its addresses lies in it (the default
+// network's may be unknown). From the default network a service address, or
+// one in a range the caller cannot read, is as reachable as any outside one.
+// From another network an address the infrastructure ranges cannot rule out
+// stays unknown, the same for every address.
 func (s *Snapshot) place(src TraceWorkload, key string, addr netip.Addr, view *TraceView) placement {
 	ranges := s.primaryRanges()
-	if len(ranges) == 1 {
-		return placeOutside
-	}
+	def, svc := ranges[0].prefixes, s.serviceRange()
+	onDefault := key == "default"
 	var own []netip.Prefix
-	other := ""
+	readable := false
 	for _, r := range ranges {
-		if r.prefixes == nil || !view.reads(r) {
-			continue
-		}
 		switch {
 		case r.key == key:
 			own = r.prefixes
-		case other == "" && containsAddr(r.prefixes, addr):
-			other = r.key
+		case r.key != "default" && containsAddr(r.prefixes, addr) && view.reads(r):
+			readable = true
 		}
 	}
+	verified := (onDefault && own == nil) || slices.ContainsFunc(src.IPs, func(ip string) bool { return containsIP(own, ip) })
 	switch {
-	case !slices.ContainsFunc(src.IPs, func(ip string) bool { return containsIP(own, ip) }):
+	case !verified:
 		return placeUnknown
 	case containsAddr(own, addr):
 		return placeSame
-	case other == "default":
-		return placeIsolated
-	case other != "":
+	case readable:
 		return placeOverlay
+	case onDefault:
+		return placeOutside
+	case containsAddr(def, addr):
+		return placeIsolated
+	case containsAddr(svc, addr) && !apiOrDNS(svc, addr):
+		return placeService
+	case def == nil || svc == nil:
+		return placeUnknown
 	}
-	return placeUnknown
+	return placeOutside
+}
+
+// apiOrDNS reports whether addr is a service address every network reaches:
+// the Kubernetes API takes the first address of the service network, and
+// OpenShift's DNS operator the tenth.
+func apiOrDNS(svc []netip.Prefix, addr netip.Addr) bool {
+	for _, p := range svc {
+		a := p.Masked().Addr()
+		for i := 1; i <= 10; i++ {
+			a = a.Next()
+			if (i == 1 || i == 10) && a == addr {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// within reports whether p lies inside one of outer.
+func within(p netip.Prefix, outer []netip.Prefix) bool {
+	return slices.ContainsFunc(outer, func(o netip.Prefix) bool { return o.Bits() <= p.Bits() && o.Contains(p.Addr()) })
 }
 
 // secondaryHolding names a non-localnet secondary network of w whose range

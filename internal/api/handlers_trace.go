@@ -101,18 +101,16 @@ func (s *Server) traceWorkload(ns, name string) (netstate.TraceWorkload, bool) {
 	}, true
 }
 
-// traceView is what the caller may read of the networks a bare address is
-// placed against: the namespaces they see, every shared network when they
-// may (as their catalog lists it), the default network's range when they may
-// list nodes. The reviews are the cached ones the network views share, asked
-// only when the trace places an address. A failed visibility read sees no
-// namespace.
+// traceView is what the caller may read of the tenant-configured networks a
+// bare address is placed against: the namespaces they see, and every shared
+// network when their catalog lists them all (the cached reviews /api/networks
+// makes, asked only when a shared network's range would place an address). A
+// failed visibility read sees no namespace.
 func (s *Server) traceView(r *http.Request, sc scope) *netstate.TraceView {
 	ctx := r.Context()
 	visible, _ := s.visibleFor(ctx, sc.id, sc.cluster)
 	return &netstate.TraceView{
 		Namespace: func(ns string) bool { return visible[ns] },
 		Shared:    sync.OnceValue(func() bool { return s.seesAllNetworks(ctx, sc.id, sc.cluster) }),
-		Nodes:     sync.OnceValue(func() bool { return s.capable(ctx, sc.id, sc.cluster, ask(verbList, ssarNodes, "")) }),
 	}
 }

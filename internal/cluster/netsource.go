@@ -5,6 +5,7 @@ import (
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/watch"
@@ -91,4 +92,29 @@ func (c *Client) ListNodeLabels(ctx context.Context) ([]NodeLabels, error) {
 		out = append(out, NodeLabels{Name: n.Name, Labels: n.Labels, PodSubnets: n.Annotations[nodeSubnetsAnnotation]})
 	}
 	return out, nil
+}
+
+// gvrClusterNetwork is OpenShift's cluster network configuration, one object
+// named cluster.
+var gvrClusterNetwork = schema.GroupVersionResource{Group: "config.openshift.io", Version: "v1", Resource: "networks"}
+
+// ClusterNetworks reads the pod network CIDRs (status.clusterNetwork) and the
+// service network CIDRs (status.serviceNetwork) the cluster runs, from
+// OpenShift's cluster Network config. A cluster that does not serve it
+// answers NotFound.
+func (c *Client) ClusterNetworks(ctx context.Context) (pod, service []string, err error) {
+	u, err := c.dyn.Resource(gvrClusterNetwork).Get(ctx, "cluster", metav1.GetOptions{})
+	if err != nil {
+		return nil, nil, err
+	}
+	service, _, _ = unstructured.NestedStringSlice(u.Object, "status", "serviceNetwork")
+	entries, _, _ := unstructured.NestedSlice(u.Object, "status", "clusterNetwork")
+	for _, e := range entries {
+		if m, ok := e.(map[string]any); ok {
+			if cidr, ok := m["cidr"].(string); ok {
+				pod = append(pod, cidr)
+			}
+		}
+	}
+	return pod, service, nil
 }
