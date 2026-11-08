@@ -185,18 +185,22 @@ func (s *Server) namespaceCaps(ctx context.Context, sc scope, ns string) model.N
 }
 
 // projectCaps answers the tenancy routes over project full: joining a new
-// namespace to it, and for a repoless one attaching a repo (with owners
-// named: GrantAdmin) or releasing it, which the routes refuse otherwise.
+// namespace to it, attaching a repo (with owners named: GrantAdmin) or
+// recovering a lost one, granting its sync account, and for a repoless one
+// releasing it, which the route refuses otherwise.
 func (s *Server) projectCaps(ctx context.Context, sc scope, full project.ProjectInfo, out *model.ProjectCaps) {
 	platform := s.platformProject()
 	id, c := sc.id, sc.cluster
 	need, err := s.draft.NamespaceNeeds(platform, full, json.RawMessage(`{"name":"`+newNamespace+`"}`))
 	out.NewNamespace = s.tenancyCap(ctx, id, c, readNamespace(""), need, err)
-	if full.Repo != "" {
+	// The rest resolve their target as tenancyTarget does: a project seen
+	// only in part is refused.
+	if len(sc.proj.Namespaces) < len(full.Namespaces) && !s.capable(ctx, id, c, claimAction("")) {
 		return
 	}
 	// The route reads and claims each namespace before the coordinator weighs
-	// the change.
+	// the change. A recovery asks what an attach does: only the repo URL its
+	// Namespaces carry differs, which changes no access.
 	var claims action
 	for _, ns := range full.Namespaces {
 		claims = append(claims, readNamespace(ns)...)
@@ -206,6 +210,11 @@ func (s *Server) projectCaps(ctx context.Context, sc scope, full project.Project
 	out.Adopt = s.tenancyCap(ctx, id, c, claims, need, err)
 	need, err = s.draft.AdoptNeeds(platform, full, []string{id.Username})
 	out.GrantAdmin = s.tenancyCap(ctx, id, c, claims, need, err)
+	need, err = s.draft.SyncAccessNeeds(platform, full)
+	out.SyncAccess = s.needsAllowed(ctx, id, c, need, err)
+	if full.Repo != "" {
+		return
+	}
 	// The release patches the namespaces git does not declare under the
 	// caller's token; the apiserver asks that patch.
 	need, residue, err := s.draft.ReleaseNeeds(platform, full)
