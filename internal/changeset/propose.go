@@ -78,7 +78,14 @@ func (c *Coordinator) toChangesetItems(entries []draft.Entry) []git.ChangesetIte
 			items = append(items, git.ChangesetItem{
 				Path: e.SourceFile,
 				Transform: func(current []byte) ([]byte, error) {
-					return manifest.ApplyEdit(current, e.Namespace, e.Name, edit)
+					if err := namedVM(e.SourceFile, current, e.Namespace, e.Name); err != nil {
+						return nil, err
+					}
+					out, err := manifest.ApplyEdit(current, defaultNamespace(e.SourceFile), e.Namespace, e.Name, edit)
+					if err != nil {
+						return nil, &staleEdit{entry: e, base: c.baseBranch, err: err}
+					}
+					return out, nil
 				},
 			})
 		case draft.KindCreate:
