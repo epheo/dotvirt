@@ -680,6 +680,20 @@ function withScaleNetworking(sc) {
 	};
 }
 
+// The scale scenario's network attachments, as the options catalog lists
+// them: one per project network with an attach ref, one per namespace a
+// shared network is published to.
+function withScaleAttachments(sc) {
+	const nads = sc.networks.networks.flatMap((n) =>
+		n.scope === 'shared'
+			? (n.namespaces ?? []).map((namespace) => ({ name: n.name, namespace }))
+			: n.attachRef?.includes('/')
+				? [{ name: n.name, namespace: n.namespace }]
+				: [],
+	);
+	return { ...sc, options: { ...sc.options, networks: nads } };
+}
+
 function withNetworking(sc) {
 	for (const p of sc.inventory.projects)
 		for (const ns of p.namespaces)
@@ -1437,7 +1451,7 @@ export const scenarios = {
 	access: accessScenario(),
 	// A full platform at the boards' numbers (2,846 VMs, 131 networks, 3,412
 	// disks); see scale.mjs.
-	scale: withScaleNetworking(scaleScenario(base)),
+	scale: withScaleAttachments(withScaleNetworking(scaleScenario(base))),
 	dupnames,
 	tenant: tenantView(base, 'team-web'),
 	noboot,
