@@ -191,6 +191,8 @@ type Server struct {
 	vnc       VNCHandler
 	cfg       Config
 
+	revokeTimeout time.Duration // bounds an SSO logout's token delete (revokeTimeout; tests shorten it)
+
 	// Proposals-refresher state (see proposals.go): who to refresh, the coalesced
 	// out-of-cycle trigger, the repos a nudge named, and the repo version each
 	// project's lane was last read at.
@@ -257,6 +259,8 @@ func NewServer(d Deps) *Server {
 		auth:      d.Auth,
 		oauth:     d.OAuth,
 		cfg:       d.Config,
+
+		revokeTimeout: revokeTimeout,
 
 		propTargets: map[string]propTarget{},
 		propNudge:   make(chan struct{}, 1),

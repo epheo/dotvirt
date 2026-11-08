@@ -14,35 +14,35 @@ import (
 	"github.com/epheo/dotvirt/internal/model"
 )
 
-// revokeTimeout bounds the token delete a logout waits on.
+// revokeTimeout bounds the SSO token delete a logout runs.
 const revokeTimeout = 10 * time.Second
 
-// handleLogout ends the caller's session and closes its streams and consoles.
-// An SSO session's token is also deleted cluster-wide, under the caller's own
-// token: dotvirt's OAuth client minted it for this session alone. A failed
-// delete is logged; the session has ended either way.
+// handleLogout ends the caller's session, answers, and closes the session's
+// streams and consoles. An SSO session's token is then deleted cluster-wide,
+// under that token itself: dotvirt's OAuth client minted it for this session
+// alone. A failed delete is logged; the session has ended either way. Only a
+// session this call ended is revoked, so a replayed cookie costs no apiserver
+// call.
 func (s *Server) handleLogout(w http.ResponseWriter, r *http.Request) {
-	id, _ := auth.FromContext(r.Context())
-	if !s.auth.Logout(w, r) {
+	id, ended := s.auth.Logout(w, r)
+	if !ended {
 		return
 	}
 	s.bus.Publish(eventbus.SessionEnded)
-	if !id.SSO {
-		return
-	}
 	name, ok := auth.OAuthTokenName(id.Token)
-	if !ok {
+	if !id.SSO || !ok || s.clusterF == nil {
 		return
 	}
+	_ = http.NewResponseController(w).Flush() // the UI need not wait on the delete
 	// Detached: a client hanging up after its logout must not keep the token alive.
-	ctx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), revokeTimeout)
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), s.revokeTimeout)
 	defer cancel()
-	_, c, err := s.userCluster(r)
+	c, err := s.clusterF.For(id.Token)
 	if err == nil {
 		err = c.DeleteOwnOAuthToken(ctx, name)
 	}
 	if err != nil && !apierrors.IsNotFound(err) {
-		log.Printf("api: %s: logout: token not revoked: %v", id.Username, err)
+		log.Printf("api: logout: SSO token not revoked: %v", err)
 	}
 }
 

@@ -10,11 +10,18 @@ import (
 // default access token lifetime: an SSO session already ends on its token.
 const sessionMaxAge = 24 * time.Hour
 
-// SessionExpiry is when a session issued at issued reaches sessionMaxAge; zero
+// sweepEvery spaces the logout record's sweeps: each scans the whole map under
+// the lock every request takes, so a logout loop must not run one per call.
+const sweepEvery = time.Hour
+
+// SessionExpiry is when a session issued at issued stops authenticating; zero
 // for a bearer header, which has no session.
 func SessionExpiry(issued time.Time) time.Time {
-	if issued.IsZero() {
+	switch {
+	case issued.IsZero():
 		return time.Time{}
+	case issued.Equal(legacyIssued):
+		return legacyUntil
 	}
 	return issued.Add(sessionMaxAge)
 }
@@ -23,14 +30,14 @@ func SessionExpiry(issued time.Time) time.Time {
 // of the same token, so one entry per token holds the newest issue time a logout
 // ended: a login/logout loop cannot grow the map, and a dead cookie replayed at
 // logout cannot end a newer session. An entry is dropped once every session it
-// ends is past sessionMaxAge.
+// ends has expired, legacy sessions of its token included.
 //
 // It lives in memory (dotvirt runs one replica), so a restart forgets it: a
-// signed-out cookie whose token still validates works again until its
-// sessionMaxAge.
+// signed-out cookie whose token still validates works again until it expires.
 type sessions struct {
 	mu    sync.Mutex
 	ended map[string]time.Time // token key -> newest issue time a logout ended
+	swept time.Time
 }
 
 func newSessions() *sessions {
@@ -41,12 +48,14 @@ func newSessions() *sessions {
 func (s *sessions) end(tokenKey string, issued time.Time) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	// Logouts are rare and the map holds one entry per token, so each one sweeps.
 	now := time.Now()
-	for k, t := range s.ended {
-		if now.Sub(t) >= sessionMaxAge {
-			delete(s.ended, k)
+	if now.Sub(s.swept) >= sweepEvery {
+		for k, t := range s.ended {
+			if !now.Before(SessionExpiry(t)) && !now.Before(legacyUntil) {
+				delete(s.ended, k)
+			}
 		}
+		s.swept = now
 	}
 	if issued.After(s.ended[tokenKey]) {
 		s.ended[tokenKey] = issued
@@ -59,7 +68,7 @@ func (s *sessions) live(tokenKey string, issued time.Time) bool {
 	if issued.IsZero() {
 		return true
 	}
-	if time.Since(issued) >= sessionMaxAge {
+	if !time.Now().Before(SessionExpiry(issued)) {
 		return false
 	}
 	s.mu.Lock()

@@ -23,14 +23,20 @@ const (
 	legacyPrefix = "v2."
 )
 
+// Each sealed value is bound to its purpose as AEAD associated data, so a
+// value sealed for one cookie fails the tag of another.
+const (
+	sessionPurpose = cookiePrefix + "session"
+	statePurpose   = cookiePrefix + "oauth-state"
+)
+
 // sealedHeader is the issue time (8 bytes, big-endian Unix nanoseconds) and a
 // flags byte.
 const sealedHeader = 9
 
 const flagSSO byte = 1
 
-// session is what the session cookie seals. The OAuth state cookie reuses the
-// format, its state in token.
+// session is what the session cookie seals.
 type session struct {
 	token  string
 	issued time.Time
@@ -39,10 +45,13 @@ type session struct {
 	sso bool
 }
 
-// legacyIssued is the issue time a legacy cookie reads as. It has none, so it
-// reads as issued at this process's start: an upgrade signs no one out, and a
-// legacy session ends sessionMaxAge after the process started.
-var legacyIssued = time.Now()
+// A legacy cookie has no issue time. It reads as issued at the Unix epoch, so
+// any logout of its token ends it, and it authenticates until legacyUntil
+// whatever restarts come between; after that it reads as logged out.
+var (
+	legacyIssued = time.Unix(0, 0)
+	legacyUntil  = time.Date(2026, time.December, 1, 0, 0, 0, 0, time.UTC)
+)
 
 // newSealer is the cookie AEAD: AES-256-GCM under a key derived from
 // SessionSecret, so the secret itself is never used as a cipher key and a later
@@ -73,17 +82,15 @@ func cookieValue(s session, sealer cipher.AEAD) string {
 	if s.sso {
 		flags |= flagSSO
 	}
-	plain = append(append(plain, flags), s.token...)
-	sealed := sealer.Seal(nil, nil, plain, []byte(cookiePrefix))
-	return cookiePrefix + base64.RawURLEncoding.EncodeToString(sealed)
+	return seal(append(append(plain, flags), s.token...), sessionPurpose, sealer)
 }
 
-// parseCookieValue opens a sealed value.
+// parseCookieValue opens a sealed session.
 func parseCookieValue(value string, sealer cipher.AEAD) (session, bool) {
-	if raw, ok := open(value, legacyPrefix, sealer); ok {
+	if raw, ok := open(value, legacyPrefix, legacyPrefix, sealer); ok {
 		return session{token: string(raw), issued: legacyIssued}, true
 	}
-	raw, ok := open(value, cookiePrefix, sealer)
+	raw, ok := open(value, cookiePrefix, sessionPurpose, sealer)
 	if !ok || len(raw) < sealedHeader {
 		return session{}, false
 	}
@@ -94,7 +101,22 @@ func parseCookieValue(value string, sealer cipher.AEAD) (session, bool) {
 	}, true
 }
 
-func open(value, prefix string, sealer cipher.AEAD) ([]byte, bool) {
+// stateValue seals the OAuth state for its cookie.
+func stateValue(state string, sealer cipher.AEAD) string {
+	return seal([]byte(state), statePurpose, sealer)
+}
+
+// parseStateValue opens a sealed OAuth state.
+func parseStateValue(value string, sealer cipher.AEAD) (string, bool) {
+	raw, ok := open(value, cookiePrefix, statePurpose, sealer)
+	return string(raw), ok
+}
+
+func seal(plain []byte, purpose string, sealer cipher.AEAD) string {
+	return cookiePrefix + base64.RawURLEncoding.EncodeToString(sealer.Seal(nil, nil, plain, []byte(purpose)))
+}
+
+func open(value, prefix, purpose string, sealer cipher.AEAD) ([]byte, bool) {
 	enc, ok := strings.CutPrefix(value, prefix)
 	if !ok {
 		return nil, false
@@ -103,7 +125,7 @@ func open(value, prefix string, sealer cipher.AEAD) ([]byte, bool) {
 	if err != nil {
 		return nil, false
 	}
-	raw, err := sealer.Open(nil, nil, sealed, []byte(prefix))
+	raw, err := sealer.Open(nil, nil, sealed, []byte(purpose))
 	if err != nil {
 		return nil, false
 	}
@@ -111,10 +133,10 @@ func open(value, prefix string, sealer cipher.AEAD) ([]byte, bool) {
 }
 
 // setCookie writes the sealed session cookie, issued now; sso says dotvirt's
-// OAuth client minted token. httpOnly (no JS
-// access), SameSite Lax (sent on top-level navigations + same-site requests),
-// Secure when the request arrived over TLS. No Max-Age: sessionMaxAge is
-// enforced server-side, and the cookie stays a browser-session one.
+// OAuth client minted token. httpOnly (no JS access), SameSite Lax (sent on
+// top-level navigations + same-site requests), Secure when the request arrived
+// over TLS. No Max-Age: sessionMaxAge is enforced server-side, and the cookie
+// stays a browser-session one.
 func setCookie(w http.ResponseWriter, r *http.Request, token string, sso bool, sealer cipher.AEAD) {
 	http.SetCookie(w, &http.Cookie{
 		Name:     cookieName,

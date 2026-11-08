@@ -47,20 +47,25 @@ func (a *Authenticator) Login(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, userResponse{Username: id.Username, Groups: id.Groups})
 }
 
-// Logout ends the caller's cookie session, with every older session of its
-// token, and clears the cookie. Always 204 (idempotent). It reports whether a
-// session ended, so the caller can close that session's streams. A bearer
-// header has no session to end: its holder keeps the raw token, which only the
-// cluster can revoke.
-func (a *Authenticator) Logout(w http.ResponseWriter, r *http.Request) bool {
-	id, ok := FromContext(r.Context())
-	ended := ok && !id.Issued.IsZero()
+// Logout ends the session the request's cookie seals, with every older session
+// of its token, clears the cookie whatever it holds, and answers 204. Opening
+// the cookie is the whole check: logout runs ahead of the middleware, so a
+// TokenReview that cannot run (budget spent, apiserver down) never leaves a
+// session standing that the UI believes over. It returns the session this call
+// ended - its token, issue time and origin, no username - for the caller to
+// close its streams and revoke an SSO token; a replayed, expired or absent
+// cookie ends nothing. A bearer header has no session: its holder keeps the
+// raw token, which only the cluster can revoke.
+func (a *Authenticator) Logout(w http.ResponseWriter, r *http.Request) (Identity, bool) {
+	s, ok := readCookie(r, a.sealer)
+	key := restfactory.TokenKey(s.token)
+	ended := ok && a.SessionLive(key, s.issued)
 	if ended {
-		a.sessions.end(restfactory.TokenKey(id.Token), id.Issued)
+		a.sessions.end(key, s.issued)
 	}
 	clearCookie(w, r)
 	w.WriteHeader(http.StatusNoContent)
-	return ended
+	return Identity{Token: s.token, Issued: s.issued, SSO: s.sso}, ended
 }
 
 // Me returns the current Identity from context (set by Middleware).
@@ -85,12 +90,16 @@ func (a *Authenticator) Middleware(next http.Handler) http.Handler {
 		}
 		s, ok := tokenFromRequest(r, a.sealer)
 		if !ok {
+			if _, err := r.Cookie(cookieName); err == nil {
+				clearCookie(w, r) // unreadable: another key, an old format
+			}
 			http.Error(w, "authentication required", http.StatusUnauthorized)
 			return
 		}
 		key := restfactory.TokenKey(s.token)
 		// Ahead of the verdict cache: a signed-out session's token still validates.
 		if !a.sessions.live(key, s.issued) {
+			clearCookie(w, r)
 			http.Error(w, "session ended", http.StatusUnauthorized)
 			return
 		}
@@ -101,6 +110,9 @@ func (a *Authenticator) Middleware(next http.Handler) http.Handler {
 			// doesn't bounce valid sessions to the login screen.
 			switch {
 			case errors.Is(err, ErrRejected):
+				if !s.issued.IsZero() {
+					clearCookie(w, r)
+				}
 				http.Error(w, "invalid or expired session", http.StatusUnauthorized)
 			case errors.Is(err, ErrThrottled):
 				throttled(w, "session validation throttled, try again shortly")
@@ -128,6 +140,9 @@ func throttled(w http.ResponseWriter, msg string) {
 func isOpenPath(path string) bool {
 	switch path {
 	case "/api/healthz", "/api/login":
+		return true
+	case "/api/logout":
+		// Authenticated by opening the session cookie alone (see Logout).
 		return true
 	case "/api/auth/methods", "/api/auth/openshift", "/api/auth/callback":
 		// The SSO surface: all pre-session by nature (methods tells the login

@@ -182,7 +182,7 @@ func (o *OAuth) oauth2Config(m *oauthMeta) *oauth2.Config {
 }
 
 // stateCookie carries the CSRF state across the round-trip to the OAuth server,
-// sealed with the session secret like the session cookie itself.
+// sealed with the session secret under its own purpose.
 const stateCookie = "dotvirt_oauth_state"
 
 // LoginRedirect (GET /api/auth/openshift) sends the browser to the cluster's
@@ -201,7 +201,7 @@ func (o *OAuth) LoginRedirect(w http.ResponseWriter, r *http.Request) {
 	state := base64.RawURLEncoding.EncodeToString(b)
 	http.SetCookie(w, &http.Cookie{
 		Name:     stateCookie,
-		Value:    cookieValue(session{token: state, issued: time.Now()}, o.auth.sealer),
+		Value:    stateValue(state, o.auth.sealer),
 		Path:     "/api/auth",
 		HttpOnly: true,
 		Secure:   isTLS(r),
@@ -227,9 +227,9 @@ func (o *OAuth) Callback(w http.ResponseWriter, r *http.Request) {
 		failLogin("state cookie missing", err)
 		return
 	}
-	want, ok := parseCookieValue(c.Value, o.auth.sealer)
+	want, ok := parseStateValue(c.Value, o.auth.sealer)
 	state := r.URL.Query().Get("state")
-	if !ok || state == "" || !hmac.Equal([]byte(state), []byte(want.token)) {
+	if !ok || state == "" || !hmac.Equal([]byte(state), []byte(want)) {
 		failLogin("state mismatch", nil)
 		return
 	}

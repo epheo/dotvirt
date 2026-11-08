@@ -11,7 +11,11 @@ import (
 	"testing"
 	"time"
 
+	"golang.org/x/time/rate"
 	authnv1 "k8s.io/api/authentication/v1"
+	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/client-go/kubernetes/fake"
+	k8stesting "k8s.io/client-go/testing"
 
 	"github.com/epheo/dotvirt/internal/restfactory"
 )
@@ -34,7 +38,8 @@ func newSessionRig(t *testing.T) *sessionRig {
 	mux.HandleFunc("GET /api/inventory", func(http.ResponseWriter, *http.Request) {})
 	mux.HandleFunc("GET /api/inventory/stream", func(http.ResponseWriter, *http.Request) { rig.streamed++ })
 	mux.HandleFunc("POST /api/logout", func(w http.ResponseWriter, r *http.Request) {
-		rig.ended = append(rig.ended, a.Logout(w, r))
+		_, ended := a.Logout(w, r)
+		rig.ended = append(rig.ended, ended)
 	})
 	rig.h = a.Middleware(mux)
 	return rig
@@ -59,6 +64,10 @@ func sealedAt(issued time.Time) *http.Cookie {
 
 // do sends one request carrying c (or the bearer token when c is nil).
 func (rig *sessionRig) do(method, path string, c *http.Cookie) int {
+	return rig.send(method, path, c).Code
+}
+
+func (rig *sessionRig) send(method, path string, c *http.Cookie) *httptest.ResponseRecorder {
 	r := httptest.NewRequest(method, path, nil)
 	if c != nil {
 		r.AddCookie(c)
@@ -71,7 +80,31 @@ func (rig *sessionRig) do(method, path string, c *http.Cookie) int {
 	}
 	rec := httptest.NewRecorder()
 	rig.h.ServeHTTP(rec, r)
-	return rec.Code
+	return rec
+}
+
+// clears reports whether rec expires the session cookie.
+func clears(rec *httptest.ResponseRecorder) bool {
+	for _, c := range rec.Result().Cookies() {
+		if c.Name == cookieName && c.MaxAge < 0 {
+			return true
+		}
+	}
+	return false
+}
+
+// withLegacyUntil moves the legacy deadline for one test, so no test depends
+// on today's date.
+func withLegacyUntil(t *testing.T, until time.Time) {
+	t.Helper()
+	saved := legacyUntil
+	legacyUntil = until
+	t.Cleanup(func() { legacyUntil = saved })
+}
+
+func legacyCookie() *http.Cookie {
+	sealed := testSealer.Seal(nil, nil, []byte("good"), []byte(legacyPrefix))
+	return &http.Cookie{Name: cookieName, Value: legacyPrefix + base64.RawURLEncoding.EncodeToString(sealed)}
 }
 
 // A logout ends its session server-side: the same cookie is refused on REST
@@ -96,8 +129,8 @@ func TestLogoutEndsSession(t *testing.T) {
 	if code := rig.do(http.MethodGet, "/api/inventory/stream", c); code != http.StatusUnauthorized || rig.streamed != 0 {
 		t.Errorf("signed-out cookie on the stream upgrade: %d (reached %d), want 401", code, rig.streamed)
 	}
-	if code := rig.do(http.MethodPost, "/api/logout", c); code != http.StatusUnauthorized {
-		t.Errorf("signed-out cookie logging out again: %d, want 401", code)
+	if rec := rig.send(http.MethodPost, "/api/logout", c); rec.Code != http.StatusNoContent || !clears(rec) || rig.ended[1] {
+		t.Errorf("signed-out cookie logging out again: %d (clears %v, ended %v), want a 204 that clears and ends nothing", rec.Code, clears(rec), rig.ended[1])
 	}
 	if *rig.reviews != 1 {
 		t.Errorf("TokenReviews = %d, want 1: an ended session is refused before validation", *rig.reviews)
@@ -111,7 +144,7 @@ func TestLogoutEndsSession(t *testing.T) {
 }
 
 // A logout ends its session and every older one of the token, never a newer
-// one; a dead cookie cannot log out again to reach a newer session.
+// one; a dead cookie logging out again cannot reach a newer session.
 func TestLogoutEndsOlderSessionsOnly(t *testing.T) {
 	rig := newSessionRig(t)
 	now := time.Now()
@@ -124,8 +157,8 @@ func TestLogoutEndsOlderSessionsOnly(t *testing.T) {
 			t.Errorf("%s session: %d, want 401", name, code)
 		}
 	}
-	if code := rig.do(http.MethodPost, "/api/logout", old); code != http.StatusUnauthorized {
-		t.Errorf("dead cookie logging out: %d, want 401", code)
+	if code := rig.do(http.MethodPost, "/api/logout", old); code != http.StatusNoContent || rig.ended[1] {
+		t.Errorf("dead cookie logging out: %d (ended %v), want 204 ending nothing", code, rig.ended[1])
 	}
 	if code := rig.do(http.MethodGet, "/api/inventory", newer); code != http.StatusOK {
 		t.Errorf("newer session: %d, want 200", code)
@@ -163,36 +196,145 @@ func TestSessionLifetime(t *testing.T) {
 	}
 }
 
-// A cookie sealed before issue times still opens after the upgrade, reads as
-// issued at process start, and a logout ends it.
-func TestLegacyCookieSurvivesUpgrade(t *testing.T) {
+// A cookie sealed before issue times still opens after the upgrade, older than
+// every session: any logout of its token ends it, a logout of it ends no newer
+// session, and it reads as logged out from legacyUntil.
+func TestLegacyCookie(t *testing.T) {
+	withLegacyUntil(t, time.Now().Add(time.Hour))
 	rig := newSessionRig(t)
-	sealed := testSealer.Seal(nil, nil, []byte("good"), []byte(legacyPrefix))
-	c := &http.Cookie{Name: cookieName, Value: legacyPrefix + base64.RawURLEncoding.EncodeToString(sealed)}
+	c := legacyCookie()
 	if s, ok := parseCookieValue(c.Value, testSealer); !ok || s.token != "good" || !s.issued.Equal(legacyIssued) || s.sso {
-		t.Fatalf("legacy cookie opened as %+v (%v), want the token at process start, not SSO", s, ok)
+		t.Fatalf("legacy cookie opened as %+v (%v), want the token at the epoch, not SSO", s, ok)
 	}
 	if code := rig.do(http.MethodGet, "/api/inventory", c); code != http.StatusOK {
 		t.Fatalf("legacy session: %d, want 200", code)
 	}
+
+	newer := rig.login(t)
 	rig.do(http.MethodPost, "/api/logout", c)
 	if code := rig.do(http.MethodGet, "/api/inventory", c); code != http.StatusUnauthorized {
 		t.Errorf("signed-out legacy session: %d, want 401", code)
 	}
+	if code := rig.do(http.MethodGet, "/api/inventory", newer); code != http.StatusOK {
+		t.Errorf("a legacy logout ended a newer session: %d", code)
+	}
+
+	other := newSessionRig(t)
+	other.do(http.MethodPost, "/api/logout", sealedAt(time.Now().Add(-2*time.Hour)))
+	if code := other.do(http.MethodGet, "/api/inventory", c); code != http.StatusUnauthorized {
+		t.Errorf("a logout of an older-process v3 session left the legacy cookie: %d, want 401", code)
+	}
+
+	withLegacyUntil(t, time.Now())
+	if code := newSessionRig(t).do(http.MethodGet, "/api/inventory", c); code != http.StatusUnauthorized {
+		t.Errorf("legacy cookie past legacyUntil: %d, want 401", code)
+	}
 }
 
-// The record keeps an entry only while a session it ends could still be live.
+// The record keeps an entry only while a session it ends could still be live,
+// legacy ones included, and sweeps at most once per sweepEvery.
 func TestEndedEntriesExpire(t *testing.T) {
-	s := newSessions()
 	now := time.Now()
+	withLegacyUntil(t, now.Add(time.Hour))
+	s := newSessions()
 	s.end("stale", now.Add(-sessionMaxAge-time.Second))
+	s.swept = time.Time{}
 	s.end("fresh", now)
+	if _, ok := s.ended["stale"]; !ok {
+		t.Fatal("swept an entry that still ends a live legacy session")
+	}
+
+	withLegacyUntil(t, now)
+	s.swept = now
+	s.end("other", now)
+	if _, ok := s.ended["stale"]; !ok {
+		t.Fatal("swept again inside sweepEvery")
+	}
+	s.swept = now.Add(-sweepEvery)
 	s.end("fresh", now.Add(-time.Hour)) // an older session never lowers the mark
-	if len(s.ended) != 1 || !s.ended["fresh"].Equal(now) {
-		t.Fatalf("record = %v, want only fresh at its newest issue time", s.ended)
+	if len(s.ended) != 2 || !s.ended["fresh"].Equal(now) {
+		t.Fatalf("record = %v, want fresh at its newest issue time and other", s.ended)
 	}
 	if s.live("fresh", now) || !s.live("fresh", now.Add(time.Nanosecond)) {
 		t.Error("the mark must end its own session and spare a newer one")
+	}
+}
+
+// Logout needs no TokenReview: with the sign-in budget spent or the apiserver
+// down, it still ends the session and clears the cookie.
+func TestLogoutWithoutTokenReview(t *testing.T) {
+	for _, c := range []struct {
+		name  string
+		block func(a *Authenticator) (restore func())
+	}{
+		{"budget spent", func(a *Authenticator) func() {
+			saved := a.reviews
+			a.reviews = rate.NewLimiter(0, 0)
+			return func() { a.reviews = saved }
+		}},
+		{"apiserver down", func(a *Authenticator) func() {
+			kube := a.saKube.(*fake.Clientset)
+			down := true
+			kube.PrependReactor("create", "tokenreviews", func(k8stesting.Action) (bool, runtime.Object, error) {
+				if down {
+					return true, nil, errors.New("connection refused")
+				}
+				return false, nil, nil
+			})
+			return func() { down = false }
+		}},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			rig := newSessionRig(t)
+			cookie := rig.login(t)
+			rig.a.cache.Delete(restfactory.TokenKey("good")) // the verdict aged out
+			restore := c.block(rig.a)
+			rec := rig.send(http.MethodPost, "/api/logout", cookie)
+			restore()
+			if rec.Code != http.StatusNoContent || !clears(rec) || len(rig.ended) != 1 || !rig.ended[0] {
+				t.Fatalf("logout: %d (clears %v, ended %v), want a 204 that clears and ends the session", rec.Code, clears(rec), rig.ended)
+			}
+			if code := rig.do(http.MethodGet, "/api/inventory", cookie); code != http.StatusUnauthorized {
+				t.Errorf("session after its logout: %d, want 401", code)
+			}
+		})
+	}
+}
+
+// A 401 for a session that is over also expires its cookie; a refused bearer
+// header leaves cookies alone.
+func TestSessionEndClearsCookie(t *testing.T) {
+	valid := map[string]authnv1.UserInfo{"good": {Username: "alice"}}
+	a, _ := fakeAuth(valid)
+	rig := &sessionRig{a: a, h: a.Middleware(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))}
+	ended := sealedAt(time.Now().Add(-time.Hour))
+	a.sessions.end(restfactory.TokenKey("good"), time.Now().Add(-time.Hour))
+	unreadable := &http.Cookie{Name: cookieName, Value: "v3.garbage"}
+	for name, c := range map[string]*http.Cookie{"ended": ended, "expired": sealedAt(time.Now().Add(-sessionMaxAge)), "unreadable": unreadable} {
+		if rec := rig.send(http.MethodGet, "/api/inventory", c); rec.Code != http.StatusUnauthorized || !clears(rec) {
+			t.Errorf("%s cookie: %d (clears %v), want a 401 that clears", name, rec.Code, clears(rec))
+		}
+	}
+	delete(valid, "good")
+	a.cache.Delete(restfactory.TokenKey("good"))
+	if rec := rig.send(http.MethodGet, "/api/inventory", sealedAt(time.Now())); rec.Code != http.StatusUnauthorized || !clears(rec) {
+		t.Errorf("rejected token's cookie: %d (clears %v), want a 401 that clears", rec.Code, clears(rec))
+	}
+	if rec := rig.send(http.MethodGet, "/api/inventory", nil); rec.Code != http.StatusUnauthorized || clears(rec) {
+		t.Errorf("rejected bearer: %d (clears %v), want a 401 that leaves cookies alone", rec.Code, clears(rec))
+	}
+}
+
+// A value sealed for one cookie never opens as the other.
+func TestStateAndSessionCookiesDoNotCross(t *testing.T) {
+	if _, ok := parseCookieValue(stateValue("state", testSealer), testSealer); ok {
+		t.Error("a state cookie opened as a session")
+	}
+	if _, ok := parseStateValue(cookieValue(session{token: "good", issued: time.Now()}, testSealer), testSealer); ok {
+		t.Error("a session cookie opened as a state")
+	}
+	if got, ok := parseStateValue(stateValue("state", testSealer), testSealer); !ok || got != "state" {
+		t.Errorf("state round-trip = %q, %v", got, ok)
 	}
 }
 
@@ -285,8 +427,8 @@ func TestRevalidateRejectsEndedSession(t *testing.T) {
 	reviews := *rig.reviews
 	ctx := context.Background()
 	for name, issued := range map[string]time.Time{"signed-out": ended, "expired": now.Add(-sessionMaxAge)} {
-		if err := rig.a.Revalidate(ctx, Identity{Token: "good", Issued: issued}); !errors.Is(err, ErrRejected) {
-			t.Errorf("%s session re-checked: %v, want ErrRejected", name, err)
+		if err := rig.a.Revalidate(ctx, Identity{Token: "good", Issued: issued}); !errors.Is(err, ErrSessionEnded) || !errors.Is(err, ErrRejected) {
+			t.Errorf("%s session re-checked: %v, want ErrSessionEnded", name, err)
 		}
 	}
 	if *rig.reviews != reviews {
