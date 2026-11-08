@@ -29,19 +29,22 @@ var (
 
 func TestCookieRoundTrip(t *testing.T) {
 	const token = "sha256~abc.def-ghi"
-	value := cookieValue(token, testSealer)
-
-	got, ok := parseCookieValue(value, testSealer)
-	if !ok {
-		t.Fatal("parseCookieValue rejected a value it just signed")
-	}
-	if got != token {
-		t.Errorf("round-trip changed the token: got %q want %q", got, token)
+	for _, want := range []session{
+		{token: token, issued: time.Unix(1700000000, 123)},
+		{token: token, issued: time.Unix(1700000000, 123), sso: true},
+	} {
+		got, ok := parseCookieValue(cookieValue(want, testSealer), testSealer)
+		if !ok {
+			t.Fatal("parseCookieValue rejected a value it just signed")
+		}
+		if got.token != want.token || !got.issued.Equal(want.issued) || got.sso != want.sso {
+			t.Errorf("round-trip changed the session: got %+v, want %+v", got, want)
+		}
 	}
 }
 
 func TestCookieTamperRejected(t *testing.T) {
-	value := cookieValue("real-token", testSealer)
+	value := cookieValue(session{token: "real-token", issued: time.Now()}, testSealer)
 
 	if _, ok := parseCookieValue(value, newSealer([]byte("other-secret"))); ok {
 		t.Error("accepted a cookie sealed with a different secret")
@@ -60,6 +63,9 @@ func TestCookieTamperRejected(t *testing.T) {
 	if _, ok := parseCookieValue(cookiePrefix+"AAAA", testSealer); ok {
 		t.Error("accepted a value shorter than the nonce")
 	}
+	if _, ok := parseCookieValue(legacyPrefix+strings.TrimPrefix(value, cookiePrefix), testSealer); ok {
+		t.Error("accepted a sealed value under the other format's prefix")
+	}
 	if _, ok := parseCookieValue("garbage", testSealer); ok {
 		t.Error("accepted a malformed cookie value")
 	}
@@ -67,7 +73,8 @@ func TestCookieTamperRejected(t *testing.T) {
 
 func TestCookieHidesToken(t *testing.T) {
 	const token = "sha256~visible-token"
-	a, b := cookieValue(token, testSealer), cookieValue(token, testSealer)
+	s := session{token: token, issued: time.Now()}
+	a, b := cookieValue(s, testSealer), cookieValue(s, testSealer)
 	if strings.Contains(a, token) || strings.Contains(a, base64.RawURLEncoding.EncodeToString([]byte(token))) {
 		t.Error("sealed cookie carries the token in clear")
 	}
@@ -80,7 +87,7 @@ func TestCookieHidesToken(t *testing.T) {
 // the 4 KiB browser cookie cap.
 func TestCookieSizeForJWT(t *testing.T) {
 	jwt := strings.Repeat("x", 1400)
-	if n := len(cookieName) + 1 + len(cookieValue(jwt, testSealer)); n > 4096 {
+	if n := len(cookieName) + 1 + len(cookieValue(session{token: jwt, issued: time.Now(), sso: true}, testSealer)); n > 4096 {
 		t.Errorf("sealed cookie is %d bytes, over the 4 KiB cap", n)
 	}
 }
@@ -242,7 +249,7 @@ func TestRevalidateOutsideTheBudget(t *testing.T) {
 	var wg sync.WaitGroup
 	for range 8 {
 		wg.Go(func() {
-			if err := a.Revalidate(context.Background(), "good"); err != nil {
+			if err := a.Revalidate(context.Background(), Identity{Token: "good"}); err != nil {
 				t.Errorf("Revalidate: %v", err)
 			}
 		})
@@ -256,7 +263,7 @@ func TestRevalidateOutsideTheBudget(t *testing.T) {
 	if _, err := a.Validate(context.Background(), "unknown"); !errors.Is(err, ErrThrottled) {
 		t.Errorf("an unknown token past the budget: %v, want ErrThrottled", err)
 	}
-	if err := a.Revalidate(context.Background(), "bad"); !errors.Is(err, ErrRejected) {
+	if err := a.Revalidate(context.Background(), Identity{Token: "bad"}); !errors.Is(err, ErrRejected) {
 		t.Errorf("a dead token re-checked: %v, want ErrRejected", err)
 	}
 }

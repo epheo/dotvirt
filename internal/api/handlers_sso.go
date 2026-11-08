@@ -1,13 +1,50 @@
 package api
 
 import (
+	"context"
 	"fmt"
+	"log"
 	"net/http"
+	"time"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 
+	"github.com/epheo/dotvirt/internal/auth"
+	"github.com/epheo/dotvirt/internal/eventbus"
 	"github.com/epheo/dotvirt/internal/model"
 )
+
+// revokeTimeout bounds the SSO token delete a logout runs.
+const revokeTimeout = 10 * time.Second
+
+// handleLogout ends the caller's session, answers, and closes the session's
+// streams and consoles. An SSO session's token is then deleted cluster-wide,
+// under that token itself: dotvirt's OAuth client minted it for this session
+// alone. A failed delete is logged; the session has ended either way. Only a
+// session this call ended is revoked, so a replayed cookie costs no apiserver
+// call.
+func (s *Server) handleLogout(w http.ResponseWriter, r *http.Request) {
+	id, ended := s.auth.Logout(w, r)
+	if !ended {
+		return
+	}
+	s.bus.Publish(eventbus.SessionEnded)
+	name, ok := auth.OAuthTokenName(id.Token)
+	if !id.SSO || !ok || s.clusterF == nil {
+		return
+	}
+	_ = http.NewResponseController(w).Flush() // the UI need not wait on the delete
+	// Detached: a client hanging up after its logout must not keep the token alive.
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), s.revokeTimeout)
+	defer cancel()
+	c, err := s.clusterF.For(id.Token)
+	if err == nil {
+		err = c.DeleteOwnOAuthToken(ctx, name)
+	}
+	if err != nil && !apierrors.IsNotFound(err) {
+		log.Printf("api: logout: SSO token not revoked: %v", err)
+	}
+}
 
 // handleFinishSSO registers the OAuthClient under the CALLER's token: the API
 // server's RBAC is the entire gate, so no dotvirt identity holds oauthclients

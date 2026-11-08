@@ -248,9 +248,9 @@ func TestNetworksWatermarkFollowsGrants(t *testing.T) {
 }
 
 // A frame re-validates its token on the authenticator's cache: a revoked
-// token ends its stream (ErrRejected evicts it) without waiting for a cached
-// review to expire; a review outage withholds the frame, never as a pass and
-// never as a sign-out.
+// token ends its stream (ErrRejected evicts it) and signals its consoles
+// without waiting for a cached review to expire; a review outage withholds the
+// frame, never as a pass and never as a sign-out.
 func TestFrameRejectsARevokedToken(t *testing.T) {
 	fc := newFakeCluster(t)
 	fc.namespaces = []corev1.Namespace{{ObjectMeta: metav1.ObjectMeta{Name: "team-a-dev", Labels: map[string]string{"dotvirt.io/project": "team-a"}}}}
@@ -281,9 +281,15 @@ func TestFrameRejectsARevokedToken(t *testing.T) {
 	if _, err := s.InventoryForIdentity(context.Background(), id); err == nil || errors.Is(err, auth.ErrRejected) {
 		t.Fatalf("a review outage must withhold the frame and keep the session: %v", err)
 	}
+	if v := s.bus.Version(eventbus.SessionEnded); v != 0 {
+		t.Fatalf("a review outage signalled %d session ends", v)
+	}
 	down.Store(false)
 	alive.Store(false)
 	if _, err := s.InventoryForIdentity(context.Background(), id); !errors.Is(err, auth.ErrRejected) {
 		t.Fatalf("a revoked token built a frame: %v", err)
+	}
+	if v := s.bus.Version(eventbus.SessionEnded); v != 1 {
+		t.Fatalf("a revoked token signalled %d session ends, want 1", v)
 	}
 }

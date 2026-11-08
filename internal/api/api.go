@@ -194,6 +194,8 @@ type Server struct {
 	vnc       VNCHandler
 	cfg       Config
 
+	revokeTimeout time.Duration // bounds an SSO logout's token delete (revokeTimeout; tests shorten it)
+
 	// Proposals-refresher state (see proposals.go): who to refresh, the coalesced
 	// out-of-cycle trigger, the repos a nudge named, and the repo version each
 	// project's lane was last read at.
@@ -260,6 +262,8 @@ func NewServer(d Deps) *Server {
 		auth:      d.Auth,
 		oauth:     d.OAuth,
 		cfg:       d.Config,
+
+		revokeTimeout: revokeTimeout,
 
 		propTargets: map[string]propTarget{},
 		propNudge:   make(chan struct{}, 1),
@@ -472,14 +476,15 @@ var errSessionRejected = fmt.Errorf("%w: session expired", auth.ErrRejected)
 
 // reviewFailed answers an authorization review that failed under the caller's
 // token. A 401 there is checked against a fresh TokenReview: only a rejected
-// token ends the session; a token that still validates, or a review that
-// cannot run, is a 503. Either way the answer is a fixed line and the detail
-// is only logged: a visibility probe's error can name other tenants'
-// namespaces.
+// token ends the session, and its open streams and consoles with it; a token
+// that still validates, or a review that cannot run, is a 503. Either way the
+// answer is a fixed line and the detail is only logged: a visibility probe's
+// error can name other tenants' namespaces.
 func (s *Server) reviewFailed(ctx context.Context, id auth.Identity, err error) error {
 	if apierrors.IsUnauthorized(err) && s.auth != nil {
 		if errors.Is(s.auth.Recheck(ctx, id.Token), auth.ErrRejected) {
 			log.Printf("api: %s: session rejected: %v", id.Username, err)
+			s.bus.Publish(eventbus.SessionEnded)
 			return errSessionRejected
 		}
 	}

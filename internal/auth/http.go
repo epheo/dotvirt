@@ -1,11 +1,14 @@
 package auth
 
 import (
+	"context"
 	"crypto/cipher"
 	"encoding/json"
 	"errors"
 	"net/http"
 	"strings"
+
+	"github.com/epheo/dotvirt/internal/restfactory"
 )
 
 // userResponse is the public shape of an Identity (the token is never returned).
@@ -41,14 +44,43 @@ func (a *Authenticator) Login(w http.ResponseWriter, r *http.Request) {
 		}
 		return
 	}
-	setCookie(w, r, token, a.sealer)
+	setCookie(w, r, token, false, a.sealer)
 	writeJSON(w, http.StatusOK, userResponse{Username: id.Username, Groups: id.Groups})
 }
 
-// Logout clears the session cookie. Always 204 (idempotent).
-func (a *Authenticator) Logout(w http.ResponseWriter, r *http.Request) {
+// Logout ends the session the request's cookie seals, with every older session
+// of its token, clears the cookie whatever it holds, and answers 204. Opening
+// the cookie is the whole check: logout runs ahead of the middleware, so a
+// TokenReview that cannot run (budget spent, apiserver down) never leaves a
+// session standing that the UI believes over. It returns the session this call
+// ended - its token, issue time and origin, no username - for the caller to
+// close its streams and revoke an SSO token; a replayed, expired, absent or
+// unproven legacy cookie ends nothing. A bearer header has no session: its
+// holder keeps the raw token, which only the cluster can revoke.
+func (a *Authenticator) Logout(w http.ResponseWriter, r *http.Request) (Identity, bool) {
+	s, ok := readCookie(r, a.sealer)
+	key := restfactory.TokenKey(s.token)
+	ended := ok && a.SessionLive(key, s.issued) && a.issuedSession(r.Context(), s, key)
+	if ended {
+		a.sessions.end(key, s.issued)
+	}
 	clearCookie(w, r)
 	w.WriteHeader(http.StatusNoContent)
+	return Identity{Token: s.token, Issued: s.issued, SSO: s.sso}, ended
+}
+
+// issuedSession reports whether s is a session cookie dotvirt issued. A v3
+// cookie seals its purpose. A legacy one may be a v0.1.0 OAuth state cookie,
+// sealed alike and harvestable from the open sign-in redirect, so it counts
+// only once its token validates: from the verdict cache, or by a review on the
+// sign-in budget, which bounds what replaying harvested cookies costs the
+// apiserver. Under a spent budget a legacy session's logout records nothing.
+func (a *Authenticator) issuedSession(ctx context.Context, s session, key string) bool {
+	if !s.issued.Equal(legacyIssued) {
+		return true
+	}
+	_, err := a.validate(ctx, s.token, key, true)
+	return err == nil
 }
 
 // Me returns the current Identity from context (set by Middleware).
@@ -71,18 +103,31 @@ func (a *Authenticator) Middleware(next http.Handler) http.Handler {
 			next.ServeHTTP(w, r)
 			return
 		}
-		token, ok := tokenFromRequest(r, a.sealer)
+		s, ok := tokenFromRequest(r, a.sealer)
 		if !ok {
+			if _, err := r.Cookie(cookieName); err == nil {
+				clearCookie(w, r) // unreadable: another key, an old format
+			}
 			http.Error(w, "authentication required", http.StatusUnauthorized)
 			return
 		}
-		id, err := a.Validate(r.Context(), token)
+		key := restfactory.TokenKey(s.token)
+		// Ahead of the verdict cache: a signed-out session's token still validates.
+		if !a.sessions.live(key, s.issued) {
+			clearCookie(w, r)
+			http.Error(w, "session ended", http.StatusUnauthorized)
+			return
+		}
+		id, err := a.validate(r.Context(), s.token, key, true)
 		if err != nil {
 			// Only a definitive rejection signs the user out (401); a transient
 			// inability to validate (API server down/throttled) is 503, so a blip
 			// doesn't bounce valid sessions to the login screen.
 			switch {
 			case errors.Is(err, ErrRejected):
+				if !s.issued.IsZero() {
+					clearCookie(w, r)
+				}
 				http.Error(w, "invalid or expired session", http.StatusUnauthorized)
 			case errors.Is(err, ErrThrottled):
 				throttled(w, "session validation throttled, try again shortly")
@@ -91,6 +136,7 @@ func (a *Authenticator) Middleware(next http.Handler) http.Handler {
 			}
 			return
 		}
+		id.Issued, id.SSO = s.issued, s.sso
 		next.ServeHTTP(w, r.WithContext(NewContext(r.Context(), id)))
 	})
 }
@@ -110,6 +156,9 @@ func isOpenPath(path string) bool {
 	switch path {
 	case "/api/healthz", "/api/login":
 		return true
+	case "/api/logout":
+		// Authenticated by opening the session cookie alone (see Logout).
+		return true
 	case "/api/auth/methods", "/api/auth/openshift", "/api/auth/callback":
 		// The SSO surface: all pre-session by nature (methods tells the login
 		// screen what to offer; the redirect/callback pair mint the session).
@@ -127,17 +176,17 @@ func isOpenPath(path string) bool {
 }
 
 // tokenFromRequest pulls the bearer token from the session cookie, falling back
-// to an Authorization: Bearer header.
-func tokenFromRequest(r *http.Request, sealer cipher.AEAD) (string, bool) {
-	if token, ok := readCookie(r, sealer); ok {
-		return token, true
+// to an Authorization: Bearer header (a session with no issue time).
+func tokenFromRequest(r *http.Request, sealer cipher.AEAD) (session, bool) {
+	if s, ok := readCookie(r, sealer); ok {
+		return s, true
 	}
 	if h := r.Header.Get("Authorization"); h != "" {
 		if token, ok := strings.CutPrefix(h, "Bearer "); ok {
-			return strings.TrimSpace(token), token != ""
+			return session{token: strings.TrimSpace(token)}, token != ""
 		}
 	}
-	return "", false
+	return session{}, false
 }
 
 func writeJSON(w http.ResponseWriter, status int, v any) {
