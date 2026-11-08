@@ -30,4 +30,19 @@ describe('bulkOutcome', () => {
 		expect(out.keep.size).toBe(0);
 		expect(out.msg).toBe('Powered on: staged 1 of 1.');
 	});
+
+	it('counts a VM the stage left matching git apart from the staged ones', () => {
+		const out = bulkOutcome(
+			'Powered off: staged',
+			2,
+			[vm('a'), vm('b')],
+			[
+				{ status: 'fulfilled', value: 'kept' },
+				{ status: 'fulfilled', value: 'gone' },
+			],
+			(value) => value === 'kept',
+		);
+		expect(out.staged).toBe(1);
+		expect(out.msg).toBe('Powered off: staged 1 of 2 (1 already matches git).');
+	});
 });

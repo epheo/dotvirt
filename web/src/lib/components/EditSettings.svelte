@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { toastStageResult } from '#lib/actions.js';
 	import { api, type Network, type VM } from '#lib/api.js';
 	import {
 		buildEditRequest,
@@ -153,5 +154,6 @@
 	finishLabel="Stage change"
 	footerHint="Staged into Changes; review and open a PR there."
 	onsubmit={stage}
+	onresult={(v) => toastStageResult(v, vm)}
 	{onclose}
 />

@@ -197,3 +197,23 @@ test('a refused edit lists every bad field, one per line, and keeps the form', a
 	expect(await full.innerText()).toContain('offers\ninvalid: memory');
 	await expect(dialog.getByRole('button', { name: 'Stage change' })).toBeVisible();
 });
+
+test('a power stage says what it left: staged, or back to what git holds', async ({ page }) => {
+	await setScenario(page, 'base');
+	await login(page);
+	await openVM(page, 'web-2');
+	await page.getByRole('button', { name: /Power on/ }).click();
+	await expect(
+		page.getByText('Power On staged for web-2. It applies when the PR merges.'),
+	).toBeVisible();
+
+	// Powering it off from the table is what git already holds: the staged
+	// start is dropped, and the toast says nothing is staged.
+	await page.goto('/compute?tab=vms');
+	const main = page.locator('main');
+	await main.getByLabel('Select web-2').check();
+	await page.getByRole('button', { name: 'Power Off' }).click();
+	await expect(
+		page.getByText('web-2 already matches git; nothing is staged for it.'),
+	).toBeVisible();
+});

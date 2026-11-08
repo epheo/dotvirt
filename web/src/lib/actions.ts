@@ -100,7 +100,7 @@ type StageTarget = { resource?: string; namespace: string; name: string };
 // Whether a stage call's answer still holds an entry for target. Staging a
 // value git already holds unstages it, so the answer says what is staged,
 // not the call.
-function isStaged(view: DraftView, target: StageTarget): boolean {
+export function isStaged(view: DraftView, target: StageTarget): boolean {
 	const resource = target.resource || 'vm';
 	return view.items.some(
 		(i) =>

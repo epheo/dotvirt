@@ -25,6 +25,7 @@
 		adoptVM,
 		manifestURL,
 		runRuntimeAction,
+		toastStageResult,
 		vmActions,
 		type VMAction,
 	} from '#lib/actions.js';
@@ -115,11 +116,15 @@
 		if (!target.sourceFile || powerOp.busy) return;
 		const to = target.power === 'On' ? 'Off' : 'On';
 		return powerOp.run(async () => {
-			await api.stageEdit(target.namespace, target.name, {
+			const view = await api.stageEdit(target.namespace, target.name, {
 				sourceFile: target.sourceFile,
 				power: to,
 			});
-			ui.toastStaged(`Power ${to} staged for ${target.name} — applies when the PR merges.`);
+			toastStageResult(
+				view,
+				target,
+				`Power ${to} staged for ${target.name}. It applies when the PR merges.`,
+			);
 		});
 	}
 

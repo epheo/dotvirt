@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { api, vmKey } from '#lib/api.js';
+	import { objectManifestEdit, templateManifestEdit } from '#lib/manifests.js';
 	import { action } from '#lib/resource.svelte.js';
 	import { drafts } from '#lib/state/drafts.svelte.js';
 	import { inventory } from '#lib/state/inventory.svelte.js';
@@ -95,7 +96,7 @@
 		sourceFile={t.sourceFile}
 		yaml={t.yaml}
 		summary={`Replaces ${t.sourceFile} in the ${t.library === 'platform' ? 'shared library' : t.library}`}
-		onsubmit={(yaml) => api.updateTemplate({ library: t.library, name: t.name, yaml })}
+		{...templateManifestEdit(t)}
 		onclose={close}
 	/>
 {:else if m?.kind === 'editManifest'}
@@ -106,7 +107,7 @@
 		yaml={o.yaml}
 		reason={o.reason}
 		summary={`Replaces ${o.sourceFile}`}
-		onsubmit={(yaml) => api.updateObjectManifest(o.resource, o.namespace, o.name, yaml)}
+		{...objectManifestEdit(o)}
 		onclose={close}
 	/>
 {:else if m?.kind === 'staged' && stagedItem}

@@ -24,6 +24,15 @@ describe('openEdit', () => {
 		expect(ui.modal).toMatchObject({ kind: 'editManifest', name: 'web', yaml: spec.manifest });
 	});
 
+	it('hands the editor the version it read, so a stale edit is refused', async () => {
+		vi.stubGlobal(
+			'fetch',
+			vi.fn(async () => json({ ...spec, baseBlob: 'b1' })),
+		);
+		await openEdit(ref);
+		expect(ui.modal).toMatchObject({ kind: 'editManifest', baseBlob: 'b1' });
+	});
+
 	it('a sign-out raises no error toast', async () => {
 		vi.stubGlobal(
 			'fetch',

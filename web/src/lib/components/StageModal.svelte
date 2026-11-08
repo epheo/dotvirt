@@ -1,5 +1,6 @@
 <script lang="ts">
 	import type { Snippet } from 'svelte';
+	import type { DraftView } from '#lib/api.js';
 	import { action } from '#lib/resource.svelte.js';
 	import { ui } from '#lib/state/ui.svelte.js';
 	import ErrorNote from './ErrorNote.svelte';
@@ -23,6 +24,7 @@
 		missing = [],
 		summary = '',
 		onsubmit,
+		onresult,
 		onstaged,
 		onclose,
 		icon,
@@ -33,8 +35,10 @@
 		label: string;
 		missing?: string[];
 		summary?: string;
-		// The staging call's response is irrelevant here: success means "staged".
 		onsubmit: () => Promise<unknown>;
+		// The draft a stage call returned, reported in place of the staged
+		// toast: a stage that left nothing staged must not claim it staged.
+		onresult?: (view: DraftView) => void;
 		// For a host that must refresh a view of its own after the stage.
 		onstaged?: () => void;
 		onclose: () => void;
@@ -46,8 +50,10 @@
 
 	async function submit() {
 		if (missing.length) return;
-		if (await op.run(onsubmit)) {
-			ui.toastStaged();
+		let result: unknown;
+		if (await op.run(async () => (result = await onsubmit()))) {
+			if (onresult) onresult(result as DraftView);
+			else ui.toastStaged();
 			onstaged?.();
 			onclose();
 		}

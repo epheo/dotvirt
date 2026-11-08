@@ -179,10 +179,8 @@
 				if (results[p.project]?.prNumber === p.prNumber) delete results[p.project];
 		});
 	});
-	// A propose moves the project's open PR head, so its cached review is stale.
 	function proposed(project: string, r: ProposeResult & { title?: string }) {
 		results[project] = r;
-		reviewCache.forgetProposals(project);
 	}
 	// The lane is the project's, not the caller's: a colleague's PR is as much
 	// in flight as one's own. The filter is a viewing preference, kept.

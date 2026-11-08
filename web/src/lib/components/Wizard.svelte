@@ -1,6 +1,7 @@
 <script lang="ts">
 	import type { Snippet } from 'svelte';
 	import { Check } from '@lucide/svelte';
+	import type { DraftView } from '#lib/api.js';
 	import { action } from '#lib/resource.svelte.js';
 	import { ui } from '#lib/state/ui.svelte.js';
 	import ErrorNote from './ErrorNote.svelte';
@@ -30,6 +31,7 @@
 		footerHint = '',
 		icon,
 		onsubmit,
+		onresult,
 		onsuccess,
 		onclose,
 	}: {
@@ -40,8 +42,10 @@
 		finishLabel?: string;
 		footerHint?: string;
 		icon?: Snippet;
-		// The staging call's response is irrelevant here: success means "staged".
 		onsubmit: () => Promise<unknown>;
+		// The draft a stage call returned, reported in place of the staged
+		// toast: a stage that left nothing staged must not claim it staged.
+		onresult?: (view: DraftView) => void;
 		// Replaces the close after a successful stage, for a wizard with a screen
 		// still to show (the VM create's credentials reveal). Unlike StageModal's
 		// onstaged, which runs in addition to the close.
@@ -54,8 +58,10 @@
 
 	async function submit() {
 		if (!canFinish) return;
-		if (await op.run(onsubmit)) {
-			ui.toastStaged();
+		let result: unknown;
+		if (await op.run(async () => (result = await onsubmit()))) {
+			if (onresult) onresult(result as DraftView);
+			else ui.toastStaged();
 			(onsuccess ?? onclose)();
 		}
 	}

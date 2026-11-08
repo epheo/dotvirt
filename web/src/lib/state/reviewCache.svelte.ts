@@ -73,11 +73,6 @@ class ReviewCache {
 		return m;
 	}
 
-	forgetProposals(project: string) {
-		for (const key of Object.keys(this.#proposals))
-			if (key.startsWith(`${project}#`)) delete this.#proposals[key];
-	}
-
 	reset() {
 		this.#generation++;
 		this.#commits = {};
