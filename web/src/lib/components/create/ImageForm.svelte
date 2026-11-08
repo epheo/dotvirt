@@ -53,8 +53,19 @@
 	let importInfo = $state('');
 
 	let file = $state<File | null>(null);
+	// What the caller may do in the picked namespace, asked when it changes. A
+	// missing answer or field reads no: Upload waits for a yes, and the
+	// boot-image choice shows only where the route would take it.
+	const caps = resource(
+		() => namespace,
+		async (ns) => (ns ? ((await api.capabilities(ns)).namespace ?? null) : null),
+		{ reset: true },
+	);
+	const canImage = $derived(!!caps.data?.bootImageCreate);
+	const canUpload = $derived(!!caps.data?.dataVolumeCreate);
 	// svelte-ignore state_referenced_locally
-	let asBoot = $state(bootImage ?? true);
+	let offerImage = $state(bootImage ?? true);
+	const asBoot = $derived(offerImage && canImage);
 	let image = $state(''); // the boot image registered, "namespace/name"
 	let name = $state('');
 	let size = $state('10Gi');
@@ -75,6 +86,10 @@
 	);
 	const missing = $derived.by(() => {
 		const m: string[] = [];
+		// Rights first: no file is worth picking where the upload is refused.
+		if (namespace && caps.data && !canUpload) m.push(`You may not upload images in ${namespace}`);
+		else if (namespace && !caps.data)
+			m.push(caps.loading ? 'Checking your rights' : 'Your rights could not be read');
 		if (!file) m.push('Pick an image file');
 		if (!name) m.push('Name the disk');
 		else if (!validName(name)) m.push('The name needs lowercase letters, digits and -');
@@ -280,15 +295,12 @@
 				onpick={(c) => (storageClass = c)}
 				classes={classRows}
 			/>
-			<label class="flex cursor-pointer items-start gap-2 text-sm text-ink">
-				<input type="checkbox" class="mt-0.5 size-4 accent-accent" bind:checked={asBoot} />
-				<span
-					>Offer it as a boot image<span class="block text-xs text-ink-muted"
-						>New VM lists it. Needs the right to add boot images in {namespace ||
-							'the namespace'}.</span
-					></span
-				>
-			</label>
+			{#if canImage}
+				<label class="flex cursor-pointer items-center gap-2 text-sm text-ink">
+					<input type="checkbox" class="size-4 accent-accent" bind:checked={offerImage} />
+					Offer it as a boot image, so new VMs can start from it
+				</label>
+			{/if}
 		{:else}
 			<ol class="flex flex-col gap-3 py-1">
 				{#each STEPS as s (s.at)}

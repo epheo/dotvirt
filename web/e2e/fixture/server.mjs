@@ -687,12 +687,75 @@ async function handleAPI(req, res, url) {
 
 const newestFirst = (a, b) => (b.created ?? '').localeCompare(a.created ?? '');
 
+// The caller's verdicts (GET /api/capabilities): everything allowed, unless
+// the scenario's `capabilities` narrows a namespace (by name, or `default`).
+const allowAll = { create: true, update: true, delete: true };
+function namespaceCaps(s, project, ns) {
+	return {
+		namespace: ns,
+		vm: allowAll,
+		resync: true,
+		restart: true,
+		migrate: true,
+		pause: true,
+		unpause: true,
+		console: true,
+		snapshotTake: true,
+		snapshotRestore: true,
+		snapshotDelete: true,
+		clone: true,
+		dataVolumeCreate: true,
+		bootImageCreate: true,
+		network: allowAll,
+		networkAttachment: allowAll,
+		networkPolicy: allowAll,
+		egressFirewall: allowAll,
+		project: {
+			name: project.name,
+			templateEdit: true,
+			newNamespace: true,
+			adopt: !project.repo,
+			grantAdmin: false,
+			release: !project.repo,
+		},
+		...(s.capabilities?.[ns] ?? s.capabilities?.default),
+	};
+}
+function clusterCaps(s) {
+	return {
+		platform: true,
+		platformRead: true,
+		network: allowAll,
+		uplink: allowAll,
+		egressIP: allowAll,
+		externalRoute: allowAll,
+		adminNetworkPolicy: allowAll,
+		baselineAdminNetworkPolicy: allowAll,
+		namespaceCreate: true,
+		vmNetwork: true,
+		grantAdmin: true,
+		sharedLibrary: true,
+		drsEnable: true,
+		drsPSI: true,
+		drsDisable: true,
+		oauthClient: true,
+		...s.capabilities?.cluster,
+	};
+}
+
 async function handleStorage(req, res, url) {
 	const path = url.pathname;
 	const s = state.scenario;
 	const listing = (v) =>
 		v === null ? sendText(res, 503, 'cluster read failed') : sendJSON(res, 200, v ?? []);
 	if (path === '/api/storage/snapshots') return listing(s.storageSnapshots);
+	if (path === '/api/capabilities') {
+		const ns = url.searchParams.get('namespace');
+		if (!ns) return sendJSON(res, 200, { cluster: clusterCaps(s) });
+		const p = projectOf(ns);
+		if (!p) return sendText(res, 404, 'namespace not found in any visible project');
+		return sendJSON(res, 200, { namespace: namespaceCaps(s, p, ns) });
+	}
 	if (path === '/api/storage/claims') return listing(s.storageClaims);
 
 	let m = path.match(/^\/api\/vms\/([^/]+)\/([^/]+)\/snapshots$/);

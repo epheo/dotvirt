@@ -1031,6 +1031,15 @@ const dupnames = {
 	],
 };
 
+// noboot and noupload: a caller who may upload but not add boot images, and
+// one who may do neither (GET /api/capabilities answers from these).
+const noboot = { ...base, name: 'noboot', capabilities: { default: { bootImageCreate: false } } };
+const noupload = {
+	...base,
+	name: 'noupload',
+	capabilities: { default: { bootImageCreate: false, dataVolumeCreate: false } },
+};
+
 // ── empty: pristine install, nothing visible yet ───────────────────────────────
 
 const empty = {
@@ -1376,4 +1385,6 @@ export const scenarios = {
 	scale: withScaleNetworking(scaleScenario(base)),
 	dupnames,
 	tenant: tenantView(base, 'team-web'),
+	noboot,
+	noupload,
 };

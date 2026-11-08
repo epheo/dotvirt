@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { untrack } from 'svelte';
 	import { ChevronRight, CircleDot, HardDrive, Layers, Upload } from '@lucide/svelte';
 	import { storageHref } from '#lib/nav.js';
 	import { catalog } from '#lib/state/catalog.svelte.js';
@@ -61,8 +62,25 @@
 
 	// The drop zone hands the file to the upload flow, which asks where it goes.
 	let dragging = $state(false);
+	// Which drop zone the caller gets: a boot image where they may add one, a
+	// plain upload where they may only upload, none at all otherwise. Keyed
+	// on the namespace set, never on the frame.
+	const nsKey = $derived(inventory.namespaces.join('\0'));
+	$effect(() => {
+		void nsKey;
+		storage.ensureUpload(untrack(() => inventory.namespaces));
+	});
+	const ability = $derived(storage.upload);
+	const asImage = $derived(!!ability?.image);
+
 	function upload(file?: File) {
-		ui.modal = { kind: 'upload', file, bootImage: true };
+		if (!ability?.upload) return;
+		ui.modal = {
+			kind: 'upload',
+			file,
+			bootImage: asImage,
+			namespace: ability.image || ability.upload,
+		};
 	}
 	function drop(e: DragEvent) {
 		e.preventDefault();
@@ -354,33 +372,49 @@
 		</table>
 	</div>
 
-	<div
-		role="region"
-		aria-label="Add a boot image"
-		ondragover={(e) => {
-			e.preventDefault();
-			dragging = true;
-		}}
-		ondragleave={() => (dragging = false)}
-		ondrop={drop}
-		class="mx-[18px] mt-3 flex flex-wrap items-center gap-x-3.5 gap-y-2.5 rounded-lg border border-dashed px-3.5 py-3 {dragging
-			? 'border-accent bg-select-soft'
-			: 'border-line-strong bg-canvas/40'}"
-	>
-		<Upload size={20} class="shrink-0 text-accent-ink" />
-		<div class="min-w-0 flex-[1_1_240px] text-sm">
-			<strong>Add a boot image.</strong>
-			<span class="text-ink-faint">Drop a qcow2, raw or iso file here.</span>
-		</div>
-		<Button
-			variant="secondary"
-			size="sm"
-			disabled={!inventory.namespaces.length}
-			onclick={() => upload()}>Choose file</Button
+	{#if ability && !ability.upload}
+		<p class="mx-[18px] mt-3 text-xs leading-4 text-ink-faint">
+			Adding images needs the right to create data volumes in a project, and your account has it in
+			none.
+		</p>
+	{:else}
+		<div
+			role="region"
+			aria-label={asImage || !ability ? 'Add a boot image' : 'Upload a disk image'}
+			ondragover={(e) => {
+				e.preventDefault();
+				dragging = true;
+			}}
+			ondragleave={() => (dragging = false)}
+			ondrop={drop}
+			class="mx-[18px] mt-3 flex flex-wrap items-center gap-x-3.5 gap-y-2.5 rounded-lg border border-dashed px-3.5 py-3 {dragging
+				? 'border-accent bg-select-soft'
+				: 'border-line-strong bg-canvas/40'}"
 		>
-		<StageChip kind="now" />
-		<span class="text-xs text-ink-faint">Streams to the cluster. No pull request.</span>
-	</div>
+			<Upload size={20} class="shrink-0 text-accent-ink" />
+			<div class="min-w-0 flex-[1_1_240px] text-sm">
+				{#if asImage || !ability}
+					<strong>Add a boot image.</strong>
+					<span class="text-ink-faint">Drop a qcow2, raw or iso file here.</span>
+				{:else}
+					<strong>Upload a disk image.</strong>
+					<span class="text-ink-faint"
+						>Drop a qcow2, raw or iso file here. It lands as a disk: your account cannot add boot
+						images.</span
+					>
+				{/if}
+			</div>
+			<Button
+				variant="secondary"
+				size="sm"
+				disabled={!ability}
+				title={ability ? '' : 'Checking where you may upload'}
+				onclick={() => upload()}>Choose file</Button
+			>
+			<StageChip kind="now" />
+			<span class="text-xs text-ink-faint">Streams to the cluster. No pull request.</span>
+		</div>
+	{/if}
 
 	<div class="flex flex-wrap items-center gap-2 px-card py-3.5 text-xs leading-4 text-ink-faint">
 		<StageChip kind="pr" />
