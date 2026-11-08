@@ -25,11 +25,26 @@ export type Tier0Initial =
 export type AppModal =
 	// namespace on the create forms is the preselected target: the one the
 	// opener's view is focused on, so a New from inside a project lands there.
-	// image prefills the boot image, as "namespace/name".
-	| { kind: 'newVM'; namespaces: string[] | null; namespace?: string; image?: string } // null = all creatable namespaces
+	// image prefills the boot image, as "namespace/name". from names where the
+	// prefill came from, finishing the sheet's "Filled in from ..." line
+	// ("web-net, selected on the map"); without it the line names the namespace.
+	| {
+			kind: 'newVM';
+			namespaces: string[] | null; // null = all creatable namespaces
+			namespace?: string;
+			image?: string;
+			from?: string;
+	  }
 	// The network-family forms take an optional initial spec: the object read
-	// back from git, so the create form doubles as the edit form.
-	| { kind: 'newNetwork'; initial?: NetworkCreate; namespace?: string }
+	// back from git, so the create form doubles as the edit form. like is a
+	// network's attach ref to fill a new one from (its project, its range).
+	| {
+			kind: 'newNetwork';
+			initial?: NetworkCreate;
+			namespace?: string;
+			like?: string;
+			from?: string;
+	  }
 	| { kind: 'uplink'; initial?: UplinkCreate }
 	| { kind: 'namespace'; project: string | null }
 	| { kind: 'newProject'; adopt?: string } // adopt = existing namespace to bring in as a project

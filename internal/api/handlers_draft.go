@@ -62,6 +62,11 @@ func (s *Server) handleCreate(w http.ResponseWriter, r *http.Request) {
 	if !ok || !s.gate(w, r, sc, vmAction(verbCreate, p.Namespace)) {
 		return
 	}
+	if isDryRun(r) {
+		p, err := s.draft.PreviewCreateVM(sc.id, sc.proj, raw)
+		respond(w, p, err)
+		return
+	}
 	result, err := s.draft.StageCreateVM(sc.id, sc.proj, raw)
 	respond(w, result, err)
 }

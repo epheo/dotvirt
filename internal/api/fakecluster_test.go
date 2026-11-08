@@ -538,6 +538,40 @@ func (d *planeDraft) StageCreateProject(_ auth.Identity, commit project.ProjectI
 	return stagedView, nil
 }
 
+func (d *planeDraft) PreviewCreate(_ auth.Identity, commit project.ProjectInfo, resource draft.Resource, spec json.RawMessage) (model.StagePreview, error) {
+	d.record("PreviewCreate "+commit.Name+" "+string(resource), spec)
+	return model.StagePreview{Project: commit.Name}, nil
+}
+
+// The tenancy previews read through live and exists as their stages do, so a
+// dry run meets the same claim gate and the same refusals.
+
+func (d *planeDraft) PreviewCreateNamespace(_ auth.Identity, commit, join project.ProjectInfo, spec json.RawMessage, live changeset.LiveNamespaces) (model.StagePreview, error) {
+	var p struct{ Name string }
+	_ = json.Unmarshal(spec, &p)
+	if _, err := live(p.Name); err != nil {
+		return model.StagePreview{}, err
+	}
+	d.record("PreviewCreateNamespace "+commit.Name+","+join.Name, spec)
+	return model.StagePreview{Project: commit.Name}, nil
+}
+
+func (d *planeDraft) PreviewCreateProject(_ auth.Identity, commit project.ProjectInfo, spec json.RawMessage, live changeset.LiveNamespaces, exists changeset.ProjectExists) (model.StagePreview, error) {
+	var p struct{ Name, Namespace string }
+	_ = json.Unmarshal(spec, &p)
+	if p.Namespace == "" {
+		p.Namespace = p.Name
+	}
+	if _, err := live(p.Namespace); err != nil {
+		return model.StagePreview{}, err
+	}
+	if exists(p.Name) {
+		return model.StagePreview{}, fmt.Errorf("%w: that project already exists", model.ErrConflict)
+	}
+	d.record("PreviewCreateProject "+commit.Name, spec)
+	return model.StagePreview{Project: commit.Name}, nil
+}
+
 func (d *planeDraft) AdoptProject(_ auth.Identity, commit, target project.ProjectInfo, owners []string, live changeset.LiveNamespaces) (model.DraftView, error) {
 	for _, ns := range target.Namespaces {
 		if _, err := live(ns); err != nil {

@@ -70,6 +70,11 @@ func (s *Server) handleDeployTemplate(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	if isDryRun(r) {
+		p, err := s.draft.PreviewDeployFromTemplate(sc.id, sc.proj, lib, req)
+		respond(w, p, err)
+		return
+	}
 	view, err := s.draft.StageDeployFromTemplate(sc.id, sc.proj, lib, req)
 	respond(w, view, err)
 }

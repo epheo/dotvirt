@@ -131,29 +131,77 @@ func (c *Coordinator) PreviewEdit(proj project.ProjectInfo, namespace, name stri
 // to its manifest here, once, so the preview shows the bytes propose commits and
 // a spec the renderer refuses fails at the form rather than at propose.
 func (c *Coordinator) StageCreateVM(id auth.Identity, proj project.ProjectInfo, rawSpec json.RawMessage) (model.DraftView, error) {
-	read, err := c.read(proj)
+	entry, err := c.renderVM(proj, rawSpec)
 	if err != nil {
 		return model.DraftView{}, err
+	}
+	return c.stage(id, proj, entry)
+}
+
+// PreviewCreateVM is StageCreateVM without the store write.
+func (c *Coordinator) PreviewCreateVM(id auth.Identity, proj project.ProjectInfo, rawSpec json.RawMessage) (model.StagePreview, error) {
+	entry, err := c.renderVM(proj, rawSpec)
+	if err != nil {
+		return model.StagePreview{}, err
+	}
+	return c.previewOf(id, proj, entry)
+}
+
+func (c *Coordinator) renderVM(proj project.ProjectInfo, rawSpec json.RawMessage) (draft.Entry, error) {
+	read, err := c.read(proj)
+	if err != nil {
+		return draft.Entry{}, err
 	}
 	var spec vmgen.Spec
 	if err := json.Unmarshal(rawSpec, &spec); err != nil {
-		return model.DraftView{}, fmt.Errorf("%w: invalid VM spec: %v", model.ErrInvalid, err)
+		return draft.Entry{}, fmt.Errorf("%w: invalid VM spec: %v", model.ErrInvalid, err)
 	}
 	path, content, err := vmgen.Manifest(spec)
 	if err != nil {
-		return model.DraftView{}, invalid(err)
+		return draft.Entry{}, invalid(err)
 	}
 	if err := c.requireUndeclaredVM(read, spec.Namespace, spec.Name); err != nil {
-		return model.DraftView{}, err
+		return draft.Entry{}, err
 	}
-	return c.stage(id, proj, draft.Entry{
+	return draft.Entry{
 		Kind:       draft.KindCreate,
 		Namespace:  spec.Namespace,
 		Name:       spec.Name,
 		SourceFile: path,
 		Manifest:   string(content),
 		FromWizard: true,
-	})
+	}, nil
+}
+
+// previewOf is stage up to the store write: the same gate (the caller's RBAC
+// for every object the files touch, the placement guard, Argo's reading of
+// the files) and the same check against the caller's draft, then what the
+// entries would write. Nothing is recorded.
+func (c *Coordinator) previewOf(id auth.Identity, proj project.ProjectInfo, entries ...draft.Entry) (model.StagePreview, error) {
+	if err := c.gate(id, proj, entries); err != nil {
+		return model.StagePreview{}, err
+	}
+	staged, err := c.store.List(id.Username, proj.Name)
+	if err != nil {
+		return model.StagePreview{}, err
+	}
+	d := make(map[string]draft.Entry, len(staged))
+	for _, e := range staged {
+		d[e.Key()] = e
+	}
+	if err := overFieldEdits(d, entries); err != nil {
+		return model.StagePreview{}, err
+	}
+	return preview(proj, entries...), nil
+}
+
+// preview lists what staging entries into proj's draft would write.
+func preview(proj project.ProjectInfo, entries ...draft.Entry) model.StagePreview {
+	p := model.StagePreview{Project: proj.Name, Files: make([]model.PreviewFile, 0, len(entries))}
+	for _, e := range entries {
+		p.Files = append(p.Files, model.PreviewFile{Kind: string(e.Kind), Path: e.SourceFile, YAML: e.Manifest})
+	}
+	return p
 }
 
 // requireUndeclaredVM refuses a create of a VM the base branch already
@@ -189,6 +237,15 @@ func (c *Coordinator) stageRendered(id auth.Identity, proj project.ProjectInfo, 
 		return model.DraftView{}, err
 	}
 	return c.stage(id, proj, entry)
+}
+
+// previewRendered is stageRendered without the store write.
+func (c *Coordinator) previewRendered(id auth.Identity, proj project.ProjectInfo, render func() (draft.Entry, error)) (model.StagePreview, error) {
+	entry, err := c.renderedEntry(proj, render)
+	if err != nil {
+		return model.StagePreview{}, err
+	}
+	return c.previewOf(id, proj, entry)
 }
 
 // renderedEntry is stageRendered's entry, unstaged.
@@ -322,11 +379,28 @@ func render[S any](what string, manifest func(S) (path string, content []byte, e
 // the object's scope - the tenant repo owning a namespaced object, the
 // platform repo for a cluster-scoped one - so resource only picks the renderer.
 func (c *Coordinator) StageCreate(id auth.Identity, proj project.ProjectInfo, resource draft.Resource, rawSpec json.RawMessage) (model.DraftView, error) {
-	stage, ok := renderers[resource]
-	if !ok {
-		return model.DraftView{}, fmt.Errorf("%w: %s has no create form", model.ErrInvalid, resource)
+	render, err := createForm(resource, rawSpec)
+	if err != nil {
+		return model.DraftView{}, err
 	}
-	return c.stageRendered(id, proj, func() (draft.Entry, error) { return stage(rawSpec) })
+	return c.stageRendered(id, proj, render)
+}
+
+// PreviewCreate is StageCreate without the store write.
+func (c *Coordinator) PreviewCreate(id auth.Identity, proj project.ProjectInfo, resource draft.Resource, rawSpec json.RawMessage) (model.StagePreview, error) {
+	render, err := createForm(resource, rawSpec)
+	if err != nil {
+		return model.StagePreview{}, err
+	}
+	return c.previewRendered(id, proj, render)
+}
+
+func createForm(resource draft.Resource, rawSpec json.RawMessage) (func() (draft.Entry, error), error) {
+	r, ok := renderers[resource]
+	if !ok {
+		return nil, fmt.Errorf("%w: %s has no create form", model.ErrInvalid, resource)
+	}
+	return func() (draft.Entry, error) { return r(rawSpec) }, nil
 }
 
 // StageCreateNamespace records a new namespace (with an optional primary "VM
@@ -357,6 +431,29 @@ func (c *Coordinator) StageCreateNamespace(id auth.Identity, commitProj, joinPro
 		return model.DraftView{}, err
 	}
 	return c.stage(id, commitProj, entries...)
+}
+
+// PreviewCreateNamespace is StageCreateNamespace step for step - the same
+// read through live (the claim gate the handler binds there), the same
+// entries, the same gate - without the store write.
+func (c *Coordinator) PreviewCreateNamespace(id auth.Identity, commitProj, joinProj project.ProjectInfo, rawSpec json.RawMessage, live LiveNamespaces) (model.StagePreview, error) {
+	var spec netgen.NamespaceSpec
+	if err := json.Unmarshal(rawSpec, &spec); err != nil {
+		return model.StagePreview{}, invalid(fmt.Errorf("invalid namespace spec: %v", err))
+	}
+	ln, err := live.lookup(spec.Name)
+	if err != nil {
+		return model.StagePreview{}, err
+	}
+	if err := primaryNetworkOnExisting(spec.Name, ln, spec.VMNetwork); err != nil {
+		return model.StagePreview{}, err
+	}
+	spec.Live = ln
+	entries, err := c.namespaceEntries(commitProj, joinProj, spec)
+	if err != nil {
+		return model.StagePreview{}, err
+	}
+	return c.previewOf(id, commitProj, entries...)
 }
 
 // namespaceEntries is what joining namespace spec to joinProj stages into
@@ -448,11 +545,10 @@ func (c *Coordinator) stage(id auth.Identity, proj project.ProjectInfo, entries 
 		return model.DraftView{}, err
 	}
 	err := c.store.Apply(id.Username, proj.Name, func(d map[string]draft.Entry) error {
+		if err := overFieldEdits(d, entries); err != nil {
+			return err
+		}
 		for _, e := range entries {
-			if staged, ok := d[e.Key()]; ok && fieldEdit(staged) && e.Kind == draft.KindEdit {
-				return fmt.Errorf("%w: %s has staged setting changes; propose or unstage them before replacing its whole manifest",
-					model.ErrConflict, objectLabel(e))
-			}
 			d[e.Key()] = e
 		}
 		return nil
@@ -461,6 +557,19 @@ func (c *Coordinator) stage(id auth.Identity, proj project.ProjectInfo, entries 
 		return model.DraftView{}, err
 	}
 	return c.Get(id, proj)
+}
+
+// overFieldEdits refuses a whole-file edit of an object the draft holds
+// setting changes for: they would vanish from the draft without the user
+// knowing.
+func overFieldEdits(d map[string]draft.Entry, entries []draft.Entry) error {
+	for _, e := range entries {
+		if staged, ok := d[e.Key()]; ok && fieldEdit(staged) && e.Kind == draft.KindEdit {
+			return fmt.Errorf("%w: %s has staged setting changes; propose or unstage them before replacing its whole manifest",
+				model.ErrConflict, objectLabel(e))
+		}
+	}
+	return nil
 }
 
 // pinOf is the pin of a file read as content, ok=false when it was absent.

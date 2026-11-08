@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { HostCapacity, VM } from '#lib/api.js';
-import { headroom, memoryFit, memoryHint } from '#lib/headroom.js';
+import { headroom, memoryFit, memoryHint, placement } from '#lib/headroom.js';
 
 const GiB = 2 ** 30;
 
@@ -105,6 +105,34 @@ describe('memoryFit', () => {
 	it('has nothing to say when no host takes VMs', () => {
 		const down = nodes.map((n) => ({ ...n, ready: false }));
 		expect(memoryFit(cap, down, GiB, { bytes: 0 })).toBeNull();
+	});
+});
+
+describe('placement', () => {
+	const nodes = [
+		{ name: 'w1', ready: true },
+		{ name: 'w2', ready: true },
+		{ name: 'w3', ready: true, maintenance: true },
+	];
+
+	it('counts fits against every host and names the ones left out', () => {
+		const p = placement(cap, nodes, 4 * GiB)!;
+		expect([p.fits, p.hosts, p.total]).toEqual([2, 2, 3]);
+		expect(p.excluded).toEqual([{ node: 'w3', reason: 'in maintenance' }]);
+		expect(p.best!.node).toBe('w2');
+	});
+
+	it('still names the hosts when none takes VMs', () => {
+		const p = placement(
+			cap,
+			nodes.map((n) => ({ ...n, maintenance: true })),
+			GiB,
+		)!;
+		expect([p.fits, p.total, p.excluded.length]).toEqual([0, 3, 3]);
+	});
+
+	it('has nothing to say without capacity', () => {
+		expect(placement({ updated: 0, nodes: [] }, nodes, GiB)).toBeNull();
 	});
 });
 

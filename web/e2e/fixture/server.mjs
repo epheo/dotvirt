@@ -19,6 +19,7 @@ import { dirname, extname, join, normalize } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { WebSocketServer } from 'ws';
 import { scenarios } from './scenarios.mjs';
+import { handleCreate } from './create.mjs';
 
 const buildDir = join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'build');
 if (!existsSync(join(buildDir, 'index.html'))) {
@@ -182,13 +183,19 @@ function stage(res, namespace, name, item) {
 	const p = projectOf(namespace);
 	if (!p) return sendText(res, 404, 'namespace not found in any visible project');
 	if (!p.repo) return sendText(res, 503, 'project has no usable repo');
-	// One entry per VM, replaced on every stage, like the backend's draft store.
-	const items = (state.staged.get(p.name) ?? []).filter(
-		(i) => i.namespace !== namespace || i.name !== name,
-	);
-	items.push({ namespace, name, ...item });
-	state.staged.set(p.name, items);
+	stageInto(p.name, { namespace, name, ...item });
 	sendJSON(res, 200, draftFor(p.name));
+}
+
+// One entry per object, replaced on every stage, like the backend's draft store.
+function stageInto(project, item) {
+	const same = (i) =>
+		(i.resource ?? '') === (item.resource ?? '') &&
+		i.namespace === item.namespace &&
+		i.name === item.name;
+	const items = (state.staged.get(project) ?? []).filter((i) => !same(i));
+	items.push(item);
+	state.staged.set(project, items);
 }
 
 // Human-readable change rows from a VMEdit body, with the backend's labels and
@@ -297,6 +304,10 @@ async function handleAPI(req, res, url) {
 		return authed(req) ? sendJSON(res, 200, s.user) : sendText(res, 401, 'no session');
 	}
 	if (!authed(req)) return sendText(res, 401, 'no session');
+
+	// The create routes and their dry runs (create.mjs).
+	const createCtx = { state, sendJSON, sendText, readBody, projectOf, stageInto, draftFor };
+	if (await handleCreate(req, res, url, createCtx)) return;
 
 	if (path === '/api/inventory') return sendJSON(res, 200, s.inventory);
 	if (path === '/api/options') return sendJSON(res, 200, s.options);
@@ -431,15 +442,6 @@ async function handleAPI(req, res, url) {
 			pushed: true,
 			prNumber: 78,
 			prURL: `https://forge.example/dotvirt/${m[1]}/pulls/78`,
-		});
-	}
-
-	if (path === '/api/vms' && req.method === 'POST') {
-		const body = await readBody(req);
-		if (!body?.namespace) return sendText(res, 400, 'spec namespace is required');
-		return stage(res, body.namespace, body.name, {
-			kind: 'create',
-			changes: [{ field: 'manifest', action: 'add', to: body.instancetype ?? 'custom' }],
 		});
 	}
 
@@ -684,6 +686,15 @@ async function handleStorage(req, res, url) {
 		if (!projectOf(body.namespace))
 			return sendText(res, 404, 'namespace not found in any visible project');
 		state.uploads.set(`${body.namespace}/${body.name}`, 'UploadReady');
+		// A boot image joins the catalog New VM reads.
+		if (body.bootImage)
+			s.options = {
+				...s.options,
+				osImages: [
+					...s.options.osImages,
+					{ name: body.name, namespace: body.namespace, ready: true },
+				],
+			};
 		return sendJSON(res, 200, {
 			namespace: body.namespace,
 			name: body.name,

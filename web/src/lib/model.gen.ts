@@ -381,6 +381,28 @@ export interface DraftView {
   defaultBody?: string;
 }
 /**
+ * StagePreview is what a create form would stage, rendered by the staging
+ * path itself but never recorded: the files its pull request would carry.
+ * Answered by a create route called with ?dryRun=true.
+ */
+export interface StagePreview {
+  /**
+   * Project names the repo the change lands in: the tenant project owning
+   * the object, or the platform project for a cluster-scoped one.
+   */
+  project: string;
+  files: PreviewFile[];
+}
+/**
+ * PreviewFile is one file a staged create writes. Kind is "edit" when git
+ * already declares the object: staging replaces that file instead.
+ */
+export interface PreviewFile {
+  kind: string; // create | edit
+  path: string;
+  yaml: string;
+}
+/**
  * ProposeResult is returned after proposing the draft as a PR.
  */
 export interface ProposeResult {

@@ -104,13 +104,13 @@ test('create VM and add a boot image start from the library', async ({ page }) =
 	await expect(page.getByRole('dialog')).toBeHidden();
 
 	await main.getByRole('button', { name: 'Choose file' }).click();
-	const dialog = page.getByRole('dialog', { name: 'Add a boot image' });
+	const dialog = page.getByRole('dialog', { name: 'New image' });
 	await dialog.locator('input[type=file]').setInputFiles({
 		name: 'rhel-10.qcow2',
 		mimeType: 'application/octet-stream',
 		buffer: Buffer.from('QFI\xfb'),
 	});
-	await dialog.getByRole('button', { name: 'Upload' }).click();
+	await dialog.getByRole('button', { name: 'Upload image' }).click();
 	await expect(dialog.getByText('is a boot image in')).toBeVisible({ timeout: 15_000 });
 });
 
@@ -196,8 +196,9 @@ test('the drop zone offers only what the caller may do', async ({ page }) => {
 	await page.goto('/storage');
 	await expect(main.getByText('Upload a disk image.')).toBeVisible();
 	await main.getByRole('button', { name: 'Choose file' }).click();
-	const dialog = page.getByRole('dialog', { name: 'Upload image' });
+	const dialog = page.getByRole('dialog', { name: 'New image' });
 	await expect(dialog.getByText('Disk size')).toBeVisible();
+	await expect(dialog.getByText('Pick an image file')).toBeVisible();
 	await expect(dialog.getByText('Offer it as a boot image')).toHaveCount(0);
 	await page.keyboard.press('Escape');
 
@@ -213,7 +214,7 @@ test('the drop zone offers only what the caller may do', async ({ page }) => {
 	await main.getByRole('button', { name: 'Choose file' }).click();
 	await expect(
 		page
-			.getByRole('dialog', { name: 'Add a boot image' })
+			.getByRole('dialog', { name: 'New image' })
 			.getByLabel('Offer it as a boot image', { exact: false }),
 	).toBeChecked();
 });

@@ -72,6 +72,18 @@ func (d *reachedDraft) StageCreate(auth.Identity, project.ProjectInfo, draft.Res
 	d.hit("StageCreate")
 	return view, nil
 }
+func (d *reachedDraft) PreviewCreateVM(auth.Identity, project.ProjectInfo, json.RawMessage) (model.StagePreview, error) {
+	d.hit("PreviewCreateVM")
+	return model.StagePreview{}, nil
+}
+func (d *reachedDraft) PreviewCreate(auth.Identity, project.ProjectInfo, draft.Resource, json.RawMessage) (model.StagePreview, error) {
+	d.hit("PreviewCreate")
+	return model.StagePreview{}, nil
+}
+func (d *reachedDraft) PreviewDeployFromTemplate(auth.Identity, project.ProjectInfo, project.ProjectInfo, model.DeployTemplateRequest) (model.StagePreview, error) {
+	d.hit("PreviewDeployFromTemplate")
+	return model.StagePreview{}, nil
+}
 func (d *reachedDraft) StageDelete(auth.Identity, project.ProjectInfo, string, string, string) (model.DraftView, error) {
 	d.hit("StageDelete")
 	return view, nil
@@ -225,6 +237,13 @@ var authorRoutes = []struct {
 	{http.MethodDelete, "/api/objects/networkpolicy/web/p1", ``, "StageDelete"},
 	{http.MethodPost, "/api/objects/networkpolicy/web/p1/restore", `{"hash":"` + hash40 + `"}`, "RestoreVersion"},
 	{http.MethodPost, "/api/templates/deploy", `{"namespace":"web","template":"t"}`, "StageDeployFromTemplate"},
+	// A dry run renders without staging, so it keeps the stage's gate: only
+	// someone who may stage sees what staging would write.
+	{http.MethodPost, "/api/vms?dryRun=true", `{"namespace":"web","name":"vm2"}`, "PreviewCreateVM"},
+	{http.MethodPost, "/api/networks?dryRun=true", `{"scope":"project","namespace":"web"}`, "PreviewCreate"},
+	{http.MethodPost, "/api/egressfirewalls?dryRun=true", `{"namespace":"web"}`, "PreviewCreate"},
+	{http.MethodPost, "/api/networkpolicies?dryRun=true", `{"namespace":"web"}`, "PreviewCreate"},
+	{http.MethodPost, "/api/templates/deploy?dryRun=true", `{"namespace":"web","template":"t"}`, "PreviewDeployFromTemplate"},
 	{http.MethodPut, "/api/templates", `{"library":"team","name":"t","yaml":"x"}`, "StageUpdateTemplate"},
 	{http.MethodPost, "/api/templates", `{"sourceNamespace":"web","sourceName":"vm1"}`, "StageSaveTemplate"},
 	// The adoption captures read the cluster before staging, so passing the

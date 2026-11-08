@@ -111,6 +111,38 @@ func (c *Coordinator) StageCreateProject(id auth.Identity, commitProj project.Pr
 	return view, nil
 }
 
+// PreviewCreateProject renders what StageCreateProject would stage, through
+// the same gate and the same existing-project refusal after it. It never
+// calls the forge: the repo URL is derived, not created.
+func (c *Coordinator) PreviewCreateProject(id auth.Identity, commitProj project.ProjectInfo, rawSpec json.RawMessage, live LiveNamespaces, exists ProjectExists) (model.StagePreview, error) {
+	spec, ns, err := parseProject(commitProj, rawSpec)
+	if err != nil {
+		return model.StagePreview{}, err
+	}
+	ln, err := live.lookup(ns)
+	if err != nil {
+		return model.StagePreview{}, err
+	}
+	if err := primaryNetworkOnExisting(ns, ln, spec.VMNetwork); err != nil {
+		return model.StagePreview{}, err
+	}
+	entries, repoURL, err := c.projectEntries(commitProj, spec, ns, ln)
+	if err != nil {
+		return model.StagePreview{}, err
+	}
+	p, err := c.previewOf(id, commitProj, entries...)
+	if err != nil {
+		return p, err
+	}
+	if exists != nil && exists(spec.Name) {
+		return model.StagePreview{}, fmt.Errorf("%w: that project already exists; adopt it instead of creating it", model.ErrConflict)
+	}
+	if _, err := c.tenantForge(repoURL); err != nil {
+		return model.StagePreview{}, err
+	}
+	return p, nil
+}
+
 // ProjectExists reports whether a project by that name exists, the cluster
 // being dotvirt's registry. nil reads none.
 type ProjectExists func(name string) bool
@@ -373,9 +405,9 @@ func tenantRepoURL(platformRepo, name string) (string, error) {
 // adoption; created is false when the repo already existed, which the caller
 // uses to guard.
 func (c *Coordinator) ensureTenantRepo(repoURL string) (created bool, err error) {
-	fc := c.forge.For(repoURL)
-	if fc == nil {
-		return false, fmt.Errorf("%w: forge not configured; cannot create the project repo", model.ErrInvalid)
+	fc, err := c.tenantForge(repoURL)
+	if err != nil {
+		return false, err
 	}
 	created, err = fc.EnsureRepo()
 	if err != nil {
@@ -386,6 +418,17 @@ func (c *Coordinator) ensureTenantRepo(repoURL string) (created bool, err error)
 		c.seedTemplates(repoURL)
 	}
 	return created, nil
+}
+
+// tenantForge is the forge client that would create repoURL, without
+// calling the forge: a project create refuses here, before any repo exists,
+// when no forge is configured.
+func (c *Coordinator) tenantForge(repoURL string) (*forge.Client, error) {
+	fc := c.forge.For(repoURL)
+	if fc == nil {
+		return nil, fmt.Errorf("%w: forge not configured; cannot create the project repo", model.ErrInvalid)
+	}
+	return fc, nil
 }
 
 // tenantNamespaces is the namespace spec joining each of target's namespaces to

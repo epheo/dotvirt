@@ -24,6 +24,18 @@ type nsPeek struct {
 	Namespace string `json:"namespace"`
 }
 
+// stageCreate is every network-family create's tail, past its gates: stage
+// the form, or render it for a dry run.
+func (s *Server) stageCreate(w http.ResponseWriter, r *http.Request, sc scope, resource draft.Resource, raw []byte) {
+	if isDryRun(r) {
+		p, err := s.draft.PreviewCreate(sc.id, sc.proj, resource, raw)
+		respond(w, p, err)
+		return
+	}
+	view, err := s.draft.StageCreate(sc.id, sc.proj, resource, raw)
+	respond(w, view, err)
+}
+
 // platformCreate builds the handler for a cluster-scoped create form on kind:
 // always the platform tier, opened by the right to create or update the kind;
 // the coordinator checks the one the rendered form needs.
@@ -37,8 +49,7 @@ func (s *Server) platformCreate(kind model.Kind, resource draft.Resource) http.H
 		if !ok {
 			return
 		}
-		view, err := s.draft.StageCreate(sc.id, sc.proj, resource, raw)
-		respond(w, view, err)
+		s.stageCreate(w, r, sc, resource, raw)
 	}
 }
 
@@ -61,8 +72,7 @@ func (s *Server) namespacedCreate(what string, resource draft.Resource, kind mod
 		if !ok || !s.gateForm(w, r, sc, kind, p.Namespace) {
 			return
 		}
-		view, err := s.draft.StageCreate(sc.id, sc.proj, resource, raw)
-		respond(w, view, err)
+		s.stageCreate(w, r, sc, resource, raw)
 	}
 }
 
@@ -93,8 +103,7 @@ func (s *Server) handleCreateNetwork(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	view, err := s.draft.StageCreate(sc.id, sc.proj, draft.ResourceNetwork, raw)
-	respond(w, view, err)
+	s.stageCreate(w, r, sc, draft.ResourceNetwork, raw)
 }
 
 // handleCreateAdminNetworkPolicy stages a cluster-wide admin DFW policy
@@ -118,6 +127,8 @@ func (s *Server) handleCreateAdminNetworkPolicy(w http.ResponseWriter, r *http.R
 	if !ok {
 		return
 	}
+	// The priority check runs before the dry-run branch, so a dry run refuses
+	// a held priority exactly as the stage does.
 	if !p.Baseline && s.netstate != nil {
 		if other, taken := s.netstate.ANPAtPriority(p.Priority, p.Name); taken {
 			fail(w, fmt.Errorf("%w: priority %d is held by admin network policy %q; pick a free one, equal priorities apply in an undefined order",
@@ -125,8 +136,7 @@ func (s *Server) handleCreateAdminNetworkPolicy(w http.ResponseWriter, r *http.R
 			return
 		}
 	}
-	view, err := s.draft.StageCreate(sc.id, sc.proj, draft.ResourceAdminNetworkPolicy, raw)
-	respond(w, view, err)
+	s.stageCreate(w, r, sc, draft.ResourceAdminNetworkPolicy, raw)
 }
 
 // handleNetworks lists the networks (Distributed Port Groups) the caller may

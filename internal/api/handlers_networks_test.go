@@ -104,4 +104,10 @@ func TestCreateAdminNetworkPolicyRefusesTakenPriority(t *testing.T) {
 	d.only(t, "StageCreate "+platformProjectName+" adminnetworkpolicy")
 	wantStatus(t, do(s, adminToken, http.MethodPost, "/api/adminnetworkpolicies", `{"baseline":true}`), http.StatusOK)
 	d.only(t, "StageCreate "+platformProjectName+" adminnetworkpolicy")
+
+	// A dry run refuses a held priority as the stage does, and renders a free one.
+	wantStatus(t, do(s, adminToken, http.MethodPost, "/api/adminnetworkpolicies?dryRun=true", `{"name":"other","priority":5}`), http.StatusConflict)
+	d.none(t)
+	wantStatus(t, do(s, adminToken, http.MethodPost, "/api/adminnetworkpolicies?dryRun=true", `{"name":"other","priority":6}`), http.StatusOK)
+	d.only(t, "PreviewCreate "+platformProjectName+" adminnetworkpolicy")
 }

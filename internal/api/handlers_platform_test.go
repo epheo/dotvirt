@@ -285,6 +285,16 @@ func TestCreateNamespace(t *testing.T) {
 	if !strings.Contains(string(d.raw), `"name":"team-a-test"`) {
 		t.Errorf("staged spec = %s", d.raw)
 	}
+
+	// A dry run passes the same gates and reaches only the render.
+	wantStatus(t, do(s, tenantToken, http.MethodPost, "/api/namespaces?dryRun=true", `{"project":"team-a","name":"x"}`), http.StatusForbidden)
+	d.none(t)
+	rec := do(s, adminToken, http.MethodPost, "/api/namespaces?dryRun=true", `{"project":"team-a","name":"team-a-test"}`)
+	wantStatus(t, rec, http.StatusOK)
+	d.only(t, "PreviewCreateNamespace platform,team-a")
+	if p := decodeBody[model.StagePreview](t, rec); p.Project != "platform" {
+		t.Errorf("preview = %+v", p)
+	}
 }
 
 func TestCreateProject(t *testing.T) {
@@ -308,6 +318,30 @@ func TestCreateProject(t *testing.T) {
 	d.none(t)
 	wantStatus(t, do(s, adminToken, http.MethodPost, "/api/projects", `{"name":"team-c"}`), http.StatusOK)
 	d.only(t, "StageCreateProject platform")
+
+	// A dry run keeps the gates and the existing-project refusal.
+	wantStatus(t, do(s, tenantToken, http.MethodPost, "/api/projects?dryRun=true", `{"name":"team-c"}`), http.StatusForbidden)
+	wantStatus(t, do(s, adminToken, http.MethodPost, "/api/projects?dryRun=true", `{"name":"team-a"}`), http.StatusConflict)
+	d.none(t)
+	wantStatus(t, do(s, adminToken, http.MethodPost, "/api/projects?dryRun=true", `{"name":"team-c"}`), http.StatusOK)
+	d.only(t, "PreviewCreateProject platform")
+}
+
+// A cluster-scoped create's dry run is the platform tier's render, behind the
+// same SSAR as its stage.
+func TestPlatformCreateDryRun(t *testing.T) {
+	fc := newFakeCluster(t)
+	d := &planeDraft{}
+	s := fc.server(d, Config{PlatformRepo: platformRepo})
+
+	wantStatus(t, do(s, tenantToken, http.MethodPost, "/api/egressips?dryRun=true", `{"name":"x"}`), http.StatusForbidden)
+	d.none(t)
+	wantStatus(t, do(s, adminToken, http.MethodPost, "/api/egressips?dryRun=true", `{"name":"x"}`), http.StatusOK)
+	d.only(t, "PreviewCreate platform egressip")
+	wantStatus(t, do(s, adminToken, http.MethodPost, "/api/egressips", `{"name":"x"}`), http.StatusOK)
+	d.only(t, "StageCreate platform egressip")
+	wantStatus(t, do(s, adminToken, http.MethodPost, "/api/networks?dryRun=true", `{"scope":"vlan","name":"x"}`), http.StatusOK)
+	d.only(t, "PreviewCreate platform network")
 }
 
 func TestAdoptProject(t *testing.T) {

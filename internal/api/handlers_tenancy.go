@@ -105,7 +105,13 @@ func (s *Server) handleCreateNamespace(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	view, err := s.draft.StageCreateNamespace(join.id, plat.proj, join.proj, raw, s.claimNamespaces(r.Context(), plat, join.proj.Name))
+	claims := s.claimNamespaces(r.Context(), plat, join.proj.Name)
+	if isDryRun(r) {
+		p, err := s.draft.PreviewCreateNamespace(join.id, plat.proj, join.proj, raw, claims)
+		respond(w, p, err)
+		return
+	}
+	view, err := s.draft.StageCreateNamespace(join.id, plat.proj, join.proj, raw, claims)
 	respond(w, view, err)
 }
 
@@ -138,7 +144,13 @@ func (s *Server) handleCreateProject(w http.ResponseWriter, r *http.Request) {
 		_, ok := s.projectByName(name)
 		return ok
 	}
-	view, err := s.draft.StageCreateProject(plat.id, plat.proj, raw, s.claimNamespaces(r.Context(), plat, p.Name), exists)
+	claims := s.claimNamespaces(r.Context(), plat, p.Name)
+	if isDryRun(r) {
+		p, err := s.draft.PreviewCreateProject(plat.id, plat.proj, raw, claims, exists)
+		respond(w, p, err)
+		return
+	}
+	view, err := s.draft.StageCreateProject(plat.id, plat.proj, raw, claims, exists)
 	respond(w, view, err)
 }
 

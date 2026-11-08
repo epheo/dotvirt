@@ -412,7 +412,11 @@ check(
 // ── networks ───────────────────────────────────────────────────────────────────
 
 const networks = [];
-const net = (n) => (networks.push({ sync: 'Synced', health: 'Healthy', ...n }), n);
+const net = (n) => {
+	const o = { sync: 'Synced', health: 'Healthy', ...n };
+	networks.push(o);
+	return o;
+};
 const attach = (v, n) => {
 	const ref = n.attachRef ?? n.name;
 	if (!v.nics.includes(ref)) v.nics.push(ref);
