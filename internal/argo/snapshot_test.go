@@ -295,11 +295,15 @@ func TestObjectDriftGen(t *testing.T) {
 	set(resources("OutOfSync", "OutOfSync", "OutOfSync"))
 	want("a dev segment moved", prod+1, dev+1)
 
-	// A Namespace object is its own scope; other cluster-scoped kinds share "".
+	// A Namespace object is its own scope; another cluster-scoped kind scopes
+	// by its kind alone.
 	set(resources("OutOfSync", "OutOfSync", "OutOfSync", cudn, nsObj))
 	want("cluster-scoped objects added", prod+1, dev+2)
-	if s.ObjectDriftGen("") == 0 {
-		t.Error("a cluster-scoped object must move the shared scope")
+	if s.ObjectDriftGen(ClusterScope("k8s.ovn.org", "ClusterUserDefinedNetwork")) == 0 {
+		t.Error("a cluster-scoped object must move its kind's scope")
+	}
+	if s.ObjectDriftGen(ClusterScope("policy.networking.k8s.io", "AdminNetworkPolicy")) != 0 {
+		t.Error("a cluster-scoped object moved another kind's scope")
 	}
 }
 

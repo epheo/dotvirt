@@ -89,14 +89,23 @@ type resKey struct{ group, kind, namespace, name string }
 func (k resKey) isVM() bool { return k.group == "kubevirt.io" && k.kind == "VirtualMachine" }
 
 // scope is who may see an object's drift: those who see its namespace, or a
-// Namespace's own name, since the object is that namespace. "" is the rest of
-// the cluster scope, the catalog every caller shares.
+// Namespace's own name, since the object is that namespace. Any other
+// cluster-scoped object scopes by its kind (ClusterScope): which kinds a
+// caller sees is its own authority's call.
 func (k resKey) scope() string {
-	if k.namespace == "" && k.group == "" && k.kind == "Namespace" {
+	switch {
+	case k.namespace != "":
+		return k.namespace
+	case k.group == "" && k.kind == "Namespace":
 		return k.name
 	}
-	return k.namespace
+	return ClusterScope(k.group, k.kind)
 }
+
+// ClusterScope is the ObjectDriftGen scope of one cluster-scoped kind. The
+// separator cannot occur in a namespace name, so it never meets a namespace's
+// scope.
+func ClusterScope(group, kind string) string { return group + "/" + kind }
 
 // resourceDriftFromApps builds per-object drift keyed by identity from a set of ArgoCD
 // Application objects (the reflector store's *unstructured.Unstructured). Un-scoped:

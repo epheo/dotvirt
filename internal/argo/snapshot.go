@@ -330,8 +330,8 @@ func (s *Snapshot) ResourceDrift(group, kind, namespace, name string) (Drift, bo
 }
 
 // ObjectDriftGen returns the generation of the non-VM drift content in one
-// scope: a namespace, or "" for cluster-scoped objects other than Namespaces
-// (see resKey.scope). A monotonic counter that moves only when a non-VM
+// scope: a namespace, or one cluster-scoped kind's ClusterScope (see
+// resKey.scope). A monotonic counter that moves only when a non-VM
 // object's sync/health/error in that scope actually changed, not on every
 // Application object churn.
 func (s *Snapshot) ObjectDriftGen(scope string) uint64 {

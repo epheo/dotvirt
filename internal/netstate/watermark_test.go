@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 
 	"github.com/epheo/dotvirt/internal/cluster"
 )
@@ -17,22 +18,28 @@ func object(ns, name, rv string) *unstructured.Unstructured {
 	return &unstructured.Unstructured{Object: map[string]any{"metadata": md}}
 }
 
+// sharedOnly admits the shared networks alone, as for a tenant without
+// authority over any cluster-tier kind; everything admits them all.
+func sharedOnly(gvr schema.GroupVersionResource) bool { return gvr == gvrCUDN }
+func everything(schema.GroupVersionResource) bool     { return true }
+
 // A caller's watermark moves with the catalog it can see - its namespaces'
-// objects and the shared cluster-scoped ones - and never with another
-// tenant's namespace. Node-level detail moves only a node reader's.
+// objects and the cluster-scoped kinds it is admitted to - and never with
+// another tenant's namespace. Node-level detail moves only a node reader's.
 func TestWatermarkScopesToTheCaller(t *testing.T) {
 	s := New(nil, nil)
 	_ = s.nad.Add(object("team-a", "net", "1"))
 	_ = s.netpol.Add(object("team-b", "deny", "1"))
 	_ = s.cudn.Add(object("", "shared", "1"))
+	_ = s.anp.Add(object("", "lockdown", "1"))
 	_ = s.nns.Add(object("", "worker-1", "1"))
 	s.nodes = []cluster.NodeLabels{{Name: "worker-1", Labels: map[string]string{"zone": "a"}}}
 
 	a := map[string]bool{"team-a": true}
-	tenant, reader := s.Watermark(a, false), s.Watermark(a, true)
+	tenant, reader := s.Watermark(a, sharedOnly, false), s.Watermark(a, everything, true)
 	check := func(what string, tenantMoves, readerMoves bool) {
 		t.Helper()
-		gotT, gotR := s.Watermark(a, false), s.Watermark(a, true)
+		gotT, gotR := s.Watermark(a, sharedOnly, false), s.Watermark(a, everything, true)
 		if (gotT != tenant) != tenantMoves || (gotR != reader) != readerMoves {
 			t.Errorf("%s: tenant moved %v, node reader moved %v; want %v, %v", what, gotT != tenant, gotR != reader, tenantMoves, readerMoves)
 		}
@@ -49,6 +56,9 @@ func TestWatermarkScopesToTheCaller(t *testing.T) {
 	_ = s.cudn.Update(object("", "shared", "2"))
 	check("a shared object", true, true)
 
+	_ = s.anp.Update(object("", "lockdown", "2"))
+	check("an admin policy only its authority sees", false, true)
+
 	_ = s.nns.Update(object("", "worker-1", "2"))
 	check("node state churn", false, false)
 
@@ -58,7 +68,7 @@ func TestWatermarkScopesToTheCaller(t *testing.T) {
 	s.nodes = []cluster.NodeLabels{{Name: "worker-1", Labels: map[string]string{"zone": "b"}}}
 	check("a node relabelled", false, true)
 
-	if s.Watermark(map[string]bool{"team-a": true, "team-b": true}, false) == tenant {
+	if s.Watermark(map[string]bool{"team-a": true, "team-b": true}, sharedOnly, false) == tenant {
 		t.Error("gaining a namespace must move the watermark")
 	}
 }
@@ -95,14 +105,14 @@ func BenchmarkWatermark(b *testing.B) {
 		visible := scope(5)
 		b.ReportAllocs()
 		for b.Loop() {
-			_ = s.Watermark(visible, false)
+			_ = s.Watermark(visible, sharedOnly, false)
 		}
 	})
 	b.Run("admin", func(b *testing.B) {
 		visible := scope(50)
 		b.ReportAllocs()
 		for b.Loop() {
-			_ = s.Watermark(visible, true)
+			_ = s.Watermark(visible, everything, true)
 		}
 	})
 }

@@ -133,11 +133,11 @@ func (s *Server) InventoryForIdentity(ctx context.Context, id auth.Identity) (mo
 	inv.Proposals = s.proposalsFor(id, propProjects, platformErr != nil)
 	// Watermarks for the out-of-band pulls, scoped to what this caller's pulls
 	// read (watermark.go): a merged segment and its badge, or a recorded op,
-	// show live without another tenant's act ever moving this frame. Node read
-	// gates node-level detail in both, as in the pulls themselves.
-	canNodes, _ := s.can(ctx, id, userCluster, verbList, ssarNodes, "")
-	inv.NetworksVersion = s.networksWatermark(visible, canNodes)
-	inv.TasksVersion = s.tasksWatermark(propProjects, canNodes)
+	// show live without another tenant's act ever moving this frame. The
+	// verdicts that shape the pulls (netGrants) shape the watermarks too.
+	grants := s.netGrants(ctx, id, userCluster, platformAuthor)
+	inv.NetworksVersion = s.networksWatermark(visible, grants)
+	inv.TasksVersion = s.tasksWatermark(propProjects, grants.nodes)
 	return inv, nil
 }
 

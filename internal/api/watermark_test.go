@@ -10,6 +10,7 @@ import (
 	"time"
 
 	authnv1 "k8s.io/api/authentication/v1"
+	authzv1 "k8s.io/api/authorization/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -208,11 +209,41 @@ func BenchmarkFrameWatermarks(b *testing.B) {
 		b.Run(c.name, func(b *testing.B) {
 			projects, visible := scope(c.n)
 			b.ReportAllocs()
+			g := netGrants{nodes: c.nodes, create: map[ssarRef]bool{ssarANP: c.nodes}}
 			for b.Loop() {
-				_ = s.networksWatermark(visible, c.nodes)
+				_ = s.networksWatermark(visible, g)
 				_ = s.tasksWatermark(projects, c.nodes)
 			}
 		})
+	}
+}
+
+// A grant or a revocation that leaves the visible set alone still moves the
+// networks watermark: the pulls it covers read those verdicts too.
+func TestNetworksWatermarkFollowsGrants(t *testing.T) {
+	fc := newFakeCluster(t)
+	var anp atomic.Bool
+	fc.ssar = func(token string, a *authzv1.ResourceAttributes) bool {
+		return a.Resource == "adminnetworkpolicies" && anp.Load()
+	}
+	s := fc.server(nil, Config{})
+	id := auth.Identity{Token: tenantToken, Username: "tenant"}
+	c, err := s.clusterF.For(id.Token)
+	if err != nil {
+		t.Fatal(err)
+	}
+	visible := map[string]bool{"team-a-dev": true}
+	mark := func() uint64 {
+		return s.networksWatermark(visible, s.netGrants(context.Background(), id, c, false))
+	}
+	before := mark()
+	if mark() != before {
+		t.Fatal("the watermark moved with nothing changed")
+	}
+	anp.Store(true)
+	s.bus.Publish(eventbus.RBACChanged) // what the grant's watch reports
+	if mark() == before {
+		t.Error("gaining admin network policy authority left the watermark")
 	}
 }
 
