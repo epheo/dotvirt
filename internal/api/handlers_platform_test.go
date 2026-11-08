@@ -36,7 +36,7 @@ func deschedOnly(token string, a *authzv1.ResourceAttributes) bool {
 
 func TestDRSView(t *testing.T) {
 	fc := newFakeCluster(t)
-	fc.ssar = deschedOnly
+	fc.ssar, fc.dryRuns = deschedOnly, deschedOnly
 	d := &planeDraft{
 		drs:      model.DRSGitState{Configured: true, PSIConfigured: true},
 		drsDraft: model.DRSDraftState{DisableStaged: true},

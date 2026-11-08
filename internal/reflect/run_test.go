@@ -52,7 +52,7 @@ func TestRunWhenServedStartsOnce(t *testing.T) {
 	var ready Ready
 	store := NewStore(NewIndexer(), func() {}, ready.Mark)
 
-	go runWhenServed(ctx, time.Millisecond, has, schema.GroupVersionResource{Resource: "things"}, lw, store, &healthy, nil)
+	go runWhenServed(ctx, time.Millisecond, has, schema.GroupVersionResource{Resource: "things"}, lw, &unstructured.Unstructured{}, store, &healthy, nil)
 
 	eventually(t, "a few probes", func() bool { return probes.Load() >= 3 })
 	if lists.Load() != 0 {
@@ -116,7 +116,7 @@ func TestRunWhenServedReportsFlips(t *testing.T) {
 	var flips atomic.Int32
 	has := func(schema.GroupVersionResource) bool { return true }
 	go runWhenServed(ctx, time.Millisecond, has, schema.GroupVersionResource{Resource: "things"}, lw,
-		NewStore(NewIndexer(), func() {}, nil), &healthy, func() { flips.Add(1) })
+		&unstructured.Unstructured{}, NewStore(NewIndexer(), func() {}, nil), &healthy, func() { flips.Add(1) })
 	eventually(t, "the failing list's flip", func() bool { return flips.Load() >= 1 })
 	if healthy.Load() {
 		t.Error("a failing list must read unhealthy")

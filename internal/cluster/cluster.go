@@ -213,19 +213,39 @@ func (c *Client) NamespaceListWatch(label string) *cache.ListWatch {
 	}
 }
 
-// RoleBindingListWatch is the List+Watch source for a cluster-wide RoleBinding
-// reflector (run on the SA client). dotvirt never reads RoleBindings; it watches
-// them only to learn when a token's namespace visibility may have changed, so the
-// per-token visible-namespace cache can be invalidated promptly instead of on a
-// blind TTL.
+// The RBAC sources are cluster-wide reflectors (run on the SA client) over
+// what a token's authorization derives from. dotvirt never reads them; it
+// watches them only to learn when a token's visibility or review verdicts may
+// have changed, so the per-token caches are invalidated promptly instead of
+// on their TTL.
+
 func (c *Client) RoleBindingListWatch() *cache.ListWatch {
+	r := c.kube.RbacV1().RoleBindings(metav1.NamespaceAll)
+	return typedListWatch(r.List, r.Watch)
+}
+
+func (c *Client) RoleListWatch() *cache.ListWatch {
+	r := c.kube.RbacV1().Roles(metav1.NamespaceAll)
+	return typedListWatch(r.List, r.Watch)
+}
+
+func (c *Client) ClusterRoleBindingListWatch() *cache.ListWatch {
+	r := c.kube.RbacV1().ClusterRoleBindings()
+	return typedListWatch(r.List, r.Watch)
+}
+
+func (c *Client) ClusterRoleListWatch() *cache.ListWatch {
+	r := c.kube.RbacV1().ClusterRoles()
+	return typedListWatch(r.List, r.Watch)
+}
+
+// typedListWatch adapts one typed client's List and Watch to a reflector source.
+func typedListWatch[L runtime.Object](list func(context.Context, metav1.ListOptions) (L, error), watchFn func(context.Context, metav1.ListOptions) (watch.Interface, error)) *cache.ListWatch {
 	return &cache.ListWatch{
 		ListWithContextFunc: func(ctx context.Context, o metav1.ListOptions) (runtime.Object, error) {
-			return c.kube.RbacV1().RoleBindings(metav1.NamespaceAll).List(ctx, o)
+			return list(ctx, o)
 		},
-		WatchFuncWithContext: func(ctx context.Context, o metav1.ListOptions) (watch.Interface, error) {
-			return c.kube.RbacV1().RoleBindings(metav1.NamespaceAll).Watch(ctx, o)
-		},
+		WatchFuncWithContext: watchFn,
 	}
 }
 

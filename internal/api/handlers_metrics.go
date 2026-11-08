@@ -182,7 +182,7 @@ func (s *Server) nodeMetricsScope(w http.ResponseWriter, r *http.Request) (auth.
 		fail(w, unavailable(err))
 		return auth.Identity{}, false
 	}
-	ok, err := s.can(r.Context(), id, c, question{verb: verbList, ref: ssarNodes})
+	ok, err := s.can(r.Context(), id, c, refQ(verbList, ssarNodes, ""))
 	if err != nil {
 		fail(w, s.reviewFailed(r.Context(), id, err))
 		return auth.Identity{}, false

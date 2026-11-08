@@ -14,7 +14,8 @@ import (
 // The Recent Tasks feed. Serving is a pure in-memory read scoped to the caller:
 // ops by visible namespace (node ops by the node-read signal), merges by visible
 // project repo. TasksVersion on the inventory frame tells clients when to
-// re-pull; the webhook and the proposals refresher keep the feed itself fresh.
+// re-pull (tasksWatermark); the webhook and the proposals refresher keep the
+// feed itself fresh.
 
 func (s *Server) handleTasks(w http.ResponseWriter, r *http.Request) {
 	if s.tasks == nil {
@@ -47,28 +48,51 @@ func (s *Server) recordTask(verb, namespace, name, by string, ok bool) {
 	s.tasks.RecordOp(tasks.Op{Verb: verb, Namespace: namespace, Name: name, By: by, OK: ok, At: time.Now()})
 }
 
-// scopeTasks projects the feed onto one caller's visibility: ops in a namespace
-// they can read (namespace-less node ops behind the node-read signal), merges in
-// a repo backing one of their projects. Pure, so it unit-tests without a Server.
-func scopeTasks(ops []tasks.Op, merges []tasks.Merge, projects []project.ProjectInfo, canNodes bool) []model.TaskEntry {
-	nsProject := map[string]string{}
-	repoProject := map[string]string{}
+// taskScope is one caller's view of the feed: ops in a namespace they can read
+// (namespace-less node ops behind the node-read signal), merges in a repo
+// backing one of their projects. The served feed and the frame's TasksVersion
+// both read through it, so the watermark moves exactly when the feed does.
+type taskScope struct {
+	nsProject, repoProject map[string]string
+	canNodes               bool
+}
+
+func newTaskScope(projects []project.ProjectInfo, canNodes bool) taskScope {
+	sc := taskScope{nsProject: map[string]string{}, repoProject: map[string]string{}, canNodes: canNodes}
 	for _, p := range projects {
 		for _, ns := range p.Namespaces {
-			nsProject[ns] = p.Name
+			sc.nsProject[ns] = p.Name
 		}
 		if p.Repo != "" {
-			repoProject[forge.NormalizeRepoURL(p.Repo)] = p.Name
+			sc.repoProject[forge.NormalizeRepoURL(p.Repo)] = p.Name
 		}
 	}
+	return sc
+}
+
+// op reports whether the caller sees o, and the project it shows under.
+func (sc taskScope) op(o tasks.Op) (project string, ok bool) {
+	if o.Namespace == "" {
+		return "", sc.canNodes
+	}
+	project = sc.nsProject[o.Namespace]
+	return project, project != ""
+}
+
+// merge reports whether the caller sees m, and the project it shows under.
+func (sc taskScope) merge(m tasks.Merge) (project string, ok bool) {
+	project, ok = sc.repoProject[m.RepoURL]
+	return project, ok
+}
+
+// scopeTasks projects the feed onto one caller's visibility (taskScope). Pure,
+// so it unit-tests without a Server.
+func scopeTasks(ops []tasks.Op, merges []tasks.Merge, projects []project.ProjectInfo, canNodes bool) []model.TaskEntry {
+	sc := newTaskScope(projects, canNodes)
 	out := []model.TaskEntry{}
 	for _, o := range ops {
-		proj := ""
-		if o.Namespace == "" {
-			if !canNodes {
-				continue
-			}
-		} else if proj = nsProject[o.Namespace]; proj == "" {
+		proj, ok := sc.op(o)
+		if !ok {
 			continue
 		}
 		out = append(out, model.TaskEntry{
@@ -77,7 +101,7 @@ func scopeTasks(ops []tasks.Op, merges []tasks.Merge, projects []project.Project
 		})
 	}
 	for _, m := range merges {
-		proj, ok := repoProject[m.RepoURL]
+		proj, ok := sc.merge(m)
 		if !ok {
 			continue
 		}

@@ -8,6 +8,7 @@ import (
 
 	"github.com/epheo/dotvirt/internal/auth"
 	"github.com/epheo/dotvirt/internal/draft"
+	"github.com/epheo/dotvirt/internal/manifest"
 	"github.com/epheo/dotvirt/internal/model"
 	"github.com/epheo/dotvirt/internal/project"
 )
@@ -16,14 +17,27 @@ import (
 // partial edit (a power toggle, a storage move, one inline field) adds to the
 // staged change instead of replacing it. A field back at the base branch's
 // value drops out: staging git's own value unstages that field, and an edit
-// left with nothing unstages the VM.
+// left with nothing unstages the VM. The incoming values are checked before
+// the merge, and the merged edit is dry-run against the VM's file before it is
+// written; the file is read once, before the store lock (see editTarget).
 func (c *Coordinator) stageEdit(id auth.Identity, proj project.ProjectInfo, e draft.Entry) (model.DraftView, error) {
+	if err := manifest.ValidateEdit(*e.Edit); err != nil {
+		return model.DraftView{}, err
+	}
 	read, err := c.read(proj)
 	if err != nil {
 		return model.DraftView{}, err
 	}
-	current, declared, err := findVM(read, c.baseBranch, e.Namespace, e.Name)
+	target, err := c.editTarget(read, e.Namespace, e.Name)
 	if err != nil {
+		return model.DraftView{}, err
+	}
+	// The gate's question for a settings edit, asked off the file just read.
+	need, err := fieldEditAccess(target.path, target.content, e.Namespace, e.Name)
+	if err != nil {
+		return model.DraftView{}, err
+	}
+	if err := c.authorize(id, need); err != nil {
 		return model.DraftView{}, err
 	}
 	key := e.Key()
@@ -36,15 +50,20 @@ func (c *Coordinator) stageEdit(id auth.Identity, proj project.ProjectInfo, e dr
 			}
 			edit = overlayEdit(*staged.Edit, edit)
 		}
-		if declared {
-			edit = withoutBase(edit, current)
-		}
+		edit = withoutBase(edit, target.vm)
 		if edit.Empty() {
 			delete(d, key)
 			return nil
 		}
+		out, err := manifest.ApplyEdit(target.content, defaultNamespace(target.path), e.Namespace, e.Name, edit)
+		if err != nil {
+			return err
+		}
+		if err := keepsDeclared(proj, target.path, target.content, out); err != nil {
+			return err
+		}
 		next := e
-		next.Edit = &edit
+		next.SourceFile, next.Edit = target.path, &edit
 		d[key] = next
 		return nil
 	})
@@ -106,7 +125,8 @@ func overlayEdit(staged, next model.VMEdit) model.VMEdit {
 	diskName := func(d model.DiskAdd) string { return d.Name }
 	out.AddDisks, out.RemoveDisks = mergeDevices(out.AddDisks, out.RemoveDisks, next.AddDisks, next.RemoveDisks, diskName)
 
-	netName := func(n model.NetworkAdd) string { return n.Name }
+	// RemoveNetworks names interfaces, so adds merge by theirs.
+	netName := func(n model.NetworkAdd) string { return n.InterfaceName() }
 	out.AddNetworks, out.RemoveNetworks = mergeDevices(out.AddNetworks, out.RemoveNetworks, next.AddNetworks, next.RemoveNetworks, netName)
 
 	groupName := func(g model.PlacementGroup) string { return g.Name }

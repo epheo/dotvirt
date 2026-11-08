@@ -55,6 +55,12 @@ func (f *proposeFixture) sentTo(method, suffix string) []string {
 	return out
 }
 
+// platform is the platform tier over the fixture's repo: the project a
+// tenant's namespaces and grants are committed to.
+func (f *proposeFixture) platform() project.ProjectInfo {
+	return project.ProjectInfo{Name: project.PlatformName, Repo: f.proj.Repo}
+}
+
 // target is a project whose repo lives on the fixture's own forge, which is what the
 // coordinator requires before it will trust a probe of that repo.
 func (f *proposeFixture) target(name string) project.ProjectInfo {
@@ -107,6 +113,7 @@ func newProposeFixture(t *testing.T, routes ...route) *proposeFixture {
 	repos := git.NewRepoSet(ctx, "", "", nil, true, nil, time.Hour)
 	ff := forge.NewFactory(srv.URL, forge.StaticToken("tok"), false, "")
 	f.c = New(store, repos, ff, nil, nil, nil, "main", "dotvirt/proposed")
+	f.c.UseAuthorizer(allowAll{})
 	f.repos = repos
 	f.proj = project.ProjectInfo{Name: "p", Repo: seedBare(t)}
 	f.id = auth.Identity{Username: "alice"}
@@ -119,7 +126,7 @@ func newProposeFixture(t *testing.T, routes ...route) *proposeFixture {
 // only the warning tells a former install's leftover from a harmless retry.
 func TestCreateProjectReusesExistingRepoWithWarning(t *testing.T) {
 	f := newProposeFixture(t, when("GET", "team-a", http.StatusOK, "{}"))
-	view, err := f.c.StageCreateProject(f.id, f.proj, json.RawMessage(`{"name":"team-a","namespace":"team-a"}`), nil)
+	view, err := f.c.StageCreateProject(f.id, f.platform(), json.RawMessage(`{"name":"team-a","namespace":"team-a"}`), nil)
 	if err != nil {
 		t.Fatalf("a pre-existing repo must be reused, not refused: %v", err)
 	}
@@ -138,7 +145,7 @@ func TestCreateProjectFreshRepoNoWarning(t *testing.T) {
 			}
 			return 0, "", false
 		})
-	view, err := f.c.StageCreateProject(f.id, f.proj, json.RawMessage(`{"name":"team-a","namespace":"team-a"}`), nil)
+	view, err := f.c.StageCreateProject(f.id, f.platform(), json.RawMessage(`{"name":"team-a","namespace":"team-a"}`), nil)
 	if err != nil {
 		t.Fatalf("StageCreateProject: %v", err)
 	}
@@ -150,7 +157,7 @@ func TestCreateProjectFreshRepoNoWarning(t *testing.T) {
 // A repo annotation that still resolves means the project is already managed.
 func TestAdoptProjectRefusesResolvingRepo(t *testing.T) {
 	f := newProposeFixture(t, when("GET", "team-a", http.StatusOK, "{}"))
-	_, err := f.c.AdoptProject(f.id, f.proj, f.target("team-a"), nil, nil)
+	_, err := f.c.AdoptProject(f.id, f.platform(), f.target("team-a"), nil, nil)
 	if !errors.Is(err, model.ErrConflict) {
 		t.Fatalf("want model.ErrConflict when the repo still resolves, got %v", err)
 	}
@@ -169,7 +176,7 @@ func TestAdoptProjectRecreatesLostRepo(t *testing.T) {
 			}
 			return 0, "", false
 		})
-	if _, err := f.c.AdoptProject(f.id, f.proj, f.target("team-a"), nil, nil); err != nil {
+	if _, err := f.c.AdoptProject(f.id, f.platform(), f.target("team-a"), nil, nil); err != nil {
 		t.Fatalf("a lost repo must be re-created, not refused: %v", err)
 	}
 }
@@ -215,7 +222,7 @@ func TestAdoptProjectRetriesRecreatedRepoAtOnce(t *testing.T) {
 		t.Fatal("the lost repo must fail to open before adoption")
 	}
 
-	if _, err := f.c.AdoptProject(f.id, f.proj, f.target("team-a"), nil, nil); err != nil {
+	if _, err := f.c.AdoptProject(f.id, f.platform(), f.target("team-a"), nil, nil); err != nil {
 		t.Fatalf("AdoptProject: %v", err)
 	}
 	if _, _, err := f.repos.Get(repoURL); err != nil {
@@ -230,7 +237,7 @@ func TestAdoptProjectRefusesRepoOnAnotherForge(t *testing.T) {
 	f := newProposeFixture(t, when("GET", "team-a", http.StatusNotFound, ""))
 	target := project.ProjectInfo{Name: "team-a", Namespaces: []string{"team-a"},
 		Repo: "https://github.example/acme/team-a.git"}
-	_, err := f.c.AdoptProject(f.id, f.proj, target, nil, nil)
+	_, err := f.c.AdoptProject(f.id, f.platform(), target, nil, nil)
 	if !errors.Is(err, model.ErrConflict) {
 		t.Fatalf("want model.ErrConflict for a repo this forge does not serve, got %v", err)
 	}
@@ -242,10 +249,10 @@ func TestAdoptProjectRehomesForeignHostRepo(t *testing.T) {
 	f := newProposeFixture(t, when("GET", "team-a", http.StatusOK, "{}"))
 	target := project.ProjectInfo{Name: "team-a", Namespaces: []string{"team-a"},
 		Repo: "https://old-forge.example/acme/team-a.git"}
-	if _, err := f.c.AdoptProject(f.id, f.proj, target, nil, nil); err != nil {
+	if _, err := f.c.AdoptProject(f.id, f.platform(), target, nil, nil); err != nil {
 		t.Fatalf("a same-owner repo on this forge must re-home, not refuse: %v", err)
 	}
-	entries, err := f.c.store.List(f.id.Username, f.proj.Name)
+	entries, err := f.c.store.List(f.id.Username, project.PlatformName)
 	if err != nil {
 		t.Fatalf("store.List: %v", err)
 	}
@@ -555,7 +562,7 @@ func TestCreateProjectKeepsExistingNamespaceMetadata(t *testing.T) {
 	live := func(string) (*netgen.LiveNamespace, error) {
 		return &netgen.LiveNamespace{Labels: map[string]string{"tenant": "a", "k8s.ovn.org/primary-user-defined-network": ""}}, nil
 	}
-	view, err := f.c.StageCreateProject(f.id, f.proj, json.RawMessage(`{"name":"tenant-a","namespace":"tenant-a"}`), live)
+	view, err := f.c.StageCreateProject(f.id, f.platform(), json.RawMessage(`{"name":"tenant-a","namespace":"tenant-a"}`), live)
 	if err != nil {
 		t.Fatalf("StageCreateProject: %v", err)
 	}
@@ -576,7 +583,7 @@ func TestCreateProjectKeepsExistingNamespaceMetadata(t *testing.T) {
 func TestCreateProjectRefusesVMNetworkOnExistingNamespace(t *testing.T) {
 	f := newProposeFixture(t)
 	live := func(string) (*netgen.LiveNamespace, error) { return &netgen.LiveNamespace{}, nil }
-	_, err := f.c.StageCreateProject(f.id, f.proj,
+	_, err := f.c.StageCreateProject(f.id, f.platform(),
 		json.RawMessage(`{"name":"tenant-a","namespace":"tenant-a","vmNetwork":{"name":"vm-net","subnet":"10.40.0.0/24"}}`), live)
 	if !errors.Is(err, model.ErrConflict) {
 		t.Fatalf("want ErrConflict, got %v", err)
@@ -606,7 +613,8 @@ func TestPreviewEditStagesNothing(t *testing.T) {
 		t.Fatalf("a VM git does not declare: want ErrNotFound, got %v", err)
 	}
 
-	req := model.EditRequest{SourceFile: "web.yaml", VMEdit: model.VMEdit{CPUCores: &cpu}}
+	off := string(model.PowerOff)
+	req := model.EditRequest{SourceFile: "web.yaml", VMEdit: model.VMEdit{Power: &off}}
 	if _, err := f.c.StageEdit(f.id, f.proj, "alpha", "web", req); err != nil {
 		t.Fatalf("StageEdit: %v", err)
 	}
@@ -614,7 +622,7 @@ func TestPreviewEditStagesNothing(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Get: %v", err)
 	}
-	if len(view.Items) != 1 || view.Items[0].Edit == nil || *view.Items[0].Edit.CPUCores != 64 {
+	if len(view.Items) != 1 || view.Items[0].Edit == nil || view.Items[0].Edit.Power == nil || *view.Items[0].Edit.Power != off {
 		t.Fatalf("the staged edit must ride the view, got %+v", view.Items)
 	}
 }
@@ -632,9 +640,9 @@ func TestProposeKeepsWhatWasStagedDuringThePush(t *testing.T) {
 			during()
 			return http.StatusCreated, `{"number":1,"state":"open","html_url":"http://forge/pulls/1"}`, true
 		})
-	cpu := 8
+	off := string(model.PowerOff)
 	during = func() {
-		if _, err := f.c.StageEdit(f.id, f.proj, "alpha", "web", model.EditRequest{SourceFile: "web.yaml", VMEdit: model.VMEdit{CPUCores: &cpu}}); err != nil {
+		if _, err := f.c.StageEdit(f.id, f.proj, "alpha", "web", model.EditRequest{SourceFile: "web.yaml", VMEdit: model.VMEdit{Power: &off}}); err != nil {
 			t.Errorf("StageEdit during the push: %v", err)
 		}
 		if err := f.c.store.Stage(f.id.Username, f.proj.Name, draft.Entry{Kind: draft.KindDelete, Namespace: "alpha", Name: "db", SourceFile: "db.yaml"}); err != nil {
@@ -646,7 +654,7 @@ func TestProposeKeepsWhatWasStagedDuringThePush(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(entries) != 2 || entries[0].Name != "db" || entries[1].Edit == nil || entries[1].Edit.CPUCores == nil {
+	if len(entries) != 2 || entries[0].Name != "db" || entries[1].Edit == nil || entries[1].Edit.Power == nil {
 		t.Fatalf("want the restaged web and the new db kept, got %+v", entries)
 	}
 }

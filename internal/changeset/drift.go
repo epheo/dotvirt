@@ -114,9 +114,7 @@ func (c *Coordinator) Adopt(id auth.Identity, proj project.ProjectInfo, namespac
 		Kind:      draft.KindEdit,
 		Namespace: namespace,
 		Name:      name,
-		// The file main actually holds, which need not be where an export would put it.
-		SourceFile: desired.SourceFile,
-		Edit:       &edit,
+		Edit:      &edit,
 	})
 }
 
@@ -153,9 +151,6 @@ func (c *Coordinator) AdoptObjects(id auth.Identity, proj project.ProjectInfo, w
 		if err := tenantDeclarable(proj, o.Kind, o.Name); err != nil {
 			platformTier = err
 			continue
-		}
-		if err := requirePlacement(proj, o.Path, o.Manifest); err != nil {
-			return model.DraftView{}, err
 		}
 		entries = append(entries, draft.Entry{
 			Kind:       draft.KindCreate,

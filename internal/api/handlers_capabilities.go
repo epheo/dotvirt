@@ -92,21 +92,6 @@ func (s *Server) clusterCaps(ctx context.Context, id auth.Identity, c *cluster.C
 	return out
 }
 
-// attachAction is attaching a repo to a project over nss: the route's claim on
-// each, and creating the Namespace objects the platform repo does not declare
-// yet, which the coordinator checks as creates. An unreadable platform repo
-// asks for the create too.
-func (s *Server) attachAction(nss []string) action {
-	act := relabelAction(nss)
-	files, err := s.reader.DeclaredFiles(s.platformProject())
-	for _, ns := range nss {
-		if _, declared := files[model.ObjectRef{Kind: model.KindNS.Kind, Name: ns}]; err != nil || !declared {
-			return append(act, question{verb: verbCreate, ref: ssarNamespace})
-		}
-	}
-	return act
-}
-
 // namespaceCaps answers namespace ns of sc's project, and that project over
 // all its namespaces. The tenancy fields need a platform repo, resync ArgoCD.
 func (s *Server) namespaceCaps(ctx context.Context, sc scope, ns string) model.NamespaceCaps {
@@ -132,15 +117,13 @@ func (s *Server) namespaceCaps(ctx context.Context, sc scope, ns string) model.N
 	fields = append(fields, objectFields(&out.Network, model.KindUDN, ns)...)
 	fields = append(fields, objectFields(&out.NetworkPolicy, model.KindNetpol, ns)...)
 	fields = append(fields, objectFields(&out.EgressFirewall, model.KindEgressFW, ns)...)
+	// A project's namespaces run, so attaching a repo weighs as relabelling
+	// each, the update the snapshot finds their Namespace objects to be.
 	if full, ok := s.projectByName(sc.proj.Name); ok && s.cfg.PlatformRepo != "" {
-		var grantAll action
-		for _, n := range full.Namespaces {
-			grantAll = append(grantAll, grantAdminAction(n)...)
-		}
 		fields = append(fields,
-			capField{&out.Project.Adopt, s.attachAction(full.Namespaces)},
-			capField{&out.Project.Release, relabelAction(full.Namespaces)},
-			capField{&out.Project.GrantAdmin, grantAll},
+			capField{&out.Project.Adopt, relabelAction(full.Namespaces)},
+			capField{&out.Project.GrantAdmin, grantAdminAction(full.Namespaces, sc.proj.Name, sc.id.Username)},
+			capField{&out.Project.Release, s.releaseAction(full.Namespaces)},
 		)
 	}
 	s.fill(ctx, sc.id, sc.cluster, fields)

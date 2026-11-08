@@ -20,17 +20,19 @@ import (
 // claimNamespaces binds the namespace capture to the caller's token and gates
 // the claim on each namespace there, where its existence is known: one that
 // already exists is adopted as the caller can read it, never regenerated, and
-// needs the right to update it (claimAction); one another project holds is
-// refused - joining would take it from that project, whose Application then
-// fails on everything it declares there.
+// needs the right to update it (claimAction), as the coordinator weighs its
+// Namespace object. One the SA snapshot holds for another project - the
+// snapshot the coordinator places namespaces by - is refused: joining would
+// take it from that project, whose Application then fails on everything it
+// declares there.
 func (s *Server) claimNamespaces(ctx context.Context, sc scope, project string) changeset.LiveNamespaces {
 	return func(name string) (*netgen.LiveNamespace, error) {
+		if held := s.state.NamespaceLabels(name)[s.cfg.ProjectLabel]; held != "" && held != project {
+			return nil, fmt.Errorf("%w: namespace %s belongs to project %s; release it there first", model.ErrConflict, name, held)
+		}
 		live, err := sc.cluster.LiveNamespace(ctx, name)
 		if err != nil || live == nil {
 			return nil, err
-		}
-		if held := live.Labels[s.cfg.ProjectLabel]; held != "" && held != project {
-			return nil, fmt.Errorf("%w: namespace %s belongs to project %s; release it there first", model.ErrConflict, name, held)
 		}
 		if err := s.require(ctx, sc.id, sc.cluster, claimAction(name)); err != nil {
 			return nil, err

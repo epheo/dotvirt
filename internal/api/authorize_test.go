@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"maps"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -20,6 +21,7 @@ import (
 	kvfake "kubevirt.io/client-go/kubevirt/fake"
 
 	"github.com/epheo/dotvirt/internal/auth"
+	"github.com/epheo/dotvirt/internal/changeset"
 	"github.com/epheo/dotvirt/internal/cluster"
 	"github.com/epheo/dotvirt/internal/clusterstate"
 	"github.com/epheo/dotvirt/internal/draft"
@@ -367,11 +369,89 @@ func TestCanCacheKey(t *testing.T) {
 	for _, q := range []struct{ verb, ns string }{
 		{verbUpdate, "a"}, {verbUpdate, "a"}, {verbUpdate, "b"}, {verbDelete, "a"},
 	} {
-		if ok, err := s.can(ctx, id, c, question{verb: q.verb, ref: ssarVM, ns: q.ns}); !ok || err != nil {
+		if ok, err := s.can(ctx, id, c, refQ(q.verb, ssarVM, q.ns)); !ok || err != nil {
 			t.Fatalf("%s in %s = %v, %v", q.verb, q.ns, ok, err)
 		}
 	}
 	if *reviews != 3 {
 		t.Fatalf("reviews = %d, want 3 (one per distinct verb and namespace)", *reviews)
+	}
+}
+
+// The coordinator's accesses are reviews under the caller's own token: the
+// whole resource first, the question the route gates cache, and the named
+// object only when that is denied, a bind by its role's name alone; each
+// distinct question once; a denial names every access refused, and a failed
+// review is not a denial.
+func TestAuthorizeAsksEachAccessOnce(t *testing.T) {
+	fc := newFakeCluster(t)
+	var mu sync.Mutex
+	var asked []authzv1.ResourceAttributes
+	fc.ssar = func(token string, a *authzv1.ResourceAttributes) bool {
+		if token != tenantToken {
+			return false
+		}
+		mu.Lock()
+		asked = append(asked, *a)
+		mu.Unlock()
+		switch {
+		case a.Resource == "virtualmachines":
+			return true
+		case a.Verb == "bind":
+			return a.Name == "admin"
+		}
+		return false
+	}
+	fc.ssarFail = func(a *authzv1.ResourceAttributes) int {
+		if a.Resource == "egressfirewalls" {
+			return http.StatusServiceUnavailable
+		}
+		return 0
+	}
+	s := fc.server(nil, Config{})
+	id := auth.Identity{Token: tenantToken, Username: "tenant"}
+	const ns = "team-a-dev"
+	update := changeset.Access{Verb: "update", Group: "kubevirt.io", Resource: "virtualmachines", Namespace: ns, Name: "web"}
+	allowed := []changeset.Access{
+		{Verb: "create", Group: "kubevirt.io", Resource: "virtualmachines", Namespace: ns},
+		update, update,
+		{Verb: "bind", Group: "rbac.authorization.k8s.io", Resource: "clusterroles", Namespace: ns, Name: "admin"},
+	}
+	if err := s.Authorize(id, allowed); err != nil {
+		t.Fatalf("Authorize: %v", err)
+	}
+	taken := func() map[string]int {
+		mu.Lock()
+		defer mu.Unlock()
+		out := map[string]int{}
+		for _, a := range asked {
+			out[a.Verb+" "+a.Resource+" "+a.Name]++
+		}
+		asked = nil
+		return out
+	}
+	want := map[string]int{"create virtualmachines ": 1, "update virtualmachines ": 1, "bind clusterroles admin": 1}
+	if got := taken(); !maps.Equal(got, want) {
+		t.Fatalf("asked %v, want %v", got, want)
+	}
+	if err := s.Authorize(id, allowed); err != nil {
+		t.Errorf("a repeat: %v", err)
+	}
+	if got := taken(); len(got) != 0 {
+		t.Errorf("a repeat asked %v, want cached verdicts", got)
+	}
+
+	err := s.Authorize(id, []changeset.Access{
+		{Verb: "delete", Group: "cdi.kubevirt.io", Resource: "datavolumes", Namespace: ns, Name: "disk"},
+		{Verb: "bind", Group: "rbac.authorization.k8s.io", Resource: "clusterroles", Namespace: ns, Name: "cluster-admin"},
+	})
+	if !errors.Is(err, model.ErrForbidden) ||
+		!strings.Contains(err.Error(), "delete datavolumes disk in "+ns) || !strings.Contains(err.Error(), "bind clusterroles cluster-admin in "+ns) {
+		t.Errorf("denial: %v", err)
+	}
+
+	err = s.Authorize(id, []changeset.Access{{Verb: "update", Group: "k8s.ovn.org", Resource: "egressfirewalls", Namespace: ns, Name: "default"}})
+	if err == nil || errors.Is(err, model.ErrForbidden) {
+		t.Errorf("a failed review: %v, want an outage, not a denial", err)
 	}
 }

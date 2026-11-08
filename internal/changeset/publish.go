@@ -6,6 +6,7 @@ import (
 	"log"
 	"net/http"
 	"reflect"
+	"slices"
 	"sort"
 	"sync"
 
@@ -44,6 +45,15 @@ func (c *Coordinator) Propose(id auth.Identity, proj project.ProjectInfo, req mo
 		c: c, id: id, proj: proj, req: req, read: read, write: write, entries: entries,
 		fc:     c.forgeFor(proj.Repo),
 		branch: c.proposedBranch(id.Username, proj.Name),
+	}
+	// Staged earlier, perhaps by rights since withdrawn: every entry passes
+	// the gate again, against the base it now lands on. A copy is gated: the
+	// entries are unstaged after the commit only while they equal the draft's.
+	if err := requirePinned(entries); err != nil {
+		return model.ProposeResult{}, err
+	}
+	if err := c.gate(id, proj, slices.Clone(entries)); err != nil {
+		return model.ProposeResult{}, run.commitFailed(err, entries, 0)
 	}
 	// The semantic view becomes the PR description (best-effort: a body render
 	// failure must not block the propose).
@@ -195,13 +205,31 @@ func (r *proposeRun) extend(pr forge.PR, rec draft.Proposal, hasRec bool) (model
 	if err := c.deletesStillDeclared(r.read, all); err != nil {
 		return model.ProposeResult{}, err
 	}
-	res, err := r.write.ProposeChangeset(c.baseBranch, r.branch, commitMessage(title, message), c.toChangesetItems(all), r.author(), plan)
+	// The rebuild pushes again what the PR carries, so the proposer must still
+	// hold every right it uses. A carried file base moved past is answered as
+	// the commit's own pin check would answer it.
+	var res git.CommitResult
 	var moved *git.BaseMovedError
+	err = requirePinned(rec.Entries)
+	if err == nil {
+		err = c.gate(r.id, r.proj, slices.Clone(rec.Entries))
+	}
+	if err != nil && !errors.As(err, &moved) {
+		return model.ProposeResult{}, fmt.Errorf("%w (carried by pull request #%d)", err, pr.Number)
+	}
+	if err == nil {
+		res, err = r.write.ProposeChangeset(c.baseBranch, r.branch, commitMessage(title, message), c.toChangesetItems(r.proj, all), r.author(), plan)
+	}
 	if r.fc == nil && errors.As(err, &moved) && !r.staged(moved.Path) {
 		return r.supersede(rec, moved.Path, all)
 	}
 	if errors.Is(err, git.ErrBranchMoved) || errors.As(err, &moved) {
 		return r.moved(pr, all, err)
+	}
+	// Unstaging cannot help an edit the PR carries: the rebuild replays it.
+	var stale *staleEdit
+	if errors.As(err, &stale) && slices.ContainsFunc(rec.Entries, func(e draft.Entry) bool { return e.Key() == stale.entry.Key() }) {
+		return model.ProposeResult{}, fmt.Errorf("%w: %s, and pull request #%d carries that edit: merge or close #%d, then propose", model.ErrConflict, stale.what(), pr.Number, pr.Number)
 	}
 	if err != nil {
 		return model.ProposeResult{}, r.commitFailed(err, all, pr.Number)
@@ -257,7 +285,7 @@ func (r *proposeRun) supersede(rec draft.Proposal, path string, carried []draft.
 	if err := r.c.deletesStillDeclared(r.read, r.entries); err != nil {
 		return model.ProposeResult{}, err
 	}
-	res, err := r.write.ProposeChangeset(r.c.baseBranch, r.branch, commitMessage(title, r.req.Message), r.c.toChangesetItems(r.entries), r.author(), git.PushPlan{Lease: rec.Head})
+	res, err := r.write.ProposeChangeset(r.c.baseBranch, r.branch, commitMessage(title, r.req.Message), r.c.toChangesetItems(r.proj, r.entries), r.author(), git.PushPlan{Lease: rec.Head})
 	if err != nil {
 		return model.ProposeResult{}, r.commitFailed(err, r.entries, 0)
 	}
@@ -329,7 +357,7 @@ func (r *proposeRun) afterMerge(pushed string) (model.ProposeResult, error) {
 	if err := r.c.deletesStillDeclared(r.read, r.entries); err != nil {
 		return model.ProposeResult{}, err
 	}
-	res, err := r.write.ProposeChangeset(r.c.baseBranch, r.branch, commitMessage(title, r.req.Message), r.c.toChangesetItems(r.entries), r.author(), git.PushPlan{Lease: pushed})
+	res, err := r.write.ProposeChangeset(r.c.baseBranch, r.branch, commitMessage(title, r.req.Message), r.c.toChangesetItems(r.proj, r.entries), r.author(), git.PushPlan{Lease: pushed})
 	if err != nil {
 		return model.ProposeResult{}, r.commitFailed(err, r.entries, 0)
 	}
@@ -358,7 +386,7 @@ func (r *proposeRun) fresh(prior forge.PR, found bool) (model.ProposeResult, err
 		return model.ProposeResult{}, err
 	}
 	out, head, ok, err := r.c.publish(r.fc, r.write, r.branch, commitMessage(title, r.req.Message), title, body,
-		r.c.toChangesetItems(r.entries), r.author(), prior, found, ahead)
+		r.c.toChangesetItems(r.proj, r.entries), r.author(), prior, found, ahead)
 	switch {
 	case err != nil:
 		return model.ProposeResult{}, r.commitFailed(err, r.entries, 0)

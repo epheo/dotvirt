@@ -3,6 +3,8 @@ package changeset
 import (
 	"encoding/json"
 	"fmt"
+	"slices"
+	"strings"
 
 	"github.com/epheo/dotvirt/internal/auth"
 	"github.com/epheo/dotvirt/internal/draft"
@@ -11,7 +13,6 @@ import (
 	"github.com/epheo/dotvirt/internal/model"
 	"github.com/epheo/dotvirt/internal/netgen"
 	"github.com/epheo/dotvirt/internal/project"
-	"github.com/epheo/dotvirt/internal/validate"
 	"github.com/epheo/dotvirt/internal/vmgen"
 	"github.com/epheo/dotvirt/pkg/forge"
 )
@@ -26,25 +27,86 @@ func (c *Coordinator) StageEdit(id auth.Identity, proj project.ProjectInfo, name
 	if edit.Empty() {
 		return model.DraftView{}, fmt.Errorf("%w: no fields to edit", model.ErrInvalid)
 	}
-	// SourceFile addresses a file in the proposal diff - the one repo path a
-	// client supplies directly, so it passes the same gate created names do.
-	if err := validate.RequireRepoPath("source file", req.SourceFile); err != nil {
-		return model.DraftView{}, err
-	}
+	// req.SourceFile is ignored: stageEdit resolves the file from git.
 	return c.stageEdit(id, proj, draft.Entry{
-		Kind:       draft.KindEdit,
-		Namespace:  namespace,
-		Name:       name,
-		SourceFile: req.SourceFile,
-		Edit:       &edit,
+		Kind:      draft.KindEdit,
+		Namespace: namespace,
+		Name:      name,
+		Edit:      &edit,
 	})
+}
+
+// vmFile is the base-branch file declaring a VM, read once: the edit merged
+// over what is staged, its dry run and the entry all work from these bytes.
+type vmFile struct {
+	path    string
+	content []byte
+	vm      model.VM
+}
+
+// editTarget resolves the file declaring VM (namespace, name) from git's
+// declared index, never from the client, so an edit cannot be aimed at
+// another namespace's manifest. It runs before the draft store's lock: the
+// index walk on a memo miss must not hold every user's staging. The index
+// and the read may see different heads; a file that moved in between is a
+// conflict to retry, never an internal error.
+func (c *Coordinator) editTarget(read *git.Repo, namespace, name string) (vmFile, error) {
+	idx, err := indexDeclared(read, c.baseBranch)
+	if err != nil {
+		return vmFile{}, err
+	}
+	ref, ok := declaredRef(idx, draft.ResourceVM, namespace, name)
+	if !ok {
+		return vmFile{}, fmt.Errorf("%w: %s/%s is not in git", model.ErrNotFound, namespace, name)
+	}
+	path := idx.Files[ref]
+	if files := idx.Repeated[ref]; len(files) > 0 {
+		return vmFile{}, fmt.Errorf("%w: %s/%s is declared in %s; keep one declaration in git", model.ErrConflict, namespace, name, strings.Join(files, " and "))
+	}
+	content, ok, err := read.LookupOnBranch(c.baseBranch, path)
+	if err != nil {
+		return vmFile{}, err
+	}
+	retry := fmt.Errorf("%w: %s changed while this was staged; try again", model.ErrConflict, path)
+	if !ok {
+		return vmFile{}, retry
+	}
+	if err := namedVM(path, content, namespace, name); err != nil {
+		return vmFile{}, err
+	}
+	vms, err := manifest.ParseVMs(path, content, defaultNamespace(path))
+	if err != nil {
+		return vmFile{}, fmt.Errorf("%w: %s does not parse; fix it in git: %v", model.ErrConflict, path, err)
+	}
+	i := slices.IndexFunc(vms, func(vm model.VM) bool { return vm.Namespace == namespace && vm.Name == name })
+	switch {
+	case i < 0:
+		return vmFile{}, retry
+	case slices.ContainsFunc(vms[i+1:], func(vm model.VM) bool { return vm.Namespace == namespace && vm.Name == name }):
+		return vmFile{}, fmt.Errorf("%w: %s declares %s/%s twice; keep one declaration in git", model.ErrConflict, path, namespace, name)
+	}
+	return vmFile{path: path, content: content, vm: vms[i]}, nil
+}
+
+// namedVM refuses a VM document that leaves its namespace to the directory:
+// dotvirt reads it there, but Argo applies it to its Application's namespace,
+// which the edit's authorization never checked.
+func namedVM(path string, content []byte, namespace, name string) error {
+	ref := model.ObjectRef{Kind: model.KindVM.Kind, Namespace: namespace, Name: name}
+	if _, implied, _ := declared(path, content); slices.Contains(implied, ref) {
+		return fmt.Errorf("%w: %s does not set metadata.namespace for VM %s/%s; set it in git", model.ErrConflict, path, namespace, name)
+	}
+	return nil
 }
 
 // PreviewEdit renders an edit as the changes staging it would list, restart
 // flags included, without touching the draft: an inline editor states the
-// consequence before the user stages.
+// consequence, or the value staging would refuse, before the user stages.
 func (c *Coordinator) PreviewEdit(proj project.ProjectInfo, namespace, name string, edit model.VMEdit) ([]model.Change, error) {
 	if err := requireRepo(proj); err != nil {
+		return nil, err
+	}
+	if err := manifest.ValidateEdit(edit); err != nil {
 		return nil, err
 	}
 	read, err := c.read(proj)
@@ -129,9 +191,6 @@ func (c *Coordinator) stageRendered(id auth.Identity, proj project.ProjectInfo, 
 	entry, err := render()
 	if err != nil {
 		return model.DraftView{}, invalid(err)
-	}
-	if err := requirePlacement(proj, entry.SourceFile, []byte(entry.Manifest)); err != nil {
-		return model.DraftView{}, err
 	}
 	entry.Kind = draft.KindCreate
 	idx, err := indexDeclared(read, c.baseBranch)
@@ -340,11 +399,12 @@ func (c *Coordinator) Unstage(id auth.Identity, proj project.ProjectInfo, resour
 }
 
 // stage writes entries into (id, proj)'s draft as one change and renders the
-// draft that results. Each entry writing a manifest records the version of
-// the file it replaces (see pin), and a whole-file edit never replaces staged
-// field edits: they would vanish from the draft without the user knowing.
+// draft that results. Each passes the gate, which pins every entry writing or
+// removing a file to the version it weighed, and a whole-file edit never
+// replaces staged field edits: they would vanish from the draft without the
+// user knowing.
 func (c *Coordinator) stage(id auth.Identity, proj project.ProjectInfo, entries ...draft.Entry) (model.DraftView, error) {
-	if err := c.pin(proj, entries); err != nil {
+	if err := c.gate(id, proj, entries); err != nil {
 		return model.DraftView{}, err
 	}
 	err := c.store.Apply(id.Username, proj.Name, func(d map[string]draft.Entry) error {
@@ -361,38 +421,6 @@ func (c *Coordinator) stage(id auth.Identity, proj project.ProjectInfo, entries 
 		return model.DraftView{}, err
 	}
 	return c.Get(id, proj)
-}
-
-// pin records on each entry writing or removing a file the version of that
-// file on base (draft.Entry.BaseBlob), in one read. An entry already pinned
-// keeps its pin: one whose content the server derived from bytes it read is
-// pinned to those bytes (pinOf), never to a second read that may see a newer
-// file.
-func (c *Coordinator) pin(proj project.ProjectInfo, entries []draft.Entry) error {
-	pinned := func(e draft.Entry) bool { return e.BaseBlob != "" || e.Manifest == "" && e.Kind != draft.KindDelete }
-	var paths []string
-	for _, e := range entries {
-		if !pinned(e) {
-			paths = append(paths, e.SourceFile)
-		}
-	}
-	if len(paths) == 0 {
-		return nil
-	}
-	read, err := c.read(proj)
-	if err != nil {
-		return err
-	}
-	pins, err := read.Pins(c.baseBranch, paths...)
-	if err != nil {
-		return err
-	}
-	for i, e := range entries {
-		if !pinned(e) {
-			entries[i].BaseBlob = pins[e.SourceFile]
-		}
-	}
-	return nil
 }
 
 // pinOf is the pin of a file read as content, ok=false when it was absent.

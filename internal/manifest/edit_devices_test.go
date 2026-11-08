@@ -90,7 +90,7 @@ func mustParse(t *testing.T, b []byte) map[string]any {
 }
 
 func TestEditInstancetypePreference(t *testing.T) {
-	out, err := ApplyEdit([]byte(vmWithDevices), "alpha", "web", VMEdit{
+	out, err := ApplyEdit([]byte(vmWithDevices), "alpha", "alpha", "web", VMEdit{
 		Instancetype: ptr("u1.large"),
 		Preference:   ptr("rhel.9"),
 	})
@@ -108,7 +108,7 @@ func TestEditInstancetypePreference(t *testing.T) {
 }
 
 func TestEditLabelsUpsertAndRemove(t *testing.T) {
-	out, err := ApplyEdit([]byte(vmWithDevices), "alpha", "web", VMEdit{
+	out, err := ApplyEdit([]byte(vmWithDevices), "alpha", "alpha", "web", VMEdit{
 		SetLabels:    map[string]string{"app": "web2", "tier": "frontend"},
 		RemoveLabels: nil,
 	})
@@ -126,7 +126,7 @@ func TestEditLabelsUpsertAndRemove(t *testing.T) {
 }
 
 func TestAddDisk(t *testing.T) {
-	out, err := ApplyEdit([]byte(vmWithDevices), "alpha", "web", VMEdit{
+	out, err := ApplyEdit([]byte(vmWithDevices), "alpha", "alpha", "web", VMEdit{
 		AddDisks: []model.DiskAdd{{Name: "data", Size: "20Gi", StorageClass: "fast"}},
 	})
 	if err != nil {
@@ -155,7 +155,7 @@ func TestAddDisk(t *testing.T) {
 
 // A VM without a dataVolumeTemplates section gets one created when a disk is added.
 func TestAddDiskCreatesTemplatesSection(t *testing.T) {
-	out, err := ApplyEdit([]byte(vmContainerDisk), "alpha", "ctr", VMEdit{
+	out, err := ApplyEdit([]byte(vmContainerDisk), "alpha", "alpha", "ctr", VMEdit{
 		AddDisks: []model.DiskAdd{{Name: "data", Size: "20Gi", StorageClass: "fast"}},
 	})
 	if err != nil {
@@ -173,7 +173,7 @@ func TestAddDiskCreatesTemplatesSection(t *testing.T) {
 }
 
 func TestAddNetwork(t *testing.T) {
-	out, err := ApplyEdit([]byte(vmWithDevices), "alpha", "web", VMEdit{
+	out, err := ApplyEdit([]byte(vmWithDevices), "alpha", "alpha", "web", VMEdit{
 		AddNetworks: []model.NetworkAdd{{Name: "tenant-a/mt-bridge"}},
 	})
 	if err != nil {
@@ -191,13 +191,13 @@ func TestAddNetwork(t *testing.T) {
 
 func TestRemoveDisk(t *testing.T) {
 	// First add two disks, then remove one by name; result should have rootdisk + kept.
-	added, err := ApplyEdit([]byte(vmWithDevices), "alpha", "web", VMEdit{
+	added, err := ApplyEdit([]byte(vmWithDevices), "alpha", "alpha", "web", VMEdit{
 		AddDisks: []model.DiskAdd{{Name: "data", Size: "20Gi"}, {Name: "logs", Size: "5Gi"}},
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	out, err := ApplyEdit(added, "alpha", "web", VMEdit{RemoveDisks: []string{"data"}})
+	out, err := ApplyEdit(added, "alpha", "alpha", "web", VMEdit{RemoveDisks: []string{"data"}})
 	if err != nil {
 		t.Fatal(err)
 	}

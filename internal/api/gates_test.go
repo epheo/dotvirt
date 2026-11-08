@@ -60,6 +60,7 @@ func newGateRig(t *testing.T) *gateRig {
 		}
 		return false
 	}
+	g.fc.dryRuns = g.fc.ssar
 	g.fc.on(http.MethodGet, "/api/v1/nodes/w1", func(w http.ResponseWriter, r *http.Request) { writeObj(w, node("w1", false, false, true)) })
 	g.d = &gatedDraft{planeDraft: &planeDraft{declared: map[model.ObjectRef]string{}}}
 	for _, ref := range []model.ObjectRef{
@@ -263,15 +264,20 @@ func gateCases() []gateCase {
 			routeNeeds: vm(verbUpdate), needs: vm(verbUpdate), cap: nsCap(func(n model.NamespaceCaps) bool { return n.Project.TemplateEdit })},
 		// Attaching a repo claims each existing namespace at the route, and
 		// writes Namespace files the platform repo does not hold yet.
+		// Attaching a repo claims each existing namespace at the route; the
+		// coordinator weighs its Namespace object, which the snapshot holds,
+		// as that same update.
 		{name: "attach repo", ns: "orphans-ns", call: route(http.MethodPost, "/api/projects/orphans/adopt", ""),
-			routeNeeds: []grant{ns(verbUpdate, "orphans-ns")}, needs: []grant{ns(verbUpdate, "orphans-ns"), ns(verbCreate, "")},
+			routeNeeds: []grant{ns(verbUpdate, "orphans-ns")}, needs: []grant{ns(verbUpdate, "orphans-ns")},
 			cap: nsCap(func(n model.NamespaceCaps) bool { return n.Project.Adopt })},
 		{name: "attach repo with owners", ns: "orphans-ns", call: route(http.MethodPost, "/api/projects/orphans/adopt", `{"owners":["alice"]}`),
 			routeNeeds: []grant{ns(verbUpdate, "orphans-ns")},
-			needs:      []grant{ns(verbUpdate, "orphans-ns"), ns(verbCreate, ""), rbIn("orphans-ns"), bindIn("orphans-ns")},
+			needs:      []grant{ns(verbUpdate, "orphans-ns"), rbIn("orphans-ns"), bindIn("orphans-ns")},
 			cap:        nsCap(func(n model.NamespaceCaps) bool { return n.Project.Adopt && n.Project.GrantAdmin })},
+		// The platform repo does not declare orphans-ns: release patches its
+		// labels away under the caller's token.
 		{name: "release", ns: "orphans-ns", call: route(http.MethodPost, "/api/projects/orphans/release", ""),
-			needs: []grant{ns(verbUpdate, "orphans-ns")}, cap: nsCap(func(n model.NamespaceCaps) bool { return n.Project.Release })},
+			needs: []grant{ns(verbPatch, "orphans-ns")}, cap: nsCap(func(n model.NamespaceCaps) bool { return n.Project.Release })},
 		{name: "project over an existing namespace", call: route(http.MethodPost, "/api/projects", `{"name":"team-c","namespace":"plain"}`),
 			routeNeeds: []grant{ns(verbUpdate, "plain")}},
 		{name: "new namespace", call: route(http.MethodPost, "/api/namespaces", `{"project":"team-a","name":"newns"}`),
@@ -416,9 +422,10 @@ func TestProjectRefusesANamespaceOfAnotherProject(t *testing.T) {
 	g.d.none(t)
 }
 
-// A namespace adoption leaves out the kinds the caller may not create, as the
-// coordinator would refuse them, and says so; with none left it refuses.
-func TestNamespaceAdoptFiltersByCreateRight(t *testing.T) {
+// A namespace adoption leaves out the objects the coordinator would refuse,
+// weighed as it weighs them, and names their kinds; with none left it
+// refuses.
+func TestNamespaceAdoptFiltersByTheGatesWeighing(t *testing.T) {
 	g := newGateRig(t)
 	g.fc.on(http.MethodGet, "/apis/kubevirt.io/v1/namespaces/team-a-dev/virtualmachines", unstructuredList("kubevirt.io/v1", "VirtualMachine",
 		map[string]any{"apiVersion": "kubevirt.io/v1", "kind": "VirtualMachine", "metadata": map[string]any{"name": "web", "namespace": "team-a-dev"}}))
@@ -441,7 +448,7 @@ func TestNamespaceAdoptFiltersByCreateRight(t *testing.T) {
 	lane := g.token([]grant{kind(verbCreate, model.KindCUDN, "")})
 	rec = do(g.s, lane, http.MethodPost, "/api/platform/adopt", "")
 	if rec.Code != http.StatusForbidden || !strings.Contains(rec.Body.String(), "egressips") {
-		t.Errorf("platform adopt without create = %d %q, want 403 naming egressips", rec.Code, rec.Body.String())
+		t.Errorf("platform adopt without the right = %d %q, want 403 naming egressips", rec.Code, rec.Body.String())
 	}
 }
 

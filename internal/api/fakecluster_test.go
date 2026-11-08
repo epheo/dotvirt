@@ -58,6 +58,8 @@ type fakeCluster struct {
 	ssarFail func(a *authzv1.ResourceAttributes) int
 	// ssrr answers a SelfSubjectRulesReview; nil grants nothing.
 	ssrr func(token, namespace string) []authzv1.ResourceRule
+	// dryRuns authorizes a dry run no route answers; nil leaves those to 404.
+	dryRuns func(token string, a *authzv1.ResourceAttributes) bool
 }
 
 const (
@@ -203,6 +205,10 @@ func (fc *fakeCluster) serve(w http.ResponseWriter, r *http.Request) {
 	fc.calls = append(fc.calls, key)
 	h := fc.routes[key]
 	fc.mu.Unlock()
+	if h == nil && fc.dryRuns != nil && r.URL.Query().Get("dryRun") == metav1.DryRunAll {
+		fc.dryRun(w, r)
+		return
+	}
 	if name, one := strings.CutPrefix(r.URL.Path, "/api/v1/namespaces/"); h == nil && r.Method == http.MethodGet && one && !strings.Contains(name, "/") {
 		for _, ns := range fc.namespaces {
 			if ns.Name == name {
@@ -217,6 +223,60 @@ func (fc *fakeCluster) serve(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	h(w, r)
+}
+
+// dryRun answers a dry-run create (POST) or replace (PUT) no test routed as
+// the apiserver would: the caller's RBAC first (dryRuns), a binding's
+// escalation rule as bind on its role, then a namespace that does not exist,
+// then a create of an object that does.
+func (fc *fakeCluster) dryRun(w http.ResponseWriter, r *http.Request) {
+	var group string
+	rest, core := strings.CutPrefix(r.URL.Path, "/api/v1/")
+	if !core {
+		parts := strings.SplitN(strings.TrimPrefix(r.URL.Path, "/apis/"), "/", 3)
+		group, rest = parts[0], parts[2]
+	}
+	seg := strings.Split(rest, "/")
+	attrs := &authzv1.ResourceAttributes{Group: group, Verb: "create"}
+	if seg[0] == "namespaces" && len(seg) >= 3 {
+		attrs.Namespace, seg = seg[1], seg[2:]
+	}
+	attrs.Resource = seg[0]
+	if len(seg) > 1 {
+		attrs.Name = seg[1]
+	}
+	if r.Method == http.MethodPut {
+		attrs.Verb = "update"
+	}
+	var obj map[string]any
+	_ = json.NewDecoder(r.Body).Decode(&obj)
+	meta, _ := obj["metadata"].(map[string]any)
+	name, _ := meta["name"].(string)
+	allow := fc.dryRuns(bearer(r), attrs)
+	if ref, ok := obj["roleRef"].(map[string]any); ok && allow {
+		role, _ := ref["name"].(string)
+		allow = fc.dryRuns(bearer(r), &authzv1.ResourceAttributes{Verb: "bind", Group: group, Resource: "clusterroles", Namespace: attrs.Namespace, Name: role})
+	}
+	exists := func(ns string) bool {
+		for _, n := range fc.namespaces {
+			if n.Name == ns {
+				return true
+			}
+		}
+		return false
+	}
+	switch {
+	case !allow:
+		writeStatus(w, http.StatusForbidden, metav1.StatusReasonForbidden)
+	case attrs.Namespace != "" && !exists(attrs.Namespace):
+		writeStatus(w, http.StatusNotFound, metav1.StatusReasonNotFound)
+	case attrs.Resource == "namespaces" && r.Method == http.MethodPost && exists(name):
+		writeStatus(w, http.StatusConflict, metav1.StatusReasonAlreadyExists)
+	default:
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusCreated)
+		_ = json.NewEncoder(w).Encode(obj)
+	}
 }
 
 // coordinator is the git plane a handler test stands up behind the transport.

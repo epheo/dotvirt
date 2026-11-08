@@ -221,6 +221,8 @@ func run() error {
 		},
 	})
 
+	coordinator.UseAuthorizer(server)
+
 	// Live inventory hub: each connection's frame is built under its identity (same
 	// path as GET /api/inventory). It wakes on every kind that can alter a frame and
 	// reconciles each identity to the version of those kinds - GitChanged only for
@@ -241,9 +243,10 @@ func run() error {
 	// forge; a changed lane publishes ProposalsChanged.
 	go server.RunProposalsRefresher(ctx, bus)
 
-	// Frames also read TTL-cached authorization that no watch observes; while a
-	// stream is open, the backstop rebuilds frames often enough that an expired
-	// entry is re-evaluated within 45s (identical frames are not resent).
+	// Frames also read TTL-cached authorization that no RBAC watch observes; while
+	// a stream is open, the backstop rebuilds frames often enough that an expired
+	// entry is re-evaluated within 7.5 minutes, or 45 seconds while an RBAC watch
+	// is down (identical frames are not resent).
 	go server.RunTTLBackstop(ctx)
 
 	// VNC dials as the requesting user (KubeVirt RBAC gates the console).
