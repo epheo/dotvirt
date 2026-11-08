@@ -434,9 +434,10 @@ func (c *Coordinator) grantSource(commitProj project.ProjectInfo) (grantSource, 
 	return g, nil
 }
 
-// inherited are the subjects proj's declared admin grants name, its own and
-// other projects' sync accounts aside: who a namespace joining proj grants, so
-// its repo never holds there what its people do not.
+// inherited are the subjects proj's declared admin-role grants name, its own
+// and other projects' sync accounts aside: who a namespace joining proj grants
+// admin, so its repo never holds there what its people do not. A narrower
+// grant's subjects stay out: the joining grant would make them admins.
 func (g grantSource) inherited(proj project.ProjectInfo) ([]netgen.Subject, error) {
 	var out []netgen.Subject
 	if g.declared == nil {
@@ -451,9 +452,12 @@ func (g grantSource) inherited(proj project.ProjectInfo) ([]netgen.Subject, erro
 		if path == "" {
 			continue
 		}
-		_, subjects, _, err := netgen.DeclaredGrant(content, name)
+		role, subjects, _, err := netgen.DeclaredGrant(content, name)
 		if err != nil {
 			return nil, invalid(err)
+		}
+		if role != "admin" {
+			continue
 		}
 		for _, sub := range subjects {
 			if g.syncAccount(sub) || slices.Contains(out, sub) {

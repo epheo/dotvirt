@@ -162,18 +162,21 @@ func TestStageSyncAccessKeepsDeclaredGrant(t *testing.T) {
 	}
 }
 
-// A namespace joining a project is granted to that project's people, as its
-// other namespaces' grants name them, and its sync account: the repo never
-// holds there what the people do not. A grant the namespace already declares
+// A namespace joining a project is granted to that project's admins, as its
+// other namespaces' admin grants name them, and its sync account: the repo
+// never holds there what the people do not, and nobody becomes an admin there
+// through a narrower grant elsewhere. A grant the namespace already declares
 // keeps its people but loses another project's sync account.
 func TestStageCreateNamespaceGrantsJoiningProject(t *testing.T) {
 	bare, _ := seedWork(t, map[string][]byte{
-		"rbac/team-a.yaml": grantYAML("team-a", "admin", user("alice"), syncSA("team-a")),
-		"rbac/shared.yaml": grantYAML("shared", "admin", user("bob"), syncSA("team-b")),
+		"rbac/team-a.yaml":       grantYAML("team-a", "admin", user("alice"), syncSA("team-a")),
+		"rbac/team-a-audit.yaml": grantYAML("team-a-audit", "view", user("victor"), syncSA("team-a")),
+		"rbac/shared.yaml":       grantYAML("shared", "admin", user("bob"), syncSA("team-b")),
 	})
 	c := newTestCoordinator(t, false).WithSyncNamespace("openshift-gitops")
 	plat := project.ProjectInfo{Name: project.PlatformName, Repo: bare}
-	join := project.ProjectInfo{Name: "team-a", Repo: "acme/team-a.git", Namespaces: []string{"team-a"}}
+	// victor only views team-a-audit: he never becomes an admin of a joining namespace.
+	join := project.ProjectInfo{Name: "team-a", Repo: "acme/team-a.git", Namespaces: []string{"team-a", "team-a-audit"}}
 	for ns, want := range map[string][]netgen.Subject{
 		"team-a-db": {user("alice"), syncSA("team-a")},
 		"shared":    {user("bob"), user("alice"), syncSA("team-a")},
