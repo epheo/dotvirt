@@ -1384,6 +1384,37 @@ function accessScenario() {
 	return { ...base, name: 'access', inventory: inv };
 }
 
+// ── caps: a caller the server refuses field by field ───────────────────────────
+// Restart, console, snapshots and VM create and delete in every namespace;
+// turning rebalancing off, uplinks and sync access cluster-wide. Each gated
+// control hides or names its own denial; the rest stays offered.
+const none = { create: false, update: false, delete: false };
+const capsDenied = {
+	...base,
+	name: 'caps',
+	drs: {
+		...base.drs,
+		configured: true,
+		config: {
+			mode: 'Predictive',
+			threshold: 'AsymmetricLow',
+			intervalSeconds: 60,
+			softTainter: true,
+			evictionNodeLimit: 2,
+			evictionTotalLimit: 5,
+		},
+	},
+	capabilities: {
+		default: {
+			restart: false,
+			console: false,
+			snapshotTake: false,
+			vm: { create: false, update: true, delete: false },
+		},
+		cluster: { drsDisable: false, grantAdmin: false, uplink: none },
+	},
+};
+
 export const scenarios = {
 	residue,
 	sso,
@@ -1401,4 +1432,5 @@ export const scenarios = {
 	tenant: tenantView(base, 'team-web'),
 	noboot,
 	noupload,
+	caps: capsDenied,
 };
