@@ -240,6 +240,9 @@ func (c *Coordinator) ReleaseDeclared(id auth.Identity, commitProj, target proje
 		entries = append(entries, e)
 		staged = append(staged, ns)
 	}
+	if err := c.gate(id, commitProj, entries); err != nil {
+		return nil, nil, err
+	}
 	if err := c.store.Stage(id.Username, commitProj.Name, entries...); err != nil {
 		return nil, nil, err
 	}

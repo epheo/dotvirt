@@ -2,11 +2,15 @@ package api
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
+	"strings"
 	"sync"
+	"time"
 
 	"github.com/epheo/dotvirt/internal/auth"
+	"github.com/epheo/dotvirt/internal/changeset"
 	"github.com/epheo/dotvirt/internal/cluster"
 	"github.com/epheo/dotvirt/internal/model"
 )
@@ -117,13 +121,12 @@ func (s *Server) authorizeDraft(w http.ResponseWriter, r *http.Request, sc scope
 	return false
 }
 
-// authorizeRepo gates a write that rewrites repo content no per-change gate
-// saw (revert): authoring rights in every namespace of the project, the ones
-// hidden from the caller included, since a commit may touch any of them.
+// authorizeRepo gates a revert before the coordinator weighs it: authoring
+// rights in every namespace of a tenant project, the ones hidden from the
+// caller included, since a commit may touch any of them. The coordinator then
+// checks each object the revert changes with its exact verb, which is all the
+// platform tier's revert passes: its repo has no namespaces of its own.
 func (s *Server) authorizeRepo(w http.ResponseWriter, r *http.Request, sc scope) bool {
-	if sc.platform {
-		return true
-	}
 	// A namespace the caller cannot read is one they cannot author; it is
 	// refused without being named.
 	if full, ok := s.projectByName(sc.proj.Name); ok && len(full.Namespaces) > len(sc.proj.Namespaces) {
@@ -173,4 +176,68 @@ func (s *Server) authorNamespaces(ctx context.Context, id auth.Identity, c *clus
 	}
 	wg.Wait()
 	return out
+}
+
+// authorizeTimeout bounds the reviews one gated change asks for: the
+// coordinator calls without the request's context.
+const authorizeTimeout = 15 * time.Second
+
+// Authorize implements changeset.Authorizer: every access a staged, proposed
+// or reverted change makes Argo perform, asked under id's own token through
+// the cached reviews, at most authorConcurrency at once. A named access asks
+// for the whole resource first, the question the route gates cached, and for
+// the one object only when that is denied, as RBAC may grant it by name.
+func (s *Server) Authorize(id auth.Identity, need []changeset.Access) error {
+	if s.clusterF == nil {
+		return unavailable(errors.New("cluster not configured"))
+	}
+	c, err := s.clusterF.For(id.Token)
+	if err != nil {
+		return unavailable(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), authorizeTimeout)
+	defer cancel()
+	seen := make(map[changeset.Access]bool, len(need))
+	var asks []changeset.Access
+	for _, a := range need {
+		if !seen[a] {
+			seen[a] = true
+			asks = append(asks, a)
+		}
+	}
+	oks, errs := make([]bool, len(asks)), make([]error, len(asks))
+	var wg sync.WaitGroup
+	sem := make(chan struct{}, authorConcurrency)
+	for i, a := range asks {
+		wg.Go(func() {
+			sem <- struct{}{}
+			defer func() { <-sem }()
+			oks[i], errs[i] = s.allows(ctx, id, c, a)
+		})
+	}
+	wg.Wait()
+	var denied []string
+	for i, a := range asks {
+		switch {
+		case errs[i] != nil:
+			return s.reviewFailed(ctx, id, errs[i])
+		case !oks[i]:
+			denied = append(denied, a.String())
+		}
+	}
+	if len(denied) > 0 {
+		return fmt.Errorf("%w: you may not %s, which this change makes the cluster do once merged",
+			model.ErrForbidden, strings.Join(denied, ", or "))
+	}
+	return nil
+}
+
+// allows answers one access, the whole resource before the named object.
+func (s *Server) allows(ctx context.Context, id auth.Identity, c *cluster.Client, a changeset.Access) (bool, error) {
+	ref := ssarRef{a.Group, a.Resource}
+	ok, err := s.can(ctx, id, c, a.Verb, ref, a.Namespace)
+	if ok || err != nil || a.Name == "" {
+		return ok, err
+	}
+	return s.canNamed(ctx, id, c, a.Verb, ref, a.Namespace, a.Name)
 }

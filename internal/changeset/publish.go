@@ -36,6 +36,11 @@ func (c *Coordinator) Propose(id auth.Identity, proj project.ProjectInfo, req mo
 	if len(entries) == 0 {
 		return model.ProposeResult{}, fmt.Errorf("%w: draft is empty", model.ErrInvalid)
 	}
+	// Staged earlier, perhaps by rights since withdrawn: every entry passes
+	// the gate again, against the base it now lands on.
+	if err := c.gate(id, proj, entries); err != nil {
+		return model.ProposeResult{}, err
+	}
 	read, write, err := c.write(proj)
 	if err != nil {
 		return model.ProposeResult{}, err
@@ -168,6 +173,11 @@ func (r *proposeRun) extend(pr forge.PR, rec draft.Proposal, hasRec bool) (model
 	}
 	if !rec.Settle(head) {
 		return r.moved(pr, rec.Entries, git.ErrBranchMoved)
+	}
+	// The rebuild pushes again what the PR carries, so the proposer must still
+	// hold every right it uses.
+	if err := c.gate(r.id, r.proj, rec.Entries); err != nil {
+		return model.ProposeResult{}, fmt.Errorf("%w (carried by pull request #%d)", err, pr.Number)
 	}
 	all, err := c.combine(r.read, pr.Number, rec.Entries, r.entries)
 	if err != nil {

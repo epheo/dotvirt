@@ -258,7 +258,13 @@ func (c *Client) CanUpdateVM(ctx context.Context, namespace, name string) (bool,
 // namespace ("" for cluster scope). A review error is returned, not read as
 // "no", so a gate can answer 503 instead of a false 403.
 func (c *Client) Can(ctx context.Context, verb, group, resource, namespace string) (bool, error) {
-	ok, err := c.allowed(ctx, &authzv1.ResourceAttributes{Namespace: namespace, Verb: verb, Group: group, Resource: resource})
+	return c.CanNamed(ctx, verb, group, resource, namespace, "")
+}
+
+// CanNamed is Can for the one object name names: what the apiserver asks of
+// an update, a delete or a bind, where RBAC may grant by resourceNames.
+func (c *Client) CanNamed(ctx context.Context, verb, group, resource, namespace, name string) (bool, error) {
+	ok, err := c.allowed(ctx, &authzv1.ResourceAttributes{Namespace: namespace, Verb: verb, Group: group, Resource: resource, Name: name})
 	if err != nil {
 		return false, fmt.Errorf("access review for %s %s in %s: %w", verb, resource, namespace, err)
 	}

@@ -107,6 +107,7 @@ func newProposeFixture(t *testing.T, routes ...route) *proposeFixture {
 	repos := git.NewRepoSet(ctx, "", "", nil, true, nil, time.Hour)
 	ff := forge.NewFactory(srv.URL, forge.StaticToken("tok"), false, "")
 	f.c = New(store, repos, ff, nil, nil, nil, "main", "dotvirt/proposed")
+	f.c.UseAuthorizer(allowAll{})
 	f.repos = repos
 	f.proj = project.ProjectInfo{Name: "p", Repo: seedBare(t)}
 	f.id = auth.Identity{Username: "alice"}

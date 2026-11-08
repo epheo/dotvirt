@@ -18,6 +18,9 @@ import (
 // value drops out: staging git's own value unstages that field, and an edit
 // left with nothing unstages the VM.
 func (c *Coordinator) stageEdit(id auth.Identity, proj project.ProjectInfo, e draft.Entry) (model.DraftView, error) {
+	if err := c.gate(id, proj, []draft.Entry{e}); err != nil {
+		return model.DraftView{}, err
+	}
 	read, err := c.read(proj)
 	if err != nil {
 		return model.DraftView{}, err

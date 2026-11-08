@@ -337,10 +337,14 @@ func (c *Coordinator) Unstage(id auth.Identity, proj project.ProjectInfo, resour
 }
 
 // stage writes entries into (id, proj)'s draft as one change and renders the
-// draft that results. Each entry writing a manifest records the version of
-// the file it replaces (see pin), and a whole-file edit never replaces staged
-// field edits: they would vanish from the draft without the user knowing.
+// draft that results. Each passes the gate, each entry writing a manifest
+// records the version of the file it replaces (see pin), and a whole-file
+// edit never replaces staged field edits: they would vanish from the draft
+// without the user knowing.
 func (c *Coordinator) stage(id auth.Identity, proj project.ProjectInfo, entries ...draft.Entry) (model.DraftView, error) {
+	if err := c.gate(id, proj, entries); err != nil {
+		return model.DraftView{}, err
+	}
 	if err := c.pin(proj, entries); err != nil {
 		return model.DraftView{}, err
 	}
