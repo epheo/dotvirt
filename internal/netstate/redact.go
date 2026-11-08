@@ -57,30 +57,31 @@ type selection struct {
 
 // confined reports whether a namespace selector may render in clear for the
 // caller (see Redaction). A nil Redaction confines everything.
-func (r *Redaction) confined(sel *metav1.LabelSelector) bool {
+func (r *Redaction) confined(sel selector) bool {
 	return r == nil || r.read(sel).confined
 }
 
 // hidesLabels reports whether the pod labels beside namespace side ns must
 // not reach the caller. A nil side is a NetworkPolicy's own namespace, which
 // only a caller who sees it reads.
-func (r *Redaction) hidesLabels(pod, ns *metav1.LabelSelector) bool {
-	return r != nil && ns != nil && !emptySelector(pod) && !r.confined(ns)
+func (r *Redaction) hidesLabels(pod, ns selector) bool {
+	return r != nil && ns.raw != nil && !emptySelector(pod.raw) && !r.confined(ns)
 }
 
 // hidesNodes reports whether a node selector's labels must not reach the
 // caller: hosts lie in no namespace of theirs.
-func (r *Redaction) hidesNodes(nodes *metav1.LabelSelector) bool {
-	return r != nil && !emptySelector(nodes) && (r.Nodes == nil || !r.Nodes())
+func (r *Redaction) hidesNodes(nodes selector) bool {
+	return r != nil && !emptySelector(nodes.raw) && (r.Nodes == nil || !r.Nodes())
 }
 
-func (r *Redaction) read(sel *metav1.LabelSelector) selection {
-	if sel == nil {
-		sel = &metav1.LabelSelector{}
-	}
-	key := metav1.FormatLabelSelector(sel)
+func (r *Redaction) read(s selector) selection {
+	key := s.key
 	if v, ok := r.memo[key]; ok {
 		return v
+	}
+	sel := s.raw
+	if sel == nil {
+		sel = &metav1.LabelSelector{}
 	}
 	v := selection{own: otherNamespaces}
 	if r.Namespaces == nil {
@@ -98,8 +99,9 @@ func (r *Redaction) read(sel *metav1.LabelSelector) selection {
 			v.own = strings.Join(append(own, otherNamespaces), ", ")
 		}
 	}
-	// An invalid selector formats to one shared key: never memoized.
-	if key != "<error>" {
+	// An invalid selector formats to one shared key, and one not built by
+	// parseSelector has none: never memoized.
+	if key != "<error>" && key != "" {
 		if r.memo == nil {
 			r.memo = map[string]selection{}
 		}

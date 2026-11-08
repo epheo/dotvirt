@@ -130,19 +130,20 @@ func (s subject) match(nsLabels, podLabels map[string]string, podScoped bool) ma
 	return combineMatch(s.ns.match(nsLabels), podMatch(s.pod, podLabels, podScoped))
 }
 
-// selector is a LabelSelector parsed once, at decode, so matching never
-// re-parses it per workload; rendering and redaction read raw. Build it with
-// parseSelector: a literal skips the parse, so a non-empty raw then matches
-// only conditionally. It is never written after decode, so requests share it
-// unlocked.
+// selector is a LabelSelector parsed once, at decode, so neither matching nor
+// a Redaction's memo re-parses it per workload; rendering reads raw. Build it
+// with parseSelector: a literal skips the parse, so a non-empty raw then
+// matches only conditionally and is never memoized. It is never written after
+// decode, so requests share it unlocked.
 type selector struct {
 	raw    *metav1.LabelSelector
 	parsed labels.Selector // nil when raw is empty or rejected
 	err    error           // the library rejected raw
+	key    string          // raw formatted, a Redaction's memo key
 }
 
 func parseSelector(raw *metav1.LabelSelector) selector {
-	s := selector{raw: raw}
+	s := selector{raw: raw, key: metav1.FormatLabelSelector(raw)}
 	if !emptySelector(raw) {
 		s.parsed, s.err = metav1.LabelSelectorAsSelector(raw)
 	}

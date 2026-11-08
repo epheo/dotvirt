@@ -10,8 +10,6 @@ import (
 	"strconv"
 	"strings"
 
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-
 	"github.com/epheo/dotvirt/internal/netgen"
 )
 
@@ -86,7 +84,7 @@ func (p peer) phrase(red *Redaction) string {
 	case peerAny:
 		return "anywhere"
 	case peerSelector:
-		return vmsPhrase(p.ns.raw, p.pod.raw, p.namespace, red)
+		return vmsPhrase(p.ns, p.pod, p.namespace, red)
 	case peerNetworks:
 		s := addressesPhrase(p.cidrs)
 		if len(p.except) > 0 {
@@ -118,7 +116,7 @@ func (p peer) phrase(red *Redaction) string {
 // namespace a selector-free NetworkPolicy peer or subject means (its policy
 // is only ever shown to a caller who sees it). Whatever the pair selects
 // outside red reads "other namespaces" or "selected".
-func vmsPhrase(ns, pod *metav1.LabelSelector, own string, red *Redaction) string {
+func vmsPhrase(ns, pod selector, own string, red *Redaction) string {
 	who := "VMs"
 	switch l := selectorSummary(pod, nil); {
 	case red.hidesLabels(pod, ns):
@@ -127,9 +125,9 @@ func vmsPhrase(ns, pod *metav1.LabelSelector, own string, red *Redaction) string
 		who = "VMs labeled " + l
 	}
 	switch {
-	case own != "" && ns == nil:
+	case own != "" && ns.raw == nil:
 		return who + " in " + own
-	case ns == nil || emptySelector(ns):
+	case emptySelector(ns.raw):
 		return who + " in any namespace"
 	}
 	return who + " in " + namespacesPhrase(ns, red)
@@ -137,8 +135,8 @@ func vmsPhrase(ns, pod *metav1.LabelSelector, own string, red *Redaction) string
 
 // namespacesPhrase names the namespaces a non-empty selector picks, as red
 // lets the caller read them.
-func namespacesPhrase(ns *metav1.LabelSelector, red *Redaction) string {
-	if names := netgen.NamespaceNames(ns); names != nil {
+func namespacesPhrase(ns selector, red *Redaction) string {
+	if names := netgen.NamespaceNames(ns.raw); names != nil {
 		return strings.Join(red.filter(netgen.NamespaceNameLabel, names), ", ")
 	}
 	if !red.confined(ns) {
@@ -157,18 +155,18 @@ func (s subject) applies(ns string, red *Redaction) string {
 		if emptySelector(s.pod.raw) {
 			return "every VM in " + ns
 		}
-		return vmsPhrase(nil, s.pod.raw, ns, red)
+		return vmsPhrase(s.ns, s.pod, ns, red)
 	}
 	if emptySelector(s.pod.raw) {
 		switch {
 		case emptySelector(s.ns.raw):
 			return "every namespace"
-		case netgen.NamespaceNames(s.ns.raw) != nil || !red.confined(s.ns.raw):
-			return "every VM in " + namespacesPhrase(s.ns.raw, red)
+		case netgen.NamespaceNames(s.ns.raw) != nil || !red.confined(s.ns):
+			return "every VM in " + namespacesPhrase(s.ns, red)
 		}
-		return "namespaces labeled " + selectorSummary(s.ns.raw, red)
+		return "namespaces labeled " + selectorSummary(s.ns, red)
 	}
-	return vmsPhrase(s.ns.raw, s.pod.raw, "", red)
+	return vmsPhrase(s.ns, s.pod, "", red)
 }
 
 // isolation states what selecting VMs with a NetworkPolicy does beyond its

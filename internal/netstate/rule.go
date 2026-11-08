@@ -4,7 +4,6 @@ import (
 	"strconv"
 	"strings"
 
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/intstr"
 
 	"github.com/epheo/dotvirt/internal/model"
@@ -40,7 +39,7 @@ const (
 type peer struct {
 	kind      peerKind
 	ns, pod   selector
-	nodes     *metav1.LabelSelector // never matched, so never parsed
+	nodes     selector
 	namespace string
 	cidrs     []string
 	except    []string
@@ -97,7 +96,7 @@ func adminRule(action string, peers []netgen.AdminPeerDoc, ports []netgen.PortDo
 		case p.Networks != nil:
 			r.peers = append(r.peers, peer{kind: peerNetworks, cidrs: p.Networks})
 		case p.Nodes != nil:
-			r.peers = append(r.peers, peer{kind: peerNodes, nodes: p.Nodes})
+			r.peers = append(r.peers, peer{kind: peerNodes, nodes: parseSelector(p.Nodes)})
 		}
 	}
 	return r
@@ -112,7 +111,7 @@ func gatewayRule(r netgen.EgressFirewallRuleDoc) rule {
 	case to.DNSName != "":
 		p = peer{kind: peerDNSName, dns: to.DNSName}
 	case to.NodeSelector != nil:
-		p = peer{kind: peerNodeSelector, nodes: to.NodeSelector}
+		p = peer{kind: peerNodeSelector, nodes: parseSelector(to.NodeSelector)}
 	default:
 		// An unrecognized destination stays a visible, unresolvable peer:
 		// dropping the rule would let a later one decide with false certainty.
@@ -184,10 +183,10 @@ func (p peer) summary(red *Redaction) string {
 	case peerSelector:
 		var parts []string
 		if p.ns.raw != nil {
-			parts = append(parts, "ns "+orAny(selectorSummary(p.ns.raw, red), "any"))
+			parts = append(parts, "ns "+orAny(selectorSummary(p.ns, red), "any"))
 		}
 		if p.pod.raw != nil {
-			parts = append(parts, "pods "+orAny(podSummary(p.pod.raw, p.ns.raw, red), "any"))
+			parts = append(parts, "pods "+orAny(podSummary(p.pod, p.ns, red), "any"))
 		}
 		return strings.Join(parts, " ")
 	case peerNetworks:

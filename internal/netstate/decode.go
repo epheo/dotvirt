@@ -11,7 +11,6 @@ import (
 	"sort"
 	"strings"
 
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/tools/cache"
@@ -82,14 +81,14 @@ func (s subject) summary(red *Redaction) string {
 		return ""
 	}
 	if s.ns.raw == nil {
-		return orAny(selectorSummary(s.pod.raw, nil), "all pods")
+		return orAny(selectorSummary(s.pod, nil), "all pods")
 	}
-	return strings.TrimSpace(orAny(selectorSummary(s.ns.raw, red), "all namespaces") + " " + prefixed("pods ", podSummary(s.pod.raw, s.ns.raw, red)))
+	return strings.TrimSpace(orAny(selectorSummary(s.ns, red), "all namespaces") + " " + prefixed("pods ", podSummary(s.pod, s.ns, red)))
 }
 
 // podSummary renders a pod selector beside its namespace side ns, its labels
 // hidden where red does not confine that side.
-func podSummary(pod, ns *metav1.LabelSelector, red *Redaction) string {
+func podSummary(pod, ns selector, red *Redaction) string {
 	if red.hidesLabels(pod, ns) {
 		return selectedLabels
 	}
