@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"slices"
@@ -19,6 +20,7 @@ import (
 	"github.com/epheo/dotvirt/internal/eventbus"
 	"github.com/epheo/dotvirt/internal/model"
 	"github.com/epheo/dotvirt/internal/netstate"
+	"github.com/epheo/dotvirt/internal/project"
 )
 
 // scopePolicies must keep namespace-tier rows only in visible namespaces and
@@ -612,5 +614,46 @@ func TestHeldPriorityNamesTheHolderToListersOnly(t *testing.T) {
 	}
 	if rec := post("lockdown"); rec.Code != http.StatusOK {
 		t.Errorf("a lister re-staging the holder at its own priority = %d %s", rec.Code, rec.Body.String())
+	}
+}
+
+// lockdownReader declares lockdown alone in the platform repo.
+type lockdownReader struct{ *planeDraft }
+
+func (d lockdownReader) ObjectSpec(_ project.ProjectInfo, _, _, name string) (model.ObjectSpec, error) {
+	if name != "lockdown" {
+		return model.ObjectSpec{}, fmt.Errorf("%w: %s", model.ErrNotFound, name)
+	}
+	return model.ObjectSpec{Name: name, SourceFile: "cluster/lockdown.yaml"}, nil
+}
+
+func (d lockdownReader) ObjectHistory(_ project.ProjectInfo, _, _, name string, _ int) ([]model.Commit, error) {
+	if name != "lockdown" {
+		return nil, fmt.Errorf("%w: %s", model.ErrNotFound, name)
+	}
+	return []model.Commit{{Message: "Create AdminNetworkPolicy lockdown"}}, nil
+}
+
+// A cluster-scoped object's spec and history read only to a caller who may
+// create and list its kind: without list, the right name and a wrong one are
+// refused alike.
+func TestClusterObjectReadsNeedList(t *testing.T) {
+	var lists atomic.Bool
+	s := lockdownServer(t, func(token string, a *authzv1.ResourceAttributes) bool {
+		return token == adminToken && (a.Verb != verbList || a.Resource != "adminnetworkpolicies" || lists.Load())
+	}, lockdownReader{&planeDraft{}})
+	for _, sub := range []string{"", "/history"} {
+		right := do(s, adminToken, http.MethodGet, "/api/objects/adminnetworkpolicy/cluster/lockdown"+sub, "")
+		wrong := do(s, adminToken, http.MethodGet, "/api/objects/adminnetworkpolicy/cluster/guess"+sub, "")
+		if right.Code != http.StatusForbidden || right.Body.String() != wrong.Body.String() {
+			t.Errorf("%q without list: right %d %q, wrong %d %q", sub, right.Code, right.Body.String(), wrong.Code, wrong.Body.String())
+		}
+	}
+	lists.Store(true)
+	s.bus.Publish(eventbus.RBACChanged)
+	for _, sub := range []string{"", "/history"} {
+		if rec := do(s, adminToken, http.MethodGet, "/api/objects/adminnetworkpolicy/cluster/lockdown"+sub, ""); rec.Code != http.StatusOK {
+			t.Errorf("%q with list = %d %s", sub, rec.Code, rec.Body.String())
+		}
 	}
 }
