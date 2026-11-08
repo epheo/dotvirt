@@ -168,7 +168,7 @@ func TestAdoptObjectsClusterScoped(t *testing.T) {
 
 	view, err := c.AdoptObjects(id, proj, "the cluster scope", []model.Adoptable{
 		{Kind: "ClusterUserDefinedNetwork", Name: "declared", Path: "networks/declared.yaml", Manifest: declared},
-		{Kind: "AdminNetworkPolicy", Name: "iso", Path: "adminnetworkpolicies/iso.yaml", Manifest: []byte("kind: AdminNetworkPolicy\nmetadata:\n  name: iso\n")},
+		{Kind: "AdminNetworkPolicy", Name: "iso", Path: "adminnetworkpolicies/iso.yaml", Manifest: []byte("apiVersion: policy.networking.k8s.io/v1alpha1\nkind: AdminNetworkPolicy\nmetadata:\n  name: iso\n")},
 	})
 	if err != nil {
 		t.Fatalf("AdoptObjects: %v", err)
@@ -211,7 +211,7 @@ func TestAdoptObjectCreateOrEdit(t *testing.T) {
 	if _, err := c.AdoptObject(id, proj, model.Adoptable{Kind: "NetworkPolicy", Namespace: "alpha", Name: "web", Path: path, Manifest: declared}); !errors.Is(err, model.ErrInvalid) {
 		t.Errorf("a matching object must be refused, got %v", err)
 	}
-	view, err = c.AdoptObject(id, proj, model.Adoptable{Kind: "NetworkPolicy", Namespace: "alpha", Name: "api", Path: "alpha/networkpolicies/api.yaml", Manifest: []byte("kind: NetworkPolicy\nmetadata:\n  name: api\n  namespace: alpha\n")})
+	view, err = c.AdoptObject(id, proj, model.Adoptable{Kind: "NetworkPolicy", Namespace: "alpha", Name: "api", Path: "alpha/networkpolicies/api.yaml", Manifest: []byte("apiVersion: networking.k8s.io/v1\nkind: NetworkPolicy\nmetadata:\n  name: api\n  namespace: alpha\n")})
 	if err != nil {
 		t.Fatalf("AdoptObject (new): %v", err)
 	}

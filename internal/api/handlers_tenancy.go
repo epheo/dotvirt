@@ -52,7 +52,7 @@ func (s *Server) handleCreateNamespace(w http.ResponseWriter, r *http.Request) {
 	}
 	live := liveNamespaces(r.Context(), plat.cluster)
 	if dryRun(r) {
-		p, err := s.draft.PreviewCreateNamespace(plat.proj, join.proj, raw, live)
+		p, err := s.draft.PreviewCreateNamespace(join.id, plat.proj, join.proj, raw, live)
 		respond(w, p, err)
 		return
 	}
@@ -90,7 +90,7 @@ func (s *Server) handleCreateProject(w http.ResponseWriter, r *http.Request) {
 	}
 	live := liveNamespaces(r.Context(), plat.cluster)
 	if dryRun(r) {
-		p, err := s.draft.PreviewCreateProject(plat.proj, raw, live)
+		p, err := s.draft.PreviewCreateProject(plat.id, plat.proj, raw, live)
 		respond(w, p, err)
 		return
 	}

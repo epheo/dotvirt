@@ -31,7 +31,7 @@ type nsPeek struct {
 // the form, or render it for a dry run.
 func (s *Server) stageCreate(w http.ResponseWriter, r *http.Request, sc scope, resource draft.Resource, raw []byte) {
 	if dryRun(r) {
-		p, err := s.draft.PreviewCreate(sc.proj, resource, raw)
+		p, err := s.draft.PreviewCreate(sc.id, sc.proj, resource, raw)
 		respond(w, p, err)
 		return
 	}

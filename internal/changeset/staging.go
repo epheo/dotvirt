@@ -139,12 +139,12 @@ func (c *Coordinator) StageCreateVM(id auth.Identity, proj project.ProjectInfo, 
 }
 
 // PreviewCreateVM is StageCreateVM without the store write.
-func (c *Coordinator) PreviewCreateVM(proj project.ProjectInfo, rawSpec json.RawMessage) (model.StagePreview, error) {
+func (c *Coordinator) PreviewCreateVM(id auth.Identity, proj project.ProjectInfo, rawSpec json.RawMessage) (model.StagePreview, error) {
 	entry, err := c.renderVM(proj, rawSpec)
 	if err != nil {
 		return model.StagePreview{}, err
 	}
-	return preview(proj, entry), nil
+	return c.previewOf(id, proj, entry)
 }
 
 func (c *Coordinator) renderVM(proj project.ProjectInfo, rawSpec json.RawMessage) (draft.Entry, error) {
@@ -171,6 +171,28 @@ func (c *Coordinator) renderVM(proj project.ProjectInfo, rawSpec json.RawMessage
 		Manifest:   string(content),
 		FromWizard: true,
 	}, nil
+}
+
+// previewOf is stage up to the store write: the same gate (the caller's RBAC
+// for every object the files touch, the placement guard, Argo's reading of
+// the files) and the same check against the caller's draft, then what the
+// entries would write. Nothing is recorded.
+func (c *Coordinator) previewOf(id auth.Identity, proj project.ProjectInfo, entries ...draft.Entry) (model.StagePreview, error) {
+	if err := c.gate(id, proj, entries); err != nil {
+		return model.StagePreview{}, err
+	}
+	staged, err := c.store.List(id.Username, proj.Name)
+	if err != nil {
+		return model.StagePreview{}, err
+	}
+	d := make(map[string]draft.Entry, len(staged))
+	for _, e := range staged {
+		d[e.Key()] = e
+	}
+	if err := overFieldEdits(d, entries); err != nil {
+		return model.StagePreview{}, err
+	}
+	return preview(proj, entries...), nil
 }
 
 // preview lists what staging entries into proj's draft would write.
@@ -218,12 +240,12 @@ func (c *Coordinator) stageRendered(id auth.Identity, proj project.ProjectInfo, 
 }
 
 // previewRendered is stageRendered without the store write.
-func (c *Coordinator) previewRendered(proj project.ProjectInfo, render func() (draft.Entry, error)) (model.StagePreview, error) {
+func (c *Coordinator) previewRendered(id auth.Identity, proj project.ProjectInfo, render func() (draft.Entry, error)) (model.StagePreview, error) {
 	entry, err := c.resolveRendered(proj, render)
 	if err != nil {
 		return model.StagePreview{}, err
 	}
-	return preview(proj, entry), nil
+	return c.previewOf(id, proj, entry)
 }
 
 func (c *Coordinator) resolveRendered(proj project.ProjectInfo, render func() (draft.Entry, error)) (draft.Entry, error) {
@@ -234,9 +256,6 @@ func (c *Coordinator) resolveRendered(proj project.ProjectInfo, render func() (d
 	entry, err := render()
 	if err != nil {
 		return draft.Entry{}, invalid(err)
-	}
-	if err := requirePlacement(proj, entry.SourceFile, []byte(entry.Manifest)); err != nil {
-		return draft.Entry{}, err
 	}
 	entry.Kind = draft.KindCreate
 	idx, err := indexDeclared(read, c.baseBranch)
@@ -367,12 +386,12 @@ func (c *Coordinator) StageCreate(id auth.Identity, proj project.ProjectInfo, re
 }
 
 // PreviewCreate is StageCreate without the store write.
-func (c *Coordinator) PreviewCreate(proj project.ProjectInfo, resource draft.Resource, rawSpec json.RawMessage) (model.StagePreview, error) {
+func (c *Coordinator) PreviewCreate(id auth.Identity, proj project.ProjectInfo, resource draft.Resource, rawSpec json.RawMessage) (model.StagePreview, error) {
 	render, err := createForm(resource, rawSpec)
 	if err != nil {
 		return model.StagePreview{}, err
 	}
-	return c.previewRendered(proj, render)
+	return c.previewRendered(id, proj, render)
 }
 
 func createForm(resource draft.Resource, rawSpec json.RawMessage) (func() (draft.Entry, error), error) {
@@ -398,12 +417,12 @@ func (c *Coordinator) StageCreateNamespace(id auth.Identity, commitProj, joinPro
 }
 
 // PreviewCreateNamespace is StageCreateNamespace without the store write.
-func (c *Coordinator) PreviewCreateNamespace(commitProj, joinProj project.ProjectInfo, rawSpec json.RawMessage, live LiveNamespaces) (model.StagePreview, error) {
+func (c *Coordinator) PreviewCreateNamespace(id auth.Identity, commitProj, joinProj project.ProjectInfo, rawSpec json.RawMessage, live LiveNamespaces) (model.StagePreview, error) {
 	render, err := c.namespaceForm(joinProj, rawSpec, live)
 	if err != nil {
 		return model.StagePreview{}, err
 	}
-	return c.previewRendered(commitProj, render)
+	return c.previewRendered(id, commitProj, render)
 }
 
 func (c *Coordinator) namespaceForm(joinProj project.ProjectInfo, rawSpec json.RawMessage, live LiveNamespaces) (func() (draft.Entry, error), error) {
@@ -479,19 +498,19 @@ func (c *Coordinator) Unstage(id auth.Identity, proj project.ProjectInfo, resour
 }
 
 // stage writes entries into (id, proj)'s draft as one change and renders the
-// draft that results. Each entry writing a manifest records the version of
-// the file it replaces (see pin), and a whole-file edit never replaces staged
-// field edits: they would vanish from the draft without the user knowing.
+// draft that results. Each passes the gate, which pins every entry writing or
+// removing a file to the version it weighed, and a whole-file edit never
+// replaces staged field edits: they would vanish from the draft without the
+// user knowing.
 func (c *Coordinator) stage(id auth.Identity, proj project.ProjectInfo, entries ...draft.Entry) (model.DraftView, error) {
-	if err := c.pin(proj, entries); err != nil {
+	if err := c.gate(id, proj, entries); err != nil {
 		return model.DraftView{}, err
 	}
 	err := c.store.Apply(id.Username, proj.Name, func(d map[string]draft.Entry) error {
+		if err := overFieldEdits(d, entries); err != nil {
+			return err
+		}
 		for _, e := range entries {
-			if staged, ok := d[e.Key()]; ok && fieldEdit(staged) && e.Kind == draft.KindEdit {
-				return fmt.Errorf("%w: %s has staged setting changes; propose or unstage them before replacing its whole manifest",
-					model.ErrConflict, objectLabel(e))
-			}
 			d[e.Key()] = e
 		}
 		return nil
@@ -502,33 +521,14 @@ func (c *Coordinator) stage(id auth.Identity, proj project.ProjectInfo, entries 
 	return c.Get(id, proj)
 }
 
-// pin records on each entry writing or removing a file the version of that
-// file on base (draft.Entry.BaseBlob), in one read. An entry already pinned
-// keeps its pin: one whose content the server derived from bytes it read is
-// pinned to those bytes (pinOf), never to a second read that may see a newer
-// file.
-func (c *Coordinator) pin(proj project.ProjectInfo, entries []draft.Entry) error {
-	pinned := func(e draft.Entry) bool { return e.BaseBlob != "" || e.Manifest == "" && e.Kind != draft.KindDelete }
-	var paths []string
+// overFieldEdits refuses a whole-file edit of an object the draft holds
+// setting changes for: they would vanish from the draft without the user
+// knowing.
+func overFieldEdits(d map[string]draft.Entry, entries []draft.Entry) error {
 	for _, e := range entries {
-		if !pinned(e) {
-			paths = append(paths, e.SourceFile)
-		}
-	}
-	if len(paths) == 0 {
-		return nil
-	}
-	read, err := c.read(proj)
-	if err != nil {
-		return err
-	}
-	pins, err := read.Pins(c.baseBranch, paths...)
-	if err != nil {
-		return err
-	}
-	for i, e := range entries {
-		if !pinned(e) {
-			entries[i].BaseBlob = pins[e.SourceFile]
+		if staged, ok := d[e.Key()]; ok && fieldEdit(staged) && e.Kind == draft.KindEdit {
+			return fmt.Errorf("%w: %s has staged setting changes; propose or unstage them before replacing its whole manifest",
+				model.ErrConflict, objectLabel(e))
 		}
 	}
 	return nil

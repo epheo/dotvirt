@@ -71,7 +71,7 @@ func (s *Server) handleDeployTemplate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if dryRun(r) {
-		p, err := s.draft.PreviewDeployFromTemplate(sc.proj, lib, req)
+		p, err := s.draft.PreviewDeployFromTemplate(sc.id, sc.proj, lib, req)
 		respond(w, p, err)
 		return
 	}

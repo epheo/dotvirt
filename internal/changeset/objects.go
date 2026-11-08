@@ -3,7 +3,6 @@ package changeset
 import (
 	"encoding/json"
 	"fmt"
-	"slices"
 
 	"github.com/epheo/dotvirt/internal/auth"
 
@@ -52,9 +51,6 @@ func declaredRef(idx declaredIndex, resource draft.Resource, namespace, name str
 func (c *Coordinator) AdoptObject(id auth.Identity, proj project.ProjectInfo, o model.Adoptable) (model.DraftView, error) {
 	read, err := c.read(proj)
 	if err != nil {
-		return model.DraftView{}, err
-	}
-	if err := requirePlacement(proj, o.Path, o.Manifest); err != nil {
 		return model.DraftView{}, err
 	}
 	idx, err := indexDeclared(read, c.baseBranch)
@@ -131,10 +127,11 @@ func (r *Reader) ObjectSpec(proj project.ProjectInfo, resource, namespace, name 
 
 // StageUpdateManifest replaces a declared object's file with req.YAML
 // verbatim - the edit for a manifest no form expresses, on the same
-// whole-file rule as every other edit. The new content must declare exactly
-// the object it replaces: a renamed or extra object is a different change.
-// req.BaseBlob, when set, is the version the editor loaded (ObjectSpec): one
-// that is no longer base's is refused, since the edit was made on it.
+// whole-file rule as every other edit. The gate holds the new content to
+// exactly the object it replaces: a renamed or extra object is a different
+// change. req.BaseBlob, when set, is the version the editor loaded
+// (ObjectSpec): one that is no longer base's is refused, since the edit was
+// made on it.
 func (c *Coordinator) StageUpdateManifest(id auth.Identity, proj project.ProjectInfo, resource, namespace, name string, req model.UpdateManifestRequest) (model.DraftView, error) {
 	yaml := req.YAML
 	read, err := c.read(proj)
@@ -143,14 +140,6 @@ func (c *Coordinator) StageUpdateManifest(id auth.Identity, proj project.Project
 	}
 	path, err := c.locate(read, draft.Resource(resource), namespace, name)
 	if err != nil {
-		return model.DraftView{}, err
-	}
-	ns := model.ObjectNamespace(namespace)
-	refs := declaredRefs(path, []byte(yaml))
-	if len(refs) != 1 || refs[0].Namespace != ns || refs[0].Name != name || !slices.Contains(draft.Resource(resource).Kinds(), refs[0].Kind) {
-		return model.DraftView{}, fmt.Errorf("%w: the manifest must declare exactly %s/%s", model.ErrInvalid, namespace, name)
-	}
-	if err := requirePlacement(proj, path, []byte(yaml)); err != nil {
 		return model.DraftView{}, err
 	}
 	current, err := read.FileOnBranch(c.baseBranch, path)
