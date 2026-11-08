@@ -71,6 +71,11 @@ func (c *Coordinator) editTarget(read *git.Repo, namespace, name string) (vmFile
 	if !ok {
 		return vmFile{}, retry
 	}
+	// The directory reading is dotvirt's; Argo applies the document to its
+	// Application's namespace, which the edit's authorization never checked.
+	if _, implied, _ := declared(path, content); slices.Contains(implied, ref) {
+		return vmFile{}, fmt.Errorf("%w: %s does not set metadata.namespace for %s/%s; set it in git before editing the VM here", model.ErrConflict, path, namespace, name)
+	}
 	vms, err := manifest.ParseVMs(path, content, defaultNamespace(path))
 	if err != nil {
 		return vmFile{}, fmt.Errorf("%w: %s does not parse; fix it in git: %v", model.ErrConflict, path, err)

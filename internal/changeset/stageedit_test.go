@@ -12,21 +12,16 @@ import (
 	"github.com/epheo/dotvirt/internal/project"
 )
 
-// nsLessVM is a VM manifest without metadata.namespace: it lives in whatever
-// namespace its directory names.
-const nsLessVM = `apiVersion: kubevirt.io/v1
-kind: VirtualMachine
-metadata:
-  name: x
-spec:
-  runStrategy: Always
-`
+// vmIn is VM x declared in namespace ns.
+func vmIn(ns string) []byte {
+	return []byte("apiVersion: kubevirt.io/v1\nkind: VirtualMachine\nmetadata:\n  name: x\n  namespace: " + ns + "\nspec:\n  runStrategy: Always\n")
+}
 
 // The file an edit rewrites comes from git, never from the client: a client
 // naming a/x.yaml for an edit of b/x would otherwise land the change on a/x
 // while the PR says b/x.
 func TestStageEditResolvesSourceFileFromGit(t *testing.T) {
-	bare := seedBareFiles(t, map[string][]byte{"a/x.yaml": []byte(nsLessVM), "b/x.yaml": []byte(nsLessVM)})
+	bare := seedBareFiles(t, map[string][]byte{"a/x.yaml": vmIn("a"), "b/x.yaml": vmIn("b")})
 	c := newTestCoordinator(t, true)
 	id := auth.Identity{Username: "alice"}
 	proj := project.ProjectInfo{Name: "p", Repo: bare}
@@ -248,5 +243,23 @@ func TestStageEditRemovesAStagedNetworkByInterface(t *testing.T) {
 	}
 	if entries, _ := c.store.List(id.Username, proj.Name); len(entries) != 0 {
 		t.Fatalf("the add and its removal must net to nothing, got %+v", entries)
+	}
+}
+
+// A VM document without metadata.namespace is read in its directory's
+// namespace, but Argo applies it to its Application's: the edit's
+// authorization would check a namespace the change may not land in.
+func TestStageEditRefusesAnImpliedNamespace(t *testing.T) {
+	loose := "apiVersion: kubevirt.io/v1\nkind: VirtualMachine\nmetadata:\n  name: x\nspec:\n  runStrategy: Always\n"
+	bare := seedBareFiles(t, map[string][]byte{"a/x.yaml": []byte(loose)})
+	c := newTestCoordinator(t, false)
+	id := auth.Identity{Username: "alice"}
+	proj := project.ProjectInfo{Name: "p", Repo: bare}
+	_, err := c.StageEdit(id, proj, "a", "x", model.EditRequest{VMEdit: model.VMEdit{SetLabels: map[string]string{"env": "prod"}}})
+	if !errors.Is(err, model.ErrConflict) || !strings.Contains(err.Error(), "metadata.namespace") {
+		t.Fatalf("want ErrConflict naming metadata.namespace, got %v", err)
+	}
+	if entries, _ := c.store.List(id.Username, proj.Name); len(entries) != 0 {
+		t.Errorf("a refused edit must not be staged, got %+v", entries)
 	}
 }
