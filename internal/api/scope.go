@@ -73,6 +73,10 @@ func (s *Server) maxAge(unsettled bool) time.Duration {
 
 // rbacVersion is the change-version a token's derived authorization depends on: a
 // watched grant move OR a namespace add/remove/relabel can change what it may see.
+// It is one version for every token, so one tenant's grant move invalidates all of
+// their entries: a visibility probe reviews every project namespace, so a
+// per-namespace version would not narrow it, while one keyed by the moved
+// bindings' subjects would.
 func (s *Server) rbacVersion() uint64 {
 	return s.bus.Version(eventbus.RBACChanged, eventbus.NamespaceChanged)
 }
