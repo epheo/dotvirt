@@ -201,14 +201,16 @@ type Inventory struct {
 	Projects  []Project  `json:"projects"`
 	Warnings  []string   `json:"warnings,omitempty"`
 	Proposals []Proposal `json:"proposals,omitempty"`
-	// NetworksVersion is a monotonic watermark that moves when a port group changes
-	// (NetworkChanged) or a non-VM object's drift content changes (the argo snapshot's
-	// ObjectDriftGen). The network catalog is fetched out-of-band (GET /api/networks,
-	// not on this frame), so the frontend re-pulls it when this bumps: a merged segment
-	// PR - and its sync badge - then appear live instead of only on reload.
+	// NetworksVersion fingerprints, for this caller only, what its out-of-band
+	// network and policy pulls (GET /api/networks, /api/policies) read: the
+	// catalog objects and their drift in its visible namespaces, the
+	// cluster-scoped ones, and the visible set itself. The frontend re-pulls
+	// when it changes, so a merged segment PR and its sync badge appear live,
+	// and another tenant's change never moves it. Equality-only: not monotonic,
+	// and a server restart changes it. Fits a JavaScript number.
 	NetworksVersion uint64 `json:"networksVersion,omitempty"`
-	// TasksVersion is the same contract for the recent-tasks feed (GET /api/tasks,
-	// fetched out-of-band): bumps when an op is recorded or a merged PR lands.
+	// TasksVersion is the same contract for the recent-tasks feed (GET
+	// /api/tasks): the entries this caller's pull returns.
 	TasksVersion uint64 `json:"tasksVersion,omitempty"`
 	// Adoptable proposes existing tenants: namespaces with VMs but no project
 	// label. Present only for callers with namespace-create authority (the

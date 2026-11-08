@@ -73,3 +73,54 @@ func TestStoreTrimsUnreadMetadata(t *testing.T) {
 		}
 	}
 }
+
+// Generation moves with writes in the namespaces asked about, and with a
+// relist only where it changed something.
+func TestGeneration(t *testing.T) {
+	idx := NewIndexer()
+	obj := func(ns, name string, rv ...string) *unstructured.Unstructured {
+		u := &unstructured.Unstructured{Object: map[string]any{}}
+		u.SetNamespace(ns)
+		u.SetName(name)
+		if len(rv) > 0 {
+			u.SetResourceVersion(rv[0])
+		}
+		return u
+	}
+	gen := func() uint64 { return Generation(idx, "", "a") }
+	last := gen()
+	step := func(what string, moves bool) {
+		t.Helper()
+		if got := gen(); (got != last) != moves {
+			t.Errorf("%s: moved %v, want %v", what, got != last, moves)
+		}
+		last = gen()
+	}
+	_ = idx.Add(obj("a", "x"))
+	step("add in a", true)
+	_ = idx.Update(obj("a", "x"))
+	step("update in a", true)
+	_ = idx.Add(obj("b", "y"))
+	_ = idx.Update(obj("b", "y"))
+	_ = idx.Delete(obj("b", "y"))
+	step("writes in b", false)
+	_ = idx.Add(obj("", "shared"))
+	step("cluster-scoped add", true)
+	_ = idx.Delete(obj("a", "x"))
+	step("delete in a", true)
+	_ = idx.Add(obj("a", "z", "1"))
+	_ = idx.Add(obj("b", "y", "1"))
+	last = gen()
+	_ = idx.Replace([]any{obj("a", "z", "1"), obj("b", "y", "1"), obj("", "shared")}, "2")
+	step("relist of nothing new", false)
+	_ = idx.Replace([]any{obj("a", "z", "1"), obj("b", "y", "2"), obj("", "shared")}, "3")
+	step("relist that moved b", false)
+	_ = idx.Replace([]any{obj("a", "z", "2"), obj("b", "y", "2"), obj("", "shared")}, "4")
+	step("relist that moved a", true)
+	_ = idx.Replace([]any{obj("b", "y", "2"), obj("", "shared")}, "5")
+	step("relist that emptied a", true)
+
+	if Generation(cache.NewIndexer(cache.MetaNamespaceKeyFunc, cache.Indexers{}), "a") != 0 {
+		t.Error("a foreign indexer has no generation")
+	}
+}
