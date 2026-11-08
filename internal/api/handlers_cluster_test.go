@@ -297,6 +297,32 @@ func TestUploadBootImage(t *testing.T) {
 	}
 }
 
+// A refused upload, plain or as a boot image, makes nothing: without the
+// upload-token right the DataVolume would only wait for bytes that never come.
+func TestUploadRefusalMakesNothing(t *testing.T) {
+	g := newGateRig(t)
+	var made []string
+	for _, res := range []string{"datavolumes", "datasources"} {
+		g.fc.on(http.MethodPost, "/apis/cdi.kubevirt.io/v1beta1/namespaces/team-a-dev/"+res, func(w http.ResponseWriter, r *http.Request) {
+			made = append(made, res)
+			echoCreate(nil, nil)(w, r)
+		})
+	}
+	dvOnly := g.token(bootImageGrants[:1])
+	if _, nc := g.caps(dvOnly, "team-a-dev"); nc.DataVolumeCreate || nc.BootImageCreate {
+		t.Errorf("without upload tokens create: dataVolumeCreate=%v bootImageCreate=%v", nc.DataVolumeCreate, nc.BootImageCreate)
+	}
+	for _, body := range []string{
+		`{"namespace":"team-a-dev","name":"disk","size":"1Gi"}`,
+		`{"namespace":"team-a-dev","name":"disk","size":"1Gi","bootImage":true}`,
+	} {
+		wantStatus(t, do(g.s, dvOnly, http.MethodPost, "/api/uploads", body), http.StatusForbidden)
+	}
+	if len(made) != 0 {
+		t.Errorf("a refused upload made %v", made)
+	}
+}
+
 // A token request the proxy answers without a token is an internal failure,
 // never an empty token handed to the browser.
 func TestUploadTokenNotIssued(t *testing.T) {
