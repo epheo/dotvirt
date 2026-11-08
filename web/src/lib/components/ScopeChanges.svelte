@@ -1,6 +1,5 @@
 <script lang="ts">
 	import { api, type Commit } from '#lib/api.js';
-	import { opStands } from '#lib/gitops.js';
 	import { relativeAge } from '#lib/format.js';
 	import { changesHref } from '#lib/nav.js';
 	import { resource } from '#lib/resource.svelte.js';
@@ -17,7 +16,7 @@
 		Pencil,
 		TriangleAlert,
 	} from '@lucide/svelte';
-	import { itemLine } from '#lib/tray.js';
+	import { itemLine, mergeState } from '#lib/tray.js';
 	import Button from './Button.svelte';
 	import InfoCard from './InfoCard.svelte';
 
@@ -40,9 +39,8 @@
 		inventory.taskFeed.filter((t) => t.kind === 'merge' && inScope(t.project)).slice(0, 3),
 	);
 
-	// A merge runs once Argo has applied a revision at or after its commit, and
-	// the app is Synced; history orders the two. A standing failed operation
-	// on a merge not yet applied reads refused.
+	// Each merge is placed by mergeState against its project's history, which
+	// the poll re-reads, so a merge missing from the first read still lands.
 	const historyKey = $derived([...new Set(merges.map((t) => t.project ?? ''))].sort().join(' '));
 	const history = resource<Record<string, Commit[]>>(
 		() => historyKey,
@@ -61,23 +59,25 @@
 		},
 		{ poll: 30000 },
 	);
+	const STATE = {
+		live: { tone: 'ok', text: 'Live' },
+		refused: { tone: 'danger', text: 'Refused' },
+		applying: { tone: 'info', text: 'Applying' },
+	} as const;
+
 	const merged = $derived(
 		merges.map((t) => {
 			const g = inventory.projects.find((p) => p.name === t.project)?.gitOps;
 			const commits = history.data?.[t.project ?? ''];
-			const at = commits?.findIndex((c) => c.prNumber === t.prNumber) ?? -1;
-			const applied = g?.revision
-				? (commits?.findIndex((c) => c.hash.startsWith(g.revision!)) ?? -1)
-				: -1;
-			const state =
-				!g || at < 0
-					? null
-					: applied >= 0 && at >= applied && g.sync === 'Synced'
-						? { tone: 'ok' as const, text: 'Live' }
-						: opStands(g)
-							? { tone: 'danger' as const, text: 'Refused' }
-							: { tone: 'info' as const, text: 'Applying' };
-			return { t, state };
+			const hash = commits?.find((c) => c.prNumber === t.prNumber)?.hash;
+			const m = hash
+				? mergeState(
+						g,
+						hash,
+						commits!.map((c) => c.hash),
+					).kind
+				: 'merged';
+			return { t, state: m === 'merged' ? null : STATE[m] };
 		}),
 	);
 

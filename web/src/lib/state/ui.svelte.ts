@@ -68,6 +68,7 @@ export type AppModal =
 			name: string;
 			sourceFile: string;
 			yaml: string;
+			baseBlob?: string; // the version yaml was read at; a stale edit is refused
 			reason?: string;
 	  }
 	| { kind: 'staged'; vm: VMRef } // the per-VM staged-changes modal (from a Staged badge)

@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { toastStageResult } from '#lib/actions.js';
 	import { api, type VM } from '#lib/api.js';
 	import { inventory } from '#lib/state/inventory.svelte.js';
 	import { TBODY, TH, TH_LAST, THEAD, THEAD_TR } from '#lib/table.js';
@@ -55,6 +56,7 @@
 		? `Stages ${moves.map((m) => `${m.name} → ${m.storageClass}`).join(', ')}`
 		: ''}
 	onsubmit={stage}
+	onresult={(v) => toastStageResult(v, vm)}
 	{onclose}
 >
 	<p class="text-xs text-ink-muted">

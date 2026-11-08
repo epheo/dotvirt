@@ -1,7 +1,8 @@
 <script lang="ts">
 	import { goto } from '$app/navigation';
 	import { page } from '$app/state';
-	import { api, Unauthorized, vmKey, vmRef, type VM } from '#lib/api.js';
+	import { isStaged, toastStageResult } from '#lib/actions.js';
+	import { api, Unauthorized, vmKey, vmRef, type DraftView, type VM } from '#lib/api.js';
 	import { bulkOutcome } from '#lib/bulk.js';
 	import { vmNetworkKeys, vmStorageKeys, type Scope } from '#lib/lenses.js';
 	import { containerTabs, vmHref, type Section } from '#lib/nav.js';
@@ -151,10 +152,11 @@
 	}
 
 	// Run one staging call per VM in parallel, tallying outcomes. `skip` filters
-	// no-ops client-side; a per-VM failure never aborts the batch.
+	// no-ops client-side; a per-VM failure never aborts the batch. The tally
+	// reads each answer: a stage that left its VM matching git staged nothing.
 	function runBulk(
 		vms: VM[],
-		stage: (vm: VM) => Promise<unknown>,
+		stage: (vm: VM) => Promise<DraftView>,
 		skip: (vm: VM) => boolean,
 		verb: string,
 	) {
@@ -167,9 +169,18 @@
 				(r) => r.status === 'rejected' && r.reason instanceof Unauthorized,
 			) as PromiseRejectedResult | undefined;
 			if (denied) throw denied.reason;
-			const { keep, staged, failed, msg } = bulkOutcome(verb, vms.length, actionable, results);
+			const { keep, staged, failed, msg } = bulkOutcome(
+				verb,
+				vms.length,
+				actionable,
+				results,
+				(view, i) => isStaged(view as DraftView, actionable[i]),
+			);
 			picked = keep;
-			if (staged > 0) ui.toastStaged(msg, { kind: failed ? 'error' : 'success' });
+			// One VM reads like its own page's button.
+			if (vms.length === 1 && results[0]?.status === 'fulfilled')
+				toastStageResult(results[0].value, actionable[0], msg);
+			else if (staged > 0) ui.toastStaged(msg, { kind: failed ? 'error' : 'success' });
 			else ui.showToast(msg, { kind: failed ? 'error' : 'success' });
 		});
 	}
@@ -178,8 +189,10 @@
 		runBulk(
 			pickedVMs,
 			(vm) => api.stageEdit(vm.namespace, vm.name, { sourceFile: vm.sourceFile, power: target }),
-			// Already in target state, or not in git (cluster-only) -> no-op.
-			(vm) => vm.power === target || !vm.sourceFile,
+			// Already headed there (a staged power change counts), or not in git
+			// (cluster-only): nothing to stage.
+			(vm) =>
+				(drafts.stagedByKey.get(vmKey(vm))?.edit?.power ?? vm.power) === target || !vm.sourceFile,
 			`Powered ${target.toLowerCase()}: staged`,
 		);
 	}

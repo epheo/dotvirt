@@ -1679,7 +1679,8 @@ export interface ProjectNamespace {
   /**
    * CanAuthor is the caller's update right on VMs here: the gate every
    * stage, propose and revert route enforces, so the UI hides what would 403.
-   * Nil when the review failed this frame: unknown, so the UI keeps offering.
+   * Nil when the review failed this frame: unknown, and the UI fails closed,
+   * offering nothing and saying the access could not be checked.
    */
   canAuthor?: boolean;
 }

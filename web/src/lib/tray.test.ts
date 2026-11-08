@@ -57,6 +57,24 @@ describe('trayLanes', () => {
 		expect(lanes({ followed: [merged] })).toEqual(['merged']);
 	});
 
+	it('calls a merge live once a later merge on top of it is what Argo runs', () => {
+		const newer = 'ffee99887766' + '0'.repeat(28);
+		const history = [newer, 'abc1234def', 'base0000'];
+		const at = (g: ProjectSync, commits?: string[]) =>
+			trayLanes({
+				drafts: [],
+				proposals: [],
+				followed: [merged],
+				sync: () => g,
+				commits: () => commits,
+			}).map((l) => l.kind);
+		expect(at({ sync: 'Synced', revision: 'ffee998' }, history)).toEqual(['live']);
+		// Without history the order is unknown: still applying, never a guess.
+		expect(at({ sync: 'Synced', revision: 'ffee998' })).toEqual(['applying']);
+		// A revision older than the merge does not hold it.
+		expect(at({ sync: 'Synced', revision: 'base000' }, history)).toEqual(['applying']);
+	});
+
 	it('marks an applying merge picked up once Argo runs its commit', () => {
 		const at = (g: ProjectSync) =>
 			trayLanes({ drafts: [], proposals: [], followed: [merged], sync: () => g }).map((l) =>

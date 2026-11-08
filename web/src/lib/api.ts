@@ -254,10 +254,25 @@ export class HttpError extends Error {
 	constructor(
 		message: string,
 		readonly status: number,
+		// The request that failed: in detail, for logs and tests, never in the
+		// message people read.
+		readonly path = '',
 	) {
 		super(message);
 		this.name = 'HttpError';
 	}
+
+	get detail(): string {
+		return `${this.path}: ${this.status} ${this.message}`;
+	}
+}
+
+// What a failed answer says to people: the server's own message, or the
+// status when it sent none (or a proxy's HTML error page).
+async function failure(path: string, res: Response): Promise<HttpError> {
+	const html = (res.headers.get('Content-Type') ?? '').includes('text/html');
+	const text = html ? '' : (await res.text()).trim();
+	return new HttpError(text || `${res.status} ${res.statusText}`.trim(), res.status, path);
 }
 
 // The one signed-out sink: every 401 funnels through req(), so the page
@@ -275,8 +290,9 @@ async function req<T>(path: string, init?: RequestInit): Promise<T> {
 		unauthorizedSink?.();
 		throw new Unauthorized();
 	}
-	if (!res.ok) throw new HttpError(`${path}: ${res.status} ${await res.text()}`, res.status);
-	if (res.status === 204) return undefined as T;
+	if (!res.ok) throw await failure(path, res);
+	// No content, by status or by length: a 2xx without a body is still a yes.
+	if (res.status === 204 || res.headers.get('Content-Length') === '0') return undefined as T;
 	return res.json() as Promise<T>;
 }
 
@@ -627,14 +643,29 @@ export function retryDelay(retry: number): number {
 // tries) before rejecting with the last error. For the once-per-session
 // catalog pulls, whose only fetch would otherwise leave the whole session on
 // placeholders after a transient boot error. A 401 is never retried: it
-// signs out centrally.
-export async function withRetry<T>(fn: () => Promise<T>, retries = 5): Promise<T> {
+// signs out centrally. signal is the owner's lifetime: once it aborts, no
+// further try runs and the last error rejects at once.
+export async function withRetry<T>(
+	fn: () => Promise<T>,
+	{ retries = 5, signal }: { retries?: number; signal?: AbortSignal } = {},
+): Promise<T> {
 	for (let attempt = 0; ; attempt++) {
 		try {
 			return await fn();
 		} catch (e) {
-			if (attempt >= retries || e instanceof Unauthorized) throw e;
-			await new Promise((r) => setTimeout(r, 2 ** attempt * 1000));
+			if (attempt >= retries || e instanceof Unauthorized || signal?.aborted) throw e;
+			await new Promise<void>((wake) => {
+				const t = setTimeout(wake, 2 ** attempt * 1000);
+				signal?.addEventListener(
+					'abort',
+					() => {
+						clearTimeout(t);
+						wake();
+					},
+					{ once: true },
+				);
+			});
+			if (signal?.aborted) throw e;
 		}
 	}
 }

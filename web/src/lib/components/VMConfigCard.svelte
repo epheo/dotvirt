@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { ArrowRight, Check, GitBranch, Minus, Pencil, Plus, Undo2 } from '@lucide/svelte';
 	import { api, vmKey, type Change, type DraftItem, type VM } from '#lib/api.js';
+	import { authorBlock } from '#lib/authoring.js';
 	import { friendlyError, quantity, quantityBytes } from '#lib/format.js';
 	import { memoryHint } from '#lib/headroom.js';
 	import {
@@ -18,6 +19,7 @@
 	import { inventory } from '#lib/state/inventory.svelte.js';
 	import { ui } from '#lib/state/ui.svelte.js';
 	import Button from './Button.svelte';
+	import ErrorNote from './ErrorNote.svelte';
 	import InfoCard from './InfoCard.svelte';
 
 	// Desired against actual, field by field: what git main declares, what runs,
@@ -285,7 +287,7 @@
 					{@const drift = driftChanges?.filter((c) => owns(r, c)) ?? []}
 					{@const block = r.inline
 						? inlineBlock(vm, r.inline.field, stagedItem) ||
-							(canAuthor ? '' : 'Read-only: you may not edit VMs here')
+							authorBlock(inventory.authoring(vm.namespace))
 						: ''}
 					<tr class="align-top {editing === r.key ? 'bg-select-soft' : ''}">
 						<td class="py-2 pr-3 pl-card text-ink-soft">{r.label}</td>
@@ -366,7 +368,7 @@
 								{#if err}
 									<p class="mt-1 text-xs text-danger-ink">{err}</p>
 								{:else if preview.error}
-									<p class="mt-1 text-xs text-danger-ink">{preview.error}</p>
+									<ErrorNote error={preview.error} class="mt-1" />
 								{:else if cq}
 									<p class="mt-1 text-xs {cq.tone === 'warn' ? 'text-warn-ink' : 'text-ok-ink'}">
 										{cq.text}
@@ -377,7 +379,7 @@
 										{fitHint.text}
 									</p>
 								{/if}
-								{#if stageOp.error}<p class="mt-1 text-xs text-danger-ink">{stageOp.error}</p>{/if}
+								<ErrorNote error={stageOp.error} class="mt-1" />
 							{:else if staged.length}
 								<div class="flex flex-wrap items-center gap-x-2 gap-y-1">
 									{#each staged as c (c.field)}
@@ -472,4 +474,6 @@
 			</tbody>
 		</table>
 	</div>
+	<!-- An Unstage runs with no editor open: its refusal shows here. -->
+	{#if !editing}<ErrorNote error={stageOp.error} class="m-3" />{/if}
 </InfoCard>

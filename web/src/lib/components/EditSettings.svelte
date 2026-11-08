@@ -1,6 +1,13 @@
 <script lang="ts">
+	import { toastStageResult } from '#lib/actions.js';
 	import { api, type Network, type VM } from '#lib/api.js';
-	import { buildEditRequest, seedEditForm, summarize, type EditSection } from '#lib/editform.js';
+	import {
+		buildEditRequest,
+		diskErrors,
+		seedEditForm,
+		summarize,
+		type EditSection,
+	} from '#lib/editform.js';
 	import { quantityBytes } from '#lib/format.js';
 	import { attachableNetworks } from '#lib/networks.js';
 	import { nodeTargets } from '#lib/state/hosts.svelte.js';
@@ -87,6 +94,7 @@
 	// combination that would silently drop the sizing change) or below the
 	// preference's minimums (the cluster would refuse the merged PR). Other states
 	// are "optional" (no marker) since every edit field is optional.
+	const storageValid = $derived(diskErrors(form).length ? false : undefined);
 	const computeValid = $derived(
 		(form.mode === 'custom' && !(form.cpuCores && form.memory)) || prefViolation
 			? false
@@ -137,14 +145,15 @@
 	steps={[
 		{ title: 'Compute', valid: computeValid, body: stepCompute },
 		{ title: 'Scheduling', body: stepScheduling },
-		{ title: 'Storage', body: stepStorage },
+		{ title: 'Storage', valid: storageValid, body: stepStorage },
 		{ title: 'Networks', body: stepNetworks },
 		{ title: 'Labels', body: stepLabels },
 		{ title: 'Ready to complete', body: review },
 	]}
-	canFinish={dirty && !prefViolation}
+	canFinish={dirty && !prefViolation && storageValid !== false}
 	finishLabel="Stage change"
 	footerHint="Staged into Changes; review and open a PR there."
 	onsubmit={stage}
+	onresult={(v) => toastStageResult(v, vm)}
 	{onclose}
 />

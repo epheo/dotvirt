@@ -10,7 +10,7 @@ const api = vi.hoisted(() => {
 			super(m);
 		}
 	}
-	return { api: { me: vi.fn() }, Unauthorized, HttpError, retryDelay: () => 1000 };
+	return { api: { me: vi.fn(), logout: vi.fn() }, Unauthorized, HttpError, retryDelay: () => 1000 };
 });
 vi.mock('#lib/api.js', () => api);
 
@@ -56,5 +56,44 @@ describe('session.check', () => {
 		expect(session.user).toBeNull();
 		expect(session.checking).toBe(false);
 		expect(session.bootError).toBeNull();
+	});
+});
+
+describe('session.logout', () => {
+	const signedIn = () => (session.user = { username: 'ada', groups: [] });
+
+	it('keeps the session when sign-out fails, says so, and a Retry finishes it', async () => {
+		signedIn();
+		let answer!: () => void;
+		api.api.logout
+			.mockRejectedValueOnce(new api.HttpError('forge down', 503))
+			.mockReturnValueOnce(new Promise<void>((r) => (answer = r)));
+		await session.logout();
+		expect(session.user?.username).toBe('ada');
+		expect(session.logoutError).toBe('Sign-out did not complete. Your session is still active.');
+		expect(session.signingOut).toBe(false);
+
+		const retry = session.logout();
+		expect(session.signingOut).toBe(true);
+		answer();
+		await retry;
+		expect(session.user).toBeNull();
+		expect(session.logoutError).toBe('');
+	});
+
+	it('keeps the session when the request never reached the server', async () => {
+		signedIn();
+		api.api.logout.mockRejectedValueOnce(new TypeError('Failed to fetch'));
+		await session.logout();
+		expect(session.user?.username).toBe('ada');
+		expect(session.logoutError).not.toBe('');
+	});
+
+	it('reads a 401 as already signed out', async () => {
+		signedIn();
+		api.api.logout.mockRejectedValueOnce(new api.Unauthorized());
+		await session.logout();
+		expect(session.user).toBeNull();
+		expect(session.logoutError).toBe('');
 	});
 });

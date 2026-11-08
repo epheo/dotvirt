@@ -15,7 +15,8 @@
 				{:else if t.kind === 'error'}<CircleAlert size={15} class="shrink-0 text-red-400" />
 				{:else if t.kind === 'warning'}<TriangleAlert size={15} class="shrink-0 text-amber-400" />
 				{:else}<Info size={15} class="shrink-0 text-side-dim" />{/if}
-				{t.msg}
+				<!-- A server error may list one bad field per line. -->
+				<span class="whitespace-pre-line">{t.msg}</span>
 				{#if t.action}
 					{@const action = t.action}
 					<button

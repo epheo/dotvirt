@@ -1287,7 +1287,7 @@ function largeScenario() {
 					}),
 				);
 			}
-			nss.push({ namespace, vms });
+			nss.push({ namespace, canAuthor: true, vms });
 		}
 		projects.push({
 			name: `tenant-${p}`,
@@ -1371,6 +1371,19 @@ function tenantView(sc, project) {
 	};
 }
 
+// ── access: the two closed authoring verdicts ──────────────────────────────────
+// web-prod carries no verdict (the review failed this frame), db-prod an
+// explicit no. Both offer nothing; only the first says the check failed.
+function accessScenario() {
+	const inv = structuredClone(base.inventory);
+	for (const p of inv.projects)
+		for (const n of p.namespaces) {
+			if (n.namespace === 'web-prod') delete n.canAuthor;
+			if (n.namespace === 'db-prod') n.canAuthor = false;
+		}
+	return { ...base, name: 'access', inventory: inv };
+}
+
 export const scenarios = {
 	residue,
 	sso,
@@ -1380,6 +1393,7 @@ export const scenarios = {
 	degraded,
 	drift,
 	large: largeScenario(),
+	access: accessScenario(),
 	// A full platform at the boards' numbers (2,846 VMs, 131 networks, 3,412
 	// disks); see scale.mjs.
 	scale: withScaleNetworking(scaleScenario(base)),

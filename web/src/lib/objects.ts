@@ -141,6 +141,7 @@ export async function openEdit(ref: ObjectRef) {
 		...ref,
 		sourceFile: read.sourceFile,
 		yaml: read.manifest,
+		baseBlob: read.baseBlob,
 		reason: read.reason ?? 'the form holds one selector and one port per rule',
 	};
 }

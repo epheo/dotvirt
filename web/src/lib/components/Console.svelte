@@ -17,9 +17,8 @@
 	// console ends; noVNC's disconnect event does not carry the code.
 	const SESSION_ENDED = 1008;
 
-	// noVNC also takes an unopened WebSocket in place of a URL (src/novnc.d.ts
-	// declares only the URL form); owning the socket is what exposes the code.
-	type RFBOnSocket = new (target: HTMLElement, socket: WebSocket) => RFB;
+	// The viewer is handed an unopened WebSocket rather than a URL: owning the
+	// socket is what exposes its close code.
 
 	function wsURL(v: VM) {
 		const proto = location.protocol === 'https:' ? 'wss' : 'ws';
@@ -52,7 +51,7 @@
 				const socket = new WebSocket(socketURL);
 				// Registered before noVNC attaches its own handler, so it runs first.
 				socket.addEventListener('close', (e) => (ended = e.code === SESSION_ENDED));
-				rfb = new (Viewer as unknown as RFBOnSocket)(target, socket);
+				rfb = new Viewer(target, socket);
 				rfb.scaleViewport = true;
 				rfb.background = '#151515';
 

@@ -2,6 +2,7 @@
 	import { Search } from '@lucide/svelte';
 	import { api, Unauthorized, vmKey, type Network } from '#lib/api.js';
 	import { bulkOutcome } from '#lib/bulk.js';
+	import { networkAdds } from '#lib/devices.js';
 	import { attachRef, networkKey } from '#lib/networks.js';
 	import { action } from '#lib/resource.svelte.js';
 	import { inventory } from '#lib/state/inventory.svelte.js';
@@ -49,7 +50,10 @@
 				vms.map((v) =>
 					api.stageEdit(v.namespace, v.name, {
 						sourceFile: v.sourceFile,
-						addNetworks: [{ name: attachRef(net) }],
+						addNetworks: networkAdds(
+							[attachRef(net)],
+							(v.networks ?? []).filter((n) => !n.implicit).map((n) => n.name),
+						),
 					}),
 				),
 			);

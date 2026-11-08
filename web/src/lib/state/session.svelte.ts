@@ -11,6 +11,11 @@ class Session {
 	// The boot probe's last non-401 failure while it keeps retrying. answered
 	// tells a server error (it replied) from no response at all.
 	bootError = $state<{ answered: boolean; detail: string } | null>(null);
+	// A sign-out the server did not confirm, and one in flight. The session
+	// stays: on a shared browser a login screen over a live cookie would let
+	// the next person reload straight back in.
+	logoutError = $state('');
+	signingOut = $state(false);
 	#wake: (() => void) | null = null;
 
 	// Only a 401 means "sign in": anything else (backend restarting, network
@@ -46,13 +51,22 @@ class Session {
 		this.#wake?.();
 	}
 
+	// Only the server's yes signs out here. A 401 means it already ended the
+	// session (the api layer's sink signs out too); any other failure, network
+	// included, keeps the session and says so.
 	async logout() {
+		if (this.signingOut) return;
+		this.signingOut = true;
+		this.logoutError = '';
 		try {
 			await api.logout();
-		} catch {
-			/* ignore */
+			this.user = null;
+		} catch (e) {
+			if (e instanceof Unauthorized) this.user = null;
+			else this.logoutError = 'Sign-out did not complete. Your session is still active.';
+		} finally {
+			this.signingOut = false;
 		}
-		this.user = null;
 	}
 }
 

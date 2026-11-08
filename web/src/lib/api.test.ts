@@ -1,6 +1,8 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
+	api,
 	draftsByProject,
+	HttpError,
 	retryDelay,
 	streamInventory,
 	Unauthorized,
@@ -48,7 +50,7 @@ describe('withRetry', () => {
 		vi.useFakeTimers();
 		try {
 			const fn = vi.fn(() => Promise.reject(new Error('down')));
-			const p = withRetry(fn, 2);
+			const p = withRetry(fn, { retries: 2 });
 			p.catch(() => {}); // the assertion below attaches after the timers run
 			await vi.advanceTimersByTimeAsync(3000);
 			expect(fn).toHaveBeenCalledTimes(3);
@@ -58,10 +60,89 @@ describe('withRetry', () => {
 		}
 	});
 
+	it('stops retrying once its owner is gone', async () => {
+		vi.useFakeTimers();
+		try {
+			const owner = new AbortController();
+			const fn = vi.fn(() => Promise.reject(new Error('down')));
+			const p = withRetry(fn, { signal: owner.signal });
+			p.catch(() => {});
+			await vi.advanceTimersByTimeAsync(0);
+			expect(fn).toHaveBeenCalledTimes(1);
+			owner.abort();
+			await vi.advanceTimersByTimeAsync(60_000);
+			expect(fn).toHaveBeenCalledTimes(1);
+			await expect(p).rejects.toThrow('down');
+		} finally {
+			vi.useRealTimers();
+		}
+	});
+
+	it('tries once when asked for no retries', async () => {
+		const fn = vi.fn(() => Promise.reject(new Error('down')));
+		await expect(withRetry(fn, { retries: 0 })).rejects.toThrow('down');
+		expect(fn).toHaveBeenCalledTimes(1);
+	});
+
 	it('never retries a 401', async () => {
 		const fn = vi.fn(() => Promise.reject(new Unauthorized()));
 		await expect(withRetry(fn)).rejects.toBeInstanceOf(Unauthorized);
 		expect(fn).toHaveBeenCalledTimes(1);
+	});
+});
+
+describe('HttpError', () => {
+	const answer = (r: Response) =>
+		vi.stubGlobal(
+			'fetch',
+			vi.fn(() => Promise.resolve(r)),
+		);
+	const caught = (p: Promise<unknown>) =>
+		p.then(
+			() => null,
+			(e: unknown) => e as HttpError,
+		);
+
+	it("shows people the server's message and keeps the path and status for logs", async () => {
+		answer(new Response('project has no usable repo\n', { status: 503 }));
+		try {
+			const e = await caught(api.tasks());
+			expect(e).toBeInstanceOf(HttpError);
+			expect(e!.message).toBe('project has no usable repo');
+			expect(e!.status).toBe(503);
+			expect(e!.path).toBe('/api/tasks');
+			expect(e!.detail).toBe('/api/tasks: 503 project has no usable repo');
+		} finally {
+			vi.unstubAllGlobals();
+		}
+	});
+
+	it('takes a 2xx without a body as a yes', async () => {
+		answer(new Response(null, { status: 200, headers: { 'Content-Length': '0' } }));
+		try {
+			await expect(api.logout()).resolves.toBeUndefined();
+			answer(new Response(null, { status: 204 }));
+			await expect(api.logout()).resolves.toBeUndefined();
+		} finally {
+			vi.unstubAllGlobals();
+		}
+	});
+
+	it('says the status when the answer has no message of its own', async () => {
+		answer(new Response('', { status: 502, statusText: 'Bad Gateway' }));
+		try {
+			expect((await caught(api.tasks()))!.message).toBe('502 Bad Gateway');
+			answer(
+				new Response('<html><body>nginx</body></html>', {
+					status: 504,
+					statusText: 'Gateway Timeout',
+					headers: { 'Content-Type': 'text/html' },
+				}),
+			);
+			expect((await caught(api.tasks()))!.message).toBe('504 Gateway Timeout');
+		} finally {
+			vi.unstubAllGlobals();
+		}
 	});
 });
 
@@ -82,9 +163,7 @@ describe('draftsByProject', () => {
 		try {
 			const out = await draftsByProject(['web', 'empty', 'platform', 'db']);
 			expect(out.drafts.map((d) => d.project)).toEqual(['web']);
-			expect(out.failed).toEqual([
-				{ project: 'db', error: '/api/draft?project=db: 503 forge unavailable' },
-			]);
+			expect(out.failed).toEqual([{ project: 'db', error: 'forge unavailable' }]);
 		} finally {
 			vi.unstubAllGlobals();
 		}

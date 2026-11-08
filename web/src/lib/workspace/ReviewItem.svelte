@@ -18,6 +18,7 @@
 	import ErrorNote from '#lib/components/ErrorNote.svelte';
 	import GitOpsStepper from '#lib/components/GitOpsStepper.svelte';
 	import ManifestDiff from '#lib/components/ManifestDiff.svelte';
+	import PruneAck from '#lib/components/PruneAck.svelte';
 	import TextArea from '#lib/components/TextArea.svelte';
 	import TextInput from '#lib/components/TextInput.svelte';
 	import ReviewPane from './ReviewPane.svelte';
@@ -76,14 +77,20 @@
 	// staging callback, another tab's merge) and would wipe a title mid-typing.
 	let title = $state('');
 	let message = $state('');
+	// Merging this draft may let the sync delete live objects: the same
+	// explicit yes the review sheet asks for, reset with the project.
+	let ack = $state(false);
+	const prune = $derived(lane?.prune ?? []);
+	const blocked = $derived(prune.length > 0 && !ack);
 	$effect(() => {
 		project;
 		title = '';
 		message = '';
+		ack = false;
 	});
 	const proposeOp = action();
 	async function propose() {
-		if (proposeOp.busy) return;
+		if (proposeOp.busy || blocked) return;
 		unstageOp.clear();
 		await proposeOp.run(async () => {
 			const r = await api.propose(project, title, message);
@@ -162,6 +169,7 @@
 	{/if}
 
 	{#snippet footer()}
+		{#if prune.length}<div class="mb-2 text-xs"><PruneAck {prune} bind:ack /></div>{/if}
 		<ErrorNote error={proposeOp.error || unstageOp.error} class="mb-2" />
 		<div class="mb-2 flex items-center gap-3">
 			<GitOpsStepper stage="staged" />
@@ -178,10 +186,13 @@
 				aria-label="Pull request title"
 				class="flex-1"
 			/>
-			<Button onclick={propose} disabled={proposeOp.busy}>
+			<Button onclick={propose} disabled={proposeOp.busy || blocked}>
 				{proposeOp.busy ? 'Proposing…' : 'Propose pull request'}
 			</Button>
 		</div>
+		{#if blocked}<p class="mt-1 text-right text-xs text-danger-ink">
+				Tick the deletion box to continue
+			</p>{/if}
 		<TextArea
 			bind:value={message}
 			suggest={lane?.defaultBody}

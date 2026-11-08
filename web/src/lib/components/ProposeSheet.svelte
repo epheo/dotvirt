@@ -8,7 +8,7 @@
 		Trash2,
 		TriangleAlert,
 	} from '@lucide/svelte';
-	import { api, type DraftItem } from '#lib/api.js';
+	import { api, HttpError, type DraftItem } from '#lib/api.js';
 	import { memoryHint } from '#lib/headroom.js';
 	import { action } from '#lib/resource.svelte.js';
 	import { drafts } from '#lib/state/drafts.svelte.js';
@@ -22,6 +22,7 @@
 	import ChangeList from './ChangeList.svelte';
 	import ErrorNote from './ErrorNote.svelte';
 	import Modal from './Modal.svelte';
+	import PruneAck from './PruneAck.svelte';
 	import TextArea from './TextArea.svelte';
 	import TextInput from './TextInput.svelte';
 
@@ -147,13 +148,20 @@
 	}
 
 	const op = action();
+	// The refused answer's status: what the server's sentence asks of the reader.
+	let refusedStatus = $state(0);
 	async function propose() {
 		if (op.busy || (prune.length && !ack)) return;
 		// Read before the refresh empties the lane.
 		const declared = changeSummary(lane?.items ?? []);
 		const prTitle = title.trim() || (openPR ? openPR.title : lane?.defaultTitle) || '';
 		const ok = await op.run(async () => {
-			const r = await api.propose(project, title.trim(), editingText ? message : '');
+			const r = await api
+				.propose(project, title.trim(), editingText ? message : '')
+				.catch((e: unknown) => {
+					refusedStatus = e instanceof HttpError ? e.status : 0;
+					throw e;
+				});
 			if (r.prNumber)
 				tray.remember({
 					project,
@@ -170,18 +178,16 @@
 	}
 
 	// A refused propose, said where the button is: the server's sentence
-	// names the way forward, and a PR it names is one click away. The
-	// transport prefix and the error kind are not for the reader.
+	// names the way forward, and a PR it names is one click away. The error
+	// kind is not for the reader.
 	const refused = $derived.by(() => {
-		const m = /^\S+: (\d{3}) (.*)$/s.exec(op.error);
-		if (!m) return op.error ? { status: 0, text: op.error, pr: undefined } : null;
-		const text = m[2].replace(
-			/^(conflict|temporarily unavailable|invalid request|not found|forbidden): /,
-			'',
-		);
+		if (!op.error) return null;
+		const text = op.error
+			.trim()
+			.replace(/^(conflict|temporarily unavailable|invalid request|not found|forbidden): /, '');
 		const n = Number(/#(\d+)/.exec(text)?.[1]);
 		return {
-			status: Number(m[1]),
+			status: refusedStatus,
 			text,
 			pr: inventory.proposals.find((p) => p.project === project && p.prNumber === n),
 		};
@@ -292,34 +298,7 @@
 					<h3 class="text-xs font-semibold tracking-wide text-ink-muted uppercase">
 						Also in this merge
 					</h3>
-					<div class="space-y-2 rounded border border-danger/40 bg-danger-soft px-3 py-2.5">
-						<p class="flex items-start gap-2 text-danger-ink">
-							<TriangleAlert size={14} class="mt-0.5 shrink-0" />
-							<span
-								><strong
-									>The sync deletes {prune.length} object{prune.length === 1 ? '' : 's'} from the cluster.</strong
-								>
-								Git main no longer declares {prune.length === 1 ? 'it' : 'them'}.</span
-							>
-						</p>
-						<ul class="space-y-0.5 pl-6 font-mono text-xs text-ink">
-							{#each prune as r (r.kind + r.namespace + r.name)}
-								<li>
-									{r.namespace ? `${r.namespace}/` : ''}{r.name}
-									<span class="text-ink-muted">{r.kind}</span>
-								</li>
-							{/each}
-						</ul>
-						<div class="flex flex-wrap items-center gap-x-4 gap-y-1 pl-6">
-							<label class="flex items-center gap-2 font-medium text-ink">
-								<input type="checkbox" bind:checked={ack} />
-								Delete {prune.length === 1 ? 'it' : `these ${prune.length}`} when this merges
-							</label>
-							<span class="text-xs text-ink-soft"
-								>Not meant to go? Adopt {prune.length === 1 ? 'it' : 'them'} into git first, from Issues.</span
-							>
-						</div>
-					</div>
+					<PruneAck {prune} bind:ack />
 				</section>
 			{:else if lane.warning}
 				<p class="rounded border border-warn/50 bg-warn-soft px-3 py-2 text-warn-ink">
