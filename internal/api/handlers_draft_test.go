@@ -51,6 +51,8 @@ func (d *stagingDraft) Get(id auth.Identity, proj project.ProjectInfo) (model.Dr
 	return model.DraftView{Base: "main"}, nil
 }
 
+func (d *stagingDraft) Holds(auth.Identity, project.ProjectInfo) (bool, error) { return false, nil }
+
 func (d *stagingDraft) DeclaredKinds(project.ProjectInfo) ([]schema.GroupKind, error) {
 	return nil, nil
 }

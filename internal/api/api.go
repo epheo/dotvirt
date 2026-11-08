@@ -109,6 +109,9 @@ type Draft interface {
 	StageUpdateManifest(id auth.Identity, proj project.ProjectInfo, resource, namespace, name string, req model.UpdateManifestRequest) (model.DraftView, error)
 	Unstage(id auth.Identity, proj project.ProjectInfo, resource, namespace, name string) error
 	Get(id auth.Identity, proj project.ProjectInfo) (model.DraftView, error)
+	// Holds reports whether id's draft of proj holds an entry, without
+	// rendering it.
+	Holds(id auth.Identity, proj project.ProjectInfo) (bool, error)
 	Discard(id auth.Identity, proj project.ProjectInfo) error
 	Propose(id auth.Identity, proj project.ProjectInfo, req model.ProposeRequest) (model.ProposeResult, error)
 	Adopt(id auth.Identity, proj project.ProjectInfo, namespace, name string) (model.DraftView, error)

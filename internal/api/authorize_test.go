@@ -129,6 +129,7 @@ func (d *reachedDraft) Get(auth.Identity, project.ProjectInfo) (model.DraftView,
 	v.Items = d.items
 	return v, nil
 }
+func (d *reachedDraft) Holds(auth.Identity, project.ProjectInfo) (bool, error) { return false, nil }
 func (d *reachedDraft) Commit(project.ProjectInfo, string) (model.CommitDetail, error) {
 	return model.CommitDetail{Items: d.items}, nil
 }

@@ -21,6 +21,12 @@ func (c *Coordinator) Get(id auth.Identity, proj project.ProjectInfo) (model.Dra
 	return c.render(id, proj, entries)
 }
 
+// Holds reports whether id's draft of proj holds an entry.
+func (c *Coordinator) Holds(id auth.Identity, proj project.ProjectInfo) (bool, error) {
+	entries, err := c.store.List(id.Username, proj.Name)
+	return len(entries) > 0, err
+}
+
 // render is entries as the draft view renders them against the base branch.
 func (c *Coordinator) render(id auth.Identity, proj project.ProjectInfo, entries []draft.Entry) (model.DraftView, error) {
 	view := model.DraftView{Base: c.baseBranch, Branch: c.proposedBranch(id.Username, proj.Name), Count: len(entries), Items: []model.DraftItem{}}
