@@ -210,6 +210,27 @@ type DraftView struct {
 	DefaultBody  string `json:"defaultBody,omitempty"`
 }
 
+// DraftsView is every draft of the caller's that the per-project draft route
+// would answer, holding an entry or carrying a warning, and every one whose
+// render failed.
+type DraftsView struct {
+	Drafts []ProjectDraft `json:"drafts"`
+	Failed []ProjectError `json:"failed"`
+}
+
+// ProjectDraft is one project's draft.
+type ProjectDraft struct {
+	Project string    `json:"project"`
+	Draft   DraftView `json:"draft"`
+}
+
+// ProjectError is why one project's draft could not be read, worded for the
+// caller.
+type ProjectError struct {
+	Project string `json:"project"`
+	Error   string `json:"error"`
+}
+
 // StagePreview is what a create form would stage, rendered by the staging
 // path itself but never recorded: the files its pull request would carry.
 // Answered by a create route called with ?dryRun=true.
