@@ -28,7 +28,6 @@ import (
 	"github.com/epheo/dotvirt/internal/eventbus"
 	"github.com/epheo/dotvirt/internal/model"
 	"github.com/epheo/dotvirt/internal/project"
-	"github.com/epheo/dotvirt/internal/restfactory"
 )
 
 // reachedDraft records which coordinator call a route reached; reaching it
@@ -190,7 +189,7 @@ func tenantServer(t *testing.T, d *reachedDraft, nss []string, visible []string)
 	if err := state.WaitForSync(wait); err != nil {
 		t.Fatalf("snapshot sync: %v", err)
 	}
-	// The seeded visible sets are stamped with rbacVersion, which the first
+	// The seeded visible sets are stamped with the RBAC levels, which the first
 	// namespace and RoleBinding relists bump after WaitForSync returns; a later
 	// bump would send visibleFor to the fake apiserver, which serves no list.
 	for bus.Version(eventbus.NamespaceChanged) == 0 || bus.Version(eventbus.RBACChanged) == 0 {
@@ -213,7 +212,7 @@ func tenantServer(t *testing.T, d *reachedDraft, nss []string, visible []string)
 		set[ns] = true
 	}
 	for _, tok := range []string{editorToken, viewerToken} {
-		s.visible.Put(restfactory.TokenKey(tok), visibleSet{ns: set, ver: s.rbacVersion()})
+		seedVisible(s, tok, set)
 	}
 	return s
 }
