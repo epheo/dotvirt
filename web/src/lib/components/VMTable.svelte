@@ -3,6 +3,7 @@
 	import { goto } from '$app/navigation';
 	import { ChevronDown, ChevronUp } from '@lucide/svelte';
 	import { vmKey, type DraftItem, type Options, type VM } from '#lib/api.js';
+	import { openEdit } from '#lib/objects.js';
 	import { adoptVM } from '#lib/actions.js';
 	import { quantity, quantityBytes } from '#lib/format.js';
 	import type { Issue } from '#lib/issues.js';
@@ -90,6 +91,7 @@
 					run: () => goto(a.href),
 				};
 			if ('modal' in a) return { label: a.label, run: () => (ui.modal = a.modal) };
+			if ('edit' in a) return { label: a.label, run: () => void openEdit(a.edit) };
 			return { label: a.label, run: () => void adoptVM(vm) };
 		}
 		if (vm.sync === 'NotTracked' && inventory.canAuthor(vm.namespace))
