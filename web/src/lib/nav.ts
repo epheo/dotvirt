@@ -69,6 +69,21 @@ export function changesHref(project?: string, namespace?: string): string {
 	return `/changes/${enc(project)}${namespace ? `/${enc(namespace)}` : ''}`;
 }
 
+// The Changes section's tabs, one job each: what waits to be proposed, what
+// waits in the forge, what already landed. Every scope (all, a project, a
+// namespace) carries all three.
+export const CHANGES_TABS = [
+	{ id: 'staged', label: 'Staged' },
+	{ id: 'review', label: 'In review' },
+	{ id: 'history', label: 'History' },
+] as const;
+export type ChangesTab = (typeof CHANGES_TABS)[number]['id'];
+
+// null when ?tab= names no Changes tab: the page then picks one from the
+// selection and from what waits.
+export const changesTab = (v: string | null): ChangesTab | null =>
+	CHANGES_TABS.find((t) => t.id === v)?.id ?? null;
+
 export const sectionRoot = (s: Section): string => `/${s}`;
 
 // The VM detail tabs: rendered by the page, validated by the route guard and
@@ -160,12 +175,13 @@ export function containerTabs(scope: Scope, section: Section): typeof CONTAINER_
 		: CONTAINER_TABS.filter((t) => t.id !== 'security');
 }
 
-// The tabs an inventory href lands on; null for anything else (catalog, changes).
+// The tabs an href lands on; null for anything else (catalog).
 function tabsAt(href: string): string[] | null {
 	const path = href.split('?')[0];
 	if (path.split('/')[1] === 'vm') return VM_TABS.map((t) => t.id);
 	const section = sectionOf(path);
-	if (!section || section === 'catalog' || section === 'changes') return null;
+	if (section === 'changes') return CHANGES_TABS.map((t) => t.id);
+	if (!section || section === 'catalog') return null;
 	const scope = scopeFromPath(path);
 	// A class drill-in is one page without tabs.
 	if (section === 'storage') return scope.kind === 'all' ? STORAGE_TABS.map((t) => t.id) : [];

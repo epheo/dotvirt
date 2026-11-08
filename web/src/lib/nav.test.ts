@@ -24,6 +24,11 @@ describe('keepTab', () => {
 		expect(keepTab('/catalog?kind=images', 'vms')).toBe('/catalog?kind=images');
 		expect(keepTab('/changes', 'vms')).toBe('/changes');
 	});
+	it('keeps a Changes tab across scopes', () => {
+		expect(keepTab('/changes/team-web', 'history')).toBe('/changes/team-web?tab=history');
+		expect(keepTab('/changes', 'review')).toBe('/changes?tab=review');
+		expect(keepTab('/changes/team-web', 'changes')).toBe('/changes/team-web');
+	});
 });
 
 describe('networkingTab', () => {
