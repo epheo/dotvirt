@@ -113,7 +113,12 @@ type State struct {
 	sa      *cluster.Client
 	specs   []reflectorSpec // reflector wiring, built in New, started in Run
 	healthy []atomic.Bool   // one reflect.TrackHealth flag per specs entry
-	signals []signalWatch   // RBAC watches gated on their grant, started in Run
+	signals []*signalWatch  // RBAC watches gated on their grant, started in Run
+
+	// The RoleBinding watch runs among specs; RBACWatched reads its sink and its
+	// health flag (healthy[rbHealth]) beside the gated ones.
+	rbSink   *rbacSignal
+	rbHealth int
 
 	// Per-store readiness: each reflector's initial LIST (first Replace) landing.
 	// Tracked per store (not a single counter) so a consumer gates on exactly the
@@ -144,10 +149,11 @@ func New(sa *cluster.Client, projectLabel string, bus *eventbus.Bus) *State {
 		// A namespace move is both a topology change (inventory) and a visibility
 		// change; NamespaceChanged is summed into both the inventory and RBAC versions.
 		{reflect.NewStore(s.nss, namespace, s.nssReady.Mark), &corev1.Namespace{}, sa.NamespaceListWatch(projectLabel)},
-		// Every operand role grants RoleBindings, so their signal watch starts with
-		// the snapshot; the other RBAC kinds wait for their grant (signals).
-		{newRBACSignal(rbac, refs, roleBindingDigest(s.inProject)), &rbacv1.RoleBinding{}, sa.RoleBindingListWatch()},
 	}
+	// Every operand role grants RoleBindings, so their signal watch starts with
+	// the snapshot; the other RBAC kinds wait for their grant (signals).
+	s.rbSink, s.rbHealth = newRBACSignal(rbac, refs, roleBindingDigest(s.inProject)), len(s.specs)
+	s.specs = append(s.specs, reflectorSpec{s.rbSink, &rbacv1.RoleBinding{}, sa.RoleBindingListWatch()})
 	s.healthy = make([]atomic.Bool, len(s.specs))
 	sources := map[schema.GroupVersionResource]*cache.ListWatch{
 		gvrRoles:               sa.RoleListWatch(),
@@ -168,22 +174,25 @@ var (
 	gvrGroups              = schema.GroupVersionResource{Group: "user.openshift.io", Version: "v1", Resource: "groups"}
 )
 
-// signalWatch is one RBAC signal watch: its source and its retain-nothing sink.
+// signalWatch is one gated RBAC signal watch: its source, its retain-nothing
+// sink, and what RBACWatched reads of it.
 type signalWatch struct {
 	gvr      schema.GroupVersionResource
 	expected any
 	lw       *cache.ListWatch
-	store    cache.Store
+	sink     *rbacSignal
+	healthy  atomic.Bool // reflect.TrackHealth's, once admitted
+	absent   atomic.Bool // the gate found the kind unserved: nothing to watch
 }
 
 // signalWatches wires the gated RBAC watches; refs is shared with the
 // RoleBinding sink, so a ClusterRole signals while any relevant binding of
 // either kind binds it.
-func (s *State) signalWatches(lw func(schema.GroupVersionResource) *cache.ListWatch, onChange func(), refs *roleRefs) []signalWatch {
-	watch := func(gvr schema.GroupVersionResource, expected any, binds *roleRefs, digest func(any) (grant, bool)) signalWatch {
-		return signalWatch{gvr, expected, lw(gvr), newRBACSignal(onChange, binds, digest)}
+func (s *State) signalWatches(lw func(schema.GroupVersionResource) *cache.ListWatch, onChange func(), refs *roleRefs) []*signalWatch {
+	watch := func(gvr schema.GroupVersionResource, expected any, binds *roleRefs, digest func(any) (grant, bool)) *signalWatch {
+		return &signalWatch{gvr: gvr, expected: expected, lw: lw(gvr), sink: newRBACSignal(onChange, binds, digest)}
 	}
-	return []signalWatch{
+	return []*signalWatch{
 		watch(gvrRoles, &rbacv1.Role{}, nil, roleDigest(s.inProject)),
 		watch(gvrClusterRoleBindings, &rbacv1.ClusterRoleBinding{}, refs, clusterRoleBindingDigest),
 		watch(gvrClusterRoles, &rbacv1.ClusterRole{}, nil, clusterRoleDigest(refs)),
@@ -212,32 +221,75 @@ func (s *State) Run(ctx context.Context) {
 	s.runSignals(ctx, listable(ctx, s.sa))
 }
 
-// runSignals starts each signal watch once has admits its kind. Their health
-// stays out of Healthy: an outage leaves visibility on its TTL backstop, while
-// everything the snapshot serves stays current.
-func (s *State) runSignals(ctx context.Context, has func(schema.GroupVersionResource) bool) {
+// runSignals starts each signal watch once gate admits its kind, re-asking on
+// the discovery pace until it does. Their health stays out of Healthy: an
+// outage only puts the authorization caches back on the short TTL
+// (RBACWatched), while everything the snapshot serves stays current.
+func (s *State) runSignals(ctx context.Context, gate func(schema.GroupVersionResource) admission) {
 	for _, w := range s.signals {
-		reflect.RunTypedWhenServed(ctx, has, w.gvr, w.lw, w.expected, w.store, new(atomic.Bool), nil)
+		has := func(gvr schema.GroupVersionResource) bool {
+			a := gate(gvr)
+			w.absent.Store(a == absent)
+			return a == admitted
+		}
+		reflect.RunTypedWhenServed(ctx, has, w.gvr, w.lw, w.expected, w.sink, &w.healthy, nil)
 	}
 }
+
+// admission is a gate's answer for one RBAC kind.
+type admission int
+
+const (
+	notYet   admission = iota // ask again later: no grant yet, or a review failed
+	absent                    // granted, and this cluster does not serve the kind
+	admitted                  // watch it
+)
 
 // listable admits a signal watch once the SA may list its kind (an operator
 // release may not grant it yet) and the cluster serves it (Groups exist only
 // on OpenShift). The review goes first: a cluster lacking the grant answers it
-// without a discovery read. A refusal re-probes on the discovery pace, one
-// review a minute per kind; a missing grant is logged once, since until it
-// lands that kind's changes reach cached authorization only through its TTL.
-func listable(ctx context.Context, sa *cluster.Client) func(schema.GroupVersionResource) bool {
+// without a discovery read. Until admitted it is asked once a minute; a
+// missing grant is logged once, since until it lands the authorization caches
+// stay on the short TTL.
+func listable(ctx context.Context, sa *cluster.Client) func(schema.GroupVersionResource) admission {
 	var warned sync.Map
-	return func(gvr schema.GroupVersionResource) bool {
+	return func(gvr schema.GroupVersionResource) admission {
 		ok, err := sa.Can(ctx, "list", gvr.Group, gvr.Resource, "")
-		if err == nil && !ok {
-			if _, dup := warned.LoadOrStore(gvr, true); !dup {
-				log.Printf("clusterstate: may not list %s; its changes reach cached authorization only through the TTL", gvr.GroupResource())
-			}
+		if err != nil {
+			return notYet
 		}
-		return err == nil && ok && sa.HasAPIResource(gvr)
+		if !ok {
+			if _, dup := warned.LoadOrStore(gvr, true); !dup {
+				log.Printf("clusterstate: may not list %s; authorization caches stay on the short TTL until it may", gvr.GroupResource())
+			}
+			return notYet
+		}
+		switch served, err := sa.ServesAPIResource(gvr); {
+		case err != nil:
+			return notYet
+		case !served:
+			return absent
+		}
+		return admitted
 	}
+}
+
+// RBACWatched reports whether every RBAC signal watch has listed and is
+// watching now; a kind this cluster does not serve counts, there being nothing
+// to miss. Only then does RBACChanged report each grant move, so only then may
+// the per-token authorization caches keep an entry for minutes. A skewed
+// operator role, a failed watch or one still listing keeps them on the short
+// TTL: a missed revocation then waits seconds, not minutes.
+func (s *State) RBACWatched() bool {
+	if s.rbSink == nil || !s.rbSink.listed.Load() || !s.healthy[s.rbHealth].Load() {
+		return false
+	}
+	for _, w := range s.signals {
+		if !w.absent.Load() && (!w.sink.listed.Load() || !w.healthy.Load()) {
+			return false
+		}
+	}
+	return true
 }
 
 // publishLive also carries health flips: the frame's stale warning reads

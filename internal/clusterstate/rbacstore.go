@@ -6,6 +6,7 @@ import (
 	"maps"
 	"strings"
 	"sync"
+	"sync/atomic"
 
 	rbacv1 "k8s.io/api/rbac/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -17,7 +18,7 @@ import (
 // It keeps a hashed key and a grant per relevant object, never the object, so
 // it publishes only when an object's grant moves, including the update or
 // delete that ends its relevance (a revocation), and a relist that changed
-// nothing stays silent. Only its reflector calls it, so it takes no lock.
+// nothing stays silent. Only its reflector writes it, so seen takes no lock.
 type rbacSignal struct {
 	// digest reads obj's grant; relevant=false is churn no caller's
 	// authorization can see. A false positive only costs a cache
@@ -26,7 +27,7 @@ type rbacSignal struct {
 	onChange func()
 	refs     *roleRefs // counts the ClusterRoles relevant objects bind; nil for kinds that bind none
 	seen     map[uint64]grant
-	listed   bool
+	listed   atomic.Bool // a list has landed; read by State.RBACWatched
 }
 
 // grant is what a signal keeps of a relevant object: a fingerprint of what
@@ -100,7 +101,7 @@ func (s *rbacSignal) Delete(obj any) error {
 // before this watch began is not covered by it.
 func (s *rbacSignal) Replace(list []any, _ string) error {
 	next := make(map[uint64]grant, len(s.seen))
-	changed := !s.listed
+	changed := !s.listed.Load()
 	for _, obj := range list {
 		key, err := cache.MetaNamespaceKeyFunc(obj)
 		if err != nil {
@@ -111,7 +112,7 @@ func (s *rbacSignal) Replace(list []any, _ string) error {
 			next[maphash.String(fingerprintSeed, key)] = g
 		}
 	}
-	s.listed = true
+	s.listed.Store(true)
 	if !changed && maps.Equal(s.seen, next) {
 		return nil
 	}

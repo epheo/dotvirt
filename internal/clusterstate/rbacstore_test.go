@@ -2,6 +2,7 @@ package clusterstate
 
 import (
 	"context"
+	"errors"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -87,7 +88,7 @@ func signalStores(t *testing.T) (map[string]cache.Store, *int) {
 	refs := newRoleRefs()
 	stores := map[string]cache.Store{"rolebindings": newRBACSignal(count, refs, roleBindingDigest(s.inProject))}
 	for _, w := range s.signalWatches(func(schema.GroupVersionResource) *cache.ListWatch { return nil }, count, refs) {
-		stores[w.gvr.Resource] = w.store
+		stores[w.gvr.Resource] = w.sink
 	}
 	return stores, n
 }
@@ -204,20 +205,29 @@ func TestClusterRoleSignalsOnlyWhileBound(t *testing.T) {
 }
 
 // fakeSource is one kind's list and watch: the list counts calls, the watch is
-// a fake the test pushes events through.
+// a fake the test pushes events through, and fail makes both refuse.
 type fakeSource struct {
 	lists atomic.Int32
+	fail  atomic.Bool
 	mu    sync.Mutex
 	w     *watch.FakeWatcher
 }
 
+var errSource = errors.New("source down")
+
 func (f *fakeSource) lw() *cache.ListWatch {
 	return &cache.ListWatch{
 		ListWithContextFunc: func(context.Context, metav1.ListOptions) (runtime.Object, error) {
+			if f.fail.Load() {
+				return nil, errSource
+			}
 			f.lists.Add(1)
 			return &unstructured.UnstructuredList{Object: map[string]any{"metadata": map[string]any{"resourceVersion": "1"}}}, nil
 		},
 		WatchFuncWithContext: func(context.Context, metav1.ListOptions) (watch.Interface, error) {
+			if f.fail.Load() {
+				return nil, errSource
+			}
 			f.mu.Lock()
 			defer f.mu.Unlock()
 			f.w = watch.NewFake()
@@ -241,9 +251,19 @@ func eventually(t *testing.T, what string, cond func() bool) {
 	}
 }
 
-// runSignalsWith starts s's gated watches over fake sources, admitting the
-// kinds served reports.
-func runSignalsWith(t *testing.T, served func(schema.GroupVersionResource) bool) (*eventbus.Bus, map[string]*fakeSource) {
+// servesAllBut is a gate admitting every kind except the one this cluster
+// does not serve.
+func servesAllBut(missing schema.GroupVersionResource) func(schema.GroupVersionResource) admission {
+	return func(gvr schema.GroupVersionResource) admission {
+		if gvr == missing {
+			return absent
+		}
+		return admitted
+	}
+}
+
+// runSignalsWith starts s's gated watches over fake sources behind gate.
+func runSignalsWith(t *testing.T, gate func(schema.GroupVersionResource) admission) (*eventbus.Bus, map[string]*fakeSource, *State) {
 	t.Helper()
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
@@ -256,8 +276,8 @@ func runSignalsWith(t *testing.T, served func(schema.GroupVersionResource) bool)
 		sources[gvr.Resource] = &fakeSource{}
 		return sources[gvr.Resource].lw()
 	}, func() { bus.Publish(eventbus.RBACChanged) }, refs)
-	s.runSignals(ctx, served)
-	return bus, sources
+	s.runSignals(ctx, gate)
+	return bus, sources, s
 }
 
 // pushPublishes drives add, update and delete through a running watch, each
@@ -279,7 +299,7 @@ func pushPublishes(t *testing.T, bus *eventbus.Bus, src *fakeSource, g [2]runtim
 // Each gated watch reaches the bus through a real reflector, and Groups start
 // only where the cluster serves them.
 func TestSignalWatchesPublishAndGateGroups(t *testing.T) {
-	bus, sources := runSignalsWith(t, func(gvr schema.GroupVersionResource) bool { return gvr != gvrGroups })
+	bus, sources, _ := runSignalsWith(t, servesAllBut(gvrGroups))
 	for resource, g := range grants() {
 		if resource == "rolebindings" || resource == "groups" {
 			continue
@@ -294,6 +314,52 @@ func TestSignalWatchesPublishAndGateGroups(t *testing.T) {
 
 // Where the cluster serves Groups, a membership change publishes.
 func TestGroupsWatchedWhenServed(t *testing.T) {
-	bus, sources := runSignalsWith(t, func(gvr schema.GroupVersionResource) bool { return gvr == gvrGroups })
+	bus, sources, _ := runSignalsWith(t, servesAllBut(schema.GroupVersionResource{}))
 	pushPublishes(t, bus, sources["groups"], grants()["groups"])
+}
+
+// The authorization caches may keep entries for minutes only while every RBAC
+// watch has listed and is watching: not while one is still listing, not while
+// one has failed, not while a kind waits for its grant. A kind the cluster
+// does not serve has nothing to miss.
+func TestRBACWatched(t *testing.T) {
+	_, sources, s := runSignalsWith(t, servesAllBut(gvrGroups))
+	s.rbSink = newRBACSignal(func() {}, nil, roleBindingDigest(s.inProject))
+	s.healthy, s.rbHealth = make([]atomic.Bool, 1), 0
+	for _, src := range sources {
+		if src != sources["groups"] {
+			eventually(t, "the watches", func() bool { return src.watcher() != nil })
+		}
+	}
+	if s.RBACWatched() {
+		t.Fatal("watched while the RoleBinding watch has not listed")
+	}
+	_ = s.rbSink.Replace(nil, "1")
+	s.healthy[0].Store(true)
+	eventually(t, "every watch running", s.RBACWatched)
+
+	roles := sources["clusterroles"]
+	roles.fail.Store(true)
+	roles.watcher().Stop()
+	eventually(t, "a failed watch to count", func() bool { return !s.RBACWatched() })
+	roles.fail.Store(false)
+	eventually(t, "the recovered watch to count", s.RBACWatched)
+
+	s.healthy[0].Store(false)
+	if s.RBACWatched() {
+		t.Error("watched while the RoleBinding watch is down")
+	}
+	s.healthy[0].Store(true)
+
+	_, _, denied := runSignalsWith(t, func(gvr schema.GroupVersionResource) admission {
+		if gvr == gvrClusterRoles {
+			return notYet
+		}
+		return admitted
+	})
+	denied.rbSink, denied.healthy, denied.rbHealth = s.rbSink, s.healthy, 0
+	time.Sleep(50 * time.Millisecond)
+	if denied.RBACWatched() {
+		t.Error("watched while a kind waits for its grant")
+	}
 }
