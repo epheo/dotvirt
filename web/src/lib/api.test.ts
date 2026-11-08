@@ -1,7 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
 	api,
-	draftsByProject,
 	HttpError,
 	retryDelay,
 	streamInventory,
@@ -140,30 +139,6 @@ describe('HttpError', () => {
 				}),
 			);
 			expect((await caught(api.tasks()))!.message).toBe('504 Gateway Timeout');
-		} finally {
-			vi.unstubAllGlobals();
-		}
-	});
-});
-
-describe('draftsByProject', () => {
-	it('reports a failed project, skips a 403, and keeps non-empty drafts', async () => {
-		const answers: Record<string, Response> = {
-			web: Response.json({ base: 'main', branch: 'd', count: 2, items: [] }),
-			empty: Response.json({ base: 'main', branch: 'd', count: 0, items: [] }),
-			platform: new Response('not authorized', { status: 403 }),
-			db: new Response('forge unavailable', { status: 503 }),
-		};
-		vi.stubGlobal(
-			'fetch',
-			vi.fn((url: string) =>
-				Promise.resolve(answers[new URL(url, 'http://x').searchParams.get('project')!]),
-			),
-		);
-		try {
-			const out = await draftsByProject(['web', 'empty', 'platform', 'db']);
-			expect(out.drafts.map((d) => d.project)).toEqual(['web']);
-			expect(out.failed).toEqual([{ project: 'db', error: 'forge unavailable' }]);
 		} finally {
 			vi.unstubAllGlobals();
 		}

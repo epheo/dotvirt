@@ -115,7 +115,6 @@ func asUser(r *http.Request, token string) *http.Request {
 func TestDraftRoutesRequireProject(t *testing.T) {
 	s := draftServer(t, &stagingDraft{})
 	for _, m := range []struct{ method, path string }{
-		{http.MethodGet, "/api/draft"},
 		{http.MethodDelete, "/api/draft"},
 		{http.MethodPost, "/api/draft/propose"},
 	} {

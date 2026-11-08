@@ -1,6 +1,5 @@
-import { draftsByProject, vmKey, type DraftItem, type DraftView } from '#lib/api.js';
-import { clusterGate } from '#lib/gates.js';
-import { inventory } from './inventory.svelte';
+import { api, Unauthorized, vmKey, type DraftItem, type DraftView } from '#lib/api.js';
+import { friendlyError } from '#lib/format.js';
 
 // The synthetic platform-tier project (matches the backend's platformProjectName);
 // holds the cluster-scoped network + namespace changeset, proposable by authors.
@@ -19,6 +18,8 @@ class DraftsStore {
 	refreshing = $state(false);
 	// Projects whose draft could not be read on the last refresh.
 	failed = $state<{ project: string; error: string }[]>([]);
+	// Why the last refresh failed as a whole; the last good summary stays.
+	error = $state('');
 
 	readonly count = $derived(this.drafts.reduce((n, d) => n + d.draft.count, 0));
 	// VMs with an unproposed staged change (this user's draft), keyed "ns/name".
@@ -36,31 +37,17 @@ class DraftsStore {
 
 	async refresh() {
 		const gen = ++this.#gen;
-		// A caller who may stage a platform change reads their own platform draft,
-		// with or without the platform tier's shared reads.
-		const names = clusterGate.platform().ok
-			? [...inventory.projectNames, PLATFORM_PROJECT]
-			: inventory.projectNames;
-		if (!names.length) {
-			// The gen bump above orphans any refresh in flight, so its finally
-			// will not clear the flag: this answer must.
-			this.refreshing = false;
-			this.drafts = [];
-			this.failed = [];
-			// An empty project set is a real answer once the inventory has landed -
-			// only "inventory not streamed yet" still counts as not-looked.
-			if (inventory.inventory) this.loaded = true;
-			return;
-		}
 		this.refreshing = true;
 		try {
-			const d = await draftsByProject(names);
+			const d = await api.drafts();
 			if (gen !== this.#gen) return;
 			this.drafts = d.drafts;
 			this.failed = d.failed;
+			this.error = '';
 			this.loaded = true;
-		} catch {
-			// Only a 401 escapes draftsByProject; it signs out centrally.
+		} catch (e) {
+			// A 401 signs out centrally.
+			if (gen === this.#gen && !(e instanceof Unauthorized)) this.error = friendlyError(e);
 		} finally {
 			if (gen === this.#gen) this.refreshing = false;
 		}
@@ -70,6 +57,7 @@ class DraftsStore {
 		this.#gen++;
 		this.drafts = [];
 		this.failed = [];
+		this.error = '';
 		this.loaded = false;
 		this.refreshing = false;
 	}

@@ -150,3 +150,15 @@ test('at scale, history pages its projects and the tree folds', async ({ page })
 	await aside.locator('a[href="/changes/team-web/web-prod?tab=history"]').click();
 	await expect(aside.getByRole('link', { name: /^\d+ more VMs$/ })).toBeVisible();
 });
+
+test('a failed drafts read says so in the Staged card and retries', async ({ page }) => {
+	await setScenario(page, 'draftsdown');
+	await login(page);
+	await page.goto('/changes');
+	const main = page.locator('main');
+	await expect(
+		main.getByText(/Could not read your staged changes: drafts unavailable/),
+	).toBeVisible();
+	await expect(main.getByRole('button', { name: 'Retry' })).toBeEnabled();
+	await expect(main.getByText('Nothing staged')).toHaveCount(0);
+});

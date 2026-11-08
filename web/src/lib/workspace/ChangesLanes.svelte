@@ -250,7 +250,14 @@
 		class="flex-[1_1_360px]"
 	>
 		<div class={BODY}>
-			{#if !drafts.loaded}
+			{#if drafts.error}
+				<div class="px-card py-3">
+					<Note tone="danger" class="flex items-center gap-2">
+						<span class="min-w-0 flex-1">Could not read your staged changes: {drafts.error}</span>
+						{@render retryDrafts()}
+					</Note>
+				</div>
+			{:else if !drafts.loaded}
 				<div class="px-card py-3"><Skeleton rows={3} class="h-7" /></div>
 			{/if}
 			{#each failedLanes as f (f.project)}

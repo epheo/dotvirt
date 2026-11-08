@@ -5,7 +5,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
-	"reflect"
 	"slices"
 	"strings"
 	"testing"
@@ -109,9 +108,13 @@ func (g *draftsRig) do(user, method, target string) *httptest.ResponseRecorder {
 func TestPlatformHolderReachesTheirDraftWhileTheRepoIsDown(t *testing.T) {
 	g := newDraftsRig(t, true)
 	g.stage(t, "holder", platformProjectName)
-	wantStatus(t, g.do("holder", http.MethodGet, "/api/draft?project=platform"), http.StatusServiceUnavailable)
+	if _, failed := projectsOf(g.drafts(t, "holder")); len(failed) != 1 || !strings.HasPrefix(failed[0], platformProjectName+": ") {
+		t.Errorf("holder while the repo is down: failed %q, want the platform lane answered as an outage", failed)
+	}
 	wantStatus(t, g.do("holder", http.MethodDelete, "/api/draft?project=platform"), http.StatusNoContent)
-	wantStatus(t, g.do("holder", http.MethodGet, "/api/draft?project=platform"), http.StatusForbidden)
+	if drafts, failed := projectsOf(g.drafts(t, "holder")); len(drafts)+len(failed) != 0 {
+		t.Errorf("holder after discard: drafts %q, failed %q; want no platform lane", drafts, failed)
+	}
 }
 
 // drafts reads user's drafts in one call.
@@ -120,27 +123,6 @@ func (g *draftsRig) drafts(t *testing.T, user string) model.DraftsView {
 	rec := g.do(user, http.MethodGet, "/api/drafts")
 	wantStatus(t, rec, http.StatusOK)
 	return decodeBody[model.DraftsView](t, rec)
-}
-
-// union is what the per-project draft route answers user, project by
-// project, kept as the store kept it: a draft holding an entry or carrying a
-// warning, a failure, and nothing for a refusal or an unknown project.
-func (g *draftsRig) union(t *testing.T, user string) model.DraftsView {
-	t.Helper()
-	out := model.DraftsView{Drafts: []model.ProjectDraft{}, Failed: []model.ProjectError{}}
-	for _, p := range []string{"broken", "team-a", "team-b", platformProjectName} {
-		rec := g.do(user, http.MethodGet, "/api/draft?project="+p)
-		switch rec.Code {
-		case http.StatusOK:
-			if v := decodeBody[model.DraftView](t, rec); v.Count > 0 || v.Warning != "" {
-				out.Drafts = append(out.Drafts, model.ProjectDraft{Project: p, Draft: v})
-			}
-		case http.StatusForbidden, http.StatusNotFound:
-		default:
-			out.Failed = append(out.Failed, model.ProjectError{Project: p, Error: strings.TrimSpace(rec.Body.String())})
-		}
-	}
-	return out
 }
 
 func projectsOf(v model.DraftsView) (drafts, failed []string) {
@@ -180,9 +162,6 @@ func TestDraftsAnswerEveryDraftOfTheCaller(t *testing.T) {
 		if !slices.Equal(drafts, c.drafts) || !slices.Equal(failed, c.failed) {
 			t.Errorf("%s: drafts %q, failed %q; want %q, %q", c.user, drafts, failed, c.drafts, c.failed)
 		}
-		if want := g.union(t, c.user); !reflect.DeepEqual(got, want) {
-			t.Errorf("%s: one call = %+v\nwant the draft route's union %+v", c.user, got, want)
-		}
 		for _, f := range got.Failed {
 			if strings.Contains(f.Error, g.repo[f.Project]) || strings.Contains(f.Error, "missing.git") {
 				t.Errorf("%s: %s failure names its repo: %q", c.user, f.Project, f.Error)
@@ -192,7 +171,6 @@ func TestDraftsAnswerEveryDraftOfTheCaller(t *testing.T) {
 	if d := g.drafts(t, "idle").Drafts; len(d) == 1 && (d[0].Draft.Count != 0 || d[0].Draft.Warning == "") {
 		t.Errorf("idle team-a = %+v, want the prune warning alone", d[0].Draft)
 	}
-	wantStatus(t, g.do("reader", http.MethodGet, "/api/draft?project=platform"), http.StatusOK)
 	if calls := g.fc.seen(); len(calls) > 0 {
 		t.Errorf("drafts read the cluster beyond its reviews: %q", calls)
 	}

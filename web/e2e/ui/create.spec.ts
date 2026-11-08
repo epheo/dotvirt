@@ -63,8 +63,8 @@ test('Show YAML renders through the dry run and stages nothing', async ({ page }
 	expect((await dry).postDataJSON().name).toBe('web-3');
 	await expect(sheet.getByText('kind: VirtualMachine')).toBeVisible();
 	await expect(sheet.getByText('name: u1.medium')).toBeVisible();
-	const draft = await page.request.get('/api/draft?project=team-web');
-	expect((await draft.json()).count).toBe(0);
+	const all = await (await page.request.get('/api/drafts')).json();
+	expect(all.drafts.some((d: { project: string }) => d.project === 'team-web')).toBe(false);
 });
 
 test('a Change editor searches, and one editor is open at a time', async ({ page }) => {
