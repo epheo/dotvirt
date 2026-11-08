@@ -54,7 +54,7 @@
 			<span class="min-w-0 flex-1 truncate text-[13px] font-medium text-ink">{b.policy.name}</span>
 			<span
 				class="hidden max-w-56 truncate text-xs text-ink-muted sm:inline"
-				title={b.policy.target}>{b.policy.target}</span
+				title={b.policy.applies ?? b.policy.target}>{b.policy.applies ?? b.policy.target}</span
 			>
 			{#if b.conditional}
 				<span
