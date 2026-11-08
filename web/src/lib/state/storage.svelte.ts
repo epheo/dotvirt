@@ -7,7 +7,7 @@ import {
 	type StorageClassInfo,
 } from '#lib/api.js';
 import { friendlyError } from '#lib/format.js';
-import { diskRows, imageUsage } from '#lib/storage.js';
+import { diskRows, imageUsage, uploadAbility, type UploadAbility } from '#lib/storage.js';
 import { catalog } from './catalog.svelte';
 import { inventory } from './inventory.svelte';
 
@@ -25,6 +25,10 @@ class StorageStore {
 	// The last pull's failure per source; '' once one succeeds.
 	classesError = $state('');
 	snapshotsError = $state('');
+	// Where the caller may upload, for the Library's drop zone: asked of the
+	// namespaces they author in, again only when that set changes.
+	upload = $state<UploadAbility | null>(null);
+	#uploadKey = '';
 	#gen = 0;
 	#loaded = false;
 
@@ -90,6 +94,19 @@ class StorageStore {
 		]);
 	}
 
+	async ensureUpload(namespaces: string[]) {
+		const key = namespaces.join('\0');
+		if (key === this.#uploadKey) return;
+		this.#uploadKey = key;
+		this.upload = null;
+		const gen = this.#gen;
+		const found = await uploadAbility(namespaces, async (ns) => {
+			const caps = await api.capabilities(ns);
+			return caps.namespace;
+		});
+		if (gen === this.#gen && key === this.#uploadKey) this.upload = found;
+	}
+
 	refreshSnapshots(): Promise<void> {
 		return this.#pull(
 			api.storageSnapshots,
@@ -125,6 +142,8 @@ class StorageStore {
 		this.nodes = null;
 		this.classesError = '';
 		this.snapshotsError = '';
+		this.upload = null;
+		this.#uploadKey = '';
 	}
 }
 

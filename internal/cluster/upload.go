@@ -98,13 +98,6 @@ func (c *Client) CreateUploadToken(ctx context.Context, namespace, name string) 
 	return token, nil
 }
 
-// CanCreateBootImages reports whether this token may register boot images
-// (DataSources) in namespace. Checked before an upload starts, so a refusal
-// leaves no half-made image behind.
-func (c *Client) CanCreateBootImages(ctx context.Context, namespace string) (bool, error) {
-	return c.Can(ctx, "create", gvrDataSources.Group, gvrDataSources.Resource, namespace)
-}
-
 // CreateBootImage registers the upload's claim as a boot image: a DataSource
 // of the same name over it, which the catalog offers once the import is
 // ready and a new VM's disk is cloned from.

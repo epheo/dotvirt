@@ -104,6 +104,11 @@ export interface NamespaceCaps {
   clone: boolean;
   dataVolumeCreate: boolean; // image upload
   /**
+   * BootImageCreate is an upload registered as a boot image (Add a boot
+   * image): the upload plus a DataSource over it.
+   */
+  bootImageCreate: boolean;
+  /**
    * The namespaced network family, staged through git. Network is the
    * project segments (UserDefinedNetwork).
    */

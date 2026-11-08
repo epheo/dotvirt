@@ -261,12 +261,9 @@ func (s *Server) handleOptions(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, s.optionsFor(r.Context(), id, c, visible, all))
 }
 
-// ssarDataSources and ssarNADs are the list authorities over the namespaced
+// ssarNADs is, with ssarDataSources, the list authority over the namespaced
 // option kinds (cluster.ListOptions reads the same resources).
-var (
-	ssarDataSources = ssarRef{group: "cdi.kubevirt.io", resource: "datasources"}
-	ssarNADs        = ssarFor(model.KindNAD)
-)
+var ssarNADs = ssarFor(model.KindNAD)
 
 // optionsFor narrows the shared catalog to what id may see: a namespaced entry
 // passes when its namespace is in the caller's visible set, or when the caller

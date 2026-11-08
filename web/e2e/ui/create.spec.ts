@@ -191,6 +191,35 @@ test('an image uploads now as a boot image, then a VM boots from it', async ({ p
 	});
 });
 
+test('the image type offers and allows only what the caller may do', async ({ page }) => {
+	// May upload, may not add boot images: no boot-image choice, a plain upload.
+	await setScenario(page, 'noboot');
+	await login(page);
+	await page.goto('/storage');
+	await page.getByTitle('Create a VM, network, rule or project').click();
+	const sheet = page.getByRole('dialog');
+	await expect(sheet.getByText('Pick an image file')).toBeVisible();
+	await expect(sheet.getByRole('checkbox', { name: /Offer it as a boot image/ })).toHaveCount(0);
+	await sheet.locator('input[type=file]').setInputFiles({
+		name: 'scratch.qcow2',
+		mimeType: 'application/octet-stream',
+		buffer: Buffer.alloc(1024),
+	});
+	const posted = page.waitForRequest(
+		(r) => r.method() === 'POST' && r.url().endsWith('/api/uploads'),
+	);
+	await sheet.getByRole('button', { name: 'Upload image' }).click();
+	expect((await posted).postDataJSON().bootImage).toBe(false);
+	await expect(sheet.getByText(/is ready in/)).toBeVisible({ timeout: 15_000 });
+
+	// May not upload: Upload stays off and says why.
+	await setScenario(page, 'noupload');
+	await page.goto('/storage');
+	await page.getByTitle('Create a VM, network, rule or project').click();
+	await expect(sheet.getByText('You may not upload images in web-prod')).toBeVisible();
+	await expect(sheet.getByRole('button', { name: 'Upload image' })).toBeDisabled();
+});
+
 test('Escape closes the sheet and hands focus back to New', async ({ page }) => {
 	const sheet = await openNew(page);
 	await page.keyboard.press('Escape');
