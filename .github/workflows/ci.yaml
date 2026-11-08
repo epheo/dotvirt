@@ -150,8 +150,9 @@ jobs:
         run: |
           # OperatorHub.io parity: their pipeline validates categories against the repo's
           # own categories.json, which drifts from operator-framework/api's built-in list.
+          # Pinned to the upstream commit that last changed it, so a red here is this diff's.
           curl -fsSL -o /tmp/categories.json \
-            https://raw.githubusercontent.com/k8s-operatorhub/community-operators/main/categories.json
+            https://raw.githubusercontent.com/k8s-operatorhub/community-operators/60e9ab2665da20563f8bd5cc91668a4248f2334d/categories.json
           OPERATOR_BUNDLE_CATEGORIES=/tmp/categories.json \
             operator-sdk bundle validate ./operator/bundle --select-optional suite=operatorframework
           opm validate operator/catalog
