@@ -11,8 +11,9 @@ import (
 // (NetworkPolicy, EgressFirewall) scoped to the caller's visible namespaces, and
 // cluster-tier rows gated per kind on the same create-SSAR the matching modal and
 // create route enforce - an admin policy's rules name namespaces across tenants,
-// so only a caller with authority over that kind may read the rollup. The catalog
-// is the SA-maintained netstate snapshot; per-object drift attaches at serve time.
+// so only a caller with authority over that kind may read the rollup - and on
+// list, as each row names its object. The catalog is the SA-maintained
+// netstate snapshot; per-object drift attaches at serve time.
 func (s *Server) handlePolicies(w http.ResponseWriter, r *http.Request) {
 	id, c, err := s.userCluster(r)
 	if err != nil {
@@ -31,7 +32,9 @@ func (s *Server) handlePolicies(w http.ResponseWriter, r *http.Request) {
 	// Visibility is authority over the kind, not platform authoring: unlike the
 	// caps in /api/networks it doesn't require a platform repo - a cluster-admin
 	// without one still audits the live policy plane.
-	out := scopePolicies(all, visible, s.clusterAuthority(r.Context(), id, c))
+	create := s.clusterAuthority(r.Context(), id, c, verbCreate)
+	list := s.clusterAuthority(r.Context(), id, c, verbList)
+	out := scopePolicies(all, visible, func(k model.PolicyKind) bool { return create(k) && list(k) })
 	s.enrichPolicyDrift(out)
 	// Which file declares each policy: the edit/delete affordance. Cluster-tier
 	// rows are already gated on the caller's authority over their kind.

@@ -1278,6 +1278,11 @@ export interface Policy {
    * platform repo for a cluster-scoped one); empty when git does not declare it.
    */
   sourceFile?: string;
+  /**
+   * Withheld: the caller may not read this cluster-scoped policy, so Name is
+   * a neutral label, distinct within the response, and names no object.
+   */
+  withheld?: boolean;
   sync?: SyncStatus;
   health?: string;
   syncError?: string;

@@ -44,6 +44,7 @@ func TestTenantPlatformView(t *testing.T) {
 			{Kind: "Namespace", Name: "team-a", Health: "Missing"},
 			{Kind: "Namespace", Name: "team-b", Health: "Missing"},
 			{Kind: "NodeNetworkConfigurationPolicy", Name: "dc-vlan-bridge", Health: "Degraded"},
+			{Kind: "AdminNetworkPolicy", Name: "acme-lockdown", Message: `AdminNetworkPolicy "acme-lockdown" is invalid`},
 		},
 	}
 	got := tenantPlatformView(full, map[string]bool{"team-a": true})
@@ -57,7 +58,7 @@ func TestTenantPlatformView(t *testing.T) {
 	if len(got.Unhealthy) != len(want) || got.Unhealthy[0] != want[0] || got.Unhealthy[1] != want[1] {
 		t.Errorf("unhealthy = %+v, want only team-a's objects", got.Unhealthy)
 	}
-	if len(full.Unhealthy) != 5 {
+	if len(full.Unhealthy) != 6 {
 		t.Error("the shared rollup was mutated")
 	}
 }

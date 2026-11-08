@@ -209,7 +209,7 @@ func BenchmarkFrameWatermarks(b *testing.B) {
 		b.Run(c.name, func(b *testing.B) {
 			projects, visible := scope(c.n)
 			b.ReportAllocs()
-			g := netGrants{nodes: c.nodes, create: map[ssarRef]bool{ssarANP: c.nodes}}
+			g := netGrants{nodes: c.nodes, create: map[ssarRef]bool{ssarANP: c.nodes}, list: map[ssarRef]bool{ssarANP: c.nodes}}
 			for b.Loop() {
 				_ = s.networksWatermark(visible, g)
 				_ = s.tasksWatermark(projects, c.nodes)
@@ -222,9 +222,9 @@ func BenchmarkFrameWatermarks(b *testing.B) {
 // networks watermark: the pulls it covers read those verdicts too.
 func TestNetworksWatermarkFollowsGrants(t *testing.T) {
 	fc := newFakeCluster(t)
-	var anp atomic.Bool
+	var anp, list atomic.Bool
 	fc.ssar = func(token string, a *authzv1.ResourceAttributes) bool {
-		return a.Resource == "adminnetworkpolicies" && anp.Load()
+		return a.Resource == "adminnetworkpolicies" && anp.Load() && (a.Verb != verbList || list.Load())
 	}
 	s := fc.server(nil, Config{})
 	id := auth.Identity{Token: tenantToken, Username: "tenant"}
@@ -241,9 +241,17 @@ func TestNetworksWatermarkFollowsGrants(t *testing.T) {
 		t.Fatal("the watermark moved with nothing changed")
 	}
 	anp.Store(true)
+	list.Store(true)
 	s.bus.Publish(eventbus.RBACChanged) // what the grant's watch reports
-	if mark() == before {
+	granted := mark()
+	if granted == before {
 		t.Error("gaining admin network policy authority left the watermark")
+	}
+	// The policy plane lists a cluster rule only to who may list its kind too.
+	list.Store(false)
+	s.bus.Publish(eventbus.RBACChanged)
+	if mark() == granted {
+		t.Error("losing list on admin network policies left the watermark")
 	}
 }
 
