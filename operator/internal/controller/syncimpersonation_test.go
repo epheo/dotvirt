@@ -45,6 +45,9 @@ func reviews(allow func(account string, a *authzv1.ResourceAttributes) bool, n *
 			return nil
 		}
 		sar.Status.Allowed = allow(strings.TrimPrefix(sar.Spec.User, argoSAUser), sar.Spec.ResourceAttributes)
+		if sar.Status.Allowed {
+			sar.Status.Reason = "allowed by the test's grant"
+		}
 		return nil
 	}}
 }
@@ -113,6 +116,13 @@ func optIn(dv *dotvirtv1alpha1.Dotvirt, ignoreForeign bool) *dotvirtv1alpha1.Dot
 func foreignApp(ns, name, project, destNS string) *unstructured.Unstructured {
 	app := argoObj("Application", ns, name, nil)
 	app.Object["spec"] = map[string]any{"project": project, "destination": map[string]any{"server": install.InClusterServer, "namespace": destNS}}
+	return app
+}
+
+// remote is an Application in project naming its cluster by name.
+func remote(project string) *unstructured.Unstructured {
+	app := foreignApp("argocd", "edge", project, "edge")
+	app.Object["spec"].(map[string]any)["destination"] = map[string]any{"name": "edge-cluster", "namespace": "edge"}
 	return app
 }
 
@@ -265,9 +275,9 @@ func TestSyncImpersonationFlipAndRollback(t *testing.T) {
 	}
 	// 2 per project namespace (no repo declares anything yet), 2 per
 	// project, the controller's clone and impersonation rights, and every
-	// account's clone rights.
-	if got := n.Load(); got != 2*3+2*2+3 {
-		t.Errorf("%d reviews, want 13", got)
+	// account's clone and tenant-kind rights.
+	if got := n.Load(); got != 2*3+2*2+8 {
+		t.Errorf("%d reviews, want 18", got)
 	}
 	// The argocd-operator copies the key into argocd-cm: on.
 	if err := c.Create(context.Background(), argoCM(true)); err != nil {
@@ -281,14 +291,14 @@ func TestSyncImpersonationFlipAndRollback(t *testing.T) {
 		t.Errorf("requeue = %v once on", res.RequeueAfter)
 	}
 	// A clean verdict serves the passes that follow until its inputs change.
-	if got := n.Load(); got != 13 {
-		t.Errorf("%d reviews after a second pass, want the cached 13", got)
+	if got := n.Load(); got != 18 {
+		t.Errorf("%d reviews after a second pass, want the cached 18", got)
 	}
 	// RBAC moves are not watched: an aged verdict is asked again.
 	now = now.Add(driftResync / 2)
 	reconcileOnce(t, r, dv)
-	if got := n.Load(); got != 26 {
-		t.Errorf("%d reviews once the verdict aged out, want 26", got)
+	if got := n.Load(); got != 36 {
+		t.Errorf("%d reviews once the verdict aged out, want 36", got)
 	}
 
 	stored := setSpec(t, c, dv, func(d *dotvirtv1alpha1.Dotvirt) { d.Spec.ArgoCD.SyncImpersonation.Enabled = false })
@@ -323,7 +333,11 @@ func TestSyncImpersonationRefusals(t *testing.T) {
 		{"declared kind beyond the grant", func(account string, a *authzv1.ResourceAttributes) bool {
 			return granted(own)(account, a) && a.Resource != "egressfirewalls"
 		}, []client.Object{tenantApp("team-a", "EgressFirewall", "team-a")}, nil,
-			"project team-a's repo declares EgressFirewalls in team-a, which its grant there does not let it write: an admin grant there carries them"},
+			"project team-a's repo declares egressfirewalls in team-a, which its grant there does not let it write: an admin grant there carries them"},
+		{"every account writes a tenant kind cluster-wide", or(func(account string, a *authzv1.ResourceAttributes) bool {
+			return account == syncProbeAccount && a.Resource == "networkpolicies" && a.Namespace == ""
+		}), nil, nil, "every ServiceAccount of argocd may create networkpolicies in every namespace, every project's sync account included (allowed by the test's grant)"},
+		{"name-addressed Application, nothing mapped", granted(own), []client.Object{remote("teamx"), appProject("teamx")}, nil, "argocd/edge"},
 		{"cluster-wide grant", or(func(account string, _ *authzv1.ResourceAttributes) bool { return account == "dotvirt-p-team-a" }),
 			nil, nil, "may create VirtualMachines in every namespace"},
 		{"namespace open to every account", or(func(account string, a *authzv1.ResourceAttributes) bool {
@@ -379,8 +393,6 @@ func TestSyncImpersonationRefusals(t *testing.T) {
 	// instance's, one naming its cluster by name (said, not counted), and a
 	// project whose grant is narrower than admin while its repo declares
 	// nothing it may not write.
-	remote := foreignApp("argocd", "edge", "default", "edge")
-	remote.Object["spec"].(map[string]any)["destination"] = map[string]any{"name": "edge-cluster", "namespace": "edge"}
 	noEgress := func(account string, a *authzv1.ResourceAttributes) bool {
 		return granted(own)(account, a) && a.Resource != "egressfirewalls"
 	}
@@ -391,8 +403,13 @@ func TestSyncImpersonationRefusals(t *testing.T) {
 	}{
 		"mapped AppProject": {[]client.Object{foreignApp("argocd", "billing", "default", "billing"),
 			appProject("default", map[string]any{"server": "https://kubernetes.*", "namespace": "{billing,payroll}", "defaultServiceAccount": "argocd:" + controllerSA})}, granted(own), ""},
-		"another instance":           {[]client.Object{foreignApp("team-argo", "web", "default", "web")}, granted(own), ""},
-		"cluster named by name":      {[]client.Object{remote, appProject("default")}, granted(own), "unchecked: Applications naming their cluster by name (argocd/edge)"},
+		"another instance": {[]client.Object{foreignApp("team-argo", "web", "default", "web")}, granted(own), ""},
+		"cluster named by name, mapped on a named server": {[]client.Object{remote("default"),
+			appProject("default", map[string]any{"server": "https://edge.example", "namespace": "*", "defaultServiceAccount": "argocd:edge-sync"})},
+			granted(own), "unchecked: Applications naming their cluster by name (argocd/edge)"},
+		"cluster named by name, mapped on every server": {[]client.Object{remote("default"),
+			appProject("default", map[string]any{"server": "*", "namespace": "edge", "defaultServiceAccount": "argocd:edge-sync"})},
+			granted(own), ""},
 		"edit grant, nothing beyond": {[]client.Object{tenantApp("team-a", "VirtualMachine", "team-a")}, noEgress, ""},
 	} {
 		dv := optIn(testCR(), false)
