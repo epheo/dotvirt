@@ -4,6 +4,7 @@ go 1.27.3
 
 require (
 	github.com/epheo/dotvirt/pkg/forge v0.0.0
+	github.com/epheo/dotvirt/pkg/tenancy v0.0.0
 	k8s.io/api v0.35.9
 	k8s.io/apiextensions-apiserver v0.35.9
 	k8s.io/apimachinery v0.35.9
@@ -72,3 +73,6 @@ require (
 // The app's forge client is a stdlib-only module of its own; resolve it from the
 // tree so the operator builds standalone (its image) without the app module.
 replace github.com/epheo/dotvirt/pkg/forge => ../pkg/forge
+
+// The tenancy rules the app's plugin generator applies too, same arrangement.
+replace github.com/epheo/dotvirt/pkg/tenancy => ../pkg/tenancy

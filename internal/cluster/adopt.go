@@ -26,21 +26,20 @@ func GVR(k model.Kind) schema.GroupVersionResource {
 // "<app>:<group>/<kind>:<namespace>/<name>" where <app> may be "<ns>/<name>".
 const trackingIDAnnotation = "argocd.argoproj.io/tracking-id"
 
-// adoptableKinds are the namespace-scoped kinds a tenant repo may declare: the
-// VM, its DataVolumes and the network family's namespaced backings. It mirrors
-// the tenant AppProject's namespaceResourceWhitelist (operator/internal/install/
-// argocd.go): capturing outside it stages manifests ArgoCD is configured to refuse,
-// capturing less leaves the namespace half under git. Operator and app ship in one
-// release, so the two are kept in step by hand rather than read back from the cluster.
+// adoptableKinds are the namespace-scoped kinds captured for adoption: the VM,
+// its DataVolumes and the network family's namespaced backings, which is
+// tenancy.TenantKinds plus the raw NetworkAttachmentDefinition. The coordinator
+// leaves that one out of a tenant repo, naming the platform tier, rather than
+// the capture going silent about it.
 var adoptableKinds = append([]schema.GroupVersionResource{
 	GVR(model.KindVM),
 	{Group: "cdi.kubevirt.io", Version: "v1beta1", Resource: "datavolumes"},
 }, networkFamilyGVRs(false)...)
 
 // clusterAdoptableKinds are the cluster-scoped kinds the platform repo may declare.
-// It mirrors the platform AppProject's clusterResourceWhitelist the way
-// adoptableKinds mirrors the tenant one; the Namespace kind is left out because
-// namespaces join through AdoptProject with their tenancy labels.
+// It mirrors the platform AppProject's clusterResourceWhitelist by hand (operator/
+// internal/install/argocd.go); the Namespace kind is left out because namespaces
+// join through AdoptProject with their tenancy labels.
 var clusterAdoptableKinds = networkFamilyGVRs(true)
 
 func networkFamilyGVRs(clusterScoped bool) []schema.GroupVersionResource {
