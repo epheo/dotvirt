@@ -2,6 +2,7 @@ package controller
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -17,6 +18,7 @@ import (
 	rbacv1 "k8s.io/api/rbac/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 
@@ -111,6 +113,17 @@ func optIn(dv *dotvirtv1alpha1.Dotvirt, ignoreForeign bool) *dotvirtv1alpha1.Dot
 func foreignApp(ns, name, project, destNS string) *unstructured.Unstructured {
 	app := argoObj("Application", ns, name, nil)
 	app.Object["spec"] = map[string]any{"project": project, "destination": map[string]any{"server": install.InClusterServer, "namespace": destNS}}
+	return app
+}
+
+// tenantApp is project's generated Application, reporting a kind it manages
+// in ns.
+func tenantApp(project, kind, ns string) *unstructured.Unstructured {
+	app := application("dotvirt-"+project, tenancy.AppProjectPrefix+project)
+	i := slices.IndexFunc(tenancy.TenantKinds, func(k tenancy.GroupKind) bool { return k.Kind == kind })
+	app.Object["status"] = map[string]any{"resources": []any{
+		map[string]any{"group": tenancy.TenantKinds[i].Group, "kind": kind, "namespace": ns, "name": "x"},
+	}}
 	return app
 }
 
@@ -250,10 +263,11 @@ func TestSyncImpersonationFlipAndRollback(t *testing.T) {
 	if res.RequeueAfter != time.Minute {
 		t.Errorf("requeue = %v, want a recheck while Pending", res.RequeueAfter)
 	}
-	// 3 per project namespace, 2 per project, the controller's clone and
-	// impersonation rights, and every account's clone rights.
-	if got := n.Load(); got != 3*3+2*2+3 {
-		t.Errorf("%d reviews, want 16", got)
+	// 2 per project namespace (no repo declares anything yet), 2 per
+	// project, the controller's clone and impersonation rights, and every
+	// account's clone rights.
+	if got := n.Load(); got != 2*3+2*2+3 {
+		t.Errorf("%d reviews, want 13", got)
 	}
 	// The argocd-operator copies the key into argocd-cm: on.
 	if err := c.Create(context.Background(), argoCM(true)); err != nil {
@@ -267,14 +281,14 @@ func TestSyncImpersonationFlipAndRollback(t *testing.T) {
 		t.Errorf("requeue = %v once on", res.RequeueAfter)
 	}
 	// A clean verdict serves the passes that follow until its inputs change.
-	if got := n.Load(); got != 16 {
-		t.Errorf("%d reviews after a second pass, want the cached 16", got)
+	if got := n.Load(); got != 13 {
+		t.Errorf("%d reviews after a second pass, want the cached 13", got)
 	}
 	// RBAC moves are not watched: an aged verdict is asked again.
 	now = now.Add(driftResync / 2)
 	reconcileOnce(t, r, dv)
-	if got := n.Load(); got != 32 {
-		t.Errorf("%d reviews once the verdict aged out, want 32", got)
+	if got := n.Load(); got != 26 {
+		t.Errorf("%d reviews once the verdict aged out, want 26", got)
 	}
 
 	stored := setSpec(t, c, dv, func(d *dotvirtv1alpha1.Dotvirt) { d.Spec.ArgoCD.SyncImpersonation.Enabled = false })
@@ -305,7 +319,11 @@ func TestSyncImpersonationRefusals(t *testing.T) {
 		inst  *unstructured.Unstructured
 		want  string
 	}{
-		{"missing grant", granted(nil), nil, nil, "project team-a cannot sync VirtualMachines into team-a"},
+		{"missing grant", granted(nil), nil, nil, "project team-a's sync account holds no grant in team-a: stage its grants (POST /api/projects/team-a/sync-access)"},
+		{"declared kind beyond the grant", func(account string, a *authzv1.ResourceAttributes) bool {
+			return granted(own)(account, a) && a.Resource != "egressfirewalls"
+		}, []client.Object{tenantApp("team-a", "EgressFirewall", "team-a")}, nil,
+			"project team-a's repo declares EgressFirewalls in team-a, which its grant there does not let it write: an admin grant there carries them"},
 		{"cluster-wide grant", or(func(account string, _ *authzv1.ResourceAttributes) bool { return account == "dotvirt-p-team-a" }),
 			nil, nil, "may create VirtualMachines in every namespace"},
 		{"namespace open to every account", or(func(account string, a *authzv1.ResourceAttributes) bool {
@@ -350,26 +368,41 @@ func TestSyncImpersonationRefusals(t *testing.T) {
 			if got.Status != metav1.ConditionFalse || got.Reason != "NotReady" || !strings.Contains(got.Message, tc.want) {
 				t.Errorf("condition = %+v, want NotReady saying %q", got, tc.want)
 			}
-			if res.RequeueAfter != time.Minute {
-				t.Errorf("requeue = %v, want the one-minute recheck", res.RequeueAfter)
+			// Held back on what a person fixes: back as the verdict ages out.
+			if res.RequeueAfter != driftResync/2 {
+				t.Errorf("requeue = %v, want %v", res.RequeueAfter, driftResync/2)
 			}
 		})
 	}
 
-	// Not held back: told to proceed past an unmapped Application, an
-	// Application whose AppProject maps an account, another instance's.
-	for name, objs := range map[string][]client.Object{
-		"mapped AppProject": {foreignApp("argocd", "billing", "default", "billing"),
-			appProject("default", map[string]any{"server": "https://kubernetes.*", "namespace": "{billing,payroll}", "defaultServiceAccount": "argocd:" + controllerSA})},
-		"another instance": {foreignApp("team-argo", "web", "default", "web")},
+	// Not held back: an Application whose AppProject maps an account, another
+	// instance's, one naming its cluster by name (said, not counted), and a
+	// project whose grant is narrower than admin while its repo declares
+	// nothing it may not write.
+	remote := foreignApp("argocd", "edge", "default", "edge")
+	remote.Object["spec"].(map[string]any)["destination"] = map[string]any{"name": "edge-cluster", "namespace": "edge"}
+	noEgress := func(account string, a *authzv1.ResourceAttributes) bool {
+		return granted(own)(account, a) && a.Resource != "egressfirewalls"
+	}
+	for name, tc := range map[string]struct {
+		objs  []client.Object
+		allow func(string, *authzv1.ResourceAttributes) bool
+		say   string
+	}{
+		"mapped AppProject": {[]client.Object{foreignApp("argocd", "billing", "default", "billing"),
+			appProject("default", map[string]any{"server": "https://kubernetes.*", "namespace": "{billing,payroll}", "defaultServiceAccount": "argocd:" + controllerSA})}, granted(own), ""},
+		"another instance":           {[]client.Object{foreignApp("team-argo", "web", "default", "web")}, granted(own), ""},
+		"cluster named by name":      {[]client.Object{remote, appProject("default")}, granted(own), "unchecked: Applications naming their cluster by name (argocd/edge)"},
+		"edit grant, nothing beyond": {[]client.Object{tenantApp("team-a", "VirtualMachine", "team-a")}, noEgress, ""},
 	} {
 		dv := optIn(testCR(), false)
 		var n atomic.Int64
-		c := testBuilder(t).WithObjects(append(objs, dv, argoCDInstance(nil), projectNS("team-a", "team-a", "dotvirt/team-a.git"))...).
-			WithInterceptorFuncs(reviews(granted(own), &n)).Build()
+		c := testBuilder(t).WithObjects(append(tc.objs, dv, argoCDInstance(nil), projectNS("team-a", "team-a", "dotvirt/team-a.git"))...).
+			WithInterceptorFuncs(reviews(tc.allow, &n)).Build()
 		reconcileOnce(t, newReconciler(c, depsOK), dv)
-		if extraConfig(t, c)[install.SyncImpersonationKey] != "true" {
-			t.Errorf("%s: held back: %+v", name, syncCond(t, c, dv))
+		got := syncCond(t, c, dv)
+		if extraConfig(t, c)[install.SyncImpersonationKey] != "true" || !strings.Contains(got.Message, tc.say) {
+			t.Errorf("%s: condition %+v, want set, saying %q", name, got, tc.say)
 		}
 	}
 	dv := optIn(testCR(), true)
@@ -412,6 +445,18 @@ func TestSyncImpersonationPlatformRoles(t *testing.T) {
 	reconcileOnce(t, newReconciler(c, depsOK), dv)
 	if got := syncCond(t, c, dv); got.Reason != "NotReady" || !strings.Contains(got.Message, "cannot bind ClusterRole view, which RoleBinding team-a/team-a-viewers") {
 		t.Errorf("condition = %+v, want the view binding named", got)
+	}
+
+	// Once on, a newly merged binding the account cannot apply never exists:
+	// the absence is what says so.
+	platformApp.Object["status"] = map[string]any{"resources": []any{
+		map[string]any{"group": "rbac.authorization.k8s.io", "kind": "RoleBinding", "namespace": "team-a", "name": "team-a-auditors"},
+	}}
+	c = testBuilder(t).WithObjects(dv, creds, platformApp, argoCM(true), argoCDInstance(nil), projectNS("team-a", "team-a", "dotvirt/team-a.git")).
+		WithInterceptorFuncs(reviews(granted(map[string][]string{"dotvirt-p-team-a": {"team-a"}}), &n)).Build()
+	reconcileOnce(t, newReconciler(c, depsOK), dv)
+	if got := syncCond(t, c, dv); got.Reason != "Degraded" || !strings.Contains(got.Message, "RoleBinding team-a/team-a-auditors the platform repo declares is not on the cluster") {
+		t.Errorf("condition = %+v, want the absent binding named", got)
 	}
 }
 
@@ -488,8 +533,22 @@ func TestSyncImpersonationPendingKeepsCloneWarning(t *testing.T) {
 func TestSyncImpersonationReleasedOnUninstall(t *testing.T) {
 	dv := optIn(testCR(), false)
 	var n atomic.Int64
+	var ops []string
+	funcs := reviews(granted(map[string][]string{"dotvirt-p-team-a": {"team-a"}}), &n)
+	funcs.Patch = func(ctx context.Context, cl client.WithWatch, obj client.Object, patch client.Patch, opts ...client.PatchOption) error {
+		if obj.GetObjectKind().GroupVersionKind() == install.ArgoCDGVK {
+			ops = append(ops, "argocd")
+		}
+		return cl.Patch(ctx, obj, patch, opts...)
+	}
+	funcs.Delete = func(ctx context.Context, cl client.WithWatch, obj client.Object, opts ...client.DeleteOption) error {
+		if obj.GetObjectKind().GroupVersionKind() == install.ArgoGVK("AppProject") {
+			ops = append(ops, "appproject")
+		}
+		return cl.Delete(ctx, obj, opts...)
+	}
 	c := testBuilder(t).WithObjects(dv, argoCDInstance(nil), projectNS("team-a", "team-a", "dotvirt/team-a.git")).
-		WithInterceptorFuncs(reviews(granted(map[string][]string{"dotvirt-p-team-a": {"team-a"}}), &n)).WithReturnManagedFields().Build()
+		WithInterceptorFuncs(funcs).WithReturnManagedFields().Build()
 	r := newReconciler(c, depsOK)
 	reconcileOnce(t, r, dv)
 	if extraConfig(t, c)[install.SyncImpersonationKey] != "true" {
@@ -498,12 +557,45 @@ func TestSyncImpersonationReleasedOnUninstall(t *testing.T) {
 	if err := c.Delete(context.Background(), getCR(t, c, dv)); err != nil {
 		t.Fatal(err)
 	}
+	ops = nil
 	reconcileOnce(t, r, dv)
 	if exists(t, c, &dotvirtv1alpha1.Dotvirt{}, dv.Namespace, dv.Name) {
 		t.Error("CR still present")
 	}
 	if extra := extraConfig(t, c); extra[install.SyncImpersonationKey] != nil {
 		t.Errorf("uninstalled, extraConfig = %v", extra)
+	}
+	if len(ops) < 2 || ops[0] != "argocd" || !slices.Contains(ops[1:], "appproject") {
+		t.Errorf("uninstall did %v, want the key released before any AppProject goes", ops)
+	}
+}
+
+// A cleanup that fails keeps the CR, which says why.
+func TestFinalizeFailureSaysWhy(t *testing.T) {
+	dv := optIn(testCR(), false)
+	var n atomic.Int64
+	refuse := false
+	funcs := reviews(granted(map[string][]string{"dotvirt-p-team-a": {"team-a"}}), &n)
+	funcs.Patch = func(ctx context.Context, cl client.WithWatch, obj client.Object, patch client.Patch, opts ...client.PatchOption) error {
+		if refuse && obj.GetObjectKind().GroupVersionKind() == install.ArgoCDGVK {
+			return errors.New("instance unreachable")
+		}
+		return cl.Patch(ctx, obj, patch, opts...)
+	}
+	c := testBuilder(t).WithObjects(dv, argoCDInstance(nil), projectNS("team-a", "team-a", "dotvirt/team-a.git")).
+		WithInterceptorFuncs(funcs).WithReturnManagedFields().Build()
+	r := newReconciler(c, depsOK)
+	reconcileOnce(t, r, dv)
+	if err := c.Delete(context.Background(), getCR(t, c, dv)); err != nil {
+		t.Fatal(err)
+	}
+	refuse = true
+	if _, err := r.Reconcile(context.Background(), ctrl.Request{NamespacedName: client.ObjectKeyFromObject(dv)}); err == nil {
+		t.Fatal("a failed cleanup reported success")
+	}
+	got := cond(getCR(t, c, dv), dotvirtv1alpha1.ConditionAvailable)
+	if got == nil || got.Reason != "CleanupFailed" || !strings.Contains(got.Message, "instance unreachable") {
+		t.Errorf("Available = %+v, want CleanupFailed saying why", got)
 	}
 }
 

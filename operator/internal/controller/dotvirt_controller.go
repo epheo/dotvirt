@@ -105,7 +105,16 @@ func (r *DotvirtReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 	log.Info("reconciling dotvirt install", "platform", r.Platform)
 
 	if !dv.DeletionTimestamp.IsZero() {
-		return ctrl.Result{}, r.finalize(ctx, &dv)
+		base := dv.DeepCopy()
+		err := r.finalize(ctx, &dv)
+		if err != nil {
+			// A CR stuck terminating says why.
+			r.setCondition(&dv, dotvirtv1alpha1.ConditionAvailable, metav1.ConditionFalse, "CleanupFailed", "deleting the install: "+err.Error())
+			if werr := r.writeStatus(ctx, &dv, base); werr != nil {
+				log.Error(werr, "status update failed")
+			}
+		}
+		return ctrl.Result{}, err
 	}
 	base := dv.DeepCopy()
 	var res ctrl.Result
@@ -219,16 +228,20 @@ func (r *DotvirtReconciler) provision(ctx context.Context, key types.NamespacedN
 	return ctrl.Result{RequeueAfter: driftResync}, nil
 }
 
-// syncWait is when a pass waiting on sync impersonation comes back: asked for
-// and not yet on, a merged grant or argocd-cm catching up is seen within
-// recheck, since neither RBAC nor argocd-cm is watched. Once on, a Degraded
-// project waits for the drift timer like any other drift.
+// syncWait is when a pass waiting on sync impersonation comes back, since
+// neither argocd-cm nor RBAC is watched: Pending, within recheck, for the
+// argocd-operator to copy the key; held back on something a person fixes, as
+// the verdict ages out; Degraded, with the drift timer like any other drift.
 func (r *DotvirtReconciler) syncWait(dv *dotvirtv1alpha1.Dotvirt) time.Duration {
 	c := meta.FindStatusCondition(dv.Status.Conditions, dotvirtv1alpha1.ConditionSyncImpersonationReady)
-	if dv.Spec.ArgoCD.SyncImpersonation.Enabled && c != nil && c.Status == metav1.ConditionFalse && c.Reason != "Degraded" {
+	switch {
+	case !dv.Spec.ArgoCD.SyncImpersonation.Enabled || c == nil || c.Status != metav1.ConditionFalse || c.Reason == "Degraded":
+		return driftResync
+	case c.Reason == "Pending":
 		return r.recheck()
+	default:
+		return r.verdictTTL()
 	}
-	return driftResync
 }
 
 // olderInstall returns the Dotvirt CR that precedes dv, if any: by creation time,

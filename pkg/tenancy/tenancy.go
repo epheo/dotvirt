@@ -74,10 +74,11 @@ func Reserved(ns string, platform []string) bool {
 	return strings.HasPrefix(ns, "openshift-") || strings.HasPrefix(ns, "kube-") || slices.Contains(platform, ns)
 }
 
-// GroupKind is a Kubernetes kind by API group.
+// GroupKind is a Kubernetes kind by API group, and the resource RBAC names it by.
 type GroupKind struct {
-	Group string
-	Kind  string
+	Group    string
+	Kind     string
+	Resource string
 }
 
 // TenantKinds are the only kinds a tenant repo may declare, all namespaced:
@@ -88,13 +89,13 @@ type GroupKind struct {
 // them, and a raw one joins another project's VLAN, reaches the underlay past
 // NetworkPolicy, or takes over a NAD a CUDN generates. It is platform tier.
 var TenantKinds = []GroupKind{
-	{Group: "kubevirt.io", Kind: "VirtualMachine"},
-	{Group: "cdi.kubevirt.io", Kind: "DataVolume"},
-	{Group: "k8s.ovn.org", Kind: "UserDefinedNetwork"},
+	{Group: "kubevirt.io", Kind: "VirtualMachine", Resource: "virtualmachines"},
+	{Group: "cdi.kubevirt.io", Kind: "DataVolume", Resource: "datavolumes"},
+	{Group: "k8s.ovn.org", Kind: "UserDefinedNetwork", Resource: "userdefinednetworks"},
 	// The Tier-1 gateway firewall: it narrows its own namespace's egress only.
-	{Group: "k8s.ovn.org", Kind: "EgressFirewall"},
+	{Group: "k8s.ovn.org", Kind: "EgressFirewall", Resource: "egressfirewalls"},
 	// The east-west Distributed Firewall.
-	{Group: "networking.k8s.io", Kind: "NetworkPolicy"},
+	{Group: "networking.k8s.io", Kind: "NetworkPolicy", Resource: "networkpolicies"},
 }
 
 // TenantKind reports whether a tenant repo may declare kind. It matches by

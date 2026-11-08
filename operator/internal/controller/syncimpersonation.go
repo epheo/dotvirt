@@ -132,17 +132,18 @@ func (r *DotvirtReconciler) syncImpersonation(ctx context.Context, dv *dotvirtv1
 	if err != nil {
 		return failed(err)
 	}
+	unchecked := uncheckedNote(v.unresolved)
 	if inConfig {
 		if problems := slices.Concat(v.missing, v.leaks, foreignProblem(v.foreign)); len(problems) > 0 {
-			return metav1.ConditionFalse, "Degraded", "on; " + strings.Join(problems, "; ")
+			return metav1.ConditionFalse, "Degraded", "on; " + strings.Join(problems, "; ") + unchecked
 		}
-		return metav1.ConditionTrue, "Enabled", fmt.Sprintf("on (%s); each Application syncs as its tier's own ServiceAccount", where)
+		return metav1.ConditionTrue, "Enabled", fmt.Sprintf("on (%s); each Application syncs as its tier's own ServiceAccount%s", where, unchecked)
 	}
 	// Until argocd-cm carries the setting, the controller's account is still
 	// the one syncing.
-	meanwhile := ""
+	meanwhile := unchecked
 	if v.cloneAnywhere {
-		meanwhile = "; meanwhile " + cloneWarning(rc)
+		meanwhile += "; meanwhile " + cloneWarning(rc)
 	}
 	pending := fmt.Sprintf("set %s on %s; waiting for %s/argocd-cm to carry it%s", install.SyncImpersonationKey, where, rc.argoNS, meanwhile)
 	if owned {
@@ -174,6 +175,13 @@ func (r *DotvirtReconciler) syncImpersonation(ctx context.Context, dv *dotvirtv1
 
 func cloneWarning(rc *reconcileCtx) string {
 	return fmt.Sprintf("Applications sync as %s, which may create datavolumes/source in every namespace: a DataVolume a tenant repo declares can clone a disk out of any namespace; spec.argocd.syncImpersonation.enabled confines each repo to its project's rights", rc.argoSA)
+}
+
+func uncheckedNote(unresolved []string) string {
+	if len(unresolved) == 0 {
+		return ""
+	}
+	return fmt.Sprintf("; unchecked: Applications naming their cluster by name (%s), whose server only its cluster Secret holds: make sure their AppProjects map an account", listSome(unresolved))
 }
 
 func foreignProblem(foreign []string) []string {
@@ -273,37 +281,45 @@ type syncVerdict struct {
 	// foreign are the instance's Applications, as ns/name, outside dotvirt's
 	// AppProjects and with no ServiceAccount their AppProject maps.
 	foreign []string
+	// unresolved are the foreign Applications naming their cluster by a name
+	// other than in-cluster: whether an account maps them is not knowable
+	// without the cluster's credentials, so they are said, never counted.
+	unresolved []string
 	// cloneAnywhere says the controller's own account may create
 	// datavolumes/source cluster-wide.
 	cloneAnywhere bool
 }
 
-func (v syncVerdict) clean() bool {
-	return len(v.missing)+len(v.leaks)+len(v.foreign) == 0
-}
-
 // syncCache memoizes the verdict: it costs SubjectAccessReviews and reads in
 // proportion to the project namespaces, while passes come in bursts (a
-// rollout's Deployment events). A clean verdict serves until its inputs or
-// the CR's spec change, or driftResync/2 elapses; one naming a problem only
-// for recheck, since RBAC moves are not watched and a grant merged since, or
-// still reaching the authorizer, must be seen soon.
+// rollout's Deployment events). A verdict serves until its inputs or the CR's
+// spec change, or verdictTTL elapses: RBAC moves are not watched, so a merged
+// grant is seen within that, or at once after a spec edit.
 type syncCache struct {
 	syncMu      sync.Mutex
 	syncKey     string
 	syncAt      time.Time
 	syncResults syncVerdict
-	// syncRecheck is a test seam; 0 = time.Minute.
-	syncRecheck time.Duration
+	// syncRecheck and syncTTL are test seams; 0 = time.Minute and driftResync/2.
+	syncRecheck, syncTTL time.Duration
 }
 
-// recheck is how long a verdict naming a problem serves, and how soon a pass
-// waiting on sync impersonation comes back.
+// recheck is how soon a pass that set the key comes back for argocd-cm: the
+// argocd-operator copies it within seconds, and argocd-cm is not watched.
 func (c *syncCache) recheck() time.Duration {
 	if c.syncRecheck > 0 {
 		return c.syncRecheck
 	}
 	return time.Minute
+}
+
+// verdictTTL is how long a verdict serves, and how soon a pass held back on
+// something a person must fix comes back.
+func (c *syncCache) verdictTTL() time.Duration {
+	if c.syncTTL > 0 {
+		return c.syncTTL
+	}
+	return driftResync / 2
 }
 
 // syncScope is what a verdict covers.
@@ -321,11 +337,7 @@ func (r *DotvirtReconciler) syncVerdict(ctx context.Context, dv *dotvirtv1alpha1
 	key := syncInputs(dv.Generation, rc, scope)
 	r.syncMu.Lock()
 	defer r.syncMu.Unlock()
-	ttl := driftResync / 2
-	if !r.syncResults.clean() {
-		ttl = r.recheck()
-	}
-	if key == r.syncKey && r.clock().Sub(r.syncAt) < ttl {
+	if key == r.syncKey && r.clock().Sub(r.syncAt) < r.verdictTTL() {
 		return r.syncResults, nil
 	}
 	v, err := r.evaluateSync(ctx, rc, scope)
@@ -362,6 +374,42 @@ func createAttrs(group, resource, ns string) authzv1.ResourceAttributes {
 	return authzv1.ResourceAttributes{Verb: "create", Group: group, Resource: resource, Namespace: ns}
 }
 
+// declaredKind is a tenant kind a project's repo declares in a namespace.
+type declaredKind struct {
+	kind      tenancy.GroupKind
+	namespace string
+}
+
+// declaredKinds are, per sync account, the tenant kinds its project's
+// Application reports managing, by namespace, as Argo read them off the repo.
+func declaredKinds(rc *reconcileCtx, apps []unstructured.Unstructured) map[string][]declaredKind {
+	out := map[string][]declaredKind{}
+	for _, a := range apps {
+		account, _, _ := unstructured.NestedString(a.Object, "spec", "project")
+		if a.GetNamespace() != rc.argoNS || rc.sync.accounts[account] == nil {
+			continue
+		}
+		resources, _, _ := unstructured.NestedSlice(a.Object, "status", "resources")
+		for _, res := range resources {
+			m, _ := res.(map[string]any)
+			ns, _ := m["namespace"].(string)
+			i := slices.IndexFunc(tenancy.TenantKinds, func(k tenancy.GroupKind) bool { return m["group"] == k.Group && m["kind"] == k.Kind })
+			if i < 0 {
+				continue
+			}
+			if d := (declaredKind{tenancy.TenantKinds[i], ns}); !slices.Contains(out[account], d) {
+				out[account] = append(out[account], d)
+			}
+		}
+	}
+	for account := range out {
+		slices.SortFunc(out[account], func(a, b declaredKind) int {
+			return strings.Compare(a.namespace+"/"+a.kind.Kind, b.namespace+"/"+b.kind.Kind)
+		})
+	}
+	return out
+}
+
 func bindAttrs(kind, name, ns string) authzv1.ResourceAttributes {
 	resource := "clusterroles"
 	if kind == "Role" {
@@ -375,12 +423,12 @@ func bindAttrs(kind, name, ns string) authzv1.ResourceAttributes {
 var cloneSource = authzv1.ResourceAttributes{Verb: "create", Group: "cdi.kubevirt.io", Resource: "datavolumes", Subresource: "source"}
 
 // evaluateSync runs the checks (syncChecks, platformRoleChecks) and, for the
-// full scope, finds the unmapped foreign Applications: 3 reviews per project
-// namespace, 2 per project, 3 more, 5 for the platform tier and one per
-// further role its RoleBindings bind, at most accessProbeLimit in flight, plus
-// a list of the Applications and AppProjects and a read of each platform
-// RoleBinding. While not asked, the one review of the controller's clone
-// rights.
+// full scope, finds the unmapped foreign Applications: 2 reviews per project
+// namespace and one per kind a project declares in it, 2 per project, 3 more,
+// 5 for the platform tier and one per further role its RoleBindings bind, at
+// most accessProbeLimit in flight, plus a list of the Applications and
+// AppProjects and a read of each platform RoleBinding. While not asked, the
+// one review of the controller's clone rights.
 func (r *DotvirtReconciler) evaluateSync(ctx context.Context, rc *reconcileCtx, scope syncScope) (syncVerdict, error) {
 	var v syncVerdict
 	checks := []accessCheck{{account: rc.argoSA, attrs: cloneSource, set: &v.cloneAnywhere}}
@@ -389,18 +437,19 @@ func (r *DotvirtReconciler) evaluateSync(ctx context.Context, rc *reconcileCtx, 
 		if err := r.reader().List(ctx, apps); err != nil {
 			return v, fmt.Errorf("list Applications: %w", err)
 		}
-		foreign, err := r.unmappedApplications(ctx, rc, apps.Items)
+		foreign, unresolved, err := r.unmappedApplications(ctx, rc, apps.Items)
 		if err != nil {
 			return v, err
 		}
-		v.foreign = foreign
-		checks = append(checks, syncChecks(rc)...)
+		v.foreign, v.unresolved = foreign, unresolved
+		checks = append(checks, syncChecks(rc, declaredKinds(rc, apps.Items))...)
 		if rc.sync.platform {
-			roles, err := r.platformRoleChecks(ctx, rc, apps.Items)
+			roles, absent, err := r.platformRoleChecks(ctx, rc, apps.Items)
 			if err != nil {
 				return v, err
 			}
 			checks = append(checks, roles...)
+			v.missing = append(v.missing, absent...)
 		}
 	}
 	verdicts := make([]bool, len(checks))
@@ -431,9 +480,11 @@ func (r *DotvirtReconciler) evaluateSync(ctx context.Context, rc *reconcileCtx, 
 
 // syncChecks are the grant checks for rc's tier, in a stable order:
 //   - the controller may impersonate the accounts;
-//   - per project, its sync account may create VirtualMachines and
-//     EgressFirewalls in each of its namespaces, and may neither create
-//     VirtualMachines nor clone disks cluster-wide;
+//   - per project, its sync account holds a grant in each of its namespaces
+//     (reads VirtualMachines there), may create each kind its repo declares
+//     there (declared), and may neither create VirtualMachines nor clone
+//     disks cluster-wide. Asking only for what the repo declares keeps a
+//     project whose grant is narrower than admin ready, as its RBAC allows;
 //   - every ServiceAccount of the ArgoCD namespace, so every other project's
 //     sync account, may neither write VirtualMachines in a project namespace
 //     nor clone disks cluster-wide. A grant naming one project's account in
@@ -441,7 +492,7 @@ func (r *DotvirtReconciler) evaluateSync(ctx context.Context, rc *reconcileCtx, 
 //     grant anyone anything there;
 //   - the platform account may create Namespaces, ClusterUserDefinedNetworks
 //     and RoleBindings, and bind the roles project grants name.
-func syncChecks(rc *reconcileCtx) []accessCheck {
+func syncChecks(rc *reconcileCtx, declared map[string][]declaredKind) []accessCheck {
 	checks := []accessCheck{
 		{account: rc.argoSA, attrs: authzv1.ResourceAttributes{Verb: "impersonate", Resource: "serviceaccounts", Namespace: rc.argoNS}, want: true,
 			problem: fmt.Sprintf("the ArgoCD controller %s cannot impersonate ServiceAccounts in %s", rc.argoSA, rc.argoNS)},
@@ -451,15 +502,22 @@ func syncChecks(rc *reconcileCtx) []accessCheck {
 	projectNS := map[string]bool{}
 	for _, account := range slices.Sorted(maps.Keys(rc.sync.accounts)) {
 		project := strings.TrimPrefix(account, tenancy.AppProjectPrefix)
-		grant := fmt.Sprintf("the platform repo grants it none there (dotvirt stages them: POST /api/projects/%s/sync-access)", project)
 		for _, ns := range rc.sync.accounts[account] {
 			projectNS[ns] = true
-			checks = append(checks,
-				accessCheck{account: account, attrs: createAttrs("kubevirt.io", "virtualmachines", ns), want: true,
-					problem: fmt.Sprintf("project %s cannot sync VirtualMachines into %s: %s", project, ns, grant)},
-				accessCheck{account: account, attrs: createAttrs("k8s.ovn.org", "egressfirewalls", ns), want: true,
-					problem: fmt.Sprintf("project %s cannot sync EgressFirewalls into %s: %s", project, ns, grant)},
-			)
+			checks = append(checks, accessCheck{account: account,
+				attrs: authzv1.ResourceAttributes{Verb: "get", Group: "kubevirt.io", Resource: "virtualmachines", Namespace: ns}, want: true,
+				problem: fmt.Sprintf("project %s's sync account holds no grant in %s: stage its grants (POST /api/projects/%s/sync-access) and merge them", project, ns, project)})
+		}
+		for _, d := range declared[account] {
+			if !slices.Contains(rc.sync.accounts[account], d.namespace) {
+				continue
+			}
+			fix := "widen the project's grant there, or drop them from its repo"
+			if d.kind.Kind == "EgressFirewall" {
+				fix = "an admin grant there carries them (sync-access pairs it with " + tenancy.EgressBinding(d.namespace) + "), or drop them from its repo"
+			}
+			checks = append(checks, accessCheck{account: account, attrs: createAttrs(d.kind.Group, d.kind.Resource, d.namespace), want: true,
+				problem: fmt.Sprintf("project %s's repo declares %ss in %s, which its grant there does not let it write: %s", project, d.kind.Kind, d.namespace, fix)})
 		}
 		checks = append(checks,
 			accessCheck{account: account, attrs: createAttrs("kubevirt.io", "virtualmachines", ""),
@@ -496,8 +554,9 @@ func syncChecks(rc *reconcileCtx) []accessCheck {
 // Argo applies a RoleBinding as that account, and the apiserver refuses one
 // binding a role the account may neither bind nor wholly hold. An account
 // holding every right of such a role reads as missing here: a review can only
-// ask for bind.
-func (r *DotvirtReconciler) platformRoleChecks(ctx context.Context, rc *reconcileCtx, apps []unstructured.Unstructured) ([]accessCheck, error) {
+// ask for bind. absent are the RoleBindings the repo declares that are not on
+// the cluster, the trace such a refusal leaves once on.
+func (r *DotvirtReconciler) platformRoleChecks(ctx context.Context, rc *reconcileCtx, apps []unstructured.Unstructured) (checks []accessCheck, absent []string, err error) {
 	var refs []types.NamespacedName
 	for _, a := range apps {
 		if a.GetNamespace() != rc.argoNS || a.GetName() != install.PlatformApplicationName {
@@ -529,12 +588,13 @@ func (r *DotvirtReconciler) platformRoleChecks(ctx context.Context, rc *reconcil
 		})
 	}
 	if err := g.Wait(); err != nil {
-		return nil, fmt.Errorf("read the platform tier's RoleBindings: %w", err)
+		return nil, nil, fmt.Errorf("read the platform tier's RoleBindings: %w", err)
 	}
 	seen := map[string]bool{"ClusterRole//admin": true, "ClusterRole//" + tenancy.TenantEgressRole: true}
-	var checks []accessCheck
-	for _, rb := range bindings {
+	for i, rb := range bindings {
 		if rb == nil {
+			absent = append(absent, fmt.Sprintf("RoleBinding %s/%s the platform repo declares is not on the cluster; if the platform sync refuses it, %s may not bind its role (see the %s Application)",
+				refs[i].Namespace, refs[i].Name, tenancy.PlatformSyncAccount, install.PlatformApplicationName))
 			continue
 		}
 		ns := ""
@@ -548,7 +608,7 @@ func (r *DotvirtReconciler) platformRoleChecks(ctx context.Context, rc *reconcil
 					tenancy.PlatformSyncAccount, rb.RoleRef.Kind, rb.RoleRef.Name, rb.Namespace, rb.Name)})
 		}
 	}
-	return checks, nil
+	return checks, absent, nil
 }
 
 // allowed asks whether account, a ServiceAccount of saNS, may do attrs. Its
@@ -568,16 +628,18 @@ func (r *DotvirtReconciler) allowed(ctx context.Context, saNS, account string, a
 // unmappedApplications are the instance's Applications (rc's appNamespaces)
 // outside dotvirt's AppProjects whose AppProject maps no ServiceAccount for
 // their destination, as ns/name in name order: the ones impersonation stops.
-func (r *DotvirtReconciler) unmappedApplications(ctx context.Context, rc *reconcileCtx, apps []unstructured.Unstructured) ([]string, error) {
+// unresolved are those naming their cluster by a name other than in-cluster
+// that no server-wide entry maps: their server is in a cluster Secret, which
+// the operator does not read.
+func (r *DotvirtReconciler) unmappedApplications(ctx context.Context, rc *reconcileCtx, apps []unstructured.Unstructured) (unmapped, unresolved []string, err error) {
 	projects := unstructuredList(install.ArgoGVK("AppProject"))().(*unstructured.UnstructuredList)
 	if err := r.reader().List(ctx, projects, client.InNamespace(rc.argoNS)); err != nil {
-		return nil, fmt.Errorf("list AppProjects: %w", err)
+		return nil, nil, fmt.Errorf("list AppProjects: %w", err)
 	}
 	mapped := map[string][]any{}
 	for _, p := range projects.Items {
 		mapped[p.GetName()], _, _ = unstructured.NestedSlice(p.Object, "spec", "destinationServiceAccounts")
 	}
-	var out []string
 	for _, a := range apps {
 		ours := slices.ContainsFunc(rc.sync.appNamespaces, func(pattern string) bool { return argoMatch(pattern, a.GetNamespace(), true) })
 		project, _, _ := unstructured.NestedString(a.Object, "spec", "project")
@@ -585,21 +647,30 @@ func (r *DotvirtReconciler) unmappedApplications(ctx context.Context, rc *reconc
 			continue
 		}
 		server, _, _ := unstructured.NestedString(a.Object, "spec", "destination", "server")
+		known := true
 		if name, _, _ := unstructured.NestedString(a.Object, "spec", "destination", "name"); server == "" && name == "in-cluster" {
 			server = install.InClusterServer
+		} else if server == "" {
+			known = false
 		}
 		ns, _, _ := unstructured.NestedString(a.Object, "spec", "destination", "namespace")
-		if !slices.ContainsFunc(mapped[project], func(e any) bool {
+		if slices.ContainsFunc(mapped[project], func(e any) bool {
 			entry, _ := e.(map[string]any)
 			s, _ := entry["server"].(string)
 			n, _ := entry["namespace"].(string)
-			return argoMatch(s, server, false) && argoMatch(n, ns, false)
+			return (argoMatch(s, server, false) || (!known && s == "*")) && argoMatch(n, ns, false)
 		}) {
-			out = append(out, a.GetNamespace()+"/"+a.GetName())
+			continue
+		}
+		if known {
+			unmapped = append(unmapped, a.GetNamespace()+"/"+a.GetName())
+		} else {
+			unresolved = append(unresolved, a.GetNamespace()+"/"+a.GetName())
 		}
 	}
-	slices.Sort(out)
-	return out, nil
+	slices.Sort(unmapped)
+	slices.Sort(unresolved)
+	return unmapped, unresolved, nil
 }
 
 // listSome names up to three of items, and how many there are beyond.

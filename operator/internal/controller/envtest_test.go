@@ -6,7 +6,9 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -159,7 +161,7 @@ func TestEnvtest(t *testing.T) {
 	})
 
 	// One manager for the remaining subtests: its cleanup belongs to the parent.
-	passes := runManager(t, opCfg, scheme)
+	passes, ops := runManager(t, opCfg, scheme)
 
 	t.Run("install reconciles to ready as the operator", func(t *testing.T) {
 		dv := &dotvirtv1alpha1.Dotvirt{ObjectMeta: metav1.ObjectMeta{Name: "x", Namespace: "dotvirt"}}
@@ -438,7 +440,7 @@ func TestEnvtest(t *testing.T) {
 		}
 		// team-z (namespace team-b) holds no grant, the billing Application
 		// no account, the controller no impersonation right.
-		for _, want := range []string{"project team-z cannot sync", "argocd/billing", "cannot impersonate ServiceAccounts in argocd"} {
+		for _, want := range []string{"project team-z's sync account holds no grant in team-b", "argocd/billing", "cannot impersonate ServiceAccounts in argocd"} {
 			eventually(t, "held back saying "+want, func() bool { return strings.Contains(reason(), want) })
 		}
 		if key() != nil {
@@ -496,6 +498,7 @@ func TestEnvtest(t *testing.T) {
 		foreign := argoObj("AppProject", "argocd", "dotvirt-p-foreign",
 			map[string]string{install.InstanceLabel: dv.Name, install.InstanceNamespaceLabel: "elsewhere"})
 		mustCreate(t, admin, foreign)
+		mark := ops.len()
 		if err := admin.Delete(ctx, dv); err != nil {
 			t.Fatal(err)
 		}
@@ -511,6 +514,12 @@ func TestEnvtest(t *testing.T) {
 		}
 		if extra, _, _ := unstructured.NestedMap(inst.Object, "spec", "extraConfig"); extra[install.SyncImpersonationKey] != nil {
 			t.Errorf("uninstalled, extraConfig = %v", extra)
+		}
+		done := ops.since(mark)
+		released := slices.Index(done, "release argocd")
+		deleted := slices.IndexFunc(done, func(op string) bool { return strings.HasPrefix(op, "delete AppProject") })
+		if released < 0 || deleted < 0 || released > deleted {
+			t.Errorf("uninstall did %v, want the key released before any AppProject goes", done)
 		}
 		left := map[string]bool{}
 		for _, list := range []client.ObjectList{
@@ -547,7 +556,57 @@ func TestEnvtest(t *testing.T) {
 
 // runManager starts the controller as cmd/main.go wires it, under cfg, and
 // counts its install passes.
-func runManager(t *testing.T, cfg *rest.Config, scheme *runtime.Scheme) *atomic.Int64 {
+// opLog records, in order, the writes the reconciler makes that ordering
+// claims are about: the sync impersonation key set or released on the ArgoCD
+// resource, and AppProject deletes.
+type opLog struct {
+	mu  sync.Mutex
+	ops []string
+}
+
+func (l *opLog) add(op string) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.ops = append(l.ops, op)
+}
+
+func (l *opLog) since(mark int) []string {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return slices.Clone(l.ops[mark:])
+}
+
+func (l *opLog) len() int {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return len(l.ops)
+}
+
+// loggingClient is the reconciler's client, recording into an opLog.
+type loggingClient struct {
+	client.Client
+	log *opLog
+}
+
+func (c loggingClient) Patch(ctx context.Context, obj client.Object, patch client.Patch, opts ...client.PatchOption) error {
+	if obj.GetObjectKind().GroupVersionKind() == install.ArgoCDGVK {
+		if u, ok := obj.(*unstructured.Unstructured); ok && u.Object["spec"] == nil {
+			c.log.add("release " + obj.GetName())
+		} else {
+			c.log.add("set " + obj.GetName())
+		}
+	}
+	return c.Client.Patch(ctx, obj, patch, opts...)
+}
+
+func (c loggingClient) Delete(ctx context.Context, obj client.Object, opts ...client.DeleteOption) error {
+	if obj.GetObjectKind().GroupVersionKind() == install.ArgoGVK("AppProject") {
+		c.log.add("delete AppProject " + obj.GetName())
+	}
+	return c.Client.Delete(ctx, obj, opts...)
+}
+
+func runManager(t *testing.T, cfg *rest.Config, scheme *runtime.Scheme) (*atomic.Int64, *opLog) {
 	t.Helper()
 	mgr, err := ctrl.NewManager(cfg, ctrl.Options{
 		Scheme:                 scheme,
@@ -560,13 +619,14 @@ func runManager(t *testing.T, cfg *rest.Config, scheme *runtime.Scheme) *atomic.
 		t.Fatal(err)
 	}
 	passes := &atomic.Int64{}
+	ops := &opLog{}
 	r := &DotvirtReconciler{
-		Client:    mgr.GetClient(),
+		Client:    loggingClient{mgr.GetClient(), ops},
 		Scheme:    mgr.GetScheme(),
 		Config:    mgr.GetConfig(),
 		Platform:  platform.Kubernetes,
 		APIReader: mgr.GetAPIReader(),
-		syncCache: syncCache{syncRecheck: time.Second},
+		syncCache: syncCache{syncRecheck: time.Second, syncTTL: time.Second},
 		probe: func(c *rest.Config) (deps.Result, error) {
 			passes.Add(1)
 			return depsOK(c)
@@ -584,7 +644,7 @@ func runManager(t *testing.T, cfg *rest.Config, scheme *runtime.Scheme) *atomic.
 			t.Errorf("manager: %v", err)
 		}
 	})
-	return passes
+	return passes, ops
 }
 
 // argoStubCRDs registers the argoproj.io kinds the install applies, schemaless:
