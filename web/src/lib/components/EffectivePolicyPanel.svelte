@@ -2,7 +2,7 @@
 	import { api, type EffectivePolicy, type PolicyBinding } from '#lib/api.js';
 	import { resource } from '#lib/resource.svelte.js';
 	import { friendlyError } from '#lib/format.js';
-	import { policyKindLabel } from '#lib/labels.js';
+	import { WITHHELD, policyKindLabel } from '#lib/labels.js';
 	import PolicyRuleTable from './PolicyRuleTable.svelte';
 	import SyncBadge from './SyncBadge.svelte';
 
@@ -26,8 +26,9 @@
 	const keyOf = (b: PolicyBinding) =>
 		`${b.policy.backing}:${b.policy.namespace ?? ''}:${b.policy.name}`;
 
+	// A withheld rule's label already says its priority.
 	const tierLabel = (b: PolicyBinding) =>
-		b.policy.kind === 'admin'
+		b.policy.kind === 'admin' && !b.policy.withheld
 			? `${policyKindLabel('admin')}, priority ${b.policy.priority ?? 0}`
 			: policyKindLabel(b.policy.kind);
 
@@ -51,7 +52,12 @@
 					>{tier}</span
 				>
 			{/if}
-			<span class="min-w-0 flex-1 truncate text-[13px] font-medium text-ink">{b.policy.name}</span>
+			<span
+				class="min-w-0 flex-1 truncate text-[13px] {b.policy.withheld
+					? 'text-ink-muted'
+					: 'font-medium text-ink'}"
+				title={b.policy.withheld ? WITHHELD : undefined}>{b.policy.name}</span
+			>
 			<span
 				class="hidden max-w-56 truncate text-xs text-ink-muted sm:inline"
 				title={b.policy.applies ?? b.policy.target}>{b.policy.applies ?? b.policy.target}</span
