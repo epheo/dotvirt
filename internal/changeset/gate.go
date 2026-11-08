@@ -34,13 +34,18 @@ import (
 // leaves the name out of the review, as the apiserver's own check of a create
 // does. Object, set for a RoleBinding, is the binding as Argo applies it: the
 // authorizer has the apiserver weigh it, escalation rule included.
+// Subresource is set only for an act the API asks of the apiserver directly
+// (a VM restart), never by a change.
 type Access struct {
-	Verb, Group, Resource, Namespace, Name string
-	Object                                 string
+	Verb, Group, Resource, Subresource, Namespace, Name string
+	Object                                              string
 }
 
 func (a Access) String() string {
 	what := a.Resource
+	if a.Subresource != "" {
+		what += "/" + a.Subresource
+	}
 	if a.Name != "" {
 		what += " " + a.Name
 	}
@@ -79,26 +84,36 @@ func (c *Coordinator) authorize(id auth.Identity, need []Access) error {
 // file it weighed (draft.Entry.BaseBlob) and answers *git.BaseMovedError for
 // one pinned to another: its accesses would be read off the wrong version.
 func (c *Coordinator) gate(id auth.Identity, proj project.ProjectInfo, entries []draft.Entry) error {
+	need, err := c.needs(proj, entries)
+	if err != nil {
+		return err
+	}
+	return c.authorize(id, need)
+}
+
+// needs is every access committing entries to proj's base branch makes the
+// cluster perform once merged.
+func (c *Coordinator) needs(proj project.ProjectInfo, entries []draft.Entry) ([]Access, error) {
 	if len(entries) == 0 {
-		return nil
+		return nil, nil
 	}
 	read, err := c.read(proj)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	idx, err := indexDeclared(read, c.baseBranch)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	var need []Access
 	for i := range entries {
 		a, err := c.entryAccess(read, idx, proj, &entries[i])
 		if err != nil {
-			return err
+			return nil, err
 		}
 		need = append(need, a...)
 	}
-	return c.authorize(id, need)
+	return need, nil
 }
 
 // write is how an entry changes its file: the one reading the gate weighs
@@ -374,7 +389,8 @@ func replaced(o object) bool {
 // applies, so they carry no namespace and touch no object. The shared library
 // is the platform repo's, written with the right to create templates
 // cluster-wide, as its routes ask; a project's library is gated by the
-// project's authoring right at its routes and at propose.
+// project's authoring right at its routes and again at the propose and revert
+// routes, which the API weighs as the library routes do.
 func libraryAccess(proj project.ProjectInfo, ch fileChange, before, after []object, want func(after []object) error) ([]Access, error) {
 	for _, o := range slices.Concat(before, after) {
 		if o.kind != model.KindTemplate {

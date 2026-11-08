@@ -63,14 +63,14 @@ func (s *Server) handleDeployTemplate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	sc, ok := s.resolveProject(w, r, byNamespace(req.Namespace))
-	if !ok || !s.authorize(w, r, sc, verbCreate, ssarVM, req.Namespace) {
+	if !ok || !s.gate(w, r, sc, vmAction(verbCreate, req.Namespace)) {
 		return
 	}
 	lib, ok := s.libraryFor(w, r, sc, req.Library)
 	if !ok {
 		return
 	}
-	if dryRun(r) {
+	if isDryRun(r) {
 		p, err := s.draft.PreviewDeployFromTemplate(sc.id, sc.proj, lib, req)
 		respond(w, p, err)
 		return
@@ -125,7 +125,7 @@ func (s *Server) handleUpdateTemplate(w http.ResponseWriter, r *http.Request) {
 		sc, ok = s.platformScope(w, r, ssarVMTemplate)
 	} else {
 		sc, ok = s.resolveProject(w, r, byName(req.Library))
-		ok = ok && s.authorizeDraft(w, r, sc)
+		ok = ok && s.authorizeLibrary(w, r, sc)
 	}
 	if !ok {
 		return
@@ -155,7 +155,7 @@ func (s *Server) handleSaveTemplate(w http.ResponseWriter, r *http.Request) {
 	commitProj := sc.proj
 	switch req.Library {
 	case "", sc.proj.Name:
-		if !s.authorizeDraft(w, r, sc) {
+		if !s.authorizeLibrary(w, r, sc) {
 			return
 		}
 	case platformProjectName:

@@ -249,46 +249,23 @@ func typedListWatch[L runtime.Object](list func(context.Context, metav1.ListOpti
 	}
 }
 
-// allowed reports whether this token may perform the action described by attrs, via
-// a SelfSubjectAccessReview - the single SSAR primitive the capability checks share.
-func (c *Client) allowed(ctx context.Context, attrs *authzv1.ResourceAttributes) (bool, error) {
-	review := &authzv1.SelfSubjectAccessReview{Spec: authzv1.SelfSubjectAccessReviewSpec{ResourceAttributes: attrs}}
+// Review reports whether this token may perform the action attrs describe, via
+// a SelfSubjectAccessReview - the single SSAR primitive every gate shares. A
+// review error is returned, not read as "no", so a gate can answer 503
+// instead of a false 403.
+func (c *Client) Review(ctx context.Context, attrs authzv1.ResourceAttributes) (bool, error) {
+	review := &authzv1.SelfSubjectAccessReview{Spec: authzv1.SelfSubjectAccessReviewSpec{ResourceAttributes: &attrs}}
 	res, err := c.kube.AuthorizationV1().SelfSubjectAccessReviews().Create(ctx, review, metav1.CreateOptions{})
 	if err != nil {
-		return false, err
+		return false, fmt.Errorf("access review for %s %s in %q: %w", attrs.Verb, attrs.Resource, attrs.Namespace, err)
 	}
 	return res.Status.Allowed, nil
 }
 
-// CanUpdateVM reports whether this token may update the VirtualMachine ns/name. It
-// gates the re-sync action: a user may drive an Argo reconcile of a VM (run with
-// dotvirt's SA) only if they could modify that VM themselves - so read-only callers
-// can't escalate into an SA-privileged sync.
-func (c *Client) CanUpdateVM(ctx context.Context, namespace, name string) (bool, error) {
-	ok, err := c.allowed(ctx, &authzv1.ResourceAttributes{
-		Namespace: namespace, Verb: "update", Group: "kubevirt.io", Resource: "virtualmachines", Name: name,
-	})
-	if err != nil {
-		return false, fmt.Errorf("access review for %s/%s: %w", namespace, name, err)
-	}
-	return ok, nil
-}
-
 // Can reports whether this token may perform verb on group/resource in
-// namespace ("" for cluster scope). A review error is returned, not read as
-// "no", so a gate can answer 503 instead of a false 403.
+// namespace ("" for cluster scope).
 func (c *Client) Can(ctx context.Context, verb, group, resource, namespace string) (bool, error) {
-	return c.CanNamed(ctx, verb, group, resource, namespace, "")
-}
-
-// CanNamed is Can for the one object name names: what the apiserver asks of
-// an update, a delete or a bind, where RBAC may grant by resourceNames.
-func (c *Client) CanNamed(ctx context.Context, verb, group, resource, namespace, name string) (bool, error) {
-	ok, err := c.allowed(ctx, &authzv1.ResourceAttributes{Namespace: namespace, Verb: verb, Group: group, Resource: resource, Name: name})
-	if err != nil {
-		return false, fmt.Errorf("access review for %s %s in %s: %w", verb, resource, namespace, err)
-	}
-	return ok, nil
+	return c.Review(ctx, authzv1.ResourceAttributes{Namespace: namespace, Verb: verb, Group: group, Resource: resource})
 }
 
 // contains reports whether haystack holds "*" or any of the wanted values.
@@ -454,21 +431,17 @@ func (c *Client) Unpause(ctx context.Context, namespace, name string) error {
 // the user explicitly exits it.
 const maintenanceAnnotation = "dotvirt.io/maintenance"
 
-// NodeInfo reads a node's schedulability under the caller's token, plus whether
-// that token may cordon it (an SSAR on node update) so the UI gates the action.
-// A read failure (no node-get RBAC) surfaces as an error the handler maps to
-// 403/404 - the action stays hidden for users who can't see nodes.
+// NodeInfo reads a node's schedulability under the caller's token. A read
+// failure (no node-get RBAC) surfaces as an error the handler maps to 403/404.
 func (c *Client) NodeInfo(ctx context.Context, name string) (model.NodeInfo, error) {
 	node, err := c.kube.CoreV1().Nodes().Get(ctx, name, metav1.GetOptions{})
 	if err != nil {
 		return model.NodeInfo{}, err
 	}
-	can, _ := c.canPatchNodes(ctx) // best-effort; false on review error
 	return model.NodeInfo{
 		Name:          name,
 		Unschedulable: node.Spec.Unschedulable,
 		Maintenance:   node.Annotations[maintenanceAnnotation] != "",
-		CanCordon:     can,
 	}, nil
 }
 
@@ -536,9 +509,4 @@ func nodeReady(n corev1.Node) bool {
 		}
 	}
 	return false
-}
-
-// canPatchNodes reports whether this token may update nodes (cluster-scoped).
-func (c *Client) canPatchNodes(ctx context.Context) (bool, error) {
-	return c.allowed(ctx, &authzv1.ResourceAttributes{Verb: "update", Resource: "nodes"})
 }

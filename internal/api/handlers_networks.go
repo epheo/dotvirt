@@ -17,8 +17,9 @@ import (
 // The networking create routes resolve their target TIER from the object's SCOPE,
 // never from a client-supplied repo: a namespace-scoped UDN goes to the tenant's own
 // project repo; cluster-scoped objects (CUDN, NNCP uplink, Namespace) go to the
-// platform repo and are SSAR-gated on the caller's authority to create that kind -
-// matching the AppProject boundary that lets only the platform app apply them.
+// platform repo. A create form also edits the object git already declares, so the
+// right to create or update the kind opens it, and the coordinator then checks
+// the exact one.
 // The single-scope routes are built by the two factories below and registered in
 // api.go, where each route's authorization rationale lives; only the routes with
 // per-request scope or SSAR switches keep bespoke handlers here.
@@ -30,7 +31,7 @@ type nsPeek struct {
 // stageCreate is every network-family create's tail, past its gates: stage
 // the form, or render it for a dry run.
 func (s *Server) stageCreate(w http.ResponseWriter, r *http.Request, sc scope, resource draft.Resource, raw []byte) {
-	if dryRun(r) {
+	if isDryRun(r) {
 		p, err := s.draft.PreviewCreate(sc.id, sc.proj, resource, raw)
 		respond(w, p, err)
 		return
@@ -39,15 +40,16 @@ func (s *Server) stageCreate(w http.ResponseWriter, r *http.Request, sc scope, r
 	respond(w, view, err)
 }
 
-// platformCreate builds the handler for a cluster-scoped create: always the
-// platform tier, SSAR-gated on the caller's authority to create ref's kind.
-func (s *Server) platformCreate(ref ssarRef, resource draft.Resource) http.HandlerFunc {
+// platformCreate builds the handler for a cluster-scoped create form on kind:
+// always the platform tier, opened by the right to create or update the kind;
+// the coordinator checks the one the rendered form needs.
+func (s *Server) platformCreate(kind model.Kind, resource draft.Resource) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		raw, ok := readRaw(w, r)
 		if !ok {
 			return
 		}
-		sc, ok := s.platformScope(w, r, ref)
+		sc, ok := s.platformForm(w, r, kind)
 		if !ok {
 			return
 		}
@@ -55,11 +57,12 @@ func (s *Server) platformCreate(ref ssarRef, resource draft.Resource) http.Handl
 	}
 }
 
-// namespacedCreate builds the handler for a namespace-scoped create: it peeks the
-// spec's namespace and routes to the tenant project owning it (resolveProject is
-// the authorization point - a namespace outside the caller's projects is not
-// found). what names the kind in the missing-namespace error, article included.
-func (s *Server) namespacedCreate(what string, resource draft.Resource) http.HandlerFunc {
+// namespacedCreate builds the handler for a namespace-scoped create form on
+// kind: it peeks the spec's namespace and routes to the tenant project owning
+// it (resolveProject is the authorization point - a namespace outside the
+// caller's projects is not found), then gates like platformCreate. what names
+// the kind in the missing-namespace error, article included.
+func (s *Server) namespacedCreate(what string, resource draft.Resource, kind model.Kind) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		raw, p, ok := readBody[nsPeek](w, r, false)
 		if !ok {
@@ -70,7 +73,7 @@ func (s *Server) namespacedCreate(what string, resource draft.Resource) http.Han
 			return
 		}
 		sc, ok := s.resolveProject(w, r, byNamespace(p.Namespace))
-		if !ok || !s.authorizeObject(w, r, sc, verbCreate, string(resource), p.Namespace, "") {
+		if !ok || !s.gateForm(w, r, sc, kind, p.Namespace) {
 			return
 		}
 		s.stageCreate(w, r, sc, resource, raw)
@@ -97,9 +100,9 @@ func (s *Server) handleCreateNetwork(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		sc, ok = s.resolveProject(w, r, byNamespace(p.Namespace))
-		ok = ok && s.authorize(w, r, sc, verbCreate, ssarFor(model.KindUDN), p.Namespace)
+		ok = ok && s.gateForm(w, r, sc, model.KindUDN, p.Namespace)
 	default: // ScopeShared / ScopeVLAN - a cluster-scoped CUDN
-		sc, ok = s.platformScope(w, r, ssarCUDN)
+		sc, ok = s.platformForm(w, r, model.KindCUDN)
 	}
 	if !ok {
 		return
@@ -109,8 +112,8 @@ func (s *Server) handleCreateNetwork(w http.ResponseWriter, r *http.Request) {
 
 // handleCreateAdminNetworkPolicy stages a cluster-wide admin DFW policy
 // (AdminNetworkPolicy or the baseline default) - always platform-tier and admin-only,
-// gated on the caller's authority to create the matching kind. A priority a live
-// policy already holds is refused: OVN-K would order the two arbitrarily.
+// gated like platformCreate on the matching kind. A priority a live policy
+// already holds is refused: OVN-K would order the two arbitrarily.
 func (s *Server) handleCreateAdminNetworkPolicy(w http.ResponseWriter, r *http.Request) {
 	raw, p, ok := readBody[struct {
 		Name     string `json:"name"`
@@ -120,11 +123,11 @@ func (s *Server) handleCreateAdminNetworkPolicy(w http.ResponseWriter, r *http.R
 	if !ok {
 		return
 	}
-	ref := ssarANP
+	kind := model.KindANP
 	if p.Baseline {
-		ref = ssarBANP
+		kind = model.KindBANP
 	}
-	sc, ok := s.platformScope(w, r, ref)
+	sc, ok := s.platformForm(w, r, kind)
 	if !ok {
 		return
 	}
@@ -169,14 +172,11 @@ func (s *Server) handleNetworks(w http.ResponseWriter, r *http.Request) {
 	}
 
 	ctx := r.Context()
-	can := func(ref ssarRef) bool {
-		ok, _ := s.can(ctx, id, c, verbCreate, ref, "")
-		return ok
-	}
-	cudn := can(ssarCUDN)
-	platform, _ := s.canAuthorPlatform(ctx, id, c)
+	can := func(k model.Kind) bool { return s.capable(ctx, id, c, kindAction(verbCreate, k, "")) }
+	cudn := can(model.KindCUDN)
+	platformRead, _ := s.canReadPlatform(ctx, id, c)
 	out := model.NetworkInventory{
-		Networks:         scopeNetworks(full.Networks, visible, cudn || platform),
+		Networks:         scopeNetworks(full.Networks, visible, cudn || platformRead),
 		Uplinks:          []model.Uplink{},
 		PhysicalAdapters: []model.PhysicalAdapter{},
 		NMStatePresent:   full.NMStatePresent,
@@ -193,13 +193,14 @@ func (s *Server) handleNetworks(w http.ResponseWriter, r *http.Request) {
 	if s.cfg.PlatformRepo != "" {
 		out.CanManage = cudn
 		out.Caps = model.NetworkCaps{
-			Uplink:             can(ssarUplink),
-			Namespace:          can(ssarNamespace),
-			EgressIP:           can(ssarEgressIP),
-			ExternalRoute:      can(ssarExtRoute),
-			AdminNetworkPolicy: can(ssarANP),
+			Uplink:                     can(model.KindNNCP),
+			Namespace:                  s.newProjectCap(ctx, id, c, `{"name":"`+newNamespace+`"}`),
+			EgressIP:                   can(model.KindEgressIP),
+			ExternalRoute:              can(model.KindExtRoute),
+			AdminNetworkPolicy:         can(model.KindANP),
+			BaselineAdminNetworkPolicy: can(model.KindBANP),
 		}
-		out.Caps.Platform = platform
+		out.Caps.Platform = platformRead
 	}
 	// Which file declares each segment: the edit/delete affordance. A shared
 	// segment's platform file shows only to callers who may author that tier.
@@ -210,7 +211,7 @@ func (s *Server) handleNetworks(w http.ResponseWriter, r *http.Request) {
 	}
 	// The physical fabric is node-level infrastructure - show it only to callers
 	// who can read nodes (cluster-admins), not every tenant who can attach a NIC.
-	if canNodes, _ := s.can(r.Context(), id, c, verbList, ssarNodes, ""); canNodes {
+	if s.capable(r.Context(), id, c, ask(verbList, ssarNodes, "")) {
 		out.Uplinks = full.Uplinks
 		out.PhysicalAdapters = full.PhysicalAdapters
 		if out.Caps.Uplink {
@@ -254,9 +255,9 @@ func (s *Server) callerNetworks(ctx context.Context, id auth.Identity, c *cluste
 	if s.netstate == nil {
 		return nil
 	}
-	all, _ := s.can(ctx, id, c, verbCreate, ssarCUDN, "")
+	all := s.capable(ctx, id, c, kindAction(verbCreate, model.KindCUDN, ""))
 	if !all {
-		all, _ = s.canAuthorPlatform(ctx, id, c)
+		all, _ = s.canReadPlatform(ctx, id, c)
 	}
 	return scopeNetworks(s.netstate.Catalog().Networks, visible, all)
 }

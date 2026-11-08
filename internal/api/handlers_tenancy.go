@@ -1,8 +1,10 @@
 package api
 
 // Tenancy: creating namespaces, bootstrapping tenant projects, and adopting
-// repoless ones. All platform-admin acts (they land Namespace + RBAC objects in
-// the platform tier), kept apart from the port-group handlers next door.
+// repoless ones. Each lands Namespace + RBAC objects in the platform tier: the
+// route gates its claim on each namespace (claimNamespaces), the coordinator
+// each object the change writes. Kept apart from the port-group handlers next
+// door.
 
 import (
 	"context"
@@ -11,24 +13,78 @@ import (
 	"net/http"
 
 	"github.com/epheo/dotvirt/internal/changeset"
-	"github.com/epheo/dotvirt/internal/cluster"
 	"github.com/epheo/dotvirt/internal/model"
 	"github.com/epheo/dotvirt/internal/netgen"
+	"github.com/epheo/dotvirt/internal/project"
 )
 
-// liveNamespaces binds the namespace capture to the caller's token: a namespace
-// that already exists is adopted as the caller can read it, never regenerated.
-func liveNamespaces(ctx context.Context, c *cluster.Client) changeset.LiveNamespaces {
+// claimNamespaces binds the namespace capture to the caller's token and gates
+// the claim on each namespace there, where its existence is known: one that
+// already exists is adopted as the caller can read it, never regenerated, and
+// needs the right to update it (claimAction), as the coordinator weighs its
+// Namespace object. Only then is one the SA snapshot holds for another
+// project - the snapshot the coordinator places namespaces by - refused:
+// joining would take it from that project, whose Application then fails on
+// everything it declares there. That project is named only to a caller who
+// sees it.
+func (s *Server) claimNamespaces(ctx context.Context, sc scope, project string) changeset.LiveNamespaces {
 	return func(name string) (*netgen.LiveNamespace, error) {
-		return c.LiveNamespace(ctx, name)
+		live, err := sc.cluster.LiveNamespace(ctx, name)
+		if err != nil || live == nil {
+			return nil, err
+		}
+		if err := s.require(ctx, sc.id, sc.cluster, claimAction(name)); err != nil {
+			return nil, err
+		}
+		held := s.state.NamespaceLabels(name)[s.cfg.ProjectLabel]
+		if held == "" || held == project {
+			return live, nil
+		}
+		if projects, err := s.projectsFor(ctx, sc.id, sc.cluster); err == nil {
+			if _, seen := findProject(projects, held); seen {
+				return nil, fmt.Errorf("%w: namespace %s belongs to project %s; release it there first", model.ErrConflict, name, held)
+			}
+		}
+		return nil, fmt.Errorf("%w: namespace %s belongs to another project", model.ErrConflict, name)
 	}
 }
 
+// tenancyTarget resolves the project an adopt, release or sync-access route
+// names: from every project when the caller may relabel any namespace
+// (claimAction("")), else from the projects they see, whole. ok=false means
+// the response is written: the same 404 for a project hidden as for none, an
+// unnamed 403 for one with a namespace hidden.
+func (s *Server) tenancyTarget(w http.ResponseWriter, r *http.Request, sc scope) (project.ProjectInfo, bool) {
+	name := r.PathValue("project")
+	var target project.ProjectInfo
+	found := false
+	if s.capable(r.Context(), sc.id, sc.cluster, claimAction("")) {
+		target, found = s.projectByName(name)
+	} else if projects, err := s.projectsFor(r.Context(), sc.id, sc.cluster); err != nil {
+		fail(w, err)
+		return project.ProjectInfo{}, false
+	} else if visible, ok := findProject(projects, name); ok {
+		// The claim and the gate weigh every namespace, and would name one the
+		// caller cannot see: such a project is refused without naming it.
+		if full, ok := s.projectByName(visible.Name); ok && len(full.Namespaces) > len(visible.Namespaces) {
+			fail(w, fmt.Errorf("%w: this needs every namespace of %s in your view", model.ErrForbidden, name))
+			return project.ProjectInfo{}, false
+		}
+		target, found = s.projectByName(visible.Name)
+	}
+	if !found {
+		fail(w, fmt.Errorf("%w: project %q", model.ErrNotFound, name))
+		return project.ProjectInfo{}, false
+	}
+	return target, true
+}
+
 // handleCreateNamespace stages a new namespace (+ optional primary "VM Network").
-// The Namespace object is cluster-scoped, so it is COMMITTED to the platform repo
-// and gated on namespace-create authority; but it is labeled/annotated to the tenant
-// project it JOINS (carried as "project"), so that project's Argo app syncs
-// workloads into it once the platform app creates it.
+// The Namespace object is cluster-scoped, so it is COMMITTED to the platform repo;
+// but it is labeled/annotated to the tenant project it JOINS (carried as
+// "project"), so that project's Argo app syncs workloads into it once the
+// platform app creates it. The route gates the claim on the namespace, decided
+// once the capture knows whether it exists.
 func (s *Server) handleCreateNamespace(w http.ResponseWriter, r *http.Request) {
 	raw, p, ok := readBody[struct {
 		Project string `json:"project"`
@@ -45,26 +101,25 @@ func (s *Server) handleCreateNamespace(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	// Commit to the platform tier, gated on namespace-create authority.
-	plat, ok := s.platformScope(w, r, ssarNamespace)
+	plat, ok := s.platformScopeGated(w, r)
 	if !ok {
 		return
 	}
-	live := liveNamespaces(r.Context(), plat.cluster)
-	if dryRun(r) {
-		p, err := s.draft.PreviewCreateNamespace(join.id, plat.proj, join.proj, raw, live)
+	claims := s.claimNamespaces(r.Context(), plat, join.proj.Name)
+	if isDryRun(r) {
+		p, err := s.draft.PreviewCreateNamespace(join.id, plat.proj, join.proj, raw, claims)
 		respond(w, p, err)
 		return
 	}
-	view, err := s.draft.StageCreateNamespace(join.id, plat.proj, join.proj, raw, live)
+	view, err := s.draft.StageCreateNamespace(join.id, plat.proj, join.proj, raw, claims)
 	respond(w, view, err)
 }
 
 // handleCreateProject bootstraps a new tenant project from the UI - the "New
 // Project" flow. It creates the project's forge repo and stages its first namespace
-// (+ an optional owners RoleBinding) into the platform repo. Gated on the same
-// namespace-create authority as handleCreateNamespace: creating a tenant is a
-// platform-admin act (it lands a Namespace + RBAC in the platform tier).
+// (+ an optional owners RoleBinding) into the platform repo, gated on the claim
+// on that namespace (see claimNamespaces), which the coordinator reads before the
+// repo exists.
 func (s *Server) handleCreateProject(w http.ResponseWriter, r *http.Request) {
 	// Peek the name for an early 400; the Coordinator re-decodes the full spec.
 	raw, p, ok := readBody[struct {
@@ -77,32 +132,33 @@ func (s *Server) handleCreateProject(w http.ResponseWriter, r *http.Request) {
 		fail(w, invalid(errors.New("a project name is required")))
 		return
 	}
-	plat, ok := s.platformScope(w, r, ssarNamespace)
+	plat, ok := s.platformScopeGated(w, r)
 	if !ok {
 		return
 	}
 	// The cluster is dotvirt's registry, so an existing project is what makes this a
-	// re-manage rather than a create. Checked here, before the coordinator touches the
-	// forge, so a refusal never leaves a repo behind.
-	if _, exists := s.projectByName(p.Name); exists {
-		fail(w, fmt.Errorf("%w: that project already exists; adopt it instead of creating it", model.ErrConflict))
-		return
+	// re-manage rather than a create. The coordinator asks once its gate passed and
+	// before it touches the forge: a refusal never leaves a repo behind, and never
+	// tells a caller without the rights which projects exist.
+	exists := func(name string) bool {
+		_, ok := s.projectByName(name)
+		return ok
 	}
-	live := liveNamespaces(r.Context(), plat.cluster)
-	if dryRun(r) {
-		p, err := s.draft.PreviewCreateProject(plat.id, plat.proj, raw, live)
+	claims := s.claimNamespaces(r.Context(), plat, p.Name)
+	if isDryRun(r) {
+		p, err := s.draft.PreviewCreateProject(plat.id, plat.proj, raw, claims, exists)
 		respond(w, p, err)
 		return
 	}
-	view, err := s.draft.StageCreateProject(plat.id, plat.proj, raw, live)
+	view, err := s.draft.StageCreateProject(plat.id, plat.proj, raw, claims, exists)
 	respond(w, view, err)
 }
 
 // handleAdoptProject wires a repo to an existing labeled-but-repoless project - the
-// "Attach repo" action on the inventory's no-repo dead-end. Like handleCreateProject
-// it's a platform-admin act (it lands a Namespace + repo annotation in the platform
-// tier), so it's gated on namespace-create authority; the target tenant is resolved
-// from the SA snapshot (the caller is a platform admin) and must currently be repoless.
+// "Attach repo" action on the inventory's no-repo dead-end. It lands a Namespace +
+// repo annotation per namespace in the platform tier, each gated on the claim on
+// that namespace; the target tenant (tenancyTarget) must currently be
+// repoless.
 func (s *Server) handleAdoptProject(w http.ResponseWriter, r *http.Request) {
 	body, ok := decodeOptional[struct {
 		Owners []string `json:"owners,omitempty"`
@@ -110,16 +166,15 @@ func (s *Server) handleAdoptProject(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	plat, ok := s.platformScope(w, r, ssarNamespace)
+	plat, ok := s.platformScopeGated(w, r)
 	if !ok {
 		return
 	}
-	target, ok := s.projectByName(r.PathValue("project"))
+	target, ok := s.tenancyTarget(w, r, plat)
 	if !ok {
-		fail(w, fmt.Errorf("%w: project %q", model.ErrNotFound, r.PathValue("project")))
 		return
 	}
-	view, err := s.draft.AdoptProject(plat.id, plat.proj, target, body.Owners, liveNamespaces(r.Context(), plat.cluster))
+	view, err := s.draft.AdoptProject(plat.id, plat.proj, target, body.Owners, s.claimNamespaces(r.Context(), plat, target.Name))
 	respond(w, view, err)
 }
 
@@ -133,9 +188,8 @@ func (s *Server) handleProjectSyncAccess(w http.ResponseWriter, r *http.Request)
 	if !ok {
 		return
 	}
-	target, ok := s.projectByName(r.PathValue("project"))
+	target, ok := s.tenancyTarget(w, r, plat)
 	if !ok {
-		fail(w, fmt.Errorf("%w: project %q", model.ErrNotFound, r.PathValue("project")))
 		return
 	}
 	view, err := s.draft.StageSyncAccess(plat.id, plat.proj, target)
@@ -145,17 +199,16 @@ func (s *Server) handleProjectSyncAccess(w http.ResponseWriter, r *http.Request)
 // handleReleaseProject dissolves a repoless project back into a plain
 // namespace (or an adoptable tenant): declared tenancy is staged as a
 // platform-repo rewrite (the PR is the release), label residue is stripped
-// imperatively under the caller's token. Repo-backed projects are refused -
-// release exists for the "no repo configured" dead end, not for tearing down
-// healthy tenants.
+// imperatively under the caller's token: the coordinator checks the first, the
+// apiserver the second. Repo-backed projects are refused - release exists for
+// the "no repo configured" dead end, not for tearing down healthy tenants.
 func (s *Server) handleReleaseProject(w http.ResponseWriter, r *http.Request) {
-	plat, ok := s.platformScope(w, r, ssarNamespace)
+	plat, ok := s.platformScopeGated(w, r)
 	if !ok {
 		return
 	}
-	target, ok := s.projectByName(r.PathValue("project"))
+	target, ok := s.tenancyTarget(w, r, plat)
 	if !ok {
-		fail(w, fmt.Errorf("%w: project %q", model.ErrNotFound, r.PathValue("project")))
 		return
 	}
 	if target.Repo != "" {
@@ -169,8 +222,8 @@ func (s *Server) handleReleaseProject(w http.ResponseWriter, r *http.Request) {
 	}
 	res := model.ReleaseResult{Staged: staged}
 	for _, ns := range residue {
-		// The k8s API is the gate: a caller without namespace-update gets its 403
-		// here. Anything already staged stays in the draft (visible, unstageable).
+		// The k8s API answers too: anything already staged stays in the draft
+		// (visible, unstageable).
 		if perr := plat.cluster.ReleaseNamespace(r.Context(), ns, s.cfg.ProjectLabel, s.cfg.RepoAnnotation); perr != nil {
 			fail(w, fmt.Errorf("release %s: %w", ns, perr))
 			return

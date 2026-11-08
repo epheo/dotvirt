@@ -9,6 +9,8 @@ import (
 	"strings"
 	"time"
 
+	authzv1 "k8s.io/api/authorization/v1"
+
 	"github.com/epheo/dotvirt/internal/auth"
 	"github.com/epheo/dotvirt/internal/cluster"
 	"github.com/epheo/dotvirt/internal/eventbus"
@@ -156,28 +158,24 @@ func (s *Server) visibleFor(ctx context.Context, id auth.Identity, c *cluster.Cl
 	return e.ns, nil
 }
 
-// can answers verb on ref in ns ("" for cluster scope) under id's token,
-// behind a per-(token, question) cache stamped with rbacVersion, so a signal
-// read on a polled or broadcast path does not post an SSAR per request. A
-// watched grant or namespace move invalidates lazily via the stamp; authTTL
-// backstops what no watch observes (see RunTTLBackstop). Only a verdict is
-// cached: a failed review is returned, so a blip can never pin a denial. A
-// gate answers the error with s.reviewFailed; a UI signal or a filter reads it
-// as no.
-func (s *Server) can(ctx context.Context, id auth.Identity, c *cluster.Client, verb string, ref ssarRef, ns string) (bool, error) {
-	return s.canNamed(ctx, id, c, verb, ref, ns, "")
-}
-
-// canNamed is can for the one object name names, cached as its own question.
-func (s *Server) canNamed(ctx context.Context, id auth.Identity, c *cluster.Client, verb string, ref ssarRef, ns, name string) (bool, error) {
+// can answers one question under id's token, behind a per-(token, question)
+// cache stamped with rbacVersion, so a signal read on a polled or broadcast
+// path does not post an SSAR per request. A watched grant or namespace move
+// invalidates lazily via the stamp; authTTL backstops what no watch observes
+// (see RunTTLBackstop). Only a verdict is cached: a failed review is returned,
+// so a blip can never pin a denial. A gate answers the error with
+// s.reviewFailed; a UI signal or a filter reads it as no.
+func (s *Server) can(ctx context.Context, id auth.Identity, c *cluster.Client, q question) (bool, error) {
 	ver := s.rbacVersion()
-	k := strings.Join([]string{restfactory.TokenKey(id.Token), verb, ref.group, ref.resource, ns, name}, "\x00")
+	k := strings.Join([]string{restfactory.TokenKey(id.Token), q.Verb, q.Group, q.Resource, q.Subresource, q.Namespace, q.Name}, "\x00")
 	if e, age, ok := s.ssar.GetAge(k); ok && e.ver == ver && age < s.maxAge(e.unsettled) {
 		return e.ok, nil
 	}
 	e, err := review(ctx, s.ssar, k, ver, func(ctx context.Context) (ssarVerdict, error) {
 		start := time.Now()
-		ok, err := c.CanNamed(ctx, verb, ref.group, ref.resource, ns, name)
+		ok, err := c.Review(ctx, authzv1.ResourceAttributes{
+			Verb: q.Verb, Group: q.Group, Resource: q.Resource, Subresource: q.Subresource, Namespace: q.Namespace, Name: q.Name,
+		})
 		if err != nil {
 			return ssarVerdict{}, err
 		}
@@ -222,7 +220,7 @@ type ssarRef struct{ group, resource string }
 // metrics, node ops in the task feed).
 var ssarNodes = ssarRef{resource: "nodes"}
 
-// ssarFor is the create authority over one managed kind.
+// ssarFor is the authority over one managed kind.
 func ssarFor(k model.Kind) ssarRef { return ssarRef{k.Group, k.Plural} }
 
 // platformProject is the synthetic platform-tier project over the platform repo.
@@ -239,10 +237,9 @@ func (s *Server) vmScope(w http.ResponseWriter, r *http.Request) (sc scope, ns, 
 	return sc, ns, name, ok
 }
 
-// The platform-tier create authorities, each named once and spelled by the
-// kind table: the create routes gate on them (platformScope), NetworkCaps
-// projects them to the UI, and the authoring signal ORs a subset - adding a
-// platform kind touches the table, this list and its routes.
+// The platform-tier authorities, each named once and spelled by the kind
+// table: the policy views and the remaining platformScope routes gate on
+// them, and the authoring signal ORs a subset.
 var (
 	ssarCUDN        = ssarFor(model.KindCUDN)
 	ssarUplink      = ssarFor(model.KindNNCP)
@@ -256,36 +253,30 @@ var (
 	ssarVMTemplate  = ssarFor(model.KindTemplate)
 )
 
-// platformAuthorResources are the create-SSARs that signal platform-tier
-// authoring - one per family of platform create routes. Holding ANY of them
-// grants access to the caller's OWN platform draft (drafts are per-user: a
-// caller can only view/unstage/propose what their per-route create gates let
-// them stage), so the whole-draft routes OR these rather than demanding one
-// specific verb; the PR merge review remains the apply boundary.
-var platformAuthorResources = []ssarRef{ssarCUDN, ssarDescheduler, ssarVMTemplate}
+// platformReaders are the cluster-wide signals that open the platform tier's
+// shared reads - its history, commit and proposal diffs, revert, its merges
+// in the task feed and its rollup detail: listing namespaces cluster-wide, or
+// creating CUDNs, KubeDeschedulers or templates in every namespace. The
+// platform repo names every project, namespace and owner, so a right scoped
+// to one namespace (an operator namespace's admin role) never opens them.
+func platformReaders() []action {
+	return []action{
+		ask(verbList, ssarNamespace, ""),
+		ask(verbCreate, ssarCUDN, ""),
+		ask(verbCreate, ssarDescheduler, ""),
+		ask(verbCreate, ssarVMTemplate, ""),
+	}
+}
 
-// canAuthorPlatform reports whether id may author platform-tier changes -
-// any platform authoring signal, TTL-cached per token so the inventory
-// broadcast path stays free of a per-subscriber cluster call. False when no
-// platform repo is configured. Used to seed the synthetic platform project
-// into the proposals query so a platform PR surfaces on a cold page load, not
-// only right after proposing. An error means no signal allowed and at least
-// one review failed.
-func (s *Server) canAuthorPlatform(ctx context.Context, id auth.Identity, c *cluster.Client) (bool, error) {
+// canReadPlatform reports whether id may read the platform tier: any of
+// platformReaders, each a review cached per token. False when no platform
+// repo is configured. An error means none allowed and at least one review
+// failed.
+func (s *Server) canReadPlatform(ctx context.Context, id auth.Identity, c *cluster.Client) (bool, error) {
 	if s.cfg.PlatformRepo == "" {
 		return false, nil
 	}
-	var failed error
-	for _, r := range platformAuthorResources {
-		ok, err := s.can(ctx, id, c, verbCreate, r, "")
-		if ok {
-			return true, nil
-		}
-		if err != nil {
-			failed = err
-		}
-	}
-	return false, failed
+	return s.anyAllowed(ctx, id, c, platformReaders())
 }
 
 func namespaceNames(nss []project.Namespace) []string {
@@ -297,14 +288,12 @@ func namespaceNames(nss []project.Namespace) []string {
 }
 
 // scope is the per-request context every draft/VM handler resolves up front: the
-// caller's identity, their cluster client, and the target project.
+// caller's identity, their cluster client, and the target project. No field
+// stands for authority: every gate asks its own questions.
 type scope struct {
 	id      auth.Identity
 	cluster *cluster.Client
 	proj    project.ProjectInfo
-	// platform is set only by platformScopeWith, after its own SSAR gate; a
-	// project name is never trusted to mean the platform tier.
-	platform bool
 }
 
 // resolveProject is the shared preamble for every draft/VM route: identity -> user
@@ -434,16 +423,31 @@ func (s *Server) draftScope(w http.ResponseWriter, r *http.Request) (scope, bool
 		fail(w, invalid(errors.New("project query parameter is required")))
 		return scope{}, false
 	}
-	return s.pickProject(w, r, want)
+	return s.pickDraft(w, r, want)
+}
+
+// pickDraft resolves the project whose draft a route acts on: pickProject,
+// and for the platform tier also any caller holding a draft there, whatever
+// right staged it (a claim on one namespace), so nothing staged is stranded.
+func (s *Server) pickDraft(w http.ResponseWriter, r *http.Request, want string) (scope, bool) {
+	if want != platformProjectName {
+		return s.pickProject(w, r, want)
+	}
+	return s.platformScopeWith(w, r, func(ctx context.Context, id auth.Identity, c *cluster.Client) (bool, error) {
+		if ok, err := s.canReadPlatform(ctx, id, c); ok || err != nil {
+			return ok, err
+		}
+		v, err := s.draft.Get(id, s.platformProject())
+		return err == nil && v.Count > 0, nil
+	}, "not authorized to author platform changes")
 }
 
 // pickProject resolves a project named by a ?project= query or {project} path
-// segment (the whole-project routes: draft, propose, unstage, history, revert).
-// The platform tier resolves ONLY for callers who can author platform changes
-// (any signal in platformAuthorResources - the routes touch the caller's own
-// draft, staged behind those same per-route gates), so a plain tenant cannot
-// reach the platform repo's draft, history, or revert. Any other name resolves
-// from the caller's visible projects.
+// segment (the whole-project routes: history, revert, and through pickDraft
+// the draft routes). The platform tier resolves ONLY for callers holding a
+// cluster-wide platform signal (platformReaders), so neither a plain tenant
+// nor a namespace-scoped right reaches the platform repo's history or
+// revert. Any other name resolves from the caller's visible projects.
 func (s *Server) pickProject(w http.ResponseWriter, r *http.Request, want string) (scope, bool) {
 	if want == platformProjectName {
 		return s.platformScopeAny(w, r)
@@ -451,11 +455,11 @@ func (s *Server) pickProject(w http.ResponseWriter, r *http.Request, want string
 	return s.resolveProject(w, r, byName(want))
 }
 
-// platformScopeAny resolves the platform tier for the whole-draft routes: any
-// platform authoring signal suffices (see platformAuthorResources). The
-// per-kind create routes keep platformScope's exact-resource gate.
+// platformScopeAny resolves the platform tier for the whole-project routes:
+// any of platformReaders suffices. The per-kind create routes keep their own
+// gate.
 func (s *Server) platformScopeAny(w http.ResponseWriter, r *http.Request) (scope, bool) {
-	return s.platformScopeWith(w, r, s.canAuthorPlatform, "not authorized to author platform changes")
+	return s.platformScopeWith(w, r, s.canReadPlatform, "not authorized to read the platform tier")
 }
 
 // platformProjectName is the synthetic project name for the platform tier - the
@@ -469,8 +473,19 @@ const platformProjectName = project.PlatformName
 // author-time check matches the apply-time AppProject boundary.
 func (s *Server) platformScope(w http.ResponseWriter, r *http.Request, ref ssarRef) (scope, bool) {
 	return s.platformScopeWith(w, r, func(ctx context.Context, id auth.Identity, c *cluster.Client) (bool, error) {
-		return s.can(ctx, id, c, verbCreate, ref, "")
+		_, ok, err := s.allowed(ctx, id, c, ask(verbCreate, ref, ""))
+		return ok, err
 	}, "not authorized to create "+ref.resource)
+}
+
+// platformScopeGated resolves the platform tier for a route that gates its
+// own verb or claim once it knows what it acts on (a namespace that exists or
+// not); the coordinator then checks each object the change writes. It grants
+// nothing by itself.
+func (s *Server) platformScopeGated(w http.ResponseWriter, r *http.Request) (scope, bool) {
+	return s.platformScopeWith(w, r, func(context.Context, auth.Identity, *cluster.Client) (bool, error) {
+		return true, nil
+	}, "")
 }
 
 // platformScopeWith is the shared platform-tier preamble - the caller's identity
@@ -498,5 +513,5 @@ func (s *Server) platformScopeWith(w http.ResponseWriter, r *http.Request, autho
 		fail(w, fmt.Errorf("%w: %s", model.ErrForbidden, deny))
 		return scope{}, false
 	}
-	return scope{id: id, cluster: c, proj: s.platformProject(), platform: true}, true
+	return scope{id: id, cluster: c, proj: s.platformProject()}, true
 }

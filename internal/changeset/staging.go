@@ -413,39 +413,52 @@ func createForm(resource draft.Resource, rawSpec json.RawMessage) (func() (draft
 // account when one is configured: the project syncs into every namespace it
 // holds, as no more than its people.
 func (c *Coordinator) StageCreateNamespace(id auth.Identity, commitProj, joinProj project.ProjectInfo, rawSpec json.RawMessage, live LiveNamespaces) (model.DraftView, error) {
-	entries, err := c.namespaceEntries(commitProj, joinProj, rawSpec, live)
+	var spec netgen.NamespaceSpec
+	if err := json.Unmarshal(rawSpec, &spec); err != nil {
+		return model.DraftView{}, invalid(fmt.Errorf("invalid namespace spec: %v", err))
+	}
+	// An existing namespace joins as it is; only a new one may take a VM Network.
+	ln, err := live.lookup(spec.Name)
+	if err != nil {
+		return model.DraftView{}, err
+	}
+	if err := primaryNetworkOnExisting(spec.Name, ln, spec.VMNetwork); err != nil {
+		return model.DraftView{}, err
+	}
+	spec.Live = ln
+	entries, err := c.namespaceEntries(commitProj, joinProj, spec)
 	if err != nil {
 		return model.DraftView{}, err
 	}
 	return c.stage(id, commitProj, entries...)
 }
 
-// PreviewCreateNamespace is StageCreateNamespace without the store write:
-// the namespace and its grants, through the same gate.
+// PreviewCreateNamespace is StageCreateNamespace step for step - the same
+// read through live (the claim gate the handler binds there), the same
+// entries, the same gate - without the store write.
 func (c *Coordinator) PreviewCreateNamespace(id auth.Identity, commitProj, joinProj project.ProjectInfo, rawSpec json.RawMessage, live LiveNamespaces) (model.StagePreview, error) {
-	entries, err := c.namespaceEntries(commitProj, joinProj, rawSpec, live)
+	var spec netgen.NamespaceSpec
+	if err := json.Unmarshal(rawSpec, &spec); err != nil {
+		return model.StagePreview{}, invalid(fmt.Errorf("invalid namespace spec: %v", err))
+	}
+	ln, err := live.lookup(spec.Name)
+	if err != nil {
+		return model.StagePreview{}, err
+	}
+	if err := primaryNetworkOnExisting(spec.Name, ln, spec.VMNetwork); err != nil {
+		return model.StagePreview{}, err
+	}
+	spec.Live = ln
+	entries, err := c.namespaceEntries(commitProj, joinProj, spec)
 	if err != nil {
 		return model.StagePreview{}, err
 	}
 	return c.previewOf(id, commitProj, entries...)
 }
 
-// namespaceEntries is what a new namespace stages: its manifest, then its
-// grants.
-func (c *Coordinator) namespaceEntries(commitProj, joinProj project.ProjectInfo, rawSpec json.RawMessage, live LiveNamespaces) ([]draft.Entry, error) {
-	var spec netgen.NamespaceSpec
-	if err := json.Unmarshal(rawSpec, &spec); err != nil {
-		return nil, invalid(fmt.Errorf("invalid namespace spec: %v", err))
-	}
-	// An existing namespace joins as it is; only a new one may take a VM Network.
-	ln, err := live.lookup(spec.Name)
-	if err != nil {
-		return nil, err
-	}
-	if err := primaryNetworkOnExisting(spec.Name, ln, spec.VMNetwork); err != nil {
-		return nil, err
-	}
-	spec.Live = ln
+// namespaceEntries is what joining namespace spec to joinProj stages into
+// commitProj: its Namespace (and primary VM Network) and its grants.
+func (c *Coordinator) namespaceEntries(commitProj, joinProj project.ProjectInfo, spec netgen.NamespaceSpec) ([]draft.Entry, error) {
 	entry, err := c.renderedEntry(commitProj, func() (draft.Entry, error) {
 		if joinProj.Repo == "" {
 			return draft.Entry{}, fmt.Errorf("the joining project has no repo")
