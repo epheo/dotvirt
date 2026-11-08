@@ -1046,6 +1046,9 @@ const uploadoff = {
 	capabilities: { ...noupload.capabilities, cluster: { imageUpload: false } },
 };
 
+// metricsoff: every metrics view answers with a reason and no numbers.
+const metricsoff = { ...base, name: 'metricsoff', metricsUnavailable: 'forbidden' };
+
 // ── empty: pristine install, nothing visible yet ───────────────────────────────
 
 const empty = {
@@ -1440,5 +1443,6 @@ export const scenarios = {
 	noboot,
 	noupload,
 	uploadoff,
+	metricsoff,
 	caps: capsDenied,
 };

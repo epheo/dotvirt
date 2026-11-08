@@ -1,7 +1,9 @@
 <script lang="ts">
 	import type { VMUsage } from '#lib/api.js';
 	import { relativeAge } from '#lib/format.js';
+	import { metricsGap } from '#lib/metrics.js';
 	import Card from './Card.svelte';
+	import MetricsGap from './MetricsGap.svelte';
 	import UsageBar from './UsageBar.svelte';
 
 	// Pure view over the summary's usage snapshot - VMSummary owns the fetch so
@@ -12,10 +14,15 @@
 
 <Card title="Capacity &amp; usage" flush>
 	{#snippet actions()}
-		{#if usage}<span class="text-ink-faint">updated {relativeAge(usage.updated)}</span>{/if}
+		{#if usage && !metricsGap(usage.unavailable)}<span class="text-ink-faint"
+				>updated {relativeAge(usage.updated)}</span
+			>{/if}
 	{/snippet}
 	<div class="space-y-3 px-card py-3">
-		{#if usage}
+		{#if usage && metricsGap(usage.unavailable)}
+			<MetricsGap reason={usage.unavailable} />
+		{:else if usage}
+			<MetricsGap reason={usage.unavailable} />
 			<UsageBar
 				label="CPU"
 				used={usage.cpu.used}

@@ -10,6 +10,7 @@
 		type VM,
 	} from '#lib/api.js';
 	import { headroom } from '#lib/headroom.js';
+	import { metricsGap } from '#lib/metrics.js';
 	import { resource } from '#lib/resource.svelte.js';
 	import { drafts } from '#lib/state/drafts.svelte.js';
 	import { inventory } from '#lib/state/inventory.svelte.js';
@@ -54,12 +55,16 @@
 		() => api.capacity(),
 		{ poll: 30000 },
 	);
+	// A capacity read with no numbers is no capacity: "room for 0" would be a lie.
+	const capData = $derived(
+		cap.failed || !cap.data || metricsGap(cap.data.unavailable) ? null : cap.data,
+	);
 	const nodesRes = resource<Node[]>(() => 'nodes', api.nodes);
 	const room = $derived.by(() => {
-		if (cap.failed || !cap.data) return null;
+		if (!capData) return null;
 		const c = scope.node
-			? { ...cap.data, nodes: cap.data.nodes.filter((n) => n.node === scope.node) }
-			: cap.data;
+			? { ...capData, nodes: capData.nodes.filter((n) => n.node === scope.node) }
+			: capData;
 		return headroom(c, nodesRes.failed ? null : nodesRes.data, vms, inventory.options);
 	});
 
@@ -143,14 +148,8 @@
 		scope={{ project: scope.project, namespace: scope.namespace }}
 		label={scope.namespace ?? scope.project ?? scope.node ?? 'All VMs'}
 	/>
-	<CapacityCard
-		{data}
-		loading={summary.loading}
-		failed={summary.failed}
-		{room}
-		cap={cap.failed ? null : cap.data}
-	/>
-	{#if data}
+	<CapacityCard {data} loading={summary.loading} failed={summary.failed} {room} cap={capData} />
+	{#if data && !metricsGap(data.unavailable)}
 		<TopConsumers topCpu={data.topCpu} topMemory={data.topMemory} {vms} {onselect} />
 	{/if}
 	<ScopeChanges scope={{ project: scope.project, namespace: scope.namespace }} />
