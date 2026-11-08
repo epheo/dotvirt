@@ -68,8 +68,9 @@ type DotvirtReconciler struct {
 // AppProjects, bindings) survives without a CR or owned-object event.
 const driftResync = 10 * time.Minute
 
-// platformRepoRetry replaces driftResync while the platform repo is missing.
-const platformRepoRetry = time.Minute
+// settleRetry replaces driftResync while a state no watch reports on is
+// unsettled: the platform repo missing, or Argo not ready yet.
+const settleRetry = time.Minute
 
 // dotvirtFinalizer guards cleanup of the cluster-scoped + ArgoCD-namespace
 // resources, which a namespaced CR can't garbage-collect via ownerReferences.
@@ -217,15 +218,18 @@ func (r *DotvirtReconciler) provision(ctx context.Context, key types.NamespacedN
 		}
 		r.markPruned(key, digest)
 	}
-	if repo := meta.FindStatusCondition(dv.Status.Conditions, dotvirtv1alpha1.ConditionForgeRepoReady); repo != nil && repo.Status == metav1.ConditionFalse {
-		return ctrl.Result{RequeueAfter: min(platformRepoRetry, r.syncWait(dv))}, nil
+	// The watches cover the CR, Deployments, Secrets, Routes and project
+	// namespaces; the drift timer heals the rest. No watch reports the platform
+	// repo or the ApplicationSet and its Applications, so their recovery polls.
+	// Argo gets driftResync to recover on its own; past that, a state only a
+	// person fixes waits on the drift timer like any other drift.
+	wait := min(r.syncWait(dv), driftResync)
+	argo := meta.FindStatusCondition(dv.Status.Conditions, dotvirtv1alpha1.ConditionArgoReady)
+	argoSettling := argo != nil && argo.Status != metav1.ConditionTrue && r.clock().Sub(argo.LastTransitionTime.Time) < driftResync
+	if argoSettling || meta.IsStatusConditionFalse(dv.Status.Conditions, dotvirtv1alpha1.ConditionForgeRepoReady) {
+		wait = min(wait, settleRetry)
 	}
-	if wait := r.syncWait(dv); wait < driftResync {
-		return ctrl.Result{RequeueAfter: wait}, nil
-	}
-	// The watches cover the CR, Deployments, Secrets and Routes; this timer heals
-	// drift on the rest.
-	return ctrl.Result{RequeueAfter: driftResync}, nil
+	return ctrl.Result{RequeueAfter: wait}, nil
 }
 
 // syncWait is when a pass waiting on sync impersonation comes back, since

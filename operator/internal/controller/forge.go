@@ -183,7 +183,7 @@ func forgeAdminHint(ns string) string {
 // failure is recorded and the pass completes, since the operand serves without
 // the repo (the condition plus the app's recover-repo UI carry the signal), so
 // Available, the observed generation and prune must not wait on the forge. The
-// pass then requeues on platformRepoRetry: no watch event fires when the forge
+// pass then requeues on settleRetry: no watch event fires when the forge
 // comes back.
 func (r *DotvirtReconciler) reconcilePlatformRepo(ctx context.Context, dv *dotvirtv1alpha1.Dotvirt, _ *reconcileCtx) (*ctrl.Result, error) {
 	if dv.Spec.Forge.PlatformRepo == "" {
