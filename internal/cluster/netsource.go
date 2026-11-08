@@ -2,6 +2,7 @@ package cluster
 
 import (
 	"context"
+	"strings"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -117,4 +118,54 @@ func (c *Client) ClusterNetworks(ctx context.Context) (pod, service []string, er
 		}
 	}
 	return pod, service, nil
+}
+
+// KindResources is the resource serving each of kinds in any version, by
+// discovery: the group list, then the group's versions until the kind turns
+// up. A kind missing from served is not served; failed names the groups whose
+// resources discovery could not read, whose kinds are unknown.
+func (c *Client) KindResources(kinds []schema.GroupKind) (served map[schema.GroupKind]string, failed map[string]bool, err error) {
+	groups, err := c.kube.Discovery().ServerGroups()
+	if err != nil {
+		return nil, nil, err
+	}
+	versions := map[string][]string{}
+	for _, g := range groups.Groups {
+		for _, v := range g.Versions {
+			versions[g.Name] = append(versions[g.Name], v.GroupVersion)
+		}
+	}
+	served, failed = map[schema.GroupKind]string{}, map[string]bool{}
+	read := map[string]*metav1.APIResourceList{}
+	for _, gk := range kinds {
+		for _, gv := range versions[gk.Group] {
+			rl, ok := read[gv]
+			if !ok {
+				rl, err = c.kube.Discovery().ServerResourcesForGroupVersion(gv)
+				if err != nil && !apierrors.IsNotFound(err) {
+					failed[gk.Group] = true
+					continue
+				}
+				read[gv] = rl
+			}
+			if res := kindResource(rl, gk.Kind); res != "" {
+				served[gk] = res
+				break
+			}
+		}
+	}
+	return served, failed, nil
+}
+
+// kindResource is the resource of rl serving kind, subresources aside.
+func kindResource(rl *metav1.APIResourceList, kind string) string {
+	if rl == nil {
+		return ""
+	}
+	for _, r := range rl.APIResources {
+		if r.Kind == kind && !strings.Contains(r.Name, "/") {
+			return r.Name
+		}
+	}
+	return ""
 }

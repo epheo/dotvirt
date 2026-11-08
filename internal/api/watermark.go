@@ -57,26 +57,31 @@ func (t *term) sum() uint64 { return t.h.Sum64() }
 
 // netGrants are the verdicts the network and policy pulls apply beyond the
 // visible set: node read (the fabric, uplinks and node ops), platform
-// authoring, and the create authorities behind CanManage, Caps, the
-// cluster-tier policy rows, shared-error redaction and platform source files.
-// Each is the cached review the pulls themselves make, so a grant or a
-// revocation that leaves the visible set alone still moves the watermark.
+// authoring, the create authorities behind CanManage, Caps, the cluster-tier
+// policy rows, shared-error redaction and platform source files, and list on
+// each cluster-tier policy kind, which those rows also need and which names a
+// cluster rule on every caller's rules pull. Each is the cached review the
+// pulls themselves make, so a grant or a revocation that leaves the visible
+// set alone still moves the watermark.
 type netGrants struct {
 	nodes  bool
 	create map[ssarRef]bool
+	list   map[ssarRef]bool
 	bits   uint64 // every verdict, platform authoring included, in a fixed order
 }
 
-// netGrantRefs are the create authorities netGrants reads; the Caps ones
-// only matter where a platform repo is configured.
+// netGrantRefs are the create authorities netGrants reads, netPolicyRefs the
+// cluster-tier policy kinds it asks list on too; the Caps ones only matter
+// where a platform repo is configured.
 var (
-	netGrantRefs  = []ssarRef{ssarCUDN, ssarANP, ssarBANP, ssarEgressIP, ssarExtRoute}
+	netPolicyRefs = []ssarRef{ssarANP, ssarBANP, ssarEgressIP, ssarExtRoute}
+	netGrantRefs  = append([]ssarRef{ssarCUDN}, netPolicyRefs...)
 	netCapRefs    = []ssarRef{ssarUplink, ssarNamespace}
 	netGrantKinds = []model.Kind{model.KindCUDN, model.KindNNCP, model.KindANP, model.KindBANP, model.KindEgressIP, model.KindExtRoute}
 )
 
 func (s *Server) netGrants(ctx context.Context, id auth.Identity, c *cluster.Client, platform bool) netGrants {
-	g := netGrants{create: map[ssarRef]bool{}}
+	g := netGrants{create: map[ssarRef]bool{}, list: map[ssarRef]bool{}}
 	g.nodes, _ = s.can(ctx, id, c, refQ(verbList, ssarNodes, ""))
 	verdicts := []bool{g.nodes, platform}
 	refs := netGrantRefs
@@ -87,6 +92,10 @@ func (s *Server) netGrants(ctx context.Context, id auth.Identity, c *cluster.Cli
 		g.create[r], _ = s.can(ctx, id, c, refQ(verbCreate, r, ""))
 		verdicts = append(verdicts, g.create[r])
 	}
+	for _, r := range netPolicyRefs {
+		g.list[r], _ = s.can(ctx, id, c, refQ(verbList, r, ""))
+		verdicts = append(verdicts, g.list[r])
+	}
 	for i, v := range verdicts {
 		if v {
 			g.bits |= 1 << i
@@ -96,14 +105,16 @@ func (s *Server) netGrants(ctx context.Context, id auth.Identity, c *cluster.Cli
 }
 
 // sees admits the cluster-scoped kinds the caller's pulls show: shared
-// networks to everyone, each cluster-tier policy kind to its authority, and
-// the fabric (uplink policies, any other cluster-scoped kind) to node readers.
+// networks to everyone, each cluster-tier policy kind to who may create and
+// list it, and the fabric (uplink policies, any other cluster-scoped kind) to
+// node readers.
 func (g netGrants) sees(gvr schema.GroupVersionResource) bool {
 	switch gvr {
 	case cluster.GVR(model.KindCUDN):
 		return true
 	case cluster.GVR(model.KindANP), cluster.GVR(model.KindBANP), cluster.GVR(model.KindEgressIP), cluster.GVR(model.KindExtRoute):
-		return g.create[ssarRef{gvr.Group, gvr.Resource}]
+		ref := ssarRef{gvr.Group, gvr.Resource}
+		return g.create[ref] && g.list[ref]
 	}
 	return g.nodes
 }

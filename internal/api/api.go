@@ -22,6 +22,7 @@ import (
 	"time"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 
 	"github.com/epheo/dotvirt/internal/argo"
 	"github.com/epheo/dotvirt/internal/auth"
@@ -66,6 +67,8 @@ type Reader interface {
 	Templates(proj project.ProjectInfo) []model.Template
 	// DeclaredFiles maps every object proj's base branch declares to its file.
 	DeclaredFiles(proj project.ProjectInfo) (map[model.ObjectRef]string, error)
+	// DeclaredKinds lists every kind proj's base branch declares.
+	DeclaredKinds(proj project.ProjectInfo) ([]schema.GroupKind, error)
 	// ObjectSpec reads a declared object back as the spec its create form accepts.
 	ObjectSpec(proj project.ProjectInfo, resource, namespace, name string) (model.ObjectSpec, error)
 	DRSState(proj project.ProjectInfo) (model.DRSGitState, error)
@@ -202,6 +205,8 @@ type Server struct {
 	visible   *ttlcache.Cache[visibleSet]       // per-token visible-namespace set, RBAC-version-stamped
 	cands     atomic.Pointer[candidates]        // the project namespaces every visible set is reviewed over
 	ssar      *ttlcache.Cache[ssarVerdict]      // per-(token, question) SSAR verdict, RBAC-version-stamped
+	kinds     atomic.Pointer[kindIndex]         // discovery's answer for the platform repo's kinds
+	kindFill  *ttlcache.Cache[*kindIndex]       // single-flights its refresh
 	proposals *ttlcache.Cache[[]model.Proposal] // per-project open-PR set; written by the refresher, read on broadcast
 	options   *ttlcache.Cache[model.Options]    // shared wizard catalog (SA-read, identical for all)
 	storage   *ttlcache.Cache[[]model.StorageClassInfo]
@@ -278,6 +283,7 @@ func NewServer(d Deps) *Server {
 		repos:     d.Repos,
 		visible:   ttlcache.New[visibleSet](visibleTTL),
 		ssar:      ttlcache.New[ssarVerdict](visibleTTL),
+		kindFill:  ttlcache.New[*kindIndex](kindProbe),
 		proposals: ttlcache.New[[]model.Proposal](proposalsCacheTTL),
 		options:   ttlcache.New[model.Options](optionsTTL),
 		storage:   ttlcache.New[[]model.StorageClassInfo](storageTTL),

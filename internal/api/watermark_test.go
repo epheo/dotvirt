@@ -209,7 +209,7 @@ func BenchmarkFrameWatermarks(b *testing.B) {
 		b.Run(c.name, func(b *testing.B) {
 			projects, visible := scope(c.n)
 			b.ReportAllocs()
-			g := netGrants{nodes: c.nodes, create: map[ssarRef]bool{ssarANP: c.nodes}}
+			g := netGrants{nodes: c.nodes, create: map[ssarRef]bool{ssarANP: c.nodes}, list: map[ssarRef]bool{ssarANP: c.nodes}}
 			for b.Loop() {
 				_ = s.networksWatermark(visible, g)
 				_ = s.tasksWatermark(projects, c.nodes)
@@ -222,9 +222,17 @@ func BenchmarkFrameWatermarks(b *testing.B) {
 // networks watermark: the pulls it covers read those verdicts too.
 func TestNetworksWatermarkFollowsGrants(t *testing.T) {
 	fc := newFakeCluster(t)
-	var anp atomic.Bool
+	var create, list atomic.Bool
 	fc.ssar = func(token string, a *authzv1.ResourceAttributes) bool {
-		return a.Resource == "adminnetworkpolicies" && anp.Load()
+		switch {
+		case a.Resource != "adminnetworkpolicies":
+			return false
+		case a.Verb == verbCreate:
+			return create.Load()
+		case a.Verb == verbList:
+			return list.Load()
+		}
+		return false
 	}
 	s := fc.server(nil, Config{})
 	id := auth.Identity{Token: tenantToken, Username: "tenant"}
@@ -240,10 +248,24 @@ func TestNetworksWatermarkFollowsGrants(t *testing.T) {
 	if mark() != before {
 		t.Fatal("the watermark moved with nothing changed")
 	}
-	anp.Store(true)
+	// Listing them names cluster rules on a rules pull, whatever else.
+	list.Store(true)
 	s.bus.Publish(eventbus.RBACChanged) // what the grant's watch reports
-	if mark() == before {
+	listed := mark()
+	if listed == before {
+		t.Error("gaining list on admin network policies left the watermark")
+	}
+	create.Store(true)
+	s.bus.Publish(eventbus.RBACChanged)
+	granted := mark()
+	if granted == listed {
 		t.Error("gaining admin network policy authority left the watermark")
+	}
+	// The policy plane lists a cluster rule only to who may list its kind too.
+	list.Store(false)
+	s.bus.Publish(eventbus.RBACChanged)
+	if mark() == granted {
+		t.Error("losing list on admin network policies left the watermark")
 	}
 }
 

@@ -39,7 +39,9 @@ export interface ClusterCaps {
    * PlatformRead opens the platform tier's shared reads: its history, its
    * open proposals and their diffs, revert, and its merges and rollup
    * detail in the frame. A cluster-wide signal: the platform repo names
-   * every project, namespace and owner.
+   * every project, namespace and owner, and holds the objects it declares,
+   * so it needs list, cluster-wide, on namespaces and on every kind the
+   * repo declares that the cluster serves.
    */
   platformRead: boolean;
   /**
@@ -1278,6 +1280,11 @@ export interface Policy {
    * platform repo for a cluster-scoped one); empty when git does not declare it.
    */
   sourceFile?: string;
+  /**
+   * Withheld: the caller may not read this cluster-scoped policy, so Name is
+   * a neutral label, distinct within the response, and names no object.
+   */
+  withheld?: boolean;
   sync?: SyncStatus;
   health?: string;
   syncError?: string;
@@ -1820,6 +1827,7 @@ export interface ProjectSync {
  * identity, the health Argo computed, and the health or apply message.
  */
 export interface ObjectHealth {
+  group?: string; // the API group; empty for the core group
   kind: string;
   namespace?: string;
   name: string;

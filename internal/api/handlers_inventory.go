@@ -5,6 +5,9 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"slices"
+
+	"k8s.io/apimachinery/pkg/runtime/schema"
 
 	"github.com/epheo/dotvirt/internal/auth"
 	"github.com/epheo/dotvirt/internal/cluster"
@@ -127,7 +130,9 @@ func (s *Server) InventoryForIdentity(ctx context.Context, id auth.Identity) (mo
 		if s.platformBusy() || rollupDetail(inv.Platform) {
 			platformAuthor, platformErr = s.canReadPlatform(ctx, id, userCluster)
 		}
-		if !platformAuthor {
+		if platformAuthor {
+			inv.Platform = s.readerPlatformView(ctx, id, userCluster, inv.Platform)
+		} else {
 			inv.Platform = tenantPlatformView(inv.Platform, visible)
 		}
 	}
@@ -227,6 +232,37 @@ func tenantPlatformView(ps *model.ProjectSync, visible map[string]bool) *model.P
 }
 
 const platformErrorForTenants = "the platform repo failed to apply; a platform administrator can see why"
+
+// readerPlatformView is the platform rollup for a platform reader: the rows
+// of kinds they may list cluster-wide. Platform read weighs the kinds git
+// declares, and Argo's live tree can hold others for a while (a mirror behind
+// a merge, a stuck prune, a List Argo unwraps), so each row's kind is asked
+// on its own, a kind discovery cannot place read as unlisted. The apply error
+// can name a dropped row, so it turns generic once one is dropped.
+func (s *Server) readerPlatformView(ctx context.Context, id auth.Identity, c *cluster.Client, ps *model.ProjectSync) *model.ProjectSync {
+	if ps == nil || len(ps.Unhealthy) == 0 {
+		return ps
+	}
+	var kinds []schema.GroupKind
+	for _, o := range ps.Unhealthy {
+		if k := (schema.GroupKind{Group: o.Group, Kind: o.Kind}); !slices.Contains(kinds, k) {
+			kinds = append(kinds, k)
+		}
+	}
+	x, _ := s.servedKinds(ctx, kinds)
+	out := *ps
+	out.Unhealthy = nil
+	for _, o := range ps.Unhealthy {
+		ref, served, err := x.ref(schema.GroupKind{Group: o.Group, Kind: o.Kind})
+		if err == nil && served && s.capable(ctx, id, c, ask(verbList, ref, "")) {
+			out.Unhealthy = append(out.Unhealthy, o)
+		}
+	}
+	if len(out.Unhealthy) < len(ps.Unhealthy) && out.SyncError != "" {
+		out.SyncError = platformErrorForTenants
+	}
+	return &out
+}
 
 func (s *Server) handleInventory(w http.ResponseWriter, r *http.Request) {
 	id, _, err := s.userCluster(r)

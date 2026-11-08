@@ -1,10 +1,13 @@
 package changeset
 
 import (
+	"cmp"
 	"fmt"
 	"maps"
 	"slices"
 	"strings"
+
+	"k8s.io/apimachinery/pkg/runtime/schema"
 
 	"github.com/epheo/dotvirt/internal/git"
 	"github.com/epheo/dotvirt/internal/manifest"
@@ -84,6 +87,8 @@ type declaredIndex struct {
 	// Repeated lists every file of an object more than one file declares;
 	// Files keeps the last of them.
 	Repeated map[model.ObjectRef][]string
+	// Kinds is every kind a document declares, named or not, in sorted order.
+	Kinds []schema.GroupKind
 }
 
 // Placement is where a branch's objects are declared, each list in tree order:
@@ -112,9 +117,13 @@ func indexDeclared(read *git.Repo, branch string) (declaredIndex, error) {
 	return git.Memoized(read, "declared", branch, func() (declaredIndex, error) {
 		idx := declaredIndex{Files: map[model.ObjectRef]string{}, Opaque: map[string]bool{}, Repeated: map[model.ObjectRef][]string{}}
 		named := map[string][]model.ObjectRef{}
+		kinds := map[schema.GroupKind]bool{}
 		err := read.WalkYAML(branch,
 			func(path string) bool { return !git.InTemplatesDir(path) },
 			func(path string, content []byte) error {
+				for _, k := range manifest.Kinds(content) {
+					kinds[k] = true
+				}
 				refs, implied, docs := declared(path, content)
 				for _, ref := range refs {
 					if prev, ok := idx.Files[ref]; ok && prev != path {
@@ -142,6 +151,9 @@ func indexDeclared(read *git.Repo, branch string) (declaredIndex, error) {
 		}
 		idx.Placement.Named = named
 		idx.Placement.Namespaces = slices.Sorted(maps.Keys(named))
+		idx.Kinds = slices.SortedFunc(maps.Keys(kinds), func(a, b schema.GroupKind) int {
+			return cmp.Or(strings.Compare(a.Group, b.Group), strings.Compare(a.Kind, b.Kind))
+		})
 		return idx, nil
 	})
 }

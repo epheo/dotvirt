@@ -124,7 +124,8 @@ func TestScopeNetworkRulesRedactsDrift(t *testing.T) {
 		Reaches: []model.PeerRule{{Policy: model.Policy{Name: "into-b", Kind: model.PolicyBaseline}}},
 	}
 	drift := func(p *model.Policy) { p.SyncError = "namespace team-b: admission denied" }
-	tenant := policyRedactor{can: func(model.PolicyKind) bool { return false }}
+	no := func(model.PolicyKind) bool { return false }
+	tenant := policyRedactor{can: no, named: no}
 	got := scopeNetworkRules(in, nil, drift, tenant.apply)
 	for _, p := range []model.Policy{got.Applies[0].Policy, got.Reaches[0].Policy} {
 		if p.SyncError != redactedSyncError {

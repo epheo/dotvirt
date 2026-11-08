@@ -52,6 +52,9 @@ type Policy struct {
 	// SourceFile is the manifest declaring this policy in its project's repo (the
 	// platform repo for a cluster-scoped one); empty when git does not declare it.
 	SourceFile string `json:"sourceFile,omitempty"`
+	// Withheld: the caller may not read this cluster-scoped policy, so Name is
+	// a neutral label, distinct within the response, and names no object.
+	Withheld bool `json:"withheld,omitempty"`
 
 	Sync      SyncStatus `json:"sync,omitempty"`
 	Health    string     `json:"health,omitempty"`

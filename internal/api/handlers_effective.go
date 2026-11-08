@@ -47,21 +47,18 @@ func (s *Server) handleNamespacePolicy(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, eff)
 }
 
-// clusterAuthority reports per kind whether the caller may read the
-// cluster-tier rollup - the same create-SSAR /api/policies and the create
-// routes enforce, cached per (token, kind).
-func (s *Server) clusterAuthority(ctx context.Context, id auth.Identity, c *cluster.Client) func(model.PolicyKind) bool {
+// clusterAuthority reports per kind whether the caller may verb that
+// cluster-tier kind cluster-wide, each a review cached per (token, kind,
+// verb). A failed review reads as no.
+func (s *Server) clusterAuthority(ctx context.Context, id auth.Identity, c *cluster.Client, verb string) func(model.PolicyKind) bool {
 	return func(k model.PolicyKind) bool {
 		ref, ok := clusterPolicyRefs[k]
-		if !ok {
-			return false
-		}
-		allowed := s.capable(ctx, id, c, ask(verbCreate, ref, ""))
-		return allowed
+		return ok && s.capable(ctx, id, c, ask(verb, ref, ""))
 	}
 }
 
-// clusterPolicyRefs is the create authority over each cluster-tier policy kind.
+// clusterPolicyRefs is each cluster-tier policy kind's resource: create on it
+// reads a policy's full text, list its identity, as the apiserver would.
 var clusterPolicyRefs = map[model.PolicyKind]ssarRef{
 	model.PolicyAdmin:    ssarANP,
 	model.PolicyBaseline: ssarBANP,
@@ -74,11 +71,15 @@ var clusterPolicyRefs = map[model.PolicyKind]ssarRef{
 // its subject namespaces, every selector value its text spells that reaches
 // outside the caller's view, and its apply error. The rules stay - a rule
 // that governs the caller's workload is never hidden - while the full rollup
-// is what /api/policies gates on the same authority.
+// is what /api/policies gates on the same authority. From a caller who may
+// not list the kind, as a namespace admin may not, it withholds the policy's
+// identity too. One serves one response.
 type policyRedactor struct {
-	can  func(model.PolicyKind) bool
-	view *netstate.Redaction
-	snap *netstate.Snapshot
+	can   func(model.PolicyKind) bool // create on the kind
+	named func(model.PolicyKind) bool // list on the kind
+	view  *netstate.Redaction
+	snap  *netstate.Snapshot
+	anon  withheld
 }
 
 // policyRedactor is the caller's redactor: their visible namespaces, the
@@ -86,7 +87,7 @@ type policyRedactor struct {
 // selectors against, and whether they may read nodes (the cached review the
 // node views share, asked only when a node selector renders). A failed
 // visibility read hides every name.
-func (s *Server) policyRedactor(ctx context.Context, id auth.Identity, c *cluster.Client) policyRedactor {
+func (s *Server) policyRedactor(ctx context.Context, id auth.Identity, c *cluster.Client) *policyRedactor {
 	projects := map[string]bool{}
 	visible, err := s.visibleFor(ctx, id, c)
 	if err == nil {
@@ -94,9 +95,10 @@ func (s *Server) policyRedactor(ctx context.Context, id auth.Identity, c *cluste
 			projects[p.Name] = true
 		}
 	}
-	return policyRedactor{
-		can:  s.clusterAuthority(ctx, id, c),
-		snap: s.netstate,
+	return &policyRedactor{
+		can:   s.clusterAuthority(ctx, id, c, verbCreate),
+		named: s.clusterAuthority(ctx, id, c, verbList),
+		snap:  s.netstate,
 		view: &netstate.Redaction{
 			ProjectLabel: s.cfg.ProjectLabel,
 			Namespace:    func(ns string) bool { return visible[ns] },
@@ -135,22 +137,76 @@ func (s *Server) namespaceLabels() []netstate.NamespaceLabels {
 }
 
 // apply redacts p, and rule when it is one of p's rows (a trace step's).
-func (pr policyRedactor) apply(p *model.Policy, rule *model.PolicyRuleView) {
-	if _, cluster := clusterPolicyRefs[p.Kind]; !cluster || pr.can(p.Kind) {
+func (pr *policyRedactor) apply(p *model.Policy, rule *model.PolicyRuleView) {
+	if _, cluster := clusterPolicyRefs[p.Kind]; !cluster {
 		return
 	}
-	p.Namespaces = nil
+	if !pr.can(p.Kind) {
+		p.Namespaces = nil
+		if p.SyncError != "" {
+			p.SyncError = redactedSyncError
+		}
+		if pr.snap != nil {
+			pr.snap.Redact(p, rule, pr.view) // finds the policy by name: before withhold
+		}
+	}
+	if !pr.named(p.Kind) {
+		pr.withhold(p)
+	}
+}
+
+// withhold replaces what names the policy object: its name by a label, its
+// source file, and its apply error, which Argo words with the object's name.
+// What it does and whether it applies stay.
+func (pr *policyRedactor) withhold(p *model.Policy) {
+	p.Name, p.Withheld, p.SourceFile = pr.anon.label(p), true, ""
 	if p.SyncError != "" {
 		p.SyncError = redactedSyncError
-	}
-	if pr.snap != nil {
-		pr.snap.Redact(p, rule, pr.view)
 	}
 }
 
 // redactedSyncError stands in for a cluster-tier policy's apply error, which
 // can name other tenants' namespaces.
 const redactedSyncError = "the platform could not apply this policy"
+
+// withheld labels the policies one response withholds: by kind, numbered from
+// the second policy sharing a label in the order the response meets them, so
+// its rows stay distinct and no label derives from a name.
+type withheld struct {
+	labels map[string]string // backing and name: its label
+	held   map[string]int    // label: the policies holding it
+}
+
+func (w *withheld) label(p *model.Policy) string {
+	k := p.Backing + "\x00" + p.Name
+	if l, ok := w.labels[k]; ok {
+		return l
+	}
+	if w.labels == nil {
+		w.labels, w.held = map[string]string{}, map[string]int{}
+	}
+	l := withheldLabel(p)
+	w.held[l]++
+	if n := w.held[l]; n > 1 {
+		l = fmt.Sprintf("%s (%d)", l, n)
+	}
+	w.labels[k] = l
+	return l
+}
+
+func withheldLabel(p *model.Policy) string {
+	switch p.Kind {
+	case model.PolicyAdmin:
+		return fmt.Sprintf("cluster rule, priority %d", p.Priority)
+	case model.PolicyBaseline:
+		return "baseline cluster rule"
+	case model.PolicyEgressIP:
+		return "fixed outbound IP"
+	case model.PolicyRoute:
+		return "external route"
+	}
+	return "cluster policy"
+}
 
 func (s *Server) redactEffective(ctx context.Context, sc scope, eff *model.EffectivePolicy) {
 	pr := s.policyRedactor(ctx, sc.id, sc.cluster)

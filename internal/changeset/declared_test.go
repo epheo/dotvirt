@@ -7,6 +7,8 @@ import (
 	"strings"
 	"testing"
 
+	"k8s.io/apimachinery/pkg/runtime/schema"
+
 	"github.com/epheo/dotvirt/internal/auth"
 	"github.com/epheo/dotvirt/internal/draft"
 	"github.com/epheo/dotvirt/internal/model"
@@ -62,6 +64,20 @@ func TestPlacementOnBranch(t *testing.T) {
 	}
 	if idx.Files[implied[0]] != "alpha/loose.yaml" {
 		t.Errorf("the directory reading changed: %v", idx.Files)
+	}
+	kinds, err := c.DeclaredKinds(project.ProjectInfo{Name: "p", Repo: bare})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []schema.GroupKind{
+		{Group: "cdi.kubevirt.io", Kind: "DataVolume"},
+		{Group: "k8s.cni.cncf.io", Kind: "NetworkAttachmentDefinition"},
+		{Group: "k8s.ovn.org", Kind: "ClusterUserDefinedNetwork"},
+		{Group: "kubevirt.io", Kind: "VirtualMachine"},
+		{Group: "networking.k8s.io", Kind: "NetworkPolicy"},
+	}
+	if !slices.Equal(kinds, want) {
+		t.Errorf("declared kinds = %v, want %v", kinds, want)
 	}
 }
 

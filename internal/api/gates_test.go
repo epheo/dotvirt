@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -13,6 +14,7 @@ import (
 	authzv1 "k8s.io/api/authorization/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	kubevirtcorev1 "kubevirt.io/api/core/v1"
 
 	"github.com/epheo/dotvirt/internal/argo"
@@ -356,10 +358,14 @@ func TestGatesAreExactAndCapabilitiesMatch(t *testing.T) {
 }
 
 // The platform tier's shared reads (its history, a commit's diff, a proposal,
-// the platform draft without one of one's own) open on a cluster-wide signal
-// alone, and cluster.platformRead says the same. A right to stage one
-// platform kind, or a DRS right inside the operator namespace (which OLM
-// folds into that namespace's admin role), stages but reads nothing.
+// the platform draft without one of one's own) open on listing namespaces and
+// every kind the repo declares that the cluster serves, cluster-wide, and
+// cluster.platformRead says the same. On a cluster serving no MachineConfig,
+// a precise role listing the other declared kinds reads it; one missing the
+// project grants' RoleBindings, or a cluster rule kind, does not. Listing
+// namespaces alone, a right to stage one platform kind, or a DRS right inside
+// the operator namespace (which OLM folds into that namespace's admin role)
+// reads nothing, until the repo declares nothing.
 func TestPlatformReadsNeedAClusterWideSignal(t *testing.T) {
 	g := newGateRig(t)
 	passes := func(tok, path string) (ok bool) {
@@ -373,14 +379,36 @@ func TestPlatformReadsNeedAClusterWideSignal(t *testing.T) {
 	desched := func(verb, name string) grant {
 		return grant{verb: verb, group: "operator.openshift.io", resource: "kubedeschedulers", ns: descheduler, name: name}
 	}
+	served := []model.Kind{model.KindNS, model.KindRB, model.KindCUDN, model.KindNNCP, model.KindEgressIP, model.KindExtRoute, model.KindANP, model.KindBANP}
+	for _, k := range append(served, model.KindMachCfg) {
+		g.d.kinds = append(g.d.kinds, schema.GroupKind{Group: k.Group, Kind: k.Kind})
+	}
+	g.fc.serveKinds(served...)
+	var listing, butRB, butANP []grant
+	for _, k := range served {
+		q := grant{verb: verbList, group: k.Group, resource: k.Plural}
+		listing = append(listing, q)
+		if k != model.KindRB {
+			butRB = append(butRB, q)
+		}
+		if k != model.KindANP {
+			butANP = append(butANP, q)
+		}
+	}
+	reads := func(gs ...grant) []grant { return append(slices.Clone(listing), gs...) }
+	nsOnly := []grant{{verb: verbList, resource: "namespaces"}}
 	for _, c := range []struct {
 		gs            []grant
 		read, staging bool
 	}{
-		{[]grant{{verb: verbList, resource: "namespaces"}}, true, false},
-		{[]grant{kind(verbCreate, model.KindCUDN, "")}, true, true},
-		{[]grant{{verb: verbCreate, group: "operator.openshift.io", resource: "kubedeschedulers"}}, true, true},
-		{[]grant{kind(verbCreate, model.KindTemplate, "")}, true, true},
+		{listing, true, false},
+		{butRB, false, false},
+		{butANP, false, false},
+		{nsOnly, false, false},
+		{reads(kind(verbCreate, model.KindCUDN, "")), true, true},
+		{[]grant{kind(verbCreate, model.KindCUDN, "")}, false, true},
+		{reads(grant{verb: verbCreate, group: "operator.openshift.io", resource: "kubedeschedulers"}), true, true},
+		{reads(kind(verbCreate, model.KindTemplate, "")), true, true},
 		{[]grant{kind(verbCreate, model.KindEgressIP, "")}, false, true},
 		{[]grant{kind(verbDelete, model.KindNNCP, "")}, false, true},
 		{[]grant{desched(verbCreate, ""), desched(verbUpdate, "cluster"), desched(verbDelete, "cluster")}, false, true},
@@ -402,6 +430,11 @@ func TestPlatformReadsNeedAClusterWideSignal(t *testing.T) {
 	rec := do(g.s, g.token(nil), http.MethodGet, "/api/projects/platform/history", "")
 	if rec.Code != http.StatusForbidden || !strings.Contains(rec.Body.String(), "not authorized to read the platform repo") {
 		t.Errorf("tenant platform history = %d %q, want the platform repo named", rec.Code, rec.Body.String())
+	}
+	// A repo declaring nothing holds no object to read: namespaces alone open it.
+	g.d.kinds = nil
+	if cl, _ := g.caps(g.token(nsOnly), "team-a-dev"); !cl.PlatformRead {
+		t.Error("an empty platform repo refused a namespace lister")
 	}
 }
 
@@ -468,7 +501,9 @@ func TestProjectRefusesANamespaceOfAnotherProject(t *testing.T) {
 	g.d.none(t)
 
 	// A caller who sees only team-a-dev learns no other project's name.
+	g.fc.mu.Lock()
 	g.fc.readsVMs = func(token, ns string) bool { return ns == "team-a-dev" }
+	g.fc.mu.Unlock()
 	rec = do(g.s, g.token(claim), http.MethodPost, "/api/namespaces", `{"project":"team-a","name":"orphans-ns"}`)
 	if rec.Code != http.StatusConflict || strings.Contains(rec.Body.String(), "project orphans") {
 		t.Errorf("hidden holder = %d %q, want an unnamed 409", rec.Code, rec.Body.String())
@@ -485,7 +520,10 @@ func TestProjectRefusesANamespaceOfAnotherProject(t *testing.T) {
 // Whether a project exists is told only past the gate.
 func TestTenancyRoutesHideProjects(t *testing.T) {
 	g := newGateRig(t)
+	// The SA's startup reviews may still be in flight: swap the fake's verdicts under its lock.
+	g.fc.mu.Lock()
 	g.fc.readsVMs = func(token, ns string) bool { return ns == "team-a-dev" }
+	g.fc.mu.Unlock()
 	nobody := g.token(nil)
 	for _, path := range []string{"/api/projects/orphans/adopt", "/api/projects/orphans/release"} {
 		hidden := do(g.s, nobody, http.MethodPost, path, "")
@@ -568,7 +606,7 @@ func TestFrameAsksThePlatformLaneOnlyWhenBusy(t *testing.T) {
 	inner := g.fc.ssar
 	g.fc.ssar = func(token string, a *authzv1.ResourceAttributes) bool {
 		mu.Lock()
-		if a.Resource == "kubedeschedulers" || a.Resource == "virtualmachinetemplates" || a.Verb == verbDelete {
+		if a.Verb == verbList && a.Group == "" && a.Resource == "namespaces" { // the platform lane's first question
 			asked[token]++
 		}
 		mu.Unlock()

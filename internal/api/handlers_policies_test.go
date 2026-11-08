@@ -2,7 +2,10 @@ package api
 
 import (
 	"context"
+	"fmt"
 	"net/http"
+	"net/http/httptest"
+	"slices"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -17,6 +20,7 @@ import (
 	"github.com/epheo/dotvirt/internal/eventbus"
 	"github.com/epheo/dotvirt/internal/model"
 	"github.com/epheo/dotvirt/internal/netstate"
+	"github.com/epheo/dotvirt/internal/project"
 )
 
 // scopePolicies must keep namespace-tier rows only in visible namespaces and
@@ -51,27 +55,59 @@ func TestScopePolicies(t *testing.T) {
 // policy's subject namespaces and apply error are authoring-tier information,
 // stripped without authority over the kind (its text goes through
 // netstate.Redact, pinned there) - while the binding itself, a namespace-tier
-// policy, and a caller with authority are untouched.
+// policy, and a caller with authority are untouched. Its identity follows
+// list on the kind alone.
 func TestPolicyRedactor(t *testing.T) {
-	none := policyRedactor{can: func(model.PolicyKind) bool { return false }}
+	yes := func(model.PolicyKind) bool { return true }
+	no := func(model.PolicyKind) bool { return false }
+	lister := policyRedactor{can: no, named: yes}
 
 	anp := model.Policy{Name: "lockdown", Kind: model.PolicyAdmin, Namespaces: []string{"tenant-a", "tenant-b"}, SyncError: "namespace tenant-b: denied"}
-	none.apply(&anp, nil)
-	if anp.Namespaces != nil || strings.Contains(anp.SyncError, "tenant-b") || anp.Name != "lockdown" {
+	lister.apply(&anp, nil)
+	if anp.Namespaces != nil || strings.Contains(anp.SyncError, "tenant-b") || anp.Name != "lockdown" || anp.Withheld {
 		t.Errorf("admin policy without authority = %+v", anp)
 	}
 
-	dfw := model.Policy{Name: "allow-web", Kind: model.PolicyProjectRule, Namespace: "team-a", Namespaces: []string{"team-a"}}
+	none := policyRedactor{can: no, named: no}
+	dfw := model.Policy{Name: "allow-web", Kind: model.PolicyProjectRule, Namespace: "team-a", Namespaces: []string{"team-a"}, SourceFile: "team-a/allow-web.yaml"}
 	none.apply(&dfw, nil)
-	if dfw.Namespaces == nil {
-		t.Error("namespace-tier policies are not admin-tier: must keep their namespaces")
+	if dfw.Namespaces == nil || dfw.Name != "allow-web" || dfw.SourceFile == "" {
+		t.Error("namespace-tier policies are not admin-tier: must keep their namespaces and identity")
 	}
 
-	all := policyRedactor{can: func(model.PolicyKind) bool { return true }}
-	allowed := model.Policy{Name: "lockdown", Kind: model.PolicyAdmin, Namespaces: []string{"tenant-a"}, SyncError: "x"}
+	all := policyRedactor{can: yes, named: yes}
+	allowed := model.Policy{Name: "lockdown", Kind: model.PolicyAdmin, Namespaces: []string{"tenant-a"}, SyncError: "x", SourceFile: "cluster/lockdown.yaml"}
 	all.apply(&allowed, nil)
-	if allowed.Namespaces == nil || allowed.SyncError != "x" {
-		t.Error("authority over the kind keeps the enumeration and the error")
+	if allowed.Namespaces == nil || allowed.SyncError != "x" || allowed.Name != "lockdown" || allowed.SourceFile == "" {
+		t.Error("authority over the kind keeps the enumeration, the error and the identity")
+	}
+
+	// Creating the kind without listing it reads the text, never the name:
+	// Argo's apply error words the object's name.
+	creator := policyRedactor{can: yes, named: no}
+	held := model.Policy{Name: "lockdown", Kind: model.PolicyAdmin, Priority: 10, SyncError: `AdminNetworkPolicy "lockdown" is invalid`, SourceFile: "cluster/lockdown.yaml"}
+	creator.apply(&held, nil)
+	if held.Name != "cluster rule, priority 10" || !held.Withheld || held.SourceFile != "" || held.SyncError != redactedSyncError {
+		t.Errorf("a cluster policy the caller may not list = %+v", held)
+	}
+
+	// One response labels each withheld policy once, distinct from the others.
+	pols := []model.Policy{
+		{Name: "a", Kind: model.PolicyAdmin, Backing: "AdminNetworkPolicy", Priority: 10},
+		{Name: "b", Kind: model.PolicyAdmin, Backing: "AdminNetworkPolicy", Priority: 10},
+		{Name: "a", Kind: model.PolicyAdmin, Backing: "AdminNetworkPolicy", Priority: 10},
+		{Name: "default", Kind: model.PolicyBaseline, Backing: "BaselineAdminNetworkPolicy"},
+		{Name: "pool", Kind: model.PolicyEgressIP, Backing: "EgressIP"},
+		{Name: "hop", Kind: model.PolicyRoute, Backing: "AdminPolicyBasedExternalRoute"},
+	}
+	var got []string
+	for i := range pols {
+		none.apply(&pols[i], nil)
+		got = append(got, pols[i].Name)
+	}
+	want := []string{"cluster rule, priority 10", "cluster rule, priority 10 (2)", "cluster rule, priority 10", "baseline cluster rule", "fixed outbound IP", "external route"}
+	if !slices.Equal(got, want) {
+		t.Errorf("withheld labels = %q, want %q", got, want)
 	}
 }
 
@@ -190,7 +226,7 @@ func TestTenantReadsOwnScopeOnEveryPolicySurface(t *testing.T) {
 				t.Errorf("%s: a tenant reads %q: %s", sf.path, secret, tenant)
 			}
 		}
-		if !strings.Contains(tenant, "platform") || !strings.Contains(tenant, "other namespaces") {
+		if !strings.Contains(tenant, "cluster rule, priority 10") || !strings.Contains(tenant, "other namespaces") {
 			t.Errorf("%s: the rule governing the tenant's VM must stay, redacted: %s", sf.path, tenant)
 		}
 		if sf.method == http.MethodGet && !strings.Contains(tenant, "dotvirt.io/project=team-a") {
@@ -333,5 +369,291 @@ func TestTraceViewIsTheCallers(t *testing.T) {
 	}
 	if res := fromLegacy("10.128.0.8"); res.Verdict != "Conditional" {
 		t.Errorf("a default-network address no VM holds: %+v", res)
+	}
+}
+
+// Through the routes: a cluster-scoped policy's identity follows the caller's
+// own list right on its kind. A tenant, who may not list them, reads every
+// cluster rule governing its VMs by a neutral label on every surface, never
+// a name or a source file; a caller who may list them reads them as before;
+// a review that fails withholds them. The policy plane lists a kind's rows
+// only to a caller who may create and list it.
+func TestClusterRuleIdentityFollowsTheCallersRBAC(t *testing.T) {
+	const (
+		listerToken  = "lister-token"
+		creatorToken = "creator-token"
+		anpGroup     = "policy.networking.k8s.io"
+	)
+	clusterTier := func(a *authzv1.ResourceAttributes) bool {
+		return slices.Contains([]string{"adminnetworkpolicies", "baselineadminnetworkpolicies", "egressips", "adminpolicybasedexternalroutes"}, a.Resource)
+	}
+	fc := newFakeCluster(t)
+	fc.readsVMs = func(token, ns string) bool { return token != adminToken && ns == "team-a-dev" }
+	fc.ssar = func(token string, a *authzv1.ResourceAttributes) bool {
+		switch token {
+		case adminToken:
+			return true
+		case listerToken:
+			return clusterTier(a) && a.Verb == verbList
+		case creatorToken:
+			return clusterTier(a) && a.Verb == verbCreate
+		}
+		return false
+	}
+	var down atomic.Bool
+	fc.ssarFail = func(a *authzv1.ResourceAttributes) int {
+		if down.Load() && clusterTier(a) && a.Verb == verbList {
+			return http.StatusServiceUnavailable
+		}
+		return 0
+	}
+	tmpl := &kubevirtcorev1.VirtualMachineInstanceTemplateSpec{}
+	tmpl.Spec.Networks = []kubevirtcorev1.Network{{Name: "default", NetworkSource: kubevirtcorev1.NetworkSource{Pod: &kubevirtcorev1.PodNetwork{}}}}
+	for _, name := range []string{"web", "db"} {
+		fc.vms = append(fc.vms, kubevirtcorev1.VirtualMachine{
+			ObjectMeta: metav1.ObjectMeta{Namespace: "team-a-dev", Name: name},
+			Spec:       kubevirtcorev1.VirtualMachineSpec{Template: tmpl},
+		})
+	}
+	resources := func(gv string, names ...string) http.HandlerFunc {
+		return func(w http.ResponseWriter, _ *http.Request) {
+			list := metav1.APIResourceList{TypeMeta: metav1.TypeMeta{Kind: "APIResourceList", APIVersion: "v1"}, GroupVersion: gv}
+			for _, n := range names {
+				list.APIResources = append(list.APIResources, metav1.APIResource{Name: n, Verbs: []string{"list", "watch"}})
+			}
+			writeObj(w, list)
+		}
+	}
+	all := map[string]any{}
+	team := map[string]any{"matchLabels": map[string]any{"dotvirt.io/project": "team-a"}}
+	admin := func(kind, name string, priority int64, action string) map[string]any {
+		spec := map[string]any{
+			"subject": map[string]any{"namespaces": all},
+			"ingress": []any{map[string]any{"action": action, "from": []any{map[string]any{"namespaces": all}}}},
+			"egress":  []any{map[string]any{"action": action, "to": []any{map[string]any{"networks": []any{"198.51.100.0/24"}}}}},
+		}
+		if kind == "AdminNetworkPolicy" {
+			spec["priority"] = priority
+		}
+		return map[string]any{
+			"apiVersion": anpGroup + "/v1alpha1", "kind": kind,
+			"metadata": map[string]any{"name": name, "resourceVersion": "1"}, "spec": spec,
+		}
+	}
+	anpGV, ovnGV := anpGroup+"/v1alpha1", "k8s.ovn.org/v1"
+	fc.on(http.MethodGet, "/apis/"+anpGV, resources(anpGV, "adminnetworkpolicies", "baselineadminnetworkpolicies"))
+	fc.on(http.MethodGet, "/apis/"+anpGV+"/adminnetworkpolicies", unstructuredList(anpGV, "AdminNetworkPolicy",
+		admin("AdminNetworkPolicy", "acme-lockdown", 10, "Allow"), admin("AdminNetworkPolicy", "acme-quarantine", 10, "Deny")))
+	fc.on(http.MethodGet, "/apis/"+anpGV+"/baselineadminnetworkpolicies", unstructuredList(anpGV, "BaselineAdminNetworkPolicy",
+		admin("BaselineAdminNetworkPolicy", "acme-baseline", 0, "Deny")))
+	fc.on(http.MethodGet, "/apis/"+ovnGV, resources(ovnGV, "userdefinednetworks", "egressips", "adminpolicybasedexternalroutes"))
+	fc.on(http.MethodGet, "/apis/"+ovnGV+"/userdefinednetworks", unstructuredList(ovnGV, "UserDefinedNetwork", map[string]any{
+		"apiVersion": ovnGV, "kind": "UserDefinedNetwork",
+		"metadata": map[string]any{"name": "vm-net", "namespace": "team-a-dev", "resourceVersion": "1"},
+		"spec":     map[string]any{"topology": "Layer2", "layer2": map[string]any{"role": "Secondary", "subnets": []any{"10.0.0.0/24"}}},
+	}))
+	fc.on(http.MethodGet, "/apis/"+ovnGV+"/egressips", unstructuredList(ovnGV, "EgressIP", map[string]any{
+		"apiVersion": ovnGV, "kind": "EgressIP",
+		"metadata": map[string]any{"name": "acme-pool", "resourceVersion": "1"},
+		"spec":     map[string]any{"egressIPs": []any{"192.0.2.10"}, "namespaceSelector": team},
+	}))
+	fc.on(http.MethodGet, "/apis/"+ovnGV+"/adminpolicybasedexternalroutes", unstructuredList(ovnGV, "AdminPolicyBasedExternalRoute", map[string]any{
+		"apiVersion": ovnGV, "kind": "AdminPolicyBasedExternalRoute",
+		"metadata": map[string]any{"name": "acme-hop", "resourceVersion": "1"},
+		"spec": map[string]any{"from": map[string]any{"namespaceSelector": team},
+			"nextHops": map[string]any{"static": []any{map[string]any{"ip": "192.0.2.1"}}}},
+	}))
+	d := &planeDraft{declared: map[model.ObjectRef]string{
+		{Kind: "AdminNetworkPolicy", Name: "acme-lockdown"}:         "cluster/acme-lockdown.yaml",
+		{Kind: "BaselineAdminNetworkPolicy", Name: "acme-baseline"}: "cluster/acme-baseline.yaml",
+	}}
+	s := fc.server(d, Config{PlatformRepo: platformRepo})
+	ns := netstate.New(fc.sa, nil)
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	ns.Run(ctx)
+	s.netstate = ns
+	for deadline := time.Now().Add(10 * time.Second); len(ns.Policies()) < 5 || len(ns.Catalog().Networks) == 0; time.Sleep(10 * time.Millisecond) {
+		if time.Now().After(deadline) {
+			t.Fatal("netstate never synced the cluster policies and the network")
+		}
+	}
+
+	surfaces := []struct{ method, path, body string }{
+		{http.MethodGet, vmPath + "/policy", ""},
+		{http.MethodGet, "/api/namespaces/team-a-dev/policy", ""},
+		{http.MethodGet, "/api/networks/rules?network=team-a-dev/vm-net", ""},
+		{http.MethodPost, "/api/networking/trace", `{"source":{"namespace":"team-a-dev","vm":"web"},"destination":{"ip":"198.51.100.7"},"port":443}`},
+		{http.MethodPost, "/api/networking/trace", `{"source":{"namespace":"team-a-dev","vm":"web"},"destination":{"namespace":"team-a-dev","vm":"db"},"port":443}`},
+	}
+	read := func(token, method, path, body string) string {
+		t.Helper()
+		rec := do(s, token, method, path, body)
+		wantStatus(t, rec, http.StatusOK)
+		return rec.Body.String()
+	}
+	names := []string{"acme-lockdown", "acme-quarantine", "acme-baseline", "acme-pool", "acme-hop"}
+	withheld := func(who, token string) {
+		t.Helper()
+		for _, sf := range surfaces {
+			body := read(token, sf.method, sf.path, sf.body)
+			for _, secret := range names {
+				if strings.Contains(body, secret) {
+					t.Errorf("%s %s %s: reads %q: %s", who, sf.method, sf.path, secret, body)
+				}
+			}
+			if !strings.Contains(body, `"withheld":true`) || !strings.Contains(body, "cluster rule, priority 10") {
+				t.Errorf("%s %s %s: the rules governing the VMs must stay, labelled: %s", who, sf.method, sf.path, body)
+			}
+		}
+		eff := decodeBody[model.EffectivePolicy](t, do(s, token, http.MethodGet, vmPath+"/policy", ""))
+		var got []string
+		for _, bs := range [][]model.PolicyBinding{eff.EastWest, eff.SNAT, eff.Routes} {
+			for _, b := range bs {
+				got = append(got, b.Policy.Name)
+			}
+		}
+		want := []string{"cluster rule, priority 10", "cluster rule, priority 10 (2)", "baseline cluster rule", "fixed outbound IP", "external route"}
+		if !slices.Equal(got, want) {
+			t.Errorf("%s: labels = %q, want %q", who, got, want)
+		}
+	}
+	named := func(who, token string) {
+		t.Helper()
+		for _, sf := range surfaces[:3] {
+			body := read(token, sf.method, sf.path, sf.body)
+			for _, name := range []string{"acme-lockdown", "acme-quarantine", "acme-baseline"} {
+				if !strings.Contains(body, name) {
+					t.Errorf("%s %s: does not read %q: %s", who, sf.path, name, body)
+				}
+			}
+			if strings.Contains(body, "withheld") {
+				t.Errorf("%s %s: withholds a rule it may list: %s", who, sf.path, body)
+			}
+		}
+	}
+	plane := func(token string) string { return read(token, http.MethodGet, "/api/policies", "") }
+
+	withheld("tenant", tenantToken)
+	withheld("creator", creatorToken)
+	named("lister", listerToken)
+	named("admin", adminToken)
+	for _, token := range []string{tenantToken, listerToken, creatorToken} {
+		if body := plane(token); strings.Contains(body, "acme-") || strings.Contains(body, "cluster/") {
+			t.Errorf("%s: the policy plane lists a cluster rule: %s", token, body)
+		}
+	}
+	if body := plane(adminToken); !strings.Contains(body, "cluster/acme-lockdown.yaml") || !strings.Contains(body, "acme-quarantine") {
+		t.Errorf("admin: the policy plane must list every cluster rule and its file: %s", body)
+	}
+
+	down.Store(true)
+	s.bus.Publish(eventbus.RBACChanged) // the cached verdicts are re-asked
+	withheld("admin, review failing", adminToken)
+	if body := plane(adminToken); strings.Contains(body, "acme-") {
+		t.Errorf("a failed review lists a cluster rule: %s", body)
+	}
+}
+
+// lockdownServer serves one live AdminNetworkPolicy, lockdown at priority 5,
+// to callers ssar answers for, over the platform tier backed by d.
+func lockdownServer(t *testing.T, ssar func(token string, a *authzv1.ResourceAttributes) bool, d coordinator) *Server {
+	t.Helper()
+	fc := newFakeCluster(t)
+	fc.ssar = ssar
+	gv := "policy.networking.k8s.io/v1alpha1"
+	fc.on(http.MethodGet, "/apis/"+gv, func(w http.ResponseWriter, _ *http.Request) {
+		writeObj(w, metav1.APIResourceList{
+			TypeMeta:     metav1.TypeMeta{Kind: "APIResourceList", APIVersion: "v1"},
+			GroupVersion: gv,
+			APIResources: []metav1.APIResource{{Name: "adminnetworkpolicies", Kind: "AdminNetworkPolicy", Verbs: []string{"list", "watch"}}},
+		})
+	})
+	fc.on(http.MethodGet, "/apis/"+gv+"/adminnetworkpolicies", unstructuredList(gv, "AdminNetworkPolicy", map[string]any{
+		"apiVersion": gv, "kind": "AdminNetworkPolicy",
+		"metadata": map[string]any{"name": "lockdown", "resourceVersion": "1"},
+		"spec":     map[string]any{"priority": int64(5), "subject": map[string]any{"namespaces": map[string]any{}}},
+	}))
+	s := fc.server(d, Config{PlatformRepo: platformRepo})
+	ns := netstate.New(fc.sa, nil)
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	ns.Run(ctx)
+	s.netstate = ns
+	for deadline := time.Now().Add(10 * time.Second); len(ns.Policies()) == 0; time.Sleep(10 * time.Millisecond) {
+		if time.Now().After(deadline) {
+			t.Fatal("netstate never synced the live ANP")
+		}
+	}
+	return s
+}
+
+// A caller who may create cluster rules but not list them is refused a held
+// priority without the name of the rule holding it, and alike whatever name
+// they send: a guess at the holder's name tells nothing.
+func TestHeldPriorityNamesTheHolderToListersOnly(t *testing.T) {
+	var lists atomic.Bool
+	s := lockdownServer(t, func(token string, a *authzv1.ResourceAttributes) bool {
+		return token == adminToken && (a.Verb != verbList || a.Resource != "adminnetworkpolicies" || lists.Load())
+	}, &planeDraft{})
+	post := func(name string) *httptest.ResponseRecorder {
+		return do(s, adminToken, http.MethodPost, "/api/adminnetworkpolicies?dryRun=true", `{"name":"`+name+`","priority":5}`)
+	}
+	guess, holder := post("guess"), post("lockdown")
+	wantStatus(t, guess, http.StatusConflict)
+	if body := guess.Body.String(); strings.Contains(body, "lockdown") || !strings.Contains(body, "another cluster rule") {
+		t.Errorf("a caller who may not list cluster rules reads = %s", body)
+	}
+	if holder.Code != guess.Code || holder.Body.String() != guess.Body.String() {
+		t.Errorf("the holder's name answers %d %q, a guess %d %q", holder.Code, holder.Body.String(), guess.Code, guess.Body.String())
+	}
+	lists.Store(true)
+	s.bus.Publish(eventbus.RBACChanged)
+	if rec := post("guess"); rec.Code != http.StatusConflict || !strings.Contains(rec.Body.String(), `"lockdown"`) {
+		t.Errorf("a caller who may list cluster rules reads = %d %s", rec.Code, rec.Body.String())
+	}
+	if rec := post("lockdown"); rec.Code != http.StatusOK {
+		t.Errorf("a lister re-staging the holder at its own priority = %d %s", rec.Code, rec.Body.String())
+	}
+}
+
+// lockdownReader declares lockdown alone in the platform repo.
+type lockdownReader struct{ *planeDraft }
+
+func (d lockdownReader) ObjectSpec(_ project.ProjectInfo, _, _, name string) (model.ObjectSpec, error) {
+	if name != "lockdown" {
+		return model.ObjectSpec{}, fmt.Errorf("%w: %s", model.ErrNotFound, name)
+	}
+	return model.ObjectSpec{Name: name, SourceFile: "cluster/lockdown.yaml"}, nil
+}
+
+func (d lockdownReader) ObjectHistory(_ project.ProjectInfo, _, _, name string, _ int) ([]model.Commit, error) {
+	if name != "lockdown" {
+		return nil, fmt.Errorf("%w: %s", model.ErrNotFound, name)
+	}
+	return []model.Commit{{Message: "Create AdminNetworkPolicy lockdown"}}, nil
+}
+
+// A cluster-scoped object's spec and history read only to a caller who may
+// create and list its kind: without list, the right name and a wrong one are
+// refused alike.
+func TestClusterObjectReadsNeedList(t *testing.T) {
+	var lists atomic.Bool
+	s := lockdownServer(t, func(token string, a *authzv1.ResourceAttributes) bool {
+		return token == adminToken && (a.Verb != verbList || a.Resource != "adminnetworkpolicies" || lists.Load())
+	}, lockdownReader{&planeDraft{}})
+	for _, sub := range []string{"", "/history"} {
+		right := do(s, adminToken, http.MethodGet, "/api/objects/adminnetworkpolicy/cluster/lockdown"+sub, "")
+		wrong := do(s, adminToken, http.MethodGet, "/api/objects/adminnetworkpolicy/cluster/guess"+sub, "")
+		if right.Code != http.StatusForbidden || right.Body.String() != wrong.Body.String() {
+			t.Errorf("%q without list: right %d %q, wrong %d %q", sub, right.Code, right.Body.String(), wrong.Code, wrong.Body.String())
+		}
+	}
+	lists.Store(true)
+	s.bus.Publish(eventbus.RBACChanged)
+	for _, sub := range []string{"", "/history"} {
+		if rec := do(s, adminToken, http.MethodGet, "/api/objects/adminnetworkpolicy/cluster/lockdown"+sub, ""); rec.Code != http.StatusOK {
+			t.Errorf("%q with list = %d %s", sub, rec.Code, rec.Body.String())
+		}
 	}
 }

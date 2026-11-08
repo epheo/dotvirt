@@ -113,7 +113,9 @@ func (s *Server) handleCreateNetwork(w http.ResponseWriter, r *http.Request) {
 // handleCreateAdminNetworkPolicy stages a cluster rule
 // (AdminNetworkPolicy or the baseline default) - always platform-tier and admin-only,
 // gated like platformCreate on the matching kind. A priority a live policy
-// already holds is refused: OVN-K would order the two arbitrarily.
+// already holds is refused: OVN-K would order the two arbitrarily. Only a
+// caller who may list the kind reads that policy's name, or may re-stage a
+// policy at the priority it holds itself.
 func (s *Server) handleCreateAdminNetworkPolicy(w http.ResponseWriter, r *http.Request) {
 	raw, p, ok := readBody[struct {
 		Name     string `json:"name"`
@@ -134,9 +136,19 @@ func (s *Server) handleCreateAdminNetworkPolicy(w http.ResponseWriter, r *http.R
 	// The priority check runs before the dry-run branch, so a dry run refuses
 	// a held priority exactly as the stage does.
 	if !p.Baseline && s.netstate != nil {
-		if other, taken := s.netstate.ANPAtPriority(p.Priority, p.Name); taken {
-			fail(w, fmt.Errorf("%w: priority %d is held by admin network policy %q; pick a free one, equal priorities apply in an undefined order",
-				model.ErrConflict, p.Priority, other))
+		// A caller who may not list cluster rules names none: whatever name
+		// they send, a held priority answers the same.
+		lists := s.clusterAuthority(r.Context(), sc.id, sc.cluster, verbList)(model.PolicyAdmin)
+		self, holder := p.Name, "another cluster rule"
+		if !lists {
+			self = ""
+		}
+		if other, taken := s.netstate.ANPAtPriority(p.Priority, self); taken {
+			if lists {
+				holder = fmt.Sprintf("admin network policy %q", other)
+			}
+			fail(w, fmt.Errorf("%w: priority %d is held by %s; pick a free one, equal priorities apply in an undefined order",
+				model.ErrConflict, p.Priority, holder))
 			return
 		}
 	}

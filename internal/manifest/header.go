@@ -5,6 +5,7 @@ import (
 	"io"
 
 	"go.yaml.in/yaml/v3"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 
 	"github.com/epheo/dotvirt/internal/model"
 )
@@ -12,8 +13,9 @@ import (
 // header is the identity every Kubernetes manifest document carries; the rest
 // of the document is left undecoded, so any kind reads without a typed model.
 type header struct {
-	Kind     string     `yaml:"kind"`
-	Metadata objectMeta `yaml:"metadata"`
+	APIVersion string     `yaml:"apiVersion"`
+	Kind       string     `yaml:"kind"`
+	Metadata   objectMeta `yaml:"metadata"`
 }
 
 type objectMeta struct {
@@ -43,15 +45,39 @@ func Header(content []byte) (model.ObjectRef, error) {
 // A document without kind or name declares nothing; docs is -1 when a
 // document fails to parse.
 func Headers(content []byte) (heads []model.ObjectRef, docs int) {
+	docs = eachHeader(content, func(h header) {
+		if h.Kind != "" && h.Metadata.Name != "" {
+			heads = append(heads, h.ref())
+		}
+	})
+	return heads, docs
+}
+
+// Kinds is the group and kind of every document of a file naming both an
+// apiVersion and a kind, in order, through the first that fails to parse.
+func Kinds(content []byte) []schema.GroupKind {
+	var out []schema.GroupKind
+	eachHeader(content, func(h header) {
+		gv, err := schema.ParseGroupVersion(h.APIVersion)
+		if h.APIVersion != "" && h.Kind != "" && err == nil {
+			out = append(out, schema.GroupKind{Group: gv.Group, Kind: h.Kind})
+		}
+	})
+	return out
+}
+
+// eachHeader visits the header of every non-null document of content, in
+// order: the count Headers reports, -1 once one fails to parse.
+func eachHeader(content []byte, visit func(header)) (docs int) {
 	dec := yaml.NewDecoder(bytes.NewReader(content))
 	for {
 		var doc yaml.Node
 		err := dec.Decode(&doc)
 		if err == io.EOF {
-			return heads, docs
+			return docs
 		}
 		if err != nil {
-			return heads, -1
+			return -1
 		}
 		if len(doc.Content) == 0 || doc.Content[0].ShortTag() == "!!null" {
 			continue
@@ -59,11 +85,8 @@ func Headers(content []byte) (heads []model.ObjectRef, docs int) {
 		docs++
 		var h header
 		if err := doc.Decode(&h); err != nil {
-			return heads, -1
+			return -1
 		}
-		if h.Kind == "" || h.Metadata.Name == "" {
-			continue
-		}
-		heads = append(heads, h.ref())
+		visit(h)
 	}
 }

@@ -2,10 +2,12 @@ package changeset
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 
-	"github.com/epheo/dotvirt/internal/auth"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 
+	"github.com/epheo/dotvirt/internal/auth"
 	"github.com/epheo/dotvirt/internal/draft"
 	"github.com/epheo/dotvirt/internal/git"
 	"github.com/epheo/dotvirt/internal/manifest"
@@ -95,6 +97,23 @@ func (r *Reader) DeclaredFiles(proj project.ProjectInfo) (map[model.ObjectRef]st
 		return nil, err
 	}
 	return idx.Files, nil
+}
+
+// DeclaredKinds lists every kind proj's base branch declares, in sorted
+// order; none while the branch does not exist yet (an empty repo).
+func (r *Reader) DeclaredKinds(proj project.ProjectInfo) ([]schema.GroupKind, error) {
+	read, err := r.read(proj)
+	if err != nil {
+		return nil, err
+	}
+	idx, err := indexDeclared(read, r.baseBranch)
+	if errors.Is(err, git.ErrNoBranch) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return idx.Kinds, nil
 }
 
 // ObjectSpec reads a declared object back as the form spec its create route

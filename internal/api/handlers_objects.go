@@ -25,8 +25,8 @@ import (
 // objectScope is the preamble of every object route: the resource, its
 // identity, and the tier resolved from its scope in the kind table. verbs are
 // the write's, any of which opens it; none is a read, for which a
-// cluster-scoped object needs the authority to author its kind and a tenant
-// one only the namespace's visibility.
+// cluster-scoped object needs the authority to author its kind and to list
+// it, and a tenant one only the namespace's visibility.
 func (s *Server) objectScope(w http.ResponseWriter, r *http.Request, verbs ...string) (sc scope, resource, ns, name string, ok bool) {
 	resource, ns, name = r.PathValue("resource"), r.PathValue("namespace"), r.PathValue("name")
 	res, known := model.LookupResource(resource)
@@ -41,7 +41,10 @@ func (s *Server) objectScope(w http.ResponseWriter, r *http.Request, verbs ...st
 			return sc, "", "", "", false
 		}
 		if len(verbs) == 0 {
-			sc, ok = s.platformScope(w, r, ssarFor(kind))
+			sc, ok = s.platformScopeWith(w, r, func(ctx context.Context, id auth.Identity, c *cluster.Client) (bool, error) {
+				_, ok, err := s.allowed(ctx, id, c, append(kindAction(verbCreate, kind, ""), kindAction(verbList, kind, "")...))
+				return ok, err
+			}, "not authorized to create and list "+kind.Plural)
 		} else {
 			sc, ok = s.platformScopeWith(w, r, func(ctx context.Context, id auth.Identity, c *cluster.Client) (bool, error) {
 				return s.anyAllowed(ctx, id, c, objectActions(verbs, resource, ns))
