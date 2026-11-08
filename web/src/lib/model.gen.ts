@@ -635,6 +635,14 @@ export interface DRSView {
 // source: metrics.go
 
 /**
+ * MetricsReason says why a metrics read carries no data; empty means it does.
+ * A view that has it set holds no numbers to show: its zeros are not zeros.
+ */
+export type MetricsReason = string;
+export const MetricsForbidden: MetricsReason = "forbidden"; // the metrics backend refused the caller
+export const MetricsUnreachable: MetricsReason = "unreachable"; // the metrics backend is down or failing
+export const MetricsUnconfigured: MetricsReason = "unconfigured"; // no metrics endpoint serves this caller
+/**
  * HostCapacityNode is one worker's commitment picture: what is promised to
  * VMs (vCPUs, guest memory) against what the node can offer.
  */
@@ -680,6 +688,7 @@ export interface MetricChart {
 export interface VMMetrics {
   range: string;
   charts: MetricChart[];
+  unavailable?: MetricsReason;
 }
 /**
  * UsageMetric is one resource's point-in-time usage for a VM Summary bar - Used of
@@ -699,6 +708,7 @@ export interface VMUsage {
   cpu: UsageMetric; // Used = % of allocated vCPU, Total = 100
   memory: UsageMetric; // bytes; Total = allocated (domain)
   storage: UsageMetric; // bytes; guest filesystem used / capacity
+  unavailable?: MetricsReason;
 }
 /**
  * ClusterMetric is one aggregate resource for the cluster/infrastructure rings:
@@ -729,9 +739,10 @@ export interface ClusterSummary {
   cpu: ClusterMetric; // cores
   memory: ClusterMetric; // bytes
   storage: ClusterMetric; // bytes
-  vms: { [key: string]: number /* int */}; // phase -> count
+  vms?: { [key: string]: number /* int */}; // phase -> count
   topCpu: ConsumerVM[];
   topMemory: ConsumerVM[];
+  unavailable?: MetricsReason;
 }
 /**
  * HostWorker is one worker in the utilization distribution. The full roster
@@ -794,6 +805,7 @@ export interface NetworkTraffic {
   network: string;
   window: string;
   vms: TrafficVM[];
+  unavailable?: MetricsReason;
 }
 /**
  * TrafficVM is one VM's traffic on a network: received plus sent, averaged.
