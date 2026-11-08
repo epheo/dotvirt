@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"slices"
+	"strings"
 
 	utilyaml "k8s.io/apimachinery/pkg/util/yaml"
 	"sigs.k8s.io/yaml"
@@ -168,11 +169,14 @@ type RoleBindingSpec struct {
 	Owners    []string `json:"owners"`         // usernames granted the role
 	Role      string   `json:"role,omitempty"` // ClusterRole to bind; default "admin"
 	// Kept are the subjects the declared binding already names, granted beside
-	// Owners: re-rendering a grant never revokes access it did not ask to.
+	// Owners: re-rendering a grant never revokes access it did not ask to,
+	// except another project's sync account (SyncAccount).
 	Kept []Subject `json:"-"`
 	// SyncAccount is the project's Argo sync ServiceAccount
 	// (tenancy.SyncAccount), nil for none. It joins the owners in every grant,
-	// so the project's repo holds exactly the project's rights.
+	// so the project's repo holds exactly the project's rights. Any other
+	// project's sync account a kept subject names is dropped: a namespace
+	// grants one project's repo, never two.
 	SyncAccount *Subject `json:"-"`
 }
 
@@ -223,6 +227,10 @@ func grantManifest(s RoleBindingSpec, name, role string) (string, []byte, error)
 		}
 	}
 	for _, sub := range s.Kept {
+		if s.SyncAccount != nil && sub != *s.SyncAccount && sub.Kind == "ServiceAccount" &&
+			sub.Namespace == s.SyncAccount.Namespace && strings.HasPrefix(sub.Name, tenancy.AppProjectPrefix) {
+			continue
+		}
 		add(sub)
 	}
 	for _, o := range s.Owners {

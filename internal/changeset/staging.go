@@ -337,9 +337,10 @@ func (c *Coordinator) StageCreate(id auth.Identity, proj project.ProjectInfo, re
 // platform repo) and applied by the platform Argo app - but it is labeled/annotated
 // to joinProj, the tenant project it JOINS, so that project's per-project app syncs
 // workloads into it once it exists. The namespace + primary UDN land as one
-// multi-doc manifest, beside its grants to the joining project's sync account
-// (grantSource.entries) when one is configured: the project syncs into every
-// namespace it holds.
+// multi-doc manifest, beside its grants (grantSource.entries) to the joining
+// project's people, as its other namespaces' grants name them, and its sync
+// account when one is configured: the project syncs into every namespace it
+// holds, as no more than its people.
 func (c *Coordinator) StageCreateNamespace(id auth.Identity, commitProj, joinProj project.ProjectInfo, rawSpec json.RawMessage, live LiveNamespaces) (model.DraftView, error) {
 	var spec netgen.NamespaceSpec
 	if err := json.Unmarshal(rawSpec, &spec); err != nil {
@@ -382,7 +383,13 @@ func (c *Coordinator) StageCreateNamespace(id auth.Identity, commitProj, joinPro
 	if err != nil {
 		return model.DraftView{}, err
 	}
-	grant, err := grants.entries(spec.Name, joinProj.Name, nil)
+	// The joining project's people come with it: its sync account never
+	// holds a namespace they do not.
+	inherit, err := grants.inherited(joinProj)
+	if err != nil {
+		return model.DraftView{}, err
+	}
+	grant, err := grants.entries(spec.Name, joinProj.Name, nil, inherit)
 	if err != nil {
 		return model.DraftView{}, err
 	}

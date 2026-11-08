@@ -238,6 +238,16 @@ func TestRoleBindingManifestSyncAccount(t *testing.T) {
 			t.Errorf("%s: egress subjects %+v, want the admin grant's %+v", name, egressSubjects, subjects)
 		}
 	}
+	// Another project's sync account never survives a re-render: a namespace
+	// grants one project's repo.
+	other := *ServiceAccountSubject("openshift-gitops", "dotvirt-p-team-b")
+	_, joined, err := RoleBindingManifest(RoleBindingSpec{Namespace: "ns", Kept: []Subject{other, {Kind: "User", APIGroup: rbacGroup, Name: "bob"}}, SyncAccount: sa})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, subjects, _, _ := DeclaredGrant(joined, "ns-admins"); slices.Contains(subjects, other) || len(subjects) != 2 {
+		t.Errorf("joined grant subjects %+v, want bob and this project's account", subjects)
+	}
 	// Kept subjects survive a re-render, each subject once.
 	kept := []Subject{{Kind: "Group", APIGroup: rbacGroup, Name: "ops"}, *sa}
 	_, content, err := RoleBindingManifest(RoleBindingSpec{Namespace: "ns", Kept: kept, SyncAccount: sa, Role: "edit"})
