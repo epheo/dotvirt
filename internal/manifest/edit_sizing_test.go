@@ -203,7 +203,7 @@ spec:
 }
 
 // Custom->instancetype where cpu/memory are the LAST lines of spec: the queued
-// instancetype insert is anchored on the memory line that stripInlineSizing then
+// instancetype insert is anchored on the memory line the sizing strip then
 // deletes. The insert must still land at spec indent and yield valid YAML.
 func TestSizingInsertAnchoredOnDeletedLine(t *testing.T) {
 	const vmCpuMemLast = `apiVersion: kubevirt.io/v1

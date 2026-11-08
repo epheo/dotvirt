@@ -14,6 +14,7 @@ import (
 	"log"
 	"sync"
 
+	"github.com/epheo/dotvirt/internal/auth"
 	"github.com/epheo/dotvirt/internal/draft"
 	"github.com/epheo/dotvirt/internal/git"
 	"github.com/epheo/dotvirt/internal/model"
@@ -43,6 +44,14 @@ type LiveSource interface {
 // The draft view relays it; re-deriving from git could diverge.
 type PruneSource interface {
 	PrunePending(repo string, namespaces []string) []model.ObjectRef
+}
+
+// InstancetypeReader reads one instancetype object under id's own token: the
+// one a VM edit switches to, as the VM names it (kind, empty for the
+// cluster-scoped default; namespaced kinds live in the VM's namespace). The
+// API implements it.
+type InstancetypeReader interface {
+	Instancetype(id auth.Identity, namespace, kind, name string) (map[string]any, error)
 }
 
 // Reader serves the read-only views of a project's git and forge state:
@@ -78,6 +87,9 @@ type Coordinator struct {
 	renderer vmtemplate.Renderer // processes library templates into VM manifests
 	prune    PruneSource         // may be nil -> the draft view carries no prune warning
 	authz    Authorizer          // nil refuses every write (see UseAuthorizer)
+	// instancetypes may be nil: an instancetype switch then strips every
+	// sizing field an instancetype may take over, and the view says so.
+	instancetypes InstancetypeReader
 
 	proposing keyedMutex // one Propose per (user, project)
 	// syncNS holds the per-project sync accounts the project grants name; ""
@@ -104,6 +116,10 @@ func (c *Coordinator) WithSyncNamespace(ns string) *Coordinator {
 	c.syncNS = ns
 	return c
 }
+
+// UseInstancetypes attaches the read an instancetype switch makes of its
+// target. Set after construction, beside UseAuthorizer.
+func (c *Coordinator) UseInstancetypes(r InstancetypeReader) { c.instancetypes = r }
 
 // read is the project repo's mirror, for parsing what the base branch holds.
 func (r *Reader) read(proj project.ProjectInfo) (*git.Repo, error) {

@@ -138,13 +138,19 @@ export interface ProjectCaps {
    */
   newNamespace: boolean;
   /**
-   * Adopt attaches a repo to the repoless project; GrantAdmin names owners
-   * while doing so. Release dissolves it. All false for a project with a
-   * repo.
+   * Adopt attaches a repo to the project: a repoless one's, or Recover repo
+   * on one whose forge lost or re-homed it (the route refuses a healthy
+   * repo). GrantAdmin names owners while doing so. Release dissolves a
+   * repoless project, false for one with a repo.
    */
   adopt: boolean;
   grantAdmin: boolean;
   release: boolean;
+  /**
+   * SyncAccess grants the project's Argo sync account in its namespaces'
+   * RoleBindings; false once it holds them, or with no sync namespace.
+   */
+  syncAccess: boolean;
 }
 
 //////////

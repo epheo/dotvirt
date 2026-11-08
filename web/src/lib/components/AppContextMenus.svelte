@@ -3,14 +3,7 @@
 	import type { VM } from '#lib/api.js';
 	import { adoptNamespaces, dispatchVMAction, type VMAction } from '#lib/actions.js';
 	import { ACCESS_UNKNOWN, READ_ONLY } from '#lib/authoring.js';
-	import {
-		clusterGate,
-		objectAdoptGate,
-		objectGate,
-		projectGate,
-		repoGate,
-		vmGate,
-	} from '#lib/gates.js';
+	import { objectAdoptGate, objectGate, projectGate, repoGate, vmGate } from '#lib/gates.js';
 	import { repoError } from '#lib/gitops.js';
 	import { inventory } from '#lib/state/inventory.svelte.js';
 	import { ui } from '#lib/state/ui.svelte.js';
@@ -80,7 +73,7 @@
 			{@const repo = repoGate(project)}
 			{@const release = projectGate.release(rep)}
 			{@const newNS = projectGate.newNamespace(rep)}
-			{@const sync = clusterGate.syncAccess()}
+			{@const sync = projectGate.syncAccess(rep)}
 			{@const here = (g: { why: string }) => createOff || (ctx.namespace ? g.why : '')}
 			{@const vmOff = here(vmGate.create(ctx.namespace ?? ''))}
 			{@const fwOff = here(

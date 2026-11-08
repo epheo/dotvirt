@@ -17,6 +17,7 @@ import (
 	"sort"
 	"sync"
 
+	"github.com/epheo/dotvirt/internal/manifest"
 	"github.com/epheo/dotvirt/internal/model"
 )
 
@@ -90,6 +91,12 @@ type Entry struct {
 
 	// Edit fields (KindEdit): the change to apply to an existing manifest.
 	Edit *model.VMEdit `json:"edit,omitempty"`
+
+	// Instancetype is what the server read, under the stager's token, of the
+	// instancetype Edit switches the VM to: which sizing fields it takes over.
+	// Never the client's, and kept so propose and the view apply the read the
+	// stage made.
+	Instancetype *manifest.Target `json:"instancetype,omitempty"`
 
 	// Manifest is the file content a create commits verbatim (rendered from a
 	// form, captured from the cluster, or deployed from a template) or a

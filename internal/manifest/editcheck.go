@@ -179,9 +179,10 @@ func verifyEdit(out []byte, defaultNS, namespace, name string, edit VMEdit) erro
 	return nil
 }
 
-// verifySizing checks the sizing outcome applySizing promises: an
-// instancetype, when the result has one, owns CPU and memory alone; without
-// one, the inline values asked for are what the manifest holds.
+// verifySizing checks the sizing outcome applySizing promises, as model.VM
+// shows it: beside an instancetype, when the result has one, no inline vCPU
+// count or guest memory is left; without one, the inline values asked for are
+// what the manifest holds. verifyStripped reads back the rest of the strip.
 func verifySizing(vm model.VM, edit VMEdit, want func(bool, string)) {
 	mode := ""
 	if edit.Sizing != nil {
@@ -197,7 +198,7 @@ func verifySizing(vm model.VM, edit VMEdit, want func(bool, string)) {
 		want(vm.Instancetype == *edit.Instancetype, "instance type")
 	}
 	if vm.Instancetype != "" {
-		want(vm.CPUCores == 0 && vm.Memory == "", "inline CPU and memory removal")
+		want(vm.CPUCores == 0 && vm.Memory == "", "inline CPU count and guest memory removal")
 		return
 	}
 	if edit.CPUCores != nil {
@@ -206,4 +207,26 @@ func verifySizing(vm model.VM, edit VMEdit, want func(bool, string)) {
 	if edit.Memory != nil {
 		want(vm.Memory == *edit.Memory, "memory")
 	}
+}
+
+// verifyStripped refuses an edit that left a field of strip in the VM:
+// KubeVirt refuses the VM with it beside its instancetype, and model.VM, which
+// verifySizing reads, does not carry requests, limits or the shared fields.
+func verifyStripped(out []byte, defaultNS, namespace, name string, strip []string) error {
+	vm, err := findVM(out, defaultNS, namespace, name)
+	if err != nil || vm == nil {
+		return nil // verifyEdit refused it already
+	}
+	domain := domainNode(vm)
+	var left []string
+	for _, p := range strip {
+		if at(domain, p) != nil {
+			left = append(left, p+" removal")
+		}
+	}
+	if len(left) > 0 {
+		return fmt.Errorf("%w: the manifest of %s/%s is laid out in a way the editor cannot change (%s would not apply); edit it in git directly",
+			model.ErrConflict, namespace, name, strings.Join(left, ", "))
+	}
+	return nil
 }

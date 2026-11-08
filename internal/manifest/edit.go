@@ -27,7 +27,17 @@ type VMEdit = model.VMEdit
 //
 // Errors are classified: model.ErrInvalid for a value the edit carries,
 // model.ErrConflict for a manifest the editor cannot apply it to.
+//
+// ApplyEdit knows nothing of an instancetype the edit switches the VM to, so
+// the switch strips every shared field (see Target); ApplyEditFor takes what
+// the server read of it.
 func ApplyEdit(content []byte, defaultNS, namespace, name string, edit VMEdit) ([]byte, error) {
+	return ApplyEditFor(content, defaultNS, namespace, name, edit, Target{})
+}
+
+// ApplyEditFor is ApplyEdit with target, the instancetype edit may switch the
+// VM to, as the server read it.
+func ApplyEditFor(content []byte, defaultNS, namespace, name string, edit VMEdit, target Target) ([]byte, error) {
 	if err := ValidateEdit(edit); err != nil {
 		return nil, err
 	}
@@ -47,7 +57,8 @@ func ApplyEdit(content []byte, defaultNS, namespace, name string, edit VMEdit) (
 	if edit.Power != nil {
 		applyPower(ed, vm, *edit.Power)
 	}
-	applySizing(ed, vm, edit)
+	plan := planSizing(vm, edit, target)
+	applySizing(ed, vm, edit, plan)
 	if edit.Preference != nil {
 		applyRef(ed, vm, "preference", *edit.Preference)
 	}
@@ -74,7 +85,10 @@ func ApplyEdit(content []byte, defaultNS, namespace, name string, edit VMEdit) (
 	if err := verifyEdit(out, defaultNS, namespace, name, edit); err != nil {
 		return nil, err
 	}
-	if err := verifyScope(content, out, defaultNS, namespace, name, edit); err != nil {
+	if err := verifyStripped(out, defaultNS, namespace, name, plan.strip); err != nil {
+		return nil, err
+	}
+	if err := verifyScope(content, out, defaultNS, namespace, name, edit, plan.strip); err != nil {
 		return nil, err
 	}
 	return out, nil
@@ -95,45 +109,36 @@ func applyEvictionStrategy(ed *lineEditor, vmRoot *yaml.Node, strategy string) {
 	ed.upsertChild(s, "evictionStrategy", ed.str(strategy))
 }
 
-// applySizing writes the VM's CPU/memory in exactly one representation - an
-// instancetype reference or inline domain.cpu/domain.memory - never both, which
-// KubeVirt's webhook rejects. The Sizing mode picks which:
+// applySizing writes the VM's CPU/memory in exactly one representation, an
+// instancetype reference or inline domain.cpu/domain.memory, as plan decided:
 //
 //   - "custom": drop spec.instancetype, then apply inline cpu/memory.
-//   - "instancetype": apply the instancetype ref, then strip any inline cpu/memory.
+//   - "instancetype": apply the instancetype ref, then strip what collides with it.
 //   - "" (mode unset, e.g. power/label/device-only edits or older clients): apply
 //     fields field-by-field, but if the VM carries an instancetype, never write
-//     inline cpu/memory - strip any that slipped in. This normalizes a VM that was
+//     inline cpu/memory and strip what collides with it. This normalizes a VM
 //     wrongly given both (the conflict that fails the webhook) on any later edit.
+//
+// What collides is plan.strip: the fields KubeVirt refuses beside any
+// instancetype, and on a switch the shared ones the new instancetype sets. A
+// shared field the VM keeps beside its instancetype stays (a hugepages or CPU
+// model the instancetype leaves to the VM), and so does every block the strip
+// leaves non-empty.
 //
 // Preference is independent (it never defines cpu/memory) and is applied by the
 // caller in every mode.
-func applySizing(ed *lineEditor, vm *yaml.Node, edit VMEdit) {
-	mode := ""
-	if edit.Sizing != nil {
-		mode = *edit.Sizing
-	}
-	switch mode {
-	case "custom":
+func applySizing(ed *lineEditor, vm *yaml.Node, edit VMEdit, plan sizing) {
+	switch {
+	case edit.Sizing != nil && *edit.Sizing == "custom":
 		stripRef(ed, vm, "instancetype")
-		applyInline(ed, vm, edit)
-	case "instancetype":
-		if edit.Instancetype != nil {
-			applyRef(ed, vm, "instancetype", *edit.Instancetype)
-		}
-		stripInlineSizing(ed, vm)
-	default:
-		hasIT := get(get(vm, "spec"), "instancetype") != nil
-		setsIT := edit.Instancetype != nil && *edit.Instancetype != ""
-		if edit.Instancetype != nil {
-			applyRef(ed, vm, "instancetype", *edit.Instancetype)
-		}
-		if hasIT || setsIT {
-			stripInlineSizing(ed, vm) // never both - instancetype wins
-		} else {
-			applyInline(ed, vm, edit)
-		}
+	case edit.Instancetype != nil:
+		applyRef(ed, vm, "instancetype", *edit.Instancetype)
 	}
+	if plan.instancetype {
+		stripPaths(ed, domainNode(vm), "", plan.strip)
+		return
+	}
+	applyInline(ed, vm, edit)
 }
 
 func applyInline(ed *lineEditor, vm *yaml.Node, edit VMEdit) {
@@ -149,22 +154,6 @@ func applyInline(ed *lineEditor, vm *yaml.Node, edit VMEdit) {
 // as preference intact.
 func stripRef(ed *lineEditor, vmRoot *yaml.Node, key string) {
 	ed.deleteChild(get(vmRoot, "spec"), key)
-}
-
-// stripInlineSizing removes the inline cpu/memory the instancetype owns:
-// domain.cpu, domain.memory, and the legacy resources.requests cpu/memory entries
-// (leaving any other resources.requests keys in place).
-func stripInlineSizing(ed *lineEditor, vmRoot *yaml.Node) {
-	domain := domainNode(vmRoot)
-	if domain == nil {
-		return
-	}
-	ed.deleteChild(domain, "cpu")
-	ed.deleteChild(domain, "memory")
-	if reqs := get(get(domain, "resources"), "requests"); reqs != nil {
-		ed.deleteChild(reqs, "cpu")
-		ed.deleteChild(reqs, "memory")
-	}
 }
 
 // applyRef sets spec.<key>.name (used for instancetype/preference), creating the

@@ -98,10 +98,14 @@ type ProjectCaps struct {
 	// NewNamespace joins a new namespace to the project (with a VM Network,
 	// ClusterCaps.VMNetwork too).
 	NewNamespace bool `json:"newNamespace"`
-	// Adopt attaches a repo to the repoless project; GrantAdmin names owners
-	// while doing so. Release dissolves it. All false for a project with a
-	// repo.
+	// Adopt attaches a repo to the project: a repoless one's, or Recover repo
+	// on one whose forge lost or re-homed it (the route refuses a healthy
+	// repo). GrantAdmin names owners while doing so. Release dissolves a
+	// repoless project, false for one with a repo.
 	Adopt      bool `json:"adopt"`
 	GrantAdmin bool `json:"grantAdmin"`
 	Release    bool `json:"release"`
+	// SyncAccess grants the project's Argo sync account in its namespaces'
+	// RoleBindings; false once it holds them, or with no sync namespace.
+	SyncAccess bool `json:"syncAccess"`
 }
