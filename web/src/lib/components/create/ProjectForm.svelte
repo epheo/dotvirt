@@ -4,6 +4,7 @@
 	import { api, type ProjectCreate } from '#lib/api.js';
 	import { splitList } from '#lib/format.js';
 	import { action } from '#lib/resource.svelte.js';
+	import { clusterGate } from '#lib/gates.js';
 	import { inventory } from '#lib/state/inventory.svelte.js';
 	import { ui } from '#lib/state/ui.svelte.js';
 	import { nearestFree, overlapping, suggestSubnet } from '#lib/subnets.js';
@@ -81,9 +82,13 @@
 			else if (!validName(name)) m.push('The name needs lowercase letters, digits and -');
 			else if (exists) m.push(`${name} exists: adopt it from its menu instead`);
 		}
+		if (!clusterGate.namespaceCreate().ok) m.push(clusterGate.namespaceCreate().why);
 		if (!namespace) m.push('Name its first namespace');
 		else if (!validName(namespace)) m.push('The namespace needs lowercase letters, digits and -');
+		if (splitList(owners).length && !clusterGate.grantAdmin().ok)
+			m.push(clusterGate.grantAdmin().why);
 		if (withNetwork) {
+			if (!clusterGate.vmNetwork().ok) m.push(clusterGate.vmNetwork().why);
 			if (!netName) m.push('Name its network');
 			if (!subnet.trim()) m.push('Its network needs a subnet');
 			else if (!validCIDR(subnet.trim())) m.push('The subnet needs CIDR form, like 10.40.0.0/16');

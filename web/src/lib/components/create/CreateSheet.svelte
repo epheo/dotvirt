@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { Copy, Disc, Folder, LogOut, Monitor, Network, Shield, X } from '@lucide/svelte';
+	import { clusterGate, clusterObjectGate } from '#lib/gates.js';
 	import { inventory } from '#lib/state/inventory.svelte.js';
 	import {
 		SHEET_TYPES,
@@ -48,15 +49,20 @@
 	);
 	const editName = $derived(editing?.name ?? editing?.spec?.name ?? editing?.namespace ?? '');
 
+	// A type is offered where the caller may make one somewhere: the cluster
+	// kinds by their own field; the namespaced ones while some namespace takes
+	// changes (the frame's signal), each form then holding its chosen place to
+	// that kind's own field.
 	const noRepo = $derived(!inventory.namespaces.length);
+	const can = (resource: string) => clusterObjectGate(resource, 'create').ok;
 	const allowed: Record<SheetType, boolean> = $derived({
 		vm: !noRepo,
 		template: !noRepo,
 		image: !noRepo,
-		network: !noRepo || inventory.canManage,
-		rule: !noRepo || inventory.canAdminFw,
-		outbound: inventory.canEgress,
-		project: inventory.canNamespace,
+		network: !noRepo || can('network'),
+		rule: !noRepo || can('adminnetworkpolicy') || can('baselineadminnetworkpolicy'),
+		outbound: can('egressip') || can('externalroute'),
+		project: clusterGate.namespaceCreate().ok,
 	});
 	const chips = $derived(SHEET_TYPES.filter((t) => allowed[t.id] || t.id === type));
 

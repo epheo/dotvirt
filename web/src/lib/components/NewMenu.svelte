@@ -2,6 +2,7 @@
 	import { page } from '$app/state';
 	import { Plus } from '@lucide/svelte';
 	import { ACCESS_UNKNOWN } from '#lib/authoring.js';
+	import { clusterGate } from '#lib/gates.js';
 	import { scopeFromPath } from '#lib/nav.js';
 	import { inventory } from '#lib/state/inventory.svelte.js';
 	import { ui } from '#lib/state/ui.svelte.js';
@@ -31,12 +32,10 @@
 		return scopeNamespaces?.[0] ?? '';
 	});
 
-	const canCreate = $derived(
-		inventory.namespaces.length > 0 ||
-			inventory.canManage ||
-			inventory.canNamespace ||
-			inventory.canEgress,
-	);
+	// Something to create: a namespace that takes changes, or any platform
+	// change (cluster.platform is the union of the platform-tier fields).
+	const platform = $derived(clusterGate.platform());
+	const canCreate = $derived(inventory.namespaces.length > 0 || platform.ok);
 </script>
 
 <Button
@@ -45,7 +44,7 @@
 	disabled={!canCreate}
 	title={canCreate
 		? 'Create a VM, network, rule or project'
-		: inventory.accessUnknown
+		: inventory.accessUnknown || platform.why === ACCESS_UNKNOWN
 			? ACCESS_UNKNOWN
 			: 'No project you may change yet'}
 >

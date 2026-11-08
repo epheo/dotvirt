@@ -5,6 +5,7 @@
 	import { attachRef } from '#lib/networks.js';
 	import { action } from '#lib/resource.svelte.js';
 	import { nodeTargets } from '#lib/state/hosts.svelte.js';
+	import { CLUSTER_NS, objectGate } from '#lib/gates.js';
 	import { inventory } from '#lib/state/inventory.svelte.js';
 	import { ui } from '#lib/state/ui.svelte.js';
 	import { canMeet, nearestFree, overlapping, suggestSubnet } from '#lib/subnets.js';
@@ -183,12 +184,22 @@
 	const projectsPicked = $derived(new Set(selectedNs.map((ns) => inventory.projectOf(ns))).size);
 
 	// ── the request ────────────────────────────────────────────────────────
+	// A project network is the namespace's to author, a shared or VLAN one the
+	// platform's: each its own capability field.
+	const gate = $derived(
+		objectGate(
+			{ resource: 'network', namespace: who === 'project' ? namespace : CLUSTER_NS },
+			editing ? 'update' : 'create',
+		),
+	);
+	const shared = $derived(objectGate({ resource: 'network', namespace: CLUSTER_NS }, 'create'));
 	const missing = $derived.by(() => {
 		const m: string[] = [];
 		if (!name) m.push('Name the network');
 		else if (!validName(name)) m.push('The name needs lowercase letters, digits and -');
 		else if (nameTaken) m.push(`${name} is taken in ${where}`);
 		if (who === 'project' && !namespace) m.push('Pick a project');
+		else if (!gate.ok) m.push(gate.why);
 		if (who !== 'project' && !selectedNs.length) m.push('Pick the projects that attach');
 		if (who === 'vlan') {
 			if (!(vlan && vlan >= 1 && vlan <= 4094)) m.push('Set a VLAN id between 1 and 4094');
@@ -245,7 +256,7 @@
 		{ id: 'shared', label: 'Shared network', text: () => 'VMs from the projects you pick.' },
 		{ id: 'vlan', label: 'VLAN network', text: () => 'VMs join a VLAN on your physical network.' },
 	];
-	const choices = $derived(CHOICES.filter((c) => c.id === 'project' || inventory.canManage));
+	const choices = $derived(CHOICES.filter((c) => c.id === 'project' || shared.ok || c.id === who));
 </script>
 
 <SheetBody error={op.error}>

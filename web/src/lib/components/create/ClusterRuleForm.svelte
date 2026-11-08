@@ -4,6 +4,7 @@
 	import { api, type AdminNetworkPolicyCreate, type AdminPolicyRule } from '#lib/api.js';
 	import { action } from '#lib/resource.svelte.js';
 	import { rowList } from '#lib/rowlist.svelte.js';
+	import { CLUSTER_NS, objectGate } from '#lib/gates.js';
 	import { inventory } from '#lib/state/inventory.svelte.js';
 	import { ui } from '#lib/state/ui.svelte.js';
 	import { NAME_HINT, validName } from '#lib/validate.js';
@@ -102,7 +103,18 @@
 		});
 	});
 
+	// The baseline is its own kind, with its own capability field.
+	const gate = $derived(
+		objectGate(
+			{
+				resource: baseline ? 'baselineadminnetworkpolicy' : 'adminnetworkpolicy',
+				namespace: CLUSTER_NS,
+			},
+			editing ? 'update' : 'create',
+		),
+	);
 	const missing = $derived.by(() => {
+		if (!gate.ok) return [gate.why];
 		if (baseline) return [];
 		const m: string[] = [];
 		if (!name) m.push('Name the rule');

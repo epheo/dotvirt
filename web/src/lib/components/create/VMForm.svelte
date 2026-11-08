@@ -28,6 +28,7 @@
 	import { diskNameError, freeName, RESERVED_DISKS } from '#lib/devices.js';
 	import { drafts } from '#lib/state/drafts.svelte.js';
 	import { memoryRoom } from '#lib/state/hosts.svelte.js';
+	import { vmGate } from '#lib/gates.js';
 	import { inventory } from '#lib/state/inventory.svelte.js';
 	import { persisted } from '#lib/state/persisted.svelte.js';
 	import { ui } from '#lib/state/ui.svelte.js';
@@ -385,6 +386,7 @@
 		else if (!validName(name)) m.push('The name needs lowercase letters, digits and -');
 		else if (taken.has(name)) m.push(`${name} is taken in ${namespace}`);
 		if (!namespace) m.push('Pick a project and namespace');
+		else if (!vmGate.create(namespace).ok) m.push(vmGate.create(namespace).why);
 		if (!osImage) m.push('Pick an image to boot from');
 		if (!instancetype) m.push('Pick a size');
 		if (!preference) m.push('Pick an OS tuning');
