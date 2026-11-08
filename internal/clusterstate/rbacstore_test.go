@@ -4,12 +4,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
 
-	corev1 "k8s.io/api/core/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
 	apimeta "k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -34,6 +34,11 @@ func serviceAccount(ns, name string) rbacv1.Subject {
 
 func roleBinding(ns, name, role string, subjects ...rbacv1.Subject) *rbacv1.RoleBinding {
 	return &rbacv1.RoleBinding{ObjectMeta: meta(ns, name), RoleRef: rbacv1.RoleRef{Kind: "ClusterRole", Name: role}, Subjects: subjects}
+}
+
+// localBinding binds a Role of its own namespace.
+func localBinding(ns, name, role string, subjects ...rbacv1.Subject) *rbacv1.RoleBinding {
+	return &rbacv1.RoleBinding{ObjectMeta: meta(ns, name), RoleRef: rbacv1.RoleRef{Kind: "Role", Name: role}, Subjects: subjects}
 }
 
 func clusterRoleBinding(name, role string, subjects ...rbacv1.Subject) *rbacv1.ClusterRoleBinding {
@@ -70,114 +75,119 @@ func grants() map[string][2]runtime.Object {
 	}
 }
 
-// withProject is a State whose snapshot holds the project namespace "proj".
-func withProject(t *testing.T) *State {
-	t.Helper()
-	s := stateWithIndexers()
-	if err := s.nss.Add(&corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "proj"}}); err != nil {
-		t.Fatal(err)
-	}
-	return s
-}
+// published records the namespaces a sink published, "" for cluster-wide.
+type published []string
 
-// signalStores wires every RBAC sink New builds to one counter, by resource.
-func signalStores(t *testing.T) (map[string]cache.Store, *int) {
+func (p *published) record(ns string) { *p = append(*p, ns) }
+
+// signalStores wires every RBAC sink New builds to one record, by resource.
+func signalStores(t *testing.T) (map[string]cache.Store, *published) {
 	t.Helper()
-	s := withProject(t)
-	n := new(int)
-	count := func() { *n++ }
+	p := &published{}
 	refs := newRoleRefs()
-	stores := map[string]cache.Store{"rolebindings": newRBACSignal(count, refs, roleBindingDigest(s.inProject))}
-	for _, w := range s.signalWatches(func(schema.GroupVersionResource) *cache.ListWatch { return nil }, count, refs) {
+	stores := map[string]cache.Store{"rolebindings": newRBACSignal(p.record, refs, roleBindingDigest)}
+	for _, w := range signalWatches(func(schema.GroupVersionResource) *cache.ListWatch { return nil }, p.record, refs) {
 		stores[w.gvr.Resource] = w.sink
 	}
-	return stores, n
+	return stores, p
 }
 
 // Every watched kind publishes when a grant appears, moves or goes, and only
-// then: a metadata write and a relist that changed nothing stay silent.
+// then: a metadata write and a relist that changed nothing stay silent. A
+// RoleBinding or Role publishes its namespace, a cluster-scoped kind and any
+// relist "" (every namespace).
 func TestRBACSignalPublishesGrantMoves(t *testing.T) {
 	for resource, g := range grants() {
 		t.Run(resource, func(t *testing.T) {
-			stores, n := signalStores(t)
+			stores, p := signalStores(t)
 			store := stores[resource]
-			if resource == "clusterroles" {
+			switch resource {
+			case "clusterroles":
 				_ = stores["clusterrolebindings"].Add(clusterRoleBinding("readers", "vm-reader", user("carol")))
-				*n = 0
+			case "roles":
+				_ = stores["rolebindings"].Add(localBinding("proj", "readers", "r", user("carol")))
 			}
-			step := func(what string, want int) {
+			*p = nil
+			own := ""
+			if resource == "rolebindings" || resource == "roles" {
+				own = "proj"
+			}
+			var want published
+			step := func(what string, ns ...string) {
 				t.Helper()
-				if *n != want {
-					t.Fatalf("%s: %d publishes, want %d", what, *n, want)
+				want = append(want, ns...)
+				if !slices.Equal(*p, want) {
+					t.Fatalf("%s: published %q, want %q", what, *p, want)
 				}
 			}
 			_ = store.Replace(nil, "1")
-			step("initial list", 1)
+			step("initial list", "")
 			_ = store.Replace(nil, "2")
-			step("relist of nothing", 1)
+			step("relist of nothing")
 			_ = store.Add(g[0])
-			step("add", 2)
+			step("add", own)
 
 			touched := g[0].DeepCopyObject()
 			m, _ := apimeta.Accessor(touched)
 			m.SetAnnotations(map[string]string{"touched": "yes"})
 			m.SetResourceVersion("2")
 			_ = store.Update(touched)
-			step("metadata-only update", 2)
+			step("metadata-only update")
 
 			_ = store.Update(g[1])
-			step("grant update", 3)
+			step("grant update", own)
 
 			_ = store.Replace([]any{g[1].DeepCopyObject()}, "3")
-			step("relist of nothing new", 3)
+			step("relist of nothing new")
 			_ = store.Replace([]any{g[0].DeepCopyObject()}, "4")
-			step("relist that moved a grant", 4)
+			step("relist that moved a grant", "")
 
 			key, _ := cache.MetaNamespaceKeyFunc(g[0])
 			_ = store.Delete(cache.DeletedFinalStateUnknown{Key: key, Obj: g[0]})
-			step("delete", 5)
+			step("delete", own)
 		})
 	}
 }
 
-// Churn no caller's authorization can see is dropped: bindings outside
-// project namespaces or granting only the platform's own ServiceAccounts, and
-// the system: roles. Editing a binding down to platform-only subjects is
-// still a revocation and publishes.
+// Churn no caller's authorization can see is dropped: bindings granting only
+// the platform's own ServiceAccounts, and the roles no other binding binds.
+// Editing a binding down to platform-only subjects is still a revocation and
+// publishes.
 func TestRBACSignalFiltersNoise(t *testing.T) {
-	stores, n := signalStores(t)
+	stores, p := signalStores(t)
 	operator := serviceAccount("openshift-operators", "op")
 	kube := serviceAccount("kube-system", "ctrl")
 
-	_ = stores["rolebindings"].Add(roleBinding("other", "rb", "view", user("alice")))
 	_ = stores["roles"].Add(&rbacv1.Role{ObjectMeta: meta("other", "r"), Rules: vmRules("get")})
 	_ = stores["rolebindings"].Add(roleBinding("proj", "sys", "view", operator))
+	_ = stores["rolebindings"].Add(localBinding("openshift-operators", "sys", "op-role", operator))
+	_ = stores["roles"].Add(&rbacv1.Role{ObjectMeta: meta("openshift-operators", "op-role"), Rules: vmRules("get")})
 	_ = stores["clusterrolebindings"].Add(clusterRoleBinding("op", "admin", operator, kube))
 	_ = stores["clusterroles"].Add(&rbacv1.ClusterRole{ObjectMeta: meta("", "system:controller:x"), Rules: vmRules("get")})
 	_ = stores["clusterrolebindings"].Delete(clusterRoleBinding("op", "admin", operator))
-	if *n != 0 {
-		t.Fatalf("noise published %d times, want 0", *n)
+	if len(*p) != 0 {
+		t.Fatalf("noise published %q, want nothing", *p)
 	}
 
 	// A tenant ServiceAccount is a dotvirt caller like any user.
 	_ = stores["clusterrolebindings"].Add(clusterRoleBinding("ci", "view", serviceAccount("proj", "ci")))
-	if *n != 1 {
-		t.Fatalf("tenant ServiceAccount binding published %d times, want 1", *n)
+	if len(*p) != 1 {
+		t.Fatalf("tenant ServiceAccount binding published %q, want once", *p)
 	}
 	_ = stores["clusterrolebindings"].Update(clusterRoleBinding("ci", "view", operator))
-	if *n != 2 {
-		t.Fatalf("revocation down to platform subjects published %d times in all, want 2", *n)
+	if len(*p) != 2 {
+		t.Fatalf("revocation down to platform subjects published %q in all, want twice", *p)
 	}
 	_ = stores["clusterrolebindings"].Update(clusterRoleBinding("ci", "view", operator, kube))
-	if *n != 2 {
-		t.Fatalf("platform-only edit published %d times in all, want 2", *n)
+	if len(*p) != 2 {
+		t.Fatalf("platform-only edit published %q in all, want twice", *p)
 	}
 }
 
 // A ClusterRole signals only while a relevant binding of either kind binds
 // it: the roles an operator writes for its own ServiceAccount stay silent.
 func TestClusterRoleSignalsOnlyWhileBound(t *testing.T) {
-	stores, n := signalStores(t)
+	stores, p := signalStores(t)
 	roles := stores["clusterroles"]
 	role := func(verbs ...string) *rbacv1.ClusterRole {
 		return &rbacv1.ClusterRole{ObjectMeta: meta("", "edit"), Rules: vmRules(verbs...)}
@@ -185,82 +195,90 @@ func TestClusterRoleSignalsOnlyWhileBound(t *testing.T) {
 	_ = roles.Add(role("get"))
 	_ = stores["clusterrolebindings"].Add(clusterRoleBinding("op", "edit", serviceAccount("openshift-cnv", "op")))
 	_ = roles.Update(role("list"))
-	if *n != 0 {
-		t.Fatalf("an unbound role published %d times, want 0", *n)
+	if len(*p) != 0 {
+		t.Fatalf("an unbound role published %q, want nothing", *p)
 	}
 
 	_ = stores["rolebindings"].Add(roleBinding("proj", "editors", "edit", user("alice")))
-	*n = 0
+	*p = nil
 	_ = roles.Update(role("get", "list"))
-	if *n != 1 {
-		t.Fatalf("a role a tenant binding binds published %d times, want 1", *n)
+	if !slices.Equal(*p, published{""}) {
+		t.Fatalf("a role a tenant binding binds published %q, want once cluster-wide", *p)
 	}
 
 	_ = stores["rolebindings"].Delete(roleBinding("proj", "editors", "edit", user("alice")))
-	*n = 0
+	*p = nil
 	_ = roles.Update(role("watch")) // ends its relevance: one last publish
 	_ = roles.Update(role("get"))
-	if *n != 1 {
-		t.Fatalf("an unbound role published %d times after its last binding went, want 1", *n)
+	if len(*p) != 1 {
+		t.Fatalf("an unbound role published %q after its last binding went, want once", *p)
 	}
 }
 
-// A RoleBinding observed before its namespace becomes a project holds its
-// ClusterRole all along: once the namespace is a project, revoking that role's
-// rules publishes. Before then the binding itself publishes nothing.
-func TestRoleBoundBeforeItsNamespaceIsAProject(t *testing.T) {
-	s := stateWithIndexers()
-	n := new(int)
-	count := func() { *n++ }
-	refs := newRoleRefs()
-	rb := newRBACSignal(count, refs, roleBindingDigest(s.inProject))
-	var cr cache.Store
-	for _, w := range s.signalWatches(func(schema.GroupVersionResource) *cache.ListWatch { return nil }, count, refs) {
-		if w.gvr == gvrClusterRoles {
-			cr = w.sink
-		}
+// A Role signals, in its namespace, only while a relevant RoleBinding there
+// binds it: the Roles an operator writes for its own ServiceAccount stay
+// silent.
+func TestRoleSignalsOnlyWhileBound(t *testing.T) {
+	stores, p := signalStores(t)
+	roles := stores["roles"]
+	role := func(ns string, verbs ...string) *rbacv1.Role {
+		return &rbacv1.Role{ObjectMeta: meta(ns, "vm"), Rules: vmRules(verbs...)}
 	}
-	_ = rb.Replace([]any{roleBinding("proj", "alice-vm", "vm-admin", user("alice"))}, "1")
-	_ = cr.Replace([]any{&rbacv1.ClusterRole{ObjectMeta: meta("", "vm-admin"), Rules: vmRules("get", "list", "update")}}, "1")
-	*n = 0
-	_ = rb.Update(roleBinding("proj", "alice-vm", "vm-admin", user("bob")))
-	if *n != 0 {
-		t.Fatalf("a binding outside any project published %d times, want 0", *n)
+	_ = roles.Add(role("x", "get"))
+	_ = stores["rolebindings"].Add(localBinding("x", "op", "vm", serviceAccount("openshift-cnv", "op")))
+	_ = stores["rolebindings"].Add(localBinding("y", "alice", "vm", user("alice")))
+	*p = nil
+	_ = roles.Update(role("x", "list"))
+	if len(*p) != 0 {
+		t.Fatalf("a Role bound only in another namespace published %q, want nothing", *p)
 	}
-
-	_ = s.nss.Add(&corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "proj"}}) // NamespaceChanged covers this move
-	_ = cr.Update(&rbacv1.ClusterRole{ObjectMeta: meta("", "vm-admin")})
-	if *n != 1 {
-		t.Fatalf("revoking a role a project binding binds published %d times, want 1", *n)
-	}
-	_ = rb.Update(roleBinding("proj", "alice-vm", "vm-admin", user("carol")))
-	if *n != 2 {
-		t.Fatalf("a binding in a project published %d times in all, want 2", *n)
+	_ = stores["rolebindings"].Add(localBinding("x", "bob", "vm", user("bob")))
+	*p = nil
+	_ = roles.Update(role("x", "get", "list"))
+	if !slices.Equal(*p, published{"x"}) {
+		t.Fatalf("a bound Role published %q, want [x]", *p)
 	}
 }
 
-// A binding first seen while its namespace was not a project is judged by the
-// namespace as it is now: once it is a project, editing the binding down to
-// no caller, or deleting it, is a revocation and publishes.
-func TestQuietBindingRevokedAfterPromotion(t *testing.T) {
-	for name, edit := range map[string]func(*rbacSignal) error{
-		"no subjects": func(rb *rbacSignal) error { return rb.Update(roleBinding("proj", "b", "vm-admin")) },
-		"platform only": func(rb *rbacSignal) error {
+// A binding outside any project publishes, keyed by its namespace: a review
+// there may be cached (a platform kind's create in an operator namespace),
+// and a keyed move no longer re-asks anything elsewhere. Its ClusterRole's
+// edits publish cluster-wide.
+func TestBindingOutsideAProjectPublishesItsNamespace(t *testing.T) {
+	stores, p := signalStores(t)
+	rb, cr := stores["rolebindings"], stores["clusterroles"]
+	_ = rb.Replace([]any{roleBinding("openshift-kube-descheduler-operator", "alice-desched", "desched-admin", user("alice"))}, "1")
+	_ = cr.Replace([]any{&rbacv1.ClusterRole{ObjectMeta: meta("", "desched-admin"), Rules: vmRules("get", "list", "update")}}, "1")
+	*p = nil
+	_ = rb.Update(roleBinding("openshift-kube-descheduler-operator", "alice-desched", "desched-admin", user("bob")))
+	_ = cr.Update(&rbacv1.ClusterRole{ObjectMeta: meta("", "desched-admin")})
+	if want := (published{"openshift-kube-descheduler-operator", ""}); !slices.Equal(*p, want) {
+		t.Fatalf("published %q, want %q", *p, want)
+	}
+}
+
+// Editing a binding down to no caller, or deleting it, is a revocation and
+// publishes its namespace; a relist that drops it publishes cluster-wide.
+func TestBindingRevocationsPublish(t *testing.T) {
+	for name, tc := range map[string]struct {
+		edit func(*rbacSignal) error
+		want string
+	}{
+		"no subjects": {func(rb *rbacSignal) error { return rb.Update(roleBinding("proj", "b", "vm-admin")) }, "proj"},
+		"platform only": {func(rb *rbacSignal) error {
 			return rb.Update(roleBinding("proj", "b", "vm-admin", serviceAccount("openshift-cnv", "op")))
-		},
-		"deleted":       func(rb *rbacSignal) error { return rb.Delete(roleBinding("proj", "b", "vm-admin", user("alice"))) },
-		"relisted away": func(rb *rbacSignal) error { return rb.Replace(nil, "2") },
+		}, "proj"},
+		"deleted":       {func(rb *rbacSignal) error { return rb.Delete(roleBinding("proj", "b", "vm-admin", user("alice"))) }, "proj"},
+		"relisted away": {func(rb *rbacSignal) error { return rb.Replace(nil, "2") }, ""},
 	} {
 		t.Run(name, func(t *testing.T) {
-			s := stateWithIndexers()
-			n := 0
-			rb := newRBACSignal(func() { n++ }, newRoleRefs(), roleBindingDigest(s.inProject))
+			p := &published{}
+			rb := newRBACSignal(p.record, newRoleRefs(), roleBindingDigest)
 			_ = rb.Replace([]any{roleBinding("proj", "b", "vm-admin", user("alice"))}, "1")
-			_ = s.nss.Add(&corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "proj"}})
-			n = 0
-			_ = edit(rb)
-			if n == 0 {
-				t.Error("the revocation published nothing")
+			*p = nil
+			_ = tc.edit(rb)
+			if !slices.Equal(*p, published{tc.want}) {
+				t.Errorf("the revocation published %q, want [%q]", *p, tc.want)
 			}
 		})
 	}
@@ -270,7 +288,7 @@ func TestQuietBindingRevokedAfterPromotion(t *testing.T) {
 // an instant the ClusterRole sink could observe from its own reflector.
 func TestRoleStaysBoundAcrossABindingUpdate(t *testing.T) {
 	refs := newRoleRefs()
-	rb := newRBACSignal(func() {}, refs, roleBindingDigest(withProject(t).inProject))
+	rb := newRBACSignal(func(string) {}, refs, roleBindingDigest)
 	_ = rb.Add(roleBinding("proj", "b", "vm-admin", user("alice")))
 	done := make(chan struct{})
 	var unbound atomic.Bool
@@ -300,16 +318,16 @@ func TestRoleStaysBoundAcrossABindingUpdate(t *testing.T) {
 
 // A namespace's ServiceAccount group is the platform's when the namespace is.
 func TestPlatformGroupBindingsAreNoise(t *testing.T) {
-	stores, n := signalStores(t)
+	stores, p := signalStores(t)
 	_ = stores["clusterrolebindings"].Add(clusterRoleBinding("pullers", "view",
 		rbacv1.Subject{Kind: rbacv1.GroupKind, Name: "system:serviceaccounts:openshift-monitoring"}))
-	if *n != 0 {
-		t.Fatalf("a platform group binding published %d times, want 0", *n)
+	if len(*p) != 0 {
+		t.Fatalf("a platform group binding published %q, want nothing", *p)
 	}
 	_ = stores["clusterrolebindings"].Add(clusterRoleBinding("tenants", "view",
 		rbacv1.Subject{Kind: rbacv1.GroupKind, Name: "system:serviceaccounts:proj"}))
-	if *n != 1 {
-		t.Fatalf("a tenant group binding published %d times, want 1", *n)
+	if len(*p) != 1 {
+		t.Fatalf("a tenant group binding published %q, want once", *p)
 	}
 }
 
@@ -377,14 +395,15 @@ func runSignalsWith(t *testing.T, gate func(schema.GroupVersionResource) admissi
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
 	bus := eventbus.New()
-	s := withProject(t)
+	s := stateWithIndexers()
 	refs := newRoleRefs()
-	refs.hold("vm-reader") // as a relevant binding of it would
+	refs.hold("vm-reader")          // as a relevant binding of it would
+	refs.hold(roleKey("proj", "r")) // likewise
 	sources := map[string]*fakeSource{}
-	s.signals = s.signalWatches(func(gvr schema.GroupVersionResource) *cache.ListWatch {
+	s.signals = signalWatches(func(gvr schema.GroupVersionResource) *cache.ListWatch {
 		sources[gvr.Resource] = &fakeSource{}
 		return sources[gvr.Resource].lw()
-	}, func() { bus.Publish(eventbus.RBACChanged) }, refs)
+	}, func(string) { bus.Publish(eventbus.RBACChanged) }, refs)
 	s.runSignals(ctx, gate)
 	return bus, sources, s
 }
@@ -433,7 +452,7 @@ func TestGroupsWatchedWhenServed(t *testing.T) {
 // does not serve has nothing to miss.
 func TestRBACWatched(t *testing.T) {
 	_, sources, s := runSignalsWith(t, servesAllBut(gvrGroups))
-	s.rbSink = newRBACSignal(func() {}, nil, roleBindingDigest(s.inProject))
+	s.rbSink = newRBACSignal(func(string) {}, nil, roleBindingDigest)
 	s.healthy, s.rbHealth = make([]atomic.Bool, 1), 0
 	for _, src := range sources {
 		if src != sources["groups"] {

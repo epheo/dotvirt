@@ -15,6 +15,8 @@
 // A kind can also be published per key (PublishKey): GitChanged is keyed by repo,
 // so a consumer scoped to some repos reconciles against KeyVersion of those alone
 // and a push to one tenant's repo leaves every other tenant's work untouched.
+// RBACChanged is keyed by the namespace whose grants moved, so a review in one
+// namespace survives a move in another (OtherRBACChanged outside projects).
 package eventbus
 
 import (
@@ -33,13 +35,24 @@ const (
 	// that move none of it are not published.
 	LiveChanged Kind = iota
 	// NamespaceChanged: a project namespace was added, removed, or relabeled - both an
-	// inventory topology change AND a visibility (RBAC) change.
+	// inventory topology change AND a change of the namespaces a token's
+	// visibility is reviewed over.
 	NamespaceChanged
-	// RBACChanged: a grant moved - a RoleBinding or Role in a project namespace, a
+	// RBACChanged: a grant moved - a RoleBinding or a Role one binds, a
 	// ClusterRoleBinding, a ClusterRole one of those binds, or an OpenShift
 	// Group's members - so a token's visible namespaces and review verdicts may
 	// have changed: the cue to revalidate the per-token authorization caches.
+	// A RoleBinding or Role grants only in its namespace, so it publishes keyed
+	// by that namespace while it is a project's; the cluster-scoped kinds
+	// publish unkeyed.
 	RBACChanged
+	// OtherRBACChanged: a RoleBinding or Role moved in a namespace that is no
+	// project's, keyed by that namespace, never unkeyed. A frame asks only of
+	// project namespaces and cluster scope, so no frame depends on it and the
+	// hub never wakes on it; a review in one of those namespaces reads both
+	// kinds' marks, which also covers a namespace that became a project as
+	// its grants moved.
+	OtherRBACChanged
 	// DriftChanged: the drift Argo reports moved - an object's sync/health/apply
 	// error or a project's rollup - or the Applications watch's health flipped.
 	// An Application write that moves none of it (each reconcile) is not published.
@@ -80,14 +93,26 @@ type Bus struct {
 	// (the sum of independent atomics is not a serializable global clock).
 	versions [kindCount]atomic.Uint64
 
-	// broad[k] counts unkeyed Publish(k) calls; it is part of every key's version,
-	// so an unkeyed publish moves every key of that kind.
-	broad [kindCount]atomic.Uint64
-	keyMu sync.Mutex
-	keyed [kindCount]map[string]uint64
+	// keys[k] is k's key levels. A publish moves versions[k] and them under
+	// keys[k].mu, which every read of them takes: a reader that sees Version(k)
+	// move, then reads a key level, sees the publish that moved it, so a stamp
+	// of Version is never newer than the key levels a build reads after it.
+	keys [kindCount]keyLevels
 
 	mu   sync.RWMutex
 	subs map[*subscription]struct{}
+}
+
+// keyLevels is one kind's key state. broad counts unkeyed publishes, part of
+// every key's version, so an unkeyed publish moves every key. keyed counts
+// each key's publishes; seq counts every keyed publish, and marks holds the
+// seq each key's last one reached.
+type keyLevels struct {
+	mu    sync.Mutex
+	broad uint64
+	seq   uint64
+	keyed map[string]uint64
+	marks map[string]uint64
 }
 
 type subscription struct {
@@ -108,8 +133,11 @@ func (b *Bus) Publish(k Kind) {
 	if b == nil {
 		return
 	}
+	l := &b.keys[k]
+	l.mu.Lock()
 	b.versions[k].Add(1)
-	b.broad[k].Add(1)
+	l.broad++
+	l.mu.Unlock()
 	b.wake(k)
 }
 
@@ -121,26 +149,106 @@ func (b *Bus) PublishKey(k Kind, key string) {
 	if b == nil {
 		return
 	}
+	l := &b.keys[k]
+	l.mu.Lock()
 	b.versions[k].Add(1)
-	b.keyMu.Lock()
-	if b.keyed[k] == nil {
-		b.keyed[k] = map[string]uint64{}
+	if l.keyed == nil {
+		l.keyed, l.marks = map[string]uint64{}, map[string]uint64{}
 	}
-	b.keyed[k][key]++
-	b.keyMu.Unlock()
+	l.keyed[key]++
+	l.seq++
+	l.marks[key] = l.seq
+	l.mu.Unlock()
 	b.wake(k)
 }
 
 // KeyVersion is the level of one key of k: it moves on PublishKey(k, key) and on
 // every unkeyed Publish(k). Equality-only, like Version. Nil-safe (returns 0).
+// It counts the key's publishes, so it restarts once the key is forgotten.
 func (b *Bus) KeyVersion(k Kind, key string) uint64 {
 	if b == nil {
 		return 0
 	}
-	b.keyMu.Lock()
-	v := b.keyed[k][key]
-	b.keyMu.Unlock()
-	return v + b.broad[k].Load()
+	l := &b.keys[k]
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.keyed[key] + l.broad
+}
+
+// BroadVersion is the level of k's unkeyed publishes alone, which move every
+// key of k: what a consumer depends on when no key of k concerns it.
+// Equality-only. Nil-safe (returns 0).
+func (b *Bus) BroadVersion(k Kind) uint64 {
+	if b == nil {
+		return 0
+	}
+	l := &b.keys[k]
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.broad
+}
+
+// KeySeq counts k's keyed publishes, each of which marks its key with the
+// count it reached: a consumer that reads KeySeq, works, then asks MovedSince
+// with that reading learns every key published after it, and none it already
+// saw. Nil-safe (returns 0).
+func (b *Bus) KeySeq(k Kind) uint64 {
+	if b == nil {
+		return 0
+	}
+	l := &b.keys[k]
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.seq
+}
+
+// KeyMark is the KeySeq count key's last publish reached, 0 when it has none
+// or was forgotten. A later publish marks it above every mark it had, so a
+// stamp of a mark never matches again once the key moves, forgotten between
+// or not. Unkeyed publishes leave it alone (BroadVersion). Nil-safe.
+func (b *Bus) KeyMark(k Kind, key string) uint64 {
+	if b == nil {
+		return 0
+	}
+	l := &b.keys[k]
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.marks[key]
+}
+
+// MovedSince reports which of keys k published after since, a KeySeq reading.
+// Nil-safe (none).
+func (b *Bus) MovedSince(k Kind, since uint64, keys []string) []string {
+	if b == nil {
+		return nil
+	}
+	l := &b.keys[k]
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	var out []string
+	for _, key := range keys {
+		if l.marks[key] > since {
+			out = append(out, key)
+		}
+	}
+	return out
+}
+
+// Forget drops what k holds of key, so a kind keyed by something short-lived
+// does not grow without bound. Until key is published again it reads as never
+// published: KeyMark 0, KeyVersion restarted, absent from MovedSince. Forget a
+// key only once no stamp of it read before its last publish can still serve,
+// and only of a kind whose consumers stamp KeyMark, which never re-equals.
+// Nil-safe.
+func (b *Bus) Forget(k Kind, key string) {
+	if b == nil {
+		return
+	}
+	l := &b.keys[k]
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	delete(l.keyed, key)
+	delete(l.marks, key)
 }
 
 func (b *Bus) wake(k Kind) {
@@ -160,7 +268,8 @@ func (b *Bus) wake(k Kind) {
 // Version returns the summed version of the named kinds - the watermark a consumer
 // reconciles against. Strictly increases whenever ANY of those kinds is published,
 // so `t := Version(ks...); work(); Version(ks...) == t` reliably means "nothing I
-// depend on moved while I worked." Lock-free. Nil-safe (returns 0). Equality-only:
+// depend on moved while I worked." Lock-free; a key level read after it is at
+// least as new (see Bus.keys). Nil-safe (returns 0). Equality-only:
 // do not subtract two readings.
 func (b *Bus) Version(kinds ...Kind) uint64 {
 	if b == nil {
