@@ -72,8 +72,8 @@ func TestPlatformRepoFailureNeverBlocksAvailable(t *testing.T) {
 	if repo := cond(got, dotvirtv1alpha1.ConditionForgeRepoReady); repo == nil || repo.Status != metav1.ConditionFalse {
 		t.Errorf("ForgeRepoReady = %+v, want False", repo)
 	}
-	if res.RequeueAfter != platformRepoRetry {
-		t.Errorf("RequeueAfter = %v, want %v while the repo is missing", res.RequeueAfter, platformRepoRetry)
+	if res.RequeueAfter != settleRetry {
+		t.Errorf("RequeueAfter = %v, want %v while the repo is missing", res.RequeueAfter, settleRetry)
 	}
 }
 
