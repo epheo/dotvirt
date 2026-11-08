@@ -242,7 +242,9 @@ ServiceAccount for it stops syncing. So the operator turns it on only when:
 - no project's account may create VirtualMachines or clone disks
   (`datavolumes/source`) cluster-wide;
 - no project namespace lets every ServiceAccount of the ArgoCD namespace create
-  VirtualMachines, and no grant lets them all clone disks cluster-wide;
+  VirtualMachines, and no grant lets them all write a tenant kind or clone disks
+  cluster-wide: such a grant would let a narrower project's repo write where its
+  people may not. The condition names the binding, from the authorizer's reason;
 - the platform account may create Namespaces, ClusterUserDefinedNetworks and
   RoleBindings, and bind every role the platform repo's RoleBindings bind (as the
   platform Application reports managing them). A role it may not bind holds the
@@ -258,8 +260,11 @@ ServiceAccount for it stops syncing. So the operator turns it on only when:
   others stop syncing. An instance owner keeps an AppProject's old behaviour by
   mapping it to the controller's own account, e.g.
   `{server: "*", namespace: "*", defaultServiceAccount: "<argoNS>:<controller SA>"}`.
-  An Application naming its cluster by a name other than `in-cluster` is said, not
-  counted: its server is in a cluster Secret, which the operator does not read.
+  An Application naming its cluster by a name other than `in-cluster` counts like
+  any other when its AppProject maps nothing for its namespace, or maps it on every
+  server (`*`). When the only entries for its namespace name specific servers, it
+  is said, not counted: its server is in a cluster Secret, which the operator does
+  not read.
 
 It then server-side-applies that one key into the ArgoCD resource's
 `spec.extraConfig` (`openshift-gitops` on OpenShift, `argocd` elsewhere), owning
@@ -286,8 +291,15 @@ DataVolume in any tenant repo could then clone a disk out of any namespace.
 `Pending`, `NotReady` and `ManualStep` keep that warning, since the controller still
 syncs until `argocd-cm` changes.
 
+Readiness does not read clone sources: a DataVolume, or a VirtualMachine's
+`dataVolumeTemplates`, cloning out of a namespace where the project's people may not
+create `datavolumes/source` syncs while off and fails once on, as CDI then
+authorizes it as the project's account. Check them before turning it on. A
+golden-image namespace that grants `datavolumes/source` to every authenticated user
+(`openshift-virtualization-os-images` does) keeps working.
+
 Checks run as SubjectAccessReviews: two per project namespace and one per kind its
-repo declares there, two per project, three for the controller and the ArgoCD
+repo declares there, two per project, eight for the controller and the ArgoCD
 namespace, five for the platform tier and one per further role its RoleBindings
 bind, at most eight in flight. They come with a list of the Applications and
 AppProjects and a read of each platform RoleBinding. A verdict is reused until a
