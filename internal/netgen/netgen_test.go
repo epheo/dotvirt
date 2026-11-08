@@ -684,10 +684,10 @@ func TestSelectorAndNamespaceValidation(t *testing.T) {
 }
 
 // The physical network is checked by the CUDN CRD's own rule (1..253 chars, no
-// ',' or ':'), so a hand-made bridge mapping like physnet_1 stays usable; NIC
-// and bridge are Linux interface names (at most 15 bytes, no '/', ':' or
-// space), which nmstate refuses otherwise - including a default br-<name>
-// grown past the limit.
+// ',' or ':'), so a hand-made bridge mapping like physnet_1 stays usable. The
+// NIC is a Linux interface name (at most 15 bytes, no '/', ':' or space); the
+// OVS bridge is not, since nmstate accepts a longer name for a bridge with
+// ports, so an uplink name past 12 characters stays usable.
 func TestUplinkAndPhysicalNetworkNames(t *testing.T) {
 	vlan := func(p string) error {
 		_, _, err := Manifest(Spec{Name: "v", Scope: ScopeVLAN, VLAN: 10, PhysicalNetwork: p, Namespaces: []string{"n"}})
@@ -708,6 +708,7 @@ func TestUplinkAndPhysicalNetworkNames(t *testing.T) {
 		{Name: "physnet-prod", NIC: "eno2"},
 		{Name: "u", NIC: "enp1s0f0.100"},
 		{Name: "a-very-long-uplink", NIC: "bond0", Bridge: "br-long"},
+		{Name: "a-very-long-uplink", NIC: "eth1"},
 	} {
 		if _, _, err := UplinkManifest(ok); err != nil {
 			t.Errorf("uplink %+v refused: %v", ok, err)
@@ -719,8 +720,6 @@ func TestUplinkAndPhysicalNetworkNames(t *testing.T) {
 		{Name: "u", NIC: "a/b"},
 		{Name: "u", NIC: "averyveryverylongnic"},
 		{Name: "u", NIC: ".."},
-		{Name: "u", NIC: "eth1", Bridge: "br/ex"},
-		{Name: "a-very-long-uplink", NIC: "eth1"},
 	} {
 		if _, _, err := UplinkManifest(bad); err == nil {
 			t.Errorf("uplink %+v accepted", bad)

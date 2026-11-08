@@ -29,9 +29,8 @@ func validIP(s string) bool {
 	return net.ParseIP(s) != nil
 }
 
-// validIfName reports whether s is a Linux interface name, the kernel rule
-// nmstate holds NICs and OVS bridges to: 1..15 bytes, not "." or "..", no '/',
-// ':' or whitespace.
+// validIfName reports whether s is a Linux interface name, the kernel rule a
+// NIC's name follows: 1..15 bytes, not "." or "..", no '/', ':' or whitespace.
 func validIfName(s string) bool {
 	if s == "" || len(s) > 15 || s == "." || s == ".." {
 		return false

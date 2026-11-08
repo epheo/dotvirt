@@ -37,12 +37,11 @@ func UplinkManifest(s UplinkSpec) (path string, content []byte, err error) {
 	if err := validate.RequireLabels("node selector label", s.NodeSelector); err != nil {
 		return "", nil, err
 	}
+	// The OVS bridge is not held to the kernel's interface-name rule: with the
+	// NIC as its port, nmstate only skips the local port of a longer name.
 	bridge := s.Bridge
 	if bridge == "" {
 		bridge = "br-" + s.Name
-	}
-	if !validIfName(bridge) {
-		return "", nil, fmt.Errorf("bridge %q must be a Linux interface name: at most 15 characters, no '/', ':' or spaces; choose a shorter bridge or uplink name", bridge)
 	}
 	sel := s.NodeSelector
 	if len(sel) == 0 {
