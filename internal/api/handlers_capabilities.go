@@ -85,7 +85,7 @@ func (s *Server) tenancyCap(ctx context.Context, id auth.Identity, c *cluster.Cl
 // platform repo, SSO's an OAuth flow: without one they stay false, as their
 // routes then answer 503. Platform is the union of the platform-tier fields.
 func (s *Server) clusterCaps(ctx context.Context, id auth.Identity, c *cluster.Client) model.ClusterCaps {
-	var out model.ClusterCaps
+	out := model.ClusterCaps{ImageUpload: s.cfg.UploadProxyURL != ""}
 	var fields []capField
 	if s.cfg.PlatformRepo != "" {
 		fields = append(fields, objectFields(&out.Network, model.KindCUDN, "")...)

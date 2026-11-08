@@ -56,6 +56,10 @@ rules:
   - apiGroups: ["cdi.kubevirt.io"]
     resources: ["storageprofiles"]
     verbs: ["get", "list", "watch"]
+  # Read once at startup: the upload proxy URL browsers stream images to.
+  - apiGroups: ["cdi.kubevirt.io"]
+    resources: ["cdiconfigs"]
+    verbs: ["get"]
   - apiGroups: ["snapshot.storage.k8s.io"]
     resources: ["volumesnapshotclasses"]
     verbs: ["get", "list", "watch"]

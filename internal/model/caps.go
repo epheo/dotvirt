@@ -52,6 +52,10 @@ type ClusterCaps struct {
 	DRSDisable bool `json:"drsDisable"`
 	// OAuthClient registers the SSO OAuthClient (finish SSO).
 	OAuthClient bool `json:"oauthClient"`
+	// ImageUpload is this dotvirt knowing an upload proxy: without one every
+	// upload is refused whatever the caller's rights, and the namespace
+	// fields DataVolumeCreate and BootImageCreate read false.
+	ImageUpload bool `json:"imageUpload"`
 }
 
 // NamespaceCaps are the actions in one namespace and on its project.

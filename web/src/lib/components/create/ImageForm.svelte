@@ -59,7 +59,13 @@
 	// boot-image choice shows only where the route would take it.
 	const canImage = $derived(!!(namespace && caps.ns(namespace)?.bootImageCreate));
 	const upload = $derived(
-		caps.nsGate(namespace, (n) => n.dataVolumeCreate, `You may not upload images in ${namespace}.`),
+		caps.cluster?.imageUpload === false
+			? { ok: false, why: "Image upload is off: this cluster's CDI publishes no upload proxy." }
+			: caps.nsGate(
+					namespace,
+					(n) => n.dataVolumeCreate,
+					`You may not upload images in ${namespace}.`,
+				),
 	);
 	// svelte-ignore state_referenced_locally
 	let offerImage = $state(bootImage ?? true);

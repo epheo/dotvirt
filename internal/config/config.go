@@ -74,8 +74,9 @@ type Config struct {
 	MetricsCA string
 
 	// UploadProxyURL is the cdi-uploadproxy base the browser streams uploaded
-	// images to (e.g. https://cdi-uploadproxy-...apps.example/); from
-	// cdiconfig.status.uploadProxyURL. Empty disables the image-upload feature.
+	// images to (e.g. https://cdi-uploadproxy-...apps.example/). Empty reads
+	// cdiconfig.status.uploadProxyURL at startup; image upload stays off when
+	// CDI publishes none.
 	UploadProxyURL string
 
 	// Webhook: Forgejo pushes/PR events hit POST /api/webhooks/forge (HMAC-signed
@@ -143,7 +144,7 @@ func Load(args []string) (*Config, error) {
 	fs.BoolVar(&c.InsecureTLS, "insecure-tls", envBool("DOTVIRT_INSECURE_TLS", false), "skip TLS verification for git+forge (dev only)")
 	fs.StringVar(&c.MetricsURL, "metrics-url", os.Getenv("DOTVIRT_METRICS_URL"), "Prometheus/Thanos query API base URL for the Performance tab (empty disables)")
 	fs.StringVar(&c.MetricsCA, "metrics-ca", os.Getenv("DOTVIRT_METRICS_CA"), "PEM CA bundle path to trust for -metrics-url (e.g. the mounted service-CA)")
-	fs.StringVar(&c.UploadProxyURL, "upload-proxy-url", os.Getenv("DOTVIRT_UPLOAD_PROXY_URL"), "cdi-uploadproxy base URL for image uploads (empty disables the feature)")
+	fs.StringVar(&c.UploadProxyURL, "upload-proxy-url", os.Getenv("DOTVIRT_UPLOAD_PROXY_URL"), "cdi-uploadproxy base URL for image uploads (empty: the one CDI publishes)")
 	fs.StringVar(&c.WebhookSecret, "webhook-secret", os.Getenv("DOTVIRT_WEBHOOK_SECRET"), "HMAC secret for the Forgejo webhook endpoint (empty disables it)")
 	fs.StringVar(&c.PublicURL, "public-url", os.Getenv("DOTVIRT_PUBLIC_URL"), "dotvirt's externally reachable base URL, for webhook auto-registration (empty disables)")
 	fs.StringVar(&c.WebhookURL, "webhook-url", os.Getenv("DOTVIRT_WEBHOOK_URL"), "base URL the forge delivers webhooks to (defaults to -public-url; set to the in-cluster Service URL when the forge can't reach/TLS-trust the external Route)")

@@ -1039,6 +1039,12 @@ const noupload = {
 	name: 'noupload',
 	capabilities: { default: { bootImageCreate: false, dataVolumeCreate: false } },
 };
+// uploadoff: no upload proxy known, so every namespace refuses uploads too.
+const uploadoff = {
+	...noupload,
+	name: 'uploadoff',
+	capabilities: { ...noupload.capabilities, cluster: { imageUpload: false } },
+};
 
 // ── empty: pristine install, nothing visible yet ───────────────────────────────
 
@@ -1433,5 +1439,6 @@ export const scenarios = {
 	tenant: tenantView(base, 'team-web'),
 	noboot,
 	noupload,
+	uploadoff,
 	caps: capsDenied,
 };

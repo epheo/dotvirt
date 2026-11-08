@@ -2,6 +2,7 @@
 	import { untrack } from 'svelte';
 	import { ChevronRight, CircleDot, HardDrive, Layers, Upload } from '@lucide/svelte';
 	import { storageHref } from '#lib/nav.js';
+	import { caps } from '#lib/state/caps.svelte.js';
 	import { catalog } from '#lib/state/catalog.svelte.js';
 	import { inventory } from '#lib/state/inventory.svelte.js';
 	import { storage } from '#lib/state/storage.svelte.js';
@@ -372,7 +373,12 @@
 		</table>
 	</div>
 
-	{#if ability && !ability.upload}
+	{#if caps.cluster?.imageUpload === false}
+		<p class="mx-[18px] mt-3 text-xs leading-4 text-ink-faint">
+			Image upload is off: this cluster's CDI publishes no upload proxy. An admin sets one with
+			uploadProxyURLOverride in the CDIConfig.
+		</p>
+	{:else if ability && !ability.upload}
 		<p class="mx-[18px] mt-3 text-xs leading-4 text-ink-faint">
 			Adding images needs the right to create data volumes in a project, and your account has it in
 			none.

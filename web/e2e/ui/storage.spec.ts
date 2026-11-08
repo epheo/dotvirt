@@ -208,6 +208,13 @@ test('the drop zone offers only what the caller may do', async ({ page }) => {
 	await expect(main.getByText('your account has it in none')).toBeVisible();
 	await expect(main.getByRole('button', { name: 'Choose file' })).toHaveCount(0);
 
+	// No upload proxy known: the line names the cluster's setting, not the account.
+	await setScenario(page, 'uploadoff');
+	await page.goto('/storage');
+	await expect(main.getByText(/Image upload is off/)).toBeVisible();
+	await expect(main.getByText('your account has it in none')).toHaveCount(0);
+	await expect(main.getByRole('button', { name: 'Choose file' })).toHaveCount(0);
+
 	// May add boot images: the choice shows, on by default from the drop zone.
 	await setScenario(page, 'base');
 	await page.goto('/storage');

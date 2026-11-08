@@ -793,6 +793,7 @@ function clusterCaps(s) {
 		drsPSI: !!s.rebalancing?.canPSI,
 		drsDisable: !!s.rebalancing?.canManage,
 		oauthClient: !!n.canManage,
+		imageUpload: true,
 		...s.capabilities?.cluster,
 	};
 }
