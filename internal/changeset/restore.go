@@ -34,7 +34,7 @@ func (c *Coordinator) RestoreVersion(id auth.Identity, proj project.ProjectInfo,
 		return model.DraftView{}, fmt.Errorf("%w: %s did not exist at %s", model.ErrNotFound, path, shortCommit(hash))
 	}
 	if err != nil {
-		return model.DraftView{}, fmt.Errorf("%w: %v", model.ErrNotFound, err)
+		return model.DraftView{}, gitFailed(hash, err)
 	}
 	current, ok, err := read.LookupOnBranch(c.baseBranch, path)
 	if err != nil {
@@ -61,7 +61,7 @@ func (c *Coordinator) RestoreVersion(id auth.Identity, proj project.ProjectInfo,
 func (r *Reader) onBase(read *git.Repo, hash string) error {
 	ok, err := read.OnBranch(r.baseBranch, hash)
 	if err != nil {
-		return err
+		return gitFailed(hash, err)
 	}
 	if !ok {
 		return fmt.Errorf("%w: %s is not in the history of %s", model.ErrNotFound, shortCommit(hash), r.baseBranch)
