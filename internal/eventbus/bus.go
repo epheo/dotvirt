@@ -61,6 +61,10 @@ const (
 	// stream is open so frames re-evaluate it. Keep it out of every cache's
 	// version stamp: it must not invalidate anything before its TTL.
 	TTLBackstop
+	// SessionEnded: sessions ended - a logout, or a TokenReview rejected their
+	// token - the cue to close their streams and consoles. No frame depends on
+	// it: keep it out of every version stamp.
+	SessionEnded
 
 	// kindCount is the number of kinds - keep it last. Sizes the version array.
 	kindCount

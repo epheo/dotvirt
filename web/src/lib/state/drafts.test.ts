@@ -74,6 +74,25 @@ describe('drafts.refresh', () => {
 		expect(drafts.refreshing).toBe(false);
 	});
 
+	it('an empty project set ends a refresh still in flight', async () => {
+		const d = deferred<ReturnType<typeof view>>();
+		api.draftsByProject.mockReturnValueOnce(d.promise);
+
+		const r = drafts.refresh();
+		expect(drafts.refreshing).toBe(true);
+		inv.projectNames = [];
+		try {
+			await drafts.refresh();
+			expect(drafts.refreshing).toBe(false);
+			d.resolve(view(4));
+			await r;
+			expect(drafts.refreshing).toBe(false);
+			expect(drafts.count).toBe(0);
+		} finally {
+			inv.projectNames = ['web-prod'];
+		}
+	});
+
 	it('keeps per-project failures beside the drafts that loaded', async () => {
 		api.draftsByProject.mockResolvedValueOnce({
 			...view(1),

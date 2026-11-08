@@ -10,9 +10,7 @@
 		LoaderCircle,
 		TriangleAlert,
 	} from '@lucide/svelte';
-	import { api } from '#lib/api.js';
 	import { changesHref, hrefForScope } from '#lib/nav.js';
-	import { action } from '#lib/resource.svelte.js';
 	import { approvalLine, checksPill, reviewURL } from '#lib/review.js';
 	import { TONE_PILL, TONE_TEXT } from '#lib/status.js';
 	import { drafts, PLATFORM_PROJECT } from '#lib/state/drafts.svelte.js';
@@ -22,6 +20,7 @@
 	import { ui } from '#lib/state/ui.svelte.js';
 	import { itemLine, trayLanes, type TrayLane } from '#lib/tray.js';
 	import Button from './Button.svelte';
+	import DiscardDraft from './DiscardDraft.svelte';
 
 	// The one place a change of this user's is followed from staged to live:
 	// it replaces the header Propose button, the Changes dot and the pending
@@ -100,15 +99,8 @@
 	const closesIn = (key: string) =>
 		Math.max(1, Math.ceil((LIVE_MS - (now - (since.get(key) ?? now))) / 1000));
 
-	// Discard asks once, in place: the draft is the user's unproposed work.
-	let confirmDiscard = $state<string | null>(null);
-	const discardOp = action();
-	async function discard(project: string) {
-		if (!(await discardOp.run(() => api.discardDraft(project)))) return;
-		confirmDiscard = null;
-		drafts.refresh();
-		ui.showToast(`Discarded the staged changes in ${project}.`, { kind: 'success' });
-	}
+	// Lanes asking to discard their draft, each on its own.
+	let discarding = $state<Record<string, boolean>>({});
 
 	async function copyLink(pr: { prNumber: number; prURL: string }) {
 		try {
@@ -265,22 +257,12 @@
 								</p>
 							{/each}
 							<footer class="flex items-center gap-3 border-t border-line-soft px-3 py-2">
-								{#if confirmDiscard === lane.project}
-									<span class="text-ink"
-										>Discard {lane.draft.count} staged change{lane.draft.count === 1
-											? ''
-											: 's'}?</span
-									>
-									<Button
-										size="sm"
-										variant="danger"
-										disabled={discardOp.busy}
-										onclick={() => discard(lane.project)}>Discard</Button
-									>
-									<button
-										class="text-ink-soft hover:underline"
-										onclick={() => (confirmDiscard = null)}>Keep</button
-									>
+								{#if discarding[lane.project]}
+									<DiscardDraft
+										project={lane.project}
+										count={lane.draft.count}
+										onclose={() => delete discarding[lane.project]}
+									/>
 								{:else}
 									<Button
 										size="sm"
@@ -289,19 +271,13 @@
 									>
 									<button
 										class="text-ink-soft hover:underline"
-										onclick={() => {
-											discardOp.clear();
-											confirmDiscard = lane.project;
-										}}>Discard</button
+										onclick={() => (discarding[lane.project] = true)}>Discard</button
 									>
 									<a class="ml-auto text-ink-soft hover:underline" href={changesHref(lane.project)}
 										>Open in Changes</a
 									>
 								{/if}
 							</footer>
-							{#if discardOp.error && confirmDiscard === lane.project}
-								<p class="px-3 pb-2 {TONE_TEXT.danger}">{discardOp.error}</p>
-							{/if}
 						{:else if lane.kind === 'review'}
 							{@const checks = checksPill(lane.pr)}
 							{@const approvals = approvalLine(lane.pr)}

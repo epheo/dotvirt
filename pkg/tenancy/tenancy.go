@@ -23,6 +23,15 @@ const PlatformProject = "platform"
 // dotvirt-tenants), so no project can claim one.
 const AppProjectPrefix = "dotvirt-p-"
 
+// PlatformSyncAccount is the ServiceAccount, in the ArgoCD namespace, Argo
+// impersonates to sync the platform tier once sync impersonation is on.
+const PlatformSyncAccount = "dotvirt-platform-sync"
+
+// TenantEgressRole is the ClusterRole granting EgressFirewall writes: a tenant
+// kind the built-in admin role lacks, bound in each project namespace to the
+// same subjects as its admin grant (EgressBinding).
+const TenantEgressRole = "dotvirt-tenant-egress"
+
 var dnsLabel = regexp.MustCompile(`^[a-z0-9]([-a-z0-9]*[a-z0-9])?$`)
 
 // AppProjectName is the AppProject confining project's Application. ok=false
@@ -41,6 +50,23 @@ func AppProjectName(project string) (string, bool) {
 	return name, true
 }
 
+// SyncAccount is the ServiceAccount, in the ArgoCD namespace, Argo
+// impersonates to sync project's Application once sync impersonation is on.
+// Named like the AppProject whose destinationServiceAccounts name it, so the
+// two cannot disagree. Its rights are the RoleBindings the platform repo holds
+// in each project namespace (AdminBinding, EgressBinding): the project's repo
+// then applies only what the project itself may.
+func SyncAccount(project string) (string, bool) { return AppProjectName(project) }
+
+// AdminBinding is the platform repo's RoleBinding granting a project namespace's
+// owners, and its project's sync account, the admin role.
+func AdminBinding(ns string) string { return ns + "-admins" }
+
+// EgressBinding is the platform repo's RoleBinding granting a project
+// namespace's admin-grant subjects, owners and sync account alike,
+// TenantEgressRole: the project's people and its repo hold the same rights.
+func EgressBinding(ns string) string { return ns + "-egress" }
+
 // Reserved reports whether ns is platform space no tenant Application may
 // target: the openshift-* and kube-* system namespaces, and platform, the
 // namespaces dotvirt, its operator and ArgoCD run in.
@@ -48,10 +74,11 @@ func Reserved(ns string, platform []string) bool {
 	return strings.HasPrefix(ns, "openshift-") || strings.HasPrefix(ns, "kube-") || slices.Contains(platform, ns)
 }
 
-// GroupKind is a Kubernetes kind by API group.
+// GroupKind is a Kubernetes kind by API group, and the resource RBAC names it by.
 type GroupKind struct {
-	Group string
-	Kind  string
+	Group    string
+	Kind     string
+	Resource string
 }
 
 // TenantKinds are the only kinds a tenant repo may declare, all namespaced:
@@ -62,13 +89,13 @@ type GroupKind struct {
 // them, and a raw one joins another project's VLAN, reaches the underlay past
 // NetworkPolicy, or takes over a NAD a CUDN generates. It is platform tier.
 var TenantKinds = []GroupKind{
-	{Group: "kubevirt.io", Kind: "VirtualMachine"},
-	{Group: "cdi.kubevirt.io", Kind: "DataVolume"},
-	{Group: "k8s.ovn.org", Kind: "UserDefinedNetwork"},
+	{Group: "kubevirt.io", Kind: "VirtualMachine", Resource: "virtualmachines"},
+	{Group: "cdi.kubevirt.io", Kind: "DataVolume", Resource: "datavolumes"},
+	{Group: "k8s.ovn.org", Kind: "UserDefinedNetwork", Resource: "userdefinednetworks"},
 	// The Tier-1 gateway firewall: it narrows its own namespace's egress only.
-	{Group: "k8s.ovn.org", Kind: "EgressFirewall"},
+	{Group: "k8s.ovn.org", Kind: "EgressFirewall", Resource: "egressfirewalls"},
 	// The east-west Distributed Firewall.
-	{Group: "networking.k8s.io", Kind: "NetworkPolicy"},
+	{Group: "networking.k8s.io", Kind: "NetworkPolicy", Resource: "networkpolicies"},
 }
 
 // TenantKind reports whether a tenant repo may declare kind. It matches by

@@ -10,9 +10,8 @@
 		Trash2,
 		TriangleAlert,
 	} from '@lucide/svelte';
-	import { api, type Commit, type DraftView, type Proposal, type ProposeResult } from '#lib/api.js';
+	import type { Commit, DraftView, Proposal, ProposeResult } from '#lib/api.js';
 	import { shortDate } from '#lib/format.js';
-	import { action } from '#lib/resource.svelte.js';
 	import {
 		approvalLine,
 		checksPill,
@@ -23,7 +22,7 @@
 	} from '#lib/review.js';
 	import { drafts } from '#lib/state/drafts.svelte.js';
 	import Button from '#lib/components/Button.svelte';
-	import ErrorNote from '#lib/components/ErrorNote.svelte';
+	import DiscardDraft from '#lib/components/DiscardDraft.svelte';
 	import Note from '#lib/components/Note.svelte';
 	import Skeleton from '#lib/components/Skeleton.svelte';
 	import StatusPill from '#lib/components/StatusPill.svelte';
@@ -65,11 +64,8 @@
 		ondismiss: (project: string) => void;
 	} = $props();
 
-	const discardOp = action();
-	async function discardAll(project: string) {
-		if (discardOp.busy) return;
-		if (await discardOp.run(() => api.discardDraft(project))) drafts.refresh();
-	}
+	// Lanes asking to discard their draft, each on its own.
+	let discarding = $state<Record<string, boolean>>({});
 
 	const on = (s: ReviewSel) => sameReview(active, s);
 	const failedLanes = $derived(
@@ -87,7 +83,6 @@
 	<div class="px-3 pt-3 pb-1 text-[11px] font-semibold tracking-wide text-ink-faint uppercase">
 		Staged
 	</div>
-	<ErrorNote error={discardOp.error} class="mx-3 mb-1" />
 	{#if !drafts.loaded}
 		<div class="p-3"><Skeleton rows={3} class="h-7" /></div>
 	{:else if drafts.loaded && lanes.length === 0 && failedLanes.length === 0}
@@ -111,13 +106,18 @@
 			<Folder size={14} class="text-ink-faint" />
 			<span class="font-medium text-ink">{project}</span>
 			<span class="text-xs text-ink-faint">{draft.count} change{draft.count > 1 ? 's' : ''}</span>
-			<button
-				onclick={() => discardAll(project)}
-				disabled={discardOp.busy}
-				class="ml-auto text-[11px] text-ink-muted hover:text-danger-ink disabled:text-ink-faint"
-				>{discardOp.busy ? 'discarding…' : 'discard all'}</button
-			>
+			{#if !discarding[project]}
+				<button
+					onclick={() => (discarding[project] = true)}
+					class="ml-auto text-[11px] text-ink-muted hover:text-danger-ink">discard all</button
+				>
+			{/if}
 		</div>
+		{#if discarding[project]}
+			<div class="mx-3 mb-1 text-xs">
+				<DiscardDraft {project} count={draft.count} onclose={() => delete discarding[project]} />
+			</div>
+		{/if}
 		{#if draft.warning}
 			<Note tone="warn" class="mx-3 mb-1 flex items-start gap-2">
 				<TriangleAlert size={14} class="mt-0.5 shrink-0" />

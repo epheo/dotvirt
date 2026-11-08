@@ -232,7 +232,7 @@ func (c *Coordinator) requireUndeclaredVM(read *git.Repo, namespace, name string
 // and an edit - the same rendering replacing the declaring file - when it does:
 // one path for the form that creates an object and the form that changes it.
 func (c *Coordinator) stageRendered(id auth.Identity, proj project.ProjectInfo, render func() (draft.Entry, error)) (model.DraftView, error) {
-	entry, err := c.resolveRendered(proj, render)
+	entry, err := c.renderedEntry(proj, render)
 	if err != nil {
 		return model.DraftView{}, err
 	}
@@ -241,14 +241,15 @@ func (c *Coordinator) stageRendered(id auth.Identity, proj project.ProjectInfo, 
 
 // previewRendered is stageRendered without the store write.
 func (c *Coordinator) previewRendered(id auth.Identity, proj project.ProjectInfo, render func() (draft.Entry, error)) (model.StagePreview, error) {
-	entry, err := c.resolveRendered(proj, render)
+	entry, err := c.renderedEntry(proj, render)
 	if err != nil {
 		return model.StagePreview{}, err
 	}
 	return c.previewOf(id, proj, entry)
 }
 
-func (c *Coordinator) resolveRendered(proj project.ProjectInfo, render func() (draft.Entry, error)) (draft.Entry, error) {
+// renderedEntry is stageRendered's entry, unstaged.
+func (c *Coordinator) renderedEntry(proj project.ProjectInfo, render func() (draft.Entry, error)) (draft.Entry, error) {
 	read, err := c.read(proj)
 	if err != nil {
 		return draft.Entry{}, err
@@ -407,25 +408,31 @@ func createForm(resource draft.Resource, rawSpec json.RawMessage) (func() (draft
 // platform repo) and applied by the platform Argo app - but it is labeled/annotated
 // to joinProj, the tenant project it JOINS, so that project's per-project app syncs
 // workloads into it once it exists. The namespace + primary UDN land as one
-// multi-doc manifest.
+// multi-doc manifest, beside its grants (grantSource.entries) to the joining
+// project's people, as its other namespaces' grants name them, and its sync
+// account when one is configured: the project syncs into every namespace it
+// holds, as no more than its people.
 func (c *Coordinator) StageCreateNamespace(id auth.Identity, commitProj, joinProj project.ProjectInfo, rawSpec json.RawMessage, live LiveNamespaces) (model.DraftView, error) {
-	render, err := c.namespaceForm(joinProj, rawSpec, live)
+	entries, err := c.namespaceEntries(commitProj, joinProj, rawSpec, live)
 	if err != nil {
 		return model.DraftView{}, err
 	}
-	return c.stageRendered(id, commitProj, render)
+	return c.stage(id, commitProj, entries...)
 }
 
-// PreviewCreateNamespace is StageCreateNamespace without the store write.
+// PreviewCreateNamespace is StageCreateNamespace without the store write:
+// the namespace and its grants, through the same gate.
 func (c *Coordinator) PreviewCreateNamespace(id auth.Identity, commitProj, joinProj project.ProjectInfo, rawSpec json.RawMessage, live LiveNamespaces) (model.StagePreview, error) {
-	render, err := c.namespaceForm(joinProj, rawSpec, live)
+	entries, err := c.namespaceEntries(commitProj, joinProj, rawSpec, live)
 	if err != nil {
 		return model.StagePreview{}, err
 	}
-	return c.previewRendered(id, commitProj, render)
+	return c.previewOf(id, commitProj, entries...)
 }
 
-func (c *Coordinator) namespaceForm(joinProj project.ProjectInfo, rawSpec json.RawMessage, live LiveNamespaces) (func() (draft.Entry, error), error) {
+// namespaceEntries is what a new namespace stages: its manifest, then its
+// grants.
+func (c *Coordinator) namespaceEntries(commitProj, joinProj project.ProjectInfo, rawSpec json.RawMessage, live LiveNamespaces) ([]draft.Entry, error) {
 	var spec netgen.NamespaceSpec
 	if err := json.Unmarshal(rawSpec, &spec); err != nil {
 		return nil, invalid(fmt.Errorf("invalid namespace spec: %v", err))
@@ -439,7 +446,7 @@ func (c *Coordinator) namespaceForm(joinProj project.ProjectInfo, rawSpec json.R
 		return nil, err
 	}
 	spec.Live = ln
-	return func() (draft.Entry, error) {
+	entry, err := c.renderedEntry(commitProj, func() (draft.Entry, error) {
 		if joinProj.Repo == "" {
 			return draft.Entry{}, fmt.Errorf("the joining project has no repo")
 		}
@@ -459,7 +466,25 @@ func (c *Coordinator) namespaceForm(joinProj project.ProjectInfo, rawSpec json.R
 			SourceFile: path,
 			Manifest:   string(content),
 		}, err
-	}, nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	grants, err := c.grantSource(commitProj)
+	if err != nil {
+		return nil, err
+	}
+	// The joining project's people come with it: its sync account never
+	// holds a namespace they do not.
+	inherit, err := grants.inherited(joinProj)
+	if err != nil {
+		return nil, err
+	}
+	grant, err := grants.entries(spec.Name, joinProj.Name, nil, inherit)
+	if err != nil {
+		return nil, err
+	}
+	return append([]draft.Entry{entry}, grant...), nil
 }
 
 // StageDelete records the removal of an existing object (a VM when resource is

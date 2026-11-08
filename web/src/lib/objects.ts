@@ -18,6 +18,7 @@ import {
 	type UplinkCreate,
 } from '#lib/api.js';
 import { friendlyError } from '#lib/format.js';
+import { action } from '#lib/resource.svelte.js';
 import { inventory } from '#lib/state/inventory.svelte.js';
 import { ui } from '#lib/state/ui.svelte.js';
 
@@ -126,13 +127,14 @@ export const canAuthorRef = (ref: ObjectRef) =>
  * is narrower) opens as the manifest itself.
  */
 export async function openEdit(ref: ObjectRef) {
-	let read: ObjectSpec;
-	try {
+	// The read outlasts a click: a dialog opened or closed meanwhile is the
+	// user's newer intent, and this one must not replace it.
+	const shown = ui.modal;
+	let read: ObjectSpec | undefined;
+	const ok = await action({ toast: ui.toastError }).run(async () => {
 		read = await api.objectSpec(ref.resource, ref.namespace, ref.name);
-	} catch (e) {
-		ui.showToast(friendlyError(e), { kind: 'error' });
-		return;
-	}
+	});
+	if (!ok || !read || ui.modal !== shown) return;
 	const modal = read.spec !== undefined ? modalFor(ref.resource, read.spec) : null;
 	ui.modal = modal ?? {
 		kind: 'editManifest',

@@ -1,15 +1,19 @@
 package stream
 
 import (
+	"context"
 	"io"
 	"log"
 	"net"
 	"net/http"
+	"sync"
+	"time"
 
 	"github.com/gorilla/websocket"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 
 	"github.com/epheo/dotvirt/internal/auth"
+	"github.com/epheo/dotvirt/internal/restfactory"
 )
 
 // VNCDialer opens a VNC stream to a VMI as a net.Conn carrying the RFB protocol.
@@ -24,16 +28,88 @@ type VNCDialer interface {
 type DialerForToken func(token string) (VNCDialer, error)
 
 // VNCProxy bridges a browser noVNC WebSocket to KubeVirt's VNC subresource, using
-// a per-request, per-user dialer.
+// a per-request, per-user dialer. An open console outlives any later check of
+// its token (virt-api never re-authenticates the stream), so the proxy closes
+// it when its session ends.
 type VNCProxy struct {
 	dialerFor DialerForToken
 	upgrader  websocket.Upgrader
+	live      SessionLive     // nil: sessions never end
+	wake      <-chan struct{} // the session-ended subscription
+
+	mu       sync.Mutex
+	consoles map[*console]struct{}
 }
 
-// NewVNCProxy builds a VNC proxy that dials as the requesting user; uiOrigin is
-// the frontend origin its sockets accept besides same-origin.
-func NewVNCProxy(d DialerForToken, uiOrigin string) *VNCProxy {
-	return &VNCProxy{dialerFor: d, upgrader: upgrader(uiOrigin)}
+// console is one open bridge, tracked under its session.
+type console struct {
+	key    string
+	issued time.Time
+	ws     *websocket.Conn
+}
+
+// NewVNCProxy builds a VNC proxy that dials as the requesting user. wake fires
+// when sessions end, live says which; uiOrigin is the frontend origin its
+// sockets accept besides same-origin.
+func NewVNCProxy(d DialerForToken, live SessionLive, wake <-chan struct{}, uiOrigin string) *VNCProxy {
+	return &VNCProxy{dialerFor: d, upgrader: upgrader(uiOrigin), live: live, wake: wake, consoles: map[*console]struct{}{}}
+}
+
+// Run closes, on each wake, the consoles whose session ended. One per proxy.
+func (p *VNCProxy) Run(ctx context.Context) {
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-p.wake:
+			p.sweep()
+		}
+	}
+}
+
+func (p *VNCProxy) sweep() {
+	if p.live == nil {
+		return
+	}
+	var ended []*console
+	p.mu.Lock()
+	for c := range p.consoles {
+		if !p.live(c.key, c.issued) {
+			ended = append(ended, c)
+			delete(p.consoles, c)
+		}
+	}
+	p.mu.Unlock()
+	for _, c := range ended {
+		go endConsole(c.ws) // a stalled console must not hold up the others
+	}
+}
+
+// track registers c until the returned func runs. A session that ended before
+// c was tracked missed the sweep, so it is checked once here.
+func (p *VNCProxy) track(c *console) (untrack func()) {
+	p.mu.Lock()
+	p.consoles[c] = struct{}{}
+	p.mu.Unlock()
+	if p.live != nil && !p.live(c.key, c.issued) {
+		endConsole(c.ws)
+	}
+	return func() {
+		p.mu.Lock()
+		delete(p.consoles, c)
+		p.mu.Unlock()
+	}
+}
+
+// closeGrace bounds the close frame to an ended console: a client that stopped
+// reading holds the write lock, and its socket closes regardless.
+const closeGrace = time.Second
+
+// endConsole closes a console like the hub closes a stream whose session is
+// over, so the client reconnects into the 401 that signs it out.
+func endConsole(ws *websocket.Conn) {
+	_ = ws.WriteControl(websocket.CloseMessage, websocket.FormatCloseMessage(websocket.ClosePolicyViolation, "session ended"), time.Now().Add(closeGrace))
+	_ = ws.Close()
 }
 
 // vncReadLimit bounds one browser frame. noVNC sends key, pointer and
@@ -91,6 +167,11 @@ func (p *VNCProxy) Handler(w http.ResponseWriter, r *http.Request) {
 	}
 	defer func() { _ = ws.Close() }()
 	ws.SetReadLimit(vncReadLimit)
+	defer p.track(&console{key: restfactory.TokenKey(id.Token), issued: id.Issued, ws: ws})()
+	if exp := auth.SessionExpiry(id.Issued); !exp.IsZero() {
+		lifetime := time.AfterFunc(time.Until(exp), func() { endConsole(ws) })
+		defer lifetime.Stop()
+	}
 
 	// Bridge both directions; when either side ends, tear down both.
 	done := make(chan struct{}, 2)

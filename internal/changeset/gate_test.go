@@ -163,7 +163,7 @@ func TestRoleBindingCarriesItself(t *testing.T) {
 	c.UseAuthorizer(r)
 	id := auth.Identity{Username: "alice"}
 	plat := project.ProjectInfo{Name: project.PlatformName, Repo: bare}
-	entries, err := projectAdoption([]netgen.NamespaceSpec{{Name: "alpha", Project: "team"}}, []string{"bob"})
+	entries, err := projectAdoption([]netgen.NamespaceSpec{{Name: "alpha", Project: "team"}}, []string{"bob"}, grantSource{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -173,7 +173,7 @@ func TestRoleBindingCarriesItself(t *testing.T) {
 	}
 	var grant *Access
 	for _, a := range r.questions() {
-		if a.Resource == "rolebindings" {
+		if a.Resource == "rolebindings" && a.Name == "alpha-admins" {
 			grant = &a
 		}
 	}
