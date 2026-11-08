@@ -552,6 +552,8 @@ func TestEvacuateHidesUnreadableFailures(t *testing.T) {
 // asked once and then cached.
 func TestFrameAsksThePlatformLaneOnlyWhenBusy(t *testing.T) {
 	g := newGateRig(t)
+	// The SA's startup reviews may still be in flight: swap the fake's verdicts under its lock.
+	g.fc.mu.Lock()
 	// A caller who sees no project: the frame reads no repo.
 	g.fc.readsVMs = func(string, string) bool { return false }
 	var mu sync.Mutex
@@ -565,6 +567,7 @@ func TestFrameAsksThePlatformLaneOnlyWhenBusy(t *testing.T) {
 		mu.Unlock()
 		return inner(token, a)
 	}
+	g.fc.mu.Unlock()
 	frame := func(token string) {
 		t.Helper()
 		if _, err := g.s.InventoryForIdentity(context.Background(), auth.Identity{Token: token, Username: "u"}); err != nil {

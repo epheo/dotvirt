@@ -6,10 +6,12 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -19,6 +21,7 @@ import (
 	authnv1 "k8s.io/api/authentication/v1"
 	authzv1 "k8s.io/api/authorization/v1"
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/watch"
@@ -35,38 +38,21 @@ import (
 )
 
 // scopeServer builds a Server with only what the scope caches read: the version
-// bus and an unsynced snapshot (empty topology is fine - the fake user client's
-// cluster-wide namespace list is the visibility source, not the candidates).
+// bus and an unsynced snapshot, which holds no namespace.
 func scopeServer(bus *eventbus.Bus) *Server {
 	sa := cluster.NewClient(fake.NewSimpleClientset(), nil, nil)
 	return NewServer(Deps{State: clusterstate.New(sa, "dotvirt.io/project", bus), Bus: bus, Reader: &fakeDraft{}, Draft: &fakeDraft{}})
 }
 
-// listCountingClient is a user-identity client over a fake clientset seeded with
-// nss, counting namespace LISTs - "cached" is pinned as "no second round". The
-// modeled token is admin-like: the cluster-wide VM read SSAR that qualifies the
-// namespace-list fast path is allowed.
-func listCountingClient(nss ...string) (*cluster.Client, *int) {
-	objs := make([]runtime.Object, 0, len(nss))
-	for _, ns := range nss {
-		objs = append(objs, &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: ns}})
-	}
-	kube := fake.NewSimpleClientset(objs...)
-	lists := new(int)
-	kube.PrependReactor("list", "namespaces", func(k8stesting.Action) (bool, runtime.Object, error) {
-		*lists++
-		return false, nil, nil // count only; the tracker still answers
-	})
-	kube.PrependReactor("create", "selfsubjectaccessreviews", func(action k8stesting.Action) (bool, runtime.Object, error) {
-		ssar := action.(k8stesting.CreateAction).GetObject().(*authzv1.SelfSubjectAccessReview).DeepCopy()
-		ssar.Status.Allowed = true
-		return true, ssar, nil
-	})
-	return cluster.NewClient(kube, nil, nil), lists
-}
-
 // ssarCountingClient answers SelfSubjectAccessReviews via allow and counts them.
 func ssarCountingClient(allow func(*authzv1.ResourceAttributes) bool) (*cluster.Client, *int) {
+	c, _, reviews := ssarCountingFake(allow)
+	return c, reviews
+}
+
+// ssarCountingFake is ssarCountingClient with its clientset, whose Actions
+// record every other request the token made.
+func ssarCountingFake(allow func(*authzv1.ResourceAttributes) bool) (*cluster.Client, *fake.Clientset, *int) {
 	kube := fake.NewSimpleClientset()
 	reviews := new(int)
 	kube.PrependReactor("create", "selfsubjectaccessreviews", func(action k8stesting.Action) (bool, runtime.Object, error) {
@@ -75,100 +61,86 @@ func ssarCountingClient(allow func(*authzv1.ResourceAttributes) bool) (*cluster.
 		ssar.Status.Allowed = allow(ssar.Spec.ResourceAttributes)
 		return true, ssar, nil
 	})
-	return cluster.NewClient(kube, nil, nil), reviews
+	return cluster.NewClient(kube, nil, nil), kube, reviews
 }
 
-// TestVisibleForCachesPerToken pins the hot-path contract: a token's visible set
-// is computed against the cluster once and every same-version read after that is
-// a pure cache hit - a request burst must not fan out into per-request LISTs.
-func TestVisibleForCachesPerToken(t *testing.T) {
-	s := scopeServer(eventbus.New())
-	c, lists := listCountingClient("tenant-a", "tenant-b")
-	id := auth.Identity{Token: "tok-alice", Username: "alice"}
-
-	first, err := s.visibleFor(context.Background(), id, c)
-	if err != nil {
-		t.Fatalf("visibleFor: %v", err)
-	}
-	if !first["tenant-a"] || !first["tenant-b"] || len(first) != 2 {
-		t.Fatalf("visible = %v, want tenant-a and tenant-b", first)
-	}
-	second, err := s.visibleFor(context.Background(), id, c)
-	if err != nil {
-		t.Fatalf("visibleFor (cached): %v", err)
-	}
-	if *lists != 1 {
-		t.Fatalf("two same-version reads cost %d cluster rounds; want 1", *lists)
-	}
-	if len(second) != len(first) || !second["tenant-a"] || !second["tenant-b"] {
-		t.Fatalf("cached read = %v, want the same set as the first", second)
-	}
+// asking is a token's client that records the namespace of every review it
+// posts ("" for cluster-wide), allowing those allow does.
+type asking struct {
+	c     *cluster.Client
+	mu    sync.Mutex
+	asked []string
+	allow func(*authzv1.ResourceAttributes) bool
+	fail  func(*authzv1.ResourceAttributes) bool
 }
 
-// Concurrent misses for one token share one probe: a frame build and the
-// pulls its watermarks trigger never review one token's visibility twice. The
-// caller that started the probe leaves on its own deadline, and the probe runs
-// on for the others still waiting on it.
-func TestVisibleForSharesOneProbe(t *testing.T) {
-	s := scopeServer(eventbus.New())
-	kube := fake.NewSimpleClientset(&corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "tenant-a"}})
-	gate := make(chan struct{})
-	var started atomic.Bool
-	lists := 0
-	kube.PrependReactor("list", "namespaces", func(k8stesting.Action) (bool, runtime.Object, error) {
-		lists++
-		started.Store(true)
-		<-gate
-		return false, nil, nil
-	})
+func newAsking(allow func(*authzv1.ResourceAttributes) bool) *asking {
+	a := &asking{allow: allow}
+	kube := fake.NewSimpleClientset()
 	kube.PrependReactor("create", "selfsubjectaccessreviews", func(action k8stesting.Action) (bool, runtime.Object, error) {
 		ssar := action.(k8stesting.CreateAction).GetObject().(*authzv1.SelfSubjectAccessReview).DeepCopy()
-		ssar.Status.Allowed = true
+		attrs := ssar.Spec.ResourceAttributes
+		a.mu.Lock()
+		defer a.mu.Unlock()
+		a.asked = append(a.asked, attrs.Namespace)
+		if a.fail != nil && a.fail(attrs) {
+			return true, nil, apierrors.NewServiceUnavailable("review backend down")
+		}
+		ssar.Status.Allowed = a.allow(attrs)
 		return true, ssar, nil
 	})
-	c := cluster.NewClient(kube, nil, nil)
-	id := auth.Identity{Token: "tok-alice", Username: "alice"}
+	a.c = cluster.NewClient(kube, nil, nil)
+	return a
+}
 
-	leader, leave := context.WithCancel(context.Background())
-	left := make(chan error, 1)
-	go func() {
-		_, err := s.visibleFor(leader, id, c)
-		left <- err
-	}()
-	for !started.Load() {
-		time.Sleep(time.Millisecond)
-	}
-	var wg sync.WaitGroup
-	for range 3 {
-		wg.Go(func() {
-			if got, err := s.visibleFor(context.Background(), id, c); err != nil || !got["tenant-a"] {
-				t.Errorf("a waiter got %v, %v; want tenant-a", got, err)
-			}
-		})
-	}
-	time.Sleep(50 * time.Millisecond) // let the waiters join the probe in flight
-	leave()
-	select {
-	case err := <-left:
-		if err == nil {
-			t.Error("the leader left with an answer it never waited for")
-		}
-	case <-time.After(5 * time.Second):
-		t.Fatal("the leader could not leave while its probe ran")
-	}
-	close(gate)
-	wg.Wait()
-	if lists != 1 {
-		t.Fatalf("four concurrent misses cost %d probes, want 1", lists)
+// take returns the namespaces asked since the last take, sorted.
+func (a *asking) take() []string {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	out := a.asked
+	a.asked = nil
+	slices.Sort(out)
+	return out
+}
+
+func (a *asking) set(allow, fail func(*authzv1.ResourceAttributes) bool) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.allow, a.fail = allow, fail
+}
+
+// readsVMsIn allows listing VMs in nss, and nothing else.
+func readsVMsIn(nss ...string) func(*authzv1.ResourceAttributes) bool {
+	return func(a *authzv1.ResourceAttributes) bool {
+		return a.Verb == verbList && a.Resource == "virtualmachines" && a.Namespace != "" && slices.Contains(nss, a.Namespace)
 	}
 }
 
-// watchedState runs a snapshot over a fake clientset whose RBAC watches all
-// run: the SA may list every kind, and Groups are absent as on any cluster but
-// OpenShift. fail makes the ClusterRole watch fail from then on.
-func watchedState(t *testing.T, bus *eventbus.Bus) (st *clusterstate.State, fail func()) {
+// seedVisibleAt caches ns as tok's visible set at the current levels, swept
+// at swept, so a test's reads stay off the visibility reviews, and off the
+// snapshot when the server has none.
+func seedVisibleAt(s *Server, tok string, ns map[string]bool, swept time.Time) {
+	lv := s.visLevels()
+	cands := &candidates{ver: lv.ns, names: map[string]bool{}}
+	if s.state != nil {
+		cands = s.candidates(lv.ns)
+	}
+	s.visible.Put(restfactory.TokenKey(tok), visibleSet{ns: ns, cands: cands, lv: lv, swept: swept})
+}
+
+func seedVisible(s *Server, tok string, ns map[string]bool) { seedVisibleAt(s, tok, ns, time.Now()) }
+
+func projectNS(name string) *corev1.Namespace {
+	return &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: name, Labels: map[string]string{"dotvirt.io/project": name}}}
+}
+
+// watchedState runs a snapshot over a fake clientset holding objs, whose RBAC
+// watches all run: the SA may list every kind, and Groups are absent as on
+// any cluster but OpenShift. It returns once the snapshot synced and its
+// first lists published. fail makes the ClusterRole watch fail from then on.
+func watchedState(t *testing.T, bus *eventbus.Bus, objs ...runtime.Object) (st *clusterstate.State, kube *fake.Clientset, fail func()) {
 	t.Helper()
-	kube := fake.NewSimpleClientset()
+	kube = fake.NewSimpleClientset(objs...)
 	var rbac []metav1.APIResource
 	for _, r := range []string{"rolebindings", "roles", "clusterrolebindings", "clusterroles"} {
 		rbac = append(rbac, metav1.APIResource{Name: r})
@@ -198,7 +170,11 @@ func watchedState(t *testing.T, bus *eventbus.Bus) (st *clusterstate.State, fail
 	t.Cleanup(cancel)
 	st.Run(ctx)
 	waitUntil(t, "every RBAC watch running", st.RBACWatched)
-	return st, func() {
+	if err := st.WaitForSync(ctx); err != nil {
+		t.Fatal(err)
+	}
+	waitUntil(t, "the namespace store's first publish", func() bool { return bus.Version(eventbus.NamespaceChanged) > 0 })
+	return st, kube, func() {
 		down.Store(true)
 		mu.Lock()
 		defer mu.Unlock()
@@ -215,36 +191,156 @@ func waitUntil(t *testing.T, what string, cond func() bool) {
 	}
 }
 
+func visibleOf(t *testing.T, s *Server, tok string, c *cluster.Client) map[string]bool {
+	t.Helper()
+	got, err := s.visibleFor(context.Background(), auth.Identity{Token: tok, Username: tok}, c)
+	if err != nil {
+		t.Fatalf("visibleFor(%s): %v", tok, err)
+	}
+	return got
+}
+
+// TestVisibleForCachesPerToken pins the hot-path contract: a token's visible set
+// is reviewed once and every same-level read after that is a pure cache hit -
+// a request burst must not fan out into per-request reviews.
+func TestVisibleForCachesPerToken(t *testing.T) {
+	bus := eventbus.New()
+	st, _, _ := watchedState(t, bus, projectNS("tenant-a"), projectNS("tenant-b"))
+	s := NewServer(Deps{State: st, Bus: bus, Reader: &fakeDraft{}, Draft: &fakeDraft{}})
+	tenant := newAsking(readsVMsIn("tenant-a"))
+
+	if got := visibleOf(t, s, "tok-alice", tenant.c); !maps.Equal(got, map[string]bool{"tenant-a": true}) {
+		t.Fatalf("visible = %v, want tenant-a", got)
+	}
+	if got := tenant.take(); !slices.Equal(got, []string{"", "tenant-a", "tenant-b"}) {
+		t.Fatalf("the first read asked %q, want the cluster-wide review and each candidate", got)
+	}
+	if got := visibleOf(t, s, "tok-alice", tenant.c); !got["tenant-a"] || len(got) != 1 {
+		t.Fatalf("cached read = %v, want the same set as the first", got)
+	}
+	if got := tenant.take(); len(got) != 0 {
+		t.Fatalf("a same-level read asked %q", got)
+	}
+}
+
+// A token that may list VMs and namespaces everywhere sees every namespace,
+// project or not, off the SA's own watch: two reviews, no list under its
+// token, none per namespace. One that may list VMs everywhere sees every
+// project namespace. Listing namespaces never stands in for reading VMs.
+func TestVisibleForClusterWideReaders(t *testing.T) {
+	bus := eventbus.New()
+	st, _, _ := watchedState(t, bus, projectNS("tenant-a"), projectNS("tenant-b"), &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "default"}})
+	s := NewServer(Deps{State: st, Bus: bus, Reader: &fakeDraft{}, Draft: &fakeDraft{}})
+
+	admin, kube, reviews := ssarCountingFake(func(*authzv1.ResourceAttributes) bool { return true })
+	if got := visibleOf(t, s, "tok-admin", admin); !maps.Equal(got, map[string]bool{"tenant-a": true, "tenant-b": true, "default": true}) {
+		t.Errorf("admin sees %v, want every namespace", got)
+	}
+	for _, a := range kube.Actions() {
+		if a.GetVerb() == "list" {
+			t.Errorf("the admin's visibility listed %s under its token", a.GetResource().Resource)
+		}
+	}
+	if *reviews != 2 {
+		t.Errorf("the admin's visibility cost %d reviews, want 2", *reviews)
+	}
+
+	vms := newAsking(func(a *authzv1.ResourceAttributes) bool { return a.Resource == "virtualmachines" })
+	if got := visibleOf(t, s, "tok-vms", vms.c); !maps.Equal(got, map[string]bool{"tenant-a": true, "tenant-b": true}) {
+		t.Errorf("a cluster-wide VM reader sees %v, want every project namespace", got)
+	}
+	if got := vms.take(); !slices.Equal(got, []string{"", ""}) {
+		t.Errorf("a cluster-wide VM reader asked %q, want the two cluster-wide reviews", got)
+	}
+
+	auditor := newAsking(func(a *authzv1.ResourceAttributes) bool { return a.Resource == "namespaces" })
+	if got := visibleOf(t, s, "tok-auditor", auditor.c); len(got) != 0 {
+		t.Errorf("a namespace lister without VM read sees %v, want nothing", got)
+	}
+}
+
+// Concurrent misses for one token share one sweep: a frame build and the
+// pulls its watermarks trigger never review one token's visibility twice. The
+// caller that started the sweep leaves on its own deadline, and the sweep runs
+// on for the others still waiting on it.
+func TestVisibleForSharesOneProbe(t *testing.T) {
+	s := scopeServer(eventbus.New())
+	kube := fake.NewSimpleClientset()
+	gate := make(chan struct{})
+	var started atomic.Bool
+	var reviews atomic.Int32
+	kube.PrependReactor("create", "selfsubjectaccessreviews", func(action k8stesting.Action) (bool, runtime.Object, error) {
+		reviews.Add(1)
+		started.Store(true)
+		<-gate
+		ssar := action.(k8stesting.CreateAction).GetObject().(*authzv1.SelfSubjectAccessReview).DeepCopy()
+		ssar.Status.Allowed = true
+		return true, ssar, nil
+	})
+	c := cluster.NewClient(kube, nil, nil)
+	id := auth.Identity{Token: "tok-alice", Username: "alice"}
+
+	leader, leave := context.WithCancel(context.Background())
+	left := make(chan error, 1)
+	go func() {
+		_, err := s.visibleFor(leader, id, c)
+		left <- err
+	}()
+	for !started.Load() {
+		time.Sleep(time.Millisecond)
+	}
+	var wg sync.WaitGroup
+	for range 3 {
+		wg.Go(func() {
+			if _, err := s.visibleFor(context.Background(), id, c); err != nil {
+				t.Errorf("a waiter got %v", err)
+			}
+		})
+	}
+	time.Sleep(50 * time.Millisecond) // let the waiters join the sweep in flight
+	leave()
+	select {
+	case err := <-left:
+		if err == nil {
+			t.Error("the leader left with an answer it never waited for")
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("the leader could not leave while its sweep ran")
+	}
+	close(gate)
+	wg.Wait()
+	if n := reviews.Load(); n != 2 {
+		t.Fatalf("four concurrent misses cost %d reviews, want one sweep's 2", n)
+	}
+}
+
 // While every RBAC watch runs, a cached visible set serves for minutes; once
 // one fails, the same entry serves only seconds, so a revocation the watches
 // cannot report waits no longer than it did before them. A snapshot whose
 // watches never ran keeps the short TTL throughout.
 func TestVisibleForTTLFollowsTheWatches(t *testing.T) {
 	bus := eventbus.New()
-	st, fail := watchedState(t, bus)
+	st, _, fail := watchedState(t, bus)
 	watched := NewServer(Deps{State: st, Bus: bus, Reader: &fakeDraft{}, Draft: &fakeDraft{}})
-	id := auth.Identity{Token: "tok-alice", Username: "alice"}
 	probes := func(s *Server) int {
 		t.Helper()
-		// The entry a review left a minute ago.
-		s.visible.PutAt(restfactory.TokenKey(id.Token), visibleSet{ns: map[string]bool{"tenant-a": true}, ver: s.rbacVersion()}, time.Now().Add(-time.Minute))
-		c, lists := listCountingClient("tenant-a")
-		if got, err := s.visibleFor(context.Background(), id, c); err != nil || !got["tenant-a"] {
-			t.Fatalf("visibleFor: %v, %v", got, err)
-		}
-		return *lists
+		// The entry a sweep left a minute ago.
+		seedVisibleAt(s, "tok-alice", map[string]bool{}, time.Now().Add(-time.Minute))
+		c, reviews := ssarCountingClient(func(*authzv1.ResourceAttributes) bool { return true })
+		visibleOf(t, s, "tok-alice", c)
+		return *reviews
 	}
 
 	if n := probes(watched); n != 0 {
-		t.Errorf("watched: a minute-old entry cost %d probes, want 0", n)
+		t.Errorf("watched: a minute-old entry cost %d reviews, want 0", n)
 	}
 	fail()
 	waitUntil(t, "the failed watch to count", func() bool { return !st.RBACWatched() })
-	if n := probes(watched); n != 1 {
-		t.Errorf("a watch down: a minute-old entry cost %d probes, want 1", n)
+	if n := probes(watched); n != 2 {
+		t.Errorf("a watch down: a minute-old entry cost %d reviews, want a sweep's 2", n)
 	}
-	if n := probes(scopeServer(eventbus.New())); n != 1 {
-		t.Errorf("never watched: a minute-old entry cost %d probes, want 1", n)
+	if n := probes(scopeServer(eventbus.New())); n != 2 {
+		t.Errorf("never watched: a minute-old entry cost %d reviews, want a sweep's 2", n)
 	}
 }
 
@@ -277,94 +373,79 @@ func TestReviewsHonorTheCallerDeadline(t *testing.T) {
 // runs. One that begins once grants settled serves the long TTL.
 func TestUnsettledReviewsServeTheShortTTL(t *testing.T) {
 	bus := eventbus.New()
-	st, _ := watchedState(t, bus) // its initial lists are grant moves
+	st, _, _ := watchedState(t, bus) // its initial lists are grant moves
 	s := NewServer(Deps{State: st, Bus: bus, Reader: &fakeDraft{}, Draft: &fakeDraft{}})
-	id := auth.Identity{Token: "tok-alice", Username: "alice"}
-	c, lists := listCountingClient("tenant-a")
-	if _, err := s.visibleFor(context.Background(), id, c); err != nil {
-		t.Fatal(err)
-	}
-	key := restfactory.TokenKey(id.Token)
+	c, reviews := ssarCountingClient(func(*authzv1.ResourceAttributes) bool { return true })
+	visibleOf(t, s, "tok-alice", c)
+	key := restfactory.TokenKey("tok-alice")
 	e, ok := s.visible.Get(key)
-	if !ok || !e.unsettled {
-		t.Fatalf("a review right after a grant move cached %+v (ok=%v), want it unsettled", e, ok)
+	if !ok || !e.sweptUnsettled {
+		t.Fatalf("a sweep right after a grant move cached %+v (ok=%v), want it unsettled", e, ok)
 	}
-	s.visible.PutAt(key, e, time.Now().Add(-time.Minute))
-	if _, err := s.visibleFor(context.Background(), id, c); err != nil || *lists != 2 {
-		t.Fatalf("a minute-old unsettled entry: %v after %d probes, want a second probe", err, *lists)
+	e.swept = time.Now().Add(-time.Minute)
+	s.visible.Put(key, e)
+	if visibleOf(t, s, "tok-alice", c); *reviews != 4 {
+		t.Fatalf("a minute-old unsettled entry: %d reviews, want a second sweep", *reviews)
 	}
 
 	settled := scopeServer(eventbus.New()) // no grant move ever reported
-	if settled.unsettled(time.Now()) {
+	if settled.unsettled(time.Now(), "") {
 		t.Error("a review with no grant move behind it read as unsettled")
 	}
-	if !s.unsettled(st.LastGrantMove().Add(grantSettle/2)) || s.unsettled(st.LastGrantMove().Add(grantSettle)) {
+	if !s.unsettled(st.LastGrantMove().Add(grantSettle/2), "") || s.unsettled(st.LastGrantMove().Add(grantSettle), "") {
 		t.Error("the settle window is not grantSettle long")
 	}
 }
 
-// TestVisibleForRBACVersionInvalidates pins the invalidation lever: the cached
-// set survives only while bus.Version(RBACChanged, NamespaceChanged) is
-// unchanged - either kind moving (a RoleBinding OR a project namespace) must
-// force a fresh cluster round, because both can change what a token may see.
-func TestVisibleForRBACVersionInvalidates(t *testing.T) {
+// The cached set survives only while its levels stand: a cluster-wide grant
+// move sweeps again, a move in one namespace re-asks that namespace alone,
+// one outside the candidates nothing, and a namespace move that left the
+// candidates as they were asks nothing.
+func TestVisibleForReasksWhatMoved(t *testing.T) {
 	bus := eventbus.New()
-	s := scopeServer(bus)
-	c, lists := listCountingClient("tenant-a")
-	id := auth.Identity{Token: "tok-alice", Username: "alice"}
-	read := func() {
-		if _, err := s.visibleFor(context.Background(), id, c); err != nil {
-			t.Fatalf("visibleFor: %v", err)
+	st, _, _ := watchedState(t, bus, projectNS("a"), projectNS("b"), projectNS("c"))
+	s := NewServer(Deps{State: st, Bus: bus, Reader: &fakeDraft{}, Draft: &fakeDraft{}})
+	tenant := newAsking(readsVMsIn("a", "b"))
+	step := func(what string, want ...string) {
+		t.Helper()
+		if got := visibleOf(t, s, "tok", tenant.c); !maps.Equal(got, map[string]bool{"a": true, "b": true}) {
+			t.Fatalf("%s: visible %v", what, got)
+		}
+		if got := tenant.take(); !slices.Equal(got, want) {
+			t.Fatalf("%s: asked %q, want %q", what, got, want)
 		}
 	}
-
-	read()
-	read()
-	if *lists != 1 {
-		t.Fatalf("quiet bus: %d rounds, want 1", *lists)
-	}
+	step("first read", "", "a", "b", "c")
+	step("quiet bus")
 	bus.Publish(eventbus.RBACChanged)
-	read()
-	if *lists != 2 {
-		t.Fatalf("after RBACChanged: %d rounds, want 2 (stale entry must not be served)", *lists)
-	}
+	step("a cluster-wide move", "", "a", "b", "c")
+	bus.PublishKey(eventbus.RBACChanged, "b")
+	step("a move in b", "b")
+	bus.PublishKey(eventbus.RBACChanged, "elsewhere")
+	step("a move outside the candidates")
 	bus.Publish(eventbus.NamespaceChanged)
-	read()
-	if *lists != 3 {
-		t.Fatalf("after NamespaceChanged: %d rounds, want 3 (namespace moves are RBAC too)", *lists)
-	}
+	step("a namespace move that changed no candidate")
 }
 
 // TestVisibleForNoCrossTokenLeak pins tenant isolation inside the cache itself:
 // entries are keyed by token, so one caller's visibility can never answer for
 // another - and a second caller filling the cache must not evict the first.
 func TestVisibleForNoCrossTokenLeak(t *testing.T) {
-	s := scopeServer(eventbus.New())
-	cAlice, aliceLists := listCountingClient("tenant-a")
-	cBob, _ := listCountingClient("tenant-b")
-	alice := auth.Identity{Token: "tok-alice", Username: "alice"}
-	bob := auth.Identity{Token: "tok-bob", Username: "bob"}
+	bus := eventbus.New()
+	st, _, _ := watchedState(t, bus, projectNS("tenant-a"), projectNS("tenant-b"))
+	s := NewServer(Deps{State: st, Bus: bus, Reader: &fakeDraft{}, Draft: &fakeDraft{}})
+	alice, bob := newAsking(readsVMsIn("tenant-a")), newAsking(readsVMsIn("tenant-b"))
 
-	got, err := s.visibleFor(context.Background(), alice, cAlice)
-	if err != nil {
-		t.Fatalf("visibleFor(alice): %v", err)
-	}
-	if !got["tenant-a"] || len(got) != 1 {
+	if got := visibleOf(t, s, "tok-alice", alice.c); !got["tenant-a"] || len(got) != 1 {
 		t.Fatalf("alice sees %v, want only tenant-a", got)
 	}
-	got, err = s.visibleFor(context.Background(), bob, cBob)
-	if err != nil {
-		t.Fatalf("visibleFor(bob): %v", err)
-	}
-	if got["tenant-a"] || !got["tenant-b"] {
+	if got := visibleOf(t, s, "tok-bob", bob.c); got["tenant-a"] || !got["tenant-b"] {
 		t.Fatalf("bob sees %v: alice's cached set leaked across tokens", got)
 	}
-	// Bob's fill must not have displaced alice's entry.
-	if _, err := s.visibleFor(context.Background(), alice, cAlice); err != nil {
-		t.Fatalf("visibleFor(alice, again): %v", err)
-	}
-	if *aliceLists != 1 {
-		t.Fatalf("alice re-read cost %d rounds, want 1 (bob's fill evicted her entry)", *aliceLists)
+	alice.take()
+	visibleOf(t, s, "tok-alice", alice.c)
+	if got := alice.take(); len(got) != 0 {
+		t.Fatalf("alice's re-read asked %q (bob's fill evicted her entry)", got)
 	}
 }
 

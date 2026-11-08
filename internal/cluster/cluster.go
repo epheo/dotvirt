@@ -15,7 +15,6 @@ import (
 
 	authzv1 "k8s.io/api/authorization/v1"
 	corev1 "k8s.io/api/core/v1"
-	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
@@ -93,33 +92,11 @@ func clientsFor(cfg *rest.Config) (*Client, error) {
 	return c, nil
 }
 
-// VisibleNamespaces returns the namespaces this client's token may read VMs in.
-// The fast path is a cluster-wide Namespaces().List - but listing namespaces
-// does not imply reading VMs in them (an auditor-style role holds the former
-// without the latter), so it counts only when a cluster-wide VM read SSAR also
-// passes. Anything less falls back to one list-virtualmachines SSAR per
-// candidate, at most probeConcurrency at once. candidates is the SA-discovered
-// project namespace set; without it the fallback has nothing to probe and
-// returns empty. A failed review is an error, never a smaller set: a smaller
-// set reads as lost access and would be cached as the answer.
-func (c *Client) VisibleNamespaces(ctx context.Context, candidates []string) ([]string, error) {
-	nsList, err := c.kube.CoreV1().Namespaces().List(ctx, metav1.ListOptions{})
-	if err == nil {
-		ok, aerr := c.Can(ctx, "list", "kubevirt.io", "virtualmachines", "")
-		if aerr != nil {
-			return nil, aerr
-		}
-		if ok {
-			names := make([]string, 0, len(nsList.Items))
-			for i := range nsList.Items {
-				names = append(names, nsList.Items[i].Name)
-			}
-			return names, nil
-		}
-	} else if !apierrors.IsForbidden(err) {
-		return nil, fmt.Errorf("list namespaces: %w", err)
-	}
-
+// CanIn reviews verb on group/resource in each of namespaces, at most
+// probeConcurrency at once, and returns those that allow it. A failed review
+// is an error, never a smaller set: a smaller set reads as lost access and
+// would be cached as the answer.
+func (c *Client) CanIn(ctx context.Context, verb, group, resource string, namespaces []string) ([]string, error) {
 	var (
 		mu       sync.Mutex
 		wg       sync.WaitGroup
@@ -128,13 +105,13 @@ func (c *Client) VisibleNamespaces(ctx context.Context, candidates []string) ([]
 		firstErr error
 		next     = make(chan string)
 	)
-	for range min(probeConcurrency, len(candidates)) {
+	for range min(probeConcurrency, len(namespaces)) {
 		wg.Go(func() {
 			for ns := range next {
 				if ctx.Err() != nil {
 					continue
 				}
-				ok, err := c.Can(ctx, "list", "kubevirt.io", "virtualmachines", ns)
+				ok, err := c.Can(ctx, verb, group, resource, ns)
 				mu.Lock()
 				switch {
 				case err != nil:
@@ -149,7 +126,7 @@ func (c *Client) VisibleNamespaces(ctx context.Context, candidates []string) ([]
 			}
 		})
 	}
-	for _, ns := range candidates {
+	for _, ns := range namespaces {
 		next <- ns
 	}
 	close(next)
@@ -158,14 +135,14 @@ func (c *Client) VisibleNamespaces(ctx context.Context, candidates []string) ([]
 		return nil, err
 	}
 	if failed > 0 {
-		return nil, fmt.Errorf("vm read review failed in %d of %d namespaces: %w", failed, len(candidates), firstErr)
+		return nil, fmt.Errorf("%s %s review failed in %d of %d namespaces: %w", verb, resource, failed, len(namespaces), firstErr)
 	}
 	sort.Strings(out)
 	return out, nil
 }
 
-// probeConcurrency bounds the per-namespace reviews one visibility probe fans
-// out, so a token without cluster-wide VM read cannot burst the apiserver.
+// probeConcurrency bounds the per-namespace reviews one CanIn fans out, so a
+// token without cluster-wide VM read cannot burst the apiserver.
 const probeConcurrency = 8
 
 // VMListWatch is the List+Watch source for a cluster-wide VirtualMachine
@@ -195,22 +172,12 @@ func (c *Client) VMIListWatch() *cache.ListWatch {
 	}
 }
 
-// NamespaceListWatch is the List+Watch source for a project-namespace reflector,
-// restricted to namespaces carrying label (dotvirt's project label). It feeds the
-// topology half of the snapshot so the read path never GETs namespaces per build.
-func (c *Client) NamespaceListWatch(label string) *cache.ListWatch {
-	withLabel := func(o metav1.ListOptions) metav1.ListOptions {
-		o.LabelSelector = label
-		return o
-	}
-	return &cache.ListWatch{
-		ListWithContextFunc: func(ctx context.Context, o metav1.ListOptions) (runtime.Object, error) {
-			return c.kube.CoreV1().Namespaces().List(ctx, withLabel(o))
-		},
-		WatchFuncWithContext: func(ctx context.Context, o metav1.ListOptions) (watch.Interface, error) {
-			return c.kube.CoreV1().Namespaces().Watch(ctx, withLabel(o))
-		},
-	}
+// NamespaceListWatch is the List+Watch source for the namespace reflector, of
+// every namespace: the snapshot selects the project ones in memory, so one
+// watch serves both them and the names of the rest.
+func (c *Client) NamespaceListWatch() *cache.ListWatch {
+	r := c.kube.CoreV1().Namespaces()
+	return typedListWatch(r.List, r.Watch)
 }
 
 // The RBAC sources are cluster-wide reflectors (run on the SA client) over

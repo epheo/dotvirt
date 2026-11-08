@@ -18,6 +18,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -165,10 +166,10 @@ type Config struct {
 }
 
 // visibleTTL bounds a token's cached visible-namespace set and SSAR verdicts
-// while every RBAC watch runs. Freshness comes from the RBAC version stamp
-// (bus.Version(RBACChanged, NamespaceChanged)): the RBAC signal watches move it
-// on every grant change they observe, and the entry is invalidated lazily, that
-// token only. The TTL is the safety net for what no watch observes (see
+// while every RBAC watch runs. Freshness comes from the RBAC version stamps
+// (grantVersion, visLevels): the RBAC signal watches move them on every grant
+// change they observe, and the entry is invalidated lazily, that token and
+// that namespace only. The TTL is the safety net for what no watch observes (see
 // RunTTLBackstop), so it runs to minutes: each expiry costs a visibility probe
 // of one review per project namespace under the token. While a watch is not
 // running, entries serve unwatchedTTL instead (authTTL). An expired entry is only
@@ -199,6 +200,7 @@ type Server struct {
 	resolver  *project.Resolver
 	repos     *git.RepoSet
 	visible   *ttlcache.Cache[visibleSet]       // per-token visible-namespace set, RBAC-version-stamped
+	cands     atomic.Pointer[candidates]        // the project namespaces every visible set is reviewed over
 	ssar      *ttlcache.Cache[ssarVerdict]      // per-(token, question) SSAR verdict, RBAC-version-stamped
 	proposals *ttlcache.Cache[[]model.Proposal] // per-project open-PR set; written by the refresher, read on broadcast
 	options   *ttlcache.Cache[model.Options]    // shared wizard catalog (SA-read, identical for all)
