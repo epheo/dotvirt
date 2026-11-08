@@ -106,11 +106,12 @@ func (s *Server) InventoryForIdentity(ctx context.Context, id auth.Identity) (mo
 		}
 	}
 	// Propose existing tenants (namespaces with VMs, no project label) to callers
-	// who could claim them: updating namespaces cluster-wide, which answers for
-	// each one the create-project route gates on. Rides the frame, so the list
+	// who could make one a project: claim it (updating namespaces cluster-wide
+	// answers for each one the create-project route claims) and declare it,
+	// the create the coordinator asks of its file. Rides the frame, so the list
 	// drains as adoptions merge.
 	if s.cfg.PlatformRepo != "" {
-		if s.capable(ctx, id, userCluster, action{{verb: verbUpdate, ref: ssarNamespace}}) {
+		if s.capable(ctx, id, userCluster, append(claimAction(""), newNamespaceAction(false, false)...)) {
 			inv.Adoptable = inventory.Adoptable(in.Live, s.state.Namespaces())
 		}
 	}
