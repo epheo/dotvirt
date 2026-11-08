@@ -9,7 +9,7 @@
 
 	// A VMs tab: the shared VM grid with the side peek (?peek=ns/name, resolved
 	// against this list so a VM leaving it closes its peek).
-	let { vms }: { vms: VM[] } = $props();
+	let { vms, label }: { vms: VM[]; label: string } = $props();
 
 	const peekKey = $derived(page.url.searchParams.get('peek'));
 	const peekVM = $derived(peekKey ? (vms.find((v) => vmKey(v) === peekKey) ?? null) : null);
@@ -21,18 +21,23 @@
 	}
 </script>
 
-<div class="mt-4 flex min-h-0 flex-1 border-t border-line bg-panel">
-	<div class="min-w-0 flex-1">
-		<VMTable
-			{vms}
-			staged={drafts.stagedByKey}
-			activeKey={peekVM ? peekKey : null}
-			onselect={(vm) => setPeek(peekKey === vmKey(vm) ? null : vm)}
-			onstagedopen={(vm) => (ui.modal = { kind: 'staged', vm: vmRef(vm) })}
-			oncontextvm={(vm, x, y) => ui.openVMContext(vm, x, y)}
-		/>
-	</div>
-	{#if peekVM}
-		<Inspector vm={peekVM} onclose={() => setPeek(null)} />
-	{/if}
+<div class="flex min-h-0 flex-1 flex-col px-6 pt-4 pb-7">
+	<section
+		aria-label={label}
+		class="flex min-h-0 flex-1 overflow-hidden rounded-lg border border-line bg-panel"
+	>
+		<div class="min-w-0 flex-1">
+			<VMTable
+				{vms}
+				staged={drafts.stagedByKey}
+				activeKey={peekVM ? peekKey : null}
+				onselect={(vm) => setPeek(peekKey === vmKey(vm) ? null : vm)}
+				onstagedopen={(vm) => (ui.modal = { kind: 'staged', vm: vmRef(vm) })}
+				oncontextvm={(vm, x, y) => ui.openVMContext(vm, x, y)}
+			/>
+		</div>
+		{#if peekVM}
+			<Inspector vm={peekVM} onclose={() => setPeek(null)} />
+		{/if}
+	</section>
 </div>

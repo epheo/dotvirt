@@ -25,6 +25,15 @@ test('hosts root is a fleet table, not the compute cards', async ({ page }) => {
 	await main.locator('tbody').getByRole('link', { name: 'worker-1' }).click();
 	await expect(page).toHaveURL(/\/hosts\/worker-1$/);
 	await expect(main.getByRole('link', { name: 'Monitor', exact: true })).toBeVisible();
+	// The Monitor card keeps one title; the toggle in its header picks the view.
+	await main.getByRole('link', { name: 'Monitor', exact: true }).click();
+	const monitor = main.getByRole('region', { name: 'Monitor' });
+	await monitor.getByRole('button', { name: 'Performance' }).click();
+	await expect(monitor.getByRole('button', { name: 'Performance' })).toHaveAttribute(
+		'aria-pressed',
+		'true',
+	);
+	await expect(main.getByRole('heading', { name: 'Performance' })).toHaveCount(0);
 });
 
 test('compute root no longer carries the host cards', async ({ page }) => {
@@ -45,7 +54,9 @@ test('networking root: the map is the first tab, the rules are the Firewall tab'
 	await page.goto('/networking');
 	const main = page.locator('main');
 	await expect(main.getByRole('heading', { name: 'Cluster map' })).toBeVisible();
-	await expect(main.getByRole('link', { name: /^VMs/ })).toBeVisible();
+	// The VMs tab is a card on the grey ground, as on Compute and Hosts.
+	await main.getByRole('link', { name: /^VMs/ }).click();
+	await expect(main.getByRole('region', { name: 'Networking, VMs' })).toBeVisible();
 	await main.getByRole('link', { name: /^Firewall/ }).click();
 	await expect(page).toHaveURL(/\/networking\?tab=firewall$/);
 	await expect(main.getByRole('button', { name: 'Check connectivity' })).toBeVisible();
