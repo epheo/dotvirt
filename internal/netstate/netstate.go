@@ -111,6 +111,9 @@ func New(sa *cluster.Client, bus *eventbus.Bus) *Snapshot {
 		udn: idx(), cudn: idx(), nad: idx(), nns: idx(), nncp: idx(), nnce: idx(),
 		netpol: idx(), anp: idx(), banp: idx(), egressfw: idx(), egressip: idx(), extroute: idx(),
 	}
+	for _, idx := range []cache.Indexer{s.udn, s.cudn, s.nad, s.nns, s.nncp, s.nnce} {
+		mustCount(idx) // the network view, uplinks and adapters memoize on them
+	}
 	s.netpols = newPolicyStore(s.netpol, decodeNetpol, nil)
 	s.anps = newPolicyStore(s.anp, decodeANP, byPrecedence)
 	s.banps = newPolicyStore(s.banp, decodeBANP, nil)

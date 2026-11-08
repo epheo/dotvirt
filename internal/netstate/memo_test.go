@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -48,7 +49,8 @@ type move struct {
 	do   func(s *Snapshot, round int) error
 }
 
-// edit rewrites the stored object at key through fn, as an update event.
+// edit rewrites the stored object at key through fn, as an update event: a
+// new copy at the next resourceVersion.
 func edit(idx cache.Indexer, key string, fn func(obj map[string]any) error) error {
 	got, ok, _ := idx.GetByKey(key)
 	if !ok {
@@ -58,6 +60,8 @@ func edit(idx cache.Indexer, key string, fn func(obj map[string]any) error) erro
 	if err := fn(u.Object); err != nil {
 		return err
 	}
+	rv, _ := strconv.Atoi(u.GetResourceVersion())
+	u.SetResourceVersion(strconv.Itoa(rv + 1))
 	return idx.Update(u)
 }
 
@@ -380,4 +384,38 @@ func TestMemoConcurrentReaders(t *testing.T) {
 		})
 	}
 	readers.Wait()
+}
+
+// A relist that changed nothing hands every object over as a new copy; the
+// next real move still decodes only the object that moved.
+func TestPlaneReuseSurvivesRelist(t *testing.T) {
+	s := scaleSnapshot(t)
+	decodes := 0
+	st := newPolicyStore(s.netpol, func(u *unstructured.Unstructured) *policy { decodes++; return decodeNetpol(u) }, nil)
+	st.plane()
+	var copies []any
+	for _, obj := range s.netpol.List() {
+		copies = append(copies, obj.(*unstructured.Unstructured).DeepCopy())
+	}
+	if err := s.netpol.Replace(copies, "2"); err != nil {
+		t.Fatal(err)
+	}
+	if err := edit(s.netpol, scaleNS(4)+"/allow-web", func(map[string]any) error { return nil }); err != nil {
+		t.Fatal(err)
+	}
+	decodes = 0
+	st.plane()
+	if decodes != 1 {
+		t.Errorf("one move after a relist decoded %d policies, want 1", decodes)
+	}
+}
+
+// A store whose writes go uncounted would freeze a view memoized on it.
+func TestMemoRefusesUncountedStore(t *testing.T) {
+	defer func() {
+		if recover() == nil {
+			t.Error("a policy store over an uncounted indexer was built")
+		}
+	}()
+	newPolicyStore(cache.NewIndexer(cache.MetaNamespaceKeyFunc, cache.Indexers{}), decodeNetpol, nil)
 }

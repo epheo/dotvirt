@@ -119,6 +119,13 @@ func Generation(idx cache.Indexer, nss ...string) uint64 {
 	return v
 }
 
+// Counted reports whether idx counts its writes (NewIndexer built it): a
+// generation of any other indexer never moves.
+func Counted(idx cache.Indexer) bool {
+	_, ok := idx.(*generations)
+	return ok
+}
+
 // StoreGeneration is idx's write count over every object it holds: a view
 // decoded from the whole store stays current while it holds still. Like
 // Generation, equality-only, and 0 for an indexer NewIndexer did not build.

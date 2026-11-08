@@ -45,32 +45,62 @@ type policyStore struct {
 	dec   decoder
 	order func([]*policy) // reorders all, when the kind is read in another order
 	memo  memo[uint64, *plane]
-	// last is each object of the last build with its decode, which the next
-	// build reuses: a stored object is replaced on update, never written, so
-	// only what moved decodes again. Touched only inside a build, under
-	// memo's lock.
-	last map[*unstructured.Unstructured]*policy
+	// last is the last build's decodes by store key, which the next build
+	// reuses for an object at the same resourceVersion: a relist that changed
+	// nothing hands every object over as a new copy, and only what moved may
+	// decode again. Touched only inside a build, under memo's lock.
+	last map[string]decodedAt
+}
+
+// decodedAt is one object's decode and the version it was decoded at. obj is
+// held only for an object without a resourceVersion, which only a test
+// writes: the same pointer is then the same object.
+type decodedAt struct {
+	rv  string
+	obj *unstructured.Unstructured
+	pol *policy
+}
+
+func (d decodedAt) holds(u *unstructured.Unstructured) bool {
+	if rv := u.GetResourceVersion(); rv != "" {
+		return rv == d.rv
+	}
+	return d.obj == u
 }
 
 func newPolicyStore(idx cache.Indexer, dec decoder, order func([]*policy)) *policyStore {
+	mustCount(idx)
 	return &policyStore{idx: idx, dec: dec, order: order}
+}
+
+// mustCount refuses a store whose writes go uncounted: a view memoized on it
+// would never move.
+func mustCount(idx cache.Indexer) {
+	if !reflect.Counted(idx) {
+		panic("netstate: a memoized store must come from reflect.NewIndexer")
+	}
 }
 
 func (p *policyStore) plane() *plane {
 	return p.memo.get(func() uint64 { return reflect.StoreGeneration(p.idx) }, func(uint64) *plane {
 		objs := sortedList(p.idx)
 		pl := &plane{all: make([]*policy, 0, len(objs)), byNS: map[string][]*policy{}, byKey: make(map[string]*policy, len(objs))}
-		decoded := make(map[*unstructured.Unstructured]*policy, len(objs))
+		decoded := make(map[string]decodedAt, len(objs))
 		for _, u := range objs {
-			pol, ok := p.last[u]
-			if !ok {
-				pol = p.dec(u)
-			}
-			decoded[u] = pol
 			ns, key := u.GetNamespace(), u.GetName()
 			if ns != "" {
 				key = ns + "/" + key
 			}
+			prev, ok := p.last[key]
+			pol := prev.pol
+			if !ok || !prev.holds(u) {
+				pol = p.dec(u)
+			}
+			at := decodedAt{rv: u.GetResourceVersion(), pol: pol}
+			if at.rv == "" {
+				at.obj = u
+			}
+			decoded[key] = at
 			pl.all = append(pl.all, pol)
 			pl.byNS[ns] = append(pl.byNS[ns], pol)
 			pl.byKey[key] = pol

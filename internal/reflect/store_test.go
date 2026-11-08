@@ -163,3 +163,9 @@ func TestStoreGeneration(t *testing.T) {
 		t.Error("a foreign indexer has no generation")
 	}
 }
+
+func TestCounted(t *testing.T) {
+	if !Counted(NewIndexer()) || Counted(cache.NewIndexer(cache.MetaNamespaceKeyFunc, cache.Indexers{})) {
+		t.Error("only an indexer NewIndexer built counts its writes")
+	}
+}
