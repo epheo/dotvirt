@@ -242,6 +242,11 @@ func (fc *fakeCluster) server(d coordinator, cfg Config) *Server {
 	}
 	fc.sa = sa
 	bus := eventbus.New()
+	// The first lists publish the kinds the RBAC version sums, and WaitForSync
+	// does not wait for those publishes (the RoleBinding signal's, nor the
+	// namespace store's, which follows its ready mark): landing mid-test, one
+	// would move the version every cached verdict is stamped with.
+	settled, _ := bus.Subscribe(eventbus.RBACChanged, eventbus.NamespaceChanged)
 	state := clusterstate.New(sa, "dotvirt.io/project", bus)
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel) // runs before srv.Close: the idle watches end first
@@ -250,6 +255,13 @@ func (fc *fakeCluster) server(d coordinator, cfg Config) *Server {
 	defer done()
 	if err := state.WaitForSync(syncCtx); err != nil {
 		t.Fatalf("snapshot sync: %v", err)
+	}
+	for bus.Version(eventbus.RBACChanged) == 0 || bus.Version(eventbus.NamespaceChanged) == 0 {
+		select {
+		case <-settled:
+		case <-syncCtx.Done():
+			t.Fatal("snapshot sync: the RBAC version never settled")
+		}
 	}
 	if d == nil {
 		d = &planeDraft{}
@@ -422,6 +434,11 @@ func (d *planeDraft) StageCreateProject(_ auth.Identity, commit project.ProjectI
 
 func (d *planeDraft) AdoptProject(_ auth.Identity, commit, target project.ProjectInfo, owners []string, _ changeset.LiveNamespaces) (model.DraftView, error) {
 	d.record("AdoptProject "+commit.Name+","+target.Name+" "+strings.Join(owners, "+"), nil)
+	return stagedView, nil
+}
+
+func (d *planeDraft) StageSyncAccess(_ auth.Identity, commit, target project.ProjectInfo) (model.DraftView, error) {
+	d.record("StageSyncAccess "+commit.Name+","+target.Name, nil)
 	return stagedView, nil
 }
 

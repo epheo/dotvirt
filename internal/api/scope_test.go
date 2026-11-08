@@ -402,9 +402,10 @@ func TestVisibleForNeverCachesAFailure(t *testing.T) {
 
 // TestOnlyARejectedSessionIs401 pins the session end: an apiserver 401 on
 // the caller's review is checked against a fresh TokenReview. A rejected token
-// answers 401 (the UI signs out); a token that still validates - an
-// authenticator blip - answers 503 and keeps the session. Neither body names a
-// namespace the probe touched.
+// answers 401 (the UI signs out) and signals the session's end to its open
+// streams and consoles; a token that still validates - an authenticator blip -
+// answers 503 and keeps the session. Neither body names a namespace the probe
+// touched.
 func TestOnlyARejectedSessionIs401(t *testing.T) {
 	fc := newFakeCluster(t)
 	// The per-namespace probe fails, so the raw error names the namespace.
@@ -434,9 +435,15 @@ func TestOnlyARejectedSessionIs401(t *testing.T) {
 	alive.Store(true)
 	rec := get()
 	wantStatus(t, rec, http.StatusServiceUnavailable)
+	if v := s.bus.Version(eventbus.SessionEnded); v != 0 {
+		t.Fatalf("a live token signalled %d session ends", v)
+	}
 	alive.Store(false)
 	rec401 := get()
 	wantStatus(t, rec401, http.StatusUnauthorized)
+	if v := s.bus.Version(eventbus.SessionEnded); v != 1 {
+		t.Fatalf("a rejected token signalled %d session ends, want 1", v)
+	}
 	for _, r := range []*httptest.ResponseRecorder{rec, rec401} {
 		if body := r.Body.String(); strings.Contains(body, "team-a-dev") || strings.Contains(body, "orphans-ns") || strings.Contains(body, "of 2") {
 			t.Errorf("body names a probed namespace: %q", body)

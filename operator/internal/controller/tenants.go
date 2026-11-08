@@ -77,6 +77,11 @@ type tenantTier struct {
 	unconfined []string
 	degraded   []string
 	notes      []string
+	// accounts are the live projects' sync accounts, each with the namespaces
+	// its project syncs into; sharedInUse says an Application still uses the
+	// shared tier, which names no sync account.
+	accounts    map[string][]string
+	sharedInUse bool
 }
 
 // tenantAppProjects renders one AppProject per project from the live namespace
@@ -87,7 +92,7 @@ type tenantTier struct {
 // admitting nothing, until its Application is removed. Unreferenced, they
 // leave the render and prune deletes them.
 func (r *DotvirtReconciler) tenantAppProjects(ctx context.Context, dv *dotvirtv1alpha1.Dotvirt, argoNS string, platformNS []string) (tenantTier, error) {
-	var t tenantTier
+	t := tenantTier{accounts: map[string][]string{}}
 	var nsList corev1.NamespaceList
 	if err := r.List(ctx, &nsList, client.HasLabels{install.ProjectLabel}); err != nil {
 		return t, fmt.Errorf("list project namespaces: %w", err)
@@ -140,6 +145,7 @@ func (r *DotvirtReconciler) tenantAppProjects(ctx context.Context, dv *dotvirtv1
 			t.notes = append(t.notes, fmt.Sprintf("project %s names no single resolvable repo; its AppProject admits no source", name))
 		}
 		t.objs = append(t.objs, install.TenantAppProject(dv, argoNS, apName, name, destinations, sources))
+		t.accounts[apName] = destinations
 		rendered[apName] = true
 	}
 
@@ -165,6 +171,7 @@ func (r *DotvirtReconciler) tenantAppProjects(ctx context.Context, dv *dotvirtv1
 		if o.GetName() == install.TenantsProjectName {
 			t.objs = append(t.objs, install.TenantsAppProject(dv, argoNS, dv.Spec.Forge.PlatformRepo, dv.Namespace))
 			t.notes = append(t.notes, fmt.Sprintf("%s kept while %d Applications still reference it", install.TenantsProjectName, n))
+			t.sharedInUse = true
 			continue
 		}
 		t.objs = append(t.objs, install.TenantAppProject(dv, argoNS, o.GetName(), o.GetLabels()[install.ProjectLabel], nil, nil))

@@ -314,6 +314,18 @@ func TestAdoptProject(t *testing.T) {
 	d.only(t, "AdoptProject platform,orphans alice+bob")
 }
 
+func TestProjectSyncAccess(t *testing.T) {
+	fc := newFakeCluster(t)
+	d := &planeDraft{}
+	s := fc.server(d, Config{PlatformRepo: platformRepo})
+
+	wantStatus(t, do(s, tenantToken, http.MethodPost, "/api/projects/team-a/sync-access", ""), http.StatusForbidden)
+	wantStatus(t, do(s, adminToken, http.MethodPost, "/api/projects/ghost/sync-access", ""), http.StatusNotFound)
+	d.none(t)
+	wantStatus(t, do(s, adminToken, http.MethodPost, "/api/projects/team-a/sync-access", ""), http.StatusOK)
+	d.only(t, "StageSyncAccess platform,team-a")
+}
+
 func TestReleaseProject(t *testing.T) {
 	fc := newFakeCluster(t)
 	var patch string

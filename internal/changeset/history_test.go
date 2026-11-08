@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"os/exec"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -291,11 +292,13 @@ func TestCommitItemsUseTableLabels(t *testing.T) {
 
 // The open-PR lane is project-wide: every open PR into the base branch, named
 // by its proposer from the branch, reverts flagged, with one branch-rule read.
-// Which rows are the caller's is answered without the forge.
+// Which rows are the caller's is answered without the forge. A row's head is
+// the mirror's, which the review renders, whatever the forge reports.
 func TestOpenProposalsListsEveryPR(t *testing.T) {
-	bare, _, hash := seedMerged(t)
+	bare, work, hash := seedMerged(t)
 	revertHead := (&Reader{proposed: "dotvirt/proposed"}).revertBranch("alice", "p", hash)
 	draftHead := proposedBranchFor("alice", "p")
+	gitRun(t, work, "push", "-q", "origin", "main:"+draftHead)
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		q := r.URL.Query()
 		switch {
@@ -323,10 +326,14 @@ func TestOpenProposalsListsEveryPR(t *testing.T) {
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
-	c := New(store, git.NewRepoSet(ctx, "", "", nil, false, nil, time.Hour), forge.NewFactory(srv.URL, forge.StaticToken("tok"), false, ""), nil, nil, nil, "main", "dotvirt/proposed")
+	repos := git.NewRepoSet(ctx, "", "", nil, false, nil, time.Hour)
+	c := New(store, repos, forge.NewFactory(srv.URL, forge.StaticToken("tok"), false, ""), nil, nil, nil, "main", "dotvirt/proposed")
 	c.UseAuthorizer(allowAll{})
 
 	proj := project.ProjectInfo{Name: "p", Repo: bare}
+	if _, _, err := repos.Get(bare); err != nil { // the inventory has opened it
+		t.Fatal(err)
+	}
 	prs, err := c.OpenProposals(proj)
 	if err != nil {
 		t.Fatalf("OpenProposals: %v", err)
@@ -345,12 +352,82 @@ func TestOpenProposalsListsEveryPR(t *testing.T) {
 			t.Errorf("row %d = %+v, want #%d by %s revert=%v with review state", i, p, w.n, w.by, w.revert)
 		}
 	}
+	if want := revParse(t, bare, draftHead); prs[0].Head != want {
+		t.Errorf("draft PR head = %q, want the mirror's %q", prs[0].Head, want)
+	}
+	if prs[3].Head != "" {
+		t.Errorf("a branch the mirror lacks has head %q, want none", prs[3].Head)
+	}
 	alice := auth.Identity{Username: "alice"}
 	if !c.OwnsProposal(alice, proj, prs[0].Branch) || !c.OwnsProposal(alice, proj, prs[1].Branch) {
 		t.Error("alice owns her draft PR and her revert")
 	}
 	if c.OwnsProposal(alice, proj, prs[2].Branch) || c.OwnsProposal(alice, proj, prs[3].Branch) {
 		t.Error("alice owns neither bob's revert nor a hand-made PR")
+	}
+}
+
+// The lane is refreshed off the hot path, and one stalled clone would hold
+// every project's lane: a mirror not open yet is not opened for its heads.
+// The rows go out without them; a later pass fills them.
+func TestOpenProposalsNeverOpensTheMirror(t *testing.T) {
+	var dialed atomic.Int32
+	stop := make(chan struct{})
+	stalled := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		dialed.Add(1)
+		select {
+		case <-stop:
+		case <-r.Context().Done():
+		}
+	}))
+	t.Cleanup(stalled.Close)
+	t.Cleanup(func() { close(stop) })
+	forgeSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case strings.HasSuffix(r.URL.Path, "/pulls"):
+			w.Header().Set("X-Total-Count", "1")
+			_, _ = w.Write([]byte(`[{"number":4,"state":"open","html_url":"http://forge/pulls/4","base":{"ref":"main"},"head":{"ref":"feature","sha":"aaa"}}]`))
+		case strings.HasSuffix(r.URL.Path, "/branch_protections"):
+			_, _ = w.Write([]byte(`[]`))
+		case strings.Contains(r.URL.Path, "/reviews"):
+			_, _ = w.Write([]byte(`[]`))
+		default:
+			_, _ = w.Write([]byte(`{"state":"success","total_count":1}`))
+		}
+	}))
+	t.Cleanup(forgeSrv.Close)
+	store, err := draft.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	repos := git.NewRepoSet(ctx, "", "", nil, false, nil, time.Hour)
+	c := New(store, repos, forge.NewFactory(forgeSrv.URL, forge.StaticToken("tok"), false, ""), nil, nil, nil, "main", "dotvirt/proposed")
+	proj := project.ProjectInfo{Name: "p", Repo: stalled.URL + "/team/p.git"}
+
+	type answer struct {
+		rows []model.Proposal
+		err  error
+	}
+	done := make(chan answer, 1)
+	go func() {
+		rows, err := c.OpenProposals(proj)
+		done <- answer{rows, err}
+	}()
+	select {
+	case a := <-done:
+		if a.err != nil || len(a.rows) != 1 || a.rows[0].PRNumber != 4 || a.rows[0].Head != "" {
+			t.Fatalf("lane = %+v, %v; want PR #4 without a head", a.rows, a.err)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("OpenProposals waited on the mirror")
+	}
+	if n := dialed.Load(); n != 0 {
+		t.Errorf("the repo was dialed %d times; want no clone", n)
+	}
+	if _, open := repos.Peek(proj.Repo); open {
+		t.Error("OpenProposals opened the mirror")
 	}
 }
 
@@ -396,7 +473,8 @@ func TestProposalRendersBranchDiff(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Proposal: %v", err)
 	}
-	if d.Proposal.PRNumber != 5 || d.Proposal.By != "alice" || d.Proposal.Branch != head || d.Proposal.Revert {
+	if d.Proposal.PRNumber != 5 || d.Proposal.By != "alice" || d.Proposal.Branch != head || d.Proposal.Revert ||
+		d.Proposal.Head != revParse(t, bare, head) {
 		t.Errorf("proposal row = %+v", d.Proposal)
 	}
 	if len(d.Items) != 1 || d.Items[0].Name != "db" || d.Items[0].Kind != "edit" ||
