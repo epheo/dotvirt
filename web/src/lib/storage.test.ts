@@ -10,6 +10,7 @@ import {
 	filtersFromQuery,
 	filtersToQuery,
 	imageUsage,
+	importUsage,
 	libraryTiles,
 	moveConsequences,
 	moveNote,
@@ -20,6 +21,10 @@ import {
 	projectsBySize,
 	repeatedNames,
 	sortRows,
+	sourceKey,
+	sourceOf,
+	sourceTail,
+	sourceText,
 	staleShare,
 	storageContext,
 	suggestTarget,
@@ -334,6 +339,90 @@ describe('library', () => {
 	it('words the header context', () => {
 		expect(storageContext(r, 3, 48)).toBe('5 disks on 3 classes, 48 hosts');
 		expect(storageContext(r.slice(0, 1), 1, 0)).toBe('1 disk on 1 class');
+	});
+});
+
+describe('imported disks', () => {
+	const pulled = (name: string, source: string, over: Partial<VM> = {}) =>
+		vm(name, {
+			disks: [
+				{
+					name: 'rootdisk',
+					type: 'dataVolume',
+					size: name === 'ci-3' ? '40Gi' : '30Gi',
+					claim: `${name}-rootdisk`,
+					import: { kind: 'registry', source },
+				},
+			],
+			...over,
+		});
+	const signed = vm('db-1', {
+		disks: [
+			{
+				name: 'data',
+				type: 'dataVolume',
+				size: '100Gi',
+				storageClass: 'bulk-hdd',
+				import: { kind: 'url', source: 'https://dl.example/seed.qcow2', redacted: true },
+			},
+		],
+	});
+	const blank = vm('scratch', { disks: [{ name: 'data', type: 'dataVolume', size: '1Ti' }] });
+	const fedora = 'quay.io/containerdisks/fedora:42';
+	const r = rows(
+		[
+			pulled('ci-1', fedora),
+			pulled('ci-2', fedora),
+			pulled('ci-3', fedora),
+			pulled('qa-1', 'quay.io/containerdisks/centos-stream:9'),
+			signed,
+			blank,
+			vm('web-1'),
+		],
+		[snap('ci-1', 1)],
+	);
+
+	it('counts imports apart from boot images and from blank disks', () => {
+		expect(imageUsage(r).map((u) => [u.image, u.disks])).toEqual([
+			['', 1],
+			['os-images/fedora-42', 1],
+		]);
+		const { all, sources } = importUsage(r);
+		expect(all).toEqual({ disks: 5, local: 4, shared: 1, fresh: 1 });
+		expect(sources.map((u) => [u.key, u.disks, u.size, u.redacted])).toEqual([
+			[`registry:${fedora}`, 3, '30Gi', false],
+			['registry:quay.io/containerdisks/centos-stream:9', 1, '30Gi', false],
+			['url:https://dl.example/seed.qcow2', 1, '100Gi', true],
+		]);
+		expect(importUsage(rows([vm('web-1')]))).toEqual({
+			all: { disks: 0, local: 0, shared: 0, fresh: 0 },
+			sources: [],
+		});
+	});
+
+	it('filters on any import or on one source, from the query', () => {
+		const any = filtersFromQuery(new URLSearchParams('source=any'));
+		expect(applyFilters(r, any).map((x) => x.vm.name)).toEqual([
+			'ci-1',
+			'ci-2',
+			'ci-3',
+			'qa-1',
+			'db-1',
+		]);
+		const one = filtersFromQuery(new URLSearchParams({ source: `registry:${fedora}` }));
+		expect(applyFilters(r, one).map((x) => x.vm.name)).toEqual(['ci-1', 'ci-2', 'ci-3']);
+		expect(filtersToQuery(one, new URLSearchParams()).get('source')).toBe(`registry:${fedora}`);
+		expect(applyFilters(r, { flags: [], q: 'seed' }).map((x) => x.vm.name)).toEqual(['db-1']);
+	});
+
+	it('keys and words a source', () => {
+		const imp = { kind: 'url', source: 'https://dl.example/a:b/seed.qcow2' };
+		expect(sourceOf(sourceKey(imp))).toEqual(imp);
+		expect(sourceText(imp)).toBe('dl.example/a:b/seed.qcow2');
+		expect(sourceText({ kind: 'registry', source: fedora })).toBe(fedora);
+		expect(sourceTail(imp)).toBe('seed.qcow2');
+		expect(sourceTail({ kind: 'registry', source: fedora })).toBe('fedora:42');
+		expect(sourceTail({ kind: 'url', source: 'https://dl.example/' })).toBe('dl.example');
 	});
 });
 

@@ -1,6 +1,13 @@
 <script lang="ts">
 	import { untrack } from 'svelte';
-	import { ChevronRight, CircleDot, HardDrive, Layers, Upload } from '@lucide/svelte';
+	import {
+		ChevronRight,
+		CircleDot,
+		CloudDownload,
+		HardDrive,
+		Layers,
+		Upload,
+	} from '@lucide/svelte';
 	import { storageHref } from '#lib/nav.js';
 	import { caps } from '#lib/state/caps.svelte.js';
 	import { catalog } from '#lib/state/catalog.svelte.js';
@@ -8,17 +15,20 @@
 	import { storage } from '#lib/state/storage.svelte.js';
 	import { ui } from '#lib/state/ui.svelte.js';
 	import {
+		ANY_SOURCE,
 		FRESH_DAYS,
 		STALE_FLAG,
 		imageUsage,
+		importUsage,
 		libraryTiles,
 		num,
 		shortName,
 		size,
+		sourceText,
 		staleShare,
 		topImages,
+		type DiskCounts,
 		type DiskRow,
-		type ImageUse,
 	} from '#lib/storage.js';
 	import Button from '#lib/components/Button.svelte';
 	import Card from '#lib/components/Card.svelte';
@@ -41,6 +51,7 @@
 		imageUsage(rows, inventory.options?.osImages ?? [], catalog.templates ?? []),
 	);
 	const summary = $derived(topImages(uses, 4));
+	const imports = $derived(importUsage(rows));
 	const noDataVMs = $derived(new Set(rows.filter((r) => r.ephemeral).map((r) => r.vmKey)).size);
 
 	const full = $derived(tiles.free.filter((f) => f.nearFull));
@@ -91,7 +102,7 @@
 	}
 </script>
 
-{#snippet snap(u: ImageUse, image: string)}
+{#snippet snap(u: DiskCounts, filter: Record<string, string | undefined>)}
 	{#if !snapshotsLoaded || !u.disks}
 		<span class="text-ink-faint">-</span>
 	{:else}
@@ -104,21 +115,21 @@
 				<span class="size-[7px] shrink-0 rounded-full bg-warn"></span>
 				<a
 					class="text-accent-ink hover:underline"
-					href={storageHref('disks', { f: 'nosnap', image: image || undefined, project: p })}
+					href={storageHref('disks', { f: 'nosnap', ...filter, project: p })}
 					>{num(without)} without, {Math.round(staleShare(u) * 100)}% of them</a
 				>
 			</span>
 		{:else}
 			<a
 				class="mt-1.5 block text-xs leading-4 text-accent-ink hover:underline"
-				href={storageHref('disks', { f: 'nosnap', image: image || undefined, project: p })}
+				href={storageHref('disks', { f: 'nosnap', ...filter, project: p })}
 				>{num(without)} without</a
 			>
 		{/if}
 	{/if}
 {/snippet}
 
-{#snippet where(u: ImageUse)}
+{#snippet where(u: DiskCounts)}
 	<LocalSharedBar local={u.local} shared={u.shared} total={u.disks} />
 	<span class="mt-1.5 block text-xs leading-4 text-ink-muted"
 		>{num(u.local)} local, {num(u.shared)} shared</span
@@ -271,7 +282,7 @@
 							<span class="text-base font-bold">{num(u.disks)}</span>
 						</td>
 						<td class="border-b border-line-soft p-3">{@render where(u)}</td>
-						<td class="border-b border-line-soft p-3">{@render snap(u, u.image)}</td>
+						<td class="border-b border-line-soft p-3">{@render snap(u, { image: u.image })}</td>
 						<td class="border-b border-line-soft p-3">
 							<div class="flex justify-end gap-1.5">
 								<Button
@@ -325,12 +336,50 @@
 								<span class="text-base font-bold">{num(more.disks)}</span>
 							</td>
 							<td class="border-b border-line-soft p-3">{@render where(more)}</td>
-							<td class="border-b border-line-soft p-3">{@render snap(more, '')}</td>
+							<td class="border-b border-line-soft p-3">{@render snap(more, {})}</td>
 						{/if}
 						<td class="border-b border-line-soft p-3">
 							<div class="flex justify-end">
 								<Button variant="secondary" size="sm" href={storageHref('images', { project: p })}
 									>Show all {num(more.count)}</Button
+								>
+							</div>
+						</td>
+					</tr>
+				{/if}
+				{#if imports.all.disks}
+					{@const all = imports.all}
+					{@const sources = imports.sources}
+					<tr>
+						<td class="border-b border-line-soft p-3">
+							<div class="flex items-center gap-2.5">
+								<CloudDownload size={16} class="shrink-0 text-ink-faint" />
+								<div class="min-w-0">
+									<span>Imported from a registry or URL</span>
+									<span class="block text-xs leading-4 text-ink-faint">
+										{#if sources.length === 1}
+											From <span class="font-mono">{sourceText(sources[0])}</span>
+										{:else}
+											From {num(sources.length)} sources
+										{/if}
+									</span>
+								</div>
+							</div>
+						</td>
+						<td class="border-b border-line-soft p-3 text-right">
+							<span class="text-base font-bold">{num(all.disks)}</span>
+						</td>
+						<td class="border-b border-line-soft p-3">{@render where(all)}</td>
+						<td class="border-b border-line-soft p-3"
+							>{@render snap(all, { source: ANY_SOURCE })}</td
+						>
+						<td class="border-b border-line-soft p-3">
+							<div class="flex justify-end">
+								<Button
+									variant="secondary"
+									size="sm"
+									aria-label="Show disks imported from a registry or URL"
+									href={storageHref('disks', { source: ANY_SOURCE, project: p })}>Show disks</Button
 								>
 							</div>
 						</td>
@@ -344,9 +393,7 @@
 								<HardDrive size={16} class="shrink-0 text-ink-faint" />
 								<div>
 									<span>Not from an image</span>
-									<span class="block text-xs leading-4 text-ink-faint"
-										>Blank, imported or cloned disks</span
-									>
+									<span class="block text-xs leading-4 text-ink-faint">Blank or cloned disks</span>
 								</div>
 							</div>
 						</td>
@@ -362,7 +409,7 @@
 						<td class="border-b border-line-soft p-3"></td>
 					</tr>
 				{/if}
-				{#if !summary.top.length && !summary.none}
+				{#if !summary.top.length && !summary.none && !imports.all.disks}
 					<tr>
 						<td colspan="5" class="p-3 text-[13px] text-ink-faint">
 							{storage.rows.length ? 'No disks in this project.' : 'No VM disks yet.'}

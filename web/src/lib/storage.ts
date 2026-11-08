@@ -5,6 +5,7 @@
 import type {
 	Claim,
 	Disk,
+	DiskImport,
 	DraftItem,
 	EditRequest,
 	Node,
@@ -45,6 +46,7 @@ export interface DiskRow {
 	host: string; // where the disk lives (local) or its VM runs; '' when unknown
 	maintenance: boolean; // host is in maintenance
 	image: string; // "namespace/name" of the boot image, '' when none
+	source: string; // the import's sourceKey, '' when not imported
 	snapshots: Snapshot[]; // ready snapshots that captured this disk, newest first
 	fresh: boolean; // a ready snapshot within FRESH_DAYS
 	running: boolean;
@@ -110,6 +112,28 @@ function isFresh(s: Snapshot | undefined, now = Date.now()): boolean {
 	return !Number.isNaN(t) && now - t <= FRESH_MS;
 }
 
+// --- imports ---
+
+// One import source's identity: disks share it when kind and source both match.
+export const sourceKey = (imp: Pick<DiskImport, 'kind' | 'source'>) => `${imp.kind}:${imp.source}`;
+
+export function sourceOf(key: string): Pick<DiskImport, 'kind' | 'source'> {
+	const i = key.indexOf(':');
+	return { kind: key.slice(0, i), source: key.slice(i + 1) };
+}
+
+export const SOURCE_WORD: Record<string, string> = { registry: 'registry', url: 'URL' };
+
+// A source in running text: a URL without its scheme. The server already left
+// out any query string or credentials.
+export const sourceText = (imp: Pick<DiskImport, 'kind' | 'source'>) =>
+	imp.kind === 'url' ? imp.source.replace(/^[a-z][a-z0-9+.-]*:\/\//i, '') : imp.source;
+
+// A source in a table cell: its last segment, the repository and tag or the
+// file name, which tells sources apart at a glance.
+export const sourceTail = (imp: Pick<DiskImport, 'kind' | 'source'>) =>
+	sourceText(imp).replace(/\/+$/, '').split('/').pop() || imp.source;
+
 // One row per persistent disk, plus one ephemeral row per VM that keeps no
 // data (its boot disk), so the "keeps no data" filter lists those VMs.
 export function diskRows(inp: StorageInputs): DiskRow[] {
@@ -147,6 +171,7 @@ export function diskRows(inp: StorageInputs): DiskRow[] {
 						host,
 						maintenance: maint.has(host),
 						image: disk.image ?? '',
+						source: disk.import ? sourceKey(disk.import) : '',
 						snapshots: mine,
 						fresh: isFresh(mine[0], now),
 						running,
@@ -169,6 +194,7 @@ export function diskRows(inp: StorageInputs): DiskRow[] {
 						host: running ? (vm.nodeName ?? '') : '',
 						maintenance: maint.has(vm.nodeName ?? ''),
 						image: '',
+						source: '',
 						snapshots: [],
 						fresh: false,
 						running,
@@ -188,14 +214,17 @@ export const FLAG_LABEL: Record<FlagFilter, string> = {
 	nodata: 'Keeps no data',
 	stopped: 'VM stopped',
 };
-export const VALUE_FILTERS = ['project', 'class', 'host', 'image'] as const;
+export const VALUE_FILTERS = ['project', 'class', 'host', 'image', 'source'] as const;
 export type ValueFilter = (typeof VALUE_FILTERS)[number];
 export const VALUE_LABEL: Record<ValueFilter, string> = {
 	project: 'Project',
 	class: 'Class',
 	host: 'Host',
 	image: 'Image',
+	source: 'Imported from',
 };
+// The source filter's value for every imported disk, whatever its source.
+export const ANY_SOURCE = 'any';
 
 export interface DiskFilters {
 	flags: FlagFilter[];
@@ -203,6 +232,7 @@ export interface DiskFilters {
 	class?: string;
 	host?: string;
 	image?: string;
+	source?: string; // a sourceKey, or ANY_SOURCE
 	q?: string;
 }
 
@@ -240,9 +270,15 @@ export const hasFilters = (f: DiskFilters) =>
 
 const matchText = (r: DiskRow, q: string) => {
 	const t = q.toLowerCase();
-	return [r.vm.name, r.vm.namespace, r.disk.name, r.storageClass, r.host, r.image].some((s) =>
-		s.toLowerCase().includes(t),
-	);
+	return [
+		r.vm.name,
+		r.vm.namespace,
+		r.disk.name,
+		r.storageClass,
+		r.host,
+		r.image,
+		r.disk.import?.source ?? '',
+	].some((s) => s.toLowerCase().includes(t));
 };
 
 function matchFlag(r: DiskRow, f: FlagFilter): boolean {
@@ -270,6 +306,7 @@ export function applyFilters(rows: DiskRow[], f: DiskFilters): DiskRow[] {
 			(!f.class || r.storageClass === f.class) &&
 			(!f.host || r.host === f.host) &&
 			(!f.image || r.image === f.image) &&
+			(!f.source || (f.source === ANY_SOURCE ? !!r.source : r.source === f.source)) &&
 			(!f.q || matchText(r, f.q)),
 	);
 }
@@ -327,17 +364,31 @@ export function sortRows(rows: DiskRow[], by: DiskSort, desc = false): DiskRow[]
 
 export const shortName = (image: string) => image.slice(image.indexOf('/') + 1);
 
-export interface ImageUse {
-	image: string; // "namespace/name"; '' gathers disks made from no image
+// How a group of disks lives: where, and how many have a fresh snapshot.
+export interface DiskCounts {
 	disks: number;
 	local: number;
 	shared: number;
 	fresh: number;
+}
+
+const noDisks = (): DiskCounts => ({ disks: 0, local: 0, shared: 0, fresh: 0 });
+
+function tally(u: DiskCounts, r: DiskRow) {
+	u.disks++;
+	if (r.shared === true) u.shared++;
+	else if (r.shared === false) u.local++;
+	if (r.fresh) u.fresh++;
+}
+
+export interface ImageUse extends DiskCounts {
+	image: string; // "namespace/name"; '' gathers blank and cloned disks
 	templates: string[];
 	catalog?: OSImage;
 }
 
 // Disks per boot image, the catalog's unused images included, biggest first.
+// An imported disk is made from no image: importUsage counts those.
 export function imageUsage(
 	rows: DiskRow[],
 	images: OSImage[] = [],
@@ -345,19 +396,11 @@ export function imageUsage(
 ): ImageUse[] {
 	const m = new Map<string, ImageUse>();
 	const use = (image: string) => {
-		if (!m.has(image))
-			m.set(image, { image, disks: 0, local: 0, shared: 0, fresh: 0, templates: [] });
+		if (!m.has(image)) m.set(image, { image, ...noDisks(), templates: [] });
 		return m.get(image)!;
 	};
 	for (const img of images) use(`${img.namespace}/${img.name}`).catalog = img;
-	for (const r of rows) {
-		if (r.ephemeral) continue;
-		const u = use(r.image);
-		u.disks++;
-		if (r.shared === true) u.shared++;
-		else if (r.shared === false) u.local++;
-		if (r.fresh) u.fresh++;
-	}
+	for (const r of rows) if (!r.ephemeral && !r.source) tally(use(r.image), r);
 	for (const t of templates)
 		if (t.image && m.has(t.image)) {
 			const u = m.get(t.image)!;
@@ -371,7 +414,7 @@ export function imageUsage(
 export interface ImageSummary {
 	top: ImageUse[];
 	more: (ImageUse & { count: number }) | null; // the images past the top, summed
-	none: ImageUse | null; // disks made from no image
+	none: ImageUse | null; // blank and cloned disks
 	total: number; // boot images
 }
 
@@ -398,6 +441,44 @@ export function topImages(uses: ImageUse[], n = 4): ImageSummary {
 		none: uses.find((u) => !u.image) ?? null,
 		total: images.length,
 	};
+}
+
+export interface SourceUse extends DiskCounts {
+	key: string; // sourceKey
+	kind: string;
+	source: string;
+	redacted: boolean; // a disk's source carried a query string or credentials, left out
+	size: string; // the size most of its disks ask for
+}
+
+export interface ImportSummary {
+	all: DiskCounts; // every imported disk
+	sources: SourceUse[]; // biggest first
+}
+
+// Imported disks per source: each of them downloaded its bytes on its own.
+export function importUsage(rows: DiskRow[]): ImportSummary {
+	const all = noDisks();
+	const m = new Map<string, SourceUse & { sizes: Map<string, number> }>();
+	for (const r of rows) {
+		const imp = r.disk.import;
+		if (r.ephemeral || !imp) continue;
+		tally(all, r);
+		let u = m.get(r.source);
+		if (!u) {
+			u = { key: r.source, ...imp, redacted: false, size: '', sizes: new Map(), ...noDisks() };
+			m.set(r.source, u);
+		}
+		tally(u, r);
+		if (imp.redacted) u.redacted = true;
+		if (r.disk.size) u.sizes.set(r.disk.size, (u.sizes.get(r.disk.size) ?? 0) + 1);
+	}
+	const sources: SourceUse[] = [...m.values()].map(({ sizes, ...u }) => ({
+		...u,
+		size: [...sizes].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))[0]?.[0] ?? '',
+	}));
+	sources.sort((a, b) => b.disks - a.disks || a.key.localeCompare(b.key));
+	return { all, sources };
 }
 
 // The without-a-fresh-snapshot share is worth a flag when it is large.

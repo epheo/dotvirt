@@ -855,6 +855,39 @@ for (const v of vms) {
 	});
 }
 
+// ── imported disks ─────────────────────────────────────────────────────────────
+// A handful of root disks downloaded from a registry or a URL instead of
+// cloned from a boot image: six CI runners each pulled the same container
+// disk (the Library offers to make it a boot image), and the pre-signed URL
+// arrives without its query string, flagged redacted, as the server sends it.
+
+const IMPORTS = [
+	['ci-runners', 6, { kind: 'registry', source: 'quay.io/containerdisks/fedora:42' }],
+	['qa-lab', 3, { kind: 'registry', source: 'quay.io/containerdisks/centos-stream:9' }],
+	[
+		'research',
+		2,
+		{
+			kind: 'url',
+			source: 'https://images.example.org/ubuntu/noble-server-cloudimg-amd64.img',
+			redacted: true,
+		},
+	],
+	['legacy-apps', 1, { kind: 'url', source: 'http://files.lab.example/images/win2019-eval.qcow2' }],
+];
+for (const [ns, n, imp] of IMPORTS) {
+	// Single-disk VMs, none of the windows-2025 ones the Library's flag counts.
+	const picked = inNs(ns)
+		.filter((v) => v.slot?.disks === 1 && v.slot.image !== 'windows-2025')
+		.slice(0, n);
+	check(`imported disks in ${ns}`, picked.length, n);
+	for (const v of picked) {
+		const root = modelVMs.get(v).disks[0];
+		delete root.image;
+		root.import = { ...imp };
+	}
+}
+
 const all = [...modelVMs.values()];
 
 // ── storage listings: every snapshot and disk claim ────────────────────────────

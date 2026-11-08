@@ -98,6 +98,59 @@ type Disk struct {
 	// Image is the boot image ("namespace/name" of a DataSource) the disk was
 	// provisioned from; empty for blank, imported or cloned disks.
 	Image string `json:"image,omitempty"`
+	// Import is where CDI downloaded the disk from; nil unless its
+	// DataVolume template imports from a registry or a URL.
+	Import *DiskImport `json:"import,omitempty"`
+}
+
+// The DataVolume sources an import downloads from.
+const (
+	ImportRegistry = "registry"
+	ImportURL      = "url"
+)
+
+// DiskImport is an import source as it may be shown: never the query string
+// or credentials a URL can carry (a pre-signed URL's signature lives in its
+// query), and a registry reference without its docker:// scheme.
+type DiskImport struct {
+	Kind   string `json:"kind"`   // ImportRegistry | ImportURL
+	Source string `json:"source"` // scheme, host and path of a URL; a registry's image reference
+	// Redacted: the source carried a query string or credentials left out
+	// here, so it cannot be fetched again as shown.
+	Redacted bool `json:"redacted,omitempty"`
+}
+
+// ImportFrom is how the url of a DataVolume's registry or http source is
+// shown. It is the one place that strips it: a source reaches the wire, an
+// annotation or a log only through here.
+func ImportFrom(kind, url string) *DiskImport {
+	imp := &DiskImport{Kind: kind}
+	s := strings.TrimSpace(url)
+	// A query precedes any fragment; the fragment never reaches the server.
+	if i := strings.IndexAny(s, "?#"); i >= 0 {
+		imp.Redacted = s[i] == '?'
+		s = s[:i]
+	}
+	scheme, rest, ok := strings.Cut(s, "://")
+	if !ok {
+		scheme, rest = "", s
+	}
+	host, path, hasPath := strings.Cut(rest, "/")
+	// A registry reference without a path may end in @digest, never userinfo.
+	if at := strings.LastIndex(host, "@"); at >= 0 && (kind != ImportRegistry || hasPath) {
+		host = host[at+1:]
+		imp.Redacted = true
+	}
+	if hasPath {
+		host += "/" + path
+	}
+	switch {
+	case scheme == "", kind == ImportRegistry && strings.EqualFold(scheme, "docker"):
+		imp.Source = host
+	default:
+		imp.Source = strings.ToLower(scheme) + "://" + host
+	}
+	return imp
 }
 
 // PodNetwork is the Network of a NIC on the pod network, where any other value

@@ -41,6 +41,10 @@ type vmDoc struct {
 					Name      string `yaml:"name"`
 					Namespace string `yaml:"namespace"`
 				} `yaml:"sourceRef"`
+				Source struct {
+					HTTP     *dvURLSource `yaml:"http"`
+					Registry *dvURLSource `yaml:"registry"`
+				} `yaml:"source"`
 				Storage *dvStorageSpec `yaml:"storage"`
 				PVC     *dvStorageSpec `yaml:"pvc"`
 			} `yaml:"spec"`
@@ -174,6 +178,22 @@ type dvStorageSpec struct {
 	} `yaml:"resources"`
 }
 
+type dvURLSource struct {
+	URL string `yaml:"url"`
+}
+
+// importOf is the import a DataVolume template's source downloads from, nil
+// for any other source.
+func importOf(http, registry *dvURLSource) *model.DiskImport {
+	switch {
+	case registry != nil && registry.URL != "":
+		return model.ImportFrom(model.ImportRegistry, registry.URL)
+	case http != nil && http.URL != "":
+		return model.ImportFrom(model.ImportURL, http.URL)
+	}
+	return nil
+}
+
 // ImageAnnotation records, on a DataVolume template, the boot image a disk was
 // first provisioned from once its own source no longer says so: a storage
 // migration provisions the destination blank.
@@ -181,17 +201,21 @@ const ImageAnnotation = "dotvirt.io/image"
 
 // disksFromDoc derives disk devices, joining each disk with its volume to label
 // the type, and dataVolume volumes with their dataVolumeTemplates for the
-// provisioned size, storage class, access modes and boot image.
+// provisioned size, storage class, access modes, and boot image or import.
 func disksFromDoc(d vmDoc, namespace string) []model.Disk {
 	type dvInfo struct {
 		size, class, image string
 		modes              []string
+		imp                *model.DiskImport
 	}
 	dvs := map[string]dvInfo{}
 	for _, t := range d.Spec.DataVolumeTemplates {
 		info := dvInfo{image: imageRef(t.Metadata.Annotations[ImageAnnotation], namespace)}
 		if ref := t.Spec.SourceRef; ref != nil && (ref.Kind == "" || ref.Kind == "DataSource") && ref.Name != "" {
 			info.image = imageRef(ref.Namespace+"/"+ref.Name, namespace)
+		}
+		if info.image == "" {
+			info.imp = importOf(t.Spec.Source.HTTP, t.Spec.Source.Registry)
 		}
 		spec := t.Spec.Storage
 		if spec == nil {
@@ -213,6 +237,7 @@ func disksFromDoc(d vmDoc, namespace string) []model.Disk {
 			disk.Claim = v.DataVolume.Name
 			if info, ok := dvs[v.DataVolume.Name]; ok {
 				disk.Size, disk.StorageClass, disk.AccessModes, disk.Image = info.size, info.class, info.modes, info.image
+				disk.Import = info.imp
 			}
 		case v.PVC != nil:
 			disk.Type = "pvc"

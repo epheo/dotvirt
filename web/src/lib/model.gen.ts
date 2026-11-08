@@ -1671,6 +1671,33 @@ export interface Disk {
    * provisioned from; empty for blank, imported or cloned disks.
    */
   image?: string;
+  /**
+   * Import is where CDI downloaded the disk from; nil unless its
+   * DataVolume template imports from a registry or a URL.
+   */
+  import?: DiskImport;
+}
+/**
+ * The DataVolume sources an import downloads from.
+ */
+export const ImportRegistry = "registry";
+/**
+ * The DataVolume sources an import downloads from.
+ */
+export const ImportURL = "url";
+/**
+ * DiskImport is an import source as it may be shown: never the query string
+ * or credentials a URL can carry (a pre-signed URL's signature lives in its
+ * query), and a registry reference without its docker:// scheme.
+ */
+export interface DiskImport {
+  kind: string; // ImportRegistry | ImportURL
+  source: string; // scheme, host and path of a URL; a registry's image reference
+  /**
+   * Redacted: the source carried a query string or credentials left out
+   * here, so it cannot be fetched again as shown.
+   */
+  redacted?: boolean;
 }
 /**
  * PodNetwork is the Network of a NIC on the pod network, where any other value

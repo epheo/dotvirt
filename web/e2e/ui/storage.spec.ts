@@ -225,3 +225,35 @@ test('the drop zone offers only what the caller may do', async ({ page }) => {
 			.getByLabel('Offer it as a boot image', { exact: false }),
 	).toBeChecked();
 });
+
+test('imported disks have their own library row and filter, shown without the query', async ({
+	page,
+}) => {
+	await page.goto('/storage');
+	const main = page.locator('main');
+	const imported = main.locator('tbody tr', { hasText: 'Imported from a registry or URL' });
+	await expect(imported).toContainText('From downloads.example.com/seed/pg-seed-2026.qcow2');
+	await expect(main.locator('tbody tr', { hasText: 'Not from an image' })).toContainText(
+		'Blank or cloned disks',
+	);
+	await imported.getByRole('link', { name: 'Show disks imported from a registry or URL' }).click();
+	await expect(page).toHaveURL(/tab=disks&source=any/);
+	await expect(
+		main.getByRole('button', { name: 'Remove filter: imported from any' }),
+	).toBeVisible();
+	await expect(main.getByText('1 of 6 disks')).toBeVisible();
+	const row = main.locator('tbody tr');
+	await expect(row).toHaveCount(1);
+	await expect(row).toContainText(/URL\s*pg-seed-2026\.qcow2/);
+
+	await row.getByRole('button', { name: 'Open db-1 data' }).click();
+	const panel = main.getByRole('complementary', { name: 'db-1 data' });
+	await expect(panel).toContainText(
+		'Imported from https://downloads.example.com/seed/pg-seed-2026.qcow2',
+	);
+	await expect(panel.getByText('Shown without the query string')).toBeVisible();
+	await panel.getByRole('link', { name: 'From a URL' }).click();
+	await expect(page).toHaveURL(/source=url%3Ahttps/);
+	await expect(main.getByText('1 of 6 disks')).toBeVisible();
+	expect(await page.locator('body').innerText()).not.toMatch(/qcow2\?|X-Amz/);
+});

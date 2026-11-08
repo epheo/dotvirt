@@ -936,6 +936,19 @@ patchDisks(base, {
 	'batch-1': [rootdisk('batch-1', '20Gi', 'rhel-9.6'), cloudinit],
 });
 
+// ── imported disks over base ───────────────────────────────────────────────────
+// db-1's data disk was downloaded from a pre-signed URL: the server sends its
+// source without the query string and flags it redacted.
+for (const p of base.inventory.projects)
+	for (const n of p.namespaces)
+		for (const v of n.vms)
+			if (v.name === 'db-1')
+				v.disks.find((d) => d.name === 'data').import = {
+					kind: 'url',
+					source: 'https://downloads.example.com/seed/pg-seed-2026.qcow2',
+					redacted: true,
+				};
+
 options.osImages.push(
 	{ name: 'centos-stream-9', namespace: IMAGES_NS, ready: true },
 	{ name: 'rhel-9.6', namespace: IMAGES_NS, ready: true },
