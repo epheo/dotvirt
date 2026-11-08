@@ -23,6 +23,7 @@
 		num,
 		planBulkMove,
 		shortName,
+		SOURCE_WORD,
 		suggestTarget,
 		type DiskRow,
 	} from '#lib/storage.js';
@@ -165,6 +166,12 @@
 					class="inline-flex h-7 items-center rounded-md border border-line bg-panel px-2.5 font-mono text-[13px] font-medium text-accent-ink hover:border-accent"
 					>{shortName(row.image)}</a
 				>
+			{:else if row.disk.import}
+				<a
+					href={storageHref('disks', { source: row.source })}
+					class="inline-flex h-7 items-center rounded-md border border-line bg-panel px-2.5 text-[13px] text-accent-ink hover:border-accent"
+					>From a {SOURCE_WORD[row.disk.import.kind] ?? row.disk.import.kind}</a
+				>
 			{:else}
 				<span
 					class="inline-flex h-7 items-center rounded-md border border-line bg-panel px-2.5 text-[13px] text-ink-faint"
@@ -184,6 +191,17 @@
 				>{num(row.snapshots.length)} {row.snapshots.length === 1 ? 'snapshot' : 'snapshots'}</a
 			>
 		</div>
+		{#if row.disk.import}
+			{@const imp = row.disk.import}
+			<p class="text-[13px] text-ink-soft">
+				Imported from <span class="font-mono font-medium break-all text-ink">{imp.source}</span>
+			</p>
+			{#if imp.redacted}
+				<p class="text-xs leading-4 text-ink-faint">
+					Shown without the query string or credentials its address carries.
+				</p>
+			{/if}
+		{/if}
 	</div>
 
 	<div class="flex flex-col gap-2 border-t border-line-soft px-card py-3.5">

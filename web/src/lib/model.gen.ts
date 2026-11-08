@@ -115,6 +115,11 @@ export interface NamespaceCaps {
    */
   bootImageCreate: boolean;
   /**
+   * BootImageImport is a boot image the cluster downloads from a registry
+   * or a URL: its DataVolume and DataSource. It needs no upload proxy.
+   */
+  bootImageImport: boolean;
+  /**
    * The namespaced network family, staged through git. Network is the
    * project networks (UserDefinedNetwork).
    */
@@ -1084,14 +1089,17 @@ export interface Clone {
   created?: string; // RFC3339
 }
 /**
- * UploadStatus is an upload DataVolume's progress (the image-upload flow). Ready
- * (phase UploadReady) means cdi-uploadproxy will accept the bytes; Progress is
- * CDI's import-progress percentage once they're flowing.
+ * UploadStatus is an upload or import DataVolume's progress. Ready (phase
+ * UploadReady) means cdi-uploadproxy will accept the bytes; Progress is CDI's
+ * import-progress percentage once they're flowing. Error is the importer's
+ * last failure while CDI retries it (an unreachable source, a refused pull),
+ * any URL in it without its query string.
  */
 export interface UploadStatus {
   phase: string;
   ready: boolean;
   progress?: string;
+  error?: string;
 }
 /**
  * UploadToken is the bearer + endpoint the browser POSTs the image to, streaming
@@ -1102,8 +1110,9 @@ export interface UploadToken {
   uploadUrl: string;
 }
 /**
- * UploadTarget identifies the upload DataVolume just created. Image is the
- * boot image ("namespace/name" DataSource) registered over it, when asked for.
+ * UploadTarget identifies the upload or import DataVolume just created. Image
+ * is the boot image ("namespace/name" DataSource) registered over it, when
+ * asked for (always, for an import).
  */
 export interface UploadTarget {
   namespace: string;
@@ -1190,6 +1199,11 @@ export interface OSImage {
   name: string;
   namespace: string;
   ready: boolean;
+  /**
+   * Import is the source dotvirt downloaded the boot image from, when it
+   * made it from a registry or a URL.
+   */
+  import?: DiskImport;
 }
 export interface NetworkOption {
   name: string;
@@ -1671,6 +1685,33 @@ export interface Disk {
    * provisioned from; empty for blank, imported or cloned disks.
    */
   image?: string;
+  /**
+   * Import is where CDI downloaded the disk from; nil unless its
+   * DataVolume template imports from a registry or a URL.
+   */
+  import?: DiskImport;
+}
+/**
+ * The DataVolume sources an import downloads from.
+ */
+export const ImportRegistry = "registry";
+/**
+ * The DataVolume sources an import downloads from.
+ */
+export const ImportURL = "url";
+/**
+ * DiskImport is an import source as it may be shown: never the query string
+ * or credentials a URL can carry (a pre-signed URL's signature lives in its
+ * query), and a registry reference without its docker:// scheme.
+ */
+export interface DiskImport {
+  kind: string; // ImportRegistry | ImportURL
+  source: string; // scheme, host and path of a URL; a registry's image reference
+  /**
+   * Redacted: the source carried a query string or credentials left out
+   * here, so it cannot be fetched again as shown.
+   */
+  redacted?: boolean;
 }
 /**
  * PodNetwork is the Network of a NIC on the pod network, where any other value

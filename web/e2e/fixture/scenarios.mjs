@@ -936,6 +936,19 @@ patchDisks(base, {
 	'batch-1': [rootdisk('batch-1', '20Gi', 'rhel-9.6'), cloudinit],
 });
 
+// ── imported disks over base ───────────────────────────────────────────────────
+// db-1's data disk was downloaded from a pre-signed URL: the server sends its
+// source without the query string and flags it redacted.
+for (const p of base.inventory.projects)
+	for (const n of p.namespaces)
+		for (const v of n.vms)
+			if (v.name === 'db-1')
+				v.disks.find((d) => d.name === 'data').import = {
+					kind: 'url',
+					source: 'https://downloads.example.com/seed/pg-seed-2026.qcow2',
+					redacted: true,
+				};
+
 options.osImages.push(
 	{ name: 'centos-stream-9', namespace: IMAGES_NS, ready: true },
 	{ name: 'rhel-9.6', namespace: IMAGES_NS, ready: true },
@@ -1045,19 +1058,30 @@ const dupnames = {
 	],
 };
 
-// noboot and noupload: a caller who may upload but not add boot images, and
-// one who may do neither (GET /api/capabilities answers from these).
-const noboot = { ...base, name: 'noboot', capabilities: { default: { bootImageCreate: false } } };
+// noboot and noupload: a caller who may upload but not add boot images (so
+// neither a download, always a boot image), and one who may do neither (GET
+// /api/capabilities answers from these).
+const noboot = {
+	...base,
+	name: 'noboot',
+	capabilities: { default: { bootImageCreate: false, bootImageImport: false } },
+};
 const noupload = {
 	...base,
 	name: 'noupload',
-	capabilities: { default: { bootImageCreate: false, dataVolumeCreate: false } },
+	capabilities: {
+		default: { bootImageCreate: false, dataVolumeCreate: false, bootImageImport: false },
+	},
 };
-// uploadoff: no upload proxy known, so every namespace refuses uploads too.
+// uploadoff: no upload proxy known, so every namespace refuses uploads too;
+// a boot image the cluster downloads needs none.
 const uploadoff = {
-	...noupload,
+	...base,
 	name: 'uploadoff',
-	capabilities: { ...noupload.capabilities, cluster: { imageUpload: false } },
+	capabilities: {
+		default: { bootImageCreate: false, dataVolumeCreate: false },
+		cluster: { imageUpload: false },
+	},
 };
 
 // metricsoff: every metrics view answers with a reason and no numbers.

@@ -104,6 +104,8 @@ class StorageStore {
 		const found = await uploadAbility(
 			namespaces,
 			async (ns) => (await caps.nsRead(ns)) ?? undefined,
+			4,
+			caps.cluster?.imageUpload === false,
 		);
 		if (gen === this.#gen && key === this.#uploadKey) this.upload = found;
 	}

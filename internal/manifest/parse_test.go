@@ -201,6 +201,13 @@ spec:
           registry:
             url: docker://quay.io/containerdisks/fedora:42
         storage: {}
+    - metadata:
+        name: app-signed
+      spec:
+        source:
+          http:
+            url: https://ops:hunter2@images.example.com/noble.img?X-Amz-Signature=abc123&X-Amz-Expires=3600
+        storage: {}
   template:
     spec:
       domain:
@@ -210,6 +217,7 @@ spec:
             - name: moved
             - name: imported
             - name: shared
+            - name: signed
       volumes:
         - name: rootdisk
           dataVolume:
@@ -223,13 +231,16 @@ spec:
         - name: shared
           persistentVolumeClaim:
             claimName: team-share
+        - name: signed
+          dataVolume:
+            name: app-signed
 `)
 	vms, err := ParseVMs("beta/app.yaml", manifest, "beta")
 	if err != nil {
 		t.Fatal(err)
 	}
 	d := vms[0].Disks
-	if len(d) != 4 {
+	if len(d) != 5 {
 		t.Fatalf("disks = %+v", d)
 	}
 	if d[0].Image != "os-images/rhel-9.6" || len(d[0].AccessModes) != 1 || d[0].AccessModes[0] != "ReadWriteMany" {
@@ -240,6 +251,16 @@ spec:
 	}
 	if d[2].Image != "" || d[2].AccessModes != nil {
 		t.Errorf("an imported disk names no boot image: %+v", d[2])
+	}
+	if imp := d[2].Import; imp == nil || *imp != (model.DiskImport{Kind: model.ImportRegistry, Source: "quay.io/containerdisks/fedora:42"}) {
+		t.Errorf("registry import = %+v", imp)
+	}
+	if d[0].Import != nil || d[1].Import != nil || d[3].Import != nil {
+		t.Errorf("only an import names its source: %+v", d)
+	}
+	// The signature and the credentials never leave the manifest.
+	if imp := d[4].Import; imp == nil || *imp != (model.DiskImport{Kind: model.ImportURL, Source: "https://images.example.com/noble.img", Redacted: true}) {
+		t.Errorf("url import = %+v", imp)
 	}
 	if d[3].Type != "pvc" || d[3].Claim != "team-share" {
 		t.Errorf("pvc disk = %+v", d[3])

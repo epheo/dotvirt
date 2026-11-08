@@ -10,7 +10,9 @@
 	import { storage } from '#lib/state/storage.svelte.js';
 	import { ui } from '#lib/state/ui.svelte.js';
 	import {
+		ANY_SOURCE,
 		FLAG_LABEL,
+		SOURCE_WORD,
 		VALUE_FILTERS,
 		VALUE_LABEL,
 		applyFilters,
@@ -27,6 +29,9 @@
 		ago,
 		shortName,
 		sortRows,
+		sourceOf,
+		sourceTail,
+		sourceText,
 		suggestTarget,
 		type DiskFilters,
 		type DiskRow,
@@ -83,6 +88,7 @@
 				class: out.get('class') ?? undefined,
 				host: out.get('host') ?? undefined,
 				image: out.get('image') ?? undefined,
+				source: out.get('source') ?? undefined,
 				q: out.get('q') ?? undefined,
 				page: undefined,
 			},
@@ -107,21 +113,26 @@
 			for (const r of rows) if (!r.ephemeral && pick(r)) m.set(pick(r), (m.get(pick(r)) ?? 0) + 1);
 			return [...m.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
 		};
+		const sources = count((r) => r.source);
+		const imported = sources.reduce((n, [, c]) => n + c, 0);
 		return {
 			project: count((r) => r.project),
 			class: count((r) => r.storageClass),
 			host: count((r) => r.host),
 			image: count((r) => r.image),
+			source: imported ? [[ANY_SOURCE, imported], ...sources] : [],
 		} satisfies Record<ValueFilter, [string, number][]>;
 	});
-	const valueText = (k: ValueFilter, v: string) => (k === 'image' ? shortName(v) : v);
+	function valueText(k: ValueFilter, v: string): string {
+		if (k === 'image') return shortName(v);
+		if (k === 'source') return v === ANY_SOURCE ? 'any registry or URL' : sourceText(sourceOf(v));
+		return v;
+	}
 
 	// --- selection: row keys, cleared when the filtered set changes ---
 	let selected = $state<Set<string>>(new Set());
 	const viewKey = $derived(
-		[q.get('f'), q.get('project'), q.get('class'), q.get('host'), q.get('image'), q.get('q')].join(
-			'|',
-		),
+		['f', 'project', 'class', 'host', 'image', 'source', 'q'].map((k) => q.get(k)).join('|'),
 	);
 	$effect(() => {
 		void viewKey;
@@ -299,7 +310,7 @@
 									/>{FLAG_LABEL[f]}
 								</label>
 							{/each}
-							{#each VALUE_FILTERS as k (k)}
+							{#each VALUE_FILTERS.filter((k) => valueChoices[k].length || filters[k]) as k (k)}
 								<label class="flex flex-col gap-1">
 									<span class="text-xs font-bold text-ink-muted">{VALUE_LABEL[k]}</span>
 									<select
@@ -522,6 +533,13 @@
 							</td>
 							<td class="h-10 border-b border-line-soft px-2 whitespace-nowrap">
 								{#if r.image}<span class="font-mono text-xs font-medium">{shortName(r.image)}</span>
+								{:else if r.disk.import}
+									{@const imp = r.disk.import}
+									<span class="text-xs text-ink-faint">{SOURCE_WORD[imp.kind] ?? imp.kind}</span>
+									<span
+										class="inline-block max-w-[180px] truncate align-bottom font-mono text-xs font-medium"
+										title={imp.source}>{sourceTail(imp)}</span
+									>
 								{:else}<span class="text-ink-faint">-</span>{/if}
 							</td>
 							<td class="h-10 border-b border-line-soft px-2 whitespace-nowrap">

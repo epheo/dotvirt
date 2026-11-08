@@ -225,3 +225,135 @@ test('the drop zone offers only what the caller may do', async ({ page }) => {
 			.getByLabel('Offer it as a boot image', { exact: false }),
 	).toBeChecked();
 });
+
+test('imported disks have their own library row and filter, shown without the query', async ({
+	page,
+}) => {
+	await page.goto('/storage');
+	const main = page.locator('main');
+	const imported = main.locator('tbody tr', { hasText: 'Imported from a registry or URL' });
+	await expect(imported).toContainText('From downloads.example.com/seed/pg-seed-2026.qcow2');
+	await expect(main.locator('tbody tr', { hasText: 'Not from an image' })).toContainText(
+		'Blank or cloned disks',
+	);
+	await imported.getByRole('link', { name: 'Show disks imported from a registry or URL' }).click();
+	await expect(page).toHaveURL(/tab=disks&source=any/);
+	await expect(
+		main.getByRole('button', { name: 'Remove filter: imported from any' }),
+	).toBeVisible();
+	await expect(main.getByText('1 of 6 disks')).toBeVisible();
+	const row = main.locator('tbody tr');
+	await expect(row).toHaveCount(1);
+	await expect(row).toContainText(/URL\s*pg-seed-2026\.qcow2/);
+
+	await row.getByRole('button', { name: 'Open db-1 data' }).click();
+	const panel = main.getByRole('complementary', { name: 'db-1 data' });
+	await expect(panel).toContainText(
+		'Imported from https://downloads.example.com/seed/pg-seed-2026.qcow2',
+	);
+	await expect(panel.getByText('Shown without the query string')).toBeVisible();
+	await panel.getByRole('link', { name: 'From a URL' }).click();
+	await expect(page).toHaveURL(/source=url%3Ahttps/);
+	await expect(main.getByText('1 of 6 disks')).toBeVisible();
+	expect(await page.locator('body').innerText()).not.toMatch(/qcow2\?|X-Amz/);
+});
+
+test('a source imported into several disks offers to become a boot image, prefilled', async ({
+	page,
+}) => {
+	test.setTimeout(60_000);
+	await setScenario(page, 'scale');
+	await page.goto('/storage');
+	const main = page.locator('main');
+	await expect(main.getByText('Imported from a registry or URL')).toBeVisible();
+	await expect(main.getByText('From 4 sources')).toBeVisible();
+	await expect(
+		main.getByText(/6 disks each downloaded\s*quay\.io\/containerdisks\/fedora:42\./),
+	).toBeVisible();
+	await main.getByRole('button', { name: 'Make it a boot image' }).click();
+
+	const dialog = page.getByRole('dialog', { name: 'New image' });
+	await expect(
+		dialog.getByText('Filled in from quay.io/containerdisks/fedora:42, which 6 disks downloaded.'),
+	).toBeVisible();
+	await expect(dialog.getByRole('radio', { name: /^Registry / })).toBeChecked();
+	await expect(dialog.getByRole('textbox', { name: 'Image reference' })).toHaveValue(
+		'quay.io/containerdisks/fedora:42',
+	);
+	await expect(dialog.getByRole('textbox', { name: 'Name', exact: true })).toHaveValue('fedora-42');
+	await expect(dialog.getByLabel('Disk size')).toHaveValue('30Gi');
+	await expect(dialog.getByText('The cluster downloads it once; new VMs clone it.')).toBeVisible();
+	await dialog.getByRole('button', { name: 'Add boot image' }).click();
+	await expect(dialog.getByText('is a boot image in')).toBeVisible({ timeout: 20_000 });
+	await dialog.getByRole('button', { name: 'Done' }).click();
+
+	// That source has its boot image now: the offer moves to the next one.
+	await expect(
+		main.getByText(/3 disks each downloaded\s*quay\.io\/containerdisks\/centos-stream:9\./),
+	).toBeVisible();
+});
+
+test('a boot image from a URL: checked as typed, then downloaded by the cluster', async ({
+	page,
+}) => {
+	await page.goto('/storage');
+	const main = page.locator('main');
+	await main.getByRole('button', { name: 'add one from a URL or registry' }).click();
+	const dialog = page.getByRole('dialog', { name: 'New image' });
+	await expect(dialog.getByRole('radio', { name: /^URL / })).toBeChecked();
+	await expect(dialog.getByText('without credentials')).toBeVisible();
+	await dialog.locator('#img-address').fill('ftp://cloud-images.example.org/noble.img');
+	await expect(
+		dialog.getByRole('status').filter({ hasText: 'The URL needs http:// or https:// and a host' }),
+	).toBeVisible();
+	await expect(dialog.getByRole('button', { name: 'Add boot image' })).toBeDisabled();
+
+	await dialog
+		.locator('#img-address')
+		.fill('https://cloud-images.example.org/noble/noble-server-cloudimg-amd64.img');
+	await expect(dialog.getByRole('textbox', { name: 'Name', exact: true })).toHaveValue(
+		'noble-server-cloudimg-amd64',
+	);
+	await dialog.getByRole('button', { name: 'Add boot image' }).click();
+	await expect(dialog.getByText('Downloading, 42.0%')).toBeVisible({ timeout: 10_000 });
+	// The cluster downloads on its own: closing loses nothing, so nothing pins the sheet.
+	await expect(
+		dialog.getByText('The cluster is downloading it. You can close this.'),
+	).toBeVisible();
+	await expect(dialog.getByLabel('Close')).toBeEnabled();
+	await expect(dialog.getByText('is a boot image in')).toBeVisible({ timeout: 15_000 });
+	await expect(dialog.getByRole('button', { name: 'New VM from it' })).toBeVisible();
+});
+
+test('a download the cluster cannot reach says why and what next', async ({ page }) => {
+	await page.goto('/storage');
+	await page
+		.locator('main')
+		.getByRole('button', { name: 'add one from a URL or registry' })
+		.click();
+	const dialog = page.getByRole('dialog', { name: 'New image' });
+	await dialog.locator('#img-address').fill('https://unreachable.example/a.img?sig=s3cret');
+	await dialog.getByRole('button', { name: 'Add boot image' }).click();
+	await expect(dialog.getByText(/The cluster cannot download it: Unable to connect/)).toBeVisible({
+		timeout: 10_000,
+	});
+	await expect(dialog.getByText(/If the address is wrong, add it again/)).toBeVisible();
+	await expect(dialog).not.toContainText('s3cret');
+});
+
+test('with upload off, a boot image still comes from a URL or a registry', async ({ page }) => {
+	await setScenario(page, 'uploadoff');
+	await page.goto('/storage');
+	const main = page.locator('main');
+	await expect(main.getByText(/Image upload is off/)).toBeVisible();
+	await expect(main.getByText(/A URL or a registry needs none\./)).toBeVisible();
+	await expect(main.getByRole('button', { name: 'Choose file' })).toHaveCount(0);
+	await main.getByRole('button', { name: 'From a URL or registry' }).click();
+	const dialog = page.getByRole('dialog', { name: 'New image' });
+	await expect(dialog.getByRole('radio', { name: /^Upload a file/ })).toBeDisabled();
+	await expect(dialog.getByText(/Image upload is off/)).toBeVisible();
+	await dialog.getByRole('radio', { name: /^Registry / }).check();
+	await dialog.locator('#img-address').fill('docker://quay.io/containerdisks/fedora:42');
+	await expect(dialog.getByRole('textbox', { name: 'Name', exact: true })).toHaveValue('fedora-42');
+	await expect(dialog.getByRole('button', { name: 'Add boot image' })).toBeEnabled();
+});

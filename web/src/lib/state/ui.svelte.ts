@@ -20,6 +20,17 @@ import { tray } from './tray.svelte';
 export type EdgeInitial =
 	{ kind: 'snat'; spec: EgressIPCreate } | { kind: 'route'; spec: ExternalRouteCreate };
 
+// The new boot image form opened on a download: the source, empty when the
+// caller picks it, else what imported disks downloaded (redacted: shown
+// without the query string or credentials they carried), with their size.
+export type ImageDownload = {
+	kind: 'url' | 'registry';
+	source: string;
+	redacted?: boolean;
+	size?: string;
+	disks?: number;
+};
+
 // Every modal the shell can show, as one discriminated union - the shell
 // renders exactly one, and opening any modal is a single assignment.
 export type AppModal =
@@ -58,7 +69,13 @@ export type AppModal =
 	// Stage the removal of a git-declared object (network, firewall rule, cluster
 	// edge object) - the VM delete's confirm, for the rest of the inventory.
 	| { kind: 'deleteObject'; resource: string; namespace: string; name: string; sourceFile: string }
-	| { kind: 'upload'; namespace?: string; file?: File; bootImage?: boolean }
+	| {
+			kind: 'upload';
+			namespace?: string;
+			file?: File;
+			bootImage?: boolean;
+			download?: ImageDownload;
+	  }
 	| { kind: 'deployTemplate'; library?: string; template?: string; namespace?: string } // Deploy from Template (Catalog / New ▾)
 	| { kind: 'editTemplate'; template: Template } // edit a library item's manifest (Catalog)
 	// Edit a declared object's manifest verbatim, when its form has no field for it.

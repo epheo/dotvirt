@@ -67,13 +67,16 @@ type Clone struct {
 	Created string `json:"created,omitempty"` // RFC3339
 }
 
-// UploadStatus is an upload DataVolume's progress (the image-upload flow). Ready
-// (phase UploadReady) means cdi-uploadproxy will accept the bytes; Progress is
-// CDI's import-progress percentage once they're flowing.
+// UploadStatus is an upload or import DataVolume's progress. Ready (phase
+// UploadReady) means cdi-uploadproxy will accept the bytes; Progress is CDI's
+// import-progress percentage once they're flowing. Error is the importer's
+// last failure while CDI retries it (an unreachable source, a refused pull),
+// any URL in it without its query string.
 type UploadStatus struct {
 	Phase    string `json:"phase"`
 	Ready    bool   `json:"ready"`
 	Progress string `json:"progress,omitempty"`
+	Error    string `json:"error,omitempty"`
 }
 
 // UploadToken is the bearer + endpoint the browser POSTs the image to, streaming
@@ -83,8 +86,9 @@ type UploadToken struct {
 	UploadURL string `json:"uploadUrl"`
 }
 
-// UploadTarget identifies the upload DataVolume just created. Image is the
-// boot image ("namespace/name" DataSource) registered over it, when asked for.
+// UploadTarget identifies the upload or import DataVolume just created. Image
+// is the boot image ("namespace/name" DataSource) registered over it, when
+// asked for (always, for an import).
 type UploadTarget struct {
 	Namespace string `json:"namespace"`
 	Name      string `json:"name"`
@@ -165,6 +169,9 @@ type OSImage struct {
 	Name      string `json:"name"`
 	Namespace string `json:"namespace"`
 	Ready     bool   `json:"ready"`
+	// Import is the source dotvirt downloaded the boot image from, when it
+	// made it from a registry or a URL.
+	Import *DiskImport `json:"import,omitempty"`
 }
 
 type NetworkOption struct {

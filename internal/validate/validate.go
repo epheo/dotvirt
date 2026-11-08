@@ -7,10 +7,12 @@ package validate
 import (
 	"fmt"
 	"maps"
+	"net/url"
 	"path"
 	"regexp"
 	"slices"
 	"strings"
+	"unicode"
 
 	"k8s.io/apimachinery/pkg/api/resource"
 	"k8s.io/apimachinery/pkg/api/validate/content"
@@ -119,6 +121,51 @@ func RequireOneOf(field, s string, allowed ...string) error {
 		return fmt.Errorf("%w: %s %q must be one of %s", model.ErrInvalid, field, s, strings.Join(quoted, ", "))
 	}
 	return nil
+}
+
+// registryRef is a container image reference: a host (with an optional
+// port), lowercase path components, then an optional tag and digest.
+var registryRef = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._:-]*(/[a-z0-9]+([._-]+[a-z0-9]+)*)*(:\w[\w.-]{0,127})?(@[a-z0-9]+:[a-f0-9]{32,})?$`)
+
+// ImportSource refuses an import source CDI could not fetch as given and
+// returns the url its DataVolume carries: a registry reference gains the
+// docker:// scheme it may be written without. Refusals never quote the
+// source: a pre-signed URL's query is a credential.
+func ImportSource(kind, source string) (string, error) {
+	bad := func(why string) (string, error) {
+		return "", fmt.Errorf("%w: the source %s", model.ErrInvalid, why)
+	}
+	if source == "" {
+		return bad("is required")
+	}
+	if strings.ContainsFunc(source, func(r rune) bool { return unicode.IsSpace(r) || unicode.IsControl(r) }) {
+		return bad("may not contain spaces or control characters")
+	}
+	const noCreds = "may not carry credentials: the cluster fetches it without any"
+	switch kind {
+	case model.ImportURL:
+		u, err := url.Parse(source)
+		if err != nil || u.Host == "" || (u.Scheme != "http" && u.Scheme != "https") {
+			return bad("must be an http or https URL")
+		}
+		if u.User != nil {
+			return bad(noCreds)
+		}
+		return source, nil
+	case model.ImportRegistry:
+		ref := source
+		if len(ref) >= len("docker://") && strings.EqualFold(ref[:len("docker://")], "docker://") {
+			ref = ref[len("docker://"):]
+		}
+		if host, _, hasPath := strings.Cut(ref, "/"); hasPath && strings.Contains(host, "@") {
+			return bad(noCreds)
+		}
+		if !registryRef.MatchString(ref) {
+			return bad("must be an image reference, like quay.io/containerdisks/fedora:42")
+		}
+		return "docker://" + ref, nil
+	}
+	return "", RequireOneOf("source kind", kind, model.ImportRegistry, model.ImportURL)
 }
 
 func check(field, s string, problems []string) error {
