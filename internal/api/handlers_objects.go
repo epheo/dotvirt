@@ -31,13 +31,13 @@ func (s *Server) objectScope(w http.ResponseWriter, r *http.Request, verbs ...st
 	resource, ns, name = r.PathValue("resource"), r.PathValue("namespace"), r.PathValue("name")
 	res, known := model.LookupResource(resource)
 	if !known || !res.NetworkFamily {
-		fail(w, invalid(fmt.Errorf("%s has no object routes", resource)))
+		fail(w, invalid(fmt.Errorf("object routes do not take %s", model.ResourceNoun(resource))))
 		return sc, "", "", "", false
 	}
 	if ns == model.ClusterScopeNS {
 		kind, clusterScoped := res.ClusterKind()
 		if !clusterScoped {
-			fail(w, invalid(fmt.Errorf("%s is not cluster-scoped", resource)))
+			fail(w, invalid(fmt.Errorf("cluster scope does not hold %s", model.ResourceNoun(resource))))
 			return sc, "", "", "", false
 		}
 		if len(verbs) == 0 {
@@ -50,7 +50,7 @@ func (s *Server) objectScope(w http.ResponseWriter, r *http.Request, verbs ...st
 		return sc, resource, ns, name, ok
 	}
 	if !res.Namespaced() {
-		fail(w, invalid(fmt.Errorf("%s is not namespace-scoped", resource)))
+		fail(w, invalid(fmt.Errorf("a namespace does not hold %s", model.ResourceNoun(resource))))
 		return sc, "", "", "", false
 	}
 	sc, ok = s.resolveProject(w, r, byNamespace(ns))

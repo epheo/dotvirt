@@ -398,7 +398,7 @@ func (c *Coordinator) PreviewCreate(id auth.Identity, proj project.ProjectInfo, 
 func createForm(resource draft.Resource, rawSpec json.RawMessage) (func() (draft.Entry, error), error) {
 	r, ok := renderers[resource]
 	if !ok {
-		return nil, fmt.Errorf("%w: %s has no create form", model.ErrInvalid, resource)
+		return nil, fmt.Errorf("%w: there is no create form for %s", model.ErrInvalid, model.ResourceNoun(string(resource)))
 	}
 	return func() (draft.Entry, error) { return r(rawSpec) }, nil
 }

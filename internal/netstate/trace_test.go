@@ -72,7 +72,7 @@ func TestTraceEastWestNetpol(t *testing.T) {
 }
 
 // ANP precedence: a higher-priority (lower number) Deny wins before the
-// project tier is ever consulted; a Pass delegates down to the netpol allow.
+// project rule is ever consulted; a Pass delegates down to the netpol allow.
 func TestTraceANPPrecedenceAndPass(t *testing.T) {
 	s := New(nil, nil)
 	add(t, s.anp, map[string]any{
@@ -104,7 +104,7 @@ func TestTraceANPPrecedenceAndPass(t *testing.T) {
 		t.Fatalf("admin deny must win over netpol allow: verdict = %s (%v)", res.Verdict, stepKinds(t, res))
 	}
 
-	// Pass at higher precedence delegates to the project tier instead.
+	// Pass at higher precedence delegates to the project rules instead.
 	add(t, s.anp, map[string]any{
 		"apiVersion": "policy.networking.k8s.io/v1alpha1", "kind": "AdminNetworkPolicy",
 		"metadata": map[string]any{"name": "delegate"},
@@ -124,7 +124,7 @@ func TestTraceANPPrecedenceAndPass(t *testing.T) {
 	var sawPass bool
 	for _, st := range res.Steps {
 		if st.Stage == "admin" && st.Action == "Pass" && st.Decisive {
-			sawPass = true
+			sawPass = st.Note == "Delegates this flow to the project rules."
 		}
 	}
 	if !sawPass {

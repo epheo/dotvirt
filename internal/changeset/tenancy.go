@@ -687,7 +687,7 @@ func tenantName(name string) error {
 		return err
 	}
 	if name == project.PlatformName {
-		return fmt.Errorf("%w: %q is reserved for the platform tier", model.ErrInvalid, name)
+		return fmt.Errorf("%w: %q is reserved for the platform repo", model.ErrInvalid, name)
 	}
 	return nil
 }

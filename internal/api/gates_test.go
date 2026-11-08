@@ -391,6 +391,11 @@ func TestPlatformReadsNeedAClusterWideSignal(t *testing.T) {
 			}
 		}
 	}
+	// The refusal names the repo in the UI's words.
+	rec := do(g.s, g.token(nil), http.MethodGet, "/api/projects/platform/history", "")
+	if rec.Code != http.StatusForbidden || !strings.Contains(rec.Body.String(), "not authorized to read the platform repo") {
+		t.Errorf("tenant platform history = %d %q, want the platform repo named", rec.Code, rec.Body.String())
+	}
 }
 
 // A caller whose only right staged something there - a claim on one

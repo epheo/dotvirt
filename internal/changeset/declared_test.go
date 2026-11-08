@@ -143,7 +143,7 @@ func TestRenderedTenantManifestsCarryNamespace(t *testing.T) {
 
 // A tenant repo never gains a NetworkAttachmentDefinition through dotvirt: the
 // manifest editor cannot turn a network into one or rewrite a hand-written
-// one, adopting one names the platform tier, and adopting a namespace leaves
+// one, adopting one names the platform repo, and adopting a namespace leaves
 // its raw NADs out while its VMs come under git.
 func TestTenantRepoRefusesNAD(t *testing.T) {
 	udn := "apiVersion: k8s.ovn.org/v1\nkind: UserDefinedNetwork\nmetadata:\n  name: net\n  namespace: alpha\nspec:\n  topology: Layer2\n"
@@ -159,8 +159,8 @@ func TestTenantRepoRefusesNAD(t *testing.T) {
 	proj := project.ProjectInfo{Name: "p", Repo: bare, Namespaces: []string{"alpha"}}
 	platformTier := func(what string, err error) {
 		t.Helper()
-		if !errors.Is(err, model.ErrInvalid) || !strings.Contains(fmt.Sprint(err), "platform tier") {
-			t.Errorf("%s: err = %v, want a refusal naming the platform tier", what, err)
+		if !errors.Is(err, model.ErrInvalid) || !strings.Contains(fmt.Sprint(err), "only the platform repo may declare") {
+			t.Errorf("%s: err = %v, want a refusal naming the platform repo", what, err)
 		}
 	}
 

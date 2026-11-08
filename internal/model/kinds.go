@@ -100,9 +100,11 @@ type Resource struct {
 	// backings, rebalancing a file set of several kinds, the rest a single kind.
 	Kinds []Kind
 	// CreateLabel and EditLabel name a create and an in-place rewrite of the
-	// resource in the Changes pane.
+	// resource in the Changes pane; Noun names it in a message. Name is
+	// persisted in drafts and never shown.
 	CreateLabel string
 	EditLabel   string
+	Noun        string
 	// NetworkFamily marks the resources one form renders and reads back: the
 	// object routes address them by draft identity and adoption captures them.
 	// The others (VM, namespace, role binding, template, rebalancing) have routes of
@@ -168,21 +170,30 @@ var KindDV = Kind{Kind: "DataVolume", Group: "cdi.kubevirt.io", Version: "v1beta
 
 // resources is the table; names are the draft's on-disk vocabulary.
 var resources = []Resource{
-	{Name: "vm", Kinds: []Kind{KindVM}, CreateLabel: "Adopt VM from cluster", EditLabel: "Edit VM"},
-	{Name: "network", Kinds: []Kind{KindUDN, KindCUDN, KindNAD}, CreateLabel: "Create network", EditLabel: "Edit network", NetworkFamily: true},
-	{Name: "uplink", Kinds: []Kind{KindNNCP}, CreateLabel: "Create uplink", EditLabel: "Edit uplink", NetworkFamily: true},
-	{Name: "namespace", Kinds: []Kind{KindNS}, CreateLabel: "Create namespace", EditLabel: "Edit namespace"},
-	{Name: "rolebinding", Kinds: []Kind{KindRB}, CreateLabel: "Grant tenant access", EditLabel: "Edit tenant access"},
-	{Name: "egressfirewall", Kinds: []Kind{KindEgressFW}, CreateLabel: "Create outbound rules", EditLabel: "Edit outbound rules", NetworkFamily: true},
-	{Name: "egressip", Kinds: []Kind{KindEgressIP}, CreateLabel: "Create fixed outbound IP", EditLabel: "Edit fixed outbound IP", NetworkFamily: true},
-	{Name: "externalroute", Kinds: []Kind{KindExtRoute}, CreateLabel: "Create external route", EditLabel: "Edit external route", NetworkFamily: true},
-	{Name: "networkpolicy", Kinds: []Kind{KindNetpol}, CreateLabel: "Create project rule", EditLabel: "Edit project rule", NetworkFamily: true},
-	{Name: "adminnetworkpolicy", Kinds: []Kind{KindANP}, CreateLabel: "Create cluster rule", EditLabel: "Edit cluster rule", NetworkFamily: true},
-	{Name: "baselineadminnetworkpolicy", Kinds: []Kind{KindBANP}, CreateLabel: "Create baseline cluster rule", EditLabel: "Edit baseline cluster rule", NetworkFamily: true},
+	{Name: "vm", Kinds: []Kind{KindVM}, CreateLabel: "Adopt VM from cluster", EditLabel: "Edit VM", Noun: "a VM"},
+	{Name: "network", Kinds: []Kind{KindUDN, KindCUDN, KindNAD}, CreateLabel: "Create network", EditLabel: "Edit network", Noun: "a network", NetworkFamily: true},
+	{Name: "uplink", Kinds: []Kind{KindNNCP}, CreateLabel: "Create uplink", EditLabel: "Edit uplink", Noun: "an uplink", NetworkFamily: true},
+	{Name: "namespace", Kinds: []Kind{KindNS}, CreateLabel: "Create namespace", EditLabel: "Edit namespace", Noun: "a namespace"},
+	{Name: "rolebinding", Kinds: []Kind{KindRB}, CreateLabel: "Grant tenant access", EditLabel: "Edit tenant access", Noun: "tenant access"},
+	{Name: "egressfirewall", Kinds: []Kind{KindEgressFW}, CreateLabel: "Create outbound rules", EditLabel: "Edit outbound rules", Noun: "outbound rules", NetworkFamily: true},
+	{Name: "egressip", Kinds: []Kind{KindEgressIP}, CreateLabel: "Create fixed outbound IP", EditLabel: "Edit fixed outbound IP", Noun: "a fixed outbound IP", NetworkFamily: true},
+	{Name: "externalroute", Kinds: []Kind{KindExtRoute}, CreateLabel: "Create external route", EditLabel: "Edit external route", Noun: "an external route", NetworkFamily: true},
+	{Name: "networkpolicy", Kinds: []Kind{KindNetpol}, CreateLabel: "Create project rule", EditLabel: "Edit project rule", Noun: "a project rule", NetworkFamily: true},
+	{Name: "adminnetworkpolicy", Kinds: []Kind{KindANP}, CreateLabel: "Create cluster rule", EditLabel: "Edit cluster rule", Noun: "a cluster rule", NetworkFamily: true},
+	{Name: "baselineadminnetworkpolicy", Kinds: []Kind{KindBANP}, CreateLabel: "Create baseline cluster rule", EditLabel: "Edit baseline cluster rule", Noun: "the baseline cluster rule", NetworkFamily: true},
 	// The rebalancing file set: the descheduler operator install, its CR and the PSI
 	// kernel-arg MachineConfig. Its Namespace document is the namespace resource.
-	{Name: "drs", Kinds: []Kind{KindOpGroup, KindSub, KindDesched, KindMachCfg}, CreateLabel: "Configure rebalancing", EditLabel: "Edit rebalancing"},
-	{Name: "template", Kinds: []Kind{KindTemplate}, CreateLabel: "Save as template", EditLabel: "Edit template"},
+	{Name: "drs", Kinds: []Kind{KindOpGroup, KindSub, KindDesched, KindMachCfg}, CreateLabel: "Configure rebalancing", EditLabel: "Edit rebalancing", Noun: "rebalancing"},
+	{Name: "template", Kinds: []Kind{KindTemplate}, CreateLabel: "Save as template", EditLabel: "Edit template", Noun: "a template"},
+}
+
+// ResourceNoun names a draft resource in a message: the persisted name is
+// not a word a user reads. An unknown name is "this kind".
+func ResourceNoun(name string) string {
+	if r, ok := LookupResource(name); ok && r.Noun != "" {
+		return r.Noun
+	}
+	return "this kind"
 }
 
 // Resources is the whole table, read-only.

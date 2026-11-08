@@ -2,6 +2,8 @@ package api
 
 import (
 	"context"
+	"net/http"
+	"strings"
 	"testing"
 
 	"k8s.io/client-go/kubernetes/fake"
@@ -53,5 +55,25 @@ func TestSourceFilesPlatformObject(t *testing.T) {
 	}
 	if got := lookup(false); got != "" {
 		t.Fatalf("sourceFile without the platform tier = %q, want none", got)
+	}
+}
+
+// A refused object route names the kind in the UI's words, never by the name
+// drafts persist it under.
+func TestObjectRouteRefusalsSpeakTheUIsWords(t *testing.T) {
+	s := tenantServer(t, &reachedDraft{}, []string{"web"}, []string{"web"})
+	for path, want := range map[string]string{
+		"/api/objects/drs/cluster/kubedescheduler": "object routes do not take rebalancing",
+		"/api/objects/networkpolicy/cluster/p1":    "cluster scope does not hold a project rule",
+		"/api/objects/uplink/web/u1":               "a namespace does not hold an uplink",
+	} {
+		rec := serve(s, http.MethodDelete, path, "", editorToken)
+		body := rec.Body.String()
+		if rec.Code != http.StatusBadRequest || !strings.Contains(body, want) {
+			t.Errorf("%s: %d %q, want 400 %q", path, rec.Code, body, want)
+		}
+		if strings.Contains(body, "drs") || strings.Contains(body, "networkpolicy") {
+			t.Errorf("%s: %q echoes a persisted resource name", path, body)
+		}
 	}
 }

@@ -15,6 +15,9 @@ func TestKindTableRoundTrips(t *testing.T) {
 		if r.CreateLabel == "" || r.EditLabel == "" {
 			t.Errorf("resource %q: missing a Changes-pane label", r.Name)
 		}
+		if r.Noun == "" || ResourceNoun(r.Name) != r.Noun {
+			t.Errorf("resource %q: missing the noun a message names it by", r.Name)
+		}
 		got, ok := LookupResource(r.Name)
 		if !ok || got.Name != r.Name {
 			t.Errorf("LookupResource(%q) = %+v, %v", r.Name, got, ok)

@@ -222,7 +222,7 @@ func (s *Snapshot) directionWalk(dir string, subject TraceWorkload, peer peerTar
 					continue
 				}
 				if !baseline && c.r.action == "Pass" {
-					w.addStep(&c.pol.view, &rv, stage, c.r.action, "Delegates this flow to the project tier.", false, true)
+					w.addStep(&c.pol.view, &rv, stage, c.r.action, "Delegates this flow to the project rules.", false, true)
 					return nil
 				}
 				w.addStep(&c.pol.view, &rv, stage, c.r.action, "", false, true)
@@ -332,7 +332,7 @@ func (s *Snapshot) gatewayWalk(ns, dstIP, protocol string, port int) walkResult 
 		}
 	}
 	if fw != nil {
-		w.addStep(&fw.view, nil, "gateway", "Allow", "No gateway rule matches - the gateway defaults to allow.", false, true)
+		w.addStep(&fw.view, nil, "gateway", "Allow", "No outbound rule matches - outbound traffic is allowed by default.", false, true)
 	}
 	return w.decide("Allow")
 }
