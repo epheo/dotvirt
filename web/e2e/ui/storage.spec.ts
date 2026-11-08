@@ -362,7 +362,7 @@ test('a download the cluster cannot reach is deleted, then added again as typed'
 	await dialog.getByRole('button', { name: 'Confirm delete' }).click();
 
 	await expect(
-		dialog.getByText(/Deleted\s*noble\s*and its disk\. Fix what was wrong/),
+		dialog.getByText(/Deleted\s*noble\s*and its disk\.\s*Fix what was wrong/),
 	).toBeVisible();
 	await expect(dialog.locator('#img-address')).toHaveValue('https://unreachable.example/noble.img');
 	await expect(dialog.getByRole('textbox', { name: 'Name', exact: true })).toHaveValue('noble');

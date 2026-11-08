@@ -131,13 +131,13 @@ func (s *Server) handleDeleteBootImage(w http.ResponseWriter, r *http.Request) {
 	if !s.gate(w, r, sc, bootImageDeleteAction(ns)) {
 		return
 	}
-	err := sc.cluster.DeleteBootImage(r.Context(), ns, name)
+	note, err := sc.cluster.DeleteBootImage(r.Context(), ns, name)
 	s.options.Delete("all")
 	if err != nil {
 		fail(w, err)
 		return
 	}
-	w.WriteHeader(http.StatusNoContent)
+	writeJSON(w, model.BootImageRemoval{Note: note})
 }
 
 // handleUploadStatus reports the upload DataVolume's phase + import progress.

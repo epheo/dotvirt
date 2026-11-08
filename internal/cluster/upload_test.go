@@ -123,7 +123,7 @@ func TestOptionsMarkRemovable(t *testing.T) {
 	ctx := context.Background()
 	var objs []runtime.Object
 	for _, name := range []string{"own", "cron", "elsewhere"} {
-		objs = append(objs, bootImageObjects(name, false, func(ds map[string]any) {
+		objs = append(objs, bootImageObjects(name, false, func(ds, _ map[string]any) {
 			switch name {
 			case "cron":
 				ds["metadata"].(map[string]any)["labels"] = map[string]any{"cdi.kubevirt.io/dataImportCron": "x"}
@@ -192,9 +192,10 @@ func TestUploadStatusReadsTheImporterError(t *testing.T) {
 }
 
 // bootImageObjects are what an import leaves: a DataSource over the claim
-// of its name, the DataVolume and the claim. ready marks the DataSource
-// Ready; edit changes it before it is stored.
-func bootImageObjects(name string, ready bool, edit func(ds map[string]any)) []runtime.Object {
+// of its name, the DataVolume filling it, and the claim. ready marks the
+// DataSource Ready; edit changes the DataSource and the DataVolume before
+// they are stored.
+func bootImageObjects(name string, ready bool, edit func(ds, dv map[string]any)) []runtime.Object {
 	status := "False"
 	if ready {
 		status = "True"
@@ -205,21 +206,25 @@ func bootImageObjects(name string, ready bool, edit func(ds map[string]any)) []r
 		"spec":     map[string]any{"source": map[string]any{"pvc": map[string]any{"name": name, "namespace": "alpha"}}},
 		"status":   map[string]any{"conditions": []any{map[string]any{"type": "Ready", "status": status}}},
 	}
+	dv := map[string]any{
+		"apiVersion": "cdi.kubevirt.io/v1beta1", "kind": "DataVolume",
+		"metadata": map[string]any{"name": name, "namespace": "alpha", "uid": "dv-uid"},
+		"spec":     map[string]any{"source": map[string]any{"http": map[string]any{"url": "https://images.example/" + name + ".img"}}},
+	}
 	if edit != nil {
-		edit(ds)
+		edit(ds, dv)
 	}
 	return []runtime.Object{
 		&unstructured.Unstructured{Object: ds},
-		&unstructured.Unstructured{Object: map[string]any{
-			"apiVersion": "cdi.kubevirt.io/v1beta1", "kind": "DataVolume",
-			"metadata": map[string]any{"name": name, "namespace": "alpha"},
-		}},
+		&unstructured.Unstructured{Object: dv},
 		&unstructured.Unstructured{Object: map[string]any{
 			"apiVersion": "v1", "kind": "PersistentVolumeClaim",
 			"metadata": map[string]any{"name": name, "namespace": "alpha"},
 		}},
 	}
 }
+
+var gvrPVC = schema.GroupVersionResource{Version: "v1", Resource: "persistentvolumeclaims"}
 
 // deletes are the resources dyn was asked to delete, in order.
 func deletes(dyn *dynamicfake.FakeDynamicClient) []string {
@@ -233,78 +238,102 @@ func deletes(dyn *dynamicfake.FakeDynamicClient) []string {
 }
 
 // An unfinished boot image goes in order: the DataSource, so the catalog
-// drops it, then the DataVolume, then the claim. One already gone is no
-// failure, and the DataSource delete is pinned to the version read, so one
-// that turned Ready since is not removed.
+// drops it, then the DataVolume, whose claim CDI collects with it; the
+// claim itself is never deleted. The DataSource delete is pinned to the
+// version read, so one that turned Ready since stays, and the DataVolume
+// delete to the one found unowned.
 func TestDeleteBootImage(t *testing.T) {
 	ctx := context.Background()
 	objs := bootImageObjects("noble", false, nil)
 	dyn := dynamicfake.NewSimpleDynamicClient(runtime.NewScheme(), objs...)
-	if err := NewClient(nil, nil, dyn).DeleteBootImage(ctx, "alpha", "noble"); err != nil {
-		t.Fatal(err)
+	note, err := NewClient(nil, nil, dyn).DeleteBootImage(ctx, "alpha", "noble")
+	if err != nil || note != "" {
+		t.Fatalf("got %q, %v", note, err)
 	}
-	if got, want := deletes(dyn), []string{"datasources", "datavolumes", "persistentvolumeclaims"}; !slices.Equal(got, want) {
+	if got, want := deletes(dyn), []string{"datasources", "datavolumes"}; !slices.Equal(got, want) {
 		t.Errorf("deleted %v, want %v", got, want)
 	}
 	for _, a := range dyn.Actions() {
-		if d, ok := a.(k8stesting.DeleteAction); ok && a.GetResource().Resource == "datasources" {
-			if p := d.GetDeleteOptions().Preconditions; p == nil || p.ResourceVersion == nil || *p.ResourceVersion != "7" {
+		d, ok := a.(k8stesting.DeleteAction)
+		if !ok {
+			continue
+		}
+		p := d.GetDeleteOptions().Preconditions
+		switch a.GetResource().Resource {
+		case "datasources":
+			if p == nil || p.ResourceVersion == nil || *p.ResourceVersion != "7" {
 				t.Errorf("datasource delete preconditions = %+v, want the version read", p)
+			}
+		case "datavolumes":
+			if p == nil || p.UID == nil || *p.UID != "dv-uid" {
+				t.Errorf("datavolume delete preconditions = %+v, want the uid read", p)
 			}
 		}
 	}
-	for _, gvr := range []schema.GroupVersionResource{gvrDataSources, gvrDataVolumes, gvrPVCs} {
-		if _, err := dyn.Resource(gvr).Namespace("alpha").Get(ctx, "noble", metav1.GetOptions{}); !apierrors.IsNotFound(err) {
-			t.Errorf("%s still there: %v", gvr.Resource, err)
-		}
-	}
 
-	// The DataVolume already gone: the claim it left still goes.
+	// The DataVolume already gone: the DataSource goes, a claim of its name
+	// stays, and the note says so.
 	dyn = dynamicfake.NewSimpleDynamicClient(runtime.NewScheme(), objs[0], objs[2])
-	if err := NewClient(nil, nil, dyn).DeleteBootImage(ctx, "alpha", "noble"); err != nil {
-		t.Fatal(err)
+	note, err = NewClient(nil, nil, dyn).DeleteBootImage(ctx, "alpha", "noble")
+	if err != nil || !strings.Contains(note, "a claim named noble, if any, was left alone") {
+		t.Fatalf("got %q, %v; want the claim left alone, said", note, err)
 	}
-	if _, err := dyn.Resource(gvrPVCs).Namespace("alpha").Get(ctx, "noble", metav1.GetOptions{}); !apierrors.IsNotFound(err) {
-		t.Errorf("claim still there: %v", err)
+	if got := deletes(dyn); !slices.Equal(got, []string{"datasources"}) {
+		t.Errorf("deleted %v, want the data source alone", got)
+	}
+	if _, err := dyn.Resource(gvrPVC).Namespace("alpha").Get(ctx, "noble", metav1.GetOptions{}); err != nil {
+		t.Errorf("claim gone: %v", err)
 	}
 
-	// Neither left: NotFound on both is no failure.
-	dyn = dynamicfake.NewSimpleDynamicClient(runtime.NewScheme(), objs[0])
-	if err := NewClient(nil, nil, dyn).DeleteBootImage(ctx, "alpha", "noble"); err != nil {
-		t.Fatal(err)
-	}
-	if got := deletes(dyn); len(got) != 3 {
-		t.Errorf("deleted %v, want all three asked", got)
+	// Gone between the read and the delete: no failure.
+	dyn = dynamicfake.NewSimpleDynamicClient(runtime.NewScheme(), objs...)
+	dyn.PrependReactor("delete", "*", func(a k8stesting.Action) (bool, runtime.Object, error) {
+		return true, nil, apierrors.NewNotFound(a.GetResource().GroupResource(), "noble")
+	})
+	if _, err := NewClient(nil, nil, dyn).DeleteBootImage(ctx, "alpha", "noble"); err != nil {
+		t.Errorf("not found on delete: %v", err)
 	}
 }
 
 // Anything but the unfinished shape dotvirt makes is refused before the
 // first delete: a ready boot image, one over another claim or another
-// namespace's, one a DataImportCron keeps, one that does not exist.
+// namespace's, one a DataImportCron keeps, a disk a VM owns, a disk cloned
+// rather than uploaded or downloaded, one that does not exist.
 func TestDeleteBootImageRefuses(t *testing.T) {
 	ctx := context.Background()
-	pvc := func(name, ns string) func(map[string]any) {
-		return func(ds map[string]any) {
+	pvc := func(name, ns string) func(ds, dv map[string]any) {
+		return func(ds, _ map[string]any) {
 			ds["spec"] = map[string]any{"source": map[string]any{"pvc": map[string]any{"name": name, "namespace": ns}}}
 		}
 	}
 	for name, c := range map[string]struct {
 		ready bool
-		edit  func(map[string]any)
+		edit  func(ds, dv map[string]any)
 		want  string
 	}{
 		"ready":           {ready: true, want: "noble is ready"},
 		"other claim":     {edit: pvc("fedora", "alpha"), want: "points at another disk"},
 		"other namespace": {edit: pvc("noble", "os-images"), want: "points at another disk"},
-		"snapshot source": {edit: func(ds map[string]any) {
+		"snapshot source": {edit: func(ds, _ map[string]any) {
 			ds["spec"] = map[string]any{"source": map[string]any{"snapshot": map[string]any{"name": "noble", "namespace": "alpha"}}}
 		}, want: "points at another disk"},
-		"cron": {edit: func(ds map[string]any) {
+		"cron": {edit: func(ds, _ map[string]any) {
 			ds["metadata"].(map[string]any)["labels"] = map[string]any{"cdi.kubevirt.io/dataImportCron": "noble-cron"}
 		}, want: "a scheduled import keeps it"},
+		"owned disk": {edit: func(_, dv map[string]any) {
+			dv["metadata"].(map[string]any)["ownerReferences"] = []any{map[string]any{
+				"apiVersion": "kubevirt.io/v1", "kind": "VirtualMachine", "name": "web-1", "uid": "vm-uid",
+			}}
+		}, want: "its disk belongs to VirtualMachine web-1"},
+		"cloned disk": {edit: func(_, dv map[string]any) {
+			dv["spec"] = map[string]any{"source": map[string]any{"pvc": map[string]any{"name": "golden", "namespace": "alpha"}}}
+		}, want: "its disk is not an upload or a download"},
+		"no source": {edit: func(_, dv map[string]any) {
+			dv["spec"] = map[string]any{"sourceRef": map[string]any{"kind": "DataSource", "name": "fedora"}}
+		}, want: "its disk is not an upload or a download"},
 	} {
 		dyn := dynamicfake.NewSimpleDynamicClient(runtime.NewScheme(), bootImageObjects("noble", c.ready, c.edit)...)
-		err := NewClient(nil, nil, dyn).DeleteBootImage(ctx, "alpha", "noble")
+		_, err := NewClient(nil, nil, dyn).DeleteBootImage(ctx, "alpha", "noble")
 		if !errors.Is(err, model.ErrConflict) || !strings.Contains(err.Error(), c.want) || !strings.Contains(err.Error(), "nothing was removed") {
 			t.Errorf("%s: %v, want a conflict saying %q", name, err, c.want)
 		}
@@ -313,25 +342,24 @@ func TestDeleteBootImageRefuses(t *testing.T) {
 		}
 	}
 	dyn := dynamicfake.NewSimpleDynamicClient(runtime.NewScheme())
-	if err := NewClient(nil, nil, dyn).DeleteBootImage(ctx, "alpha", "noble"); !apierrors.IsNotFound(err) {
+	if _, err := NewClient(nil, nil, dyn).DeleteBootImage(ctx, "alpha", "noble"); !apierrors.IsNotFound(err) {
 		t.Errorf("missing: %v, want not found", err)
 	}
 }
 
-// A delete that fails past the first says what went and what stays, and
-// keeps the apiserver's status for the route to answer with.
+// A delete that fails says what went and what stays, and keeps the
+// apiserver's status for the route to answer with.
 func TestDeleteBootImagePartial(t *testing.T) {
 	ctx := context.Background()
 	for resource, want := range map[string]string{
-		"datasources":            "nothing was removed: ",
-		"datavolumes":            "removed the boot image noble; its data volume and its claim remain: ",
-		"persistentvolumeclaims": "removed the boot image noble and its data volume; its claim remains: ",
+		"datasources": "nothing was removed: ",
+		"datavolumes": "removed the boot image noble; its data volume remains: ",
 	} {
 		dyn := dynamicfake.NewSimpleDynamicClient(runtime.NewScheme(), bootImageObjects("noble", false, nil)...)
 		dyn.PrependReactor("delete", resource, func(a k8stesting.Action) (bool, runtime.Object, error) {
 			return true, nil, apierrors.NewForbidden(a.GetResource().GroupResource(), "noble", errors.New("no"))
 		})
-		err := NewClient(nil, nil, dyn).DeleteBootImage(ctx, "alpha", "noble")
+		_, err := NewClient(nil, nil, dyn).DeleteBootImage(ctx, "alpha", "noble")
 		if !apierrors.IsForbidden(err) || !strings.HasPrefix(err.Error(), want) {
 			t.Errorf("%s fails: %v, want %q and forbidden", resource, err, want)
 		}

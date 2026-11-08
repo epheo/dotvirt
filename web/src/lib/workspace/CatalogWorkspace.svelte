@@ -230,7 +230,7 @@
 						size="sm"
 						aria-label="Create VM from {r.title}"
 						disabled={!r.image.ready}
-						title={r.image.ready ? '' : 'The image is still importing'}
+						title={r.image.ready ? '' : 'The image is not ready yet'}
 						onclick={(e) => {
 							e.stopPropagation();
 							fromImage(r);
@@ -383,7 +383,7 @@
 						createOff={open.template?.error
 							? 'It does not parse. Fix its file first.'
 							: open.image && !open.image.ready
-								? 'The image is still importing.'
+								? 'The image is not ready yet.'
 								: ''}
 						disks={disks
 							? {

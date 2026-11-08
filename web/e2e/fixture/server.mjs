@@ -1043,8 +1043,7 @@ async function handleStorage(req, res, url) {
 		s.options = { ...s.options, osImages: s.options.osImages.filter((i) => i !== img) };
 		state.uploads.delete(key);
 		if (s.imageStatus?.[key]) s.imageStatus = { ...s.imageStatus, [key]: undefined };
-		res.writeHead(204);
-		return res.end();
+		return sendJSON(res, 200, {});
 	}
 
 	m = path.match(/^\/api\/uploads\/([^/]+)\/([^/]+)(\/token)?$/);

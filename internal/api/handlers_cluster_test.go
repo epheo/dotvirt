@@ -426,9 +426,9 @@ func TestImportRefusalMakesNothing(t *testing.T) {
 	}
 }
 
-// unfinishedImage answers the DataSource noble in team-a-dev, in the shape
-// dotvirt makes, and records each delete of it, its DataVolume and its claim
-// in order; failing names a resource path whose delete is forbidden.
+// unfinishedImage answers the DataSource noble in team-a-dev and its
+// DataVolume, in the shape dotvirt makes, and records each delete of them in
+// order; failing names a resource path whose delete is forbidden.
 func unfinishedImage(fc *fakeCluster, ready bool, failing string) *[]string {
 	const cdi = "/apis/cdi.kubevirt.io/v1beta1/namespaces/team-a-dev/"
 	status := "False"
@@ -443,8 +443,15 @@ func unfinishedImage(fc *fakeCluster, ready bool, failing string) *[]string {
 			"status":   map[string]any{"conditions": []any{map[string]any{"type": "Ready", "status": status}}},
 		})
 	})
+	fc.on(http.MethodGet, cdi+"datavolumes/noble", func(w http.ResponseWriter, _ *http.Request) {
+		writeObj(w, map[string]any{
+			"apiVersion": "cdi.kubevirt.io/v1beta1", "kind": "DataVolume",
+			"metadata": map[string]any{"name": "noble", "namespace": "team-a-dev", "uid": "dv-uid"},
+			"spec":     map[string]any{"source": map[string]any{"http": map[string]any{"url": "https://images.example/noble.img"}}},
+		})
+	})
 	var deleted []string
-	for _, res := range []string{cdi + "datasources", cdi + "datavolumes", "/api/v1/namespaces/team-a-dev/persistentvolumeclaims"} {
+	for _, res := range []string{cdi + "datasources", cdi + "datavolumes"} {
 		fc.on(http.MethodDelete, res+"/noble", func(w http.ResponseWriter, _ *http.Request) {
 			if res == failing {
 				writeStatus(w, http.StatusForbidden, metav1.StatusReasonForbidden)
@@ -457,8 +464,8 @@ func unfinishedImage(fc *fakeCluster, ready bool, failing string) *[]string {
 	return &deleted
 }
 
-// A refused delete removes nothing: the three rights are asked whole before
-// the first delete, and the capability reads false without any one.
+// A refused delete removes nothing: both rights are asked whole before the
+// first delete, and the capability reads false without either.
 func TestBootImageDeleteRefusalDeletesNothing(t *testing.T) {
 	g := newGateRig(t)
 	deleted := unfinishedImage(g.fc, false, "")
@@ -476,8 +483,8 @@ func TestBootImageDeleteRefusalDeletesNothing(t *testing.T) {
 	if _, nc := g.caps(tok, "team-a-dev"); !nc.BootImageDelete {
 		t.Error("with the delete rights: bootImageDelete false")
 	}
-	wantStatus(t, do(g.s, tok, http.MethodDelete, "/api/images/team-a-dev/noble", ""), http.StatusNoContent)
-	if want := []string{"datasources", "datavolumes", "persistentvolumeclaims"}; !reflect.DeepEqual(*deleted, want) {
+	wantStatus(t, do(g.s, tok, http.MethodDelete, "/api/images/team-a-dev/noble", ""), http.StatusOK)
+	if want := []string{"datasources", "datavolumes"}; !reflect.DeepEqual(*deleted, want) {
 		t.Errorf("deleted %v, want %v", *deleted, want)
 	}
 }
@@ -501,9 +508,10 @@ func TestBootImageDelete(t *testing.T) {
 	deleted = unfinishedImage(fc, false, "")
 	s = fc.server(nil, Config{})
 	s.options.Put("all", model.Options{OSImages: []model.OSImage{{Name: "noble", Namespace: "team-a-dev"}}})
-	wantStatus(t, do(s, adminToken, http.MethodDelete, "/api/images/team-a-dev/noble", ""), http.StatusNoContent)
-	if len(*deleted) != 3 {
-		t.Errorf("deleted %v, want all three", *deleted)
+	rec = do(s, adminToken, http.MethodDelete, "/api/images/team-a-dev/noble", "")
+	wantStatus(t, rec, http.StatusOK)
+	if got := decodeBody[model.BootImageRemoval](t, rec); got.Note != "" || len(*deleted) != 2 {
+		t.Errorf("removal %+v, deleted %v; want both, no note", got, *deleted)
 	}
 	if _, ok := s.options.Get("all"); ok {
 		t.Error("the catalog cache still holds the deleted boot image")
@@ -514,7 +522,7 @@ func TestBootImageDelete(t *testing.T) {
 	s = fc.server(nil, Config{})
 	rec = do(s, adminToken, http.MethodDelete, "/api/images/team-a-dev/noble", "")
 	wantStatus(t, rec, http.StatusForbidden)
-	if !strings.Contains(rec.Body.String(), "removed the boot image noble; its data volume and its claim remain") {
+	if !strings.Contains(rec.Body.String(), "removed the boot image noble; its data volume remains") {
 		t.Errorf("partial: %q", rec.Body.String())
 	}
 }

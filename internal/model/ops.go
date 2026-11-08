@@ -79,6 +79,13 @@ type UploadStatus struct {
 	Error    string `json:"error,omitempty"`
 }
 
+// BootImageRemoval is what DELETE /api/images did. Note says what it left
+// alone: a claim of the boot image's name, when the DataVolume that would
+// vouch for it was already gone.
+type BootImageRemoval struct {
+	Note string `json:"note,omitempty"`
+}
+
 // UploadToken is the bearer + endpoint the browser POSTs the image to, streaming
 // directly to cdi-uploadproxy (which ships open CORS).
 type UploadToken struct {

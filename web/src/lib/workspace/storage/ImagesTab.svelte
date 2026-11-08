@@ -70,6 +70,10 @@
 		{ reset: true },
 	);
 	const sentence = (t: string) => (/[.!?]$/.test(t) ? t : `${t}.`);
+	// VMs git declares from it: never cloned, they wait for it to be ready.
+	const waiting = $derived(
+		pending ? new Set(rows.filter((r) => r.image === pending).map((r) => r.vmKey)).size : 0,
+	);
 	const progress = $derived(
 		pending && status.data ? imageProgress(status.data, !!open?.catalog?.import) : null,
 	);
@@ -90,9 +94,13 @@
 			return;
 		}
 		const name = shortName(u.image);
-		if (!(await removal.run(() => api.deleteImage(nsOf(u.image), name)))) return;
+		let note = '';
+		const del = async () => {
+			note = (await api.deleteImage(nsOf(u.image), name)).note ?? '';
+		};
+		if (!(await removal.run(del))) return;
 		armed = '';
-		ui.showToast(`Boot image ${name} deleted.`, { kind: 'success' });
+		ui.showToast(`Boot image ${name} deleted.${note ? ` ${note}` : ''}`, { kind: 'success' });
 		go({ image: undefined }, { replace: true });
 		await inventory.loadOptions(true);
 	}
@@ -279,7 +287,7 @@
 						<Consequence tone="danger" size="sm"
 							>{imageDeleteConsequence(
 								shortName(open.image),
-								open.disks,
+								waiting,
 								moving ? (open.catalog.import ? 'download' : 'import') : '',
 							)}</Consequence
 						>

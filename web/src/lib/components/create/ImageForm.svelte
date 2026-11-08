@@ -103,6 +103,7 @@
 		return { namespace: image.slice(0, at), name: image.slice(at + 1) };
 	});
 	let gone = $state(''); // a boot image deleted here, so the form offers to add it again
+	let goneNote = $state(''); // what that delete left alone, said by the server
 	// svelte-ignore state_referenced_locally
 	let address = $state(given?.source ?? '');
 	// svelte-ignore state_referenced_locally
@@ -303,6 +304,7 @@
 		importError = '';
 		image = '';
 		gone = '';
+		goneNote = '';
 		armed = false;
 		watch = new AbortController();
 		try {
@@ -335,10 +337,15 @@
 			return;
 		}
 		const { namespace: ns, name: n } = made;
-		if (!(await removal.run(() => api.deleteImage(ns, n)))) return;
+		let note = '';
+		const del = async () => {
+			note = (await api.deleteImage(ns, n)).note ?? '';
+		};
+		if (!(await removal.run(del))) return;
 		watch.abort();
 		armed = false;
 		gone = n;
+		goneNote = note;
 		image = '';
 		error = '';
 		importError = '';
@@ -412,9 +419,10 @@
 				</section>
 			{:else if gone}
 				<p class="rounded-lg border border-ok/40 bg-ok-soft px-3.5 py-2.5 text-[13px] text-ok-ink">
-					Deleted <span class="font-mono font-medium">{gone}</span> and its disk. {downloads
-						? 'Fix what was wrong and add it again.'
-						: 'Upload it again.'}
+					Deleted <span class="font-mono font-medium">{gone}</span>{goneNote
+						? `. ${goneNote}`
+						: ' and its disk.'}
+					{downloads ? 'Fix what was wrong and add it again.' : 'Upload it again.'}
 				</p>
 			{/if}
 			{#if choices.length > 1}

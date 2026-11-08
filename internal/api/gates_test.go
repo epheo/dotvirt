@@ -271,8 +271,8 @@ func gateCases() []gateCase {
 		{name: "boot image import", call: route(http.MethodPost, "/api/imports", `{"namespace":"team-a-dev","name":"img","size":"1Gi","kind":"registry","source":"quay.io/x/img:1"}`),
 			routeNeeds: importGrants, needs: importGrants,
 			cap: nsCap(func(n model.NamespaceCaps) bool { return n.BootImageImport })},
-		// Removing an unfinished boot image: its DataSource, DataVolume and
-		// claim, gated whole before the first delete.
+		// Removing an unfinished boot image: its DataSource and DataVolume,
+		// gated whole before the first delete.
 		{name: "boot image delete", call: route(http.MethodDelete, "/api/images/team-a-dev/img", ""),
 			routeNeeds: deleteGrants, needs: deleteGrants,
 			cap: nsCap(func(n model.NamespaceCaps) bool { return n.BootImageDelete })},
@@ -316,7 +316,6 @@ var importGrants = []grant{bootImageGrants[0], bootImageGrants[2]}
 var deleteGrants = []grant{
 	{verb: verbDelete, group: "cdi.kubevirt.io", resource: "datasources", ns: "team-a-dev"},
 	{verb: verbDelete, group: "cdi.kubevirt.io", resource: "datavolumes", ns: "team-a-dev"},
-	{verb: verbDelete, resource: "persistentvolumeclaims", ns: "team-a-dev"},
 }
 
 func without(gs []grant, i int) []grant {

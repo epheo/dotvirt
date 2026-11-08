@@ -767,7 +767,7 @@ describe('an unfinished boot image', () => {
 		});
 	});
 
-	it('says what a delete takes, and that disks made from it stay', () => {
+	it('says what a delete takes, and the VMs in git that wait on it', () => {
 		expect(imageDeleteConsequence('noble', 0)).toBe(
 			'Removes noble and its disk. It never finished, so no VM was made from it.',
 		);
@@ -775,10 +775,10 @@ describe('an unfinished boot image', () => {
 			'Stops the download and removes noble and its disk. It has not finished, so no VM was made from it.',
 		);
 		expect(imageDeleteConsequence('noble', 1)).toBe(
-			'Removes noble and its disk. The disk made from it stays.',
+			'Removes noble and its disk. 1 VM in git waits on it; its disk stays pending until a boot image named noble is ready.',
 		);
 		expect(imageDeleteConsequence('noble', 1200)).toBe(
-			'Removes noble and its disk. The 1,200 disks made from it stay.',
+			'Removes noble and its disk. 1,200 VMs in git wait on it; their disks stay pending until a boot image named noble is ready.',
 		);
 	});
 });

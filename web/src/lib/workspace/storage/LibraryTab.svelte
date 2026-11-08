@@ -330,7 +330,7 @@
 										? 'Not in the catalog: the image is gone or not readable here'
 										: u.catalog.ready
 											? ''
-											: 'The image is still importing'}
+											: 'The image is not ready yet'}
 									onclick={() => createVM(u.image)}>Create VM</Button
 								>
 								<Button

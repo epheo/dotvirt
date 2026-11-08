@@ -189,8 +189,6 @@ func (c *Client) CreateBootImage(ctx context.Context, namespace, name string, im
 	return err
 }
 
-var gvrPVCs = schema.GroupVersionResource{Version: "v1", Resource: "persistentvolumeclaims"}
-
 // dataImportCronLabel marks a DataSource a DataImportCron keeps: CDI points
 // it at each scheduled import and would bring a deleted one back.
 const dataImportCronLabel = "cdi.kubevirt.io/dataImportCron"
@@ -210,64 +208,75 @@ func notOwnShape(ds *unstructured.Unstructured) string {
 	return ""
 }
 
+// notOwnDisk says why dv is not a disk createDataVolume makes, "" when it
+// is: nothing owns it (a VM's disk has its VM as owner), and it is an
+// upload or a download.
+func notOwnDisk(dv *unstructured.Unstructured) string {
+	if refs := dv.GetOwnerReferences(); len(refs) > 0 {
+		return fmt.Sprintf("its disk belongs to %s %s", refs[0].Kind, refs[0].Name)
+	}
+	src, _, _ := unstructured.NestedMap(dv.Object, "spec", "source")
+	if len(src) == 1 {
+		for k := range src {
+			if k == "upload" || k == "http" || k == "registry" {
+				return ""
+			}
+		}
+	}
+	return "its disk is not an upload or a download"
+}
+
 // DeleteBootImage removes a boot image that never finished, under the
-// caller's token: the DataSource first, so the catalog stops listing it, then
-// the DataVolume of its name, then the claim, which CDI collects with the
-// DataVolume but which outlives one already gone. Only the shape
-// CreateBootImage makes, while not Ready, is removed; anything else is
-// refused before the first delete. NotFound is no failure; any other error
-// stops and says what was removed and what remains.
-func (c *Client) DeleteBootImage(ctx context.Context, namespace, name string) error {
+// caller's token: the DataSource first, so the catalog stops listing it,
+// then the DataVolume of its name, whose claim CDI owns to it and collects
+// with it. Only the shape CreateBootImage and createDataVolume make, while
+// not Ready, is removed; anything else, a VM's disk above all, is refused
+// before the first delete. With the DataVolume already gone nothing vouches
+// for a claim of that name, so it is left alone and the note says so.
+func (c *Client) DeleteBootImage(ctx context.Context, namespace, name string) (note string, err error) {
 	dyn, err := c.dynamic()
 	if err != nil {
-		return err
+		return "", err
 	}
 	ds, err := dyn.Resource(gvrDataSources).Namespace(namespace).Get(ctx, name, metav1.GetOptions{})
 	if err != nil {
-		return err
+		return "", err
 	}
 	if why := notOwnShape(ds); why != "" {
-		return fmt.Errorf("%w: %s is not a boot image dotvirt added (%s); nothing was removed", model.ErrConflict, name, why)
+		return "", fmt.Errorf("%w: %s is not a boot image dotvirt added (%s); nothing was removed", model.ErrConflict, name, why)
 	}
 	if dataSourceReady(ds) {
-		return fmt.Errorf("%w: %s is ready, and only an unfinished boot image is deleted here; nothing was removed", model.ErrConflict, name)
+		return "", fmt.Errorf("%w: %s is ready, and only an unfinished boot image is deleted here; nothing was removed", model.ErrConflict, name)
 	}
-	steps := []struct {
-		gvr  schema.GroupVersionResource
-		what string
-	}{
-		{gvrDataSources, "the boot image " + name},
-		{gvrDataVolumes, "its data volume"},
-		{gvrPVCs, "its claim"},
+	dv, err := dyn.Resource(gvrDataVolumes).Namespace(namespace).Get(ctx, name, metav1.GetOptions{})
+	switch {
+	case apierrors.IsNotFound(err):
+		dv = nil
+	case err != nil:
+		return "", fmt.Errorf("nothing was removed: %w", err)
+	default:
+		if why := notOwnDisk(dv); why != "" {
+			return "", fmt.Errorf("%w: %s is not a boot image dotvirt added (%s); nothing was removed", model.ErrConflict, name, why)
+		}
 	}
-	for i, st := range steps {
-		opts := metav1.DeleteOptions{}
-		if i == 0 {
-			// Ready between the read and the delete changes the version.
-			rv := ds.GetResourceVersion()
-			opts.Preconditions = &metav1.Preconditions{ResourceVersion: &rv}
-		}
-		err := dyn.Resource(st.gvr).Namespace(namespace).Delete(ctx, name, opts)
-		switch {
-		case err == nil, apierrors.IsNotFound(err):
-			continue
-		case i == 0 && apierrors.IsConflict(err):
-			return fmt.Errorf("%w: %s changed while it was being deleted; nothing was removed", model.ErrConflict, name)
-		case i == 0:
-			return fmt.Errorf("nothing was removed: %w", err)
-		}
-		var done, left []string
-		for _, s := range steps[:i] {
-			done = append(done, s.what)
-		}
-		for _, s := range steps[i:] {
-			left = append(left, s.what)
-		}
-		verb := "remains"
-		if len(left) > 1 {
-			verb = "remain"
-		}
-		return fmt.Errorf("removed %s; %s %s: %w", strings.Join(done, " and "), strings.Join(left, " and "), verb, err)
+
+	// Ready between the read and the delete changes the version.
+	rv := ds.GetResourceVersion()
+	err = dyn.Resource(gvrDataSources).Namespace(namespace).Delete(ctx, name, metav1.DeleteOptions{Preconditions: &metav1.Preconditions{ResourceVersion: &rv}})
+	switch {
+	case apierrors.IsConflict(err):
+		return "", fmt.Errorf("%w: %s changed while it was being deleted; nothing was removed", model.ErrConflict, name)
+	case err != nil && !apierrors.IsNotFound(err):
+		return "", fmt.Errorf("nothing was removed: %w", err)
 	}
-	return nil
+	if dv == nil {
+		return fmt.Sprintf("Its data volume was already gone, so a claim named %s, if any, was left alone.", name), nil
+	}
+	// The one read and found unowned, not another made since under its name.
+	uid := dv.GetUID()
+	err = dyn.Resource(gvrDataVolumes).Namespace(namespace).Delete(ctx, name, metav1.DeleteOptions{Preconditions: &metav1.Preconditions{UID: &uid}})
+	if err != nil && !apierrors.IsNotFound(err) {
+		return "", fmt.Errorf("removed the boot image %s; its data volume remains: %w", name, err)
+	}
+	return "", nil
 }

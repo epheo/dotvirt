@@ -112,11 +112,11 @@ test('catalog: a template or a boot image makes a VM; images link their disks', 
 	await sheet.getByRole('button', { name: 'Close' }).click();
 
 	await main.getByRole('link', { name: /^Boot images\s*5$/ }).click();
-	// An image still importing stays offered, disabled, with the reason.
+	// An image not ready yet stays offered, disabled, with the reason.
 	await expect(main.getByRole('button', { name: 'Create VM from debian-13' })).toBeDisabled();
 	await expect(main.getByRole('button', { name: 'Create VM from debian-13' })).toHaveAttribute(
 		'title',
-		'The image is still importing',
+		'The image is not ready yet',
 	);
 	const fedora = main.locator('tbody tr', { hasText: 'fedora-42' });
 	await fedora.getByRole('link', { name: /^\d+ disks?$/ }).click();

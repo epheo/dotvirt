@@ -123,7 +123,7 @@ export interface NamespaceCaps {
   bootImageImport: boolean;
   /**
    * BootImageDelete removes a boot image that never finished: its
-   * DataSource, DataVolume and claim.
+   * DataSource and DataVolume, whose claim goes with it.
    */
   bootImageDelete: boolean;
   /**
@@ -1107,6 +1107,14 @@ export interface UploadStatus {
   ready: boolean;
   progress?: string;
   error?: string;
+}
+/**
+ * BootImageRemoval is what DELETE /api/images did. Note says what it left
+ * alone: a claim of the boot image's name, when the DataVolume that would
+ * vouch for it was already gone.
+ */
+export interface BootImageRemoval {
+  note?: string;
 }
 /**
  * UploadToken is the bearer + endpoint the browser POSTs the image to, streaming
