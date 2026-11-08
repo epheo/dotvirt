@@ -59,7 +59,7 @@ func seedPlatformRepo(t *testing.T, files map[string]string) string {
 // newCoordinatorRig is a grant rig whose server stands over a real
 // coordinator, the server its authorizer, the platform repo seeded with a
 // committed DRS configuration, and project grants made to a sync account.
-// The forge has no repo and creates any asked for.
+// The forge has no repo and creates any asked for: team-a's is one it lost.
 func newCoordinatorRig(t *testing.T) *gateRig {
 	g := newGrantCluster(t)
 	forgeSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -71,6 +71,7 @@ func newCoordinatorRig(t *testing.T) *gateRig {
 		http.NotFound(w, r)
 	}))
 	t.Cleanup(forgeSrv.Close)
+	g.fc.namespaces[0].Annotations["dotvirt.io/repo"] = forgeSrv.URL + "/o/team-a.git"
 	platform := seedPlatformRepo(t, map[string]string{
 		"descheduler/kubedescheduler.yaml": "apiVersion: operator.openshift.io/v1\nkind: KubeDescheduler\nmetadata:\n  name: cluster\n  namespace: " + descheduler + "\nspec:\n  mode: Automatic\n",
 	})
@@ -146,6 +147,10 @@ func TestCapabilitiesEqualTheCoordinatorsGate(t *testing.T) {
 			pr(func(p model.ProjectCaps) bool { return p.GrantAdmin })},
 		{"release", "orphans-ns", http.MethodPost, "/api/projects/orphans/release", ``,
 			pr(func(p model.ProjectCaps) bool { return p.Release })},
+		{"recover repo", "team-a-dev", http.MethodPost, "/api/projects/team-a/adopt", ``,
+			pr(func(p model.ProjectCaps) bool { return p.Adopt })},
+		{"sync access", "team-a-dev", http.MethodPost, "/api/projects/team-a/sync-access", ``,
+			pr(func(p model.ProjectCaps) bool { return p.SyncAccess })},
 		// Reconfiguring: the committed KubeDescheduler is updated, the rest of
 		// the set created.
 		{"drs enable", "", http.MethodPost, "/api/drs", `{"mode":"Predictive"}`,
@@ -284,23 +289,55 @@ func TestNamespaceRightsInsideTheNamespaceCount(t *testing.T) {
 	}
 }
 
+// Granting a project's sync account lands RoleBindings alone: rights on
+// those in its namespaces, and none on any Namespace, grant it, and the
+// capability agrees.
+func TestSyncAccessNeedsOnlyItsGrants(t *testing.T) {
+	g := newCoordinatorRig(t)
+	rbac := "rbac.authorization.k8s.io"
+	in := func(verb, resource, name string) grant {
+		return grant{verb: verb, group: rbac, resource: resource, ns: "team-a-dev", name: name}
+	}
+	tok := g.token([]grant{
+		in(verbCreate, "rolebindings", ""),
+		in(verbBind, "clusterroles", "admin"),
+		in(verbBind, "clusterroles", tenancy.TenantEgressRole),
+	})
+	if _, nc := g.caps(tok, "team-a-dev"); !nc.Project.SyncAccess {
+		t.Errorf("sync access capability false with the grants' rights")
+	}
+	if rec := do(g.s, tok, http.MethodPost, "/api/projects/team-a/sync-access", ""); rec.Code != http.StatusOK {
+		t.Errorf("sync access = %d %q", rec.Code, rec.Body.String())
+	}
+}
+
 // A visible project with a namespace the caller cannot see is refused by the
-// tenancy routes without naming that namespace.
+// tenancy routes without naming that namespace, whatever rights they hold
+// there, and their capabilities agree.
 func TestTenancyRefusesAProjectWithAHiddenNamespace(t *testing.T) {
 	g := newCoordinatorRig(t)
 	g.fc.namespaces = append(g.fc.namespaces, corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "orphans-zsecret", Labels: map[string]string{"dotvirt.io/project": "orphans"}}})
 	c := g.s.draft.(*changeset.Coordinator)
 	g.s = g.fc.server(c, g.s.cfg)
 	c.UseAuthorizer(g.s)
-	tok := g.token([]grant{
-		{verb: verbGet, resource: "namespaces", name: "orphans-ns"},
-		{verb: verbUpdate, resource: "namespaces", name: "orphans-ns"},
-		{verb: verbPatch, resource: "namespaces", name: "orphans-ns"},
-	})
-	for _, path := range []string{"/api/projects/orphans/adopt", "/api/projects/orphans/release"} {
+	rbac := "rbac.authorization.k8s.io"
+	gs := []grant{
+		{verb: verbCreate, group: rbac, resource: "rolebindings"},
+		{verb: verbBind, group: rbac, resource: "clusterroles", name: "admin"},
+		{verb: verbBind, group: rbac, resource: "clusterroles", name: tenancy.TenantEgressRole},
+	}
+	for _, ns := range []string{"orphans-ns", "orphans-zsecret"} {
+		gs = append(gs, grant{verb: verbGet, resource: "namespaces", name: ns}, grant{verb: verbUpdate, resource: "namespaces", name: ns},
+			grant{verb: verbPatch, resource: "namespaces", name: ns})
+	}
+	tok := g.token(gs)
+	for _, path := range []string{"/api/projects/orphans/adopt", "/api/projects/orphans/release", "/api/projects/orphans/sync-access"} {
 		rec := do(g.s, tok, http.MethodPost, path, "")
 		if rec.Code != http.StatusForbidden || strings.Contains(rec.Body.String(), "zsecret") {
 			t.Errorf("%s = %d %q, want an unnamed 403", path, rec.Code, rec.Body.String())
 		}
+	}
+	if _, nc := g.caps(tok, "orphans-ns"); nc.Project.Adopt || nc.Project.GrantAdmin || nc.Project.Release || nc.Project.SyncAccess {
+		t.Errorf("capabilities %+v, want every tenancy-target action false", nc.Project)
 	}
 }

@@ -242,28 +242,38 @@ func (c *Coordinator) AdoptProject(id auth.Identity, commitProj, target project.
 // platform-repo PR a project created before sync impersonation needs before
 // Argo may sync it as that account. Each grant keeps every subject it names.
 func (c *Coordinator) StageSyncAccess(id auth.Identity, commitProj, target project.ProjectInfo) (model.DraftView, error) {
+	entries, err := c.syncAccessEntries(commitProj, target)
+	if err != nil {
+		return model.DraftView{}, err
+	}
+	return c.stage(id, commitProj, entries...)
+}
+
+// syncAccessEntries is what granting target's sync account stages into
+// commitProj.
+func (c *Coordinator) syncAccessEntries(commitProj, target project.ProjectInfo) ([]draft.Entry, error) {
 	if c.syncNS == "" {
-		return model.DraftView{}, fmt.Errorf("%w: no ArgoCD namespace is configured, so there is no sync account to grant", model.ErrInvalid)
+		return nil, fmt.Errorf("%w: no ArgoCD namespace is configured, so there is no sync account to grant", model.ErrInvalid)
 	}
 	if err := tenantName(target.Name); err != nil {
-		return model.DraftView{}, err
+		return nil, err
 	}
 	grants, err := c.grantSource(commitProj)
 	if err != nil {
-		return model.DraftView{}, err
+		return nil, err
 	}
 	var entries []draft.Entry
 	for _, ns := range target.Namespaces {
 		grant, err := grants.entries(ns, target.Name, nil, nil)
 		if err != nil {
-			return model.DraftView{}, err
+			return nil, err
 		}
 		entries = append(entries, grant...)
 	}
 	if len(entries) == 0 {
-		return model.DraftView{}, fmt.Errorf("%w: project %q already grants its sync account", model.ErrInvalid, target.Name)
+		return nil, fmt.Errorf("%w: project %q already grants its sync account", model.ErrInvalid, target.Name)
 	}
-	return c.stage(id, commitProj, entries...)
+	return entries, nil
 }
 
 // ReleaseDeclared stages the declarative half of a project release: every
