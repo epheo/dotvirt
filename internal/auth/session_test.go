@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"encoding/base64"
 	"errors"
+	"log"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -255,7 +256,7 @@ func TestEndedEntriesExpire(t *testing.T) {
 	if _, ok := s.ended["stale"]; !ok {
 		t.Fatal("swept again inside sweepEvery")
 	}
-	if !s.ended["fresh"].Equal(now) {
+	if !s.ended["fresh"].issued.Equal(now) {
 		t.Fatalf("fresh mark = %v, want its newest issue time", s.ended["fresh"])
 	}
 	if s.live("fresh", now) || !s.live("fresh", now.Add(time.Nanosecond)) {
@@ -287,6 +288,55 @@ func TestEndedRecordCap(t *testing.T) {
 	s.end("newest", now.Add(time.Second)) // a known token moves its mark without evicting
 	if len(s.ended) != 3 {
 		t.Errorf("updating a known token evicted: %d entries", len(s.ended))
+	}
+}
+
+// A legacy session's own logout holds until legacyUntil: a later v3 logout of
+// the same token adds its mark beside it, and that mark expiring does not
+// revive the legacy cookie.
+func TestLegacyLogoutOutlivesV3Mark(t *testing.T) {
+	withLegacyUntil(t, time.Now().Add(20*24*time.Hour))
+	rig := newSessionRig(t)
+	v2 := legacyCookie()
+	rig.do(http.MethodPost, "/api/logout", v2)
+	rig.do(http.MethodPost, "/api/logout", sealedAt(time.Now().Add(-sessionMaxAge+time.Minute)))
+	key := restfactory.TokenKey("good")
+	s := rig.a.sessions
+	s.mu.Lock()
+	m := s.ended[key]
+	m.issued = time.Now().Add(-sessionMaxAge - time.Second) // the v3 mark has expired
+	s.ended[key] = m
+	s.swept = time.Time{}
+	s.mu.Unlock()
+	s.end("other", time.Now()) // the sweep runs
+	if code := rig.do(http.MethodGet, "/api/inventory", v2); code != http.StatusUnauthorized {
+		t.Errorf("signed-out legacy cookie after a later v3 mark expired: %d, want 401", code)
+	}
+	if code := rig.do(http.MethodGet, "/api/inventory", rig.login(t)); code != http.StatusOK {
+		t.Errorf("a new session of the token: %d, want 200", code)
+	}
+}
+
+// Evictions at the cap are logged at most once per evictReportEvery, with the
+// count since the last line, so filling the record shows.
+func TestEvictionReported(t *testing.T) {
+	var buf strings.Builder
+	prev := log.Writer()
+	log.SetOutput(&buf)
+	defer log.SetOutput(prev)
+	s := newSessions()
+	s.limit = 1
+	now := time.Now()
+	s.end("a", now)
+	s.end("b", now) // evicts a, reported at once
+	s.end("c", now) // evicts b, inside the window
+	if n := strings.Count(buf.String(), "logout record at its cap"); n != 1 || !strings.Contains(buf.String(), "evicted 1 entries") {
+		t.Fatalf("log after two evictions in one window: %q, want one line for the first", buf.String())
+	}
+	s.reported = now.Add(-evictReportEvery)
+	s.end("d", now) // evicts c; reports it with the one held back
+	if n := strings.Count(buf.String(), "logout record at its cap"); n != 2 || !strings.Contains(buf.String(), "evicted 2 entries") {
+		t.Fatalf("log after the window: %q, want a second line counting 2", buf.String())
 	}
 }
 
@@ -434,7 +484,7 @@ func TestSessionsConcurrent(t *testing.T) {
 		}()
 	}
 	wg.Wait()
-	if want := base.Add(63 * time.Second); !s.ended["tok"].Equal(want) {
+	if want := base.Add(63 * time.Second); !s.ended["tok"].issued.Equal(want) {
 		t.Fatalf("mark = %v, want the newest ended session %v", s.ended["tok"], want)
 	}
 }
