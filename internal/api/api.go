@@ -145,18 +145,17 @@ type Config struct {
 	RepoAnnotation    string // namespace annotation holding the repo URL (release strips it)
 }
 
-// visibleTTL bounds a token's cached visible-namespace set. The RBAC version stamp
-// (bus.Version(RBACChanged, NamespaceChanged)) makes the common case instant: a
-// RoleBinding or project-namespace change invalidates the entry immediately, lazily,
-// that token only - no all-token herd. But the version watches only namespaced
-// RoleBindings + namespaces; a token's visibility can ALSO change via a
-// ClusterRoleBinding/ClusterRole, which the version does NOT observe. The TTL is the
-// backstop that bounds staleness for those un-watched RBAC sources, so it stays short
-// - long enough to spare the periodic visibility probe on quiet tokens, short
-// enough that a cluster-level revocation can't linger. An expired entry is only
-// re-evaluated by a rebuild, which RunTTLBackstop causes for open streams, so a
-// revocation reaches an open frame within ttlBackstopBound.
-const visibleTTL = 30 * time.Second
+// visibleTTL bounds a token's cached visible-namespace set and SSAR verdicts
+// while every RBAC watch runs. Freshness comes from the RBAC version stamp
+// (bus.Version(RBACChanged, NamespaceChanged)): the RBAC signal watches move it
+// on every grant change they observe, and the entry is invalidated lazily, that
+// token only. The TTL is the safety net for what no watch observes (see
+// RunTTLBackstop), so it runs to minutes: each expiry costs a visibility probe
+// of one review per project namespace under the token. While a watch is not
+// running, entries serve unwatchedTTL instead (authTTL). An expired entry is only
+// re-evaluated by a rebuild, which RunTTLBackstop causes for open streams, so an
+// unwatched change reaches an open frame within backstopBound(authTTL).
+const visibleTTL = 5 * time.Minute
 
 // optionsTTL caches the wizard catalog (instancetypes/preferences/datasources).
 // It's SA-read, identical for every user, and changes rarely - so one shared cache
