@@ -153,9 +153,10 @@ func (r *Reader) OpenProposals(proj project.ProjectInfo) ([]model.Proposal, erro
 	if req, found, rerr := fc.RequiredApprovals(r.baseBranch); rerr == nil && found {
 		required = req
 	}
-	// The heads come from the mirror the reviews render from; a mirror that
-	// does not open leaves them empty, never the lane.
-	read, _ := r.read(proj)
+	// The heads come from the mirror the reviews render from, read only when
+	// it is open: a clone must not stall the refresher. A head left empty is
+	// filled by a later pass (a GitChanged or the backstop).
+	read, _ := r.repos.Peek(proj.Repo)
 	prev := r.getReviewed(key)
 	next := make(map[int]reviewed, len(open))
 	out := make([]model.Proposal, 0, len(open))

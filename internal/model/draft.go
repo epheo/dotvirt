@@ -243,7 +243,7 @@ type Proposal struct {
 	// Head is the head branch's commit as dotvirt's mirror holds it: the
 	// version a review renders (ProposalDetail), so a review cache keys on
 	// it. Not the forge's head, which can lead the mirror until its fetch.
-	// Empty while the mirror lacks the branch.
+	// Empty while the mirror lacks the branch or is not open yet.
 	Head string `json:"head,omitempty"`
 	// Review state, read best-effort from the forge each refresh; zero values
 	// mean unknown (an unreadable protection rule must not render as "none").
