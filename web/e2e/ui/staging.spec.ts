@@ -171,3 +171,29 @@ test('the tray discards a draft in place, asking once', async ({ page }) => {
 	await expect(page.getByText('Discarded the staged changes in team-web.')).toBeVisible();
 	await expect(tray.getByText(/staged change/)).toHaveCount(0);
 });
+
+test('a refused edit lists every bad field, one per line, and keeps the form', async ({ page }) => {
+	await setScenario(page, 'base');
+	await login(page);
+	await openVM(page, 'web-1');
+
+	// The config card's inline editor.
+	await page.getByRole('button', { name: 'Change vCPU' }).click();
+	await page.getByRole('spinbutton', { name: 'vCPU' }).fill('99');
+	await page.getByRole('button', { name: 'Stage', exact: true }).click();
+	const inline = page.locator('main pre', { hasText: 'CPU count 99' });
+	await expect(inline).toBeVisible();
+	expect(await inline.innerText()).toContain('offers\ninvalid: memory');
+	await expect(page.getByRole('spinbutton', { name: 'vCPU' })).toHaveValue('99');
+	await page.getByRole('button', { name: 'Cancel', exact: true }).click();
+
+	// Edit Settings: the same answer in full, the dialog still open.
+	await page.getByRole('button', { name: /Edit Settings/ }).click();
+	const dialog = page.getByRole('dialog');
+	await dialog.getByLabel('vCPUs').fill('99');
+	await stageChange(page);
+	const full = dialog.locator('pre', { hasText: 'CPU count 99' });
+	await expect(full).toBeVisible();
+	expect(await full.innerText()).toContain('offers\ninvalid: memory');
+	await expect(dialog.getByRole('button', { name: 'Stage change' })).toBeVisible();
+});

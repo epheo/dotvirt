@@ -605,6 +605,14 @@ async function handleAPI(req, res, url) {
 			if (sub === 'edit') {
 				const body = await readBody(req);
 				if (!body?.sourceFile) return sendText(res, 400, 'sourceFile is required');
+				// The server lists every bad field, one per line; 99 vCPU is the
+				// deterministic trigger.
+				if (body.cpuCores === 99)
+					return sendText(
+						res,
+						400,
+						'invalid: CPU count 99 is more than any host offers\ninvalid: memory "99Ti" is not available\n',
+					);
 				const { sourceFile: _, ...incoming } = body;
 				const vm = findVM(ns, name);
 				const proj = projectOf(ns);

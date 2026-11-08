@@ -1,17 +1,23 @@
 <script lang="ts">
 	import type { Options } from '#lib/api.js';
-	import type { DiskRow, EditForm } from '#lib/editform.js';
+	import { freeName } from '#lib/devices.js';
+	import { diskError, diskErrors, type DiskRow, type EditForm } from '#lib/editform.js';
 	import RowListEditor from '../RowListEditor.svelte';
 	import StorageClassSelect from '../StorageClassSelect.svelte';
 	import TextInput from '../TextInput.svelte';
 
 	let { form = $bindable(), options }: { form: EditForm; options: Options | null } = $props();
 
+	const errors = $derived(diskErrors(form));
+
 	function addDisk() {
 		form.disks = [
 			...form.disks,
 			{
-				name: `disk-${form.disks.length + 1}`,
+				name: freeName(
+					'disk-',
+					form.disks.map((d) => d.name),
+				),
 				type: 'dataVolume',
 				size: '10Gi',
 				storageClass: '',
@@ -23,8 +29,16 @@
 </script>
 
 {#snippet diskRow(disk: DiskRow)}
+	{@const err = diskError(form, disk)}
 	{#if disk.isNew}
-		<TextInput bind:value={disk.name} size="sm" width="w-24" />
+		<TextInput
+			bind:value={disk.name}
+			size="sm"
+			width="w-24"
+			aria-label="New disk name"
+			aria-invalid={!!err}
+			title={err}
+		/>
 		<TextInput bind:value={disk.size} size="sm" width="w-16" />
 		<StorageClassSelect
 			options={options?.storageClasses ?? []}
@@ -49,3 +63,4 @@
 	ontoggle={(d) => (d.removed = !d.removed)}
 	row={diskRow}
 />
+{#each errors as e (e)}<p class="mt-1 text-xs text-danger-ink">{e}</p>{/each}

@@ -24,7 +24,8 @@
 	import { placement } from '#lib/headroom.js';
 	import { attachRef, attachableNetworks } from '#lib/networks.js';
 	import { action, resource } from '#lib/resource.svelte.js';
-	import { rowList } from '#lib/rowlist.svelte.js';
+	import { rowList, type RowList } from '#lib/rowlist.svelte.js';
+	import { diskNameError, freeName, RESERVED_DISKS } from '#lib/devices.js';
 	import { drafts } from '#lib/state/drafts.svelte.js';
 	import { memoryRoom } from '#lib/state/hosts.svelte.js';
 	import { inventory } from '#lib/state/inventory.svelte.js';
@@ -206,9 +207,23 @@
 	// ── disks ──────────────────────────────────────────────────────────────
 	let diskSize = $state('30Gi');
 	let storageClass = $state(''); // '' = the cluster default
-	const disks = rowList((n) => ({ name: `disk${n + 1}`, size: '10Gi', storageClass: '' }), [], {
-		empty: true,
-	});
+	// A new disk takes the first name the VM does not use yet: after a removal
+	// the gap is filled, never a repeat the server would refuse.
+	type ExtraDisk = { name: string; size: string; storageClass: string };
+	const disks: RowList<ExtraDisk> = rowList<ExtraDisk>(
+		(): ExtraDisk => ({
+			name: freeName('disk', [...RESERVED_DISKS, ...disks.rows.map((d) => d.name)]),
+			size: '10Gi',
+			storageClass: '',
+		}),
+		[],
+		{ empty: true },
+	);
+	const diskError = (i: number) =>
+		diskNameError(disks.rows[i].name, [
+			...RESERVED_DISKS,
+			...disks.rows.filter((_, j) => j !== i).map((d) => d.name),
+		]);
 	const classesRes = resource<StorageClassInfo[]>(() => 'storage-classes', api.storageClasses);
 	const classes = $derived(classesRes.data ?? []);
 	// Facts when the class list loaded, else the bare names the options carry.
@@ -376,6 +391,7 @@
 		else if (short) m.push(short);
 		if (!sizeOK(diskSize)) m.push('The disk size needs a unit, like 30Gi');
 		if (!hasNetwork) m.push('Keep at least one network');
+		for (const e of disks.rows.map((_, i) => diskError(i))) if (e) m.push(e);
 		return m;
 	});
 
@@ -821,6 +837,7 @@
 						class="{FIELD} flex-1 font-mono"
 						bind:value={d.name}
 						aria-label="Disk {i + 2} name"
+						aria-invalid={!!diskError(i)}
 					/>
 					<input
 						class="{FIELD} w-24! font-mono"
@@ -835,6 +852,7 @@
 						><X size={16} /></button
 					>
 				</div>
+				{#if diskError(i)}<p class="text-xs text-danger-ink">{diskError(i)}</p>{/if}
 				<ClassPick
 					label="{d.name} class"
 					value={d.storageClass}

@@ -223,6 +223,26 @@ describe('buildEditRequest', () => {
 	});
 });
 
+describe('buildEditRequest devices', () => {
+	it("names an added NIC's interface when the network's own name is taken", () => {
+		const v = vm({ networks: [{ name: 'lan', network: 'other-ns/lan' }] });
+		const form = seedEditForm(v);
+		form.nics = [...form.nics, { name: 'lan', network: 'ns-a/lan', removed: false, isNew: true }];
+		expect(buildEditRequest(v, form).addNetworks).toEqual([
+			{ name: 'ns-a/lan', interface: 'lan-2' },
+		]);
+	});
+	it('counts a NIC being removed in the same edit as taken: adds land first', () => {
+		const v = vm({ networks: [{ name: 'lan', network: 'other-ns/lan' }] });
+		const form = seedEditForm(v);
+		form.nics[0].removed = true;
+		form.nics = [...form.nics, { name: 'lan', network: 'ns-a/lan', removed: false, isNew: true }];
+		expect(buildEditRequest(v, form).addNetworks).toEqual([
+			{ name: 'ns-a/lan', interface: 'lan-2' },
+		]);
+	});
+});
+
 describe('buildEditRequest placement', () => {
 	const schedVM = () =>
 		vm({

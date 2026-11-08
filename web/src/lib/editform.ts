@@ -3,6 +3,7 @@
 // seed/diff behavior is unit-testable.
 
 import type { Disk, EditRequest, NIC, PlacementGroup, Power, VM } from '#lib/api.js';
+import { diskNameError, networkAdds } from '#lib/devices.js';
 
 // The Edit Settings sections a Configure card (or context menu) can deep-link
 // to - one vocabulary for the dialog, its openers, and the wizard step map.
@@ -65,6 +66,20 @@ export function seedEditForm(vm: VM): EditForm {
 			.map((n) => ({ ...n, removed: false, isNew: false })),
 	};
 }
+
+// diskError says why a disk added in the dialog cannot be staged, or ''.
+// Every other disk name counts against it, removed ones too: the server adds
+// before it removes.
+export const diskError = (form: EditForm, disk: DiskRow) =>
+	disk.isNew && !disk.removed
+		? diskNameError(
+				disk.name,
+				form.disks.filter((d) => d !== disk).map((d) => d.name),
+			)
+		: '';
+
+export const diskErrors = (form: EditForm) =>
+	form.disks.map((d) => diskError(form, d)).filter(Boolean);
 
 // Diff the form against the VM it was seeded from: only changed fields land in
 // the request.
@@ -154,7 +169,11 @@ export function buildEditRequest(vm: VM, form: EditForm): EditRequest {
 
 	// Networks
 	const addNetworks = form.nics.filter((n) => n.isNew && !n.removed && n.network);
-	if (addNetworks.length) req.addNetworks = addNetworks.map((n) => ({ name: n.network! }));
+	if (addNetworks.length)
+		req.addNetworks = networkAdds(
+			addNetworks.map((n) => n.network!),
+			form.nics.filter((n) => !n.isNew).map((n) => n.name),
+		);
 	const removeNetworks = form.nics.filter((n) => !n.isNew && n.removed).map((n) => n.name);
 	if (removeNetworks.length) req.removeNetworks = removeNetworks;
 

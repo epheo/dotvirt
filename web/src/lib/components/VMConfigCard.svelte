@@ -19,6 +19,7 @@
 	import { inventory } from '#lib/state/inventory.svelte.js';
 	import { ui } from '#lib/state/ui.svelte.js';
 	import Button from './Button.svelte';
+	import ErrorNote from './ErrorNote.svelte';
 	import InfoCard from './InfoCard.svelte';
 
 	// Desired against actual, field by field: what git main declares, what runs,
@@ -367,7 +368,7 @@
 								{#if err}
 									<p class="mt-1 text-xs text-danger-ink">{err}</p>
 								{:else if preview.error}
-									<p class="mt-1 text-xs text-danger-ink">{preview.error}</p>
+									<ErrorNote error={preview.error} class="mt-1" />
 								{:else if cq}
 									<p class="mt-1 text-xs {cq.tone === 'warn' ? 'text-warn-ink' : 'text-ok-ink'}">
 										{cq.text}
@@ -378,7 +379,7 @@
 										{fitHint.text}
 									</p>
 								{/if}
-								{#if stageOp.error}<p class="mt-1 text-xs text-danger-ink">{stageOp.error}</p>{/if}
+								<ErrorNote error={stageOp.error} class="mt-1" />
 							{:else if staged.length}
 								<div class="flex flex-wrap items-center gap-x-2 gap-y-1">
 									{#each staged as c (c.field)}
@@ -473,4 +474,6 @@
 			</tbody>
 		</table>
 	</div>
+	<!-- An Unstage runs with no editor open: its refusal shows here. -->
+	{#if !editing}<ErrorNote error={stageOp.error} class="m-3" />{/if}
 </InfoCard>
