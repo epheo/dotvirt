@@ -516,7 +516,7 @@ func (s *State) Namespaces() []project.Namespace {
 		if !ok {
 			continue
 		}
-		out = append(out, project.Namespace{Name: ns.Name, Labels: ns.Labels, Annotations: ns.Annotations})
+		out = append(out, project.Namespace{Name: ns.Name, Labels: ns.Labels, Annotations: ns.Annotations, Created: ns.CreationTimestamp.Time})
 	}
 	return out
 }

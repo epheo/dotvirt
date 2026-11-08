@@ -1,6 +1,8 @@
 package install
 
 import (
+	"reflect"
+	"slices"
 	"strings"
 	"testing"
 
@@ -333,5 +335,99 @@ func TestForgejoVerifiesWebhookTLS(t *testing.T) {
 	}
 	if !hasVolume(d, "ingress-ca") {
 		t.Error("forgejo ingress-ca mount missing")
+	}
+}
+
+// A tenant AppProject admits exactly its project's namespaces and repo, with
+// the shared tier's workload whitelist, and the ApplicationSet template names
+// it and a destination the plugin picks among those namespaces.
+func TestTenantAppProjectConfinesOneProject(t *testing.T) {
+	dv := testDotvirt()
+	ap := TenantAppProject(dv, "argocd", "dotvirt-p-team-a", "team-a", []string{"a-dev", "a-prod"}, []string{"https://forge/dotvirt/team-a.git"})
+	if ap.GetName() != "dotvirt-p-team-a" || ap.GetLabels()[ProjectLabel] != "team-a" || !OwnedBy(ap.GetLabels(), dv) {
+		t.Fatalf("name %s labels %v", ap.GetName(), ap.GetLabels())
+	}
+	dests, _, _ := unstructured.NestedSlice(ap.Object, "spec", "destinations")
+	var got []string
+	for _, d := range dests {
+		got = append(got, d.(map[string]any)["namespace"].(string))
+	}
+	if strings.Join(got, ",") != "a-dev,a-prod" {
+		t.Errorf("destinations = %v", got)
+	}
+	if repos, _, _ := unstructured.NestedStringSlice(ap.Object, "spec", "sourceRepos"); len(repos) != 1 || repos[0] != "https://forge/dotvirt/team-a.git" {
+		t.Errorf("sourceRepos = %v", repos)
+	}
+	shared := TenantsAppProject(dv, "argocd", "https://forge/dotvirt/platform.git", "ns")
+	for _, f := range []string{"clusterResourceWhitelist", "namespaceResourceWhitelist"} {
+		if !reflect.DeepEqual(ap.Object["spec"].(map[string]any)[f], shared.Object["spec"].(map[string]any)[f]) {
+			t.Errorf("%s differs from the shared tier's", f)
+		}
+	}
+	empty := TenantAppProject(dv, "argocd", "dotvirt-p-gone", "gone", nil, nil)
+	for _, f := range []string{"destinations", "sourceRepos"} {
+		if v, _, _ := unstructured.NestedSlice(empty.Object, "spec", f); v == nil || len(v) != 0 {
+			t.Errorf("a project with nothing to admit must render an empty %s, got %v", f, v)
+		}
+	}
+
+	set := ApplicationSet(dv, "argocd", []string{"argocd", "ns"}, nil)
+	spec, _, _ := unstructured.NestedMap(set.Object, "spec", "template", "spec")
+	if spec["project"] != "dotvirt-p-{{.project}}" || spec["destination"].(map[string]any)["namespace"] != "{{.namespace}}" {
+		t.Errorf("template project %v destination %v", spec["project"], spec["destination"])
+	}
+	gen, _, _ := unstructured.NestedSlice(set.Object, "spec", "generators")
+	g := gen[0].(map[string]any)
+	if reserved, _, _ := unstructured.NestedSlice(g, "plugin", "input", "parameters", "reservedNamespaces"); !reflect.DeepEqual(reserved, []any{"argocd", "ns"}) {
+		t.Errorf("generator input reservedNamespaces = %v", reserved)
+	}
+	if _, has := g["selector"]; has {
+		t.Error("a selector rendered with nothing to exclude")
+	}
+	platform, _, _ := unstructured.NestedString(PlatformApplication(dv, "argocd", "https://forge/x/platform.git").Object, "spec", "project")
+	if platform != projectPlatform {
+		t.Errorf("platform Application project = %s", platform)
+	}
+}
+
+// A project with no AppProject of this install's is kept out of the generator:
+// Argo checks only that an Application's project exists.
+func TestApplicationSetExcludesUnconfinedProjects(t *testing.T) {
+	gen, _, _ := unstructured.NestedSlice(ApplicationSet(testDotvirt(), "argocd", nil, []string{"taken"}).Object, "spec", "generators")
+	exprs, _, _ := unstructured.NestedSlice(gen[0].(map[string]any), "selector", "matchExpressions")
+	want := []any{map[string]any{"key": "project", "operator": "NotIn", "values": []any{"taken"}}}
+	if !reflect.DeepEqual(exprs, want) {
+		t.Errorf("selector = %v, want %v", exprs, want)
+	}
+}
+
+// The app reads tenancy from the keys the AppProjects are derived from.
+func TestDeploymentPinsTenancyKeys(t *testing.T) {
+	args := Deployment(testDotvirt()).Spec.Template.Spec.Containers[0].Args
+	for _, want := range []string{"-project-label=" + ProjectLabel, "-repo-annotation=" + RepoAnnotation} {
+		if !slices.Contains(args, want) {
+			t.Errorf("args %v lack %s", args, want)
+		}
+	}
+}
+
+// A tenant repo can never reach a NetworkAttachmentDefinition through Argo's
+// rights: no tenant AppProject admits one, the platform tier keeps them.
+func TestTenantAppProjectsAdmitNoNAD(t *testing.T) {
+	dv := testDotvirt()
+	nad := func(ap *unstructured.Unstructured) bool {
+		kinds, _, _ := unstructured.NestedSlice(ap.Object, "spec", "namespaceResourceWhitelist")
+		for _, k := range kinds {
+			if k.(map[string]any)["kind"] == "NetworkAttachmentDefinition" {
+				return true
+			}
+		}
+		return false
+	}
+	if nad(TenantAppProject(dv, "argocd", "dotvirt-p-a", "a", []string{"a"}, nil)) || nad(TenantsAppProject(dv, "argocd", "https://forge/dotvirt/platform.git", "ns")) {
+		t.Error("a tenant AppProject admits NetworkAttachmentDefinitions")
+	}
+	if !nad(PlatformAppProject(dv, "argocd", "https://forge/dotvirt/platform.git")) {
+		t.Error("the platform AppProject lost NetworkAttachmentDefinitions")
 	}
 }
