@@ -29,9 +29,9 @@ type ClusterCaps struct {
 	// PlatformRead opens the platform tier's shared reads: its history, its
 	// open proposals and their diffs, revert, and its merges and rollup
 	// detail in the frame. A cluster-wide signal: the platform repo names
-	// every project, namespace and owner. It needs list on every
-	// cluster-scoped kind dotvirt manages too, as the repo declares those
-	// objects.
+	// every project, namespace and owner, and holds the objects it declares,
+	// so it needs list, cluster-wide, on namespaces and on every kind the
+	// repo declares that the cluster serves.
 	PlatformRead bool `json:"platformRead"`
 	// Network is the shared networks (ClusterUserDefinedNetwork).
 	Network                    ObjectCaps `json:"network"`

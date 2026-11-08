@@ -11,6 +11,7 @@ import (
 	"time"
 
 	authzv1 "k8s.io/api/authorization/v1"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 
 	"github.com/epheo/dotvirt/internal/argo"
 	"github.com/epheo/dotvirt/internal/model"
@@ -74,7 +75,8 @@ func TestTenantPlatformView(t *testing.T) {
 
 // Through the frame: the platform rollup names a cluster-scoped object only
 // to a caller who may list every kind the platform repo declares. Listing
-// namespaces cluster-wide alone reads the verdict and the generic line.
+// namespaces cluster-wide alone, in a repo holding cluster rules, reads the
+// verdict and the generic line.
 func TestPlatformRollupNamesWhatTheCallerMayList(t *testing.T) {
 	fc := newFakeCluster(t)
 	const reader, platform = "reader-token", "platform-token"
@@ -103,7 +105,9 @@ func TestPlatformRollupNamesWhatTheCallerMayList(t *testing.T) {
 		},
 	}
 	fc.on(http.MethodGet, "/apis/argoproj.io/v1alpha1/applications", unstructuredList("argoproj.io/v1alpha1", "Application", app))
-	s := fc.server(nil, Config{PlatformRepo: platformRepo})
+	fc.serveKinds(model.KindNS, model.KindANP)
+	declares := []schema.GroupKind{{Kind: model.KindNS.Kind}, {Group: model.KindANP.Group, Kind: model.KindANP.Kind}}
+	s := fc.server(&planeDraft{kinds: declares}, Config{PlatformRepo: platformRepo})
 	kubeconfig := filepath.Join(t.TempDir(), "kubeconfig")
 	kc := fmt.Sprintf("apiVersion: v1\nkind: Config\nclusters:\n- name: t\n  cluster: {server: %s, insecure-skip-tls-verify: true}\ncontexts:\n- name: t\n  context: {cluster: t, user: t}\ncurrent-context: t\nusers:\n- name: t\n  user: {token: sa-token}\n", fc.srv.URL)
 	if err := os.WriteFile(kubeconfig, []byte(kc), 0o600); err != nil {

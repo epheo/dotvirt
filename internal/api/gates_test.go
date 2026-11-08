@@ -14,6 +14,7 @@ import (
 	authzv1 "k8s.io/api/authorization/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	kubevirtcorev1 "kubevirt.io/api/core/v1"
 
 	"github.com/epheo/dotvirt/internal/argo"
@@ -357,11 +358,14 @@ func TestGatesAreExactAndCapabilitiesMatch(t *testing.T) {
 }
 
 // The platform tier's shared reads (its history, a commit's diff, a proposal,
-// the platform draft without one of one's own) open on listing every
-// cluster-scoped kind the repo declares, and cluster.platformRead says the
-// same. Listing namespaces alone, or a right to stage one platform kind, or a
-// DRS right inside the operator namespace (which OLM folds into that
-// namespace's admin role), reads nothing.
+// the platform draft without one of one's own) open on listing namespaces and
+// every kind the repo declares that the cluster serves, cluster-wide, and
+// cluster.platformRead says the same. On a cluster serving no MachineConfig,
+// a precise role listing the other declared kinds reads it; one missing the
+// project grants' RoleBindings, or a cluster rule kind, does not. Listing
+// namespaces alone, a right to stage one platform kind, or a DRS right inside
+// the operator namespace (which OLM folds into that namespace's admin role)
+// reads nothing, until the repo declares nothing.
 func TestPlatformReadsNeedAClusterWideSignal(t *testing.T) {
 	g := newGateRig(t)
 	passes := func(tok, path string) (ok bool) {
@@ -375,25 +379,32 @@ func TestPlatformReadsNeedAClusterWideSignal(t *testing.T) {
 	desched := func(verb, name string) grant {
 		return grant{verb: verb, group: "operator.openshift.io", resource: "kubedeschedulers", ns: descheduler, name: name}
 	}
-	var listing, butANP []grant
-	for _, r := range model.Resources() {
-		for _, k := range r.Kinds {
-			if k.ClusterScoped {
-				listing = append(listing, kind(verbList, k, ""))
-				if k != model.KindANP {
-					butANP = append(butANP, kind(verbList, k, ""))
-				}
-			}
+	served := []model.Kind{model.KindNS, model.KindRB, model.KindCUDN, model.KindNNCP, model.KindEgressIP, model.KindExtRoute, model.KindANP, model.KindBANP}
+	for _, k := range append(served, model.KindMachCfg) {
+		g.d.kinds = append(g.d.kinds, schema.GroupKind{Group: k.Group, Kind: k.Kind})
+	}
+	g.fc.serveKinds(served...)
+	var listing, butRB, butANP []grant
+	for _, k := range served {
+		q := grant{verb: verbList, group: k.Group, resource: k.Plural}
+		listing = append(listing, q)
+		if k != model.KindRB {
+			butRB = append(butRB, q)
+		}
+		if k != model.KindANP {
+			butANP = append(butANP, q)
 		}
 	}
 	reads := func(gs ...grant) []grant { return append(slices.Clone(listing), gs...) }
+	nsOnly := []grant{{verb: verbList, resource: "namespaces"}}
 	for _, c := range []struct {
 		gs            []grant
 		read, staging bool
 	}{
 		{listing, true, false},
+		{butRB, false, false},
 		{butANP, false, false},
-		{[]grant{{verb: verbList, resource: "namespaces"}}, false, false},
+		{nsOnly, false, false},
 		{reads(kind(verbCreate, model.KindCUDN, "")), true, true},
 		{[]grant{kind(verbCreate, model.KindCUDN, "")}, false, true},
 		{reads(grant{verb: verbCreate, group: "operator.openshift.io", resource: "kubedeschedulers"}), true, true},
@@ -419,6 +430,11 @@ func TestPlatformReadsNeedAClusterWideSignal(t *testing.T) {
 	rec := do(g.s, g.token(nil), http.MethodGet, "/api/projects/platform/history", "")
 	if rec.Code != http.StatusForbidden || !strings.Contains(rec.Body.String(), "not authorized to read the platform repo") {
 		t.Errorf("tenant platform history = %d %q, want the platform repo named", rec.Code, rec.Body.String())
+	}
+	// A repo declaring nothing holds no object to read: namespaces alone open it.
+	g.d.kinds = nil
+	if cl, _ := g.caps(g.token(nsOnly), "team-a-dev"); !cl.PlatformRead {
+		t.Error("an empty platform repo refused a namespace lister")
 	}
 }
 
@@ -588,10 +604,9 @@ func TestFrameAsksThePlatformLaneOnlyWhenBusy(t *testing.T) {
 	var mu sync.Mutex
 	asked := map[string]int{}
 	inner := g.fc.ssar
-	lane := platformListing()[0] // the platform lane's first question
 	g.fc.ssar = func(token string, a *authzv1.ResourceAttributes) bool {
 		mu.Lock()
-		if a.Verb == lane.Verb && a.Group == lane.Group && a.Resource == lane.Resource {
+		if a.Verb == verbList && a.Group == "" && a.Resource == "namespaces" { // the platform lane's first question
 			asked[token]++
 		}
 		mu.Unlock()

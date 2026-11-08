@@ -13,6 +13,7 @@ import (
 	authzv1 "k8s.io/api/authorization/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/client-go/kubernetes/fake"
 
 	"github.com/epheo/dotvirt/internal/auth"
@@ -48,6 +49,10 @@ func (d *stagingDraft) Unstage(id auth.Identity, proj project.ProjectInfo, resou
 
 func (d *stagingDraft) Get(id auth.Identity, proj project.ProjectInfo) (model.DraftView, error) {
 	return model.DraftView{Base: "main"}, nil
+}
+
+func (d *stagingDraft) DeclaredKinds(project.ProjectInfo) ([]schema.GroupKind, error) {
+	return nil, nil
 }
 
 // draftServer is the transport under test with a fake apiserver behind it: the

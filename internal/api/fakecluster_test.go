@@ -19,6 +19,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/client-go/kubernetes/scheme"
 	kubevirtcorev1 "kubevirt.io/api/core/v1"
 
@@ -363,6 +364,44 @@ func (fc *fakeCluster) server(d coordinator, cfg Config) *Server {
 	})
 }
 
+// serveKinds answers discovery for kinds alone, each in its table version:
+// the group list and each group version's resources.
+func (fc *fakeCluster) serveKinds(kinds ...model.Kind) {
+	versions := map[string][]string{}
+	resources := map[string][]metav1.APIResource{}
+	for _, k := range kinds {
+		gv := schema.GroupVersion{Group: k.Group, Version: k.Version}.String()
+		if _, seen := resources[gv]; !seen {
+			versions[k.Group] = append(versions[k.Group], gv)
+		}
+		resources[gv] = append(resources[gv], metav1.APIResource{Name: k.Plural, Kind: k.Kind, Namespaced: !k.ClusterScoped, Verbs: []string{"list", "watch"}})
+	}
+	fc.on(http.MethodGet, "/api", func(w http.ResponseWriter, _ *http.Request) {
+		writeObj(w, metav1.APIVersions{TypeMeta: metav1.TypeMeta{Kind: "APIVersions"}, Versions: []string{"v1"}})
+	})
+	groups := metav1.APIGroupList{TypeMeta: metav1.TypeMeta{Kind: "APIGroupList", APIVersion: "v1"}}
+	for g, gvs := range versions {
+		if g == "" {
+			continue
+		}
+		group := metav1.APIGroup{Name: g}
+		for _, gv := range gvs {
+			group.Versions = append(group.Versions, metav1.GroupVersionForDiscovery{GroupVersion: gv, Version: strings.TrimPrefix(gv, g+"/")})
+		}
+		group.PreferredVersion = group.Versions[0]
+		groups.Groups = append(groups.Groups, group)
+	}
+	fc.on(http.MethodGet, "/apis", func(w http.ResponseWriter, _ *http.Request) { writeObj(w, groups) })
+	for gv, rs := range resources {
+		path := "/apis/" + gv
+		if gv == "v1" {
+			path = "/api/v1"
+		}
+		list := metav1.APIResourceList{TypeMeta: metav1.TypeMeta{Kind: "APIResourceList", APIVersion: "v1"}, GroupVersion: gv, APIResources: rs}
+		fc.on(http.MethodGet, path, func(w http.ResponseWriter, _ *http.Request) { writeObj(w, list) })
+	}
+}
+
 // do runs one request through the full handler chain as token.
 func do(s *Server, token, method, target, body string) *httptest.ResponseRecorder {
 	var rd io.Reader
@@ -440,6 +479,7 @@ type planeDraft struct {
 	releaseStaged, releaseResidue []string
 
 	declared map[model.ObjectRef]string // what DeclaredFiles answers
+	kinds    []schema.GroupKind         // what DeclaredKinds answers
 	staged   bool                       // a call staged something: Get shows a draft
 }
 
@@ -599,6 +639,10 @@ func (d *planeDraft) StageCreate(_ auth.Identity, p project.ProjectInfo, res dra
 
 func (d *planeDraft) DeclaredFiles(project.ProjectInfo) (map[model.ObjectRef]string, error) {
 	return d.declared, nil
+}
+
+func (d *planeDraft) DeclaredKinds(project.ProjectInfo) ([]schema.GroupKind, error) {
+	return d.kinds, nil
 }
 
 // The Needs answer nothing: a test of what the gate asks runs a real

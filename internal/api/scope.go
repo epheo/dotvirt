@@ -452,34 +452,27 @@ var (
 	ssarVMTemplate  = ssarFor(model.KindTemplate)
 )
 
-// platformListing is listing, cluster-wide, every cluster-scoped kind the
-// kinds table holds: it opens the platform tier's shared reads - its history,
-// commit and proposal diffs, revert, its merges in the task feed and its
-// rollup detail. The platform repo declares those objects, so a caller the
-// apiserver would refuse one of them is refused the repo. Namespaces are one
-// of them, and the repo names every project, namespace and owner, so a right
-// scoped to one namespace (an operator namespace's admin role) never opens it.
-func platformListing() action {
-	var act action
-	for _, r := range model.Resources() {
-		for _, k := range r.Kinds {
-			if k.ClusterScoped {
-				act = append(act, kindAction(verbList, k, "")...)
-			}
-		}
-	}
-	return act
-}
-
-// canReadPlatform reports whether id may read the platform tier:
-// platformListing, each question a review cached per token, asked until one
-// is denied. False when no platform repo is configured. An error means a
-// review the answer needed failed.
+// canReadPlatform reports whether id may read the platform tier: its
+// history, commit and proposal diffs, revert, its merges in the task feed
+// and its rollup detail. The repo names every project, namespace and owner,
+// and declares the objects it holds, so the caller must list namespaces
+// cluster-wide (a right scoped to one namespace, an operator namespace's
+// admin role, never opens it), then every kind it declares (platformListing).
+// Each question is a review cached per token, asked until one is denied; a
+// tenant is asked the first alone. False when no platform repo is
+// configured. An error means a read the answer needed failed.
 func (s *Server) canReadPlatform(ctx context.Context, id auth.Identity, c *cluster.Client) (bool, error) {
 	if s.cfg.PlatformRepo == "" {
 		return false, nil
 	}
-	_, ok, err := s.allowed(ctx, id, c, platformListing())
+	if _, ok, err := s.allowed(ctx, id, c, ask(verbList, ssarNamespace, "")); !ok || err != nil {
+		return ok, err
+	}
+	act, err := s.platformListing(ctx)
+	if err != nil || len(act) == 0 {
+		return err == nil, err
+	}
+	_, ok, err := s.allowed(ctx, id, c, act)
 	return ok, err
 }
 
@@ -624,17 +617,21 @@ func (s *Server) draftScope(w http.ResponseWriter, r *http.Request) (scope, bool
 
 // pickDraft resolves the project whose draft a route acts on: pickProject,
 // and for the platform tier also any caller holding a draft there, whatever
-// right staged it (a claim on one namespace), so nothing staged is stranded.
+// right staged it (a claim on one namespace), so nothing staged is stranded,
+// even while platform read cannot be told (a forge or review outage).
 func (s *Server) pickDraft(w http.ResponseWriter, r *http.Request, want string) (scope, bool) {
 	if want != platformProjectName {
 		return s.pickProject(w, r, want)
 	}
 	return s.platformScopeWith(w, r, func(ctx context.Context, id auth.Identity, c *cluster.Client) (bool, error) {
-		if ok, err := s.canReadPlatform(ctx, id, c); ok || err != nil {
-			return ok, err
+		ok, err := s.canReadPlatform(ctx, id, c)
+		if ok {
+			return true, nil
 		}
-		v, err := s.draft.Get(id, s.platformProject())
-		return err == nil && v.Count > 0, nil
+		if v, derr := s.draft.Get(id, s.platformProject()); derr == nil && v.Count > 0 {
+			return true, nil
+		}
+		return false, err
 	}, "not authorized to author platform changes")
 }
 
