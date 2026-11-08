@@ -3,6 +3,8 @@ package changeset
 import (
 	"encoding/json"
 	"errors"
+	"maps"
+	"net/http"
 	"strings"
 	"testing"
 
@@ -123,25 +125,60 @@ func TestPreviewCreateResolvesDeclaredAsEdit(t *testing.T) {
 	requireNothingStaged(t, c, id, proj)
 }
 
-// A project preview renders the namespace and owners grant against the repo
-// the create would make, and never calls the forge: the fixture fails any call.
-func TestPreviewCreateProjectCallsNoForge(t *testing.T) {
-	f := newProposeFixture(t)
-	p, err := f.c.PreviewCreateProject(f.id, f.platform(), json.RawMessage(`{"name":"team-a","owners":["bob"],
-		"vmNetwork":{"name":"team-a-net","subnet":"10.60.0.0/16"}}`), nil)
+// A project preview is the files its stage records, grants included, and
+// never calls the forge: the repo is made only when the project stages.
+func TestPreviewCreateProjectIsWhatStageRecords(t *testing.T) {
+	forgeCalls := 0
+	f := newProposeFixture(t, func(m, path string) (int, string, bool) {
+		forgeCalls++
+		if m == "GET" && strings.HasSuffix(path, "/team-a") {
+			return http.StatusNotFound, "", true
+		}
+		if m == "POST" && strings.HasSuffix(path, "/repos") {
+			return http.StatusCreated, "{}", true
+		}
+		return 0, "", false
+	})
+	raw := json.RawMessage(`{"name":"team-a","owners":["bob"],"vmNetwork":{"name":"team-a-net","subnet":"10.60.0.0/16"}}`)
+	p, err := f.c.PreviewCreateProject(f.id, f.platform(), raw, nil)
 	if err != nil {
 		t.Fatalf("PreviewCreateProject: %v", err)
 	}
-	requireNothingStaged(t, f.c, f.id, f.platform())
-	if p.Project != project.PlatformName || len(p.Files) != 2 {
-		t.Fatalf("want the namespace and its owners grant, got %+v", p)
+	if forgeCalls != 0 {
+		t.Fatalf("a preview called the forge %d times", forgeCalls)
 	}
-	ns, rb := p.Files[0], p.Files[1]
-	if !strings.Contains(ns.YAML, "team-a.git") || !strings.Contains(ns.YAML, "10.60.0.0/16") {
+	requireNothingStaged(t, f.c, f.id, f.platform())
+	if p.Project != project.PlatformName || len(p.Files) < 2 {
+		t.Fatalf("want the namespace and its grants, got %+v", p)
+	}
+	if ns := p.Files[0]; !strings.Contains(ns.YAML, "team-a.git") || !strings.Contains(ns.YAML, "10.60.0.0/16") {
 		t.Fatalf("namespace must name its repo and carry its VM Network:\n%s", ns.YAML)
 	}
-	if !strings.Contains(rb.YAML, "bob") {
-		t.Fatalf("owners grant must name bob:\n%s", rb.YAML)
+	owners := false
+	for _, f := range p.Files[1:] {
+		owners = owners || (strings.Contains(f.YAML, "team-a-admins") && strings.Contains(f.YAML, "bob"))
+	}
+	if !owners {
+		t.Fatalf("the owners grant must name bob: %+v", p.Files)
+	}
+
+	if _, err := f.c.StageCreateProject(f.id, f.platform(), raw, nil); err != nil {
+		t.Fatalf("StageCreateProject: %v", err)
+	}
+	entries, err := f.c.store.List(f.id.Username, f.platform().Name)
+	if err != nil || len(entries) != len(p.Files) {
+		t.Fatalf("staged %d entries (%v), previewed %d files", len(entries), err, len(p.Files))
+	}
+	staged := map[string]string{}
+	for _, e := range entries {
+		staged[e.SourceFile] += e.Manifest
+	}
+	previewed := map[string]string{}
+	for _, f := range p.Files {
+		previewed[f.Path] += f.YAML
+	}
+	if !maps.Equal(staged, previewed) {
+		t.Fatalf("the stage recorded other files than the preview showed:\nstaged %v\npreviewed %v", staged, previewed)
 	}
 
 	if _, err := f.c.PreviewCreateProject(f.id, f.platform(), json.RawMessage(`{"name":"platform"}`), nil); !errors.Is(err, model.ErrInvalid) {
@@ -243,5 +280,56 @@ func TestPreviewIsGatedLikeStage(t *testing.T) {
 	f.c.UseAuthorizer(&rbac{deny: verbOn("create", "namespaces")})
 	if _, err := f.c.PreviewCreateProject(f.id, f.platform(), json.RawMessage(`{"name":"team-a"}`), nil); !errors.Is(err, model.ErrForbidden) {
 		t.Errorf("a project the caller may not create: preview err = %v", err)
+	}
+}
+
+// A joining namespace previews with the grants its stage writes: its admins
+// and egress grants to the joining project's people and sync account, the
+// same files the stage then records.
+func TestPreviewCreateNamespaceShowsItsGrants(t *testing.T) {
+	bare, _ := seedWork(t, map[string][]byte{
+		"rbac/team-a.yaml": grantYAML("team-a", "admin", user("alice"), syncSA("team-a")),
+	})
+	c := newTestCoordinator(t, false).WithSyncNamespace("openshift-gitops")
+	id := auth.Identity{Username: "admin"}
+	plat := project.ProjectInfo{Name: project.PlatformName, Repo: bare}
+	join := project.ProjectInfo{Name: "team-a", Repo: "acme/team-a.git", Namespaces: []string{"team-a"}}
+	raw := json.RawMessage(`{"name":"team-a-db"}`)
+
+	p, err := c.PreviewCreateNamespace(id, plat, join, raw, nil)
+	if err != nil {
+		t.Fatalf("PreviewCreateNamespace: %v", err)
+	}
+	requireNothingStaged(t, c, id, plat)
+	previewed := map[string]string{}
+	for _, f := range p.Files {
+		previewed[f.Path] += f.YAML
+	}
+	grants := 0
+	for _, y := range previewed {
+		if strings.Contains(y, "team-a-db-admins") || strings.Contains(y, "team-a-db-egress") {
+			grants++
+		}
+	}
+	if grants != 2 {
+		t.Fatalf("want the admins and egress grants beside the namespace, got %+v", p.Files)
+	}
+
+	if _, err := c.StageCreateNamespace(id, plat, join, raw, nil); err != nil {
+		t.Fatalf("StageCreateNamespace: %v", err)
+	}
+	entries, _ := c.store.List(id.Username, plat.Name)
+	staged := map[string]string{}
+	for _, e := range entries {
+		staged[e.SourceFile] += e.Manifest
+	}
+	if !maps.Equal(staged, previewed) {
+		t.Fatalf("the stage recorded other files than the preview showed:\nstaged %v\npreviewed %v", staged, previewed)
+	}
+
+	// The grants pass the gate too: one the caller may not make refuses the preview.
+	c.UseAuthorizer(&rbac{deny: verbOn("create", "rolebindings")})
+	if _, err := c.PreviewCreateNamespace(id, plat, join, json.RawMessage(`{"name":"team-a-web"}`), nil); !errors.Is(err, model.ErrForbidden) {
+		t.Errorf("a grant the caller may not make: preview err = %v", err)
 	}
 }

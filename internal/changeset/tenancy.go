@@ -3,15 +3,19 @@ package changeset
 import (
 	"encoding/json"
 	"fmt"
+	"slices"
+	"strings"
 
 	"github.com/epheo/dotvirt/internal/auth"
 	"github.com/epheo/dotvirt/internal/draft"
 	"github.com/epheo/dotvirt/internal/git"
+	"github.com/epheo/dotvirt/internal/manifest"
 	"github.com/epheo/dotvirt/internal/model"
 	"github.com/epheo/dotvirt/internal/netgen"
 	"github.com/epheo/dotvirt/internal/project"
 	"github.com/epheo/dotvirt/internal/validate"
 	"github.com/epheo/dotvirt/pkg/forge"
+	"github.com/epheo/dotvirt/pkg/tenancy"
 )
 
 // Tenant bootstrap: the one corner of the changeset that creates forge repos
@@ -67,7 +71,7 @@ func (c *Coordinator) StageCreateProject(id auth.Identity, commitProj project.Pr
 		return model.DraftView{}, err
 	}
 	first.Repo = forge.PathRef(repoURL)
-	entries, err := projectAdoption([]netgen.NamespaceSpec{first}, spec.Owners)
+	entries, err := c.projectAdoption(commitProj, []netgen.NamespaceSpec{first}, spec.Owners)
 	if err != nil {
 		return model.DraftView{}, err
 	}
@@ -105,7 +109,7 @@ func (c *Coordinator) PreviewCreateProject(id auth.Identity, commitProj project.
 		return model.StagePreview{}, err
 	}
 	first.Repo = forge.PathRef(repoURL)
-	entries, err := projectAdoption([]netgen.NamespaceSpec{first}, spec.Owners)
+	entries, err := c.projectAdoption(commitProj, []netgen.NamespaceSpec{first}, spec.Owners)
 	if err != nil {
 		return model.StagePreview{}, err
 	}
@@ -206,7 +210,7 @@ func (c *Coordinator) AdoptProject(id auth.Identity, commitProj, target project.
 			if err != nil {
 				return model.DraftView{}, err
 			}
-			entries, err := projectAdoption(specs, owners)
+			entries, err := c.projectAdoption(commitProj, specs, owners)
 			if err != nil {
 				return model.DraftView{}, err
 			}
@@ -227,7 +231,7 @@ func (c *Coordinator) AdoptProject(id auth.Identity, commitProj, target project.
 	if err != nil {
 		return model.DraftView{}, err
 	}
-	entries, err := projectAdoption(specs, owners)
+	entries, err := c.projectAdoption(commitProj, specs, owners)
 	if err != nil {
 		return model.DraftView{}, err
 	}
@@ -240,6 +244,35 @@ func (c *Coordinator) AdoptProject(id auth.Identity, commitProj, target project.
 	return c.stage(id, commitProj, entries...)
 }
 
+// StageSyncAccess stages, into the platform draft, the grants of each of
+// target's namespaces with its sync account added (grantSource.entries): the
+// platform-repo PR a project created before sync impersonation needs before
+// Argo may sync it as that account. Each grant keeps every subject it names.
+func (c *Coordinator) StageSyncAccess(id auth.Identity, commitProj, target project.ProjectInfo) (model.DraftView, error) {
+	if c.syncNS == "" {
+		return model.DraftView{}, fmt.Errorf("%w: no ArgoCD namespace is configured, so there is no sync account to grant", model.ErrInvalid)
+	}
+	if err := tenantName(target.Name); err != nil {
+		return model.DraftView{}, err
+	}
+	grants, err := c.grantSource(commitProj)
+	if err != nil {
+		return model.DraftView{}, err
+	}
+	var entries []draft.Entry
+	for _, ns := range target.Namespaces {
+		grant, err := grants.entries(ns, target.Name, nil, nil)
+		if err != nil {
+			return model.DraftView{}, err
+		}
+		entries = append(entries, grant...)
+	}
+	if len(entries) == 0 {
+		return model.DraftView{}, fmt.Errorf("%w: project %q already grants its sync account", model.ErrInvalid, target.Name)
+	}
+	return c.stage(id, commitProj, entries...)
+}
+
 // ReleaseDeclared stages the declarative half of a project release: every
 // project namespace the PLATFORM repo declares, wherever its file sits, is
 // rewritten without its tenancy - the file stays (handing Argo a deletion
@@ -248,7 +281,8 @@ func (c *Coordinator) AdoptProject(id auth.Identity, commitProj, target project.
 // residue for the caller to unlabel imperatively (label residue has no git
 // path); a declared one sent there would be relabeled by the next sync. A
 // declared file carrying more than its Namespace (a VM Network rides some)
-// refuses the whole release rather than pruning tenant networking.
+// refuses the whole release rather than pruning tenant networking. The
+// project's sync account leaves its grants too (grantSource.released).
 func (c *Coordinator) ReleaseDeclared(id auth.Identity, commitProj, target project.ProjectInfo) (staged, residue []string, err error) {
 	read, err := c.read(commitProj)
 	if err != nil {
@@ -290,6 +324,18 @@ func (c *Coordinator) ReleaseDeclared(id auth.Identity, commitProj, target proje
 		}
 		entries = append(entries, e)
 		staged = append(staged, ns)
+	}
+	grants, err := c.grantSource(commitProj)
+	if err != nil {
+		return nil, nil, err
+	}
+	revoked, err := grants.released(target)
+	if err != nil {
+		return nil, nil, err
+	}
+	for _, e := range revoked {
+		entries = append(entries, e)
+		staged = append(staged, e.Name)
 	}
 	if err := c.gate(id, commitProj, entries); err != nil {
 		return nil, nil, err
@@ -358,14 +404,21 @@ func tenantNamespaces(target project.ProjectInfo, repoURL string, live LiveNames
 	return specs, nil
 }
 
-// projectAdoption is the Namespace manifest of each spec (and, when owners are
-// given, the namespace-admin RoleBinding that makes them a tenant) for the
-// platform draft: the declarative half of creating, adopting and re-homing a
-// project, unit-testable without a forge. They stage as creates that the
-// propose step writes by path - create-or-overwrite - so a namespace already
-// in the platform repo (e.g. dotvirt-made, annotation later dropped) is
-// corrected rather than duplicated.
-func projectAdoption(specs []netgen.NamespaceSpec, owners []string) ([]draft.Entry, error) {
+// projectAdoption is the platform draft's half of creating, adopting and
+// re-homing a project: each spec's Namespace manifest and grants
+// (grantSource.entries). The Namespaces stage as creates the propose step writes
+// by path - create-or-overwrite - so a namespace already in the platform repo
+// (e.g. dotvirt-made, annotation later dropped) is corrected rather than
+// duplicated.
+func (c *Coordinator) projectAdoption(commitProj project.ProjectInfo, specs []netgen.NamespaceSpec, owners []string) ([]draft.Entry, error) {
+	grants, err := c.grantSource(commitProj)
+	if err != nil {
+		return nil, err
+	}
+	return projectAdoption(specs, owners, grants)
+}
+
+func projectAdoption(specs []netgen.NamespaceSpec, owners []string, grants grantSource) ([]draft.Entry, error) {
 	var entries []draft.Entry
 	for _, spec := range specs {
 		nsPath, nsContent, err := netgen.NamespaceManifest(spec)
@@ -380,23 +433,220 @@ func projectAdoption(specs []netgen.NamespaceSpec, owners []string) ([]draft.Ent
 			SourceFile: nsPath,
 			Manifest:   string(nsContent),
 		})
-		if len(owners) == 0 {
+		grant, err := grants.entries(spec.Name, spec.Project, owners, nil)
+		if err != nil {
+			return nil, err
+		}
+		entries = append(entries, grant...)
+	}
+	return entries, nil
+}
+
+// grantSource is what a project namespace's grants render from: the sync
+// account namespace (Coordinator.WithSyncNamespace) and the grants the
+// platform repo already declares.
+type grantSource struct {
+	syncNS string
+	// declared is the base-branch file declaring ref, and its bytes; "" when
+	// none does. sole refuses a file holding anything else, as one to rewrite.
+	// nil reads none.
+	declared func(ref model.ObjectRef, sole bool) (path string, content []byte, err error)
+}
+
+// grantSource reads commitProj's declared grants.
+func (c *Coordinator) grantSource(commitProj project.ProjectInfo) (grantSource, error) {
+	g := grantSource{syncNS: c.syncNS}
+	read, err := c.read(commitProj)
+	if err != nil {
+		return g, err
+	}
+	idx, err := indexDeclared(read, c.baseBranch)
+	if err != nil {
+		return g, err
+	}
+	g.declared = func(ref model.ObjectRef, sole bool) (string, []byte, error) {
+		path := idx.Files[ref]
+		if sole {
+			var err error
+			if path, err = soleDeclarer(idx, []model.ObjectRef{ref}); err != nil {
+				return "", nil, err
+			}
+		}
+		if path == "" {
+			return "", nil, nil
+		}
+		content, err := read.FileOnBranch(c.baseBranch, path)
+		return path, content, err
+	}
+	return g, nil
+}
+
+// inherited are the subjects proj's declared admin-role grants name, its own
+// and other projects' sync accounts aside: who a namespace joining proj grants
+// admin, so its repo never holds there what its people do not. A narrower
+// grant's subjects stay out: the joining grant would make them admins.
+func (g grantSource) inherited(proj project.ProjectInfo) ([]netgen.Subject, error) {
+	var out []netgen.Subject
+	if g.declared == nil {
+		return nil, nil
+	}
+	for _, ns := range proj.Namespaces {
+		name := tenancy.AdminBinding(ns)
+		path, content, err := g.declared(model.ObjectRef{Kind: model.KindRB.Kind, Namespace: ns, Name: name}, false)
+		if err != nil {
+			return nil, err
+		}
+		if path == "" {
 			continue
 		}
-		rbPath, rbContent, err := netgen.RoleBindingManifest(netgen.RoleBindingSpec{Namespace: spec.Name, Project: spec.Project, Owners: owners})
+		role, subjects, _, err := netgen.DeclaredGrant(content, name)
 		if err != nil {
 			return nil, invalid(err)
 		}
-		entries = append(entries, draft.Entry{
-			Kind:       draft.KindCreate,
-			Resource:   draft.ResourceRoleBinding,
-			Namespace:  spec.Name,
-			Name:       spec.Name + "-admins",
-			SourceFile: rbPath,
-			Manifest:   string(rbContent),
-		})
+		if role != "admin" {
+			continue
+		}
+		for _, sub := range subjects {
+			if g.syncAccount(sub) || slices.Contains(out, sub) {
+				continue
+			}
+			out = append(out, sub)
+		}
 	}
-	return entries, nil
+	return out, nil
+}
+
+// released stages proj's sync account out of each of its namespaces' grants:
+// each rewritten without it, or removed when it named nothing else. Its name
+// outlives the project, so a later project of that name inherits nothing.
+func (g grantSource) released(proj project.ProjectInfo) ([]draft.Entry, error) {
+	name, ok := tenancy.SyncAccount(proj.Name)
+	if !ok || g.syncNS == "" || g.declared == nil {
+		return nil, nil
+	}
+	account := *netgen.ServiceAccountSubject(g.syncNS, name)
+	var out []draft.Entry
+	for _, ns := range proj.Namespaces {
+		for _, grant := range []struct {
+			name   string
+			render func(netgen.RoleBindingSpec) (string, []byte, error)
+		}{
+			{tenancy.AdminBinding(ns), netgen.RoleBindingManifest},
+			{tenancy.EgressBinding(ns), netgen.EgressManifest},
+		} {
+			path, content, err := g.declared(model.ObjectRef{Kind: model.KindRB.Kind, Namespace: ns, Name: grant.name}, true)
+			if err != nil {
+				return nil, err
+			}
+			if path == "" {
+				continue
+			}
+			role, subjects, _, err := netgen.DeclaredGrant(content, grant.name)
+			if err != nil {
+				return nil, invalid(err)
+			}
+			if !slices.Contains(subjects, account) {
+				continue
+			}
+			kept := slices.DeleteFunc(subjects, func(s netgen.Subject) bool { return s == account })
+			e := draft.Entry{Kind: draft.KindDelete, Resource: draft.ResourceRoleBinding, Namespace: ns, Name: grant.name, SourceFile: path, BaseBlob: pinOf(content, true)}
+			if len(kept) > 0 {
+				_, manifest, err := grant.render(netgen.RoleBindingSpec{Namespace: ns, Role: role, Kept: kept})
+				if err != nil {
+					return nil, invalid(err)
+				}
+				e.Kind, e.Manifest = draft.KindEdit, string(manifest)
+			}
+			out = append(out, e)
+		}
+	}
+	return out, nil
+}
+
+// syncAccount reports whether sub is a project's sync account.
+func (g grantSource) syncAccount(sub netgen.Subject) bool {
+	return g.syncNS != "" && sub.Kind == "ServiceAccount" && sub.Namespace == g.syncNS && strings.HasPrefix(sub.Name, tenancy.AppProjectPrefix)
+}
+
+// entries stages ns's grants: the admin RoleBinding naming the subjects it
+// already declares, inherit, the owners and the project's sync account
+// (netgen.RoleBindingManifest), and, while that grant is the admin role, the
+// EgressFirewall grant to those same subjects plus any it already declares
+// (netgen.EgressManifest). Each rewrites the file declaring it, if any; the
+// admin grant keeps its role. A grant git already states is left out, and none
+// at all with nobody to grant.
+func (g grantSource) entries(ns, proj string, owners []string, inherit []netgen.Subject) ([]draft.Entry, error) {
+	spec := netgen.RoleBindingSpec{Namespace: ns, Project: proj, Owners: owners, Kept: inherit}
+	if name, ok := tenancy.SyncAccount(proj); ok && g.syncNS != "" {
+		spec.SyncAccount = netgen.ServiceAccountSubject(g.syncNS, name)
+	}
+	if spec.SyncAccount == nil && len(owners) == 0 && len(inherit) == 0 {
+		return nil, nil
+	}
+	admin, err := g.entry(ns, tenancy.AdminBinding(ns), func(declared []byte) (string, []byte, error) {
+		if declared != nil {
+			role, kept, _, err := netgen.DeclaredGrant(declared, tenancy.AdminBinding(ns))
+			if err != nil {
+				return "", nil, err
+			}
+			spec.Role, spec.Kept = role, slices.Concat(kept, inherit)
+		}
+		return netgen.RoleBindingManifest(spec)
+	})
+	if err != nil {
+		return nil, err
+	}
+	// Egress writes go to admins only: a project whose grant is a narrower
+	// role holds none, and so neither does its repo.
+	if spec.Role != "" && spec.Role != "admin" {
+		return admin, nil
+	}
+	// After the admin grant: spec.Kept holds the subjects it declares.
+	egress, err := g.entry(ns, tenancy.EgressBinding(ns), func(declared []byte) (string, []byte, error) {
+		s := spec
+		if declared != nil {
+			_, kept, _, err := netgen.DeclaredGrant(declared, tenancy.EgressBinding(ns))
+			if err != nil {
+				return "", nil, err
+			}
+			s.Kept = slices.Concat(spec.Kept, kept)
+		}
+		return netgen.EgressManifest(s)
+	})
+	if err != nil {
+		return nil, err
+	}
+	return append(admin, egress...), nil
+}
+
+// entry stages RoleBinding ns/name as render renders it from the bytes git
+// declares it in (nil for none): a create at its layout path, or an edit of
+// its file pinned to those bytes; nothing when git already says the same.
+func (g grantSource) entry(ns, name string, render func(declared []byte) (string, []byte, error)) ([]draft.Entry, error) {
+	e := draft.Entry{Kind: draft.KindCreate, Resource: draft.ResourceRoleBinding, Namespace: ns, Name: name}
+	var declared []byte
+	if g.declared != nil {
+		path, content, err := g.declared(model.ObjectRef{Kind: model.KindRB.Kind, Namespace: ns, Name: name}, true)
+		if err != nil {
+			return nil, err
+		}
+		if path != "" {
+			declared = content
+			e.Kind, e.SourceFile, e.BaseBlob = draft.KindEdit, path, pinOf(content, true)
+		}
+	}
+	path, content, err := render(declared)
+	if err != nil {
+		return nil, invalid(err)
+	}
+	if declared != nil && manifest.SameDocument(declared, content) {
+		return nil, nil
+	}
+	if e.SourceFile == "" {
+		e.SourceFile = path
+	}
+	e.Manifest = string(content)
+	return []draft.Entry{e}, nil
 }
 
 // tenantName validates a tenant project name: a DNS-1123 label that is not the

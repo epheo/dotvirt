@@ -61,6 +61,7 @@ type DotvirtReconciler struct {
 	forgeAPIBase func(*dotvirtv1alpha1.Dotvirt) string
 
 	pruneState
+	syncCache
 }
 
 // driftResync bounds how long out-of-band drift on an unwatched kind (Services,
@@ -104,7 +105,16 @@ func (r *DotvirtReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 	log.Info("reconciling dotvirt install", "platform", r.Platform)
 
 	if !dv.DeletionTimestamp.IsZero() {
-		return ctrl.Result{}, r.finalize(ctx, &dv)
+		base := dv.DeepCopy()
+		err := r.finalize(ctx, &dv)
+		if err != nil {
+			// A CR stuck terminating says why.
+			r.setCondition(&dv, dotvirtv1alpha1.ConditionAvailable, metav1.ConditionFalse, "CleanupFailed", "deleting the install: "+err.Error())
+			if werr := r.writeStatus(ctx, &dv, base); werr != nil {
+				log.Error(werr, "status update failed")
+			}
+		}
+		return ctrl.Result{}, err
 	}
 	base := dv.DeepCopy()
 	var res ctrl.Result
@@ -163,6 +173,8 @@ func (r *DotvirtReconciler) provision(ctx context.Context, key types.NamespacedN
 		{dotvirtv1alpha1.ConditionSecretsReady, r.reconcileSecrets, "secret generation"},
 		{dotvirtv1alpha1.ConditionWorkloadReady, r.reconcileWorkload, ""},
 		{dotvirtv1alpha1.ConditionArgoReady, r.reconcileArgo, ""},
+		// It writes the shared ArgoCD instance, outside the render.
+		{dotvirtv1alpha1.ConditionSyncImpersonationReady, r.reconcileSyncImpersonation, "sync impersonation"},
 		// Before the org webhooks, which need the managed forge's org it ensures;
 		// after the rest, so a slow forge only delays phases that call it anyway.
 		{dotvirtv1alpha1.ConditionForgeRepoReady, r.reconcilePlatformRepo, "platform-repo bootstrap"},
@@ -206,11 +218,30 @@ func (r *DotvirtReconciler) provision(ctx context.Context, key types.NamespacedN
 		r.markPruned(key, digest)
 	}
 	if repo := meta.FindStatusCondition(dv.Status.Conditions, dotvirtv1alpha1.ConditionForgeRepoReady); repo != nil && repo.Status == metav1.ConditionFalse {
-		return ctrl.Result{RequeueAfter: platformRepoRetry}, nil
+		return ctrl.Result{RequeueAfter: min(platformRepoRetry, r.syncWait(dv))}, nil
+	}
+	if wait := r.syncWait(dv); wait < driftResync {
+		return ctrl.Result{RequeueAfter: wait}, nil
 	}
 	// The watches cover the CR, Deployments, Secrets and Routes; this timer heals
 	// drift on the rest.
 	return ctrl.Result{RequeueAfter: driftResync}, nil
+}
+
+// syncWait is when a pass waiting on sync impersonation comes back, since
+// neither argocd-cm nor RBAC is watched: Pending, within recheck, for the
+// argocd-operator to copy the key; held back on something a person fixes, as
+// the verdict ages out; Degraded, with the drift timer like any other drift.
+func (r *DotvirtReconciler) syncWait(dv *dotvirtv1alpha1.Dotvirt) time.Duration {
+	c := meta.FindStatusCondition(dv.Status.Conditions, dotvirtv1alpha1.ConditionSyncImpersonationReady)
+	switch {
+	case !dv.Spec.ArgoCD.SyncImpersonation.Enabled || c == nil || c.Status != metav1.ConditionFalse || c.Reason == "Degraded":
+		return driftResync
+	case c.Reason == "Pending":
+		return r.recheck()
+	default:
+		return r.verdictTTL()
+	}
 }
 
 // olderInstall returns the Dotvirt CR that precedes dv, if any: by creation time,
@@ -268,6 +299,9 @@ type reconcileCtx struct {
 	// anchors degrade to the system pool, the managed forge's Argo trust blocks.
 	ingressCA    string
 	ingressCAErr error
+	// sync is what the Argo phase rendered for sync impersonation, read by the
+	// phase after it.
+	sync syncTier
 }
 
 func (r *DotvirtReconciler) newReconcileCtx(ctx context.Context, dv *dotvirtv1alpha1.Dotvirt) *reconcileCtx {

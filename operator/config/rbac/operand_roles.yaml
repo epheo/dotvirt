@@ -163,3 +163,40 @@ rules:
   - apiGroups: ["template.kubevirt.io"]
     resources: ["virtualmachinetemplates"]
     verbs: ["create"]
+---
+# EgressFirewall writes: a tenant kind the built-in admin role lacks. The platform
+# repo binds it, per project namespace, to the subjects of that namespace's admin
+# grant, the owners and the project's Argo sync account alike (<ns>-egress): the
+# project's people may stage the egress firewall its repo may sync, and no more.
+# The operator never binds it.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: dotvirt-tenant-egress
+  labels:
+    app.kubernetes.io/name: dotvirt
+    app.kubernetes.io/managed-by: dotvirt-operator
+rules:
+  - apiGroups: ["k8s.ovn.org"]
+    resources: ["egressfirewalls"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+---
+# What the platform tier's Argo sync account needs beyond dotvirt-argocd-apply once
+# Argo syncs the platform repo as it: the Namespaces that repo declares, and `bind` on
+# the roles its project grants name, which is what lets it apply those RoleBindings
+# without holding every right they grant (no escalate, no other role).
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: dotvirt-platform-sync
+  labels:
+    app.kubernetes.io/name: dotvirt
+    app.kubernetes.io/managed-by: dotvirt-operator
+rules:
+  - apiGroups: [""]
+    resources: ["namespaces"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: ["rbac.authorization.k8s.io"]
+    resources: ["clusterroles"]
+    resourceNames: ["admin", "dotvirt-tenant-egress"]
+    verbs: ["bind"]

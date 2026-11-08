@@ -176,6 +176,22 @@ func (s *RepoSet) Created(repoURL string) {
 	s.mu.Unlock()
 }
 
+// Peek returns repoURL's read mirror when it is already open, and never opens
+// it: for a caller that must not wait on a clone. It does not count as use,
+// so it keeps no idle repo alive. Nil-safe.
+func (s *RepoSet) Peek(repoURL string) (*Repo, bool) {
+	if s == nil {
+		return nil, false
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	p, ok := s.cache[forge.NormalizeRepoURL(repoURL)]
+	if !ok {
+		return nil, false
+	}
+	return p.read, true
+}
+
 // Poke fetches repoURL's heads now instead of waiting for the next poll tick -
 // the webhook's instant-update path. Matched by canonical URL, so a webhook
 // payload's clone_url/html_url form finds the entry the project annotation opened.

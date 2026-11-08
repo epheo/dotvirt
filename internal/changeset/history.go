@@ -118,7 +118,7 @@ func (r *Reader) Proposal(proj project.ProjectInfo, number int) (model.ProposalD
 	if err != nil {
 		return model.ProposalDetail{}, err
 	}
-	return model.ProposalDetail{Proposal: r.proposalRow(proj, pr), Items: commitItems(files)}, nil
+	return model.ProposalDetail{Proposal: r.proposalRow(proj, pr, read), Items: commitItems(files)}, nil
 }
 
 // nameByPR replaces a forge merge subject with the merged PR's title and link.
