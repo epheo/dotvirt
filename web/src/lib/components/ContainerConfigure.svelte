@@ -1,6 +1,6 @@
 <script lang="ts">
 	import type { Project } from '#lib/api.js';
-	import { clusterGate } from '#lib/gates.js';
+	import { projectGate, projectNS } from '#lib/gates.js';
 	import { ui } from '#lib/state/ui.svelte.js';
 	import Button from './Button.svelte';
 	import Consequence from './Consequence.svelte';
@@ -21,8 +21,6 @@
 		projects: Project[];
 		cluster?: boolean;
 	} = $props();
-
-	const sync = $derived(clusterGate.syncAccess());
 </script>
 
 <div class="min-h-0 flex-1 overflow-y-auto p-4">
@@ -59,6 +57,7 @@
 					</p>
 				{/if}
 				{#if p.repo}
+					{@const sync = projectGate.syncAccess(projectNS(p))}
 					<div class="flex flex-col gap-1.5 border-t border-line-soft px-card py-3">
 						<div class="flex flex-wrap items-center gap-2">
 							<Button

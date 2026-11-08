@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { api } from '#lib/api.js';
-	import { clusterGate } from '#lib/gates.js';
+	import { projectGate, projectNS } from '#lib/gates.js';
+	import { inventory } from '#lib/state/inventory.svelte.js';
 	import { ui } from '#lib/state/ui.svelte.js';
 	import Consequence from './Consequence.svelte';
 	import StageChip from './StageChip.svelte';
@@ -8,7 +9,11 @@
 
 	let { project, onclose }: { project: string; onclose: () => void } = $props();
 
-	const gate = $derived(clusterGate.syncAccess());
+	const gate = $derived(
+		projectGate.syncAccess(
+			projectNS(inventory.projects.find((p) => p.name === project) ?? { namespaces: [] }),
+		),
+	);
 	// svelte-ignore state_referenced_locally
 	const name = project;
 </script>

@@ -48,6 +48,8 @@ export const projectGate = {
 		proj(n, (c) => c.project.newNamespace, 'add a namespace to this project'),
 	adopt: (n: string) => proj(n, (c) => c.project.adopt, 'attach a repo to this project'),
 	release: (n: string) => proj(n, (c) => c.project.release, 'release this project'),
+	grantAdmin: (n: string) => proj(n, (c) => c.project.grantAdmin, 'name owners for this project'),
+	syncAccess: (n: string) => proj(n, (c) => c.project.syncAccess, 'grant sync access'),
 };
 
 // templateGate is writing one template library: the shared one ('platform'),
@@ -67,10 +69,13 @@ export const projectNS = (p: { namespaces: { namespace: string }[] }) =>
 	p.namespaces[0]?.namespace ?? '';
 
 // repoGate is attaching a repo to a repoless project, or re-creating a lost
-// one. No field asks the recover path (ProjectCaps.Adopt is false once a repo
-// is set): it reads the namespace write its dialog stages.
+// one: both read ProjectCaps.Adopt, the route's own check. Naming owners also
+// needs ProjectCaps.GrantAdmin (ownersGate).
 export function repoGate(p: { repo?: string; namespaces: { namespace: string }[] }): Gate {
-	return p.repo ? clusterGate.namespaceCreate() : projectGate.adopt(projectNS(p));
+	const n = projectNS(p);
+	return p.repo
+		? proj(n, (c) => c.project.adopt, "recover this project's repo")
+		: projectGate.adopt(n);
 }
 
 // Namespaced network objects, by draft resource. A network attachment git
@@ -133,8 +138,4 @@ export const clusterGate = {
 	drsPSI: () => cluster((c) => c.drsPSI, 'turn on host pressure readings'),
 	drsDisable: () => cluster((c) => c.drsDisable, 'turn off rebalancing'),
 	oauthClient: () => cluster((c) => c.oauthClient, 'finish single sign-on'),
-	// No field asks the sync-access route, and ProjectCaps.GrantAdmin answers
-	// only repoless projects. GrantAdmin here asks the same route check
-	// (namespace create) and an admin RoleBinding grant, what the change writes.
-	syncAccess: () => cluster((c) => c.grantAdmin, 'grant sync access'),
 };

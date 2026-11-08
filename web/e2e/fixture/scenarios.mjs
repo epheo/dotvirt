@@ -1410,6 +1410,7 @@ const capsDenied = {
 			console: false,
 			snapshotTake: false,
 			vm: { create: false, update: true, delete: false },
+			project: { syncAccess: false },
 		},
 		cluster: { drsDisable: false, grantAdmin: false, uplink: none },
 	},

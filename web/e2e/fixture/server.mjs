@@ -737,6 +737,7 @@ const denyAll = { create: false, update: false, delete: false };
 function namespaceCaps(s, project, ns) {
 	const author = project.namespaces.find((n) => n.namespace === ns)?.canAuthor !== false;
 	const objects = author ? allowAll : denyAll;
+	const override = s.capabilities?.[ns] ?? s.capabilities?.default;
 	return {
 		namespace: ns,
 		vm: objects,
@@ -756,15 +757,17 @@ function namespaceCaps(s, project, ns) {
 		networkAttachment: objects,
 		networkPolicy: objects,
 		egressFirewall: objects,
+		...override,
 		project: {
 			name: project.name,
 			templateEdit: author,
 			newNamespace: true,
-			adopt: !project.repo,
-			grantAdmin: false,
+			adopt: author,
+			grantAdmin: author,
 			release: !project.repo,
+			syncAccess: author && !!project.repo,
+			...override?.project,
 		},
-		...(s.capabilities?.[ns] ?? s.capabilities?.default),
 	};
 }
 // The cluster verdicts follow the scenario's /api/networks signals, which the

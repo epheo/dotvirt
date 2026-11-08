@@ -7,7 +7,15 @@ const api = vi.hoisted(() => ({
 vi.mock('#lib/api.js', () => api);
 
 import { ACCESS_UNKNOWN, NOT_IN_GIT } from './authoring';
-import { clusterGate, objectGate, repoGate, templateSaveGate, vmEditGate, vmGate } from './gates';
+import {
+	clusterGate,
+	objectGate,
+	projectGate,
+	repoGate,
+	templateSaveGate,
+	vmEditGate,
+	vmGate,
+} from './gates';
 import { caps } from './state/caps.svelte';
 
 // Every control reads the field its server gate asks, and says why not in one
@@ -83,27 +91,29 @@ describe('the fields the audit named', () => {
 		expect(clusterGate.drsDisable().why).toBe('You may not turn off rebalancing.');
 	});
 
-	it('sync access reads the cluster grant, whatever the project says', async () => {
+	it('sync access reads the project field', async () => {
 		await answer({
-			cluster: { platform: true, grantAdmin: false },
-			namespace: { namespace: 'web', project: { name: 'p', grantAdmin: true } },
+			cluster: { platform: true, grantAdmin: true },
+			namespace: { namespace: 'web', project: { name: 'p', syncAccess: false } },
 		});
-		expect(clusterGate.syncAccess().why).toBe('You may not grant sync access.');
-		await answer({ cluster: { platform: true, grantAdmin: true } });
-		expect(clusterGate.syncAccess().ok).toBe(true);
+		expect(projectGate.syncAccess('web').why).toBe('You may not grant sync access.');
+		await answer({ namespace: { namespace: 'web', project: { name: 'p', syncAccess: true } } });
+		expect(projectGate.syncAccess('web').ok).toBe(true);
 	});
 });
 
 describe('repoGate', () => {
-	it('attaches on the project field, recovers on namespace create', async () => {
+	it('attaches and recovers on the project adopt field', async () => {
 		await answer({
 			cluster: { namespaceCreate: false },
 			namespace: { namespace: 'web', project: { name: 'p', adopt: true } },
 		});
 		const nss = [{ namespace: 'web' }];
 		expect(repoGate({ namespaces: nss }).ok).toBe(true);
+		expect(repoGate({ repo: 'https://forge/p.git', namespaces: nss }).ok).toBe(true);
+		await answer({ namespace: { namespace: 'web', project: { name: 'p', adopt: false } } });
 		expect(repoGate({ repo: 'https://forge/p.git', namespaces: nss }).why).toBe(
-			'You may not create projects or namespaces.',
+			"You may not recover this project's repo.",
 		);
 	});
 });
