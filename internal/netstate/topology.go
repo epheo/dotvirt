@@ -232,10 +232,12 @@ func (s *Snapshot) serviceRange() []netip.Prefix {
 
 // place classifies addr for src, on primary network key. The source's own
 // range counts only when one of its addresses lies in it (the default
-// network's may be unknown). From the default network a service address, or
-// one in a range the caller cannot read, is as reachable as any outside one.
-// From another network an address the infrastructure ranges cannot rule out
-// stays unknown, the same for every address.
+// network's may be unknown). A service address other than the API and DNS
+// may belong to an isolated network wherever a primary UDN or CUDN exists.
+// From the default network an address in a range the caller cannot read is
+// as reachable as any outside one; from another network an address the
+// infrastructure ranges cannot rule out stays unknown, the same for every
+// address.
 func (s *Snapshot) place(src TraceWorkload, key string, addr netip.Addr, view *TraceView) placement {
 	ranges := s.primaryRanges()
 	def, svc := ranges[0].prefixes, s.serviceRange()
@@ -258,12 +260,12 @@ func (s *Snapshot) place(src TraceWorkload, key string, addr netip.Addr, view *T
 		return placeSame
 	case readable:
 		return placeOverlay
+	case containsAddr(svc, addr) && !apiOrDNS(svc, addr) && len(ranges) > 1:
+		return placeService
 	case onDefault:
 		return placeOutside
 	case containsAddr(def, addr):
 		return placeIsolated
-	case containsAddr(svc, addr) && !apiOrDNS(svc, addr):
-		return placeService
 	case def == nil || svc == nil:
 		return placeUnknown
 	}

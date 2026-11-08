@@ -498,8 +498,8 @@ func (s *Snapshot) primaryPath(src TraceWorkload, dstIP string, vlan bool, view 
 		return []model.TraceStep{cut}, "Unreachable", where
 	case placeService:
 		reach.Conditional = true
-		reach.Note = dstIP + " is a cluster service address: from " + name +
-			" only the Kubernetes API and DNS services of other networks answer, and which network serves it cannot be told here."
+		reach.Note = dstIP + " is a cluster service address, and which network serves it cannot be told here: a service of a network isolated from " +
+			name + " does not answer, only the Kubernetes API and DNS services cross."
 	case placeOverlay:
 		reach.Conditional = true
 		reach.Note = dstIP + " lies in the range of a network isolated from " + name +

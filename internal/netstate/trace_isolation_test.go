@@ -188,11 +188,12 @@ func TestTraceOutsideAddressFromIsolatedNetwork(t *testing.T) {
 	}
 }
 
-// From a primary UDN a service address answers only for the Kubernetes API
-// (the service network's first address) and DNS (its tenth); any other may
-// be another network's service, so an Allow, or an outbound rule's Deny, is
-// not certain. A source egress rule's Deny is. From the default network a
-// service address is reached as before.
+// Beside a primary UDN a service address answers across networks only for
+// the Kubernetes API (the service network's first address) and DNS (its
+// tenth); any other may be an isolated network's service, from a UDN or the
+// default network alike, so an Allow, or an outbound rule's Deny, is not
+// certain. A source egress rule's Deny is. With no primary UDN a service
+// address is reached as before.
 func TestTraceServiceAddressFromIsolatedNetwork(t *testing.T) {
 	s := isolated(t, true)
 	a := wl("tenant-a", "web", nil, nil, "10.100.0.5")
@@ -205,8 +206,17 @@ func TestTraceServiceAddressFromIsolatedNetwork(t *testing.T) {
 			t.Errorf("API or DNS service %s: verdict = %s (%v)", ip, res.Verdict, stepKinds(t, res))
 		}
 	}
-	if res := s.Trace(nil, wl("plain", "legacy", nil, nil, "10.128.0.9"), nil, "172.30.12.7", "TCP", 8080); res.Verdict != "Allow" {
-		t.Errorf("service address from the default network: verdict = %s (%v)", res.Verdict, stepKinds(t, res))
+	plain := wl("plain", "legacy", nil, nil, "10.128.0.9")
+	if res := s.Trace(nil, plain, nil, "172.30.12.7", "TCP", 8080); res.Verdict != "Conditional" {
+		t.Errorf("service address from the default network beside UDNs: verdict = %s (%v)", res.Verdict, stepKinds(t, res))
+	}
+	if res := s.Trace(nil, plain, nil, "172.30.0.10", "UDP", 53); res.Verdict != "Allow" {
+		t.Errorf("DNS from the default network: verdict = %s (%v)", res.Verdict, stepKinds(t, res))
+	}
+	alone := New(nil, nil)
+	alone.svcNet = parsePrefixes([]string{"172.30.0.0/16"})
+	if res := alone.Trace(nil, plain, nil, "172.30.12.7", "TCP", 8080); res.Verdict != "Allow" {
+		t.Errorf("service address with no primary UDN: verdict = %s (%v)", res.Verdict, stepKinds(t, res))
 	}
 
 	add(t, s.egressfw, map[string]any{
