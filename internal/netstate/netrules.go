@@ -106,14 +106,14 @@ func peerRule(p *policy, r rule, dir string, namespaces []string, nsLabels func(
 			if pe.namespace != "" && pe.namespace != ns {
 				continue
 			}
-			m := combineMatch(matchSelector(pe.ns, nsLabels(ns)), podMatch(pe.pod, nil, false))
+			m := combineMatch(pe.ns.match(nsLabels(ns)), podMatch(pe.pod, nil, false))
 			if m == matchNo {
 				continue
 			}
 			if m == matchYes || best == matchNo {
 				best = m
 			}
-			names = names || pe.namespace == ns || namesNamespace(pe.ns, ns, nsLabels(ns), projectLabel)
+			names = names || pe.namespace == ns || namesNamespace(pe.ns.raw, ns, nsLabels(ns), projectLabel)
 		}
 		if best == matchNo || (picked != nil && (named || !names)) {
 			continue

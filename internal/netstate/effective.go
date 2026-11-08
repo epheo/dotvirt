@@ -127,23 +127,43 @@ func (s subject) match(nsLabels, podLabels map[string]string, podScoped bool) ma
 	if s.none {
 		return matchNo
 	}
-	return combineMatch(matchSelector(s.ns, nsLabels), podMatch(s.pod, podLabels, podScoped))
+	return combineMatch(s.ns.match(nsLabels), podMatch(s.pod, podLabels, podScoped))
 }
 
-// matchSelector evaluates a LabelSelector against known labels. Absent/empty
-// selects everything - the API convention every kind here shares. A selector
-// the library rejects comes back matchCond, not matchNo: live objects are
-// apiserver-validated so this is near-impossible, but the conservative
-// direction is to keep the row.
-func matchSelector(sel *metav1.LabelSelector, lbls map[string]string) match {
-	if emptySelector(sel) {
-		return matchYes
+// selector is a LabelSelector parsed once, at decode, so neither matching nor
+// a Redaction's memo re-parses it per workload; rendering reads raw. Build it
+// with parseSelector: a literal skips the parse, so a non-empty raw then
+// matches only conditionally and is never memoized. It is never written after
+// decode, so requests share it unlocked.
+type selector struct {
+	raw    *metav1.LabelSelector
+	parsed labels.Selector // nil when raw is empty or rejected
+	err    error           // the library rejected raw
+	key    string          // raw formatted, a Redaction's memo key
+}
+
+func parseSelector(raw *metav1.LabelSelector) selector {
+	s := selector{raw: raw, key: metav1.FormatLabelSelector(raw)}
+	if !emptySelector(raw) {
+		s.parsed, s.err = metav1.LabelSelectorAsSelector(raw)
 	}
-	sl, err := metav1.LabelSelectorAsSelector(sel)
-	if err != nil {
+	return s
+}
+
+// match evaluates the selector against known labels. Absent/empty selects
+// everything - the API convention every kind here shares. A selector the
+// library rejects, or one never parsed, comes back matchCond, not matchNo:
+// live objects are apiserver-validated so this is near-impossible, but the
+// conservative direction is to keep the row.
+func (s selector) match(lbls map[string]string) match {
+	switch {
+	case s.err != nil:
 		return matchCond
-	}
-	if sl.Matches(labels.Set(lbls)) {
+	case emptySelector(s.raw):
+		return matchYes
+	case s.parsed == nil:
+		return matchCond
+	case s.parsed.Matches(labels.Set(lbls)):
 		return matchYes
 	}
 	return matchNo
@@ -156,12 +176,12 @@ func emptySelector(sel *metav1.LabelSelector) bool {
 // podMatch resolves a pod-level selector: empty selects all pods (so it is
 // definite even for a namespace-level query); otherwise a namespace-level
 // query can only say "the pods matching this".
-func podMatch(sel *metav1.LabelSelector, podLabels map[string]string, podScoped bool) match {
-	if emptySelector(sel) {
+func podMatch(sel selector, podLabels map[string]string, podScoped bool) match {
+	if emptySelector(sel.raw) {
 		return matchYes
 	}
 	if !podScoped {
 		return matchCond
 	}
-	return matchSelector(sel, podLabels)
+	return sel.match(podLabels)
 }

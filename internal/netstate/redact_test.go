@@ -389,15 +389,34 @@ func TestRedactionConfinement(t *testing.T) {
 			MatchExpressions: names("tenant-a").MatchExpressions,
 		}, false},
 	} {
-		if got := red.confined(c.sel); got != c.want {
+		if got := red.confined(parseSelector(c.sel)); got != c.want {
 			t.Errorf("%s: confined = %v, want %v", c.name, got, c.want)
 		}
 	}
 
 	blind := *red
 	blind.Namespaces, blind.memo = nil, nil
-	if !blind.confined(names("tenant-a")) || blind.confined(ls("dotvirt.io/project", "alpha")) {
+	if !blind.confined(parseSelector(names("tenant-a"))) || blind.confined(parseSelector(ls("dotvirt.io/project", "alpha"))) {
 		t.Error("with no namespace list only a name pin may confine")
+	}
+
+	// Every selector the library rejects shares one memo key, so each must
+	// read from its own requirements.
+	rejected := func(ns string) selector {
+		return parseSelector(&metav1.LabelSelector{
+			MatchLabels:      map[string]string{"kubernetes.io/metadata.name": ns},
+			MatchExpressions: []metav1.LabelSelectorRequirement{{Key: "env", Operator: metav1.LabelSelectorOpNotIn, Values: []string{"not a value!"}}},
+		})
+	}
+	mine, theirs := rejected("tenant-a"), rejected("tenant-b")
+	if mine.err == nil || theirs.err == nil {
+		t.Fatal("a selector with an invalid value must be rejected")
+	}
+	if got := red.read(theirs).own; got != otherNamespaces {
+		t.Errorf("rejected selector on tenant-b reads %q, want %q", got, otherNamespaces)
+	}
+	if got, want := red.read(mine).own, "tenant-a, "+otherNamespaces; got != want {
+		t.Errorf("rejected selector on tenant-a reads %q, want %q", got, want)
 	}
 }
 
@@ -511,9 +530,9 @@ func BenchmarkRedactionRead(b *testing.B) {
 			all = append(all, NamespaceLabels{Name: fmt.Sprintf("ns-%d", i)})
 		}
 	}
-	var sels []*metav1.LabelSelector
+	var sels []selector
 	for j := range 50 {
-		sels = append(sels, &metav1.LabelSelector{MatchLabels: map[string]string{"dotvirt.io/project": fmt.Sprintf("p%d", j)}})
+		sels = append(sels, parseSelector(&metav1.LabelSelector{MatchLabels: map[string]string{"dotvirt.io/project": fmt.Sprintf("p%d", j)}}))
 	}
 	for b.Loop() {
 		r := &Redaction{ProjectLabel: "dotvirt.io/project", Namespace: func(ns string) bool { return ns == "ns-0" },

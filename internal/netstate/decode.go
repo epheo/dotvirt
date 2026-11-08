@@ -11,7 +11,6 @@ import (
 	"sort"
 	"strings"
 
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/tools/cache"
@@ -73,7 +72,7 @@ func (p *policy) render(red *Redaction) (target, applies string, rows []model.Po
 // check), the cluster kinds a namespace selector and, for an admin pods
 // subject or an EgressIP, a pod selector narrowing it.
 type subject struct {
-	ns, pod *metav1.LabelSelector
+	ns, pod selector
 	none    bool // an admin policy without a subject applies to nothing
 }
 
@@ -81,7 +80,7 @@ func (s subject) summary(red *Redaction) string {
 	if s.none {
 		return ""
 	}
-	if s.ns == nil {
+	if s.ns.raw == nil {
 		return orAny(selectorSummary(s.pod, nil), "all pods")
 	}
 	return strings.TrimSpace(orAny(selectorSummary(s.ns, red), "all namespaces") + " " + prefixed("pods ", podSummary(s.pod, s.ns, red)))
@@ -89,7 +88,7 @@ func (s subject) summary(red *Redaction) string {
 
 // podSummary renders a pod selector beside its namespace side ns, its labels
 // hidden where red does not confine that side.
-func podSummary(pod, ns *metav1.LabelSelector, red *Redaction) string {
+func podSummary(pod, ns selector, red *Redaction) string {
 	if red.hidesLabels(pod, ns) {
 		return selectedLabels
 	}
@@ -104,7 +103,7 @@ func decodeNetpol(u *unstructured.Unstructured) *policy {
 	ns := u.GetNamespace()
 	p := &policy{
 		view:    model.Policy{Name: u.GetName(), Kind: model.PolicyProjectRule, Namespace: ns, Backing: "NetworkPolicy"},
-		subject: subject{pod: &doc.Spec.PodSelector},
+		subject: subject{pod: parseSelector(&doc.Spec.PodSelector)},
 	}
 	p.denyIngress, p.denyEgress = netpolTypes(doc)
 	for _, r := range doc.Spec.Ingress {
@@ -146,13 +145,13 @@ func decodeAdmin(u *unstructured.Unstructured, baseline bool) *policy {
 	}
 	switch sub := doc.Spec.Subject; {
 	case sub.Namespaces != nil:
-		p.subject = subject{ns: sub.Namespaces}
+		p.subject = subject{ns: parseSelector(sub.Namespaces)}
 	case sub.Pods != nil:
-		p.subject = subject{ns: &sub.Pods.NamespaceSelector, pod: &sub.Pods.PodSelector}
+		p.subject = subject{ns: parseSelector(&sub.Pods.NamespaceSelector), pod: parseSelector(&sub.Pods.PodSelector)}
 	default:
 		p.subject = subject{none: true}
 	}
-	p.view.Namespaces = netgen.NamespaceNames(p.subject.ns)
+	p.view.Namespaces = netgen.NamespaceNames(p.subject.ns.raw)
 	for _, r := range doc.Spec.Ingress {
 		p.ingress = append(p.ingress, adminRule(r.Action, r.From, r.Ports))
 	}
@@ -179,9 +178,9 @@ func decodeEgressIP(u *unstructured.Unstructured) *policy {
 	doc := decode[netgen.EgressIPDoc](u)
 	p := &policy{
 		view:    model.Policy{Name: u.GetName(), Kind: model.PolicyEgressIP, Backing: "EgressIP"},
-		subject: subject{ns: &doc.Spec.NamespaceSelector, pod: &doc.Spec.PodSelector},
+		subject: subject{ns: parseSelector(&doc.Spec.NamespaceSelector), pod: parseSelector(&doc.Spec.PodSelector)},
 	}
-	p.view.Namespaces = netgen.NamespaceNames(p.subject.ns)
+	p.view.Namespaces = netgen.NamespaceNames(p.subject.ns.raw)
 	if len(doc.Spec.EgressIPs) > 0 {
 		p.fixed = []model.PolicyRuleView{{
 			Direction: "Egress", Action: "SNAT", Peer: strings.Join(doc.Spec.EgressIPs, ", "),
@@ -197,9 +196,9 @@ func decodeExtRoute(u *unstructured.Unstructured) *policy {
 	doc := decode[netgen.ExternalRouteDoc](u)
 	p := &policy{
 		view:    model.Policy{Name: u.GetName(), Kind: model.PolicyRoute, Backing: "AdminPolicyBasedExternalRoute"},
-		subject: subject{ns: &doc.Spec.From.NamespaceSelector},
+		subject: subject{ns: parseSelector(&doc.Spec.From.NamespaceSelector)},
 	}
-	p.view.Namespaces = netgen.NamespaceNames(p.subject.ns)
+	p.view.Namespaces = netgen.NamespaceNames(p.subject.ns.raw)
 	var ips []string
 	for _, h := range doc.Spec.NextHops.Static {
 		if h.IP != "" {

@@ -6,8 +6,6 @@ import (
 	"sort"
 	"strings"
 
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-
 	"github.com/epheo/dotvirt/internal/model"
 	"github.com/epheo/dotvirt/internal/netgen"
 )
@@ -85,12 +83,13 @@ func kindRank(k model.PolicyKind) int {
 // reaching past their view reads as their own namespaces it selects, then
 // otherNamespaces, and a hidden name stands as otherNamespaces. nil renders
 // everything.
-func selectorSummary(sel *metav1.LabelSelector, red *Redaction) string {
+func selectorSummary(s selector, red *Redaction) string {
+	sel := s.raw
 	if sel == nil {
 		return ""
 	}
-	if !emptySelector(sel) && netgen.NamespaceNames(sel) == nil && !red.confined(sel) {
-		return red.read(sel).own
+	if !emptySelector(sel) && netgen.NamespaceNames(sel) == nil && !red.confined(s) {
+		return red.read(s).own
 	}
 	var parts []string
 	add := func(part string) {
