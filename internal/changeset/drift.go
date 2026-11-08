@@ -152,9 +152,6 @@ func (c *Coordinator) AdoptObjects(id auth.Identity, proj project.ProjectInfo, w
 			platformTier = err
 			continue
 		}
-		if err := requirePlacement(proj, o.Path, o.Manifest); err != nil {
-			return model.DraftView{}, err
-		}
 		entries = append(entries, draft.Entry{
 			Kind:       draft.KindCreate,
 			Resource:   adoptResource(o.Kind),

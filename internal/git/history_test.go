@@ -332,3 +332,37 @@ func TestFileHistoryFollowsOneFile(t *testing.T) {
 		t.Errorf("missing file: %v %+v", err, none)
 	}
 }
+
+// Only main's own first-parent commits are main's history: a commit pushed
+// to a proposal branch, and the inside of a merged PR, are not.
+func TestOnBranch(t *testing.T) {
+	h := seedMerge(t)
+	run, write, work := h.run, h.write, h.work
+	run("eve", work, "checkout", "-qb", "dotvirt/proposed/eve/p-1")
+	write("tenant-a/web.yaml", webYAML(64))
+	run("eve", work, "commit", "-qam", "proposal")
+	run("eve", work, "push", "-q", "origin", "dotvirt/proposed/eve/p-1")
+	head := func(rev string) string {
+		out, err := exec.Command("git", "-C", work, "rev-parse", rev).Output()
+		if err != nil {
+			t.Fatalf("rev-parse %s: %v", rev, err)
+		}
+		return strings.TrimSpace(string(out))
+	}
+	r, err := Open(h.bare, "", nil)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	for rev, want := range map[string]bool{
+		"main":                     true,
+		"main^":                    true,
+		"main~3":                   true,
+		"main^2":                   false,
+		"dotvirt/proposed/eve/p-1": false,
+	} {
+		got, err := r.OnBranch("main", head(rev))
+		if err != nil || got != want {
+			t.Errorf("OnBranch(%s) = %v, %v; want %v", rev, got, err, want)
+		}
+	}
+}
