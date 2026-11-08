@@ -1,4 +1,5 @@
 import { api, type HostCapacity, type Node, type NodeTarget } from '#lib/api.js';
+import { metricsGap } from '#lib/metrics.js';
 import { resource, type Resource } from '#lib/resource.svelte.js';
 
 // The host roster behind every host picker, pulled fresh per dialog open
@@ -23,7 +24,10 @@ export function memoryRoom(active: () => boolean): Resource<Room | null> {
 		async (k) => {
 			if (!k) return null;
 			const [cap, nodes] = await Promise.all([
-				api.capacity().catch(() => null),
+				api
+					.capacity()
+					.then((c) => (metricsGap(c.unavailable) ? null : c))
+					.catch(() => null),
 				api.nodes().catch(() => null),
 			]);
 			return { cap, nodes };

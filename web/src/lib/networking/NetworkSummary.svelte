@@ -11,6 +11,7 @@
 	import { vmGate, type Gate } from '#lib/gates.js';
 	import { plural, relativeAge } from '#lib/format.js';
 	import { POD_NETWORK, vmNetworkKeys } from '#lib/lenses.js';
+	import { metricsGap } from '#lib/metrics.js';
 	import { uplinkLabel } from '#lib/netmap.js';
 	import { networkHref, vmHref } from '#lib/nav.js';
 	import { attachRef, networkKey } from '#lib/networks.js';
@@ -34,6 +35,7 @@
 	import Button from '#lib/components/Button.svelte';
 	import Card from '#lib/components/Card.svelte';
 	import Consequence from '#lib/components/Consequence.svelte';
+	import MetricsGap from '#lib/components/MetricsGap.svelte';
 	import StageChip from '#lib/components/StageChip.svelte';
 	import AttachVMsModal from './AttachVMsModal.svelte';
 	import DeleteNetworkModal from './DeleteNetworkModal.svelte';
@@ -716,7 +718,14 @@
 				</p>
 			{:else if rank === 'traffic' && !trafficRes.data}
 				<p class="px-card pb-4 text-[13px] text-ink-faint">Reading traffic...</p>
+			{:else if rank === 'traffic' && metricsGap(trafficRes.data?.unavailable)}
+				<div class="px-card pb-4">
+					<MetricsGap reason={trafficRes.data?.unavailable} />
+				</div>
 			{:else}
+				{#if rank === 'traffic'}
+					<MetricsGap reason={trafficRes.data?.unavailable} class="px-card pb-2" />
+				{/if}
 				<table class="w-full text-[13px]">
 					<thead>
 						<tr class="border-y border-line-soft text-left text-xs text-ink-faint">

@@ -1,10 +1,12 @@
 <script lang="ts">
 	import { api, type HostCapacity, type HostLoad, type Node, type VM } from '#lib/api.js';
 	import { bytes, cores } from '#lib/format.js';
+	import { metricsGap } from '#lib/metrics.js';
 	import { hrefForScope } from '#lib/nav.js';
 	import { resource } from '#lib/resource.svelte.js';
 	import type { Tone } from '#lib/status.js';
 	import HostBalance from '#lib/components/HostBalance.svelte';
+	import MetricsGap from '#lib/components/MetricsGap.svelte';
 	import TabPane from '#lib/components/TabPane.svelte';
 	import StatusPill from '#lib/components/StatusPill.svelte';
 
@@ -27,12 +29,13 @@
 		{ poll: 30000 },
 	);
 	const nodes = $derived(nodesRes.failed ? null : nodesRes.data);
-	const workers = $derived(
-		new Map((load.failed ? [] : (load.data?.nodes ?? [])).map((n) => [n.node, n])),
-	);
-	const capacity = $derived(
-		new Map((cap.failed ? [] : (cap.data?.nodes ?? [])).map((n) => [n.node, n])),
-	);
+	// A metrics read with no numbers drops its columns, and one line says why.
+	const shown = <T extends { unavailable?: string }>(r: { failed: boolean; data: T | null }) =>
+		r.failed || !r.data || metricsGap(r.data.unavailable) ? null : r.data;
+	const workers = $derived(new Map((shown(load)?.nodes ?? []).map((n) => [n.node, n])));
+	const capacity = $derived(new Map((shown(cap)?.nodes ?? []).map((n) => [n.node, n])));
+	const reasons = $derived([load.data?.unavailable, cap.data?.unavailable].filter(Boolean));
+	const metricsReason = $derived(reasons.find((r) => metricsGap(r)) ?? reasons[0]);
 	const placed = $derived.by(() => {
 		const m = new Map<string, number>();
 		for (const vm of vms) if (vm.nodeName) m.set(vm.nodeName, (m.get(vm.nodeName) ?? 0) + 1);
@@ -184,6 +187,11 @@
 					{unscheduled} VM{unscheduled === 1 ? '' : 's'} not placed on any host
 				</a>
 			</p>
+		{/if}
+		{#if metricsReason}
+			<div class="border-b border-line-soft px-4 py-2">
+				<MetricsGap reason={metricsReason} />
+			</div>
 		{/if}
 	{:else if loading}
 		<p class="py-6 text-center text-sm text-ink-faint">Loading hosts…</p>

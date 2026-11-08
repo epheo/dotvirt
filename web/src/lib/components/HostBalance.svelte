@@ -2,10 +2,12 @@
 	import { api, type HostLoad, type HostWorker } from '#lib/api.js';
 	import { densityPath, layoutStrip } from '#lib/dotstrip.js';
 	import { relativeAge } from '#lib/format.js';
+	import { metricsGap } from '#lib/metrics.js';
 	import { resource } from '#lib/resource.svelte.js';
 	import { inventory } from '#lib/state/inventory.svelte.js';
 	import InfoCard from './InfoCard.svelte';
 	import Button from './Button.svelte';
+	import MetricsGap from './MetricsGap.svelte';
 
 	// Worker utilization with the rebalancing band. A small fleet is a labeled
 	// per-host comparison: the roster rows ARE the chart (a strip with three
@@ -22,7 +24,8 @@
 		() => api.hostLoad(),
 		{ poll: 30000 },
 	);
-	const data = $derived(hl.failed ? null : hl.data);
+	// A read with no numbers absents the card too: the hosts table above says why.
+	const data = $derived(hl.failed || !hl.data || metricsGap(hl.data.unavailable) ? null : hl.data);
 	// Rows list everyone up to 10 workers (see rows below); the strip starts
 	// once the roster alone can no longer show the whole fleet.
 	const strip = $derived(!!data && data.workers > 10);
@@ -156,6 +159,7 @@
 		{/snippet}
 
 		<div class="px-card py-3">
+			<MetricsGap reason={data.unavailable} class="mb-2" />
 			{#if strip}
 				<svg
 					viewBox="0 0 {W} {vbH}"

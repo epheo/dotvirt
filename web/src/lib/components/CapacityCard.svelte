@@ -2,8 +2,10 @@
 	import type { ClusterSummary, HostCapacity } from '#lib/api.js';
 	import { bytes, quantity } from '#lib/format.js';
 	import type { Headroom } from '#lib/headroom.js';
+	import { metricsGap } from '#lib/metrics.js';
 	import Button from './Button.svelte';
 	import InfoCard from './InfoCard.svelte';
+	import MetricsGap from './MetricsGap.svelte';
 
 	// Can I add a VM here: the headroom answer first, then each resource as one
 	// bar in real units. The solid band is in use now, the light band what VMs
@@ -101,7 +103,10 @@
 			</div>
 		{/if}
 
-		{#if data}
+		{#if data && metricsGap(data.unavailable)}
+			<MetricsGap reason={data.unavailable} />
+		{:else if data}
+			<MetricsGap reason={data.unavailable} />
 			<div class="space-y-3">
 				{#each bars as b (b.label)}
 					<div>

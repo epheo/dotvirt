@@ -1,7 +1,9 @@
 <script lang="ts">
 	import { METRIC_RANGES, type VMMetrics } from '#lib/api.js';
+	import { metricsGap } from '#lib/metrics.js';
 	import { resource } from '#lib/resource.svelte.js';
 	import ErrorNote from './ErrorNote.svelte';
+	import MetricsGap from './MetricsGap.svelte';
 	import UPlotChart from './UPlotChart.svelte';
 
 	// The one Performance panel - range tiers spanning real-time /
@@ -50,9 +52,12 @@
 
 	{#if res.failed}
 		<ErrorNote error={res.error} />
+	{:else if metrics && metricsGap(metrics.unavailable)}
+		<MetricsGap reason={metrics.unavailable} />
 	{:else if empty}
 		<p class="py-8 text-center text-sm text-ink-faint">{emptyText}</p>
 	{:else if metrics}
+		<MetricsGap reason={metrics.unavailable} />
 		<div class="grid grid-cols-1 gap-3 xl:grid-cols-2">
 			{#each metrics.charts as chart (chart.key)}
 				<UPlotChart {chart} />

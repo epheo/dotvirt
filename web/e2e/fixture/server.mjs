@@ -424,6 +424,14 @@ async function handleAPI(req, res, url) {
 	if (path === '/api/permissions') {
 		return sendJSON(res, 200, { ...s.permissions, namespace: url.searchParams.get('namespace') });
 	}
+	if (path.startsWith('/api/metrics/') && s.metricsUnavailable) {
+		const why = metricsWithout(s.metricsUnavailable);
+		if (path === '/api/metrics/cluster') return sendJSON(res, 200, why.cluster);
+		if (path === '/api/metrics/hosts') return sendJSON(res, 200, why.hosts);
+		if (path === '/api/metrics/capacity') return sendJSON(res, 200, why.capacity);
+		if (path === '/api/metrics/scope') return sendJSON(res, 200, why.charts);
+		if (path === '/api/metrics/network') return sendJSON(res, 200, why.network);
+	}
 	if (path.startsWith('/api/metrics/')) {
 		if (!s.metrics) return sendText(res, 503, 'metrics not configured');
 		if (path === '/api/metrics/cluster') return sendJSON(res, 200, s.metrics.clusterSummary);
@@ -694,6 +702,10 @@ async function handleAPI(req, res, url) {
 				(s.events ?? []).filter((e) => e.name === name),
 			);
 		}
+		if (s.metricsUnavailable && (sub === 'usage' || sub === 'metrics')) {
+			const why = metricsWithout(s.metricsUnavailable);
+			return sendJSON(res, 200, sub === 'usage' ? why.usage : why.charts);
+		}
 		if (sub === 'usage') return sendJSON(res, 200, s.metrics?.vmUsage ?? {});
 		if (sub === 'metrics') {
 			if (!s.metrics) return sendText(res, 503, 'metrics not configured');
@@ -770,6 +782,34 @@ function namespaceCaps(s, project, ns) {
 		},
 	};
 }
+// A metrics view the server could not fill: 200 with the reason and no
+// numbers, as the server answers since metrics tenancy (alarms keep their 503).
+function metricsWithout(reason) {
+	const none = { used: 0, total: 0 };
+	return {
+		cluster: {
+			updated: 0,
+			cpu: none,
+			memory: none,
+			storage: none,
+			topCpu: [],
+			topMemory: [],
+			unavailable: reason,
+		},
+		hosts: { updated: 0, workers: 0, mean: 0, nodes: [], unavailable: reason },
+		capacity: { updated: 0, nodes: [], unavailable: reason },
+		charts: { range: '1h', charts: [], unavailable: reason },
+		usage: {
+			updated: 0,
+			cpu: { used: 0 },
+			memory: { used: 0 },
+			storage: { used: 0 },
+			unavailable: reason,
+		},
+		network: { network: '', window: '1h', vms: [], unavailable: reason },
+	};
+}
+
 // The cluster verdicts follow the scenario's /api/networks signals, which the
 // server derives from the same checks, so a scenario narrows both at once.
 function clusterCaps(s) {
