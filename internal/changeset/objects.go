@@ -128,10 +128,10 @@ func (r *Reader) ObjectSpec(proj project.ProjectInfo, resource, namespace, name 
 // StageUpdateManifest replaces a declared object's file with req.YAML
 // verbatim - the edit for a manifest no form expresses, on the same
 // whole-file rule as every other edit. The gate holds the new content to
-// exactly the object it replaces, at its kind: a renamed, retyped or extra
-// object is a different change. req.BaseBlob, when set, is the version the
-// editor loaded (ObjectSpec): one that is no longer base's is refused, since
-// the edit was made on it.
+// exactly the object it replaces: a renamed or extra object is a different
+// change. req.BaseBlob, when set, is the version the editor loaded
+// (ObjectSpec): one that is no longer base's is refused, since the edit was
+// made on it.
 func (c *Coordinator) StageUpdateManifest(id auth.Identity, proj project.ProjectInfo, resource, namespace, name string, req model.UpdateManifestRequest) (model.DraftView, error) {
 	yaml := req.YAML
 	read, err := c.read(proj)

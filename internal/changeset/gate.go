@@ -132,7 +132,7 @@ type fileChange struct {
 // declares is created, one both declare is updated when it differs, one only
 // before declares is deleted. want, when set, is the identity the write
 // claims; a revert claims none and may restore any managed object.
-func fileAccess(proj project.ProjectInfo, ch fileChange, want func(after, before []object) error) ([]Access, error) {
+func fileAccess(proj project.ProjectInfo, ch fileChange, want func(after []object) error) ([]Access, error) {
 	var before, after []object
 	if ch.before != nil {
 		var err error
@@ -155,7 +155,7 @@ func fileAccess(proj project.ProjectInfo, ch fileChange, want func(after, before
 		}
 	}
 	if want != nil {
-		if err := want(after, before); err != nil {
+		if err := want(after); err != nil {
 			return nil, err
 		}
 	}
@@ -196,14 +196,14 @@ func fileAccess(proj project.ProjectInfo, ch fileChange, want func(after, before
 // is the platform repo's, written with the right to create templates
 // cluster-wide, as its routes ask; a project's library is gated by the
 // project's authoring right at its routes and at propose.
-func libraryAccess(proj project.ProjectInfo, ch fileChange, before, after []object, want func(after, before []object) error) ([]Access, error) {
-	for _, o := range append(before, after...) {
+func libraryAccess(proj project.ProjectInfo, ch fileChange, before, after []object, want func(after []object) error) ([]Access, error) {
+	for _, o := range slices.Concat(before, after) {
 		if o.kind != model.KindTemplate {
 			return nil, fmt.Errorf("%w: %s holds a %s; the template library holds only %s", model.ErrInvalid, ch.path, o.ref.Kind, model.KindTemplate.Kind)
 		}
 	}
 	if want != nil {
-		if err := want(after, before); err != nil {
+		if err := want(after); err != nil {
 			return nil, err
 		}
 	}
@@ -240,15 +240,14 @@ func bindAccess(rb object) (Access, error) {
 }
 
 // expected is the identity e's manifest claims: one object of e's resource
-// under e's name, which an edit keeps at the kind base declares it as. A
-// namespace may carry its primary network, and each DRS file is one object of
-// the DRS set.
-func expected(e draft.Entry) func(after, before []object) error {
+// under e's name. A namespace may carry its primary network, and each DRS
+// file is one object of the DRS set.
+func expected(e draft.Entry) func(after []object) error {
 	res := e.Resource
 	if res == "" {
 		res = draft.ResourceVM
 	}
-	return func(after, before []object) error {
+	return func(after []object) error {
 		refuse := fmt.Errorf("%w: the manifest must declare %s and nothing else", model.ErrInvalid, objectLabel(e))
 		switch res {
 		case draft.ResourceNamespace:
@@ -264,13 +263,6 @@ func expected(e draft.Entry) func(after, before []object) error {
 			kinds = append(kinds, model.KindDV.Kind)
 		}
 		ns := model.ObjectNamespace(e.Namespace)
-		if e.Kind == draft.KindEdit {
-			for _, o := range before {
-				if o.ref.Namespace == ns && o.ref.Name == e.Name && slices.Contains(kinds, o.ref.Kind) {
-					kinds = []string{o.ref.Kind}
-				}
-			}
-		}
 		// A library template's namespace is not where it lands: it is never applied.
 		if len(after) != 1 || !slices.Contains(kinds, after[0].ref.Kind) || after[0].ref.Name != e.Name ||
 			res != draft.ResourceTemplate && after[0].ref.Namespace != ns {
