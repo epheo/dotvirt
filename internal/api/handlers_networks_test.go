@@ -100,7 +100,7 @@ func TestScopeNetworkRules(t *testing.T) {
 		},
 	}
 	var redacted []string
-	got := scopeNetworkRules(in, map[string]bool{"a": true}, func(p *model.Policy, _ *model.PolicyRuleView) {
+	got := scopeNetworkRules(in, map[string]bool{"a": true}, func(*model.Policy) {}, func(p *model.Policy, _ *model.PolicyRuleView) {
 		redacted = append(redacted, p.Name)
 	})
 	var names []string
@@ -112,6 +112,23 @@ func TestScopeNetworkRules(t *testing.T) {
 	}
 	if strings.Join(redacted, ",") != "deny-lateral,mine,cluster" {
 		t.Errorf("redacted = %v, want every kept policy through the redactor", redacted)
+	}
+}
+
+// A cluster rule's apply error names whatever its selectors reach: the drift
+// attaches before the redactor runs, so a tenant reads only the generic line.
+func TestScopeNetworkRulesRedactsDrift(t *testing.T) {
+	in := model.NetworkRules{
+		Applies: []model.PolicyBinding{{Policy: model.Policy{Name: "deny-lateral", Kind: model.PolicyAdmin}}},
+		Reaches: []model.PeerRule{{Policy: model.Policy{Name: "into-b", Kind: model.PolicyBaseline}}},
+	}
+	drift := func(p *model.Policy) { p.SyncError = "namespace team-b: admission denied" }
+	tenant := policyRedactor{can: func(model.PolicyKind) bool { return false }}
+	got := scopeNetworkRules(in, nil, drift, tenant.apply)
+	for _, p := range []model.Policy{got.Applies[0].Policy, got.Reaches[0].Policy} {
+		if p.SyncError != redactedSyncError {
+			t.Errorf("%s: a tenant reads the apply error %q", p.Name, p.SyncError)
+		}
 	}
 }
 
@@ -201,7 +218,7 @@ func TestNetworksTenantSeesOwnScope(t *testing.T) {
 	cudn := func(name string) map[string]any {
 		return map[string]any{
 			"apiVersion": "k8s.ovn.org/v1", "kind": "ClusterUserDefinedNetwork",
-			"metadata": map[string]any{"name": name, "resourceVersion": "1"},
+			"metadata": map[string]any{"name": name, "uid": name, "resourceVersion": "1"},
 			"spec":     map[string]any{"network": map[string]any{"topology": "Layer2", "layer2": map[string]any{"role": "Secondary", "subnets": []any{"10.0.0.0/24"}}}},
 		}
 	}

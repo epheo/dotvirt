@@ -155,8 +155,8 @@ func decodePorts(docs []netgen.PortDoc, defaultProto string) []port {
 	return out
 }
 
-// view renders the rule as one Security table row; red hides namespaces in
-// its peers (nil renders everything).
+// view renders the rule as one Security table row; red hides what its peers
+// select outside the caller's view (nil renders everything).
 func (r rule) view(dir string, red *Redaction) model.PolicyRuleView {
 	return model.PolicyRuleView{Direction: dir, Action: r.action, Peer: r.peerSummary(red), Ports: r.portSummary(), Text: r.text(dir, red)}
 }
@@ -187,12 +187,15 @@ func (p peer) summary(red *Redaction) string {
 			parts = append(parts, "ns "+orAny(selectorSummary(p.ns, red), "any"))
 		}
 		if p.pod != nil {
-			parts = append(parts, "pods "+orAny(selectorSummary(p.pod, nil), "any"))
+			parts = append(parts, "pods "+orAny(podSummary(p.pod, p.ns, red), "any"))
 		}
 		return strings.Join(parts, " ")
 	case peerNetworks:
 		return "cidr " + strings.Join(p.cidrs, ", ")
 	case peerNodes:
+		if red.hidesNodes(p.nodes) {
+			return "nodes " + selectedLabels
+		}
 		return "nodes " + orAny(selectorSummary(p.nodes, nil), "any")
 	case peerCIDRSelector:
 		return p.cidrs[0]

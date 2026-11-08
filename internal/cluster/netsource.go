@@ -5,6 +5,7 @@ import (
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/watch"
@@ -41,28 +42,41 @@ func (c *Client) HasAPIResource(gvr schema.GroupVersionResource) bool {
 // version or the resource is not served) from a failed discovery read, which
 // returns its error.
 func (c *Client) ServesAPIResource(gvr schema.GroupVersionResource) (bool, error) {
-	rls, err := c.kube.Discovery().ServerResourcesForGroupVersion(gvr.GroupVersion().String())
+	served, err := c.ServedResources(gvr.GroupVersion())
+	return served[gvr.Resource], err
+}
+
+// ServedResources is the set of resources one discovery read finds gv
+// serving: empty when gv is not served, the error of a failed read.
+func (c *Client) ServedResources(gv schema.GroupVersion) (map[string]bool, error) {
+	rls, err := c.kube.Discovery().ServerResourcesForGroupVersion(gv.String())
 	if apierrors.IsNotFound(err) {
-		return false, nil
+		return map[string]bool{}, nil
 	}
 	if err != nil {
-		return false, err
+		return nil, err
 	}
+	out := make(map[string]bool, len(rls.APIResources))
 	for _, r := range rls.APIResources {
-		if r.Name == gvr.Resource {
-			return true, nil
-		}
+		out[r.Name] = true
 	}
-	return false, nil
+	return out, nil
 }
 
 // NodeLabels is a node's name + labels - enough for netstate to compute which nodes
-// an uplink (an NNCP nodeSelector, or all of them for br-ex) covers. Distinct from
-// model.NodeInfo (the UI's node detail) and model.Node (the inventory row).
+// an uplink (an NNCP nodeSelector, or all of them for br-ex) covers - and the pod
+// subnets OVN-Kubernetes gave it, the cluster default network's address range.
+// Distinct from model.NodeInfo (the UI's node detail) and model.Node (the inventory row).
 type NodeLabels struct {
 	Name   string
 	Labels map[string]string
+	// PodSubnets is the node's OVN-Kubernetes node-subnets annotation: JSON, per
+	// network name.
+	PodSubnets string
 }
+
+// nodeSubnetsAnnotation is where OVN-Kubernetes records each node's pod subnets.
+const nodeSubnetsAnnotation = "k8s.ovn.org/node-subnets"
 
 // ListNodeLabels lists every node's name+labels under this client (nodes:list - no
 // watch). netstate refreshes a cache from this off the request path, so uplink node
@@ -74,7 +88,33 @@ func (c *Client) ListNodeLabels(ctx context.Context) ([]NodeLabels, error) {
 	}
 	out := make([]NodeLabels, 0, len(list.Items))
 	for i := range list.Items {
-		out = append(out, NodeLabels{Name: list.Items[i].Name, Labels: list.Items[i].Labels})
+		n := &list.Items[i]
+		out = append(out, NodeLabels{Name: n.Name, Labels: n.Labels, PodSubnets: n.Annotations[nodeSubnetsAnnotation]})
 	}
 	return out, nil
+}
+
+// gvrClusterNetwork is OpenShift's cluster network configuration, one object
+// named cluster.
+var gvrClusterNetwork = schema.GroupVersionResource{Group: "config.openshift.io", Version: "v1", Resource: "networks"}
+
+// ClusterNetworks reads the pod network CIDRs (status.clusterNetwork) and the
+// service network CIDRs (status.serviceNetwork) the cluster runs, from
+// OpenShift's cluster Network config. A cluster that does not serve it
+// answers NotFound.
+func (c *Client) ClusterNetworks(ctx context.Context) (pod, service []string, err error) {
+	u, err := c.dyn.Resource(gvrClusterNetwork).Get(ctx, "cluster", metav1.GetOptions{})
+	if err != nil {
+		return nil, nil, err
+	}
+	service, _, _ = unstructured.NestedStringSlice(u.Object, "status", "serviceNetwork")
+	entries, _, _ := unstructured.NestedSlice(u.Object, "status", "clusterNetwork")
+	for _, e := range entries {
+		if m, ok := e.(map[string]any); ok {
+			if cidr, ok := m["cidr"].(string); ok {
+				pod = append(pod, cidr)
+			}
+		}
+	}
+	return pod, service, nil
 }

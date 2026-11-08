@@ -16,10 +16,12 @@ package netstate
 import (
 	"context"
 	"maps"
+	"net/netip"
 	"sync"
 	"sync/atomic"
 	"time"
 
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/client-go/tools/cache"
 
@@ -48,6 +50,17 @@ var (
 	gvrEgressFW = cluster.GVR(model.KindEgressFW)
 	gvrEgressIP = cluster.GVR(model.KindEgressIP)
 	gvrExtRoute = cluster.GVR(model.KindExtRoute)
+
+	// Only discovered, never listed: whether the cluster can advertise pod
+	// networks, which may join networks OVN-K otherwise isolates.
+	gvrRouteAds = schema.GroupVersionResource{Group: gvrUDN.Group, Version: "v1", Resource: "routeadvertisements"}
+)
+
+// What discovery last said of the RouteAdvertisements API.
+const (
+	routeAdsUnknown int32 = iota // no probe has answered yet
+	routeAdsAbsent
+	routeAdsServed
 )
 
 // Snapshot holds the watch-fed networking stores. Build with New, start with Run;
@@ -67,8 +80,15 @@ type Snapshot struct {
 	watches []watchSpec
 	healthy []atomic.Bool // one reflect.TrackHealth flag per watches entry
 
-	nodesMu sync.RWMutex
-	nodes   []cluster.NodeLabels
+	// The cluster's infrastructure ranges, refreshed off the request path; nil
+	// is unknown.
+	nodesMu    sync.RWMutex
+	nodes      []cluster.NodeLabels
+	podNet     []netip.Prefix // the default network's node subnets
+	clusterNet []netip.Prefix // the pod network CIDRs the cluster config declares
+	svcNet     []netip.Prefix // the service network CIDRs
+
+	routeAds atomic.Int32 // routeAdsUnknown, routeAdsAbsent or routeAdsServed
 }
 
 // New builds the snapshot over sa (dotvirt's ServiceAccount client). bus may be nil in
@@ -161,10 +181,49 @@ func (s *Snapshot) Run(ctx context.Context) {
 	go s.refreshNodes(ctx)
 }
 
+// ovnServed gates the k8s.ovn.org watches, and from the same discovery read
+// records whether the RouteAdvertisements API is served. A failed read keeps
+// the last answer.
+func (s *Snapshot) ovnServed(gvr schema.GroupVersionResource) bool {
+	served, err := s.sa.ServedResources(gvr.GroupVersion())
+	if err != nil {
+		return false
+	}
+	s.recordRouteAds(served)
+	return served[gvr.Resource]
+}
+
+// probeRouteAds re-reads discovery on the node tick until RouteAdvertisements
+// is served: once every OVN-K watch is admitted no gate reads it, and it may
+// be installed later.
+func (s *Snapshot) probeRouteAds() {
+	if s.routeAds.Load() == routeAdsServed {
+		return
+	}
+	if served, err := s.sa.ServedResources(gvrRouteAds.GroupVersion()); err == nil {
+		s.recordRouteAds(served)
+	}
+}
+
+func (s *Snapshot) recordRouteAds(served map[string]bool) {
+	if served[gvrRouteAds.Resource] {
+		s.routeAds.Store(routeAdsServed)
+	} else {
+		s.routeAds.Store(routeAdsAbsent)
+	}
+}
+
+// mayJoin reports whether route advertisement may join primary networks
+// OVN-K otherwise isolates: its API is served, or discovery has not said.
+func (s *Snapshot) mayJoin() bool { return s.routeAds.Load() != routeAdsAbsent }
+
 // watch starts one spec's discovery-gated reflector. Serving the NNS CRD flips
 // nmstatePresent, which gates the fabric UI.
 func (s *Snapshot) watch(ctx context.Context, w watchSpec, healthy *atomic.Bool) {
 	served := s.sa.HasAPIResource
+	if w.gvr.GroupVersion() == gvrRouteAds.GroupVersion() {
+		served = s.ovnServed
+	}
 	if w.gvr == gvrNNS {
 		served = reflect.Served(served, &s.nmstatePresent)
 	}
@@ -194,26 +253,49 @@ func (s *Snapshot) watch(ctx context.Context, w watchSpec, healthy *atomic.Bool)
 // refreshNodes keeps the node-name cache current via a periodic LIST (populated at once
 // on start, then every nodeRefreshInterval). A changed node set signals NetworkChanged:
 // uplink membership derives from it, and the first LIST usually lands after clients
-// already pulled the catalog.
+// already pulled the catalog. The same LIST carries the default network's node
+// subnets, and the same tick reads the cluster's pod and service networks
+// and, until it is served, whether route advertisement is: only the trace
+// reads those, so their moves signal nothing.
 func (s *Snapshot) refreshNodes(ctx context.Context) {
 	t := time.NewTicker(nodeRefreshInterval)
 	defer t.Stop()
 	for {
 		if infos, err := s.sa.ListNodeLabels(ctx); err == nil {
+			podNet := defaultPodSubnets(infos)
 			s.nodesMu.Lock()
 			changed := !nodesEqual(s.nodes, infos)
-			s.nodes = infos
+			s.nodes, s.podNet = infos, podNet
 			s.nodesMu.Unlock()
 			if changed && s.bus != nil {
 				s.bus.Publish(eventbus.NetworkChanged)
 			}
 		}
+		s.refreshClusterNetworks(ctx)
+		s.probeRouteAds()
 		select {
 		case <-ctx.Done():
 			return
 		case <-t.C:
 		}
 	}
+}
+
+// refreshClusterNetworks reads the cluster's declared pod and service
+// networks. A cluster without OpenShift's Network config, or one the SA may
+// not read, leaves them unknown; a failed read keeps the last one.
+func (s *Snapshot) refreshClusterNetworks(ctx context.Context) {
+	pod, svc, err := s.sa.ClusterNetworks(ctx)
+	switch {
+	case apierrors.IsNotFound(err), apierrors.IsForbidden(err):
+		pod, svc = nil, nil
+	case err != nil:
+		return
+	}
+	clusterNet, svcNet := parsePrefixes(pod), parsePrefixes(svc)
+	s.nodesMu.Lock()
+	s.clusterNet, s.svcNet = clusterNet, svcNet
+	s.nodesMu.Unlock()
 }
 
 func nodesEqual(a, b []cluster.NodeLabels) bool {
