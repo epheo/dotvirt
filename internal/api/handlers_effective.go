@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"sync"
 
 	"github.com/epheo/dotvirt/internal/auth"
 	"github.com/epheo/dotvirt/internal/cluster"
@@ -69,19 +70,22 @@ var clusterPolicyRefs = map[model.PolicyKind]ssarRef{
 }
 
 // policyRedactor hides, from a caller without authority over a cluster-tier
-// policy's kind, what that policy says about other tenants: its subject
-// namespaces, every namespace name and project label value its text spells
-// outside the caller's view, and its apply error. The rules stay - a rule that
-// governs the caller's workload is never hidden - while the full rollup is
-// what /api/policies gates on the same authority.
+// policy's kind, what that policy says beyond the caller's own namespaces:
+// its subject namespaces, every selector value its text spells that reaches
+// outside the caller's view, and its apply error. The rules stay - a rule
+// that governs the caller's workload is never hidden - while the full rollup
+// is what /api/policies gates on the same authority.
 type policyRedactor struct {
 	can  func(model.PolicyKind) bool
 	view *netstate.Redaction
 	snap *netstate.Snapshot
 }
 
-// policyRedactor is the caller's redactor: their visible namespaces and the
-// projects those belong to. A failed visibility read hides every name.
+// policyRedactor is the caller's redactor: their visible namespaces, the
+// projects those belong to, every namespace the snapshot holds to test
+// selectors against, and whether they may read nodes (the cached review the
+// node views share, asked only when a node selector renders). A failed
+// visibility read hides every name.
 func (s *Server) policyRedactor(ctx context.Context, id auth.Identity, c *cluster.Client) policyRedactor {
 	projects := map[string]bool{}
 	visible, err := s.visibleFor(ctx, id, c)
@@ -97,8 +101,29 @@ func (s *Server) policyRedactor(ctx context.Context, id auth.Identity, c *cluste
 			ProjectLabel: s.cfg.ProjectLabel,
 			Namespace:    func(ns string) bool { return visible[ns] },
 			Project:      func(name string) bool { return projects[name] },
+			Namespaces:   sync.OnceValue(s.namespaceLabels),
+			Nodes:        sync.OnceValue(func() bool { return s.capable(ctx, id, c, ask(verbList, ssarNodes, "")) }),
 		},
 	}
+}
+
+// namespaceLabels is every namespace as the SA snapshot holds it: the project
+// namespaces with their labels, every other one by name alone.
+func (s *Server) namespaceLabels() []netstate.NamespaceLabels {
+	held := s.state.Namespaces()
+	all := s.state.AllNamespaces()
+	out := make([]netstate.NamespaceLabels, 0, len(all))
+	seen := make(map[string]bool, len(held))
+	for _, ns := range held {
+		out = append(out, netstate.NamespaceLabels{Name: ns.Name, Labels: ns.Labels})
+		seen[ns.Name] = true
+	}
+	for name := range all {
+		if !seen[name] {
+			out = append(out, netstate.NamespaceLabels{Name: name})
+		}
+	}
+	return out
 }
 
 // apply redacts p, and rule when it is one of p's rows (a trace step's).

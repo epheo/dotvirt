@@ -84,7 +84,16 @@ func (s subject) summary(red *Redaction) string {
 	if s.ns == nil {
 		return orAny(selectorSummary(s.pod, nil), "all pods")
 	}
-	return strings.TrimSpace(orAny(selectorSummary(s.ns, red), "all namespaces") + " " + prefixed("pods ", selectorSummary(s.pod, nil)))
+	return strings.TrimSpace(orAny(selectorSummary(s.ns, red), "all namespaces") + " " + prefixed("pods ", podSummary(s.pod, s.ns, red)))
+}
+
+// podSummary renders a pod selector beside its namespace side ns, its labels
+// hidden where red does not confine that side.
+func podSummary(pod, ns *metav1.LabelSelector, red *Redaction) string {
+	if red.hidesLabels(pod, ns) {
+		return selectedLabels
+	}
+	return selectorSummary(pod, nil)
 }
 
 // decodeNetpol reads a NetworkPolicy: the project rules. A

@@ -83,6 +83,12 @@ rules:
   - apiGroups: [""]
     resources: ["nodes"]
     verbs: ["get", "list"]
+  # The cluster's pod and service networks, which the connectivity trace
+  # places addresses against.
+  - apiGroups: ["config.openshift.io"]
+    resources: ["networks"]
+    resourceNames: ["cluster"]
+    verbs: ["get"]
 ---
 # The apply rights for the kinds dotvirt's PR flow emits, granted to the SHARED Argo
 # application-controller SA (the binding targets it). The AppProjects — not this role —
