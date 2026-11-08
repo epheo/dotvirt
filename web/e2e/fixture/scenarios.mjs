@@ -1482,6 +1482,28 @@ const hosttrouble = {
 };
 // --- end hosts ---
 
+// --- withheld: cluster rules the caller may not read ---
+// The server names them by tier and priority alone, with no file and no
+// specific sync error: nothing on the page may point at the object.
+const withheld = {
+	...base,
+	name: 'withheld',
+	policies: {
+		policies: base.policies.policies.map((p) =>
+			p.kind === 'admin'
+				? {
+						...p,
+						name: `cluster rule, priority ${p.priority ?? 0}`,
+						withheld: true,
+						sourceFile: undefined,
+						syncError: undefined,
+					}
+				: p,
+		),
+	},
+};
+// --- end withheld ---
+
 export const scenarios = {
 	residue,
 	sso,
@@ -1503,4 +1525,5 @@ export const scenarios = {
 	metricsoff,
 	caps: capsDenied,
 	hosttrouble,
+	withheld,
 };

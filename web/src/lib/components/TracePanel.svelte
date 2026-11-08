@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { Play } from '@lucide/svelte';
 	import { api, type TraceResult, type TraceStep } from '#lib/api.js';
-	import { traceStageLabel } from '#lib/labels.js';
+	import { WITHHELD, traceStageLabel } from '#lib/labels.js';
 	import { action } from '#lib/resource.svelte.js';
 	import { inventory } from '#lib/state/inventory.svelte.js';
 	import { TONE_PILL, TONE_TEXT, type Tone } from '#lib/status.js';
@@ -186,7 +186,12 @@
 								</span>
 								<span class="font-medium {TONE_TEXT[actionTone(s)]}">{s.action}</span>
 								{#if s.policy}
-									<span class="min-w-0 truncate font-medium text-ink">{s.policy.name}</span>
+									<span
+										class="min-w-0 truncate {s.policy.withheld
+											? 'text-ink-muted'
+											: 'font-medium text-ink'}"
+										title={s.policy.withheld ? WITHHELD : undefined}>{s.policy.name}</span
+									>
 									{#if s.policy.namespace}
 										<span class="rounded bg-inset px-1.5 py-0.5 text-ink-muted"
 											>{s.policy.namespace}</span

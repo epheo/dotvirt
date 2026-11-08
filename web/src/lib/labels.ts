@@ -46,6 +46,9 @@ export const DRAFT_RESOURCE_LABEL: Record<string, string> = {
 const own = (m: Record<string, string>, k: string) =>
 	Object.prototype.hasOwnProperty.call(m, k) ? m[k] : undefined;
 
+// Title of a withheld rule's label: the caller may not read that cluster rule.
+export const WITHHELD = 'You cannot read this cluster rule, so its name is hidden.';
+
 export const policyKindLabel = (kind: string): string => own(POLICY_KIND_LABEL, kind) ?? 'Rule';
 export const traceStageLabel = (stage: string): string => own(TRACE_STAGE_LABEL, stage) ?? 'Step';
 export const draftResourceLabel = (resource: string | undefined): string =>

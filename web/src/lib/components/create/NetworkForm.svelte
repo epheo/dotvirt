@@ -6,7 +6,7 @@
 	import { attachRef } from '#lib/networks.js';
 	import { action } from '#lib/resource.svelte.js';
 	import { nodeTargets } from '#lib/state/hosts.svelte.js';
-	import { CLUSTER_NS, objectGate } from '#lib/gates.js';
+	import { CLUSTER_NS, clusterGate, objectGate } from '#lib/gates.js';
 	import { inventory } from '#lib/state/inventory.svelte.js';
 	import { ui } from '#lib/state/ui.svelte.js';
 	import { canMeet, nearestFree, overlapping, suggestSubnet } from '#lib/subnets.js';
@@ -144,13 +144,16 @@
 	const nodes = nodeTargets();
 	const hostCount = $derived(nodes.data?.length ?? 0);
 	const uplinks = $derived(inventory.uplinks.filter((u) => !u.builtin));
-	const failing = (u: { policy?: string; health?: string }) =>
-		u.health === 'Degraded' ||
-		!!inventory.inventory?.platform?.unhealthy?.some(
+	// The platform rollup's rows reach only callers with platform read; the
+	// uplink's own health still says it fails, without the reason.
+	const issueOf = (u: { policy?: string }) =>
+		inventory.inventory?.platform?.unhealthy?.find(
 			(o) => o.kind === 'NodeNetworkConfigurationPolicy' && o.name === u.policy,
 		);
+	const failing = (u: { policy?: string; health?: string }) =>
+		u.health === 'Degraded' || !!issueOf(u);
 	const failure = (u: { policy?: string }) =>
-		inventory.inventory?.platform?.unhealthy?.find((o) => o.name === u.policy)?.message ?? '';
+		issueOf(u)?.message || (clusterGate.platformRead().ok ? '' : 'a platform admin can see why');
 	// The hosts a failure names, when its message lists them ("... (host-41)").
 	const failingOn = (u: { policy?: string }) => /\(([^)]+)\)\s*$/.exec(failure(u))?.[1] ?? '';
 	$effect(() => {

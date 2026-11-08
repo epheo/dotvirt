@@ -158,3 +158,18 @@ test('a rule on another project reads its subject in the words the caller may se
 	await expect(main.getByText('TCP 5432 to other namespaces')).toBeVisible();
 	await expect(main.getByText(/VMs labeled tenant-a/)).toHaveCount(0);
 });
+
+test('a cluster rule the caller may not read names no object and links nowhere', async ({
+	page,
+}) => {
+	await setScenario(page, 'withheld');
+	await login(page);
+	const main = page.locator('main');
+	await page.goto('/compute/team-web/web-prod?tab=security');
+	await expect(main.getByText('cluster rule, priority 10').first()).toBeVisible();
+	// The label carries the priority; the tier pill does not repeat it.
+	await expect(main.getByText('Cluster rule, priority 10', { exact: true })).toHaveCount(0);
+	await page.goto('/networking/web-prod/web-net');
+	await expect(main.getByText(/Cluster rule, priority 10/).first()).toBeVisible();
+	await expect(main.getByRole('link', { name: /cluster rule, priority/ })).toHaveCount(0);
+});
