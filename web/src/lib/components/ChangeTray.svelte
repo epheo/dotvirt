@@ -13,6 +13,7 @@
 	import { changesHref, hrefForScope } from '#lib/nav.js';
 	import { approvalLine, checksPill, reviewURL } from '#lib/review.js';
 	import { TONE_PILL, TONE_TEXT } from '#lib/status.js';
+	import { caps } from '#lib/state/caps.svelte.js';
 	import { drafts, PLATFORM_PROJECT } from '#lib/state/drafts.svelte.js';
 	import { inventory } from '#lib/state/inventory.svelte.js';
 	import { reviewCache } from '#lib/state/reviewCache.svelte.js';
@@ -26,9 +27,15 @@
 	// it replaces the header Propose button, the Changes dot and the pending
 	// banners. Every lane names what happens next and who acts. Hidden on
 	// /changes, which is the full view of the same pipeline.
+	// A platform stager without platform read gets the platform's verdict but
+	// not its revision or history: their merge cannot be followed past git.
+	const unfollowable = (p: string) =>
+		p === PLATFORM_PROJECT && caps.cluster?.platformRead === false;
 	const syncOf = (p: string) =>
 		p === PLATFORM_PROJECT
-			? inventory.inventory?.platform
+			? unfollowable(p)
+				? undefined
+				: inventory.inventory?.platform
 			: inventory.projects.find((x) => x.name === p)?.gitOps;
 	const lanes = $derived(
 		trayLanes({
@@ -404,7 +411,9 @@
 						{:else}
 							<div class="flex items-center gap-3 px-3 py-2">
 								<p class="min-w-0 flex-1 text-ink-soft">
-									GitOps status is not available, so dotvirt cannot follow it to the cluster.
+									{unfollowable(lane.project)
+										? "You cannot read the platform's history, so dotvirt cannot follow it to the cluster."
+										: 'GitOps status is not available, so dotvirt cannot follow it to the cluster.'}
 								</p>
 								<button class="text-ink-soft hover:underline" onclick={() => tray.dismiss(lane.key)}
 									>Dismiss</button

@@ -1,5 +1,5 @@
 import { untrack } from 'svelte';
-import { api, type CommitDetail, type Proposal, type ProposalDetail } from '#lib/api.js';
+import { api, HttpError, type CommitDetail, type Proposal, type ProposalDetail } from '#lib/api.js';
 import { friendlyError } from '#lib/format.js';
 import { commitKey, prKey } from '#lib/review.js';
 import { itemLine } from '#lib/tray.js';
@@ -10,8 +10,9 @@ import { inventory } from './inventory.svelte';
 // object's History card look at the same ones, so a review loads once per
 // key for the session. A commit never changes; a PR's review is keyed on the
 // head the live lane reports, so a push to the PR, from this app or not, is
-// a miss that loads the new version.
-type Review<T> = { readonly data: T | null; readonly error: string };
+// a miss that loads the new version. Denied is the server's 403: its message
+// is the answer, and asking again cannot change it.
+type Review<T> = { readonly data: T | null; readonly error: string; readonly denied?: boolean };
 
 class ReviewCache {
 	#commits = $state<Record<string, Review<CommitDetail>>>({});
@@ -90,7 +91,12 @@ class ReviewCache {
 					if (gen === this.#generation) store[key] = { data, error: '' };
 				},
 				(e) => {
-					if (gen === this.#generation) store[key] = { data: null, error: friendlyError(e) };
+					if (gen === this.#generation)
+						store[key] = {
+							data: null,
+							error: friendlyError(e),
+							denied: e instanceof HttpError && e.status === 403,
+						};
 				},
 			);
 		});

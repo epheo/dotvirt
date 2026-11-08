@@ -1556,6 +1556,65 @@ const withheld = {
 };
 // --- end withheld ---
 
+// --- platstager: stages to the platform, cannot read it ---
+// The server lists only the caller's own platform PRs, serves the review of
+// the ones that still match what dotvirt proposed, refuses the platform's
+// history, and keeps their platform merges in the task feed.
+const platstager = {
+	...base,
+	name: 'platstager',
+	networks: { ...base.networks, caps: { ...base.networks.caps, platform: false } },
+	inventory: {
+		...base.inventory,
+		platform: { sync: 'Synced', health: 'Healthy' },
+		proposals: [
+			...base.inventory.proposals,
+			{
+				project: 'platform',
+				prNumber: 7,
+				prURL: 'https://forge.example/dotvirt/platform/pulls/7',
+				title: 'Add network dc-vlan-120',
+				branch: 'dotvirt/proposed/admin/platform-7c7c',
+				by: 'admin',
+				mine: true,
+				checks: 'success',
+				approvals: 0,
+				requiredApprovals: 1,
+			},
+			{
+				project: 'platform',
+				prNumber: 8,
+				prURL: 'https://forge.example/dotvirt/platform/pulls/8',
+				title: 'Add uplink storage-net',
+				branch: 'dotvirt/proposed/admin/platform-8d8d',
+				by: 'admin',
+				mine: true,
+				approvals: 0,
+				requiredApprovals: 1,
+			},
+		],
+	},
+	tasks: [
+		...base.tasks,
+		{
+			kind: 'merge',
+			verb: 'Merged',
+			project: 'platform',
+			prNumber: 6,
+			prURL: 'https://forge.example/dotvirt/platform/pulls/6',
+			title: 'Add network dc-vlan-110',
+			by: 'admin',
+			ok: true,
+			at: iso(30),
+		},
+	],
+	proposalDenied: {
+		'platform#8':
+			'forbidden: pull request #8 changed outside dotvirt since you proposed it; a platform administrator can review it',
+	},
+};
+// --- end platstager ---
+
 export const scenarios = {
 	residue,
 	sso,
@@ -1581,4 +1640,5 @@ export const scenarios = {
 	hosttrouble,
 	withheld,
 	draftsdown,
+	platstager,
 };

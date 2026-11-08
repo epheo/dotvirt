@@ -41,7 +41,14 @@
 
 	// Each merge is placed by mergeState against its project's history, which
 	// the poll re-reads, so a merge missing from the first read still lands.
-	const historyKey = $derived([...new Set(merges.map((t) => t.project ?? ''))].sort().join(' '));
+	// Only a project with a GitOps row can place one: the platform has none
+	// here, and a stager without platform read is refused its history.
+	const gitOpsOf = (project?: string) => inventory.projects.find((p) => p.name === project)?.gitOps;
+	const historyKey = $derived(
+		[...new Set(merges.filter((t) => gitOpsOf(t.project)).map((t) => t.project ?? ''))]
+			.sort()
+			.join(' '),
+	);
 	const history = resource<Record<string, Commit[]>>(
 		() => historyKey,
 		async (k) => {
@@ -67,7 +74,7 @@
 
 	const merged = $derived(
 		merges.map((t) => {
-			const g = inventory.projects.find((p) => p.name === t.project)?.gitOps;
+			const g = gitOpsOf(t.project);
 			const commits = history.data?.[t.project ?? ''];
 			const hash = commits?.find((c) => c.prNumber === t.prNumber)?.hash;
 			const m = hash

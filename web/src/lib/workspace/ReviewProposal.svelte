@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { ExternalLink } from '@lucide/svelte';
 	import type { Proposal } from '#lib/api.js';
+	import { serverReason } from '#lib/format.js';
 	import { approvalLine, checksPill } from '#lib/review.js';
 	import { reviewCache } from '#lib/state/reviewCache.svelte.js';
 	import Button from '#lib/components/Button.svelte';
@@ -42,7 +43,12 @@
 	{/snippet}
 
 	<ReviewSection title="Changes in this pull request">
-		{#if review?.error}
+		{#if review?.denied}
+			<!-- The server's answer, one clause per line. -->
+			{#each serverReason(review.error).split('; ') as line (line)}
+				<p class="text-ink-soft">{line.charAt(0).toUpperCase() + line.slice(1)}.</p>
+			{/each}
+		{:else if review?.error}
 			<ErrorNote error={review.error} />
 			<div>
 				<Button

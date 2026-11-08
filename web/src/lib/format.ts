@@ -92,6 +92,13 @@ export function fmtUsage(unit: 'pct' | 'bytes' | 'cores', v: number): string {
 // comma-separated entries.
 export const splitList = (s: string): string[] => s.split(/[\s,]+/).filter(Boolean);
 
+// A refusal's text without its kind ("forbidden: ..."): the kind is not for
+// the reader, the server's sentence is.
+export const serverReason = (msg: string): string =>
+	msg
+		.trim()
+		.replace(/^(conflict|temporarily unavailable|invalid request|not found|forbidden): /, '');
+
 // Thrown errors stringify as "Error: <msg>"; toasts show just the message.
 export function friendlyError(e: unknown): string {
 	return (e instanceof Error ? e.message : String(e)).replace(/^Error:\s*/, '');

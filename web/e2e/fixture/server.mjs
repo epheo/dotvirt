@@ -562,6 +562,9 @@ async function handleAPI(req, res, url) {
 		return sendJSON(res, 200, draftFor('platform'));
 	}
 
+	m = path.match(/^\/api\/projects\/([^/]+)\/history(\/|$)/);
+	if (m && m[1] === 'platform' && !clusterCaps(s).platformRead)
+		return sendText(res, 403, 'forbidden: not authorized to read the platform repo');
 	m = path.match(/^\/api\/projects\/([^/]+)\/history$/);
 	if (m) {
 		// ?namespace= narrows to the commits under that directory: the merge
@@ -595,6 +598,8 @@ async function handleAPI(req, res, url) {
 			(p) => p.project === m[1] && p.prNumber === Number(m[2]),
 		);
 		if (!pr) return sendText(res, 404, `not found: pull request #${m[2]}`);
+		const denied = s.proposalDenied?.[`${m[1]}#${m[2]}`];
+		if (denied) return sendText(res, 403, denied);
 		const items = {
 			41: {
 				kind: 'edit',
@@ -603,6 +608,14 @@ async function handleAPI(req, res, url) {
 				changes: [{ field: 'Memory', action: 'change', from: '8Gi', to: '12Gi' }],
 				yaml: 'kind: VirtualMachine\nmetadata:\n  name: db-1\nspec:\n  memory: 12Gi\n',
 				baseYAML: 'kind: VirtualMachine\nmetadata:\n  name: db-1\nspec:\n  memory: 8Gi\n',
+			},
+			7: {
+				kind: 'create',
+				namespace: 'cluster',
+				name: 'dc-vlan-120',
+				resource: 'network',
+				changes: [{ field: 'VLAN', action: 'add', to: '120' }],
+				yaml: 'kind: ClusterUserDefinedNetwork\nmetadata:\n  name: dc-vlan-120\n',
 			},
 			42: {
 				kind: 'edit',
