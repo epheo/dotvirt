@@ -136,14 +136,19 @@ func (a *Authenticator) Validate(ctx context.Context, token string) (Identity, e
 	return a.validate(ctx, token, restfactory.TokenKey(token), true)
 }
 
-// Revalidate re-checks a token an open session already presented, as a live
-// stream does: the cached verdict when there is one, else a review outside
-// the budget unknown tokens spend, so streams re-checking cannot starve
-// sign-ins and a re-check is never refused into a pass. Its load is bounded
-// by the open sessions: one review per token per authCacheTTL. A transient
-// failure is returned as such, never as a rejection.
-func (a *Authenticator) Revalidate(ctx context.Context, token string) error {
-	_, err := a.validate(ctx, token, restfactory.TokenKey(token), false)
+// Revalidate re-checks a session an open stream already presented: an ended
+// session (signed out, past its lifetime) is rejected outright, else the cached
+// verdict when there is one, else a review outside the budget unknown tokens
+// spend, so streams re-checking cannot starve sign-ins and a re-check is never
+// refused into a pass. Its load is bounded by the open sessions: one review per
+// token per authCacheTTL. A transient failure is returned as such, never as a
+// rejection.
+func (a *Authenticator) Revalidate(ctx context.Context, id Identity) error {
+	key := restfactory.TokenKey(id.Token)
+	if !a.sessions.live(key, id.Issued) {
+		return fmt.Errorf("%w: session ended", ErrRejected)
+	}
+	_, err := a.validate(ctx, id.Token, key, false)
 	return err
 }
 

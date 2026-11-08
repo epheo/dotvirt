@@ -8,6 +8,7 @@ import (
 
 	"github.com/epheo/dotvirt/internal/auth"
 	"github.com/epheo/dotvirt/internal/cluster"
+	"github.com/epheo/dotvirt/internal/eventbus"
 	"github.com/epheo/dotvirt/internal/inventory"
 	"github.com/epheo/dotvirt/internal/model"
 	"github.com/epheo/dotvirt/pkg/forge"
@@ -27,9 +28,11 @@ func (s *Server) InventoryForIdentity(ctx context.Context, id auth.Identity) (mo
 	// reviews can outlive a revoked token by minutes: re-check it on the
 	// authenticator's cache, shared with the session's REST calls, so a dead
 	// token ends its stream at the next frame past that cache's TTL. A failed
-	// re-check withholds the frame without ending the session.
+	// re-check withholds the frame without ending the session. A signed-out or
+	// expired session fails it too, and a rejection closes the token's consoles.
 	if s.auth != nil {
-		if err := s.auth.Revalidate(ctx, id.Token); errors.Is(err, auth.ErrRejected) {
+		if err := s.auth.Revalidate(ctx, id); errors.Is(err, auth.ErrRejected) {
+			s.bus.Publish(eventbus.SessionEnded)
 			return model.Inventory{}, errSessionRejected
 		} else if err != nil {
 			return model.Inventory{}, unavailable(err)

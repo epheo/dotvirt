@@ -249,7 +249,7 @@ func TestRevalidateOutsideTheBudget(t *testing.T) {
 	var wg sync.WaitGroup
 	for range 8 {
 		wg.Go(func() {
-			if err := a.Revalidate(context.Background(), "good"); err != nil {
+			if err := a.Revalidate(context.Background(), Identity{Token: "good"}); err != nil {
 				t.Errorf("Revalidate: %v", err)
 			}
 		})
@@ -263,7 +263,7 @@ func TestRevalidateOutsideTheBudget(t *testing.T) {
 	if _, err := a.Validate(context.Background(), "unknown"); !errors.Is(err, ErrThrottled) {
 		t.Errorf("an unknown token past the budget: %v, want ErrThrottled", err)
 	}
-	if err := a.Revalidate(context.Background(), "bad"); !errors.Is(err, ErrRejected) {
+	if err := a.Revalidate(context.Background(), Identity{Token: "bad"}); !errors.Is(err, ErrRejected) {
 		t.Errorf("a dead token re-checked: %v, want ErrRejected", err)
 	}
 }

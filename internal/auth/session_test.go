@@ -273,3 +273,28 @@ func TestOAuthTokenName(t *testing.T) {
 		t.Error("named an object for a token without the sha256~ prefix")
 	}
 }
+
+// A stream's re-check fails for an ended session before any review, so its
+// frames stop through the build path as well as the sweep; a newer session and
+// a bearer use of the same token still pass.
+func TestRevalidateRejectsEndedSession(t *testing.T) {
+	rig := newSessionRig(t)
+	now := time.Now()
+	ended, newer := now.Add(-time.Hour), now.Add(-time.Minute)
+	rig.do(http.MethodPost, "/api/logout", sealedAt(ended))
+	reviews := *rig.reviews
+	ctx := context.Background()
+	for name, issued := range map[string]time.Time{"signed-out": ended, "expired": now.Add(-sessionMaxAge)} {
+		if err := rig.a.Revalidate(ctx, Identity{Token: "good", Issued: issued}); !errors.Is(err, ErrRejected) {
+			t.Errorf("%s session re-checked: %v, want ErrRejected", name, err)
+		}
+	}
+	if *rig.reviews != reviews {
+		t.Errorf("an ended session's re-check spent %d TokenReviews", *rig.reviews-reviews)
+	}
+	for name, issued := range map[string]time.Time{"newer": newer, "bearer": {}} {
+		if err := rig.a.Revalidate(ctx, Identity{Token: "good", Issued: issued}); err != nil {
+			t.Errorf("%s re-checked: %v, want nil", name, err)
+		}
+	}
+}
