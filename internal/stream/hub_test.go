@@ -28,7 +28,7 @@ func testLevels() Levels {
 }
 
 func newTestHub() *Hub {
-	return NewHub(echoInventory, make(chan struct{}, 1), testLevels(), "")
+	return NewHub(echoInventory, nil, make(chan struct{}, 1), testLevels(), "")
 }
 
 func testConn(name string) *conn {
@@ -169,7 +169,7 @@ func TestReconcileBoundsOneIdentityBuild(t *testing.T) {
 		}
 		return echoInventory(ctx, id)
 	}
-	h := NewHub(stall, make(chan struct{}, 1), testLevels(), "")
+	h := NewHub(stall, nil, make(chan struct{}, 1), testLevels(), "")
 	h.timeout = 50 * time.Millisecond
 	stuck, alice := testConn("stuck"), testConn("alice")
 	h.add(stuck)
@@ -196,7 +196,7 @@ func repoHub(bus *eventbus.Bus) (*Hub, *sync.Map) {
 		n.(*atomic.Int64).Add(1)
 		return model.Inventory{Projects: []model.Project{{Name: id.Username, Repo: "https://forge/" + id.Username + ".git"}}}, nil
 	}
-	return NewHub(inv, make(chan struct{}, 1), RepoLevels(bus, eventbus.GitChanged, eventbus.LiveChanged, eventbus.GitChanged), ""), &builds
+	return NewHub(inv, nil, make(chan struct{}, 1), RepoLevels(bus, eventbus.GitChanged, eventbus.LiveChanged, eventbus.GitChanged), ""), &builds
 }
 
 func takeBuilds(builds *sync.Map) map[string]int64 {
@@ -263,7 +263,7 @@ func TestReconcileLevelMovedMidBuild(t *testing.T) {
 		}
 		return echoInventory(context.Background(), id)
 	}
-	h := NewHub(inv, make(chan struct{}, 1), RepoLevels(bus, eventbus.GitChanged, eventbus.LiveChanged, eventbus.GitChanged), "")
+	h := NewHub(inv, nil, make(chan struct{}, 1), RepoLevels(bus, eventbus.GitChanged, eventbus.LiveChanged, eventbus.GitChanged), "")
 	h.add(testConn("a"))
 	h.reconcile(context.Background())
 	h.reconcile(context.Background())
@@ -290,7 +290,7 @@ func TestReconcileWorkerPoolBound(t *testing.T) {
 		active.Add(-1)
 		return echoInventory(ctx, id)
 	}
-	h := NewHub(inv, make(chan struct{}, 1), testLevels(), "")
+	h := NewHub(inv, nil, make(chan struct{}, 1), testLevels(), "")
 	conns := make([]*conn, 3*buildWorkers)
 	for i := range conns {
 		conns[i] = testConn(fmt.Sprintf("u%d", i))
@@ -331,7 +331,7 @@ func TestReconcileUnrelatedPushMidBuild(t *testing.T) {
 		}
 		return model.Inventory{Projects: []model.Project{{Name: id.Username, Repo: "https://forge/a.git"}}}, nil
 	}
-	h := NewHub(inv, make(chan struct{}, 1), RepoLevels(bus, eventbus.GitChanged, eventbus.LiveChanged, eventbus.GitChanged), "")
+	h := NewHub(inv, nil, make(chan struct{}, 1), RepoLevels(bus, eventbus.GitChanged, eventbus.LiveChanged, eventbus.GitChanged), "")
 	h.add(testConn("a"))
 	h.reconcile(context.Background())
 
@@ -366,7 +366,7 @@ func TestRejectedTokenEndsItsConnections(t *testing.T) {
 		}
 		return echoInventory(context.Background(), id)
 	}
-	h := NewHub(inv, make(chan struct{}, 1), testLevels(), "")
+	h := NewHub(inv, nil, make(chan struct{}, 1), testLevels(), "")
 	alice, alice2, bob, carol := testConn("alice"), testConn("alice"), testConn("bob"), testConn("carol")
 	for _, c := range []*conn{alice, alice2, bob, carol} {
 		h.add(c)
@@ -401,7 +401,7 @@ func TestFailedBuildRetriesWithoutAnEvent(t *testing.T) {
 		}
 		return echoInventory(ctx, id)
 	}
-	h := NewHub(inv, make(chan struct{}), testLevels(), "")
+	h := NewHub(inv, nil, make(chan struct{}), testLevels(), "")
 	h.retryBase = 10 * time.Millisecond
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -439,7 +439,7 @@ func TestRetryBackoffAndDisconnect(t *testing.T) {
 	fail := func(context.Context, auth.Identity) (model.Inventory, error) {
 		return model.Inventory{}, errors.New("review backend down")
 	}
-	h := NewHub(fail, make(chan struct{}, 1), testLevels(), "")
+	h := NewHub(fail, nil, make(chan struct{}, 1), testLevels(), "")
 	h.retryBase = time.Hour
 	if d := h.retryDelay(0); d != retryCap {
 		t.Errorf("first delay = %v, want the cap", d)
@@ -472,5 +472,45 @@ func TestRetryBackoffAndDisconnect(t *testing.T) {
 	h.mu.Unlock()
 	if left != 0 {
 		t.Error("a retry was scheduled for an identity no longer connected")
+	}
+}
+
+// An ended session's connections close before any build, per connection: a
+// newer session and a bearer connection of the same token, sharing its key,
+// stay and get their frame.
+func TestEndedSessionEndsOnlyItsConnections(t *testing.T) {
+	signedOut := time.Now().Add(-time.Hour)
+	live := func(key string, issued time.Time) bool {
+		return issued.IsZero() || key != "alice" || issued.After(signedOut)
+	}
+	h := NewHub(echoInventory, live, make(chan struct{}, 1), testLevels(), "")
+	session := func(key string, issued time.Time) *conn {
+		return newConn(auth.Identity{Username: key, Token: "tok-" + key, Issued: issued}, key)
+	}
+	ended := session("alice", signedOut)
+	newer, bearer, bob := session("alice", time.Now()), session("alice", time.Time{}), session("bob", signedOut)
+	for _, c := range []*conn{ended, newer, bearer, bob} {
+		h.add(c)
+	}
+
+	h.reconcile(context.Background())
+	h.reconcile(context.Background()) // a second pass before teardown must not double-close
+	select {
+	case <-ended.evict:
+	default:
+		t.Fatal("a signed-out session's connection was kept open")
+	}
+	if len(ended.out) != 0 {
+		t.Error("a signed-out session's connection got a frame")
+	}
+	for _, c := range []*conn{newer, bearer, bob} {
+		select {
+		case <-c.evict:
+			t.Fatalf("%s (issued %v) was evicted; only the ended session closes", c.id.Username, c.id.Issued)
+		default:
+		}
+		if len(c.out) != 1 {
+			t.Errorf("%s (issued %v) got no frame", c.id.Username, c.id.Issued)
+		}
 	}
 }

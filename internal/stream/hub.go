@@ -50,6 +50,11 @@ const (
 // burst of apiserver calls under every connected token at once.
 const buildWorkers = 8
 
+// SessionLive reports whether the session a connection opened under may still
+// authenticate (auth.Authenticator.SessionLive). tokenKey is
+// restfactory.TokenKey of the connection's token; issued is its Identity's.
+type SessionLive func(tokenKey string, issued time.Time) bool
+
 // Levels is the change level frames are reconciled against.
 type Levels interface {
 	// Total moves whenever anything any frame depends on moves: the Run loop's
@@ -65,6 +70,7 @@ type Levels interface {
 // Hub is the central inventory reconciler. One Hub per process.
 type Hub struct {
 	inventory InventoryFunc
+	live      SessionLive     // nil: sessions never end
 	wake      <-chan struct{} // bus subscription over the inventory kinds (the edge)
 	levels    Levels          // the level
 	kick      chan struct{}   // a connection was added - rebuild so it gets a first frame
@@ -94,10 +100,13 @@ type frame struct {
 
 // NewHub builds the hub over a bus subscription (wake) and the levels of the kinds
 // that subscription covers. Passing both keeps this package decoupled from the
-// specific kind set - the caller (main) owns it.
-func NewHub(inventory InventoryFunc, wake <-chan struct{}, levels Levels, uiOrigin string) *Hub {
+// specific kind set - the caller (main) owns it. The subscription also carries
+// the signal that a session ended, which no level covers: live then closes that
+// session's connections without rebuilding any frame.
+func NewHub(inventory InventoryFunc, live SessionLive, wake <-chan struct{}, levels Levels, uiOrigin string) *Hub {
 	return &Hub{
 		inventory: inventory,
+		live:      live,
 		wake:      wake,
 		levels:    levels,
 		kick:      make(chan struct{}, 1),
@@ -236,14 +245,22 @@ func (h *Hub) Run(ctx context.Context) {
 // one worker per pass and passes never overlap, so its frames arrive in build order.
 // A per-identity build failure is logged and skips that identity, never the
 // others; it stays due, and a retry pass is scheduled (retryLater). A rejected
-// session ends that identity's connections instead (see reject).
+// session ends that identity's connections instead (see reject), and so does an
+// ended one, checked per connection before any build: sessions of one token
+// share a key, and a logout ends only some of them.
 func (h *Hub) reconcile(ctx context.Context) {
 	h.mu.Lock()
 	byKey := make(map[string][]*conn, len(h.conns))
+	var ended []*conn
 	for c := range h.conns {
+		if h.live != nil && !h.live(c.key, c.id.Issued) {
+			ended = append(ended, c)
+			continue
+		}
 		byKey[c.key] = append(byKey[c.key], c)
 	}
 	h.mu.Unlock()
+	h.reject(ended)
 
 	for key := range h.idents {
 		if _, ok := byKey[key]; !ok {
@@ -341,9 +358,10 @@ func (h *Hub) build(ctx context.Context, conns []*conn, prev *frame) (f *frame, 
 	return f, false
 }
 
-// reject ends conns whose session a TokenReview rejected: a frozen frame would
-// otherwise stand in for a session that is over. The rejection is cached, so
-// the client's reconnect meets the 401 that signs it out.
+// reject ends conns whose session is over - a TokenReview rejected it, or it
+// ended (signed out, past its lifetime): a frozen frame would otherwise stand
+// in for it. Both verdicts outlive the connection, so the client's reconnect
+// meets the 401 that signs it out.
 func (h *Hub) reject(conns []*conn) {
 	for _, c := range conns {
 		select {
