@@ -57,12 +57,19 @@ func (c *Client) ServesAPIResource(gvr schema.GroupVersionResource) (bool, error
 }
 
 // NodeLabels is a node's name + labels - enough for netstate to compute which nodes
-// an uplink (an NNCP nodeSelector, or all of them for br-ex) covers. Distinct from
-// model.NodeInfo (the UI's node detail) and model.Node (the inventory row).
+// an uplink (an NNCP nodeSelector, or all of them for br-ex) covers - and the pod
+// subnets OVN-Kubernetes gave it, the cluster default network's address range.
+// Distinct from model.NodeInfo (the UI's node detail) and model.Node (the inventory row).
 type NodeLabels struct {
 	Name   string
 	Labels map[string]string
+	// PodSubnets is the node's OVN-Kubernetes node-subnets annotation: JSON, per
+	// network name.
+	PodSubnets string
 }
+
+// nodeSubnetsAnnotation is where OVN-Kubernetes records each node's pod subnets.
+const nodeSubnetsAnnotation = "k8s.ovn.org/node-subnets"
 
 // ListNodeLabels lists every node's name+labels under this client (nodes:list - no
 // watch). netstate refreshes a cache from this off the request path, so uplink node
@@ -74,7 +81,8 @@ func (c *Client) ListNodeLabels(ctx context.Context) ([]NodeLabels, error) {
 	}
 	out := make([]NodeLabels, 0, len(list.Items))
 	for i := range list.Items {
-		out = append(out, NodeLabels{Name: list.Items[i].Name, Labels: list.Items[i].Labels})
+		n := &list.Items[i]
+		out = append(out, NodeLabels{Name: n.Name, Labels: n.Labels, PodSubnets: n.Annotations[nodeSubnetsAnnotation]})
 	}
 	return out, nil
 }

@@ -2,6 +2,7 @@ package netstate
 
 import (
 	"fmt"
+	"net/netip"
 	"strings"
 
 	"github.com/epheo/dotvirt/internal/model"
@@ -56,10 +57,10 @@ func (s *Snapshot) Trace(src TraceWorkload, dst *TraceWorkload, dstIP, protocol 
 		return res
 	}
 
-	steps, decided, vlan := s.externalConnectivity(src, dstIP)
-	res.Steps = append(res.Steps, steps...)
-	if decided != "" {
-		res.Verdict = decided
+	path := s.externalConnectivity(src, dstIP)
+	res.Steps = append(res.Steps, path.steps...)
+	if path.decided != "" {
+		res.Verdict = path.decided
 		return res
 	}
 	// Both must pass: OVN-K runs the admin, project and baseline egress rules
@@ -71,8 +72,11 @@ func (s *Snapshot) Trace(src TraceWorkload, dst *TraceWorkload, dstIP, protocol 
 	res.Steps = append(append(res.Steps, eg.steps...), gw.steps...)
 	res.Steps = append(res.Steps, s.egressPlaneSteps(src)...)
 	res.Verdict = verdict(eg, gw)
-	if vlan && res.Verdict == "Deny" {
+	switch {
+	case path.vlan && res.Verdict == "Deny":
 		res.Verdict = "Conditional" // the guest may route the flow out its VLAN NIC
+	case path.uncertain && res.Verdict == "Allow":
+		res.Verdict = "Conditional" // the address may sit on a network isolated from the source
 	}
 	return res
 }
@@ -403,12 +407,21 @@ func (s *Snapshot) connectivity(src, dst TraceWorkload) (decided string, steps [
 	return decided, steps
 }
 
+// egressPath frames a flow to a bare address. decided is the verdict when no
+// policy walk applies; vlan reports a VLAN NIC, which leaves a cluster Deny
+// inconclusive; uncertain reports an address the snapshot cannot place,
+// which leaves an Allow inconclusive.
+type egressPath struct {
+	steps           []model.TraceStep
+	decided         string
+	vlan, uncertain bool
+}
+
 // externalConnectivity frames the egress path. The cluster controls filter
 // only the primary NIC (the pod network, or a default multus binding that is
-// not localnet); a VLAN NIC reaches the fabric around all of them. decided is
-// the verdict when no primary NIC exists, so no cluster control sees the flow;
-// vlan reports a VLAN NIC, which leaves a cluster Deny inconclusive.
-func (s *Snapshot) externalConnectivity(src TraceWorkload, dstIP string) (steps []model.TraceStep, decided string, vlan bool) {
+// not localnet); a VLAN NIC reaches the fabric around all of them. With no
+// primary NIC no cluster control sees the flow.
+func (s *Snapshot) externalConnectivity(src TraceWorkload, dstIP string) egressPath {
 	cluster := src.PodNet || (src.DefaultNet != "" && !s.isLocalnet(src.DefaultNet))
 	refs := src.Nets
 	if src.DefaultNet != "" && !cluster {
@@ -422,21 +435,61 @@ func (s *Snapshot) externalConnectivity(src TraceWorkload, dstIP string) (steps 
 				Note: "NIC on VLAN network " + name + " - the guest can route this flow out of it, around every control evaluated here."})
 		}
 	}
-	vlan = len(bypasses) > 0
+	p := egressPath{vlan: len(bypasses) > 0}
 	switch {
 	case cluster:
-		steps = append(steps, model.TraceStep{Stage: "connectivity", Action: "Reachable",
-			Note: "Cluster egress path to " + dstIP + ", evaluated against the source's egress controls."})
+		p.steps, p.decided, p.uncertain = s.primaryPath(src, dstIP, p.vlan)
 	case len(refs) > 0:
 		// A secondary network has no cluster egress, but a VLAN, or a router
 		// on the network, may still carry the flow.
-		decided = "Conditional"
-		steps = append(steps, model.TraceStep{Stage: "connectivity", Action: "Bypass", Conditional: true,
+		p.decided = "Conditional"
+		p.steps = append(p.steps, model.TraceStep{Stage: "connectivity", Action: "Bypass", Conditional: true,
 			Note: src.Name + " has no primary network: traffic to " + dstIP + " can leave only through a secondary network, which no cluster control filters. The network behind it decides."})
 	default:
-		decided = "Unreachable"
-		steps = append(steps, model.TraceStep{Stage: "connectivity", Action: "Unreachable", Decisive: true,
+		p.decided = "Unreachable"
+		p.steps = append(p.steps, model.TraceStep{Stage: "connectivity", Action: "Unreachable", Decisive: true,
 			Note: src.Name + " has no network attachment."})
 	}
-	return append(steps, bypasses...), decided, vlan
+	p.steps = append(p.steps, bypasses...)
+	return p
+}
+
+// primaryPath frames a flow out of the primary NIC by where the address
+// lies. In the source's own network's range or in none, the egress controls
+// decide. In another primary network's range there is no path; a VLAN NIC,
+// or a secondary NIC whose range may hold the address, leaves that
+// inconclusive. Where an unknown range could hold it, an Allow is.
+func (s *Snapshot) primaryPath(src TraceWorkload, dstIP string, vlan bool) (steps []model.TraceStep, decided string, uncertain bool) {
+	reach := model.TraceStep{Stage: "connectivity", Action: "Reachable",
+		Note: "Cluster egress path to " + dstIP + ", evaluated against the source's egress controls."}
+	addr, err := netip.ParseAddr(dstIP)
+	if err != nil {
+		return []model.TraceStep{reach}, "", false
+	}
+	addr = addr.Unmap()
+	key, name := s.primaryOf(src)
+	where, other := s.place(key, addr)
+	switch where {
+	case placeIsolated:
+		holder := "another network"
+		if other == "default" {
+			holder = "the cluster default network"
+		}
+		cut := model.TraceStep{Stage: "connectivity", Action: "Unreachable",
+			Note: fmt.Sprintf("%s is on %s, isolated from %s, which holds %s.", src.Name, name, holder, dstIP)}
+		if seg := s.secondaryHolding(src, addr); seg != "" {
+			return []model.TraceStep{cut, {Stage: "segment", Action: "Bypass", Conditional: true,
+				Note: "NIC on network " + seg + " may hold " + dstIP + " - the guest can reach it there, around every control evaluated here."}}, "Conditional", false
+		}
+		if vlan {
+			return []model.TraceStep{cut}, "Conditional", false
+		}
+		cut.Decisive = true
+		return []model.TraceStep{cut}, "Unreachable", false
+	case placeUnknown:
+		reach.Conditional = true
+		reach.Note = dstIP + " may sit on a network isolated from " + name + ": the address ranges of some networks are unknown here."
+		return []model.TraceStep{reach}, "", true
+	}
+	return []model.TraceStep{reach}, "", false
 }

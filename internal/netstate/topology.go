@@ -1,15 +1,20 @@
 package netstate
 
-// The east-west topology questions the trace asks before any policy runs:
-// which primary network an endpoint sits on, and which secondary networks two
-// endpoints share (an unfiltered layer-2 bypass).
+// The topology questions the trace asks before any policy runs: which
+// primary network an endpoint sits on, which secondary networks two endpoints
+// share (an unfiltered layer-2 bypass), and which network's address range a
+// bare destination address falls in.
 
 import (
 	"cmp"
+	"encoding/json"
+	"net/netip"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
 
+	"github.com/epheo/dotvirt/internal/cluster"
 	"github.com/epheo/dotvirt/internal/reflect"
 )
 
@@ -117,4 +122,154 @@ func (s *Snapshot) isLocalnet(ref string) bool {
 	}
 	c, ok := nadConfig(u)
 	return ok && strings.EqualFold(c.Topology, "localnet")
+}
+
+// placement is where a bare destination address lies for a source, by the
+// primary networks' address ranges. OVN-Kubernetes isolates every primary
+// network (the cluster default one, each Primary UDN and CUDN) from the
+// others: only the Kubernetes API and DNS services cross, through service
+// addresses no range here holds.
+type placement int
+
+const (
+	placeOutside  placement = iota // in no primary network's range
+	placeSame                      // in the source's own network's range
+	placeIsolated                  // in another primary network's range only
+	placeUnknown                   // a range the answer turns on is unknown
+)
+
+// primaryRange is one primary network's address range, keyed as primaryOf
+// keys networks; nil prefixes when the snapshot holds none.
+type primaryRange struct {
+	key      string
+	prefixes []netip.Prefix
+}
+
+// primaryRanges lists every primary network's range: the default network's
+// node subnets, then each Primary UDN and CUDN's declared subnets.
+func (s *Snapshot) primaryRanges() []primaryRange {
+	s.nodesMu.RLock()
+	out := []primaryRange{{key: "default", prefixes: s.podNet}}
+	s.nodesMu.RUnlock()
+	for _, u := range reflect.List(s.udn) {
+		if cfg := udnConfig(u); strings.EqualFold(cfg.Role(), "Primary") {
+			out = append(out, primaryRange{"udn:" + u.GetNamespace() + "/" + u.GetName(), parsePrefixes(cfg.Subnets())})
+		}
+	}
+	for _, u := range reflect.List(s.cudn) {
+		if cfg := cudnConfig(u); strings.EqualFold(cfg.Role(), "Primary") {
+			out = append(out, primaryRange{"cudn:" + u.GetName(), parsePrefixes(cfg.Subnets())})
+		}
+	}
+	return out
+}
+
+// place classifies addr for a source on primary network key, naming one
+// other network whose range holds it. An address in the source's own range
+// stays on its network. Another network's range isolates it only when the
+// source's own range is known, since UDN ranges may overlap; and an address
+// in no known range is outside only when no other range is unknown.
+func (s *Snapshot) place(key string, addr netip.Addr) (where placement, other string) {
+	var own []netip.Prefix
+	unknown := false
+	for _, r := range s.primaryRanges() {
+		switch {
+		case r.key == key:
+			own = r.prefixes
+		case r.prefixes == nil:
+			unknown = true
+		case other == "" && containsAddr(r.prefixes, addr):
+			other = r.key
+		}
+	}
+	switch {
+	case containsAddr(own, addr):
+		return placeSame, ""
+	case other != "" && own != nil:
+		return placeIsolated, other
+	case other != "" || unknown:
+		return placeUnknown, other
+	}
+	return placeOutside, ""
+}
+
+// secondaryHolding names a non-localnet secondary network of w whose range
+// holds addr, or is unknown: the guest may reach the address there. Localnet
+// NICs are the VLAN bypass's, which reaches the fabric whatever the range.
+func (s *Snapshot) secondaryHolding(w TraceWorkload, addr netip.Addr) string {
+	for _, ref := range w.Nets {
+		if s.isLocalnet(ref) {
+			continue
+		}
+		if p := s.nadPrefixes(ref); p == nil || containsAddr(p, addr) {
+			_, name := s.networkIdentity(ref)
+			return name
+		}
+	}
+	return ""
+}
+
+// nadPrefixes reads a multus ref's address range: its owning UDN or CUDN's
+// subnets, else the NAD's own; nil when unknown.
+func (s *Snapshot) nadPrefixes(ref string) []netip.Prefix {
+	u, ok := reflect.Get(s.nad, ref)
+	if !ok {
+		return nil
+	}
+	for _, o := range u.GetOwnerReferences() {
+		switch o.Kind {
+		case "ClusterUserDefinedNetwork":
+			if n, ok := reflect.Get(s.cudn, o.Name); ok {
+				return parsePrefixes(cudnConfig(n).Subnets())
+			}
+			return nil
+		case "UserDefinedNetwork":
+			if n, ok := reflect.Get(s.udn, u.GetNamespace()+"/"+o.Name); ok {
+				return parsePrefixes(udnConfig(n).Subnets())
+			}
+			return nil
+		}
+	}
+	if c, ok := nadConfig(u); ok {
+		return parsePrefixes(strings.Split(c.Subnets, ","))
+	}
+	return nil
+}
+
+// defaultPodSubnets reads the cluster default network's range from each
+// node's node-subnets annotation: {"default":["10.128.0.0/23"]}, or a bare
+// string where a release wrote one subnet. nil when no node reports one.
+func defaultPodSubnets(nodes []cluster.NodeLabels) []netip.Prefix {
+	var out []netip.Prefix
+	for _, n := range nodes {
+		var nets map[string]json.RawMessage
+		if json.Unmarshal([]byte(n.PodSubnets), &nets) != nil {
+			continue
+		}
+		var subnets []string
+		if json.Unmarshal(nets["default"], &subnets) != nil {
+			var one string
+			if json.Unmarshal(nets["default"], &one) != nil {
+				continue
+			}
+			subnets = []string{one}
+		}
+		out = append(out, parsePrefixes(subnets)...)
+	}
+	return out
+}
+
+// parsePrefixes parses CIDRs, skipping malformed ones; nil when none parse.
+func parsePrefixes(cidrs []string) []netip.Prefix {
+	var out []netip.Prefix
+	for _, c := range cidrs {
+		if p, err := netip.ParsePrefix(strings.TrimSpace(c)); err == nil {
+			out = append(out, p.Masked())
+		}
+	}
+	return out
+}
+
+func containsAddr(ps []netip.Prefix, a netip.Addr) bool {
+	return slices.ContainsFunc(ps, func(p netip.Prefix) bool { return p.Contains(a) })
 }

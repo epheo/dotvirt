@@ -16,6 +16,7 @@ package netstate
 import (
 	"context"
 	"maps"
+	"net/netip"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -69,6 +70,7 @@ type Snapshot struct {
 
 	nodesMu sync.RWMutex
 	nodes   []cluster.NodeLabels
+	podNet  []netip.Prefix // the cluster default network's node subnets; nil: unknown
 }
 
 // New builds the snapshot over sa (dotvirt's ServiceAccount client). bus may be nil in
@@ -194,15 +196,17 @@ func (s *Snapshot) watch(ctx context.Context, w watchSpec, healthy *atomic.Bool)
 // refreshNodes keeps the node-name cache current via a periodic LIST (populated at once
 // on start, then every nodeRefreshInterval). A changed node set signals NetworkChanged:
 // uplink membership derives from it, and the first LIST usually lands after clients
-// already pulled the catalog.
+// already pulled the catalog. The same LIST carries the default network's node
+// subnets, which only the trace reads, so their moves signal nothing.
 func (s *Snapshot) refreshNodes(ctx context.Context) {
 	t := time.NewTicker(nodeRefreshInterval)
 	defer t.Stop()
 	for {
 		if infos, err := s.sa.ListNodeLabels(ctx); err == nil {
+			podNet := defaultPodSubnets(infos)
 			s.nodesMu.Lock()
 			changed := !nodesEqual(s.nodes, infos)
-			s.nodes = infos
+			s.nodes, s.podNet = infos, podNet
 			s.nodesMu.Unlock()
 			if changed && s.bus != nil {
 				s.bus.Publish(eventbus.NetworkChanged)
