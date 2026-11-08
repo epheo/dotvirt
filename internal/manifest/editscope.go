@@ -19,7 +19,9 @@ import (
 // edit owns may differ. The line editor splices by line and indentation, so
 // a layout it misreads damages siblings of what it edits; the read-back only
 // checks what was asked for, this catches everything else.
-func verifyScope(before, after []byte, defaultNS, namespace, name string, edit VMEdit) error {
+// strip is the sizing plan's: the sizing fields an instancetype-sized result
+// loses.
+func verifyScope(before, after []byte, defaultNS, namespace, name string, edit VMEdit, strip []string) error {
 	refuse := func(what string) error {
 		return fmt.Errorf("%w: the edit of %s/%s would also change %s; the editor cannot change this layout safely; edit it in git directly",
 			model.ErrConflict, namespace, name, what)
@@ -46,7 +48,7 @@ func verifyScope(before, after []byte, defaultNS, namespace, name string, edit V
 		return refuse("which document declares the VM")
 	}
 	b, a := newShape(bDocs[target]), newShape(aDocs[target])
-	owned := ownedPaths(edit, bDocs[target], aDocs[target])
+	owned := ownedPaths(edit, bDocs[target], aDocs[target], strip)
 	var stray []string
 	for p := range pathUnion(b.leaves, a.leaves) {
 		if b.leaves[p] != a.leaves[p] && !ownedBy(p, owned) {
@@ -223,8 +225,8 @@ func ownedBy(p string, owned []string) bool {
 // ownedPaths is every path edit may change, mirroring what each applier
 // writes. before and after are the VM document, for the names an edit
 // reaches only through the file (a removed disk's DataVolume, a migrated
-// volume's new one).
-func ownedPaths(e VMEdit, before, after any) []string {
+// volume's new one); strip is what applySizing deletes beside an instancetype.
+func ownedPaths(e VMEdit, before, after any, strip []string) []string {
 	spec, tmpl := "spec", docPath("spec", "template")
 	tspec := docPath(tmpl, "spec")
 	domain := docPath(tspec, "domain")
@@ -235,13 +237,15 @@ func ownedPaths(e VMEdit, before, after any) []string {
 	if e.Power != nil {
 		own = append(own, docPath(spec, "running"), docPath(spec, "runStrategy"))
 	}
-	// applySizing strips inline sizing from any VM keeping an instancetype,
-	// whatever the edit; without one, only the axes asked for move.
+	// applySizing strips what collides with the instancetype of any VM keeping
+	// one, whatever the edit, and only that: a shared field the VM keeps beside
+	// it must not move. Without one, only the axes asked for move.
 	if e.Sizing != nil || e.CPUCores != nil || e.Memory != nil || e.Instancetype != nil || lookup(before, "spec", "instancetype") != nil {
 		own = append(own, docPath(spec, "instancetype"))
 		if lookup(after, "spec", "instancetype") != nil {
-			own = append(own, docPath(domain, "cpu"), docPath(domain, "memory"),
-				docPath(domain, "resources", "requests", "cpu"), docPath(domain, "resources", "requests", "memory"))
+			for _, p := range strip {
+				own = append(own, docPath(append([]string{domain}, strings.Split(p, ".")...)...))
+			}
 		} else {
 			own = append(own, docPath(domain, "cpu", "cores"), docPath(domain, "cpu", "sockets"), docPath(domain, "cpu", "threads"),
 				docPath(domain, "memory", "guest"), docPath(domain, "resources", "requests", "memory"))

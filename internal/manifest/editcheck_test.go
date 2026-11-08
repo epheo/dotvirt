@@ -334,7 +334,7 @@ func TestVerifyEditCoversEveryField(t *testing.T) {
 			continue
 		}
 		damaged := strings.Replace(string(out), "metadata:\n  name: web\n", "metadata:\n  name: web\n  annotations:\n    collateral: x\n", 1)
-		if err := verifyScope([]byte(s.base), []byte(damaged), "alpha", "alpha", "web", s.edit); !errors.Is(err, model.ErrConflict) {
+		if err := verifyScope([]byte(s.base), []byte(damaged), "alpha", "alpha", "web", s.edit, stripOf(t, s.base, s.edit)); !errors.Is(err, model.ErrConflict) {
 			t.Errorf("%s: collateral damage beside the edit passed the scope check (%v)", field, err)
 		}
 	}
@@ -395,4 +395,15 @@ func TestVerifyEditCoversEveryItemField(t *testing.T) {
 			}
 		}
 	}
+}
+
+// stripOf is the sizing plan's strip for edit on base, nothing read of an
+// instancetype it switches to.
+func stripOf(t *testing.T, base string, edit VMEdit) []string {
+	t.Helper()
+	vm, err := findVM([]byte(base), "alpha", "alpha", "web")
+	if err != nil || vm == nil {
+		t.Fatalf("findVM: %v", err)
+	}
+	return planSizing(vm, edit, Target{}).strip
 }
