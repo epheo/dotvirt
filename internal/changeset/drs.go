@@ -59,6 +59,9 @@ func (c *Coordinator) StageEnableDRS(id auth.Identity, proj project.ProjectInfo,
 			BaseBlob:   pinOf(current, ok),
 		})
 	}
+	if err := c.gate(id, proj, entries); err != nil {
+		return model.DraftView{}, err
+	}
 	if _, err := c.store.ReplaceResource(id.Username, proj.Name, draft.ResourceDRS, entries...); err != nil {
 		return model.DraftView{}, err
 	}
@@ -88,6 +91,9 @@ func (c *Coordinator) StageDisableDRS(id auth.Identity, proj project.ProjectInfo
 			SourceFile: drs.CRPath,
 			BaseBlob:   git.BlobID(cr),
 		})
+	}
+	if err := c.gate(id, proj, entries); err != nil {
+		return model.DraftView{}, err
 	}
 	pending, err := c.store.ReplaceResource(id.Username, proj.Name, draft.ResourceDRS, entries...)
 	if err != nil {

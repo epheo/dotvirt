@@ -125,6 +125,23 @@ func (s *Snapshot) listable(ctx context.Context) func(schema.GroupVersionResourc
 	}
 }
 
+// Holds reports whether a store holds the object of resource (group, plural)
+// named namespace/name ("" for a cluster-scoped one). A kind no store
+// watches reads as absent.
+func (s *Snapshot) Holds(group, resource, namespace, name string) bool {
+	key := name
+	if namespace != "" {
+		key = namespace + "/" + name
+	}
+	for _, w := range s.watches {
+		if w.gvr.Group == group && w.gvr.Resource == resource {
+			_, ok, _ := w.idx.GetByKey(key)
+			return ok
+		}
+	}
+	return false
+}
+
 // Healthy reports whether every started networking watch is currently established.
 // The catalog keeps serving its last-good stores while unhealthy; the inventory
 // surfaces a "may be stale" warning so a sustained outage isn't silent.

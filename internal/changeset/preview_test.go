@@ -24,11 +24,11 @@ func TestPreviewCreateVMIsWhatStageRecords(t *testing.T) {
 	bare := seedBare(t)
 	c := newTestCoordinator(t, false)
 	id := auth.Identity{Username: "alice"}
-	proj := project.ProjectInfo{Name: "p", Repo: bare}
+	proj := project.ProjectInfo{Name: "p", Repo: bare, Namespaces: []string{"alpha"}}
 	raw := json.RawMessage(`{"name":"db","namespace":"alpha","instancetype":"u1.medium","preference":"fedora",
 		"osImage":{"name":"fedora","namespace":"kv"},"diskSize":"40Gi","running":true}`)
 
-	p, err := c.PreviewCreateVM(proj, raw)
+	p, err := c.PreviewCreateVM(id, proj, raw)
 	if err != nil {
 		t.Fatalf("PreviewCreateVM: %v", err)
 	}
@@ -52,10 +52,11 @@ func TestPreviewCreateVMIsWhatStageRecords(t *testing.T) {
 
 // The typed password never comes back, even in a preview: only its hash.
 func TestPreviewCreateVMHashesPassword(t *testing.T) {
+	id := auth.Identity{Username: "alice"}
 	c := newTestCoordinator(t, false)
-	proj := project.ProjectInfo{Name: "p", Repo: seedBare(t)}
+	proj := project.ProjectInfo{Name: "p", Repo: seedBare(t), Namespaces: []string{"alpha"}}
 	const typed = "hunter2-plaintext"
-	p, err := c.PreviewCreateVM(proj, json.RawMessage(`{"name":"db","namespace":"alpha","instancetype":"u1.medium",
+	p, err := c.PreviewCreateVM(id, proj, json.RawMessage(`{"name":"db","namespace":"alpha","instancetype":"u1.medium",
 		"preference":"fedora","osImage":{"name":"fedora","namespace":"kv"},"cloudInit":{"password":"`+typed+`"}}`))
 	if err != nil {
 		t.Fatalf("PreviewCreateVM: %v", err)
@@ -69,7 +70,7 @@ func TestPreviewCreateVMHashesPassword(t *testing.T) {
 func TestPreviewCreateVMRefusesLikeStage(t *testing.T) {
 	c := newTestCoordinator(t, false)
 	id := auth.Identity{Username: "alice"}
-	proj := project.ProjectInfo{Name: "p", Repo: seedBare(t)}
+	proj := project.ProjectInfo{Name: "p", Repo: seedBare(t), Namespaces: []string{"alpha"}}
 	for _, tc := range []struct {
 		spec string
 		want error
@@ -78,11 +79,11 @@ func TestPreviewCreateVMRefusesLikeStage(t *testing.T) {
 		{`{"name":"db","namespace":"alpha","preference":"fedora","osImage":{"name":"f"}}`, model.ErrInvalid},
 		{`{"name":"web","namespace":"alpha","instancetype":"u1.medium","preference":"fedora","osImage":{"name":"f"}}`, model.ErrConflict},
 	} {
-		if _, err := c.PreviewCreateVM(proj, json.RawMessage(tc.spec)); !errors.Is(err, tc.want) {
+		if _, err := c.PreviewCreateVM(id, proj, json.RawMessage(tc.spec)); !errors.Is(err, tc.want) {
 			t.Errorf("PreviewCreateVM(%s): want %v, got %v", tc.spec, tc.want, err)
 		}
 	}
-	if _, err := c.PreviewCreateVM(project.ProjectInfo{Name: "norepo"}, json.RawMessage(`{}`)); !errors.Is(err, model.ErrConflict) {
+	if _, err := c.PreviewCreateVM(id, project.ProjectInfo{Name: "norepo"}, json.RawMessage(`{}`)); !errors.Is(err, model.ErrConflict) {
 		t.Errorf("a repoless project must refuse as ErrConflict, got %v", err)
 	}
 	requireNothingStaged(t, c, id, proj)
@@ -95,9 +96,9 @@ func TestPreviewCreateResolvesDeclaredAsEdit(t *testing.T) {
 	bare := seedBareFiles(t, map[string][]byte{"nets/web-net.yaml": []byte(udn)})
 	c := newTestCoordinator(t, false)
 	id := auth.Identity{Username: "alice"}
-	proj := project.ProjectInfo{Name: "p", Repo: bare}
+	proj := project.ProjectInfo{Name: "p", Repo: bare, Namespaces: []string{"alpha"}}
 
-	declared, err := c.PreviewCreate(proj, draft.ResourceNetwork, json.RawMessage(`{"name":"web-net","namespace":"alpha","scope":"project","subnets":["10.40.0.0/16"]}`))
+	declared, err := c.PreviewCreate(id, proj, draft.ResourceNetwork, json.RawMessage(`{"name":"web-net","namespace":"alpha","scope":"project","subnets":["10.40.0.0/16"]}`))
 	if err != nil {
 		t.Fatalf("PreviewCreate: %v", err)
 	}
@@ -105,7 +106,7 @@ func TestPreviewCreateResolvesDeclaredAsEdit(t *testing.T) {
 		t.Fatalf("want an edit of the declaring file, got %+v", f)
 	}
 
-	fresh, err := c.PreviewCreate(proj, draft.ResourceNetwork, json.RawMessage(`{"name":"web-backend","namespace":"alpha","scope":"project"}`))
+	fresh, err := c.PreviewCreate(id, proj, draft.ResourceNetwork, json.RawMessage(`{"name":"web-backend","namespace":"alpha","scope":"project"}`))
 	if err != nil {
 		t.Fatalf("PreviewCreate: %v", err)
 	}
@@ -113,10 +114,10 @@ func TestPreviewCreateResolvesDeclaredAsEdit(t *testing.T) {
 		t.Fatalf("want a new file at the rendered path, got %+v", f)
 	}
 
-	if _, err := c.PreviewCreate(proj, draft.ResourceNetwork, json.RawMessage(`{"name":"x","namespace":"alpha","subnets":["nope"]}`)); !errors.Is(err, model.ErrInvalid) {
+	if _, err := c.PreviewCreate(id, proj, draft.ResourceNetwork, json.RawMessage(`{"name":"x","namespace":"alpha","subnets":["nope"]}`)); !errors.Is(err, model.ErrInvalid) {
 		t.Errorf("a bad subnet must refuse as ErrInvalid, got %v", err)
 	}
-	if _, err := c.PreviewCreate(proj, draft.ResourceVM, json.RawMessage(`{}`)); !errors.Is(err, model.ErrInvalid) {
+	if _, err := c.PreviewCreate(id, proj, draft.ResourceVM, json.RawMessage(`{}`)); !errors.Is(err, model.ErrInvalid) {
 		t.Errorf("a resource with no create form must refuse as ErrInvalid, got %v", err)
 	}
 	requireNothingStaged(t, c, id, proj)
@@ -126,13 +127,13 @@ func TestPreviewCreateResolvesDeclaredAsEdit(t *testing.T) {
 // the create would make, and never calls the forge: the fixture fails any call.
 func TestPreviewCreateProjectCallsNoForge(t *testing.T) {
 	f := newProposeFixture(t)
-	p, err := f.c.PreviewCreateProject(f.proj, json.RawMessage(`{"name":"team-a","owners":["bob"],
+	p, err := f.c.PreviewCreateProject(f.id, f.platform(), json.RawMessage(`{"name":"team-a","owners":["bob"],
 		"vmNetwork":{"name":"team-a-net","subnet":"10.60.0.0/16"}}`), nil)
 	if err != nil {
 		t.Fatalf("PreviewCreateProject: %v", err)
 	}
-	requireNothingStaged(t, f.c, f.id, f.proj)
-	if p.Project != "p" || len(p.Files) != 2 {
+	requireNothingStaged(t, f.c, f.id, f.platform())
+	if p.Project != project.PlatformName || len(p.Files) != 2 {
 		t.Fatalf("want the namespace and its owners grant, got %+v", p)
 	}
 	ns, rb := p.Files[0], p.Files[1]
@@ -143,7 +144,7 @@ func TestPreviewCreateProjectCallsNoForge(t *testing.T) {
 		t.Fatalf("owners grant must name bob:\n%s", rb.YAML)
 	}
 
-	if _, err := f.c.PreviewCreateProject(f.proj, json.RawMessage(`{"name":"platform"}`), nil); !errors.Is(err, model.ErrInvalid) {
+	if _, err := f.c.PreviewCreateProject(f.id, f.platform(), json.RawMessage(`{"name":"platform"}`), nil); !errors.Is(err, model.ErrInvalid) {
 		t.Errorf("the reserved name must refuse as ErrInvalid, got %v", err)
 	}
 }
@@ -151,7 +152,7 @@ func TestPreviewCreateProjectCallsNoForge(t *testing.T) {
 // Without a forge no repo can be made, so the preview refuses like the stage.
 func TestPreviewCreateProjectNeedsForge(t *testing.T) {
 	c := newTestCoordinator(t, false)
-	_, err := c.PreviewCreateProject(project.ProjectInfo{Name: "platform", Repo: "https://forge.example/dotvirt/platform.git"},
+	_, err := c.PreviewCreateProject(auth.Identity{Username: "alice"}, project.ProjectInfo{Name: "platform", Repo: seedBare(t)},
 		json.RawMessage(`{"name":"team-a"}`), nil)
 	if !errors.Is(err, model.ErrInvalid) || !strings.Contains(err.Error(), "forge not configured") {
 		t.Fatalf("want the stage's forge refusal, got %v", err)
@@ -162,9 +163,9 @@ func TestPreviewCreateProjectNeedsForge(t *testing.T) {
 func TestPreviewCreateNamespace(t *testing.T) {
 	c := newTestCoordinator(t, false)
 	id := auth.Identity{Username: "alice"}
-	plat := project.ProjectInfo{Name: "platform", Repo: seedBare(t)}
+	plat := project.ProjectInfo{Name: project.PlatformName, Repo: seedBare(t)}
 	join := project.ProjectInfo{Name: "team-a", Repo: "https://forge.example/dotvirt/team-a.git"}
-	p, err := c.PreviewCreateNamespace(plat, join, json.RawMessage(`{"name":"team-a-dev"}`), nil)
+	p, err := c.PreviewCreateNamespace(id, plat, join, json.RawMessage(`{"name":"team-a-dev"}`), nil)
 	if err != nil {
 		t.Fatalf("PreviewCreateNamespace: %v", err)
 	}
@@ -178,8 +179,8 @@ func TestPreviewCreateNamespace(t *testing.T) {
 func TestPreviewDeployFromTemplate(t *testing.T) {
 	c := newTestCoordinator(t, false)
 	id := auth.Identity{Username: "alice"}
-	proj := project.ProjectInfo{Name: "p", Repo: seedBareFiles(t, map[string][]byte{"templates/base.yaml": []byte(libraryTemplate)})}
-	p, err := c.PreviewDeployFromTemplate(proj, proj, model.DeployTemplateRequest{Template: "base", Namespace: "alpha", Name: "web-9"})
+	proj := project.ProjectInfo{Name: "p", Repo: seedBareFiles(t, map[string][]byte{"templates/base.yaml": []byte(libraryTemplate)}), Namespaces: []string{"alpha"}}
+	p, err := c.PreviewDeployFromTemplate(id, proj, proj, model.DeployTemplateRequest{Template: "base", Namespace: "alpha", Name: "web-9"})
 	if err != nil {
 		t.Fatalf("PreviewDeployFromTemplate: %v", err)
 	}
@@ -187,7 +188,7 @@ func TestPreviewDeployFromTemplate(t *testing.T) {
 	if f := p.Files[0]; f.Kind != "create" || f.Path != "alpha/web-9.yaml" || !strings.Contains(f.YAML, "name: web-9") {
 		t.Fatalf("unexpected template preview: %+v", f)
 	}
-	if _, err := c.PreviewDeployFromTemplate(proj, proj, model.DeployTemplateRequest{Template: "absent", Namespace: "alpha"}); !errors.Is(err, model.ErrNotFound) {
+	if _, err := c.PreviewDeployFromTemplate(id, proj, proj, model.DeployTemplateRequest{Template: "absent", Namespace: "alpha"}); !errors.Is(err, model.ErrNotFound) {
 		t.Errorf("an absent template must refuse as ErrNotFound, got %v", err)
 	}
 }
@@ -195,12 +196,52 @@ func TestPreviewDeployFromTemplate(t *testing.T) {
 // A file that does not parse costs a preview nothing elsewhere: a new VM
 // beside it still renders, as staging would.
 func TestPreviewSurvivesUnparsedFile(t *testing.T) {
+	id := auth.Identity{Username: "alice"}
 	bare := seedBareFiles(t, map[string][]byte{"alpha/bad.yaml": []byte("kind: VirtualMachine\n---\nfoo: [\n")})
 	c := newTestCoordinator(t, false)
-	proj := project.ProjectInfo{Name: "p", Repo: bare}
-	p, err := c.PreviewCreateVM(proj, json.RawMessage(`{"name":"db","namespace":"alpha","instancetype":"u1.medium",
+	proj := project.ProjectInfo{Name: "p", Repo: bare, Namespaces: []string{"alpha"}}
+	p, err := c.PreviewCreateVM(id, proj, json.RawMessage(`{"name":"db","namespace":"alpha","instancetype":"u1.medium",
 		"preference":"fedora","osImage":{"name":"fedora","namespace":"kv"}}`))
 	if err != nil || len(p.Files) != 1 || p.Files[0].Path != "alpha/db.yaml" {
 		t.Fatalf("PreviewCreateVM beside an unparsed file = %+v, %v", p, err)
+	}
+}
+
+// A preview runs staging's gate under the caller's identity: what the caller
+// may not create, the preview refuses with the stage's own 403, and a refused
+// project preview still makes no repo.
+func TestPreviewIsGatedLikeStage(t *testing.T) {
+	c := newTestCoordinator(t, false)
+	r := &rbac{deny: verbOn("create", "networkpolicies")}
+	c.UseAuthorizer(r)
+	id := auth.Identity{Username: "alice"}
+	proj := project.ProjectInfo{Name: "p", Repo: seedBare(t), Namespaces: []string{"alpha"}}
+	raw := json.RawMessage(`{"name":"web","namespace":"alpha"}`)
+
+	_, staged := c.StageCreate(id, proj, draft.ResourceNetworkPolicy, raw)
+	_, previewed := c.PreviewCreate(id, proj, draft.ResourceNetworkPolicy, raw)
+	if !errors.Is(previewed, model.ErrForbidden) || staged == nil || previewed.Error() != staged.Error() {
+		t.Fatalf("preview %v, stage %v: want the same 403", previewed, staged)
+	}
+	vm := json.RawMessage(`{"name":"db","namespace":"alpha","instancetype":"u1.medium","preference":"fedora","osImage":{"name":"f"}}`)
+	r.refuse(verbOn("create", "virtualmachines"))
+	if _, err := c.PreviewCreateVM(id, proj, vm); !errors.Is(err, model.ErrForbidden) {
+		t.Errorf("a VM the caller may not create: preview err = %v", err)
+	}
+	r.refuse(nil)
+	if _, err := c.PreviewCreateVM(id, proj, vm); err != nil {
+		t.Errorf("an allowed preview: %v", err)
+	}
+	requireNothingStaged(t, c, id, proj)
+
+	c.UseAuthorizer(nil)
+	if _, err := c.PreviewCreateVM(id, proj, vm); !errors.Is(err, model.ErrUnavailable) {
+		t.Errorf("no authorizer: preview err = %v, want the stage's ErrUnavailable", err)
+	}
+
+	f := newProposeFixture(t)
+	f.c.UseAuthorizer(&rbac{deny: verbOn("create", "namespaces")})
+	if _, err := f.c.PreviewCreateProject(f.id, f.platform(), json.RawMessage(`{"name":"team-a"}`), nil); !errors.Is(err, model.ErrForbidden) {
+		t.Errorf("a project the caller may not create: preview err = %v", err)
 	}
 }

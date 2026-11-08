@@ -15,10 +15,14 @@ import (
 // RestoreVersion stages one VM's manifest exactly as commit hash held it: the
 // object-level undo. Unlike Revert, which turns a whole merged PR around, this
 // touches one file and goes through the caller's draft like any edit, so the
-// restore is reviewed and proposed before anything reaches the cluster.
+// restore is reviewed and proposed before anything reaches the cluster, and
+// passes the gate as any whole-file edit does.
 func (c *Coordinator) RestoreVersion(id auth.Identity, proj project.ProjectInfo, resource, namespace, name, hash string) (model.DraftView, error) {
 	read, err := c.read(proj)
 	if err != nil {
+		return model.DraftView{}, err
+	}
+	if err := c.onBase(read, hash); err != nil {
 		return model.DraftView{}, err
 	}
 	path, err := c.locate(read, draft.Resource(resource), namespace, name)
@@ -49,4 +53,18 @@ func (c *Coordinator) RestoreVersion(id auth.Identity, proj project.ProjectInfo,
 		FromVersion: shortCommit(hash),
 		BaseBlob:    pinOf(current, ok),
 	})
+}
+
+// onBase refuses a commit the base branch never held: restore and revert
+// bring back past states of base, never content only another branch or an
+// open proposal carries.
+func (r *Reader) onBase(read *git.Repo, hash string) error {
+	ok, err := read.OnBranch(r.baseBranch, hash)
+	if err != nil {
+		return err
+	}
+	if !ok {
+		return fmt.Errorf("%w: %s is not in the history of %s", model.ErrNotFound, shortCommit(hash), r.baseBranch)
+	}
+	return nil
 }
