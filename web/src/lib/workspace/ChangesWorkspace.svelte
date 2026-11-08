@@ -17,6 +17,7 @@
 		sameReview,
 		type ReviewSel,
 	} from '#lib/review.js';
+	import { caps } from '#lib/state/caps.svelte.js';
 	import { drafts, PLATFORM_PROJECT } from '#lib/state/drafts.svelte.js';
 	import { inventory } from '#lib/state/inventory.svelte.js';
 	import { persisted } from '#lib/state/persisted.svelte.js';
@@ -355,12 +356,17 @@
 
 	// Which list is empty decides between the queue (list and review) and one
 	// card that says what the tab holds and where to go instead.
+	// A stager without platform read reaches the platform scope through their
+	// own PRs; its history stays the readers'.
+	const platformHidden = $derived(
+		scopeProject === PLATFORM_PROJECT && caps.cluster?.platformRead === false,
+	);
 	const empty = $derived(
 		tab === 'staged'
 			? drafts.loaded && !drafts.error && lanes.length === 0 && failedLanes.length === 0
 			: tab === 'review'
 				? proposedLane.length === 0 && pushed === 0
-				: !scopeProject && repoProjects.length === 0,
+				: platformHidden || (!scopeProject && repoProjects.length === 0),
 	);
 	const tabHref = (id: string) => `${page.url.pathname}?tab=${id}`;
 </script>
@@ -451,6 +457,10 @@
 						<p class="text-ink-soft">
 							A proposed draft waits here for approval and merge in the forge.
 						</p>
+					{:else if platformHidden}
+						<p class="font-medium text-ink">You cannot read the platform's history.</p>
+						<p class="text-ink-soft">A platform administrator can.</p>
+						<p class="text-ink-soft">Your own pull requests there stay under In review.</p>
 					{:else}
 						<p class="font-medium text-ink">No repo-backed projects.</p>
 						<p class="text-ink-soft">

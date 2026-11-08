@@ -564,7 +564,7 @@ async function handleAPI(req, res, url) {
 
 	m = path.match(/^\/api\/projects\/([^/]+)\/history(\/|$)/);
 	if (m && m[1] === 'platform' && !clusterCaps(s).platformRead)
-		return sendText(res, 403, 'not authorized to read the platform repo');
+		return sendText(res, 403, 'forbidden: not authorized to read the platform repo');
 	m = path.match(/^\/api\/projects\/([^/]+)\/history$/);
 	if (m) {
 		// ?namespace= narrows to the commits under that directory: the merge

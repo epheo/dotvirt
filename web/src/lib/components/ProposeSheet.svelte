@@ -9,6 +9,7 @@
 		TriangleAlert,
 	} from '@lucide/svelte';
 	import { api, HttpError, type DraftItem } from '#lib/api.js';
+	import { serverReason } from '#lib/format.js';
 	import { memoryHint } from '#lib/headroom.js';
 	import { draftResourceLabel } from '#lib/labels.js';
 	import { action } from '#lib/resource.svelte.js';
@@ -182,9 +183,7 @@
 	// kind is not for the reader.
 	const refused = $derived.by(() => {
 		if (!op.error) return null;
-		const text = op.error
-			.trim()
-			.replace(/^(conflict|temporarily unavailable|invalid request|not found|forbidden): /, '');
+		const text = serverReason(op.error);
 		const n = Number(/#(\d+)/.exec(text)?.[1]);
 		return {
 			status: refusedStatus,

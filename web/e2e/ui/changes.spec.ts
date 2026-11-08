@@ -178,8 +178,9 @@ test('a platform stager without platform read reviews their own platform PRs', a
 	// Changed outside dotvirt: the server's answer is the review, with nothing to retry.
 	await main.getByRole('button', { name: /PR #8/ }).click();
 	await expect(
-		main.getByText(/pull request #8 changed outside dotvirt since you proposed it/),
+		main.getByText('Pull request #8 changed outside dotvirt since you proposed it.'),
 	).toBeVisible();
+	await expect(main.getByText('A platform administrator can review it.')).toBeVisible();
 	await expect(main.getByRole('button', { name: 'Retry' })).toHaveCount(0);
 	await expect(main.getByRole('link', { name: /Open PR to approve and merge/ })).toHaveAttribute(
 		'href',
@@ -189,6 +190,7 @@ test('a platform stager without platform read reviews their own platform PRs', a
 	// History stays the readers'; it says so and points back at the PRs.
 	await page.goto('/changes/platform?tab=history');
 	await expect(main.getByText("You cannot read the platform's history.")).toBeVisible();
-	await main.getByRole('link', { name: 'Your pull requests there are under In review' }).click();
+	await expect(main.getByText('Pick a change')).toHaveCount(0);
+	await main.getByRole('link', { name: '2 pull requests in review' }).click();
 	await expect(main.getByRole('button', { name: /PR #7/ })).toBeVisible();
 });
