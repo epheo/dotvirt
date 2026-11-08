@@ -1,8 +1,15 @@
 package netstate
 
 import (
+	"errors"
 	"strings"
 	"testing"
+
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
+	fakediscovery "k8s.io/client-go/discovery/fake"
+	"k8s.io/client-go/kubernetes/fake"
+	k8stesting "k8s.io/client-go/testing"
 
 	"github.com/epheo/dotvirt/internal/cluster"
 	"github.com/epheo/dotvirt/internal/model"
@@ -10,11 +17,12 @@ import (
 
 // isolated seeds tenant-a on a primary UDN, tenant-b on another, tenant-c
 // and tenant-d on one primary CUDN, and a default network whose node
-// subnets the node LIST reports (one node per annotation form). podNet false
-// leaves that range unknown.
+// subnets the node LIST reports (one node per annotation form), in a cluster
+// that serves no route advertisement. podNet false leaves that range unknown.
 func isolated(t *testing.T, podNet bool) *Snapshot {
 	t.Helper()
 	s := New(nil, nil)
+	s.routeAds.Store(routeAdsAbsent)
 	if podNet {
 		s.podNet = defaultPodSubnets([]cluster.NodeLabels{
 			{Name: "w1", PodSubnets: `{"default":["10.128.0.0/23"]}`},
@@ -201,5 +209,60 @@ func TestTraceIsolationBypass(t *testing.T) {
 		if st := connectivityStep(t, res); st.Action != "Unreachable" || st.Decisive != (c.want == "Unreachable") {
 			t.Errorf("%s: step %+v", c.name, st)
 		}
+	}
+}
+
+// Isolated primaries are certainly apart only where no route advertisement
+// can join them: with the API served, or before discovery has said, the
+// answer is Conditional, and still never names the other network.
+func TestTraceIsolationRouteAdvertisement(t *testing.T) {
+	for _, state := range []int32{routeAdsServed, routeAdsUnknown} {
+		s := isolated(t, true)
+		s.routeAds.Store(state)
+		a := wl("tenant-a", "web", nil, nil, "10.100.0.5")
+		for _, ip := range []string{"10.128.1.5", "10.200.3.4"} {
+			res := s.Trace(a, nil, ip, "TCP", 443)
+			st := connectivityStep(t, res)
+			if res.Verdict != "Conditional" || st.Action != "Unreachable" || st.Decisive || !st.Conditional ||
+				!strings.Contains(st.Note, "Route advertisement may join") {
+				t.Errorf("state %d, %s: verdict %s, step %+v", state, ip, res.Verdict, st)
+			}
+			if strings.Contains(st.Note, "tenant-b") || strings.Contains(st.Note, "net-b") {
+				t.Errorf("state %d, %s: the note names the other network: %q", state, ip, st.Note)
+			}
+		}
+		b := wl("tenant-b", "db", nil, nil, "10.200.3.4")
+		if res := s.Trace(a, &b, "", "TCP", 5432); res.Verdict != "Conditional" || !strings.Contains(connectivityStep(t, res).Note, "Route advertisement") {
+			t.Errorf("state %d, east-west: verdict %s (%v)", state, res.Verdict, stepKinds(t, res))
+		}
+		if res := s.Trace(a, nil, "203.0.113.9", "TCP", 443); res.Verdict != "Allow" {
+			t.Errorf("state %d, outside address: verdict = %s (%v)", state, res.Verdict, stepKinds(t, res))
+		}
+	}
+}
+
+// Discovery alone decides the route-advertisement state, off the request
+// path: served sticks, absent re-probes, a failed probe keeps the last answer.
+func TestProbeRouteAds(t *testing.T) {
+	kube := fake.NewSimpleClientset()
+	disc := kube.Discovery().(*fakediscovery.FakeDiscovery)
+	s := New(cluster.NewClient(kube, nil, nil), nil)
+
+	if s.probeRouteAds() || s.routeAds.Load() != routeAdsAbsent {
+		t.Fatalf("unserved API: state %d", s.routeAds.Load())
+	}
+	kube.PrependReactor("get", "resource", func(k8stesting.Action) (bool, runtime.Object, error) {
+		return true, nil, errors.New("discovery down")
+	})
+	if s.probeRouteAds() || s.routeAds.Load() != routeAdsAbsent {
+		t.Fatalf("a failed probe must keep the last answer: state %d", s.routeAds.Load())
+	}
+	kube.ReactionChain = kube.ReactionChain[1:]
+	disc.Resources = []*metav1.APIResourceList{{
+		GroupVersion: gvrRouteAds.GroupVersion().String(),
+		APIResources: []metav1.APIResource{{Name: gvrRouteAds.Resource}},
+	}}
+	if !s.probeRouteAds() || s.routeAds.Load() != routeAdsServed {
+		t.Fatalf("served API: state %d", s.routeAds.Load())
 	}
 }

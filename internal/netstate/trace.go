@@ -373,15 +373,17 @@ func planeStep(b bound, stage, action, note string) model.TraceStep {
 // on the same primary network, or isolated primaries drop the flow before any
 // policy runs. A shared secondary network is an unfiltered layer-2 bypass;
 // without a shared primary it is the only path, so the answer is Conditional,
-// never a certain Unreachable. decided is "" when the policy walk decides.
+// never a certain Unreachable, as it is where route advertisement may join
+// the two primaries. decided is "" when the policy walk decides.
 func (s *Snapshot) connectivity(src, dst TraceWorkload) (decided string, steps []model.TraceStep) {
 	srcKey, srcName := s.primaryOf(src)
 	dstKey, dstName := s.primaryOf(dst)
 	reachable := srcKey != "" && srcKey == dstKey
 	shared := s.sharedNetworks(src.Nets, dst.Nets)
+	joinable := !reachable && srcKey != "" && dstKey != "" && s.mayJoin()
 	if !reachable {
 		decided = "Unreachable"
-		if len(shared) > 0 {
+		if len(shared) > 0 || joinable {
 			decided = "Conditional"
 		}
 	}
@@ -397,8 +399,9 @@ func (s *Snapshot) connectivity(src, dst TraceWorkload) (decided string, steps [
 		steps = append(steps, model.TraceStep{Stage: "connectivity", Action: "Unreachable", Decisive: len(shared) == 0,
 			Note: who + " has no primary network attachment."})
 	default:
-		steps = append(steps, model.TraceStep{Stage: "connectivity", Action: "Unreachable", Decisive: len(shared) == 0,
-			Note: fmt.Sprintf("Isolated primary networks: %s is on %s, %s on %s.", src.Name, srcName, dst.Name, dstName)})
+		steps = append(steps, model.TraceStep{Stage: "connectivity", Action: "Unreachable",
+			Decisive: len(shared) == 0 && !joinable, Conditional: joinable,
+			Note: fmt.Sprintf("Isolated primary networks: %s is on %s, %s on %s.", src.Name, srcName, dst.Name, dstName) + joinNote(joinable)})
 	}
 	for _, name := range shared {
 		steps = append(steps, model.TraceStep{Stage: "segment", Action: "Bypass", Conditional: !reachable,
@@ -456,9 +459,10 @@ func (s *Snapshot) externalConnectivity(src TraceWorkload, dstIP string) egressP
 
 // primaryPath frames a flow out of the primary NIC by where the address
 // lies. In the source's own network's range or in none, the egress controls
-// decide. In another primary network's range there is no path; a VLAN NIC,
-// or a secondary NIC whose range may hold the address, leaves that
-// inconclusive. Where an unknown range could hold it, an Allow is.
+// decide. In another primary network's range there is no path; route
+// advertisement that may join the networks, a VLAN NIC, or a secondary NIC
+// whose range may hold the address leaves that inconclusive. Where an
+// unknown range could hold it, an Allow is.
 func (s *Snapshot) primaryPath(src TraceWorkload, dstIP string, vlan bool) (steps []model.TraceStep, decided string, uncertain bool) {
 	reach := model.TraceStep{Stage: "connectivity", Action: "Reachable",
 		Note: "Cluster egress path to " + dstIP + ", evaluated against the source's egress controls."}
@@ -475,13 +479,14 @@ func (s *Snapshot) primaryPath(src TraceWorkload, dstIP string, vlan bool) (step
 		if other == "default" {
 			holder = "the cluster default network"
 		}
-		cut := model.TraceStep{Stage: "connectivity", Action: "Unreachable",
-			Note: fmt.Sprintf("%s is on %s, isolated from %s, which holds %s.", src.Name, name, holder, dstIP)}
+		joinable := s.mayJoin()
+		cut := model.TraceStep{Stage: "connectivity", Action: "Unreachable", Conditional: joinable,
+			Note: fmt.Sprintf("%s is on %s, isolated from %s, which holds %s.", src.Name, name, holder, dstIP) + joinNote(joinable)}
 		if seg := s.secondaryHolding(src, addr); seg != "" {
 			return []model.TraceStep{cut, {Stage: "segment", Action: "Bypass", Conditional: true,
 				Note: "NIC on network " + seg + " may hold " + dstIP + " - the guest can reach it there, around every control evaluated here."}}, "Conditional", false
 		}
-		if vlan {
+		if vlan || joinable {
 			return []model.TraceStep{cut}, "Conditional", false
 		}
 		cut.Decisive = true
@@ -492,4 +497,14 @@ func (s *Snapshot) primaryPath(src TraceWorkload, dstIP string, vlan bool) (step
 		return []model.TraceStep{reach}, "", true
 	}
 	return []model.TraceStep{reach}, "", false
+}
+
+// joinNote words why isolated primaries are not certainly apart: OVN-K
+// advertised networks under loose isolation reach each other through the
+// provider network, and only discovery, not the advertisements, is read here.
+func joinNote(joinable bool) string {
+	if !joinable {
+		return ""
+	}
+	return " Route advertisement may join the networks outside the cluster."
 }

@@ -49,6 +49,17 @@ var (
 	gvrEgressFW = cluster.GVR(model.KindEgressFW)
 	gvrEgressIP = cluster.GVR(model.KindEgressIP)
 	gvrExtRoute = cluster.GVR(model.KindExtRoute)
+
+	// Only discovered, never listed: whether the cluster can advertise pod
+	// networks, which may join networks OVN-K otherwise isolates.
+	gvrRouteAds = schema.GroupVersionResource{Group: gvrUDN.Group, Version: "v1", Resource: "routeadvertisements"}
+)
+
+// What discovery last said of the RouteAdvertisements API.
+const (
+	routeAdsUnknown int32 = iota // no probe has answered yet
+	routeAdsAbsent
+	routeAdsServed
 )
 
 // Snapshot holds the watch-fed networking stores. Build with New, start with Run;
@@ -71,6 +82,8 @@ type Snapshot struct {
 	nodesMu sync.RWMutex
 	nodes   []cluster.NodeLabels
 	podNet  []netip.Prefix // the cluster default network's node subnets; nil: unknown
+
+	routeAds atomic.Int32 // routeAdsUnknown, routeAdsAbsent or routeAdsServed
 }
 
 // New builds the snapshot over sa (dotvirt's ServiceAccount client). bus may be nil in
@@ -153,15 +166,50 @@ func (s *Snapshot) Healthy() bool { return reflect.AllHealthy(s.healthy) }
 // is rare and this cache is off the request path, so a coarse poll is enough.
 const nodeRefreshInterval = 2 * time.Minute
 
-// Run starts one discovery-gated reflector per CRD plus the node-cache refresher, and
-// returns immediately; everything stops when ctx is cancelled. Network and policy
-// kinds signal NetworkChanged; NNS is watched silently.
+// Run starts one discovery-gated reflector per CRD, the node-cache refresher and the
+// route-advertisement probe, and returns immediately; everything stops when ctx is
+// cancelled. Network and policy kinds signal NetworkChanged; NNS is watched silently.
 func (s *Snapshot) Run(ctx context.Context) {
 	for i := range s.watches {
 		s.watch(ctx, s.watches[i], &s.healthy[i])
 	}
 	go s.refreshNodes(ctx)
+	go s.watchRouteAds(ctx)
 }
+
+// watchRouteAds probes discovery for the RouteAdvertisements API on the
+// watches' pace until it is served, as the gated watches do: CRD removal is
+// not re-probed.
+func (s *Snapshot) watchRouteAds(ctx context.Context) {
+	t := time.NewTicker(reflect.DiscoveryInterval)
+	defer t.Stop()
+	for !s.probeRouteAds() {
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+		}
+	}
+}
+
+// probeRouteAds records what discovery says of the RouteAdvertisements API
+// and reports whether it is served. A failed probe keeps the last answer.
+func (s *Snapshot) probeRouteAds() bool {
+	served, err := s.sa.ServesAPIResource(gvrRouteAds)
+	switch {
+	case err != nil:
+		return false
+	case served:
+		s.routeAds.Store(routeAdsServed)
+		return true
+	}
+	s.routeAds.Store(routeAdsAbsent)
+	return false
+}
+
+// mayJoin reports whether route advertisement may join primary networks
+// OVN-K otherwise isolates: its API is served, or discovery has not said.
+func (s *Snapshot) mayJoin() bool { return s.routeAds.Load() != routeAdsAbsent }
 
 // watch starts one spec's discovery-gated reflector. Serving the NNS CRD flips
 // nmstatePresent, which gates the fabric UI.

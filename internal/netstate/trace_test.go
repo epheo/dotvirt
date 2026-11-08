@@ -176,6 +176,7 @@ func TestTraceBaselineAndDefault(t *testing.T) {
 // Unreachable. Without one, Unreachable is certain.
 func TestTraceUnreachableAndSegmentBypass(t *testing.T) {
 	s := New(nil, nil)
+	s.routeAds.Store(routeAdsAbsent)
 	add(t, s.udn, map[string]any{
 		"apiVersion": "k8s.ovn.org/v1", "kind": "UserDefinedNetwork",
 		"metadata": map[string]any{"name": "isolated", "namespace": "team-a"},
@@ -463,6 +464,7 @@ func TestTracePassConvergence(t *testing.T) {
 // the same network identity.
 func TestTraceDefaultMultusSegment(t *testing.T) {
 	s := New(nil, nil)
+	s.routeAds.Store(routeAdsAbsent)
 	for _, ns := range []string{"team-a", "team-b"} {
 		add(t, s.nad, map[string]any{
 			"apiVersion": "k8s.cni.cncf.io/v1", "kind": "NetworkAttachmentDefinition",
