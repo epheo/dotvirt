@@ -429,9 +429,8 @@ func TestEnvtest(t *testing.T) {
 			t.Fatal(err)
 		}
 		eventually(t, "impersonation set", func() bool { return key() == "true" })
-		if !strings.HasPrefix(reason(), "Enabled") {
-			t.Errorf("condition = %s", reason())
-		}
+		// The pass writes its status after the flip.
+		eventually(t, "condition Enabled", func() bool { return strings.HasPrefix(reason(), "Enabled") })
 		if _, ok, _ := unstructured.NestedMap(inst.Object, "spec", "server"); !ok {
 			t.Errorf("the flip dropped a field it does not own: %v", inst.Object["spec"])
 		}
