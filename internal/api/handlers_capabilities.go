@@ -2,6 +2,8 @@ package api
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"net/http"
 
@@ -64,9 +66,14 @@ func (s *Server) fill(ctx context.Context, id auth.Identity, c *cluster.Client, 
 	}
 }
 
-// newNamespace names the namespace a capability for a new one weighs: no
-// namespace holds the name, so its dry runs answer as any new one's.
-const newNamespace = "dotvirt-new-namespace"
+// newNamespace names the namespace a capability for a new one weighs: drawn
+// per process so no namespace holds it, and its dry runs answer as any new
+// one's.
+var newNamespace = func() string {
+	b := make([]byte, 6)
+	_, _ = rand.Read(b)
+	return "dotvirt-probe-" + hex.EncodeToString(b)
+}()
 
 // tenancyCap is a tenancy route's verdict: its route actions, then the
 // coordinator's needs for the change.
@@ -107,6 +114,7 @@ func (s *Server) clusterCaps(ctx context.Context, id auth.Identity, c *cluster.C
 	}
 	out.Platform = out.Platform || out.SharedLibrary || out.NamespaceCreate || out.VMNetwork || out.GrantAdmin ||
 		out.DRSEnable || out.DRSPSI || out.DRSDisable
+	out.PlatformRead, _ = s.canReadPlatform(ctx, id, c)
 	return out
 }
 

@@ -67,6 +67,11 @@ func (s *Server) ask(ctx context.Context, id auth.Identity, c *cluster.Client, q
 	if q.Verb == verbCreate {
 		q.Name = ""
 	}
+	// The apiserver authorizes a request on one Namespace object within that
+	// namespace, so a RoleBinding there may grant it.
+	if q.Group == ssarNamespace.group && q.Resource == ssarNamespace.resource && q.Name != "" {
+		q.Namespace = q.Name
+	}
 	if q.Name == "" || q.Verb == verbBind {
 		return s.can(ctx, id, c, q)
 	}

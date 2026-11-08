@@ -389,7 +389,8 @@ func replaced(o object) bool {
 // applies, so they carry no namespace and touch no object. The shared library
 // is the platform repo's, written with the right to create templates
 // cluster-wide, as its routes ask; a project's library is gated by the
-// project's authoring right at its routes and at propose.
+// project's authoring right at its routes and again at the propose and revert
+// routes, which the API weighs as the library routes do.
 func libraryAccess(proj project.ProjectInfo, ch fileChange, before, after []object, want func(after []object) error) ([]Access, error) {
 	for _, o := range slices.Concat(before, after) {
 		if o.kind != model.KindTemplate {

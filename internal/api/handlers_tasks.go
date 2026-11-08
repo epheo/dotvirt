@@ -32,7 +32,7 @@ func (s *Server) handleTasks(w http.ResponseWriter, r *http.Request) {
 		fail(w, err)
 		return
 	}
-	if platform, _ := s.canAuthorPlatform(r.Context(), id, c); platform {
+	if platform, _ := s.canReadPlatform(r.Context(), id, c); platform {
 		projects = append(projects, s.platformProject())
 	}
 	canNodes := s.capable(r.Context(), id, c, ask(verbList, ssarNodes, ""))

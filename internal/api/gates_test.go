@@ -336,23 +336,47 @@ func TestGatesAreExactAndCapabilitiesMatch(t *testing.T) {
 	}
 }
 
-// The lane is any platform authoring signal: each one opens it, none refuses,
-// and the capability says the same.
-func TestPlatformLaneMatchesItsGate(t *testing.T) {
+// The platform tier's shared reads (its history, a commit's diff, a proposal,
+// the platform draft without one of one's own) open on a cluster-wide signal
+// alone, and cluster.platformRead says the same. A right to stage one
+// platform kind, or a DRS right inside the operator namespace (which OLM
+// folds into that namespace's admin role), stages but reads nothing.
+func TestPlatformReadsNeedAClusterWideSignal(t *testing.T) {
 	g := newGateRig(t)
-	for _, gs := range [][]grant{
-		{kind(verbCreate, model.KindCUDN, "")},
-		{kind(verbCreate, model.KindEgressIP, "")},
-		{kind(verbDelete, model.KindNNCP, "")},
-		{kind(verbCreate, model.KindDesched, "")},
-		{kind(verbCreate, model.KindTemplate, "")},
-		nil,
+	passes := func(tok, path string) (ok bool) {
+		defer func() {
+			if recover() != nil {
+				ok = true // past the gate, into the stubbed reader
+			}
+		}()
+		return do(g.s, tok, http.MethodGet, path, "").Code != http.StatusForbidden
+	}
+	desched := func(verb, name string) grant {
+		return grant{verb: verb, group: "operator.openshift.io", resource: "kubedeschedulers", ns: descheduler, name: name}
+	}
+	for _, c := range []struct {
+		gs            []grant
+		read, staging bool
+	}{
+		{[]grant{{verb: verbList, resource: "namespaces"}}, true, false},
+		{[]grant{kind(verbCreate, model.KindCUDN, "")}, true, true},
+		{[]grant{{verb: verbCreate, group: "operator.openshift.io", resource: "kubedeschedulers"}}, true, true},
+		{[]grant{kind(verbCreate, model.KindTemplate, "")}, true, true},
+		{[]grant{kind(verbCreate, model.KindEgressIP, "")}, false, true},
+		{[]grant{kind(verbDelete, model.KindNNCP, "")}, false, true},
+		{[]grant{desched(verbCreate, ""), desched(verbUpdate, "cluster"), desched(verbDelete, "cluster")}, false, true},
+		{nil, false, false},
 	} {
-		tok := g.token(gs)
+		tok := g.token(c.gs)
 		cl, _ := g.caps(tok, "team-a-dev")
-		rec := do(g.s, tok, http.MethodGet, "/api/draft?project=platform", "")
-		if allowed := rec.Code != http.StatusForbidden; allowed != cl.Platform || allowed != (gs != nil) {
-			t.Errorf("with %v: draft = %d, capability = %v", gs, rec.Code, cl.Platform)
+		if cl.PlatformRead != c.read || cl.Platform != c.staging {
+			t.Errorf("with %v: platformRead = %v, platform = %v; want %v, %v", c.gs, cl.PlatformRead, cl.Platform, c.read, c.staging)
+		}
+		for _, path := range []string{"/api/projects/platform/history", "/api/projects/platform/history/" + hash40,
+			"/api/projects/platform/proposals/1", "/api/draft?project=platform"} {
+			if got := passes(tok, path); got != c.read {
+				t.Errorf("with %v: %s passes = %v, want %v", c.gs, path, got, c.read)
+			}
 		}
 	}
 }

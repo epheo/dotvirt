@@ -31,9 +31,17 @@ export interface ObjectCaps {
 export interface ClusterCaps {
   /**
    * Platform is any platform-tier field below (OAuthClient aside): the
-   * platform lane, the caller's own platform draft and its proposals.
+   * caller may stage a platform change, and so reach their own platform
+   * draft once they hold one.
    */
   platform: boolean;
+  /**
+   * PlatformRead opens the platform tier's shared reads: its history, its
+   * open proposals and their diffs, revert, and its merges and rollup
+   * detail in the frame. A cluster-wide signal: the platform repo names
+   * every project, namespace and owner.
+   */
+  platformRead: boolean;
   /**
    * Network is the shared segments (ClusterUserDefinedNetwork).
    */
@@ -907,8 +915,8 @@ export interface NetworkCaps {
    */
   baselineAdminNetworkPolicy: boolean;
   /**
-   * Platform is any platform authoring signal: the gate on the platform
-   * tier's whole-draft routes and its revert.
+   * Platform is the platform tier's shared reads (its history, proposals and
+   * revert): ClusterCaps.PlatformRead, as of this pull.
    */
   platform: boolean;
 }

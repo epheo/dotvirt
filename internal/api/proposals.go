@@ -204,9 +204,10 @@ func (s *Server) refreshProposals(all bool) bool {
 			watched[p.Name] = p
 		}
 	}
-	// The platform tier's lane is read whenever anyone looks: frames ask the
-	// platform-author review only once it holds a proposal (platformBusy).
-	if len(watched) > 0 && s.cfg.PlatformRepo != "" {
+	// The platform tier's lane is read whenever anyone looks, a caller who
+	// sees no tenant project included: frames ask the platform-reader review
+	// only once it holds a proposal (platformBusy).
+	if len(s.propTargets) > 0 && s.cfg.PlatformRepo != "" {
 		watched[platformProjectName] = s.platformProject()
 	}
 	dirty := s.propDirty
@@ -291,8 +292,9 @@ func (s *Server) refreshMerged(reads mergedReads, settle bool) {
 			}
 		}
 	}
+	anyone := len(s.propTargets) > 0
 	s.propMu.Unlock()
-	if len(byRepo) > 0 && s.cfg.PlatformRepo != "" {
+	if anyone && s.cfg.PlatformRepo != "" {
 		byRepo[forge.NormalizeRepoURL(s.cfg.PlatformRepo)] = s.platformProject()
 	}
 	for repo := range reads {

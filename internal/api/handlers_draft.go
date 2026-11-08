@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/epheo/dotvirt/internal/changeset"
+	"github.com/epheo/dotvirt/internal/draft"
 	"github.com/epheo/dotvirt/internal/model"
 	"github.com/epheo/dotvirt/internal/validate"
 )
@@ -119,12 +120,22 @@ func (s *Server) handleUnstage(w http.ResponseWriter, r *http.Request) {
 }
 
 // handlePropose opens a PR from the caller's draft of a project they see. The
-// coordinator weighs every entry again under the caller's token, so no
-// stand-in right is asked here.
+// coordinator weighs every entry again under the caller's token; a project
+// library entry, which no gate weighs, is weighed again here.
 func (s *Server) handlePropose(w http.ResponseWriter, r *http.Request) {
 	sc, ok := s.draftScope(w, r)
 	if !ok {
 		return
+	}
+	if sc.proj.Name != platformProjectName {
+		view, err := s.draft.Get(sc.id, sc.proj)
+		if err != nil {
+			fail(w, err)
+			return
+		}
+		if touchesLibrary(view.Items) && !s.authorizeLibrary(w, r, sc) {
+			return
+		}
 	}
 	req, ok := decode[model.ProposeRequest](w, r)
 	if !ok {
@@ -311,6 +322,16 @@ func (s *Server) handleRestore(w http.ResponseWriter, r *http.Request) {
 	respond(w, result, err)
 }
 
+// touchesLibrary reports whether items write a template library.
+func touchesLibrary(items []model.DraftItem) bool {
+	for _, it := range items {
+		if it.Resource == string(draft.ResourceTemplate) {
+			return true
+		}
+	}
+	return false
+}
+
 // hashBody reads the commit hash a restore or revert body names; ok=false means
 // the response is written.
 func hashBody(w http.ResponseWriter, r *http.Request) (string, bool) {
@@ -378,7 +399,8 @@ func (s *Server) handleProposal(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleRevert proposes a forward commit reverting one commit in the project's
-// repo - a new PR, never a history rewrite.
+// repo - a new PR, never a history rewrite. The coordinator weighs each object
+// it changes; a project library file, which no gate weighs, is weighed here.
 func (s *Server) handleRevert(w http.ResponseWriter, r *http.Request) {
 	sc, ok := s.pickProject(w, r, r.PathValue("project"))
 	if !ok || !s.authorizeRepo(w, r, sc) {
@@ -387,6 +409,16 @@ func (s *Server) handleRevert(w http.ResponseWriter, r *http.Request) {
 	hash, ok := hashBody(w, r)
 	if !ok {
 		return
+	}
+	if sc.proj.Name != platformProjectName {
+		detail, err := s.reader.Commit(sc.proj, hash)
+		if err != nil {
+			fail(w, err)
+			return
+		}
+		if touchesLibrary(detail.Items) && !s.authorizeLibrary(w, r, sc) {
+			return
+		}
 	}
 	result, err := s.draft.Revert(sc.id, sc.proj, hash)
 	if err == nil {

@@ -38,6 +38,7 @@ type reachedDraft struct {
 	Draft
 	mu      sync.Mutex
 	reached []string
+	items   []model.DraftItem // what the draft, or a reverted commit, holds
 }
 
 func (d *reachedDraft) hit(name string) {
@@ -111,6 +112,14 @@ func (d *reachedDraft) Adopt(auth.Identity, project.ProjectInfo, string, string)
 func (d *reachedDraft) RestoreVersion(auth.Identity, project.ProjectInfo, string, string, string, string) (model.DraftView, error) {
 	d.hit("RestoreVersion")
 	return view, nil
+}
+func (d *reachedDraft) Get(auth.Identity, project.ProjectInfo) (model.DraftView, error) {
+	v := view
+	v.Items = d.items
+	return v, nil
+}
+func (d *reachedDraft) Commit(project.ProjectInfo, string) (model.CommitDetail, error) {
+	return model.CommitDetail{Items: d.items}, nil
 }
 func (d *reachedDraft) Revert(auth.Identity, project.ProjectInfo, string) (model.ProposeResult, error) {
 	d.hit("Revert")
@@ -279,6 +288,23 @@ func TestCoordinatorGatedRoutesReachIt(t *testing.T) {
 		rec := serve(s, rt.method, rt.path, rt.body, viewerToken)
 		if got := d.take(); len(got) != 1 || got[0] != rt.reaches {
 			t.Errorf("viewer %s %s = %d %q, reached %v", rt.method, rt.path, rec.Code, rec.Body.String(), got)
+		}
+	}
+}
+
+// A project library file, which no gate weighs, is weighed at propose and at
+// revert as its own routes weigh it: the project's authoring right.
+func TestLibraryWritesWeighedAtProposeAndRevert(t *testing.T) {
+	d := &reachedDraft{items: []model.DraftItem{{Kind: "create", Resource: "template", Name: "t"}}}
+	s := tenantServer(t, d, []string{"web"}, []string{"web"})
+	for _, rt := range coordinatorGated {
+		rec := serve(s, rt.method, rt.path, rt.body, viewerToken)
+		if !gateDenied(rec) || len(d.take()) != 0 {
+			t.Errorf("viewer %s %s = %d %q, want the library's 403", rt.method, rt.path, rec.Code, rec.Body.String())
+		}
+		serve(s, rt.method, rt.path, rt.body, editorToken)
+		if got := d.take(); len(got) != 1 || got[0] != rt.reaches {
+			t.Errorf("editor %s %s reached %v", rt.method, rt.path, got)
 		}
 	}
 }

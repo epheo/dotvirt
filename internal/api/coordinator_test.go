@@ -12,6 +12,7 @@ import (
 	"time"
 
 	authzv1 "k8s.io/api/authorization/v1"
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	kubevirtcorev1 "kubevirt.io/api/core/v1"
 
@@ -84,7 +85,7 @@ func newCoordinatorRig(t *testing.T) *gateRig {
 		WithSyncNamespace("dotvirt-sync")
 	// The release strips label residue under the caller's token.
 	g.fc.on(http.MethodPatch, "/api/v1/namespaces/orphans-ns", func(w http.ResponseWriter, r *http.Request) {
-		if !g.fc.ssar(bearer(r), &authzv1.ResourceAttributes{Verb: verbPatch, Resource: "namespaces", Name: "orphans-ns"}) {
+		if !g.fc.ssar(bearer(r), &authzv1.ResourceAttributes{Verb: verbPatch, Resource: "namespaces", Namespace: "orphans-ns", Name: "orphans-ns"}) {
 			writeStatus(w, http.StatusForbidden, metav1.StatusReasonForbidden)
 			return
 		}
@@ -255,6 +256,51 @@ func TestCanResyncEqualsTheResyncGate(t *testing.T) {
 		}
 		if allowed == 0 || allowed == len(sets) {
 			t.Errorf("%s: allowed under %d of %d grant sets: the case weighs nothing", name, allowed, len(sets))
+		}
+	}
+}
+
+// A right on a Namespace object granted inside that namespace counts, as the
+// apiserver asks it there: a project admin bound only in orphans-ns may claim
+// it, and the capability agrees.
+func TestNamespaceRightsInsideTheNamespaceCount(t *testing.T) {
+	g := newCoordinatorRig(t)
+	rbac := "rbac.authorization.k8s.io"
+	in := func(verb, group, resource, name string) grant {
+		return grant{verb: verb, group: group, resource: resource, ns: "orphans-ns", name: name}
+	}
+	tok := g.token([]grant{
+		in(verbGet, "", "namespaces", "orphans-ns"),
+		in(verbUpdate, "", "namespaces", "orphans-ns"),
+		in(verbCreate, rbac, "rolebindings", ""),
+		in(verbBind, rbac, "clusterroles", "admin"),
+		in(verbBind, rbac, "clusterroles", tenancy.TenantEgressRole),
+	})
+	if _, nc := g.caps(tok, "orphans-ns"); !nc.Project.Adopt {
+		t.Errorf("adopt capability false with the rights granted inside the namespace")
+	}
+	if rec := do(g.s, tok, http.MethodPost, "/api/projects/orphans/adopt", ""); rec.Code != http.StatusOK {
+		t.Errorf("adopt = %d %q", rec.Code, rec.Body.String())
+	}
+}
+
+// A visible project with a namespace the caller cannot see is refused by the
+// tenancy routes without naming that namespace.
+func TestTenancyRefusesAProjectWithAHiddenNamespace(t *testing.T) {
+	g := newCoordinatorRig(t)
+	g.fc.namespaces = append(g.fc.namespaces, corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "orphans-zsecret", Labels: map[string]string{"dotvirt.io/project": "orphans"}}})
+	c := g.s.draft.(*changeset.Coordinator)
+	g.s = g.fc.server(c, g.s.cfg)
+	c.UseAuthorizer(g.s)
+	tok := g.token([]grant{
+		{verb: verbGet, resource: "namespaces", name: "orphans-ns"},
+		{verb: verbUpdate, resource: "namespaces", name: "orphans-ns"},
+		{verb: verbPatch, resource: "namespaces", name: "orphans-ns"},
+	})
+	for _, path := range []string{"/api/projects/orphans/adopt", "/api/projects/orphans/release"} {
+		rec := do(g.s, tok, http.MethodPost, path, "")
+		if rec.Code != http.StatusForbidden || strings.Contains(rec.Body.String(), "zsecret") {
+			t.Errorf("%s = %d %q, want an unnamed 403", path, rec.Code, rec.Body.String())
 		}
 	}
 }

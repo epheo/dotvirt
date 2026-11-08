@@ -212,7 +212,7 @@ func (fc *fakeCluster) serve(w http.ResponseWriter, r *http.Request) {
 	if name, one := strings.CutPrefix(r.URL.Path, "/api/v1/namespaces/"); h == nil && r.Method == http.MethodGet && one && !strings.Contains(name, "/") {
 		allow := bearer(r) == adminToken
 		if fc.ssar != nil {
-			allow = fc.ssar(bearer(r), &authzv1.ResourceAttributes{Verb: "get", Resource: "namespaces", Name: name})
+			allow = fc.ssar(bearer(r), &authzv1.ResourceAttributes{Verb: "get", Resource: "namespaces", Namespace: name, Name: name})
 		}
 		if !allow {
 			writeStatus(w, http.StatusForbidden, metav1.StatusReasonForbidden)
@@ -252,6 +252,9 @@ func (fc *fakeCluster) dryRun(w http.ResponseWriter, r *http.Request) {
 	attrs.Resource = seg[0]
 	if len(seg) > 1 {
 		attrs.Name = seg[1]
+	}
+	if core && attrs.Resource == "namespaces" {
+		attrs.Namespace = attrs.Name
 	}
 	if r.Method == http.MethodPut {
 		attrs.Verb = "update"

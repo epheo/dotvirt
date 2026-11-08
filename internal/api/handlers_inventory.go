@@ -116,16 +116,16 @@ func (s *Server) InventoryForIdentity(ctx context.Context, id auth.Identity) (mo
 	// The platform tier has no project row; its Application rollup rides the frame
 	// on its own so the issues plane names what it failed to apply or keeps
 	// unhealthy. Every user sees its verdict (a user scoped to no project must not
-	// mask a broken platform sync); only platform authors see its detail, its
-	// open proposals and its merges. The platform lane (up to one review per
-	// platform action) is asked only when the frame holds one of those: a quiet
-	// platform costs a caller with no platform right nothing.
+	// mask a broken platform sync); only platform readers (canReadPlatform) see
+	// its detail, its open proposals and its merges. That is asked only when
+	// the frame holds one of those: a quiet platform costs a caller with no
+	// platform right nothing.
 	var platformAuthor bool
 	var platformErr error
 	if s.cfg.PlatformRepo != "" {
 		inv.Platform = platformRollup(in.ProjectDrift, s.cfg.PlatformRepo)
 		if s.platformBusy() || rollupDetail(inv.Platform) {
-			platformAuthor, platformErr = s.canAuthorPlatform(ctx, id, userCluster)
+			platformAuthor, platformErr = s.canReadPlatform(ctx, id, userCluster)
 		}
 		if !platformAuthor {
 			inv.Platform = tenantPlatformView(inv.Platform, visible)
@@ -181,8 +181,12 @@ func platformRollup(drift map[string]model.ProjectSync, platformRepo string) *mo
 // shows only to its authors beyond its rollup: open proposals (the refresher
 // watches the platform repo whenever anyone looks) or merges in the task feed.
 func (s *Server) platformBusy() bool {
-	if rows, ok := s.proposals.Get(platformProjectName); ok && len(rows) > 0 {
+	rows, ok := s.proposals.Get(platformProjectName)
+	if ok && len(rows) > 0 {
 		return true
+	}
+	if !ok {
+		s.nudgeProposals("")
 	}
 	if s.tasks == nil {
 		return false

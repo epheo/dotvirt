@@ -253,34 +253,30 @@ var (
 	ssarVMTemplate  = ssarFor(model.KindTemplate)
 )
 
-// platformActions open the platform tier's routes: each network-family
-// kind's create, update and delete, a namespace's create or claim, the shared
-// library's create and the DRS routes' verbs. Holding any opens the platform
-// lane: the caller's OWN platform draft, its history and its proposals -
-// drafts are per user, every entry passed its own gate, and propose weighs
-// each again.
-func platformActions() []action {
-	var acts []action
-	for _, k := range []model.Kind{model.KindCUDN, model.KindNNCP, model.KindEgressIP, model.KindExtRoute, model.KindANP, model.KindBANP} {
-		for _, verb := range []string{verbCreate, verbUpdate, verbDelete} {
-			acts = append(acts, kindAction(verb, k, ""))
-		}
+// platformReaders are the cluster-wide signals that open the platform tier's
+// shared reads - its history, commit and proposal diffs, revert, its merges
+// in the task feed and its rollup detail: listing namespaces cluster-wide, or
+// creating CUDNs, KubeDeschedulers or templates in every namespace. The
+// platform repo names every project, namespace and owner, so a right scoped
+// to one namespace (an operator namespace's admin role) never opens them.
+func platformReaders() []action {
+	return []action{
+		ask(verbList, ssarNamespace, ""),
+		ask(verbCreate, ssarCUDN, ""),
+		ask(verbCreate, ssarDescheduler, ""),
+		ask(verbCreate, ssarVMTemplate, ""),
 	}
-	acts = append(acts, ask(verbCreate, ssarNamespace, ""), claimAction(""), ask(verbCreate, ssarVMTemplate, ""), drsDisableAction())
-	return append(acts, drsSchedulerActions()...)
 }
 
-// canAuthorPlatform reports whether id may author platform-tier changes - any
-// of platformActions, each a review cached per token, so the inventory
-// broadcast path stays free of a per-subscriber cluster call. False when no
-// platform repo is configured. It also seeds the synthetic platform project
-// into the proposals query, so a platform PR surfaces on a cold page load. An
-// error means none allowed and at least one review failed.
-func (s *Server) canAuthorPlatform(ctx context.Context, id auth.Identity, c *cluster.Client) (bool, error) {
+// canReadPlatform reports whether id may read the platform tier: any of
+// platformReaders, each a review cached per token. False when no platform
+// repo is configured. An error means none allowed and at least one review
+// failed.
+func (s *Server) canReadPlatform(ctx context.Context, id auth.Identity, c *cluster.Client) (bool, error) {
 	if s.cfg.PlatformRepo == "" {
 		return false, nil
 	}
-	return s.anyAllowed(ctx, id, c, platformActions())
+	return s.anyAllowed(ctx, id, c, platformReaders())
 }
 
 func namespaceNames(nss []project.Namespace) []string {
@@ -438,7 +434,7 @@ func (s *Server) pickDraft(w http.ResponseWriter, r *http.Request, want string) 
 		return s.pickProject(w, r, want)
 	}
 	return s.platformScopeWith(w, r, func(ctx context.Context, id auth.Identity, c *cluster.Client) (bool, error) {
-		if ok, err := s.canAuthorPlatform(ctx, id, c); ok || err != nil {
+		if ok, err := s.canReadPlatform(ctx, id, c); ok || err != nil {
 			return ok, err
 		}
 		v, err := s.draft.Get(id, s.platformProject())
@@ -448,10 +444,10 @@ func (s *Server) pickDraft(w http.ResponseWriter, r *http.Request, want string) 
 
 // pickProject resolves a project named by a ?project= query or {project} path
 // segment (the whole-project routes: history, revert, and through pickDraft
-// the draft routes). The platform tier resolves ONLY for callers who can
-// author platform changes (platformActions), so a plain tenant cannot reach
-// the platform repo's history or revert. Any other name resolves from the
-// caller's visible projects.
+// the draft routes). The platform tier resolves ONLY for callers holding a
+// cluster-wide platform signal (platformReaders), so neither a plain tenant
+// nor a namespace-scoped right reaches the platform repo's history or
+// revert. Any other name resolves from the caller's visible projects.
 func (s *Server) pickProject(w http.ResponseWriter, r *http.Request, want string) (scope, bool) {
 	if want == platformProjectName {
 		return s.platformScopeAny(w, r)
@@ -460,10 +456,10 @@ func (s *Server) pickProject(w http.ResponseWriter, r *http.Request, want string
 }
 
 // platformScopeAny resolves the platform tier for the whole-project routes:
-// any of platformActions suffices. The per-kind create routes keep their own
+// any of platformReaders suffices. The per-kind create routes keep their own
 // gate.
 func (s *Server) platformScopeAny(w http.ResponseWriter, r *http.Request) (scope, bool) {
-	return s.platformScopeWith(w, r, s.canAuthorPlatform, "not authorized to author platform changes")
+	return s.platformScopeWith(w, r, s.canReadPlatform, "not authorized to read the platform tier")
 }
 
 // platformProjectName is the synthetic project name for the platform tier - the

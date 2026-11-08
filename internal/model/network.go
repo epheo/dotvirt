@@ -120,7 +120,7 @@ type NetworkCaps struct {
 	AdminNetworkPolicy bool `json:"adminNetworkPolicy"` // cluster-wide admin DFW (AdminNetworkPolicy)
 	// BaselineAdminNetworkPolicy is the cluster's baseline default policy.
 	BaselineAdminNetworkPolicy bool `json:"baselineAdminNetworkPolicy"`
-	// Platform is any platform authoring signal: the gate on the platform
-	// tier's whole-draft routes and its revert.
+	// Platform is the platform tier's shared reads (its history, proposals and
+	// revert): ClusterCaps.PlatformRead, as of this pull.
 	Platform bool `json:"platform"`
 }

@@ -23,8 +23,14 @@ type ObjectCaps struct {
 // ClusterCaps are the platform tier's actions and the cluster-scoped ones.
 type ClusterCaps struct {
 	// Platform is any platform-tier field below (OAuthClient aside): the
-	// platform lane, the caller's own platform draft and its proposals.
+	// caller may stage a platform change, and so reach their own platform
+	// draft once they hold one.
 	Platform bool `json:"platform"`
+	// PlatformRead opens the platform tier's shared reads: its history, its
+	// open proposals and their diffs, revert, and its merges and rollup
+	// detail in the frame. A cluster-wide signal: the platform repo names
+	// every project, namespace and owner.
+	PlatformRead bool `json:"platformRead"`
 	// Network is the shared segments (ClusterUserDefinedNetwork).
 	Network                    ObjectCaps `json:"network"`
 	Uplink                     ObjectCaps `json:"uplink"`

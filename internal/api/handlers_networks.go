@@ -185,7 +185,7 @@ func (s *Server) handleNetworks(w http.ResponseWriter, r *http.Request) {
 			AdminNetworkPolicy:         can(model.KindANP),
 			BaselineAdminNetworkPolicy: can(model.KindBANP),
 		}
-		out.Caps.Platform, _ = s.canAuthorPlatform(ctx, id, c)
+		out.Caps.Platform, _ = s.canReadPlatform(ctx, id, c)
 	}
 	// Which file declares each segment: the edit/delete affordance. A shared
 	// segment's platform file shows only to callers who may author that tier.

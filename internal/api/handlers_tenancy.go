@@ -51,8 +51,9 @@ func (s *Server) claimNamespaces(ctx context.Context, sc scope, project string) 
 
 // tenancyTarget resolves the project an adopt, release or sync-access route
 // names: from every project when the caller may relabel any namespace
-// (claimAction("")), else from the projects they see. ok=false means the
-// response is written, the same 404 for a project hidden as for none.
+// (claimAction("")), else from the projects they see, whole. ok=false means
+// the response is written: the same 404 for a project hidden as for none, an
+// unnamed 403 for one with a namespace hidden.
 func (s *Server) tenancyTarget(w http.ResponseWriter, r *http.Request, sc scope) (project.ProjectInfo, bool) {
 	name := r.PathValue("project")
 	var target project.ProjectInfo
@@ -63,7 +64,12 @@ func (s *Server) tenancyTarget(w http.ResponseWriter, r *http.Request, sc scope)
 		fail(w, err)
 		return project.ProjectInfo{}, false
 	} else if visible, ok := findProject(projects, name); ok {
-		// The whole project, as the claim and the gate weigh every namespace.
+		// The claim and the gate weigh every namespace, and would name one the
+		// caller cannot see: such a project is refused without naming it.
+		if full, ok := s.projectByName(visible.Name); ok && len(full.Namespaces) > len(visible.Namespaces) {
+			fail(w, fmt.Errorf("%w: this needs every namespace of %s in your view", model.ErrForbidden, name))
+			return project.ProjectInfo{}, false
+		}
 		target, found = s.projectByName(visible.Name)
 	}
 	if !found {

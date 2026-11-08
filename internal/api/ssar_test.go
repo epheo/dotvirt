@@ -27,9 +27,9 @@ func TestEverySSARIsATableKind(t *testing.T) {
 			t.Errorf("ssar %s = %+v is not in the kind table", name, ref)
 		}
 	}
-	for _, act := range platformActions() {
-		if len(act) == 0 || act[0].Resource == "" {
-			t.Errorf("platform action %+v is empty", act)
+	for _, act := range platformReaders() {
+		if len(act) == 0 || act[0].Resource == "" || act[0].Namespace != "" {
+			t.Errorf("platform reader %+v is empty or namespace-scoped", act)
 		}
 	}
 }
