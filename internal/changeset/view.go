@@ -57,6 +57,9 @@ func (c *Coordinator) render(id auth.Identity, proj project.ProjectInfo, entries
 				return model.DraftView{}, err
 			}
 			item.Changes = manifest.ChangesForEdit(current, *e.Edit)
+			if content, ok, err := read.LookupOnBranch(c.baseBranch, e.SourceFile); err == nil && ok {
+				item.Changes = append(item.Changes, manifest.StripChanges(content, defaultNamespace(e.SourceFile), e.Namespace, e.Name, *e.Edit, targetOf(e))...)
+			}
 			item.Edit = e.Edit
 		case draft.KindCreate:
 			// The manifest IS the change; the rows only explain it.
