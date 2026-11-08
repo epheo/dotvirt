@@ -14,12 +14,14 @@ import (
 
 // Redaction is what a cluster policy's text may tell one caller: only what
 // lies in the namespaces they see. A namespace selector renders in clear only
-// when it can match no namespace outside their view, and even then hides a
-// namespace name or project label value they do not see; otherwise it reads
-// as the caller's own namespaces it selects, then otherNamespaces. Pod labels
-// render only beside a namespace side so confined, node labels only to a
-// caller who may read nodes. Actions, ports and directions render as they
-// are, and matching never reads text, so verdicts are untouched.
+// when it selects some of their namespaces and can match none outside their
+// view, and even then hides a namespace name or project label value they do
+// not see; otherwise it reads as the caller's own namespaces it selects, then
+// otherNamespaces. A selector matching none of theirs speaks only of others,
+// even one matching nothing at all. Pod labels render only beside a namespace
+// side so confined, node labels only to a caller who may read nodes. Actions,
+// ports and directions render as they are, and matching never reads text, so
+// verdicts are untouched.
 //
 // One Redaction serves one request: it memoizes per selector without locking.
 type Redaction struct {
@@ -27,7 +29,7 @@ type Redaction struct {
 	Namespace    func(name string) bool // the caller sees this namespace
 	Project      func(name string) bool // the caller sees this project
 	// Namespaces lists every namespace in the cluster. Nil confines only the
-	// selectors that pin their namespaces by name.
+	// selectors that pin their namespaces by name to ones the caller sees.
 	Namespaces func() []NamespaceLabels
 	Nodes      func() bool // the caller may read nodes; nil: they may not
 
@@ -50,12 +52,13 @@ const (
 
 // selection is one namespace selector as the caller may read it.
 type selection struct {
-	confined bool   // it can match no namespace outside the caller's view
+	confined bool   // it selects some of the caller's namespaces and none outside
 	own      string // the caller's namespaces it selects, then otherNamespaces
 }
 
-// confined reports whether a namespace selector can match no namespace
-// outside the caller's view. A nil Redaction confines everything.
+// confined reports whether a namespace selector selects some of the caller's
+// namespaces and can match none outside their view. A nil Redaction confines
+// everything.
 func (r *Redaction) confined(sel *metav1.LabelSelector) bool {
 	return r == nil || r.read(sel).confined
 }
@@ -82,11 +85,11 @@ func (r *Redaction) read(sel *metav1.LabelSelector) selection {
 		return v
 	}
 	v := selection{confined: true}
-	switch {
-	case r.pinned(sel):
-	case r.Namespaces == nil:
-		v = selection{own: otherNamespaces}
-	default:
+	if r.Namespaces == nil {
+		if !r.pinned(sel) {
+			v = selection{own: otherNamespaces}
+		}
+	} else {
 		var own []string
 		for _, ns := range r.Namespaces() {
 			m := r.selects(sel, ns)
@@ -98,6 +101,9 @@ func (r *Redaction) read(sel *metav1.LabelSelector) selection {
 			case m != matchNo:
 				v.confined = false
 			}
+		}
+		if len(own) == 0 {
+			v.confined = false
 		}
 		slices.Sort(own)
 		v.own = strings.Join(append(own, otherNamespaces), ", ")
@@ -112,14 +118,14 @@ func (r *Redaction) read(sel *metav1.LabelSelector) selection {
 	return v
 }
 
-// pinned reports whether sel names its namespaces outright, each one the
-// caller sees: whatever else it requires only narrows that set.
+// pinned reports whether sel names its namespaces outright, at least one and
+// each one the caller sees: whatever else it requires only narrows that set.
 func (r *Redaction) pinned(sel *metav1.LabelSelector) bool {
 	if v, ok := sel.MatchLabels[netgen.NamespaceNameLabel]; ok && r.Namespace(v) {
 		return true
 	}
 	for _, e := range sel.MatchExpressions {
-		if vals, ok := netgen.NameIn(e); ok && !slices.ContainsFunc(vals, func(v string) bool { return !r.Namespace(v) }) {
+		if vals, ok := netgen.NameIn(e); ok && len(vals) > 0 && !slices.ContainsFunc(vals, func(v string) bool { return !r.Namespace(v) }) {
 			return true
 		}
 	}

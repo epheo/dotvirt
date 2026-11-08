@@ -375,6 +375,12 @@ func TestRedactionConfinement(t *testing.T) {
 		{"named namespaces", names("tenant-a"), true},
 		{"named past the view", names("tenant-a", "tenant-b"), false},
 		{"every namespace", &metav1.LabelSelector{}, false},
+		{"a project with no namespace", ls("dotvirt.io/project", "gamma"), false},
+		{"a label no namespace carries", ls("team", "finance"), false},
+		{"named, but narrowed to nothing", &metav1.LabelSelector{
+			MatchLabels:      map[string]string{"team": "finance"},
+			MatchExpressions: names("tenant-a").MatchExpressions,
+		}, false},
 	} {
 		if got := red.confined(c.sel); got != c.want {
 			t.Errorf("%s: confined = %v, want %v", c.name, got, c.want)
@@ -385,5 +391,60 @@ func TestRedactionConfinement(t *testing.T) {
 	blind.Namespaces, blind.memo = nil, nil
 	if !blind.confined(names("tenant-a")) || blind.confined(ls("dotvirt.io/project", "alpha")) {
 		t.Error("with no namespace list only a name pin may confine")
+	}
+}
+
+// A selector matching none of the caller's namespaces, nothing at all
+// included, is the platform's own text: it reads as other namespaces, its
+// pod labels hidden beside it. Without a Redaction it reads whole.
+func TestRedactVacuousSelector(t *testing.T) {
+	s, _, all, _, _ := ownScope(t)
+	add(t, s.anp, map[string]any{
+		"apiVersion": "policy.networking.k8s.io/v1alpha1", "kind": "AdminNetworkPolicy",
+		"metadata": map[string]any{"name": "finance"},
+		"spec": map[string]any{
+			"priority": int64(30),
+			"subject":  map[string]any{"namespaces": map[string]any{"matchLabels": map[string]any{"team": "finance"}}},
+			"ingress": []any{map[string]any{"action": "Deny", "from": []any{
+				map[string]any{"namespaces": map[string]any{"matchLabels": map[string]any{"dotvirt.io/project": "gamma"}}},
+				map[string]any{"pods": map[string]any{
+					"namespaceSelector": map[string]any{
+						"matchLabels":      map[string]any{"team": "finance"},
+						"matchExpressions": nameInSelector("tenant-a")["matchExpressions"],
+					},
+					"podSelector": map[string]any{"matchLabels": map[string]any{"app": "ledger"}},
+				}},
+			}}},
+		},
+	})
+	tenant := &Redaction{
+		ProjectLabel: "dotvirt.io/project",
+		Namespace:    func(ns string) bool { return ns == "tenant-a" },
+		Project:      func(p string) bool { return p == "alpha" },
+		Namespaces:   func() []NamespaceLabels { return all },
+	}
+	var full model.Policy
+	for _, p := range s.Policies() {
+		if p.Name == "finance" {
+			full = p
+		}
+	}
+	p := full
+	p.Rules = slices.Clone(full.Rules)
+	s.Redact(&p, nil, tenant)
+	for _, x := range policyTexts(p, nil) {
+		for _, secret := range []string{"finance", "gamma", "ledger"} {
+			if strings.Contains(x, secret) {
+				t.Errorf("a vacuous selector leaks %q: %q", secret, x)
+			}
+		}
+	}
+	if p.Target != otherNamespaces || p.Rules[0].Peer != "ns other namespaces; ns other namespaces pods selected" {
+		t.Errorf("target %q, peer %q", p.Target, p.Rules[0].Peer)
+	}
+	whole := full
+	s.Redact(&whole, nil, nil)
+	if !strings.Contains(whole.Target, "team=finance") || !strings.Contains(whole.Rules[0].Peer, "app=ledger") {
+		t.Errorf("without a Redaction the rule reads whole: %q %q", whole.Target, whole.Rules[0].Peer)
 	}
 }
