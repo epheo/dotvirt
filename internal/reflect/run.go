@@ -10,9 +10,10 @@ import (
 	"k8s.io/client-go/tools/cache"
 )
 
-// NewIndexer builds the namespace-keyed store every snapshot reflector feeds.
+// NewIndexer builds the namespace-keyed store every snapshot reflector feeds,
+// counting its writes per namespace (Generation).
 func NewIndexer() cache.Indexer {
-	return cache.NewIndexer(cache.MetaNamespaceKeyFunc, cache.Indexers{})
+	return &generations{Indexer: cache.NewIndexer(cache.MetaNamespaceKeyFunc, cache.Indexers{}), gens: map[string]uint64{}}
 }
 
 // Run starts a reflector feeding store from lw with unstructured objects and
@@ -48,7 +49,13 @@ const discoveryInterval = time.Minute
 // reflector error loop, so a snapshot can watch a CRD whose installation is
 // itself something dotvirt proposes.
 func RunWhenServed(ctx context.Context, has func(schema.GroupVersionResource) bool, gvr schema.GroupVersionResource, lw *cache.ListWatch, store cache.Store, healthy *atomic.Bool, onFlip func()) {
-	go runWhenServed(ctx, discoveryInterval, has, gvr, lw, store, healthy, onFlip)
+	RunTypedWhenServed(ctx, has, gvr, lw, &unstructured.Unstructured{}, store, healthy, onFlip)
+}
+
+// RunTypedWhenServed is RunWhenServed for a source that yields typed objects
+// (see RunTyped).
+func RunTypedWhenServed(ctx context.Context, has func(schema.GroupVersionResource) bool, gvr schema.GroupVersionResource, lw *cache.ListWatch, expected any, store cache.Store, healthy *atomic.Bool, onFlip func()) {
+	go runWhenServed(ctx, discoveryInterval, has, gvr, lw, expected, store, healthy, onFlip)
 }
 
 // Served returns has with one side effect: a positive probe also sets flag,
@@ -63,12 +70,12 @@ func Served(has func(schema.GroupVersionResource) bool, flag *atomic.Bool) func(
 	}
 }
 
-func runWhenServed(ctx context.Context, every time.Duration, has func(schema.GroupVersionResource) bool, gvr schema.GroupVersionResource, lw *cache.ListWatch, store cache.Store, healthy *atomic.Bool, onFlip func()) {
+func runWhenServed(ctx context.Context, every time.Duration, has func(schema.GroupVersionResource) bool, gvr schema.GroupVersionResource, lw *cache.ListWatch, expected any, store cache.Store, healthy *atomic.Bool, onFlip func()) {
 	t := time.NewTicker(every)
 	defer t.Stop()
 	for {
 		if has(gvr) {
-			Run(ctx, TrackHealth(lw, healthy, onFlip), store)
+			RunTyped(ctx, TrackHealth(lw, healthy, onFlip), expected, store)
 			return
 		}
 		select {

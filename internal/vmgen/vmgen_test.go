@@ -1,10 +1,13 @@
 package vmgen
 
 import (
+	"errors"
 	"strings"
 	"testing"
 
 	"sigs.k8s.io/yaml"
+
+	"github.com/epheo/dotvirt/internal/model"
 )
 
 func TestManifestMinimal(t *testing.T) {
@@ -245,5 +248,59 @@ func TestManifestPasswordSSHAuth(t *testing.T) {
 	}
 	if !strings.Contains(string(content), "ssh_pwauth: True") {
 		t.Errorf("password without an SSH key must enable password SSH:\n%s", content)
+	}
+}
+
+// Every value the wizard sends reaches the API server verbatim: one it would
+// reject fails at the form as ErrInvalid naming the field, not at Argo apply.
+func TestManifestRefusesInvalidValues(t *testing.T) {
+	valid := func() Spec {
+		return Spec{
+			Name: "web", Namespace: "team-a", Instancetype: "u1.medium", Preference: "fedora",
+			OSImage: OSImageRef{Name: "fedora", Namespace: "os-images"},
+		}
+	}
+	if _, _, err := Manifest(valid()); err != nil {
+		t.Fatalf("valid spec: %v", err)
+	}
+	for field, mutate := range map[string]func(*Spec){
+		"instance type":            func(s *Spec) { s.Instancetype = "U1 Large" },
+		"preference":               func(s *Spec) { s.Preference = "a b" },
+		"OS image":                 func(s *Spec) { s.OSImage.Name = "Fedora 40" },
+		"OS image namespace":       func(s *Spec) { s.OSImage.Namespace = "OS" },
+		"disk size":                func(s *Spec) { s.DiskSize = "big" },
+		"storage class":            func(s *Spec) { s.StorageClass = "Fast Disk" },
+		"extra disk name":          func(s *Spec) { s.ExtraDisks = []ExtraDisk{{Name: "Data"}} },
+		"extra disk size":          func(s *Spec) { s.ExtraDisks = []ExtraDisk{{Name: "data", Size: "-1Gi"}} },
+		"extra disk storage class": func(s *Spec) { s.ExtraDisks = []ExtraDisk{{Name: "data", StorageClass: "Fast"}} },
+		"network":                  func(s *Spec) { s.Networks = []NetworkRef{{Name: "a/b/c"}} },
+		"label":                    func(s *Spec) { s.Labels = map[string]string{"app": "a\nkind: RoleBinding"} },
+	} {
+		s := valid()
+		mutate(&s)
+		_, _, err := Manifest(s)
+		if !errors.Is(err, model.ErrInvalid) || !strings.Contains(err.Error(), field) {
+			t.Errorf("%s: want ErrInvalid naming it, got %v", field, err)
+		}
+	}
+}
+
+// A tenant manifest without metadata.namespace is applied by Argo into its
+// Application's destination namespace, not the one the wizard chose.
+func TestManifestCarriesNamespace(t *testing.T) {
+	_, content, err := Manifest(Spec{
+		Name: "web", Namespace: "team-a", Instancetype: "u1.medium", Preference: "fedora",
+		OSImage: OSImageRef{Name: "fedora", Namespace: "os-images"},
+	})
+	if err != nil {
+		t.Fatalf("Manifest: %v", err)
+	}
+	var vm struct {
+		Metadata struct {
+			Namespace string `json:"namespace"`
+		} `json:"metadata"`
+	}
+	if err := yaml.Unmarshal(content, &vm); err != nil || vm.Metadata.Namespace != "team-a" {
+		t.Fatalf("metadata.namespace = %q (%v), want team-a", vm.Metadata.Namespace, err)
 	}
 }
