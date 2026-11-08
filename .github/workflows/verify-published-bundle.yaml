@@ -16,6 +16,7 @@ on:
       - operator/install/**
       - .github/workflows/verify-published-bundle.yaml
       - .github/actions/olm-kind/**
+      - .github/actions/tools/**
   workflow_call:
     inputs:
       catalog-image:

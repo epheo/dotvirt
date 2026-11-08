@@ -4,10 +4,17 @@
 # the only network a job depends on is what it deliberately tests.
 name: olm-kind
 description: kind cluster + local registry + pinned OLM, third-party images preloaded
+inputs:
+  tools:
+    description: What the calling job needs from .github/actions/tools beside kind and olm
+    required: false
+    default: ''
 runs:
   using: composite
   steps:
-    - uses: ./.github/actions/operator-tools # kind, operator-sdk
+    - uses: ./.github/actions/tools
+      with:
+        tools: kind olm ${{ inputs.tools }}
     - name: Restore preloaded-image cache
       id: images
       uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
@@ -58,9 +65,18 @@ runs:
     - name: Install OLM
       shell: bash
       # Pin the OLM version: unpinned pulls latest-of-the-day, whose images
-      # intermittently fail to come up in kind and leave no InstallPlan.
+      # intermittently fail to come up in kind and leave no InstallPlan. The verified
+      # release manifests go in the way `operator-sdk olm install` and OLM's install.sh
+      # do it: CRDs, then the rest, then wait for both operators and the packageserver.
       run: |
-        operator-sdk olm install --version "$OLM_VERSION" --timeout 5m
+        olm="$RUNNER_TEMP/tools/olm"
+        kubectl create -f "$olm/crds.yaml"
+        kubectl wait --for=condition=Established -f "$olm/crds.yaml" --timeout 5m
+        kubectl create -f "$olm/olm.yaml"
+        kubectl -n olm rollout status deploy/olm-operator --timeout 5m
+        kubectl -n olm rollout status deploy/catalog-operator --timeout 5m
+        kubectl -n olm wait csv/packageserver --for=jsonpath='{.status.phase}'=Succeeded --timeout 5m
+        kubectl -n olm rollout status deploy/packageserver --timeout 5m
         # The default operatorhubio catalog is a large pull that lands exactly when the
         # test's own CatalogSource needs the node's bandwidth and the resolver's
         # attention, and nothing here subscribes to it.

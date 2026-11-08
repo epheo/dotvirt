@@ -65,8 +65,10 @@ jobs:
             echo "REL_SKIP=true" >> "$GITHUB_ENV"
           fi
           echo "Releasing v$ver (replaces v$prev)"
-      - uses: ./.github/actions/operator-tools # skopeo ships on the runner image
+      - uses: ./.github/actions/tools # skopeo ships on the runner image
         if: env.REL_SKIP != 'true'
+        with:
+          tools: operator-sdk opm
       - name: Registry login (docker + skopeo)
         if: env.REL_SKIP != 'true'
         env:
@@ -88,7 +90,7 @@ jobs:
         if: env.REL_SKIP != 'true'
         env:
           FORCE: ${{ inputs.force && '1' || '' }}
-          OPM: opm # the operator-tools binary; the scripts' default compiles opm from source
+          OPM: opm # the verified binary from the tools action; the scripts' default compiles opm from source
         run: VERSION="$REL_VERSION" PREV="$REL_PREV" CONTAINER_TOOL=docker ./hack/release.sh
       - name: Record the pinned catalog image
         id: pins

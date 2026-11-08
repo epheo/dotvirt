@@ -28,7 +28,9 @@ jobs:
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go.mod
-      - uses: ./.github/actions/operator-tools # skopeo ships on the runner image
+      - uses: ./.github/actions/tools # skopeo ships on the runner image
+        with:
+          tools: operator-sdk opm
       - name: Registry login (docker + skopeo)
         env:
           U: ${{ secrets.QUAY_USERNAME }}
@@ -46,7 +48,7 @@ jobs:
       - name: Cut preview
         env:
           FORCE: ${{ inputs.force && '1' || '' }}
-          OPM: opm # the operator-tools binary; the scripts' default compiles opm from source
+          OPM: opm # the verified binary from the tools action; the scripts' default compiles opm from source
         run: VERSION=${{ inputs.version }} CONTAINER_TOOL=docker ./hack/preview.sh
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:

@@ -28,8 +28,11 @@ jobs:
       # ./... stops at nested modules, so the pkg modules and the operator are named.
       # go vet runs in lint, as golangci-lint's govet.
       - run: go test ./... ./pkg/forge/... ./pkg/tenancy/... ./operator/...
+      - uses: ./.github/actions/tools
+        with:
+          tools: envtest
       - name: Operator envtest (server-side apply + RBAC on a real apiserver)
-        run: make -C operator test-envtest
+        run: make -C operator test-envtest ENVTEST_ASSETS="$RUNNER_TEMP/tools/envtest"
 
   lint:
     runs-on: ubuntu-latest
@@ -38,22 +41,25 @@ jobs:
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go.mod
-      - run: grep -v '^#' hack/versions.env >> "$GITHUB_ENV"
-      # Every module shares .golangci.yml (resolved by walking up).
+      - uses: ./.github/actions/tools
+        with:
+          tools: golangci-lint
+      # Every module shares .golangci.yml (resolved by walking up). install-mode none:
+      # the action's own download is unverified, so it runs the binary verified above.
       - uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9.3.0
         with:
-          version: ${{ env.GOLANGCI_LINT_VERSION }}
+          install-mode: none
       - uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9.3.0
         with:
-          version: ${{ env.GOLANGCI_LINT_VERSION }}
+          install-mode: none
           working-directory: operator
       - uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9.3.0
         with:
-          version: ${{ env.GOLANGCI_LINT_VERSION }}
+          install-mode: none
           working-directory: pkg/forge
       - uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9.3.0
         with:
-          version: ${{ env.GOLANGCI_LINT_VERSION }}
+          install-mode: none
           working-directory: pkg/tenancy
 
   web:
@@ -130,7 +136,9 @@ jobs:
             operator/go.sum
             operator/Makefile
             hack/versions.env
-      - uses: ./.github/actions/operator-tools
+      - uses: ./.github/actions/tools
+        with:
+          tools: operator-sdk opm
       - name: Catalog image's opm matches OPM_VERSION
         run: |
           grep -q "^FROM quay.io/operator-framework/opm:$OPM_VERSION@sha256:" operator/catalog.Dockerfile \
@@ -185,6 +193,8 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: ./.github/actions/olm-kind
+        with:
+          tools: operator-sdk opm
       - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
         id: buildx
         with:
