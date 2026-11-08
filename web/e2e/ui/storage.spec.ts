@@ -188,3 +188,33 @@ test('a VM name in two namespaces shows the namespace on its rows', async ({ pag
 		'web-prod',
 	);
 });
+
+test('the drop zone offers only what the caller may do', async ({ page }) => {
+	const main = page.locator('main');
+	// May upload, may not add boot images: a plain upload, no boot-image choice.
+	await setScenario(page, 'noboot');
+	await page.goto('/storage');
+	await expect(main.getByText('Upload a disk image.')).toBeVisible();
+	await main.getByRole('button', { name: 'Choose file' }).click();
+	const dialog = page.getByRole('dialog', { name: 'New image' });
+	await expect(dialog.getByText('Disk size')).toBeVisible();
+	await expect(dialog.getByText('Pick an image file')).toBeVisible();
+	await expect(dialog.getByText('Offer it as a boot image')).toHaveCount(0);
+	await page.keyboard.press('Escape');
+
+	// May do neither: no drop zone, one quiet line saying why.
+	await setScenario(page, 'noupload');
+	await page.goto('/storage');
+	await expect(main.getByText('your account has it in none')).toBeVisible();
+	await expect(main.getByRole('button', { name: 'Choose file' })).toHaveCount(0);
+
+	// May add boot images: the choice shows, on by default from the drop zone.
+	await setScenario(page, 'base');
+	await page.goto('/storage');
+	await main.getByRole('button', { name: 'Choose file' }).click();
+	await expect(
+		page
+			.getByRole('dialog', { name: 'New image' })
+			.getByLabel('Offer it as a boot image', { exact: false }),
+	).toBeChecked();
+});

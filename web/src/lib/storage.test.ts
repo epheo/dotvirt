@@ -16,6 +16,7 @@ import {
 	planBulkMove,
 	planBulkSnapshot,
 	settleEach,
+	uploadAbility,
 	projectsBySize,
 	repeatedNames,
 	sortRows,
@@ -569,5 +570,30 @@ describe('repeatedNames', () => {
 				() => '',
 			),
 		).toEqual(new Set());
+	});
+});
+
+describe('uploadAbility', () => {
+	const caps: Record<string, { bootImageCreate?: boolean; dataVolumeCreate?: boolean }> = {
+		a: {},
+		b: { dataVolumeCreate: true },
+		c: { dataVolumeCreate: true, bootImageCreate: true },
+		d: { dataVolumeCreate: true, bootImageCreate: true },
+	};
+	it('finds the first namespace for each and stops at a boot image', async () => {
+		const asked: string[] = [];
+		const ask = async (ns: string) => {
+			asked.push(ns);
+			if (ns === 'x') throw new Error('review failed');
+			return caps[ns];
+		};
+		expect(await uploadAbility(['a', 'b', 'c', 'd', 'e'], ask, 2)).toEqual({
+			image: 'c',
+			upload: 'b',
+		});
+		expect(asked).toEqual(['a', 'b', 'c', 'd']);
+		// A failed or missing verdict reads as no.
+		expect(await uploadAbility(['x', 'a', 'zz'], ask)).toEqual({ image: '', upload: '' });
+		expect(await uploadAbility(['x', 'b'], ask)).toEqual({ image: '', upload: 'b' });
 	});
 });

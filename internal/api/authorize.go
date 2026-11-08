@@ -235,6 +235,11 @@ var (
 	dataVolumeAction      = func(ns string) action {
 		return action{refQ(verbCreate, ssarDataVolumes, ns), refQ(verbCreate, ssarUploadTokens, ns)}
 	}
+	// bootImageAction is an upload registered as a boot image: the upload, then
+	// a DataSource over its claim.
+	bootImageAction = func(ns string) action {
+		return append(dataVolumeAction(ns), refQ(verbCreate, ssarDataSources, ns))
+	}
 )
 
 // claimAction is relabelling the existing namespace ns: what joining it to a

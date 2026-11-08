@@ -370,6 +370,12 @@ export const api = {
 	// reads under the caller's token, fetched when the Storage section opens.
 	storageSnapshots: () => get<gen.Snapshot[]>('/api/storage/snapshots'),
 	storageClaims: () => get<gen.Claim[]>('/api/storage/claims'),
+	// The caller's verdict on each gated action; ask with a namespace for its
+	// actions and project. Asked on demand, never per frame.
+	capabilities: (namespace?: string) =>
+		get<gen.Capabilities>(
+			`/api/capabilities${namespace ? `?namespace=${encodeURIComponent(namespace)}` : ''}`,
+		),
 	networks: () => get<gen.NetworkInventory>('/api/networks'),
 	policies: () => get<gen.PolicyInventory>('/api/policies'),
 	vmPolicy: (namespace: string, name: string) =>

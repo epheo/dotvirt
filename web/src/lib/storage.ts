@@ -773,3 +773,35 @@ export async function settleEach<T>(
 	await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker));
 	return out;
 }
+
+// --- uploads ---
+
+// Where the caller may upload: the first namespace (in the order given) that
+// allows adding a boot image, and the first that allows a plain upload; ''
+// when none does. A missing or failed verdict reads as no.
+export interface UploadAbility {
+	image: string;
+	upload: string;
+}
+
+type UploadCaps = { bootImageCreate?: boolean; dataVolumeCreate?: boolean } | undefined;
+
+// Asks a few namespaces at a time and stops once one allows a boot image,
+// which also allows the plain upload it builds on.
+export async function uploadAbility(
+	namespaces: readonly string[],
+	caps: (ns: string) => Promise<UploadCaps>,
+	batch = 4,
+): Promise<UploadAbility> {
+	const out: UploadAbility = { image: '', upload: '' };
+	for (let i = 0; i < namespaces.length && !out.image; i += batch) {
+		const chunk = namespaces.slice(i, i + batch);
+		const verdicts = await Promise.all(chunk.map((ns) => caps(ns).catch(() => undefined)));
+		chunk.forEach((ns, j) => {
+			if (!out.image && verdicts[j]?.bootImageCreate) out.image = ns;
+			if (!out.upload && (verdicts[j]?.dataVolumeCreate || verdicts[j]?.bootImageCreate))
+				out.upload = ns;
+		});
+	}
+	return out;
+}

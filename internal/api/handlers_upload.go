@@ -15,8 +15,9 @@ import (
 // images never pass through dotvirt. Disabled when -upload-proxy-url is unset.
 
 // handleCreateUpload creates the upload-target DataVolume in the caller's
-// project. With bootImage it also registers the volume as a boot image; that
-// authority is checked first, so a refusal creates nothing.
+// project. With bootImage it also registers the volume as a boot image; the
+// whole action is gated first, the question NamespaceCaps.BootImageCreate
+// asks, so a refusal creates nothing.
 func (s *Server) handleCreateUpload(w http.ResponseWriter, r *http.Request) {
 	if s.cfg.UploadProxyURL == "" {
 		fail(w, fmt.Errorf("%w: image upload not configured", model.ErrUnavailable))
@@ -40,16 +41,8 @@ func (s *Server) handleCreateUpload(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if req.BootImage {
-		ok, err := sc.cluster.CanCreateBootImages(r.Context(), req.Namespace)
-		if err != nil {
-			fail(w, err)
-			return
-		}
-		if !ok {
-			fail(w, fmt.Errorf("%w: you may not add boot images in %s", model.ErrForbidden, req.Namespace))
-			return
-		}
+	if req.BootImage && !s.gate(w, r, sc, bootImageAction(req.Namespace)) {
+		return
 	}
 	if err := sc.cluster.CreateUploadDataVolume(r.Context(), req.Namespace, req.Name, req.Size, req.StorageClass); err != nil {
 		fail(w, err)
