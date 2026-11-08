@@ -155,7 +155,7 @@
 			</Button>
 		{/snippet}
 
-		<div class="p-3">
+		<div class="px-card py-3">
 			{#if strip}
 				<svg
 					viewBox="0 0 {W} {vbH}"

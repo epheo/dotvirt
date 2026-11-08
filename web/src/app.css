@@ -36,6 +36,8 @@
 	--color-accent: #0066cc;
 	--color-accent-hover: #1e7ce0;
 	--color-accent-ink: #0066cc;
+	/* filled-button hover: darker, so white ink gains contrast in both themes */
+	--color-accent-deep: #004d99;
 
 	/* selection — the one pair every panel uses: current target vs hover */
 	--color-select: #e7f1fa;
@@ -60,6 +62,9 @@
 	--color-ok-ink: #1e4f18;
 	--color-warn-ink: #795600;
 	--color-danger-ink: #7d1007;
+	/* destructive-button fill: one red in both themes, white ink >=4.5:1 */
+	--color-danger-fill: #c9190b;
+	--color-danger-deep: #a30000;
 
 	/* below-band "cold" state (host balance): informational, not a warning */
 	--color-cold-soft: #daf2f2;
@@ -74,6 +79,9 @@
 	--color-side-hover: #333638;
 	--color-side-active: #4f5255;
 	--color-side-line: #151515;
+	--color-side-edge: #3c3f42; /* field borders on the dark chrome */
+	--color-side-link: #73bcf7; /* links on the dark chrome */
+	--color-brand: #2b9af3; /* the wordmark's dot */
 }
 
 /* Chart series + furniture. Plain :root (no utilities wanted); hex on purpose —
@@ -94,6 +102,19 @@
 	--chart-cold: #009596;
 	--chart-band: #3e8635;
 	--chart-mean: #4d4d4d;
+}
+
+/* Inline inset of card content: Card sets --card-x so rows, lists and table
+   cells line up with its header; the same markup outside a card keeps the
+   compact inset. */
+@utility px-card {
+	padding-inline: var(--card-x, 0.75rem);
+}
+@utility pl-card {
+	padding-left: var(--card-x, 0.75rem);
+}
+@utility pr-card {
+	padding-right: var(--card-x, 0.75rem);
 }
 
 /* Keyboard affordance everywhere: components rely on this instead of per-element

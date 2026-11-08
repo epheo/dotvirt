@@ -18,11 +18,13 @@
 	let {
 		namespaces,
 		namespace: initialNamespace = '',
+		image = '',
 		networks = [],
 		onclose,
 	}: {
 		namespaces: string[];
 		namespace?: string; // preselected target (the opener's scope)
+		image?: string; // preselected boot image, "namespace/name"
 		networks?: Network[]; // port-group catalog (from the page), for the adapter picker
 		onclose: () => void;
 	} = $props();
@@ -35,7 +37,8 @@
 	// Default to the first project; seeded in the mount effect to avoid capturing
 	// only the initial prop value.
 	let namespace = $state('');
-	let osImage = $state(''); // "name|namespace"
+	// "name|namespace", seeded once from the opener's image.
+	let osImage = $state(untrack(() => imageRef(image)));
 	let instancetype = $state('');
 	let preference = $state('');
 	let diskSize = $state('30Gi');
@@ -87,6 +90,12 @@
 		selectedNetworks = [];
 		attachPrimary = true;
 	});
+
+	// The modal names an image "namespace/name"; the picker holds "name|namespace".
+	function imageRef(ref: string): string {
+		const [ns, name] = ref.split('/');
+		return ns && name ? `${name}|${ns}` : '';
+	}
 
 	// Conventional first-boot login per image family; a prefill, freely editable.
 	function defaultUser(image: string): string {

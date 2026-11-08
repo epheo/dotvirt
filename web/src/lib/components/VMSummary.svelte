@@ -119,7 +119,7 @@
 						>
 					{/if}
 				{/snippet}
-				<div class="px-3 pt-2 pb-1">
+				<div class="px-card pt-2 pb-1">
 					<GitOpsStepper
 						stage={stagedItem ? 'staged' : vm.sync === 'Synced' ? 'synced' : 'merged'}
 					/>
@@ -137,7 +137,7 @@
 					/>
 				</dl>
 				{#if vm.sourceFile}
-					<div class="flex items-center gap-2 border-t border-line-soft px-3 py-1.5 text-xs">
+					<div class="flex items-center gap-2 border-t border-line-soft px-card py-1.5 text-xs">
 						{#if historyRes.loading}
 							<span class="text-ink-faint">loading history…</span>
 						{:else if historyRes.failed}
@@ -161,13 +161,13 @@
 			</InfoCard>
 			<InfoCard title="Issues">
 				{#if vmIssues.length === 0}
-					<p class="flex items-center gap-2 px-3 py-2 text-xs text-ink-faint">
+					<p class="flex items-center gap-2 px-card py-2 text-xs text-ink-faint">
 						<StatusDot tone="ok" size="xs" /> No standing problems.
 					</p>
 				{:else}
 					<ul class="divide-y divide-line-soft">
 						{#each vmIssues as i (i.label)}
-							<li class="flex items-start gap-2 px-3 py-2 text-xs">
+							<li class="flex items-start gap-2 px-card py-2 text-xs">
 								<span class="mt-0.5"><StatusDot tone={i.severity} size="xs" /></span>
 								<span class="text-ink-soft">{i.label}{i.detail ? ` — ${i.detail}` : ''}</span>
 							</li>

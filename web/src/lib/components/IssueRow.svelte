@@ -28,7 +28,7 @@
 	}
 </script>
 
-<li class="flex items-center gap-3 px-3 py-2.5">
+<li class="flex items-center gap-3 px-card py-2.5">
 	<StatusDot tone={issue.severity} size="sm" />
 	<button onclick={view} title={issue.detail ?? ''} class="min-w-0 flex-1 text-left">
 		<span class="block truncate"

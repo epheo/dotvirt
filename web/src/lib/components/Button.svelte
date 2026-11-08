@@ -2,11 +2,14 @@
 	import type { Snippet } from 'svelte';
 	import type { HTMLAnchorAttributes, HTMLButtonAttributes } from 'svelte/elements';
 
-	// The button shapes in the product: primary (the one pill per surface),
-	// secondary (bordered), ghost (a footer's Cancel/Back), danger (the
-	// destructive confirm), link (accent text). href renders an anchor with
-	// the same look, for a verb that is a navigation (a forge deep link, a
-	// tab). class is for layout only (ml-auto, flex-1, w-full).
+	// The button shapes in the product, all radius-6 rectangles: primary (blue
+	// fill, the one per surface), outline (blue border, a strong second verb),
+	// secondary (grey border, the quiet one), ghost (a footer's Cancel/Back),
+	// danger (the red-filled destructive confirm), danger-secondary (the quiet
+	// entry to a destructive flow: grey border, red ink), link (accent text).
+	// href renders an anchor with the same look, for a verb that is a
+	// navigation (a forge deep link, a tab). class is for layout only (ml-auto,
+	// flex-1, w-full).
 	let {
 		variant = 'primary',
 		size = 'md',
@@ -15,7 +18,8 @@
 		children,
 		...rest
 	}: {
-		variant?: 'primary' | 'secondary' | 'outline' | 'ghost' | 'danger' | 'link';
+		variant?:
+			'primary' | 'outline' | 'secondary' | 'ghost' | 'danger' | 'danger-secondary' | 'link';
 		size?: 'md' | 'sm';
 		href?: string;
 		class?: string;
@@ -25,21 +29,27 @@
 
 	const SHAPE = {
 		primary:
-			'rounded-full bg-accent font-medium text-white hover:bg-accent-hover disabled:bg-line-strong',
-		secondary:
-			'rounded border border-line-strong bg-panel text-ink-soft hover:bg-inset disabled:opacity-50',
+			'border border-accent bg-accent font-bold text-white hover:border-accent-deep hover:bg-accent-deep disabled:border-line-soft disabled:bg-inset disabled:text-ink-faint',
 		outline:
-			'rounded border border-accent bg-panel text-accent-ink hover:bg-select-soft disabled:opacity-50',
-		ghost: 'rounded text-ink-soft hover:bg-inset-strong disabled:text-ink-faint',
-		danger: 'rounded bg-danger font-medium text-white hover:bg-danger-ink disabled:opacity-50',
+			'border border-accent bg-panel font-medium text-accent-ink hover:bg-select-soft disabled:opacity-50',
+		secondary:
+			'border border-line bg-panel font-medium text-ink hover:border-ink-faint disabled:opacity-50 disabled:hover:border-line',
+		ghost: 'text-ink-soft hover:bg-inset-strong disabled:text-ink-faint',
+		danger:
+			'border border-danger-fill bg-danger-fill font-bold text-white hover:border-danger-deep hover:bg-danger-deep disabled:opacity-50',
+		'danger-secondary':
+			'border border-line bg-panel font-medium text-danger-ink hover:border-danger disabled:opacity-50',
 		link: 'text-accent-ink hover:underline disabled:opacity-50',
 	};
-	const PAD = { md: 'px-4 py-1.5 text-sm', sm: 'px-3 py-1 text-xs' };
+	const BOX = {
+		md: 'h-8 justify-center gap-1.5 rounded-md px-3.5 text-sm whitespace-nowrap',
+		sm: 'h-7 justify-center gap-1.5 rounded-md px-2.5 text-[13px] whitespace-nowrap',
+	};
 	const classes = $derived(
 		[
-			'inline-flex items-center gap-1.5',
+			'inline-flex items-center',
 			SHAPE[variant],
-			variant === 'link' ? (size === 'sm' ? 'text-xs' : '') : PAD[size],
+			variant === 'link' ? `gap-1.5 ${size === 'sm' ? 'text-xs' : ''}` : BOX[size],
 			cls,
 		].join(' '),
 	);

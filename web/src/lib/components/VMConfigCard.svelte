@@ -273,10 +273,10 @@
 		<table class="w-full text-[13px]">
 			<thead>
 				<tr class="border-b border-line text-left text-xs text-ink-muted">
-					<th class="w-32 px-3 py-1.5 font-medium">Setting</th>
+					<th class="w-32 py-1.5 pr-3 pl-card font-medium">Setting</th>
 					<th class="w-2/5 px-3 py-1.5 font-medium">In git (main)</th>
 					<th class="px-3 py-1.5 font-medium">Live on the cluster</th>
-					<th class="w-px px-3 py-1.5"><span class="sr-only">Actions</span></th>
+					<th class="w-px py-1.5 pr-card pl-3"><span class="sr-only">Actions</span></th>
 				</tr>
 			</thead>
 			<tbody class="divide-y divide-line-soft">
@@ -288,7 +288,7 @@
 							(canAuthor ? '' : 'Read-only: you may not edit VMs here')
 						: ''}
 					<tr class="align-top {editing === r.key ? 'bg-select-soft' : ''}">
-						<td class="px-3 py-2 text-ink-soft">{r.label}</td>
+						<td class="py-2 pr-3 pl-card text-ink-soft">{r.label}</td>
 						<td class="px-3 py-2">
 							{#if editing === r.key && r.inline}
 								{@const err = invalid(r)}
@@ -459,7 +459,7 @@
 								>
 							{/if}
 						</td>
-						<td class="px-3 py-2 text-right whitespace-nowrap">
+						<td class="py-2 pr-card pl-3 text-right whitespace-nowrap">
 							{#if staged.length && r.inline && !block}
 								<button
 									class="inline-flex items-center gap-1 text-xs text-accent-ink hover:underline"
