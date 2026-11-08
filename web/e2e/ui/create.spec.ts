@@ -71,7 +71,7 @@ test('a Change editor searches, and one editor is open at a time', async ({ page
 	const sheet = await openNew(page);
 	await sheet.getByRole('button', { name: 'Change network' }).click();
 	await page.keyboard.type('frontend');
-	await expect(sheet.getByText(/1 of 5 networks match/)).toBeVisible();
+	await expect(sheet.getByText(/1 of 6 networks match/)).toBeVisible();
 	await sheet.getByRole('checkbox', { name: /udn-frontend/ }).check();
 	await sheet.getByRole('button', { name: 'Change size' }).click();
 	await expect(sheet.getByRole('button', { name: 'Change network' })).toBeVisible();
