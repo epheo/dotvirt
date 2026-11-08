@@ -1,6 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Inventory, VM } from './api';
-import { adoptNamespaces, dispatchVMAction, manifestURL, vmActions } from './actions';
+import {
+	adoptNamespaces,
+	dispatchVMAction,
+	manifestURL,
+	toastStageResult,
+	vmActions,
+} from './actions';
 import { inventory } from './state/inventory.svelte';
 import { ui } from './state/ui.svelte';
 import { navigations } from '../test/app-navigation';
@@ -187,5 +193,35 @@ describe('adoptNamespaces', () => {
 		fetchMock.mockResolvedValue(new Response('forbidden', { status: 403 }));
 		await adoptNamespaces(['ns-a']);
 		expect(ui.toasts.at(-1)).toMatchObject({ kind: 'error' });
+	});
+});
+
+describe('toastStageResult', () => {
+	const view = (items: { resource?: string; namespace: string; name: string }[]) => ({
+		base: 'main',
+		branch: 'draft',
+		count: items.length,
+		items: items.map((i) => ({ kind: 'edit' as const, changes: [], ...i })),
+	});
+
+	it('toasts staged while the VM keeps an entry', () => {
+		toastStageResult(view([{ namespace: 'team-a', name: 'web' }]), vm(), 'Power off staged.');
+		expect(ui.toasts.at(-1)).toMatchObject({ kind: 'success', msg: 'Power off staged.' });
+		expect(ui.toasts.at(-1)!.action?.label).toBe('Review & propose');
+	});
+
+	it('says the VM matches git once the stage unstaged it', () => {
+		toastStageResult(
+			view([
+				{ namespace: 'team-a', name: 'db' },
+				{ resource: 'networkpolicy', namespace: 'team-a', name: 'web' },
+			]),
+			vm(),
+			'Power off staged.',
+		);
+		expect(ui.toasts.at(-1)).toMatchObject({
+			kind: 'info',
+			msg: 'web already matches git; nothing is staged for it.',
+		});
 	});
 });

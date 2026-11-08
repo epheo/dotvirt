@@ -13,8 +13,9 @@ import { vmPath, vmRef } from './api';
 //    download a file) - the registry only describes and gates it. A
 //    dialog-backed one names its modal in `open`, so no host has to keep an
 //    id-to-dialog switch of its own.
-import { api, Unauthorized, type VM } from '#lib/api.js';
+import { api, Unauthorized, type DraftView, type VM } from '#lib/api.js';
 import { friendlyError } from '#lib/format.js';
+import { drafts } from '#lib/state/drafts.svelte.js';
 import { inventory } from '#lib/state/inventory.svelte.js';
 import { ui, type AppModal } from '#lib/state/ui.svelte.js';
 import { vmHref } from '#lib/nav.js';
@@ -91,6 +92,33 @@ export async function dispatchVMAction(a: VMAction, vm: VM): Promise<void> {
 			goto(vmHref(vm.namespace, vm.name, 'snapshots'));
 			return;
 	}
+}
+
+// What a stage call acts on: a VM, or another draft resource by name.
+type StageTarget = { resource?: string; namespace: string; name: string };
+
+// Whether a stage call's answer still holds an entry for target. Staging a
+// value git already holds unstages it, so the answer says what is staged,
+// not the call.
+export function isStaged(view: DraftView, target: StageTarget): boolean {
+	const resource = target.resource || 'vm';
+	return view.items.some(
+		(i) =>
+			(i.resource || 'vm') === resource &&
+			i.namespace === target.namespace &&
+			i.name === target.name,
+	);
+}
+
+// toastStageResult reports a stage call by the draft view it returned: the
+// staged toast while target keeps an entry, else that it matches git.
+export function toastStageResult(view: DraftView, target: StageTarget, staged?: string): void {
+	if (isStaged(view, target)) {
+		ui.toastStaged(staged);
+		return;
+	}
+	drafts.refresh();
+	ui.showToast(`${target.name} already matches git; nothing is staged for it.`, { kind: 'info' });
 }
 
 // adoptVM stages a cluster-only VM's live state into the draft, with the one
