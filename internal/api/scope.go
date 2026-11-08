@@ -5,7 +5,9 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"strconv"
 	"strings"
+	"time"
 
 	"github.com/epheo/dotvirt/internal/auth"
 	"github.com/epheo/dotvirt/internal/cluster"
@@ -17,20 +19,64 @@ import (
 )
 
 // visibleSet is a token's visible-namespace set stamped with the RBAC version it was
-// derived at; the read is valid only while that version still matches the bus.
+// derived at; the read is valid only while that version still matches the bus and
+// the entry is younger than its maxAge.
 type visibleSet struct {
-	ns  map[string]bool
-	ver uint64
+	ns        map[string]bool
+	ver       uint64
+	unsettled bool // its review began right after a grant move (see unsettled)
 }
 
 // ssarVerdict is one (token, question) SSAR verdict, stamped the same way.
 type ssarVerdict struct {
-	ok  bool
-	ver uint64
+	ok        bool
+	ver       uint64
+	unsettled bool
+}
+
+// unwatchedTTL is how long a cached visible set or verdict serves while some
+// RBAC watch is not running: a grant move may then publish nothing, and this
+// age is all that bounds a revocation.
+const unwatchedTTL = 30 * time.Second
+
+// authTTL is how long a cached visible set or verdict serves now: visibleTTL
+// while every RBAC watch runs (clusterstate.RBACWatched) and RBACChanged
+// reports each grant move, unwatchedTTL otherwise. Read on every use, so a
+// watch failing shortens the entries already cached.
+func (s *Server) authTTL() time.Duration {
+	if s.state != nil && s.state.RBACWatched() {
+		return visibleTTL
+	}
+	return unwatchedTTL
+}
+
+// grantSettle is how long after a grant move a review may still read the old
+// grant: on a control plane of several apiservers, each one's RBAC informer
+// catches up on its own, and the review may land on a lagging one.
+const grantSettle = 5 * time.Second
+
+// unsettled reports whether a review beginning at start is within grantSettle
+// of the last grant move a watch reported. Its answer serves unwatchedTTL
+// only: a stale verdict from a lagging apiserver, stamped with the new RBAC
+// version, must not hold for the long TTL.
+func (s *Server) unsettled(start time.Time) bool {
+	return s.state != nil && start.Sub(s.state.LastGrantMove()) < grantSettle
+}
+
+// maxAge is how long an entry serves.
+func (s *Server) maxAge(unsettled bool) time.Duration {
+	if unsettled {
+		return unwatchedTTL
+	}
+	return s.authTTL()
 }
 
 // rbacVersion is the change-version a token's derived authorization depends on: a
-// RoleBinding move OR a namespace add/remove/relabel can change what it may see.
+// watched grant move OR a namespace add/remove/relabel can change what it may see.
+// It is one version for every token, so one tenant's grant move invalidates all of
+// their entries: a visibility probe reviews every project namespace, so a
+// per-namespace version would not narrow it, while one keyed by the moved
+// bindings' subjects would.
 func (s *Server) rbacVersion() uint64 {
 	return s.bus.Version(eventbus.RBACChanged, eventbus.NamespaceChanged)
 }
@@ -65,37 +111,59 @@ func (s *Server) projectsFor(ctx context.Context, id auth.Identity, c *cluster.C
 	return s.resolver.Resolve(s.state.Namespaces(), visible), nil
 }
 
+// reviewTimeout bounds a shared review (see review), which no single
+// caller's deadline ends while others still wait on it.
+const reviewTimeout = 15 * time.Second
+
+// review runs fill once per key and RBAC version, however many frame builds
+// and pulls of one token miss at once (ttlcache.Do): each caller leaves on its
+// own deadline, and the review stops once none waits. A caller with a newer
+// version never joins an older review.
+func review[V any](ctx context.Context, cache *ttlcache.Cache[V], key string, ver uint64, fill func(context.Context) (V, error)) (V, error) {
+	return cache.Do(ctx, key+"\x00"+strconv.FormatUint(ver, 10), func(ctx context.Context) (V, error) {
+		ctx, cancel := context.WithTimeout(ctx, reviewTimeout)
+		defer cancel()
+		return fill(ctx)
+	})
+}
+
 // visibleFor returns the set of namespaces id's token may read VMs in, cached by
-// token for visibleTTL. The snapshot's project namespaces are the candidates
+// token for authTTL. The snapshot's project namespaces are the candidates
 // VisibleNamespaces probes when the token lacks cluster-wide VM read. A failed
 // probe is never cached: the next read asks again.
 func (s *Server) visibleFor(ctx context.Context, id auth.Identity, c *cluster.Client) (map[string]bool, error) {
 	ver := s.rbacVersion()
 	key := restfactory.TokenKey(id.Token)
-	if e, ok := s.visible.Get(key); ok && e.ver == ver {
+	if e, age, ok := s.visible.GetAge(key); ok && e.ver == ver && age < s.maxAge(e.unsettled) {
 		return e.ns, nil
 	}
-	candidates := namespaceNames(s.state.Namespaces())
-	names, err := c.VisibleNamespaces(ctx, candidates)
+	e, err := review(ctx, s.visible, key, ver, func(ctx context.Context) (visibleSet, error) {
+		start := time.Now()
+		names, err := c.VisibleNamespaces(ctx, namespaceNames(s.state.Namespaces()))
+		if err != nil {
+			return visibleSet{}, err
+		}
+		e := visibleSet{ns: make(map[string]bool, len(names)), ver: ver, unsettled: s.unsettled(start)}
+		for _, n := range names {
+			e.ns[n] = true
+		}
+		s.visible.PutAt(key, e, start)
+		return e, nil
+	})
 	if err != nil {
 		return nil, s.reviewFailed(ctx, id, err)
 	}
-	set := make(map[string]bool, len(names))
-	for _, n := range names {
-		set[n] = true
-	}
-	s.visible.Put(key, visibleSet{ns: set, ver: ver})
-	return set, nil
+	return e.ns, nil
 }
 
 // can answers verb on ref in ns ("" for cluster scope) under id's token,
 // behind a per-(token, question) cache stamped with rbacVersion, so a signal
 // read on a polled or broadcast path does not post an SSAR per request. A
-// RoleBinding/namespace move invalidates lazily via the stamp; the TTL
-// backstops the cluster-scoped RBAC changes the stamp doesn't observe (see
-// visibleTTL). Only a verdict is cached: a failed review is returned, so a
-// blip can never pin a denial. A gate answers the error with s.reviewFailed; a
-// UI signal or a filter reads it as no.
+// watched grant or namespace move invalidates lazily via the stamp; authTTL
+// backstops what no watch observes (see RunTTLBackstop). Only a verdict is
+// cached: a failed review is returned, so a blip can never pin a denial. A
+// gate answers the error with s.reviewFailed; a UI signal or a filter reads it
+// as no.
 func (s *Server) can(ctx context.Context, id auth.Identity, c *cluster.Client, verb string, ref ssarRef, ns string) (bool, error) {
 	return s.canNamed(ctx, id, c, verb, ref, ns, "")
 }
@@ -104,15 +172,20 @@ func (s *Server) can(ctx context.Context, id auth.Identity, c *cluster.Client, v
 func (s *Server) canNamed(ctx context.Context, id auth.Identity, c *cluster.Client, verb string, ref ssarRef, ns, name string) (bool, error) {
 	ver := s.rbacVersion()
 	k := strings.Join([]string{restfactory.TokenKey(id.Token), verb, ref.group, ref.resource, ns, name}, "\x00")
-	if e, ok := s.ssar.Get(k); ok && e.ver == ver {
+	if e, age, ok := s.ssar.GetAge(k); ok && e.ver == ver && age < s.maxAge(e.unsettled) {
 		return e.ok, nil
 	}
-	ok, err := c.CanNamed(ctx, verb, ref.group, ref.resource, ns, name)
-	if err != nil {
-		return false, err
-	}
-	s.ssar.Put(k, ssarVerdict{ok: ok, ver: ver})
-	return ok, nil
+	e, err := review(ctx, s.ssar, k, ver, func(ctx context.Context) (ssarVerdict, error) {
+		start := time.Now()
+		ok, err := c.CanNamed(ctx, verb, ref.group, ref.resource, ns, name)
+		if err != nil {
+			return ssarVerdict{}, err
+		}
+		e := ssarVerdict{ok: ok, ver: ver, unsettled: s.unsettled(start)}
+		s.ssar.PutAt(k, e, start)
+		return e, nil
+	})
+	return e.ok, err
 }
 
 // saCached is the preamble of a catalog route: the caller's identity first

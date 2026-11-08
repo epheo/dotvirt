@@ -61,8 +61,8 @@ func (r *Reader) proposedBranch(user, project string) string {
 
 // toChangesetItems is the commit of entries, each read as the gate weighed it
 // (writeOf). A settings edit is applied to its file as base holds it at
-// commit time, and its result checked there (editedOnly): those are the bytes
-// the gate could only preview.
+// commit time and its result checked there (keepsDeclared): staging only
+// dry-ran it on an earlier version.
 func (c *Coordinator) toChangesetItems(proj project.ProjectInfo, entries []draft.Entry) []git.ChangesetItem {
 	items := make([]git.ChangesetItem, 0, len(entries))
 	for _, e := range entries {
@@ -71,15 +71,17 @@ func (c *Coordinator) toChangesetItems(proj project.ProjectInfo, entries []draft
 			items = append(items, git.ChangesetItem{Path: e.SourceFile, NewContent: []byte(e.Manifest), BaseBlob: e.BaseBlob})
 		case fieldWrite:
 			edit := *e.Edit
-			vm := model.ObjectRef{Kind: model.KindVM.Kind, Namespace: e.Namespace, Name: e.Name}
 			items = append(items, git.ChangesetItem{
 				Path: e.SourceFile,
 				Transform: func(current []byte) ([]byte, error) {
-					out, err := manifest.ApplyEdit(current, e.Namespace, e.Name, edit)
-					if err != nil {
+					if err := namedVM(e.SourceFile, current, e.Namespace, e.Name); err != nil {
 						return nil, err
 					}
-					return out, editedOnly(proj, e.SourceFile, vm, current, out)
+					out, err := manifest.ApplyEdit(current, defaultNamespace(e.SourceFile), e.Namespace, e.Name, edit)
+					if err != nil {
+						return nil, &staleEdit{entry: e, base: c.baseBranch, err: err}
+					}
+					return out, keepsDeclared(proj, e.SourceFile, current, out)
 				},
 			})
 		case removal:

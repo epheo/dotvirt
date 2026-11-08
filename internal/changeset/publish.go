@@ -220,6 +220,11 @@ func (r *proposeRun) extend(pr forge.PR, rec draft.Proposal, hasRec bool) (model
 	if errors.Is(err, git.ErrBranchMoved) || errors.As(err, &moved) {
 		return r.moved(pr, all, err)
 	}
+	// Unstaging cannot help an edit the PR carries: the rebuild replays it.
+	var stale *staleEdit
+	if errors.As(err, &stale) && slices.ContainsFunc(rec.Entries, func(e draft.Entry) bool { return e.Key() == stale.entry.Key() }) {
+		return model.ProposeResult{}, fmt.Errorf("%w: %s, and pull request #%d carries that edit: merge or close #%d, then propose", model.ErrConflict, stale.what(), pr.Number, pr.Number)
+	}
 	if err != nil {
 		return model.ProposeResult{}, r.commitFailed(err, all, pr.Number)
 	}

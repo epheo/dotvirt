@@ -285,21 +285,26 @@ func (s *Server) dryRun(ctx context.Context, id auth.Identity, c *cluster.Client
 	sum := sha256.Sum256([]byte(a.Object))
 	ver := s.rbacVersion()
 	k := strings.Join([]string{restfactory.TokenKey(id.Token), "dry-run", a.Verb, a.Group, a.Resource, a.Namespace, a.Name, hex.EncodeToString(sum[:])}, "\x00")
-	if e, ok := s.ssar.Get(k); ok && e.ver == ver {
+	if e, age, ok := s.ssar.GetAge(k); ok && e.ver == ver && age < s.maxAge(e.unsettled) {
 		return e.ok, nil
 	}
-	ok, existed, err := c.DryRunRoleBinding(ctx, a.Verb, []byte(a.Object))
-	if existed {
-		ok, _, err = c.DryRunRoleBinding(ctx, verbUpdate, []byte(a.Object))
-	}
-	if errors.Is(err, cluster.ErrNoNamespace) {
-		ok, err = s.bindReviews(ctx, id, c, a)
-	}
-	if err != nil {
-		return false, err
-	}
-	s.ssar.Put(k, ssarVerdict{ok: ok, ver: ver})
-	return ok, nil
+	e, err := review(ctx, s.ssar, k, ver, func(ctx context.Context) (ssarVerdict, error) {
+		start := time.Now()
+		ok, existed, err := c.DryRunRoleBinding(ctx, a.Verb, []byte(a.Object))
+		if existed {
+			ok, _, err = c.DryRunRoleBinding(ctx, verbUpdate, []byte(a.Object))
+		}
+		if errors.Is(err, cluster.ErrNoNamespace) {
+			ok, err = s.bindReviews(ctx, id, c, a)
+		}
+		if err != nil {
+			return ssarVerdict{}, err
+		}
+		e := ssarVerdict{ok: ok, ver: ver, unsettled: s.unsettled(start)}
+		s.ssar.PutAt(k, e, start)
+		return e, nil
+	})
+	return e.ok, err
 }
 
 // bindReviews asks a RoleBinding's verb and bind on the role it references.

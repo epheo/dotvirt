@@ -213,29 +213,31 @@ func TestArgoObjectsRefusesWhatTheParsersReadApart(t *testing.T) {
 	}
 }
 
-// A settings edit is checked as Argo reads its result, at stage on the file
-// git declares the VM in and again at the commit: a value breaking into a
-// second document is refused at both.
-func TestSettingsEditCannotAddAnObject(t *testing.T) {
+// A settings edit's result is read as Argo reads it, beside the editor's own
+// checks: one declaring another object is refused, and so is an edit of a
+// file whose other document Argo would place itself.
+func TestSettingsEditKeepsWhatTheFileDeclares(t *testing.T) {
+	vm := "apiVersion: kubevirt.io/v1\nkind: VirtualMachine\nmetadata:\n  name: web\n  namespace: alpha\nspec:\n  runStrategy: Always\n"
+	proj := project.ProjectInfo{Name: "p", Namespaces: []string{"alpha"}}
+	if err := keepsDeclared(proj, "web.yaml", []byte(vm), []byte(vm+"---\n"+ownerRB)); !errors.Is(err, model.ErrInvalid) {
+		t.Errorf("a result declaring a RoleBinding: err = %v, want ErrInvalid", err)
+	}
+	if err := keepsDeclared(proj, "web.yaml", []byte(vm), []byte(strings.Replace(vm, "Always", "Halted", 1))); err != nil {
+		t.Errorf("a plain edit: %v", err)
+	}
+
+	loose := vm + "---\n" + strings.Replace(webPolicy, "  namespace: alpha\n", "", 1)
 	f := newProposeFixture(t)
-	injected := map[string]string{"x": "y\n---\n" + strings.TrimSpace(ownerRB)}
-	_, err := f.c.StageEdit(f.id, f.proj, "alpha", "web", model.EditRequest{SourceFile: "web.yaml", VMEdit: model.VMEdit{SetLabels: injected}})
+	f.commitMain(t, "web.yaml", loose)
+	off := "Off"
+	_, err := f.c.StageEdit(f.id, f.proj, "alpha", "web", model.EditRequest{VMEdit: model.VMEdit{Power: &off}})
 	if !errors.Is(err, model.ErrInvalid) {
-		t.Fatalf("stage: err = %v, want ErrInvalid", err)
+		t.Fatalf("stage beside a namespace-less document: err = %v, want ErrInvalid", err)
 	}
-	// An entry that reached the draft past the gate meets the commit's own check.
 	items := f.c.toChangesetItems(f.proj, []draft.Entry{{Kind: draft.KindEdit, Namespace: "alpha", Name: "web", SourceFile: "web.yaml",
-		Edit: &model.VMEdit{SetLabels: injected}}})
-	read, err := f.c.read(f.proj)
-	if err != nil {
-		t.Fatal(err)
-	}
-	current, err := read.FileOnBranch("main", "web.yaml")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := items[0].Transform(current); !errors.Is(err, model.ErrInvalid) {
-		t.Errorf("commit: err = %v, want ErrInvalid", err)
+		Edit: &model.VMEdit{Power: &off}}})
+	if _, err := items[0].Transform([]byte(loose)); !errors.Is(err, model.ErrInvalid) {
+		t.Errorf("commit beside a namespace-less document: err = %v, want ErrInvalid", err)
 	}
 }
 

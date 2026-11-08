@@ -64,7 +64,7 @@ func (c *Coordinator) StageDeployFromTemplate(id auth.Identity, targetProj, libr
 	// the rendered manifest so the VM boots as soon as the merge syncs.
 	if req.PowerOn {
 		on := string(model.PowerOn)
-		patched, err := manifest.ApplyEdit(rendered.Manifest, req.Namespace, rendered.Name, manifest.VMEdit{Power: &on})
+		patched, err := manifest.ApplyEdit(rendered.Manifest, req.Namespace, req.Namespace, rendered.Name, manifest.VMEdit{Power: &on})
 		if err != nil {
 			return model.DraftView{}, fmt.Errorf("power on rendered VM: %w", err)
 		}

@@ -142,7 +142,7 @@ func (c *Coordinator) entryAccess(read *git.Repo, idx declaredIndex, proj projec
 		}
 		return fileAccess(proj, idx, fileChange{path: e.SourceFile, before: before, remove: true}, nil)
 	case fieldWrite:
-		return c.fieldEditAccess(read, proj, *e)
+		return c.fieldEditAccess(*e), nil
 	}
 	return nil, nil
 }
@@ -183,47 +183,33 @@ func (m *movedPin) Error() string {
 
 func (m *movedPin) Unwrap() []error { return []error{model.ErrConflict, &m.BaseMovedError} }
 
-// fieldEditAccess is a settings edit's access, the VM's update, and a dry
-// run of the edit on the file git declares the VM in, never the file the
-// client named: what it would commit is checked as the commit checks it
-// (editedOnly). An edit that does not apply is left to the commit to report.
-func (c *Coordinator) fieldEditAccess(read *git.Repo, proj project.ProjectInfo, e draft.Entry) ([]Access, error) {
-	ref := model.ObjectRef{Kind: model.KindVM.Kind, Namespace: e.Namespace, Name: e.Name}
-	need := []Access{access(verbUpdate, model.KindVM, ref)}
-	vm, declared, err := findVM(read, c.baseBranch, e.Namespace, e.Name)
-	if err != nil || !declared {
-		return need, err
-	}
-	current, err := read.FileOnBranch(c.baseBranch, vm.SourceFile)
-	if err != nil {
-		return nil, err
-	}
-	out, err := manifest.ApplyEdit(current, e.Namespace, e.Name, *e.Edit)
-	if err != nil {
-		return need, nil
-	}
-	return need, editedOnly(proj, vm.SourceFile, ref, current, out)
+// fieldEditAccess is a settings edit's access: the VM's update. What the
+// edit writes is checked where it is applied: staging's dry run and the
+// commit, each on the file git declares the VM in (keepsDeclared).
+func (c *Coordinator) fieldEditAccess(e draft.Entry) []Access {
+	return []Access{access(verbUpdate, model.KindVM, model.ObjectRef{Namespace: e.Namespace, Name: e.Name})}
 }
 
-// editedOnly refuses a settings edit's result unless, read as Argo reads it,
-// it declares what the file declared, in order, with every object but the
-// edited one unchanged, and passes the placement guard: a value carrying a
-// document break or a key would otherwise add or alter an object no gate
-// weighed.
-func editedOnly(proj project.ProjectInfo, path string, edited model.ObjectRef, current, out []byte) error {
-	before, err := argoObjects(path, current)
+// keepsDeclared refuses a settings edit's result unless, read as Argo reads
+// it, it declares what the file declared and passes the placement guard.
+// manifest.ApplyEdit already holds the edit to the VM's own fields in its own
+// decoding; this is Argo's, so a value breaking into another document adds no
+// object no gate weighed.
+func keepsDeclared(proj project.ProjectInfo, path string, content, out []byte) error {
+	before, err := argoObjects(path, content)
 	if err != nil {
 		return fmt.Errorf("%w: %s as it stands %v; change it in git", model.ErrConflict, path, err)
 	}
 	after, err := argoObjects(path, out)
-	refuse := fmt.Errorf("%w: the settings edit of %s/%s would change %s beyond that VM", model.ErrInvalid, edited.Namespace, edited.Name, path)
-	if err != nil || len(after) != len(before) {
-		return refuse
-	}
-	for i, o := range after {
-		if o.ref != before[i].ref || o.ref != edited && !reflect.DeepEqual(o.body, before[i].body) {
-			return refuse
+	if err == nil && len(after) == len(before) {
+		for i, o := range after {
+			if o.ref != before[i].ref {
+				err = errors.New("declares other objects")
+			}
 		}
+	}
+	if err != nil || len(after) != len(before) {
+		return fmt.Errorf("%w: the settings edit would change what %s declares", model.ErrInvalid, path)
 	}
 	return requirePlacement(proj, path, out)
 }
