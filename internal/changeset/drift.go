@@ -186,18 +186,21 @@ func adoptResource(kind string) draft.Resource {
 // SA-identity resyncer (Argo operations have no user context, but the request's
 // ctx still bounds the call so a hung Argo op doesn't outlive the HTTP request).
 // Because this is the one operation that escalates to dotvirt's SA, the caller's
-// own authority over the VM (canUpdateVM, a user-token SSAR) is enforced here,
-// beside the escalation - not only at the transport layer.
-func (c *Coordinator) Resync(ctx context.Context, canUpdateVM func(context.Context, string, string) (bool, error), username, namespace, name string) (model.ResyncResult, error) {
+// own authority over what the sync applies (ResyncNeeds, weighed by the gate's
+// authorizer under the caller's token) is enforced here, beside the escalation -
+// not only at the transport layer.
+func (c *Coordinator) Resync(ctx context.Context, id auth.Identity, proj project.ProjectInfo, namespace, name string) (model.ResyncResult, error) {
 	if c.resyncer == nil {
 		return model.ResyncResult{}, fmt.Errorf("%w: re-sync unavailable (ArgoCD not configured)", model.ErrUnavailable)
 	}
-	if allowed, err := canUpdateVM(ctx, namespace, name); err != nil {
+	need, err := c.ResyncNeeds(proj, namespace, name)
+	if err != nil {
 		return model.ResyncResult{}, err
-	} else if !allowed {
-		return model.ResyncResult{}, fmt.Errorf("%w: you don't have permission to sync VM %s/%s", model.ErrForbidden, namespace, name)
 	}
-	return c.resyncer.Resync(ctx, username, namespace, name)
+	if err := c.authorize(id, need); err != nil {
+		return model.ResyncResult{}, err
+	}
+	return c.resyncer.Resync(ctx, id.Username, namespace, name)
 }
 
 // VMDrift returns the semantic diff between a VM as it runs (actual) and as main

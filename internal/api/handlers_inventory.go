@@ -11,6 +11,7 @@ import (
 	"github.com/epheo/dotvirt/internal/eventbus"
 	"github.com/epheo/dotvirt/internal/inventory"
 	"github.com/epheo/dotvirt/internal/model"
+	"github.com/epheo/dotvirt/internal/tasks"
 	"github.com/epheo/dotvirt/pkg/forge"
 )
 
@@ -112,22 +113,31 @@ func (s *Server) InventoryForIdentity(ctx context.Context, id auth.Identity) (mo
 			}
 		}
 	}
-	platformAuthor, platformErr := s.canAuthorPlatform(ctx, id, userCluster)
 	// The platform tier has no project row; its Application rollup rides the frame
 	// on its own so the issues plane names what it failed to apply or keeps
 	// unhealthy. Every user sees its verdict (a user scoped to no project must not
-	// mask a broken platform sync); only platform authors see its detail.
+	// mask a broken platform sync); only platform readers (canReadPlatform) see
+	// its detail, its open proposals and its merges. That is asked only when
+	// the frame holds one of those: a quiet platform costs a caller with no
+	// platform right nothing.
+	var platformAuthor bool
+	var platformErr error
 	if s.cfg.PlatformRepo != "" {
 		inv.Platform = platformRollup(in.ProjectDrift, s.cfg.PlatformRepo)
+		if s.platformBusy() || rollupDetail(inv.Platform) {
+			platformAuthor, platformErr = s.canReadPlatform(ctx, id, userCluster)
+		}
 		if !platformAuthor {
 			inv.Platform = tenantPlatformView(inv.Platform, visible)
 		}
 	}
 	// Propose existing tenants (namespaces with VMs, no project label) to callers
-	// who could adopt them - the same namespace-create authority the create-project
-	// route enforces. Rides the frame, so the list drains as adoptions merge.
+	// who could make one a project: updating namespaces cluster-wide answers
+	// for each one the create-project route claims, and for its Namespace
+	// object, which the coordinator's dry run finds running. Rides the frame,
+	// so the list drains as adoptions merge.
 	if s.cfg.PlatformRepo != "" {
-		if ok, _ := s.can(ctx, id, userCluster, verbCreate, ssarNamespace, ""); ok {
+		if s.capable(ctx, id, userCluster, claimAction("")) {
 			inv.Adoptable = inventory.Adoptable(in.Live, s.state.Namespaces())
 		}
 	}
@@ -165,6 +175,31 @@ func platformRollup(drift map[string]model.ProjectSync, platformRepo string) *mo
 		Operation: "Error",
 		SyncError: "no ArgoCD Application sources the platform repo - the dotvirt-platform Application is missing, so tenancy changes cannot apply",
 	}
+}
+
+// platformBusy reports whether the platform tier holds something a frame
+// shows only to its authors beyond its rollup: open proposals (the refresher
+// watches the platform repo whenever anyone looks) or merges in the task feed.
+func (s *Server) platformBusy() bool {
+	rows, ok := s.proposals.Get(platformProjectName)
+	if ok && len(rows) > 0 {
+		return true
+	}
+	if !ok {
+		s.nudgeProposals("")
+	}
+	if s.tasks == nil {
+		return false
+	}
+	repo, busy := forge.NormalizeRepoURL(s.cfg.PlatformRepo), false
+	s.tasks.Visit(func(tasks.Op) {}, func(m tasks.Merge) { busy = busy || m.RepoURL == repo })
+	return busy
+}
+
+// rollupDetail reports whether the platform rollup carries detail beyond its
+// verdict, which only platform authors read.
+func rollupDetail(ps *model.ProjectSync) bool {
+	return ps != nil && (ps.SyncError != "" || len(ps.Unhealthy) > 0)
 }
 
 // tenantPlatformView is the platform rollup for a caller without platform
@@ -229,7 +264,7 @@ func (s *Server) handleOptions(w http.ResponseWriter, r *http.Request) {
 // ssarDataSources and ssarNADs are the list authorities over the namespaced
 // option kinds (cluster.ListOptions reads the same resources).
 var (
-	ssarDataSources = ssarRef{"cdi.kubevirt.io", "datasources"}
+	ssarDataSources = ssarRef{group: "cdi.kubevirt.io", resource: "datasources"}
 	ssarNADs        = ssarFor(model.KindNAD)
 )
 
@@ -243,8 +278,7 @@ func (s *Server) optionsFor(ctx context.Context, id auth.Identity, c *cluster.Cl
 		if visible[ns] {
 			return true
 		}
-		ok, _ := s.can(ctx, id, c, verbList, ref, ns)
-		return ok
+		return s.capable(ctx, id, c, ask(verbList, ref, ns))
 	}
 	out := all
 	out.OSImages = make([]model.OSImage, 0, len(all.OSImages))
