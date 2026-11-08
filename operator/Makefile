@@ -38,12 +38,15 @@ fmt: ; go fmt ./...
 vet: ; go vet ./...
 
 # The envtest suite runs the controller against a real kube-apiserver + etcd,
-# fetched (pinned) into bin/; plain `go test` skips it.
+# fetched (pinned) into bin/; plain `go test` skips it. setup-envtest checks the archive
+# against the sha512 in its index, read at a pinned commit; CI passes ENVTEST_ASSETS
+# from its own verified download instead.
 SETUP_ENVTEST ?= go run sigs.k8s.io/controller-runtime/tools/setup-envtest@$(SETUP_ENVTEST_VERSION)
+ENVTEST_INDEX ?= https://raw.githubusercontent.com/kubernetes-sigs/controller-tools/$(ENVTEST_INDEX_COMMIT)/envtest-releases.yaml
+ENVTEST_ASSETS ?= $$($(SETUP_ENVTEST) use $(ENVTEST_K8S_VERSION) --index $(ENVTEST_INDEX) --bin-dir $(CURDIR)/bin/envtest -p path)
 .PHONY: test-envtest
 test-envtest: ## Run the envtest suite (server-side apply + the operator's RBAC).
-	KUBEBUILDER_ASSETS="$$($(SETUP_ENVTEST) use $(ENVTEST_K8S_VERSION) --bin-dir $(CURDIR)/bin/envtest -p path)" \
-		go test ./internal/controller/ -run TestEnvtest -count=1 -v
+	KUBEBUILDER_ASSETS="$(ENVTEST_ASSETS)" go test ./internal/controller/ -run TestEnvtest -count=1 -v
 
 .PHONY: build
 build: generate fmt vet ## Build the manager binary.
