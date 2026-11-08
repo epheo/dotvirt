@@ -45,7 +45,7 @@ func FuzzApplyEdit(f *testing.F) {
 		if _, perr := ParseVMs("vms/fuzz.yaml", content, ns); perr != nil {
 			return
 		}
-		out, err := ApplyEdit(content, ns, name, edit)
+		out, err := ApplyEdit(content, ns, ns, name, edit)
 		if err != nil {
 			return // refusing an edit is always allowed
 		}

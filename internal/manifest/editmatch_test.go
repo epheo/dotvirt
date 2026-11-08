@@ -1,6 +1,7 @@
 package manifest
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/epheo/dotvirt/internal/model"
@@ -74,7 +75,7 @@ spec:
 		if len(DiffVMs(from, to)) > 0 && edit.Empty() {
 			t.Fatalf("%s: DiffVMs reports drift but EditToMatch is empty (unadoptable drift)", name)
 		}
-		out, err := ApplyEdit([]byte(base), "alpha", "web", edit)
+		out, err := ApplyEdit([]byte(base), "alpha", "alpha", "web", edit)
 		if err != nil {
 			t.Fatalf("%s: ApplyEdit: %v", name, err)
 		}
@@ -83,4 +84,57 @@ spec:
 			t.Errorf("%s: drift did not converge after adopt, remaining: %+v\n%s", name, d, out)
 		}
 	}
+}
+
+// Adopting a live NIC writes it the way KubeVirt runs it: a pod-network NIC
+// as a masquerade interface on `pod: {}` (never a multus network named
+// "pod"), and every NIC under its live name, so the adopted file converges
+// instead of leaving drift that a second adopt would duplicate.
+func TestEditToMatchAdoptsNICs(t *testing.T) {
+	const base = `apiVersion: kubevirt.io/v1
+kind: VirtualMachine
+metadata:
+  name: web
+  namespace: alpha
+spec:
+  runStrategy: Always
+  template:
+    spec:
+      domain:
+        devices:
+          interfaces:
+          - name: data
+            bridge: {}
+      networks:
+      - name: data
+        multus:
+          networkName: alpha/vlan-10
+`
+	from := parseOne(t, base)
+	to := from
+	to.Networks = append(append([]model.NIC(nil), from.Networks...),
+		model.NIC{Name: "default", Network: model.PodNetwork},
+		model.NIC{Name: "nic-b", Network: "alpha/vlan-20"},
+	)
+	edit := EditToMatch(from, to)
+	out, err := ApplyEdit([]byte(base), "alpha", "alpha", "web", edit)
+	if err != nil {
+		t.Fatalf("ApplyEdit(%+v): %v", edit, err)
+	}
+	if d := DiffVMs(parseOne(t, string(out)), to); len(d) != 0 {
+		t.Errorf("adopted NICs did not converge, remaining: %+v\n%s", d, out)
+	}
+	s := string(out)
+	if strings.Contains(s, "networkName: pod") || !strings.Contains(s, "masquerade: {}") || !strings.Contains(s, "pod: {}") {
+		t.Errorf("the pod NIC must be a masquerade interface on the pod network:\n%s", s)
+	}
+}
+
+func parseOne(t *testing.T, content string) model.VM {
+	t.Helper()
+	vms, err := ParseVMs("alpha/web.yaml", []byte(content), "alpha")
+	if err != nil || len(vms) != 1 {
+		t.Fatalf("parse: %v (%d VMs)\n%s", err, len(vms), content)
+	}
+	return vms[0]
 }
