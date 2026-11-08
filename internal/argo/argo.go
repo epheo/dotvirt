@@ -254,7 +254,7 @@ func unhealthyResources(app map[string]any, opStands bool) []model.ObjectHealth 
 		if o, ok := byKey[k]; ok {
 			return o
 		}
-		o := &model.ObjectHealth{Kind: k.kind, Namespace: k.namespace, Name: k.name}
+		o := &model.ObjectHealth{Group: k.group, Kind: k.kind, Namespace: k.namespace, Name: k.name}
 		byKey[k] = o
 		out = append(out, o)
 		return o

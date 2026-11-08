@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"slices"
 	"time"
 
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -58,20 +59,34 @@ func (s *Server) platformListing(ctx context.Context) (action, error) {
 	}
 	var act action
 	for _, k := range kinds {
-		res, served := x.resource[k]
-		if !served && x.asked[k] && !x.failed[k.Group] {
-			continue
+		ref, served, err := x.ref(k)
+		if err != nil {
+			return nil, err
 		}
-		if !served {
-			_, mk, known := model.LookupKind(k.Kind)
-			if !known || mk.Group != k.Group {
-				return nil, fmt.Errorf("%w: discovery could not tell which resource serves %s", model.ErrUnavailable, k)
-			}
-			res = mk.Plural
+		if served {
+			act = append(act, refQ(verbList, ref, ""))
 		}
-		act = append(act, refQ(verbList, ssarRef{k.Group, res}, ""))
 	}
 	return act, nil
+}
+
+// ref is the resource serving k. served is false when discovery found k not
+// served. A kind discovery could not read is served all the same, its
+// resource named by the kinds table; err when the table does not name it.
+// A nil x knows nothing.
+func (x *kindIndex) ref(k schema.GroupKind) (ref ssarRef, served bool, err error) {
+	if x != nil {
+		if res, ok := x.resource[k]; ok {
+			return ssarRef{k.Group, res}, true, nil
+		}
+		if x.asked[k] && !x.failed[k.Group] {
+			return ssarRef{}, false, nil
+		}
+	}
+	if _, mk, known := model.LookupKind(k.Kind); known && mk.Group == k.Group {
+		return ssarFor(mk), true, nil
+	}
+	return ssarRef{}, false, fmt.Errorf("%w: discovery could not tell which resource serves %s", model.ErrUnavailable, k)
 }
 
 // servedKinds is discovery's answer for kinds, read through the SA once for
@@ -81,21 +96,32 @@ func (s *Server) servedKinds(ctx context.Context, kinds []schema.GroupKind) (*ki
 		return x, nil
 	}
 	return s.kindFill.Do(ctx, "platform", func(context.Context) (*kindIndex, error) {
-		if x := s.kinds.Load(); x.covers(kinds, time.Now()) {
-			return x, nil
+		prev := s.kinds.Load()
+		if prev.covers(kinds, time.Now()) {
+			return prev, nil
+		}
+		// The read and rollup paths ask different sets: asking their union
+		// keeps one index covering both. kinds may be the memoized index's.
+		want := slices.Clone(kinds)
+		if prev != nil {
+			for k := range prev.asked {
+				if !slices.Contains(want, k) {
+					want = append(want, k)
+				}
+			}
 		}
 		sa, err := s.clusterF.SA()
 		if err != nil {
 			return nil, err
 		}
 		at := time.Now()
-		served, failed, err := sa.KindResources(kinds)
+		served, failed, err := sa.KindResources(want)
 		if err != nil {
 			log.Printf("api: discovery for the platform repo's kinds: %v", err) // SA-side detail stays in the log
 			return nil, fmt.Errorf("%w: cluster discovery failed", model.ErrUnavailable)
 		}
-		x := &kindIndex{at: at, asked: make(map[schema.GroupKind]bool, len(kinds)), resource: served, failed: failed}
-		for _, k := range kinds {
+		x := &kindIndex{at: at, asked: make(map[schema.GroupKind]bool, len(want)), resource: served, failed: failed}
+		for _, k := range want {
 			x.asked[k] = true
 		}
 		s.kinds.Store(x)

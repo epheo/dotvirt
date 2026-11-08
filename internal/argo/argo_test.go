@@ -341,7 +341,7 @@ func TestUnhealthyResourcesNamesObjects(t *testing.T) {
 	if got[0].Kind != "Namespace" || got[0].Name != "tenant-a" || got[0].Health != "" || !strings.Contains(got[0].Message, "forbidden") {
 		t.Errorf("refused apply: got %+v", got[0])
 	}
-	if got[1].Kind != "NodeNetworkConfigurationPolicy" || got[1].Health != "Degraded" || got[1].Message != "FailedToConfigure: 1/1 nodes failed to configure" {
+	if got[1].Group != "nmstate.io" || got[1].Kind != "NodeNetworkConfigurationPolicy" || got[1].Health != "Degraded" || got[1].Message != "FailedToConfigure: 1/1 nodes failed to configure" {
 		t.Errorf("degraded object: got %+v", got[1])
 	}
 	// A settled operation leaves no refused applies: the syncResult is history.

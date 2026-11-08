@@ -79,10 +79,10 @@ func TestTenantPlatformView(t *testing.T) {
 // verdict and the generic line.
 func TestPlatformRollupNamesWhatTheCallerMayList(t *testing.T) {
 	fc := newFakeCluster(t)
-	const reader, platform = "reader-token", "platform-token"
+	const reader, lagging, platform = "reader-token", "lagging-token", "platform-token"
 	fc.ssar = func(token string, a *authzv1.ResourceAttributes) bool {
 		switch token {
-		case reader:
+		case reader, lagging:
 			return a.Resource == "namespaces" && a.Verb == verbList
 		case platform:
 			return a.Verb == verbList && a.Namespace == "" && a.Resource != "virtualmachines" // no project: the frame reads no repo
@@ -107,7 +107,8 @@ func TestPlatformRollupNamesWhatTheCallerMayList(t *testing.T) {
 	fc.on(http.MethodGet, "/apis/argoproj.io/v1alpha1/applications", unstructuredList("argoproj.io/v1alpha1", "Application", app))
 	fc.serveKinds(model.KindNS, model.KindANP)
 	declares := []schema.GroupKind{{Kind: model.KindNS.Kind}, {Group: model.KindANP.Group, Kind: model.KindANP.Kind}}
-	s := fc.server(&planeDraft{kinds: declares}, Config{PlatformRepo: platformRepo})
+	d := &planeDraft{kinds: declares}
+	s := fc.server(d, Config{PlatformRepo: platformRepo})
 	kubeconfig := filepath.Join(t.TempDir(), "kubeconfig")
 	kc := fmt.Sprintf("apiVersion: v1\nkind: Config\nclusters:\n- name: t\n  cluster: {server: %s, insecure-skip-tls-verify: true}\ncontexts:\n- name: t\n  context: {cluster: t, user: t}\ncurrent-context: t\nusers:\n- name: t\n  user: {token: sa-token}\n", fc.srv.URL)
 	if err := os.WriteFile(kubeconfig, []byte(kc), 0o600); err != nil {
@@ -141,5 +142,19 @@ func TestPlatformRollupNamesWhatTheCallerMayList(t *testing.T) {
 	}
 	if body := frame(platform); !strings.Contains(body, "acme-lockdown") {
 		t.Errorf("a caller listing every platform kind must read the rollup: %s", body)
+	}
+
+	// Git's declared kinds and Argo's live tree part (a mirror behind the
+	// merge): a reader of a repo declaring namespaces alone still never reads
+	// the cluster rule Argo reports.
+	d.kinds = declares[:1]
+	if cl := decodeBody[model.Capabilities](t, do(s, lagging, http.MethodGet, "/api/capabilities", "")).Cluster; cl == nil || !cl.PlatformRead {
+		t.Fatalf("a namespace lister of a namespaces-only repo must read the platform tier: %+v", cl)
+	}
+	if body := frame(lagging); strings.Contains(body, "acme-lockdown") || !strings.Contains(body, platformErrorForTenants) {
+		t.Errorf("a platform reader without list on cluster rules reads one: %s", body)
+	}
+	if body := frame(platform); !strings.Contains(body, "acme-lockdown") {
+		t.Errorf("a caller listing cluster rules must still read the row: %s", body)
 	}
 }

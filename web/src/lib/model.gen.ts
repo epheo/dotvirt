@@ -1827,6 +1827,7 @@ export interface ProjectSync {
  * identity, the health Argo computed, and the health or apply message.
  */
 export interface ObjectHealth {
+  group?: string; // the API group; empty for the core group
   kind: string;
   namespace?: string;
   name: string;

@@ -248,6 +248,7 @@ type ProjectSync struct {
 // ObjectHealth is one object an Application reports as degraded or refused: its
 // identity, the health Argo computed, and the health or apply message.
 type ObjectHealth struct {
+	Group     string `json:"group,omitempty"` // the API group; empty for the core group
 	Kind      string `json:"kind"`
 	Namespace string `json:"namespace,omitempty"`
 	Name      string `json:"name"`
