@@ -331,6 +331,8 @@ func TestDeploymentMetricsTenancyURL(t *testing.T) {
 		"https://thanos-querier.openshift-monitoring.svc:9091/":              "https://thanos-querier.openshift-monitoring.svc:9092/",
 		"https://thanos-querier-openshift-monitoring.apps.example.com":       "",
 		"http://prometheus-operated.monitoring.svc.cluster.local:9090":       "",
+		"https://prometheus-k8s.openshift-monitoring.svc.cluster.local:9091": "",
+		"https://thanos-querier.example.com:9091":                            "",
 	} {
 		dv := testDotvirt()
 		dv.Spec.Metrics.URL = url

@@ -56,11 +56,14 @@ const (
 
 // metricsTenancyURL is the thanos-querier tenancy port beside its
 // cluster-wide one: the service serves every namespace on 9091 and one
-// namespace per query on 9092, under the same serving cert. "" when raw is
-// not on 9091: no other endpoint has a known tenancy port.
+// namespace per query on 9092, under the same serving cert. "" for any other
+// endpoint, prometheus-k8s on 9091 included: none has a known tenancy port.
 func metricsTenancyURL(raw string) string {
 	u, err := url.Parse(raw)
 	if err != nil || u.Port() != "9091" {
+		return ""
+	}
+	if h := u.Hostname(); h != "thanos-querier.openshift-monitoring.svc" && h != "thanos-querier.openshift-monitoring.svc.cluster.local" {
 		return ""
 	}
 	u.Host = net.JoinHostPort(u.Hostname(), "9092")
