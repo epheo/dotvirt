@@ -26,6 +26,13 @@ rules:
   - apiGroups: ["rbac.authorization.k8s.io"]
     resources: ["rolebindings"]
     verbs: ["list", "watch"]
+  # The rest of what a token's authorization derives from, watched the same way.
+  - apiGroups: ["rbac.authorization.k8s.io"]
+    resources: ["roles", "clusterrolebindings", "clusterroles"]
+    verbs: ["list", "watch"]
+  - apiGroups: ["user.openshift.io"]
+    resources: ["groups"]
+    verbs: ["list", "watch"]
   - apiGroups: ["kubevirt.io"]
     resources: ["virtualmachines", "virtualmachineinstances"]
     verbs: ["get", "list", "watch"]

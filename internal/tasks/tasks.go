@@ -131,6 +131,22 @@ func (f *Feed) Merges() []Merge {
 	return out
 }
 
+// Visit calls op for each recorded op and merge for each retained merge, in no
+// particular order, under the feed's lock: a reader that only folds the feed
+// copies nothing. The callbacks must not call back into the feed.
+func (f *Feed) Visit(op func(Op), merge func(Merge)) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	for _, o := range f.ops {
+		op(o)
+	}
+	for _, byNum := range f.merges {
+		for _, m := range byNum {
+			merge(m)
+		}
+	}
+}
+
 // RevertSegment is the branch segment under the proposed prefix that holds
 // revert PRs: <prefix>/revert/<user>/<project>-<commit>. Named here, beside the
 // attribution that must skip it, so the two cannot drift apart.

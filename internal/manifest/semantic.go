@@ -404,7 +404,7 @@ func EditToMatch(from, to model.VM) VMEdit {
 	fromNets, toNets := nicNameSet(from), nicNameSet(to)
 	added, removed = addedRemoved(fromNets, toNets)
 	for _, name := range added {
-		edit.AddNetworks = append(edit.AddNetworks, model.NetworkAdd{Name: toNets[name]})
+		edit.AddNetworks = append(edit.AddNetworks, model.NetworkAdd{Name: toNets[name], Interface: name})
 	}
 	edit.RemoveNetworks = removed
 	return edit

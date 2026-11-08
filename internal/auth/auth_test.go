@@ -11,7 +11,9 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 
 	"golang.org/x/time/rate"
 	authnv1 "k8s.io/api/authentication/v1"
@@ -222,6 +224,40 @@ func TestValidateThrottlesUnknownTokens(t *testing.T) {
 	}
 	if _, err := a.Validate(ctx, "good"); err != nil {
 		t.Errorf("cached session must not queue behind the budget: %v", err)
+	}
+}
+
+// A live session's re-check spends nothing from the sign-in budget, so
+// streams re-checking cannot starve a sign-in or be refused into a pass, and
+// concurrent re-checks of one token share one TokenReview.
+func TestRevalidateOutsideTheBudget(t *testing.T) {
+	a, calls := fakeAuth(map[string]authnv1.UserInfo{"good": {Username: "alice"}})
+	a.reviews = rate.NewLimiter(0, 0) // no sign-in budget at all
+	gate := make(chan struct{})
+	kube := a.saKube.(*fake.Clientset)
+	kube.PrependReactor("create", "tokenreviews", func(k8stesting.Action) (bool, runtime.Object, error) {
+		<-gate
+		return false, nil, nil
+	})
+	var wg sync.WaitGroup
+	for range 8 {
+		wg.Go(func() {
+			if err := a.Revalidate(context.Background(), "good"); err != nil {
+				t.Errorf("Revalidate: %v", err)
+			}
+		})
+	}
+	time.Sleep(50 * time.Millisecond) // let every re-check join the review in flight
+	close(gate)
+	wg.Wait()
+	if *calls != 1 {
+		t.Errorf("TokenReviews = %d for 8 concurrent re-checks, want 1", *calls)
+	}
+	if _, err := a.Validate(context.Background(), "unknown"); !errors.Is(err, ErrThrottled) {
+		t.Errorf("an unknown token past the budget: %v, want ErrThrottled", err)
+	}
+	if err := a.Revalidate(context.Background(), "bad"); !errors.Is(err, ErrRejected) {
+		t.Errorf("a dead token re-checked: %v, want ErrRejected", err)
 	}
 }
 
