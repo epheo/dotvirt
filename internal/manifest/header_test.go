@@ -1,6 +1,11 @@
 package manifest
 
-import "testing"
+import (
+	"slices"
+	"testing"
+
+	"k8s.io/apimachinery/pkg/runtime/schema"
+)
 
 // A null document is no content: a trailing --- or a comment-only document
 // must not mark a file as holding something its headers cannot name.
@@ -25,5 +30,18 @@ func TestHeadersSkipNullDocuments(t *testing.T) {
 		if len(heads) != tc.heads || docs != tc.docs {
 			t.Errorf("%s: heads=%d docs=%d, want %d/%d", tc.name, len(heads), docs, tc.heads, tc.docs)
 		}
+	}
+}
+
+// Kinds reads each document's group from its apiVersion, the core group
+// included, whether or not the document is named.
+func TestKinds(t *testing.T) {
+	content := "apiVersion: v1\nkind: Namespace\nmetadata:\n  name: a\n---\n" +
+		"apiVersion: rbac.authorization.k8s.io/v1\nkind: RoleBinding\n---\n" +
+		"kind: NoVersion\n---\n"
+	got := Kinds([]byte(content))
+	want := []schema.GroupKind{{Kind: "Namespace"}, {Group: "rbac.authorization.k8s.io", Kind: "RoleBinding"}}
+	if !slices.Equal(got, want) {
+		t.Errorf("Kinds = %v, want %v", got, want)
 	}
 }
