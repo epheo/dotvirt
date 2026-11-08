@@ -60,7 +60,7 @@ func (d *reachedDraft) StageEdit(auth.Identity, project.ProjectInfo, string, str
 	d.hit("StageEdit")
 	return view, nil
 }
-func (d *reachedDraft) PreviewEdit(project.ProjectInfo, string, string, model.VMEdit) ([]model.Change, error) {
+func (d *reachedDraft) PreviewEdit(auth.Identity, project.ProjectInfo, string, string, model.VMEdit) ([]model.Change, error) {
 	d.hit("PreviewEdit")
 	return nil, nil
 }

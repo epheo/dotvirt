@@ -146,6 +146,33 @@ func TestInstancetypeSwitchFallsBackWhenUnread(t *testing.T) {
 	}
 }
 
+// An edit's preview reads the instancetype it switches to as staging does, so
+// it lists what staging lists: the shared fields that instancetype sets, or,
+// read refused, every one and why.
+func TestPreviewEditListsWhatStagingLists(t *testing.T) {
+	for name, it := range map[string]string{"shared field": "u1.large", "unread": "u1.secret"} {
+		its := &fakeInstancetypes{objs: map[string]map[string]any{
+			"u1.large": {"spec": map[string]any{"memory": map[string]any{"hugepages": map[string]any{"pageSize": "1Gi"}}}},
+		}}
+		s := newITStage(t, its)
+		edit := model.VMEdit{Instancetype: ptr(it)}
+		preview, err := s.c.PreviewEdit(s.id, s.proj, "alpha", "web", edit)
+		if err != nil {
+			t.Fatalf("%s: PreviewEdit: %v", name, err)
+		}
+		if want := []string{"alice alpha  " + it}; !slices.Equal(its.reads, want) {
+			t.Errorf("%s: preview reads = %q, want %q", name, its.reads, want)
+		}
+		view, err := s.c.StageEdit(s.id, s.proj, "alpha", "web", model.EditRequest{VMEdit: edit})
+		if err != nil {
+			t.Fatalf("%s: StageEdit: %v", name, err)
+		}
+		if staged := view.Items[0].Changes; !slices.Equal(preview, staged) {
+			t.Errorf("%s: preview = %+v\nstaging lists %+v", name, preview, staged)
+		}
+	}
+}
+
 // A re-propose lays the draft over what the open PR carries: the PR's read of
 // the instancetype it switches to rides into the combined edit, so a later
 // power toggle does not turn it into a strip of every shared field.

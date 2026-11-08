@@ -101,8 +101,9 @@ func namedVM(path string, content []byte, namespace, name string) error {
 
 // PreviewEdit renders an edit as the changes staging it would list, restart
 // flags included, without touching the draft: an inline editor states the
-// consequence, or the value staging would refuse, before the user stages.
-func (c *Coordinator) PreviewEdit(proj project.ProjectInfo, namespace, name string, edit model.VMEdit) ([]model.Change, error) {
+// consequence, or the value staging would refuse, before the user stages. It
+// reads the VM's file and the instancetype a switch names as stageEdit does.
+func (c *Coordinator) PreviewEdit(id auth.Identity, proj project.ProjectInfo, namespace, name string, edit model.VMEdit) ([]model.Change, error) {
 	if err := requireRepo(proj); err != nil {
 		return nil, err
 	}
@@ -113,14 +114,13 @@ func (c *Coordinator) PreviewEdit(proj project.ProjectInfo, namespace, name stri
 	if err != nil {
 		return nil, err
 	}
-	current, ok, err := findVM(read, c.baseBranch, namespace, name)
+	f, err := c.editTarget(read, namespace, name)
 	if err != nil {
 		return nil, err
 	}
-	if !ok {
-		return nil, fmt.Errorf("%w: %s/%s is not in git", model.ErrNotFound, namespace, name)
-	}
-	changes := manifest.ChangesForEdit(current, edit)
+	e := draft.Entry{Kind: draft.KindEdit, Namespace: namespace, Name: name, SourceFile: f.path, Edit: &edit}
+	e.Instancetype = c.readSwitch(id, f, e)
+	changes := fieldChanges(f.vm, f.content, e)
 	if changes == nil {
 		changes = []model.Change{}
 	}
