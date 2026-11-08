@@ -2,6 +2,7 @@ package changeset
 
 import (
 	"fmt"
+	"log"
 	"maps"
 	"slices"
 	"strings"
@@ -19,7 +20,8 @@ import (
 // value drops out: staging git's own value unstages that field, and an edit
 // left with nothing unstages the VM. The incoming values are checked before
 // the merge, and the merged edit is dry-run against the VM's file before it is
-// written; the file is read once, before the store lock (see editTarget).
+// written; the file is read once, before the store lock (see editTarget), and
+// so is an instancetype the edit switches the VM to (readSwitch).
 func (c *Coordinator) stageEdit(id auth.Identity, proj project.ProjectInfo, e draft.Entry) (model.DraftView, error) {
 	if err := manifest.ValidateEdit(*e.Edit); err != nil {
 		return model.DraftView{}, err
@@ -40,30 +42,36 @@ func (c *Coordinator) stageEdit(id auth.Identity, proj project.ProjectInfo, e dr
 	if err := c.authorize(id, need); err != nil {
 		return model.DraftView{}, err
 	}
+	fresh := c.readSwitch(id, target, e)
 	key := e.Key()
 	err = c.store.Apply(id.Username, proj.Name, func(d map[string]draft.Entry) error {
 		edit := *e.Edit
+		var held *manifest.Target
 		if staged, ok := d[key]; ok {
 			if !fieldEdit(staged) {
 				return fmt.Errorf("%w: %s/%s has a staged %s waiting; propose or unstage it before editing its settings",
 					model.ErrConflict, e.Namespace, e.Name, stagedChange(staged))
 			}
 			edit = overlayEdit(*staged.Edit, edit)
+			held = staged.Instancetype
 		}
 		edit = withoutBase(edit, target.vm)
 		if edit.Empty() {
 			delete(d, key)
 			return nil
 		}
-		out, err := manifest.ApplyEdit(target.content, defaultNamespace(target.path), e.Namespace, e.Name, edit)
+		next := e
+		next.SourceFile, next.Edit, next.Instancetype = target.path, &edit, nil
+		if want, ok := manifest.SwitchTarget(target.content, defaultNamespace(target.path), e.Namespace, e.Name, edit); ok {
+			next.Instancetype = readFor(want, fresh, held)
+		}
+		out, err := manifest.ApplyEditFor(target.content, defaultNamespace(target.path), e.Namespace, e.Name, edit, targetOf(next))
 		if err != nil {
 			return err
 		}
 		if err := keepsDeclared(proj, target.path, target.content, out); err != nil {
 			return err
 		}
-		next := e
-		next.SourceFile, next.Edit = target.path, &edit
 		d[key] = next
 		return nil
 	})
@@ -71,6 +79,44 @@ func (c *Coordinator) stageEdit(id auth.Identity, proj project.ProjectInfo, e dr
 		return model.DraftView{}, err
 	}
 	return c.Get(id, proj)
+}
+
+// readSwitch reads the instancetype e's own edit switches the VM in f to,
+// under id's token: one GET per edit naming a new instancetype, none for one
+// that leaves sizing alone (the staged read then still answers). It runs
+// before the store lock, so a slow apiserver stalls no one else's staging. A
+// failed read is nil: the switch then strips every field an instancetype may
+// take over, and the view says so.
+func (c *Coordinator) readSwitch(id auth.Identity, f vmFile, e draft.Entry) *manifest.Target {
+	want, ok := manifest.SwitchTarget(f.content, defaultNamespace(f.path), e.Namespace, e.Name, *e.Edit)
+	if !ok || c.instancetypes == nil {
+		return nil
+	}
+	obj, err := c.instancetypes.Instancetype(id, e.Namespace, want.Kind, want.Name)
+	if err != nil {
+		log.Printf("changeset: read instancetype %s for %s/%s: %v", want.Name, e.Namespace, e.Name, err)
+		return nil
+	}
+	want.Read, want.Sets = true, manifest.SharedSet(obj)
+	return &want
+}
+
+// readFor is the first of reads made for want, else want unread.
+func readFor(want manifest.Target, reads ...*manifest.Target) *manifest.Target {
+	for _, r := range reads {
+		if r != nil && r.Answers(want) {
+			return r
+		}
+	}
+	return &want
+}
+
+// targetOf is what e holds of the instancetype its edit switches to.
+func targetOf(e draft.Entry) manifest.Target {
+	if e.Instancetype == nil {
+		return manifest.Target{}
+	}
+	return *e.Instancetype
 }
 
 // fieldEdit reports whether e is a VM field edit, the one kind of entry an

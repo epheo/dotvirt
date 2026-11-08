@@ -58,6 +58,16 @@ func (c *Coordinator) AdoptNeeds(commitProj, target project.ProjectInfo, owners 
 	return c.needs(commitProj, entries)
 }
 
+// SyncAccessNeeds is granting target's sync account, staged into commitProj:
+// the error StageSyncAccess answers when there is nothing to grant.
+func (c *Coordinator) SyncAccessNeeds(commitProj, target project.ProjectInfo) ([]Access, error) {
+	entries, err := c.syncAccessEntries(commitProj, target)
+	if err != nil {
+		return nil, err
+	}
+	return c.needs(commitProj, entries)
+}
+
 // ReleaseNeeds is releasing target, staged into commitProj, and the
 // namespaces the release unlabels on the cluster instead (residue).
 func (c *Coordinator) ReleaseNeeds(commitProj, target project.ProjectInfo) (need []Access, residue []string, err error) {

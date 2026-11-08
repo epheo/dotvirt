@@ -3,6 +3,7 @@ package cluster
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -16,6 +17,7 @@ import (
 // OS tuning (preferences), boot images (DataSources), networks (NADs).
 var (
 	gvrInstancetypes  = schema.GroupVersionResource{Group: "instancetype.kubevirt.io", Version: "v1beta1", Resource: "virtualmachineclusterinstancetypes"}
+	gvrNSInstancetype = schema.GroupVersionResource{Group: "instancetype.kubevirt.io", Version: "v1beta1", Resource: "virtualmachineinstancetypes"}
 	gvrPreferences    = schema.GroupVersionResource{Group: "instancetype.kubevirt.io", Version: "v1beta1", Resource: "virtualmachineclusterpreferences"}
 	gvrDataSources    = schema.GroupVersionResource{Group: "cdi.kubevirt.io", Version: "v1beta1", Resource: "datasources"}
 	gvrNADs           = GVR(model.KindNAD)
@@ -96,6 +98,31 @@ func (c *Client) ListOptions(ctx context.Context) (model.Options, error) {
 	}
 
 	return opts, nil
+}
+
+// Instancetype reads the instancetype a VM's spec.instancetype names: kind
+// VirtualMachineInstancetype in the VM's namespace, the default
+// VirtualMachineClusterInstancetype cluster-wide. Kinds match as KubeVirt
+// matches them, case-insensitive, singular or plural.
+func (c *Client) Instancetype(ctx context.Context, namespace, kind, name string) (map[string]any, error) {
+	dyn, err := c.dynamic()
+	if err != nil {
+		return nil, err
+	}
+	var r dynamic.ResourceInterface
+	switch strings.ToLower(kind) {
+	case "", "virtualmachineclusterinstancetype", "virtualmachineclusterinstancetypes":
+		r = dyn.Resource(gvrInstancetypes)
+	case "virtualmachineinstancetype", "virtualmachineinstancetypes":
+		r = dyn.Resource(gvrNSInstancetype).Namespace(namespace)
+	default:
+		return nil, fmt.Errorf("instancetype kind %q is not one KubeVirt reads", kind)
+	}
+	u, err := r.Get(ctx, name, metav1.GetOptions{})
+	if err != nil {
+		return nil, err
+	}
+	return u.Object, nil
 }
 
 func listAll(ctx context.Context, dyn dynamic.Interface, gvr schema.GroupVersionResource) ([]unstructured.Unstructured, error) {
