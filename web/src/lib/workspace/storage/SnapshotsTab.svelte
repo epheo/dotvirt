@@ -2,6 +2,7 @@
 	import { page } from '$app/state';
 	import { Funnel, X } from '@lucide/svelte';
 	import { api, type Snapshot } from '#lib/api.js';
+	import { vmGate } from '#lib/gates.js';
 	import { vmHref } from '#lib/nav.js';
 	import { action } from '#lib/resource.svelte.js';
 	import { inventory } from '#lib/state/inventory.svelte.js';
@@ -124,6 +125,7 @@
 			<tbody>
 				{#each pageRows as s (`${s.namespace}/${s.name}`)}
 					{@const key = `${s.namespace}/${s.name}`}
+					{@const del = vmGate.snapshotDelete(s.namespace ?? '')}
 					<tr class="hover:bg-select-soft">
 						<td class="{TD} pl-card">
 							<a
@@ -150,7 +152,8 @@
 							<Button
 								variant={armed === key ? 'danger' : 'danger-secondary'}
 								size="sm"
-								disabled={op.busy}
+								disabled={op.busy || !del.ok}
+								title={del.why}
 								aria-label="Delete snapshot {s.name}"
 								onclick={() => remove(s)}>{armed === key ? 'Confirm delete' : 'Delete'}</Button
 							>

@@ -16,7 +16,7 @@
 		api,
 		vmKey,
 		vmRef,
-		type Change,
+		type DriftResult,
 		type DraftItem,
 		type Network,
 		type VM,
@@ -29,7 +29,7 @@
 		vmActions,
 		type VMAction,
 	} from '#lib/actions.js';
-	import { editBlock } from '#lib/authoring.js';
+	import { vmEditGate, vmGate } from '#lib/gates.js';
 	import { type EditSection } from '#lib/editform.js';
 	import { VM_TABS, type VMTab } from '#lib/nav.js';
 	import { action, resource } from '#lib/resource.svelte.js';
@@ -176,12 +176,16 @@
 		inventory.projects.find((p) => p.namespaces.some((n) => n.namespace === vm.namespace))?.gitOps
 			?.revision ?? '',
 	);
-	const driftRes = resource<Change[]>(
+	const driftRes = resource<DriftResult>(
 		() => `${key}|${vm.sync}|${revision}`,
-		() => api.drift(vm.namespace, vm.name).then((d) => (d.drift ? d.changes : [])),
+		() => api.drift(vm.namespace, vm.name),
 		{ reset: true },
 	);
-	const driftChanges = $derived(driftRes.data);
+	const driftChanges = $derived(
+		driftRes.data ? (driftRes.data.drift ? driftRes.data.changes : []) : null,
+	);
+	// The one VM's own resync verdict (an absent or a replaced VM included).
+	const canResync = $derived(!!driftRes.data?.canResync);
 
 	// What it is doing and for how long; the host is a link in the line.
 	const runState = $derived(
@@ -206,8 +210,9 @@
 
 	// adoptVM owns its toasts; the run only feeds the busy state.
 	const adopt = () => reconcileOp.run(() => adoptVM(vm));
-	const canAuthor = $derived(inventory.canAuthor(vm.namespace));
-	const block = $derived(editBlock(vm, inventory.authoring(vm.namespace)));
+	// Power, Edit and adopt stage a change to this VM: its own capability field.
+	const update = $derived(vmGate.update(vm.namespace));
+	const block = $derived(vmEditGate(vm).why);
 
 	function resync() {
 		return reconcileOp.run(async () => {
@@ -267,7 +272,7 @@
 						<button
 							onclick={() => handleAction(t.action)}
 							disabled={!t.action.enabled(vm) || runtimeOp.busy}
-							title={t.action.title ?? ''}
+							title={t.action.why?.(vm) || t.action.title || ''}
 							class="flex items-center gap-1.5 rounded border border-line-strong bg-panel px-2.5 py-1 text-xs font-medium text-ink-soft hover:bg-inset disabled:opacity-45 disabled:hover:bg-panel"
 						>
 							<Icon size={13} />
@@ -345,11 +350,13 @@
 				{stagedItem}
 				{driftChanges}
 				reconciling={reconcileOp.busy}
-				onadopt={canAuthor ? adopt : undefined}
-				onresync={resync}
-				onconsole={() => ontab?.('console')}
-				onedit={canAuthor ? () => openEdit() : undefined}
-				onmigrate={() => (ui.modal = { kind: 'migrateVM', vm: vmRef(vm) })}
+				onadopt={update.ok ? adopt : undefined}
+				onresync={canResync ? resync : undefined}
+				onconsole={vmGate.console(vm.namespace).ok ? () => ontab?.('console') : undefined}
+				onedit={update.ok && vm.sourceFile ? () => openEdit() : undefined}
+				onmigrate={vmGate.migrate(vm.namespace).ok
+					? () => (ui.modal = { kind: 'migrateVM', vm: vmRef(vm) })
+					: undefined}
 			/>
 		{:else if tab === 'monitor'}
 			<TabBar
@@ -391,9 +398,14 @@
 				<Snapshots {vm} />
 			{/key}
 		{:else}
-			{#key key}
-				<Console {vm} />
-			{/key}
+			{@const con = vmGate.console(vm.namespace)}
+			{#if con.ok}
+				{#key key}
+					<Console {vm} />
+				{/key}
+			{:else}
+				<p class="text-[13px] text-ink-faint">{con.why}</p>
+			{/if}
 		{/if}
 	</div>
 </div>

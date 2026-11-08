@@ -5,6 +5,7 @@
 	import { liveMigrates } from '#lib/create.js';
 	import { friendlyError } from '#lib/format.js';
 	import { resource } from '#lib/resource.svelte.js';
+	import { caps } from '#lib/state/caps.svelte.js';
 	import { inventory } from '#lib/state/inventory.svelte.js';
 	import { ui } from '#lib/state/ui.svelte.js';
 	import { NAME_HINT, validName } from '#lib/validate.js';
@@ -56,13 +57,10 @@
 	// What the caller may do in the picked namespace, asked when it changes. A
 	// missing answer or field reads no: Upload waits for a yes, and the
 	// boot-image choice shows only where the route would take it.
-	const caps = resource(
-		() => namespace,
-		async (ns) => (ns ? ((await api.capabilities(ns)).namespace ?? null) : null),
-		{ reset: true },
+	const canImage = $derived(!!(namespace && caps.ns(namespace)?.bootImageCreate));
+	const upload = $derived(
+		caps.nsGate(namespace, (n) => n.dataVolumeCreate, `You may not upload images in ${namespace}.`),
 	);
-	const canImage = $derived(!!caps.data?.bootImageCreate);
-	const canUpload = $derived(!!caps.data?.dataVolumeCreate);
 	// svelte-ignore state_referenced_locally
 	let offerImage = $state(bootImage ?? true);
 	const asBoot = $derived(offerImage && canImage);
@@ -87,9 +85,7 @@
 	const missing = $derived.by(() => {
 		const m: string[] = [];
 		// Rights first: no file is worth picking where the upload is refused.
-		if (namespace && caps.data && !canUpload) m.push(`You may not upload images in ${namespace}`);
-		else if (namespace && !caps.data)
-			m.push(caps.loading ? 'Checking your rights' : 'Your rights could not be read');
+		if (namespace && !upload.ok) m.push(upload.why);
 		if (!file) m.push('Pick an image file');
 		if (!name) m.push('Name the disk');
 		else if (!validName(name)) m.push('The name needs lowercase letters, digits and -');

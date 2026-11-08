@@ -21,6 +21,8 @@
 	import { inventory } from '#lib/state/inventory.svelte.js';
 	import { reviewCache } from '#lib/state/reviewCache.svelte.js';
 	import { storage } from '#lib/state/storage.svelte.js';
+	import { clusterGate } from '#lib/gates.js';
+	import { caps } from '#lib/state/caps.svelte.js';
 	import { lastSection } from '#lib/state/nav.svelte.js';
 	import { session } from '#lib/state/session.svelte.js';
 	import { tray } from '#lib/state/tray.svelte.js';
@@ -76,6 +78,7 @@
 			ui.reset();
 			catalog.reset();
 			storage.reset();
+			caps.reset();
 			tray.reset();
 		}
 	});
@@ -130,6 +133,15 @@
 		return () => owner.abort();
 	});
 
+	// What the caller may do can move with a merge (a grant, a new platform
+	// object) or a network or policy change: the same fingerprints drop every
+	// cached answer, and each control asks again.
+	$effect(() => {
+		if (!session.user) return;
+		void `${inventory.networksVersion}|${inventory.tasksVersion}`;
+		untrack(() => caps.invalidate());
+	});
+
 	// The options catalog, once per session: the storage lens groups classless
 	// disks under the real default class, read views resolve instancetype sizing.
 	$effect(() => {
@@ -181,7 +193,7 @@
 	$effect(() => {
 		inventory.projectKey;
 		inventory.proposalsKey;
-		inventory.canManage; // platform authors also carry a platform draft
+		void clusterGate.platform().ok; // platform stagers also carry a platform draft
 		if (session.user && streamed) untrack(() => drafts.refresh());
 	});
 </script>
@@ -265,7 +277,7 @@
 					{:else if inventory.projects.length === 0 && inventory.adoptable.length === 0 && treeSection !== 'catalog' && treeSection !== 'changes'}
 						<div class="space-y-3 p-6 text-center">
 							<p class="text-xs text-side-dim">No projects visible.</p>
-							{#if inventory.canNamespace}
+							{#if clusterGate.namespaceCreate().ok}
 								<Button size="sm" onclick={() => (ui.modal = { kind: 'newProject' })}>
 									<FolderPlus size={14} /> Create your first project
 								</Button>

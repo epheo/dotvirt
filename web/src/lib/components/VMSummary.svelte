@@ -46,8 +46,10 @@
 		reconciling: boolean;
 		// Absent when the caller may not stage in this namespace.
 		onadopt?: () => void;
-		onresync: () => void;
-		onconsole: () => void;
+		// Absent when this VM's resync is not the caller's to run.
+		onresync?: () => void;
+		// Absent when the caller may not open this VM's console.
+		onconsole?: () => void;
 		// Opens Edit settings (the card header's next action); absent = read-only host.
 		onedit?: () => void;
 		// Opens the live-migration target picker (the Placement card's action).
@@ -181,7 +183,7 @@
 	<div class="flex min-w-0 flex-col gap-4">
 		<InfoCard title="Guest">
 			{#snippet action()}
-				{#if vm.phase === 'Running'}
+				{#if onconsole && vm.phase === 'Running'}
 					<Button variant="link" size="sm" onclick={onconsole}>Open console</Button>
 				{/if}
 			{/snippet}
@@ -222,7 +224,9 @@
 				<Row label="Eviction strategy" value={vm.evictionStrategy || 'Cluster default'} />
 			</dl>
 		</InfoCard>
-		<ConsolePreview {vm} onopen={() => onconsole()} />
+		{#if onconsole}
+			<ConsolePreview {vm} onopen={onconsole} />
+		{/if}
 	</div>
 </div>
 
@@ -284,8 +288,10 @@
 					{/if}
 					<button
 						onclick={onresync}
-						disabled={reconciling}
-						title="Trigger ArgoCD to reconcile the cluster back to git"
+						disabled={reconciling || !onresync}
+						title={onresync
+							? 'Trigger ArgoCD to reconcile the cluster back to git'
+							: 'You may not resync this VM.'}
 						class="rounded border border-warn/70 bg-panel px-2.5 py-1 text-xs font-medium text-warn-ink hover:bg-warn-soft disabled:opacity-50"
 					>
 						Re-sync from git (main→running)

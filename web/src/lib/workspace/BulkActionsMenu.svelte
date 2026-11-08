@@ -9,6 +9,8 @@
 		x,
 		y,
 		count,
+		powerWhy = '',
+		deleteWhy = '',
 		onclose,
 		onpower,
 		ondelete,
@@ -17,6 +19,9 @@
 		x: number;
 		y: number;
 		count: number;
+		// Why none of the selection may be powered or deleted; '' when some may.
+		powerWhy?: string;
+		deleteWhy?: string;
 		onclose: () => void;
 		onpower: (target: 'On' | 'Off') => void;
 		ondelete: () => void;
@@ -30,12 +35,16 @@
 			{count} VMs selected
 		</div>
 		<MenuItem
+			disabled={!!powerWhy}
+			title={powerWhy}
 			onclick={() => {
 				onclose();
 				onpower('On');
 			}}>Power On (staged)</MenuItem
 		>
 		<MenuItem
+			disabled={!!powerWhy}
+			title={powerWhy}
 			onclick={() => {
 				onclose();
 				onpower('Off');
@@ -44,6 +53,8 @@
 		<div class="my-1 border-t border-line-soft"></div>
 		<MenuItem
 			danger
+			disabled={!!deleteWhy}
+			title={deleteWhy}
 			onclick={() => {
 				onclose();
 				ondelete();

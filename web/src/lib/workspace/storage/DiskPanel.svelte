@@ -9,6 +9,7 @@
 		X,
 	} from '@lucide/svelte';
 	import { api } from '#lib/api.js';
+	import { vmGate } from '#lib/gates.js';
 	import { quantity } from '#lib/format.js';
 	import { hrefForScope, storageHref } from '#lib/nav.js';
 	import { itemKey } from '#lib/review.js';
@@ -114,6 +115,11 @@
 		});
 	}
 	const snapshotsAllowed = $derived(here.snapshots !== false);
+	// The caller's own rights on this VM: the move stages a VM change, the
+	// snapshot and the restore run under their token.
+	const move = $derived(vmGate.update(vm.namespace));
+	const take = $derived(vmGate.snapshotTake(vm.namespace));
+	const back = $derived(vmGate.snapshotRestore(vm.namespace));
 </script>
 
 {#snippet verdict(v: boolean | null, yes: string, no: string)}
@@ -291,13 +297,15 @@
 				<Button
 					variant="outline"
 					size="sm"
-					disabled={op.busy || !plan?.edits.length}
-					title={plan?.blocked[0]?.reason ?? ''}
+					disabled={op.busy || !plan?.edits.length || !move.ok}
+					title={move.why || (plan?.blocked[0]?.reason ?? '')}
 					onclick={stageMove}><ArrowLeftRight size={14} />Move disk</Button
 				>
 				<StageChip kind="pr" />
 			</div>
-			{#if stagedTo}
+			{#if !move.ok}
+				<p class="text-xs leading-4 text-ink-faint">{move.why}</p>
+			{:else if stagedTo}
 				<p class="text-xs leading-4 text-ink-faint">
 					<strong class="text-ink-soft">Staged to {stagedTo}</strong> in the {row.project} draft.
 					<button
@@ -341,13 +349,15 @@
 				<Button
 					variant="secondary"
 					size="sm"
-					disabled={op.busy || !snapshotsAllowed}
+					disabled={op.busy || !snapshotsAllowed || !take.ok}
 					onclick={snapshotNow}><Camera size={14} />Snapshot now</Button
 				>
 				<StageChip kind="now" />
 			</div>
 			<p class="text-xs leading-4 text-ink-faint">
-				{#if !snapshotsAllowed}
+				{#if !take.ok}
+					{take.why}
+				{:else if !snapshotsAllowed}
 					{row.storageClass} cannot take snapshots.
 				{:else}
 					Snapshots {vm.name} now{row.running ? ', while it runs' : ''}. No pull request.
@@ -361,13 +371,15 @@
 					<Button
 						variant={armed ? 'danger' : 'secondary'}
 						size="sm"
-						disabled={op.busy || row.running}
+						disabled={op.busy || row.running || !back.ok}
+						title={back.why}
 						aria-label="Restore to {point.name}"
 						onclick={restore}><RotateCcw size={14} />{armed ? 'Confirm restore' : 'Restore'}</Button
 					>
 					<StageChip kind="now" />
 				</div>
 				<div class="flex flex-col gap-1">
+					{#if !back.ok}<p class="text-xs leading-4 text-ink-faint">{back.why}</p>{/if}
 					<Consequence tone="danger" size="sm"
 						>Puts {vm.name} back to {point.name}, every disk it captured. Writes since then are
 						lost.</Consequence
