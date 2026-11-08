@@ -139,3 +139,11 @@ export const clusterGate = {
 	rebalanceOff: () => cluster((c) => c.drsDisable, 'turn off rebalancing'),
 	oauthClient: () => cluster((c) => c.oauthClient, 'finish single sign-on'),
 };
+
+// A host's maintenance verbs: the host's own read carries the server's answer
+// (NodeInfo.canCordon, the node-patch check its routes run).
+export function hostGate(info: { canCordon: boolean }): Gate {
+	return info.canCordon
+		? { ok: true, why: '' }
+		: { ok: false, why: 'You may not cordon or drain hosts.' };
+}

@@ -9,6 +9,7 @@ vi.mock('#lib/api.js', () => api);
 import { ACCESS_UNKNOWN, NOT_IN_GIT } from './authoring';
 import {
 	clusterGate,
+	hostGate,
 	objectGate,
 	projectGate,
 	repoGate,
@@ -130,5 +131,15 @@ describe('templateSaveGate', () => {
 			namespace: { namespace: 'web', project: { name: 'p', templateEdit: false } },
 		});
 		expect(templateSaveGate('web').why).toBe("You may not change this project's templates.");
+	});
+});
+
+describe('hostGate', () => {
+	it("reads the host read's own answer", () => {
+		expect(hostGate({ canCordon: true })).toEqual({ ok: true, why: '' });
+		expect(hostGate({ canCordon: false })).toEqual({
+			ok: false,
+			why: 'You may not cordon or drain hosts.',
+		});
 	});
 });

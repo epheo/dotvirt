@@ -1,4 +1,11 @@
-import { api, type HostCapacity, type Node, type NodeTarget } from '#lib/api.js';
+import {
+	api,
+	type HostCapacity,
+	type HostLoad,
+	type Node,
+	type NodeInfo,
+	type NodeTarget,
+} from '#lib/api.js';
 import { metricsGap } from '#lib/metrics.js';
 import { resource, type Resource } from '#lib/resource.svelte.js';
 
@@ -33,4 +40,47 @@ export function memoryRoom(active: () => boolean): Resource<Room | null> {
 			return { cap, nodes };
 		},
 	);
+}
+
+export type HostFacts = {
+	nodes: Resource<Node[] | null>;
+	cap: Resource<HostCapacity | null>;
+	load: Resource<HostLoad | null>;
+	info: Resource<NodeInfo | null>;
+};
+
+// What a Hosts page reads about its hosts, once per page, for its header and
+// its Summary alike: node state, capacity, live load, and on a host's page
+// that host's own read (whether the caller may cordon it). on() is false
+// outside the Hosts section, where nothing is read. The metrics feeds poll
+// only while live() says something shows them. A host switch reads the node
+// list again, so the header's state is that of the host now in view.
+export function hostFacts(opts: {
+	on: () => boolean;
+	node: () => string;
+	live: () => boolean;
+}): HostFacts {
+	const idle = () => Promise.resolve(null);
+	const poll = () => (opts.on() && opts.live() ? 30_000 : 0);
+	return {
+		nodes: resource<Node[] | null>(
+			() => (opts.on() ? `nodes|${opts.node()}` : ''),
+			(k) => (k ? api.nodes() : idle()),
+		),
+		cap: resource<HostCapacity | null>(
+			() => (opts.on() ? 'capacity' : ''),
+			(k) => (k ? api.capacity() : idle()),
+			{ poll },
+		),
+		load: resource<HostLoad | null>(
+			() => (opts.on() && !opts.node() ? 'load' : ''),
+			(k) => (k ? api.hostLoad() : idle()),
+			{ poll },
+		),
+		info: resource<NodeInfo | null>(
+			() => (opts.on() ? opts.node() : ''),
+			(k) => (k ? api.nodeInfo(k) : idle()),
+			{ reset: true },
+		),
+	};
 }
