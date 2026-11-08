@@ -578,6 +578,9 @@ func (d *planeDraft) NamespaceNeeds(project.ProjectInfo, project.ProjectInfo, js
 func (d *planeDraft) AdoptNeeds(project.ProjectInfo, project.ProjectInfo, []string) ([]changeset.Access, error) {
 	return nil, nil
 }
+func (d *planeDraft) SyncAccessNeeds(project.ProjectInfo, project.ProjectInfo) ([]changeset.Access, error) {
+	return nil, nil
+}
 func (d *planeDraft) ReleaseNeeds(project.ProjectInfo, project.ProjectInfo) ([]changeset.Access, []string, error) {
 	return nil, d.releaseResidue, nil
 }
