@@ -88,10 +88,12 @@ type Bus struct {
 	// broad[k] counts unkeyed Publish(k) calls; it is part of every key's version,
 	// so an unkeyed publish moves every key of that kind.
 	broad [kindCount]atomic.Uint64
-	// seq[k] counts keyed PublishKey(k) calls, and marks[k][key] is the count the
-	// key's last one reached: a key's version is its mark plus broad[k]. Both
-	// move under keyMu, so a mark is readable once seq counts it (see KeySeq).
+	// keyed[k][key] counts PublishKey(k, key) calls. seq[k] counts every
+	// PublishKey(k), and marks[k][key] is the count the key's last one
+	// reached. All move under keyMu, so a mark is readable once seq counts it
+	// (see KeySeq).
 	keyMu sync.Mutex
+	keyed [kindCount]map[string]uint64
 	seq   [kindCount]atomic.Uint64
 	marks [kindCount]map[string]uint64
 
@@ -132,9 +134,10 @@ func (b *Bus) PublishKey(k Kind, key string) {
 	}
 	b.versions[k].Add(1)
 	b.keyMu.Lock()
-	if b.marks[k] == nil {
-		b.marks[k] = map[string]uint64{}
+	if b.keyed[k] == nil {
+		b.keyed[k], b.marks[k] = map[string]uint64{}, map[string]uint64{}
 	}
+	b.keyed[k][key]++
 	n := b.seq[k].Load() + 1
 	b.marks[k][key] = n
 	b.seq[k].Store(n)
@@ -149,7 +152,7 @@ func (b *Bus) KeyVersion(k Kind, key string) uint64 {
 		return 0
 	}
 	b.keyMu.Lock()
-	v := b.marks[k][key]
+	v := b.keyed[k][key]
 	b.keyMu.Unlock()
 	return v + b.broad[k].Load()
 }

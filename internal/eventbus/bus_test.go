@@ -168,11 +168,11 @@ func TestPublishKeyConcurrent(t *testing.T) {
 	}
 	<-done
 	<-done
+	if got := b.KeyVersion(GitChanged, "a") + b.KeyVersion(GitChanged, "b"); got != 2000 {
+		t.Errorf("keyed versions sum = %d, want 2000", got)
+	}
 	if got := b.KeySeq(GitChanged); got != 2000 {
 		t.Errorf("KeySeq = %d after 2000 keyed publishes", got)
-	}
-	if last := max(b.KeyVersion(GitChanged, "a"), b.KeyVersion(GitChanged, "b")); last != 2000 {
-		t.Errorf("the last key published reads %d, want the count it reached (2000)", last)
 	}
 }
 
