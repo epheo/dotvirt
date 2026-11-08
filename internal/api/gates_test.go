@@ -253,11 +253,11 @@ func gateCases() []gateCase {
 		imperative("snapshot restore", verbCreate, "snapshot.kubevirt.io", "virtualmachinerestores", "", func(n model.NamespaceCaps) bool { return n.SnapshotRestore }),
 		imperative("snapshot delete", verbDelete, "snapshot.kubevirt.io", "virtualmachinesnapshots", "", func(n model.NamespaceCaps) bool { return n.SnapshotDelete }),
 		imperative("clone", verbCreate, "clone.kubevirt.io", "virtualmachineclones", "", func(n model.NamespaceCaps) bool { return n.Clone }),
-		// An upload creates its DataVolume, then its token request.
-		{name: "upload", needs: []grant{
-			{verb: verbCreate, group: "cdi.kubevirt.io", resource: "datavolumes", ns: "team-a-dev"},
-			{verb: verbCreate, group: "upload.cdi.kubevirt.io", resource: "uploadtokenrequests", ns: "team-a-dev"},
-		}, cap: nsCap(func(n model.NamespaceCaps) bool { return n.DataVolumeCreate })},
+		// An upload creates its DataVolume, then its token request: gated whole
+		// before either is made.
+		{name: "upload", call: route(http.MethodPost, "/api/uploads", `{"namespace":"team-a-dev","name":"img","size":"1Gi"}`),
+			routeNeeds: bootImageGrants[:2], needs: bootImageGrants[:2],
+			cap: nsCap(func(n model.NamespaceCaps) bool { return n.DataVolumeCreate })},
 		// Add a boot image: the upload plus its DataSource, gated whole before
 		// anything is made, so a token without datasources create reads the
 		// field false and is refused by the route.
