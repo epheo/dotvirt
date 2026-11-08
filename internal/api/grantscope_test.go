@@ -11,6 +11,7 @@ import (
 	"time"
 
 	authzv1 "k8s.io/api/authorization/v1"
+	corev1 "k8s.io/api/core/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -459,5 +460,50 @@ func TestForgottenNamespaceNeverRevalidates(t *testing.T) {
 				t.Fatal("the cached allow revalidated across the forget")
 			}
 		})
+	}
+}
+
+// relabel makes ns a project or not, and waits for the snapshot to agree.
+func relabel(t *testing.T, g *grantRig, ns string, project bool) {
+	t.Helper()
+	obj := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: ns}}
+	if project {
+		obj.Labels = map[string]string{"dotvirt.io/project": ns}
+	}
+	if _, err := g.kube.CoreV1().Namespaces().Update(context.Background(), obj, metav1.UpdateOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	waitUntil(t, "the label to reach the store", func() bool { return g.s.state.Holds("", "namespaces", "", ns) == project })
+}
+
+// A namespace leaves the projects, its grant is revoked there (published as
+// OtherRBACChanged), and it comes back: with or without a read between,
+// neither the visible set nor a verdict cached in it keeps the old allow.
+func TestCrossKindRevocation(t *testing.T) {
+	for _, between := range []bool{false, true} {
+		g := newGrantRig(t, []string{"z", "y"}, userBinding("z", "carol-edit", "carol"))
+		tenant := newAsking(readsVMsIn("z", "y"))
+		visibleOf(t, g.s, "tok", tenant.c)
+		q := question{Verb: verbList, Group: "kubevirt.io", Resource: "virtualmachines", Namespace: "z"}
+		if !g.ask("tok", tenant, q) {
+			t.Fatal("the grant reads denied")
+		}
+		relabel(t, g, "z", false)
+		if between {
+			visibleOf(t, g.s, "tok", tenant.c)
+		}
+		other := g.bus.KeySeq(eventbus.OtherRBACChanged)
+		tenant.set(readsVMsIn("y"), nil)
+		if err := g.kube.RbacV1().RoleBindings("z").Delete(context.Background(), "carol-edit", metav1.DeleteOptions{}); err != nil {
+			t.Fatal(err)
+		}
+		waitUntil(t, "the revocation's publish", func() bool { return g.bus.KeySeq(eventbus.OtherRBACChanged) != other })
+		relabel(t, g, "z", true)
+		if got := visibleOf(t, g.s, "tok", tenant.c); got["z"] {
+			t.Errorf("between=%v: the visible set kept the revoked z: %v", between, got)
+		}
+		if g.ask("tok", tenant, q) {
+			t.Errorf("between=%v: the verdict cached in z kept the revoked allow", between)
+		}
 	}
 }
