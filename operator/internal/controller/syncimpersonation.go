@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"maps"
+	"path"
 	"slices"
 	"strings"
 	"sync"
@@ -40,6 +41,9 @@ type syncTier struct {
 	// appProjects are the AppProjects the pass rendered: an Application in
 	// any other is not dotvirt's.
 	appProjects map[string]bool
+	// appNamespaces are the namespace patterns the instance reads
+	// Applications from: its own namespace and its sourceNamespaces.
+	appNamespaces []string
 }
 
 // syncProbeAccount is no project's sync account (tenancy.SyncAccount names
@@ -118,6 +122,7 @@ func (r *DotvirtReconciler) syncImpersonation(ctx context.Context, dv *dotvirtv1
 		}
 		return metav1.ConditionTrue, "Enabled", fmt.Sprintf("on (%s); each Application syncs as its tier's own ServiceAccount", where)
 	}
+	rc.sync.appNamespaces = instanceAppNamespaces(rc.argoNS, inst)
 	v, err := r.syncVerdict(ctx, dv, rc, scopeGate)
 	if err != nil {
 		return failed(err)
@@ -233,7 +238,7 @@ func syncInputs(generation int64, rc *reconcileCtx, scope syncScope) string {
 	for _, account := range slices.Sorted(maps.Keys(rc.sync.accounts)) {
 		fmt.Fprintf(&b, "%s=%s\n", account, strings.Join(rc.sync.accounts[account], ","))
 	}
-	fmt.Fprintf(&b, "%s\n", strings.Join(slices.Sorted(maps.Keys(rc.sync.appProjects)), ","))
+	fmt.Fprintf(&b, "%s\n%s\n", strings.Join(slices.Sorted(maps.Keys(rc.sync.appProjects)), ","), strings.Join(rc.sync.appNamespaces, ","))
 	sum := sha256.Sum256([]byte(b.String()))
 	return hex.EncodeToString(sum[:])
 }
@@ -277,7 +282,7 @@ func (r *DotvirtReconciler) evaluateSync(ctx context.Context, rc *reconcileCtx, 
 		checks = syncChecks(rc)
 	}
 	if scope == scopeGate {
-		foreign, err := r.foreignApplications(ctx, rc.sync.appProjects)
+		foreign, err := r.foreignApplications(ctx, rc.sync)
 		if err != nil {
 			return v, err
 		}
@@ -366,16 +371,33 @@ func (r *DotvirtReconciler) allowed(ctx context.Context, saNS, account string, a
 	return sar.Status.Allowed, nil
 }
 
-// foreignApplications are the Applications, in any namespace, whose
-// AppProject the pass did not render, as ns/name in name order.
-func (r *DotvirtReconciler) foreignApplications(ctx context.Context, appProjects map[string]bool) ([]string, error) {
+// instanceAppNamespaces are the namespace patterns the instance reads
+// Applications from: argoNS, and the ArgoCD resource's sourceNamespaces
+// (Applications in any namespace). Applications elsewhere are another
+// instance's, which the setting does not reach.
+func instanceAppNamespaces(argoNS string, inst *unstructured.Unstructured) []string {
+	out := []string{argoNS}
+	if inst != nil {
+		more, _, _ := unstructured.NestedStringSlice(inst.Object, "spec", "sourceNamespaces")
+		out = append(out, more...)
+	}
+	return out
+}
+
+// foreignApplications are the instance's Applications (tier.appNamespaces)
+// whose AppProject the pass did not render, as ns/name in name order.
+func (r *DotvirtReconciler) foreignApplications(ctx context.Context, tier syncTier) ([]string, error) {
 	apps := unstructuredList(install.ArgoGVK("Application"))().(*unstructured.UnstructuredList)
 	if err := r.reader().List(ctx, apps); err != nil {
 		return nil, fmt.Errorf("list Applications: %w", err)
 	}
 	var out []string
 	for _, a := range apps.Items {
-		if p, _, _ := unstructured.NestedString(a.Object, "spec", "project"); !appProjects[p] {
+		ours := slices.ContainsFunc(tier.appNamespaces, func(pattern string) bool {
+			ok, _ := path.Match(pattern, a.GetNamespace())
+			return ok
+		})
+		if p, _, _ := unstructured.NestedString(a.Object, "spec", "project"); ours && !tier.appProjects[p] {
 			out = append(out, a.GetNamespace()+"/"+a.GetName())
 		}
 	}

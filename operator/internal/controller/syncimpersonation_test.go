@@ -247,6 +247,9 @@ func TestSyncImpersonationFlipAndRollback(t *testing.T) {
 func TestSyncImpersonationRefusals(t *testing.T) {
 	foreignApp := argoObj("Application", "argocd", "billing", nil)
 	foreignApp.Object["spec"] = map[string]any{"project": "default"}
+	// Another instance's Application, which the setting does not reach.
+	otherInstance := argoObj("Application", "team-argo", "web", nil)
+	otherInstance.Object["spec"] = map[string]any{"project": "default"}
 	sharedApp := application("dotvirt-team-a", install.TenantsProjectName)
 	sharedTier := argoObj("AppProject", "argocd", install.TenantsProjectName, install.Labels(testCR()))
 	own := map[string][]string{"dotvirt-p-team-a": {"team-a"}}
@@ -293,6 +296,16 @@ func TestSyncImpersonationRefusals(t *testing.T) {
 	reconcileOnce(t, newReconciler(c, depsOK), dv)
 	if extraConfig(t, c)[install.SyncImpersonationKey] != "true" {
 		t.Error("ignoreForeignApplications did not proceed")
+	}
+
+	// Another instance's Applications do not hold this one back.
+	dv = testCR()
+	dv.Spec.ArgoCD.SyncImpersonation.Enabled = true
+	c = testBuilder(t).WithObjects(dv, otherInstance, argoCDInstance(nil), projectNS("team-a", "team-a", "dotvirt/team-a.git")).
+		WithInterceptorFuncs(reviews(granted(own), &n)).Build()
+	reconcileOnce(t, newReconciler(c, depsOK), dv)
+	if extraConfig(t, c)[install.SyncImpersonationKey] != "true" {
+		t.Errorf("held back by another instance's Application: %+v", syncCond(t, c, dv))
 	}
 }
 

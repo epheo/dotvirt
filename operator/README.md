@@ -232,7 +232,8 @@ ServiceAccount stops syncing. So the operator turns it on only when:
 - the platform account may create Namespaces, ClusterUserDefinedNetworks and
   RoleBindings, and bind `admin` and `dotvirt-tenant-egress`;
 - no Application still uses the shared `dotvirt-tenants` AppProject;
-- the instance syncs no Application outside dotvirt's AppProjects, unless
+- the instance syncs no Application outside dotvirt's AppProjects (in its namespace
+  or its `sourceNamespaces`), unless
   `spec.argocd.syncImpersonation.ignoreForeignApplications: true` accepts that
   those stop syncing until their AppProjects name a ServiceAccount.
 
