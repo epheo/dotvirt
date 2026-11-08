@@ -49,6 +49,9 @@ func (c *Coordinator) Propose(id auth.Identity, proj project.ProjectInfo, req mo
 	// Staged earlier, perhaps by rights since withdrawn: every entry passes
 	// the gate again, against the base it now lands on. A copy is gated: the
 	// entries are unstaged after the commit only while they equal the draft's.
+	if err := requirePinned(entries); err != nil {
+		return model.ProposeResult{}, err
+	}
 	if err := c.gate(id, proj, slices.Clone(entries)); err != nil {
 		return model.ProposeResult{}, run.commitFailed(err, entries, 0)
 	}
@@ -207,7 +210,10 @@ func (r *proposeRun) extend(pr forge.PR, rec draft.Proposal, hasRec bool) (model
 	// the commit's own pin check would answer it.
 	var res git.CommitResult
 	var moved *git.BaseMovedError
-	err = c.gate(r.id, r.proj, slices.Clone(rec.Entries))
+	err = requirePinned(rec.Entries)
+	if err == nil {
+		err = c.gate(r.id, r.proj, slices.Clone(rec.Entries))
+	}
 	if err != nil && !errors.As(err, &moved) {
 		return model.ProposeResult{}, fmt.Errorf("%w (carried by pull request #%d)", err, pr.Number)
 	}

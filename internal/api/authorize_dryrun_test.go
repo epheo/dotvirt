@@ -96,7 +96,7 @@ func TestAuthorizeWeighsARoleBindingByDryRun(t *testing.T) {
 		return a.Resource == "rolebindings" || a.Verb == "bind" && a.Name == "admin"
 	}
 	var mu sync.Mutex
-	var calls []string
+	var calls, sent []string
 	answer := func(w http.ResponseWriter, r *http.Request) {
 		body, _ := io.ReadAll(r.Body)
 		var rb rbacv1.RoleBinding
@@ -106,6 +106,7 @@ func TestAuthorizeWeighsARoleBindingByDryRun(t *testing.T) {
 		}
 		mu.Lock()
 		calls = append(calls, r.Method+" "+rb.Name+" dryRun="+r.URL.Query().Get("dryRun"))
+		sent = append(sent, string(body))
 		mu.Unlock()
 		switch {
 		case bearer(r) != tenantToken || rb.RoleRef.Name != "admin":
@@ -145,6 +146,10 @@ func TestAuthorizeWeighsARoleBindingByDryRun(t *testing.T) {
 	if got := took(); !slices.Equal(got, []string{"POST owners dryRun=All"}) {
 		t.Errorf("calls %v, want one dry-run create", got)
 	}
+	if mu.Lock(); len(sent) != 1 || sent[0] != grant("team-a-dev", "owners", "admin").Object {
+		t.Errorf("sent %q, want the binding's own bytes", sent)
+	}
+	mu.Unlock()
 	if err := s.Authorize(id, []changeset.Access{grant("team-a-dev", "owners", "admin")}); err != nil || len(took()) != 0 {
 		t.Errorf("a repeat: %v, want the cached verdict", err)
 	}
@@ -172,5 +177,85 @@ func TestAuthorizeWeighsARoleBindingByDryRun(t *testing.T) {
 	}
 	if err := s.Authorize(id, []changeset.Access{grant("fresh", "root", "cluster-admin")}); !errors.Is(err, model.ErrForbidden) {
 		t.Errorf("an escalation in a new namespace: %v", err)
+	}
+}
+
+// A create the snapshot cannot place is dry-run as the caller, the exact
+// bytes sent: an existing object (a namespace without the project label) is
+// asked as the update Argo makes of it, so a caller who may create
+// namespaces but not update them cannot join one; a new one is a create;
+// the verdict is cached.
+func TestAuthorizeDryRunsACreateTheSnapshotCannotPlace(t *testing.T) {
+	fc := newFakeCluster(t)
+	q := &questions{}
+	fc.ssar = func(token string, a *authzv1.ResourceAttributes) bool {
+		if token != tenantToken {
+			return false
+		}
+		q.add(a)
+		return a.Verb != "update"
+	}
+	var mu sync.Mutex
+	var bodies []string
+	created := func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		mu.Lock()
+		bodies = append(bodies, r.URL.Query().Get("dryRun")+" "+string(body))
+		mu.Unlock()
+		if strings.Contains(string(body), `"existing"`) {
+			writeStatus(w, http.StatusConflict, metav1.StatusReasonAlreadyExists)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write(body)
+	}
+	fc.on(http.MethodPost, "/api/v1/namespaces", created)
+	fc.on(http.MethodPost, "/apis/cdi.kubevirt.io/v1beta1/namespaces/team-a-dev/datavolumes", created)
+	s := fc.server(nil, Config{})
+	id := auth.Identity{Token: tenantToken, Username: "tenant"}
+	namespace := func(name string) changeset.Access {
+		return changeset.Access{Verb: "create", Resource: "namespaces", Name: name,
+			Object: `{"apiVersion":"v1","kind":"Namespace","metadata":{"labels":{"dotvirt.io/project":"team-b"},"name":"` + name + `"}}`}
+	}
+	took := func() []string {
+		mu.Lock()
+		defer mu.Unlock()
+		out := bodies
+		bodies = nil
+		return out
+	}
+
+	err := s.Authorize(id, []changeset.Access{namespace("existing")})
+	if !errors.Is(err, model.ErrForbidden) || !strings.Contains(err.Error(), "namespaces existing") {
+		t.Errorf("joining an existing namespace without update: %v", err)
+	}
+	if got := took(); len(got) != 1 || got[0] != "All "+namespace("existing").Object {
+		t.Errorf("sent %q, want the object's own bytes, dry run", got)
+	}
+	if got := q.take(); !slices.Equal(got, []string{"update namespaces ", "update namespaces existing"}) {
+		t.Errorf("asked %v, want the update", got)
+	}
+
+	if err := s.Authorize(id, []changeset.Access{namespace("fresh")}); err != nil {
+		t.Errorf("a new namespace: %v", err)
+	}
+	disk := changeset.Access{Verb: "create", Group: "cdi.kubevirt.io", Resource: "datavolumes", Namespace: "team-a-dev", Name: "disk",
+		Object: `{"apiVersion":"cdi.kubevirt.io/v1beta1","kind":"DataVolume","metadata":{"name":"disk","namespace":"team-a-dev"}}`}
+	for range 2 {
+		if err := s.Authorize(id, []changeset.Access{disk}); err != nil {
+			t.Errorf("a DataVolume: %v", err)
+		}
+	}
+	if got := took(); len(got) != 2 {
+		t.Errorf("dry runs %q, want one per new object, the repeat cached", got)
+	}
+}
+
+// The role a binding grants is read as the apiserver reads it: by its exact
+// key, never a differently cased decoy.
+func TestRoleRefIsReadCaseSensitively(t *testing.T) {
+	kind, name := roleRefOf(`{"roleref":{"kind":"ClusterRole","name":"view"},"roleRef":{"kind":"ClusterRole","name":"cluster-admin"}}`)
+	if kind != "ClusterRole" || name != "cluster-admin" {
+		t.Errorf("roleRef = %s %s, want ClusterRole cluster-admin", kind, name)
 	}
 }

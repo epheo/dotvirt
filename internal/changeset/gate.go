@@ -142,7 +142,15 @@ func (c *Coordinator) entryAccess(read *git.Repo, idx declaredIndex, proj projec
 		}
 		return fileAccess(proj, idx, fileChange{path: e.SourceFile, before: before, remove: true}, nil)
 	case fieldWrite:
-		return c.fieldEditAccess(*e), nil
+		ref, ok := declaredRef(idx, draft.ResourceVM, e.Namespace, e.Name)
+		if !ok {
+			return []Access{access(verbUpdate, model.KindVM, model.ObjectRef{Namespace: e.Namespace, Name: e.Name})}, nil
+		}
+		content, err := read.FileOnBranch(c.baseBranch, idx.Files[ref])
+		if err != nil {
+			return nil, err
+		}
+		return fieldEditAccess(idx.Files[ref], content, e.Namespace, e.Name)
 	}
 	return nil, nil
 }
@@ -169,6 +177,18 @@ func (c *Coordinator) based(read *git.Repo, e *draft.Entry) ([]byte, error) {
 	return content, nil
 }
 
+// requirePinned refuses an entry writing or removing a file without a pin:
+// one staged before entries were pinned, which the gate would weigh against
+// one version and the commit apply to whatever base holds then.
+func requirePinned(entries []draft.Entry) error {
+	for _, e := range entries {
+		if w := writeOf(e); (w == wholeFile || w == removal) && e.BaseBlob == "" {
+			return fmt.Errorf("%w: %s was staged without the version it was made from; unstage it and stage it again", model.ErrConflict, objectLabel(e))
+		}
+	}
+	return nil
+}
+
 // movedPin is an entry pinned to a version of its file base has moved past:
 // a conflict to the stager, and to propose the *git.BaseMovedError the commit
 // would meet.
@@ -183,11 +203,21 @@ func (m *movedPin) Error() string {
 
 func (m *movedPin) Unwrap() []error { return []error{model.ErrConflict, &m.BaseMovedError} }
 
-// fieldEditAccess is a settings edit's access: the VM's update. What the
-// edit writes is checked where it is applied: staging's dry run and the
-// commit, each on the file git declares the VM in (keepsDeclared).
-func (c *Coordinator) fieldEditAccess(e draft.Entry) []Access {
-	return []Access{access(verbUpdate, model.KindVM, model.ObjectRef{Namespace: e.Namespace, Name: e.Name})}
+// fieldEditAccess is a settings edit's access, read off the VM as content
+// declares it: its update, or its delete and create when Argo replaces it,
+// disks from its templates included. What the edit writes is checked where it
+// is applied: staging's dry run and the commit (keepsDeclared).
+func fieldEditAccess(path string, content []byte, namespace, name string) ([]Access, error) {
+	objs, err := argoObjects(path, content)
+	if err != nil {
+		return nil, fmt.Errorf("%w: %s as it stands %v; change it in git", model.ErrConflict, path, err)
+	}
+	for _, o := range objs {
+		if o.kind == model.KindVM && o.ref.Namespace == namespace && o.ref.Name == name {
+			return objectAccess(o, true)
+		}
+	}
+	return nil, fmt.Errorf("%w: %s no longer declares %s/%s; try again", model.ErrConflict, path, namespace, name)
 }
 
 // keepsDeclared refuses a settings edit's result unless, read as Argo reads
@@ -311,7 +341,7 @@ func objectAccess(o object, declared bool) ([]Access, error) {
 		need = append(need, access(verbDelete, o.kind, o.ref))
 	}
 	a := access(verb, o.kind, o.ref)
-	if o.kind == model.KindRB {
+	if verb == verbCreate || o.kind == model.KindRB {
 		raw, err := json.Marshal(o.body)
 		if err != nil {
 			return nil, err
@@ -483,6 +513,9 @@ func objectOf(path string, body map[string]any) (object, error) {
 	if _, ok := body["items"]; ok {
 		return object{}, fmt.Errorf("holds a document with a top-level items list, which Argo unpacks into objects of their own; declare each as its own document")
 	}
+	if key := foldedTwice(body); key != "" {
+		return object{}, fmt.Errorf("holds a mapping with two keys spelled %q in different cases, which decoders read differently", key)
+	}
 	apiVersion, _ := body["apiVersion"].(string)
 	kind, _ := body["kind"].(string)
 	meta, _ := body["metadata"].(map[string]any)
@@ -503,6 +536,11 @@ func objectOf(path string, body map[string]any) (object, error) {
 		return object{}, fmt.Errorf("declares %s %s (%s), which dotvirt does not manage", kind, name, apiVersion)
 	}
 	o := object{written: model.ObjectRef{Kind: kind, Namespace: namespace, Name: name}, kind: k, body: body}
+	if annotations, _ := meta["annotations"].(map[string]any); annotations != nil {
+		if options, _ := annotations["argocd.argoproj.io/sync-options"].(string); strings.Contains(options, "Validate=false") {
+			return object{}, fmt.Errorf("has %s %s skip the apiserver's validation (Validate=false)", kind, name)
+		}
+	}
 	o.ref = o.written
 	switch {
 	case k.ClusterScoped:
@@ -511,6 +549,33 @@ func objectOf(path string, body map[string]any) (object, error) {
 		o.ref.Namespace = defaultNamespace(path)
 	}
 	return o, nil
+}
+
+// foldedTwice is a key of a mapping anywhere in v that the mapping holds
+// twice under case folding, "" when none: Go's JSON decoding matches fields
+// case-insensitively, the apiserver's does not, so the two would read
+// different values.
+func foldedTwice(v any) string {
+	switch t := v.(type) {
+	case map[string]any:
+		keys := make([]string, 0, len(t))
+		for k, child := range t {
+			if slices.ContainsFunc(keys, func(seen string) bool { return strings.EqualFold(seen, k) }) {
+				return k
+			}
+			keys = append(keys, k)
+			if key := foldedTwice(child); key != "" {
+				return key
+			}
+		}
+	case []any:
+		for _, child := range t {
+			if key := foldedTwice(child); key != "" {
+				return key
+			}
+		}
+	}
+	return ""
 }
 
 // managedKind is the managed kind group serves under that name.

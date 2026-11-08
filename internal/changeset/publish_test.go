@@ -425,6 +425,7 @@ func TestProposeRefusesAWholeFileEditOverThePRsFieldEdit(t *testing.T) {
 // Two tabs propose at once: the second waits for the first, then builds on
 // its PR, so neither change is lost.
 func TestConcurrentProposesKeepBothChanges(t *testing.T) {
+	const db = "apiVersion: kubevirt.io/v1\nkind: VirtualMachine\nmetadata:\n  name: db\n  namespace: alpha\n"
 	prs := newForgePRs()
 	var f *proposeFixture
 	var once sync.Once
@@ -436,7 +437,7 @@ func TestConcurrentProposesKeepBothChanges(t *testing.T) {
 				// The other tab stages its change and proposes while the
 				// first is asking the forge.
 				go func() {
-					if err := f.c.store.Stage("alice", "p", draft.Entry{Kind: draft.KindDelete, Namespace: "alpha", Name: "db", SourceFile: "db.yaml"}); err != nil {
+					if err := f.c.store.Stage("alice", "p", draft.Entry{Kind: draft.KindDelete, Namespace: "alpha", Name: "db", SourceFile: "db.yaml", BaseBlob: git.BlobID([]byte(db))}); err != nil {
 						second <- err
 						return
 					}
@@ -455,7 +456,7 @@ func TestConcurrentProposesKeepBothChanges(t *testing.T) {
 	}
 	f = newProposeFixture(t, route)
 	prs.f = f
-	f.commitMain(t, "db.yaml", "apiVersion: kubevirt.io/v1\nkind: VirtualMachine\nmetadata:\n  name: db\n  namespace: alpha\n")
+	f.commitMain(t, "db.yaml", db)
 	f.stageLabel(t, "env", "prod")
 	if _, err := f.c.Propose(f.id, f.proj, model.ProposeRequest{Title: "A"}); err != nil {
 		t.Fatalf("A: %v", err)

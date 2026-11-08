@@ -56,6 +56,15 @@ func (r *rbac) questions() []Access {
 	return slices.Clone(r.asked)
 }
 
+// verbs is the questions without the objects a create carries.
+func (r *rbac) verbs() []Access {
+	out := r.questions()
+	for i := range out {
+		out[i].Object = ""
+	}
+	return out
+}
+
 func verbOn(verb, resource string) func(Access) bool {
 	return func(a Access) bool { return a.Verb == verb && a.Resource == resource }
 }
@@ -303,7 +312,7 @@ func TestGateReadsEffectsPerObject(t *testing.T) {
 	if _, err := c.StageUpdateManifest(id, proj, "network", "alpha", "net", model.UpdateManifestRequest{YAML: replaced}); err != nil {
 		t.Fatal(err)
 	}
-	if got := r.questions(); !slices.Equal(got, []Access{udn("delete"), udn("create")}) {
+	if got := r.verbs(); !slices.Equal(got, []Access{udn("delete"), udn("create")}) {
 		t.Errorf("a replace: asked %+v, want a delete and a create", got)
 	}
 }
@@ -455,4 +464,50 @@ func head(t *testing.T, work string) string {
 		t.Fatal(err)
 	}
 	return strings.TrimSpace(string(out))
+}
+
+// Keys the same but for case read differently in Go's decoding and the
+// apiserver's, so a file holding them is refused, as is one turning the
+// apiserver's validation off.
+func TestArgoObjectsRefusesCaseFoldedKeysAndSkippedValidation(t *testing.T) {
+	decoy := strings.Replace(ownerRB, "subjects:", "roleref: {apiGroup: rbac.authorization.k8s.io, kind: ClusterRole, name: view}\nsubjects:", 1)
+	unvalidated := strings.Replace(netUDN, "  namespace: alpha\n", "  namespace: alpha\n  annotations: {argocd.argoproj.io/sync-options: Validate=false}\n", 1)
+	nested := strings.Replace(netUDN, "  topology: Layer2\n", "  topology: Layer2\n  Topology: Layer3\n", 1)
+	for name, content := range map[string]string{"a decoy roleref": decoy, "Validate=false": unvalidated, "a nested decoy": nested} {
+		if objs, err := argoObjects("alpha/x.yaml", []byte(content)); err == nil {
+			t.Errorf("%s: read as %+v", name, objs)
+		}
+	}
+}
+
+// A settings edit of a VM Argo replaces rather than patches asks for its
+// delete and create: the replace takes its template disks with it.
+func TestSettingsEditOfAReplacedVM(t *testing.T) {
+	f := newProposeFixture(t)
+	r := &rbac{}
+	f.c.UseAuthorizer(r)
+	f.commitMain(t, "web.yaml", "apiVersion: kubevirt.io/v1\nkind: VirtualMachine\nmetadata:\n  name: web\n  namespace: alpha\n  annotations: {argocd.argoproj.io/sync-options: Replace=true}\nspec:\n  runStrategy: Always\n")
+	off := "Off"
+	if _, err := f.c.StageEdit(f.id, f.proj, "alpha", "web", model.EditRequest{VMEdit: model.VMEdit{Power: &off}}); err != nil {
+		t.Fatal(err)
+	}
+	vm := func(verb string) Access {
+		return Access{Verb: verb, Group: "kubevirt.io", Resource: "virtualmachines", Namespace: "alpha", Name: "web"}
+	}
+	if got := r.verbs(); !slices.Equal(got, []Access{vm("delete"), vm("create")}) {
+		t.Errorf("asked %+v, want the delete and the create", got)
+	}
+}
+
+// An entry staged before entries were pinned is refused at propose: the gate
+// would weigh it against one version and the commit apply it to another.
+func TestProposeRefusesAnUnpinnedEntry(t *testing.T) {
+	f, _ := newPRFixture(t)
+	legacy := draft.Entry{Kind: draft.KindDelete, Namespace: "alpha", Name: "web", SourceFile: "web.yaml"}
+	if err := f.c.store.Stage(f.id.Username, f.proj.Name, legacy); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.c.Propose(f.id, f.proj, model.ProposeRequest{}); !errors.Is(err, model.ErrConflict) || !strings.Contains(err.Error(), "stage it again") {
+		t.Errorf("err = %v, want a conflict asking to stage it again", err)
+	}
 }

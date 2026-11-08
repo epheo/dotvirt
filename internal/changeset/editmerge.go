@@ -24,15 +24,20 @@ func (c *Coordinator) stageEdit(id auth.Identity, proj project.ProjectInfo, e dr
 	if err := manifest.ValidateEdit(*e.Edit); err != nil {
 		return model.DraftView{}, err
 	}
-	if err := c.gate(id, proj, []draft.Entry{e}); err != nil {
-		return model.DraftView{}, err
-	}
 	read, err := c.read(proj)
 	if err != nil {
 		return model.DraftView{}, err
 	}
 	target, err := c.editTarget(read, e.Namespace, e.Name)
 	if err != nil {
+		return model.DraftView{}, err
+	}
+	// The gate's question for a settings edit, asked off the file just read.
+	need, err := fieldEditAccess(target.path, target.content, e.Namespace, e.Name)
+	if err != nil {
+		return model.DraftView{}, err
+	}
+	if err := c.authorize(id, need); err != nil {
 		return model.DraftView{}, err
 	}
 	key := e.Key()

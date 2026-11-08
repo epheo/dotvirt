@@ -188,9 +188,13 @@ const authorizeTimeout = 15 * time.Second
 
 // Authorize implements changeset.Authorizer: every access a staged, proposed
 // or reverted change makes Argo perform, asked under id's own token through
-// the cached reviews, at most authorConcurrency at once. A create of an
-// object the SA snapshot holds is asked as the update Argo makes of it,
-// unless the change also deletes it (a replace).
+// the cached reviews, at most authorConcurrency at once.
+//
+// A create may land on an object that already runs, which Argo then patches:
+// an update. One the SA snapshot holds is asked as that update; one it knows
+// absent (a VM, once its snapshot synced) as the create; any other is
+// dry-run (dryRunCreate). A create the change pairs with a delete is a
+// replace and stays a create.
 func (s *Server) Authorize(id auth.Identity, need []changeset.Access) error {
 	if s.clusterF == nil {
 		return unavailable(errors.New("cluster not configured"))
@@ -201,17 +205,30 @@ func (s *Server) Authorize(id auth.Identity, need []changeset.Access) error {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), authorizeTimeout)
 	defer cancel()
+	identity := func(a changeset.Access) changeset.Access {
+		return changeset.Access{Group: a.Group, Resource: a.Resource, Namespace: a.Namespace, Name: a.Name}
+	}
 	deleted := map[changeset.Access]bool{}
 	for _, a := range need {
 		if a.Verb == verbDelete {
-			deleted[changeset.Access{Group: a.Group, Resource: a.Resource, Namespace: a.Namespace, Name: a.Name}] = true
+			deleted[identity(a)] = true
 		}
 	}
 	seen := make(map[changeset.Access]bool, len(need))
 	var asks []changeset.Access
 	for _, a := range need {
-		if a.Verb == verbCreate && !deleted[changeset.Access{Group: a.Group, Resource: a.Resource, Namespace: a.Namespace, Name: a.Name}] && s.holds(a) {
-			a.Verb = verbUpdate
+		if a.Verb == verbCreate {
+			held, absent := s.snapshot(a)
+			switch {
+			case deleted[identity(a)] || absent || binding(a):
+			case held:
+				a.Verb = verbUpdate
+			default:
+				a.Verb = verbDryRun
+			}
+		}
+		if a.Verb != verbDryRun && !binding(a) {
+			a.Object = ""
 		}
 		if !seen[a] {
 			seen[a] = true
@@ -237,6 +254,9 @@ func (s *Server) Authorize(id auth.Identity, need []changeset.Access) error {
 		case errs[i] != nil:
 			return s.reviewFailed(ctx, id, errs[i])
 		case !oks[i]:
+			if a.Verb == verbDryRun {
+				a.Verb = "create or update"
+			}
 			denied = append(denied, a.String())
 		}
 	}
@@ -247,24 +267,47 @@ func (s *Server) Authorize(id auth.Identity, need []changeset.Access) error {
 	return nil
 }
 
-// holds reports whether an SA snapshot holds the object a names: a VM, a
-// project namespace, or a networking object. One it does not watch reads as
-// absent, so its create is asked as a create.
-func (s *Server) holds(a changeset.Access) bool {
-	if s.state != nil && s.state.Holds(a.Group, a.Resource, a.Namespace, a.Name) {
-		return true
-	}
-	return s.netstate != nil && s.netstate.Holds(a.Group, a.Resource, a.Namespace, a.Name)
+// verbDryRun marks a create the snapshot cannot place: asked by a dry run.
+const verbDryRun = "dry-run create"
+
+// binding reports whether a is a RoleBinding carrying itself: weighed by the
+// apiserver whatever its verb, as only it applies the escalation rule.
+func binding(a changeset.Access) bool {
+	return a.Object != "" && a.Group == model.KindRB.Group && a.Resource == model.KindRB.Plural
 }
 
-// allows answers one access. A RoleBinding is weighed by the apiserver
-// itself (dryRun); any other access asks for the whole resource first, the
-// question the route gates cached, and for the one object only when that is
-// denied, as RBAC may grant it by name. A create never names its object.
-func (s *Server) allows(ctx context.Context, id auth.Identity, c *cluster.Client, a changeset.Access) (bool, error) {
-	if a.Object != "" {
-		return s.dryRun(ctx, id, c, a)
+// snapshot is what the SA snapshots say of the object a names: held, or
+// known absent. A project namespace or networking object can only be known
+// held: the snapshot watches labelled namespaces alone, and a networking
+// store may not have synced.
+func (s *Server) snapshot(a changeset.Access) (held, absent bool) {
+	if s.state != nil && s.state.Holds(a.Group, a.Resource, a.Namespace, a.Name) {
+		return true, false
 	}
+	if s.netstate != nil && s.netstate.Holds(a.Group, a.Resource, a.Namespace, a.Name) {
+		return true, false
+	}
+	vm := a.Group == model.KindVM.Group && a.Resource == model.KindVM.Plural
+	return false, vm && s.state != nil && s.state.VMSnapshotReady()
+}
+
+// allows answers one access. A RoleBinding, and a create the snapshot cannot
+// place, are weighed by the apiserver (dry runs); any other access asks for
+// the whole resource first, the question the route gates cached, and for the
+// one object only when that is denied, as RBAC may grant it by name. A create
+// never names its object.
+func (s *Server) allows(ctx context.Context, id auth.Identity, c *cluster.Client, a changeset.Access) (bool, error) {
+	switch {
+	case binding(a):
+		return s.dryRun(ctx, id, c, a, s.weighBinding)
+	case a.Verb == verbDryRun:
+		return s.dryRun(ctx, id, c, a, s.weighCreate)
+	}
+	return s.updates(ctx, id, c, a)
+}
+
+// updates asks a review, the whole resource before the named object.
+func (s *Server) updates(ctx context.Context, id auth.Identity, c *cluster.Client, a changeset.Access) (bool, error) {
 	ref := ssarRef{a.Group, a.Resource}
 	ok, err := s.can(ctx, id, c, a.Verb, ref, a.Namespace)
 	if ok || err != nil || a.Name == "" || a.Verb == verbCreate {
@@ -273,15 +316,9 @@ func (s *Server) allows(ctx context.Context, id auth.Identity, c *cluster.Client
 	return s.canNamed(ctx, id, c, a.Verb, ref, a.Namespace, a.Name)
 }
 
-// dryRun has the apiserver weigh a RoleBinding as Argo would apply it, under
-// the caller's token and persisting nothing: the verb's RBAC and the
-// escalation rule (bind on the role, or holding all it grants) answer as they
-// would for the real request. A create that finds the binding there is asked
-// again as the update it is. In a namespace the change creates no dry run
-// reaches those checks, so their two halves are asked as reviews: the verb,
-// and bind on the role by name. The verdict is cached like a review, by the
-// binding's content.
-func (s *Server) dryRun(ctx context.Context, id auth.Identity, c *cluster.Client, a changeset.Access) (bool, error) {
+// dryRun caches weigh's verdict on a like a review, keyed by the object's
+// content.
+func (s *Server) dryRun(ctx context.Context, id auth.Identity, c *cluster.Client, a changeset.Access, weigh func(context.Context, auth.Identity, *cluster.Client, changeset.Access) (bool, error)) (bool, error) {
 	sum := sha256.Sum256([]byte(a.Object))
 	ver := s.rbacVersion()
 	k := strings.Join([]string{restfactory.TokenKey(id.Token), "dry-run", a.Verb, a.Group, a.Resource, a.Namespace, a.Name, hex.EncodeToString(sum[:])}, "\x00")
@@ -290,13 +327,7 @@ func (s *Server) dryRun(ctx context.Context, id auth.Identity, c *cluster.Client
 	}
 	e, err := review(ctx, s.ssar, k, ver, func(ctx context.Context) (ssarVerdict, error) {
 		start := time.Now()
-		ok, existed, err := c.DryRunRoleBinding(ctx, a.Verb, []byte(a.Object))
-		if existed {
-			ok, _, err = c.DryRunRoleBinding(ctx, verbUpdate, []byte(a.Object))
-		}
-		if errors.Is(err, cluster.ErrNoNamespace) {
-			ok, err = s.bindReviews(ctx, id, c, a)
-		}
+		ok, err := weigh(ctx, id, c, a)
 		if err != nil {
 			return ssarVerdict{}, err
 		}
@@ -307,20 +338,83 @@ func (s *Server) dryRun(ctx context.Context, id auth.Identity, c *cluster.Client
 	return e.ok, err
 }
 
-// bindReviews asks a RoleBinding's verb and bind on the role it references.
+// weighCreate dry-runs a create the snapshot cannot place, under the
+// caller's token: the object found there is an update, asked as one;
+// forbidden is a denial; any other answer came after authorization, which
+// is all this asks. Admission runs too, but only webhooks declaring
+// sideEffects None or NoneOnDryRun: a dry run reaches no other.
+func (s *Server) weighCreate(ctx context.Context, id auth.Identity, c *cluster.Client, a changeset.Access) (bool, error) {
+	out, _, err := c.DryRun(ctx, verbCreate, a.Group, apiVersionOf(a.Object), a.Resource, a.Namespace, a.Name, []byte(a.Object))
+	switch {
+	case err != nil:
+		return false, err
+	case out == cluster.DryRunExists:
+		a.Verb = verbUpdate
+		return s.updates(ctx, id, c, a)
+	}
+	return out != cluster.DryRunDenied, nil
+}
+
+// weighBinding has the apiserver weigh a RoleBinding as Argo would apply it:
+// the verb's RBAC and the escalation rule (bind on the role, or holding all
+// it grants). A create that finds the binding there is asked again as the
+// update it is. In a namespace the change creates no dry run reaches those
+// checks, so their two halves are asked as reviews: the verb, and bind on
+// the role by name. A binding refused past authorization is refused here:
+// its escalation may not have been weighed.
+func (s *Server) weighBinding(ctx context.Context, id auth.Identity, c *cluster.Client, a changeset.Access) (bool, error) {
+	version := apiVersionOf(a.Object)
+	out, refused, err := c.DryRun(ctx, a.Verb, a.Group, version, a.Resource, a.Namespace, a.Name, []byte(a.Object))
+	if err == nil && out == cluster.DryRunExists {
+		out, refused, err = c.DryRun(ctx, verbUpdate, a.Group, version, a.Resource, a.Namespace, a.Name, []byte(a.Object))
+	}
+	switch {
+	case err != nil:
+		return false, err
+	case out == cluster.DryRunNoNamespace:
+		return s.bindReviews(ctx, id, c, a)
+	case out == cluster.DryRunRefused:
+		return false, fmt.Errorf("%w: RoleBinding %s/%s: %v", model.ErrInvalid, a.Namespace, a.Name, refused)
+	}
+	return out == cluster.DryRunAllowed, nil
+}
+
+// bindReviews asks a RoleBinding's verb and bind on the role it references,
+// read case-sensitively, as the apiserver reads it.
 func (s *Server) bindReviews(ctx context.Context, id auth.Identity, c *cluster.Client, a changeset.Access) (bool, error) {
-	var rb struct {
-		RoleRef struct{ Kind, Name string } `json:"roleRef"`
-	}
-	if err := json.Unmarshal([]byte(a.Object), &rb); err != nil {
-		return false, invalid(err)
-	}
-	role := map[string]string{"ClusterRole": "clusterroles", "Role": "roles"}[rb.RoleRef.Kind]
-	if role == "" || rb.RoleRef.Name == "" {
+	kind, name := roleRefOf(a.Object)
+	role := map[string]string{"ClusterRole": "clusterroles", "Role": "roles"}[kind]
+	if role == "" || name == "" {
 		return false, invalid(fmt.Errorf("RoleBinding %s references no Role or ClusterRole", a.Name))
 	}
 	if ok, err := s.can(ctx, id, c, a.Verb, ssarRef{a.Group, a.Resource}, a.Namespace); !ok || err != nil {
 		return false, err
 	}
-	return s.canNamed(ctx, id, c, "bind", ssarRef{a.Group, role}, a.Namespace, rb.RoleRef.Name)
+	return s.canNamed(ctx, id, c, "bind", ssarRef{a.Group, role}, a.Namespace, name)
+}
+
+// roleRefOf is the role a binding references. Map keys match exactly, where
+// decoding into a struct would match any case.
+func roleRefOf(raw string) (kind, name string) {
+	var obj map[string]any
+	if json.Unmarshal([]byte(raw), &obj) != nil {
+		return "", ""
+	}
+	ref, _ := obj["roleRef"].(map[string]any)
+	kind, _ = ref["kind"].(string)
+	name, _ = ref["name"].(string)
+	return kind, name
+}
+
+// apiVersionOf is the version of the object raw holds, as it spells it.
+func apiVersionOf(raw string) string {
+	var obj map[string]any
+	if json.Unmarshal([]byte(raw), &obj) != nil {
+		return ""
+	}
+	v, _ := obj["apiVersion"].(string)
+	if _, version, ok := strings.Cut(v, "/"); ok {
+		return version
+	}
+	return v
 }
