@@ -3,6 +3,7 @@
 	import { Check, TriangleAlert } from '@lucide/svelte';
 	import { api, type DeployTemplateRequest, type Template } from '#lib/api.js';
 	import { libraryLabel } from '#lib/catalog.js';
+	import { plural } from '#lib/format.js';
 	import { action } from '#lib/resource.svelte.js';
 	import { catalog } from '#lib/state/catalog.svelte.js';
 	import { vmGate } from '#lib/gates.js';
@@ -16,7 +17,7 @@
 	import SheetBody from './SheetBody.svelte';
 	import SheetFooter from './SheetFooter.svelte';
 	import StagesPanel from './StagesPanel.svelte';
-	import { FIELD, HELP, LABEL, plural, useSheet } from './sheet.svelte.js';
+	import { FIELD, HELP, LABEL, useSheet } from './sheet.svelte.js';
 
 	// A VM from a saved setup: pick the template, the place and a name, fill
 	// what the template asks for. The server renders it with the engine the

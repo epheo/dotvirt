@@ -215,7 +215,7 @@
 	title="Disks by boot image"
 	flush
 	link={{
-		label: `All ${num(summary.total)} images on the Images tab`,
+		label: `${summary.total === 1 ? 'The image' : `All ${num(summary.total)} images`} on the Images tab`,
 		href: storageHref('images', { project: p }),
 	}}
 >

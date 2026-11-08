@@ -2,6 +2,7 @@
 	import { untrack, type Snippet } from 'svelte';
 	import { Plus, X } from '@lucide/svelte';
 	import { api, type EgressFirewallCreate, type EgressFirewallRule } from '#lib/api.js';
+	import { plural } from '#lib/format.js';
 	import { action } from '#lib/resource.svelte.js';
 	import { rowList } from '#lib/rowlist.svelte.js';
 	import { objectGate } from '#lib/gates.js';
@@ -13,7 +14,7 @@
 	import SheetBody from './SheetBody.svelte';
 	import SheetFooter from './SheetFooter.svelte';
 	import StagesPanel from './StagesPanel.svelte';
-	import { FIELD, HELP, LABEL, SMALL, plural, stagePath, useSheet } from './sheet.svelte.js';
+	import { FIELD, HELP, LABEL, SMALL, stagePath, useSheet } from './sheet.svelte.js';
 
 	// Outbound rules: where a namespace's VMs may go outside the cluster, first
 	// match wins. A namespace has one set; staging replaces it.

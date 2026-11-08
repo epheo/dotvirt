@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { ChevronDown, CircleX, Globe, Plug, Search, TriangleAlert } from '@lucide/svelte';
 	import type { VM } from '#lib/api.js';
+	import { plural } from '#lib/format.js';
 	import { POD_NETWORK } from '#lib/lenses.js';
 	import type { ClusterMap, NetNode, NetProblem, UplinkRow, WayOut } from '#lib/netmap.js';
 	import { canEditUplink, openEdit, uplinkRef } from '#lib/objects.js';
@@ -185,9 +186,9 @@
 	const hostsText = (r: UplinkRow) =>
 		!r.known
 			? 'Details need host access'
-			: r.allHosts
+			: r.allHosts && r.uplink.nodeCount > 1
 				? `all ${fmt(r.uplink.nodeCount)} hosts`
-				: `${fmt(r.uplink.nodeCount)} host${r.uplink.nodeCount === 1 ? '' : 's'}`;
+				: plural(r.uplink.nodeCount, 'host');
 	const netSub = (n: NetNode) =>
 		n.net.kind === 'vlan'
 			? `VLAN ${n.net.vlan ? `${n.net.vlan} ` : ''}on ${n.net.uplink ?? 'an uplink'}`
@@ -360,7 +361,7 @@
 						{@render name('pod', 'Pod network', false)}
 						<span class="text-xs leading-4 text-ink-muted">Built in, every project.</span>
 						<span class="text-xs leading-4 text-ink-muted"
-							>{fmt(model.podOnly)} VM{model.podOnly === 1 ? '' : 's'} use only this.</span
+							>{plural(model.podOnly, 'VM')} {model.podOnly === 1 ? 'uses' : 'use'} only this.</span
 						>
 					</div>
 					{#each builtin.nets as n (n.key)}{@render netNode(n)}{/each}

@@ -3,7 +3,7 @@
 	import { Check, Upload } from '@lucide/svelte';
 	import { api, Unauthorized, type StorageClassInfo } from '#lib/api.js';
 	import { liveMigrates } from '#lib/create.js';
-	import { friendlyError } from '#lib/format.js';
+	import { friendlyError, plural } from '#lib/format.js';
 	import { resource } from '#lib/resource.svelte.js';
 	import { caps } from '#lib/state/caps.svelte.js';
 	import { inventory } from '#lib/state/inventory.svelte.js';
@@ -16,7 +16,7 @@
 	import SheetBody from './SheetBody.svelte';
 	import SheetFooter from './SheetFooter.svelte';
 	import StagesPanel from './StagesPanel.svelte';
-	import { FIELD, HELP, LABEL, plural, useSheet } from './sheet.svelte.js';
+	import { FIELD, HELP, LABEL, useSheet } from './sheet.svelte.js';
 
 	// A boot image: dotvirt creates the upload target (and, for a boot image,
 	// registers it so New VM offers it) and mints a token, then the browser

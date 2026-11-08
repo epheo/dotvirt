@@ -2,6 +2,7 @@
 	import { ChevronDown, ChevronRight, Map as MapIcon } from '@lucide/svelte';
 	import { page } from '$app/state';
 	import type { Network } from '#lib/api.js';
+	import { plural } from '#lib/format.js';
 	import { POD_NETWORK } from '#lib/lenses.js';
 	import { cutOffHosts, uplinkLabel } from '#lib/netmap.js';
 	import { networkHref, networkingTab, scopeFromPath } from '#lib/nav.js';
@@ -136,7 +137,7 @@
 	{@render row({
 		href: networkHref(k),
 		label: n.name,
-		count: `${fmt(vmsOf(n))} VMs`,
+		count: plural(vmsOf(n), 'VM'),
 		indent,
 		active: current === k,
 		mono: true,
@@ -237,7 +238,7 @@
 				{@render row({
 					href: `/networking?tab=uplinks`,
 					label: uplinkLabel(u),
-					count: `${fmt(u.nodeCount)} hosts`,
+					count: plural(u.nodeCount, 'host'),
 					indent: 34,
 					mono: true,
 					dot: u.failures?.length ? 'danger' : null,

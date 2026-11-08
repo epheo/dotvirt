@@ -58,7 +58,7 @@
 	<div class="flex min-h-full flex-col gap-[18px] px-7 pt-5 pb-8">
 		<div class="flex flex-col gap-2">
 			<Breadcrumb trail={trailForScope({ kind: 'storage', storageClass: name })} />
-			<PageHeader title={name} mono {status} {context}>
+			<PageHeader title={name} {status} {context}>
 				{#snippet actions()}
 					{#if disks.length}
 						<Button variant="secondary" href={storageHref('disks', { class: name })}

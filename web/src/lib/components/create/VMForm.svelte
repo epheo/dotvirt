@@ -20,7 +20,7 @@
 		usualPreference,
 		vmCountByNetwork,
 	} from '#lib/create.js';
-	import { bytes, quantity, quantityBytes } from '#lib/format.js';
+	import { bytes, plural, quantity, quantityBytes } from '#lib/format.js';
 	import { placement } from '#lib/headroom.js';
 	import { attachRef, attachableNetworks } from '#lib/networks.js';
 	import { action, resource } from '#lib/resource.svelte.js';
@@ -43,7 +43,7 @@
 	import SheetBody from './SheetBody.svelte';
 	import SheetFooter from './SheetFooter.svelte';
 	import StagesPanel from './StagesPanel.svelte';
-	import { FIELD, HELP, LABEL, plural, useSheet } from './sheet.svelte.js';
+	import { FIELD, HELP, LABEL, useSheet } from './sheet.svelte.js';
 
 	// New VM: a name and a place, everything else set up from what the
 	// project usually runs, each choice one line with Change. Full parity with
@@ -127,7 +127,7 @@
 		common && instancetype === common.it.name
 			? `Most common in ${project}`
 			: tally.get(instancetype)
-				? `${tally.get(instancetype)} VMs in ${project} use it`
+				? `${plural(tally.get(instancetype) ?? 0, 'VM')} in ${project} ${tally.get(instancetype) === 1 ? 'uses' : 'use'} it`
 				: sizeTouched
 					? 'Your pick'
 					: 'The default size',
@@ -360,8 +360,13 @@
 					: fit.excluded.length
 						? ` ${fit.excluded.length} take no new VMs.`
 						: '';
-			const n = fit.fits === fit.total ? `all ${fit.total}` : `${fit.fits} of ${fit.total}`;
-			return { tone: 'ok', text: `Fits on ${n} hosts.${left}` };
+			const n =
+				fit.fits !== fit.total
+					? `${fit.fits} of ${plural(fit.total, 'host')}`
+					: fit.total === 1
+						? 'the only host'
+						: `all ${fit.total} hosts`;
+			return { tone: 'ok', text: `Fits on ${n}.${left}` };
 		}
 		const most = fit.best ? ` Most room: ${fit.best.node}, ${bytes(fit.best.free)}.` : '';
 		return { tone: 'warn', text: `No host has ${quantity(it?.memory ?? '')} free.${most}` };
@@ -605,8 +610,8 @@
 									}}
 									{done}
 									note={imageQuery
-										? `${images.length} of ${options?.osImages.length} images match.`
-										: `${ready.length} images ready to boot.`}
+										? `${images.length} of ${plural(options?.osImages.length ?? 0, 'image')} match.`
+										: `${plural(ready.length, 'image')} ready to boot.`}
 								>
 									{#snippet row(i)}
 										<span class="flex items-baseline justify-between gap-3">
@@ -693,9 +698,9 @@
 									ontoggle={(h, on) => toggleNet(h.net, on)}
 									{done}
 									note={netQuery
-										? `${hits.length} of ${available.length} networks match. ${project}'s come first.`
+										? `${hits.length} of ${plural(available.length, 'network')} match. ${project}'s come first.`
 										: available.length
-											? `${available.length} networks you can attach in ${namespace}. ${project}'s come first.`
+											? `${plural(available.length, 'network')} you can attach in ${namespace}. ${project}'s come first.`
 											: `No other network reaches ${namespace}.`}
 								>
 									{#snippet row(h)}

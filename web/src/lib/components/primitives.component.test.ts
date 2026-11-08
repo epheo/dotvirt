@@ -124,13 +124,12 @@ describe('PageHeader', () => {
 		render(PageHeader, {
 			props: {
 				title: 'web-net',
-				mono: true,
 				status: { tone: 'ok', text: 'Project network of team-web' },
 				context: '10.40.0.0/16',
 			},
 		});
 		const h1 = screen.getByRole('heading', { level: 1, name: 'web-net' });
-		expect(h1.className).toContain('font-mono');
+		expect(h1.className).toContain('font-bold');
 		expect(screen.getByText('Project network of team-web')).toBeTruthy();
 		expect(screen.getByText('10.40.0.0/16')).toBeTruthy();
 	});

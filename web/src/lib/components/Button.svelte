@@ -29,14 +29,14 @@
 
 	const SHAPE = {
 		primary:
-			'border border-accent bg-accent font-bold text-white hover:border-accent-deep hover:bg-accent-deep disabled:border-line-soft disabled:bg-inset disabled:text-ink-faint',
+			'border border-accent bg-accent font-medium text-white hover:border-accent-deep hover:bg-accent-deep disabled:border-line-soft disabled:bg-inset disabled:text-ink-faint',
 		outline:
 			'border border-accent bg-panel font-medium text-accent-ink hover:bg-select-soft disabled:opacity-50',
 		secondary:
 			'border border-line bg-panel font-medium text-ink hover:border-ink-faint disabled:opacity-50 disabled:hover:border-line',
 		ghost: 'text-ink-soft hover:bg-inset-strong disabled:text-ink-faint',
 		danger:
-			'border border-danger-fill bg-danger-fill font-bold text-white hover:border-danger-deep hover:bg-danger-deep disabled:opacity-50',
+			'border border-danger-fill bg-danger-fill font-medium text-white hover:border-danger-deep hover:bg-danger-deep disabled:opacity-50',
 		'danger-secondary':
 			'border border-line bg-panel font-medium text-danger-ink hover:border-danger disabled:opacity-50',
 		link: 'text-accent-ink hover:underline disabled:opacity-50',

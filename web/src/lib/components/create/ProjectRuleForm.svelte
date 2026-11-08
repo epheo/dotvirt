@@ -2,6 +2,7 @@
 	import { untrack, type Snippet } from 'svelte';
 	import { Plus, X } from '@lucide/svelte';
 	import { api, type NetworkPolicyCreate, type PolicyRule } from '#lib/api.js';
+	import { plural } from '#lib/format.js';
 	import { action } from '#lib/resource.svelte.js';
 	import { rowList } from '#lib/rowlist.svelte.js';
 	import { objectGate } from '#lib/gates.js';
@@ -14,7 +15,7 @@
 	import SheetBody from './SheetBody.svelte';
 	import SheetFooter from './SheetFooter.svelte';
 	import StagesPanel from './StagesPanel.svelte';
-	import { FIELD, HELP, LABEL, SMALL, plural, stagePath, useSheet } from './sheet.svelte.js';
+	import { FIELD, HELP, LABEL, SMALL, stagePath, useSheet } from './sheet.svelte.js';
 
 	// A project rule: the VMs it protects (by label, or every VM in the
 	// namespace) and who may reach them, one sentence per source. Protecting
