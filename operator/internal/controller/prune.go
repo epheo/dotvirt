@@ -137,12 +137,31 @@ func (r *DotvirtReconciler) finalize(ctx context.Context, dv *dotvirtv1alpha1.Do
 	if r.DryRun || !controllerutil.ContainsFinalizer(dv, dotvirtFinalizer) {
 		return nil
 	}
+	// Before prune takes dotvirt's AppProjects and their destinationServiceAccounts:
+	// left on, the setting would stop every Application on the instance that
+	// names no other account.
+	for _, instance := range r.syncInstances(dv) {
+		if err := r.releaseSyncImpersonation(ctx, instance); err != nil {
+			return err
+		}
+	}
 	if err := r.prune(ctx, dv, renderSet{}); err != nil {
 		return err
 	}
 	r.markPruned(client.ObjectKeyFromObject(dv), "")
 	controllerutil.RemoveFinalizer(dv, dotvirtFinalizer)
 	return r.Update(ctx, dv)
+}
+
+// syncInstances are the ArgoCD resources the operator may have set sync
+// impersonation on: the one status records and the one spec.argocd names.
+func (r *DotvirtReconciler) syncInstances(dv *dotvirtv1alpha1.Dotvirt) []string {
+	argoNS, _ := r.argoTarget(dv)
+	out := []string{argoNS + "/" + r.argoInstance()}
+	if prev := dv.Status.SyncImpersonationInstance; prev != "" && prev != out[0] {
+		out = append(out, prev)
+	}
+	return out
 }
 
 // prune deletes this install's objects that the completed pass did not render:

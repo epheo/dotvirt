@@ -80,6 +80,9 @@ type Coordinator struct {
 	authz    Authorizer          // nil refuses every write (see UseAuthorizer)
 
 	proposing keyedMutex // one Propose per (user, project)
+	// syncNS holds the per-project sync accounts the project grants name; ""
+	// stages owner grants only.
+	syncNS string
 }
 
 // New builds a Coordinator. forge and resyncer may be nil (PR creation degrades
@@ -92,6 +95,14 @@ func New(store *draft.Store, repos *git.RepoSet, ff *forge.Factory, rs Resyncer,
 		renderer: vmtemplate.EngineRenderer{},
 		prune:    prune,
 	}
+}
+
+// WithSyncNamespace names the ArgoCD namespace holding the per-project sync
+// accounts (tenancy.SyncAccount) every project grant includes. Set once,
+// before serving.
+func (c *Coordinator) WithSyncNamespace(ns string) *Coordinator {
+	c.syncNS = ns
+	return c
 }
 
 // read is the project repo's mirror, for parsing what the base branch holds.

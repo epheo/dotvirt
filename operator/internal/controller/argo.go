@@ -50,7 +50,7 @@ func (r *DotvirtReconciler) reconcileArgo(ctx context.Context, dv *dotvirtv1alph
 	appset := install.ApplicationSet(dv, argoNS, platformNS, tenants.unconfined)
 	objs := []client.Object{
 		install.DotvirtClusterRoleBinding(dv),
-		install.ArgocdApplyClusterRoleBinding(dv, argoNS, argoSA),
+		install.ArgocdApplyClusterRoleBinding(dv, argoNS, argoSA, platformRepo != ""),
 		install.PlatformNetworkAdminBinding(dv),
 	}
 	// The tenant AppProjects precede the ApplicationSet whose template names
@@ -62,6 +62,7 @@ func (r *DotvirtReconciler) reconcileArgo(ctx context.Context, dv *dotvirtv1alph
 	// platform repo is configured.
 	if platformRepo != "" {
 		objs = append(objs,
+			install.PlatformSyncClusterRoleBinding(dv, argoNS),
 			install.PlatformAppProject(dv, argoNS, platformRepo),
 			install.PlatformApplication(dv, argoNS, platformRepo),
 		)
@@ -76,9 +77,13 @@ func (r *DotvirtReconciler) reconcileArgo(ctx context.Context, dv *dotvirtv1alph
 	if creds != nil {
 		objs = append(objs, creds)
 	}
+	rc.sync = syncTier{accounts: tenants.accounts, platform: platformRepo != "", sharedInUse: tenants.sharedInUse, appProjects: map[string]bool{}}
 	for _, obj := range objs {
 		if err := r.apply(ctx, obj); err != nil {
 			return nil, applyFailed(err)
+		}
+		if obj.GetObjectKind().GroupVersionKind() == install.ArgoGVK("AppProject") {
+			rc.sync.appProjects[obj.GetName()] = true
 		}
 	}
 	if r.DryRun {

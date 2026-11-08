@@ -437,6 +437,11 @@ func (d *planeDraft) AdoptProject(_ auth.Identity, commit, target project.Projec
 	return stagedView, nil
 }
 
+func (d *planeDraft) StageSyncAccess(_ auth.Identity, commit, target project.ProjectInfo) (model.DraftView, error) {
+	d.record("StageSyncAccess "+commit.Name+","+target.Name, nil)
+	return stagedView, nil
+}
+
 func (d *planeDraft) ReleaseDeclared(_ auth.Identity, commit, target project.ProjectInfo) ([]string, []string, error) {
 	d.record("ReleaseDeclared "+commit.Name+","+target.Name, nil)
 	return d.releaseStaged, d.releaseResidue, nil

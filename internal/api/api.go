@@ -108,6 +108,9 @@ type Draft interface {
 	AdoptObject(id auth.Identity, proj project.ProjectInfo, obj model.Adoptable) (model.DraftView, error)
 	AdoptProject(id auth.Identity, commitProj, target project.ProjectInfo, owners []string, live changeset.LiveNamespaces) (model.DraftView, error)
 	ReleaseDeclared(id auth.Identity, commitProj, target project.ProjectInfo) (staged, residue []string, err error)
+	// StageSyncAccess stages target's grants to its Argo sync account into the
+	// platform draft: the PR a project made before sync impersonation needs.
+	StageSyncAccess(id auth.Identity, commitProj, target project.ProjectInfo) (model.DraftView, error)
 	// Resync runs with dotvirt's SA (Argo operations carry no user context);
 	// canUpdateVM is the caller-token SSAR the implementation enforces before
 	// escalating, so no future caller can reach the SA-privileged patch unchecked.

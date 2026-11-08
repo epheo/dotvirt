@@ -65,8 +65,12 @@ func (k Kind) RepoPath(namespace, name string) string {
 		// OVN admits one per namespace, named default.
 		return namespace + "/egressfirewalls/default.yaml"
 	case KindRB.Kind:
-		// One tenant grant per namespace.
-		return "rbac/" + namespace + ".yaml"
+		// A namespace's tenant grant, then any other grant in it by name: each
+		// in its own file, so each edits and deletes alone.
+		if name == namespace+"-admins" {
+			return "rbac/" + namespace + ".yaml"
+		}
+		return "rbac/" + namespace + "/" + name + ".yaml"
 	case KindNS.Kind:
 		return "namespaces/" + name + ".yaml"
 	case KindCUDN.Kind:
