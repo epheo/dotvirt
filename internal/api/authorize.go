@@ -319,7 +319,9 @@ func (s *Server) updates(ctx context.Context, id auth.Identity, c *cluster.Clien
 }
 
 // dryRun caches weigh's verdict on a like a review, keyed by the object's
-// content.
+// content, for the short unwatchedTTL alone: a dry run answers for the object
+// as it stands, which a delete or a create can change with no watch to say
+// so.
 func (s *Server) dryRun(ctx context.Context, id auth.Identity, c *cluster.Client, a changeset.Access, weigh func(context.Context, auth.Identity, *cluster.Client, changeset.Access) (bool, error)) (bool, error) {
 	sum := sha256.Sum256([]byte(a.Object))
 	ver := s.rbacVersion()
@@ -333,7 +335,7 @@ func (s *Server) dryRun(ctx context.Context, id auth.Identity, c *cluster.Client
 		if err != nil {
 			return ssarVerdict{}, err
 		}
-		e := ssarVerdict{ok: ok, ver: ver, unsettled: s.unsettled(start)}
+		e := ssarVerdict{ok: ok, ver: ver, unsettled: true}
 		s.ssar.PutAt(k, e, start)
 		return e, nil
 	})
@@ -341,10 +343,12 @@ func (s *Server) dryRun(ctx context.Context, id auth.Identity, c *cluster.Client
 }
 
 // weighCreate dry-runs a create the snapshot cannot place, under the
-// caller's token: the object found there is an update, asked as one; any
-// answer but a denial came after authorization, which is all this asks.
-// Admission runs too, but only webhooks declaring sideEffects None or
-// NoneOnDryRun: a dry run reaches no other.
+// caller's token: the object found there is an update, asked as one. A
+// create refused past authorization is refused here with the apiserver's
+// reason: validation and admission answer before the apiserver looks for the
+// object, and an admission plugin may weigh the caller too. Admission runs
+// only webhooks declaring sideEffects None or NoneOnDryRun: a dry run reaches
+// no other.
 //
 // The apiserver authorizes a create before it looks for the object, so a
 // caller who may update an object but not create it is denied though Argo
@@ -352,9 +356,12 @@ func (s *Server) dryRun(ctx context.Context, id auth.Identity, c *cluster.Client
 // and allowed when the object exists.
 func (s *Server) weighCreate(ctx context.Context, id auth.Identity, c *cluster.Client, a changeset.Access) (bool, error) {
 	version := apiVersionOf(a.Object)
-	out, _, err := c.DryRun(ctx, verbCreate, a.Group, version, a.Resource, a.Namespace, a.Name, []byte(a.Object))
+	out, refused, err := c.DryRun(ctx, verbCreate, a.Group, version, a.Resource, a.Namespace, a.Name, []byte(a.Object))
 	if err != nil {
 		return false, err
+	}
+	if out == cluster.DryRunRefused {
+		return false, fmt.Errorf("%w: %s %s/%s: %v", model.ErrInvalid, a.Resource, a.Namespace, a.Name, refused)
 	}
 	update := a
 	update.Verb = verbUpdate

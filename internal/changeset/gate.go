@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"reflect"
+	"regexp"
 	"slices"
 	"strings"
 
@@ -527,6 +528,9 @@ func objectOf(path string, body map[string]any) (object, error) {
 	if apiVersion == "" || kind == "" || name == "" {
 		return object{}, fmt.Errorf("holds a document without apiVersion, kind or metadata.name")
 	}
+	if !apiVersionForm.MatchString(apiVersion) {
+		return object{}, fmt.Errorf("declares %s %s under apiVersion %q, which is no group/version", kind, name, apiVersion)
+	}
 	group, _, ok := strings.Cut(apiVersion, "/")
 	if !ok {
 		group = ""
@@ -577,6 +581,11 @@ func foldedTwice(v any) string {
 	}
 	return ""
 }
+
+// apiVersionForm is an apiVersion as Kubernetes spells one: an optional DNS
+// subdomain group, then a version (v1, v1beta1). It goes into a dry run's
+// URL, so nothing else may.
+var apiVersionForm = regexp.MustCompile(`^([a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*/)?v[0-9]+((alpha|beta)[0-9]+)?$`)
 
 // managedKind is the managed kind group serves under that name.
 func managedKind(group, kind string) (model.Kind, bool) {

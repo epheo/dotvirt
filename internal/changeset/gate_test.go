@@ -511,3 +511,17 @@ func TestProposeRefusesAnUnpinnedEntry(t *testing.T) {
 		t.Errorf("err = %v, want a conflict asking to stage it again", err)
 	}
 }
+
+// An apiVersion goes into a dry run's URL, so it must read as one group and
+// one version, nothing more.
+func TestArgoObjectsRefusesAnAPIVersionOfMoreThanGroupAndVersion(t *testing.T) {
+	for _, v := range []string{"kubevirt.io/v1/../x", "kubevirt.io/../v1", "kubevirt.io/v1?x=y", "kubevirt.io//v1", "kubevirt.io/V1"} {
+		y := "apiVersion: " + v + "\nkind: VirtualMachine\nmetadata: {name: web, namespace: alpha}\n"
+		if objs, err := argoObjects("alpha/web.yaml", []byte(y)); err == nil {
+			t.Errorf("%s: read as %+v", v, objs)
+		}
+	}
+	if _, err := argoObjects("alpha/web.yaml", []byte("apiVersion: kubevirt.io/v1\nkind: VirtualMachine\nmetadata: {name: web, namespace: alpha}\n")); err != nil {
+		t.Errorf("kubevirt.io/v1: %v", err)
+	}
+}

@@ -308,3 +308,21 @@ func TestAuthorizeACreateDeniedButExistingIsAnUpdate(t *testing.T) {
 		t.Errorf("a namespace the SA may not read: %v", err)
 	}
 }
+
+// A create refused past authorization is refused, with the apiserver's
+// reason: validation and admission answer before the apiserver looks for the
+// object, and admission may weigh the caller.
+func TestAuthorizeRefusesACreateTheApiserverRefused(t *testing.T) {
+	fc := newFakeCluster(t)
+	fc.ssar = func(token string, _ *authzv1.ResourceAttributes) bool { return token == tenantToken }
+	fc.on(http.MethodPost, "/apis/cdi.kubevirt.io/v1beta1/namespaces/team-a-dev/datavolumes", func(w http.ResponseWriter, r *http.Request) {
+		writeStatus(w, http.StatusUnprocessableEntity, metav1.StatusReasonInvalid)
+	})
+	s := fc.server(nil, Config{})
+	disk := changeset.Access{Verb: "create", Group: "cdi.kubevirt.io", Resource: "datavolumes", Namespace: "team-a-dev", Name: "clone",
+		Object: `{"apiVersion":"cdi.kubevirt.io/v1beta1","kind":"DataVolume","metadata":{"name":"clone","namespace":"team-a-dev"}}`}
+	err := s.Authorize(auth.Identity{Token: tenantToken, Username: "tenant"}, []changeset.Access{disk})
+	if !errors.Is(err, model.ErrInvalid) || !strings.Contains(err.Error(), "datavolumes team-a-dev/clone") {
+		t.Errorf("err = %v, want ErrInvalid naming the DataVolume", err)
+	}
+}
