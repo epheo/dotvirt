@@ -1,6 +1,9 @@
 package install
 
 import (
+	"encoding/json"
+	"slices"
+
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -22,13 +25,18 @@ const (
 	// projectPlatform is the privileged tier. Per-project AppProjects are named
 	// by tenancy.AppProjectName.
 	TenantsProjectName = "dotvirt-tenants"
-	projectPlatform    = "dotvirt-platform"
+	projectPlatform    = PlatformApplicationName
 
 	// appTargetRevision is the branch every dotvirt Application syncs, spelled once so
 	// the tenant template and the platform app cannot drift apart.
 	appTargetRevision = "main"
 
-	inClusterServer = "https://kubernetes.default.svc"
+	// InClusterServer is the cluster every dotvirt Application deploys to.
+	InClusterServer = "https://kubernetes.default.svc"
+
+	// PlatformApplicationName names the platform tier's Application and
+	// AppProject.
+	PlatformApplicationName = "dotvirt-platform"
 )
 
 // ArgoGVK is the GroupVersionKind for an argoproj.io resource (used by the builders
@@ -114,11 +122,11 @@ func TenantsAppProject(dv *dotvirtv1alpha1.Dotvirt, argoNS, platformRepo, operat
 		"description": "dotvirt tenant projects — namespaced workloads only.",
 		"sourceRepos": []any{repoPrefix(platformRepo)},
 		"destinations": []any{
-			map[string]any{"server": inClusterServer, "namespace": "*"},
-			map[string]any{"server": inClusterServer, "namespace": "!openshift-*"},
-			map[string]any{"server": inClusterServer, "namespace": "!kube-*"},
-			map[string]any{"server": inClusterServer, "namespace": "!" + operatorNS},
-			map[string]any{"server": inClusterServer, "namespace": "!" + argoNS},
+			map[string]any{"server": InClusterServer, "namespace": "*"},
+			map[string]any{"server": InClusterServer, "namespace": "!openshift-*"},
+			map[string]any{"server": InClusterServer, "namespace": "!kube-*"},
+			map[string]any{"server": InClusterServer, "namespace": "!" + operatorNS},
+			map[string]any{"server": InClusterServer, "namespace": "!" + argoNS},
 		},
 	}))
 }
@@ -139,21 +147,42 @@ const (
 // whose namespaces are gone while its Application is still being removed, or
 // whose repo does not resolve. Labeled with the project, which is how a pass
 // finds the ones it no longer derives.
+//
+// Its sync account (tenancy.SyncAccount, named like the AppProject) is the
+// ServiceAccount Argo syncs the project's Application as once sync
+// impersonation is on (syncAccounts).
 func TenantAppProject(dv *dotvirtv1alpha1.Dotvirt, argoNS, name, project string, namespaces, sourceRepos []string) *unstructured.Unstructured {
 	destinations := make([]any, 0, len(namespaces))
 	for _, ns := range namespaces {
-		destinations = append(destinations, map[string]any{"server": inClusterServer, "namespace": ns})
+		destinations = append(destinations, map[string]any{"server": InClusterServer, "namespace": ns})
 	}
 	repos := toAny(sourceRepos)
 	u := argoObject("AppProject", name, argoNS, dv, tenantWhitelist(map[string]any{
-		"description":  "dotvirt project " + project + ": its own namespaces and repo only.",
-		"sourceRepos":  repos,
-		"destinations": destinations,
+		"description":                "dotvirt project " + project + ": its own namespaces and repo only.",
+		"sourceRepos":                repos,
+		"destinations":               destinations,
+		"destinationServiceAccounts": syncAccounts(argoNS, name),
 	}))
 	labels := u.GetLabels()
 	labels[ProjectLabel] = project
 	u.SetLabels(labels)
 	return u
+}
+
+// syncAccounts names the one ServiceAccount, in argoNS, Argo syncs an
+// AppProject's Applications as while sync impersonation is on: any
+// destination, since the AppProject's destinations already bound where they
+// go. Inert while it is off, so it is rendered either way: the setting can
+// then flip with no window in which an Application names no account, and an
+// instance switched on by hand syncs dotvirt's tiers as their own accounts.
+// The account is a name only, never created: Argo impersonates it by username
+// and RBAC binds it by name, so the platform repo's grants are all it is.
+func syncAccounts(argoNS, account string) []any {
+	return []any{map[string]any{
+		"server":                InClusterServer,
+		"namespace":             "*",
+		"defaultServiceAccount": argoNS + ":" + account,
+	}}
 }
 
 // PlatformAppProject is the only tier allowed cluster-scoped + tenancy objects.
@@ -162,8 +191,9 @@ func PlatformAppProject(dv *dotvirtv1alpha1.Dotvirt, argoNS, platformRepo string
 		"description": "dotvirt platform tier — tenancy + cluster-scoped network infrastructure.",
 		"sourceRepos": []any{platformRepo},
 		"destinations": []any{
-			map[string]any{"server": inClusterServer, "namespace": "*"},
+			map[string]any{"server": InClusterServer, "namespace": "*"},
 		},
+		"destinationServiceAccounts": syncAccounts(argoNS, tenancy.PlatformSyncAccount),
 		"clusterResourceWhitelist": []any{
 			map[string]any{"group": "", "kind": "Namespace"},
 			map[string]any{"group": "k8s.ovn.org", "kind": "ClusterUserDefinedNetwork"},
@@ -210,7 +240,7 @@ func argoAppSpec(project, repoURL, namespace string) map[string]any {
 			// nested <ns>/<vm>.yaml).
 			"directory": map[string]any{"recurse": true, "include": "*.yaml", "exclude": "templates/*"},
 		},
-		"destination": map[string]any{"server": inClusterServer, "namespace": namespace},
+		"destination": map[string]any{"server": InClusterServer, "namespace": namespace},
 		"syncPolicy": map[string]any{
 			"automated":   map[string]any{"prune": true, "selfHeal": true},
 			"syncOptions": []any{"CreateNamespace=false"},
@@ -222,5 +252,55 @@ func argoAppSpec(project, repoURL, namespace string) map[string]any {
 // privileged tier, deliberately NOT generated by the ApplicationSet (so the
 // privileged app's existence never flows through dotvirt's dynamic project list).
 func PlatformApplication(dv *dotvirtv1alpha1.Dotvirt, argoNS, platformRepo string) *unstructured.Unstructured {
-	return argoObject("Application", "dotvirt-platform", argoNS, dv, argoAppSpec(projectPlatform, platformRepo, "default"))
+	return argoObject("Application", PlatformApplicationName, argoNS, dv, argoAppSpec(projectPlatform, platformRepo, "default"))
+}
+
+// SyncImpersonationKey is the argocd-cm setting that makes Argo sync each
+// Application as the ServiceAccount its AppProject names.
+const SyncImpersonationKey = "application.sync.impersonation.enabled"
+
+// ArgoCDGVK is the argocd-operator's instance kind; its spec.extraConfig is
+// copied into argocd-cm, which the argocd-operator rewrites from the CR.
+var ArgoCDGVK = schema.GroupVersionKind{Group: argoGroup, Version: "v1beta1", Kind: "ArgoCD"}
+
+// ArgoCDSyncImpersonation is the operator's whole apply on the shared ArgoCD
+// instance: SyncImpersonationKey alone, or nothing, which releases the key.
+// extraConfig is a granular map, so the operator owns that one key and no
+// other field; unlabeled, since the instance is not the install's.
+func ArgoCDSyncImpersonation(name, namespace string, on bool) *unstructured.Unstructured {
+	u := &unstructured.Unstructured{Object: map[string]any{}}
+	u.SetGroupVersionKind(ArgoCDGVK)
+	u.SetName(name)
+	u.SetNamespace(namespace)
+	if on {
+		u.Object["spec"] = map[string]any{"extraConfig": map[string]any{SyncImpersonationKey: "true"}}
+	}
+	return u
+}
+
+// OwnsSyncImpersonation reports whether the operator's apply holds
+// SyncImpersonationKey on inst: only then is removing it the operator's call.
+func OwnsSyncImpersonation(inst *unstructured.Unstructured) bool {
+	return slices.Contains(SyncImpersonationManagers(inst), fieldManager)
+}
+
+// SyncImpersonationManagers are the field managers holding
+// SyncImpersonationKey on inst, the operator's apply as fieldManager.
+func SyncImpersonationManagers(inst *unstructured.Unstructured) []string {
+	var out []string
+	for _, mf := range inst.GetManagedFields() {
+		if mf.FieldsV1 == nil || (mf.Manager == fieldManager && mf.Operation != metav1.ManagedFieldsOperationApply) {
+			continue
+		}
+		var fields map[string]any
+		if json.Unmarshal(mf.FieldsV1.Raw, &fields) != nil {
+			continue
+		}
+		spec, _ := fields["f:spec"].(map[string]any)
+		extra, _ := spec["f:extraConfig"].(map[string]any)
+		if _, ok := extra["f:"+SyncImpersonationKey]; ok && !slices.Contains(out, mf.Manager) {
+			out = append(out, mf.Manager)
+		}
+	}
+	return out
 }

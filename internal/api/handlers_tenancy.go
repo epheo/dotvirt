@@ -128,6 +128,25 @@ func (s *Server) handleAdoptProject(w http.ResponseWriter, r *http.Request) {
 	respond(w, view, err)
 }
 
+// handleProjectSyncAccess stages the platform-repo grants a project made before
+// sync impersonation needs: each of its namespaces' admin RoleBinding gains
+// the project's Argo sync account, beside that account's EgressFirewall grant.
+// A platform-admin act like adopting a project: it lands RBAC in the platform
+// tier.
+func (s *Server) handleProjectSyncAccess(w http.ResponseWriter, r *http.Request) {
+	plat, ok := s.platformScope(w, r, ssarNamespace)
+	if !ok {
+		return
+	}
+	target, ok := s.projectByName(r.PathValue("project"))
+	if !ok {
+		fail(w, fmt.Errorf("%w: project %q", model.ErrNotFound, r.PathValue("project")))
+		return
+	}
+	view, err := s.draft.StageSyncAccess(plat.id, plat.proj, target)
+	respond(w, view, err)
+}
+
 // handleReleaseProject dissolves a repoless project back into a plain
 // namespace (or an adoptable tenant): declared tenancy is staged as a
 // platform-repo rewrite (the PR is the release), label residue is stripped

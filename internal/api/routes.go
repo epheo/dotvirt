@@ -16,7 +16,7 @@ func (s *Server) routes(mux *http.ServeMux) {
 
 	if s.auth != nil {
 		mux.HandleFunc("POST /api/login", s.auth.Login)
-		mux.HandleFunc("POST /api/logout", s.auth.Logout)
+		mux.HandleFunc("POST /api/logout", s.handleLogout)
 		mux.HandleFunc("GET /api/me", s.auth.Me)
 		// The login screen asks which sign-in paths exist before any session.
 		// ssoPending says SSO is configured but its OAuthClient isn't registered yet,
@@ -111,6 +111,7 @@ func (s *Server) routes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/projects/{project}/revert", s.handleRevert)
 	mux.HandleFunc("POST /api/projects/{project}/adopt", s.handleAdoptProject)
 	mux.HandleFunc("POST /api/projects/{project}/release", s.handleReleaseProject)
+	mux.HandleFunc("POST /api/projects/{project}/sync-access", s.handleProjectSyncAccess)
 
 	if s.stream != nil {
 		mux.HandleFunc("GET /api/inventory/stream", s.streaming(s.stream.Handler))

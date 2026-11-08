@@ -224,7 +224,7 @@ func TestProjectAdoptionStampsRepoOnEveryNamespace(t *testing.T) {
 	repoURL := "https://forge.example/acme/team-a.git"
 
 	specs := tenantNamespaces(target, repoURL, make([]*netgen.LiveNamespace, len(target.Namespaces)))
-	entries, err := projectAdoption(specs, []string{"alice", "bob"})
+	entries, err := projectAdoption(specs, []string{"alice", "bob"}, grantSource{})
 	if err != nil {
 		t.Fatalf("projectAdoption: %v", err)
 	}
