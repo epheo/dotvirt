@@ -166,6 +166,18 @@ func forgeFailed(what string, err error) error {
 	return fmt.Errorf("%s: the forge rejected dotvirt's request (%d)", what, se.Status)
 }
 
+// gitFailed turns a failed read of commit hash from the project's mirror into
+// one fixed line: a commit the mirror lacks is not found, named as the caller
+// gave it. Any other failure is inside the mirror, so it is logged here and
+// answered as the repo being unreadable.
+func gitFailed(hash string, err error) error {
+	if errors.Is(err, git.ErrNoCommit) {
+		return fmt.Errorf("%w: no commit %s in the project repo", model.ErrNotFound, shortCommit(hash))
+	}
+	log.Printf("changeset: git: commit %s: %v", hash, err)
+	return fmt.Errorf("%w: commit %s: the project repo could not be read", model.ErrUnavailable, shortCommit(hash))
+}
+
 func isNotFound(err error) bool {
 	var se *forge.StatusError
 	return errors.As(err, &se) && se.Status == http.StatusNotFound

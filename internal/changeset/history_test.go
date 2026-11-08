@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -553,6 +554,54 @@ func wantNoForgeInternals(t *testing.T, err error, forgeURL string) {
 			t.Errorf("err %q carries %q", err, leak)
 		}
 	}
+}
+
+// shallowMirror is a project repo cloned from its remote at depth 1: the
+// mirror holds main's head but not the commit before it, so a read past the
+// head fails inside the mirror. Returns the repo, its head and that commit.
+func shallowMirror(t *testing.T) (repo, head, before string) {
+	t.Helper()
+	bare, _, head := seedMerged(t)
+	repo = filepath.Join(t.TempDir(), "shallow.git")
+	gitRun(t, filepath.Dir(repo), "clone", "-q", "--bare", "--depth", "1", "file://"+bare, repo)
+	return repo, head, revParse(t, bare, "main~1")
+}
+
+// wantGitClass fails unless err is kind saying says, with neither the
+// mirror's own wording nor the repo's location.
+func wantGitClass(t *testing.T, err, kind error, says, repo string) {
+	t.Helper()
+	if !errors.Is(err, kind) || !strings.Contains(err.Error(), says) {
+		t.Fatalf("err = %v, want %v saying %q", err, kind, says)
+	}
+	for _, leak := range []string{"object not found", repo} {
+		if strings.Contains(err.Error(), leak) {
+			t.Errorf("err %q carries %q", err, leak)
+		}
+	}
+}
+
+// A commit's review reads the mirror: an unknown commit is not found, named
+// as the caller gave it, and a known one the mirror cannot read says so; in
+// neither case with the mirror's own error.
+func TestCommitReadFailureNamesOnlyTheCommit(t *testing.T) {
+	bare, _, _ := seedMerged(t)
+	c := newTestCoordinator(t, false)
+	_, err := c.Commit(project.ProjectInfo{Name: "p", Repo: bare}, strings.Repeat("ab", 20))
+	wantGitClass(t, err, model.ErrNotFound, "no commit abababab in the project repo", bare)
+
+	repo, head, _ := shallowMirror(t)
+	_, err = c.Commit(project.ProjectInfo{Name: "s", Repo: repo}, head)
+	wantGitClass(t, err, model.ErrUnavailable, "commit "+head[:8]+": the project repo could not be read", repo)
+}
+
+// A revert of a commit the mirror cannot diff answers the failure's class,
+// not the mirror's error.
+func TestRevertReadFailureNamesOnlyTheCommit(t *testing.T) {
+	repo, head, _ := shallowMirror(t)
+	c := newTestCoordinator(t, false)
+	_, err := c.Revert(auth.Identity{Username: "alice"}, project.ProjectInfo{Name: "p", Repo: repo}, head)
+	wantGitClass(t, err, model.ErrUnavailable, "commit "+head[:8]+": the project repo could not be read", repo)
 }
 
 // A VM's history is its manifest file's, named by the merged PRs; a VM git does

@@ -135,3 +135,12 @@ func TestWholeFileEditOverStagedFieldEditConflicts(t *testing.T) {
 		t.Fatalf("the staged field edit must stay, got %+v", entries)
 	}
 }
+
+// Restoring a version the mirror cannot walk to answers the failure's class,
+// not the mirror's error.
+func TestRestoreReadFailureNamesOnlyTheCommit(t *testing.T) {
+	repo, _, before := shallowMirror(t)
+	c := newTestCoordinator(t, false)
+	_, err := c.RestoreVersion(auth.Identity{Username: "alice"}, project.ProjectInfo{Name: "p", Repo: repo}, "", "alpha", "web", before)
+	wantGitClass(t, err, model.ErrUnavailable, "commit "+before[:8]+": the project repo could not be read", repo)
+}

@@ -85,7 +85,7 @@ func (r *Reader) Commit(proj project.ProjectInfo, hash string) (model.CommitDeta
 	}
 	d, err := read.CommitDiff(hash)
 	if err != nil {
-		return model.CommitDetail{}, fmt.Errorf("%w: %v", model.ErrNotFound, err)
+		return model.CommitDetail{}, gitFailed(hash, err)
 	}
 	r.nameByPR(&d.Commit, proj)
 	out := model.CommitDetail{Commit: d.Commit, Items: commitItems(d.Files)}
