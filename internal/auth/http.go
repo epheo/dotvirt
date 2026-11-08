@@ -1,6 +1,7 @@
 package auth
 
 import (
+	"context"
 	"crypto/cipher"
 	"encoding/json"
 	"errors"
@@ -53,19 +54,33 @@ func (a *Authenticator) Login(w http.ResponseWriter, r *http.Request) {
 // TokenReview that cannot run (budget spent, apiserver down) never leaves a
 // session standing that the UI believes over. It returns the session this call
 // ended - its token, issue time and origin, no username - for the caller to
-// close its streams and revoke an SSO token; a replayed, expired or absent
-// cookie ends nothing. A bearer header has no session: its holder keeps the
-// raw token, which only the cluster can revoke.
+// close its streams and revoke an SSO token; a replayed, expired, absent or
+// unproven legacy cookie ends nothing. A bearer header has no session: its
+// holder keeps the raw token, which only the cluster can revoke.
 func (a *Authenticator) Logout(w http.ResponseWriter, r *http.Request) (Identity, bool) {
 	s, ok := readCookie(r, a.sealer)
 	key := restfactory.TokenKey(s.token)
-	ended := ok && a.SessionLive(key, s.issued)
+	ended := ok && a.SessionLive(key, s.issued) && a.issuedSession(r.Context(), s, key)
 	if ended {
 		a.sessions.end(key, s.issued)
 	}
 	clearCookie(w, r)
 	w.WriteHeader(http.StatusNoContent)
 	return Identity{Token: s.token, Issued: s.issued, SSO: s.sso}, ended
+}
+
+// issuedSession reports whether s is a session cookie dotvirt issued. A v3
+// cookie seals its purpose. A legacy one may be a v0.1.0 OAuth state cookie,
+// sealed alike and harvestable from the open sign-in redirect, so it counts
+// only once its token validates: from the verdict cache, or by a review on the
+// sign-in budget, which bounds what replaying harvested cookies costs the
+// apiserver. Under a spent budget a legacy session's logout records nothing.
+func (a *Authenticator) issuedSession(ctx context.Context, s session, key string) bool {
+	if !s.issued.Equal(legacyIssued) {
+		return true
+	}
+	_, err := a.validate(ctx, s.token, key, true)
+	return err == nil
 }
 
 // Me returns the current Identity from context (set by Middleware).

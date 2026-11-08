@@ -2,6 +2,7 @@ package auth
 
 import (
 	"context"
+	"crypto/rand"
 	"encoding/base64"
 	"errors"
 	"net/http"
@@ -231,32 +232,109 @@ func TestLegacyCookie(t *testing.T) {
 	}
 }
 
-// The record keeps an entry only while a session it ends could still be live,
-// legacy ones included, and sweeps at most once per sweepEvery.
+// The record keeps an entry only until the session it names expires: a v3
+// one for sessionMaxAge, a legacy one until legacyUntil. It sweeps at most once
+// per sweepEvery.
 func TestEndedEntriesExpire(t *testing.T) {
 	now := time.Now()
-	withLegacyUntil(t, now.Add(time.Hour))
+	withLegacyUntil(t, now.Add(23*24*time.Hour))
 	s := newSessions()
 	s.end("stale", now.Add(-sessionMaxAge-time.Second))
-	s.swept = time.Time{}
+	s.end("legacy", legacyIssued)
+	s.swept = now.Add(-sweepEvery)
 	s.end("fresh", now)
-	if _, ok := s.ended["stale"]; !ok {
-		t.Fatal("swept an entry that still ends a live legacy session")
+	if _, ok := s.ended["stale"]; ok {
+		t.Error("kept a v3 entry past its own expiry until legacyUntil")
+	}
+	if _, ok := s.ended["legacy"]; !ok {
+		t.Error("dropped a legacy entry before legacyUntil")
 	}
 
-	withLegacyUntil(t, now)
-	s.swept = now
-	s.end("other", now)
+	s.end("stale", now.Add(-sessionMaxAge-time.Second))
+	s.end("fresh", now.Add(-time.Hour)) // an older session never lowers the mark
 	if _, ok := s.ended["stale"]; !ok {
 		t.Fatal("swept again inside sweepEvery")
 	}
-	s.swept = now.Add(-sweepEvery)
-	s.end("fresh", now.Add(-time.Hour)) // an older session never lowers the mark
-	if len(s.ended) != 2 || !s.ended["fresh"].Equal(now) {
-		t.Fatalf("record = %v, want fresh at its newest issue time and other", s.ended)
+	if !s.ended["fresh"].Equal(now) {
+		t.Fatalf("fresh mark = %v, want its newest issue time", s.ended["fresh"])
 	}
 	if s.live("fresh", now) || !s.live("fresh", now.Add(time.Nanosecond)) {
 		t.Error("the mark must end its own session and spare a newer one")
+	}
+}
+
+// Past its cap the record drops the entry closest to expiring on its own, so a
+// flood of logouts can neither grow it without bound nor evict a legacy entry
+// before a v3 one.
+func TestEndedRecordCap(t *testing.T) {
+	now := time.Now()
+	withLegacyUntil(t, now.Add(23*24*time.Hour))
+	s := newSessions()
+	s.limit = 3
+	s.end("legacy", legacyIssued)
+	s.end("older", now.Add(-2*time.Hour))
+	s.end("newer", now.Add(-time.Hour))
+	s.end("newest", now)
+	if len(s.ended) != 3 {
+		t.Fatalf("record holds %d entries, want the cap of 3", len(s.ended))
+	}
+	if _, ok := s.ended["older"]; ok {
+		t.Error("kept the entry closest to expiry past the cap")
+	}
+	if _, ok := s.ended["legacy"]; !ok {
+		t.Error("evicted the legacy entry, which expires last")
+	}
+	s.end("newest", now.Add(time.Second)) // a known token moves its mark without evicting
+	if len(s.ended) != 3 {
+		t.Errorf("updating a known token evicted: %d entries", len(s.ended))
+	}
+}
+
+// v010StateCookie is a v0.1.0 OAuth state cookie, harvestable from the open
+// sign-in redirect: sealed like a v0.1.0 session cookie, so it opens as a
+// legacy session whose token is the random state.
+func v010StateCookie(t *testing.T) *http.Cookie {
+	t.Helper()
+	b := make([]byte, 24)
+	if _, err := rand.Read(b); err != nil {
+		t.Fatal(err)
+	}
+	sealed := testSealer.Seal(nil, nil, []byte(base64.RawURLEncoding.EncodeToString(b)), []byte(legacyPrefix))
+	return &http.Cookie{Name: cookieName, Value: legacyPrefix + base64.RawURLEncoding.EncodeToString(sealed)}
+}
+
+// A legacy cookie's logout counts only once its token validates, on the
+// sign-in budget: replayed harvested state cookies get their 204 and a cleared
+// cookie but grow no record and cost at most the budget in reviews, while a
+// real legacy session still logs out.
+func TestHarvestedLegacyStateEndsNothing(t *testing.T) {
+	withLegacyUntil(t, time.Now().Add(time.Hour))
+	rig := newSessionRig(t)
+	rig.a.reviews = rate.NewLimiter(0, 3)
+	for range 50 {
+		if rec := rig.send(http.MethodPost, "/api/logout", v010StateCookie(t)); rec.Code != http.StatusNoContent || !clears(rec) {
+			t.Fatalf("harvested state logout: %d (clears %v), want a 204 that clears", rec.Code, clears(rec))
+		}
+	}
+	for _, ended := range rig.ended {
+		if ended {
+			t.Fatal("a harvested state cookie ended a session")
+		}
+	}
+	if n := len(rig.a.sessions.ended); n != 0 {
+		t.Errorf("harvested state cookies left %d logout records", n)
+	}
+	if *rig.reviews > 3 {
+		t.Errorf("harvested state cookies spent %d TokenReviews, past the budget of 3", *rig.reviews)
+	}
+
+	rig.a.reviews = rate.NewLimiter(rate.Inf, 0)
+	c := legacyCookie()
+	if rig.do(http.MethodPost, "/api/logout", c); !rig.ended[len(rig.ended)-1] {
+		t.Fatal("a real legacy session's logout ended nothing")
+	}
+	if code := rig.do(http.MethodGet, "/api/inventory", c); code != http.StatusUnauthorized {
+		t.Errorf("signed-out legacy session: %d, want 401", code)
 	}
 }
 

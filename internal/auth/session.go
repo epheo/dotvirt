@@ -14,6 +14,10 @@ const sessionMaxAge = 24 * time.Hour
 // the lock every request takes, so a logout loop must not run one per call.
 const sweepEvery = time.Hour
 
+// maxEnded backstops the record's size, far above one entry per token signed
+// out in a day: past it, the entry closest to expiring on its own is dropped.
+const maxEnded = 100_000
+
 // SessionExpiry is when a session issued at issued stops authenticating; zero
 // for a bearer header, which has no session.
 func SessionExpiry(issued time.Time) time.Time {
@@ -29,8 +33,10 @@ func SessionExpiry(issued time.Time) time.Time {
 // sessions is the logout record. A logout ends its session and every older one
 // of the same token, so one entry per token holds the newest issue time a logout
 // ended: a login/logout loop cannot grow the map, and a dead cookie replayed at
-// logout cannot end a newer session. An entry is dropped once every session it
-// ends has expired, legacy sessions of its token included.
+// logout cannot end a newer session. An entry is dropped once the session it
+// names has expired, so a v3 entry lasts sessionMaxAge and a legacy one until
+// legacyUntil; a legacy cookie a v3 logout of its token ended works again once
+// that entry goes, until legacyUntil.
 //
 // It lives in memory (dotvirt runs one replica), so a restart forgets it: a
 // signed-out cookie whose token still validates works again until it expires.
@@ -38,10 +44,11 @@ type sessions struct {
 	mu    sync.Mutex
 	ended map[string]time.Time // token key -> newest issue time a logout ended
 	swept time.Time
+	limit int // maxEnded; tests shrink it
 }
 
 func newSessions() *sessions {
-	return &sessions{ended: map[string]time.Time{}}
+	return &sessions{ended: map[string]time.Time{}, limit: maxEnded}
 }
 
 // end records the logout of the session issued at issued for tokenKey.
@@ -51,15 +58,32 @@ func (s *sessions) end(tokenKey string, issued time.Time) {
 	now := time.Now()
 	if now.Sub(s.swept) >= sweepEvery {
 		for k, t := range s.ended {
-			if !now.Before(SessionExpiry(t)) && !now.Before(legacyUntil) {
+			if !now.Before(SessionExpiry(t)) {
 				delete(s.ended, k)
 			}
 		}
 		s.swept = now
 	}
-	if issued.After(s.ended[tokenKey]) {
-		s.ended[tokenKey] = issued
+	prev, ok := s.ended[tokenKey]
+	if !issued.After(prev) {
+		return
 	}
+	if !ok && len(s.ended) >= s.limit {
+		s.evictLocked()
+	}
+	s.ended[tokenKey] = issued
+}
+
+// evictLocked drops the entry closest to expiring on its own.
+func (s *sessions) evictLocked() {
+	var first string
+	var at time.Time
+	for k, t := range s.ended {
+		if e := SessionExpiry(t); first == "" || e.Before(at) {
+			first, at = k, e
+		}
+	}
+	delete(s.ended, first)
 }
 
 // live reports whether the session issued at issued for tokenKey may still
