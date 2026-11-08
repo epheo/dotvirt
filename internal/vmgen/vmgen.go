@@ -3,6 +3,7 @@
 package vmgen
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 
@@ -113,7 +114,37 @@ func validateSpec(s Spec) error {
 	case s.OSImage.Name == "":
 		return fmt.Errorf("osImage is required")
 	}
-	return nil
+	// Every other value reaches the API server verbatim, so a value it would
+	// reject is refused here rather than at Argo apply after merge.
+	errs := []error{
+		validate.RequireObjectName("instance type", s.Instancetype),
+		validate.RequireObjectName("preference", s.Preference),
+		validate.RequireObjectName("OS image", s.OSImage.Name),
+		validate.RequireLabels("label", s.Labels),
+	}
+	if s.OSImage.Namespace != "" {
+		errs = append(errs, validate.RequireDNS1123("OS image namespace", s.OSImage.Namespace))
+	}
+	if s.DiskSize != "" {
+		errs = append(errs, validate.RequireQuantity("disk size", s.DiskSize))
+	}
+	if s.StorageClass != "" {
+		errs = append(errs, validate.RequireObjectName("storage class", s.StorageClass))
+	}
+	for _, d := range s.ExtraDisks {
+		errs = append(errs, validate.RequireDNS1123("extra disk name", d.Name))
+		if d.Size != "" {
+			errs = append(errs, validate.RequireQuantity("extra disk size", d.Size))
+		}
+		if d.StorageClass != "" {
+			errs = append(errs, validate.RequireObjectName("extra disk storage class", d.StorageClass))
+		}
+	}
+	for _, n := range s.Networks {
+		errs = append(errs, validate.RequireNetworkRef("network", n.Name),
+			validate.RequireInterfaceName("network interface name", model.InterfaceName(n.Name)))
+	}
+	return errors.Join(errs...)
 }
 
 func metadata(s Spec) map[string]any {

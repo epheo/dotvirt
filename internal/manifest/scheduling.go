@@ -8,7 +8,6 @@ import (
 	"go.yaml.in/yaml/v3"
 
 	"github.com/epheo/dotvirt/internal/model"
-	"github.com/epheo/dotvirt/internal/validate"
 )
 
 // GroupLabelPrefix marks a placement-group membership label on the VM
@@ -198,7 +197,7 @@ func applySchedulingRules(ed *lineEditor, vmRoot *yaml.Node, edit VMEdit) (map[s
 	}
 	tmplSpec := templateSpecNode(vmRoot)
 	if tmplSpec == nil {
-		return nil, nil, fmt.Errorf("%w: VM has no template spec", model.ErrInvalid)
+		return nil, nil, fmt.Errorf("%w: VM has no template spec", model.ErrConflict)
 	}
 	cur, pinViaSelector := currentScheduling(vmRoot)
 	if cur != nil && cur.Custom {
@@ -217,12 +216,6 @@ func applySchedulingRules(ed *lineEditor, vmRoot *yaml.Node, edit VMEdit) (map[s
 	set := map[string]string{}
 	var remove []string
 	for _, g := range edit.AddGroups {
-		if err := validate.RequireDNS1123("group name", g.Name); err != nil {
-			return nil, nil, err
-		}
-		if g.Mode != "together" && g.Mode != "apart" {
-			return nil, nil, fmt.Errorf("%w: group mode %q must be together or apart", model.ErrInvalid, g.Mode)
-		}
 		groups[g.Name] = g
 		set[GroupLabelPrefix+g.Name] = g.Mode
 	}
@@ -232,14 +225,7 @@ func applySchedulingRules(ed *lineEditor, vmRoot *yaml.Node, edit VMEdit) (map[s
 	}
 
 	if edit.Pin != nil {
-		pin = nil
-		for _, h := range *edit.Pin {
-			h = strings.TrimSpace(h)
-			if h == "" {
-				return nil, nil, fmt.Errorf("%w: empty host in pin list", model.ErrInvalid)
-			}
-			pin = append(pin, h)
-		}
+		pin = *edit.Pin
 		// A hostname nodeSelector (the legacy single-host pin) would double-
 		// constrain placement beside the regenerated node-affinity term.
 		applyMapEdits(ed, tmplSpec, "nodeSelector", nil, []string{hostnameLabel})
@@ -250,7 +236,7 @@ func applySchedulingRules(ed *lineEditor, vmRoot *yaml.Node, edit VMEdit) (map[s
 	}
 
 	ed.deleteChild(tmplSpec, "affinity")
-	if block := affinityBlock(pin, sortedGroups(groups)); len(block) > 0 {
+	if block := affinityBlock(ed, pin, sortedGroups(groups)); len(block) > 0 {
 		ed.insertBlock(tmplSpec, block)
 	}
 	return set, remove, nil
@@ -260,7 +246,7 @@ func applySchedulingRules(ed *lineEditor, vmRoot *yaml.Node, edit VMEdit) (map[s
 // the editor always rewrites it wholesale (it refuses hand-written content),
 // so rendering stays deterministic: pin, then together, then apart, groups
 // sorted by name.
-func affinityBlock(pin []string, groups []model.PlacementGroup) []string {
+func affinityBlock(ed *lineEditor, pin []string, groups []model.PlacementGroup) []string {
 	var together, apart []model.PlacementGroup
 	for _, g := range groups {
 		if g.Mode == "together" {
@@ -284,15 +270,15 @@ func affinityBlock(pin []string, groups []model.PlacementGroup) []string {
 			"              values:",
 		)
 		for _, h := range pin {
-			b = append(b, "                - "+h)
+			b = append(b, "                - "+ed.str(h))
 		}
 	}
-	b = append(b, podAffinitySection("podAffinity", together)...)
-	b = append(b, podAffinitySection("podAntiAffinity", apart)...)
+	b = append(b, podAffinitySection(ed, "podAffinity", together)...)
+	b = append(b, podAffinitySection(ed, "podAntiAffinity", apart)...)
 	return b
 }
 
-func podAffinitySection(field string, groups []model.PlacementGroup) []string {
+func podAffinitySection(ed *lineEditor, field string, groups []model.PlacementGroup) []string {
 	var req, pref []model.PlacementGroup
 	for _, g := range groups {
 		if g.Strict {
@@ -311,7 +297,7 @@ func podAffinitySection(field string, groups []model.PlacementGroup) []string {
 			b = append(b,
 				"      - labelSelector:",
 				"          matchLabels:",
-				"            "+quoteKey(GroupLabelPrefix+g.Name)+": "+g.Mode,
+				"            "+ed.str(GroupLabelPrefix+g.Name)+": "+ed.str(g.Mode),
 				"        topologyKey: "+hostnameLabel,
 			)
 		}
@@ -324,7 +310,7 @@ func podAffinitySection(field string, groups []model.PlacementGroup) []string {
 				"        podAffinityTerm:",
 				"          labelSelector:",
 				"            matchLabels:",
-				"              "+quoteKey(GroupLabelPrefix+g.Name)+": "+g.Mode,
+				"              "+ed.str(GroupLabelPrefix+g.Name)+": "+ed.str(g.Mode),
 				"          topologyKey: "+hostnameLabel,
 			)
 		}

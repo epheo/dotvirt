@@ -15,25 +15,33 @@ import (
 type VMEdit = model.VMEdit
 
 // ApplyEdit edits the VirtualMachine named (namespace, name) within a manifest,
-// changing only the targeted fields. It works by splicing new values into the
-// original text at the exact lines of the target scalars - never re-serializing
-// the document - so the resulting diff touches only the changed lines and all
-// formatting, comments, and key order are preserved byte-for-byte elsewhere.
+// changing only the targeted fields. defaultNS is the namespace a document
+// without metadata.namespace belongs to (the repo layout's directory rule), as
+// ParseVMs takes it. It works by splicing new values into the original text at
+// the exact lines of the target scalars - never re-serializing the document -
+// so the resulting diff touches only the changed lines and all formatting,
+// comments, and key order are preserved byte-for-byte elsewhere.
 //
 // yaml.v3's encoder reformats sequences on round-trip, so a node-tree re-marshal
 // would produce noisy diffs; line splicing avoids that entirely.
-func ApplyEdit(content []byte, namespace, name string, edit VMEdit) ([]byte, error) {
-	vm, err := findVM(content, namespace, name)
+//
+// Errors are classified: model.ErrInvalid for a value the edit carries,
+// model.ErrConflict for a manifest the editor cannot apply it to.
+func ApplyEdit(content []byte, defaultNS, namespace, name string, edit VMEdit) ([]byte, error) {
+	if err := ValidateEdit(edit); err != nil {
+		return nil, err
+	}
+	vm, err := findVM(content, defaultNS, namespace, name)
 	if err != nil {
-		return nil, fmt.Errorf("parse manifest: %w", err)
+		return nil, fmt.Errorf("%w: the manifest of %s/%s does not parse; fix it in git: %v", model.ErrConflict, namespace, name, err)
 	}
 	if vm == nil {
-		return nil, fmt.Errorf("VM %s/%s not found in manifest", namespace, name)
+		return nil, fmt.Errorf("%w: VM %s/%s not found in manifest", model.ErrConflict, namespace, name)
 	}
 
 	ed, err := newLineEditor(content)
 	if err != nil {
-		return nil, fmt.Errorf("edit %s/%s in git directly: %w", namespace, name, err)
+		return nil, fmt.Errorf("%w: edit %s/%s in git directly: %v", model.ErrConflict, namespace, name, err)
 	}
 
 	if edit.Power != nil {
@@ -58,15 +66,16 @@ func ApplyEdit(content []byte, namespace, name string, edit VMEdit) ([]byte, err
 	}
 	applyDisksNetworks(ed, vm, edit)
 	applyVolumeMigrations(ed, vm, edit.MigrateVolumes)
+	if ed.err != nil {
+		return nil, ed.err
+	}
 
-	// Line splicing trusts the document's indentation; degenerate-but-parseable
-	// YAML (found by fuzzing: a tagged scalar where a mapping child sits at a
-	// shallower indent) can defeat that and corrupt the file. Refuse here, at
-	// stage time, rather than let a broken manifest land in a PR and fail only
-	// at apply time.
 	out := ed.bytes()
-	if _, err := ParseVMs("", out, namespace); err != nil {
-		return nil, fmt.Errorf("edit would corrupt the manifest of %s/%s; edit it in git directly: %w", namespace, name, err)
+	if err := verifyEdit(out, defaultNS, namespace, name, edit); err != nil {
+		return nil, err
+	}
+	if err := verifyScope(content, out, defaultNS, namespace, name, edit); err != nil {
+		return nil, err
 	}
 	return out, nil
 }
@@ -79,17 +88,11 @@ func applyEvictionStrategy(ed *lineEditor, vmRoot *yaml.Node, strategy string) {
 	if s == nil {
 		return
 	}
-	if es := get(s, "evictionStrategy"); es != nil {
-		if strategy == "" {
-			ed.deleteChild(s, "evictionStrategy")
-			return
-		}
-		ed.setScalarAt(es, strategy)
+	if strategy == "" {
+		ed.deleteChild(s, "evictionStrategy")
 		return
 	}
-	if strategy != "" {
-		ed.insertChild(s, "evictionStrategy", strategy)
-	}
+	ed.upsertChild(s, "evictionStrategy", ed.str(strategy))
 }
 
 // applySizing writes the VM's CPU/memory in exactly one representation - an
@@ -171,29 +174,26 @@ func applyRef(ed *lineEditor, vmRoot *yaml.Node, key, value string) {
 	if spec == nil {
 		return
 	}
+	value = ed.str(value)
 	if ref := get(spec, key); ref != nil {
 		// A captured ControllerRevision pin (older KubeVirt writes it into spec)
 		// must not survive a matcher edit: the webhook rejects a Name change that
 		// keeps the old RevisionName.
-		if get(ref, "revisionName") != nil {
-			ed.deleteChild(ref, "revisionName")
-		}
-		if nameNode := get(ref, "name"); nameNode != nil {
-			ed.setScalarAt(nameNode, value)
-			return
-		}
-		ed.insertChild(ref, "name", value)
+		ed.deleteChild(ref, "revisionName")
+		ed.upsertChild(ref, "name", value)
 		return
 	}
 	ed.insertBlock(spec, []string{key + ":", "  name: " + value})
 }
 
 // findVM locates the VirtualMachine mapping node for (namespace, name), nil
-// when no document declares it. Documents are decoded one by one: a single
-// Unmarshal yields only the first of a multi-document file. Node lines count
-// from the start of content whichever document they sit in, so the node found
-// addresses the line editor directly.
-func findVM(content []byte, namespace, name string) (*yaml.Node, error) {
+// when no document declares it. A document without metadata.namespace is in
+// defaultNS, never in any namespace: otherwise an edit of b/x could land on
+// the a/x a namespace-less file in a/ declares. Documents are decoded one by
+// one: a single Unmarshal yields only the first of a multi-document file.
+// Node lines count from the start of content whichever document they sit in,
+// so the node found addresses the line editor directly.
+func findVM(content []byte, defaultNS, namespace, name string) (*yaml.Node, error) {
 	dec := yaml.NewDecoder(bytes.NewReader(content))
 	for {
 		var doc yaml.Node
@@ -212,7 +212,11 @@ func findVM(content []byte, namespace, name string) (*yaml.Node, error) {
 		if meta == nil || nodeValue(get(meta, "name")) != name {
 			continue
 		}
-		if ns := nodeValue(get(meta, "namespace")); ns != "" && ns != namespace {
+		ns := nodeValue(get(meta, "namespace"))
+		if ns == "" {
+			ns = defaultNS
+		}
+		if ns != namespace {
 			continue
 		}
 		return m, nil
@@ -225,12 +229,12 @@ func applyPower(ed *lineEditor, spec *yaml.Node, power string) {
 		return
 	}
 	on := power == string(model.PowerOn)
-	if running := get(s, "running"); running != nil {
-		ed.setScalarAt(running, boolStr(on))
+	if get(s, "running") != nil {
+		ed.setChild(s, "running", boolStr(on))
 		return
 	}
-	if rs := get(s, "runStrategy"); rs != nil {
-		ed.setScalarAt(rs, model.RunStrategy(on))
+	if get(s, "runStrategy") != nil {
+		ed.setChild(s, "runStrategy", model.RunStrategy(on))
 		return
 	}
 	ed.insertChild(s, "runStrategy", model.RunStrategy(on))
@@ -257,7 +261,7 @@ func applyCPU(ed *lineEditor, vmRoot *yaml.Node, vcpus int) {
 	}
 	cores, sockets, threads := get(cpu, "cores"), get(cpu, "sockets"), get(cpu, "threads")
 	if cores != nil && sockets == nil && threads == nil {
-		ed.setScalarAt(cores, val)
+		ed.setChild(cpu, "cores", val)
 		return
 	}
 	if cores != nil {
@@ -266,11 +270,7 @@ func applyCPU(ed *lineEditor, vmRoot *yaml.Node, vcpus int) {
 	if threads != nil {
 		ed.deleteChild(cpu, "threads")
 	}
-	if sockets != nil {
-		ed.setScalarAt(sockets, val)
-		return
-	}
-	ed.insertChild(cpu, "sockets", val)
+	ed.upsertChild(cpu, "sockets", val)
 }
 
 func applyMemory(ed *lineEditor, vmRoot *yaml.Node, memory string) {
@@ -278,21 +278,14 @@ func applyMemory(ed *lineEditor, vmRoot *yaml.Node, memory string) {
 	if domain == nil {
 		return
 	}
+	memory = ed.str(memory)
 	if mem := get(domain, "memory"); mem != nil {
-		if g := get(mem, "guest"); g != nil {
-			ed.setScalarAt(g, memory)
-			return
-		}
-		ed.insertChild(mem, "guest", memory)
+		ed.upsertChild(mem, "guest", memory)
 		return
 	}
-	if res := get(domain, "resources"); res != nil {
-		if reqs := get(res, "requests"); reqs != nil {
-			if m := get(reqs, "memory"); m != nil {
-				ed.setScalarAt(m, memory)
-				return
-			}
-		}
+	if reqs := get(get(domain, "resources"), "requests"); get(reqs, "memory") != nil {
+		ed.setChild(reqs, "memory", memory)
+		return
 	}
 	ed.insertBlock(domain, []string{"memory:", "  guest: " + memory})
 }

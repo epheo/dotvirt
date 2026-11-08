@@ -2,6 +2,7 @@ package manifest
 
 import (
 	"bytes"
+	"fmt"
 	"strings"
 
 	"go.yaml.in/yaml/v3"
@@ -26,27 +27,63 @@ func applyDisksNetworks(ed *lineEditor, vmRoot *yaml.Node, edit VMEdit) {
 	domain := get(tmplSpec, "domain")
 	devices := get(domain, "devices")
 
-	applyAddDisks(ed, spec, tmplSpec, devices, nodeValue(get(get(vmRoot, "metadata"), "name")), edit.AddDisks)
+	vm := nodeValue(get(get(vmRoot, "metadata"), "name"))
+	if len(edit.AddNetworks) > 0 && get(devices, "interfaces") == nil {
+		// KubeVirt attaches the pod network only to a template declaring no
+		// interface, so the first one declared would silently drop it.
+		ed.fail(fmt.Errorf("%w: %s declares no interfaces and runs on the implicit pod network, which adding a network would drop; declare its interfaces in git first", model.ErrConflict, vm))
+		return
+	}
+	applyAddDisks(ed, spec, tmplSpec, devices, vm, edit.AddDisks)
 	for _, name := range edit.RemoveDisks {
 		removeDisk(ed, spec, tmplSpec, devices, name)
 	}
 
+	added := map[string]bool{}
 	for _, n := range edit.AddNetworks {
-		iface := model.InterfaceName(n.Name)
-		appendItem(ed, get(devices, "interfaces"), []string{
-			"- name: " + iface,
-			"  bridge: {}",
-		})
-		appendItem(ed, get(tmplSpec, "networks"), []string{
-			"- name: " + iface,
-			"  multus:",
-			"    networkName: " + n.Name,
-		})
+		name := n.InterfaceName()
+		if added[name] || namedItem(get(devices, "interfaces"), name) != nil || namedItem(get(tmplSpec, "networks"), name) != nil {
+			ed.fail(fmt.Errorf("%w: %s already has an interface named %s", model.ErrConflict, vm, name))
+			return
+		}
+		if pod := podNetwork(get(tmplSpec, "networks")); n.Name == model.PodNetwork && pod != "" {
+			ed.fail(fmt.Errorf("%w: %s is already on the pod network, through interface %s", model.ErrConflict, vm, pod))
+			return
+		}
+		added[name] = true
+		iface := "- name: " + ed.str(name)
+		binding, network := "  bridge: {}", []string{"  multus:", "    networkName: " + ed.str(n.Name)}
+		if n.Name == model.PodNetwork {
+			// Masquerade, as vmgen's primary NIC: the binding KubeVirt
+			// recommends on the pod network, where bridge is often refused.
+			// The model does not record a live NIC's binding, so an adopted pod
+			// NIC on another one (l2bridge, passt) is written as masquerade too.
+			binding, network = "  masquerade: {}", []string{"  pod: {}"}
+		}
+		appendItem(ed, get(devices, "interfaces"), []string{iface, binding})
+		appendItem(ed, get(tmplSpec, "networks"), append([]string{iface}, network...))
 	}
 	for _, name := range edit.RemoveNetworks {
 		removeNamedItem(ed, get(devices, "interfaces"), name)
 		removeNamedItem(ed, get(tmplSpec, "networks"), name)
 	}
+}
+
+// defaultDiskSize is an added disk's size when the edit names none.
+const defaultDiskSize = "10Gi"
+
+// podNetwork is the name of the networks entry on the pod network, "" when
+// none is.
+func podNetwork(networks *yaml.Node) string {
+	if networks == nil {
+		return ""
+	}
+	for _, n := range networks.Content {
+		if get(n, "pod") != nil {
+			return nodeValue(get(n, "name"))
+		}
+	}
+	return ""
 }
 
 // applyAddDisks adds each new disk as a persistent, blank DataVolume: a disk
@@ -59,22 +96,33 @@ func applyAddDisks(ed *lineEditor, spec, tmplSpec, devices *yaml.Node, vm string
 		return
 	}
 	templates := get(spec, "dataVolumeTemplates")
+	if templates != nil && (templates.Kind != yaml.SequenceNode || len(templates.Content) == 0) {
+		// A null or empty list has no item to align with: write it anew.
+		ed.deleteChild(spec, "dataVolumeTemplates")
+		templates = nil
+	}
 	var created []string // a new dataVolumeTemplates section, built when none exists
+	seen := map[string]bool{}
 	for _, d := range adds {
 		dv := vm + "-" + d.Name
+		if seen[d.Name] || namedItem(get(devices, "disks"), d.Name) != nil || namedItem(get(tmplSpec, "volumes"), d.Name) != nil || templateNamed(templates, dv) != nil {
+			ed.fail(fmt.Errorf("%w: %s already has a disk named %s", model.ErrConflict, vm, d.Name))
+			return
+		}
+		seen[d.Name] = true
 		size := d.Size
 		if size == "" {
-			size = "10Gi"
+			size = defaultDiskSize
 		}
 		appendItem(ed, get(devices, "disks"), []string{
-			"- name: " + d.Name,
+			"- name: " + ed.str(d.Name),
 			"  disk:",
 			"    bus: virtio",
 		})
 		appendItem(ed, get(tmplSpec, "volumes"), []string{
-			"- name: " + d.Name,
+			"- name: " + ed.str(d.Name),
 			"  dataVolume:",
-			"    name: " + dv,
+			"    name: " + ed.str(dv),
 		})
 		item := blankDVTemplate(dv, size, d.StorageClass)
 		if templates != nil {
@@ -126,7 +174,7 @@ func removeDisk(ed *lineEditor, spec, tmplSpec, devices *yaml.Node, name string)
 // removeTemplateNamed deletes the dataVolumeTemplates item whose metadata.name
 // equals name - their identity, unlike the top-level name: of disks and volumes.
 func removeTemplateNamed(ed *lineEditor, seq *yaml.Node, name string) {
-	if i, item := findNamed(seq, name, true); item != nil {
+	if i, item := findNamed(seq, name, true); item != nil && !ed.inFlow(seq) {
 		ed.removeRange(item.Line-1, itemEndLine(ed, seq, i))
 	}
 }
@@ -139,7 +187,7 @@ func templateSpecNode(vmRoot *yaml.Node) *yaml.Node {
 
 // removeNamedItem deletes the sequence item whose `name:` equals name.
 func removeNamedItem(ed *lineEditor, seq *yaml.Node, name string) {
-	if i, item := findNamed(seq, name, false); item != nil {
+	if i, item := findNamed(seq, name, false); item != nil && !ed.inFlow(seq) {
 		ed.removeRange(item.Line-1, itemEndLine(ed, seq, i))
 	}
 }

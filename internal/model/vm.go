@@ -91,11 +91,15 @@ type Disk struct {
 	StorageClass string `json:"storageClass,omitempty"` // dataVolume storageClassName (empty = cluster default)
 }
 
+// PodNetwork is the Network of a NIC on the pod network, where any other value
+// is a multus networkName.
+const PodNetwork = "pod"
+
 // NIC is a network interface on the VM. Name/Network come from the manifest;
 // MAC/IP are merged from the live VMI status when running.
 type NIC struct {
 	Name    string `json:"name"`
-	Network string `json:"network,omitempty"` // "pod" or the multus networkName
+	Network string `json:"network,omitempty"` // PodNetwork or the multus networkName
 	MAC     string `json:"mac,omitempty"`     // live, from VMI status
 	IP      string `json:"ip,omitempty"`      // live, from VMI status
 	// Implicit marks the pod-network adapter KubeVirt attaches when the manifest
