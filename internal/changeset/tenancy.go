@@ -3,6 +3,7 @@ package changeset
 import (
 	"encoding/json"
 	"fmt"
+	"slices"
 
 	"github.com/epheo/dotvirt/internal/auth"
 	"github.com/epheo/dotvirt/internal/draft"
@@ -391,10 +392,11 @@ func (c *Coordinator) grantSource(commitProj project.ProjectInfo) (grantSource, 
 
 // entries stages ns's grants: the admin RoleBinding naming the subjects it
 // already declares, the owners and the project's sync account
-// (netgen.RoleBindingManifest), and that account's EgressFirewall grant
-// (netgen.SyncEgressManifest). Each rewrites the file declaring it, if any;
-// the admin grant keeps its role. A grant git already states is left out, and
-// none at all with no owners and no sync account.
+// (netgen.RoleBindingManifest), and the EgressFirewall grant to those same
+// subjects plus any it already declares (netgen.EgressManifest). Each rewrites
+// the file declaring it, if any; the admin grant keeps its role. A grant git
+// already states is left out, and none at all with no owners and no sync
+// account.
 func (g grantSource) entries(ns, proj string, owners []string) ([]draft.Entry, error) {
 	spec := netgen.RoleBindingSpec{Namespace: ns, Project: proj, Owners: owners}
 	if name, ok := tenancy.SyncAccount(proj); ok && g.syncNS != "" {
@@ -403,10 +405,9 @@ func (g grantSource) entries(ns, proj string, owners []string) ([]draft.Entry, e
 	if spec.SyncAccount == nil && len(owners) == 0 {
 		return nil, nil
 	}
-	var out []draft.Entry
 	admin, err := g.entry(ns, tenancy.AdminBinding(ns), func(declared []byte) (string, []byte, error) {
 		if declared != nil {
-			role, kept, _, err := netgen.DeclaredGrant(declared, ns)
+			role, kept, _, err := netgen.DeclaredGrant(declared, tenancy.AdminBinding(ns))
 			if err != nil {
 				return "", nil, err
 			}
@@ -417,17 +418,22 @@ func (g grantSource) entries(ns, proj string, owners []string) ([]draft.Entry, e
 	if err != nil {
 		return nil, err
 	}
-	out = append(out, admin...)
-	if spec.SyncAccount != nil {
-		egress, err := g.entry(ns, tenancy.EgressBinding(ns), func([]byte) (string, []byte, error) {
-			return netgen.SyncEgressManifest(ns, proj, *spec.SyncAccount)
-		})
-		if err != nil {
-			return nil, err
+	// After the admin grant: spec.Kept holds the subjects it declares.
+	egress, err := g.entry(ns, tenancy.EgressBinding(ns), func(declared []byte) (string, []byte, error) {
+		s := spec
+		if declared != nil {
+			_, kept, _, err := netgen.DeclaredGrant(declared, tenancy.EgressBinding(ns))
+			if err != nil {
+				return "", nil, err
+			}
+			s.Kept = slices.Concat(spec.Kept, kept)
 		}
-		out = append(out, egress...)
+		return netgen.EgressManifest(s)
+	})
+	if err != nil {
+		return nil, err
 	}
-	return out, nil
+	return append(admin, egress...), nil
 }
 
 // entry stages RoleBinding ns/name as render renders it from the bytes git

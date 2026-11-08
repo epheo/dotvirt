@@ -310,11 +310,15 @@ func TestEnvtest(t *testing.T) {
 	if err := admin.Update(ctx, adminRole); err != nil {
 		t.Fatal(err)
 	}
-	// syncGrants are the platform repo's grants of ns to project's sync
-	// account, as the app renders them (netgen.RoleBindingManifest).
+	// syncGrants are the platform repo's grants of ns to its owner and
+	// project's sync account, as the app renders them (netgen.RoleBindingManifest,
+	// netgen.EgressManifest): both grants to the same subjects.
 	syncGrants := func(ns, project string) {
 		account, _ := tenancy.SyncAccount(project)
-		sa := []rbacv1.Subject{{Kind: rbacv1.ServiceAccountKind, Name: account, Namespace: "argocd"}}
+		sa := []rbacv1.Subject{
+			{Kind: rbacv1.UserKind, APIGroup: rbacv1.GroupName, Name: project + "-owner"},
+			{Kind: rbacv1.ServiceAccountKind, Name: account, Namespace: "argocd"},
+		}
 		for name, role := range map[string]string{tenancy.AdminBinding(ns): "admin", tenancy.EgressBinding(ns): tenancy.TenantEgressRole} {
 			mustCreate(t, admin, &rbacv1.RoleBinding{
 				ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: ns},
@@ -329,7 +333,17 @@ func TestEnvtest(t *testing.T) {
 		syncGrants("team-a", "team-a")
 		syncGrants("team-c", "team-c")
 		kube := kubernetes.NewForConfigOrDie(adminCfg)
+		review := func(user string, groups []string, attrs authzv1.ResourceAttributes) bool {
+			res, err := kube.AuthorizationV1().SubjectAccessReviews().Create(ctx, &authzv1.SubjectAccessReview{Spec: authzv1.SubjectAccessReviewSpec{
+				User: user, Groups: groups, ResourceAttributes: &attrs,
+			}}, metav1.CreateOptions{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			return res.Status.Allowed
+		}
 		user := "system:serviceaccount:argocd:dotvirt-p-team-a"
+		groups := []string{"system:serviceaccounts", "system:serviceaccounts:argocd", "system:authenticated"}
 		for _, c := range []struct {
 			group, resource, ns string
 			want                bool
@@ -347,16 +361,13 @@ func TestEnvtest(t *testing.T) {
 			{"k8s.ovn.org", "egressfirewalls", "team-c", false},
 			{"kubevirt.io", "virtualmachines", "", false},
 		} {
-			res, err := kube.AuthorizationV1().SubjectAccessReviews().Create(ctx, &authzv1.SubjectAccessReview{Spec: authzv1.SubjectAccessReviewSpec{
-				User:               user,
-				Groups:             []string{"system:serviceaccounts", "system:serviceaccounts:argocd", "system:authenticated"},
-				ResourceAttributes: &authzv1.ResourceAttributes{Verb: "create", Group: c.group, Resource: c.resource, Namespace: c.ns},
-			}}, metav1.CreateOptions{})
-			if err != nil {
-				t.Fatal(err)
+			attrs := authzv1.ResourceAttributes{Verb: "create", Group: c.group, Resource: c.resource, Namespace: c.ns}
+			if got := review(user, groups, attrs); got != c.want {
+				t.Errorf("team-a's sync account create %s/%s in %q: allowed=%v, want %v", c.group, c.resource, c.ns, got, c.want)
 			}
-			if res.Status.Allowed != c.want {
-				t.Errorf("team-a's sync account create %s/%s in %q: allowed=%v, want %v", c.group, c.resource, c.ns, res.Status.Allowed, c.want)
+			// The project's people hold what its repo holds.
+			if got := review("team-a-owner", []string{"system:authenticated"}, attrs); got != c.want {
+				t.Errorf("team-a's owner create %s/%s in %q: allowed=%v, want %v", c.group, c.resource, c.ns, got, c.want)
 			}
 		}
 		// The account is the AppProject's, for the garbage collector.

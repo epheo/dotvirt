@@ -25,10 +25,10 @@ func TestTenantNameRefusesReserved(t *testing.T) {
 	}
 }
 
-// A project's grant names its sync account beside the owners, with that
-// account's EgressFirewall grant in its own file, and is staged even without
-// owners: the project's repo syncs as that account. With no sync account
-// configured and no owners there is nothing to grant.
+// A project's grants name its sync account beside the owners, the
+// EgressFirewall one in its own file to the same subjects, and are staged even
+// without owners: the project's repo syncs as that account. With no sync
+// account configured and no owners there is nothing to grant.
 func TestProjectAdoptionGrantsSyncAccount(t *testing.T) {
 	specs := []netgen.NamespaceSpec{{Name: "team-a", Project: "team-a", Repo: "acme/team-a.git"}}
 	grants := func(entries []draft.Entry) map[string]draft.Entry {
@@ -46,16 +46,16 @@ func TestProjectAdoptionGrantsSyncAccount(t *testing.T) {
 			t.Fatalf("%s: %v", name, err)
 		}
 		rb := grants(entries)
-		admin, egress := rb["team-a-admins"], rb["team-a-sync-egress"]
-		if len(rb) != 2 || admin.SourceFile != "rbac/team-a.yaml" || egress.SourceFile != "rbac/team-a/team-a-sync-egress.yaml" {
+		admin, egress := rb["team-a-admins"], rb["team-a-egress"]
+		if len(rb) != 2 || admin.SourceFile != "rbac/team-a.yaml" || egress.SourceFile != "rbac/team-a/team-a-egress.yaml" {
 			t.Fatalf("%s: grants %+v", name, rb)
 		}
-		_, subjects, _, err := netgen.DeclaredGrant([]byte(admin.Manifest), "team-a")
-		if err != nil || !slices.Contains(subjects, *netgen.ServiceAccountSubject("openshift-gitops", "dotvirt-p-team-a")) {
-			t.Errorf("%s: subjects %+v (%v), want the sync account", name, subjects, err)
+		_, subjects, _, err := netgen.DeclaredGrant([]byte(admin.Manifest), "team-a-admins")
+		if err != nil || !slices.Contains(subjects, *netgen.ServiceAccountSubject("openshift-gitops", "dotvirt-p-team-a")) || len(subjects) != len(owners)+1 {
+			t.Errorf("%s: subjects %+v (%v), want the owners and the sync account", name, subjects, err)
 		}
-		if !strings.Contains(egress.Manifest, "name: dotvirt-tenant-egress") {
-			t.Errorf("%s: egress grant:\n%s", name, egress.Manifest)
+		if role, egressSubjects, _, _ := netgen.DeclaredGrant([]byte(egress.Manifest), "team-a-egress"); role != "dotvirt-tenant-egress" || !slices.Equal(egressSubjects, subjects) {
+			t.Errorf("%s: egress grant %q %+v, want the admin grant's subjects", name, role, egressSubjects)
 		}
 	}
 	entries, err := projectAdoption(specs, nil, grantSource{})
@@ -81,9 +81,9 @@ subjects:
 
 // The grant helper for a project made before sync impersonation rewrites the
 // file declaring each namespace's grant, wherever it sits, keeping its role and
-// every subject; a namespace with none gets a fresh one; a file shared with
-// other objects is refused rather than rewritten; a project already granted
-// stages nothing.
+// every subject, and grants those same subjects EgressFirewall writes; a
+// namespace with none gets fresh grants; a file shared with other objects is
+// refused rather than rewritten; a project already granted stages nothing.
 func TestStageSyncAccessKeepsDeclaredGrant(t *testing.T) {
 	bare, _ := seedWork(t, map[string][]byte{
 		"tenancy/alpha-grant.yaml": []byte(declaredGrant),
@@ -101,13 +101,17 @@ func TestStageSyncAccessKeepsDeclaredGrant(t *testing.T) {
 	for _, it := range view.Items {
 		items[it.Name] = it.YAML
 	}
-	if len(items) != 4 || items["alpha-sync-egress"] == "" || items["beta-sync-egress"] == "" {
+	if len(items) != 4 || items["alpha-egress"] == "" || items["beta-egress"] == "" {
 		t.Errorf("staged %v, want both namespaces' admin and egress grants", slices.Sorted(maps.Keys(items)))
 	}
 	sa := *netgen.ServiceAccountSubject("openshift-gitops", "dotvirt-p-legacy")
-	role, subjects, _, err := netgen.DeclaredGrant([]byte(items["alpha-admins"]), "alpha")
+	role, subjects, _, err := netgen.DeclaredGrant([]byte(items["alpha-admins"]), "alpha-admins")
 	if err != nil || role != "edit" || len(subjects) != 2 || subjects[0].Name != "carol" || subjects[1] != sa {
 		t.Errorf("alpha grant = %q %+v (%v), want edit for carol and the sync account", role, subjects, err)
+	}
+	// carol may stage the egress firewall the project's repo may sync.
+	if _, egress, _, _ := netgen.DeclaredGrant([]byte(items["alpha-egress"]), "alpha-egress"); !slices.Equal(egress, subjects) {
+		t.Errorf("alpha egress subjects %+v, want the admin grant's %+v", egress, subjects)
 	}
 	d, err := c.store.List(id.Username, plat.Name)
 	if err != nil {
@@ -118,7 +122,7 @@ func TestStageSyncAccessKeepsDeclaredGrant(t *testing.T) {
 			t.Errorf("alpha grant written to %s (%s), want the declaring file rewritten", e.SourceFile, e.Kind)
 		}
 	}
-	if _, subjects, _, _ := netgen.DeclaredGrant([]byte(items["beta-admins"]), "beta"); len(subjects) != 1 || subjects[0] != sa {
+	if _, subjects, _, _ := netgen.DeclaredGrant([]byte(items["beta-admins"]), "beta-admins"); len(subjects) != 1 || subjects[0] != sa {
 		t.Errorf("beta grant subjects %+v, want the sync account alone", subjects)
 	}
 
@@ -157,11 +161,11 @@ func TestStageCreateNamespaceGrantsJoiningProject(t *testing.T) {
 	for _, it := range view.Items {
 		items[it.Name] = it.YAML
 	}
-	_, subjects, _, err := netgen.DeclaredGrant([]byte(items["team-a-db-admins"]), "team-a-db")
+	_, subjects, _, err := netgen.DeclaredGrant([]byte(items["team-a-db-admins"]), "team-a-db-admins")
 	if err != nil || len(subjects) != 1 || subjects[0] != *netgen.ServiceAccountSubject("argocd", "dotvirt-p-team-a") {
 		t.Errorf("grant subjects %+v (%v), want the joining project's sync account", subjects, err)
 	}
-	if items["team-a-db"] == "" || items["team-a-db-sync-egress"] == "" {
+	if items["team-a-db"] == "" || items["team-a-db-egress"] == "" {
 		t.Errorf("staged %v, want the namespace and both grants", slices.Sorted(maps.Keys(items)))
 	}
 }

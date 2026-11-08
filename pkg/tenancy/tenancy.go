@@ -28,8 +28,8 @@ const AppProjectPrefix = "dotvirt-p-"
 const PlatformSyncAccount = "dotvirt-platform-sync"
 
 // TenantEgressRole is the ClusterRole granting EgressFirewall writes: a tenant
-// kind the built-in admin role lacks, bound to each project's sync account in
-// each of its namespaces (EgressBinding).
+// kind the built-in admin role lacks, bound in each project namespace to the
+// same subjects as its admin grant (EgressBinding).
 const TenantEgressRole = "dotvirt-tenant-egress"
 
 var dnsLabel = regexp.MustCompile(`^[a-z0-9]([-a-z0-9]*[a-z0-9])?$`)
@@ -63,8 +63,9 @@ func SyncAccount(project string) (string, bool) { return AppProjectName(project)
 func AdminBinding(ns string) string { return ns + "-admins" }
 
 // EgressBinding is the platform repo's RoleBinding granting a project
-// namespace's sync account TenantEgressRole.
-func EgressBinding(ns string) string { return ns + "-sync-egress" }
+// namespace's admin-grant subjects, owners and sync account alike,
+// TenantEgressRole: the project's people and its repo hold the same rights.
+func EgressBinding(ns string) string { return ns + "-egress" }
 
 // Reserved reports whether ns is platform space no tenant Application may
 // target: the openshift-* and kube-* system namespaces, and platform, the

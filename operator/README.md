@@ -211,12 +211,13 @@ them Argo writes with the controller's rights, not the project's.
 `spec.argocd.syncImpersonation.enabled: true` turns on Argo CD's sync
 impersonation, so each Application syncs as its tier's ServiceAccount:
 
-- `dotvirt-p-<project>` holds what the platform repo grants it in each project
-  namespace: `<ns>-admins` (the `admin` role, beside the project's owners) and
-  `<ns>-sync-egress` (`dotvirt-tenant-egress`, EgressFirewall writes, which `admin`
-  lacks). A project's repo can then apply only what its project may: no
-  NetworkAttachmentDefinition, nothing in another project's namespace, and a
-  DataVolume clones only from namespaces the project can read.
+- `dotvirt-p-<project>` holds what the platform repo grants the project in each
+  of its namespaces, beside the project's owners: `<ns>-admins` (the `admin` role)
+  and `<ns>-egress` (`dotvirt-tenant-egress`, EgressFirewall writes, which `admin`
+  lacks), both to the same subjects. A project's repo can then apply only what its
+  people may: no NetworkAttachmentDefinition, nothing in another project's
+  namespace, and a DataVolume clones only from namespaces the project can read.
+  The owners' EgressFirewall right is also what the UI checks before staging one.
 - `dotvirt-platform-sync` holds `dotvirt-argocd-apply` and `dotvirt-platform-sync`.
 
 dotvirt stages both grants with every project, namespace and adoption it creates.
@@ -265,8 +266,9 @@ that, or at once after any spec edit. While off, one review per 5 minutes.
 2. For each project made before, stage its grants: `POST
    /api/projects/<project>/sync-access` as a platform admin, then merge the
    platform PR. Each namespace's `<ns>-admins` keeps its role and subjects and gains
-   the project's account; `<ns>-sync-egress` is added. A grant file holding other
-   objects is refused: edit it in git.
+   the project's account; `<ns>-egress` grants those same subjects EgressFirewall
+   writes, so the owners gain them too. A grant file holding other objects is
+   refused: edit it in git.
 3. Move Applications off the shared `dotvirt-tenants` AppProject (the upgrade does
    this) and decide on any non-dotvirt Applications on the instance.
 4. Set `spec.argocd.syncImpersonation.enabled: true` and read

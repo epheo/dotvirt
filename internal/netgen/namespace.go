@@ -171,9 +171,8 @@ type RoleBindingSpec struct {
 	// Owners: re-rendering a grant never revokes access it did not ask to.
 	Kept []Subject `json:"-"`
 	// SyncAccount is the project's Argo sync ServiceAccount
-	// (tenancy.SyncAccount), nil for none. It joins the same binding as the
-	// owners, so it holds exactly the project's role; SyncEgressManifest adds
-	// EgressFirewall writes, a tenant kind admin lacks.
+	// (tenancy.SyncAccount), nil for none. It joins the owners in every grant,
+	// so the project's repo holds exactly the project's rights.
 	SyncAccount *Subject `json:"-"`
 }
 
@@ -196,12 +195,26 @@ func ServiceAccountSubject(namespace, name string) *Subject {
 // sync account. With a sync account it is rendered even without owners: the
 // project's repo syncs as that account.
 func RoleBindingManifest(s RoleBindingSpec) (path string, content []byte, err error) {
-	if err := validate.RequireDNS1123("namespace", s.Namespace); err != nil {
-		return "", nil, err
-	}
 	role := s.Role
 	if role == "" {
 		role = "admin" // the built-in namespace-admin ClusterRole
+	}
+	return grantManifest(s, tenancy.AdminBinding(s.Namespace), role)
+}
+
+// EgressManifest renders a project namespace's EgressFirewall grant
+// (tenancy.TenantEgressRole), a tenant kind the admin role lacks, to the same
+// subjects as its RoleBindingManifest: the project's people may stage what
+// its repo may sync, and no more. s.Role does not apply.
+func EgressManifest(s RoleBindingSpec) (path string, content []byte, err error) {
+	return grantManifest(s, tenancy.EgressBinding(s.Namespace), tenancy.TenantEgressRole)
+}
+
+// grantManifest renders RoleBinding name binding role to s's kept subjects,
+// each owner (kind User) and the sync account, each once.
+func grantManifest(s RoleBindingSpec, name, role string) (string, []byte, error) {
+	if err := validate.RequireDNS1123("namespace", s.Namespace); err != nil {
+		return "", nil, err
 	}
 	var subjects []Subject
 	add := func(sub Subject) {
@@ -224,28 +237,11 @@ func RoleBindingManifest(s RoleBindingSpec) (path string, content []byte, err er
 	if len(subjects) == 0 {
 		return "", nil, fmt.Errorf("at least one owner is required")
 	}
-	name := tenancy.AdminBinding(s.Namespace)
 	rb, err := roleBinding(name, s.Namespace, s.Project, role, subjects)
 	if err != nil {
 		return "", nil, err
 	}
 	return model.KindRB.RepoPath(s.Namespace, name), rb, nil
-}
-
-// SyncEgressManifest renders the RoleBinding granting a project namespace's
-// sync account EgressFirewall writes (tenancy.TenantEgressRole): a tenant kind
-// the admin role lacks, so the project's repo keeps syncing its egress firewall
-// once Argo syncs it as that account. The owners do not gain it.
-func SyncEgressManifest(namespace, project string, account Subject) (path string, content []byte, err error) {
-	if err := validate.RequireDNS1123("namespace", namespace); err != nil {
-		return "", nil, err
-	}
-	name := tenancy.EgressBinding(namespace)
-	rb, err := roleBinding(name, namespace, project, tenancy.TenantEgressRole, []Subject{account})
-	if err != nil {
-		return "", nil, err
-	}
-	return model.KindRB.RepoPath(namespace, name), rb, nil
 }
 
 const rbacGroup = "rbac.authorization.k8s.io"
@@ -264,10 +260,9 @@ func roleBinding(name, namespace, project, role string, subjects []Subject) ([]b
 	})
 }
 
-// DeclaredGrant reads the admin RoleBinding (tenancy.AdminBinding) a grant
-// file declares for namespace: the ClusterRole it binds and its subjects.
-// ok=false when the file declares none.
-func DeclaredGrant(content []byte, namespace string) (role string, subjects []Subject, ok bool, err error) {
+// DeclaredGrant reads RoleBinding name from a file declaring it: the
+// ClusterRole it binds and its subjects. ok=false when the file declares none.
+func DeclaredGrant(content []byte, name string) (role string, subjects []Subject, ok bool, err error) {
 	dec := utilyaml.NewYAMLOrJSONDecoder(bytes.NewReader(content), 4096)
 	for {
 		var rb struct {
@@ -287,7 +282,7 @@ func DeclaredGrant(content []byte, namespace string) (role string, subjects []Su
 		} else if err != nil {
 			return "", nil, false, fmt.Errorf("declared grant: %w", err)
 		}
-		if rb.Kind != model.KindRB.Kind || rb.Metadata.Name != tenancy.AdminBinding(namespace) {
+		if rb.Kind != model.KindRB.Kind || rb.Metadata.Name != name {
 			continue
 		}
 		// A namespaced Role cannot be re-rendered as the ClusterRole RoleBindingManifest binds.
