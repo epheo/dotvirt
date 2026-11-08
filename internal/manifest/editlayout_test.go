@@ -290,3 +290,53 @@ func TestEditTreatsBlockScalarLinesAsContent(t *testing.T) {
 		t.Errorf("removing the cloud-init disk must take its whole script: %v\n%s", err, out)
 	}
 }
+
+// KubeVirt reads meaning from empty maps (a binding's `masquerade: {}`, a
+// network's `pod: {}`, `efi: {}` against `bios: {}`), from nulls, and from
+// the order of devices (boot order without bootOrder). The scope check sees
+// each: damage to any of them beside an edit is refused.
+func TestVerifyScopeSeesEmptyValuesAndOrder(t *testing.T) {
+	addNIC := VMEdit{AddNetworks: []model.NetworkAdd{{Name: "vlan-10"}}}
+	label := VMEdit{SetLabels: map[string]string{"env": "prod"}}
+	withNIC, err := applyGuard(t, guardVM, addNIC)
+	if err != nil {
+		t.Fatalf("add NIC: %v", err)
+	}
+	firmware := strings.Replace(guardVM, "        devices:\n", "        firmware:\n          bootloader:\n            efi: {}\n        devices:\n", 1)
+	twoDisks := strings.Replace(guardVM, "          - name: data\n            disk:\n              bus: virtio\n",
+		"          - name: root\n            disk:\n              bus: virtio\n          - name: data\n            disk:\n              bus: virtio\n", 1)
+	labeled := func(in string) string {
+		out, err := applyGuard(t, in, label)
+		if err != nil {
+			t.Fatalf("label: %v", err)
+		}
+		return string(out)
+	}
+	moved := strings.Replace(string(withNIC), "          - name: default\n            masquerade: {}\n", "          - name: default\n", 1)
+	moved = strings.Replace(moved, "            bridge: {}\n", "            bridge: {}\n            masquerade: {}\n", 1)
+	for name, c := range map[string]struct {
+		before, after string
+		edit          VMEdit
+	}{
+		"a binding moved to the new NIC": {guardVM, moved, addNIC},
+		"pod: {} dropped":                {guardVM, strings.Replace(string(withNIC), "      - name: default\n        pod: {}\n", "      - name: default\n", 1), addNIC},
+		"efi swapped for bios":           {firmware, strings.Replace(labeled(firmware), "efi: {}", "bios: {}", 1), label},
+		"disks reordered": {twoDisks, strings.Replace(labeled(twoDisks),
+			"          - name: root\n            disk:\n              bus: virtio\n          - name: data\n",
+			"          - name: data\n            disk:\n              bus: virtio\n          - name: root\n", 1), label},
+		"a null key added": {guardVM, strings.Replace(labeled(guardVM), "  runStrategy: Always\n", "  runStrategy: Always\n  running:\n", 1), label},
+	} {
+		if c.after == c.before {
+			t.Fatalf("%s: the damage did not apply", name)
+		}
+		if err := verifyScope([]byte(c.before), []byte(c.after), "alpha", "alpha", "web", c.edit); !errors.Is(err, model.ErrConflict) {
+			t.Errorf("%s: want ErrConflict, got %v", name, err)
+		}
+	}
+
+	// Recreating an empty or null container the edit fills stays allowed.
+	empty := strings.Replace(guardVM, "  labels:\n    app: web\n", "  labels: {}\n", 1)
+	if _, err := applyGuard(t, empty, label); err != nil {
+		t.Errorf("labels: {} filled: %v", err)
+	}
+}

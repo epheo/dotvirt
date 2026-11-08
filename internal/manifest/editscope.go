@@ -45,14 +45,17 @@ func verifyScope(before, after []byte, defaultNS, namespace, name string, edit V
 	if target < 0 {
 		return refuse("which document declares the VM")
 	}
-	b, a := map[string]string{}, map[string]string{}
-	flatten("", bDocs[target], b)
-	flatten("", aDocs[target], a)
+	b, a := newShape(bDocs[target]), newShape(aDocs[target])
 	owned := ownedPaths(edit, bDocs[target], aDocs[target])
 	var stray []string
-	for p := range pathUnion(b, a) {
-		if b[p] != a[p] && !ownedBy(p, owned) {
+	for p := range pathUnion(b.leaves, a.leaves) {
+		if b.leaves[p] != a.leaves[p] && !ownedBy(p, owned) {
 			stray = append(stray, readable(p))
+		}
+	}
+	for list, items := range b.order {
+		if !slices.Equal(kept(items, a.order[list], owned), kept(a.order[list], items, owned)) {
+			stray = append(stray, "the order of "+readable(list))
 		}
 	}
 	if len(stray) > 0 {
@@ -97,12 +100,26 @@ func docPath(segs ...string) string { return strings.Join(segs, pathSep) }
 
 func readable(p string) string { return strings.ReplaceAll(p, pathSep, ".") }
 
-// flatten records each scalar leaf of v under its path, typed so a string
-// "true" and a bool differ. List items are keyed by their name (a
-// dataVolumeTemplate's metadata.name) when every item has a distinct one, so
-// an append or a removal moves no other item's path. Null and empty
-// collections record nothing: absent and empty read the same to the API.
-func flatten(prefix string, v any, out map[string]string) {
+// shape is a document flattened for comparison: each leaf under its path,
+// and the item order of each list keyed by name.
+type shape struct {
+	leaves map[string]string
+	order  map[string][]string // list path -> its item paths, in order
+}
+
+func newShape(doc any) shape {
+	s := shape{leaves: map[string]string{}, order: map[string][]string{}}
+	s.flatten("", doc)
+	return s
+}
+
+// flatten records each leaf of v under its path, typed so a string "true"
+// and a bool differ. Empty maps, empty lists and nulls are leaves too:
+// KubeVirt reads meaning from `masquerade: {}` or `efi: {}`. List items are
+// keyed by their name (a dataVolumeTemplate's metadata.name) when every item
+// has a distinct one, so an append or a removal moves no other item's path;
+// their order, which KubeVirt also reads (boot order), is kept apart.
+func (s shape) flatten(prefix string, v any) {
 	join := func(seg string) string {
 		if prefix == "" {
 			return seg
@@ -111,22 +128,47 @@ func flatten(prefix string, v any, out map[string]string) {
 	}
 	switch t := v.(type) {
 	case map[string]any:
+		if len(t) == 0 {
+			s.leaves[prefix] = "{}"
+		}
 		for k, c := range t {
-			flatten(join(k), c, out)
+			s.flatten(join(k), c)
 		}
 	case map[any]any:
+		if len(t) == 0 {
+			s.leaves[prefix] = "{}"
+		}
 		for k, c := range t {
-			flatten(join(fmt.Sprint(k)), c, out)
+			s.flatten(join(fmt.Sprint(k)), c)
 		}
 	case []any:
+		if len(t) == 0 {
+			s.leaves[prefix] = "[]"
+		}
 		keys := itemKeys(t)
 		for i, c := range t {
-			flatten(join(keys[i]), c, out)
+			s.flatten(join(keys[i]), c)
+			if strings.HasPrefix(keys[i], "[") {
+				s.order[prefix] = append(s.order[prefix], join(keys[i]))
+			}
 		}
 	case nil:
+		s.leaves[prefix] = "null"
 	default:
-		out[prefix] = fmt.Sprintf("%T:%v", t, t)
+		s.leaves[prefix] = fmt.Sprintf("%T:%v", t, t)
 	}
+}
+
+// kept is items without those the edit owns or other lacks: the items whose
+// relative order an edit must leave alone.
+func kept(items, other []string, owned []string) []string {
+	var out []string
+	for _, it := range items {
+		if !ownedBy(it, owned) && slices.Contains(other, it) {
+			out = append(out, it)
+		}
+	}
+	return out
 }
 
 func itemKeys(items []any) []string {
@@ -167,9 +209,11 @@ func pathUnion(a, b map[string]string) map[string]bool {
 	return out
 }
 
+// ownedBy reports whether path p is owned: an owned path, inside one, or a
+// leaf above one (the null or empty container an edit fills or empties).
 func ownedBy(p string, owned []string) bool {
 	for _, o := range owned {
-		if p == o || strings.HasPrefix(p, o+pathSep) {
+		if p == o || strings.HasPrefix(p, o+pathSep) || strings.HasPrefix(o, p+pathSep) {
 			return true
 		}
 	}
