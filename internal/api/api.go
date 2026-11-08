@@ -121,6 +121,7 @@ type Draft interface {
 	ProjectNeeds(commitProj project.ProjectInfo, spec json.RawMessage) ([]changeset.Access, error)
 	NamespaceNeeds(commitProj, joinProj project.ProjectInfo, spec json.RawMessage) ([]changeset.Access, error)
 	AdoptNeeds(commitProj, target project.ProjectInfo, owners []string) ([]changeset.Access, error)
+	SyncAccessNeeds(commitProj, target project.ProjectInfo) ([]changeset.Access, error)
 	ReleaseNeeds(commitProj, target project.ProjectInfo) (need []changeset.Access, residue []string, err error)
 	EnableDRSNeeds(proj project.ProjectInfo, spec json.RawMessage) ([]changeset.Access, error)
 	DisableDRSNeeds(proj project.ProjectInfo) ([]changeset.Access, error)
