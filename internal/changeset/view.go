@@ -2,6 +2,7 @@ package changeset
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 
 	"github.com/epheo/dotvirt/internal/auth"
@@ -19,6 +20,48 @@ func (c *Coordinator) Get(id auth.Identity, proj project.ProjectInfo) (model.Dra
 		return model.DraftView{}, err
 	}
 	return c.render(id, proj, entries)
+}
+
+// DraftResult is one project's draft as Drafts renders it, or the error its
+// render failed with.
+type DraftResult struct {
+	Project string
+	View    model.DraftView
+	Err     error
+}
+
+// Drafts renders id's draft of each of projs, in order, that holds an entry
+// or carries a warning. Only the drafts the store holds for id read their
+// entries and repo; any other renders empty, from the prune source alone.
+func (c *Coordinator) Drafts(id auth.Identity, projs []project.ProjectInfo) ([]DraftResult, error) {
+	held, err := c.store.Projects(id.Username)
+	if err != nil {
+		return nil, err
+	}
+	var out []DraftResult
+	for _, p := range projs {
+		var entries []draft.Entry
+		if slices.Contains(held, p.Name) {
+			if entries, err = c.store.List(id.Username, p.Name); err != nil {
+				out = append(out, DraftResult{Project: p.Name, Err: err})
+				continue
+			}
+		}
+		view, err := c.render(id, p, entries)
+		switch {
+		case err != nil:
+			out = append(out, DraftResult{Project: p.Name, Err: err})
+		case view.Count > 0 || view.Warning != "":
+			out = append(out, DraftResult{Project: p.Name, View: view})
+		}
+	}
+	return out, nil
+}
+
+// Holds reports whether id's draft of proj holds an entry.
+func (c *Coordinator) Holds(id auth.Identity, proj project.ProjectInfo) (bool, error) {
+	entries, err := c.store.List(id.Username, proj.Name)
+	return len(entries) > 0, err
 }
 
 // render is entries as the draft view renders them against the base branch.

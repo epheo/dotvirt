@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"slices"
 	"testing"
 
 	"github.com/epheo/dotvirt/internal/manifest"
@@ -75,6 +76,41 @@ func TestStorePersistsAcrossReopen(t *testing.T) {
 	}
 	if len(got) != 1 || got[0].Name != "web" {
 		t.Errorf("reopened store lost the draft: %+v", got)
+	}
+}
+
+// Projects lists a user's non-empty drafts from disk, as a restarted backend
+// finds them: neither another user's, an emptied one's, nor one holding only
+// a stale create.
+func TestProjectsListsHeldDrafts(t *testing.T) {
+	dir := t.TempDir()
+	s, _ := Open(dir)
+	for _, p := range []string{"team-a", "team/b", "emptied"} {
+		if err := s.Stage("system:admin", p, editEntry("ns", "vm")); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := s.Stage("bob", "team-c", editEntry("ns", "vm")); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Clear("system:admin", "emptied"); err != nil {
+		t.Fatal(err)
+	}
+	stale := `[{"kind":"create","namespace":"ns","name":"db"}]`
+	if err := os.WriteFile(s.path("system:admin", "stale"), []byte(stale), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	reopened, _ := Open(dir)
+	got, err := reopened.Projects("system:admin")
+	if err != nil {
+		t.Fatal(err)
+	}
+	slices.Sort(got)
+	if !slices.Equal(got, []string{"team-a", "team/b"}) {
+		t.Errorf("Projects = %q, want team-a and team/b", got)
+	}
+	if got, err := reopened.Projects("nobody"); err != nil || len(got) != 0 {
+		t.Errorf("a user without drafts = %q, %v; want none", got, err)
 	}
 }
 

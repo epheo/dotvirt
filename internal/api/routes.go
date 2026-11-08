@@ -132,6 +132,7 @@ func (s *Server) routes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/vms/{namespace}/{name}/delete", s.handleDelete)
 	mux.HandleFunc("POST /api/vms", s.handleCreate)
 	mux.HandleFunc("GET /api/draft", s.handleDraftGet)
+	mux.HandleFunc("GET /api/drafts", s.handleDrafts)
 	mux.HandleFunc("DELETE /api/draft", s.handleDraftDiscard)
 	mux.HandleFunc("DELETE /api/draft/{namespace}/{name}", s.handleUnstage)
 	mux.HandleFunc("POST /api/draft/propose", s.handlePropose)
