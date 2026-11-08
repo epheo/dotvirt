@@ -44,9 +44,9 @@ func (s *Server) handlePolicies(w http.ResponseWriter, r *http.Request) {
 }
 
 // scopePolicies keeps namespace-tier policies in visible namespaces and
-// cluster-tier policies the caller has authority over. Returns fresh slices only
-// by construction - the netstate catalog built each row per call, so mutating the
-// kept rows (drift enrichment) is safe.
+// cluster-tier policies the caller has authority over. The kept rows are
+// copies, so drift enrichment may set their fields; the slices inside them
+// are the snapshot's, never written.
 func scopePolicies(all []model.Policy, visible map[string]bool, canCluster func(model.PolicyKind) bool) []model.Policy {
 	out := make([]model.Policy, 0, len(all))
 	for _, p := range all {

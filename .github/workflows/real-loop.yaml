@@ -27,7 +27,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 50
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Free runner disk (the bootc image embeds its payload)
         run: |
           sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc /usr/local/.ghcup
@@ -45,7 +45,7 @@ jobs:
           mkdir -p artifacts
           cp -r "$RUNNER_TEMP/e2e" artifacts/ 2>/dev/null || true
           sudo podman logs dotvirt-e2e-microshift > artifacts/microshift-container.log 2>&1 || true
-      - uses: actions/upload-artifact@v7
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
         with:
           name: real-loop-diagnostics

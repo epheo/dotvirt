@@ -108,8 +108,15 @@ func (s *Server) policyRedactor(ctx context.Context, id auth.Identity, c *cluste
 }
 
 // namespaceLabels is every namespace as the SA snapshot holds it: the project
-// namespaces with their labels, every other one by name alone.
+// namespaces with their labels, every other one by name alone. One list serves
+// every caller until the snapshot's namespaces move; none may modify it.
 func (s *Server) namespaceLabels() []netstate.NamespaceLabels {
+	s.nsListMu.Lock()
+	defer s.nsListMu.Unlock()
+	gen := s.state.NamespacesGeneration()
+	if s.nsList != nil && s.nsListGen == gen {
+		return s.nsList
+	}
 	held := s.state.Namespaces()
 	all := s.state.AllNamespaces()
 	out := make([]netstate.NamespaceLabels, 0, len(all))
@@ -123,6 +130,7 @@ func (s *Server) namespaceLabels() []netstate.NamespaceLabels {
 			out = append(out, netstate.NamespaceLabels{Name: name})
 		}
 	}
+	s.nsList, s.nsListGen = out, gen
 	return out
 }
 

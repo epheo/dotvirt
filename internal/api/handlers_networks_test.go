@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -281,4 +282,31 @@ func TestNetworksTenantSeesOwnScope(t *testing.T) {
 	}
 	// A network the tenant cannot list is not found by key either.
 	wantStatus(t, do(s, tenantToken, http.MethodGet, "/api/networks/rules?network=mt-b", ""), http.StatusNotFound)
+}
+
+// Concurrent callers each enrich their own copy of the shared catalog: the
+// uplinks the route stamps with source files and drift are never the
+// snapshot's (fails under -race otherwise).
+func TestNetworksConcurrentCallersOwnTheirUplinks(t *testing.T) {
+	fc := newFakeCluster(t)
+	s := fc.server(nil, Config{PlatformRepo: platformRepo})
+	s.netstate = netstate.New(fc.sa, nil)
+	var wg sync.WaitGroup
+	for range 8 {
+		wg.Go(func() {
+			for range 5 {
+				rec := do(s, adminToken, http.MethodGet, "/api/networks", "")
+				if rec.Code != http.StatusOK {
+					t.Errorf("status %d: %s", rec.Code, rec.Body)
+					return
+				}
+				var inv model.NetworkInventory
+				if err := json.Unmarshal(rec.Body.Bytes(), &inv); err != nil || len(inv.Uplinks) == 0 {
+					t.Errorf("uplinks = %+v (%v), want the builtin one", inv.Uplinks, err)
+					return
+				}
+			}
+		})
+	}
+	wg.Wait()
 }

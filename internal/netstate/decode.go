@@ -229,51 +229,15 @@ func byKey(objs []*unstructured.Unstructured) []*unstructured.Unstructured {
 
 func sortedList(idx cache.Indexer) []*unstructured.Unstructured { return byKey(reflect.List(idx)) }
 
-// decoded runs one store's objects through a kind's decoder, in sortedList
-// order.
-func decoded(idx cache.Indexer, dec decoder) []*policy {
-	objs := sortedList(idx)
-	out := make([]*policy, 0, len(objs))
-	for _, u := range objs {
-		out = append(out, dec(u))
-	}
-	return out
-}
-
-// inNamespace decodes a namespaced store's objects for ns, by name.
-func inNamespace(idx cache.Indexer, ns string, dec decoder) []*policy {
-	var objs []*unstructured.Unstructured
-	for _, u := range reflect.List(idx) {
-		if u.GetNamespace() == ns {
-			objs = append(objs, u)
-		}
-	}
-	out := make([]*policy, 0, len(objs))
-	for _, u := range byKey(objs) {
-		out = append(out, dec(u))
-	}
-	return out
-}
-
 // sortedANPs returns the admin policies in precedence order (priority, name):
 // the order Trace evaluates them in and Effective lists them in.
-func (s *Snapshot) sortedANPs() []*policy {
-	ps := decoded(s.anp, decodeANP)
-	sort.Slice(ps, func(i, j int) bool {
-		a, b := ps[i].view, ps[j].view
-		if a.Priority != b.Priority {
-			return a.Priority < b.Priority
-		}
-		return a.Name < b.Name
-	})
-	return ps
-}
+func (s *Snapshot) sortedANPs() []*policy { return s.anps.plane().all }
 
 // enforcedANPs splits sortedANPs at the priority OVN-K stops programming.
 func (s *Snapshot) enforcedANPs() (enforced, unenforced []*policy) {
 	ps := s.sortedANPs()
 	i := sort.Search(len(ps), func(i int) bool { return ps[i].view.Priority > netgen.MaxANPPriority })
-	return ps[:i], ps[i:]
+	return ps[:i:i], ps[i:]
 }
 
 // ANPAtPriority names the AdminNetworkPolicy other than name that holds
@@ -288,7 +252,7 @@ func (s *Snapshot) ANPAtPriority(priority int, name string) (string, bool) {
 	return "", false
 }
 
-func (s *Snapshot) baselines() []*policy { return decoded(s.banp, decodeBANP) }
+func (s *Snapshot) baselines() []*policy { return s.banps.plane().all }
 
 // gateways returns the namespace's EgressFirewalls (OVN-K allows one).
-func (s *Snapshot) gateways(ns string) []*policy { return inNamespace(s.egressfw, ns, decodeGateway) }
+func (s *Snapshot) gateways(ns string) []*policy { return s.firewalls.plane().byNS[ns] }

@@ -117,9 +117,10 @@ fbc:
         - v4.21
         - v4.22
 EOF
-	# The canonical per-operator Makefile their FBC tooling expects.
+	# The canonical per-operator Makefile their FBC tooling expects. Pinned to the upstream
+	# commit that last changed it; re-pin to their latest when submitting.
 	curl -fsSL -o "$DEST/openshift/operators/$PKG/Makefile" \
-		https://raw.githubusercontent.com/redhat-openshift-ecosystem/operator-pipelines/main/fbc/Makefile
+		https://raw.githubusercontent.com/redhat-openshift-ecosystem/operator-pipelines/f3b3522d4e327c994333ead3f64c6ebdcdb7d463/fbc/Makefile
 fi
 
 # Validate the staged bundle with the suite the community pipelines gate on (identical bytes
