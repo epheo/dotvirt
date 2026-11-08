@@ -124,3 +124,42 @@ func TestGeneration(t *testing.T) {
 		t.Error("a foreign indexer has no generation")
 	}
 }
+
+// StoreGeneration moves with a write anywhere in the store, and with a
+// relist only where it changed something.
+func TestStoreGeneration(t *testing.T) {
+	idx := NewIndexer()
+	obj := func(ns, name, rv string) *unstructured.Unstructured {
+		u := &unstructured.Unstructured{Object: map[string]any{}}
+		u.SetNamespace(ns)
+		u.SetName(name)
+		u.SetResourceVersion(rv)
+		return u
+	}
+	last := StoreGeneration(idx)
+	step := func(what string, moves bool) {
+		t.Helper()
+		if got := StoreGeneration(idx); (got != last) != moves {
+			t.Errorf("%s: moved %v, want %v", what, got != last, moves)
+		}
+		last = StoreGeneration(idx)
+	}
+	_ = idx.Add(obj("a", "x", "1"))
+	step("add in a", true)
+	_ = idx.Update(obj("b", "y", "1"))
+	step("write in b", true)
+	_ = idx.Add(obj("", "shared", "1"))
+	step("cluster-scoped add", true)
+	_ = idx.Delete(obj("a", "x", "1"))
+	step("delete in a", true)
+	_ = idx.Replace([]any{obj("b", "y", "1"), obj("", "shared", "1")}, "2")
+	step("relist of nothing new", false)
+	_ = idx.Replace([]any{obj("b", "y", "2"), obj("", "shared", "1")}, "3")
+	step("relist that moved b", true)
+	_ = idx.Replace([]any{obj("b", "y", "2")}, "4")
+	step("relist that dropped the cluster-scoped object", true)
+
+	if StoreGeneration(cache.NewIndexer(cache.MetaNamespaceKeyFunc, cache.Indexers{})) != 0 {
+		t.Error("a foreign indexer has no generation")
+	}
+}

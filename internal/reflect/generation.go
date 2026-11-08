@@ -14,8 +14,9 @@ import (
 // cluster-scoped objects.
 type generations struct {
 	cache.Indexer
-	mu   sync.RWMutex
-	gens map[string]uint64
+	mu    sync.RWMutex
+	gens  map[string]uint64
+	total uint64 // the sum of gens
 }
 
 func (g *generations) Add(obj any) error {
@@ -56,11 +57,13 @@ func (g *generations) Replace(list []any, rv string) error {
 	for ns, d := range after {
 		if before[ns] != d {
 			g.gens[ns]++
+			g.total++
 		}
 	}
 	for ns := range before {
 		if _, ok := after[ns]; !ok {
 			g.gens[ns]++
+			g.total++
 		}
 	}
 	return nil
@@ -94,6 +97,7 @@ func (g *generations) bump(obj any) {
 	}
 	g.mu.Lock()
 	g.gens[ns]++
+	g.total++
 	g.mu.Unlock()
 }
 
@@ -113,4 +117,17 @@ func Generation(idx cache.Indexer, nss ...string) uint64 {
 		v += g.gens[ns]
 	}
 	return v
+}
+
+// StoreGeneration is idx's write count over every object it holds: a view
+// decoded from the whole store stays current while it holds still. Like
+// Generation, equality-only, and 0 for an indexer NewIndexer did not build.
+func StoreGeneration(idx cache.Indexer) uint64 {
+	g, ok := idx.(*generations)
+	if !ok {
+		return 0
+	}
+	g.mu.RLock()
+	defer g.mu.RUnlock()
+	return g.total
 }
