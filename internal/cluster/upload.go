@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 
-	authzv1 "k8s.io/api/authorization/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -103,7 +102,7 @@ func (c *Client) CreateUploadToken(ctx context.Context, namespace, name string) 
 // (DataSources) in namespace. Checked before an upload starts, so a refusal
 // leaves no half-made image behind.
 func (c *Client) CanCreateBootImages(ctx context.Context, namespace string) (bool, error) {
-	return c.Review(ctx, authzv1.ResourceAttributes{Namespace: namespace, Verb: "create", Group: gvrDataSources.Group, Resource: gvrDataSources.Resource})
+	return c.Can(ctx, "create", gvrDataSources.Group, gvrDataSources.Resource, namespace)
 }
 
 // CreateBootImage registers the upload's claim as a boot image: a DataSource

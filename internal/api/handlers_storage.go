@@ -20,7 +20,7 @@ func (s *Server) handleStorageClasses(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if canNodes, _ := s.can(r.Context(), id, c, refQ(verbList, ssarNodes, "")); !canNodes {
+	if !s.capable(r.Context(), id, c, ask(verbList, ssarNodes, "")) {
 		classes = withoutSegments(classes)
 	}
 	writeJSON(w, classes)
