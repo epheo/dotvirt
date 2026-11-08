@@ -82,6 +82,9 @@ type NamespaceCaps struct {
 	// BootImageCreate is an upload registered as a boot image (Add a boot
 	// image): the upload plus a DataSource over it.
 	BootImageCreate bool `json:"bootImageCreate"`
+	// BootImageImport is a boot image the cluster downloads from a registry
+	// or a URL: its DataVolume and DataSource. It needs no upload proxy.
+	BootImageImport bool `json:"bootImageImport"`
 	// The namespaced network family, staged through git. Network is the
 	// project networks (UserDefinedNetwork).
 	Network ObjectCaps `json:"network"`

@@ -35,6 +35,13 @@ export const vmGate = {
 	resync: (n: string) => ns(n, (c) => c.resync, 'resync VMs'),
 };
 
+// Boot images, in their namespace: a file uploaded from the browser, or a
+// source the cluster downloads from a registry or a URL.
+export const imageGate = {
+	upload: (n: string) => ns(n, (c) => c.bootImageCreate, 'add boot images'),
+	import: (n: string) => ns(n, (c) => c.bootImageImport, 'add boot images'),
+};
+
 // An edit to a VM needs git to hold it, then the right to change VMs there.
 export function vmEditGate(vm: { namespace: string; sourceFile?: string }): Gate {
 	return vm.sourceFile ? vmGate.update(vm.namespace) : { ok: false, why: NOT_IN_GIT };

@@ -240,6 +240,11 @@ var (
 	bootImageAction = func(ns string) action {
 		return append(dataVolumeAction(ns), refQ(verbCreate, ssarDataSources, ns))
 	}
+	// bootImageImportAction is a boot image the cluster downloads itself: the
+	// import DataVolume and its DataSource, no upload token.
+	bootImageImportAction = func(ns string) action {
+		return action{refQ(verbCreate, ssarDataVolumes, ns), refQ(verbCreate, ssarDataSources, ns)}
+	}
 )
 
 // claimAction is relabelling the existing namespace ns: what joining it to a

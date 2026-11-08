@@ -24,11 +24,13 @@
 		num,
 		shortName,
 		size,
+		sourceKey,
 		sourceText,
 		staleShare,
 		topImages,
 		type DiskCounts,
 		type DiskRow,
+		type SourceUse,
 	} from '#lib/storage.js';
 	import Button from '#lib/components/Button.svelte';
 	import Card from '#lib/components/Card.svelte';
@@ -94,6 +96,40 @@
 			namespace: ability.image || ability.upload,
 		};
 	}
+	const uploadOff = $derived(caps.cluster?.imageUpload === false);
+
+	// The next action on imports: the source the most disks downloaded one by
+	// one, while no boot image is made from it. Offered where the caller may
+	// add a boot image the cluster downloads, prefilled to it.
+	const madeFrom = $derived(
+		new Set(
+			(inventory.options?.osImages ?? []).flatMap((i) => (i.import ? [sourceKey(i.import)] : [])),
+		),
+	);
+	const offer = $derived(
+		ability?.import ? imports.sources.find((u) => u.disks >= 2 && !madeFrom.has(u.key)) : undefined,
+	);
+	function makeBootImage(u: SourceUse) {
+		ui.modal = {
+			kind: 'upload',
+			namespace: ability?.import,
+			download: {
+				kind: u.kind === 'registry' ? 'registry' : 'url',
+				source: u.source,
+				redacted: u.redacted,
+				size: u.size,
+				disks: u.disks,
+			},
+		};
+	}
+	function fromSource() {
+		ui.modal = {
+			kind: 'upload',
+			namespace: ability?.import,
+			download: { kind: 'url', source: '' },
+		};
+	}
+
 	function drop(e: DragEvent) {
 		e.preventDefault();
 		dragging = false;
@@ -350,8 +386,9 @@
 				{#if imports.all.disks}
 					{@const all = imports.all}
 					{@const sources = imports.sources}
+					{@const td = offer ? 'p-3 pb-1.5' : 'border-b border-line-soft p-3'}
 					<tr>
-						<td class="border-b border-line-soft p-3">
+						<td class={td}>
 							<div class="flex items-center gap-2.5">
 								<CloudDownload size={16} class="shrink-0 text-ink-faint" />
 								<div class="min-w-0">
@@ -366,14 +403,12 @@
 								</div>
 							</div>
 						</td>
-						<td class="border-b border-line-soft p-3 text-right">
+						<td class="{td} text-right">
 							<span class="text-base font-bold">{num(all.disks)}</span>
 						</td>
-						<td class="border-b border-line-soft p-3">{@render where(all)}</td>
-						<td class="border-b border-line-soft p-3"
-							>{@render snap(all, { source: ANY_SOURCE })}</td
-						>
-						<td class="border-b border-line-soft p-3">
+						<td class={td}>{@render where(all)}</td>
+						<td class={td}>{@render snap(all, { source: ANY_SOURCE })}</td>
+						<td class={td}>
 							<div class="flex justify-end">
 								<Button
 									variant="secondary"
@@ -384,6 +419,24 @@
 							</div>
 						</td>
 					</tr>
+					{#if offer}
+						<tr>
+							<td colspan="4" class="border-b border-line-soft px-3 pb-3">
+								<p class="pl-[26px] text-[13px] leading-5 text-ink-soft">
+									{num(offer.disks)} disks each downloaded
+									<span class="font-mono font-medium text-ink">{sourceText(offer)}</span>. As a boot
+									image it downloads once and new VMs clone it.
+								</p>
+							</td>
+							<td class="border-b border-line-soft px-3 pb-3">
+								<div class="flex justify-end">
+									<Button variant="outline" size="sm" onclick={() => makeBootImage(offer)}
+										>Make it a boot image</Button
+									>
+								</div>
+							</td>
+						</tr>
+					{/if}
 				{/if}
 				{#if summary.none}
 					{@const none = summary.none}
@@ -420,15 +473,35 @@
 		</table>
 	</div>
 
-	{#if caps.cluster?.imageUpload === false}
+	{#if uploadOff || (ability && !ability.upload)}
+		{#if ability?.import}
+			<div
+				role="region"
+				aria-label="Add a boot image"
+				class="mx-[18px] mt-3 flex flex-wrap items-center gap-x-3.5 gap-y-2.5 rounded-lg border border-dashed border-line-strong bg-canvas/40 px-3.5 py-3"
+			>
+				<CloudDownload size={20} class="shrink-0 text-accent-ink" />
+				<div class="min-w-0 flex-[1_1_240px] text-sm">
+					<strong>Add a boot image.</strong>
+					<span class="text-ink-faint">The cluster downloads it from a URL or a registry.</span>
+				</div>
+				<Button variant="secondary" size="sm" onclick={fromSource}>From a URL or registry</Button>
+				<StageChip kind="now" />
+				<span class="text-xs text-ink-faint">Downloads in the cluster. No pull request.</span>
+			</div>
+		{/if}
 		<p class="mx-[18px] mt-3 text-xs leading-4 text-ink-faint">
-			Image upload is off: this cluster's CDI publishes no upload proxy. An admin sets one with
-			uploadProxyURLOverride in the CDIConfig.
-		</p>
-	{:else if ability && !ability.upload}
-		<p class="mx-[18px] mt-3 text-xs leading-4 text-ink-faint">
-			Adding images needs the right to create data volumes in a project, and your account has it in
-			none.
+			{#if uploadOff}
+				Image upload is off: this cluster's CDI publishes no upload proxy. An admin sets one with
+				uploadProxyURLOverride in the CDIConfig.{ability?.import
+					? ' A URL or a registry needs none.'
+					: ''}
+			{:else if ability?.import}
+				Your account cannot upload files here, only add images the cluster downloads.
+			{:else}
+				Adding images needs the right to create data volumes in a project, and your account has it
+				in none.
+			{/if}
 		</p>
 	{:else}
 		<div
@@ -448,7 +521,12 @@
 			<div class="min-w-0 flex-[1_1_240px] text-sm">
 				{#if asImage || !ability}
 					<strong>Add a boot image.</strong>
-					<span class="text-ink-faint">Drop a qcow2, raw or iso file here.</span>
+					<span class="text-ink-faint"
+						>Drop a qcow2, raw or iso file here{#if ability?.import}, or <button
+								class="text-accent-ink underline underline-offset-2 hover:text-accent-deep"
+								onclick={fromSource}>add one from a URL or registry</button
+							>{/if}.</span
+					>
 				{:else}
 					<strong>Upload a disk image.</strong>
 					<span class="text-ink-faint"

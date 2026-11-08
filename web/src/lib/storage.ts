@@ -857,32 +857,66 @@ export async function settleEach<T>(
 
 // --- uploads ---
 
-// Where the caller may upload: the first namespace (in the order given) that
-// allows adding a boot image, and the first that allows a plain upload; ''
-// when none does. A missing or failed verdict reads as no.
+// Where the caller may add images: the first namespace (in the order given)
+// that allows uploading a boot image, the first that allows a plain upload,
+// and the first that allows a boot image the cluster downloads; '' when none
+// does. A missing or failed verdict reads as no.
 export interface UploadAbility {
 	image: string;
 	upload: string;
+	import: string;
 }
 
-type UploadCaps = { bootImageCreate?: boolean; dataVolumeCreate?: boolean } | undefined;
+type UploadCaps =
+	{ bootImageCreate?: boolean; dataVolumeCreate?: boolean; bootImageImport?: boolean } | undefined;
 
-// Asks a few namespaces at a time and stops once one allows a boot image,
-// which also allows the plain upload it builds on.
+// Asks a few namespaces at a time and stops once one allows uploading a boot
+// image, which also allows the plain upload it builds on and, its rights
+// being a superset, the import. With upload off nothing allows the upload,
+// so uploadOff stops at the first import instead.
 export async function uploadAbility(
 	namespaces: readonly string[],
 	caps: (ns: string) => Promise<UploadCaps>,
 	batch = 4,
+	uploadOff = false,
 ): Promise<UploadAbility> {
-	const out: UploadAbility = { image: '', upload: '' };
-	for (let i = 0; i < namespaces.length && !out.image; i += batch) {
+	const out: UploadAbility = { image: '', upload: '', import: '' };
+	const done = () => !!(uploadOff ? out.import : out.image);
+	for (let i = 0; i < namespaces.length && !done(); i += batch) {
 		const chunk = namespaces.slice(i, i + batch);
 		const verdicts = await Promise.all(chunk.map((ns) => caps(ns).catch(() => undefined)));
 		chunk.forEach((ns, j) => {
-			if (!out.image && verdicts[j]?.bootImageCreate) out.image = ns;
-			if (!out.upload && (verdicts[j]?.dataVolumeCreate || verdicts[j]?.bootImageCreate))
-				out.upload = ns;
+			const v = verdicts[j];
+			if (!out.image && v?.bootImageCreate) out.image = ns;
+			if (!out.upload && (v?.dataVolumeCreate || v?.bootImageCreate)) out.upload = ns;
+			if (!out.import && (v?.bootImageImport || v?.bootImageCreate)) out.import = ns;
 		});
 	}
 	return out;
+}
+
+const IMAGE_SUFFIX = /\.(qcow2|img|raw|iso|gz|xz|bz2|zst|tar|vmdk|vhdx?)$/i;
+
+// The name a boot image from a source suggests: a registry's repository and
+// tag ("fedora-42"; "latest" and a digest say nothing), a URL's file name
+// without its extensions. '' when nothing usable is left.
+export function suggestImageName(kind: string, source: string): string {
+	let s = source
+		.trim()
+		.split(/[?#]/)[0]
+		.replace(/^[a-z][a-z0-9+.-]*:\/\//i, '');
+	s = s.replace(/\/+$/, '');
+	let base = s.slice(s.lastIndexOf('/') + 1);
+	if (kind === 'registry') {
+		const [repo, tag = ''] = base.split('@')[0].split(':');
+		base = tag && tag !== 'latest' ? `${repo}-${tag}` : repo;
+	} else if (!s.includes('/')) base = '';
+	else while (IMAGE_SUFFIX.test(base)) base = base.replace(IMAGE_SUFFIX, '');
+	return base
+		.toLowerCase()
+		.replace(/[^a-z0-9-]+/g, '-')
+		.replace(/-+/g, '-')
+		.replace(/^-+|-+$/g, '')
+		.slice(0, 63)
+		.replace(/-+$/, '');
 }

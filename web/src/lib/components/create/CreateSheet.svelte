@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { Copy, Disc, Folder, LogOut, Monitor, Network, Shield, X } from '@lucide/svelte';
+	import { plural } from '#lib/format.js';
 	import { clusterGate, clusterObjectGate } from '#lib/gates.js';
 	import { inventory } from '#lib/state/inventory.svelte.js';
 	import {
@@ -76,6 +77,9 @@
 	const from = $derived(
 		('from' in modal && modal.from) ||
 			(modal.kind === 'upload' && modal.file ? `${modal.file.name}, the file you dropped` : '') ||
+			(modal.kind === 'upload' && modal.download?.source
+				? `${modal.download.source}${modal.download.disks ? `, which ${plural(modal.download.disks, 'disk')} downloaded` : ''}`
+				: '') ||
 			(modal.kind === 'newVM' && modal.image
 				? `${modal.image.split('/').pop()}, the image you picked`
 				: '') ||
@@ -249,6 +253,7 @@
 					bind:namespace
 					file={own?.kind === 'upload' ? own.file : undefined}
 					bootImage={own?.kind === 'upload' ? own.bootImage : undefined}
+					download={own?.kind === 'upload' ? own.download : undefined}
 					{onclose}
 				/>
 			{:else if type === 'network'}

@@ -104,3 +104,52 @@ func TestRequireObjectNameAndLists(t *testing.T) {
 		t.Errorf("RequireOneOf: want ErrInvalid, got %v", err)
 	}
 }
+
+// An import source is fetched by the cluster as given: http or https only, a
+// registry reference with docker:// optional, never credentials, spaces or
+// control characters, and a refusal never quotes it back.
+func TestImportSource(t *testing.T) {
+	for _, c := range []struct{ kind, in, want string }{
+		{model.ImportURL, "https://images.example/noble.img", "https://images.example/noble.img"},
+		{model.ImportURL, "http://files.lab:8080/win.qcow2?X-Amz-Signature=abc", "http://files.lab:8080/win.qcow2?X-Amz-Signature=abc"},
+		{model.ImportURL, "HTTPS://images.example/a.img", "HTTPS://images.example/a.img"},
+		{model.ImportRegistry, "quay.io/containerdisks/fedora:42", "docker://quay.io/containerdisks/fedora:42"},
+		{model.ImportRegistry, "docker://quay.io/containerdisks/fedora:42", "docker://quay.io/containerdisks/fedora:42"},
+		{model.ImportRegistry, "Docker://registry.example:5000/vm/rhel:9", "docker://registry.example:5000/vm/rhel:9"},
+		{model.ImportRegistry, "fedora", "docker://fedora"},
+		{model.ImportRegistry, "quay.io/containerdisks/fedora@sha256:" + strings.Repeat("ab", 32), "docker://quay.io/containerdisks/fedora@sha256:" + strings.Repeat("ab", 32)},
+	} {
+		got, err := ImportSource(c.kind, c.in)
+		if err != nil || got != c.want {
+			t.Errorf("ImportSource(%q, %q) = %q, %v; want %q", c.kind, c.in, got, err, c.want)
+		}
+	}
+	for _, c := range []struct{ kind, in string }{
+		{model.ImportURL, ""},
+		{model.ImportURL, "ftp://files.lab/a.img"},
+		{model.ImportURL, "file:///etc/passwd"},
+		{model.ImportURL, "images.example/noble.img"},
+		{model.ImportURL, "https:///noble.img"},
+		{model.ImportURL, "https://ops:s3cret@images.example/a.img?sig=xyz"},
+		{model.ImportURL, "https://images.example/a b.img"},
+		{model.ImportURL, " https://images.example/a.img"},
+		{model.ImportURL, "https://images.example/a.img\n"},
+		{model.ImportURL, "https://images.example/a\x00.img"},
+		{model.ImportRegistry, ""},
+		{model.ImportRegistry, "docker://"},
+		{model.ImportRegistry, "oci-archive://images/rhel.tar"},
+		{model.ImportRegistry, "https://quay.io/containerdisks/fedora:42"},
+		{model.ImportRegistry, "robot:pw@quay.io/vm/rhel:9"},
+		{model.ImportRegistry, "quay.io/ContainerDisks/Fedora"},
+		{model.ImportRegistry, "quay.io/containerdisks/fedora:42\t"},
+		{"s3", "https://bucket.example/a.img"},
+	} {
+		_, err := ImportSource(c.kind, c.in)
+		if !errors.Is(err, model.ErrInvalid) {
+			t.Errorf("ImportSource(%q, %q): want ErrInvalid, got %v", c.kind, c.in, err)
+		}
+		if c.in != "" && err != nil && strings.Contains(err.Error(), c.in) && c.kind != "s3" {
+			t.Errorf("ImportSource(%q, %q): the refusal quotes the source: %v", c.kind, c.in, err)
+		}
+	}
+}

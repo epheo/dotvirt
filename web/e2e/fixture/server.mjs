@@ -150,7 +150,7 @@ const state = {
 	loginStatus: 0, // one-shot override for POST /api/login
 	wsRefuse: 0, // destroy the next n WS handshakes before the socket opens
 	sockets: new Set(),
-	uploads: new Map(), // "ns/name" -> DataVolume phase, for the upload flow
+	uploads: new Map(), // "ns/name" -> DataVolume phase, or an import's phases, for the status poll
 	fail: new Map(), // plane -> reads left to fail, so a test sees the error and the retry
 };
 
@@ -790,6 +790,7 @@ function namespaceCaps(s, project, ns) {
 		clone: true,
 		dataVolumeCreate: true,
 		bootImageCreate: true,
+		bootImageImport: true,
 		network: objects,
 		networkAttachment: objects,
 		networkPolicy: objects,
@@ -951,11 +952,75 @@ async function handleStorage(req, res, url) {
 			...(body.bootImage ? { image: `${body.namespace}/${body.name}` } : {}),
 		});
 	}
+	// ── imports: a boot image the cluster downloads ──
+	// Answers as the server does: the same checks before anything is made, a
+	// DataSource naming the source without its query string, then CDI's
+	// import phases one status poll at a time. A source naming "unreachable"
+	// never lands: the importer fails and retries, as CDI does.
+	if (path === '/api/imports' && req.method === 'POST') {
+		const body = await readBody(req);
+		if (!body?.namespace || !body?.name || !body?.size)
+			return sendText(res, 400, 'namespace, name and size are required');
+		const src = String(body.source ?? '');
+		const bad =
+			!src || /\s/.test(src)
+				? 'is required and may not contain spaces'
+				: body.kind === 'url'
+					? !/^https?:\/\/[^/?#@]+/i.test(src) && 'must be an http or https URL'
+					: body.kind === 'registry'
+						? /:\/\//.test(src.replace(/^docker:\/\//i, '')) && 'must be an image reference'
+						: 'kind must be "url" or "registry"';
+		if (bad) return sendText(res, 400, `invalid: the source ${bad}`);
+		if (!projectOf(body.namespace))
+			return sendText(res, 404, 'namespace not found in any visible project');
+		const key = `${body.namespace}/${body.name}`;
+		if (state.uploads.has(key))
+			return sendText(res, 409, `datavolumes "${body.name}" already exists`);
+		const unreachable = src.includes('unreachable');
+		state.uploads.set(key, {
+			phases: unreachable
+				? ['ImportScheduled', 'ImportInProgress']
+				: ['ImportScheduled', 'ImportInProgress', 'ImportInProgress', 'Succeeded'],
+			at: 0,
+			error: unreachable
+				? `Unable to connect to http data source: Get "${src.split('?')[0]}": dial tcp: lookup unreachable.example: no such host`
+				: '',
+		});
+		const shown = src.replace(/^docker:\/\//i, '').split(/[?#]/)[0];
+		s.options = {
+			...s.options,
+			osImages: [
+				...s.options.osImages,
+				{
+					name: body.name,
+					namespace: body.namespace,
+					ready: !unreachable,
+					import: { kind: body.kind, source: shown },
+				},
+			],
+		};
+		return sendJSON(res, 200, {
+			namespace: body.namespace,
+			name: body.name,
+			image: `${body.namespace}/${body.name}`,
+		});
+	}
+
 	m = path.match(/^\/api\/uploads\/([^/]+)\/([^/]+)(\/token)?$/);
 	if (m) {
 		const key = `${m[1]}/${m[2]}`;
-		const phase = state.uploads.get(key);
-		if (!phase) return sendText(res, 404, 'not found: upload');
+		const entry = state.uploads.get(key);
+		if (!entry) return sendText(res, 404, 'not found: upload');
+		if (typeof entry === 'object' && !m[3]) {
+			const phase = entry.phases[Math.min(entry.at++, entry.phases.length - 1)];
+			return sendJSON(res, 200, {
+				phase,
+				ready: false,
+				progress: phase === 'ImportInProgress' ? '42.0%' : phase === 'Succeeded' ? '100.0%' : 'N/A',
+				...(entry.error && phase === 'ImportInProgress' ? { error: entry.error } : {}),
+			});
+		}
+		const phase = entry;
 		if (m[3] && req.method === 'POST')
 			return sendJSON(res, 200, {
 				token: 'fixture-upload-token',
@@ -983,6 +1048,7 @@ function handleControl(req, res, url) {
 		state.scenario = structuredClone(next);
 		state.staged.clear();
 		state.fail.clear();
+		state.uploads.clear();
 		broadcastInventory();
 		return sendJSON(res, 200, { scenario: next.name });
 	}

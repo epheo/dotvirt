@@ -74,11 +74,16 @@ func (c *Client) ListOptions(ctx context.Context) (model.Options, error) {
 
 	if items, err := listAllNS(ctx, dyn, gvrDataSources); err == nil {
 		for i := range items {
-			opts.OSImages = append(opts.OSImages, model.OSImage{
+			img := model.OSImage{
 				Name:      items[i].GetName(),
 				Namespace: items[i].GetNamespace(),
 				Ready:     dataSourceReady(&items[i]),
-			})
+			}
+			a := items[i].GetAnnotations()
+			if kind, src := a[importKindAnnotation], a[importSourceAnnotation]; kind != "" && src != "" {
+				img.Import = model.ImportFrom(kind, src)
+			}
+			opts.OSImages = append(opts.OSImages, img)
 		}
 	}
 

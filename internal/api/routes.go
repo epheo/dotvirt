@@ -107,6 +107,7 @@ func (s *Server) routes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/nodes/{node}/maintenance", s.handleNodeMaintenance)
 	mux.HandleFunc("POST /api/nodes/{node}/evacuate", s.handleNodeEvacuate)
 	mux.HandleFunc("POST /api/uploads", s.handleCreateUpload)
+	mux.HandleFunc("POST /api/imports", s.handleCreateImport)
 	mux.HandleFunc("GET /api/uploads/{namespace}/{name}", s.handleUploadStatus)
 	mux.HandleFunc("POST /api/uploads/{namespace}/{name}/token", s.handleUploadToken)
 	mux.HandleFunc("GET /api/projects/{project}/history", s.handleHistory)

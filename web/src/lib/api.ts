@@ -543,6 +543,16 @@ export const api = {
 		storageClass?: string;
 		bootImage?: boolean; // also register it as a boot image (a DataSource over it)
 	}) => post<gen.UploadTarget>('/api/uploads', req),
+	// A boot image the cluster downloads from a registry or a URL; its progress
+	// reads through uploadStatus.
+	createImport: (req: {
+		namespace: string;
+		name: string;
+		size: string;
+		storageClass?: string;
+		kind: 'url' | 'registry';
+		source: string;
+	}) => post<gen.UploadTarget>('/api/imports', req),
 	uploadStatus: (namespace: string, name: string) =>
 		get<gen.UploadStatus>(`/api/uploads/${enc(namespace)}/${enc(name)}`),
 	uploadToken: (namespace: string, name: string) =>

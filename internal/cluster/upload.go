@@ -3,6 +3,7 @@ package cluster
 import (
 	"context"
 	"fmt"
+	"regexp"
 	"strings"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -47,6 +48,21 @@ func (c *Client) UploadProxyURL(ctx context.Context) (string, error) {
 // provisions once it reaches UploadReady. An empty storageClass uses the
 // cluster default.
 func (c *Client) CreateUploadDataVolume(ctx context.Context, namespace, name, size, storageClass string) error {
+	return c.createDataVolume(ctx, namespace, name, size, storageClass, map[string]any{"upload": map[string]any{}})
+}
+
+// CreateImportDataVolume creates a DataVolume CDI fills by downloading url
+// itself: kind model.ImportRegistry (url carries docker://) or
+// model.ImportURL (http or https).
+func (c *Client) CreateImportDataVolume(ctx context.Context, namespace, name, size, storageClass, kind, url string) error {
+	from := "http"
+	if kind == model.ImportRegistry {
+		from = "registry"
+	}
+	return c.createDataVolume(ctx, namespace, name, size, storageClass, map[string]any{from: map[string]any{"url": url}})
+}
+
+func (c *Client) createDataVolume(ctx context.Context, namespace, name, size, storageClass string, source map[string]any) error {
 	dyn, err := c.dynamic()
 	if err != nil {
 		return err
@@ -63,13 +79,13 @@ func (c *Client) CreateUploadDataVolume(ctx context.Context, namespace, name, si
 		"metadata": map[string]any{
 			"name":      name,
 			"namespace": namespace,
-			// WaitForFirstConsumer storage would deadlock an upload DV: the PVC
-			// waits for a consumer, but the upload pod waits for the bound PVC.
-			// Force immediate binding so it reaches UploadReady.
+			// On WaitForFirstConsumer storage neither ever starts: an upload
+			// waits for a bound claim that waits for a consumer, and a boot
+			// image is only ever cloned from, never consumed. Bind now.
 			"annotations": map[string]any{"cdi.kubevirt.io/storage.bind.immediate.requested": "true"},
 		},
 		"spec": map[string]any{
-			"source":  map[string]any{"upload": map[string]any{}},
+			"source":  source,
 			"storage": storage,
 		},
 	}}
@@ -77,9 +93,9 @@ func (c *Client) CreateUploadDataVolume(ctx context.Context, namespace, name, si
 	return err
 }
 
-// UploadStatus reads the upload DataVolume's phase. Ready (UploadReady) means
-// the proxy will accept bytes; Progress is CDI's import-progress annotation,
-// present once bytes are flowing.
+// UploadStatus reads an upload or import DataVolume's phase. Ready
+// (UploadReady) means the proxy will accept bytes; Progress is CDI's
+// import-progress annotation, present once bytes are flowing.
 func (c *Client) UploadStatus(ctx context.Context, namespace, name string) (model.UploadStatus, error) {
 	dyn, err := c.dynamic()
 	if err != nil {
@@ -91,8 +107,28 @@ func (c *Client) UploadStatus(ctx context.Context, namespace, name string) (mode
 	}
 	phase, _, _ := unstructured.NestedString(dv.Object, "status", "phase")
 	progress, _, _ := unstructured.NestedString(dv.Object, "status", "progress")
-	return model.UploadStatus{Phase: phase, Ready: phase == "UploadReady", Progress: progress}, nil
+	return model.UploadStatus{Phase: phase, Ready: phase == "UploadReady", Progress: progress, Error: importerError(dv)}, nil
 }
+
+// importerError is the import pod's last failure: CDI keeps the pod's
+// termination message on the DataVolume's Running condition, reason Error,
+// and restarts the pod with backoff, so the phase alone never says.
+func importerError(dv *unstructured.Unstructured) string {
+	conds, _, _ := unstructured.NestedSlice(dv.Object, "status", "conditions")
+	for _, raw := range conds {
+		c, ok := raw.(map[string]any)
+		if !ok || c["type"] != "Running" || c["status"] != "False" || c["reason"] != "Error" {
+			continue
+		}
+		msg, _ := c["message"].(string)
+		return urlQuery.ReplaceAllString(msg, "$1")
+	}
+	return ""
+}
+
+// urlQuery matches a URL's query string: an importer's error quotes the
+// source it failed to fetch, pre-signed signature and all.
+var urlQuery = regexp.MustCompile(`(\w+://[^\s"'?]*)\?[^\s"']*`)
 
 // CreateUploadToken mints an UploadTokenRequest for the upload PVC and returns
 // the bearer the browser sends to the proxy. The aggregated API populates the
@@ -119,18 +155,31 @@ func (c *Client) CreateUploadToken(ctx context.Context, namespace, name string) 
 	return token, nil
 }
 
-// CreateBootImage registers the upload's claim as a boot image: a DataSource
-// of the same name over it, which the catalog offers once the import is
-// ready and a new VM's disk is cloned from.
-func (c *Client) CreateBootImage(ctx context.Context, namespace, name string) error {
+// The annotations a boot image dotvirt imported carries: where it came from,
+// as model.ImportFrom shows it, so the Library can stop offering to make a
+// boot image of a source that already has one.
+const (
+	importKindAnnotation   = "dotvirt.io/import-kind"
+	importSourceAnnotation = "dotvirt.io/import-source"
+)
+
+// CreateBootImage registers the claim the DataVolume name fills as a boot
+// image: a DataSource of the same name over it, which the catalog offers once
+// the import is ready and a new VM's disk is cloned from. imp, when not nil,
+// is the source an import downloaded.
+func (c *Client) CreateBootImage(ctx context.Context, namespace, name string, imp *model.DiskImport) error {
 	dyn, err := c.dynamic()
 	if err != nil {
 		return err
 	}
+	meta := map[string]any{"name": name, "namespace": namespace}
+	if imp != nil {
+		meta["annotations"] = map[string]any{importKindAnnotation: imp.Kind, importSourceAnnotation: imp.Source}
+	}
 	obj := &unstructured.Unstructured{Object: map[string]any{
 		"apiVersion": "cdi.kubevirt.io/v1beta1",
 		"kind":       "DataSource",
-		"metadata":   map[string]any{"name": name, "namespace": namespace},
+		"metadata":   meta,
 		"spec": map[string]any{
 			"source": map[string]any{"pvc": map[string]any{"name": name, "namespace": namespace}},
 		},

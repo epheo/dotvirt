@@ -115,6 +115,11 @@ export interface NamespaceCaps {
    */
   bootImageCreate: boolean;
   /**
+   * BootImageImport is a boot image the cluster downloads from a registry
+   * or a URL: its DataVolume and DataSource. It needs no upload proxy.
+   */
+  bootImageImport: boolean;
+  /**
    * The namespaced network family, staged through git. Network is the
    * project networks (UserDefinedNetwork).
    */
@@ -1084,14 +1089,17 @@ export interface Clone {
   created?: string; // RFC3339
 }
 /**
- * UploadStatus is an upload DataVolume's progress (the image-upload flow). Ready
- * (phase UploadReady) means cdi-uploadproxy will accept the bytes; Progress is
- * CDI's import-progress percentage once they're flowing.
+ * UploadStatus is an upload or import DataVolume's progress. Ready (phase
+ * UploadReady) means cdi-uploadproxy will accept the bytes; Progress is CDI's
+ * import-progress percentage once they're flowing. Error is the importer's
+ * last failure while CDI retries it (an unreachable source, a refused pull),
+ * any URL in it without its query string.
  */
 export interface UploadStatus {
   phase: string;
   ready: boolean;
   progress?: string;
+  error?: string;
 }
 /**
  * UploadToken is the bearer + endpoint the browser POSTs the image to, streaming
@@ -1102,8 +1110,9 @@ export interface UploadToken {
   uploadUrl: string;
 }
 /**
- * UploadTarget identifies the upload DataVolume just created. Image is the
- * boot image ("namespace/name" DataSource) registered over it, when asked for.
+ * UploadTarget identifies the upload or import DataVolume just created. Image
+ * is the boot image ("namespace/name" DataSource) registered over it, when
+ * asked for (always, for an import).
  */
 export interface UploadTarget {
   namespace: string;
@@ -1190,6 +1199,11 @@ export interface OSImage {
   name: string;
   namespace: string;
   ready: boolean;
+  /**
+   * Import is the source dotvirt downloaded the boot image from, when it
+   * made it from a registry or a URL.
+   */
+  import?: DiskImport;
 }
 export interface NetworkOption {
   name: string;

@@ -323,6 +323,107 @@ func TestUploadRefusalMakesNothing(t *testing.T) {
 	}
 }
 
+// A boot image from a URL or a registry: CDI downloads it inside the cluster,
+// so it works with upload off. The source is checked before anything is
+// made, a registry reference gains docker://, and the DataSource names the
+// source without its query string.
+func TestImports(t *testing.T) {
+	fc := newFakeCluster(t)
+	var dvs, dss []map[string]any
+	record := func(into *[]map[string]any) http.HandlerFunc {
+		return func(w http.ResponseWriter, r *http.Request) {
+			var obj map[string]any
+			echoCreate(&obj, nil)(w, r)
+			*into = append(*into, obj)
+		}
+	}
+	fc.on(http.MethodPost, "/apis/cdi.kubevirt.io/v1beta1/namespaces/team-a-dev/datavolumes", record(&dvs))
+	fc.on(http.MethodPost, "/apis/cdi.kubevirt.io/v1beta1/namespaces/team-a-dev/datasources", record(&dss))
+	s := fc.server(nil, Config{})
+
+	const ok = `"namespace":"team-a-dev","name":"noble","size":"20Gi"`
+	for body, want := range map[string]int{
+		`{"namespace":"team-a-dev","name":"noble","kind":"url","source":"https://a.example/x.img"}`:               http.StatusBadRequest,
+		`{` + ok + `,"kind":"url","source":"ftp://a.example/x.img"}`:                                              http.StatusBadRequest,
+		`{` + ok + `,"kind":"url","source":"https://ops:pw@a.example/x.img"}`:                                     http.StatusBadRequest,
+		`{` + ok + `,"kind":"url","source":"https://a.example/x y.img"}`:                                          http.StatusBadRequest,
+		`{` + ok + `,"kind":"url","source":""}`:                                                                   http.StatusBadRequest,
+		`{` + ok + `,"kind":"s3","source":"https://a.example/x.img"}`:                                             http.StatusBadRequest,
+		`{` + ok + `,"kind":"registry","source":"https://quay.io/x/y:1"}`:                                         http.StatusBadRequest,
+		`{"namespace":"team-a-dev","name":"Noble","size":"20Gi","kind":"url","source":"https://a.example/x.img"}`: http.StatusBadRequest,
+		`{"namespace":"team-a-dev","name":"noble","size":"lots","kind":"url","source":"https://a.example/x.img"}`: http.StatusBadRequest,
+		`{"namespace":"elsewhere","name":"noble","size":"20Gi","kind":"url","source":"https://a.example/x.img"}`:  http.StatusNotFound,
+	} {
+		if rec := do(s, adminToken, http.MethodPost, "/api/imports", body); rec.Code != want {
+			t.Errorf("import %s = %d %q, want %d", body, rec.Code, rec.Body.String(), want)
+		} else if strings.Contains(rec.Body.String(), "a.example") {
+			t.Errorf("import %s: the refusal quotes the source: %q", body, rec.Body.String())
+		}
+	}
+	if len(dvs)+len(dss) != 0 {
+		t.Fatalf("a refused import made objects: %v %v", dvs, dss)
+	}
+
+	rec := do(s, adminToken, http.MethodPost, "/api/imports", `{`+ok+`,"kind":"url","source":"https://images.example/noble.img?X-Amz-Signature=abc"}`)
+	wantStatus(t, rec, http.StatusOK)
+	if got := decodeBody[model.UploadTarget](t, rec); got.Image != "team-a-dev/noble" {
+		t.Errorf("target = %+v", got)
+	}
+	rec = do(s, adminToken, http.MethodPost, "/api/imports", `{"namespace":"team-a-dev","name":"fedora","size":"30Gi","storageClass":"fast","kind":"registry","source":"quay.io/containerdisks/fedora:42"}`)
+	wantStatus(t, rec, http.StatusOK)
+	if len(dvs) != 2 || len(dss) != 2 {
+		t.Fatalf("made %d data volumes, %d data sources; want 2 each", len(dvs), len(dss))
+	}
+	source := func(dv map[string]any) map[string]any { return dv["spec"].(map[string]any)["source"].(map[string]any) }
+	if got := source(dvs[0])["http"].(map[string]any)["url"]; got != "https://images.example/noble.img?X-Amz-Signature=abc" {
+		t.Errorf("http source = %v, want the url as given", got)
+	}
+	if got := source(dvs[1])["registry"].(map[string]any)["url"]; got != "docker://quay.io/containerdisks/fedora:42" {
+		t.Errorf("registry source = %v, want docker:// added", got)
+	}
+	ann := func(ds map[string]any) map[string]any {
+		return ds["metadata"].(map[string]any)["annotations"].(map[string]any)
+	}
+	if got := ann(dss[0]); got["dotvirt.io/import-kind"] != "url" || got["dotvirt.io/import-source"] != "https://images.example/noble.img" {
+		t.Errorf("datasource annotations = %v", got)
+	}
+	if got := ann(dss[1])["dotvirt.io/import-source"]; got != "quay.io/containerdisks/fedora:42" {
+		t.Errorf("registry datasource source = %v", got)
+	}
+}
+
+// A refused import makes nothing; it asks no upload token, which an import
+// never mints.
+func TestImportRefusalMakesNothing(t *testing.T) {
+	g := newGateRig(t)
+	var made []string
+	for _, res := range []string{"datavolumes", "datasources"} {
+		g.fc.on(http.MethodPost, "/apis/cdi.kubevirt.io/v1beta1/namespaces/team-a-dev/"+res, func(w http.ResponseWriter, r *http.Request) {
+			made = append(made, res)
+			echoCreate(nil, nil)(w, r)
+		})
+	}
+	body := `{"namespace":"team-a-dev","name":"noble","size":"20Gi","kind":"url","source":"https://images.example/noble.img"}`
+	for i := range importGrants {
+		tok := g.token(without(importGrants, i))
+		if _, nc := g.caps(tok, "team-a-dev"); nc.BootImageImport {
+			t.Errorf("without %v: bootImageImport true", importGrants[i])
+		}
+		wantStatus(t, do(g.s, tok, http.MethodPost, "/api/imports", body), http.StatusForbidden)
+	}
+	if len(made) != 0 {
+		t.Errorf("a refused import made %v", made)
+	}
+	tok := g.token(importGrants)
+	if _, nc := g.caps(tok, "team-a-dev"); !nc.BootImageImport || nc.BootImageCreate {
+		t.Errorf("with the import rights alone: bootImageImport=%v bootImageCreate=%v", nc.BootImageImport, nc.BootImageCreate)
+	}
+	wantStatus(t, do(g.s, tok, http.MethodPost, "/api/imports", body), http.StatusOK)
+	if len(made) != 2 {
+		t.Errorf("made %v, want a data volume and a data source", made)
+	}
+}
+
 // A token request the proxy answers without a token is an internal failure,
 // never an empty token handed to the browser.
 func TestUploadTokenNotIssued(t *testing.T) {

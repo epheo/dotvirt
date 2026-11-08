@@ -18,6 +18,7 @@ import {
 	planBulkSnapshot,
 	settleEach,
 	uploadAbility,
+	suggestImageName,
 	projectsBySize,
 	repeatedNames,
 	sortRows,
@@ -679,10 +680,52 @@ describe('uploadAbility', () => {
 		expect(await uploadAbility(['a', 'b', 'c', 'd', 'e'], ask, 2)).toEqual({
 			image: 'c',
 			upload: 'b',
+			import: 'c',
 		});
 		expect(asked).toEqual(['a', 'b', 'c', 'd']);
 		// A failed or missing verdict reads as no.
-		expect(await uploadAbility(['x', 'a', 'zz'], ask)).toEqual({ image: '', upload: '' });
-		expect(await uploadAbility(['x', 'b'], ask)).toEqual({ image: '', upload: 'b' });
+		expect(await uploadAbility(['x', 'a', 'zz'], ask)).toEqual({
+			image: '',
+			upload: '',
+			import: '',
+		});
+		expect(await uploadAbility(['x', 'b'], ask)).toEqual({ image: '', upload: 'b', import: '' });
+	});
+
+	it('with upload off, stops at the first namespace the cluster may import into', async () => {
+		const asked: string[] = [];
+		const off: Record<string, { bootImageImport?: boolean }> = {
+			a: {},
+			b: {},
+			c: { bootImageImport: true },
+		};
+		const ask = async (ns: string) => (asked.push(ns), off[ns]);
+		expect(await uploadAbility(['a', 'b', 'c', 'd', 'e', 'f'], ask, 1, true)).toEqual({
+			image: '',
+			upload: '',
+			import: 'c',
+		});
+		expect(asked).toEqual(['a', 'b', 'c']);
+	});
+});
+
+describe('suggestImageName', () => {
+	it('names a boot image after its repository and tag, or its file', () => {
+		expect(suggestImageName('registry', 'quay.io/containerdisks/fedora:42')).toBe('fedora-42');
+		expect(suggestImageName('registry', 'docker://quay.io/containerdisks/centos-stream:9')).toBe(
+			'centos-stream-9',
+		);
+		expect(suggestImageName('registry', 'registry.example:5000/vm/rhel:latest')).toBe('rhel');
+		expect(suggestImageName('registry', `quay.io/x/fedora@sha256:${'ab'.repeat(32)}`)).toBe(
+			'fedora',
+		);
+		expect(
+			suggestImageName('url', 'https://images.example.org/ubuntu/noble-server-cloudimg-amd64.img'),
+		).toBe('noble-server-cloudimg-amd64');
+		expect(suggestImageName('url', 'http://files.lab/Win2019_Eval.qcow2.xz?sig=1')).toBe(
+			'win2019-eval',
+		);
+		expect(suggestImageName('url', 'https://images.example.org/')).toBe('');
+		expect(suggestImageName('url', '')).toBe('');
 	});
 });

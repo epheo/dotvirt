@@ -1058,19 +1058,30 @@ const dupnames = {
 	],
 };
 
-// noboot and noupload: a caller who may upload but not add boot images, and
-// one who may do neither (GET /api/capabilities answers from these).
-const noboot = { ...base, name: 'noboot', capabilities: { default: { bootImageCreate: false } } };
+// noboot and noupload: a caller who may upload but not add boot images (so
+// neither a download, always a boot image), and one who may do neither (GET
+// /api/capabilities answers from these).
+const noboot = {
+	...base,
+	name: 'noboot',
+	capabilities: { default: { bootImageCreate: false, bootImageImport: false } },
+};
 const noupload = {
 	...base,
 	name: 'noupload',
-	capabilities: { default: { bootImageCreate: false, dataVolumeCreate: false } },
+	capabilities: {
+		default: { bootImageCreate: false, dataVolumeCreate: false, bootImageImport: false },
+	},
 };
-// uploadoff: no upload proxy known, so every namespace refuses uploads too.
+// uploadoff: no upload proxy known, so every namespace refuses uploads too;
+// a boot image the cluster downloads needs none.
 const uploadoff = {
-	...noupload,
+	...base,
 	name: 'uploadoff',
-	capabilities: { ...noupload.capabilities, cluster: { imageUpload: false } },
+	capabilities: {
+		default: { bootImageCreate: false, dataVolumeCreate: false },
+		cluster: { imageUpload: false },
+	},
 };
 
 // metricsoff: every metrics view answers with a reason and no numbers.
