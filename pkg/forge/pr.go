@@ -99,17 +99,24 @@ func (c *Client) pairPR(head, base string) (PR, error) {
 	return pr, err
 }
 
-// From reports whether p's head is branch in the base repo. A merged PR
-// whose branch was deleted reports its own refs/pull/<n>/head as the ref and
-// keeps the branch name only in the label.
+// HeadBranch is the branch p was opened from. A PR whose branch was deleted
+// reports its own refs/pull/<n>/head as the ref and keeps the branch name
+// only in the label.
+func (p PR) HeadBranch() string {
+	if p.Head.Label != "" && p.Head.Ref == fmt.Sprintf("refs/pull/%d/head", p.Number) {
+		return p.Head.Label
+	}
+	return p.Head.Ref
+}
+
+// From reports whether p's head is branch in the base repo. Only a merged
+// PR matches by a deleted branch: an open one without its branch cannot be
+// pushed to.
 func (p PR) From(branch string) bool {
 	if p.Head.RepoID != p.Base.RepoID {
 		return false
 	}
-	if p.Head.Ref == branch {
-		return true
-	}
-	return p.Merged && p.Head.Label == branch && p.Head.Ref == fmt.Sprintf("refs/pull/%d/head", p.Number)
+	return p.Head.Ref == branch || p.Merged && p.HeadBranch() == branch
 }
 
 // eachPR visits the PRs into base in state, most recently updated first,

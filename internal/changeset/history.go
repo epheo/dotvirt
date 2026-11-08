@@ -112,9 +112,9 @@ func (r *Reader) Proposal(proj project.ProjectInfo, number int) (model.ProposalD
 	if err != nil {
 		return model.ProposalDetail{}, forgeFailed(fmt.Sprintf("pull request #%d", number), err)
 	}
-	files, err := read.BranchDiff(r.baseBranch, pr.Head.Ref)
+	files, err := read.BranchDiff(r.baseBranch, pr.HeadBranch())
 	if errors.Is(err, git.ErrNoBranch) {
-		return model.ProposalDetail{}, fmt.Errorf("%w: branch %s is not mirrored yet; retry in a moment", model.ErrNotFound, pr.Head.Ref)
+		return model.ProposalDetail{}, fmt.Errorf("%w: branch %s is not mirrored yet; retry in a moment", model.ErrNotFound, pr.HeadBranch())
 	}
 	if err != nil {
 		return model.ProposalDetail{}, err

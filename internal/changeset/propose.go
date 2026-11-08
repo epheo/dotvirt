@@ -42,8 +42,8 @@ func (r *Reader) RecentlyMerged(proj project.ProjectInfo, since time.Time) ([]ta
 			Number:  pr.Number,
 			URL:     pr.HTMLURL,
 			Title:   pr.Title,
-			By:      tasks.MergeAuthor(pr.Head.Ref, r.proposed, pr.User.Login),
-			Branch:  pr.Head.Ref,
+			By:      tasks.MergeAuthor(pr.HeadBranch(), r.proposed, pr.User.Login),
+			Branch:  pr.HeadBranch(),
 			At:      pr.MergedAt,
 		})
 	}
@@ -212,13 +212,13 @@ func (r *Reader) setReviewed(repo string, prs map[int]reviewed) {
 func (r *Reader) proposalRow(proj project.ProjectInfo, pr forge.PR, read *git.Repo) model.Proposal {
 	head := ""
 	if read != nil {
-		head = read.BranchHash(pr.Head.Ref)
+		head = read.BranchHash(pr.HeadBranch())
 	}
 	return model.Proposal{
 		Project: proj.Name, PRNumber: pr.Number, PRURL: pr.HTMLURL, Title: pr.Title,
-		Branch: pr.Head.Ref, Head: head,
-		By:     tasks.MergeAuthor(pr.Head.Ref, r.proposed, pr.User.Login),
-		Revert: strings.HasPrefix(pr.Head.Ref, r.proposed+"/"+tasks.RevertSegment+"/"),
+		Branch: pr.HeadBranch(), Head: head,
+		By:     tasks.MergeAuthor(pr.HeadBranch(), r.proposed, pr.User.Login),
+		Revert: strings.HasPrefix(pr.HeadBranch(), r.proposed+"/"+tasks.RevertSegment+"/"),
 	}
 }
 
