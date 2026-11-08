@@ -582,6 +582,12 @@ func (d *planeDraft) DisableDRSNeeds(project.ProjectInfo) ([]changeset.Access, e
 	return nil, nil
 }
 
+// ResyncNeeds is the VM's create carrying its object, as the coordinator
+// states what Argo applying it does.
+func (d *planeDraft) ResyncNeeds(_ project.ProjectInfo, ns, name string) ([]changeset.Access, error) {
+	return []changeset.Access{{Verb: "create", Group: model.KindVM.Group, Resource: model.KindVM.Plural, Namespace: ns, Name: name, Object: "{}"}}, nil
+}
+
 func (d *planeDraft) Discard(auth.Identity, project.ProjectInfo) error {
 	d.mu.Lock()
 	defer d.mu.Unlock()

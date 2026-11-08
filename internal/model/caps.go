@@ -54,7 +54,9 @@ type NamespaceCaps struct {
 	// VM is the VirtualMachines staged through git: create (a new VM, a
 	// template deploy), update (edit, adopt, restore), delete.
 	VM ObjectCaps `json:"vm"`
-	// Resync drives an ArgoCD sync of one VM; false without ArgoCD.
+	// Resync may resync running VMs here (their update); false without
+	// ArgoCD. A list view's signal: the one VM's verdict, an absent or a
+	// replaced one included, is DriftResult.CanResync.
 	Resync bool `json:"resync"`
 	// The imperative operations, run under the caller's token.
 	Restart          bool `json:"restart"`

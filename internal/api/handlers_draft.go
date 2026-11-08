@@ -137,12 +137,18 @@ func (s *Server) handlePropose(w http.ResponseWriter, r *http.Request) {
 	respond(w, result, err)
 }
 
+// handleDrift answers the VM detail's drift, with the caller's verdict on
+// resyncing the VM, weighed on the resync route's own path.
 func (s *Server) handleDrift(w http.ResponseWriter, r *http.Request) {
 	sc, ns, name, ok := s.vmScope(w, r)
 	if !ok {
 		return
 	}
 	result, err := s.reader.VMDrift(sc.proj, ns, name)
+	if err == nil && s.drift != nil {
+		need, nerr := s.draft.ResyncNeeds(sc.proj, ns, name)
+		result.CanResync = s.needsAllowed(r.Context(), sc.id, sc.cluster, need, nerr)
+	}
 	respond(w, result, err)
 }
 

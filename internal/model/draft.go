@@ -134,6 +134,11 @@ type ProposeRequest struct {
 type DriftResult struct {
 	Drift   bool     `json:"drift"`
 	Changes []Change `json:"changes"`
+	// CanResync is the caller's verdict on resyncing this VM, weighed as the
+	// resync route weighs it: what Argo applying its declared object does
+	// (its update, its create when absent, a delete and a create when its
+	// sync options replace it). False without ArgoCD.
+	CanResync bool `json:"canResync"`
 }
 
 // ObjectRef identifies one declared object, kind-agnostic. Namespace is empty for

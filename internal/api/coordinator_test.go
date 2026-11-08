@@ -13,7 +13,9 @@ import (
 
 	authzv1 "k8s.io/api/authorization/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	kubevirtcorev1 "kubevirt.io/api/core/v1"
 
+	"github.com/epheo/dotvirt/internal/argo"
 	"github.com/epheo/dotvirt/internal/changeset"
 	"github.com/epheo/dotvirt/internal/draft"
 	"github.com/epheo/dotvirt/internal/git"
@@ -182,5 +184,77 @@ func TestCapabilitiesEqualTheCoordinatorsGate(t *testing.T) {
 				t.Errorf("allowed under %d of %d grant sets: the case weighs nothing", allowed, len(sets))
 			}
 		})
+	}
+}
+
+// liveOff is a ready live source holding no VM: drift reads git alone.
+type liveOff struct{}
+
+func (liveOff) VMManifests([]string) []model.File { return nil }
+func (liveOff) Ready() bool                       { return true }
+
+type resyncOK struct{}
+
+func (resyncOK) Resync(context.Context, string, string, string) (model.ResyncResult, error) {
+	return model.ResyncResult{Application: "app"}, nil
+}
+
+// The VM detail's resync verdict is the resync route's own, VM by VM: the
+// update of a running VM, the create of one the snapshot knows absent, and a
+// delete and a create under a replacing sync option - each through the real
+// coordinator, under every grant set minus one, all, and none.
+func TestCanResyncEqualsTheResyncGate(t *testing.T) {
+	g := newGrantCluster(t)
+	vm := func(name, annotations string) string {
+		return "apiVersion: kubevirt.io/v1\nkind: VirtualMachine\nmetadata:\n  name: " + name + "\n  namespace: team-a-dev\n" + annotations + "spec:\n  runStrategy: Always\n"
+	}
+	tenant := seedPlatformRepo(t, map[string]string{
+		"team-a-dev/web.yaml": vm("web", ""),
+		"team-a-dev/db.yaml":  vm("db", ""),
+		"team-a-dev/rep.yaml": vm("rep", "  annotations:\n    argocd.argoproj.io/sync-options: Replace=true\n"),
+	})
+	g.fc.namespaces[0].Annotations["dotvirt.io/repo"] = "file://" + tenant
+	g.fc.vms = []kubevirtcorev1.VirtualMachine{
+		{ObjectMeta: metav1.ObjectMeta{Namespace: "team-a-dev", Name: "web"}},
+		{ObjectMeta: metav1.ObjectMeta{Namespace: "team-a-dev", Name: "rep"}},
+	}
+	store, err := draft.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	repos := git.NewRepoSet(ctx, "", "", nil, false, nil, time.Hour)
+	c := changeset.New(store, repos, nil, resyncOK{}, liveOff{}, nil, "main", "dotvirt/proposed")
+	g.s = g.fc.server(c, Config{BaseBranch: "main"})
+	g.s.drift = argo.NewSnapshot(nil, nil)
+	c.UseAuthorizer(g.s)
+
+	full := []grant{kind(verbCreate, model.KindVM, "team-a-dev"), kind(verbUpdate, model.KindVM, "team-a-dev"), kind(verbDelete, model.KindVM, "team-a-dev")}
+	sets := [][]grant{full, nil}
+	for i := range full {
+		sets = append(sets, without(full, i))
+	}
+	for _, name := range []string{"web", "db", "rep"} {
+		allowed := 0
+		for _, gs := range sets {
+			tok := g.token(gs)
+			rec := do(g.s, tok, http.MethodGet, "/api/vms/team-a-dev/"+name+"/drift", "")
+			wantStatus(t, rec, http.StatusOK)
+			can := decodeBody[model.DriftResult](t, rec).CanResync
+			rec = do(g.s, tok, http.MethodPost, "/api/vms/team-a-dev/"+name+"/resync", "")
+			switch {
+			case can && rec.Code != http.StatusOK:
+				t.Errorf("%s: canResync but resync = %d %q (grants %v)", name, rec.Code, rec.Body.String(), gs)
+			case !can && rec.Code != http.StatusForbidden:
+				t.Errorf("%s: no canResync but resync = %d %q (grants %v)", name, rec.Code, rec.Body.String(), gs)
+			}
+			if can {
+				allowed++
+			}
+		}
+		if allowed == 0 || allowed == len(sets) {
+			t.Errorf("%s: allowed under %d of %d grant sets: the case weighs nothing", name, allowed, len(sets))
+		}
 	}
 }

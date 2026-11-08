@@ -148,11 +148,10 @@ func (d *gatedDraft) AdoptObjects(_ auth.Identity, _ project.ProjectInfo, _ stri
 	return stagedView, nil
 }
 
-// Resync asks the server, as the coordinator does, what Argo applying the VM
-// asks: its create, which the server weighs as the update of a running VM.
-func (d *gatedDraft) Resync(_ context.Context, id auth.Identity, _ project.ProjectInfo, ns, name string) (model.ResyncResult, error) {
-	vm := changeset.Access{Verb: verbCreate, Group: model.KindVM.Group, Resource: model.KindVM.Plural, Namespace: ns, Name: name, Object: "{}"}
-	if err := d.authz.Authorize(id, []changeset.Access{vm}); err != nil {
+// Resync asks the server, as the coordinator does, its ResyncNeeds.
+func (d *gatedDraft) Resync(_ context.Context, id auth.Identity, proj project.ProjectInfo, ns, name string) (model.ResyncResult, error) {
+	need, _ := d.ResyncNeeds(proj, ns, name)
+	if err := d.authz.Authorize(id, need); err != nil {
 		return model.ResyncResult{}, err
 	}
 	return model.ResyncResult{Application: "app"}, nil

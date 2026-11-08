@@ -124,6 +124,7 @@ type Draft interface {
 	ReleaseNeeds(commitProj, target project.ProjectInfo) (need []changeset.Access, residue []string, err error)
 	EnableDRSNeeds(proj project.ProjectInfo, spec json.RawMessage) ([]changeset.Access, error)
 	DisableDRSNeeds(proj project.ProjectInfo) ([]changeset.Access, error)
+	ResyncNeeds(proj project.ProjectInfo, namespace, name string) ([]changeset.Access, error)
 	Revert(id auth.Identity, proj project.ProjectInfo, hash string) (model.ProposeResult, error)
 	// RestoreVersion stages one VM's manifest as a past commit held it: the
 	// object-level undo, through the caller's draft like any edit.

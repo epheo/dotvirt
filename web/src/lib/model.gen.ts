@@ -77,7 +77,9 @@ export interface NamespaceCaps {
    */
   vm: ObjectCaps;
   /**
-   * Resync drives an ArgoCD sync of one VM; false without ArgoCD.
+   * Resync may resync running VMs here (their update); false without
+   * ArgoCD. A list view's signal: the one VM's verdict, an absent or a
+   * replaced one included, is DriftResult.CanResync.
    */
   resync: boolean;
   /**
@@ -265,6 +267,13 @@ export interface ProposeRequest {
 export interface DriftResult {
   drift: boolean;
   changes: Change[];
+  /**
+   * CanResync is the caller's verdict on resyncing this VM, weighed as the
+   * resync route weighs it: what Argo applying its declared object does
+   * (its update, its create when absent, a delete and a create when its
+   * sync options replace it). False without ArgoCD.
+   */
+  canResync: boolean;
 }
 /**
  * ObjectRef identifies one declared object, kind-agnostic. Namespace is empty for
