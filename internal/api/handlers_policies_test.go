@@ -208,3 +208,85 @@ func TestTenantReadsOwnScopeOnEveryPolicySurface(t *testing.T) {
 		t.Errorf("the policy plane hides values from authority over the kind: %s", pols)
 	}
 }
+
+// Through the route: a tenant on a primary UDN tracing to an address in
+// another tenant's network range reads exactly what it reads for any address
+// it cannot place, so the trace is no oracle for that range; a caller who
+// sees that namespace reads the overlay answer.
+func TestTraceViewIsTheCallers(t *testing.T) {
+	fc := newFakeCluster(t)
+	fc.readsVMs = tenantReadsTeamA
+	tmpl := &kubevirtcorev1.VirtualMachineInstanceTemplateSpec{}
+	tmpl.Spec.Networks = []kubevirtcorev1.Network{{Name: "default", NetworkSource: kubevirtcorev1.NetworkSource{Pod: &kubevirtcorev1.PodNetwork{}}}}
+	fc.vms = []kubevirtcorev1.VirtualMachine{{ObjectMeta: metav1.ObjectMeta{Namespace: "team-a-dev", Name: "web"}, Spec: kubevirtcorev1.VirtualMachineSpec{Template: tmpl}}}
+	fc.vmis = []kubevirtcorev1.VirtualMachineInstance{{
+		ObjectMeta: metav1.ObjectMeta{Namespace: "team-a-dev", Name: "web"},
+		Spec:       kubevirtcorev1.VirtualMachineInstanceSpec{Networks: tmpl.Spec.Networks},
+		Status: kubevirtcorev1.VirtualMachineInstanceStatus{Interfaces: []kubevirtcorev1.VirtualMachineInstanceNetworkInterface{
+			{Name: "default", IP: "10.100.0.5", IPs: []string{"10.100.0.5"}},
+		}},
+	}}
+	resources := func(gv string, names ...string) http.HandlerFunc {
+		return func(w http.ResponseWriter, _ *http.Request) {
+			list := metav1.APIResourceList{TypeMeta: metav1.TypeMeta{Kind: "APIResourceList", APIVersion: "v1"}, GroupVersion: gv}
+			for _, n := range names {
+				list.APIResources = append(list.APIResources, metav1.APIResource{Name: n, Verbs: []string{"list", "watch"}})
+			}
+			writeObj(w, list)
+		}
+	}
+	udn := func(ns, name, cidr string) map[string]any {
+		return map[string]any{
+			"apiVersion": "k8s.ovn.org/v1", "kind": "UserDefinedNetwork",
+			"metadata": map[string]any{"name": name, "namespace": ns, "resourceVersion": "1"},
+			"spec":     map[string]any{"topology": "Layer2", "layer2": map[string]any{"role": "Primary", "subnets": []any{cidr}}},
+		}
+	}
+	nad := func(ns, name string) map[string]any {
+		return map[string]any{
+			"apiVersion": "k8s.cni.cncf.io/v1", "kind": "NetworkAttachmentDefinition",
+			"metadata": map[string]any{"name": name, "namespace": ns, "resourceVersion": "1",
+				"ownerReferences": []any{map[string]any{"apiVersion": "k8s.ovn.org/v1", "kind": "UserDefinedNetwork", "name": name, "uid": name}}},
+		}
+	}
+	fc.on(http.MethodGet, "/apis/k8s.ovn.org/v1", resources("k8s.ovn.org/v1", "userdefinednetworks"))
+	fc.on(http.MethodGet, "/apis/k8s.cni.cncf.io/v1", resources("k8s.cni.cncf.io/v1", "network-attachment-definitions"))
+	fc.on(http.MethodGet, "/apis/k8s.ovn.org/v1/userdefinednetworks", unstructuredList("k8s.ovn.org/v1", "UserDefinedNetwork",
+		udn("team-a-dev", "net-a", "10.100.0.0/16"), udn("orphans-ns", "net-o", "10.200.0.0/16")))
+	fc.on(http.MethodGet, "/apis/k8s.cni.cncf.io/v1/network-attachment-definitions", unstructuredList("k8s.cni.cncf.io/v1", "NetworkAttachmentDefinition",
+		nad("team-a-dev", "net-a"), nad("orphans-ns", "net-o")))
+	s := fc.server(nil, Config{})
+	ns := netstate.New(fc.sa, nil)
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	ns.Run(ctx)
+	s.netstate = ns
+	for deadline := time.Now().Add(10 * time.Second); len(ns.Catalog().Networks) < 2; time.Sleep(10 * time.Millisecond) {
+		if time.Now().After(deadline) {
+			t.Fatal("netstate never synced the networks")
+		}
+	}
+
+	trace := func(token, ip string) model.TraceResult {
+		t.Helper()
+		rec := do(s, token, http.MethodPost, "/api/networking/trace", `{"source":{"namespace":"team-a-dev","vm":"web"},"destination":{"ip":"`+ip+`"},"port":443}`)
+		wantStatus(t, rec, http.StatusOK)
+		return decodeBody[model.TraceResult](t, rec)
+	}
+	note := func(res model.TraceResult, ip string) string {
+		for _, st := range res.Steps {
+			if st.Stage == "connectivity" {
+				return strings.ReplaceAll(st.Note, ip, "<ip>")
+			}
+		}
+		return ""
+	}
+	inRange, outside := trace(tenantToken, "10.200.0.7"), trace(tenantToken, "10.201.0.7")
+	if inRange.Verdict != outside.Verdict || note(inRange, "10.200.0.7") != note(outside, "10.201.0.7") {
+		t.Errorf("a tenant tells another tenant's range apart: %s %q vs %s %q",
+			inRange.Verdict, note(inRange, "10.200.0.7"), outside.Verdict, note(outside, "10.201.0.7"))
+	}
+	if admin := trace(adminToken, "10.200.0.7"); !strings.Contains(note(admin, "10.200.0.7"), "no in-cluster path") {
+		t.Errorf("a caller who sees the namespace reads the overlay answer: %+v", admin)
+	}
+}

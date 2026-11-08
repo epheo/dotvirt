@@ -47,7 +47,7 @@ func TestTraceEastWestNetpol(t *testing.T) {
 	src := wl("team-b", "client", nil, map[string]string{"app": "client"})
 	dst := wl("team-a", "web", nil, map[string]string{"app": "web"})
 
-	res := s.Trace(src, &dst, "", "TCP", 443)
+	res := s.Trace(nil, src, &dst, "", "TCP", 443)
 	if res.Verdict != "Allow" {
 		t.Fatalf("443: verdict = %s (%v)", res.Verdict, stepKinds(t, res))
 	}
@@ -61,7 +61,7 @@ func TestTraceEastWestNetpol(t *testing.T) {
 		t.Fatalf("want decisive dfw ingress step for web-ingress, got %v", stepKinds(t, res))
 	}
 
-	res = s.Trace(src, &dst, "", "TCP", 22)
+	res = s.Trace(nil, src, &dst, "", "TCP", 22)
 	if res.Verdict != "Deny" {
 		t.Fatalf("22: verdict = %s (%v)", res.Verdict, stepKinds(t, res))
 	}
@@ -99,7 +99,7 @@ func TestTraceANPPrecedenceAndPass(t *testing.T) {
 	src := wl("team-b", "client", nil, nil)
 	dst := wl("team-a", "web", nil, map[string]string{"app": "web"})
 
-	res := s.Trace(src, &dst, "", "TCP", 443)
+	res := s.Trace(nil, src, &dst, "", "TCP", 443)
 	if res.Verdict != "Deny" {
 		t.Fatalf("admin deny must win over netpol allow: verdict = %s (%v)", res.Verdict, stepKinds(t, res))
 	}
@@ -117,7 +117,7 @@ func TestTraceANPPrecedenceAndPass(t *testing.T) {
 			}},
 		},
 	})
-	res = s.Trace(src, &dst, "", "TCP", 443)
+	res = s.Trace(nil, src, &dst, "", "TCP", 443)
 	if res.Verdict != "Allow" {
 		t.Fatalf("pass then netpol allow: verdict = %s (%v)", res.Verdict, stepKinds(t, res))
 	}
@@ -139,7 +139,7 @@ func TestTraceBaselineAndDefault(t *testing.T) {
 	src := wl("team-b", "client", nil, nil)
 	dst := wl("team-a", "web", nil, nil)
 
-	res := s.Trace(src, &dst, "", "TCP", 80)
+	res := s.Trace(nil, src, &dst, "", "TCP", 80)
 	if res.Verdict != "Allow" {
 		t.Fatalf("no policy: verdict = %s", res.Verdict)
 	}
@@ -155,7 +155,7 @@ func TestTraceBaselineAndDefault(t *testing.T) {
 			}},
 		},
 	})
-	res = s.Trace(src, &dst, "", "TCP", 80)
+	res = s.Trace(nil, src, &dst, "", "TCP", 80)
 	if res.Verdict != "Deny" {
 		t.Fatalf("baseline deny: verdict = %s (%v)", res.Verdict, stepKinds(t, res))
 	}
@@ -177,14 +177,7 @@ func TestTraceBaselineAndDefault(t *testing.T) {
 func TestTraceUnreachableAndSegmentBypass(t *testing.T) {
 	s := New(nil, nil)
 	s.routeAds.Store(routeAdsAbsent)
-	add(t, s.udn, map[string]any{
-		"apiVersion": "k8s.ovn.org/v1", "kind": "UserDefinedNetwork",
-		"metadata": map[string]any{"name": "isolated", "namespace": "team-a"},
-		"spec": map[string]any{
-			"topology": "Layer2",
-			"layer2":   map[string]any{"role": "Primary"},
-		},
-	})
+	primaryUDN(t, s, "team-a", "isolated", map[string]any{"topology": "Layer2", "layer2": map[string]any{"role": "Primary"}})
 	for _, ns := range []string{"team-a", "team-b"} {
 		add(t, s.nad, map[string]any{
 			"apiVersion": "k8s.cni.cncf.io/v1", "kind": "NetworkAttachmentDefinition",
@@ -202,7 +195,7 @@ func TestTraceUnreachableAndSegmentBypass(t *testing.T) {
 	dst := wl("team-b", "db", nil, nil)
 	dst.Nets = []string{"team-b/shared-vlan"}
 
-	res := s.Trace(src, &dst, "", "TCP", 5432)
+	res := s.Trace(nil, src, &dst, "", "TCP", 5432)
 	if res.Verdict != "Conditional" {
 		t.Fatalf("isolated primaries sharing a network: verdict = %s (%v)", res.Verdict, stepKinds(t, res))
 	}
@@ -220,7 +213,7 @@ func TestTraceUnreachableAndSegmentBypass(t *testing.T) {
 	}
 
 	dst.Nets = nil
-	if res := s.Trace(src, &dst, "", "TCP", 5432); res.Verdict != "Unreachable" {
+	if res := s.Trace(nil, src, &dst, "", "TCP", 5432); res.Verdict != "Unreachable" {
 		t.Fatalf("isolated primaries, nothing shared: verdict = %s (%v)", res.Verdict, stepKinds(t, res))
 	}
 }
@@ -247,7 +240,7 @@ func TestTraceExternal(t *testing.T) {
 	})
 	src := wl("team-a", "web", nil, nil, "10.128.2.5")
 
-	res := s.Trace(src, nil, "198.51.100.7", "TCP", 443)
+	res := s.Trace(nil, src, nil, "198.51.100.7", "TCP", 443)
 	if res.Verdict != "Allow" {
 		t.Fatalf("allowed CIDR: verdict = %s (%v)", res.Verdict, stepKinds(t, res))
 	}
@@ -261,7 +254,7 @@ func TestTraceExternal(t *testing.T) {
 		t.Fatalf("want the SNAT plane reported, got %v", stepKinds(t, res))
 	}
 
-	if res := s.Trace(src, nil, "203.0.113.9", "TCP", 443); res.Verdict != "Deny" {
+	if res := s.Trace(nil, src, nil, "203.0.113.9", "TCP", 443); res.Verdict != "Deny" {
 		t.Fatalf("catch-all deny: verdict = %s (%v)", res.Verdict, stepKinds(t, res))
 	}
 
@@ -278,7 +271,7 @@ func TestTraceExternal(t *testing.T) {
 			}},
 		},
 	})
-	if res := s.Trace(src, nil, "198.51.100.7", "TCP", 443); res.Verdict != "Deny" {
+	if res := s.Trace(nil, src, nil, "198.51.100.7", "TCP", 443); res.Verdict != "Deny" {
 		t.Fatalf("admin networks deny: verdict = %s (%v)", res.Verdict, stepKinds(t, res))
 	}
 }
@@ -300,7 +293,7 @@ func TestTraceConditional(t *testing.T) {
 	})
 	src := wl("team-b", "client", nil, nil)
 	dst := wl("team-a", "web", nil, nil)
-	res := s.Trace(src, &dst, "", "TCP", 8080)
+	res := s.Trace(nil, src, &dst, "", "TCP", 8080)
 	if res.Verdict != "Conditional" {
 		t.Fatalf("named port: verdict = %s (%v)", res.Verdict, stepKinds(t, res))
 	}
@@ -328,7 +321,7 @@ func TestTraceConditional(t *testing.T) {
 		},
 	})
 	stopped := wl("team-b", "client", nil, nil) // no IPs
-	if res := s2.Trace(stopped, &dst, "", "TCP", 443); res.Verdict != "Conditional" {
+	if res := s2.Trace(nil, stopped, &dst, "", "TCP", 443); res.Verdict != "Conditional" {
 		t.Fatalf("no addresses vs ipBlock: verdict = %s (%v)", res.Verdict, stepKinds(t, res))
 	}
 
@@ -343,7 +336,7 @@ func TestTraceConditional(t *testing.T) {
 		}},
 	})
 	live := wl("team-a", "web", nil, nil, "10.128.2.5")
-	if res := s3.Trace(live, nil, "203.0.113.9", "TCP", 443); res.Verdict != "Conditional" {
+	if res := s3.Trace(nil, live, nil, "203.0.113.9", "TCP", 443); res.Verdict != "Conditional" {
 		t.Fatalf("dns rule before catch-all deny: verdict = %s (%v)", res.Verdict, stepKinds(t, res))
 	}
 }
@@ -363,7 +356,7 @@ func TestTraceGatewayNodeSelector(t *testing.T) {
 	})
 	src := wl("team-a", "web", nil, nil, "10.128.2.5")
 
-	res := s.Trace(src, nil, "203.0.113.9", "TCP", 443)
+	res := s.Trace(nil, src, nil, "203.0.113.9", "TCP", 443)
 	if res.Verdict != "Conditional" {
 		t.Fatalf("node-selector deny before catch-all allow: verdict = %s (%v)", res.Verdict, stepKinds(t, res))
 	}
@@ -392,7 +385,7 @@ func TestTraceGatewayMaybeAllowAgreesWithDefault(t *testing.T) {
 	})
 	src := wl("team-a", "web", nil, nil, "10.128.2.5")
 
-	res := s.Trace(src, nil, "203.0.113.9", "TCP", 443)
+	res := s.Trace(nil, src, nil, "203.0.113.9", "TCP", 443)
 	if res.Verdict != "Allow" {
 		t.Fatalf("dns allow before the default allow: verdict = %s (%v)", res.Verdict, stepKinds(t, res))
 	}
@@ -416,11 +409,11 @@ func TestTraceANPNodesPeer(t *testing.T) {
 	})
 	src := wl("team-a", "web", nil, nil, "10.128.2.5")
 
-	if res := s.Trace(src, nil, "192.0.2.20", "TCP", 22); res.Verdict != "Conditional" {
+	if res := s.Trace(nil, src, nil, "192.0.2.20", "TCP", 22); res.Verdict != "Conditional" {
 		t.Fatalf("external target may be a node: verdict = %s (%v)", res.Verdict, stepKinds(t, res))
 	}
 	dst := wl("team-b", "db", nil, nil, "10.128.3.7")
-	if res := s.Trace(src, &dst, "", "TCP", 22); res.Verdict != "Allow" {
+	if res := s.Trace(nil, src, &dst, "", "TCP", 22); res.Verdict != "Allow" {
 		t.Fatalf("nodes peer must not match a VM: verdict = %s (%v)", res.Verdict, stepKinds(t, res))
 	}
 }
@@ -444,7 +437,7 @@ func TestTracePassConvergence(t *testing.T) {
 	src := wl("team-b", "client", nil, nil, "10.128.2.5")
 	dst := wl("team-a", "web", nil, nil) // stopped: the Pass peer can't resolve
 
-	res := s.Trace(src, &dst, "", "TCP", 443)
+	res := s.Trace(nil, src, &dst, "", "TCP", 443)
 	if res.Verdict != "Allow" {
 		t.Fatalf("conditional Pass with converging branches: verdict = %s (%v)", res.Verdict, stepKinds(t, res))
 	}
@@ -482,7 +475,7 @@ func TestTraceDefaultMultusSegment(t *testing.T) {
 	onDefault.PodNet = false
 	onDefault.DefaultNet = "team-a/vlan-x"
 	onPod := wl("team-b", "db", nil, nil)
-	if res := s.Trace(onDefault, &onPod, "", "TCP", 5432); res.Verdict != "Unreachable" {
+	if res := s.Trace(nil, onDefault, &onPod, "", "TCP", 5432); res.Verdict != "Unreachable" {
 		t.Fatalf("substituted default vs cluster default: verdict = %s (%v)", res.Verdict, stepKinds(t, res))
 	}
 
@@ -490,7 +483,7 @@ func TestTraceDefaultMultusSegment(t *testing.T) {
 	a.PodNet, a.DefaultNet = false, "team-a/shared-vlan"
 	b := wl("team-b", "db", nil, nil)
 	b.PodNet, b.DefaultNet = false, "team-b/shared-vlan"
-	if res := s.Trace(a, &b, "", "TCP", 5432); res.Verdict != "Allow" {
+	if res := s.Trace(nil, a, &b, "", "TCP", 5432); res.Verdict != "Allow" {
 		t.Fatalf("same CUDN network as default: verdict = %s (%v)", res.Verdict, stepKinds(t, res))
 	}
 }
@@ -513,11 +506,11 @@ func TestTraceNetpolSameNamespacePeer(t *testing.T) {
 	dst := wl("team-a", "db", nil, map[string]string{"app": "db"})
 
 	same := wl("team-a", "web", nil, map[string]string{"app": "web"})
-	if res := s.Trace(same, &dst, "", "TCP", 5432); res.Verdict != "Allow" {
+	if res := s.Trace(nil, same, &dst, "", "TCP", 5432); res.Verdict != "Allow" {
 		t.Fatalf("same-ns web: verdict = %s (%v)", res.Verdict, stepKinds(t, res))
 	}
 	other := wl("team-b", "web", nil, map[string]string{"app": "web"})
-	if res := s.Trace(other, &dst, "", "TCP", 5432); res.Verdict != "Deny" {
+	if res := s.Trace(nil, other, &dst, "", "TCP", 5432); res.Verdict != "Deny" {
 		t.Fatalf("other-ns web: verdict = %s (%v)", res.Verdict, stepKinds(t, res))
 	}
 }
@@ -546,7 +539,7 @@ func TestTraceLocalnetSegmentByPhysnetVLAN(t *testing.T) {
 	src.Nets = []string{"team-a/dc-100"}
 	dst := wl("team-b", "db", nil, nil)
 	dst.Nets = []string{"team-b/legacy"}
-	res := s.Trace(src, &dst, "", "TCP", 5432)
+	res := s.Trace(nil, src, &dst, "", "TCP", 5432)
 	var bypass int
 	for _, st := range res.Steps {
 		if st.Stage == "segment" && st.Action == "Bypass" {
@@ -558,7 +551,7 @@ func TestTraceLocalnetSegmentByPhysnetVLAN(t *testing.T) {
 	}
 
 	dst.Nets = []string{"team-b/other-vlan"}
-	for _, st := range s.Trace(src, &dst, "", "TCP", 5432).Steps {
+	for _, st := range s.Trace(nil, src, &dst, "", "TCP", 5432).Steps {
 		if st.Stage == "segment" {
 			t.Fatalf("another VLAN is another domain, got %+v", st)
 		}
@@ -592,7 +585,7 @@ func TestTraceEqualPriorityANPs(t *testing.T) {
 	s := New(nil, nil)
 	anp(t, s, "a-deny", 5, anpEgress("Deny", "team-a"))
 	anp(t, s, "b-allow", 5, anpEgress("Allow", "team-a"))
-	res := s.Trace(src, &dst, "", "TCP", 443)
+	res := s.Trace(nil, src, &dst, "", "TCP", 443)
 	if res.Verdict != "Conditional" {
 		t.Fatalf("conflicting equal-priority ANPs: verdict = %s (%v)", res.Verdict, stepKinds(t, res))
 	}
@@ -609,14 +602,14 @@ func TestTraceEqualPriorityANPs(t *testing.T) {
 	s = New(nil, nil)
 	anp(t, s, "a-deny", 5, anpEgress("Deny", "team-a"))
 	anp(t, s, "b-elsewhere", 5, anpEgress("Allow", "team-c"))
-	if res := s.Trace(src, &dst, "", "TCP", 443); res.Verdict != "Deny" {
+	if res := s.Trace(nil, src, &dst, "", "TCP", 443); res.Verdict != "Deny" {
 		t.Fatalf("one deciding policy at the priority: verdict = %s (%v)", res.Verdict, stepKinds(t, res))
 	}
 
 	s = New(nil, nil)
 	anp(t, s, "a-pass", 5, anpEgress("Pass", "team-a"))
 	anp(t, s, "b-pass", 5, anpEgress("Pass", "team-a"))
-	if res := s.Trace(src, &dst, "", "TCP", 443); res.Verdict != "Allow" {
+	if res := s.Trace(nil, src, &dst, "", "TCP", 443); res.Verdict != "Allow" {
 		t.Fatalf("agreeing passes converge: verdict = %s (%v)", res.Verdict, stepKinds(t, res))
 	}
 }
@@ -643,7 +636,7 @@ func TestTraceProjectSelectionUnresolved(t *testing.T) {
 	})
 	src := wl("team-b", "client", nil, nil)
 	dst := wl("team-a", "web", nil, map[string]string{"app": "web"})
-	res := s.Trace(src, &dst, "", "TCP", 443)
+	res := s.Trace(nil, src, &dst, "", "TCP", 443)
 	if res.Verdict != "Conditional" {
 		t.Fatalf("allow from an unresolved selection: verdict = %s (%v)", res.Verdict, stepKinds(t, res))
 	}
@@ -670,7 +663,7 @@ func TestTraceExternalVLAN(t *testing.T) {
 
 	vlanOnly := wl("team-a", "appliance", nil, nil, "192.0.2.5")
 	vlanOnly.PodNet, vlanOnly.Nets = false, []string{"team-a/vlan10"}
-	res := s.Trace(vlanOnly, nil, "203.0.113.9", "TCP", 443)
+	res := s.Trace(nil, vlanOnly, nil, "203.0.113.9", "TCP", 443)
 	if res.Verdict != "Conditional" {
 		t.Fatalf("VLAN-only source: verdict = %s (%v)", res.Verdict, stepKinds(t, res))
 	}
@@ -682,19 +675,19 @@ func TestTraceExternalVLAN(t *testing.T) {
 
 	both := wl("team-a", "web", nil, nil, "10.128.2.5")
 	both.Nets = []string{"team-a/vlan10"}
-	if res := s.Trace(both, nil, "203.0.113.9", "TCP", 443); res.Verdict != "Conditional" {
+	if res := s.Trace(nil, both, nil, "203.0.113.9", "TCP", 443); res.Verdict != "Conditional" {
 		t.Fatalf("primary plus VLAN under a gateway deny: verdict = %s (%v)", res.Verdict, stepKinds(t, res))
 	}
 
 	internal := wl("team-a", "backend", nil, nil)
 	internal.PodNet, internal.Nets = false, []string{"team-a/db-net"}
-	if res := s.Trace(internal, nil, "203.0.113.9", "TCP", 443); res.Verdict != "Conditional" {
+	if res := s.Trace(nil, internal, nil, "203.0.113.9", "TCP", 443); res.Verdict != "Conditional" {
 		t.Fatalf("secondary-only source, a router may carry it: verdict = %s (%v)", res.Verdict, stepKinds(t, res))
 	}
 
 	bare := wl("team-a", "island", nil, nil)
 	bare.PodNet = false
-	if res := s.Trace(bare, nil, "203.0.113.9", "TCP", 443); res.Verdict != "Unreachable" {
+	if res := s.Trace(nil, bare, nil, "203.0.113.9", "TCP", 443); res.Verdict != "Unreachable" {
 		t.Fatalf("no NIC: verdict = %s (%v)", res.Verdict, stepKinds(t, res))
 	}
 }
@@ -714,7 +707,7 @@ func TestTraceExternalAdminAllowMeetsGateway(t *testing.T) {
 		}},
 	})
 	src := wl("team-a", "web", nil, nil, "10.128.2.5")
-	res := s.Trace(src, nil, "198.51.100.7", "TCP", 443)
+	res := s.Trace(nil, src, nil, "198.51.100.7", "TCP", 443)
 	if res.Verdict != "Deny" {
 		t.Fatalf("admin allow then gateway deny: verdict = %s (%v)", res.Verdict, stepKinds(t, res))
 	}
@@ -733,7 +726,7 @@ func TestTraceUnenforcedANPPriority(t *testing.T) {
 
 	s := New(nil, nil)
 	anp(t, s, "too-low", 500, anpEgress("Deny", "team-a"))
-	res := s.Trace(src, &dst, "", "TCP", 443)
+	res := s.Trace(nil, src, &dst, "", "TCP", 443)
 	if res.Verdict != "Conditional" {
 		t.Fatalf("unenforced deny vs default allow: verdict = %s (%v)", res.Verdict, stepKinds(t, res))
 	}
@@ -752,7 +745,7 @@ func TestTraceUnenforcedANPPriority(t *testing.T) {
 
 	// An enforced lower priority number still decides, and agrees.
 	anp(t, s, "lockdown", 10, anpEgress("Deny", "team-a"))
-	if res := s.Trace(src, &dst, "", "TCP", 443); res.Verdict != "Deny" {
+	if res := s.Trace(nil, src, &dst, "", "TCP", 443); res.Verdict != "Deny" {
 		t.Fatalf("enforced deny agreeing with the unenforced one: verdict = %s (%v)", res.Verdict, stepKinds(t, res))
 	}
 }

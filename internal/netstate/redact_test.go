@@ -119,7 +119,7 @@ func TestRedactTraceStep(t *testing.T) {
 	})
 	src := wl("team-b", "client", nil, map[string]string{"app": "client"})
 	dst := wl("team-a", "web", nil, map[string]string{"app": "web"})
-	res := s.Trace(src, &dst, "", "TCP", 443)
+	res := s.Trace(nil, src, &dst, "", "TCP", 443)
 	if res.Verdict != "Deny" {
 		t.Fatalf("verdict = %s (%v)", res.Verdict, stepKinds(t, res))
 	}
@@ -278,7 +278,7 @@ func TestRedactOwnScopeEverySurface(t *testing.T) {
 	}
 	src := wl("tenant-a", "web", nsLabels("tenant-a"), map[string]string{"app": "web"})
 	dst := wl("tenant-b", "billing", nsLabels("tenant-b"), map[string]string{"app": "billing"})
-	res := s.Trace(src, &dst, "", "TCP", 443)
+	res := s.Trace(nil, src, &dst, "", "TCP", 443)
 	steps := 0
 	for i := range res.Steps {
 		if st := &res.Steps[i]; st.Policy != nil {

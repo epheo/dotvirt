@@ -14,6 +14,8 @@ import (
 	"strconv"
 	"strings"
 
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+
 	"github.com/epheo/dotvirt/internal/cluster"
 	"github.com/epheo/dotvirt/internal/reflect"
 )
@@ -35,14 +37,14 @@ func (s *Snapshot) primaryOf(w TraceWorkload) (key, display string) {
 }
 
 // primaryDomain resolves a namespace's primary network: a Primary-role UDN in
-// the namespace, a Primary-role CUDN whose generated NAD sits there, else the
-// cluster default network.
+// the namespace, a Primary-role CUDN, each only where OVN-K generated its NAD
+// there, else the cluster default network.
 func (s *Snapshot) primaryDomain(ns string) (key, display string) {
 	for _, u := range reflect.List(s.udn) {
 		if u.GetNamespace() != ns {
 			continue
 		}
-		if strings.EqualFold(udnConfig(u).Role(), "Primary") {
+		if strings.EqualFold(udnConfig(u).Role(), "Primary") && s.realized(ns, u.GetName()) {
 			return "udn:" + ns + "/" + u.GetName(), "network " + u.GetName()
 		}
 	}
@@ -62,6 +64,16 @@ func (s *Snapshot) primaryDomain(ns string) (key, display string) {
 		}
 	}
 	return "default", "the cluster default network"
+}
+
+// realized reports whether OVN-K generated the UDN's NAD. It refuses a
+// primary UDN in a namespace created without the primary-UDN label, whose VMs
+// then stay on the default network.
+func (s *Snapshot) realized(ns, name string) bool {
+	u, ok := reflect.Get(s.nad, ns+"/"+name)
+	return ok && slices.ContainsFunc(u.GetOwnerReferences(), func(r metav1.OwnerReference) bool {
+		return r.Kind == "UserDefinedNetwork" && r.Name == name
+	})
 }
 
 // sharedNetworks returns the display names of secondary networks both NIC
@@ -125,72 +137,116 @@ func (s *Snapshot) isLocalnet(ref string) bool {
 }
 
 // placement is where a bare destination address lies for a source, by the
-// primary networks' address ranges. OVN-Kubernetes isolates every primary
-// network (the cluster default one, each Primary UDN and CUDN) from the
-// others: only the Kubernetes API and DNS services cross, through service
-// addresses no range here holds.
+// primary networks' address ranges the caller may read. OVN-Kubernetes
+// isolates every primary network (the cluster default one, each Primary UDN
+// and CUDN) from the others: only the Kubernetes API and DNS services of the
+// default network cross, through service addresses no range here holds. A
+// UDN or CUDN range is overlay only: an address in it that also exists
+// outside the cluster is reached there, through the gateway.
 type placement int
 
 const (
-	placeOutside  placement = iota // in no primary network's range
+	placeOutside  placement = iota // nothing in the cluster isolates it
 	placeSame                      // in the source's own network's range
-	placeIsolated                  // in another primary network's range only
-	placeUnknown                   // a range the answer turns on is unknown
+	placeIsolated                  // in the default network's range, the source on another
+	placeOverlay                   // in another UDN or CUDN's range: no in-cluster path
+	placeUnknown                   // what the caller may read cannot place it
 )
 
-// primaryRange is one primary network's address range, keyed as primaryOf
-// keys networks; nil prefixes when the snapshot holds none.
-type primaryRange struct {
-	key      string
-	prefixes []netip.Prefix
+// TraceView is what the caller may read of the networks a bare address is
+// placed against; a certain verdict rests on nothing else. nil reads every
+// network.
+type TraceView struct {
+	Namespace func(name string) bool // the caller sees this namespace
+	Shared    func() bool            // the caller sees every shared network, published to them or not
+	Nodes     func() bool            // the caller may list nodes, and so read the default network's range
 }
 
-// primaryRanges lists every primary network's range: the default network's
-// node subnets, then each Primary UDN and CUDN's declared subnets.
+// reads reports whether the caller may read r: the default network's range
+// with nodes, a UDN in a namespace they see, a CUDN published to one.
+func (v *TraceView) reads(r primaryRange) bool {
+	switch {
+	case v == nil:
+		return true
+	case r.key == "default":
+		return v.Nodes != nil && v.Nodes()
+	case v.Namespace != nil && slices.ContainsFunc(r.namespaces, v.Namespace):
+		return true
+	}
+	return strings.HasPrefix(r.key, "cudn:") && v.Shared != nil && v.Shared()
+}
+
+// primaryRange is one realized primary network's address range, keyed as
+// primaryOf keys networks; nil prefixes when the snapshot holds none.
+type primaryRange struct {
+	key        string
+	prefixes   []netip.Prefix
+	namespaces []string // where it is realized; nil for the default network
+}
+
+// primaryRanges lists every realized primary network's range: the default
+// network's node subnets, then each Primary UDN and CUDN's declared subnets.
 func (s *Snapshot) primaryRanges() []primaryRange {
 	s.nodesMu.RLock()
 	out := []primaryRange{{key: "default", prefixes: s.podNet}}
 	s.nodesMu.RUnlock()
+	cudnNS := map[string][]string{}
+	for _, nad := range reflect.List(s.nad) {
+		for _, ref := range nad.GetOwnerReferences() {
+			if ref.Kind == "ClusterUserDefinedNetwork" {
+				cudnNS[ref.Name] = append(cudnNS[ref.Name], nad.GetNamespace())
+			}
+		}
+	}
 	for _, u := range reflect.List(s.udn) {
-		if cfg := udnConfig(u); strings.EqualFold(cfg.Role(), "Primary") {
-			out = append(out, primaryRange{"udn:" + u.GetNamespace() + "/" + u.GetName(), parsePrefixes(cfg.Subnets())})
+		ns, name := u.GetNamespace(), u.GetName()
+		if cfg := udnConfig(u); strings.EqualFold(cfg.Role(), "Primary") && s.realized(ns, name) {
+			out = append(out, primaryRange{"udn:" + ns + "/" + name, parsePrefixes(cfg.Subnets()), []string{ns}})
 		}
 	}
 	for _, u := range reflect.List(s.cudn) {
-		if cfg := cudnConfig(u); strings.EqualFold(cfg.Role(), "Primary") {
-			out = append(out, primaryRange{"cudn:" + u.GetName(), parsePrefixes(cfg.Subnets())})
+		if cfg := cudnConfig(u); strings.EqualFold(cfg.Role(), "Primary") && len(cudnNS[u.GetName()]) > 0 {
+			out = append(out, primaryRange{"cudn:" + u.GetName(), parsePrefixes(cfg.Subnets()), cudnNS[u.GetName()]})
 		}
 	}
 	return out
 }
 
-// place classifies addr for a source on primary network key, naming one
-// other network whose range holds it. An address in the source's own range
-// stays on its network. Another network's range isolates it only when the
-// source's own range is known, since UDN ranges may overlap; and an address
-// in no known range is outside only when no other range is unknown.
-func (s *Snapshot) place(key string, addr netip.Addr) (where placement, other string) {
+// place classifies addr for src, on primary network key, by the ranges view
+// reads. With the default network alone nothing isolates an address. The
+// source's own range counts only when one of its addresses lies in it. An
+// address in no range read is unknown, the same for every address: it may lie
+// in a range the caller cannot read, or be a service of another primary
+// network, whose service range no snapshot holds.
+func (s *Snapshot) place(src TraceWorkload, key string, addr netip.Addr, view *TraceView) placement {
+	ranges := s.primaryRanges()
+	if len(ranges) == 1 {
+		return placeOutside
+	}
 	var own []netip.Prefix
-	unknown := false
-	for _, r := range s.primaryRanges() {
+	other := ""
+	for _, r := range ranges {
+		if r.prefixes == nil || !view.reads(r) {
+			continue
+		}
 		switch {
 		case r.key == key:
 			own = r.prefixes
-		case r.prefixes == nil:
-			unknown = true
 		case other == "" && containsAddr(r.prefixes, addr):
 			other = r.key
 		}
 	}
 	switch {
+	case !slices.ContainsFunc(src.IPs, func(ip string) bool { return containsIP(own, ip) }):
+		return placeUnknown
 	case containsAddr(own, addr):
-		return placeSame, ""
-	case other != "" && own != nil:
-		return placeIsolated, other
-	case other != "" || unknown:
-		return placeUnknown, other
+		return placeSame
+	case other == "default":
+		return placeIsolated
+	case other != "":
+		return placeOverlay
 	}
-	return placeOutside, ""
+	return placeUnknown
 }
 
 // secondaryHolding names a non-localnet secondary network of w whose range
@@ -238,23 +294,29 @@ func (s *Snapshot) nadPrefixes(ref string) []netip.Prefix {
 
 // defaultPodSubnets reads the cluster default network's range from each
 // node's node-subnets annotation: {"default":["10.128.0.0/23"]}, or a bare
-// string where a release wrote one subnet. nil when no node reports one.
+// string where a release wrote one subnet. nil, the range unknown, when any
+// node lacks a parseable default entry: its pods' addresses would read as
+// outside the cluster.
 func defaultPodSubnets(nodes []cluster.NodeLabels) []netip.Prefix {
 	var out []netip.Prefix
 	for _, n := range nodes {
 		var nets map[string]json.RawMessage
 		if json.Unmarshal([]byte(n.PodSubnets), &nets) != nil {
-			continue
+			return nil
 		}
 		var subnets []string
 		if json.Unmarshal(nets["default"], &subnets) != nil {
 			var one string
 			if json.Unmarshal(nets["default"], &one) != nil {
-				continue
+				return nil
 			}
 			subnets = []string{one}
 		}
-		out = append(out, parsePrefixes(subnets)...)
+		p := parsePrefixes(subnets)
+		if p == nil {
+			return nil
+		}
+		out = append(out, p...)
 	}
 	return out
 }
@@ -268,6 +330,12 @@ func parsePrefixes(cidrs []string) []netip.Prefix {
 		}
 	}
 	return out
+}
+
+// containsIP reports whether ps holds the address ip spells.
+func containsIP(ps []netip.Prefix, ip string) bool {
+	a, err := netip.ParseAddr(ip)
+	return err == nil && containsAddr(ps, a.Unmap())
 }
 
 func containsAddr(ps []netip.Prefix, a netip.Addr) bool {

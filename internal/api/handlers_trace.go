@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/netip"
+	"sync"
 
 	"github.com/epheo/dotvirt/internal/model"
 	"github.com/epheo/dotvirt/internal/netstate"
@@ -73,7 +74,7 @@ func (s *Server) handleTrace(w http.ResponseWriter, r *http.Request) {
 		dst = &d
 	}
 
-	res := s.netstate.Trace(src, dst, req.Destination.IP, req.Protocol, req.Port)
+	res := s.netstate.Trace(s.traceView(r, sc), src, dst, req.Destination.IP, req.Protocol, req.Port)
 	pr := s.policyRedactor(r.Context(), sc.id, sc.cluster)
 	for i := range res.Steps {
 		if p := res.Steps[i].Policy; p != nil {
@@ -98,4 +99,20 @@ func (s *Server) traceWorkload(ns, name string) (netstate.TraceWorkload, bool) {
 		PodLabels: w.Labels, IPs: w.IPs, PodNet: w.PodNet, DefaultNet: w.DefaultNet, Nets: w.Nets,
 		NSLabels: s.state.NamespaceLabels(ns),
 	}, true
+}
+
+// traceView is what the caller may read of the networks a bare address is
+// placed against: the namespaces they see, every shared network when they
+// may (as their catalog lists it), the default network's range when they may
+// list nodes. The reviews are the cached ones the network views share, asked
+// only when the trace places an address. A failed visibility read sees no
+// namespace.
+func (s *Server) traceView(r *http.Request, sc scope) *netstate.TraceView {
+	ctx := r.Context()
+	visible, _ := s.visibleFor(ctx, sc.id, sc.cluster)
+	return &netstate.TraceView{
+		Namespace: func(ns string) bool { return visible[ns] },
+		Shared:    sync.OnceValue(func() bool { return s.seesAllNetworks(ctx, sc.id, sc.cluster) }),
+		Nodes:     sync.OnceValue(func() bool { return s.capable(ctx, sc.id, sc.cluster, ask(verbList, ssarNodes, "")) }),
+	}
 }

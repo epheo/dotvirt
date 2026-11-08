@@ -32,12 +32,13 @@ type TraceWorkload struct {
 // the selecting NetworkPolicies (selection alone isolates: no allowing rule
 // means default-deny), then baseline. An external destination runs the egress
 // side plus the outbound rules, and reports the SNAT/route planes; a VLAN
-// NIC is a path none of them filter.
+// NIC is a path none of them filter. view is what the caller may read of the
+// networks an external destination is placed against (nil reads all).
 //
 // Deny is only ever certain. A rule that cannot be resolved here (named port,
 // a stopped VM's unknown addresses, a DNS rule) stays visible as a
 // Conditional step and downgrades the verdict - never silently dropped.
-func (s *Snapshot) Trace(src TraceWorkload, dst *TraceWorkload, dstIP, protocol string, port int) model.TraceResult {
+func (s *Snapshot) Trace(view *TraceView, src TraceWorkload, dst *TraceWorkload, dstIP, protocol string, port int) model.TraceResult {
 	res := model.TraceResult{Steps: []model.TraceStep{}}
 	if protocol == "" {
 		protocol = "TCP"
@@ -57,7 +58,7 @@ func (s *Snapshot) Trace(src TraceWorkload, dst *TraceWorkload, dstIP, protocol 
 		return res
 	}
 
-	path := s.externalConnectivity(src, dstIP)
+	path := s.externalConnectivity(src, dstIP, view)
 	res.Steps = append(res.Steps, path.steps...)
 	if path.decided != "" {
 		res.Verdict = path.decided
@@ -72,11 +73,17 @@ func (s *Snapshot) Trace(src TraceWorkload, dst *TraceWorkload, dstIP, protocol 
 	res.Steps = append(append(res.Steps, eg.steps...), gw.steps...)
 	res.Steps = append(res.Steps, s.egressPlaneSteps(src)...)
 	res.Verdict = verdict(eg, gw)
-	switch {
-	case path.vlan && res.Verdict == "Deny":
+	if path.vlan && res.Verdict == "Deny" {
 		res.Verdict = "Conditional" // the guest may route the flow out its VLAN NIC
-	case path.uncertain && res.Verdict == "Allow":
-		res.Verdict = "Conditional" // the address may sit on a network isolated from the source
+	}
+	switch path.place {
+	case placeOverlay, placeUnknown:
+		if res.Verdict == "Allow" {
+			res.Verdict = "Conditional" // the address may be a workload no path reaches
+		}
+		if path.place == placeUnknown && res.Verdict == "Deny" && eg.outcome != "Deny" {
+			res.Verdict = "Conditional" // the outbound rules bind only a flow leaving the cluster
+		}
 	}
 	return res
 }
@@ -412,19 +419,19 @@ func (s *Snapshot) connectivity(src, dst TraceWorkload) (decided string, steps [
 
 // egressPath frames a flow to a bare address. decided is the verdict when no
 // policy walk applies; vlan reports a VLAN NIC, which leaves a cluster Deny
-// inconclusive; uncertain reports an address the snapshot cannot place,
-// which leaves an Allow inconclusive.
+// inconclusive; place is where the address lies, for a primary NIC.
 type egressPath struct {
-	steps           []model.TraceStep
-	decided         string
-	vlan, uncertain bool
+	steps   []model.TraceStep
+	decided string
+	vlan    bool
+	place   placement
 }
 
 // externalConnectivity frames the egress path. The cluster controls filter
 // only the primary NIC (the pod network, or a default multus binding that is
 // not localnet); a VLAN NIC reaches the fabric around all of them. With no
 // primary NIC no cluster control sees the flow.
-func (s *Snapshot) externalConnectivity(src TraceWorkload, dstIP string) egressPath {
+func (s *Snapshot) externalConnectivity(src TraceWorkload, dstIP string, view *TraceView) egressPath {
 	cluster := src.PodNet || (src.DefaultNet != "" && !s.isLocalnet(src.DefaultNet))
 	refs := src.Nets
 	if src.DefaultNet != "" && !cluster {
@@ -441,7 +448,7 @@ func (s *Snapshot) externalConnectivity(src TraceWorkload, dstIP string) egressP
 	p := egressPath{vlan: len(bypasses) > 0}
 	switch {
 	case cluster:
-		p.steps, p.decided, p.uncertain = s.primaryPath(src, dstIP, p.vlan)
+		p.steps, p.decided, p.place = s.primaryPath(src, dstIP, p.vlan, view)
 	case len(refs) > 0:
 		// A secondary network has no cluster egress, but a VLAN, or a router
 		// on the network, may still carry the flow.
@@ -458,45 +465,47 @@ func (s *Snapshot) externalConnectivity(src TraceWorkload, dstIP string) egressP
 }
 
 // primaryPath frames a flow out of the primary NIC by where the address
-// lies. In the source's own network's range or in none, the egress controls
-// decide. In another primary network's range there is no path; route
-// advertisement that may join the networks, a VLAN NIC, or a secondary NIC
-// whose range may hold the address leaves that inconclusive. Where an
-// unknown range could hold it, an Allow is.
-func (s *Snapshot) primaryPath(src TraceWorkload, dstIP string, vlan bool) (steps []model.TraceStep, decided string, uncertain bool) {
+// lies. In the source's own network's range or outside the cluster, the
+// egress controls decide. In the default network's range, the source on
+// another, there is no path; route advertisement that may join the networks,
+// a VLAN NIC, or a secondary NIC whose range may hold the address leaves that
+// inconclusive. In another UDN or CUDN's range, or wherever the caller's view
+// cannot place it, the address may be a workload no path reaches, worded
+// alike for every address the view cannot place.
+func (s *Snapshot) primaryPath(src TraceWorkload, dstIP string, vlan bool, view *TraceView) (steps []model.TraceStep, decided string, where placement) {
 	reach := model.TraceStep{Stage: "connectivity", Action: "Reachable",
 		Note: "Cluster egress path to " + dstIP + ", evaluated against the source's egress controls."}
-	addr, err := netip.ParseAddr(dstIP)
-	if err != nil {
-		return []model.TraceStep{reach}, "", false
-	}
-	addr = addr.Unmap()
 	key, name := s.primaryOf(src)
-	where, other := s.place(key, addr)
+	where = placeUnknown
+	addr, err := netip.ParseAddr(dstIP)
+	if err == nil {
+		addr = addr.Unmap()
+		where = s.place(src, key, addr, view)
+	}
 	switch where {
 	case placeIsolated:
-		holder := "another network"
-		if other == "default" {
-			holder = "the cluster default network"
-		}
 		joinable := s.mayJoin()
 		cut := model.TraceStep{Stage: "connectivity", Action: "Unreachable", Conditional: joinable,
-			Note: fmt.Sprintf("%s is on %s, isolated from %s, which holds %s.", src.Name, name, holder, dstIP) + joinNote(joinable)}
+			Note: fmt.Sprintf("%s is on %s, isolated from the cluster default network, which holds %s.", src.Name, name, dstIP) + joinNote(joinable)}
 		if seg := s.secondaryHolding(src, addr); seg != "" {
 			return []model.TraceStep{cut, {Stage: "segment", Action: "Bypass", Conditional: true,
-				Note: "NIC on network " + seg + " may hold " + dstIP + " - the guest can reach it there, around every control evaluated here."}}, "Conditional", false
+				Note: "NIC on network " + seg + " may hold " + dstIP + " - the guest can reach it there, around every control evaluated here."}}, "Conditional", where
 		}
 		if vlan || joinable {
-			return []model.TraceStep{cut}, "Conditional", false
+			return []model.TraceStep{cut}, "Conditional", where
 		}
 		cut.Decisive = true
-		return []model.TraceStep{cut}, "Unreachable", false
+		return []model.TraceStep{cut}, "Unreachable", where
+	case placeOverlay:
+		reach.Conditional = true
+		reach.Note = dstIP + " lies in the range of a network isolated from " + name +
+			": no in-cluster path reaches it, and the flow arrives only if the address also exists outside the cluster."
 	case placeUnknown:
 		reach.Conditional = true
-		reach.Note = dstIP + " may sit on a network isolated from " + name + ": the address ranges of some networks are unknown here."
-		return []model.TraceStep{reach}, "", true
+		reach.Note = dstIP + " may be a workload or service on a network isolated from " + name +
+			", which no path reaches; that cannot be ruled out here."
 	}
-	return []model.TraceStep{reach}, "", false
+	return []model.TraceStep{reach}, "", where
 }
 
 // joinNote words why isolated primaries are not certainly apart: OVN-K
