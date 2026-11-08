@@ -256,3 +256,12 @@ func (c *Client) ApplyOAuthClient(ctx context.Context, id, secret, redirectURL s
 	_, err := c.dyn.Resource(gvr).Apply(ctx, id, obj, metav1.ApplyOptions{FieldManager: "dotvirt", Force: true})
 	return err
 }
+
+// DeleteOwnOAuthToken revokes one of THIS client's user's OAuth access tokens
+// cluster-wide, by object name (auth.OAuthTokenName). useroauthaccesstokens is
+// OpenShift's self-service view: any user may delete their own tokens, and
+// another user's answer NotFound.
+func (c *Client) DeleteOwnOAuthToken(ctx context.Context, name string) error {
+	gvr := schema.GroupVersionResource{Group: "oauth.openshift.io", Version: "v1", Resource: "useroauthaccesstokens"}
+	return c.dyn.Resource(gvr).Delete(ctx, name, metav1.DeleteOptions{})
+}

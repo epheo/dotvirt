@@ -19,7 +19,7 @@ func TestLevelMoveWithIdenticalFrameSendsNothing(t *testing.T) {
 		builds.Add(1)
 		return echoInventory(ctx, id)
 	}
-	h := NewHub(inv, make(chan struct{}, 1), RepoLevels(bus, eventbus.GitChanged, eventbus.TTLBackstop, eventbus.GitChanged), "")
+	h := NewHub(inv, nil, make(chan struct{}, 1), RepoLevels(bus, eventbus.GitChanged, eventbus.TTLBackstop, eventbus.GitChanged), "")
 	a := testConn("a")
 	h.add(a)
 	h.reconcile(context.Background())

@@ -233,8 +233,10 @@ func run() error {
 		eventbus.RBACChanged, eventbus.DriftChanged, eventbus.GitChanged, eventbus.ProposalsChanged,
 		eventbus.NetworkChanged, eventbus.TaskChanged, eventbus.TTLBackstop,
 	}
-	hubWake, _ := bus.Subscribe(inventoryKinds...)
-	hub := stream.NewHub(server.InventoryForIdentity, hubWake, stream.RepoLevels(bus, eventbus.GitChanged, inventoryKinds...), cfg.UIOrigin)
+	// SessionEnded only wakes the hub to close ended sessions' streams; no frame
+	// depends on it, so it stays out of the levels.
+	hubWake, _ := bus.Subscribe(append(inventoryKinds, eventbus.SessionEnded)...)
+	hub := stream.NewHub(server.InventoryForIdentity, authenticator.SessionLive, hubWake, stream.RepoLevels(bus, eventbus.GitChanged, inventoryKinds...), cfg.UIOrigin)
 	go hub.Run(ctx)
 	server.UseStream(hub)
 
@@ -249,10 +251,14 @@ func run() error {
 	// is down (identical frames are not resent).
 	go server.RunTTLBackstop(ctx)
 
-	// VNC dials as the requesting user (KubeVirt RBAC gates the console).
-	server.UseVNC(stream.NewVNCProxy(func(token string) (stream.VNCDialer, error) {
+	// VNC dials as the requesting user (KubeVirt RBAC gates the console); a
+	// console closes when its session ends.
+	vncWake, _ := bus.Subscribe(eventbus.SessionEnded)
+	vnc := stream.NewVNCProxy(func(token string) (stream.VNCDialer, error) {
 		return clusterFactory.For(token)
-	}, cfg.UIOrigin))
+	}, authenticator.SessionLive, vncWake, cfg.UIOrigin)
+	go vnc.Run(ctx)
+	server.UseVNC(vnc)
 
 	// Webhook auto-registration: one ORG-level hook so the forge delivers push/PR events
 	// for every repo (the platform repo + all projects, present + future) to dotvirt, so
