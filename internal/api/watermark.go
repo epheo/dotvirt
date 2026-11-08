@@ -59,14 +59,15 @@ func (t *term) sum() uint64 { return t.h.Sum64() }
 // visible set: node read (the fabric, uplinks and node ops), platform
 // authoring, the create authorities behind CanManage, Caps, the cluster-tier
 // policy rows, shared-error redaction and platform source files, and list on
-// each cluster-tier policy kind, which those rows also need. Each is the
-// cached review the pulls themselves make, so a grant or a revocation that
-// leaves the visible set alone still moves the watermark.
+// each cluster-tier policy kind, which those rows also need and which names a
+// cluster rule on every caller's rules pull. Each is the cached review the
+// pulls themselves make, so a grant or a revocation that leaves the visible
+// set alone still moves the watermark.
 type netGrants struct {
 	nodes  bool
 	create map[ssarRef]bool
-	list   map[ssarRef]bool // asked of a policy kind's creators alone
-	bits   uint64           // every verdict, platform authoring included, in a fixed order
+	list   map[ssarRef]bool
+	bits   uint64 // every verdict, platform authoring included, in a fixed order
 }
 
 // netGrantRefs are the create authorities netGrants reads, netPolicyRefs the
@@ -92,9 +93,7 @@ func (s *Server) netGrants(ctx context.Context, id auth.Identity, c *cluster.Cli
 		verdicts = append(verdicts, g.create[r])
 	}
 	for _, r := range netPolicyRefs {
-		if g.create[r] {
-			g.list[r], _ = s.can(ctx, id, c, refQ(verbList, r, ""))
-		}
+		g.list[r], _ = s.can(ctx, id, c, refQ(verbList, r, ""))
 		verdicts = append(verdicts, g.list[r])
 	}
 	for i, v := range verdicts {
