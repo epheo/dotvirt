@@ -55,6 +55,13 @@ test('every section renders the full platform', async ({ page }) => {
 
 	await page.goto('/catalog?kind=images');
 	await expect(main.getByText('windows-2025').first()).toBeVisible();
+	// Attachments read one row per network, paged; an item opened from a link
+	// lands on the page that holds it.
+	await page.goto('/catalog?kind=networks&item=dc-vlan-net');
+	await expect(main.getByRole('link', { name: /^Networks\s*130$/ })).toBeVisible();
+	await expect(main.getByRole('button', { name: 'dc-vlan-net', expanded: true })).toBeVisible();
+	await expect(main.getByText('Page 3 of 3')).toBeVisible();
+	await expect(main.locator('aside').getByText('VLAN network in 11 namespaces.')).toBeVisible();
 
 	await page.goto('/changes');
 	await expect(main.getByText('web-1').first()).toBeVisible();
