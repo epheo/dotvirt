@@ -301,3 +301,87 @@ func TestVNCClosesAtSessionLifetime(t *testing.T) {
 	ws := openConsole(t, p, auth.Identity{Token: "alice", Issued: now.Add(100*time.Millisecond - maxAge)})
 	wantSessionClose(t, ws)
 }
+
+// A console whose session ended before it was tracked missed the sweep, so it
+// closes at registration with no signal at all.
+func TestVNCClosesSessionEndedBeforeTracking(t *testing.T) {
+	p := NewVNCProxy(nil, func(string, time.Time) bool { return false }, nil, "")
+	wantSessionClose(t, openConsole(t, p, auth.Identity{Token: "alice", Issued: time.Now()}))
+}
+
+// floodDialer's VM side writes as fast as the proxy reads, so a browser that
+// stops reading stalls the proxy's writer on the socket.
+type floodDialer struct{}
+
+func (floodDialer) VNCConn(string, string) (net.Conn, error) {
+	vmSide, proxySide := net.Pipe()
+	go func() {
+		buf := make([]byte, 32*1024)
+		for {
+			if _, err := vmSide.Write(buf); err != nil {
+				return
+			}
+		}
+	}()
+	return proxySide, nil
+}
+
+// One ended console whose client stopped reading does not hold up the close
+// of another's.
+func TestVNCStalledConsoleDoesNotDelaySweep(t *testing.T) {
+	var stalledOut, victimOut atomic.Bool
+	live := func(key string, _ time.Time) bool {
+		switch key {
+		case restfactory.TokenKey("stalled"):
+			return !stalledOut.Load()
+		case restfactory.TokenKey("victim"):
+			return !victimOut.Load()
+		}
+		return true
+	}
+	wake := make(chan struct{}, 1)
+	p := NewVNCProxy(func(string) (VNCDialer, error) { return floodDialer{}, nil }, live, wake, "")
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go p.Run(ctx)
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /vnc/{who}", func(w http.ResponseWriter, r *http.Request) {
+		p.Handler(w, r.WithContext(auth.NewContext(r.Context(), auth.Identity{Token: r.PathValue("who"), Issued: time.Now()})))
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+	stalled, _, err := websocket.DefaultDialer.Dial(wsURL(srv, "/vnc/stalled"), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = stalled.Close() }() // never read
+	victim, _, err := websocket.DefaultDialer.Dial(wsURL(srv, "/vnc/victim"), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = victim.Close() }()
+	closed := make(chan struct{})
+	go func() {
+		defer close(closed)
+		for {
+			if _, _, err := victim.ReadMessage(); err != nil {
+				return
+			}
+		}
+	}()
+	time.Sleep(500 * time.Millisecond) // the stalled socket's buffers fill
+	stalledOut.Store(true)
+	wake <- struct{}{}
+	time.Sleep(50 * time.Millisecond)
+	victimOut.Store(true)
+	start := time.Now()
+	wake <- struct{}{}
+	select {
+	case <-closed:
+		if d := time.Since(start); d > closeGrace/2 {
+			t.Errorf("victim closed %v after its session ended, want within %v", d, closeGrace/2)
+		}
+	case <-time.After(15 * time.Second):
+		t.Fatal("victim console never closed")
+	}
+}

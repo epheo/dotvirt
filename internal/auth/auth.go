@@ -85,7 +85,7 @@ func New(saKube kubernetes.Interface, secret []byte) *Authenticator {
 
 // SessionLive reports whether the session issued at issued may still
 // authenticate: its token not rejected by the last TokenReview, the session
-// not signed out, and younger than sessionMaxAge. tokenKey is
+// not signed out, and not past SessionExpiry. tokenKey is
 // restfactory.TokenKey of its token. A zero issued (a bearer header) has no
 // session to end, only a token to reject.
 func (a *Authenticator) SessionLive(tokenKey string, issued time.Time) bool {
@@ -115,6 +115,10 @@ var ErrThrottled = errors.New("token validation throttled")
 // the API server is unreachable). Callers map ErrRejected -> 401 and everything else
 // -> 503, so an API-server blip doesn't sign valid users out.
 var ErrRejected = errors.New("token rejected")
+
+// ErrSessionEnded rejects one session (signed out, or past its lifetime), not
+// its token: other sessions of the token stand.
+var ErrSessionEnded = fmt.Errorf("%w: session ended", ErrRejected)
 
 // Recheck re-runs the TokenReview for a token the apiserver refused after the
 // cache vouched for it, and caches the new verdict; a cached rejection answers
@@ -146,7 +150,7 @@ func (a *Authenticator) Validate(ctx context.Context, token string) (Identity, e
 func (a *Authenticator) Revalidate(ctx context.Context, id Identity) error {
 	key := restfactory.TokenKey(id.Token)
 	if !a.sessions.live(key, id.Issued) {
-		return fmt.Errorf("%w: session ended", ErrRejected)
+		return ErrSessionEnded
 	}
 	_, err := a.validate(ctx, id.Token, key, false)
 	return err

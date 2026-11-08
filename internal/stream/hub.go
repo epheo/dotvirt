@@ -334,7 +334,9 @@ func (h *Hub) build(ctx context.Context, conns []*conn, prev *frame) (f *frame, 
 	cancel()
 	if err != nil {
 		log.Printf("stream: inventory build failed for %s: %v", conns[0].id.Username, err)
-		if errors.Is(err, auth.ErrRejected) {
+		// An ended session is one connection's, not the token's: the retry's
+		// sweep closes it and builds for the rest.
+		if errors.Is(err, auth.ErrRejected) && !errors.Is(err, auth.ErrSessionEnded) {
 			h.reject(conns)
 			return nil, false
 		}

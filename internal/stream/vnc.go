@@ -81,7 +81,7 @@ func (p *VNCProxy) sweep() {
 	}
 	p.mu.Unlock()
 	for _, c := range ended {
-		endConsole(c.ws)
+		go endConsole(c.ws) // a stalled console must not hold up the others
 	}
 }
 
@@ -101,10 +101,14 @@ func (p *VNCProxy) track(c *console) (untrack func()) {
 	}
 }
 
+// closeGrace bounds the close frame to an ended console: a client that stopped
+// reading holds the write lock, and its socket closes regardless.
+const closeGrace = time.Second
+
 // endConsole closes a console like the hub closes a stream whose session is
 // over, so the client reconnects into the 401 that signs it out.
 func endConsole(ws *websocket.Conn) {
-	_ = ws.WriteControl(websocket.CloseMessage, websocket.FormatCloseMessage(websocket.ClosePolicyViolation, "session ended"), time.Now().Add(writeWait))
+	_ = ws.WriteControl(websocket.CloseMessage, websocket.FormatCloseMessage(websocket.ClosePolicyViolation, "session ended"), time.Now().Add(closeGrace))
 	_ = ws.Close()
 }
 

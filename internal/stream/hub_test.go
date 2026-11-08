@@ -514,3 +514,30 @@ func TestEndedSessionEndsOnlyItsConnections(t *testing.T) {
 		}
 	}
 }
+
+// A build refused because its session ended closes nothing by itself: the
+// session is one connection's, so the retry's sweep closes that one and builds
+// for the rest of its token.
+func TestEndedSessionBuildSparesItsToken(t *testing.T) {
+	inv := func(_ context.Context, id auth.Identity) (model.Inventory, error) {
+		return model.Inventory{}, auth.ErrSessionEnded
+	}
+	h := NewHub(inv, nil, make(chan struct{}, 1), testLevels(), "")
+	a, b := testConn("alice"), testConn("alice")
+	h.add(a)
+	h.add(b)
+	h.reconcile(context.Background())
+	for _, c := range []*conn{a, b} {
+		select {
+		case <-c.evict:
+			t.Fatal("an ended session's build evicted every connection of its token")
+		default:
+		}
+	}
+	h.mu.Lock()
+	pending := h.retries["alice"] != nil
+	h.mu.Unlock()
+	if !pending {
+		t.Error("no retry scheduled to sweep the ended session")
+	}
+}

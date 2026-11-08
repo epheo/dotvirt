@@ -33,6 +33,9 @@ func (s *Server) InventoryForIdentity(ctx context.Context, id auth.Identity) (mo
 	if s.auth != nil {
 		if err := s.auth.Revalidate(ctx, id); errors.Is(err, auth.ErrRejected) {
 			s.bus.Publish(eventbus.SessionEnded)
+			if errors.Is(err, auth.ErrSessionEnded) {
+				return model.Inventory{}, err // this session's end, not its token's
+			}
 			return model.Inventory{}, errSessionRejected
 		} else if err != nil {
 			return model.Inventory{}, unavailable(err)
