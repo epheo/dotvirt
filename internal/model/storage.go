@@ -17,6 +17,8 @@ type StorageClassInfo struct {
 	// CDI's pick when its profile names one, else the first class registered
 	// for the provisioner. Empty means VM snapshots cannot be taken here.
 	SnapshotClass string `json:"snapshotClass,omitempty"`
+	// Replication is what an r-drbd class asks of each disk; nil on any other.
+	Replication *ClassReplication `json:"replication,omitempty"`
 
 	// Profile is CDI's StorageProfile for the class; nil when CDI has none,
 	// which means DataVolumes there need explicit claim settings.
@@ -47,6 +49,12 @@ type StorageProfile struct {
 type CapacitySegment struct {
 	Topology string `json:"topology,omitempty"` // the segment's topology label values; empty = cluster-wide
 	Free     int64  `json:"free"`
+}
+
+// ClassReplication is an r-drbd class's parameters.
+type ClassReplication struct {
+	Copies int    `json:"copies"`
+	Tier   string `json:"tier"`
 }
 
 // Replication is GET /api/storage/replication: where every copy of every

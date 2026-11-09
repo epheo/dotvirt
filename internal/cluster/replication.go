@@ -5,14 +5,30 @@ import (
 	"encoding/json"
 	"fmt"
 	"slices"
+	"strconv"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
 
 	"github.com/epheo/dotvirt/internal/model"
 )
+
+// classReplication reads what an r-drbd class asks of each disk; nil for any
+// other provisioner. r-drbd takes an absent replicas as one.
+func classReplication(class *unstructured.Unstructured, provisioner string) *model.ClassReplication {
+	if provisioner != "r-drbd.io" {
+		return nil
+	}
+	params, _, _ := unstructured.NestedStringMap(class.Object, "parameters")
+	copies, err := strconv.Atoi(params["replicas"])
+	if err != nil {
+		copies = 1
+	}
+	return &model.ClassReplication{Copies: copies, Tier: params["tier"]}
+}
 
 var gvrReplicatedVolume = schema.GroupVersionResource{Group: "r-drbd.io", Version: "v1alpha1", Resource: "volumes"}
 

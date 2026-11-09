@@ -126,6 +126,7 @@ type State struct {
 	// health flag (healthy[rbHealth]) beside the gated ones.
 	rbSink   *rbacSignal
 	rbHealth int
+	bindings *bindingIndex
 
 	grants grantMoves // when the RBAC sinks last published RBACChanged, by namespace
 
@@ -199,7 +200,8 @@ func New(sa *cluster.Client, projectLabel string, bus *eventbus.Bus) *State {
 	// Every operand role grants RoleBindings, so their signal watch starts with
 	// the snapshot; the other RBAC kinds wait for their grant (signals).
 	s.rbSink, s.rbHealth = newRBACSignal(rbac, refs, roleBindingDigest), len(s.specs)
-	s.specs = append(s.specs, reflectorSpec{s.rbSink, &rbacv1.RoleBinding{}, sa.RoleBindingListWatch(), nil})
+	s.bindings = newBindingIndex()
+	s.specs = append(s.specs, reflectorSpec{indexedBindings{s.rbSink, s.bindings}, &rbacv1.RoleBinding{}, sa.RoleBindingListWatch(), nil})
 	s.healthy = make([]atomic.Bool, len(s.specs))
 	sources := map[schema.GroupVersionResource]*cache.ListWatch{
 		gvrRoles:               sa.RoleListWatch(),

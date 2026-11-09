@@ -2,7 +2,13 @@
 // takes with it, and what is left of each tier. Pure, so a rehearsal never
 // asks the cluster anything and adds no authority: it reads the copies the
 // caller may already see.
-import type { DiskProtection, ReplicatedVolume, ReplicationPool, VM } from '#lib/api.js';
+import type {
+	ClassReplication,
+	DiskProtection,
+	ReplicatedVolume,
+	ReplicationPool,
+	VM,
+} from '#lib/api.js';
 import { size, type DiskRow } from '#lib/storage.js';
 import type { Tone } from '#lib/status.js';
 
@@ -381,6 +387,17 @@ export type Standing = { tone: Tone; label: string; detail: string };
 function survivesText(copies: number): string {
 	const hosts = Math.max(1, Math.floor((copies - 1) / 2));
 	return `Survives losing ${hosts === 1 ? 'any one host' : `any ${hosts} hosts`}.`;
+}
+
+// What a class promises a disk, before it exists.
+export function classPromise(r: ClassReplication): { ok: boolean; text: string } {
+	const tier = r.tier ? `, ${r.tier}` : '';
+	return r.copies <= 1
+		? { ok: false, text: `One copy${tier}: lost with its host` }
+		: {
+				ok: true,
+				text: `${r.copies} copies${tier}: ${survivesText(r.copies).toLowerCase().replace(/\.$/, '')}`,
+			};
 }
 
 export function standingOf(p: DiskProtection): Standing {

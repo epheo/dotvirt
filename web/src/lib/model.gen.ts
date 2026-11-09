@@ -1619,6 +1619,10 @@ export interface StorageClassInfo {
    */
   snapshotClass?: string;
   /**
+   * Replication is what an r-drbd class asks of each disk; nil on any other.
+   */
+  replication?: ClassReplication;
+  /**
    * Profile is CDI's StorageProfile for the class; nil when CDI has none,
    * which means DataVolumes there need explicit claim settings.
    */
@@ -1654,6 +1658,13 @@ export interface StorageProfile {
 export interface CapacitySegment {
   topology?: string; // the segment's topology label values; empty = cluster-wide
   free: number /* int64 */;
+}
+/**
+ * ClassReplication is an r-drbd class's parameters.
+ */
+export interface ClassReplication {
+  copies: number /* int */;
+  tier: string;
 }
 /**
  * Replication is GET /api/storage/replication: where every copy of every
