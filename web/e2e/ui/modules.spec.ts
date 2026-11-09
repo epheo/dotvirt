@@ -44,6 +44,10 @@ test('without VMs the VM tabs leave Networking and Storage', async ({ page }) =>
 	await page.goto('/networking?tab=vms');
 	await expect(main.getByRole('link', { name: 'Map' })).toHaveAttribute('aria-current', 'page');
 
+	await page.goto('/networking/blue-secondary');
+	await expect(main.getByRole('heading', { name: 'Where it connects' })).toBeVisible();
+	await expect(main.getByText('in a VM manifest')).toHaveCount(0);
+
 	await page.goto('/storage');
 	await expect(main.getByRole('link', { name: /^Classes/ })).toBeVisible();
 	await expect(main.getByRole('link', { name: /^Library/ })).toHaveCount(0);

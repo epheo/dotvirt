@@ -74,36 +74,6 @@ func Reserved(ns string, platform []string) bool {
 	return strings.HasPrefix(ns, "openshift-") || strings.HasPrefix(ns, "kube-") || slices.Contains(platform, ns)
 }
 
-// GroupKind is a Kubernetes kind by API group, and the resource RBAC names it by.
-type GroupKind struct {
-	Group    string
-	Kind     string
-	Resource string
-}
-
-// TenantKinds are the only kinds a tenant repo may declare, all namespaced:
-// its AppProject's whitelist and what dotvirt stages into a tenant repo. Argo
-// applies them with its own rights, so a kind on this list is one a project
-// may hold without doing more than its RBAC allows. A
-// NetworkAttachmentDefinition is not one: a project's admin role may only read
-// them, and a raw one joins another project's VLAN, reaches the underlay past
-// NetworkPolicy, or takes over a NAD a CUDN generates. It is platform tier.
-var TenantKinds = []GroupKind{
-	{Group: "kubevirt.io", Kind: "VirtualMachine", Resource: "virtualmachines"},
-	{Group: "cdi.kubevirt.io", Kind: "DataVolume", Resource: "datavolumes"},
-	{Group: "k8s.ovn.org", Kind: "UserDefinedNetwork", Resource: "userdefinednetworks"},
-	// Outbound rules: they narrow their own namespace's egress only.
-	{Group: "k8s.ovn.org", Kind: "EgressFirewall", Resource: "egressfirewalls"},
-	// Project rules.
-	{Group: "networking.k8s.io", Kind: "NetworkPolicy", Resource: "networkpolicies"},
-}
-
-// TenantKind reports whether a tenant repo may declare kind. It matches by
-// kind name alone, as a manifest header names it.
-func TenantKind(kind string) bool {
-	return slices.ContainsFunc(TenantKinds, func(k GroupKind) bool { return k.Kind == kind })
-}
-
 // Namespace is a project namespace as Destination weighs it.
 type Namespace struct {
 	Name    string
