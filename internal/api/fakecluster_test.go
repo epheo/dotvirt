@@ -193,6 +193,10 @@ func (fc *fakeCluster) serve(w http.ResponseWriter, r *http.Request) {
 		case "/api/v1/namespaces":
 			writeObj(w, corev1.NamespaceList{TypeMeta: metav1.TypeMeta{Kind: "NamespaceList", APIVersion: "v1"}, Items: fc.namespaces})
 			return
+		case "/apis/kubevirt.io/v1":
+			writeObj(w, metav1.APIResourceList{TypeMeta: metav1.TypeMeta{Kind: "APIResourceList", APIVersion: "v1"}, GroupVersion: "kubevirt.io/v1",
+				APIResources: []metav1.APIResource{{Name: "virtualmachines"}, {Name: "virtualmachineinstances"}}})
+			return
 		case "/apis/kubevirt.io/v1/virtualmachines":
 			writeObj(w, kubevirtcorev1.VirtualMachineList{TypeMeta: metav1.TypeMeta{Kind: "VirtualMachineList", APIVersion: "kubevirt.io/v1"}, Items: fc.vms})
 			return

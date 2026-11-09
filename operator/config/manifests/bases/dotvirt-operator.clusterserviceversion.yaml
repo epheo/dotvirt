@@ -173,10 +173,10 @@ spec:
 
     ### Prerequisites
 
-    - ArgoCD (OpenShift GitOps or community) and KubeVirt: required; the
-      operator waits for them and reports what is missing
-    - OVN-Kubernetes, NMState, CDI: optional; unlock the networking tier and
-      image upload
+    - ArgoCD (OpenShift GitOps or community): required; the operator waits
+      for it and reports what is missing
+    - KubeVirt, OVN-Kubernetes, NMState, CDI: optional; unlock virtual
+      machines, the networking tier and image upload
 
     ### Uninstalling
 
