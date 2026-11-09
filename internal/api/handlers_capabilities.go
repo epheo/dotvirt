@@ -86,7 +86,7 @@ func (s *Server) tenancyCap(ctx context.Context, id auth.Identity, c *cluster.Cl
 // routes then answer 503. Platform is the union of the platform-tier fields.
 func (s *Server) clusterCaps(ctx context.Context, id auth.Identity, c *cluster.Client) model.ClusterCaps {
 	out := model.ClusterCaps{ImageUpload: s.cfg.UploadProxyURL != ""}
-	var fields []capField
+	fields := []capField{{&out.Hosts, ask(verbList, ssarNodes, "")}}
 	if s.cfg.PlatformRepo != "" {
 		fields = append(fields, objectFields(&out.Network, model.KindCUDN, "")...)
 		fields = append(fields, objectFields(&out.Uplink, model.KindNNCP, "")...)
