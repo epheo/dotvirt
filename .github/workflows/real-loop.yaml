@@ -75,6 +75,7 @@ jobs:
         run: |
           mkdir -p "$RUNNER_TEMP/images"
           docker buildx bake \
+            --allow "fs.write=$RUNNER_TEMP/images" \
             --set '*.platform=linux/amd64' \
             --set app.tags=localhost/dotvirt:e2e \
             --set "app.output=type=docker,dest=$RUNNER_TEMP/images/app.tar" \
