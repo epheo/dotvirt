@@ -36,10 +36,11 @@ var adoptableKinds = append([]schema.GroupVersionResource{
 	{Group: "cdi.kubevirt.io", Version: "v1beta1", Resource: "datavolumes"},
 }, networkFamilyGVRs(false)...)
 
-// clusterAdoptableKinds are the cluster-scoped kinds the platform repo may declare.
-// It mirrors the platform AppProject's clusterResourceWhitelist by hand (operator/
-// internal/install/argocd.go); the Namespace kind is left out because namespaces
-// join through AdoptProject with their tenancy labels.
+// clusterAdoptableKinds are the cluster-scoped kinds adoption captures. Opt-in
+// through the network family, not every platform kind: a capture takes each
+// object of a kind the caller can read, which a MachineConfig or the next
+// module's kind must not get by default. A Namespace joins through AdoptProject
+// with its tenancy labels.
 var clusterAdoptableKinds = networkFamilyGVRs(true)
 
 func networkFamilyGVRs(clusterScoped bool) []schema.GroupVersionResource {
