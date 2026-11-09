@@ -84,16 +84,16 @@ spec:
                     description: |-
                       SyncImpersonation makes ArgoCD sync each dotvirt Application as its
                       project's own ServiceAccount, which holds exactly the project's grants,
-                      instead of the shared controller's account. Off by default.
+                      instead of the shared controller's account. On by default.
                     properties:
                       enabled:
                         description: |-
-                          Enabled turns impersonation on once every project's sync account holds its
-                          grants and nothing else on the instance would stop syncing; the
-                          SyncImpersonationReady condition says what is missing. The setting is
-                          instance-wide: every Application on that ArgoCD then syncs as the
-                          ServiceAccount its AppProject names, or not at all. Turning it off removes
-                          the setting.
+                          Enabled, true when unset, turns impersonation on once every project's sync
+                          account holds its grants and nothing else on the instance would stop
+                          syncing; the SyncImpersonationReady condition says what is missing. The
+                          setting is instance-wide: every Application on that ArgoCD then syncs as
+                          the ServiceAccount its AppProject names, or not at all. false removes the
+                          setting.
                         type: boolean
                       ignoreForeignApplications:
                         description: |-

@@ -293,7 +293,7 @@ func TestCacheByObjectScope(t *testing.T) {
 // says so instead of reading Ready, and since nothing watches the
 // ApplicationSet, the pass polls it on settleRetry until it clears.
 func TestArgoReadyCarriesApplicationSetError(t *testing.T) {
-	dv := testCR()
+	dv := optOut(testCR())
 	appset := erroredAppSet(dv, `map has no entry for key "namespace"`)
 	c := testBuilder(t).WithObjects(dv, appset).Build()
 	r := newReconciler(c, depsOK)
@@ -325,7 +325,7 @@ func TestArgoReadyCarriesApplicationSetError(t *testing.T) {
 // An ApplicationSet error that outlasts driftResync is not Argo recovering on
 // its own: the pass falls back to the drift timer instead of polling forever.
 func TestArgoNotReadyPollsOnlyWhileRecovering(t *testing.T) {
-	dv := testCR()
+	dv := optOut(testCR())
 	c := testBuilder(t).WithObjects(dv, erroredAppSet(dv, "connection refused")).Build()
 	r := newReconciler(c, depsOK)
 	if res := reconcileOnce(t, r, dv); res.RequeueAfter != settleRetry {
