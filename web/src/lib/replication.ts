@@ -226,6 +226,8 @@ export function tierRooms(pools: ReplicationPool[]): TierRoom[] {
 
 // One disk as it stands, in the map's last column.
 export function diskNow(v: ReplicatedVolume, runsOn: string): { tone: Tone; text: string } {
+	if (v.resolving)
+		return { tone: 'info', text: `Keeping the copy on ${v.resolving}, the rest rebuild` };
 	if (v.splitBrain) return { tone: 'danger', text: 'Two copies disagree' };
 	if (v.quorumLost) return { tone: 'danger', text: 'Lost its majority, writes stopped' };
 	if (v.phase === 'Failed') return { tone: 'danger', text: 'Failed' };

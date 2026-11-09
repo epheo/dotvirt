@@ -228,6 +228,13 @@ describe('the map', () => {
 		expect(cellFor(two, 'h4', 'h4')).toMatchObject({ kind: 'remote' });
 	});
 
+	it('says which copy is being kept once a split is being resolved', () => {
+		expect(diskNow({ ...two, splitBrain: true, resolving: 'h2' }, 'h1')).toEqual({
+			tone: 'info',
+			text: 'Keeping the copy on h2, the rest rebuild',
+		});
+	});
+
 	it('names the worst fact about a disk first', () => {
 		expect(diskNow({ ...two, splitBrain: true }, 'h1').tone).toBe('danger');
 		expect(diskNow(vol('a', [copy('h1'), copy('h2')], { phase: 'Ready' }), 'h3').text).toBe(

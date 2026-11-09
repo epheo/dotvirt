@@ -390,6 +390,14 @@ export const api = {
 	replication: () => get<gen.Replication>('/api/storage/replication'),
 	// The standing of the caller's replicated disks, with no host named.
 	protection: () => get<gen.DiskProtection[]>('/api/storage/protection'),
+	// since is the split the caller decided on: the server refuses a later one.
+	resolveSplitBrain: (volume: string, survivor: string, since: string) =>
+		post<void>(`/api/storage/replication/volumes/${enc(volume)}/resolve`, { survivor, since }),
+	evictHost: (node: string, dryRun = false) =>
+		post<gen.ReplicationEvict>(
+			`/api/storage/replication/hosts/${enc(node)}/evict${dryRun ? '?dryRun=true' : ''}`,
+			{},
+		),
 	// The caller's verdict on each gated action; ask with a namespace for its
 	// actions and project. Asked on demand, never per frame.
 	capabilities: (namespace?: string) =>

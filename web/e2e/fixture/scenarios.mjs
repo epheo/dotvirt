@@ -1715,7 +1715,12 @@ const placement = {
 			250,
 			'hdd',
 			[copy('worker-1'), copy('worker-3'), witness('worker-2')],
-			{ phase: 'Degraded', splitBrain: true, primary: 'worker-1' },
+			{
+				phase: 'Degraded',
+				splitBrain: true,
+				splitSince: '2026-11-09T10:00:00Z',
+				primary: 'worker-1',
+			},
 		),
 	],
 };
@@ -1723,8 +1728,49 @@ const replicated = {
 	...base,
 	name: 'replicated',
 	modules: { replicatedStorage: true },
-	capabilities: { ...base.capabilities, cluster: { replication: true } },
+	capabilities: { ...base.capabilities, cluster: { replication: true, replicationRepair: true } },
 	replication: placement,
+};
+const replicatedsplit = {
+	...replicated,
+	name: 'replicatedsplit',
+	replication: {
+		...placement,
+		volumes: placement.volumes.map((v) =>
+			v.name === 'pvc-db1a' || v.name === 'pvc-db1b'
+				? {
+						...v,
+						phase: 'Degraded',
+						splitBrain: true,
+						splitSince: '2026-11-09T10:00:00Z',
+						primary: 'worker-1',
+						replicas: v.replicas.map((r) =>
+							r.state === 'catching-up' ? { ...r, state: 'in-sync', syncPercent: undefined } : r,
+						),
+					}
+				: v,
+		),
+	},
+};
+// Two claims no VM holds, named alike in different namespaces.
+const replicatedalike = {
+	...replicated,
+	name: 'replicatedalike',
+	replication: {
+		...placement,
+		volumes: ['web-prod', 'db-prod'].map((ns) =>
+			volume(`pvc-${ns}`, ns, 'data', 10, 'nvme', [
+				copy('worker-1'),
+				copy('worker-2'),
+				witness('worker-3'),
+			]),
+		),
+	},
+};
+const replicatedreadonly = {
+	...replicated,
+	name: 'replicatedreadonly',
+	capabilities: { ...base.capabilities, cluster: { replication: true, replicationRepair: false } },
 };
 const replicatedtenant = {
 	...replicated,
@@ -1753,6 +1799,9 @@ const replicatedtenant = {
 
 export const scenarios = {
 	replicated,
+	replicatedalike,
+	replicatedsplit,
+	replicatedreadonly,
 	replicatedtenant,
 	novms,
 	residue,
