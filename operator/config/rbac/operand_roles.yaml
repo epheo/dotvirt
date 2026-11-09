@@ -25,6 +25,14 @@ rules:
   - apiGroups: ["gateway.networking.k8s.io"]
     resources: ["gatewayclasses"]
     verbs: ["list"]
+  # The front door, read in memory and filtered per caller. The experimental
+  # route kinds and portail's rate limits may not be served.
+  - apiGroups: ["gateway.networking.k8s.io"]
+    resources: ["gateways", "httproutes", "tlsroutes", "tcproutes", "udproutes"]
+    verbs: ["list", "watch"]
+  - apiGroups: ["portail.epheo.eu"]
+    resources: ["ratelimitpolicies"]
+    verbs: ["list", "watch"]
   # r-drbd's cluster-scoped objects, read in memory and filtered per caller,
   # and the PersistentVolumes that say which claim each Volume serves.
   - apiGroups: ["r-drbd.io"]

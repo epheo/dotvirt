@@ -279,6 +279,9 @@ type Inventory struct {
 	// ReplicationVersion is the same contract for GET /api/storage/replication
 	// and /api/storage/protection. Absent while the cluster serves no r-drbd.
 	ReplicationVersion uint64 `json:"replicationVersion,omitempty"`
+	// RoutesVersion is the same contract for GET /api/networking/gateways and
+	// /api/networking/routes. Absent while no GatewayClass exists.
+	RoutesVersion uint64 `json:"routesVersion,omitempty"`
 	// Adoptable proposes existing tenants: namespaces with VMs but no project
 	// label. Present only for callers with namespace-create authority (the
 	// adoption gate) - the candidate scan is cluster-wide, so the SSAR is what
