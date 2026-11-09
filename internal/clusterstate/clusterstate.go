@@ -189,14 +189,14 @@ func New(sa *cluster.Client, projectLabel string, bus *eventbus.Bus) *State {
 	// the candidates each token's visibility is reviewed over.
 	s.names = newNamespaceSink(project, reflect.NewStore(s.nss, namespace, s.nssReady.Mark), forget, s.namesReady.Mark)
 	s.specs = []reflectorSpec{
-		{s.live.store(s.vms, s.vmsReady.Mark), &kubevirtcorev1.VirtualMachine{}, sa.VMListWatch()},
-		{s.live.store(s.vmis, s.vmisReady.Mark), &kubevirtcorev1.VirtualMachineInstance{}, sa.VMIListWatch()},
-		{s.names, &corev1.Namespace{}, sa.NamespaceListWatch()},
+		{s.live.store(s.vms, s.vmsReady.Mark), &kubevirtcorev1.VirtualMachine{}, sa.VMListWatch(), &optionalAPI{gvrVMs, &s.vmsReady}},
+		{s.live.store(s.vmis, s.vmisReady.Mark), &kubevirtcorev1.VirtualMachineInstance{}, sa.VMIListWatch(), &optionalAPI{gvrVMIs, &s.vmisReady}},
+		{s.names, &corev1.Namespace{}, sa.NamespaceListWatch(), nil},
 	}
 	// Every operand role grants RoleBindings, so their signal watch starts with
 	// the snapshot; the other RBAC kinds wait for their grant (signals).
 	s.rbSink, s.rbHealth = newRBACSignal(rbac, refs, roleBindingDigest), len(s.specs)
-	s.specs = append(s.specs, reflectorSpec{s.rbSink, &rbacv1.RoleBinding{}, sa.RoleBindingListWatch()})
+	s.specs = append(s.specs, reflectorSpec{s.rbSink, &rbacv1.RoleBinding{}, sa.RoleBindingListWatch(), nil})
 	s.healthy = make([]atomic.Bool, len(s.specs))
 	sources := map[schema.GroupVersionResource]*cache.ListWatch{
 		gvrRoles:               sa.RoleListWatch(),
@@ -207,6 +207,12 @@ func New(sa *cluster.Client, projectLabel string, bus *eventbus.Bus) *State {
 	s.signals = signalWatches(func(gvr schema.GroupVersionResource) *cache.ListWatch { return sources[gvr] }, rbac, refs)
 	return s
 }
+
+// KubeVirt's kinds: a cluster may have desktops or storage and no VMs.
+var (
+	gvrVMs  = kubevirtcorev1.SchemeGroupVersion.WithResource("virtualmachines")
+	gvrVMIs = kubevirtcorev1.SchemeGroupVersion.WithResource("virtualmachineinstances")
+)
 
 // The RBAC kinds watched once the SA may list them. Groups are OpenShift's
 // (user.openshift.io), absent on other clusters.
@@ -251,16 +257,42 @@ type reflectorSpec struct {
 	store    cache.Store // already wrapped to fire the right Publishes + readiness
 	expected any
 	lw       *cache.ListWatch
+	optional *optionalAPI // nil: the API is always served
+}
+
+// optionalAPI is the API a reflector waits for. Its absence satisfies ready:
+// no store fed by an API the cluster does not serve can have an initial LIST.
+type optionalAPI struct {
+	gvr   schema.GroupVersionResource
+	ready *reflect.Ready
 }
 
 // Run starts one reflector per resource; each owns its own relist/backoff and
 // stops when ctx is cancelled. Returns immediately - call WaitForSync to block
 // until the initial LIST has populated the snapshot.
 func (s *State) Run(ctx context.Context) {
-	for i, spec := range s.specs {
-		reflect.RunTyped(ctx, reflect.TrackHealth(spec.lw, &s.healthy[i], s.publishLive), spec.expected, spec.store)
-	}
+	s.runReflectors(ctx, s.sa.ServesAPIResource)
 	s.runSignals(ctx, listable(ctx, s.sa))
+}
+
+func (s *State) runReflectors(ctx context.Context, served func(schema.GroupVersionResource) (bool, error)) {
+	for i, spec := range s.specs {
+		if spec.optional == nil {
+			reflect.RunTyped(ctx, reflect.TrackHealth(spec.lw, &s.healthy[i], s.publishLive), spec.expected, spec.store)
+			continue
+		}
+		s.healthy[i].Store(true) // absence is not staleness (AllHealthy)
+		has := func(gvr schema.GroupVersionResource) bool {
+			ok, err := served(gvr)
+			// Only a definite answer: drift reads an empty store as every VM
+			// stopped, which a failed discovery read must not claim.
+			if err == nil && !ok {
+				spec.optional.ready.Mark()
+			}
+			return ok
+		}
+		reflect.RunTypedWhenServed(ctx, has, spec.optional.gvr, spec.lw, spec.expected, spec.store, &s.healthy[i], s.publishLive)
+	}
 }
 
 // runSignals starts each signal watch once gate admits its kind, re-asking on

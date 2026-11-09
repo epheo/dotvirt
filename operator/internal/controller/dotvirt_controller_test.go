@@ -198,7 +198,7 @@ func TestReconcileHaltsOnMissingHardDependency(t *testing.T) {
 	dv := testCR()
 	c := testBuilder(t).WithObjects(dv).Build()
 	r := newReconciler(c, func(*rest.Config) (deps.Result, error) {
-		return deps.Result{MissingHard: []string{"KubeVirt / OpenShift Virtualization"}}, nil
+		return deps.Result{MissingHard: []string{"OpenShift GitOps / Argo CD"}}, nil
 	})
 
 	res := reconcileOnce(t, r, dv)

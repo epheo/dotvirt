@@ -30,7 +30,7 @@ bundle** (OperatorHub, OpenShift): same binary, two packagings.
 ```
 api/v1alpha1/        Dotvirt CRD types (spec/status + conditions)
 internal/platform/   OpenShift-vs-Kubernetes detection
-internal/deps/       discovery probe for the ArgoCD/KubeVirt prerequisites
+internal/deps/       discovery probe for the ArgoCD prerequisite and the soft features
 internal/controller/ the phased reconcile (one status condition per phase)
 internal/install/    typed renderers for every applied resource
 cmd/                 manager entrypoint (leader election, health, metrics)
@@ -53,9 +53,9 @@ From one `Dotvirt` resource the controller runs the phases below in order. Each
 owns one status condition; a phase that fails or waits records why there, so
 `kubectl get dotvirt` / `describe` explains a stuck install.
 
-1. **Dependencies** (`DependenciesReady`): probes for ArgoCD and KubeVirt, hard
-   prerequisites it never installs (it waits and reports if either is absent), and
-   for OVN-K, NMState and CDI (soft: noted, the install proceeds).
+1. **Dependencies** (`DependenciesReady`): probes for ArgoCD, a hard prerequisite
+   it never installs (it waits and reports if it is absent), and for KubeVirt,
+   OVN-K, NMState and CDI (soft: noted, the install proceeds).
 2. **Forge** (`ForgeReady`): converges the trust anchors (below) first, then, with
    `spec.forge.managed`, stands up the eval-grade Forgejo (single pod, SQLite, a PVC
    that survives uninstall), resolves its external URL (an explicit `spec.forge.url`,

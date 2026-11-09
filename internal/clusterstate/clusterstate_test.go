@@ -1,13 +1,19 @@
 package clusterstate
 
 import (
+	"context"
+	"errors"
 	"maps"
 	"slices"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/client-go/tools/cache"
 	kubevirtcorev1 "kubevirt.io/api/core/v1"
 
@@ -311,4 +317,60 @@ func TestStoredVMExportsUnchanged(t *testing.T) {
 	if string(got) != string(want) {
 		t.Errorf("export moved:\n%s\nwant:\n%s", got, want)
 	}
+}
+
+func answering(ok bool, err error) func(schema.GroupVersionResource) (bool, error) {
+	return func(schema.GroupVersionResource) (bool, error) { return ok, err }
+}
+
+func kubevirtState(src *fakeSource) *State {
+	s := stateWithIndexers()
+	s.specs = []reflectorSpec{{s.vmStore(), &kubevirtcorev1.VirtualMachine{}, src.lw(), &optionalAPI{gvrVMs, &s.vmsReady}}}
+	s.healthy = make([]atomic.Bool, len(s.specs))
+	return s
+}
+
+// A cluster without KubeVirt is synced, healthy and never listed: dotvirt must
+// start and serve there as on any other.
+func TestAbsentKubeVirtReadsAsSynced(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	src := &fakeSource{}
+	s := kubevirtState(src)
+	s.runReflectors(ctx, answering(false, nil))
+	eventually(t, "VMs synced", s.vmsReady.Done)
+	if !s.Healthy() {
+		t.Error("an API the cluster does not serve reads as stale")
+	}
+	if got := src.lists.Load(); got != 0 {
+		t.Errorf("VMs listed %d times on a cluster that does not serve them", got)
+	}
+}
+
+// A failed discovery read proves nothing: reading it as absence would report
+// every VM stopped on a cluster that has them.
+func TestFailedDiscoveryIsNotAbsence(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	asked := make(chan struct{})
+	var once sync.Once
+	s := kubevirtState(&fakeSource{})
+	s.runReflectors(ctx, func(schema.GroupVersionResource) (bool, error) {
+		defer once.Do(func() { close(asked) })
+		return false, errors.New("discovery failed")
+	})
+	<-asked
+	time.Sleep(10 * time.Millisecond)
+	if s.vmsReady.Done() {
+		t.Error("a failed discovery read marked the VM store synced")
+	}
+}
+
+func TestServedKubeVirtIsWatched(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	src := &fakeSource{}
+	s := kubevirtState(src)
+	s.runReflectors(ctx, answering(true, nil))
+	eventually(t, "the VM watch", func() bool { return src.watcher() != nil })
 }
