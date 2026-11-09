@@ -361,7 +361,7 @@ func (s *Server) handleNetworkRules(w http.ResponseWriter, r *http.Request) {
 	}
 	out := s.netstate.NetworkRules(nss, s.state.NamespaceLabels, red, s.cfg.ProjectLabel)
 	out.Network = key
-	writeJSON(w, scopeNetworkRules(out, visible, s.policyDrift, pr.apply))
+	writeJSON(w, scopeNetworkRules(out, visible, v.listsBacking, s.policyDrift, pr.apply))
 }
 
 // findNetwork resolves a network key the way the UI routes it: a project
@@ -387,14 +387,14 @@ func findNetwork(nets []model.Network, key string) (model.Network, bool) {
 // caller sees that namespace; a cluster rule naming these VMs governs them
 // too, so it stays, redacted. drift attaches each kept policy's apply state
 // first, so the redactor sees, and hides, a cluster rule's apply error.
-func scopeNetworkRules(in model.NetworkRules, visible map[string]bool, drift func(*model.Policy), redact func(*model.Policy, *model.PolicyRuleView)) model.NetworkRules {
+func scopeNetworkRules(in model.NetworkRules, visible map[string]bool, lists func(backing, ns string) bool, drift func(*model.Policy), redact func(*model.Policy, *model.PolicyRuleView)) model.NetworkRules {
 	for i := range in.Applies {
 		drift(&in.Applies[i].Policy)
 		redact(&in.Applies[i].Policy, nil)
 	}
 	reaches := make([]model.PeerRule, 0, len(in.Reaches))
 	for _, pr := range in.Reaches {
-		if pr.Policy.Namespace != "" && !visible[pr.Policy.Namespace] {
+		if ns := pr.Policy.Namespace; ns != "" && (!visible[ns] || !lists(pr.Policy.Backing, ns)) {
 			continue
 		}
 		drift(&pr.Policy)

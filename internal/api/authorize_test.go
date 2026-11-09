@@ -179,7 +179,6 @@ func tenantServer(t *testing.T, d *reachedDraft, nss []string, visible []string)
 		}})
 	}
 	kube := fake.NewSimpleClientset(&corev1.NamespaceList{Items: objs})
-	answerRules(kube)
 	sa := cluster.NewClient(kube, kvfake.NewSimpleClientset(), nil)
 	bus := eventbus.New()
 	state := clusterstate.New(sa, "dotvirt.io/project", bus)
@@ -398,7 +397,6 @@ func TestAuthorNamespaces(t *testing.T) {
 	})
 	t.Run("a failed review is unknown", func(t *testing.T) {
 		kube := fake.NewSimpleClientset()
-		answerRules(kube)
 		kube.PrependReactor("create", "selfsubjectaccessreviews", func(k8stesting.Action) (bool, runtime.Object, error) {
 			return true, nil, errors.New("timeout")
 		})

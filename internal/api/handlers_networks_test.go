@@ -95,13 +95,15 @@ func TestScopeNetworkRules(t *testing.T) {
 	in := model.NetworkRules{
 		Applies: []model.PolicyBinding{{Policy: model.Policy{Name: "deny-lateral", Kind: model.PolicyAdmin}}},
 		Reaches: []model.PeerRule{
-			{Policy: model.Policy{Name: "mine", Kind: model.PolicyProjectRule, Namespace: "a"}},
-			{Policy: model.Policy{Name: "foreign", Kind: model.PolicyProjectRule, Namespace: "b"}},
+			{Policy: model.Policy{Name: "mine", Kind: model.PolicyProjectRule, Namespace: "a", Backing: "NetworkPolicy"}},
+			{Policy: model.Policy{Name: "unlisted", Kind: model.PolicyProjectRule, Namespace: "a", Backing: "EgressFirewall"}},
+			{Policy: model.Policy{Name: "foreign", Kind: model.PolicyProjectRule, Namespace: "b", Backing: "NetworkPolicy"}},
 			{Policy: model.Policy{Name: "cluster", Kind: model.PolicyAdmin}},
 		},
 	}
 	var redacted []string
-	got := scopeNetworkRules(in, map[string]bool{"a": true}, func(*model.Policy) {}, func(p *model.Policy, _ *model.PolicyRuleView) {
+	lists := func(backing, _ string) bool { return backing == "NetworkPolicy" }
+	got := scopeNetworkRules(in, map[string]bool{"a": true}, lists, func(*model.Policy) {}, func(p *model.Policy, _ *model.PolicyRuleView) {
 		redacted = append(redacted, p.Name)
 	})
 	var names []string
@@ -126,7 +128,7 @@ func TestScopeNetworkRulesRedactsDrift(t *testing.T) {
 	drift := func(p *model.Policy) { p.SyncError = "namespace team-b: admission denied" }
 	no := func(model.PolicyKind) bool { return false }
 	tenant := policyRedactor{can: no, named: no}
-	got := scopeNetworkRules(in, nil, drift, tenant.apply)
+	got := scopeNetworkRules(in, nil, listsAll, drift, tenant.apply)
 	for _, p := range []model.Policy{got.Applies[0].Policy, got.Reaches[0].Policy} {
 		if p.SyncError != redactedSyncError {
 			t.Errorf("%s: a tenant reads the apply error %q", p.Name, p.SyncError)

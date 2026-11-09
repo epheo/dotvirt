@@ -11,7 +11,6 @@ import (
 	"time"
 
 	authzv1 "k8s.io/api/authorization/v1"
-	"k8s.io/apimachinery/pkg/runtime/schema"
 
 	"github.com/epheo/dotvirt/internal/auth"
 	"github.com/epheo/dotvirt/internal/cluster"
@@ -73,19 +72,26 @@ func readSetOf(answer []bool) readSet {
 	return r
 }
 
-// askReads is one rules review per namespace.
-func askReads(ctx context.Context, c *cluster.Client, namespaces []string) (map[string]readSet, error) {
-	kinds := make([]schema.GroupResource, len(readKinds))
+// askReads is what the token may list in namespaces, past what it may list
+// everywhere (held). SubjectAccessReviews, not one rules review per namespace:
+// this decides what dotvirt serves from its own account, which the API's own
+// docs say a rules review must not.
+func askReads(ctx context.Context, c *cluster.Client, namespaces []string, held readSet) (map[string]readSet, error) {
+	out := make(map[string]readSet, len(namespaces))
+	for _, ns := range namespaces {
+		out[ns] = 0
+	}
 	for i, k := range readKinds {
-		kinds[i] = schema.GroupResource{Group: k.group, Resource: k.resource}
-	}
-	answers, err := c.ListableIn(ctx, namespaces, kinds)
-	if err != nil {
-		return nil, err
-	}
-	out := make(map[string]readSet, len(answers))
-	for ns, answer := range answers {
-		out[ns] = readSetOf(answer)
+		if held&(1<<i) != 0 {
+			continue
+		}
+		allowed, err := c.CanIn(ctx, "list", k.group, k.resource, namespaces)
+		if err != nil {
+			return nil, err
+		}
+		for _, ns := range allowed {
+			out[ns] |= 1 << i
+		}
 	}
 	return out, nil
 }
@@ -416,7 +422,7 @@ func (s *Server) refreshReads(ctx context.Context, c *cluster.Client, next, prev
 			ask = append(ask, ns)
 		}
 	}
-	fresh, err := askReads(ctx, c, ask)
+	fresh, err := askReads(ctx, c, ask, next.wideReads)
 	if err != nil {
 		return visibleSet{}, err
 	}
@@ -456,7 +462,7 @@ func (s *Server) sweep(ctx context.Context, c *cluster.Client, cands *candidates
 		}
 	}
 	if e.wideReads != allReads {
-		if e.reads, err = askReads(ctx, c, slices.Collect(maps.Keys(e.ns))); err != nil {
+		if e.reads, err = askReads(ctx, c, slices.Collect(maps.Keys(e.ns)), e.wideReads); err != nil {
 			return visibleSet{}, err
 		}
 	}

@@ -188,8 +188,7 @@ func (fc *fakeCluster) serve(w http.ResponseWriter, r *http.Request) {
 		}
 		writeObj(w, authzv1.SelfSubjectRulesReview{
 			TypeMeta: metav1.TypeMeta{Kind: "SelfSubjectRulesReview", APIVersion: "authorization.k8s.io/v1"},
-			// With no rules wired, the kind-by-kind path answers through fc.ssar.
-			Status: authzv1.SubjectRulesReviewStatus{ResourceRules: rules, Incomplete: fc.ssrr == nil},
+			Status:   authzv1.SubjectRulesReviewStatus{ResourceRules: rules},
 		})
 		return
 	}
