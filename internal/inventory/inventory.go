@@ -46,6 +46,9 @@ type Inputs struct {
 	// about a tenant namespace hidden from them.
 	Visible map[string]bool
 	Owners  map[string]string
+	// ListsVMs reports whether the caller may list VMs in a namespace it sees;
+	// nil is yes.
+	ListsVMs func(namespace string) bool
 }
 
 // Build produces the inventory. A project whose repo can't be read (or that has
@@ -119,6 +122,9 @@ func buildProject(in Inputs, p project.ProjectInfo) model.Project {
 		if _, ok := allowed[vm.Namespace]; !ok {
 			continue // manifest for a namespace outside this project; ignore
 		}
+		if in.ListsVMs != nil && !in.ListsVMs(vm.Namespace) {
+			continue
+		}
 		inGit[vm.Namespace+"/"+vm.Name] = struct{}{}
 		enrich(&vm, in)
 		byNS[vm.Namespace] = append(byNS[vm.Namespace], vm)
@@ -131,6 +137,9 @@ func buildProject(in Inputs, p project.ProjectInfo) model.Project {
 	// state doesn't exist, so Power is Unknown and config fields stay empty -
 	// an empty SourceFile is the UI's "not in git" marker.
 	for ns := range allowed {
+		if in.ListsVMs != nil && !in.ListsVMs(ns) {
+			continue
+		}
 		for name, live := range in.Live[ns] {
 			if _, tracked := inGit[ns+"/"+name]; tracked {
 				continue

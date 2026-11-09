@@ -35,6 +35,7 @@ import (
 	"github.com/epheo/dotvirt/internal/cluster"
 	"github.com/epheo/dotvirt/internal/clusterstate"
 	"github.com/epheo/dotvirt/internal/eventbus"
+	"github.com/epheo/dotvirt/internal/model"
 	"github.com/epheo/dotvirt/internal/modules"
 	"github.com/epheo/dotvirt/internal/restfactory"
 )
@@ -56,6 +57,7 @@ func ssarCountingClient(allow func(*authzv1.ResourceAttributes) bool) (*cluster.
 // record every other request the token made.
 func ssarCountingFake(allow func(*authzv1.ResourceAttributes) bool) (*cluster.Client, *fake.Clientset, *int) {
 	kube := fake.NewSimpleClientset()
+	answerRules(kube)
 	reviews := new(int)
 	kube.PrependReactor("create", "selfsubjectaccessreviews", func(action k8stesting.Action) (bool, runtime.Object, error) {
 		*reviews++
@@ -79,6 +81,7 @@ type asking struct {
 func newAsking(allow func(*authzv1.ResourceAttributes) bool) *asking {
 	a := &asking{allow: allow}
 	kube := fake.NewSimpleClientset()
+	answerRules(kube)
 	kube.PrependReactor("create", "selfsubjectaccessreviews", func(action k8stesting.Action) (bool, runtime.Object, error) {
 		ssar := action.(k8stesting.CreateAction).GetObject().(*authzv1.SelfSubjectAccessReview).DeepCopy()
 		attrs := ssar.Spec.ResourceAttributes
@@ -127,7 +130,7 @@ func seedVisibleAt(s *Server, tok string, ns map[string]bool, swept time.Time) {
 	if s.state != nil {
 		cands = s.candidates(lv.ns)
 	}
-	s.visible.Put(restfactory.TokenKey(tok), visibleSet{ns: ns, cands: cands, lv: lv, swept: swept})
+	s.visible.Put(restfactory.TokenKey(tok), visibleSet{ns: ns, wideReads: allReads, cands: cands, lv: lv, swept: swept})
 }
 
 func seedVisible(s *Server, tok string, ns map[string]bool) { seedVisibleAt(s, tok, ns, time.Now()) }
@@ -143,6 +146,7 @@ func projectNS(name string) *corev1.Namespace {
 func watchedState(t *testing.T, bus *eventbus.Bus, objs ...runtime.Object) (st *clusterstate.State, kube *fake.Clientset, fail func()) {
 	t.Helper()
 	kube = fake.NewSimpleClientset(objs...)
+	answerRules(kube)
 	var rbac []metav1.APIResource
 	for _, r := range []string{"rolebindings", "roles", "clusterrolebindings", "clusterroles"} {
 		rbac = append(rbac, metav1.APIResource{Name: r})
@@ -259,16 +263,16 @@ func TestVisibleForClusterWideReaders(t *testing.T) {
 			t.Errorf("the admin's visibility listed %s under its token", a.GetResource().Resource)
 		}
 	}
-	if *reviews != 2 {
-		t.Errorf("the admin's visibility cost %d reviews, want 2", *reviews)
+	if want := wideSweep; *reviews != want {
+		t.Errorf("the admin's visibility cost %d reviews, want %d", *reviews, want)
 	}
 
 	vms := newAsking(func(a *authzv1.ResourceAttributes) bool { return a.Resource == "virtualmachines" })
 	if got := visibleOf(t, s, "tok-vms", vms.c); !maps.Equal(got, map[string]bool{"tenant-a": true, "tenant-b": true}) {
 		t.Errorf("a cluster-wide VM reader sees %v, want every project namespace", got)
 	}
-	if got := vms.take(); !slices.Equal(got, []string{"", ""}) {
-		t.Errorf("a cluster-wide VM reader asked %q, want the two cluster-wide reviews", got)
+	if got := vms.take(); !slices.Equal(got, slices.Repeat([]string{""}, wideSweep)) {
+		t.Errorf("a cluster-wide VM reader asked %q, want only cluster-wide reviews", got)
 	}
 
 	auditor := newAsking(func(a *authzv1.ResourceAttributes) bool { return a.Resource == "namespaces" })
@@ -284,6 +288,7 @@ func TestVisibleForClusterWideReaders(t *testing.T) {
 func TestVisibleForSharesOneProbe(t *testing.T) {
 	s := scopeServer(eventbus.New())
 	kube := fake.NewSimpleClientset()
+	answerRules(kube)
 	gate := make(chan struct{})
 	var started atomic.Bool
 	var reviews atomic.Int32
@@ -327,8 +332,8 @@ func TestVisibleForSharesOneProbe(t *testing.T) {
 	}
 	close(gate)
 	wg.Wait()
-	if n := reviews.Load(); n != 2 {
-		t.Fatalf("four concurrent misses cost %d reviews, want one sweep's 2", n)
+	if n := int(reviews.Load()); n != wideSweep {
+		t.Fatalf("four concurrent misses cost %d reviews, want one sweep's %d", n, wideSweep)
 	}
 }
 
@@ -354,11 +359,11 @@ func TestVisibleForTTLFollowsTheWatches(t *testing.T) {
 	}
 	fail()
 	waitUntil(t, "the failed watch to count", func() bool { return !st.RBACWatched() })
-	if n := probes(watched); n != 2 {
-		t.Errorf("a watch down: a minute-old entry cost %d reviews, want a sweep's 2", n)
+	if n := probes(watched); n != wideSweep {
+		t.Errorf("a watch down: a minute-old entry cost %d reviews, want a sweep's %d", n, wideSweep)
 	}
-	if n := probes(scopeServer(eventbus.New())); n != 2 {
-		t.Errorf("never watched: a minute-old entry cost %d reviews, want a sweep's 2", n)
+	if n := probes(scopeServer(eventbus.New())); n != wideSweep {
+		t.Errorf("never watched: a minute-old entry cost %d reviews, want a sweep's %d", n, wideSweep)
 	}
 }
 
@@ -402,7 +407,7 @@ func TestUnsettledReviewsServeTheShortTTL(t *testing.T) {
 	}
 	e.swept = time.Now().Add(-time.Minute)
 	s.visible.Put(key, e)
-	if visibleOf(t, s, "tok-alice", c); *reviews != 4 {
+	if visibleOf(t, s, "tok-alice", c); *reviews != 2*wideSweep {
 		t.Fatalf("a minute-old unsettled entry: %d reviews, want a second sweep", *reviews)
 	}
 
@@ -517,6 +522,7 @@ func TestOnlyARejectedSessionIs401(t *testing.T) {
 	s := fc.server(nil, Config{})
 	var alive atomic.Bool
 	kube := fake.NewSimpleClientset()
+	answerRules(kube)
 	kube.PrependReactor("create", "tokenreviews", func(action k8stesting.Action) (bool, runtime.Object, error) {
 		tr := action.(k8stesting.CreateAction).GetObject().(*authnv1.TokenReview).DeepCopy()
 		tr.Status = authnv1.TokenReviewStatus{Authenticated: alive.Load(), User: authnv1.UserInfo{Username: "tenant"}}
@@ -670,6 +676,14 @@ func platformFactory(t *testing.T) *cluster.Factory {
 func ssarFactory(t *testing.T, allow func(*http.Request, *authzv1.SelfSubjectAccessReview) bool) *cluster.Factory {
 	t.Helper()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/apis/authorization.k8s.io/v1/selfsubjectrulesreviews" {
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(authzv1.SelfSubjectRulesReview{
+				TypeMeta: metav1.TypeMeta{Kind: "SelfSubjectRulesReview", APIVersion: "authorization.k8s.io/v1"},
+				Status:   authzv1.SubjectRulesReviewStatus{Incomplete: true},
+			})
+			return
+		}
 		if r.URL.Path != "/apis/authorization.k8s.io/v1/selfsubjectaccessreviews" {
 			http.NotFound(w, r)
 			return
@@ -877,4 +891,65 @@ func TestUnknownModulesKeepTheVMQuestion(t *testing.T) {
 	if visible, _ := tenantView(t, s); len(visible) != 0 {
 		t.Errorf("visible = %v, want none", visible)
 	}
+}
+
+// wideSweep is what a token seeing every namespace costs: the two cluster-wide
+// visibility reviews and one per kind a view narrows by.
+var wideSweep = 2 + len(readKinds)
+
+// answerRules has a rules review grant every list: what a caller is shown is
+// tested on its own, and the review counts here are about visibility.
+func answerRules(kube *fake.Clientset) {
+	kube.PrependReactor("create", "selfsubjectrulesreviews", func(action k8stesting.Action) (bool, runtime.Object, error) {
+		r := action.(k8stesting.CreateAction).GetObject().(*authzv1.SelfSubjectRulesReview).DeepCopy()
+		r.Status.ResourceRules = []authzv1.ResourceRule{{Verbs: []string{"*"}, APIGroups: []string{"*"}, Resources: []string{"*"}}}
+		return true, r, nil
+	})
+}
+
+// Seeing a namespace is not seeing all it holds: each row asks its own kind.
+func TestAViewNarrowsByKind(t *testing.T) {
+	vmsOnly := callerView{set: visibleSet{reads: map[string]readSet{"a": readSetOf([]bool{true, false, false, false, false})}}}
+	if !vmsOnly.lists(ssarVM, "a") || vmsOnly.lists(ssarNetpol, "a") || vmsOnly.lists(ssarVM, "b") {
+		t.Errorf("a namespace reader's rights: %+v", vmsOnly.set.reads)
+	}
+	if vmsOnly.listsBacking("no-such-kind", "a") {
+		t.Error("an unknown backing was shown")
+	}
+	wide := callerView{set: visibleSet{wideReads: allReads}}
+	if !wide.lists(ssarNetpol, "anywhere") || !wide.listsBacking(model.KindUDN.Kind, "anywhere") {
+		t.Error("a cluster-wide reader was narrowed")
+	}
+}
+
+// A grant move in one namespace re-reads that namespace alone.
+func TestReadsAreKeptWhereNothingMoved(t *testing.T) {
+	prev := visibleSet{reads: map[string]readSet{"kept": 1, "moved": 1}}
+	next := visibleSet{ns: map[string]bool{"kept": true, "moved": true}}
+	kube := fake.NewSimpleClientset()
+	var asked []string
+	kube.PrependReactor("create", "selfsubjectrulesreviews", func(action k8stesting.Action) (bool, runtime.Object, error) {
+		r := action.(k8stesting.CreateAction).GetObject().(*authzv1.SelfSubjectRulesReview).DeepCopy()
+		asked = append(asked, r.Spec.Namespace)
+		return true, r, nil
+	})
+	got, err := (&Server{}).refreshReads(context.Background(), cluster.NewClient(kube, nil, nil), next, prev, map[string]bool{"moved": true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(asked, []string{"moved"}) || got.reads["kept"] != 1 || got.reads["moved"] != 0 {
+		t.Errorf("asked %v, reads %v", asked, got.reads)
+	}
+}
+
+// A VM page opens only for who may list VMs there.
+func TestVMRoutesNeedVMRights(t *testing.T) {
+	fc := newFakeCluster(t)
+	fc.readsVMs = tenantReadsTeamA
+	s := fc.server(nil, Config{})
+	s.visible.Put(restfactory.TokenKey(tenantToken), visibleSet{
+		ns: map[string]bool{"team-a-dev": true}, cands: s.candidates(s.visLevels().ns), lv: s.visLevels(), swept: time.Now(),
+		reads: map[string]readSet{"team-a-dev": 0},
+	})
+	wantStatus(t, do(s, tenantToken, http.MethodGet, "/api/vms/team-a-dev/web/manifest", ""), http.StatusNotFound)
 }

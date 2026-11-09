@@ -37,7 +37,7 @@ func TestScopeNetworks(t *testing.T) {
 		return m
 	}
 
-	tenant := names(scopeNetworks(in, visible, false))
+	tenant := names(scopeNetworks(in, visible, listsAll, false))
 	for _, hidden := range []string{"secret", "mt-b", "green-secondary"} {
 		if _, ok := tenant[hidden]; ok {
 			t.Errorf("a tenant sees %s", hidden)
@@ -54,7 +54,7 @@ func TestScopeNetworks(t *testing.T) {
 		t.Errorf("shared network namespaces = %v, want [tenant-a] (foreign namespaces redacted)", shared.Namespaces)
 	}
 
-	platform := names(scopeNetworks(in, visible, true))
+	platform := names(scopeNetworks(in, visible, listsAll, true))
 	for _, want := range []string{"vm-net", "prod-vlan", "mt-b", "green-secondary"} {
 		if _, ok := platform[want]; !ok {
 			t.Errorf("a platform caller misses %s", want)
@@ -310,4 +310,17 @@ func TestNetworksConcurrentCallersOwnTheirUplinks(t *testing.T) {
 		})
 	}
 	wg.Wait()
+}
+
+// A project network shows only to who may list its backing kind there.
+func TestScopeNetworksAsksTheBackingKind(t *testing.T) {
+	in := []model.Network{
+		{Name: "udn", Scope: model.ScopeProject, Namespace: "a", Backing: model.KindUDN.Kind},
+		{Name: "nad", Scope: model.ScopeProject, Namespace: "a", Backing: model.KindNAD.Kind},
+	}
+	onlyUDN := func(backing, _ string) bool { return backing == model.KindUDN.Kind }
+	got := scopeNetworks(in, map[string]bool{"a": true}, onlyUDN, false)
+	if len(got) != 1 || got[0].Name != "udn" {
+		t.Errorf("networks = %+v, want the udn alone", got)
+	}
 }

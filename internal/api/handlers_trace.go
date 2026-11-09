@@ -113,7 +113,8 @@ func (s *Server) traceWorkload(ns, name string) (netstate.TraceWorkload, bool) {
 // sees no namespace.
 func (s *Server) traceView(r *http.Request, sc scope) *netstate.TraceView {
 	ctx := r.Context()
-	visible, _ := s.visibleFor(ctx, sc.id, sc.cluster)
+	v, _ := s.viewFor(ctx, sc.id, sc.cluster)
+	visible := v.names
 	return &netstate.TraceView{
 		Namespace: func(ns string) bool { return visible[ns] },
 		Shared:    s.seesAllNetworks(ctx, sc.id, sc.cluster),
@@ -121,6 +122,9 @@ func (s *Server) traceView(r *http.Request, sc scope) *netstate.TraceView {
 			var out []netstate.TraceWorkload
 			live := s.state.Live()
 			for ns := range visible {
+				if !v.lists(ssarVM, ns) {
+					continue
+				}
 				for name, vm := range live[ns] {
 					if slices.ContainsFunc(vm.IPs, func(ip string) bool {
 						a, err := netip.ParseAddr(ip)
