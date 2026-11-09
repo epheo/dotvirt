@@ -1,6 +1,7 @@
 package tenancy
 
 import (
+	"slices"
 	"testing"
 	"time"
 )
@@ -77,5 +78,62 @@ func TestTenantKindsExcludeNAD(t *testing.T) {
 	}
 	if TenantKind("NetworkAttachmentDefinition") || !TenantKind("VirtualMachine") {
 		t.Error("TenantKind disagrees with TenantKinds")
+	}
+}
+
+type gk struct{ group, kind string }
+
+func gks(kinds []Kind) []gk {
+	out := make([]gk, 0, len(kinds))
+	for _, k := range kinds {
+		out = append(out, gk{k.Group, k.Kind})
+	}
+	return out
+}
+
+// A change here widens what every tenant, or the platform repo, may apply:
+// it is meant to be a deliberate edit, reviewed as a security change.
+func TestWhatEachRepoMayDeclare(t *testing.T) {
+	tenant := []gk{
+		{"kubevirt.io", "VirtualMachine"},
+		{"cdi.kubevirt.io", "DataVolume"},
+		{"k8s.ovn.org", "UserDefinedNetwork"},
+		{"k8s.ovn.org", "EgressFirewall"},
+		{"networking.k8s.io", "NetworkPolicy"},
+	}
+	platformCluster := []gk{
+		{"", "Namespace"},
+		{"k8s.ovn.org", "ClusterUserDefinedNetwork"},
+		{"k8s.ovn.org", "EgressIP"},
+		{"k8s.ovn.org", "AdminPolicyBasedExternalRoute"},
+		{"policy.networking.k8s.io", "AdminNetworkPolicy"},
+		{"policy.networking.k8s.io", "BaselineAdminNetworkPolicy"},
+		{"nmstate.io", "NodeNetworkConfigurationPolicy"},
+		{"machineconfiguration.openshift.io", "MachineConfig"},
+	}
+	platformNamespaced := []gk{
+		{"k8s.ovn.org", "UserDefinedNetwork"},
+		{"k8s.cni.cncf.io", "NetworkAttachmentDefinition"},
+		{"rbac.authorization.k8s.io", "RoleBinding"},
+		{"operators.coreos.com", "Subscription"},
+		{"operators.coreos.com", "OperatorGroup"},
+		{"operator.openshift.io", "KubeDescheduler"},
+	}
+	for name, c := range map[string]struct{ got, want []gk }{
+		"tenant":              {gks(TenantKinds), tenant},
+		"platform cluster":    {gks(PlatformKinds(true)), platformCluster},
+		"platform namespaced": {gks(PlatformKinds(false)), platformNamespaced},
+	} {
+		if !slices.Equal(c.got, c.want) {
+			t.Errorf("%s = %v, want %v", name, c.got, c.want)
+		}
+	}
+}
+
+func TestTenantKindsAreNamespaced(t *testing.T) {
+	for _, k := range TenantKinds {
+		if k.ClusterScoped {
+			t.Errorf("%s is cluster-scoped: a tenant repo would reach outside its namespaces", k.Kind)
+		}
 	}
 }
