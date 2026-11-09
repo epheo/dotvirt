@@ -19,8 +19,9 @@ container image).
 ## Platform-agnostic, OpenShift as a profile
 
 The controller detects the distribution (`internal/platform`) and renders
-accordingly: a **Route** on OpenShift, an **Ingress** on vanilla Kubernetes
-(`spec.ingress.type` pins one; `auto` follows the platform). It picks the ArgoCD
+accordingly: a **Route** on OpenShift, an **Ingress** on vanilla Kubernetes, an
+**HTTPRoute** when `spec.ingress.gateway` names a Gateway (`spec.ingress.type` pins
+one; `auto` takes a named Gateway, else follows the platform). It picks the ArgoCD
 namespace/SA defaults the same way (`openshift-gitops` vs `argocd`). It installs
 either as **plain manifests** (any cluster, no OLM: `make deploy`) or as an **OLM
 bundle** (OperatorHub, OpenShift): same binary, two packagings.
@@ -30,7 +31,7 @@ bundle** (OperatorHub, OpenShift): same binary, two packagings.
 ```
 api/v1alpha1/        Dotvirt CRD types (spec/status + conditions)
 internal/platform/   OpenShift-vs-Kubernetes detection
-internal/deps/       discovery probe for the ArgoCD/KubeVirt prerequisites
+internal/deps/       discovery probe for the ArgoCD prerequisite and the soft features
 internal/controller/ the phased reconcile (one status condition per phase)
 internal/install/    typed renderers for every applied resource
 cmd/                 manager entrypoint (leader election, health, metrics)
@@ -53,9 +54,9 @@ From one `Dotvirt` resource the controller runs the phases below in order. Each
 owns one status condition; a phase that fails or waits records why there, so
 `kubectl get dotvirt` / `describe` explains a stuck install.
 
-1. **Dependencies** (`DependenciesReady`): probes for ArgoCD and KubeVirt, hard
-   prerequisites it never installs (it waits and reports if either is absent), and
-   for OVN-K, NMState and CDI (soft: noted, the install proceeds).
+1. **Dependencies** (`DependenciesReady`): probes for ArgoCD, a hard prerequisite
+   it never installs (it waits and reports if it is absent), and for KubeVirt,
+   OVN-K, NMState and CDI (soft: noted, the install proceeds).
 2. **Forge** (`ForgeReady`): converges the trust anchors (below) first, then, with
    `spec.forge.managed`, stands up the eval-grade Forgejo (single pod, SQLite, a PVC
    that survives uninstall), resolves its external URL (an explicit `spec.forge.url`,
@@ -67,8 +68,8 @@ owns one status condition; a phase that fails or waits records why there, so
 3. **Secrets** (`SecretsReady`): generates the session key, the ApplicationSet-plugin
    token, the webhook secrets and, with SSO, the OAuth client secret. Create-once:
    they survive restarts and are never regenerated.
-4. **Workload** (`WorkloadReady`): the ServiceAccount, drafts PVC, Service, Route or
-   Ingress, NetworkPolicy (below) and the Deployment, owner-referenced to the CR for
+4. **Workload** (`WorkloadReady`): the ServiceAccount, drafts PVC, Service, Route,
+   Ingress or HTTPRoute, NetworkPolicy (below) and the Deployment, owner-referenced to the CR for
    automatic cleanup. `True` only once the dotvirt pod is ready; `Progressing` until
    then, without holding back the later phases. Single replica, see below.
 5. **GitOps wiring** (`ArgoReady`): mirrors the plugin token into the ArgoCD
@@ -82,6 +83,9 @@ owns one status condition; a phase that fails or waits records why there, so
    labeled `dotvirt.io/project=<project>`: those namespaces are its only
    destinations and the `dotvirt.io/repo` they name its only source, so a manifest
    merged into one tenant's repo cannot land in another tenant's namespace.
+   `dotvirt.io/path` beside it scopes the project to a folder of that repo, for a
+   repo that holds something else too. It only locates content: Argo and the forge
+   grant by repo, so a repo is one project's, and two projects naming one are refused.
    Platform space (`openshift-*`, `kube-*`, the dotvirt, operator and ArgoCD
    namespaces) is never a destination, and a repo that does not resolve to one URL
    admits no source. The rules live in `pkg/tenancy`, shared with the app's plugin
@@ -156,6 +160,19 @@ against a real cluster. Phases whose work dry-run cannot model (the secrets, the
 forge bootstrap, the workload rollout, both webhooks, the platform repo) record a
 `DryRun` condition instead, and so does `Available`: nothing serves.
 
+## Serving through a Gateway
+
+With `spec.ingress.gateway` the operator attaches HTTPRoutes for the UI and a managed
+forge to a Gateway someone else runs. Two things stay with whoever runs it:
+
+- The listener must allow routes from the Dotvirt's namespace and no other. dotvirt's
+  HTTPRoute matches every path, and the longest path wins across routes on one
+  hostname: a route another namespace attaches there with `/api/login` takes the
+  login and the tokens. Gateway API has no hostname ownership check, unlike Routes.
+- The operator adds no trust for the Gateway's certificate. A managed forge behind a
+  private CA fails x509 at ArgoCD: use a publicly trusted certificate, or keep
+  `spec.forge.url` on the in-cluster Service.
+
 ## Network policies
 
 On OpenShift the dotvirt and managed Forgejo pods get an ingress NetworkPolicy
@@ -165,6 +182,8 @@ admitting their HTTP port only from:
 - the ArgoCD namespace (the ApplicationSet plugin generator; repo-server on an
   in-cluster forge URL);
 - the operator namespace (the forge bootstrap calls Forgejo's Service);
+- a Gateway named in another namespace: that namespace, where its data plane runs.
+  A host-network data plane needs its own policy beside this one.
 - the router: the `policy-group.network.openshift.io/ingress` and `/host-network`
   namespace groups, and `openshift-ingress` by name for MicroShift. Browsers, a
   bring-your-own forge's webhooks, ArgoCD clones of a Route-exposed forge and the

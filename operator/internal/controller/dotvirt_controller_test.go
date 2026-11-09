@@ -56,6 +56,8 @@ func testScheme(t *testing.T) *runtime.Scheme {
 	s.AddKnownTypeWithName(install.ArgoCDGVK.GroupVersion().WithKind("ArgoCDList"), &unstructured.UnstructuredList{})
 	s.AddKnownTypeWithName(install.RouteGVK, &unstructured.Unstructured{})
 	s.AddKnownTypeWithName(install.RouteGVK.GroupVersion().WithKind("RouteList"), &unstructured.UnstructuredList{})
+	s.AddKnownTypeWithName(install.HTTPRouteGVK, &unstructured.Unstructured{})
+	s.AddKnownTypeWithName(install.HTTPRouteGVK.GroupVersion().WithKind("HTTPRouteList"), &unstructured.UnstructuredList{})
 	return s
 }
 
@@ -198,7 +200,7 @@ func TestReconcileHaltsOnMissingHardDependency(t *testing.T) {
 	dv := testCR()
 	c := testBuilder(t).WithObjects(dv).Build()
 	r := newReconciler(c, func(*rest.Config) (deps.Result, error) {
-		return deps.Result{MissingHard: []string{"KubeVirt / OpenShift Virtualization"}}, nil
+		return deps.Result{MissingHard: []string{"OpenShift GitOps / Argo CD"}}, nil
 	})
 
 	res := reconcileOnce(t, r, dv)
@@ -727,5 +729,78 @@ func TestEnsureTrustAnchors(t *testing.T) {
 	if err := c.Get(context.Background(), types.NamespacedName{Namespace: dv.Namespace, Name: install.ServiceCAConfigMap}, &sc); err != nil ||
 		sc.Annotations["service.beta.openshift.io/inject-cabundle"] != "true" {
 		t.Fatalf("service-CA ConfigMap not requested for injection: %v %v", err, sc.Annotations)
+	}
+}
+
+func TestAutoPicksANamedGatewayOverThePlatform(t *testing.T) {
+	gw := &dotvirtv1alpha1.GatewayRef{Name: "edge", Namespace: "gateway-system"}
+	cases := []struct {
+		name     string
+		platform platform.Platform
+		ingress  dotvirtv1alpha1.IngressSpec
+		want     dotvirtv1alpha1.IngressType
+	}{
+		{"OpenShift", platform.OpenShift, dotvirtv1alpha1.IngressSpec{}, dotvirtv1alpha1.IngressRoute},
+		{"Kubernetes", platform.Kubernetes, dotvirtv1alpha1.IngressSpec{}, dotvirtv1alpha1.IngressIngress},
+		{"a Gateway, where the Route API has no router", platform.OpenShift, dotvirtv1alpha1.IngressSpec{Host: "h", Gateway: gw}, dotvirtv1alpha1.IngressGateway},
+		{"a Gateway, explicit auto", platform.Kubernetes, dotvirtv1alpha1.IngressSpec{Type: dotvirtv1alpha1.IngressAuto, Host: "h", Gateway: gw}, dotvirtv1alpha1.IngressGateway},
+		{"an explicit type wins", platform.OpenShift, dotvirtv1alpha1.IngressSpec{Type: dotvirtv1alpha1.IngressRoute, Host: "h", Gateway: gw}, dotvirtv1alpha1.IngressRoute},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			dv := testCR()
+			dv.Spec.Ingress = c.ingress
+			r := &DotvirtReconciler{Platform: c.platform}
+			if got := r.resolveExposureType(dv); got != c.want {
+				t.Errorf("resolved %q, want %q", got, c.want)
+			}
+		})
+	}
+}
+
+// MicroShift publishes no ingress CA: an https forge URL behind a Gateway must
+// not wedge the pass on a certificate the router would have signed.
+func TestGatewayForgeNeedsNoIngressCA(t *testing.T) {
+	dv := testCR()
+	dv.Spec.Forge.Managed = true
+	dv.Spec.Forge.URL = "https://git.example.com"
+	dv.Spec.Ingress = dotvirtv1alpha1.IngressSpec{Host: "dotvirt.example.com", Gateway: &dotvirtv1alpha1.GatewayRef{Name: "edge"}}
+	r := &DotvirtReconciler{Platform: platform.OpenShift}
+	rc := &reconcileCtx{ingressCAErr: errors.New("no default-ingress-cert")}
+	if err := r.ensureForgeTLSTrust(context.Background(), dv, rc); err != nil {
+		t.Errorf("wedged on the ingress CA: %v", err)
+	}
+}
+
+// The router serves an Ingress on OpenShift with a certificate the ingress CA
+// signs: only a Gateway skips the trust.
+func TestIngressForgeStillNeedsTheIngressCA(t *testing.T) {
+	dv := testCR()
+	dv.Spec.Forge.Managed = true
+	dv.Spec.Forge.URL = "https://git.example.com"
+	dv.Spec.Ingress = dotvirtv1alpha1.IngressSpec{Type: dotvirtv1alpha1.IngressIngress, Host: "dotvirt.example.com"}
+	r := &DotvirtReconciler{Platform: platform.OpenShift}
+	rc := &reconcileCtx{ingressCAErr: errors.New("no default-ingress-cert")}
+	if err := r.ensureForgeTLSTrust(context.Background(), dv, rc); err == nil {
+		t.Error("an Ingress forge skipped the ingress CA")
+	}
+}
+
+func TestGatewayRendersAnHTTPRouteThatPruneSweeps(t *testing.T) {
+	dv := testCR()
+	dv.Spec.Ingress = dotvirtv1alpha1.IngressSpec{Host: "dotvirt.example.com", Gateway: &dotvirtv1alpha1.GatewayRef{Name: "edge", Namespace: "gateway-system"}}
+	r := &DotvirtReconciler{Platform: platform.OpenShift}
+	got, ok := r.exposure(dv).(*unstructured.Unstructured)
+	if !ok || got.GroupVersionKind() != install.HTTPRouteGVK {
+		t.Fatalf("exposure = %T %v", r.exposure(dv), got)
+	}
+	var swept bool
+	for _, sc := range pruneScopes() {
+		if l, ok := sc.list().(*unstructured.UnstructuredList); ok && l.GroupVersionKind().Kind == install.HTTPRouteGVK.Kind+"List" {
+			swept = true
+		}
+	}
+	if !swept {
+		t.Error("prune does not sweep HTTPRoutes: leaving a Gateway would strand one")
 	}
 }

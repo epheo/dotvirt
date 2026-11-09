@@ -107,8 +107,8 @@
 	const createVM = (u: ImageUse) =>
 		(ui.modal = { kind: 'newVM', namespaces: null, image: u.image });
 	const TH =
-		'border-b border-line px-3 py-2 text-left text-xs font-bold whitespace-nowrap text-ink-muted';
-	const TD = 'border-b border-line-soft px-3 py-2.5';
+		'border-b border-line px-2 py-2 text-left align-bottom text-xs font-bold text-ink-muted';
+	const TD = 'border-b border-line-soft px-2 py-2.5 whitespace-nowrap';
 </script>
 
 <div class="flex flex-wrap items-start gap-4">
@@ -129,20 +129,25 @@
 			</span>
 		</div>
 		<div class="overflow-x-auto">
-			<table class="w-full border-collapse text-[13px] tabular-nums">
+			<!-- Fixed shares: beside the open panel a long name is cut instead of
+			     pushing the columns past the card. -->
+			<table class="w-full min-w-[620px] table-fixed border-collapse text-[13px] tabular-nums">
 				<thead>
 					<tr>
 						<th scope="col" class="{TH} pl-card">Image</th>
-						<th scope="col" class={TH}>State</th>
-						<th scope="col" class="{TH} text-right">Disks made from it</th>
-						<th scope="col" class={TH}>Where they live</th>
-						<th scope="col" class={TH}>Snapshot in {FRESH_DAYS} days</th>
-						<th scope="col" class="{TH} pr-card"><span class="sr-only">Actions</span></th>
+						<th scope="col" class="{TH} w-[12%]">State</th>
+						<th scope="col" class="{TH} w-[12%] text-right">Disks made from it</th>
+						<th scope="col" class="{TH} w-[21%]">Where they live</th>
+						<th scope="col" class="{TH} w-[14%]">Snapshot in {FRESH_DAYS} days</th>
+						<th scope="col" class="{TH} w-[16%] pr-card"><span class="sr-only">Actions</span></th>
 					</tr>
 				</thead>
 				<tbody>
 					{#each pageRows as u (u.image)}
 						{@const current = u.image === openKey}
+						{@const origin = u.templates.length
+							? `${u.templates.length === 1 ? 'Template' : 'Templates'} ${u.templates.join(', ')}`
+							: `In ${u.image.split('/')[0]}`}
 						<tr
 							class="cursor-pointer {current
 								? 'bg-select shadow-[inset_3px_0_0_var(--color-accent)]'
@@ -154,24 +159,24 @@
 									<CircleDot size={16} class="shrink-0 text-ink-faint" />
 									<div class="min-w-0">
 										<button
-											class="font-mono font-medium hover:text-accent-ink"
+											class="block max-w-full truncate text-left font-mono font-medium hover:text-accent-ink"
+											title={shortName(u.image)}
 											aria-expanded={current}
 											onclick={(e) => {
 												e.stopPropagation();
 												go({ image: current ? undefined : u.image }, { replace: true });
 											}}>{shortName(u.image)}</button
 										>
-										<span class="block text-xs leading-4 text-ink-faint">
-											{u.templates.length
-												? `${u.templates.length === 1 ? 'Template' : 'Templates'} ${u.templates.join(', ')}`
-												: `In ${u.image.split('/')[0]}`}
-										</span>
+										<span class="block truncate text-xs leading-4 text-ink-faint" title={origin}
+											>{origin}</span
+										>
 									</div>
 								</div>
 							</td>
 							<td class={TD}>
-								<span class={u.catalog?.ready ? 'text-ink-soft' : 'text-warn-ink'}
-									>{imageState(u)}</span
+								<span
+									class="block truncate {u.catalog?.ready ? 'text-ink-soft' : 'text-warn-ink'}"
+									title={imageState(u)}>{imageState(u)}</span
 								>
 							</td>
 							<td class="{TD} text-right font-bold">{num(u.disks)}</td>

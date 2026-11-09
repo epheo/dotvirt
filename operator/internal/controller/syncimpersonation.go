@@ -376,7 +376,7 @@ func createAttrs(group, resource, ns string) authzv1.ResourceAttributes {
 
 // declaredKind is a tenant kind a project's repo declares in a namespace.
 type declaredKind struct {
-	kind      tenancy.GroupKind
+	kind      tenancy.Kind
 	namespace string
 }
 
@@ -393,7 +393,7 @@ func declaredKinds(rc *reconcileCtx, apps []unstructured.Unstructured) map[strin
 		for _, res := range resources {
 			m, _ := res.(map[string]any)
 			ns, _ := m["namespace"].(string)
-			i := slices.IndexFunc(tenancy.TenantKinds, func(k tenancy.GroupKind) bool { return m["group"] == k.Group && m["kind"] == k.Kind })
+			i := slices.IndexFunc(tenancy.TenantKinds, func(k tenancy.Kind) bool { return m["group"] == k.Group && m["kind"] == k.Kind })
 			if i < 0 {
 				continue
 			}

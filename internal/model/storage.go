@@ -48,3 +48,100 @@ type CapacitySegment struct {
 	Topology string `json:"topology,omitempty"` // the segment's topology label values; empty = cluster-wide
 	Free     int64  `json:"free"`
 }
+
+// Replication is GET /api/storage/replication: where every copy of every
+// replicated disk lives, and the room left. Operator-only: it names hosts.
+type Replication struct {
+	// Synced is false until every watch's first list landed, while an empty
+	// list means unknown rather than none.
+	Synced bool `json:"synced"`
+	// Stale: a watch is down and this is its last known state.
+	Stale   bool               `json:"stale,omitempty"`
+	Pools   []ReplicationPool  `json:"pools"`
+	Volumes []ReplicatedVolume `json:"volumes"`
+	Hosts   []ReplicationHost  `json:"hosts"`
+}
+
+// ReplicationPool is one r-drbd Pool: a tier's room on one host.
+type ReplicationPool struct {
+	Name       string `json:"name"`
+	Node       string `json:"node"`
+	Tier       string `json:"tier"`
+	TotalBytes int64  `json:"totalBytes"`
+	FreeBytes  int64  `json:"freeBytes"`
+	// PlaceableBytes is the largest new copy placement accepts here now.
+	PlaceableBytes int64  `json:"placeableBytes"`
+	Available      bool   `json:"available"`
+	Reason         string `json:"reason,omitempty"` // the Available condition's reason
+}
+
+// ReplicationHost is one host r-drbd's agent reports on.
+type ReplicationHost struct {
+	Name  string      `json:"name"`
+	Blank []BlankDisk `json:"blank,omitempty"` // disks a Pool could take
+}
+
+// BlankDisk is an unclaimed whole disk.
+type BlankDisk struct {
+	Path      string `json:"path"`
+	SizeBytes int64  `json:"sizeBytes"`
+	Model     string `json:"model,omitempty"`
+}
+
+// ReplicatedVolume is one r-drbd Volume and the claim it serves.
+type ReplicatedVolume struct {
+	Name       string          `json:"name"`
+	Namespace  string          `json:"namespace,omitempty"`
+	Claim      string          `json:"claim,omitempty"`
+	SizeBytes  int64           `json:"sizeBytes"`
+	Copies     int             `json:"copies"` // the copies asked for
+	Tier       string          `json:"tier"`
+	Phase      string          `json:"phase,omitempty"`
+	Primary    string          `json:"primary,omitempty"` // the host the device is open on
+	SplitBrain bool            `json:"splitBrain,omitempty"`
+	QuorumLost bool            `json:"quorumLost,omitempty"`
+	Evicting   []string        `json:"evicting,omitempty"` // hosts whose copy is being moved off
+	Replicas   []VolumeReplica `json:"replicas"`
+}
+
+// What a replica is doing, read from every replica's report.
+const (
+	ReplicaInSync      = "in-sync"
+	ReplicaCatchingUp  = "catching-up"
+	ReplicaBehind      = "behind"
+	ReplicaStandby     = "standby" // a reachable witness or diskless attachment
+	ReplicaUnreachable = "unreachable"
+	ReplicaUnknown     = "unknown" // assigned, not reported yet
+)
+
+// VolumeReplica is one assigned replica.
+type VolumeReplica struct {
+	Node        string `json:"node"`
+	Pool        string `json:"pool,omitempty"`
+	Role        string `json:"role"` // diskful, diskless or tiebreaker
+	State       string `json:"state"`
+	DiskState   string `json:"diskState,omitempty"`
+	SyncPercent *int   `json:"syncPercent,omitempty"`
+	InUse       bool   `json:"inUse,omitempty"`
+}
+
+// What a disk's owner can act on.
+const (
+	StandingProtected     = "protected"
+	StandingLocal         = "local" // one copy by choice
+	StandingCatchingUp    = "catching-up"
+	StandingExposed       = "exposed" // fewer copies in sync than asked, none catching up
+	StandingPending       = "pending"
+	StandingNeedsOperator = "needs-operator"
+)
+
+// DiskProtection is GET /api/storage/protection's row: a replicated disk's
+// standing as its owner may read it. Never a host or a pool.
+type DiskProtection struct {
+	Namespace   string `json:"namespace"`
+	Claim       string `json:"claim"`
+	Copies      int    `json:"copies"`
+	InSync      int    `json:"inSync"`
+	Standing    string `json:"standing"`
+	SyncPercent *int   `json:"syncPercent,omitempty"`
+}

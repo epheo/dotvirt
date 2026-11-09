@@ -5,6 +5,7 @@
 	import { Search } from '@lucide/svelte';
 	import { STORAGE_TABS, storageHref, storageTab } from '#lib/nav.js';
 	import { inventory } from '#lib/state/inventory.svelte.js';
+	import { vmsOff } from '#lib/state/modules.svelte.js';
 	import { storage } from '#lib/state/storage.svelte.js';
 	import { storageContext } from '#lib/storage.js';
 	import Breadcrumb from '#lib/components/Breadcrumb.svelte';
@@ -21,8 +22,13 @@
 	// count on the Library links into a view the back button and a shared link
 	// both reach.
 	storage.ensure();
+	$effect(() => storage.catchUp());
 
-	const tab = $derived(storageTab(page.url.searchParams.get('tab')));
+	// Library, Disks, Images and Snapshots all read VM disks.
+	const available = $derived(
+		vmsOff() ? STORAGE_TABS.filter((t) => t.id === 'classes') : STORAGE_TABS,
+	);
+	const tab = $derived(storageTab(page.url.searchParams.get('tab'), available));
 	const project = $derived(page.url.searchParams.get('project') ?? '');
 	const rows = $derived(project ? storage.rows.filter((r) => r.project === project) : storage.rows);
 	const disks = $derived(storage.rows.filter((r) => !r.ephemeral).length);
@@ -43,7 +49,7 @@
 		storageContext(storage.rows, storage.classNames.length, storage.hostCount),
 	);
 	const tabs = $derived(
-		STORAGE_TABS.map((t) => ({
+		available.map((t) => ({
 			id: t.id,
 			label: t.label,
 			count:

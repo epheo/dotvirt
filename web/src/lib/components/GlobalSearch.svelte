@@ -13,6 +13,7 @@
 	import { clusterGate } from '#lib/gates.js';
 	import { vmStorageKeys, NO_STORAGE } from '#lib/lenses.js';
 	import { inventory } from '#lib/state/inventory.svelte.js';
+	import { vmsOff } from '#lib/state/modules.svelte.js';
 	import { ui } from '#lib/state/ui.svelte.js';
 
 	export type SearchHit =
@@ -266,7 +267,11 @@
 			bind:value={query}
 			onfocus={() => (open = true)}
 			{onkeydown}
-			placeholder={clusterGate.hosts().ok ? 'Search VMs, hosts, disks' : 'Search VMs, disks'}
+			placeholder={vmsOff()
+				? 'Search hosts'
+				: clusterGate.hosts().ok
+					? 'Search VMs, hosts, disks'
+					: 'Search VMs, disks'}
 			aria-label="Search inventory"
 			class="w-full min-w-0 bg-transparent text-[13px] text-white placeholder-side-dim focus:outline-none"
 		/>
