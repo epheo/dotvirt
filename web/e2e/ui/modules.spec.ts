@@ -11,10 +11,16 @@ test('without VMs Compute leaves, home lands on the next section', async ({ page
 	await expect(page).toHaveURL(/\/hosts$/);
 });
 
-test('a link kept from before leaves Compute without a dead page', async ({ page }) => {
+test('a project keeps its page without VMs, and only the root leaves', async ({ page }) => {
 	await setScenario(page, 'novms');
 	await login(page);
 	await page.goto('/compute/team-web');
+	await expect(page).toHaveURL(/\/compute\/team-web$/);
+	const main = page.locator('main');
+	await expect(main.getByRole('link', { name: 'Permissions' })).toBeVisible();
+	await expect(main.getByRole('link', { name: /^VMs/ })).toHaveCount(0);
+	await expect(page.locator('aside').first().getByText('All VMs')).toHaveCount(0);
+	await page.goto('/compute');
 	await expect(page).toHaveURL(/\/hosts$/);
 });
 
@@ -25,6 +31,10 @@ test('without VMs the VM tabs leave Networking and Storage', async ({ page }) =>
 	const main = page.locator('main');
 	await expect(main.getByRole('link', { name: 'Map' })).toBeVisible();
 	await expect(main.getByRole('link', { name: /^VMs/ })).toHaveCount(0);
+
+	// A kept link lands on the page's default, not on an empty VM table.
+	await page.goto('/networking?tab=vms');
+	await expect(main.getByRole('link', { name: 'Map' })).toHaveAttribute('aria-current', 'page');
 
 	await page.goto('/storage');
 	await expect(main.getByRole('link', { name: /^Classes/ })).toBeVisible();

@@ -114,9 +114,9 @@ export const NETWORK_TABS = [
 
 // The Networking root's tab for a ?tab= value: the old names still deep-link
 // (its Summary was the topology, its Security the policy plane).
-export function networkingTab(raw: string | null): string {
+export function networkingTab(raw: string | null, tabs = NETWORKING_TABS): string {
 	if (raw === 'security') return 'firewall';
-	return NETWORKING_TABS.some((t) => t.id === raw) ? raw! : 'map';
+	return tabs.some((t) => t.id === raw) ? raw! : 'map';
 }
 
 // The Storage root's tabs: one section page, each tab one job. Disks, Images

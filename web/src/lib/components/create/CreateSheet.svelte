@@ -3,7 +3,7 @@
 	import { plural } from '#lib/format.js';
 	import { clusterGate, clusterObjectGate } from '#lib/gates.js';
 	import { inventory } from '#lib/state/inventory.svelte.js';
-	import { vmsOff } from '#lib/state/modules.svelte.js';
+	import { networksOff, vmsOff } from '#lib/state/modules.svelte.js';
 	import {
 		SHEET_TYPES,
 		SheetCtl,
@@ -61,7 +61,7 @@
 		vm: !noRepo && !vmsOff(),
 		template: !noRepo && !vmsOff(),
 		image: !noRepo && !vmsOff(),
-		network: !noRepo || can('network'),
+		network: !(vmsOff() && networksOff()) && (!noRepo || can('network')),
 		rule: !noRepo || can('adminnetworkpolicy') || can('baselineadminnetworkpolicy'),
 		outbound: can('egressip') || can('externalroute'),
 		project: clusterGate.namespaceCreate().ok,

@@ -6,12 +6,13 @@ import { CHECKING } from './caps.svelte';
 // GET /api/modules. Only a known no hides anything: null (not read yet, or the
 // read failed) keeps the console as it is.
 class ModulesStore {
-	value = $state<Modules | null>(null);
+	value = $state.raw<Modules | null>(null);
 }
 export const modules = new ModulesStore();
 
 export const vmsOff = () => modules.value !== null && !modules.value.vms;
 export const computeOff = () => vmsOff() && !modules.value?.desktops;
+export const networksOff = () => modules.value !== null && !modules.value.networks;
 
 // Where a caller lands when Compute is off; null while the Hosts answer is out,
 // or a caller allowed Hosts would land past it.

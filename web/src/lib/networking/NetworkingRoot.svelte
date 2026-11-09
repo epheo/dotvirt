@@ -22,19 +22,15 @@
 
 	// The Networking section's root: one header, five tabs. The map answers
 	// what connects to what; the other tabs list everything at scale.
-	const tab = $derived(networkingTab(page.url.searchParams.get('tab')));
+	const available = $derived(NETWORKING_TABS.filter((t) => t.id !== 'vms' || !vmsOff()));
+	const tab = $derived(networkingTab(page.url.searchParams.get('tab'), available));
 	const counts: Record<string, number> = $derived({
 		networks: inventory.networks.length,
 		firewall: networking.clusterRules.length + networking.projectRules.length,
 		uplinks: inventory.uplinks.length,
 		vms: inventory.vmCount,
 	});
-	const tabs = $derived(
-		NETWORKING_TABS.filter((t) => t.id !== 'vms' || !vmsOff()).map((t) => ({
-			...t,
-			count: counts[t.id],
-		})),
-	);
+	const tabs = $derived(available.map((t) => ({ ...t, count: counts[t.id] })));
 	const problems = $derived(networking.problems);
 	const context = $derived(
 		[
