@@ -138,7 +138,14 @@
 		placeholder="Filter {projects.length} projects"
 	/>
 
-	{#if !vmsOff()}
+	{#if vmsOff()}
+		<TreeRow active={scope.kind === 'all'} href="/compute">
+			<span class="truncate text-side-ink">All projects</span>
+			{#snippet trailing()}<span class="text-xs text-side-dim"
+					>{fmt(inventory.projects.length)}</span
+				>{/snippet}
+		</TreeRow>
+	{:else}
 		<!-- A row keeps the tab in view (keepTab), so All VMs names its tab to leave Templates. -->
 		<TreeRow
 			active={scope.kind === 'all' && page.url.pathname.startsWith('/compute') && !onTemplates}

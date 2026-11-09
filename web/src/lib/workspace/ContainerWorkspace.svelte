@@ -16,7 +16,7 @@
 	import { drafts } from '#lib/state/drafts.svelte.js';
 	import { hostFacts } from '#lib/state/hosts.svelte.js';
 	import { inventory } from '#lib/state/inventory.svelte.js';
-	import { vmsOff } from '#lib/state/modules.svelte.js';
+	import { computeRoot, vmsOff } from '#lib/state/modules.svelte.js';
 	import { reviewCache } from '#lib/state/reviewCache.svelte.js';
 	import { ui } from '#lib/state/ui.svelte.js';
 	import AdoptBanner from '#lib/components/AdoptBanner.svelte';
@@ -37,6 +37,7 @@
 	import BulkDeleteConfirm from './BulkDeleteConfirm.svelte';
 	import HostsRootSummary from './HostsRootSummary.svelte';
 	import NodeConfigure from './NodeConfigure.svelte';
+	import ProjectsList from './ProjectsList.svelte';
 	import TemplatesTab from './TemplatesTab.svelte';
 
 	// The container workspace: every inventory level, section roots included,
@@ -200,10 +201,11 @@
 				context: `${vms} in ${plural(p?.namespaces.length ?? 0, 'namespace')}`,
 			};
 		}
+		const projects = plural(inventory.projects.length, 'project');
 		return {
-			title: 'All VMs',
-			status,
-			context: `${vms} in ${plural(inventory.projects.length, 'project')}`,
+			title: computeRoot(),
+			status: vmsOff() ? null : status,
+			context: vmsOff() ? projects : `${vms} in ${projects}`,
 		};
 	});
 
@@ -393,6 +395,8 @@
 			{#if tab === 'summary'}
 				{#if root && section === 'hosts'}
 					<HostsRootSummary vms={scopedVMs} {facts} />
+				{:else if root && vmsOff()}
+					<ProjectsList />
 				{:else}
 					{#if scope.kind === 'project' || scope.kind === 'namespace'}
 						<!-- The project's standing prompts, as callouts on the ground; the

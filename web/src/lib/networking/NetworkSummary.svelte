@@ -30,6 +30,7 @@
 	import { hasOwnRule, topLines, wildcardSummary, type RuleLine } from '#lib/rulelines.js';
 	import { overlaps, usableAddresses } from '#lib/subnets.js';
 	import { inventory } from '#lib/state/inventory.svelte.js';
+	import { vmsOff } from '#lib/state/modules.svelte.js';
 	import { networking } from '#lib/state/networking.svelte.js';
 	import { ui } from '#lib/state/ui.svelte.js';
 	import Button from '#lib/components/Button.svelte';
@@ -580,6 +581,13 @@
 							<Consequence size="sm" tone="info"
 								>Each VM gets a {net.name} NIC at its next restart.</Consequence
 							>
+							{#if !vmsOff()}
+								<p class="pl-[15px] text-xs leading-4 text-ink-muted">
+									Attach as <code class="font-mono break-all text-ink select-all"
+										>{attachRef(net)}</code
+									> in a VM manifest.
+								</p>
+							{/if}
 						</div>
 					{/if}
 					{#if subnet}

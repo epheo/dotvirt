@@ -50,6 +50,7 @@ test('a network page answers where it connects and stages an attach', async ({ p
 	const main = page.locator('main');
 	await expect(main.getByRole('heading', { name: 'Where it connects' })).toBeVisible();
 	await expect(main.getByText('Shared network, 3 projects')).toBeVisible();
+	await expect(main.getByText('Attach as blue-secondary in a VM manifest.')).toBeVisible();
 	await main.getByRole('button', { name: 'Attach VMs' }).click();
 	const dialog = page.getByRole('dialog', { name: 'Attach VMs to blue-secondary' });
 	await dialog.getByRole('checkbox').first().check();
