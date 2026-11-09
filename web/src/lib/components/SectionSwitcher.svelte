@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { Database, GitBranch, Monitor, Network, Server } from '@lucide/svelte';
+	import { Database, Folder, GitBranch, Monitor, Network, Server } from '@lucide/svelte';
 	import { clusterGate } from '#lib/gates.js';
 	import type { Section } from '#lib/nav.js';
 	import { computeOff } from '#lib/state/modules.svelte.js';
@@ -38,7 +38,12 @@
 				? 'bg-side-active text-side-ink'
 				: 'text-side-dim hover:bg-side-hover hover:text-side-ink'}"
 		>
-			{#if s.id === 'compute'}<Monitor size={22} strokeWidth={1.75} class="shrink-0" />
+			{#if s.id === 'compute' && computeOff()}<Folder
+					size={22}
+					strokeWidth={1.75}
+					class="shrink-0"
+				/>
+			{:else if s.id === 'compute'}<Monitor size={22} strokeWidth={1.75} class="shrink-0" />
 			{:else if s.id === 'hosts'}<Server size={22} strokeWidth={1.75} class="shrink-0" />
 			{:else if s.id === 'networking'}<Network size={22} strokeWidth={1.75} class="shrink-0" />
 			{:else if s.id === 'storage'}<Database size={22} strokeWidth={1.75} class="shrink-0" />

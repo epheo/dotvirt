@@ -9,6 +9,12 @@ test('without VMs the first tile is Projects and home lists them', async ({ page
 	await page.goto('/');
 	await expect(tiles(page)).toHaveText(['Projects', 'Hosts', 'Networking', 'Storage', 'Changes']);
 	await expect(page).toHaveURL(/\/compute$/);
+	await expect(
+		page
+			.locator('aside')
+			.first()
+			.getByRole('link', { name: /^All projects/ }),
+	).toHaveAttribute('aria-current', 'page');
 	const main = page.locator('main');
 	await main.getByRole('link', { name: 'team-web', exact: true }).click();
 	await expect(page).toHaveURL(/\/compute\/team-web$/);
@@ -52,6 +58,14 @@ test('without VMs New opens on a network and offers no VM', async ({ page }) => 
 	await expect(page.getByRole('radio', { name: 'Network', exact: true })).toBeChecked();
 	await expect(page.getByRole('radio', { name: 'VM', exact: true })).toHaveCount(0);
 	await expect(page.getByRole('radio', { name: 'Image', exact: true })).toHaveCount(0);
+});
+
+test('without VMs New on the Projects root opens on a project', async ({ page }) => {
+	await setScenario(page, 'novms');
+	await login(page);
+	await page.goto('/compute');
+	await page.getByRole('button', { name: 'New', exact: true }).click();
+	await expect(page.getByRole('radio', { name: 'Project', exact: true })).toBeChecked();
 });
 
 test('an unanswered module read keeps the whole console', async ({ page }) => {
