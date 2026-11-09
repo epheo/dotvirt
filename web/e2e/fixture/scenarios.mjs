@@ -1616,7 +1616,21 @@ const platstager = {
 };
 // --- end platstager ---
 
+// A cluster without KubeVirt: storage and networking only.
+const novms = {
+	...base,
+	inventory: {
+		...base.inventory,
+		projects: base.inventory.projects.map((p) => ({
+			...p,
+			namespaces: p.namespaces.map((n) => ({ ...n, vms: [] })),
+		})),
+	},
+	modules: { vms: false },
+};
+
 export const scenarios = {
+	novms,
 	residue,
 	sso,
 	ssoready,

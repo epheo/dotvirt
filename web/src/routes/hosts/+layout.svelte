@@ -12,8 +12,10 @@
 	// reads them. Only a known no leaves: while the answer is out, or if it
 	// failed, the URL stays and a reload keeps the page.
 	const gate = $derived(clusterGate.hosts());
+	// A bool, so a re-read of the answer during the redirect toasts no second time.
+	const denied = $derived(caps.cluster?.hosts === false);
 	$effect(() => {
-		if (caps.cluster?.hosts !== false) return;
+		if (!denied) return;
 		untrack(() => ui.showToast(gate.why));
 		goto('/compute', { replace: true });
 	});

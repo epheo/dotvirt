@@ -48,17 +48,17 @@ const (
 	PhaseBlockedOnDependencies = "BlockedOnDependencies"
 )
 
-// IngressType selects how the dotvirt Route is exposed. "auto" picks Route on
-// OpenShift and Ingress on vanilla Kubernetes (the operator detects the platform).
-// No gateway value: nothing renders it, so admission rejects it instead of a
-// silent no-exposure install.
-// +kubebuilder:validation:Enum=auto;route;ingress
+// IngressType selects how the dotvirt UI is exposed. "auto" picks a Gateway when
+// spec.ingress.gateway names one, else Route on OpenShift and Ingress on vanilla
+// Kubernetes (the operator detects the platform).
+// +kubebuilder:validation:Enum=auto;route;ingress;gateway
 type IngressType string
 
 const (
 	IngressAuto    IngressType = "auto"
 	IngressRoute   IngressType = "route"
 	IngressIngress IngressType = "ingress"
+	IngressGateway IngressType = "gateway"
 )
 
 // ForgeSpec points dotvirt at its git forge and the platform-tier repo. The forge
@@ -125,12 +125,32 @@ type SyncImpersonationSpec struct {
 }
 
 // IngressSpec controls how the UI is exposed.
+// +kubebuilder:validation:XValidation:rule="!has(self.type) || self.type != 'gateway' || has(self.gateway)",message="type gateway needs spec.ingress.gateway"
+// +kubebuilder:validation:XValidation:rule="!has(self.gateway) || (has(self.host) && size(self.host) > 0)",message="a Gateway serves named hosts: set spec.ingress.host"
 type IngressSpec struct {
 	Type IngressType `json:"type,omitempty"`
 	// Host is the external hostname the UI is served on. Leave empty on OpenShift for a
 	// router-assigned host (reported in status.consoleURL); required for an Ingress on
-	// vanilla Kubernetes.
+	// vanilla Kubernetes and for a Gateway.
 	Host string `json:"host,omitempty"`
+	// Gateway is what serves the UI and a managed forge, through HTTPRoutes. Its
+	// listener terminates TLS: the console URL is https. Name one where no router
+	// serves Routes, such as MicroShift with its ingress Removed.
+	Gateway *GatewayRef `json:"gateway,omitempty"`
+}
+
+// GatewayRef names the Gateway API Gateway the HTTPRoutes attach to.
+type GatewayRef struct {
+	// +kubebuilder:validation:MinLength=1
+	Name string `json:"name"`
+	// Namespace of the Gateway; empty is this Dotvirt's. Its listener must allow
+	// routes from the Dotvirt's namespace and no other: dotvirt's HTTPRoute
+	// matches every path, so a route another namespace attaches on the same
+	// hostname with a longer path takes that path, /api/login included.
+	Namespace string `json:"namespace,omitempty"`
+	// SectionName attaches to one listener; empty attaches to every listener
+	// that admits the hostname.
+	SectionName string `json:"sectionName,omitempty"`
 }
 
 // MetricsSpec points the Performance tab at a Prometheus/Thanos query API; empty

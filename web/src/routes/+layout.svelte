@@ -9,6 +9,7 @@
 		api,
 		onUnauthorized,
 		type Alert,
+		type Modules,
 		streamInventory,
 		Unauthorized,
 		type StreamStatus,
@@ -23,6 +24,7 @@
 	import { storage } from '#lib/state/storage.svelte.js';
 	import { clusterGate } from '#lib/gates.js';
 	import { caps } from '#lib/state/caps.svelte.js';
+	import { modules } from '#lib/state/modules.svelte.js';
 	import { lastSection } from '#lib/state/nav.svelte.js';
 	import { session } from '#lib/state/session.svelte.js';
 	import { tray } from '#lib/state/tray.svelte.js';
@@ -78,6 +80,7 @@
 			templates.reset();
 			storage.reset();
 			caps.reset();
+			modules.value = null;
 			tray.reset();
 		}
 	});
@@ -181,6 +184,16 @@
 	);
 	$effect(() => {
 		inventory.alerts = alarms.failed ? null : (alarms.data ?? []);
+	});
+
+	// Kept across a failed read: a blip must not bring dead tiles back.
+	const moduleRead = resource<Modules | null>(
+		() => (session.user ? 'on' : ''),
+		(k) => (k ? api.modules() : Promise.resolve(null)),
+		{ poll: () => (session.user ? 60000 : 0) },
+	);
+	$effect(() => {
+		if (moduleRead.data) modules.value = moduleRead.data;
 	});
 
 	// Recompute the draft summary only when the SET of projects or PR lanes

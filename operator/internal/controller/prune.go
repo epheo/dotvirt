@@ -107,6 +107,7 @@ func pruneScopes() []pruneScope {
 		{typedList(&networkingv1.NetworkPolicyList{}), installNS},
 		{typedList(&networkingv1.IngressList{}), installNS},
 		{unstructuredList(install.RouteGVK), installNS},
+		{unstructuredList(install.HTTPRouteGVK), installNS},
 		{typedList(&rbacv1.ClusterRoleBindingList{}), anywhere},
 	}
 	for _, kind := range []string{"AppProject", "Application", "ApplicationSet"} {

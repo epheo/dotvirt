@@ -4,6 +4,7 @@
 	import { hrefForScope, scopeFromPath, storageHref, storageTab } from '#lib/nav.js';
 	import { TOP_GROUPS, fold, matches } from '#lib/rail.js';
 	import { inventory } from '#lib/state/inventory.svelte.js';
+	import { vmsOff } from '#lib/state/modules.svelte.js';
 	import { storage } from '#lib/state/storage.svelte.js';
 	import { classTag, num, projectsBySize } from '#lib/storage.js';
 	import RailFilter from './RailFilter.svelte';
@@ -55,42 +56,45 @@
 	aria-label="Storage scope"
 	class="flex flex-col gap-0.5 px-2.5 pt-3 pb-3 text-[13px] select-none"
 >
-	<div class={HEAD}>Projects</div>
-	<TreeRow href={projectHref(null)} active={onRoot && !current}>
-		<span class="truncate">All projects</span>
-		{#snippet trailing()}<span class="text-xs text-side-dim">{num(projects.length)}</span>{/snippet}
-	</TreeRow>
-	{#if expanded && projects.length > 20}
-		<RailFilter
-			bind:value={query}
-			label="Filter projects"
-			placeholder="Filter {projects.length} projects"
-		/>
-	{/if}
-	{#each shown as p (p.name)}
-		<TreeRow href={projectHref(p.name)} active={p.name === current}>
-			<span class="truncate">{p.name}</span>
-			{#snippet trailing()}
-				<span class="text-xs text-side-dim">{num(p.vms)} {p.vms === 1 ? 'VM' : 'VMs'}</span>
-			{/snippet}
+	{#if !vmsOff()}
+		<div class={HEAD}>Projects</div>
+		<TreeRow href={projectHref(null)} active={onRoot && !current}>
+			<span class="truncate">All projects</span>
+			{#snippet trailing()}<span class="text-xs text-side-dim">{num(projects.length)}</span
+				>{/snippet}
 		</TreeRow>
-	{/each}
-	{#if expanded && query.trim() && shown.length === 0}
-		<div class="px-2 py-1.5 text-xs text-side-dim">No project matches.</div>
-	{/if}
-	{#if folded.folded.length > 0}
-		<button
-			class="flex w-full items-center rounded py-1.5 pr-2 pl-2 text-left text-side-dim hover:bg-side-hover/60 hover:text-side-ink"
-			aria-expanded={expanded}
-			onclick={() => {
-				expanded = !expanded;
-				query = '';
-			}}
-		>
-			{expanded
-				? 'Fewer projects'
-				: `${num(folded.folded.length)} more ${folded.folded.length === 1 ? 'project' : 'projects'}`}
-		</button>
+		{#if expanded && projects.length > 20}
+			<RailFilter
+				bind:value={query}
+				label="Filter projects"
+				placeholder="Filter {projects.length} projects"
+			/>
+		{/if}
+		{#each shown as p (p.name)}
+			<TreeRow href={projectHref(p.name)} active={p.name === current}>
+				<span class="truncate">{p.name}</span>
+				{#snippet trailing()}
+					<span class="text-xs text-side-dim">{num(p.vms)} {p.vms === 1 ? 'VM' : 'VMs'}</span>
+				{/snippet}
+			</TreeRow>
+		{/each}
+		{#if expanded && query.trim() && shown.length === 0}
+			<div class="px-2 py-1.5 text-xs text-side-dim">No project matches.</div>
+		{/if}
+		{#if folded.folded.length > 0}
+			<button
+				class="flex w-full items-center rounded py-1.5 pr-2 pl-2 text-left text-side-dim hover:bg-side-hover/60 hover:text-side-ink"
+				aria-expanded={expanded}
+				onclick={() => {
+					expanded = !expanded;
+					query = '';
+				}}
+			>
+				{expanded
+					? 'Fewer projects'
+					: `${num(folded.folded.length)} more ${folded.folded.length === 1 ? 'project' : 'projects'}`}
+			</button>
+		{/if}
 	{/if}
 
 	<div class="{HEAD} pt-3">Classes</div>
