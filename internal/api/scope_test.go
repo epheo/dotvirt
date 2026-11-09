@@ -35,7 +35,6 @@ import (
 	"github.com/epheo/dotvirt/internal/cluster"
 	"github.com/epheo/dotvirt/internal/clusterstate"
 	"github.com/epheo/dotvirt/internal/eventbus"
-	"github.com/epheo/dotvirt/internal/model"
 	"github.com/epheo/dotvirt/internal/modules"
 	"github.com/epheo/dotvirt/internal/restfactory"
 )
