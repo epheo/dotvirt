@@ -3,25 +3,33 @@ import { expect, login, setScenario, test } from './fx';
 const tiles = (page: import('@playwright/test').Page) =>
 	page.locator('aside').first().locator('nav a');
 
-test('without VMs Compute leaves, home lands on the next section', async ({ page }) => {
+test('without VMs the first tile is Projects and home lists them', async ({ page }) => {
 	await setScenario(page, 'novms');
 	await login(page);
 	await page.goto('/');
-	await expect(tiles(page)).toHaveText(['Hosts', 'Networking', 'Storage', 'Changes']);
-	await expect(page).toHaveURL(/\/hosts$/);
+	await expect(tiles(page)).toHaveText(['Projects', 'Hosts', 'Networking', 'Storage', 'Changes']);
+	await expect(page).toHaveURL(/\/compute$/);
+	await expect(
+		page
+			.locator('aside')
+			.first()
+			.getByRole('link', { name: /^All projects/ }),
+	).toHaveAttribute('aria-current', 'page');
+	const main = page.locator('main');
+	await main.getByRole('link', { name: 'team-web', exact: true }).click();
+	await expect(page).toHaveURL(/\/compute\/team-web$/);
 });
 
-test('a project keeps its page without VMs, and only the root leaves', async ({ page }) => {
+test('a project keeps its page without VMs, under All projects', async ({ page }) => {
 	await setScenario(page, 'novms');
 	await login(page);
 	await page.goto('/compute/team-web');
-	await expect(page).toHaveURL(/\/compute\/team-web$/);
 	const main = page.locator('main');
 	await expect(main.getByRole('link', { name: 'Permissions' })).toBeVisible();
 	await expect(main.getByRole('link', { name: /^VMs/ })).toHaveCount(0);
+	await expect(main.getByRole('link', { name: 'All projects', exact: true })).toBeVisible();
+	await expect(main.getByText('All VMs')).toHaveCount(0);
 	await expect(page.locator('aside').first().getByText('All VMs')).toHaveCount(0);
-	await page.goto('/compute');
-	await expect(page).toHaveURL(/\/hosts$/);
 });
 
 test('without VMs the VM tabs leave Networking and Storage', async ({ page }) => {
@@ -54,6 +62,14 @@ test('without VMs New opens on a network and offers no VM', async ({ page }) => 
 	await expect(page.getByRole('radio', { name: 'Network', exact: true })).toBeChecked();
 	await expect(page.getByRole('radio', { name: 'VM', exact: true })).toHaveCount(0);
 	await expect(page.getByRole('radio', { name: 'Image', exact: true })).toHaveCount(0);
+});
+
+test('without VMs New on the Projects root opens on a project', async ({ page }) => {
+	await setScenario(page, 'novms');
+	await login(page);
+	await page.goto('/compute');
+	await page.getByRole('button', { name: 'New', exact: true }).click();
+	await expect(page.getByRole('radio', { name: 'Project', exact: true })).toBeChecked();
 });
 
 test('an unanswered module read keeps the whole console', async ({ page }) => {

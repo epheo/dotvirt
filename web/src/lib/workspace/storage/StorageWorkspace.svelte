@@ -22,6 +22,7 @@
 	// count on the Library links into a view the back button and a shared link
 	// both reach.
 	storage.ensure();
+	$effect(() => storage.catchUp());
 
 	// Library, Disks, Images and Snapshots all read VM disks.
 	const available = $derived(
