@@ -45,7 +45,7 @@ func TestApplyRolesCoverEveryDeclarableKind(t *testing.T) {
 	for _, k := range tenancy.Kinds {
 		// A DataVolume's create comes with the project's admin grant, through
 		// CDI's aggregated role.
-		if !(k.Tenant || k.Platform) || k.Kind == "DataVolume" {
+		if (!k.Tenant && !k.Platform) || k.Kind == "DataVolume" {
 			continue
 		}
 		if !grants(k) {
