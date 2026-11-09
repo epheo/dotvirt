@@ -369,3 +369,24 @@ func TestBuildRepoErrorHidesDetail(t *testing.T) {
 		t.Errorf("project error = %q, want the fixed %q", p.Error, "repo unavailable")
 	}
 }
+
+// A VM declared elsewhere in the repo is someone else's, even in a namespace
+// the project holds.
+func TestBuildReadsOnlyTheProjectsFolder(t *testing.T) {
+	bare := seedRepoFiles(t, map[string]string{
+		"clusters/a/tenant-a/web.yaml": vmYAML("web", "tenant-a"),
+		"tenant-a/stray.yaml":          vmYAML("stray", "tenant-a"),
+	})
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	repos := git.NewRepoSet(ctx, "", "", nil, false, nil, time.Hour)
+	inv := Build(Inputs{
+		Branch:   "main",
+		Repos:    repos,
+		Projects: []project.ProjectInfo{{Name: "team-a", Repo: bare, Path: "clusters/a", Namespaces: []string{"tenant-a"}}},
+	})
+	vms := inv.Projects[0].Namespaces[0].VMs
+	if len(vms) != 1 || vms[0].Name != "web" {
+		t.Errorf("vms = %+v, want the folder's web alone", vms)
+	}
+}

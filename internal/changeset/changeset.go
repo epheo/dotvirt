@@ -137,7 +137,7 @@ func (r *Reader) pair(proj project.ProjectInfo) (*git.Repo, *git.WriteRepo, erro
 	if err := requireRepo(proj); err != nil {
 		return nil, nil, err
 	}
-	read, write, err := r.repos.GetAt(proj.Repo, proj.Path)
+	read, write, err := r.repos.Get(proj.Repo, proj.Path)
 	if err != nil {
 		log.Printf("changeset: project %s repo: %v", proj.Name, err)
 		return nil, nil, fmt.Errorf("%w: project repo unreachable", model.ErrUnavailable)

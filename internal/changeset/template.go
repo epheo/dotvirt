@@ -198,7 +198,7 @@ func (c *Coordinator) StageUpdateTemplate(id auth.Identity, commitProj project.P
 // ArgoCD-applied path, so the seed changes nothing on the cluster, and a
 // failure only leaves the new library empty - never fails project creation.
 func (c *Coordinator) seedTemplates(repoURL string) {
-	_, write, err := c.repos.Get(repoURL)
+	_, write, err := c.repos.Get(repoURL, "")
 	if err != nil {
 		log.Printf("seed templates %s: %v", repoURL, err)
 		return

@@ -98,14 +98,12 @@ func NewRepoSet(ctx context.Context, forgeURL, forgeUser string, tokenFn forge.T
 // first call (and starting that repo's background poll). Subsequent calls return
 // the cached pair. The read clone can fail (network/auth/bad URL); the write view
 // is lazy (clones per commit) so OpenWrite itself never errors.
-func (s *RepoSet) Get(repoURL string) (*Repo, *WriteRepo, error) {
-	return s.GetAt(repoURL, "")
-}
-
-// GetAt is Get scoped to the folder root of the repo: every path read or written
-// through the pair is relative to it. One project per repo, so one pair per URL:
-// a folder that moved replaces it.
-func (s *RepoSet) GetAt(repoURL, root string) (*Repo, *WriteRepo, error) {
+//
+// root scopes the pair to a folder of the repo, "" being all of it: every path
+// read or written through the pair is relative to it. A required argument, since
+// one project per repo means one pair per URL: a caller naming another folder
+// replaces the pair, and a re-clone on every alternation.
+func (s *RepoSet) Get(repoURL, root string) (*Repo, *WriteRepo, error) {
 	key := forge.NormalizeRepoURL(repoURL)
 	var done chan struct{}
 	for done == nil {

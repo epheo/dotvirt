@@ -149,6 +149,26 @@ func TestResolvePath(t *testing.T) {
 	}
 }
 
+// Reading a project as the whole repo would let its writes land outside the folder.
+func TestAFolderHoldsForACallerWhoSeesOnlyOtherNamespaces(t *testing.T) {
+	repo := "https://forge/team-a.git"
+	nss := []Namespace{withPath(nsInfo("a", "team-a", repo), "clusters/a"), nsInfo("b", "team-a", repo)}
+	infos := resolver().Resolve(nss, map[string]bool{"b": true})
+	if len(infos) != 1 || infos[0].Path != "clusters/a" || infos[0].Error != "" {
+		t.Errorf("filtered view: %+v", infos)
+	}
+}
+
+// Two spellings of one URL are one repo, as the mirror cache keys them.
+func TestASharedRepoIsFoundUnderAnySpelling(t *testing.T) {
+	nss := []Namespace{withPath(nsInfo("a", "team-a", "https://forge/shared.git"), "a"), nsInfo("b", "team-b", "https://forge/shared")}
+	for _, p := range resolver().Resolve(nss, nil) {
+		if p.Error == "" {
+			t.Errorf("%s: %+v, want it refused", p.Name, p)
+		}
+	}
+}
+
 // Argo and the forge grant by repo, so a folder cannot separate two tenants.
 func TestAFolderCannotShareARepo(t *testing.T) {
 	repo := "https://forge/shared.git"

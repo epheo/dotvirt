@@ -129,22 +129,22 @@ func TestAMovedPinNamesThePathInsideTheFolder(t *testing.T) {
 	}
 }
 
-func TestGetAtScopesThePair(t *testing.T) {
+func TestGetScopesThePair(t *testing.T) {
 	bare := seedRepo(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	rs := NewRepoSet(ctx, "", "", nil, false, nil, time.Hour)
-	first, firstW, err := rs.GetAt(bare, "a")
+	first, firstW, err := rs.Get(bare, "a")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if first.root != "a" || firstW.root != "a" {
 		t.Errorf("roots = %q, %q", first.root, firstW.root)
 	}
-	if again, _, _ := rs.GetAt(bare, "a"); again != first {
+	if again, _, _ := rs.Get(bare, "a"); again != first {
 		t.Error("the same folder re-opened the repo")
 	}
-	moved, _, err := rs.GetAt(bare, "b")
+	moved, _, err := rs.Get(bare, "b")
 	if err != nil {
 		t.Fatal(err)
 	}

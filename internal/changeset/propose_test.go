@@ -246,14 +246,14 @@ func TestAdoptProjectRetriesRecreatedRepoAtOnce(t *testing.T) {
 			return 0, "", false
 		})
 	repoURL = filepath.Join(filepath.Dir(f.proj.Repo), "team-a.git")
-	if _, _, err := f.repos.Get(repoURL); err == nil {
+	if _, _, err := f.repos.Get(repoURL, ""); err == nil {
 		t.Fatal("the lost repo must fail to open before adoption")
 	}
 
 	if _, err := f.c.AdoptProject(f.id, f.platform(), f.target("team-a"), nil, nil); err != nil {
 		t.Fatalf("AdoptProject: %v", err)
 	}
-	if _, _, err := f.repos.Get(repoURL); err != nil {
+	if _, _, err := f.repos.Get(repoURL, ""); err != nil {
 		t.Fatalf("re-created repo still served the cached failure: %v", err)
 	}
 }

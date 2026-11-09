@@ -70,7 +70,6 @@ func NewResolver(projectLabel, repoAnno, forgeBase string) *Resolver {
 type accum struct {
 	namespaces []string
 	repos      map[string]struct{}
-	paths      map[string]struct{}
 }
 
 // Resolve groups the project-labeled namespaces into projects, keeping only those
@@ -87,6 +86,7 @@ type accum struct {
 // the visible set, computed once per token and cached by the caller.
 func (r *Resolver) Resolve(namespaces []Namespace, visible map[string]bool) []ProjectInfo {
 	shared := r.sharedRepos(namespaces)
+	folders := r.folders(namespaces)
 	byProject := map[string]*accum{}
 	for _, ns := range namespaces {
 		if visible != nil && !visible[ns.Name] {
@@ -104,7 +104,7 @@ func (r *Resolver) Resolve(namespaces []Namespace, visible map[string]bool) []Pr
 		}
 		a := byProject[name]
 		if a == nil {
-			a = &accum{repos: map[string]struct{}{}, paths: map[string]struct{}{}}
+			a = &accum{repos: map[string]struct{}{}}
 			byProject[name] = a
 		}
 		a.namespaces = append(a.namespaces, ns.Name)
@@ -112,10 +112,6 @@ func (r *Resolver) Resolve(namespaces []Namespace, visible map[string]bool) []Pr
 		// one repo rather than a conflict.
 		if repo := ns.Annotations[r.repoAnno]; repo != "" {
 			a.repos[forge.ResolveRef(r.forgeBase, repo)] = struct{}{}
-		}
-		// Absent is no opinion, like the repo: a namespace added later need not repeat it.
-		if p, ok := ns.Annotations[tenancy.PathAnnotation]; ok {
-			a.paths[p] = struct{}{}
 		}
 	}
 
@@ -138,9 +134,9 @@ func (r *Resolver) Resolve(namespaces []Namespace, visible map[string]bool) []Pr
 			info.Error = "conflicting dotvirt.io/repo annotations across the project's namespaces"
 		}
 		if info.Error == "" {
-			info.Path, info.Error = a.path()
+			info.Path, info.Error = folderOf(folders[name])
 		}
-		if info.Error == "" && shared[info.Repo] {
+		if info.Error == "" && shared[forge.NormalizeRepoURL(info.Repo)] {
 			info.Error = "this repo is also another project's: a folder does not separate tenants, give each project its own repo"
 		}
 		if info.Error != "" {
@@ -152,12 +148,32 @@ func (r *Resolver) Resolve(namespaces []Namespace, visible map[string]bool) []Pr
 	return out
 }
 
-// path is the project's one folder, or why it has none.
-func (a *accum) path() (string, string) {
-	if len(a.paths) > 1 {
+// folders are the path annotations of each project, across every namespace,
+// whatever the caller may see: a caller shown only a namespace without one must
+// not read the project as the whole repo. Absent is no opinion, as for the repo:
+// a namespace added later need not repeat it.
+func (r *Resolver) folders(namespaces []Namespace) map[string]map[string]struct{} {
+	out := map[string]map[string]struct{}{}
+	for _, ns := range namespaces {
+		name := ns.Labels[r.projectLabel]
+		p, ok := ns.Annotations[tenancy.PathAnnotation]
+		if name == "" || !ok {
+			continue
+		}
+		if out[name] == nil {
+			out[name] = map[string]struct{}{}
+		}
+		out[name][p] = struct{}{}
+	}
+	return out
+}
+
+// folderOf is a project's one folder, or why it has none.
+func folderOf(paths map[string]struct{}) (string, string) {
+	if len(paths) > 1 {
 		return "", "conflicting dotvirt.io/path annotations across the project's namespaces"
 	}
-	for p := range a.paths {
+	for p := range paths {
 		clean, ok := CleanPath(p)
 		if !ok {
 			return "", "invalid dotvirt.io/path annotation"
@@ -203,7 +219,8 @@ func (r *Resolver) sharedRepos(namespaces []Namespace) map[string]bool {
 		if name == "" || name == PlatformName || ref == "" {
 			continue
 		}
-		repo := forge.ResolveRef(r.forgeBase, ref)
+		// Normalized as RepoSet keys them: .../r and .../r.git are one repo.
+		repo := forge.NormalizeRepoURL(forge.ResolveRef(r.forgeBase, ref))
 		u := byRepo[repo]
 		if u == nil {
 			u = &use{projects: map[string]bool{}}
