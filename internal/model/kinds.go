@@ -1,14 +1,17 @@
 package model
 
-import "strings"
+import (
+	"strings"
+
+	"github.com/epheo/dotvirt/pkg/tenancy"
+)
 
 // The managed-object vocabulary: every Kubernetes kind dotvirt's repos
 // declare, the draft resource each backs, and what the Changes pane calls a
 // change to it. Draft labels, API gates, watches, renderers, adoption and the
 // git index all derive their view from this table, so a kind is added here and
-// nowhere else. Which kinds a tenant repo may hold is pkg/tenancy's TenantKinds,
-// shared with the operator's tenant AppProject; the platform AppProject's
-// whitelist mirrors this table by hand across the module boundary.
+// nowhere else. A kind's coordinates, and which repos may hold it, are
+// pkg/tenancy's Kinds, shared with the operator's AppProjects.
 
 // ClusterScopeNS stands in for the empty namespace of a cluster-scoped object
 // wherever an identity is ns/name-shaped: draft keys and the object routes.
@@ -144,29 +147,39 @@ func (r Resource) KindNames() []string {
 // The managed kinds, each spelled once; a consumer that knows which kind it
 // wants names the var rather than looking the name up.
 var (
-	KindVM       = Kind{Kind: "VirtualMachine", Group: "kubevirt.io", Version: "v1", Plural: "virtualmachines"}
-	KindUDN      = Kind{Kind: "UserDefinedNetwork", Group: "k8s.ovn.org", Version: "v1", Plural: "userdefinednetworks"}
-	KindCUDN     = Kind{Kind: "ClusterUserDefinedNetwork", Group: "k8s.ovn.org", Version: "v1", Plural: "clusteruserdefinednetworks", ClusterScoped: true}
-	KindNAD      = Kind{Kind: "NetworkAttachmentDefinition", Group: "k8s.cni.cncf.io", Version: "v1", Plural: "network-attachment-definitions"}
-	KindNNCP     = Kind{Kind: "NodeNetworkConfigurationPolicy", Group: "nmstate.io", Version: "v1", Plural: "nodenetworkconfigurationpolicies", ClusterScoped: true}
-	KindNS       = Kind{Kind: "Namespace", Version: "v1", Plural: "namespaces", ClusterScoped: true}
-	KindRB       = Kind{Kind: "RoleBinding", Group: "rbac.authorization.k8s.io", Version: "v1", Plural: "rolebindings"}
-	KindEgressFW = Kind{Kind: "EgressFirewall", Group: "k8s.ovn.org", Version: "v1", Plural: "egressfirewalls"}
-	KindEgressIP = Kind{Kind: "EgressIP", Group: "k8s.ovn.org", Version: "v1", Plural: "egressips", ClusterScoped: true}
-	KindExtRoute = Kind{Kind: "AdminPolicyBasedExternalRoute", Group: "k8s.ovn.org", Version: "v1", Plural: "adminpolicybasedexternalroutes", ClusterScoped: true}
-	KindNetpol   = Kind{Kind: "NetworkPolicy", Group: "networking.k8s.io", Version: "v1", Plural: "networkpolicies"}
-	KindANP      = Kind{Kind: "AdminNetworkPolicy", Group: "policy.networking.k8s.io", Version: "v1alpha1", Plural: "adminnetworkpolicies", ClusterScoped: true}
-	KindBANP     = Kind{Kind: "BaselineAdminNetworkPolicy", Group: "policy.networking.k8s.io", Version: "v1alpha1", Plural: "baselineadminnetworkpolicies", ClusterScoped: true}
-	KindOpGroup  = Kind{Kind: "OperatorGroup", Group: "operators.coreos.com", Version: "v1", Plural: "operatorgroups"}
-	KindSub      = Kind{Kind: "Subscription", Group: "operators.coreos.com", Version: "v1alpha1", Plural: "subscriptions"}
-	KindDesched  = Kind{Kind: "KubeDescheduler", Group: "operator.openshift.io", Version: "v1", Plural: "kubedeschedulers"}
-	KindMachCfg  = Kind{Kind: "MachineConfig", Group: "machineconfiguration.openshift.io", Version: "v1", Plural: "machineconfigs", ClusterScoped: true}
-	KindTemplate = Kind{Kind: "VirtualMachineTemplate", Group: "template.kubevirt.io", Version: "v1beta1", Plural: "virtualmachinetemplates"}
+	KindVM       = kindOf("VirtualMachine")
+	KindUDN      = kindOf("UserDefinedNetwork")
+	KindCUDN     = kindOf("ClusterUserDefinedNetwork")
+	KindNAD      = kindOf("NetworkAttachmentDefinition")
+	KindNNCP     = kindOf("NodeNetworkConfigurationPolicy")
+	KindNS       = kindOf("Namespace")
+	KindRB       = kindOf("RoleBinding")
+	KindEgressFW = kindOf("EgressFirewall")
+	KindEgressIP = kindOf("EgressIP")
+	KindExtRoute = kindOf("AdminPolicyBasedExternalRoute")
+	KindNetpol   = kindOf("NetworkPolicy")
+	KindANP      = kindOf("AdminNetworkPolicy")
+	KindBANP     = kindOf("BaselineAdminNetworkPolicy")
+	KindOpGroup  = kindOf("OperatorGroup")
+	KindSub      = kindOf("Subscription")
+	KindDesched  = kindOf("KubeDescheduler")
+	KindMachCfg  = kindOf("MachineConfig")
+	KindTemplate = kindOf("VirtualMachineTemplate")
 )
 
 // KindDV is a VM's disk, declared beside it in a tenant repo. It has no row:
 // adoption stages one under the VM resource.
-var KindDV = Kind{Kind: "DataVolume", Group: "cdi.kubevirt.io", Version: "v1beta1", Plural: "datavolumes"}
+var KindDV = kindOf("DataVolume")
+
+// kindOf panics on a name the table does not hold: a typo fails at init, in
+// every test, rather than as an empty kind on one code path.
+func kindOf(name string) Kind {
+	k, ok := tenancy.LookupKind(name)
+	if !ok {
+		panic("model: no kind " + name + " in tenancy.Kinds")
+	}
+	return Kind{Kind: k.Kind, Group: k.Group, Version: k.Version, Plural: k.Resource, ClusterScoped: k.ClusterScoped}
+}
 
 // resources is the table; names are the draft's on-disk vocabulary.
 var resources = []Resource{

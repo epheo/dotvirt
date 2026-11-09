@@ -28,6 +28,7 @@ package controller
 // on a live CR re-homes the existing Route instead of being denied ("cannot set host field").
 // +kubebuilder:rbac:groups=route.openshift.io,resources=routes/custom-host,verbs=create;update
 // +kubebuilder:rbac:groups=networking.k8s.io,resources=ingresses,verbs=list;create;patch
+// +kubebuilder:rbac:groups=gateway.networking.k8s.io,resources=httproutes,verbs=list;create;patch
 // +kubebuilder:rbac:groups=argoproj.io,resources=appprojects;applications;applicationsets,verbs=list;create;patch
 // namespaces list/watch: the project-labeled namespaces the tenant AppProjects are
 // derived from (the cache selects on the project label; CacheByObject).
@@ -59,6 +60,7 @@ package controller
 // +kubebuilder:rbac:groups="",resources=services;serviceaccounts,resourceNames=dotvirt;dotvirt-forgejo,verbs=delete
 // +kubebuilder:rbac:groups=networking.k8s.io,resources=networkpolicies;ingresses,resourceNames=dotvirt;dotvirt-forgejo,verbs=delete
 // +kubebuilder:rbac:groups=route.openshift.io,resources=routes,resourceNames=dotvirt;dotvirt-forgejo,verbs=delete
+// +kubebuilder:rbac:groups=gateway.networking.k8s.io,resources=httproutes,resourceNames=dotvirt;dotvirt-forgejo,verbs=delete
 // +kubebuilder:rbac:groups="",resources=secrets,resourceNames=dotvirt-appset-plugin;dotvirt-repo-creds,verbs=delete
 // +kubebuilder:rbac:groups="",resources=configmaps,resourceNames=dotvirt-appset-plugin,verbs=delete
 // +kubebuilder:rbac:groups=rbac.authorization.k8s.io,resources=clusterrolebindings,resourceNames=dotvirt;dotvirt-argocd-apply;dotvirt-platform-network-admin;dotvirt-platform-sync,verbs=delete

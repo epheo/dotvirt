@@ -161,6 +161,7 @@ func (s *Server) InventoryForIdentity(ctx context.Context, id auth.Identity) (mo
 	grants := s.netGrants(ctx, id, userCluster, platformAuthor)
 	inv.NetworksVersion = s.networksWatermark(visible, grants)
 	inv.TasksVersion = s.tasksWatermark(s.taskScope(id, projects, platformAuthor, grants.nodes))
+	inv.ReplicationVersion = s.replicationWatermark(ctx, id, userCluster, visible)
 	return inv, nil
 }
 

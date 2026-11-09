@@ -13,6 +13,10 @@ import (
 // OpenShift API.
 var RouteGVK = schema.GroupVersionKind{Group: "route.openshift.io", Version: "v1", Kind: "Route"}
 
+// HTTPRouteGVK renders HTTPRoutes as unstructured so the operator needn't import
+// the Gateway API.
+var HTTPRouteGVK = schema.GroupVersionKind{Group: "gateway.networking.k8s.io", Version: "v1", Kind: "HTTPRoute"}
+
 // Route exposes the named Service (its "http" port, edge TLS at the router) on
 // OpenShift, as a Route of the same name. host may be empty - the router then
 // assigns one. In the dotvirt namespace, so it's owner-referenced like the other
@@ -27,6 +31,26 @@ func Route(dv *dotvirtv1alpha1.Dotvirt, name, host string) *unstructured.Unstruc
 		spec["host"] = host
 	}
 	return unstructuredObject(RouteGVK, name, dv.Namespace, dv, spec)
+}
+
+// HTTPRoute exposes the named Service through the Gateway spec.ingress.gateway
+// names, as an HTTPRoute of the same name.
+func HTTPRoute(dv *dotvirtv1alpha1.Dotvirt, name string, port int32, host string) *unstructured.Unstructured {
+	ref := dv.Spec.Ingress.Gateway
+	parent := map[string]any{"name": ref.Name}
+	if ref.Namespace != "" {
+		parent["namespace"] = ref.Namespace
+	}
+	if ref.SectionName != "" {
+		parent["sectionName"] = ref.SectionName
+	}
+	return unstructuredObject(HTTPRouteGVK, name, dv.Namespace, dv, map[string]any{
+		"parentRefs": []any{parent},
+		"hostnames":  []any{host},
+		"rules": []any{map[string]any{
+			"backendRefs": []any{map[string]any{"name": name, "port": int64(port)}},
+		}},
+	})
 }
 
 // Ingress exposes the named Service on vanilla Kubernetes, as an Ingress of the

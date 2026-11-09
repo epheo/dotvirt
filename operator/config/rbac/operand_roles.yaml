@@ -21,6 +21,18 @@ rules:
   - apiGroups: [""]
     resources: ["namespaces"]
     verbs: ["get", "list", "watch"]
+  # Whether routes are on: a GatewayClass exists.
+  - apiGroups: ["gateway.networking.k8s.io"]
+    resources: ["gatewayclasses"]
+    verbs: ["list"]
+  # r-drbd's cluster-scoped objects, read in memory and filtered per caller,
+  # and the PersistentVolumes that say which claim each Volume serves.
+  - apiGroups: ["r-drbd.io"]
+    resources: ["volumes", "pools", "nodedisks"]
+    verbs: ["list", "watch"]
+  - apiGroups: [""]
+    resources: ["persistentvolumes"]
+    verbs: ["list", "watch"]
   # Watched (never read) to learn when a token's namespace visibility may have
   # changed, so the per-token visible-set cache is invalidated promptly.
   - apiGroups: ["rbac.authorization.k8s.io"]

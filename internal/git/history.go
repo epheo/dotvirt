@@ -18,6 +18,9 @@ import (
 // branch's own commits are that PR's internals, and a full walk would list them
 // again below the root, out of date order.
 func (r *Repo) History(branch string, limit int) ([]model.Commit, error) {
+	if r.root != "" {
+		return r.walkHistory(branch, limit, func(c *object.Commit) (bool, error) { return touches(c, r.root) })
+	}
 	return r.walkHistory(branch, limit, func(*object.Commit) (bool, error) { return true, nil })
 }
 
@@ -25,7 +28,11 @@ func (r *Repo) History(branch string, limit int) ([]model.Commit, error) {
 // branch, the merged PRs that touched one manifest. A rename reads as a new
 // file, and a multi-document file's history includes its siblings' changes.
 func (r *Repo) FileHistory(branch, path string, limit int) ([]model.Commit, error) {
-	return r.walkHistory(branch, limit, func(c *object.Commit) (bool, error) { return touches(c, path) })
+	full, err := inRoot(r.root, path)
+	if err != nil {
+		return nil, err
+	}
+	return r.walkHistory(branch, limit, func(c *object.Commit) (bool, error) { return touches(c, full) })
 }
 
 // DirHistory is History narrowed to the commits that changed anything under
@@ -33,18 +40,25 @@ func (r *Repo) FileHistory(branch, path string, limit int) ([]model.Commit, erro
 // subtree's entry hash moves with any file below it, so this is one tree
 // lookup per commit, like FileHistory.
 func (r *Repo) DirHistory(branch, dir string, limit int) ([]model.Commit, error) {
-	dir = strings.TrimSuffix(dir, "/")
-	return r.walkHistory(branch, limit, func(c *object.Commit) (bool, error) { return touches(c, dir) })
+	full, err := inRoot(r.root, strings.TrimSuffix(dir, "/"))
+	if err != nil {
+		return nil, err
+	}
+	return r.walkHistory(branch, limit, func(c *object.Commit) (bool, error) { return touches(c, full) })
 }
 
 // FileAt reads path as it was in commit hash. ErrNoFile when the commit's
 // tree has no such file.
 func (r *Repo) FileAt(hash, path string) ([]byte, error) {
+	full, err := inRoot(r.root, path)
+	if err != nil {
+		return nil, err
+	}
 	c, err := commitAt(r.repo.Load(), hash)
 	if err != nil {
 		return nil, err
 	}
-	f, err := c.File(path)
+	f, err := c.File(full)
 	if errors.Is(err, object.ErrFileNotFound) {
 		return nil, fmt.Errorf("%w: %s at %s", ErrNoFile, path, hash[:8])
 	}
@@ -201,7 +215,7 @@ func (r *Repo) CommitDiff(hash string) (CommitDiff, error) {
 	if err != nil {
 		return CommitDiff{}, err
 	}
-	files, err := firstParentDiff(c)
+	files, err := r.firstParentDiff(c)
 	if err != nil {
 		return CommitDiff{}, err
 	}
@@ -245,7 +259,7 @@ func (r *Repo) BranchDiff(base, head string) ([]FileChange, error) {
 	if err != nil {
 		return nil, err
 	}
-	return treeDiff(fromTree, toTree)
+	return r.scopedDiff(fromTree, toTree)
 }
 
 // ErrForeignCommit: a branch carries, past its fork from base, a commit
@@ -297,7 +311,7 @@ func (r *Repo) BranchDiffBy(base, head string, by Author) (files []FileChange, a
 	if err != nil {
 		return nil, "", err
 	}
-	files, err = treeDiff(fromTree, toTree)
+	files, err = r.scopedDiff(fromTree, toTree)
 	return files, to.Hash.String(), err
 }
 
@@ -357,7 +371,7 @@ func commitAt(repo *git.Repository, hash string) (*object.Commit, error) {
 
 // firstParentDiff lists the YAML files c changed against its first parent, with
 // both sides' content, in path order.
-func firstParentDiff(c *object.Commit) ([]FileChange, error) {
+func (r *Repo) firstParentDiff(c *object.Commit) ([]FileChange, error) {
 	tree, err := c.Tree()
 	if err != nil {
 		return nil, err
@@ -372,7 +386,7 @@ func firstParentDiff(c *object.Commit) ([]FileChange, error) {
 			return nil, err
 		}
 	}
-	return treeDiff(parentTree, tree)
+	return r.scopedDiff(parentTree, tree)
 }
 
 // treeDiff is the YAML files that differ between two trees, with both sides'

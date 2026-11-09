@@ -11,6 +11,7 @@
 	import { resource } from '#lib/resource.svelte.js';
 	import { hasOwnRule, networkRuleLines } from '#lib/rulelines.js';
 	import { inventory } from '#lib/state/inventory.svelte.js';
+	import { vmsOff } from '#lib/state/modules.svelte.js';
 	import { networking } from '#lib/state/networking.svelte.js';
 	import { ui } from '#lib/state/ui.svelte.js';
 	import Breadcrumb from '#lib/components/Breadcrumb.svelte';
@@ -31,9 +32,10 @@
 	const isPod = $derived(key === POD_NETWORK);
 	const net = $derived(networking.byKey.get(key) ?? networkByRef(key, inventory.networks) ?? null);
 	const nkey = $derived(net ? networkKey(net) : key);
+	const available = $derived(NETWORK_TABS.filter((t) => t.id !== 'vms' || !vmsOff()));
 	const tab = $derived.by(() => {
 		const t = page.url.searchParams.get('tab');
-		return NETWORK_TABS.some((x) => x.id === t) ? t! : 'summary';
+		return available.some((x) => x.id === t) ? t! : 'summary';
 	});
 	const vms = $derived(networking.vmsOn(nkey));
 	const owner = $derived(net ? networking.ownerOf(net) : '');
@@ -61,7 +63,7 @@
 		vms: vms.length,
 		rules: isPod || rulesRes.data ? ruleLines.length : undefined,
 	});
-	const tabs = $derived(NETWORK_TABS.map((t) => ({ ...t, count: counts[t.id] })));
+	const tabs = $derived(available.map((t) => ({ ...t, count: counts[t.id] })));
 
 	const problems = $derived(networking.problemsOf(nkey));
 	const cut = $derived(net ? cutOffHosts(net, inventory.uplinks) : []);

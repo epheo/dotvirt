@@ -332,7 +332,7 @@ func TestOpenProposalsListsEveryPR(t *testing.T) {
 	c.UseAuthorizer(allowAll{})
 
 	proj := project.ProjectInfo{Name: "p", Repo: bare}
-	if _, _, err := repos.Get(bare); err != nil { // the inventory has opened it
+	if _, _, err := repos.Get(bare, ""); err != nil { // the inventory has opened it
 		t.Fatal(err)
 	}
 	prs, err := c.OpenProposals(proj)

@@ -77,8 +77,8 @@ spec:
           and application-controller service account.'
         displayName: ArgoCD
         path: argocd
-      - description: How the UI is exposed (a Route on OpenShift or an Ingress on
-          vanilla Kubernetes) and at which host.
+      - description: How the UI is exposed (a Route on OpenShift, an Ingress on vanilla
+          Kubernetes or an HTTPRoute on a Gateway) and at which host.
         displayName: Ingress
         path: ingress
       - description: Prometheus/Thanos query API backing the Performance tab.
@@ -173,10 +173,10 @@ spec:
 
     ### Prerequisites
 
-    - ArgoCD (OpenShift GitOps or community) and KubeVirt: required; the
-      operator waits for them and reports what is missing
-    - OVN-Kubernetes, NMState, CDI: optional; unlock the networking tier and
-      image upload
+    - ArgoCD (OpenShift GitOps or community): required; the operator waits
+      for it and reports what is missing
+    - KubeVirt, OVN-Kubernetes, NMState, CDI: optional; unlock virtual
+      machines, the networking tier and image upload
 
     ### Uninstalling
 

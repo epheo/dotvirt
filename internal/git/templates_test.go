@@ -14,7 +14,7 @@ func TestTemplatesDirSplit(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
 	repos := NewRepoSet(ctx, "", "", nil, true, nil, time.Hour)
-	read, write, err := repos.Get(bare)
+	read, write, err := repos.Get(bare, "")
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -59,7 +59,7 @@ type PrimaryNet struct {
 // ReleasedNamespaceManifest rewrites a declared Namespace with dotvirt's
 // tenancy stripped - the declarative half of a project release. The FILE stays
 // (handing Argo a deletion would prune the namespace itself) and so does
-// everything else it declares: only the project label and repo annotation go,
+// everything else it declares: only the project label and the repo and path annotations go,
 // so the next sync unlabels the live namespace and touches nothing else.
 func ReleasedNamespaceManifest(declared []byte) ([]byte, error) {
 	var doc map[string]any
@@ -72,6 +72,7 @@ func ReleasedNamespaceManifest(declared []byte) ([]byte, error) {
 	}
 	dropMetaKey(meta, "labels", projectLabel)
 	dropMetaKey(meta, "annotations", repoAnnotation)
+	dropMetaKey(meta, "annotations", tenancy.PathAnnotation)
 	return yaml.Marshal(doc)
 }
 

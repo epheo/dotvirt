@@ -114,9 +114,9 @@ export const NETWORK_TABS = [
 
 // The Networking root's tab for a ?tab= value: the old names still deep-link
 // (its Summary was the topology, its Security the policy plane).
-export function networkingTab(raw: string | null): string {
+export function networkingTab(raw: string | null, tabs = NETWORKING_TABS): string {
 	if (raw === 'security') return 'firewall';
-	return NETWORKING_TABS.some((t) => t.id === raw) ? raw! : 'map';
+	return tabs.some((t) => t.id === raw) ? raw! : 'map';
 }
 
 // The Storage root's tabs: one section page, each tab one job. Disks, Images
@@ -130,8 +130,10 @@ export const STORAGE_TABS = [
 ] as const;
 export type StorageTab = (typeof STORAGE_TABS)[number]['id'];
 
-export const storageTab = (v: string | null): StorageTab =>
-	STORAGE_TABS.find((t) => t.id === v)?.id ?? 'library';
+export const storageTab = (
+	v: string | null,
+	tabs: readonly { id: StorageTab }[] = STORAGE_TABS,
+): StorageTab => tabs.find((t) => t.id === v)?.id ?? tabs[0].id;
 
 // A Storage root view: the tab plus its query (project scope, disk filters,
 // the open disk). The tab is always explicit so the breadcrumb and the tree,
@@ -197,15 +199,15 @@ export function keepTab(href: string, tab: string | null): string {
 
 // The workspace breadcrumb for a scope: ancestors link, the focus is plain.
 // Roots name the section, not "All VMs" everywhere.
-export function trailForScope(s: Scope): { label: string; href?: string }[] {
+export function trailForScope(s: Scope, root = 'All VMs'): { label: string; href?: string }[] {
 	switch (s.kind) {
 		case 'all':
-			return [{ label: 'All VMs' }];
+			return [{ label: root }];
 		case 'project':
-			return [{ label: 'All VMs', href: '/compute' }, { label: s.project }];
+			return [{ label: root, href: '/compute' }, { label: s.project }];
 		case 'namespace':
 			return [
-				{ label: 'All VMs', href: '/compute' },
+				{ label: root, href: '/compute' },
 				{ label: s.project, href: hrefForScope({ kind: 'project', project: s.project }) },
 				{ label: s.namespace },
 			];

@@ -130,7 +130,7 @@ func remote(project string) *unstructured.Unstructured {
 // in ns.
 func tenantApp(project, kind, ns string) *unstructured.Unstructured {
 	app := application("dotvirt-"+project, tenancy.AppProjectPrefix+project)
-	i := slices.IndexFunc(tenancy.TenantKinds, func(k tenancy.GroupKind) bool { return k.Kind == kind })
+	i := slices.IndexFunc(tenancy.TenantKinds, func(k tenancy.Kind) bool { return k.Kind == kind })
 	app.Object["status"] = map[string]any{"resources": []any{
 		map[string]any{"group": tenancy.TenantKinds[i].Group, "kind": kind, "namespace": ns, "name": "x"},
 	}}

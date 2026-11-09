@@ -13,6 +13,7 @@
 	import PageHeader from '#lib/components/PageHeader.svelte';
 	import PlatformAdoptBanner from '#lib/components/PlatformAdoptBanner.svelte';
 	import TabBar from '#lib/components/TabBar.svelte';
+	import { vmsOff } from '#lib/state/modules.svelte.js';
 	import FirewallTab from './FirewallTab.svelte';
 	import MapTab from './MapTab.svelte';
 	import NetworksTab from './NetworksTab.svelte';
@@ -21,18 +22,19 @@
 
 	// The Networking section's root: one header, five tabs. The map answers
 	// what connects to what; the other tabs list everything at scale.
-	const tab = $derived(networkingTab(page.url.searchParams.get('tab')));
+	const available = $derived(NETWORKING_TABS.filter((t) => t.id !== 'vms' || !vmsOff()));
+	const tab = $derived(networkingTab(page.url.searchParams.get('tab'), available));
 	const counts: Record<string, number> = $derived({
 		networks: inventory.networks.length,
 		firewall: networking.clusterRules.length + networking.projectRules.length,
 		uplinks: inventory.uplinks.length,
 		vms: inventory.vmCount,
 	});
-	const tabs = $derived(NETWORKING_TABS.map((t) => ({ ...t, count: counts[t.id] })));
+	const tabs = $derived(available.map((t) => ({ ...t, count: counts[t.id] })));
 	const problems = $derived(networking.problems);
 	const context = $derived(
 		[
-			plural(inventory.vmCount, 'VM'),
+			vmsOff() ? '' : plural(inventory.vmCount, 'VM'),
 			plural(inventory.networks.length, 'network'),
 			inventory.uplinks.length ? plural(inventory.uplinks.length, 'uplink') : '',
 		]

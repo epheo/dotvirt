@@ -6,6 +6,7 @@
 	import { objectAdoptGate, objectGate, projectGate, repoGate, vmGate } from '#lib/gates.js';
 	import { repoError } from '#lib/gitops.js';
 	import { inventory } from '#lib/state/inventory.svelte.js';
+	import { vmsOff } from '#lib/state/modules.svelte.js';
 	import { ui } from '#lib/state/ui.svelte.js';
 	import ActionMenu from './ActionMenu.svelte';
 	import ContextMenu from './ContextMenu.svelte';
@@ -143,15 +144,17 @@
 						>Adopt into git</MenuItem
 					>
 				{/if}
-				<MenuItem
-					onclick={() => {
-						const ns = ctx.kind === 'container' ? authorNS : null;
-						ui.ctx = null;
-						ui.modal = { kind: 'newVM', namespaces: ns };
-					}}
-					disabled={!!vmOff}
-					title={vmOff}>New VM here…</MenuItem
-				>
+				{#if !vmsOff()}
+					<MenuItem
+						onclick={() => {
+							const ns = ctx.kind === 'container' ? authorNS : null;
+							ui.ctx = null;
+							ui.modal = { kind: 'newVM', namespaces: ns };
+						}}
+						disabled={!!vmOff}
+						title={vmOff}>New VM here…</MenuItem
+					>
+				{/if}
 				<MenuItem
 					onclick={() => {
 						const c = ctx.kind === 'container' ? ctx : null;

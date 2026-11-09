@@ -234,6 +234,11 @@ func (r *DotvirtReconciler) ensureForgeTLSTrust(ctx context.Context, dv *dotvirt
 	if !dv.Spec.Forge.Managed || r.Platform != platform.OpenShift {
 		return nil
 	}
+	// The ingress CA signs what the router serves; a Gateway holds its own
+	// certificate, and MicroShift publishes no ingress CA at all.
+	if r.resolveExposureType(dv) == dotvirtv1alpha1.IngressGateway {
+		return nil
+	}
 	host := install.ForgejoHost(dv)
 	if host == "" {
 		return nil
