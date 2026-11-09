@@ -498,14 +498,16 @@ merge_pr "${PROJECT}" "${PR}"
 anchor_in_cluster() { kc get vm anchor -n "${PROJECT}"; }
 retry "anchor VM in cluster" 400 anchor_in_cluster
 
-# A repo holds every kind it declares, here VMs and a NetworkPolicy. Kubernetes
-# answers who reads it: a namespace admin may, a role listing VMs alone may not.
-log "checking who reads the project's repo"
-kc -n "${PROJECT}" create serviceaccount e2e-admin-reader --dry-run=client -o yaml | kc apply -f -
-kc -n "${PROJECT}" create rolebinding e2e-admin-reader --clusterrole=admin \
-	--serviceaccount="${PROJECT}:e2e-admin-reader" --dry-run=client -o yaml | kc apply -f -
-kc -n "${PROJECT}" create serviceaccount e2e-narrow --dry-run=client -o yaml | kc apply -f -
-kc -n "${PROJECT}" apply -f - <<YAML
+# Published images may predate these rules; this tree must hold them.
+if [ -n "${APP_IMAGE_TAR}" ]; then
+	# A repo holds every kind it declares, here VMs and a NetworkPolicy. Kubernetes
+	# answers who reads it: a namespace admin may, a role listing VMs alone may not.
+	log "checking who reads the project's repo"
+	kc -n "${PROJECT}" create serviceaccount e2e-admin-reader --dry-run=client -o yaml | kc apply -f -
+	kc -n "${PROJECT}" create rolebinding e2e-admin-reader --clusterrole=admin \
+		--serviceaccount="${PROJECT}:e2e-admin-reader" --dry-run=client -o yaml | kc apply -f -
+	kc -n "${PROJECT}" create serviceaccount e2e-narrow --dry-run=client -o yaml | kc apply -f -
+	kc -n "${PROJECT}" apply -f - <<YAML
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata: {name: e2e-narrow}
@@ -519,24 +521,25 @@ metadata: {name: e2e-narrow}
 roleRef: {apiGroup: rbac.authorization.k8s.io, kind: Role, name: e2e-narrow}
 subjects: [{kind: ServiceAccount, name: e2e-narrow, namespace: "${PROJECT}"}]
 YAML
-ADMIN_READER_TOK="$(kc -n "${PROJECT}" create token e2e-admin-reader --duration=1h)"
-NARROW_TOK="$(kc -n "${PROJECT}" create token e2e-narrow --duration=1h)"
-history_answers() {
-	local got
-	got="$(curl -s -o /dev/null -w '%{http_code}' --max-time 30 -H "Authorization: Bearer $1" \
-		"${BASE}/api/projects/${PROJECT}/history")"
-	echo "history answered ${got}, wanted $2"
-	[ "${got}" = "$2" ]
-}
-# Until the mirror holds the merge the repo declares nothing, so nothing is
-# refused. The poll is the backstop when no webhook lands.
-mirror_holds_anchor() {
-	curl -fsS --max-time 30 -H "Authorization: Bearer ${ADMIN_READER_TOK}" \
-		"${BASE}/api/projects/${PROJECT}/history" | grep -q 'e2e: anchor'
-}
-retry "the mirror holds the anchor merge" 400 mirror_holds_anchor
-retry "a namespace admin reads its project's repo" 180 history_answers "${ADMIN_READER_TOK}" 200
-retry "a role listing VMs alone is refused the repo" 180 history_answers "${NARROW_TOK}" 403
+	ADMIN_READER_TOK="$(kc -n "${PROJECT}" create token e2e-admin-reader --duration=1h)"
+	NARROW_TOK="$(kc -n "${PROJECT}" create token e2e-narrow --duration=1h)"
+	history_answers() {
+		local got
+		got="$(curl -s -o /dev/null -w '%{http_code}' --max-time 30 -H "Authorization: Bearer $1" \
+			"${BASE}/api/projects/${PROJECT}/history")"
+		echo "history answered ${got}, wanted $2"
+		[ "${got}" = "$2" ]
+	}
+	# Until the mirror holds the merge the repo declares nothing, so nothing is
+	# refused. The poll is the backstop when no webhook lands.
+	mirror_holds_anchor() {
+		curl -fsS --max-time 30 -H "Authorization: Bearer ${ADMIN_READER_TOK}" \
+			"${BASE}/api/projects/${PROJECT}/history" | grep -q 'e2e: anchor'
+	}
+	retry "the mirror holds the anchor merge" 400 mirror_holds_anchor
+	retry "a namespace admin reads its project's repo" 180 history_answers "${ADMIN_READER_TOK}" 200
+	retry "a role listing VMs alone is refused the repo" 180 history_answers "${NARROW_TOK}" 403
+fi
 
 # ── 10. The round-trip itself ───────────────────────────────────────────────────
 log "running the GitOps round-trip"
