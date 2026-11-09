@@ -85,7 +85,7 @@ owns one status condition; a phase that fails or waits records why there, so
    merged into one tenant's repo cannot land in another tenant's namespace.
    `dotvirt.io/path` beside it scopes the project to a folder of that repo, for a
    repo that holds something else too. It only locates content: Argo and the forge
-   grant by repo, so a project with a folder cannot share its repo with another.
+   grant by repo, so a repo is one project's, and two projects naming one are refused.
    Platform space (`openshift-*`, `kube-*`, the dotvirt, operator and ArgoCD
    namespaces) is never a destination, and a repo that does not resolve to one URL
    admits no source. The rules live in `pkg/tenancy`, shared with the app's plugin

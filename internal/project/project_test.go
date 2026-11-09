@@ -169,24 +169,32 @@ func TestASharedRepoIsFoundUnderAnySpelling(t *testing.T) {
 	}
 }
 
-// Argo and the forge grant by repo, so a folder cannot separate two tenants.
-func TestAFolderCannotShareARepo(t *testing.T) {
+// A repo is one tenant: Argo and the forge grant by repo, folder or no folder.
+func TestARepoIsOneProject(t *testing.T) {
 	repo := "https://forge/shared.git"
-	nss := []Namespace{withPath(nsInfo("a", "team-a", repo), "a"), nsInfo("b", "team-b", repo)}
-	for _, p := range resolver().Resolve(nss, nil) {
-		if p.Error == "" || p.Repo != "" {
-			t.Errorf("%s: %+v, want it refused", p.Name, p)
+	refused := func(name string, nss []Namespace, visible map[string]bool) {
+		t.Helper()
+		infos := resolver().Resolve(nss, visible)
+		if len(infos) == 0 {
+			t.Fatalf("%s: no projects", name)
+		}
+		for _, p := range infos {
+			if p.Error == "" || p.Repo != "" {
+				t.Errorf("%s: %s = %+v, want it refused", name, p.Name, p)
+			}
 		}
 	}
-	// A caller who sees only one of them gets the same answer.
-	only := resolver().Resolve(nss, map[string]bool{"b": true})
-	if len(only) != 1 || only[0].Error == "" {
-		t.Errorf("filtered view: %+v", only)
-	}
-	// Sharing with no folder at all predates folders and keeps working.
-	for _, p := range resolver().Resolve([]Namespace{nsInfo("a", "team-a", repo), nsInfo("b", "team-b", repo)}, nil) {
-		if p.Error != "" || p.Repo != repo {
-			t.Errorf("%s: %+v, want it unchanged", p.Name, p)
-		}
+	plain := []Namespace{nsInfo("a", "team-a", repo), nsInfo("b", "team-b", repo)}
+	refused("no folder", plain, nil)
+	refused("a folder", []Namespace{withPath(nsInfo("a", "team-a", repo), "a"), nsInfo("b", "team-b", repo)}, nil)
+	refused("a caller who sees one of them", plain, map[string]bool{"b": true})
+}
+
+// One project over several namespaces is the normal shape, not sharing.
+func TestOneProjectMayHoldManyNamespaces(t *testing.T) {
+	repo := "https://forge/team-a.git"
+	infos := resolver().Resolve([]Namespace{nsInfo("a", "team-a", repo), nsInfo("b", "team-a", repo)}, nil)
+	if len(infos) != 1 || infos[0].Repo != repo || infos[0].Error != "" {
+		t.Errorf("infos = %+v", infos)
 	}
 }
