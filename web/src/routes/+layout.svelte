@@ -21,6 +21,7 @@
 	import { templates } from '#lib/state/templates.svelte.js';
 	import { inventory } from '#lib/state/inventory.svelte.js';
 	import { reviewCache } from '#lib/state/reviewCache.svelte.js';
+	import { replication } from '#lib/state/replication.svelte.js';
 	import { storage } from '#lib/state/storage.svelte.js';
 	import { clusterGate } from '#lib/gates.js';
 	import { caps } from '#lib/state/caps.svelte.js';
@@ -79,6 +80,7 @@
 			ui.reset();
 			templates.reset();
 			storage.reset();
+			replication.reset();
 			caps.reset();
 			modules.value = null;
 			tray.reset();
@@ -140,7 +142,7 @@
 	// cached answer, and each control asks again.
 	$effect(() => {
 		if (!session.user) return;
-		void `${inventory.networksVersion}|${inventory.tasksVersion}`;
+		void `${inventory.networksVersion}|${inventory.tasksVersion}|${inventory.replicationVersion !== 0}`;
 		untrack(() => caps.invalidate());
 	});
 

@@ -127,6 +127,7 @@ export const STORAGE_TABS = [
 	{ id: 'images', label: 'Images' },
 	{ id: 'snapshots', label: 'Snapshots' },
 	{ id: 'classes', label: 'Classes' },
+	{ id: 'replication', label: 'Replication' },
 ] as const;
 export type StorageTab = (typeof STORAGE_TABS)[number]['id'];
 

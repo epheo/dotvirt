@@ -36,6 +36,9 @@ type ClusterCaps struct {
 	// Replication reads where replicated disks' copies live and the room left:
 	// list, cluster-wide, on every kind GET /api/storage/replication shows.
 	Replication bool `json:"replication"`
+	// ReplicationRepair resolves a split brain and moves copies off a host:
+	// Replication, and patch on r-drbd's Volumes.
+	ReplicationRepair bool `json:"replicationRepair"`
 	// Network is the shared networks (ClusterUserDefinedNetwork).
 	Network                    ObjectCaps `json:"network"`
 	Uplink                     ObjectCaps `json:"uplink"`

@@ -50,6 +50,11 @@ export interface ClusterCaps {
    */
   replication: boolean;
   /**
+   * ReplicationRepair resolves a split brain and moves copies off a host:
+   * Replication, and patch on r-drbd's Volumes.
+   */
+  replicationRepair: boolean;
+  /**
    * Network is the shared networks (ClusterUserDefinedNetwork).
    */
   network: ObjectCaps;
@@ -1616,7 +1621,16 @@ export interface ReplicatedVolume {
   tier: string;
   phase?: string;
   primary?: string; // the host the device is open on
+  pinnedNode?: string;
+  pinnedPool?: string;
+  attachments?: string[]; // hosts the device is published to
   splitBrain?: boolean;
+  /**
+   * SplitSince is when this split began. A resolve sends it back, so a dialog
+   * left open cannot pick the winner of a later split.
+   */
+  splitSince?: string;
+  resolving?: string; // the survivor already named, while r-drbd works
   quorumLost?: boolean;
   evicting?: string[]; // hosts whose copy is being moved off
   replicas: VolumeReplica[];
@@ -1681,6 +1695,21 @@ export const StandingPending = "pending";
  * What a disk's owner can act on.
  */
 export const StandingNeedsOperator = "needs-operator";
+/**
+ * ReplicationEvict is what moving the copies off a host does, or would do on a
+ * dry run: the replicas leaving, and what stays and why.
+ */
+export interface ReplicationEvict {
+  moving: string[];
+  skipped?: ReplicationSkip[];
+}
+/**
+ * ReplicationSkip is one volume that keeps its replica on the host.
+ */
+export interface ReplicationSkip {
+  volume: string;
+  reason: string;
+}
 /**
  * DiskProtection is GET /api/storage/protection's row: a replicated disk's
  * standing as its owner may read it. Never a host or a pool.

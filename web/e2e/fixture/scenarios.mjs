@@ -1629,7 +1629,131 @@ const novms = {
 	modules: { vms: false },
 };
 
+// ── replicated storage: a placement with one of each state ─────────────────
+const GIB = 1024 ** 3;
+const copy = (node, state = 'in-sync', extra = {}) => ({
+	node,
+	pool: `nvme-${node}`,
+	role: 'diskful',
+	state,
+	diskState: state === 'in-sync' ? 'UpToDate' : 'Inconsistent',
+	...extra,
+});
+const witness = (node) => ({ node, role: 'tiebreaker', state: 'standby', diskState: 'Diskless' });
+const volume = (name, namespace, claim, size, tier, replicas, extra = {}) => ({
+	name,
+	namespace,
+	claim,
+	sizeBytes: size * GIB,
+	copies: replicas.filter((r) => r.role === 'diskful').length,
+	tier,
+	phase: 'Ready',
+	replicas,
+	...extra,
+});
+const pool = (node, tier, total, free) => ({
+	name: `${tier}-${node}`,
+	node,
+	tier,
+	totalBytes: total * GIB,
+	freeBytes: free * GIB,
+	placeableBytes: Math.floor(free * 0.9) * GIB,
+	available: true,
+});
+const placement = {
+	synced: true,
+	pools: [
+		pool('worker-1', 'nvme', 2000, 900),
+		pool('worker-2', 'nvme', 2000, 500),
+		pool('worker-3', 'nvme', 2000, 1400),
+		pool('worker-1', 'hdd', 8000, 7000),
+		pool('worker-3', 'hdd', 8000, 5000),
+	],
+	hosts: [
+		{ name: 'worker-1' },
+		{ name: 'worker-2' },
+		{
+			name: 'worker-3',
+			blank: [{ path: '/dev/disk/by-id/wwn-0x5000', sizeBytes: 4000 * GIB, model: 'NVMe' }],
+		},
+	],
+	volumes: [
+		volume('pvc-web1', 'web-prod', 'web-1-rootdisk', 30, 'nvme', [
+			copy('worker-1'),
+			copy('worker-2'),
+			witness('worker-3'),
+		]),
+		volume('pvc-web2a', 'web-prod', 'web-2-rootdisk', 30, 'nvme', [copy('worker-3')]),
+		volume('pvc-web2b', 'web-prod', 'web-2-data', 200, 'hdd', [
+			copy('worker-1'),
+			copy('worker-3'),
+			witness('worker-2'),
+		]),
+		volume('pvc-db1a', 'db-prod', 'db-1-rootdisk', 50, 'nvme', [
+			copy('worker-1'),
+			copy('worker-2'),
+			copy('worker-3'),
+		]),
+		volume(
+			'pvc-db1b',
+			'db-prod',
+			'db-1-data',
+			500,
+			'nvme',
+			[copy('worker-1'), copy('worker-3', 'catching-up', { syncPercent: 64 }), witness('worker-2')],
+			{ phase: 'Degraded' },
+		),
+		volume('pvc-batch', 'batch-prod', 'batch-1-rootdisk', 40, 'nvme', [
+			copy('worker-1'),
+			copy('worker-3'),
+			witness('worker-2'),
+		]),
+		volume(
+			'pvc-orphan',
+			'db-prod',
+			'ledger-export',
+			250,
+			'hdd',
+			[copy('worker-1'), copy('worker-3'), witness('worker-2')],
+			{ phase: 'Degraded', splitBrain: true, primary: 'worker-1' },
+		),
+	],
+};
+const replicated = {
+	...base,
+	name: 'replicated',
+	modules: { replicatedStorage: true },
+	capabilities: { ...base.capabilities, cluster: { replication: true } },
+	replication: placement,
+};
+const replicatedtenant = {
+	...replicated,
+	name: 'replicatedtenant',
+	capabilities: { ...base.capabilities, cluster: { replication: false } },
+	protection: [
+		{ namespace: 'web-prod', claim: 'web-1-rootdisk', copies: 2, inSync: 2, standing: 'protected' },
+		{ namespace: 'web-prod', claim: 'web-2-rootdisk', copies: 1, inSync: 1, standing: 'local' },
+		{
+			namespace: 'db-prod',
+			claim: 'db-1-data',
+			copies: 2,
+			inSync: 1,
+			standing: 'catching-up',
+			syncPercent: 64,
+		},
+		{
+			namespace: 'db-prod',
+			claim: 'ledger-export',
+			copies: 2,
+			inSync: 2,
+			standing: 'needs-operator',
+		},
+	],
+};
+
 export const scenarios = {
+	replicated,
+	replicatedtenant,
 	novms,
 	residue,
 	sso,

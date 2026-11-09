@@ -386,6 +386,10 @@ export const api = {
 	// reads under the caller's token, fetched when the Storage section opens.
 	storageSnapshots: () => get<gen.Snapshot[]>('/api/storage/snapshots'),
 	storageClaims: () => get<gen.Claim[]>('/api/storage/claims'),
+	// Where every copy lives: answers only a caller who may list r-drbd's kinds.
+	replication: () => get<gen.Replication>('/api/storage/replication'),
+	// The standing of the caller's replicated disks, with no host named.
+	protection: () => get<gen.DiskProtection[]>('/api/storage/protection'),
 	// The caller's verdict on each gated action; ask with a namespace for its
 	// actions and project. Asked on demand, never per frame.
 	capabilities: (namespace?: string) =>

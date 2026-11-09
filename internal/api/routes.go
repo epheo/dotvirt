@@ -100,6 +100,8 @@ func (s *Server) routes(mux *http.ServeMux) {
 	if s.replication != nil {
 		mux.HandleFunc("GET /api/storage/replication", s.handleReplication)
 		mux.HandleFunc("GET /api/storage/protection", s.handleProtection)
+		mux.HandleFunc("POST /api/storage/replication/volumes/{volume}/resolve", s.handleResolveSplitBrain)
+		mux.HandleFunc("POST /api/storage/replication/hosts/{node}/evict", s.handleEvictHost)
 	}
 	mux.HandleFunc("GET /api/metrics/cluster", s.handleClusterSummary)
 	mux.HandleFunc("GET /api/metrics/scope", s.handleScopeMetrics)
