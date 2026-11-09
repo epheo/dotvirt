@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"net/http"
 
 	"github.com/epheo/dotvirt/internal/auth"
@@ -225,4 +226,14 @@ func (s *Server) projectCaps(ctx context.Context, sc scope, full project.Project
 		patches = append(patches, question{Verb: verbPatch, Group: ssarNamespace.group, Resource: ssarNamespace.resource, Name: ns})
 	}
 	out.Release = (len(patches) == 0 || s.capable(ctx, id, c, patches)) && s.needsAllowed(ctx, id, c, need, err) && (len(need) > 0 || len(patches) > 0)
+}
+
+// handleModules answers GET /api/modules from the SA's discovery snapshot.
+func (s *Server) handleModules(w http.ResponseWriter, _ *http.Request) {
+	m, ok := s.modules.Get()
+	if !ok {
+		fail(w, unavailable(errors.New("the cluster's APIs have not all answered yet")))
+		return
+	}
+	writeJSON(w, m)
 }

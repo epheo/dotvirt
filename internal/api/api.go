@@ -35,6 +35,7 @@ import (
 	"github.com/epheo/dotvirt/internal/git"
 	"github.com/epheo/dotvirt/internal/metrics"
 	"github.com/epheo/dotvirt/internal/model"
+	"github.com/epheo/dotvirt/internal/modules"
 	"github.com/epheo/dotvirt/internal/netstate"
 	"github.com/epheo/dotvirt/internal/project"
 	"github.com/epheo/dotvirt/internal/tasks"
@@ -212,6 +213,7 @@ type Server struct {
 	drift     *argo.Snapshot      // nil when Argo disabled; SA-owned, watch-fed Application snapshot
 	drs       *drs.Snapshot       // nil disables the DRS live plane; SA-owned KubeDescheduler snapshot
 	netstate  *netstate.Snapshot  // SA-owned, watch-fed networking catalog (networks + fabric)
+	modules   *modules.Snapshot   // what the cluster serves; nil leaves GET /api/modules unmounted
 	bus       *eventbus.Bus       // change-version source for the version-stamped auth caches
 	resolver  *project.Resolver
 	repos     *git.RepoSet
@@ -266,6 +268,7 @@ type Deps struct {
 	Drift          *argo.Snapshot     // SA-owned drift snapshot (watch-fed); nil when Argo disabled
 	DRS            *drs.Snapshot      // SA-owned KubeDescheduler snapshot; nil disables the DRS live plane
 	Netstate       *netstate.Snapshot // SA-owned networking catalog snapshot (watch-fed)
+	Modules        *modules.Snapshot  // what the cluster serves; nil leaves GET /api/modules unmounted
 	Bus            *eventbus.Bus      // change-version source for version-stamped caches
 	Resolver       *project.Resolver
 	Repos          *git.RepoSet
@@ -291,6 +294,7 @@ func NewServer(d Deps) *Server {
 		drift:     d.Drift,
 		drs:       d.DRS,
 		netstate:  d.Netstate,
+		modules:   d.Modules,
 		bus:       d.Bus,
 		resolver:  d.Resolver,
 		repos:     d.Repos,

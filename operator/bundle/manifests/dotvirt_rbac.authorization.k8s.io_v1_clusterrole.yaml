@@ -22,6 +22,12 @@ rules:
   - list
   - watch
 - apiGroups:
+  - gateway.networking.k8s.io
+  resources:
+  - gatewayclasses
+  verbs:
+  - list
+- apiGroups:
   - rbac.authorization.k8s.io
   resources:
   - rolebindings

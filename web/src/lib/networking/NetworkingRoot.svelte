@@ -13,6 +13,7 @@
 	import PageHeader from '#lib/components/PageHeader.svelte';
 	import PlatformAdoptBanner from '#lib/components/PlatformAdoptBanner.svelte';
 	import TabBar from '#lib/components/TabBar.svelte';
+	import { vmsOff } from '#lib/state/modules.svelte.js';
 	import FirewallTab from './FirewallTab.svelte';
 	import MapTab from './MapTab.svelte';
 	import NetworksTab from './NetworksTab.svelte';
@@ -28,11 +29,16 @@
 		uplinks: inventory.uplinks.length,
 		vms: inventory.vmCount,
 	});
-	const tabs = $derived(NETWORKING_TABS.map((t) => ({ ...t, count: counts[t.id] })));
+	const tabs = $derived(
+		NETWORKING_TABS.filter((t) => t.id !== 'vms' || !vmsOff()).map((t) => ({
+			...t,
+			count: counts[t.id],
+		})),
+	);
 	const problems = $derived(networking.problems);
 	const context = $derived(
 		[
-			plural(inventory.vmCount, 'VM'),
+			vmsOff() ? '' : plural(inventory.vmCount, 'VM'),
 			plural(inventory.networks.length, 'network'),
 			inventory.uplinks.length ? plural(inventory.uplinks.length, 'uplink') : '',
 		]

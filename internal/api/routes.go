@@ -94,6 +94,9 @@ func (s *Server) routes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/events", s.handleAllEvents)
 	mux.HandleFunc("GET /api/permissions", s.handlePermissions)
 	mux.HandleFunc("GET /api/capabilities", s.handleCapabilities)
+	if s.modules != nil {
+		mux.HandleFunc("GET /api/modules", s.handleModules)
+	}
 	mux.HandleFunc("GET /api/metrics/cluster", s.handleClusterSummary)
 	mux.HandleFunc("GET /api/metrics/scope", s.handleScopeMetrics)
 	mux.HandleFunc("GET /api/metrics/hosts", s.handleHostLoad)

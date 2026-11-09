@@ -3,6 +3,7 @@
 	import { plural } from '#lib/format.js';
 	import { clusterGate, clusterObjectGate } from '#lib/gates.js';
 	import { inventory } from '#lib/state/inventory.svelte.js';
+	import { vmsOff } from '#lib/state/modules.svelte.js';
 	import {
 		SHEET_TYPES,
 		SheetCtl,
@@ -57,9 +58,9 @@
 	const noRepo = $derived(!inventory.namespaces.length);
 	const can = (resource: string) => clusterObjectGate(resource, 'create').ok;
 	const allowed: Record<SheetType, boolean> = $derived({
-		vm: !noRepo,
-		template: !noRepo,
-		image: !noRepo,
+		vm: !noRepo && !vmsOff(),
+		template: !noRepo && !vmsOff(),
+		image: !noRepo && !vmsOff(),
 		network: !noRepo || can('network'),
 		rule: !noRepo || can('adminnetworkpolicy') || can('baselineadminnetworkpolicy'),
 		outbound: can('egressip') || can('externalroute'),

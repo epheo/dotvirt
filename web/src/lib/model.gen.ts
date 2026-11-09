@@ -890,6 +890,22 @@ export const SyncPending: SyncStatus = "Pending";
 export const SyncUnknown: SyncStatus = "Unknown";
 
 //////////
+// source: modules.go
+
+/**
+ * Modules is GET /api/modules: the parts of the console this cluster serves.
+ * What the caller may do inside one stays Capabilities' answer.
+ */
+export interface Modules {
+  vms: boolean;
+  desktops: boolean;
+  networks: boolean;
+  rebalancing: boolean;
+  routes: boolean;
+  replicatedStorage: boolean;
+}
+
+//////////
 // source: network.go
 
 /**

@@ -1,5 +1,6 @@
 import { getContext, setContext } from 'svelte';
 import type { CreateBodies, CreateKind } from '#lib/api.js';
+import { vmsOff } from '#lib/state/modules.svelte.js';
 import type { AppModal } from '#lib/state/ui.svelte.js';
 
 export type SheetType = 'vm' | 'template' | 'image' | 'network' | 'rule' | 'outbound' | 'project';
@@ -79,6 +80,7 @@ export function newFromHere(
 			return { kind: 'projectRule', namespaces: [], namespace: ns };
 		return { kind: 'newNetwork', namespace: ns };
 	}
+	if (vmsOff()) return { kind: 'newNetwork', namespace: ns };
 	if (path.startsWith('/storage')) return { kind: 'upload', namespace: ns };
 	if (/[?&]tab=templates/.test(path)) return { kind: 'deployTemplate', namespace: ns };
 	return { kind: 'newVM', namespaces, namespace: ns };
