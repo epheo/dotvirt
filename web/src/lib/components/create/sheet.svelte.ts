@@ -1,5 +1,6 @@
 import { getContext, setContext } from 'svelte';
 import type { CreateBodies, CreateKind } from '#lib/api.js';
+import { networksOff, vmsOff } from '#lib/state/modules.svelte.js';
 import type { AppModal } from '#lib/state/ui.svelte.js';
 
 export type SheetType = 'vm' | 'template' | 'image' | 'network' | 'rule' | 'outbound' | 'project';
@@ -74,11 +75,14 @@ export function newFromHere(
 	namespaces: string[] | null,
 ): AppModal {
 	const ns = namespace || undefined;
+	const rule: AppModal = { kind: 'projectRule', namespaces: [], namespace: ns };
+	// A cluster with neither VMs nor OVN networks has only rules to make.
+	const network: AppModal =
+		vmsOff() && networksOff() ? rule : { kind: 'newNetwork', namespace: ns };
 	if (path.startsWith('/networking')) {
-		if (/[?&]tab=(security|firewall)/.test(path))
-			return { kind: 'projectRule', namespaces: [], namespace: ns };
-		return { kind: 'newNetwork', namespace: ns };
+		return /[?&]tab=(security|firewall)/.test(path) ? rule : network;
 	}
+	if (vmsOff()) return network;
 	if (path.startsWith('/storage')) return { kind: 'upload', namespace: ns };
 	if (/[?&]tab=templates/.test(path)) return { kind: 'deployTemplate', namespace: ns };
 	return { kind: 'newVM', namespaces, namespace: ns };

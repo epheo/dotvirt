@@ -103,13 +103,17 @@ func RepoCredsSecret(dv *dotvirtv1alpha1.Dotvirt, argoNS, urlPrefix, username, t
 // clusterResourceWhitelist stays empty, so a tenant repo cannot reconcile a
 // CUDN/NNCP/Namespace even though the shared Argo controller SA could.
 func tenantWhitelist(spec map[string]any) map[string]any {
-	kinds := make([]any, 0, len(tenancy.TenantKinds))
-	for _, k := range tenancy.TenantKinds {
-		kinds = append(kinds, map[string]any{"group": k.Group, "kind": k.Kind})
-	}
 	spec["clusterResourceWhitelist"] = []any{}
-	spec["namespaceResourceWhitelist"] = kinds
+	spec["namespaceResourceWhitelist"] = whitelist(tenancy.TenantKinds)
 	return spec
+}
+
+func whitelist(kinds []tenancy.Kind) []any {
+	out := make([]any, 0, len(kinds))
+	for _, k := range kinds {
+		out = append(out, map[string]any{"group": k.Group, "kind": k.Kind})
+	}
+	return out
 }
 
 // TenantsAppProject is the shared tenant tier: any namespace outside platform
@@ -194,29 +198,8 @@ func PlatformAppProject(dv *dotvirtv1alpha1.Dotvirt, argoNS, platformRepo string
 			map[string]any{"server": InClusterServer, "namespace": "*"},
 		},
 		"destinationServiceAccounts": syncAccounts(argoNS, tenancy.PlatformSyncAccount),
-		"clusterResourceWhitelist": []any{
-			map[string]any{"group": "", "kind": "Namespace"},
-			map[string]any{"group": "k8s.ovn.org", "kind": "ClusterUserDefinedNetwork"},
-			// The cluster edge - cluster-scoped fixed outbound IPs + external routes.
-			map[string]any{"group": "k8s.ovn.org", "kind": "EgressIP"},
-			map[string]any{"group": "k8s.ovn.org", "kind": "AdminPolicyBasedExternalRoute"},
-			// The cluster rule tiers.
-			map[string]any{"group": "policy.networking.k8s.io", "kind": "AdminNetworkPolicy"},
-			map[string]any{"group": "policy.networking.k8s.io", "kind": "BaselineAdminNetworkPolicy"},
-			map[string]any{"group": "nmstate.io", "kind": "NodeNetworkConfigurationPolicy"},
-			// DRS: the worker PSI kernel-arg the load-aware descheduler profile needs.
-			map[string]any{"group": "machineconfiguration.openshift.io", "kind": "MachineConfig"},
-		},
-		"namespaceResourceWhitelist": []any{
-			map[string]any{"group": "k8s.ovn.org", "kind": "UserDefinedNetwork"},
-			map[string]any{"group": "k8s.cni.cncf.io", "kind": "NetworkAttachmentDefinition"},
-			// Tenant access delegation: a project's owners -> namespace-admin grant.
-			map[string]any{"group": "rbac.authorization.k8s.io", "kind": "RoleBinding"},
-			// DRS: the descheduler operator install + its configuration CR.
-			map[string]any{"group": "operators.coreos.com", "kind": "Subscription"},
-			map[string]any{"group": "operators.coreos.com", "kind": "OperatorGroup"},
-			map[string]any{"group": "operator.openshift.io", "kind": "KubeDescheduler"},
-		},
+		"clusterResourceWhitelist":   whitelist(tenancy.PlatformKinds(true)),
+		"namespaceResourceWhitelist": whitelist(tenancy.PlatformKinds(false)),
 	})
 }
 

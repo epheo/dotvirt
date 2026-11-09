@@ -29,6 +29,7 @@ import (
 	"github.com/epheo/dotvirt/internal/git"
 	"github.com/epheo/dotvirt/internal/metrics"
 	"github.com/epheo/dotvirt/internal/model"
+	"github.com/epheo/dotvirt/internal/modules"
 	"github.com/epheo/dotvirt/internal/netstate"
 	"github.com/epheo/dotvirt/internal/project"
 	"github.com/epheo/dotvirt/internal/stream"
@@ -132,6 +133,10 @@ func run() error {
 	netSnapshot := netstate.New(saCluster, bus)
 	netSnapshot.Run(ctx)
 
+	// Which parts of the console this cluster serves, from discovery.
+	moduleSnapshot := modules.New(saCluster)
+	moduleSnapshot.Run(ctx)
+
 	var argoSnapshot *argo.Snapshot
 	var resyncer changeset.Resyncer
 	if cfg.ArgoEnabled {
@@ -198,6 +203,7 @@ func run() error {
 		Drift:          argoSnapshot,
 		DRS:            drsSnapshot,
 		Netstate:       netSnapshot,
+		Modules:        moduleSnapshot,
 		Bus:            bus,
 		Resolver:       resolver,
 		Repos:          repos,

@@ -24,11 +24,11 @@ import (
 	"github.com/epheo/dotvirt/internal/reflect"
 )
 
-// kubedeschedulersGVR is the Kube Descheduler Operator's configuration CR, the
+// GVR is the Kube Descheduler Operator's configuration CR, the
 // object behind dotvirt's DRS status plane. The CR is namespaced (to the
 // operator's install namespace) but watched across all namespaces so a
 // nonstandard install still surfaces.
-var kubedeschedulersGVR = schema.GroupVersionResource{
+var GVR = schema.GroupVersionResource{
 	Group:    "operator.openshift.io",
 	Version:  "v1",
 	Resource: "kubedeschedulers",
@@ -61,7 +61,7 @@ func (s *Snapshot) Run(ctx context.Context) {
 	served := reflect.Served(s.sa.HasAPIResource, &s.apiPresent)
 	store := reflect.NewStore(s.store, func() {}, s.synced.Mark)
 	// No flip publish: DRS health is read per request, never by a frame.
-	reflect.RunWhenServed(ctx, served, kubedeschedulersGVR, s.sa.DynamicListWatch(kubedeschedulersGVR), store, &s.healthy, nil)
+	reflect.RunWhenServed(ctx, served, GVR, s.sa.DynamicListWatch(GVR), store, &s.healthy, nil)
 }
 
 // Live reads the current DRS live state from the in-memory store. Only scalar
