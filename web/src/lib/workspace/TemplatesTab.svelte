@@ -2,11 +2,11 @@
 	import { goto } from '$app/navigation';
 	import { page } from '$app/state';
 	import type { Template } from '#lib/api.js';
-	import { libraryLabel, templateKey, templatesFor } from '#lib/catalog.js';
+	import { libraryLabel, templateKey, templatesFor } from '#lib/templates.js';
 	import { plural } from '#lib/format.js';
 	import { projectNS } from '#lib/gates.js';
 	import { DEFAULT_PAGE_SIZE, pageFor, pageSlice } from '#lib/paging.js';
-	import { catalog } from '#lib/state/catalog.svelte.js';
+	import { templates } from '#lib/state/templates.svelte.js';
 	import { inventory } from '#lib/state/inventory.svelte.js';
 	import { ui } from '#lib/state/ui.svelte.js';
 	import { shortName } from '#lib/storage.js';
@@ -27,10 +27,10 @@
 	// through the app appears without a reload.
 	$effect(() => {
 		inventory.tasksVersion;
-		catalog.load();
+		templates.load();
 	});
 
-	const rows = $derived(catalog.templates && templatesFor(catalog.templates, project));
+	const rows = $derived(templates.list && templatesFor(templates.list, project));
 	const invalid = $derived(rows?.filter((t) => t.error).length ?? 0);
 	// A VM stages into a namespace the caller authors in; the sheet then asks
 	// vmGate.create of the one picked.
@@ -92,16 +92,16 @@
 	/>
 {/snippet}
 
-{#if catalog.error}
+{#if templates.error}
 	<div class="mb-4 flex flex-col items-start gap-2">
-		<ErrorNote error={catalog.error} class="w-full" />
-		<Button variant="secondary" size="sm" onclick={() => catalog.load()}>Try again</Button>
+		<ErrorNote error={templates.error} class="w-full" />
+		<Button variant="secondary" size="sm" onclick={() => templates.load()}>Try again</Button>
 	</div>
 {/if}
 
 <!-- A failed read with nothing to show is the error alone, never a table that
      reads as loading. -->
-{#if !catalog.error || rows}
+{#if !templates.error || rows}
 	<div class="flex flex-wrap items-start gap-4">
 		<Card
 			class="flex-[2_1_640px]"

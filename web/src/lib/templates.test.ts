@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { Template } from './api';
-import { libraryLabel, templateKey, templatesFor } from './catalog';
+import { libraryLabel, templateKey, templatesFor } from './templates';
 
 const tpl = (name: string, library: string): Template => ({
 	name,

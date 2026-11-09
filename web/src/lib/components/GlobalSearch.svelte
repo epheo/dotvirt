@@ -266,7 +266,7 @@
 			bind:value={query}
 			onfocus={() => (open = true)}
 			{onkeydown}
-			placeholder="Search VMs, hosts, disks"
+			placeholder={clusterGate.hosts().ok ? 'Search VMs, hosts, disks' : 'Search VMs, disks'}
 			aria-label="Search inventory"
 			class="w-full min-w-0 bg-transparent text-[13px] text-white placeholder-side-dim focus:outline-none"
 		/>

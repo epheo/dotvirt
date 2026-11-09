@@ -17,7 +17,7 @@
 	import { resource } from '#lib/resource.svelte.js';
 	import { INVENTORY_SECTIONS, sectionOf, vmHref, type Section } from '#lib/nav.js';
 	import { drafts } from '#lib/state/drafts.svelte.js';
-	import { catalog } from '#lib/state/catalog.svelte.js';
+	import { templates } from '#lib/state/templates.svelte.js';
 	import { inventory } from '#lib/state/inventory.svelte.js';
 	import { reviewCache } from '#lib/state/reviewCache.svelte.js';
 	import { storage } from '#lib/state/storage.svelte.js';
@@ -75,7 +75,7 @@
 			drafts.reset();
 			reviewCache.reset();
 			ui.reset();
-			catalog.reset();
+			templates.reset();
 			storage.reset();
 			caps.reset();
 			tray.reset();

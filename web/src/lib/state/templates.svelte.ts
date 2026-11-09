@@ -3,8 +3,8 @@ import { friendlyError } from '#lib/format.js';
 
 // The template library, shared by the Templates tab, the deploy sheet and
 // Storage's image usage so they list the same items.
-class Catalog {
-	templates = $state<Template[] | null>(null);
+class Templates {
+	list = $state<Template[] | null>(null);
 	error = $state('');
 	#inflight: Promise<void> | null = null;
 	// Bumped by reset(), so a load started before a sign-out drops its late
@@ -19,7 +19,7 @@ class Catalog {
 			.templates()
 			.then((t) => {
 				if (gen !== this.#gen) return;
-				this.templates = t.templates;
+				this.list = t.templates;
 				this.error = '';
 			})
 			.catch((e) => {
@@ -36,9 +36,9 @@ class Catalog {
 	reset() {
 		this.#gen++;
 		this.#inflight = null;
-		this.templates = null;
+		this.list = null;
 		this.error = '';
 	}
 }
 
-export const catalog = new Catalog();
+export const templates = new Templates();

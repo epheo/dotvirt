@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { X } from '@lucide/svelte';
 	import type { Template } from '#lib/api.js';
-	import { libraryLabel } from '#lib/catalog.js';
+	import { libraryLabel } from '#lib/templates.js';
 	import { plural } from '#lib/format.js';
 	import { projectNS, templateGate } from '#lib/gates.js';
 	import { inventory } from '#lib/state/inventory.svelte.js';
