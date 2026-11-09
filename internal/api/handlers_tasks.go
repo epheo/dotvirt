@@ -33,9 +33,14 @@ func (s *Server) handleTasks(w http.ResponseWriter, r *http.Request) {
 		fail(w, err)
 		return
 	}
+	v, err := s.viewFor(r.Context(), id, c)
+	if err != nil {
+		fail(w, err)
+		return
+	}
 	platform, _ := s.canReadPlatform(r.Context(), id, c)
 	canNodes := s.capable(r.Context(), id, c, ask(verbList, ssarNodes, ""))
-	writeJSON(w, scopeTasks(s.tasks.Ops(), s.tasks.Merges(), s.taskScope(id, projects, platform, canNodes)))
+	writeJSON(w, scopeTasks(s.tasks.Ops(), s.tasks.Merges(), s.taskScope(id, projects, v, platform, canNodes)))
 }
 
 // recordTask logs one imperative act into the feed. Nil-safe so handlers need no
@@ -58,16 +63,20 @@ type taskScope struct {
 	nsProject, repoProject map[string]string
 	canNodes               bool
 	own                    map[string]ownLane
+	// listsVMs reports whether the caller may list VMs where an op ran; every
+	// op acts on a VM. nil is yes.
+	listsVMs func(namespace string) bool
 }
 
 // taskScope is id's view of the feed over their projects: every platform
 // merge for a platform reader, their own draft's for anyone else.
-func (s *Server) taskScope(id auth.Identity, projects []project.ProjectInfo, readsPlatform, canNodes bool) taskScope {
+func (s *Server) taskScope(id auth.Identity, projects []project.ProjectInfo, v callerView, readsPlatform, canNodes bool) taskScope {
 	platform := s.platformProject()
 	if readsPlatform {
 		projects = append(projects[:len(projects):len(projects)], platform)
 	}
 	sc := newTaskScope(projects, canNodes)
+	sc.listsVMs = func(ns string) bool { return v.lists(ssarVM, ns) }
 	if !readsPlatform && platform.Repo != "" {
 		sc.own[forge.NormalizeRepoURL(platform.Repo)] = ownLane{platform.Name, s.reader.ProposedBranch(id, platform)}
 	}
@@ -103,7 +112,7 @@ func (sc taskScope) op(o tasks.Op) (project string, ok bool) {
 		return "", sc.canNodes
 	}
 	project = sc.nsProject[o.Namespace]
-	return project, project != ""
+	return project, project != "" && (sc.listsVMs == nil || sc.listsVMs(o.Namespace))
 }
 
 // merge reports whether the caller sees m, and the project it shows under.

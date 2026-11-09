@@ -539,6 +539,17 @@ YAML
 	retry "the mirror holds the anchor merge" 400 mirror_holds_anchor
 	retry "a namespace admin reads its project's repo" 180 history_answers "${ADMIN_READER_TOK}" 200
 	retry "a role listing VMs alone is refused the repo" 180 history_answers "${NARROW_TOK}" 403
+	# Kubernetes will not get them the namespace, so neither will dotvirt.
+	kc -n "${PROJECT}" create serviceaccount e2e-no-get --dry-run=client -o yaml | kc apply -f -
+	kc -n "${PROJECT}" create role e2e-no-get --verb=list --resource=virtualmachines.kubevirt.io \
+		--dry-run=client -o yaml | kc apply -f -
+	kc -n "${PROJECT}" create rolebinding e2e-no-get --role=e2e-no-get \
+		--serviceaccount="${PROJECT}:e2e-no-get" --dry-run=client -o yaml | kc apply -f -
+	NO_GET_TOK="$(kc -n "${PROJECT}" create token e2e-no-get --duration=1h)"
+	sees_no_project() {
+		curl -fsS --max-time 30 -H "Authorization: Bearer ${NO_GET_TOK}" "${BASE}/api/inventory" | jq -e '.projects | length == 0'
+	}
+	retry "a token that may not get the namespace sees no project" 180 sees_no_project
 fi
 
 # ── 10. The round-trip itself ───────────────────────────────────────────────────

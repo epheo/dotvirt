@@ -9,7 +9,7 @@ import (
 // not git-managed, so ArgoCD never reverts them.
 
 func (s *Server) handleSnapshots(w http.ResponseWriter, r *http.Request) {
-	sc, ns, name, ok := s.vmScope(w, r)
+	sc, ns, name, ok := s.vmCallerScope(w, r)
 	if !ok {
 		return
 	}
@@ -20,7 +20,7 @@ func (s *Server) handleSnapshots(w http.ResponseWriter, r *http.Request) {
 // handleTakeSnapshot creates a point-in-time snapshot; a name may be supplied, else
 // one is derived from the VM name + timestamp.
 func (s *Server) handleTakeSnapshot(w http.ResponseWriter, r *http.Request) {
-	sc, ns, name, ok := s.vmScope(w, r)
+	sc, ns, name, ok := s.vmCallerScope(w, r)
 	if !ok {
 		return
 	}
@@ -45,7 +45,7 @@ func (s *Server) handleTakeSnapshot(w http.ResponseWriter, r *http.Request) {
 
 // handleRestoreSnapshot rolls the VM back to a snapshot (the VM must be stopped).
 func (s *Server) handleRestoreSnapshot(w http.ResponseWriter, r *http.Request) {
-	sc, ns, name, ok := s.vmScope(w, r)
+	sc, ns, name, ok := s.vmCallerScope(w, r)
 	if !ok {
 		return
 	}
@@ -59,7 +59,7 @@ func (s *Server) handleRestoreSnapshot(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleDeleteSnapshot(w http.ResponseWriter, r *http.Request) {
-	sc, ns, _, ok := s.vmScope(w, r)
+	sc, ns, _, ok := s.vmCallerScope(w, r)
 	if !ok {
 		return
 	}

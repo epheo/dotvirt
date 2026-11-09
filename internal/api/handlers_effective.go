@@ -75,8 +75,9 @@ var clusterPolicyRefs = map[model.PolicyKind]ssarRef{
 // not list the kind, as a namespace admin may not, it withholds the policy's
 // identity too. One serves one response.
 type policyRedactor struct {
-	can   func(model.PolicyKind) bool // create on the kind
-	named func(model.PolicyKind) bool // list on the kind
+	can   func(model.PolicyKind) bool   // create on the kind
+	named func(model.PolicyKind) bool   // list on the kind
+	lists func(backing, ns string) bool // list on a namespaced row's kind, where it lives
 	view  *netstate.Redaction
 	snap  *netstate.Snapshot
 	anon  withheld
@@ -89,13 +90,15 @@ type policyRedactor struct {
 // visibility read hides every name.
 func (s *Server) policyRedactor(ctx context.Context, id auth.Identity, c *cluster.Client) *policyRedactor {
 	projects := map[string]bool{}
-	visible, err := s.visibleFor(ctx, id, c)
+	v, err := s.viewFor(ctx, id, c)
+	visible := v.names
 	if err == nil {
 		for _, p := range s.resolver.Resolve(s.state.Namespaces(), visible) {
 			projects[p.Name] = true
 		}
 	}
 	return &policyRedactor{
+		lists: v.listsBacking,
 		can:   s.clusterAuthority(ctx, id, c, verbCreate),
 		named: s.clusterAuthority(ctx, id, c, verbList),
 		snap:  s.netstate,
@@ -139,19 +142,28 @@ func (s *Server) namespaceLabels() []netstate.NamespaceLabels {
 // apply redacts p, and rule when it is one of p's rows (a trace step's).
 func (pr *policyRedactor) apply(p *model.Policy, rule *model.PolicyRuleView) {
 	if _, cluster := clusterPolicyRefs[p.Kind]; !cluster {
+		if p.Namespace != "" && !pr.lists(p.Backing, p.Namespace) {
+			pr.redact(p, rule)
+			pr.withhold(p)
+		}
 		return
 	}
 	if !pr.can(p.Kind) {
-		p.Namespaces = nil
-		if p.SyncError != "" {
-			p.SyncError = redactedSyncError
-		}
-		if pr.snap != nil {
-			pr.snap.Redact(p, rule, pr.view) // finds the policy by name: before withhold
-		}
+		pr.redact(p, rule)
 	}
 	if !pr.named(p.Kind) {
 		pr.withhold(p)
+	}
+}
+
+// redact leaves what p and rule do, without what they name.
+func (pr *policyRedactor) redact(p *model.Policy, rule *model.PolicyRuleView) {
+	p.Namespaces = nil
+	if p.SyncError != "" {
+		p.SyncError = redactedSyncError
+	}
+	if pr.snap != nil {
+		pr.snap.Redact(p, rule, pr.view) // finds the policy by name: before withhold
 	}
 }
 
@@ -204,6 +216,10 @@ func withheldLabel(p *model.Policy) string {
 		return "fixed outbound IP"
 	case model.PolicyRoute:
 		return "external route"
+	case model.PolicyProjectRule:
+		return "project rule"
+	case model.PolicyGateway:
+		return "gateway rule"
 	}
 	return "cluster policy"
 }

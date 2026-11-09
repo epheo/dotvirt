@@ -36,7 +36,7 @@ func TestOptionsFilteredPerCaller(t *testing.T) {
 	}
 	s.options.Put("all", all)
 	id := auth.Identity{Token: "tenant-token", Username: "tenant"}
-	seedVisible(s, id.Token, map[string]bool{"team-a": true})
+	seedVisibleWithReads(s, id.Token, map[string]bool{"team-a": true})
 
 	r := httptest.NewRequest(http.MethodGet, "/api/options", nil)
 	r = r.WithContext(auth.NewContext(r.Context(), id))

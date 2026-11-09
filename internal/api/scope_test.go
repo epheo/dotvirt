@@ -21,6 +21,7 @@ import (
 	authnv1 "k8s.io/api/authentication/v1"
 	authzv1 "k8s.io/api/authorization/v1"
 	corev1 "k8s.io/api/core/v1"
+	rbacv1 "k8s.io/api/rbac/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -115,9 +116,12 @@ func (a *asking) set(allow, fail func(*authzv1.ResourceAttributes) bool) {
 	a.allow, a.fail = allow, fail
 }
 
-// readsVMsIn allows listing VMs in nss, and nothing else.
+// readsVMsIn allows seeing nss and listing VMs there, and nothing else.
 func readsVMsIn(nss ...string) func(*authzv1.ResourceAttributes) bool {
 	return func(a *authzv1.ResourceAttributes) bool {
+		if a.Verb == "get" && a.Resource == "namespaces" && slices.Contains(nss, a.Name) {
+			return true
+		}
 		return a.Verb == verbList && a.Resource == "virtualmachines" && a.Namespace != "" && slices.Contains(nss, a.Namespace)
 	}
 }
@@ -135,6 +139,18 @@ func seedVisibleAt(s *Server, tok string, ns map[string]bool, swept time.Time) {
 }
 
 func seedVisible(s *Server, tok string, ns map[string]bool) { seedVisibleAt(s, tok, ns, time.Now()) }
+
+// seedVisibleWithReads caches ns as tok's visible set, each listable, and
+// nothing cluster-wide.
+func seedVisibleWithReads(s *Server, tok string, ns map[string]bool) {
+	seedVisible(s, tok, ns)
+	e, _ := s.visible.Get(restfactory.TokenKey(tok))
+	e.wideReads, e.reads = 0, map[string]readSet{}
+	for n := range ns {
+		e.reads[n] = allReads
+	}
+	s.visible.Put(restfactory.TokenKey(tok), e)
+}
 
 func projectNS(name string) *corev1.Namespace {
 	return &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: name, Labels: map[string]string{"dotvirt.io/project": name}}}
@@ -267,7 +283,9 @@ func TestVisibleForClusterWideReaders(t *testing.T) {
 		t.Errorf("the admin's visibility cost %d reviews, want %d", *reviews, want)
 	}
 
-	vms := newAsking(func(a *authzv1.ResourceAttributes) bool { return a.Resource == "virtualmachines" })
+	vms := newAsking(func(a *authzv1.ResourceAttributes) bool {
+		return a.Verb == "get" && a.Resource == "namespaces" || a.Resource == "virtualmachines"
+	})
 	if got := visibleOf(t, s, "tok-vms", vms.c); !maps.Equal(got, map[string]bool{"tenant-a": true, "tenant-b": true}) {
 		t.Errorf("a cluster-wide VM reader sees %v, want every project namespace", got)
 	}
@@ -277,9 +295,9 @@ func TestVisibleForClusterWideReaders(t *testing.T) {
 		t.Errorf("a cluster-wide VM reader asked %q, want the wide sweep and each kind it lacks per namespace", got)
 	}
 
-	auditor := newAsking(func(a *authzv1.ResourceAttributes) bool { return a.Resource == "namespaces" })
+	auditor := newAsking(func(a *authzv1.ResourceAttributes) bool { return a.Verb == verbList && a.Resource == "namespaces" })
 	if got := visibleOf(t, s, "tok-auditor", auditor.c); len(got) != 0 {
-		t.Errorf("a namespace lister without VM read sees %v, want nothing", got)
+		t.Errorf("a namespace lister without get sees %v, want nothing", got)
 	}
 }
 
@@ -805,13 +823,13 @@ func knownModules(t *testing.T, vms bool) *modules.Snapshot {
 }
 
 // A namespace admin's grants, on a cluster where KubeVirt's aggregated roles do
-// or do not exist: rights on NetworkPolicies, on VMs only with KubeVirt.
+// or do not exist: the namespace, NetworkPolicies, VMs only with KubeVirt.
 func namespaceAdmin(withVMs bool) func(string, *authzv1.ResourceAttributes) bool {
 	return func(token string, a *authzv1.ResourceAttributes) bool {
 		if token != tenantToken || a.Namespace != "team-a-dev" {
 			return false
 		}
-		return a.Resource == "pods" || a.Resource == "networkpolicies" || (withVMs && a.Resource == "virtualmachines")
+		return a.Resource == "namespaces" || a.Resource == "pods" || a.Resource == "networkpolicies" || (withVMs && a.Resource == "virtualmachines")
 	}
 }
 
@@ -863,25 +881,69 @@ func TestRightsOnPodsAloneOpenNothing(t *testing.T) {
 	}
 }
 
-// A namespace admin of a cluster with KubeVirt but none of its roles sees nothing.
-func TestWithKubeVirtVisibilityStillAsksAboutVMs(t *testing.T) {
+// A namespace admin of a cluster with KubeVirt but none of its roles sees the
+// namespace and authors no VMs in it.
+func TestWithKubeVirtAuthoringStillAsksAboutVMs(t *testing.T) {
 	fc := newFakeCluster(t)
 	fc.ssar = namespaceAdmin(false)
 	s := fc.server(nil, Config{})
 	s.modules = knownModules(t, true)
-	if visible, author := tenantView(t, s); len(visible) != 0 || author["team-a-dev"] {
-		t.Errorf("visible = %v, author = %v, want neither", visible, author)
+	if visible, author := tenantView(t, s); !visible["team-a-dev"] || author["team-a-dev"] {
+		t.Errorf("visible = %v, author = %v, want the namespace and no authoring", visible, author)
 	}
 }
 
-// Until discovery answers, nothing opens on a guess.
+// Until discovery answers, authoring keeps the VM question.
 func TestUnknownModulesKeepTheVMQuestion(t *testing.T) {
 	fc := newFakeCluster(t)
 	fc.ssar = namespaceAdmin(false)
 	s := fc.server(nil, Config{})
 	s.modules = modules.New(fakeModules{})
-	if visible, _ := tenantView(t, s); len(visible) != 0 {
-		t.Errorf("visible = %v, want none", visible)
+	if visible, author := tenantView(t, s); !visible["team-a-dev"] || author["team-a-dev"] {
+		t.Errorf("visible = %v, author = %v, want the namespace and no authoring", visible, author)
+	}
+}
+
+// resourceNames can open one namespace through a ClusterRoleBinding, which the
+// RoleBinding index cannot see: the gate asks such a caller everywhere.
+func TestTheGateAsksEverywhereForAClusterBoundCaller(t *testing.T) {
+	ctx := context.Background()
+	bus := eventbus.New()
+	st, kube, _ := watchedState(t, bus, projectNS("mine"), projectNS("theirs"), userBinding("mine", "owners", "alice"))
+	waitUntil(t, "the RBAC watches", func() bool { return !st.ClusterBound("alice", nil) })
+	s := scopeServer(bus)
+	s.state, s.indexBindings = st, true
+	all := []string{"mine", "theirs"}
+	everyone := []string{"system:authenticated"}
+	alice := auth.Identity{Username: "alice", Groups: everyone}
+	if got := s.gateOnly(alice, all); !slices.Equal(got, []string{"mine"}) {
+		t.Errorf("before: asked %v, want the bound namespace", got)
+	}
+	// In watch order: once the second lands, the first was seen too.
+	createCRB(t, ctx, kube, "1-basic", rbacv1.Subject{Kind: rbacv1.GroupKind, Name: "system:authenticated"})
+	createCRB(t, ctx, kube, "2-one-namespace", rbacv1.Subject{Kind: rbacv1.UserKind, Name: "alice"})
+	waitUntil(t, "the ClusterRoleBinding", func() bool { return st.ClusterBound("alice", everyone) })
+	if got := s.gateOnly(alice, all); !slices.Equal(got, all) {
+		t.Errorf("named by a ClusterRoleBinding: asked %v, want everywhere", got)
+	}
+	if got := s.gateOnly(auth.Identity{Username: "bob", Groups: everyone}, all); len(got) != 0 {
+		t.Errorf("a binding to system:authenticated stopped the narrowing for bob: %v", got)
+	}
+	// A list names no object: the reads stay narrowed for alice.
+	if got := s.boundOnly(alice, all); !slices.Equal(got, []string{"mine"}) {
+		t.Errorf("reads asked %v, want the bound namespace", got)
+	}
+}
+
+func createCRB(t *testing.T, ctx context.Context, kube *fake.Clientset, name string, sub rbacv1.Subject) {
+	t.Helper()
+	_, err := kube.RbacV1().ClusterRoleBindings().Create(ctx, &rbacv1.ClusterRoleBinding{
+		ObjectMeta: metav1.ObjectMeta{Name: name},
+		RoleRef:    rbacv1.RoleRef{APIGroup: rbacv1.GroupName, Kind: "ClusterRole", Name: "view"},
+		Subjects:   []rbacv1.Subject{sub},
+	}, metav1.CreateOptions{})
+	if err != nil {
+		t.Fatal(err)
 	}
 }
 
@@ -971,7 +1033,9 @@ func TestASweepAsksOnlyWhereABindingNamesTheCaller(t *testing.T) {
 
 	// Wide but lacking a kind: a kind it lacks everywhere can only be held
 	// where a RoleBinding names it.
-	reader := newAsking(func(a *authzv1.ResourceAttributes) bool { return a.Resource == "virtualmachines" })
+	reader := newAsking(func(a *authzv1.ResourceAttributes) bool {
+		return a.Verb == "get" && a.Resource == "namespaces" || a.Resource == "virtualmachines"
+	})
 	if _, err := s.viewFor(ctx, auth.Identity{Token: "w", Username: "alice"}, reader.c); err != nil {
 		t.Fatal(err)
 	}

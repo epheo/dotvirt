@@ -63,13 +63,14 @@ func (s *Server) InventoryForIdentity(ctx context.Context, id auth.Identity) (mo
 	// fans out to. enrich() applies live/drift only to VMs already in the user's
 	// resolved projects, so the shared snapshot leaks nothing across tenants.
 	in := inventory.Inputs{
-		Projects: projects,
-		Branch:   s.cfg.BaseBranch,
-		Repos:    s.repos,
-		Live:     s.state.Live(),
-		Visible:  visible,
-		Owners:   s.resolver.Owners(all),
-		ListsVMs: func(ns string) bool { return v.lists(ssarVM, ns) },
+		Projects:  projects,
+		Branch:    s.cfg.BaseBranch,
+		Repos:     s.repos,
+		Live:      s.state.Live(),
+		Visible:   visible,
+		Owners:    s.resolver.Owners(all),
+		ListsVMs:  func(ns string) bool { return v.lists(ssarVM, ns) },
+		ListsVMIs: func(ns string) bool { return v.lists(ssarVMI, ns) },
 		ScopeSync: func(p project.ProjectInfo, ps model.ProjectSync) *model.ProjectSync {
 			return s.projectSyncView(ctx, id, userCluster, p, ps)
 		},
@@ -165,8 +166,8 @@ func (s *Server) InventoryForIdentity(ctx context.Context, id auth.Identity) (mo
 	// show live without another tenant's act ever moving this frame. The
 	// verdicts that shape the pulls (netGrants) shape the watermarks too.
 	grants := s.netGrants(ctx, id, userCluster, platformAuthor)
-	inv.NetworksVersion = s.networksWatermark(visible, grants)
-	inv.TasksVersion = s.tasksWatermark(s.taskScope(id, projects, platformAuthor, grants.nodes))
+	inv.NetworksVersion = s.networksWatermark(v, grants)
+	inv.TasksVersion = s.tasksWatermark(s.taskScope(id, projects, v, platformAuthor, grants.nodes))
 	inv.ReplicationVersion = s.replicationWatermark(ctx, id, userCluster, visible)
 	inv.RoutesVersion = s.routesWatermark(ctx, id, userCluster, visible)
 	return inv, nil
@@ -322,12 +323,12 @@ func (s *Server) handleOptions(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	visible, err := s.visibleFor(r.Context(), id, c)
+	v, err := s.viewFor(r.Context(), id, c)
 	if err != nil {
 		fail(w, err)
 		return
 	}
-	writeJSON(w, s.optionsFor(r.Context(), id, c, visible, all))
+	writeJSON(w, s.optionsFor(r.Context(), id, c, v, all))
 }
 
 // ssarNADs is, with ssarDataSources, the list authority over the namespaced
@@ -335,16 +336,17 @@ func (s *Server) handleOptions(w http.ResponseWriter, r *http.Request) {
 var ssarNADs = ssarFor(model.KindNAD)
 
 // optionsFor narrows the shared catalog to what id may see: a namespaced entry
-// passes when its namespace is in the caller's visible set, or when the caller
-// could list that kind there itself (a shared golden-image namespace grants that
-// to every authenticated user; the verdict is SSAR-cached per token). The cached
+// passes when the caller may list that kind there, read off the caller's view
+// or, outside it, asked where a binding names them (a shared golden-image
+// namespace grants that to every authenticated user; the verdict is SSAR-cached
+// per token). The cached
 // catalog is never mutated - fresh, non-nil slices so they serialize as [].
-func (s *Server) optionsFor(ctx context.Context, id auth.Identity, c *cluster.Client, visible map[string]bool, all model.Options) model.Options {
+func (s *Server) optionsFor(ctx context.Context, id auth.Identity, c *cluster.Client, v callerView, all model.Options) model.Options {
 	allowed := func(ns string, ref ssarRef) bool {
-		if visible[ns] {
-			return true
+		if v.names[ns] || v.lists(ref, ns) {
+			return v.lists(ref, ns)
 		}
-		return s.capable(ctx, id, c, ask(verbList, ref, ns))
+		return len(s.boundOnly(id, []string{ns})) == 1 && s.capable(ctx, id, c, ask(verbList, ref, ns))
 	}
 	out := all
 	out.OSImages = make([]model.OSImage, 0, len(all.OSImages))

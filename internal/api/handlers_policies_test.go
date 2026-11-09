@@ -60,7 +60,7 @@ func TestScopePolicies(t *testing.T) {
 func TestPolicyRedactor(t *testing.T) {
 	yes := func(model.PolicyKind) bool { return true }
 	no := func(model.PolicyKind) bool { return false }
-	lister := policyRedactor{can: no, named: yes}
+	lister := policyRedactor{can: no, named: yes, lists: listsAll}
 
 	anp := model.Policy{Name: "lockdown", Kind: model.PolicyAdmin, Namespaces: []string{"tenant-a", "tenant-b"}, SyncError: "namespace tenant-b: denied"}
 	lister.apply(&anp, nil)
@@ -68,7 +68,7 @@ func TestPolicyRedactor(t *testing.T) {
 		t.Errorf("admin policy without authority = %+v", anp)
 	}
 
-	none := policyRedactor{can: no, named: no}
+	none := policyRedactor{can: no, named: no, lists: listsAll}
 	dfw := model.Policy{Name: "allow-web", Kind: model.PolicyProjectRule, Namespace: "team-a", Namespaces: []string{"team-a"}, SourceFile: "team-a/allow-web.yaml"}
 	none.apply(&dfw, nil)
 	if dfw.Namespaces == nil || dfw.Name != "allow-web" || dfw.SourceFile == "" {
@@ -114,6 +114,23 @@ func TestPolicyRedactor(t *testing.T) {
 // The redactor's view is the caller's own: their visible namespaces and the
 // projects those belong to, under the configured project label. A failed
 // visibility read hides every name.
+// A namespaced row keeps what it does and loses what names it, for a caller
+// who may not list its kind.
+func TestPolicyRedactorWithholdsRowsTheCallerCannotList(t *testing.T) {
+	no := func(model.PolicyKind) bool { return false }
+	pr := policyRedactor{can: no, named: no, lists: func(backing, _ string) bool { return backing != "EgressFirewall" }}
+	hidden := model.Policy{Name: "egress", Kind: model.PolicyGateway, Namespace: "a", Backing: "EgressFirewall", SourceFile: "x.yaml", SyncError: "boom"}
+	pr.apply(&hidden, nil)
+	if !hidden.Withheld || hidden.Name != "gateway rule" || hidden.SourceFile != "" || hidden.SyncError != redactedSyncError {
+		t.Errorf("hidden = %+v", hidden)
+	}
+	shown := model.Policy{Name: "web", Kind: model.PolicyProjectRule, Namespace: "a", Backing: "NetworkPolicy", SourceFile: "w.yaml"}
+	pr.apply(&shown, nil)
+	if shown.Withheld || shown.Name != "web" || shown.SourceFile != "w.yaml" {
+		t.Errorf("shown = %+v", shown)
+	}
+}
+
 func TestPolicyRedactorView(t *testing.T) {
 	fc := newFakeCluster(t)
 	fc.readsVMs = tenantReadsTeamA

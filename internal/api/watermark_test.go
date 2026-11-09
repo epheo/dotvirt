@@ -211,7 +211,7 @@ func BenchmarkFrameWatermarks(b *testing.B) {
 			b.ReportAllocs()
 			g := netGrants{nodes: c.nodes, create: map[ssarRef]bool{ssarANP: c.nodes}, list: map[ssarRef]bool{ssarANP: c.nodes}}
 			for b.Loop() {
-				_ = s.networksWatermark(visible, g)
+				_ = s.networksWatermark(wideView(visible), g)
 				_ = s.tasksWatermark(newTaskScope(projects, c.nodes))
 			}
 		})
@@ -242,7 +242,7 @@ func TestNetworksWatermarkFollowsGrants(t *testing.T) {
 	}
 	visible := map[string]bool{"team-a-dev": true}
 	mark := func() uint64 {
-		return s.networksWatermark(visible, s.netGrants(context.Background(), id, c, false))
+		return s.networksWatermark(wideView(visible), s.netGrants(context.Background(), id, c, false))
 	}
 	before := mark()
 	if mark() != before {
@@ -314,4 +314,9 @@ func TestFrameRejectsARevokedToken(t *testing.T) {
 	if v := s.bus.Version(eventbus.SessionEnded); v != 1 {
 		t.Fatalf("a revoked token signalled %d session ends, want 1", v)
 	}
+}
+
+// wideView is a caller who sees visible and may list every read kind there.
+func wideView(visible map[string]bool) callerView {
+	return callerView{names: visible, set: visibleSet{wideReads: allReads}}
 }

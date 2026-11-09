@@ -74,7 +74,7 @@ type accum struct {
 
 // Resolve groups the project-labeled namespaces into projects, keeping only those
 // the caller may see. namespaces is the SA-owned snapshot of every labeled
-// namespace (clusterstate); visible is the set the caller's token can read VMs in
+// namespace (clusterstate); visible is the set the caller's token may get
 // (nil means "no filter" - the SA/background path, which sees all). A namespace
 // not in visible is dropped, so a user never learns a project (or its repo URL)
 // outside their RBAC: this filter is the authorization gate. A project whose

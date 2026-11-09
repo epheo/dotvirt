@@ -125,11 +125,15 @@ func (g netGrants) sees(gvr schema.GroupVersionResource) bool {
 // kinds it is shown (netstate.Watermark), their drift by the same scopes, the
 // visible set itself, which filters both pulls, and the verdicts that shape
 // them.
-func (s *Server) networksWatermark(visible map[string]bool, g netGrants) uint64 {
+func (s *Server) networksWatermark(v callerView, g netGrants) uint64 {
+	visible := v.names
 	var sum uint64
 	var t term
 	if s.netstate != nil {
-		sum = s.netstate.Watermark(visible, g.sees, g.nodes)
+		lists := func(gvr schema.GroupVersionResource, ns string) bool {
+			return v.lists(ssarRef{gvr.Group, gvr.Resource}, ns)
+		}
+		sum = s.netstate.Watermark(visible, g.sees, lists, g.nodes)
 	}
 	drift := func(scope string) uint64 {
 		if s.drift == nil {

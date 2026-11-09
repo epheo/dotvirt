@@ -33,7 +33,7 @@ import (
 type visibleSet struct {
 	ns    map[string]bool // never mutated once cached
 	cands *candidates     // the project namespaces ns was reviewed over
-	wide  bool            // may list VMs in every namespace: every candidate is visible
+	wide  bool            // may get every namespace: every candidate is visible
 	// reads is what the token may list in each visible namespace, wideReads in
 	// all of them. Never mutated once cached.
 	reads     map[string]readSet
@@ -55,7 +55,7 @@ type readSet uint32
 
 // readKinds narrow what a caller is shown: listing one in Kubernetes is what
 // shows it here.
-var readKinds = []ssarRef{ssarVM, ssarFor(model.KindUDN), ssarFor(model.KindNAD), ssarNetpol, ssarFor(model.KindEgressFW)}
+var readKinds = []ssarRef{ssarVM, ssarFor(model.KindUDN), ssarFor(model.KindNAD), ssarNetpol, ssarFor(model.KindEgressFW), ssarVMI, ssarDataSources}
 
 var allReads = readSet(1<<len(readKinds) - 1)
 
@@ -273,26 +273,14 @@ func (s *Server) noVMs() bool {
 	return ok && !m.VMs
 }
 
-// visibilityRef is what a token must be able to list in a namespace to see it:
-// VMs, or where the cluster serves none, NetworkPolicies. The rights to VMs reach
-// admin, edit and view through KubeVirt's aggregated roles, which then do not
-// exist, so asking about VMs would refuse every namespace admin. Not pods: log
-// shippers and monitoring accounts may list those, and seeing a namespace opens
-// its project's repo and network data.
-func (s *Server) visibilityRef() ssarRef {
-	if s.noVMs() {
-		return ssarNetpol
-	}
-	return ssarVM
-}
-
-// visibleFor returns the set of namespaces id's token may read VMs in, or
-// NetworkPolicies without KubeVirt (visibilityRef), cached by token. A token that may list them
-// in every namespace sees every candidate;
-// one that may also list namespaces sees every namespace's name, read off the
-// SA's own watch (AllNamespaces). Any other token's candidates, the snapshot's
-// project namespaces, are reviewed one by one. A failed review is never
-// cached: the next read asks again.
+// visibleFor returns the namespaces id's token may get, cached by token: the
+// rule on the namespace itself, as kubectl get namespace answers it. What
+// shows inside one follows each kind's own list right (callerView). A token
+// that may get them all sees every candidate; one that may also list
+// namespaces sees every namespace's name, read off the SA's own watch
+// (AllNamespaces). Any other token's candidates, the snapshot's project
+// namespaces where a binding names it, are reviewed one by one. A failed
+// review is never cached: the next read asks again.
 func (s *Server) visibleFor(ctx context.Context, id auth.Identity, c *cluster.Client) (map[string]bool, error) {
 	v, err := s.viewFor(ctx, id, c)
 	return v.names, err
@@ -384,8 +372,7 @@ func (s *Server) reconcile(ctx context.Context, id auth.Identity, c *cluster.Cli
 		return s.refreshReads(ctx, id, c, next, prev, due)
 	}
 	start := time.Now()
-	see := s.visibilityRef()
-	allowed, err := c.CanIn(ctx, "list", see.group, see.resource, s.boundOnly(id, slices.Sorted(maps.Keys(due))))
+	allowed, err := c.CanGetNamespaces(ctx, s.gateOnly(id, slices.Sorted(maps.Keys(due))))
 	if err != nil {
 		return visibleSet{}, err
 	}
@@ -433,10 +420,21 @@ func (s *Server) refreshReads(ctx context.Context, id auth.Identity, c *cluster.
 	return next, nil
 }
 
+// gateOnly is boundOnly for the gate, a review naming the namespace:
+// resourceNames answers one, so a ClusterRoleBinding can open a single
+// namespace and a caller one names is asked everywhere.
+func (s *Server) gateOnly(id auth.Identity, namespaces []string) []string {
+	if !s.indexBindings || s.state == nil || s.state.ClusterBound(id.Username, id.Groups) {
+		return namespaces
+	}
+	return s.boundOnly(id, namespaces)
+}
+
 // boundOnly narrows namespaces to those a RoleBinding names id in, so a user
 // costs reviews for where they belong, not for every namespace on the cluster.
-// A ClusterRoleBinding reaches everywhere and is the sweep's cluster-wide
-// review. Not narrowed while the RoleBinding watch is incomplete.
+// For a list review, which names no object: a ClusterRoleBinding then reaches
+// everywhere, the cluster-wide review's answer, or nowhere. Not narrowed while
+// the RoleBinding watch is incomplete.
 func (s *Server) boundOnly(id auth.Identity, namespaces []string) []string {
 	if !s.indexBindings || s.state == nil {
 		return namespaces
@@ -448,13 +446,12 @@ func (s *Server) boundOnly(id auth.Identity, namespaces []string) []string {
 	return slices.DeleteFunc(slices.Clone(namespaces), func(ns string) bool { return !bound[ns] })
 }
 
-// sweep reviews the token's visibility from scratch: whether it may list VMs
-// in every namespace (and namespaces too), else each candidate. The cluster-
-// wide review goes first, so a token holding it costs no per-namespace one.
+// sweep reviews the token's visibility from scratch: whether it may get every
+// namespace (and list them too), else each candidate. The cluster-wide review
+// goes first, so a token holding it costs no per-namespace one.
 func (s *Server) sweep(ctx context.Context, id auth.Identity, c *cluster.Client, cands *candidates, lv visLevels) (visibleSet, error) {
 	e := visibleSet{cands: cands, lv: lv, swept: time.Now()}
-	see := s.visibilityRef()
-	wide, err := c.Can(ctx, "list", see.group, see.resource, "")
+	wide, err := c.Can(ctx, "get", "", "namespaces", "")
 	if err != nil {
 		return visibleSet{}, err
 	}
@@ -464,7 +461,7 @@ func (s *Server) sweep(ctx context.Context, id auth.Identity, c *cluster.Client,
 			return visibleSet{}, err
 		}
 	} else {
-		allowed, err := c.CanIn(ctx, "list", see.group, see.resource, s.boundOnly(id, cands.list))
+		allowed, err := c.CanGetNamespaces(ctx, s.gateOnly(id, cands.list))
 		if err != nil {
 			return visibleSet{}, err
 		}
@@ -629,7 +626,10 @@ var gatewaysRead = action{
 // when an upload registers one.
 var ssarDataSources = ssarRef{group: "cdi.kubevirt.io", resource: "datasources"}
 
-var ssarNetpol = ssarFor(model.KindNetpol)
+var (
+	ssarNetpol = ssarFor(model.KindNetpol)
+	ssarVMI    = ssarRef{group: "kubevirt.io", resource: "virtualmachineinstances"}
+)
 
 // ssarFor is the authority over one managed kind.
 func ssarFor(k model.Kind) ssarRef { return ssarRef{k.Group, k.Plural} }
@@ -643,21 +643,47 @@ func (s *Server) platformProject() project.ProjectInfo {
 // path (name is empty on the namespace-only routes): resolve the tenant project
 // owning the path's namespace (the authorization point) and hand back the pair.
 func (s *Server) vmScope(w http.ResponseWriter, r *http.Request) (sc scope, ns, name string, ok bool) {
-	ns, name = r.PathValue("namespace"), r.PathValue("name")
-	sc, ok = s.resolveProject(w, r, byNamespace(ns))
+	sc, ns, name, ok = s.vmCallerScope(w, r)
 	if !ok || name == "" {
 		return sc, ns, name, ok
 	}
+	return sc, ns, name, s.gateVMRead(w, r, sc, ns, name)
+}
+
+// vmCallerScope is vmScope for a route that reads and acts with the caller's own
+// token: the apiserver answers for the object, so nothing is asked here.
+func (s *Server) vmCallerScope(w http.ResponseWriter, r *http.Request) (sc scope, ns, name string, ok bool) {
+	ns, name = r.PathValue("namespace"), r.PathValue("name")
+	sc, ok = s.resolveProject(w, r, byNamespace(ns))
+	return sc, ns, name, ok
+}
+
+// gateVMRead answers 404 unless the caller may list VMs in ns: what dotvirt
+// reads from git or its own account for a VM is theirs only if Kubernetes
+// would show them the VM.
+func (s *Server) gateVMRead(w http.ResponseWriter, r *http.Request, sc scope, ns, name string, also ...ssarRef) bool {
 	v, err := s.viewFor(r.Context(), sc.id, sc.cluster)
 	if err != nil {
 		fail(w, err)
-		return sc, ns, name, false
+		return false
 	}
-	if !v.lists(ssarVM, ns) {
-		fail(w, fmt.Errorf("%w: vm %s/%s", model.ErrNotFound, ns, name))
-		return sc, ns, name, false
+	for _, ref := range append([]ssarRef{ssarVM}, also...) {
+		if !v.lists(ref, ns) {
+			fail(w, fmt.Errorf("%w: vm %s/%s", model.ErrNotFound, ns, name))
+			return false
+		}
 	}
-	return sc, ns, name, true
+	return true
+}
+
+// vmNamespaces keeps those of nss whose VMs the caller may list. A failed read
+// keeps none: a smaller count is honest, a larger one is not.
+func (s *Server) vmNamespaces(ctx context.Context, sc scope, nss []string) []string {
+	v, err := s.viewFor(ctx, sc.id, sc.cluster)
+	if err != nil {
+		return nil
+	}
+	return slices.DeleteFunc(slices.Clone(nss), func(ns string) bool { return !v.lists(ssarVM, ns) })
 }
 
 // The platform-tier authorities, each named once and spelled by the kind

@@ -127,7 +127,7 @@ func TestScopeNetworkRulesRedactsDrift(t *testing.T) {
 	}
 	drift := func(p *model.Policy) { p.SyncError = "namespace team-b: admission denied" }
 	no := func(model.PolicyKind) bool { return false }
-	tenant := policyRedactor{can: no, named: no}
+	tenant := policyRedactor{can: no, named: no, lists: listsAll}
 	got := scopeNetworkRules(in, nil, listsAll, drift, tenant.apply)
 	for _, p := range []model.Policy{got.Applies[0].Policy, got.Reaches[0].Policy} {
 		if p.SyncError != redactedSyncError {

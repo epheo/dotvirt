@@ -164,8 +164,10 @@ func (fc *fakeCluster) serve(w http.ResponseWriter, r *http.Request) {
 		readsVMs, ssar := fc.readsVMs, fc.ssar
 		fc.mu.Unlock()
 		switch {
+		case readsVMs != nil && readsVMs(bearer(r), attrs.Namespace) && attrs.Verb == "get" && attrs.Resource == "namespaces":
+			allow = true
 		case readsVMs != nil && readsVMs(bearer(r), attrs.Namespace) && attrs.Verb == "list" &&
-			slices.Contains([]string{"virtualmachines", "userdefinednetworks", "network-attachment-definitions", "networkpolicies", "egressfirewalls"}, attrs.Resource):
+			slices.Contains([]string{"virtualmachines", "userdefinednetworks", "network-attachment-definitions", "networkpolicies", "egressfirewalls", "virtualmachineinstances", "datasources"}, attrs.Resource):
 			allow = true
 		case ssar != nil:
 			allow = ssar(bearer(r), attrs)
@@ -222,8 +224,8 @@ func (fc *fakeCluster) serve(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if name, one := strings.CutPrefix(r.URL.Path, "/api/v1/namespaces/"); h == nil && r.Method == http.MethodGet && one && !strings.Contains(name, "/") {
-		allow := bearer(r) == adminToken
-		if fc.ssar != nil {
+		allow := bearer(r) == adminToken || fc.readsVMs != nil && fc.readsVMs(bearer(r), name)
+		if !allow && fc.ssar != nil {
 			allow = fc.ssar(bearer(r), &authzv1.ResourceAttributes{Verb: "get", Resource: "namespaces", Namespace: name, Name: name})
 		}
 		if !allow {

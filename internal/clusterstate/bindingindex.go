@@ -1,15 +1,18 @@
 package clusterstate
 
 import (
+	"slices"
+	"strings"
 	"sync"
 
 	rbacv1 "k8s.io/api/rbac/v1"
 	"k8s.io/client-go/tools/cache"
 )
 
-// bindingIndex is which namespaces' RoleBindings name each subject. It narrows
-// which namespaces a token is asked about: the apiserver's review stays the
-// answer, so a miss can hide a namespace and never reveal one.
+// bindingIndex is where bindings of one kind name each subject: by namespace
+// for RoleBindings, under "" for ClusterRoleBindings. It narrows which
+// namespaces a token is asked about: the apiserver's review stays the answer,
+// so a miss can hide a namespace and never reveal one.
 type bindingIndex struct {
 	mu        sync.RWMutex
 	bySubject map[string]map[string]int // subject -> namespace -> bindings naming it there
@@ -44,25 +47,39 @@ func subjectKey(bindingNS string, sub rbacv1.Subject) string {
 	return userSubject(sub.Name)
 }
 
-func (x *bindingIndex) put(rb *rbacv1.RoleBinding) {
-	x.mu.Lock()
-	defer x.mu.Unlock()
-	x.putLocked(rb)
+// bindingOf reads either binding kind; its key is the watch's own.
+func bindingOf(obj any) (key, namespace string, subjects []rbacv1.Subject, ok bool) {
+	switch b := obj.(type) {
+	case *rbacv1.RoleBinding:
+		return b.Namespace + "/" + b.Name, b.Namespace, b.Subjects, true
+	case *rbacv1.ClusterRoleBinding:
+		return b.Name, "", b.Subjects, true
+	}
+	return "", "", nil, false
 }
 
-func (x *bindingIndex) putLocked(rb *rbacv1.RoleBinding) {
-	key := rb.Namespace + "/" + rb.Name
+func (x *bindingIndex) put(obj any) {
+	x.mu.Lock()
+	defer x.mu.Unlock()
+	x.putLocked(obj)
+}
+
+func (x *bindingIndex) putLocked(obj any) {
+	key, namespace, subs, ok := bindingOf(obj)
+	if !ok {
+		return
+	}
 	x.dropLocked(key)
-	subjects := make([]string, 0, len(rb.Subjects))
-	for _, sub := range rb.Subjects {
-		k := subjectKey(rb.Namespace, sub)
+	subjects := make([]string, 0, len(subs))
+	for _, sub := range subs {
+		k := subjectKey(namespace, sub)
 		subjects = append(subjects, k)
 		if x.bySubject[k] == nil {
 			x.bySubject[k] = map[string]int{}
 		}
-		x.bySubject[k][rb.Namespace]++
+		x.bySubject[k][namespace]++
 	}
-	x.byBinding[key] = boundSubjects{namespace: rb.Namespace, subjects: subjects}
+	x.byBinding[key] = boundSubjects{namespace: namespace, subjects: subjects}
 }
 
 func (x *bindingIndex) dropLocked(key string) {
@@ -86,9 +103,7 @@ func (x *bindingIndex) replace(list []any) {
 	defer x.mu.Unlock()
 	x.bySubject, x.byBinding = map[string]map[string]int{}, make(map[string]boundSubjects, len(list))
 	for _, obj := range list {
-		if rb, ok := obj.(*rbacv1.RoleBinding); ok {
-			x.putLocked(rb)
-		}
+		x.putLocked(obj)
 	}
 }
 
@@ -115,16 +130,12 @@ type indexedBindings struct {
 }
 
 func (b indexedBindings) Add(obj any) error {
-	if rb, ok := obj.(*rbacv1.RoleBinding); ok {
-		b.index.put(rb)
-	}
+	b.index.put(obj)
 	return b.rbacSignal.Add(obj)
 }
 
 func (b indexedBindings) Update(obj any) error {
-	if rb, ok := obj.(*rbacv1.RoleBinding); ok {
-		b.index.put(rb)
-	}
+	b.index.put(obj)
 	return b.rbacSignal.Update(obj)
 }
 
@@ -150,4 +161,17 @@ func (s *State) BoundNamespaces(username string, groups []string) (map[string]bo
 		return nil, false
 	}
 	return s.bindings.namespaces(username, groups), true
+}
+
+// ClusterBound reports whether a ClusterRoleBinding may reach username in a
+// single namespace, which a review naming the object sees through
+// resourceNames and the RoleBinding index cannot. True while that watch is
+// incomplete. system: groups do not count: they hold nearly everyone, and what
+// they grant is cluster-wide or nothing.
+func (s *State) ClusterBound(username string, groups []string) bool {
+	if username == "" || !s.RBACWatched() {
+		return true
+	}
+	named := slices.DeleteFunc(slices.Clone(groups), func(g string) bool { return strings.HasPrefix(g, "system:") })
+	return len(s.clusterBindings.namespaces(username, named)) > 0
 }

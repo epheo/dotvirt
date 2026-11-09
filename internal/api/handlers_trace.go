@@ -46,11 +46,14 @@ func (s *Server) handleTrace(w http.ResponseWriter, r *http.Request) {
 	}
 
 	sc, ok := s.resolveProject(w, r, byNamespace(req.Source.Namespace))
-	if !ok {
+	if !ok || !s.gateVMRead(w, r, sc, req.Source.Namespace, req.Source.VM, ssarVMI) {
 		return
 	}
 	if dstVM {
 		if _, ok := s.resolveProject(w, r, byNamespace(req.Destination.Namespace)); !ok {
+			return
+		}
+		if !s.gateVMRead(w, r, sc, req.Destination.Namespace, req.Destination.VM, ssarVMI) {
 			return
 		}
 	}
@@ -123,7 +126,7 @@ func (s *Server) traceView(r *http.Request, sc scope) *netstate.TraceView {
 			var out []netstate.TraceWorkload
 			live := s.state.Live()
 			for ns := range visible {
-				if !v.lists(ssarVM, ns) {
+				if !v.lists(ssarVM, ns) || !v.lists(ssarVMI, ns) {
 					continue
 				}
 				for name, vm := range live[ns] {

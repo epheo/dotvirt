@@ -8,7 +8,7 @@ import "net/http"
 // handleEvents lists recent Events for a VM (+ its VMI) - the per-VM Monitor tab.
 // resolveProject gates the namespace.
 func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request) {
-	sc, ns, name, ok := s.vmScope(w, r)
+	sc, ns, name, ok := s.vmCallerScope(w, r)
 	if !ok {
 		return
 	}
