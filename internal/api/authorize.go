@@ -776,7 +776,7 @@ func (s *Server) authorNamespaces(ctx context.Context, id auth.Identity, c *clus
 	authorIn := vmAction
 	if s.noVMs() {
 		// admin and edit grant this on any Kubernetes; see visibilityRef.
-		authorIn = func(verb, ns string) action { return ask(verb, ssarFor(model.KindNetpol), ns) }
+		authorIn = func(verb, ns string) action { return ask(verb, ssarNetpol, ns) }
 	}
 	if _, all, err := s.allowed(ctx, id, c, authorIn(verbUpdate, "")); err == nil && all {
 		for _, ns := range nss {

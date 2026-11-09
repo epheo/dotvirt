@@ -188,18 +188,20 @@ func (s *Server) noVMs() bool {
 }
 
 // visibilityRef is what a token must be able to list in a namespace to see it:
-// VMs, or where the cluster serves none, pods. The rights to VMs reach admin,
-// edit and view through KubeVirt's aggregated roles, which then do not exist,
-// so asking about VMs would refuse every namespace admin.
+// VMs, or where the cluster serves none, NetworkPolicies. The rights to VMs reach
+// admin, edit and view through KubeVirt's aggregated roles, which then do not
+// exist, so asking about VMs would refuse every namespace admin. Not pods: log
+// shippers and monitoring accounts may list those, and seeing a namespace opens
+// its project's repo and network data.
 func (s *Server) visibilityRef() ssarRef {
 	if s.noVMs() {
-		return ssarPods
+		return ssarNetpol
 	}
 	return ssarVM
 }
 
-// visibleFor returns the set of namespaces id's token may read VMs in, or pods
-// without KubeVirt (visibilityRef), cached by token. A token that may list them
+// visibleFor returns the set of namespaces id's token may read VMs in, or
+// NetworkPolicies without KubeVirt (visibilityRef), cached by token. A token that may list them
 // in every namespace sees every candidate;
 // one that may also list namespaces sees every namespace's name, read off the
 // SA's own watch (AllNamespaces). Any other token's candidates, the snapshot's
@@ -443,7 +445,7 @@ var ssarNodes = ssarRef{resource: "nodes"}
 // when an upload registers one.
 var ssarDataSources = ssarRef{group: "cdi.kubevirt.io", resource: "datasources"}
 
-var ssarPods = ssarRef{group: "", resource: "pods"}
+var ssarNetpol = ssarFor(model.KindNetpol)
 
 // ssarFor is the authority over one managed kind.
 func ssarFor(k model.Kind) ssarRef { return ssarRef{k.Group, k.Plural} }

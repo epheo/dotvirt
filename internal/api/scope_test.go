@@ -783,20 +783,19 @@ func knownModules(t *testing.T, vms bool) *modules.Snapshot {
 }
 
 // A namespace admin's grants, on a cluster where KubeVirt's aggregated roles do
-// or do not exist: rights on pods and NetworkPolicies, on VMs only with KubeVirt.
+// or do not exist: rights on NetworkPolicies, on VMs only with KubeVirt.
 func namespaceAdmin(withVMs bool) func(string, *authzv1.ResourceAttributes) bool {
 	return func(token string, a *authzv1.ResourceAttributes) bool {
 		if token != tenantToken || a.Namespace != "team-a-dev" {
 			return false
 		}
-		switch a.Resource {
-		case "pods", "networkpolicies":
-			return true
-		case "virtualmachines":
-			return withVMs
-		}
-		return false
+		return a.Resource == "pods" || a.Resource == "networkpolicies" || (withVMs && a.Resource == "virtualmachines")
 	}
+}
+
+// A log shipper or a monitoring account: pods everywhere, nothing else.
+func podsOnly(token string, a *authzv1.ResourceAttributes) bool {
+	return token == tenantToken && a.Resource == "pods"
 }
 
 func tenantView(t *testing.T, s *Server) (map[string]bool, map[string]bool) {
@@ -827,7 +826,22 @@ func TestANamespaceAdminSeesItsNamespaceWithoutKubeVirt(t *testing.T) {
 	}
 }
 
-// Rights on pods alone must not open a namespace on a cluster with VMs.
+// Seeing a namespace opens its project's repo and network data.
+func TestRightsOnPodsAloneOpenNothing(t *testing.T) {
+	for name, vms := range map[string]bool{"with KubeVirt": true, "without": false} {
+		t.Run(name, func(t *testing.T) {
+			fc := newFakeCluster(t)
+			fc.ssar = podsOnly
+			s := fc.server(nil, Config{})
+			s.modules = knownModules(t, vms)
+			if visible, author := tenantView(t, s); len(visible) != 0 || author["team-a-dev"] {
+				t.Errorf("visible = %v, author = %v, want neither", visible, author)
+			}
+		})
+	}
+}
+
+// A namespace admin of a cluster with KubeVirt but none of its roles sees nothing.
 func TestWithKubeVirtVisibilityStillAsksAboutVMs(t *testing.T) {
 	fc := newFakeCluster(t)
 	fc.ssar = namespaceAdmin(false)
