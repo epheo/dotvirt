@@ -57,10 +57,13 @@ func (s *Server) objectScope(w http.ResponseWriter, r *http.Request, verbs ...st
 		return sc, "", "", "", false
 	}
 	sc, ok = s.resolveProject(w, r, byNamespace(ns))
-	if ok && len(verbs) > 0 {
-		ok = s.gateAny(w, r, sc, objectActions(verbs, resource, ns))
+	if !ok {
+		return sc, "", "", "", false
 	}
-	return sc, resource, ns, name, ok
+	if len(verbs) == 0 {
+		verbs = []string{verbList}
+	}
+	return sc, resource, ns, name, s.gateAny(w, r, sc, objectActions(verbs, resource, ns))
 }
 
 // handleObjectSpec reads a declared object back as the spec its form edits.

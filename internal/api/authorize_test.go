@@ -16,6 +16,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/client-go/kubernetes/fake"
 	k8stesting "k8s.io/client-go/testing"
 	kvfake "kubevirt.io/client-go/kubevirt/fake"
@@ -130,6 +131,10 @@ func (d *reachedDraft) Get(auth.Identity, project.ProjectInfo) (model.DraftView,
 	return v, nil
 }
 func (d *reachedDraft) Holds(auth.Identity, project.ProjectInfo) (bool, error) { return false, nil }
+func (d *reachedDraft) DeclaredKinds(project.ProjectInfo) ([]schema.GroupKind, error) {
+	return nil, nil
+}
+
 func (d *reachedDraft) Commit(project.ProjectInfo, string) (model.CommitDetail, error) {
 	return model.CommitDetail{Items: d.items}, nil
 }

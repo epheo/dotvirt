@@ -755,16 +755,33 @@ func (s *Server) projectAuthor(ctx context.Context, id auth.Identity, c *cluster
 	return s.anyAllowed(ctx, id, c, acts)
 }
 
-// authorizeRepo gates a revert before the coordinator weighs it: a commit may
-// touch any namespace of a tenant project, so the caller must see every one -
-// one they cannot read is refused without being named. The coordinator then
-// checks each object the revert changes with its exact verb.
-func (s *Server) authorizeRepo(w http.ResponseWriter, r *http.Request, sc scope) bool {
-	if full, ok := s.projectByName(sc.proj.Name); ok && len(full.Namespaces) > len(sc.proj.Namespaces) {
-		fail(w, fmt.Errorf("%w: reverting needs every namespace of %s in your view", model.ErrForbidden, sc.proj.Name))
+// gateRepo refuses a caller who may not read what a tenant project's repo holds
+// in namespace, or in every namespace of the project when it is "": the repo
+// holds those objects, so the apiserver's answer on each declared kind is the
+// answer on the repo. A namespace they cannot read is refused without being
+// named. The platform tier answered this at its own scope (canReadPlatform).
+func (s *Server) gateRepo(w http.ResponseWriter, r *http.Request, sc scope, namespace string) bool {
+	if sc.proj.Name == platformProjectName {
+		return true
+	}
+	namespaces := []string{namespace}
+	if namespace == "" {
+		full, ok := s.projectByName(sc.proj.Name)
+		if ok && len(full.Namespaces) > len(sc.proj.Namespaces) {
+			fail(w, fmt.Errorf("%w: this needs every namespace of %s in your view", model.ErrForbidden, sc.proj.Name))
+			return false
+		}
+		namespaces = sc.proj.Namespaces
+	}
+	act, err := s.repoListing(r.Context(), sc.proj, namespaces)
+	if err != nil {
+		fail(w, err)
 		return false
 	}
-	return true
+	if len(act) == 0 {
+		return true
+	}
+	return s.gate(w, r, sc, act)
 }
 
 // authorNamespaces is the UI's authoring signal for nss. One cluster-wide

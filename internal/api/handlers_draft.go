@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"path"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -326,8 +327,18 @@ func (s *Server) handleHistory(w http.ResponseWriter, r *http.Request) {
 			fail(w, err)
 			return
 		}
+		if sc.proj.Name != platformProjectName && !slices.Contains(sc.proj.Namespaces, ns) {
+			fail(w, fmt.Errorf("%w: namespace %q in project %s", model.ErrNotFound, ns, sc.proj.Name))
+			return
+		}
+		if !s.gateRepo(w, r, sc, ns) {
+			return
+		}
 		commits, err := s.reader.NamespaceHistory(sc.proj, ns, 25)
 		respond(w, commits, err)
+		return
+	}
+	if !s.gateRepo(w, r, sc, "") {
 		return
 	}
 	commits, err := s.reader.History(sc.proj, 25)
@@ -394,7 +405,7 @@ var commitHash = regexp.MustCompile(`^[0-9a-f]{40}$`)
 // review of a merged change, and what reverting it now would do.
 func (s *Server) handleCommit(w http.ResponseWriter, r *http.Request) {
 	sc, ok := s.pickProject(w, r, r.PathValue("project"))
-	if !ok {
+	if !ok || !s.gateRepo(w, r, sc, "") {
 		return
 	}
 	hash := r.PathValue("hash")
@@ -430,6 +441,9 @@ func (s *Server) handleProposal(w http.ResponseWriter, r *http.Request) {
 		s.ownPlatformProposal(w, sc, n)
 		return
 	}
+	if !s.gateRepo(w, r, sc, "") {
+		return
+	}
 	detail, err := s.reader.Proposal(sc.proj, n)
 	if err == nil {
 		detail.Proposal.Mine = s.reader.OwnsProposal(sc.id, sc.proj, detail.Proposal.Branch)
@@ -462,7 +476,7 @@ func (s *Server) ownPlatformProposal(w http.ResponseWriter, sc scope, n int) {
 // it changes; a project library file, which no gate weighs, is weighed here.
 func (s *Server) handleRevert(w http.ResponseWriter, r *http.Request) {
 	sc, ok := s.pickProject(w, r, r.PathValue("project"))
-	if !ok || !s.authorizeRepo(w, r, sc) {
+	if !ok || !s.gateRepo(w, r, sc, "") {
 		return
 	}
 	hash, ok := hashBody(w, r)
