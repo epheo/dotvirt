@@ -283,8 +283,14 @@ func sortRoutes(rs []model.Route) {
 }
 
 // Overview is every Gateway and route. sees answers for each kind the caller
-// was not already reviewed for.
+// was not already reviewed for; it may reach the cluster, so it runs before the
+// lock, which the frame path's reads wait on.
 func (s *Snapshot) Overview(sees func(group, resource string) bool) model.Gateways {
+	limits := sees(GVRRateLimit.Group, GVRRateLimit.Resource)
+	kinds := make([]bool, len(RouteKinds))
+	for i, k := range RouteKinds {
+		kinds[i] = sees(group, k.Resource)
+	}
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	out := model.Gateways{
@@ -294,7 +300,7 @@ func (s *Snapshot) Overview(sees func(group, resource string) bool) model.Gatewa
 		Routes:   []model.Route{},
 	}
 	byGateway := map[string][]model.GatewayRateLimit{}
-	if len(s.limits.Rows) > 0 && sees(GVRRateLimit.Group, GVRRateLimit.Resource) {
+	if limits {
 		for _, l := range s.limits.Rows {
 			key := l.Namespace + "/" + l.Gateway
 			byGateway[key] = append(byGateway[key], model.GatewayRateLimit{Listener: l.Listener, RequestsPerSecond: l.RequestsPerSecond, Burst: l.Burst})
@@ -309,7 +315,7 @@ func (s *Snapshot) Overview(sees func(group, resource string) bool) model.Gatewa
 		return strings.Compare(a.Namespace+"\x00"+a.Name, b.Namespace+"\x00"+b.Name)
 	})
 	for i, t := range s.routes {
-		if len(t.Rows) == 0 || !sees(group, RouteKinds[i].Resource) {
+		if !kinds[i] {
 			continue
 		}
 		for _, r := range t.Rows {

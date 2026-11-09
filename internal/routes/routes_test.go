@@ -174,6 +174,30 @@ func TestOverviewAsksForEachOptionalKind(t *testing.T) {
 	}
 }
 
+// A review can reach the apiserver: held under the lock, a slow one would stall
+// the frame path behind a waiting writer.
+func TestOverviewReviewsWithTheLockFree(t *testing.T) {
+	s, _ := newSnapshot(t)
+	mustAdd(t, s.routes[0], httpRoute("web", "shop", true))
+	mustAdd(t, s.limits, obj("edge", "limit", map[string]any{"spec": map[string]any{
+		"targetRef": map[string]any{"name": "public"}, "requestsPerSecond": int64(20),
+	}}))
+	done := make(chan struct{})
+	go func() {
+		s.Overview(func(string, string) bool {
+			s.mu.Lock()
+			defer s.mu.Unlock()
+			return true
+		})
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("a review ran under the snapshot's lock")
+	}
+}
+
 func TestATenantsLevelMovesWithItsOwnRoutesOnly(t *testing.T) {
 	s, bus := newSnapshot(t)
 	mustAdd(t, s.routes[0], httpRoute("web", "shop", true))
