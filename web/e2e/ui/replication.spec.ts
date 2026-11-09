@@ -145,6 +145,42 @@ test('a caller who may read but not repair is offered no repair', async ({ page 
 	await expect(main.getByRole('button', { name: /^Keep one copy/ })).toHaveCount(0);
 });
 
+test('a VM page says where its copies are and what a lost host does', async ({ page }) => {
+	await setScenario(page, 'replicated');
+	await login(page);
+	await page.goto('/vm/db-prod/db-1');
+	const card = page.locator('main').getByRole('region', { name: 'Replicated disks' });
+	await expect(card.getByText('rootdisk', { exact: true })).toBeVisible();
+	await expect(card.getByText('Copy on worker-3 catching up, 64%')).toBeVisible();
+	await expect(card.getByText('Offline until worker-1 returns')).toBeVisible();
+	await expect(card.getByRole('link', { name: 'Where every copy lives' })).toBeVisible();
+});
+
+test('a tenant reads a VM disk standing and no host', async ({ page }) => {
+	await setScenario(page, 'replicatedtenant');
+	await login(page);
+	await page.goto('/vm/db-prod/db-1');
+	const card = page.locator('main').getByRole('region', { name: 'Replicated disks' });
+	await expect(card.getByText('Catching up, 64%')).toBeVisible();
+	await expect(card).not.toContainText('worker-');
+	await expect(card.getByRole('link', { name: 'Where every copy lives' })).toHaveCount(0);
+});
+
+test('a VM with no replicated disk has no such card', async ({ page }) => {
+	await setScenario(page, 'replicated');
+	await login(page);
+	await page.goto('/vm/batch-prod/batch-1');
+	await expect(
+		page.locator('main').getByRole('region', { name: 'Replicated disks' }),
+	).toBeVisible();
+	await setScenario(page, 'base');
+	await page.goto('/vm/batch-prod/batch-1');
+	await expect(page.locator('main').getByRole('heading', { name: 'Placement' })).toBeVisible();
+	await expect(page.locator('main').getByRole('region', { name: 'Replicated disks' })).toHaveCount(
+		0,
+	);
+});
+
 test('without r-drbd there is no Replication tab', async ({ page }) => {
 	await setScenario(page, 'base');
 	await login(page);
