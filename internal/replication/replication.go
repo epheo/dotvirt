@@ -354,7 +354,10 @@ type volumeDoc struct {
 		Node        string   `json:"node"`
 		Attachments []string `json:"attachments"`
 		Evict       []string `json:"evict"`
-		Assignment  struct {
+		Resolve     struct {
+			Survivor string `json:"survivor"`
+		} `json:"resolve"`
+		Assignment struct {
 			Replicas []struct {
 				Node string `json:"node"`
 				Pool string `json:"pool"`
@@ -366,8 +369,9 @@ type volumeDoc struct {
 		Phase      string `json:"phase"`
 		Primary    string `json:"primary"`
 		Conditions []struct {
-			Type   string `json:"type"`
-			Status string `json:"status"`
+			Type               string `json:"type"`
+			Status             string `json:"status"`
+			LastTransitionTime string `json:"lastTransitionTime"`
 		} `json:"conditions"`
 		Replicas []replicaDoc `json:"replicas"`
 	} `json:"status"`
@@ -403,6 +407,7 @@ func decodeVolume(u *unstructured.Unstructured) (model.ReplicatedVolume, bool) {
 		PinnedNode:  doc.Spec.Node,
 		PinnedPool:  doc.Spec.Pool,
 		Attachments: doc.Spec.Attachments,
+		Resolving:   doc.Spec.Resolve.Survivor,
 	}
 	for _, c := range doc.Status.Conditions {
 		if c.Status != "True" {
@@ -411,6 +416,7 @@ func decodeVolume(u *unstructured.Unstructured) (model.ReplicatedVolume, bool) {
 		switch c.Type {
 		case "SplitBrain":
 			v.SplitBrain = true
+			v.SplitSince = c.LastTransitionTime
 		case "QuorumLost":
 			v.QuorumLost = true
 		}
@@ -665,6 +671,9 @@ func (s *Snapshot) Evictions(node string) (moving []model.ReplicatedVolume, skip
 	return moving, skipped
 }
 
+// evictBlock says why r-drbd would refuse. It also holds a move while a
+// snapshot is being taken or a status is being rediscovered; those are not
+// read here, and r-drbd keeps trying, so such a move just starts late.
 func evictBlock(v model.ReplicatedVolume, node string, pinned bool) string {
 	diskful := slices.ContainsFunc(v.Replicas, func(r model.VolumeReplica) bool {
 		return r.Node == node && r.Role == "diskful"
@@ -674,11 +683,13 @@ func evictBlock(v model.ReplicatedVolume, node string, pinned bool) string {
 		return "One copy: it cannot move. Recreate it on replicated storage first."
 	case v.SplitBrain:
 		return "Its copies disagree: resolve that first."
+	case v.Resolving != "":
+		return "A split brain is being resolved."
 	case v.Phase == "" || v.Phase == "Pending" || v.Phase == "Provisioning":
 		return "Still being set up."
 	case slices.Contains(v.Attachments, node) || v.Primary == node ||
 		slices.ContainsFunc(v.Replicas, func(r model.VolumeReplica) bool { return r.Node == node && r.InUse }):
-		return "In use on " + node + ": move what runs there away first."
+		return "In use on " + node + ": move what runs there away first. If " + node + " is dead, delete its Node object and r-drbd can move this copy."
 	case !diskful:
 		return ""
 	case pinned:
@@ -691,6 +702,23 @@ func evictBlock(v model.ReplicatedVolume, node string, pinned bool) string {
 		return "No other copy is in sync."
 	}
 	return ""
+}
+
+// keepsMajority reports whether losing one more voter leaves a majority.
+// r-drbd suspends IO without one, so every copy in sync is not protection
+// while a witness is out of reach or a pair has none.
+func keepsMajority(v model.ReplicatedVolume) bool {
+	var voters, reachable int
+	for _, r := range v.Replicas {
+		if r.Role == "diskless" {
+			continue
+		}
+		voters++
+		if r.State != model.ReplicaUnreachable && r.State != model.ReplicaUnknown {
+			reachable++
+		}
+	}
+	return (reachable-1)*2 > voters
 }
 
 // standing folds a volume into what its owner can act on.
@@ -717,7 +745,7 @@ func standing(v model.ReplicatedVolume) (inSync int, percent *int, st string) {
 		st = model.StandingNeedsOperator
 	case v.Copies <= 1:
 		st = model.StandingLocal
-	case inSync >= v.Copies:
+	case inSync >= v.Copies && keepsMajority(v):
 		st = model.StandingProtected
 	case percent != nil:
 		st = model.StandingCatchingUp

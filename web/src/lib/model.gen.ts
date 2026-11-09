@@ -1625,6 +1625,12 @@ export interface ReplicatedVolume {
   pinnedPool?: string;
   attachments?: string[]; // hosts the device is published to
   splitBrain?: boolean;
+  /**
+   * SplitSince is when this split began. A resolve sends it back, so a dialog
+   * left open cannot pick the winner of a later split.
+   */
+  splitSince?: string;
+  resolving?: string; // the survivor already named, while r-drbd works
   quorumLost?: boolean;
   evicting?: string[]; // hosts whose copy is being moved off
   replicas: VolumeReplica[];

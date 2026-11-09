@@ -90,21 +90,25 @@ type BlankDisk struct {
 
 // ReplicatedVolume is one r-drbd Volume and the claim it serves.
 type ReplicatedVolume struct {
-	Name        string          `json:"name"`
-	Namespace   string          `json:"namespace,omitempty"`
-	Claim       string          `json:"claim,omitempty"`
-	SizeBytes   int64           `json:"sizeBytes"`
-	Copies      int             `json:"copies"` // the copies asked for
-	Tier        string          `json:"tier"`
-	Phase       string          `json:"phase,omitempty"`
-	Primary     string          `json:"primary,omitempty"` // the host the device is open on
-	PinnedNode  string          `json:"pinnedNode,omitempty"`
-	PinnedPool  string          `json:"pinnedPool,omitempty"`
-	Attachments []string        `json:"attachments,omitempty"` // hosts the device is published to
-	SplitBrain  bool            `json:"splitBrain,omitempty"`
-	QuorumLost  bool            `json:"quorumLost,omitempty"`
-	Evicting    []string        `json:"evicting,omitempty"` // hosts whose copy is being moved off
-	Replicas    []VolumeReplica `json:"replicas"`
+	Name        string   `json:"name"`
+	Namespace   string   `json:"namespace,omitempty"`
+	Claim       string   `json:"claim,omitempty"`
+	SizeBytes   int64    `json:"sizeBytes"`
+	Copies      int      `json:"copies"` // the copies asked for
+	Tier        string   `json:"tier"`
+	Phase       string   `json:"phase,omitempty"`
+	Primary     string   `json:"primary,omitempty"` // the host the device is open on
+	PinnedNode  string   `json:"pinnedNode,omitempty"`
+	PinnedPool  string   `json:"pinnedPool,omitempty"`
+	Attachments []string `json:"attachments,omitempty"` // hosts the device is published to
+	SplitBrain  bool     `json:"splitBrain,omitempty"`
+	// SplitSince is when this split began. A resolve sends it back, so a dialog
+	// left open cannot pick the winner of a later split.
+	SplitSince string          `json:"splitSince,omitempty"`
+	Resolving  string          `json:"resolving,omitempty"` // the survivor already named, while r-drbd works
+	QuorumLost bool            `json:"quorumLost,omitempty"`
+	Evicting   []string        `json:"evicting,omitempty"` // hosts whose copy is being moved off
+	Replicas   []VolumeReplica `json:"replicas"`
 }
 
 // What a replica is doing, read from every replica's report.

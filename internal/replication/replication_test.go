@@ -177,6 +177,8 @@ func TestReplicaStates(t *testing.T) {
 
 func TestStanding(t *testing.T) {
 	inSync := model.VolumeReplica{Role: "diskful", State: model.ReplicaInSync}
+	witness := model.VolumeReplica{Role: "tiebreaker", State: model.ReplicaStandby}
+	witnessGone := model.VolumeReplica{Role: "tiebreaker", State: model.ReplicaUnreachable}
 	lost := model.VolumeReplica{Role: "diskful", State: model.ReplicaUnreachable}
 	p := 40
 	catching := model.VolumeReplica{Role: "diskful", State: model.ReplicaCatchingUp, SyncPercent: &p}
@@ -185,7 +187,10 @@ func TestStanding(t *testing.T) {
 		v    model.ReplicatedVolume
 		want string
 	}{
-		{"every copy in sync", model.ReplicatedVolume{Phase: "Ready", Copies: 2, Replicas: []model.VolumeReplica{inSync, inSync}}, model.StandingProtected},
+		{"every copy in sync", model.ReplicatedVolume{Phase: "Ready", Copies: 2, Replicas: []model.VolumeReplica{inSync, inSync, witness}}, model.StandingProtected},
+		{"three copies in sync", model.ReplicatedVolume{Phase: "Ready", Copies: 3, Replicas: []model.VolumeReplica{inSync, inSync, inSync}}, model.StandingProtected},
+		{"its witness out of reach", model.ReplicatedVolume{Phase: "Ready", Copies: 2, Replicas: []model.VolumeReplica{inSync, inSync, witnessGone}}, model.StandingExposed},
+		{"a pair with no witness", model.ReplicatedVolume{Phase: "Ready", Copies: 2, Replicas: []model.VolumeReplica{inSync, inSync}}, model.StandingExposed},
 		{"one copy by choice", model.ReplicatedVolume{Phase: "Ready", Copies: 1, Replicas: []model.VolumeReplica{inSync}}, model.StandingLocal},
 		{"catching up", model.ReplicatedVolume{Phase: "Degraded", Copies: 2, Replicas: []model.VolumeReplica{inSync, catching}}, model.StandingCatchingUp},
 		{"a copy lost", model.ReplicatedVolume{Phase: "Degraded", Copies: 2, Replicas: []model.VolumeReplica{inSync, lost}}, model.StandingExposed},
@@ -404,6 +409,9 @@ func TestEvictionsSayWhatCannotMove(t *testing.T) {
 	mustAdd(t, s.volumes, two("split", func(_, st map[string]any) {
 		st["conditions"] = []any{map[string]any{"type": "SplitBrain", "status": "True"}}
 	}))
+	mustAdd(t, s.volumes, two("resolving", func(sp, _ map[string]any) {
+		sp["resolve"] = map[string]any{"survivor": "host-2"}
+	}))
 	mustAdd(t, s.volumes, two("attached", func(sp, _ map[string]any) { sp["attachments"] = []any{"host-1"} }))
 	mustAdd(t, s.volumes, two("primary", func(_, st map[string]any) { st["primary"] = "host-1" }))
 	mustAdd(t, s.volumes, two("pin-node", func(sp, _ map[string]any) { sp["node"] = "host-1" }))
@@ -434,7 +442,8 @@ func TestEvictionsSayWhatCannotMove(t *testing.T) {
 	for vol, want := range map[string]string{
 		"local":      "One copy",
 		"split":      "disagree",
-		"attached":   "In use on host-1",
+		"resolving":  "being resolved",
+		"attached":   "delete its Node object",
 		"primary":    "In use on host-1",
 		"pin-node":   "Pinned to host-1",
 		"pin-pool":   "Pinned to host-1",

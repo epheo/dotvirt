@@ -243,40 +243,134 @@ func patchRecorder(fc *fakeCluster) (bodies *[]string, tokens *[]string) {
 	return &b, &t
 }
 
+const splitAt = "2026-11-09T10:00:00Z"
+
+// liveVolume is the Volume a resolve reads under the caller's token.
+func liveVolume(split string, survivor string) map[string]any {
+	spec := map[string]any{"assignment": map[string]any{"secret": "s3cret", "replicas": []any{
+		map[string]any{"node": "host-1", "role": "diskful"},
+		map[string]any{"node": "host-2", "role": "diskful"},
+		map[string]any{"node": "host-3", "role": "tiebreaker"},
+	}}}
+	if survivor != "" {
+		spec["resolve"] = map[string]any{"survivor": survivor}
+	}
+	status := map[string]any{}
+	if split != "" {
+		status["conditions"] = []any{map[string]any{"type": "SplitBrain", "status": "True", "lastTransitionTime": split}}
+	}
+	return map[string]any{
+		"apiVersion": "r-drbd.io/v1alpha1", "kind": "Volume",
+		"metadata": map[string]any{"name": "pvc-1", "resourceVersion": "42"},
+		"spec":     spec, "status": status,
+	}
+}
+
+func serveLive(fc *fakeCluster, v map[string]any) {
+	fc.on(http.MethodGet, volumePath, func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(v)
+	})
+}
+
+func resolveBody(survivor, since string) string {
+	return `{"survivor":"` + survivor + `","since":"` + since + `"}`
+}
+
 func TestResolveSplitBrainPatchesAsTheCaller(t *testing.T) {
 	fc := newFakeCluster(t)
+	serveLive(fc, liveVolume(splitAt, ""))
 	bodies, tokens := patchRecorder(fc)
 	s := replicationServer(t, fc, &replicationSource{listed: twoCopies(true)})
 
-	wantStatus(t, do(s, adminToken, http.MethodPost, "/api/storage/replication/volumes/pvc-1/resolve", `{"survivor":"host-2"}`), http.StatusNoContent)
-	if len(*bodies) != 1 || (*bodies)[0] != `{"spec":{"resolve":{"survivor":"host-2"}}}` {
+	wantStatus(t, do(s, adminToken, http.MethodPost, "/api/storage/replication/volumes/pvc-1/resolve", resolveBody("host-2", splitAt)), http.StatusNoContent)
+	if len(*bodies) != 1 {
 		t.Fatalf("patches = %q", *bodies)
+	}
+	var patch struct {
+		Metadata struct {
+			ResourceVersion string `json:"resourceVersion"`
+		} `json:"metadata"`
+		Spec struct {
+			Resolve struct {
+				Survivor string `json:"survivor"`
+			} `json:"resolve"`
+		} `json:"spec"`
+	}
+	if err := json.Unmarshal([]byte((*bodies)[0]), &patch); err != nil {
+		t.Fatal(err)
+	}
+	if patch.Metadata.ResourceVersion != "42" || patch.Spec.Resolve.Survivor != "host-2" {
+		t.Fatalf("patch = %s", (*bodies)[0])
 	}
 	if (*tokens)[0] != adminToken {
 		t.Fatalf("patched as %q, want the caller", (*tokens)[0])
 	}
 }
 
+// A retried click names the survivor already named: nothing changes.
+func TestResolveRetryWithTheSameSurvivorIsAllowed(t *testing.T) {
+	fc := newFakeCluster(t)
+	serveLive(fc, liveVolume(splitAt, "host-2"))
+	patchRecorder(fc)
+	s := replicationServer(t, fc, &replicationSource{listed: twoCopies(true)})
+	wantStatus(t, do(s, adminToken, http.MethodPost, "/api/storage/replication/volumes/pvc-1/resolve", resolveBody("host-2", splitAt)), http.StatusNoContent)
+}
+
 func TestResolveRefusesWhatWouldDiscardTheWrongData(t *testing.T) {
 	for _, c := range []struct {
 		name     string
-		split    bool
+		live     map[string]any
 		survivor string
-		want     int
+		since    string
 	}{
-		{"no split brain any more", false, "host-1", http.StatusConflict},
-		{"a host holding no copy", true, "host-9", http.StatusConflict},
+		{"no split brain any more", liveVolume("", ""), "host-1", splitAt},
+		{"a newer split than the one decided on", liveVolume("2026-11-09T11:00:00Z", ""), "host-1", splitAt},
+		{"a resolve already running for the other copy", liveVolume(splitAt, "host-1"), "host-2", splitAt},
+		{"a host holding no copy", liveVolume(splitAt, ""), "host-9", splitAt},
+		{"a witness holds no data to keep", liveVolume(splitAt, ""), "host-3", splitAt},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			fc := newFakeCluster(t)
+			serveLive(fc, c.live)
 			bodies, _ := patchRecorder(fc)
-			s := replicationServer(t, fc, &replicationSource{listed: twoCopies(c.split)})
-			wantStatus(t, do(s, adminToken, http.MethodPost, "/api/storage/replication/volumes/pvc-1/resolve", `{"survivor":"`+c.survivor+`"}`), c.want)
+			s := replicationServer(t, fc, &replicationSource{listed: twoCopies(true)})
+			wantStatus(t, do(s, adminToken, http.MethodPost, "/api/storage/replication/volumes/pvc-1/resolve", resolveBody(c.survivor, c.since)), http.StatusConflict)
 			if len(*bodies) != 0 {
 				t.Fatalf("patched anyway: %q", *bodies)
 			}
 		})
 	}
+}
+
+func TestResolveNeedsTheSplitItAnswers(t *testing.T) {
+	fc := newFakeCluster(t)
+	bodies, _ := patchRecorder(fc)
+	s := replicationServer(t, fc, &replicationSource{listed: twoCopies(true)})
+	wantStatus(t, do(s, adminToken, http.MethodPost, "/api/storage/replication/volumes/pvc-1/resolve", `{"survivor":"host-1"}`), http.StatusBadRequest)
+	if len(*bodies) != 0 {
+		t.Fatalf("patched anyway: %q", *bodies)
+	}
+}
+
+// Whatever lands between the read and the write loses the race to the patch.
+func TestResolveReportsAConflictOnThePatch(t *testing.T) {
+	fc := newFakeCluster(t)
+	serveLive(fc, liveVolume(splitAt, ""))
+	fc.on(http.MethodPatch, volumePath, func(w http.ResponseWriter, _ *http.Request) {
+		writeStatus(w, http.StatusConflict, metav1.StatusReasonConflict)
+	})
+	s := replicationServer(t, fc, &replicationSource{listed: twoCopies(true)})
+	wantStatus(t, do(s, adminToken, http.MethodPost, "/api/storage/replication/volumes/pvc-1/resolve", resolveBody("host-1", splitAt)), http.StatusConflict)
+}
+
+func TestResolveOfAVolumeGoneIsNotFound(t *testing.T) {
+	fc := newFakeCluster(t)
+	fc.on(http.MethodGet, volumePath, func(w http.ResponseWriter, _ *http.Request) {
+		writeStatus(w, http.StatusNotFound, metav1.StatusReasonNotFound)
+	})
+	s := replicationServer(t, fc, &replicationSource{listed: twoCopies(true)})
+	wantStatus(t, do(s, adminToken, http.MethodPost, "/api/storage/replication/volumes/pvc-1/resolve", resolveBody("host-1", splitAt)), http.StatusNotFound)
 }
 
 func TestRepairsNeedPatchAndSayNothingOfWhatExists(t *testing.T) {

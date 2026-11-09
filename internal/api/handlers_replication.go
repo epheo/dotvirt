@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"slices"
@@ -70,9 +71,9 @@ func (s *Server) repairCaller(w http.ResponseWriter, r *http.Request) (auth.Iden
 	return id, c, true
 }
 
-// handleResolveSplitBrain names the copy that wins. r-drbd then discards every
-// other copy's writes since the split, so the checks here turn a stale click
-// into a refusal rather than a patch that r-drbd would have to reject.
+// handleResolveSplitBrain names the copy that wins. since is the split the
+// operator decided on; the live checks are ResolveSplitBrain's, as the SA
+// snapshot can lag and this discards data.
 func (s *Server) handleResolveSplitBrain(w http.ResponseWriter, r *http.Request) {
 	id, c, ok := s.repairCaller(w, r)
 	if !ok {
@@ -80,25 +81,17 @@ func (s *Server) handleResolveSplitBrain(w http.ResponseWriter, r *http.Request)
 	}
 	req, ok := decode[struct {
 		Survivor string `json:"survivor"`
+		Since    string `json:"since"`
 	}](w, r)
 	if !ok {
 		return
 	}
+	if req.Survivor == "" || req.Since == "" {
+		fail(w, invalid(errors.New("name the copy to keep and the split it answers")))
+		return
+	}
 	name := r.PathValue("volume")
-	v, found := s.replication.Volume(name)
-	if !found {
-		fail(w, fmt.Errorf("%w: volume %s", model.ErrNotFound, name))
-		return
-	}
-	if !v.SplitBrain {
-		fail(w, fmt.Errorf("%w: the copies of %s no longer disagree", model.ErrConflict, name))
-		return
-	}
-	if !slices.ContainsFunc(v.Replicas, func(x model.VolumeReplica) bool { return x.Node == req.Survivor && x.Role == "diskful" }) {
-		fail(w, fmt.Errorf("%w: %s holds no copy of %s", model.ErrConflict, req.Survivor, name))
-		return
-	}
-	opErr := c.ResolveSplitBrain(r.Context(), name, req.Survivor)
+	opErr := c.ResolveSplitBrain(r.Context(), name, req.Survivor, req.Since)
 	s.recordTask("Resolve split brain", "", name, id.Username, opErr == nil)
 	if opErr != nil {
 		fail(w, opErr)
