@@ -1,6 +1,7 @@
 import { getContext, setContext } from 'svelte';
 import type { CreateBodies, CreateKind } from '#lib/api.js';
-import { networksOff, vmsOff } from '#lib/state/modules.svelte.js';
+import { clusterGate } from '#lib/gates.js';
+import { computeOff, networksOff, vmsOff } from '#lib/state/modules.svelte.js';
 import type { AppModal } from '#lib/state/ui.svelte.js';
 
 export type SheetType = 'vm' | 'template' | 'image' | 'network' | 'rule' | 'outbound' | 'project';
@@ -82,7 +83,11 @@ export function newFromHere(
 	if (path.startsWith('/networking')) {
 		return /[?&]tab=(security|firewall)/.test(path) ? rule : network;
 	}
-	if (vmsOff()) return network;
+	if (vmsOff()) {
+		// New opens on what the section in view makes most.
+		const onProjects = path.split('?')[0] === '/compute' && computeOff();
+		return onProjects && clusterGate.namespaceCreate().ok ? { kind: 'newProject' } : network;
+	}
 	if (path.startsWith('/storage')) return { kind: 'upload', namespace: ns };
 	if (/[?&]tab=templates/.test(path)) return { kind: 'deployTemplate', namespace: ns };
 	return { kind: 'newVM', namespaces, namespace: ns };

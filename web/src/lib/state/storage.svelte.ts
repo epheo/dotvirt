@@ -1,3 +1,4 @@
+import { untrack } from 'svelte';
 import {
 	api,
 	Unauthorized,
@@ -33,6 +34,7 @@ class StorageStore {
 	#uploadKey = '';
 	#gen = 0;
 	#loaded = false;
+	#skippedVMs = false;
 
 	readonly rows = $derived(
 		diskRows({
@@ -72,6 +74,7 @@ class StorageStore {
 		const gen = this.#gen;
 		// Options, templates, snapshots and claims all read VM disks.
 		const vms = !vmsOff();
+		this.#skippedVMs = !vms;
 		if (vms) {
 			inventory.loadOptions();
 			templates.load();
@@ -99,6 +102,11 @@ class StorageStore {
 				gen,
 			),
 		]);
+	}
+
+	// KubeVirt installed while Storage stays open: the reads refresh skipped.
+	catchUp() {
+		if (this.#skippedVMs && !vmsOff()) untrack(() => this.refresh());
 	}
 
 	async ensureUpload(namespaces: string[]) {
@@ -145,6 +153,7 @@ class StorageStore {
 	reset() {
 		this.#gen++;
 		this.#loaded = false;
+		this.#skippedVMs = false;
 		this.classes = null;
 		this.snapshots = null;
 		this.claims = null;
