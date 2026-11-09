@@ -254,6 +254,25 @@ func TestEnvtest(t *testing.T) {
 		eventually(t, "unreferenced team-b pruned", func() bool { _, ok := dests("dotvirt-p-team-b"); return !ok })
 	})
 
+	t.Run("admission refuses a Gateway exposure nothing could render", func(t *testing.T) {
+		gw := &dotvirtv1alpha1.GatewayRef{Name: "edge", Namespace: "gateway-system"}
+		for name, ingress := range map[string]dotvirtv1alpha1.IngressSpec{
+			"type gateway, no Gateway": {Type: dotvirtv1alpha1.IngressGateway, Host: "h.example.com"},
+			"a Gateway, no host":       {Gateway: gw},
+		} {
+			dv := testCR()
+			dv.Spec.Ingress = ingress
+			if err := admin.Create(ctx, dv, client.DryRunAll); !apierrors.IsInvalid(err) {
+				t.Errorf("%s: got %v, want Invalid", name, err)
+			}
+		}
+		dv := testCR()
+		dv.Spec.Ingress = dotvirtv1alpha1.IngressSpec{Host: "h.example.com", Gateway: gw}
+		if err := admin.Create(ctx, dv, client.DryRunAll); client.IgnoreAlreadyExists(err) != nil {
+			t.Errorf("a named Gateway with a host: %v", err)
+		}
+	})
+
 	t.Run("apply reclaims owned fields and keeps foreign ones", func(t *testing.T) {
 		key := types.NamespacedName{Namespace: "dotvirt", Name: install.AppName}
 		var dep appsv1.Deployment

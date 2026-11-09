@@ -77,8 +77,8 @@ spec:
           and application-controller service account.'
         displayName: ArgoCD
         path: argocd
-      - description: How the UI is exposed (a Route on OpenShift or an Ingress on
-          vanilla Kubernetes) and at which host.
+      - description: How the UI is exposed (a Route on OpenShift, an Ingress on vanilla
+          Kubernetes or an HTTPRoute on a Gateway) and at which host.
         displayName: Ingress
         path: ingress
       - description: Prometheus/Thanos query API backing the Performance tab.

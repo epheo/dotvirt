@@ -158,24 +158,51 @@ spec:
               ingress:
                 description: IngressSpec controls how the UI is exposed.
                 properties:
+                  gateway:
+                    description: |-
+                      Gateway is what serves the UI and a managed forge, through HTTPRoutes. Its
+                      listener terminates TLS: the console URL is https. Name one where no router
+                      serves Routes, such as MicroShift with its ingress Removed.
+                    properties:
+                      name:
+                        minLength: 1
+                        type: string
+                      namespace:
+                        description: |-
+                          Namespace of the Gateway; empty is this Dotvirt's. Its listener must allow
+                          routes from the Dotvirt's namespace.
+                        type: string
+                      sectionName:
+                        description: |-
+                          SectionName attaches to one listener; empty attaches to every listener
+                          that admits the hostname.
+                        type: string
+                    required:
+                    - name
+                    type: object
                   host:
                     description: |-
                       Host is the external hostname the UI is served on. Leave empty on OpenShift for a
                       router-assigned host (reported in status.consoleURL); required for an Ingress on
-                      vanilla Kubernetes.
+                      vanilla Kubernetes and for a Gateway.
                     type: string
                   type:
                     description: |-
-                      IngressType selects how the dotvirt Route is exposed. "auto" picks Route on
-                      OpenShift and Ingress on vanilla Kubernetes (the operator detects the platform).
-                      No gateway value: nothing renders it, so admission rejects it instead of a
-                      silent no-exposure install.
+                      IngressType selects how the dotvirt UI is exposed. "auto" picks a Gateway when
+                      spec.ingress.gateway names one, else Route on OpenShift and Ingress on vanilla
+                      Kubernetes (the operator detects the platform).
                     enum:
                     - auto
                     - route
                     - ingress
+                    - gateway
                     type: string
                 type: object
+                x-kubernetes-validations:
+                - message: type gateway needs spec.ingress.gateway
+                  rule: '!has(self.type) || self.type != ''gateway'' || has(self.gateway)'
+                - message: 'a Gateway serves named hosts: set spec.ingress.host'
+                  rule: '!has(self.gateway) || has(self.host)'
               metrics:
                 description: |-
                   MetricsSpec points the Performance tab at a Prometheus/Thanos query API; empty
