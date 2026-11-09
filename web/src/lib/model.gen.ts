@@ -45,6 +45,11 @@ export interface ClusterCaps {
    */
   platformRead: boolean;
   /**
+   * Replication reads where replicated disks' copies live and the room left:
+   * list, cluster-wide, on every kind GET /api/storage/replication shows.
+   */
+  replication: boolean;
+  /**
    * Network is the shared networks (ClusterUserDefinedNetwork).
    */
   network: ObjectCaps;
@@ -1550,6 +1555,144 @@ export interface CapacitySegment {
   topology?: string; // the segment's topology label values; empty = cluster-wide
   free: number /* int64 */;
 }
+/**
+ * Replication is GET /api/storage/replication: where every copy of every
+ * replicated disk lives, and the room left. Operator-only: it names hosts.
+ */
+export interface Replication {
+  /**
+   * Synced is false until every watch's first list landed, while an empty
+   * list means unknown rather than none.
+   */
+  synced: boolean;
+  /**
+   * Stale: a watch is down and this is its last known state.
+   */
+  stale?: boolean;
+  pools: ReplicationPool[];
+  volumes: ReplicatedVolume[];
+  hosts: ReplicationHost[];
+}
+/**
+ * ReplicationPool is one r-drbd Pool: a tier's room on one host.
+ */
+export interface ReplicationPool {
+  name: string;
+  node: string;
+  tier: string;
+  totalBytes: number /* int64 */;
+  freeBytes: number /* int64 */;
+  /**
+   * PlaceableBytes is the largest new copy placement accepts here now.
+   */
+  placeableBytes: number /* int64 */;
+  available: boolean;
+  reason?: string; // the Available condition's reason
+}
+/**
+ * ReplicationHost is one host r-drbd's agent reports on.
+ */
+export interface ReplicationHost {
+  name: string;
+  blank?: BlankDisk[]; // disks a Pool could take
+}
+/**
+ * BlankDisk is an unclaimed whole disk.
+ */
+export interface BlankDisk {
+  path: string;
+  sizeBytes: number /* int64 */;
+  model?: string;
+}
+/**
+ * ReplicatedVolume is one r-drbd Volume and the claim it serves.
+ */
+export interface ReplicatedVolume {
+  name: string;
+  namespace?: string;
+  claim?: string;
+  sizeBytes: number /* int64 */;
+  copies: number /* int */; // the copies asked for
+  tier: string;
+  phase?: string;
+  primary?: string; // the host the device is open on
+  splitBrain?: boolean;
+  quorumLost?: boolean;
+  evicting?: string[]; // hosts whose copy is being moved off
+  replicas: VolumeReplica[];
+}
+/**
+ * What a replica is doing, read from every replica's report.
+ */
+export const ReplicaInSync = "in-sync";
+/**
+ * What a replica is doing, read from every replica's report.
+ */
+export const ReplicaCatchingUp = "catching-up";
+/**
+ * What a replica is doing, read from every replica's report.
+ */
+export const ReplicaBehind = "behind";
+/**
+ * What a replica is doing, read from every replica's report.
+ */
+export const ReplicaStandby = "standby"; // a reachable witness or diskless attachment
+/**
+ * What a replica is doing, read from every replica's report.
+ */
+export const ReplicaUnreachable = "unreachable";
+/**
+ * What a replica is doing, read from every replica's report.
+ */
+export const ReplicaUnknown = "unknown"; // assigned, not reported yet
+/**
+ * VolumeReplica is one assigned replica.
+ */
+export interface VolumeReplica {
+  node: string;
+  pool?: string;
+  role: string; // diskful, diskless or tiebreaker
+  state: string;
+  diskState?: string;
+  syncPercent?: number /* int */;
+  inUse?: boolean;
+}
+/**
+ * What a disk's owner can act on.
+ */
+export const StandingProtected = "protected";
+/**
+ * What a disk's owner can act on.
+ */
+export const StandingLocal = "local"; // one copy by choice
+/**
+ * What a disk's owner can act on.
+ */
+export const StandingCatchingUp = "catching-up";
+/**
+ * What a disk's owner can act on.
+ */
+export const StandingExposed = "exposed"; // fewer copies in sync than asked, none catching up
+/**
+ * What a disk's owner can act on.
+ */
+export const StandingPending = "pending";
+/**
+ * What a disk's owner can act on.
+ */
+export const StandingNeedsOperator = "needs-operator";
+/**
+ * DiskProtection is GET /api/storage/protection's row: a replicated disk's
+ * standing as its owner may read it. Never a host or a pool.
+ */
+export interface DiskProtection {
+  namespace: string;
+  claim: string;
+  copies: number /* int */;
+  inSync: number /* int */;
+  standing: string;
+  syncPercent?: number /* int */;
+}
 
 //////////
 // source: template.go
@@ -1810,8 +1953,8 @@ export interface ProjectNamespace {
   namespace: string;
   vms: VM[];
   /**
-   * CanAuthor is the caller's update right on VMs here: the gate every
-   * stage, propose and revert route enforces, so the UI hides what would 403.
+   * CanAuthor is the caller's update right on VMs here, or on NetworkPolicies
+   * on a cluster with no VMs: the UI hides what would 403.
    * Nil when the review failed this frame: unknown, and the UI fails closed,
    * offering nothing and saying the access could not be checked.
    */
@@ -1923,6 +2066,11 @@ export interface Inventory {
    * /api/tasks): the entries this caller's pull returns.
    */
   tasksVersion?: number /* uint64 */;
+  /**
+   * ReplicationVersion is the same contract for GET /api/storage/replication
+   * and /api/storage/protection. Absent while the cluster serves no r-drbd.
+   */
+  replicationVersion?: number /* uint64 */;
   /**
    * Adoptable proposes existing tenants: namespaces with VMs but no project
    * label. Present only for callers with namespace-create authority (the

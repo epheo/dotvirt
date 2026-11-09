@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/binary"
 	"hash/maphash"
+	"maps"
+	"slices"
 
 	"k8s.io/apimachinery/pkg/runtime/schema"
 
@@ -145,6 +147,25 @@ func (s *Server) networksWatermark(visible map[string]bool, g netGrants) uint64 
 		sum += t.start("namespace").str(ns).num(drift(ns)).sum()
 	}
 	sum += t.start("grants").num(g.bits).sum()
+	return sum & wireMask
+}
+
+// replicationWatermark covers what the caller's replication pulls read: every
+// disk for an operator, the disks of the namespaces whose claims it may list
+// for anyone else. The reviews are the cached ones the pull itself makes, so a
+// grant moves it.
+func (s *Server) replicationWatermark(ctx context.Context, id auth.Identity, c *cluster.Client, visible map[string]bool) uint64 {
+	if s.replication == nil || !s.replication.Started() {
+		return 0
+	}
+	var t term
+	if s.capable(ctx, id, c, replicationRead) {
+		return t.start("replication-operator").num(s.replication.Total()).sum() & wireMask
+	}
+	var sum uint64
+	for _, ns := range s.pvcNamespaces(ctx, id, c, slices.Collect(maps.Keys(visible))) {
+		sum += t.start("replication").str(ns).num(s.replication.Gen(ns)).sum()
+	}
 	return sum & wireMask
 }
 
