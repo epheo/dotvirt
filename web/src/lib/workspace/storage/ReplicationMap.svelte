@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { page } from '$app/state';
-	import type { Replication } from '#lib/api.js';
+	import type { ReplicatedVolume, Replication } from '#lib/api.js';
 	import { clusterGate } from '#lib/gates.js';
 	import { hrefForScope, vmHref } from '#lib/nav.js';
 	import {
@@ -20,6 +20,8 @@
 	import Button from '#lib/components/Button.svelte';
 	import Card from '#lib/components/Card.svelte';
 	import CopyGlyph from './CopyGlyph.svelte';
+	import MoveCopiesModal from './MoveCopiesModal.svelte';
+	import SplitBrainModal from './SplitBrainModal.svelte';
 
 	// Where every copy lives, one column per host. A click on a host rehearses
 	// losing it, read from placement alone: nothing changes on the cluster.
@@ -56,6 +58,14 @@
 		return hosts.includes(raw) ? raw : '';
 	});
 	const rehearsal = $derived(down ? rehearse(mapped, down) : null);
+	const repair = $derived(clusterGate.replicationRepair());
+	let splitOpen = $state<{ volume: ReplicatedVolume; name: string } | null>(null);
+	let moveOff = $state('');
+	const nameOf = (volume: string) => {
+		const row = mapped.find((r) => r.disks.some((d) => d.volume.name === volume));
+		const disk = row?.disks.find((d) => d.volume.name === volume);
+		return row && disk && row.vm ? `${row.name} ${disk.label}` : (row?.name ?? volume);
+	};
 	const protection = $derived(protectionOf(mapped));
 	const rooms = $derived(tierRooms(overview.pools));
 	const blank = $derived(overview.hosts.filter((h) => h.blank?.length));
@@ -155,6 +165,16 @@
 				<div class="flex flex-col gap-1.5 rounded-md bg-inset p-3">
 					<h3 class="text-[13px] font-bold text-ink">It never comes back</h3>
 					<p class="text-[13px] text-ink-muted">{rehearsal.retire}</p>
+					{#if repair.ok}
+						<Button
+							variant="outline"
+							size="sm"
+							class="mt-1 self-start"
+							onclick={() => (moveOff = rehearsal.host)}
+						>
+							Move copies off {rehearsal.host}
+						</Button>
+					{/if}
 				</div>
 			</div>
 		</section>
@@ -332,6 +352,16 @@
 										<span class={now.tone === 'neutral' ? 'text-ink-muted' : TONE_TEXT[now.tone]}>
 											{now.text}
 										</span>
+										{#if d.volume.splitBrain && !d.volume.resolving && repair.ok}
+											<button
+												type="button"
+												class="ml-2 cursor-pointer font-medium text-accent-ink hover:underline"
+												aria-label="Keep one copy of {r.name} {d.label}"
+												onclick={() => (splitOpen = { volume: d.volume, name: r.name })}
+											>
+												Keep one
+											</button>
+										{/if}
 									{:else}
 										{@const out = diskIfDown(d.volume, down)}
 										<span class={TONE_TEXT[FATE_TONE[out.fate]]}>{out.text}</span>
@@ -359,6 +389,17 @@
 			<span class="inline-flex items-center gap-1.5"><CopyGlyph kind="lost" />Out of reach</span>
 		</div>
 	</Card>
+{/if}
+
+{#if splitOpen}
+	<SplitBrainModal
+		volume={splitOpen.volume}
+		name={splitOpen.name}
+		onclose={() => (splitOpen = null)}
+	/>
+{/if}
+{#if moveOff}
+	<MoveCopiesModal host={moveOff} {nameOf} onclose={() => (moveOff = '')} />
 {/if}
 
 <style>

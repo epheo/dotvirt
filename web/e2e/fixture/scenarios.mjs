@@ -1715,7 +1715,12 @@ const placement = {
 			250,
 			'hdd',
 			[copy('worker-1'), copy('worker-3'), witness('worker-2')],
-			{ phase: 'Degraded', splitBrain: true, primary: 'worker-1' },
+			{
+				phase: 'Degraded',
+				splitBrain: true,
+				splitSince: '2026-11-09T10:00:00Z',
+				primary: 'worker-1',
+			},
 		),
 	],
 };
@@ -1723,8 +1728,13 @@ const replicated = {
 	...base,
 	name: 'replicated',
 	modules: { replicatedStorage: true },
-	capabilities: { ...base.capabilities, cluster: { replication: true } },
+	capabilities: { ...base.capabilities, cluster: { replication: true, replicationRepair: true } },
 	replication: placement,
+};
+const replicatedreadonly = {
+	...replicated,
+	name: 'replicatedreadonly',
+	capabilities: { ...base.capabilities, cluster: { replication: true, replicationRepair: false } },
 };
 const replicatedtenant = {
 	...replicated,
@@ -1753,6 +1763,7 @@ const replicatedtenant = {
 
 export const scenarios = {
 	replicated,
+	replicatedreadonly,
 	replicatedtenant,
 	novms,
 	residue,

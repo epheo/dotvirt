@@ -60,6 +60,55 @@ test('a project shows its claims that no VM holds', async ({ page }) => {
 	await expect(main.getByRole('link', { name: 'web-1' })).toHaveCount(0);
 });
 
+test('keeping one copy of a split disk means typing its name', async ({ page }) => {
+	await setScenario(page, 'replicated');
+	await login(page);
+	await page.goto('/storage?tab=replication');
+	const main = page.locator('main');
+	await main.getByRole('button', { name: /^Keep one copy of ledger-export/ }).click();
+	const dialog = page.getByRole('dialog');
+	await expect(dialog.getByText('Two copies of ledger-export disagree')).toBeVisible();
+	await expect(dialog).toContainText(/split [^,]* ago(?! ago)/);
+	await expect(dialog.getByRole('radio', { name: /worker-1/ })).toHaveAttribute(
+		'aria-checked',
+		'true',
+	);
+	const confirm = dialog.getByRole('button', { name: 'Keep worker-1, discard the rest' });
+	await expect(confirm).toBeDisabled();
+	await dialog.getByRole('textbox').fill('ledger-export');
+	await confirm.click();
+	await expect(dialog).toHaveCount(0);
+	await expect(main.getByText('Keeping the copy on worker-1, the rest rebuild')).toBeVisible();
+	await expect(main.getByRole('button', { name: /^Keep one copy/ })).toHaveCount(0);
+});
+
+test('moving copies off a host shows what stays and why first', async ({ page }) => {
+	await setScenario(page, 'replicated');
+	await login(page);
+	await page.goto('/storage?tab=replication&down=worker-1');
+	const main = page.locator('main');
+	await main.getByRole('button', { name: 'Move copies off worker-1' }).click();
+	const dialog = page.getByRole('dialog');
+	await expect(dialog.getByText('Its copies disagree: resolve that first.')).toBeVisible();
+	await expect(dialog.getByText('A copy is still catching up.')).toBeVisible();
+	const confirm = dialog.getByRole('button', { name: /^Move \d+ cop/ });
+	await expect(confirm).toBeDisabled();
+	await dialog.getByRole('textbox').fill('worker-1');
+	await confirm.click();
+	await expect(dialog).toHaveCount(0);
+	await expect(page.getByText(/moving off worker-1/)).toBeVisible();
+});
+
+test('a caller who may read but not repair is offered no repair', async ({ page }) => {
+	await setScenario(page, 'replicatedreadonly');
+	await login(page);
+	await page.goto('/storage?tab=replication&down=worker-1');
+	const main = page.locator('main');
+	await expect(main.getByRole('heading', { name: 'If worker-1 goes down' })).toBeVisible();
+	await expect(main.getByRole('button', { name: /^Move copies off/ })).toHaveCount(0);
+	await expect(main.getByRole('button', { name: /^Keep one copy/ })).toHaveCount(0);
+});
+
 test('without r-drbd there is no Replication tab', async ({ page }) => {
 	await setScenario(page, 'base');
 	await login(page);

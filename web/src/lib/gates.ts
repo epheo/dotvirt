@@ -138,6 +138,7 @@ export function objectAdoptGate(ref: { resource: string; namespace: string }): G
 export const clusterGate = {
 	hosts: () => cluster((c) => c.hosts, 'list hosts'),
 	replication: () => cluster((c) => c.replication, "read replicated storage's placement"),
+	replicationRepair: () => cluster((c) => c.replicationRepair, 'repair replicated storage'),
 	platform: () => cluster((c) => c.platform, 'change the platform'),
 	platformRead: () => cluster((c) => c.platformRead, "read the platform's changes"),
 	namespaceCreate: () => cluster((c) => c.namespaceCreate, 'create projects or namespaces'),
