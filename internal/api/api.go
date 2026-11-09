@@ -38,6 +38,7 @@ import (
 	"github.com/epheo/dotvirt/internal/modules"
 	"github.com/epheo/dotvirt/internal/netstate"
 	"github.com/epheo/dotvirt/internal/project"
+	"github.com/epheo/dotvirt/internal/replication"
 	"github.com/epheo/dotvirt/internal/tasks"
 	"github.com/epheo/dotvirt/internal/ttlcache"
 )
@@ -208,32 +209,33 @@ const storageTTL = 20 * time.Second
 // Server holds the long-lived collaborators and builds per-request, identity-
 // scoped state.
 type Server struct {
-	clusterF  *cluster.Factory
-	state     *clusterstate.State // SA-owned live+topology snapshot; the read path's source
-	drift     *argo.Snapshot      // nil when Argo disabled; SA-owned, watch-fed Application snapshot
-	drs       *drs.Snapshot       // nil disables the DRS live plane; SA-owned KubeDescheduler snapshot
-	netstate  *netstate.Snapshot  // SA-owned, watch-fed networking catalog (networks + fabric)
-	modules   *modules.Snapshot   // what the cluster serves; nil leaves GET /api/modules unmounted
-	bus       *eventbus.Bus       // change-version source for the version-stamped auth caches
-	resolver  *project.Resolver
-	repos     *git.RepoSet
-	visible   *ttlcache.Cache[visibleSet]       // per-token visible-namespace set, RBAC-version-stamped
-	cands     atomic.Pointer[candidates]        // the project namespaces every visible set is reviewed over
-	ssar      *ttlcache.Cache[ssarVerdict]      // per-(token, question) SSAR verdict, RBAC-version-stamped
-	kinds     atomic.Pointer[kindIndex]         // discovery's answer for the platform repo's kinds
-	kindFill  *ttlcache.Cache[*kindIndex]       // single-flights its refresh
-	proposals *ttlcache.Cache[[]model.Proposal] // per-project open-PR set; written by the refresher, read on broadcast
-	options   *ttlcache.Cache[model.Options]    // shared wizard catalog (SA-read, identical for all)
-	storage   *ttlcache.Cache[[]model.StorageClassInfo]
-	metrics   *metrics.Client // Prometheus/Thanos for the Performance tab; nil disables it
-	tasks     *tasks.Feed     // recent-activity feed (ops + merged PRs); nil disables it
-	reader    Reader
-	draft     Draft
-	auth      *auth.Authenticator // nil leaves the API open (dev)
-	oauth     *auth.OAuth         // nil hides the OpenShift SSO login path
-	stream    StreamHandler
-	vnc       VNCHandler
-	cfg       Config
+	clusterF    *cluster.Factory
+	state       *clusterstate.State   // SA-owned live+topology snapshot; the read path's source
+	drift       *argo.Snapshot        // nil when Argo disabled; SA-owned, watch-fed Application snapshot
+	drs         *drs.Snapshot         // nil disables the DRS live plane; SA-owned KubeDescheduler snapshot
+	netstate    *netstate.Snapshot    // SA-owned, watch-fed networking catalog (networks + fabric)
+	modules     *modules.Snapshot     // what the cluster serves; nil leaves GET /api/modules unmounted
+	replication *replication.Snapshot // r-drbd's SA-held read model; nil leaves its routes unmounted
+	bus         *eventbus.Bus         // change-version source for the version-stamped auth caches
+	resolver    *project.Resolver
+	repos       *git.RepoSet
+	visible     *ttlcache.Cache[visibleSet]       // per-token visible-namespace set, RBAC-version-stamped
+	cands       atomic.Pointer[candidates]        // the project namespaces every visible set is reviewed over
+	ssar        *ttlcache.Cache[ssarVerdict]      // per-(token, question) SSAR verdict, RBAC-version-stamped
+	kinds       atomic.Pointer[kindIndex]         // discovery's answer for the platform repo's kinds
+	kindFill    *ttlcache.Cache[*kindIndex]       // single-flights its refresh
+	proposals   *ttlcache.Cache[[]model.Proposal] // per-project open-PR set; written by the refresher, read on broadcast
+	options     *ttlcache.Cache[model.Options]    // shared wizard catalog (SA-read, identical for all)
+	storage     *ttlcache.Cache[[]model.StorageClassInfo]
+	metrics     *metrics.Client // Prometheus/Thanos for the Performance tab; nil disables it
+	tasks       *tasks.Feed     // recent-activity feed (ops + merged PRs); nil disables it
+	reader      Reader
+	draft       Draft
+	auth        *auth.Authenticator // nil leaves the API open (dev)
+	oauth       *auth.OAuth         // nil hides the OpenShift SSO login path
+	stream      StreamHandler
+	vnc         VNCHandler
+	cfg         Config
 
 	revokeTimeout time.Duration // bounds an SSO logout's token delete (revokeTimeout; tests shorten it)
 
@@ -265,11 +267,12 @@ type Server struct {
 type Deps struct {
 	ClusterFactory *cluster.Factory
 	State          *clusterstate.State
-	Drift          *argo.Snapshot     // SA-owned drift snapshot (watch-fed); nil when Argo disabled
-	DRS            *drs.Snapshot      // SA-owned KubeDescheduler snapshot; nil disables the DRS live plane
-	Netstate       *netstate.Snapshot // SA-owned networking catalog snapshot (watch-fed)
-	Modules        *modules.Snapshot  // what the cluster serves; nil leaves GET /api/modules unmounted
-	Bus            *eventbus.Bus      // change-version source for version-stamped caches
+	Drift          *argo.Snapshot        // SA-owned drift snapshot (watch-fed); nil when Argo disabled
+	DRS            *drs.Snapshot         // SA-owned KubeDescheduler snapshot; nil disables the DRS live plane
+	Netstate       *netstate.Snapshot    // SA-owned networking catalog snapshot (watch-fed)
+	Modules        *modules.Snapshot     // what the cluster serves; nil leaves GET /api/modules unmounted
+	Replication    *replication.Snapshot // r-drbd's SA-held read model; nil leaves its routes unmounted
+	Bus            *eventbus.Bus         // change-version source for version-stamped caches
 	Resolver       *project.Resolver
 	Repos          *git.RepoSet
 	Metrics        *metrics.Client // Prometheus/Thanos query client; nil disables the Performance tab
@@ -289,28 +292,29 @@ func NewServer(d Deps) *Server {
 		panic("api: NewServer requires a Reader and a Draft")
 	}
 	return &Server{
-		clusterF:  d.ClusterFactory,
-		state:     d.State,
-		drift:     d.Drift,
-		drs:       d.DRS,
-		netstate:  d.Netstate,
-		modules:   d.Modules,
-		bus:       d.Bus,
-		resolver:  d.Resolver,
-		repos:     d.Repos,
-		visible:   ttlcache.New[visibleSet](visibleTTL),
-		ssar:      ttlcache.New[ssarVerdict](visibleTTL),
-		kindFill:  ttlcache.New[*kindIndex](kindProbe),
-		proposals: ttlcache.New[[]model.Proposal](proposalsCacheTTL),
-		options:   ttlcache.New[model.Options](optionsTTL),
-		storage:   ttlcache.New[[]model.StorageClassInfo](storageTTL),
-		metrics:   d.Metrics,
-		tasks:     d.Tasks,
-		reader:    d.Reader,
-		draft:     d.Draft,
-		auth:      d.Auth,
-		oauth:     d.OAuth,
-		cfg:       d.Config,
+		clusterF:    d.ClusterFactory,
+		state:       d.State,
+		drift:       d.Drift,
+		drs:         d.DRS,
+		netstate:    d.Netstate,
+		modules:     d.Modules,
+		replication: d.Replication,
+		bus:         d.Bus,
+		resolver:    d.Resolver,
+		repos:       d.Repos,
+		visible:     ttlcache.New[visibleSet](visibleTTL),
+		ssar:        ttlcache.New[ssarVerdict](visibleTTL),
+		kindFill:    ttlcache.New[*kindIndex](kindProbe),
+		proposals:   ttlcache.New[[]model.Proposal](proposalsCacheTTL),
+		options:     ttlcache.New[model.Options](optionsTTL),
+		storage:     ttlcache.New[[]model.StorageClassInfo](storageTTL),
+		metrics:     d.Metrics,
+		tasks:       d.Tasks,
+		reader:      d.Reader,
+		draft:       d.Draft,
+		auth:        d.Auth,
+		oauth:       d.OAuth,
+		cfg:         d.Config,
 
 		revokeTimeout: revokeTimeout,
 

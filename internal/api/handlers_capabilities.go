@@ -88,6 +88,9 @@ func (s *Server) tenancyCap(ctx context.Context, id auth.Identity, c *cluster.Cl
 func (s *Server) clusterCaps(ctx context.Context, id auth.Identity, c *cluster.Client) model.ClusterCaps {
 	out := model.ClusterCaps{ImageUpload: s.cfg.UploadProxyURL != ""}
 	fields := []capField{{&out.Hosts, ask(verbList, ssarNodes, "")}}
+	if s.replication != nil && s.replication.Started() {
+		fields = append(fields, capField{&out.Replication, replicationRead})
+	}
 	if s.cfg.PlatformRepo != "" {
 		fields = append(fields, objectFields(&out.Network, model.KindCUDN, "")...)
 		fields = append(fields, objectFields(&out.Uplink, model.KindNNCP, "")...)

@@ -148,6 +148,24 @@ func (s *Server) networksWatermark(visible map[string]bool, g netGrants) uint64 
 	return sum & wireMask
 }
 
+// replicationWatermark covers what the caller's replication pulls read: every
+// disk for an operator, the disks in its visible namespaces for anyone else.
+// The review is the cached one the pull itself makes, so a grant moves it.
+func (s *Server) replicationWatermark(ctx context.Context, id auth.Identity, c *cluster.Client, visible map[string]bool) uint64 {
+	if s.replication == nil || !s.replication.Started() {
+		return 0
+	}
+	var t term
+	if s.capable(ctx, id, c, replicationRead) {
+		return t.start("replication-operator").num(s.replication.Total()).sum() & wireMask
+	}
+	var sum uint64
+	for ns := range visible {
+		sum += t.start("replication").str(ns).num(s.replication.Gen(ns)).sum()
+	}
+	return sum & wireMask
+}
+
 // tasksWatermark covers the entries the caller's tasks pull returns (the
 // same taskScope), each with the project it shows under.
 func (s *Server) tasksWatermark(sc taskScope) uint64 {
