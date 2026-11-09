@@ -35,7 +35,7 @@ func TestScopePolicies(t *testing.T) {
 	}
 	visible := map[string]bool{"team-a": true}
 
-	got := scopePolicies(all, visible, func(k model.PolicyKind) bool { return k == model.PolicyEgressIP })
+	got := scopePolicies(all, visible, listsAll, func(k model.PolicyKind) bool { return k == model.PolicyEgressIP })
 	names := map[string]bool{}
 	for _, p := range got {
 		names[p.Name] = true
@@ -663,5 +663,14 @@ func TestClusterObjectReadsNeedList(t *testing.T) {
 		if rec := do(s, adminToken, http.MethodGet, "/api/objects/adminnetworkpolicy/cluster/lockdown"+sub, ""); rec.Code != http.StatusOK {
 			t.Errorf("%q with list = %d %s", sub, rec.Code, rec.Body.String())
 		}
+	}
+}
+
+func TestScopePoliciesAsksTheBackingKind(t *testing.T) {
+	all := []model.Policy{{Name: "fw", Namespace: "a", Backing: model.KindEgressFW.Kind}, {Name: "np", Namespace: "a", Backing: model.KindNetpol.Kind}}
+	only := func(backing, _ string) bool { return backing == model.KindNetpol.Kind }
+	got := scopePolicies(all, map[string]bool{"a": true}, only, func(model.PolicyKind) bool { return false })
+	if len(got) != 1 || got[0].Name != "np" {
+		t.Errorf("policies = %+v, want the NetworkPolicy alone", got)
 	}
 }

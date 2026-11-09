@@ -35,6 +35,7 @@ import (
 	"github.com/epheo/dotvirt/internal/cluster"
 	"github.com/epheo/dotvirt/internal/clusterstate"
 	"github.com/epheo/dotvirt/internal/eventbus"
+	"github.com/epheo/dotvirt/internal/model"
 	"github.com/epheo/dotvirt/internal/modules"
 	"github.com/epheo/dotvirt/internal/restfactory"
 )
@@ -105,6 +106,9 @@ func (a *asking) take() []string {
 	return out
 }
 
+// where is the namespaces asked about, however many kinds each cost.
+func (a *asking) where() []string { return slices.Compact(a.take()) }
+
 func (a *asking) set(allow, fail func(*authzv1.ResourceAttributes) bool) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
@@ -127,7 +131,7 @@ func seedVisibleAt(s *Server, tok string, ns map[string]bool, swept time.Time) {
 	if s.state != nil {
 		cands = s.candidates(lv.ns)
 	}
-	s.visible.Put(restfactory.TokenKey(tok), visibleSet{ns: ns, cands: cands, lv: lv, swept: swept})
+	s.visible.Put(restfactory.TokenKey(tok), visibleSet{ns: ns, wideReads: allReads, cands: cands, lv: lv, swept: swept})
 }
 
 func seedVisible(s *Server, tok string, ns map[string]bool) { seedVisibleAt(s, tok, ns, time.Now()) }
@@ -230,7 +234,7 @@ func TestVisibleForCachesPerToken(t *testing.T) {
 	if got := visibleOf(t, s, "tok-alice", tenant.c); !maps.Equal(got, map[string]bool{"tenant-a": true}) {
 		t.Fatalf("visible = %v, want tenant-a", got)
 	}
-	if got := tenant.take(); !slices.Equal(got, []string{"", "tenant-a", "tenant-b"}) {
+	if got := tenant.where(); !slices.Equal(got, []string{"", "tenant-a", "tenant-b"}) {
 		t.Fatalf("the first read asked %q, want the cluster-wide review and each candidate", got)
 	}
 	if got := visibleOf(t, s, "tok-alice", tenant.c); !got["tenant-a"] || len(got) != 1 {
@@ -259,16 +263,18 @@ func TestVisibleForClusterWideReaders(t *testing.T) {
 			t.Errorf("the admin's visibility listed %s under its token", a.GetResource().Resource)
 		}
 	}
-	if *reviews != 2 {
-		t.Errorf("the admin's visibility cost %d reviews, want 2", *reviews)
+	if want := wideSweep; *reviews != want {
+		t.Errorf("the admin's visibility cost %d reviews, want %d", *reviews, want)
 	}
 
 	vms := newAsking(func(a *authzv1.ResourceAttributes) bool { return a.Resource == "virtualmachines" })
 	if got := visibleOf(t, s, "tok-vms", vms.c); !maps.Equal(got, map[string]bool{"tenant-a": true, "tenant-b": true}) {
 		t.Errorf("a cluster-wide VM reader sees %v, want every project namespace", got)
 	}
-	if got := vms.take(); !slices.Equal(got, []string{"", ""}) {
-		t.Errorf("a cluster-wide VM reader asked %q, want the two cluster-wide reviews", got)
+	lacking := len(readKinds) - 1
+	want := slices.Concat(slices.Repeat([]string{""}, wideSweep), slices.Repeat([]string{"tenant-a"}, lacking), slices.Repeat([]string{"tenant-b"}, lacking))
+	if got := vms.take(); !slices.Equal(got, want) {
+		t.Errorf("a cluster-wide VM reader asked %q, want the wide sweep and each kind it lacks per namespace", got)
 	}
 
 	auditor := newAsking(func(a *authzv1.ResourceAttributes) bool { return a.Resource == "namespaces" })
@@ -327,8 +333,8 @@ func TestVisibleForSharesOneProbe(t *testing.T) {
 	}
 	close(gate)
 	wg.Wait()
-	if n := reviews.Load(); n != 2 {
-		t.Fatalf("four concurrent misses cost %d reviews, want one sweep's 2", n)
+	if n := int(reviews.Load()); n != wideSweep {
+		t.Fatalf("four concurrent misses cost %d reviews, want one sweep's %d", n, wideSweep)
 	}
 }
 
@@ -354,11 +360,11 @@ func TestVisibleForTTLFollowsTheWatches(t *testing.T) {
 	}
 	fail()
 	waitUntil(t, "the failed watch to count", func() bool { return !st.RBACWatched() })
-	if n := probes(watched); n != 2 {
-		t.Errorf("a watch down: a minute-old entry cost %d reviews, want a sweep's 2", n)
+	if n := probes(watched); n != wideSweep {
+		t.Errorf("a watch down: a minute-old entry cost %d reviews, want a sweep's %d", n, wideSweep)
 	}
-	if n := probes(scopeServer(eventbus.New())); n != 2 {
-		t.Errorf("never watched: a minute-old entry cost %d reviews, want a sweep's 2", n)
+	if n := probes(scopeServer(eventbus.New())); n != wideSweep {
+		t.Errorf("never watched: a minute-old entry cost %d reviews, want a sweep's %d", n, wideSweep)
 	}
 }
 
@@ -402,7 +408,7 @@ func TestUnsettledReviewsServeTheShortTTL(t *testing.T) {
 	}
 	e.swept = time.Now().Add(-time.Minute)
 	s.visible.Put(key, e)
-	if visibleOf(t, s, "tok-alice", c); *reviews != 4 {
+	if visibleOf(t, s, "tok-alice", c); *reviews != 2*wideSweep {
 		t.Fatalf("a minute-old unsettled entry: %d reviews, want a second sweep", *reviews)
 	}
 
@@ -429,7 +435,7 @@ func TestVisibleForReasksWhatMoved(t *testing.T) {
 		if got := visibleOf(t, s, "tok", tenant.c); !maps.Equal(got, map[string]bool{"a": true, "b": true}) {
 			t.Fatalf("%s: visible %v", what, got)
 		}
-		if got := tenant.take(); !slices.Equal(got, want) {
+		if got := tenant.where(); !slices.Equal(got, want) {
 			t.Fatalf("%s: asked %q, want %q", what, got, want)
 		}
 	}
@@ -877,4 +883,64 @@ func TestUnknownModulesKeepTheVMQuestion(t *testing.T) {
 	if visible, _ := tenantView(t, s); len(visible) != 0 {
 		t.Errorf("visible = %v, want none", visible)
 	}
+}
+
+// wideSweep is what a token seeing every namespace costs: the two cluster-wide
+// visibility reviews and one per kind a view narrows by.
+var wideSweep = 2 + len(readKinds)
+
+// Seeing a namespace is not seeing all it holds: each row asks its own kind.
+func TestAViewNarrowsByKind(t *testing.T) {
+	vmsOnly := callerView{set: visibleSet{reads: map[string]readSet{"a": readSetOf([]bool{true, false, false, false, false})}}}
+	if !vmsOnly.lists(ssarVM, "a") || vmsOnly.lists(ssarNetpol, "a") || vmsOnly.lists(ssarVM, "b") {
+		t.Errorf("a namespace reader's rights: %+v", vmsOnly.set.reads)
+	}
+	if vmsOnly.listsBacking("no-such-kind", "a") {
+		t.Error("an unknown backing was shown")
+	}
+	wide := callerView{set: visibleSet{wideReads: allReads}}
+	if !wide.lists(ssarNetpol, "anywhere") || !wide.listsBacking(model.KindUDN.Kind, "anywhere") {
+		t.Error("a cluster-wide reader was narrowed")
+	}
+}
+
+// A grant move in one namespace re-reads that namespace alone.
+func TestReadsAreKeptWhereNothingMoved(t *testing.T) {
+	prev := visibleSet{reads: map[string]readSet{"kept": 1, "moved": 1}}
+	next := visibleSet{ns: map[string]bool{"kept": true, "moved": true}}
+	token := newAsking(func(*authzv1.ResourceAttributes) bool { return false })
+	got, err := (&Server{}).refreshReads(context.Background(), token.c, next, prev, map[string]bool{"moved": true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if asked := token.take(); !slices.Equal(asked, slices.Repeat([]string{"moved"}, len(readKinds))) {
+		t.Errorf("asked %v", asked)
+	}
+	if got.reads["kept"] != 1 || got.reads["moved"] != 0 {
+		t.Errorf("reads = %v", got.reads)
+	}
+}
+
+// What a token may list everywhere is not asked again per namespace.
+func TestAskReadsSkipsWhatIsHeldEverywhere(t *testing.T) {
+	token := newAsking(func(*authzv1.ResourceAttributes) bool { return true })
+	got, err := askReads(context.Background(), token.c, []string{"a"}, allReads&^1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if asked := token.take(); !slices.Equal(asked, []string{"a"}) || got["a"] != 1 {
+		t.Errorf("asked %v, reads %v", asked, got)
+	}
+}
+
+// A VM page opens only for who may list VMs there.
+func TestVMRoutesNeedVMRights(t *testing.T) {
+	fc := newFakeCluster(t)
+	fc.readsVMs = tenantReadsTeamA
+	s := fc.server(nil, Config{})
+	s.visible.Put(restfactory.TokenKey(tenantToken), visibleSet{
+		ns: map[string]bool{"team-a-dev": true}, cands: s.candidates(s.visLevels().ns), lv: s.visLevels(), swept: time.Now(),
+		reads: map[string]readSet{"team-a-dev": 0},
+	})
+	wantStatus(t, do(s, tenantToken, http.MethodGet, "/api/vms/team-a-dev/web/manifest", ""), http.StatusNotFound)
 }

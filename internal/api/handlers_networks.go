@@ -177,7 +177,7 @@ func (s *Server) handleNetworks(w http.ResponseWriter, r *http.Request) {
 		full = s.netstate.Catalog()
 	}
 
-	visible, err := s.visibleFor(r.Context(), id, c)
+	v, err := s.viewFor(r.Context(), id, c)
 	if err != nil {
 		fail(w, err)
 		return
@@ -187,7 +187,7 @@ func (s *Server) handleNetworks(w http.ResponseWriter, r *http.Request) {
 	can := func(k model.Kind) bool { return s.capable(ctx, id, c, kindAction(verbCreate, k, "")) }
 	cudn := can(model.KindCUDN)
 	out := model.NetworkInventory{
-		Networks:         scopeNetworks(full.Networks, visible, s.seesAllNetworks(ctx, id, c)),
+		Networks:         scopeNetworks(full.Networks, v.names, v.listsBacking, s.seesAllNetworks(ctx, id, c)),
 		Uplinks:          []model.Uplink{},
 		PhysicalAdapters: []model.PhysicalAdapter{},
 		NMStatePresent:   full.NMStatePresent,
@@ -243,7 +243,7 @@ func (s *Server) handleNetworks(w http.ResponseWriter, r *http.Request) {
 // them, its Namespaces narrowed to those (a shared network's name and its
 // other namespaces echo other tenants). A caller with platform networking
 // authority (all) sees every shared network, published or not, to fix it.
-func scopeNetworks(nets []model.Network, visible map[string]bool, all bool) []model.Network {
+func scopeNetworks(nets []model.Network, visible map[string]bool, lists func(backing, namespace string) bool, all bool) []model.Network {
 	out := make([]model.Network, 0, len(nets))
 	for _, n := range nets {
 		switch {
@@ -252,7 +252,7 @@ func scopeNetworks(nets []model.Network, visible map[string]bool, all bool) []mo
 			if all || len(n.Namespaces) > 0 {
 				out = append(out, n)
 			}
-		case visible[n.Namespace]:
+		case visible[n.Namespace] && lists(n.Backing, n.Namespace):
 			out = append(out, n)
 		}
 	}
@@ -262,11 +262,11 @@ func scopeNetworks(nets []model.Network, visible map[string]bool, all bool) []mo
 // callerNetworks is the catalog as /api/networks serves it to this caller, for
 // the routes that resolve one network by key: a network the caller cannot
 // see there is not found here either.
-func (s *Server) callerNetworks(ctx context.Context, id auth.Identity, c *cluster.Client, visible map[string]bool) []model.Network {
+func (s *Server) callerNetworks(ctx context.Context, id auth.Identity, c *cluster.Client, v callerView) []model.Network {
 	if s.netstate == nil {
 		return nil
 	}
-	return scopeNetworks(s.netstate.Catalog().Networks, visible, s.seesAllNetworks(ctx, id, c))
+	return scopeNetworks(s.netstate.Catalog().Networks, v.names, v.listsBacking, s.seesAllNetworks(ctx, id, c))
 }
 
 // seesAllNetworks reports whether the caller's catalog holds every shared
@@ -336,13 +336,14 @@ func (s *Server) handleNetworkRules(w http.ResponseWriter, r *http.Request) {
 		fail(w, fmt.Errorf("%w: networking is not wired", model.ErrUnavailable))
 		return
 	}
-	visible, err := s.visibleFor(r.Context(), id, c)
+	v, err := s.viewFor(r.Context(), id, c)
 	if err != nil {
 		fail(w, err)
 		return
 	}
+	visible := v.names
 	key := r.URL.Query().Get("network")
-	n, ok := findNetwork(s.callerNetworks(r.Context(), id, c, visible), key)
+	n, ok := findNetwork(s.callerNetworks(r.Context(), id, c, v), key)
 	if !ok {
 		fail(w, fmt.Errorf("%w: network %q", model.ErrNotFound, key))
 		return
@@ -360,7 +361,7 @@ func (s *Server) handleNetworkRules(w http.ResponseWriter, r *http.Request) {
 	}
 	out := s.netstate.NetworkRules(nss, s.state.NamespaceLabels, red, s.cfg.ProjectLabel)
 	out.Network = key
-	writeJSON(w, scopeNetworkRules(out, visible, s.policyDrift, pr.apply))
+	writeJSON(w, scopeNetworkRules(out, visible, v.listsBacking, s.policyDrift, pr.apply))
 }
 
 // findNetwork resolves a network key the way the UI routes it: a project
@@ -386,14 +387,14 @@ func findNetwork(nets []model.Network, key string) (model.Network, bool) {
 // caller sees that namespace; a cluster rule naming these VMs governs them
 // too, so it stays, redacted. drift attaches each kept policy's apply state
 // first, so the redactor sees, and hides, a cluster rule's apply error.
-func scopeNetworkRules(in model.NetworkRules, visible map[string]bool, drift func(*model.Policy), redact func(*model.Policy, *model.PolicyRuleView)) model.NetworkRules {
+func scopeNetworkRules(in model.NetworkRules, visible map[string]bool, lists func(backing, ns string) bool, drift func(*model.Policy), redact func(*model.Policy, *model.PolicyRuleView)) model.NetworkRules {
 	for i := range in.Applies {
 		drift(&in.Applies[i].Policy)
 		redact(&in.Applies[i].Policy, nil)
 	}
 	reaches := make([]model.PeerRule, 0, len(in.Reaches))
 	for _, pr := range in.Reaches {
-		if pr.Policy.Namespace != "" && !visible[pr.Policy.Namespace] {
+		if ns := pr.Policy.Namespace; ns != "" && (!visible[ns] || !lists(pr.Policy.Backing, ns)) {
 			continue
 		}
 		drift(&pr.Policy)

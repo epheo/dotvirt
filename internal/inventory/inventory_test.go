@@ -390,3 +390,21 @@ func TestBuildReadsOnlyTheProjectsFolder(t *testing.T) {
 		t.Errorf("vms = %+v, want the folder's web alone", vms)
 	}
 }
+
+// The namespace stays in the tree; its VMs need their own right.
+func TestBuildHidesVMsFromWhoMayNotListThem(t *testing.T) {
+	bare := seedRepo(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	repos := git.NewRepoSet(ctx, "", "", nil, false, nil, time.Hour)
+	inv := Build(Inputs{
+		Branch:   "main",
+		Repos:    repos,
+		Projects: []project.ProjectInfo{{Name: "team-a", Repo: bare, Namespaces: []string{"tenant-a"}}},
+		Live:     clusterstate.LiveView{"tenant-a": {"only-live": {Phase: "Running"}}},
+		ListsVMs: func(string) bool { return false },
+	})
+	if got := inv.Projects[0].Namespaces; len(got) != 1 || len(got[0].VMs) != 0 {
+		t.Errorf("namespaces = %+v, want tenant-a with no VMs", got)
+	}
+}

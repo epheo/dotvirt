@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -51,7 +52,7 @@ type fakeCluster struct {
 	calls  []string                    // "METHOD /path" of every non-authz, non-snapshot request
 	// ssar decides a SelfSubjectAccessReview; nil allows exactly admin-token.
 	ssar func(token string, a *authzv1.ResourceAttributes) bool
-	// readsVMs grants list virtualmachines in one namespace, the visibility
+	// readsVMs grants list on what a namespace shows, VMs first, in one namespace, the visibility
 	// probe, ahead of ssar.
 	readsVMs func(token, namespace string) bool
 	// ssarFail fails a review with the status it returns, ahead of the rest;
@@ -68,6 +69,9 @@ const (
 	tenantToken = "tenant-token"
 	repoTeamA   = "https://forge/team-a.git"
 )
+
+// listsAll leaves a scope filter to the namespaces alone.
+func listsAll(string, string) bool { return true }
 
 // tenantReadsTeamA is the readsVMs of a tenant scoped to team-a-dev.
 func tenantReadsTeamA(token, ns string) bool { return token == tenantToken && ns == "team-a-dev" }
@@ -160,8 +164,8 @@ func (fc *fakeCluster) serve(w http.ResponseWriter, r *http.Request) {
 		readsVMs, ssar := fc.readsVMs, fc.ssar
 		fc.mu.Unlock()
 		switch {
-		case readsVMs != nil && readsVMs(bearer(r), attrs.Namespace) &&
-			attrs.Verb == "list" && attrs.Resource == "virtualmachines":
+		case readsVMs != nil && readsVMs(bearer(r), attrs.Namespace) && attrs.Verb == "list" &&
+			slices.Contains([]string{"virtualmachines", "userdefinednetworks", "network-attachment-definitions", "networkpolicies", "egressfirewalls"}, attrs.Resource):
 			allow = true
 		case ssar != nil:
 			allow = ssar(bearer(r), attrs)

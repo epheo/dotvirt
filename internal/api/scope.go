@@ -32,8 +32,12 @@ type visibleSet struct {
 	ns    map[string]bool // never mutated once cached
 	cands *candidates     // the project namespaces ns was reviewed over
 	wide  bool            // may list VMs in every namespace: every candidate is visible
-	names bool            // wide, and may list namespaces: every namespace is (AllNamespaces)
-	lv    visLevels       // what the set was reconciled at
+	// reads is what the token may list in each visible namespace, wideReads in
+	// all of them. Never mutated once cached.
+	reads     map[string]readSet
+	wideReads readSet
+	names     bool      // wide, and may list namespaces: every namespace is (AllNamespaces)
+	lv        visLevels // what the set was reconciled at
 
 	// swept is when the last sweep began, and sweptUnsettled whether right
 	// after a cluster-wide grant move: a verdict reviewed since ages from it
@@ -42,6 +46,85 @@ type visibleSet struct {
 	swept          time.Time
 	sweptUnsettled bool
 	unsettled      map[string]time.Time
+}
+
+// readSet is the readKinds a token may list, one bit each.
+type readSet uint32
+
+// readKinds narrow what a caller is shown: listing one in Kubernetes is what
+// shows it here.
+var readKinds = []ssarRef{ssarVM, ssarFor(model.KindUDN), ssarFor(model.KindNAD), ssarNetpol, ssarFor(model.KindEgressFW)}
+
+var allReads = readSet(1<<len(readKinds) - 1)
+
+func (r readSet) has(ref ssarRef) bool {
+	i := slices.Index(readKinds, ref)
+	return i >= 0 && r&(1<<i) != 0
+}
+
+func readSetOf(answer []bool) readSet {
+	var r readSet
+	for i, ok := range answer {
+		if ok {
+			r |= 1 << i
+		}
+	}
+	return r
+}
+
+// askReads is what the token may list in namespaces, past what it may list
+// everywhere (held). SubjectAccessReviews, not one rules review per namespace:
+// this decides what dotvirt serves from its own account, which the API's own
+// docs say a rules review must not.
+func askReads(ctx context.Context, c *cluster.Client, namespaces []string, held readSet) (map[string]readSet, error) {
+	out := make(map[string]readSet, len(namespaces))
+	for _, ns := range namespaces {
+		out[ns] = 0
+	}
+	for i, k := range readKinds {
+		if held&(1<<i) != 0 {
+			continue
+		}
+		allowed, err := c.CanIn(ctx, "list", k.group, k.resource, namespaces)
+		if err != nil {
+			return nil, err
+		}
+		for _, ns := range allowed {
+			out[ns] |= 1 << i
+		}
+	}
+	return out, nil
+}
+
+// askWideReads is what the token may list in every namespace.
+func askWideReads(ctx context.Context, c *cluster.Client) (readSet, error) {
+	answer := make([]bool, len(readKinds))
+	for i, k := range readKinds {
+		ok, err := c.Can(ctx, "list", k.group, k.resource, "")
+		if err != nil {
+			return 0, err
+		}
+		answer[i] = ok
+	}
+	return readSetOf(answer), nil
+}
+
+// callerView is what one token may see: the namespaces, and what it may list in each.
+type callerView struct {
+	names map[string]bool
+	set   visibleSet
+}
+
+// lists reports whether the token may list ref in namespace.
+func (v callerView) lists(ref ssarRef, namespace string) bool {
+	return v.set.wideReads.has(ref) || v.set.reads[namespace].has(ref)
+}
+
+// listsBacking is lists by the Kubernetes kind that backs a row. A kind that
+// narrows nothing here is not shown: unknown never opens anything.
+func (v callerView) listsBacking(backing, namespace string) bool {
+	_, k, ok := model.LookupKind(backing)
+	return ok && v.lists(ssarFor(k), namespace)
 }
 
 // visLevels are the bus levels a visible set depends on: cluster-wide grant
@@ -209,10 +292,16 @@ func (s *Server) visibilityRef() ssarRef {
 // project namespaces, are reviewed one by one. A failed review is never
 // cached: the next read asks again.
 func (s *Server) visibleFor(ctx context.Context, id auth.Identity, c *cluster.Client) (map[string]bool, error) {
+	v, err := s.viewFor(ctx, id, c)
+	return v.names, err
+}
+
+// viewFor is visibleFor with what the token may list in each namespace.
+func (s *Server) viewFor(ctx context.Context, id auth.Identity, c *cluster.Client) (callerView, error) {
 	key := restfactory.TokenKey(id.Token)
 	lv := s.visLevels()
 	if e, ok := s.visible.Get(key); ok && e.lv == lv && s.fresh(e, time.Now()) {
-		return s.visibleNames(e), nil
+		return callerView{s.visibleNames(e), e}, nil
 	}
 	e, err := review(ctx, s.visible, key, lv, func(ctx context.Context) (visibleSet, error) {
 		prev, had := s.visible.Get(key)
@@ -224,9 +313,9 @@ func (s *Server) visibleFor(ctx context.Context, id auth.Identity, c *cluster.Cl
 		return e, nil
 	})
 	if err != nil {
-		return nil, s.reviewFailed(ctx, id, err)
+		return callerView{}, s.reviewFailed(ctx, id, err)
 	}
-	return s.visibleNames(e), nil
+	return callerView{s.visibleNames(e), e}, nil
 }
 
 func (s *Server) visibleNames(e visibleSet) map[string]bool {
@@ -262,7 +351,7 @@ func (s *Server) reconcile(ctx context.Context, c *cluster.Client, prev visibleS
 	}
 	next := prev
 	next.lv, next.cands = lv, cands
-	if prev.wide {
+	if prev.wide && prev.wideReads == allReads {
 		next.ns = cands.names
 		return next, nil
 	}
@@ -287,6 +376,10 @@ func (s *Server) reconcile(ctx context.Context, c *cluster.Client, prev visibleS
 	}
 	if len(due) == 0 && cands == prev.cands {
 		return next, nil
+	}
+	if prev.wide {
+		next.ns = cands.names
+		return s.refreshReads(ctx, c, next, prev, due)
 	}
 	start := time.Now()
 	see := s.visibilityRef()
@@ -314,6 +407,27 @@ func (s *Server) reconcile(ctx context.Context, c *cluster.Client, prev visibleS
 			next.unsettled[ns] = start
 		}
 	}
+	return s.refreshReads(ctx, c, next, prev, due)
+}
+
+// refreshReads re-asks what the token may list where its visibility or grants
+// moved, keeping the rest of prev.
+func (s *Server) refreshReads(ctx context.Context, c *cluster.Client, next, prev visibleSet, due map[string]bool) (visibleSet, error) {
+	ask := make([]string, 0, len(due))
+	reads := make(map[string]readSet, len(next.ns))
+	for ns := range next.ns {
+		if r, kept := prev.reads[ns]; kept && !due[ns] {
+			reads[ns] = r
+		} else {
+			ask = append(ask, ns)
+		}
+	}
+	fresh, err := askReads(ctx, c, ask, next.wideReads)
+	if err != nil {
+		return visibleSet{}, err
+	}
+	maps.Copy(reads, fresh)
+	next.reads = reads
 	return next, nil
 }
 
@@ -340,6 +454,16 @@ func (s *Server) sweep(ctx context.Context, c *cluster.Client, cands *candidates
 		e.ns = make(map[string]bool, len(allowed))
 		for _, ns := range allowed {
 			e.ns[ns] = true
+		}
+	}
+	if e.wide {
+		if e.wideReads, err = askWideReads(ctx, c); err != nil {
+			return visibleSet{}, err
+		}
+	}
+	if e.wideReads != allReads {
+		if e.reads, err = askReads(ctx, c, slices.Collect(maps.Keys(e.ns)), e.wideReads); err != nil {
+			return visibleSet{}, err
 		}
 	}
 	if e.sweptUnsettled = s.unsettled(e.swept, ""); !e.wide && !e.sweptUnsettled {
@@ -480,7 +604,19 @@ func (s *Server) platformProject() project.ProjectInfo {
 func (s *Server) vmScope(w http.ResponseWriter, r *http.Request) (sc scope, ns, name string, ok bool) {
 	ns, name = r.PathValue("namespace"), r.PathValue("name")
 	sc, ok = s.resolveProject(w, r, byNamespace(ns))
-	return sc, ns, name, ok
+	if !ok || name == "" {
+		return sc, ns, name, ok
+	}
+	v, err := s.viewFor(r.Context(), sc.id, sc.cluster)
+	if err != nil {
+		fail(w, err)
+		return sc, ns, name, false
+	}
+	if !v.lists(ssarVM, ns) {
+		fail(w, fmt.Errorf("%w: vm %s/%s", model.ErrNotFound, ns, name))
+		return sc, ns, name, false
+	}
+	return sc, ns, name, true
 }
 
 // The platform-tier authorities, each named once and spelled by the kind
