@@ -177,8 +177,30 @@ func review[V any](ctx context.Context, cache *ttlcache.Cache[V], key string, ve
 	})
 }
 
-// visibleFor returns the set of namespaces id's token may read VMs in, cached by
-// token. A token that may list VMs in every namespace sees every candidate;
+// noVMs reports a known absence of KubeVirt. Until discovery has answered, VMs
+// are assumed: a namespace admin sees nothing for a moment, never too much.
+func (s *Server) noVMs() bool {
+	if s.modules == nil {
+		return false
+	}
+	m, ok := s.modules.Get()
+	return ok && !m.VMs
+}
+
+// visibilityRef is what a token must be able to list in a namespace to see it:
+// VMs, or where the cluster serves none, pods. The rights to VMs reach admin,
+// edit and view through KubeVirt's aggregated roles, which then do not exist,
+// so asking about VMs would refuse every namespace admin.
+func (s *Server) visibilityRef() ssarRef {
+	if s.noVMs() {
+		return ssarPods
+	}
+	return ssarVM
+}
+
+// visibleFor returns the set of namespaces id's token may read VMs in, or pods
+// without KubeVirt (visibilityRef), cached by token. A token that may list them
+// in every namespace sees every candidate;
 // one that may also list namespaces sees every namespace's name, read off the
 // SA's own watch (AllNamespaces). Any other token's candidates, the snapshot's
 // project namespaces, are reviewed one by one. A failed review is never
@@ -264,7 +286,8 @@ func (s *Server) reconcile(ctx context.Context, c *cluster.Client, prev visibleS
 		return next, nil
 	}
 	start := time.Now()
-	allowed, err := c.CanIn(ctx, "list", "kubevirt.io", "virtualmachines", slices.Sorted(maps.Keys(due)))
+	see := s.visibilityRef()
+	allowed, err := c.CanIn(ctx, "list", see.group, see.resource, slices.Sorted(maps.Keys(due)))
 	if err != nil {
 		return visibleSet{}, err
 	}
@@ -296,7 +319,8 @@ func (s *Server) reconcile(ctx context.Context, c *cluster.Client, prev visibleS
 // wide review goes first, so a token holding it costs no per-namespace one.
 func (s *Server) sweep(ctx context.Context, c *cluster.Client, cands *candidates, lv visLevels) (visibleSet, error) {
 	e := visibleSet{cands: cands, lv: lv, swept: time.Now()}
-	wide, err := c.Can(ctx, "list", "kubevirt.io", "virtualmachines", "")
+	see := s.visibilityRef()
+	wide, err := c.Can(ctx, "list", see.group, see.resource, "")
 	if err != nil {
 		return visibleSet{}, err
 	}
@@ -306,7 +330,7 @@ func (s *Server) sweep(ctx context.Context, c *cluster.Client, cands *candidates
 			return visibleSet{}, err
 		}
 	} else {
-		allowed, err := c.CanIn(ctx, "list", "kubevirt.io", "virtualmachines", cands.list)
+		allowed, err := c.CanIn(ctx, "list", see.group, see.resource, cands.list)
 		if err != nil {
 			return visibleSet{}, err
 		}
@@ -418,6 +442,8 @@ var ssarNodes = ssarRef{resource: "nodes"}
 // ssarDataSources is the boot images: listed for the options catalog, created
 // when an upload registers one.
 var ssarDataSources = ssarRef{group: "cdi.kubevirt.io", resource: "datasources"}
+
+var ssarPods = ssarRef{group: "", resource: "pods"}
 
 // ssarFor is the authority over one managed kind.
 func ssarFor(k model.Kind) ssarRef { return ssarRef{k.Group, k.Plural} }

@@ -24,6 +24,7 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/watch"
 	"k8s.io/client-go/kubernetes/fake"
 	"k8s.io/client-go/kubernetes/scheme"
@@ -34,6 +35,8 @@ import (
 	"github.com/epheo/dotvirt/internal/cluster"
 	"github.com/epheo/dotvirt/internal/clusterstate"
 	"github.com/epheo/dotvirt/internal/eventbus"
+	"github.com/epheo/dotvirt/internal/model"
+	"github.com/epheo/dotvirt/internal/modules"
 	"github.com/epheo/dotvirt/internal/restfactory"
 )
 
@@ -754,4 +757,95 @@ func TestPlatformScope(t *testing.T) {
 			t.Fatalf("success wrote status %d", rec.Code)
 		}
 	})
+}
+
+// fakeModules answers the discovery the modules ask, KubeVirt or none.
+type fakeModules struct{ vms bool }
+
+func (f fakeModules) ServesAPIResource(gvr schema.GroupVersionResource) (bool, error) {
+	return f.vms && gvr.Resource == "virtualmachines", nil
+}
+
+func (fakeModules) HasAny(context.Context, schema.GroupVersionResource) (bool, error) {
+	return false, nil
+}
+
+func knownModules(t *testing.T, vms bool) *modules.Snapshot {
+	t.Helper()
+	snap := modules.New(fakeModules{vms})
+	snap.Run(t.Context())
+	for deadline := time.Now().Add(5 * time.Second); time.Now().Before(deadline); time.Sleep(time.Millisecond) {
+		if _, ok := snap.Get(); ok {
+			return snap
+		}
+	}
+	t.Fatal("the modules never answered")
+	return nil
+}
+
+// A namespace admin's grants, on a cluster where KubeVirt's aggregated roles do
+// or do not exist: rights on pods and NetworkPolicies, on VMs only with KubeVirt.
+func namespaceAdmin(withVMs bool) func(string, *authzv1.ResourceAttributes) bool {
+	return func(token string, a *authzv1.ResourceAttributes) bool {
+		if token != tenantToken || a.Namespace != "team-a-dev" {
+			return false
+		}
+		switch a.Resource {
+		case "pods", "networkpolicies":
+			return true
+		case "virtualmachines":
+			return withVMs
+		}
+		return false
+	}
+}
+
+func tenantView(t *testing.T, s *Server) (map[string]bool, map[string]bool) {
+	t.Helper()
+	id := auth.Identity{Token: tenantToken, Username: "tenant"}
+	c, err := s.clusterF.For(id.Token)
+	if err != nil {
+		t.Fatal(err)
+	}
+	visible, err := s.visibleFor(context.Background(), id, c)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return visible, s.authorNamespaces(context.Background(), id, c, []string{"team-a-dev"})
+}
+
+func TestANamespaceAdminSeesItsNamespaceWithoutKubeVirt(t *testing.T) {
+	fc := newFakeCluster(t)
+	fc.ssar = namespaceAdmin(false)
+	s := fc.server(nil, Config{})
+	s.modules = knownModules(t, false)
+	visible, author := tenantView(t, s)
+	if !visible["team-a-dev"] || len(visible) != 1 {
+		t.Errorf("visible = %v, want team-a-dev alone", visible)
+	}
+	if !author["team-a-dev"] {
+		t.Errorf("author = %v, want true on NetworkPolicies", author)
+	}
+}
+
+// Rights on pods alone must not open a namespace on a cluster with VMs.
+func TestWithKubeVirtVisibilityStillAsksAboutVMs(t *testing.T) {
+	fc := newFakeCluster(t)
+	fc.ssar = namespaceAdmin(false)
+	s := fc.server(nil, Config{})
+	s.modules = knownModules(t, true)
+	if visible, author := tenantView(t, s); len(visible) != 0 || author["team-a-dev"] {
+		t.Errorf("visible = %v, author = %v, want neither", visible, author)
+	}
+}
+
+// Until discovery answers, nothing opens on a guess.
+func TestUnknownModulesKeepTheVMQuestion(t *testing.T) {
+	fc := newFakeCluster(t)
+	fc.ssar = namespaceAdmin(false)
+	s := fc.server(nil, Config{})
+	s.modules = modules.New(fakeModules{})
+	if visible, _ := tenantView(t, s); len(visible) != 0 {
+		t.Errorf("visible = %v, want none", visible)
+	}
 }

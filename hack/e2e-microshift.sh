@@ -457,6 +457,17 @@ if [ "${KUBEVIRT}" = "0" ]; then
 		api "${BASE}/api/modules" | jq -e '.vms == false and .routes == true and .replicatedStorage == true'
 	}
 	retry "modules report no VMs, routes and r-drbd" 180 modules_right
+	# A namespace admin, not the cluster-admin everything above runs as: KubeVirt's
+	# aggregated roles are absent, and admin alone must still see its namespace.
+	kc -n "${PROJECT}" create serviceaccount e2e-tenant --dry-run=client -o yaml | kc apply -f -
+	kc -n "${PROJECT}" create rolebinding e2e-tenant --clusterrole=admin \
+		--serviceaccount="${PROJECT}:e2e-tenant" --dry-run=client -o yaml | kc apply -f -
+	TENANT_TOK="$(kc -n "${PROJECT}" create token e2e-tenant --duration=1h)"
+	tenant_sees_project() {
+		curl -fsS --max-time 30 -H "Authorization: Bearer ${TENANT_TOK}" "${BASE}/api/inventory" \
+			| jq -e --arg p "${PROJECT}" '[.projects[].name] == [$p] and ([.projects[0].namespaces[].canAuthor] | all)'
+	}
+	retry "a namespace admin sees and may author its project" 180 tenant_sees_project
 	warnings="$(api "${BASE}/api/inventory" | jq -c '.warnings // []')"
 	[ "${warnings}" = "[]" ] || { echo "ERROR: inventory warnings without KubeVirt: ${warnings}" >&2; exit 1; }
 	log "no-KubeVirt install complete"

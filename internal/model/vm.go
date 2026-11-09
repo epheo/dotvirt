@@ -183,8 +183,8 @@ func InterfaceName(networkRef string) string {
 type ProjectNamespace struct {
 	Namespace string `json:"namespace"`
 	VMs       []VM   `json:"vms"`
-	// CanAuthor is the caller's update right on VMs here: the gate every
-	// stage, propose and revert route enforces, so the UI hides what would 403.
+	// CanAuthor is the caller's update right on VMs here, or on NetworkPolicies
+	// on a cluster with no VMs: the UI hides what would 403.
 	// Nil when the review failed this frame: unknown, and the UI fails closed,
 	// offering nothing and saying the access could not be checked.
 	CanAuthor *bool `json:"canAuthor,omitempty"`

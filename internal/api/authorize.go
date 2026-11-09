@@ -773,7 +773,12 @@ func (s *Server) authorizeRepo(w http.ResponseWriter, r *http.Request, sc scope)
 // fails is left out of the map, so a timeout reads as unknown, never as no.
 func (s *Server) authorNamespaces(ctx context.Context, id auth.Identity, c *cluster.Client, nss []string) map[string]bool {
 	out := make(map[string]bool, len(nss))
-	if _, all, err := s.allowed(ctx, id, c, vmAction(verbUpdate, "")); err == nil && all {
+	authorIn := vmAction
+	if s.noVMs() {
+		// admin and edit grant this on any Kubernetes; see visibilityRef.
+		authorIn = func(verb, ns string) action { return ask(verb, ssarFor(model.KindNetpol), ns) }
+	}
+	if _, all, err := s.allowed(ctx, id, c, authorIn(verbUpdate, "")); err == nil && all {
 		for _, ns := range nss {
 			out[ns] = true
 		}
@@ -788,7 +793,7 @@ func (s *Server) authorNamespaces(ctx context.Context, id auth.Identity, c *clus
 		wg.Go(func() {
 			sem <- struct{}{}
 			defer func() { <-sem }()
-			_, ok, err := s.allowed(ctx, id, c, vmAction(verbUpdate, ns))
+			_, ok, err := s.allowed(ctx, id, c, authorIn(verbUpdate, ns))
 			if err != nil {
 				return
 			}
