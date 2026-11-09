@@ -22,7 +22,10 @@ func deschedOnly(token string, a *authzv1.ResourceAttributes) bool {
 	if token == adminToken {
 		return true
 	}
-	if token != "drs-token" {
+	if token == "psi-author" && a.Resource == "machineconfigs" {
+		return a.Verb != verbList
+	}
+	if token != "drs-token" && token != "psi-author" {
 		return false
 	}
 	switch a.Resource {
@@ -58,11 +61,19 @@ func TestDRSView(t *testing.T) {
 		t.Errorf("drs author view = %+v, want manage", v)
 	}
 
-	// A tenant reads the committed state but never a draft.
+	// A tenant who may not list KubeDeschedulers reads neither plane.
 	rec = do(s, tenantToken, http.MethodGet, "/api/drs", "")
 	wantStatus(t, rec, http.StatusOK)
-	if v := decodeBody[model.DRSView](t, rec); v.CanManage || v.Draft != nil || !v.Configured {
+	if v := decodeBody[model.DRSView](t, rec); v.CanManage || v.Draft != nil || v.Configured || v.PSIConfigured {
 		t.Errorf("tenant view = %+v", v)
+	}
+
+	// Who may author the PSI file reads whether it is committed, without
+	// listing the rendered MachineConfigs.
+	rec = do(s, "psi-author", http.MethodGet, "/api/drs", "")
+	wantStatus(t, rec, http.StatusOK)
+	if v := decodeBody[model.DRSView](t, rec); !v.CanPSI || !v.PSIConfigured {
+		t.Errorf("PSI author view = %+v", v)
 	}
 
 	// The git plane failing degrades to a warning, never a 500.

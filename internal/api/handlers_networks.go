@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"slices"
 
 	"github.com/epheo/dotvirt/internal/auth"
 	"github.com/epheo/dotvirt/internal/cluster"
@@ -220,11 +221,12 @@ func (s *Server) handleNetworks(w http.ResponseWriter, r *http.Request) {
 		n := &out.Networks[i]
 		n.SourceFile = declared(n.Backing, n.Namespace, n.Name)
 	}
-	// The physical fabric is node-level infrastructure - show it only to callers
-	// who can read nodes (cluster-admins), not every tenant who can attach a NIC.
-	if s.capable(r.Context(), id, c, ask(verbList, ssarNodes, "")) {
-		out.Uplinks = full.Uplinks
+	// The physical fabric: each half follows its own kind.
+	if s.capable(r.Context(), id, c, ask(verbList, ssarNNS, "")) {
 		out.PhysicalAdapters = full.PhysicalAdapters
+	}
+	if s.capable(r.Context(), id, c, ask(verbList, ssarUplink, "")) {
+		out.Uplinks = full.Uplinks
 		if out.Caps.Uplink {
 			for i := range out.Uplinks {
 				u := &out.Uplinks[i]
@@ -248,7 +250,10 @@ func scopeNetworks(nets []model.Network, visible map[string]bool, lists func(bac
 	for _, n := range nets {
 		switch {
 		case n.Scope == model.ScopeShared:
-			n.Namespaces = visibleSubset(n.Namespaces, visible)
+			// What a tenant reads of one is its NetworkAttachmentDefinition.
+			n.Namespaces = slices.DeleteFunc(visibleSubset(n.Namespaces, visible), func(ns string) bool {
+				return !lists(model.KindNAD.Kind, ns)
+			})
 			if all || len(n.Namespaces) > 0 {
 				out = append(out, n)
 			}
@@ -270,16 +275,10 @@ func (s *Server) callerNetworks(ctx context.Context, id auth.Identity, c *cluste
 }
 
 // seesAllNetworks reports whether the caller's catalog holds every shared
-// network, published to them or not: they may create shared networks, read
-// the platform tier, or list shared networks cluster-wide (which kubectl
-// would show them anyway). Every review goes through the cached layer.
+// network, published to them or not: they may list shared networks
+// cluster-wide, as kubectl answers it.
 func (s *Server) seesAllNetworks(ctx context.Context, id auth.Identity, c *cluster.Client) bool {
-	if s.capable(ctx, id, c, kindAction(verbCreate, model.KindCUDN, "")) ||
-		s.capable(ctx, id, c, kindAction(verbList, model.KindCUDN, "")) {
-		return true
-	}
-	ok, _ := s.canReadPlatform(ctx, id, c)
-	return ok
+	return s.capable(ctx, id, c, kindAction(verbList, model.KindCUDN, ""))
 }
 
 // redactSharedErrors replaces a shared network's apply error with a generic

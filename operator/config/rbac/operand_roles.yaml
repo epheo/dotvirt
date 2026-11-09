@@ -156,10 +156,10 @@ rules:
     resources: ["machineconfigs"]
     verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
 ---
-# The authoring SIGNAL the UI's SSAR-gate reads (create cudn/nncp/namespaces). The user
-# never creates these — Argo applies them from the platform repo — so it's decoupled from
-# the apply path; bind it to delegate platform-network authoring to non-admins
-# (cluster-admins satisfy it implicitly).
+# The authoring SIGNAL the UI's SSAR-gate reads (create cudn/nncp/namespaces), and list,
+# so a delegate is shown what they author. The user never creates these: Argo applies
+# them from the platform repo, so it's decoupled from the apply path. Bind it to delegate
+# platform-network authoring to non-admins (cluster-admins satisfy it implicitly).
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
@@ -170,13 +170,13 @@ metadata:
 rules:
   - apiGroups: ["k8s.ovn.org"]
     resources: ["clusteruserdefinednetworks", "egressips", "adminpolicybasedexternalroutes"]
-    verbs: ["create"]
+    verbs: ["create", "list"]
   - apiGroups: ["policy.networking.k8s.io"]
     resources: ["adminnetworkpolicies", "baselineadminnetworkpolicies"]
-    verbs: ["create"]
+    verbs: ["create", "list"]
   - apiGroups: ["nmstate.io"]
     resources: ["nodenetworkconfigurationpolicies"]
-    verbs: ["create"]
+    verbs: ["create", "list"]
   - apiGroups: [""]
     resources: ["namespaces"]
     verbs: ["create"]
@@ -184,7 +184,7 @@ rules:
   # only for the PSI opt-in).
   - apiGroups: ["operator.openshift.io"]
     resources: ["kubedeschedulers"]
-    verbs: ["create"]
+    verbs: ["create", "list"]
   - apiGroups: ["machineconfiguration.openshift.io"]
     resources: ["machineconfigs"]
     verbs: ["create"]

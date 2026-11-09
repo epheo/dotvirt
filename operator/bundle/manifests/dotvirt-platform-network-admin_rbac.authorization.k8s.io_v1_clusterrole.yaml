@@ -15,6 +15,7 @@ rules:
   - adminpolicybasedexternalroutes
   verbs:
   - create
+  - list
 - apiGroups:
   - policy.networking.k8s.io
   resources:
@@ -22,12 +23,14 @@ rules:
   - baselineadminnetworkpolicies
   verbs:
   - create
+  - list
 - apiGroups:
   - nmstate.io
   resources:
   - nodenetworkconfigurationpolicies
   verbs:
   - create
+  - list
 - apiGroups:
   - ""
   resources:
@@ -40,6 +43,7 @@ rules:
   - kubedeschedulers
   verbs:
   - create
+  - list
 - apiGroups:
   - machineconfiguration.openshift.io
   resources:

@@ -143,9 +143,9 @@ func (p placement) inCluster() bool { return p == placeSame || p == placePodMayb
 // bare address is placed against, settled before any address is placed so
 // no review runs for one address and not another. nil reads every network.
 type TraceView struct {
-	Namespace func(name string) bool // the caller sees this namespace
-	UDNs      func(name string) bool // the caller may list UserDefinedNetworks in this namespace
-	Shared    bool                   // the caller sees every shared network, published to them or not
+	NADs   func(name string) bool // the caller may list NetworkAttachmentDefinitions in this namespace
+	UDNs   func(name string) bool // the caller may list UserDefinedNetworks in this namespace
+	Shared bool                   // the caller sees every shared network, published to them or not
 	// Workloads resolves an address to the VMs the caller sees that hold it,
 	// from the snapshot; nil resolves none.
 	Workloads func(netip.Addr) []TraceWorkload
@@ -153,13 +153,13 @@ type TraceView struct {
 
 // reads reports whether the caller may read a UDN or CUDN range, as the
 // network catalog answers it: a UDN where they may list UDNs, a CUDN published
-// to a namespace they see, or every CUDN where their catalog lists them all.
+// where they may list its NAD, or every CUDN where their catalog lists them all.
 func (v *TraceView) reads(r primaryRange) bool {
 	switch {
 	case v == nil:
 		return true
 	case strings.HasPrefix(r.key, "cudn:"):
-		return v.Shared || v.Namespace != nil && slices.ContainsFunc(r.namespaces, v.Namespace)
+		return v.Shared || v.NADs != nil && slices.ContainsFunc(r.namespaces, v.NADs)
 	}
 	return v.UDNs != nil && slices.ContainsFunc(r.namespaces, v.UDNs)
 }

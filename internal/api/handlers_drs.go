@@ -4,6 +4,7 @@ import (
 	"log"
 	"net/http"
 
+	"github.com/epheo/dotvirt/internal/drs"
 	"github.com/epheo/dotvirt/internal/model"
 )
 
@@ -25,18 +26,24 @@ func (s *Server) handleDRS(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var view model.DRSView
-	if s.drs != nil {
+	ctx := r.Context()
+	lists := s.capable(ctx, id, c, descheduleRead)
+	if s.drs != nil && lists {
 		view.Live = s.drs.Live()
 	}
 	if s.cfg.PlatformRepo != "" {
-		ctx := r.Context()
 		view.CanManage, view.CanPSI, view.CanDisable = s.drsCaps(ctx, id, c)
 		platform := s.platformProject()
-		if git, err := s.reader.DRSState(platform); err != nil {
-			log.Printf("api: drs: read platform repo: %v", err)
-			view.Warning = "platform repo unavailable - committed rebalancing state unknown"
-		} else {
-			view.Configured, view.Config, view.PSIConfigured = git.Configured, git.Config, git.PSIConfigured
+		if lists {
+			if git, err := s.reader.DRSState(platform); err != nil {
+				log.Printf("api: drs: read platform repo: %v", err)
+				view.Warning = "platform repo unavailable - committed rebalancing state unknown"
+			} else {
+				view.Configured, view.Config = git.Configured, git.Config
+				// A delegate may author the PSI file without listing rendered
+				// MachineConfigs, which hold node secrets: it is a fact of git.
+				view.PSIConfigured = git.PSIConfigured && (view.CanPSI || s.capable(ctx, id, c, ask(verbList, ssarMachineCfg, "")))
+			}
 		}
 		if view.CanManage || view.CanDisable {
 			if d, err := s.draft.DRSDraft(id, platform); err == nil && (d.Config != nil || d.PSI || d.DisableStaged) {
@@ -45,6 +52,15 @@ func (s *Server) handleDRS(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	writeJSON(w, view)
+}
+
+// descheduleRead is what the rebalancer's state, live or committed, asks.
+var descheduleRead = ask(verbList, ssarDescheduler, drs.Namespace)
+
+// listsDescheduler is descheduleRead for a route holding only the request.
+func (s *Server) listsDescheduler(r *http.Request) bool {
+	id, c, err := s.userCluster(r)
+	return err == nil && s.capable(r.Context(), id, c, descheduleRead)
 }
 
 // handleDRSEnable stages the DRS (descheduler) file set - operator install +
