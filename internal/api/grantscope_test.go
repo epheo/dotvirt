@@ -121,15 +121,15 @@ func TestGrantMoveReasksOnlyItsNamespace(t *testing.T) {
 	g.bind("p1", "carol-edit")
 	read()
 	for tok, a := range tokens {
-		if got := a.take(); !slices.Equal(got, []string{"p1", "p1"}) {
-			t.Fatalf("%s after a move in p1 asked %q, want p1's visibility and p1's question", tok, got)
+		if got := a.take(); !slices.Equal(got, slices.Repeat([]string{"p1"}, 2+len(readKinds))) {
+			t.Fatalf("%s after a move in p1 asked %q, want p1's visibility, its reads and p1's question", tok, got)
 		}
 	}
 
 	g.bind("", "carol-view")
 	read()
 	for tok, a := range tokens {
-		if got := a.take(); !slices.Equal(got, []string{"", "p0", "p0", "p1", "p1", "p2"}) {
+		if got := a.where(); !slices.Equal(got, []string{"", "p0", "p1", "p2"}) {
 			t.Fatalf("%s after a cluster-wide move asked %q, want everything again", tok, got)
 		}
 	}
@@ -179,7 +179,7 @@ func TestNamespaceMovesAreDeltas(t *testing.T) {
 	if got := visibleOf(t, g.s, "tok", tenant.c); !maps.Equal(got, map[string]bool{"a": true, "b": true, "c": true}) {
 		t.Fatalf("after c was added: visible = %v", got)
 	}
-	if got := tenant.take(); !slices.Equal(got, []string{"c"}) {
+	if got := tenant.where(); !slices.Equal(got, []string{"c"}) {
 		t.Fatalf("adding c asked %q, want c alone", got)
 	}
 
@@ -223,9 +223,10 @@ func TestFailedPartialReviewIsNotCached(t *testing.T) {
 }
 
 // The request cost of one grant move at N tokens over M project namespaces:
-// a RoleBinding in one project namespace costs a review per token, one
-// outside the projects none, and a ClusterRoleBinding a sweep per token, one
-// cluster-wide review and one per namespace. A sweep per token is what a
+// a RoleBinding in one project namespace costs a review per token plus one per
+// read kind for those who see it, one outside the projects none, and a
+// ClusterRoleBinding a sweep per token, one cluster-wide review, one per
+// namespace and one per read kind per namespace seen. A sweep per token is what a
 // RoleBinding in a project namespace cost before (a namespace list and a
 // review per namespace), each repeated once its unsettled answers expired.
 func TestReviewsPerGrantMove(t *testing.T) {
@@ -247,8 +248,9 @@ func TestReviewsPerGrantMove(t *testing.T) {
 		}
 		return total
 	}
-	if got := cost(); got != n*(1+m) {
-		t.Fatalf("first reads cost %d reviews, want %d", got, n*(1+m))
+	sweep := n * (1 + m + len(readKinds))
+	if got := cost(); got != sweep {
+		t.Fatalf("first reads cost %d reviews, want %d", got, sweep)
 	}
 	g.bind("p03", "rb")
 	keyed := cost()
@@ -258,8 +260,12 @@ func TestReviewsPerGrantMove(t *testing.T) {
 	wide := cost()
 	t.Logf("reviews per grant move at %d tokens x %d namespaces: RoleBinding in a project %d, outside %d, ClusterRoleBinding %d",
 		n, m, keyed, outside, wide)
-	if keyed != n || outside != 0 || wide != n*(1+m) {
-		t.Fatalf("got %d, %d, %d reviews; want %d, 0, %d", keyed, outside, wide, n, n*(1+m))
+	seers := n / m
+	if n%m > 3 {
+		seers++
+	}
+	if want := n + seers*len(readKinds); keyed != want || outside != 0 || wide != sweep {
+		t.Fatalf("got %d, %d, %d reviews; want %d, 0, %d", keyed, outside, wide, want, sweep)
 	}
 }
 
@@ -369,11 +375,11 @@ func TestGrantMoveOutsideProjectsWakesNoFrame(t *testing.T) {
 	}
 }
 
-// A token that may list VMs everywhere sees a new project namespace with no
-// review, and stops seeing a removed one.
+// A token that may list every read kind everywhere sees a new project namespace
+// with no review, and stops seeing a removed one.
 func TestWideReaderFollowsTheProjects(t *testing.T) {
 	g := newGrantRig(t, []string{"a"})
-	wide := newAsking(func(a *authzv1.ResourceAttributes) bool { return a.Resource == "virtualmachines" })
+	wide := newAsking(func(*authzv1.ResourceAttributes) bool { return true })
 	visibleOf(t, g.s, "tok", wide.c)
 	wide.take()
 	if _, err := g.kube.CoreV1().Namespaces().Create(context.Background(), projectNS("b"), metav1.CreateOptions{}); err != nil {
@@ -408,7 +414,7 @@ func TestUnsettledIsPerNamespace(t *testing.T) {
 	g.bind("x", "rb")
 	tenant.take()
 	visibleOf(t, g.s, "tok", tenant.c)
-	if got := tenant.take(); !slices.Equal(got, []string{"x"}) {
+	if got := tenant.take(); !slices.Equal(got, slices.Repeat([]string{"x"}, 1+len(readKinds))) {
 		t.Fatalf("a move in x asked %q", got)
 	}
 	e, _ := g.s.visible.Get(key)
@@ -419,7 +425,7 @@ func TestUnsettledIsPerNamespace(t *testing.T) {
 	e.unsettled = map[string]time.Time{"x": time.Now().Add(-unwatchedTTL)}
 	g.s.visible.Put(key, e)
 	visibleOf(t, g.s, "tok", tenant.c)
-	if got := tenant.take(); !slices.Equal(got, []string{"x"}) {
+	if got := tenant.where(); !slices.Equal(got, []string{"x"}) {
 		t.Fatalf("x's short TTL ran out, yet the read asked %q", got)
 	}
 

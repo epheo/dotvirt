@@ -169,6 +169,24 @@ func (s *Server) replicationWatermark(ctx context.Context, id auth.Identity, c *
 	return sum & wireMask
 }
 
+// routesWatermark covers what the caller's Gateway and route pulls read: every
+// route for an operator, the kinds it may list in its visible namespaces for
+// anyone else.
+func (s *Server) routesWatermark(ctx context.Context, id auth.Identity, c *cluster.Client, visible map[string]bool) uint64 {
+	if s.frontDoor == nil || !s.frontDoor.Started() {
+		return 0
+	}
+	var t term
+	if s.capable(ctx, id, c, gatewaysRead) {
+		return t.start("routes-operator").num(s.frontDoor.Total()).sum() & wireMask
+	}
+	var sum uint64
+	for h := range s.routesReadable(ctx, id, c, slices.Collect(maps.Keys(visible))) {
+		sum += t.start("routes").str(h.Namespace, h.Resource).num(s.frontDoor.Gen(h.Namespace, h.Resource)).sum()
+	}
+	return sum & wireMask
+}
+
 // tasksWatermark covers the entries the caller's tasks pull returns (the
 // same taskScope), each with the project it shows under.
 func (s *Server) tasksWatermark(sc taskScope) uint64 {

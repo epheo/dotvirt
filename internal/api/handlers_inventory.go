@@ -49,10 +49,11 @@ func (s *Server) InventoryForIdentity(ctx context.Context, id auth.Identity) (mo
 	if err != nil {
 		return model.Inventory{}, err
 	}
-	visible, err := s.visibleFor(ctx, id, userCluster)
+	v, err := s.viewFor(ctx, id, userCluster)
 	if err != nil {
 		return model.Inventory{}, err
 	}
+	visible := v.names
 	all := s.state.Namespaces()
 	projects := s.resolver.Resolve(all, visible)
 
@@ -67,6 +68,7 @@ func (s *Server) InventoryForIdentity(ctx context.Context, id auth.Identity) (mo
 		Live:     s.state.Live(),
 		Visible:  visible,
 		Owners:   s.resolver.Owners(all),
+		ListsVMs: func(ns string) bool { return v.lists(ssarVM, ns) },
 	}
 	// Drift comes from the SA-owned Application snapshot (lock-free, watch-fed).
 	// Three states the inventory must NOT conflate: Argo off (s.drift nil: no
@@ -162,6 +164,7 @@ func (s *Server) InventoryForIdentity(ctx context.Context, id auth.Identity) (mo
 	inv.NetworksVersion = s.networksWatermark(visible, grants)
 	inv.TasksVersion = s.tasksWatermark(s.taskScope(id, projects, platformAuthor, grants.nodes))
 	inv.ReplicationVersion = s.replicationWatermark(ctx, id, userCluster, visible)
+	inv.RoutesVersion = s.routesWatermark(ctx, id, userCluster, visible)
 	return inv, nil
 }
 

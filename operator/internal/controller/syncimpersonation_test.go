@@ -24,6 +24,7 @@ import (
 
 	dotvirtv1alpha1 "github.com/epheo/dotvirt/operator/api/v1alpha1"
 	"github.com/epheo/dotvirt/operator/internal/install"
+	"github.com/epheo/dotvirt/operator/internal/platform"
 	"github.com/epheo/dotvirt/pkg/tenancy"
 )
 
@@ -109,8 +110,85 @@ func syncCond(t *testing.T, c client.Client, dv *dotvirtv1alpha1.Dotvirt) *metav
 }
 
 func optIn(dv *dotvirtv1alpha1.Dotvirt, ignoreForeign bool) *dotvirtv1alpha1.Dotvirt {
-	dv.Spec.ArgoCD.SyncImpersonation = dotvirtv1alpha1.SyncImpersonationSpec{Enabled: true, IgnoreForeignApplications: ignoreForeign}
+	dv.Spec.ArgoCD.SyncImpersonation = dotvirtv1alpha1.SyncImpersonationSpec{Enabled: new(true), IgnoreForeignApplications: ignoreForeign}
 	return dv
+}
+
+func optOut(dv *dotvirtv1alpha1.Dotvirt) *dotvirtv1alpha1.Dotvirt {
+	dv.Spec.ArgoCD.SyncImpersonation.Enabled = new(false)
+	return dv
+}
+
+// A CR that says nothing gets impersonation: only an explicit false opts out.
+func TestSyncImpersonationIsOnWhenUnset(t *testing.T) {
+	dv := testCR()
+	var n atomic.Int64
+	c := testBuilder(t).WithObjects(dv, argoCDInstance(nil), projectNS("b", "team-b", "dotvirt/team-b.git")).
+		WithInterceptorFuncs(reviews(granted(map[string][]string{"dotvirt-p-team-b": {"b"}}), &n)).
+		WithReturnManagedFields().Build()
+	reconcileOnce(t, newReconciler(c, depsOK), dv)
+	if got := extraConfig(t, c)[install.SyncImpersonationKey]; got != "true" {
+		t.Errorf("%s = %v, want true", install.SyncImpersonationKey, got)
+	}
+}
+
+// Another team's Application must not stop syncing on a flip nobody chose.
+func TestAnUnsetFlipWaitsOnApplicationsItCannotCheck(t *testing.T) {
+	dv := testCR()
+	var n atomic.Int64
+	c := testBuilder(t).WithObjects(dv, remote("default"), argoCDInstance(nil), projectNS("team-a", "team-a", "dotvirt/team-a.git"),
+		appProject("default", map[string]any{"server": "https://edge.example", "namespace": "*", "defaultServiceAccount": "argocd:edge-sync"})).
+		WithInterceptorFuncs(reviews(granted(map[string][]string{"dotvirt-p-team-a": {"team-a"}}), &n)).Build()
+	reconcileOnce(t, newReconciler(c, depsOK), dv)
+	if got := extraConfig(t, c)[install.SyncImpersonationKey]; got != nil {
+		t.Errorf("%s = %v, want it left unset", install.SyncImpersonationKey, got)
+	}
+	if got := syncCond(t, c, dv); got.Reason != "NotReady" || !strings.Contains(got.Message, "enabled: true") {
+		t.Errorf("condition = %+v, want NotReady naming how to accept it", got)
+	}
+}
+
+// MicroShift reads as OpenShift and runs community Argo CD: the namespace says
+// whose install this is, not the platform.
+func TestArgoDefaultsFollowTheNamespace(t *testing.T) {
+	for name, c := range map[string]struct {
+		platform     platform.Platform
+		ns, sa       string
+		wantNS, want string
+	}{
+		"OpenShift GitOps":             {platform.OpenShift, "", "", openShiftGitOpsNS, "openshift-gitops-argocd-application-controller"},
+		"community Argo on MicroShift": {platform.OpenShift, "argocd", "", "argocd", "argocd-application-controller"},
+		"vanilla":                      {platform.Kubernetes, "", "", "argocd", "argocd-application-controller"},
+		"an explicit account wins":     {platform.OpenShift, "argocd", "mine", "argocd", "mine"},
+	} {
+		dv := testCR()
+		dv.Spec.ArgoCD.Namespace, dv.Spec.ArgoCD.ControllerServiceAccount = c.ns, c.sa
+		ns, sa := (&DotvirtReconciler{Platform: c.platform}).argoTarget(dv)
+		if ns != c.wantNS || sa != c.want {
+			t.Errorf("%s: %s, %s; want %s, %s", name, ns, sa, c.wantNS, c.want)
+		}
+	}
+	if got := argoInstance("argocd"); got != "argocd" {
+		t.Errorf("instance in argocd = %q", got)
+	}
+	if got := argoInstance(openShiftGitOpsNS); got != openShiftGitOpsNS {
+		t.Errorf("instance in %s = %q", openShiftGitOpsNS, got)
+	}
+}
+
+// Without KubeVirt an admin grant carries no VM rights, and is a grant all the same.
+func TestAGrantCountsWithoutKubeVirt(t *testing.T) {
+	dv := optIn(testCR(), false)
+	var n atomic.Int64
+	own := granted(map[string][]string{"dotvirt-p-team-a": {"team-a"}})
+	c := testBuilder(t).WithObjects(dv, argoCDInstance(nil), projectNS("team-a", "team-a", "dotvirt/team-a.git")).
+		WithInterceptorFuncs(reviews(func(account string, a *authzv1.ResourceAttributes) bool {
+			return a.Group != "kubevirt.io" && own(account, a)
+		}, &n)).WithReturnManagedFields().Build()
+	reconcileOnce(t, newReconciler(c, depsOK), dv)
+	if got := extraConfig(t, c)[install.SyncImpersonationKey]; got != "true" {
+		t.Errorf("%s = %v, condition %+v", install.SyncImpersonationKey, got, syncCond(t, c, dv))
+	}
 }
 
 func foreignApp(ns, name, project, destNS string) *unstructured.Unstructured {
@@ -166,6 +244,7 @@ func TestSyncAccountsRendered(t *testing.T) {
 	}))
 	defer forgeDown.Close()
 	dv, creds := byoForgeCR(forgeDown.URL)
+	optOut(dv)
 	var n atomic.Int64
 	c := testBuilder(t).WithObjects(dv, creds, projectNS("team-a", "team-a", "dotvirt/team-a.git")).
 		WithInterceptorFuncs(reviews(granted(nil), &n)).Build()
@@ -301,7 +380,7 @@ func TestSyncImpersonationFlipAndRollback(t *testing.T) {
 		t.Errorf("%d reviews once the verdict aged out, want 36", got)
 	}
 
-	stored := setSpec(t, c, dv, func(d *dotvirtv1alpha1.Dotvirt) { d.Spec.ArgoCD.SyncImpersonation.Enabled = false })
+	stored := setSpec(t, c, dv, func(d *dotvirtv1alpha1.Dotvirt) { d.Spec.ArgoCD.SyncImpersonation.Enabled = new(false) })
 	reconcileOnce(t, r, stored)
 	if extra := extraConfig(t, c); extra[install.SyncImpersonationKey] != nil {
 		t.Errorf("opted out, extraConfig = %v", extra)
@@ -497,7 +576,7 @@ func TestSyncImpersonationStaysOn(t *testing.T) {
 		t.Errorf("requeue = %v; Degraded waits for the drift timer", res.RequeueAfter)
 	}
 
-	stored := setSpec(t, c, dv, func(d *dotvirtv1alpha1.Dotvirt) { d.Spec.ArgoCD.SyncImpersonation.Enabled = false })
+	stored := setSpec(t, c, dv, func(d *dotvirtv1alpha1.Dotvirt) { d.Spec.ArgoCD.SyncImpersonation.Enabled = new(false) })
 	reconcileOnce(t, r, stored)
 	if extraConfig(t, c)[install.SyncImpersonationKey] != "true" {
 		t.Error("removed a key the operator did not set")
@@ -642,7 +721,7 @@ func TestSyncImpersonationFollowsInstance(t *testing.T) {
 // tenant repo's DataVolume could clone a disk out of any namespace, so the
 // condition says so.
 func TestSyncImpersonationWarnsCloneAnywhere(t *testing.T) {
-	dv := testCR()
+	dv := optOut(testCR())
 	var n atomic.Int64
 	c := testBuilder(t).WithObjects(dv, projectNS("team-a", "team-a", "dotvirt/team-a.git")).
 		WithInterceptorFuncs(reviews(func(account string, a *authzv1.ResourceAttributes) bool {

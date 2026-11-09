@@ -158,7 +158,7 @@ func (r *DotvirtReconciler) finalize(ctx context.Context, dv *dotvirtv1alpha1.Do
 // impersonation on: the one status records and the one spec.argocd names.
 func (r *DotvirtReconciler) syncInstances(dv *dotvirtv1alpha1.Dotvirt) []string {
 	argoNS, _ := r.argoTarget(dv)
-	out := []string{argoNS + "/" + r.argoInstance()}
+	out := []string{argoNS + "/" + argoInstance(argoNS)}
 	if prev := dv.Status.SyncImpersonationInstance; prev != "" && prev != out[0] {
 		out = append(out, prev)
 	}

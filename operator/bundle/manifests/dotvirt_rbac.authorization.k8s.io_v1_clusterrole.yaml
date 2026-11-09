@@ -28,6 +28,24 @@ rules:
   verbs:
   - list
 - apiGroups:
+  - gateway.networking.k8s.io
+  resources:
+  - gateways
+  - httproutes
+  - tlsroutes
+  - tcproutes
+  - udproutes
+  verbs:
+  - list
+  - watch
+- apiGroups:
+  - portail.epheo.eu
+  resources:
+  - ratelimitpolicies
+  verbs:
+  - list
+  - watch
+- apiGroups:
   - r-drbd.io
   resources:
   - volumes

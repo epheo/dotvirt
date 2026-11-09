@@ -134,3 +134,78 @@ type NetworkCaps struct {
 	// (its history, proposals and revert).
 	Platform bool `json:"platform"`
 }
+
+// Gateways is GET /api/networking/gateways: every Gateway and route. Operator
+// only: it reaches across every tenant's namespaces.
+type Gateways struct {
+	// Synced is false until the Gateways' and HTTPRoutes' first lists landed.
+	Synced bool `json:"synced"`
+	// Stale: a watch is down and this is its last known state.
+	Stale    bool          `json:"stale,omitempty"`
+	Gateways []GatewayInfo `json:"gateways"`
+	Routes   []Route       `json:"routes"`
+}
+
+// GatewayInfo is one Gateway as its controller reports it.
+type GatewayInfo struct {
+	Namespace string   `json:"namespace"`
+	Name      string   `json:"name"`
+	Class     string   `json:"class"`
+	Addresses []string `json:"addresses,omitempty"`
+	Ready     bool     `json:"ready"`
+	// Reason and Message are the first condition that does not hold.
+	Reason     string             `json:"reason,omitempty"`
+	Message    string             `json:"message,omitempty"`
+	Listeners  []GatewayListener  `json:"listeners"`
+	RateLimits []GatewayRateLimit `json:"rateLimits,omitempty"`
+}
+
+// GatewayListener is one port a Gateway serves.
+type GatewayListener struct {
+	Name           string `json:"name"`
+	Port           int32  `json:"port"`
+	Protocol       string `json:"protocol"`
+	Hostname       string `json:"hostname,omitempty"`
+	AttachedRoutes int32  `json:"attachedRoutes"`
+	Ready          bool   `json:"ready"`
+	Reason         string `json:"reason,omitempty"`
+	Message        string `json:"message,omitempty"`
+}
+
+// GatewayRateLimit is one per-client budget on a Gateway; Listener is empty
+// for the whole Gateway.
+type GatewayRateLimit struct {
+	Listener          string `json:"listener,omitempty"`
+	RequestsPerSecond int32  `json:"requestsPerSecond"`
+	Burst             int32  `json:"burst"`
+}
+
+// Route is one HTTP, TLS, TCP or UDP route.
+type Route struct {
+	Kind      string         `json:"kind"`
+	Namespace string         `json:"namespace"`
+	Name      string         `json:"name"`
+	Hostnames []string       `json:"hostnames,omitempty"`
+	Parents   []RouteParent  `json:"parents,omitempty"`
+	Backends  []RouteBackend `json:"backends,omitempty"`
+}
+
+// RouteParent is a Gateway a route asks to attach to.
+type RouteParent struct {
+	Namespace string `json:"namespace"`
+	Name      string `json:"name"`
+	Section   string `json:"section,omitempty"`
+	Attached  bool   `json:"attached"`
+	Reason    string `json:"reason,omitempty"`
+	// Message is the controller's text, which can name another tenant's route.
+	// Empty on GET /api/networking/routes.
+	Message string `json:"message,omitempty"`
+}
+
+// RouteBackend is a Service a route sends traffic to.
+type RouteBackend struct {
+	Namespace string `json:"namespace"`
+	Name      string `json:"name"`
+	Port      int32  `json:"port,omitempty"`
+	Weight    int32  `json:"weight"`
+}

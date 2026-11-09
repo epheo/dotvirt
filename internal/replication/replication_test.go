@@ -111,7 +111,7 @@ func TestSecretIsNeverHeld(t *testing.T) {
 	s, _ := newSnapshot(t)
 	mustAdd(t, s.volumes, healthyTwoCopies("pvc-a"))
 	mustAdd(t, s.claims, pv("pvc-a", driver, "Bound", "team-a", "root"))
-	if got := fmt.Sprintf("%+v", s.volumes.rows); strings.Contains(got, secret) {
+	if got := fmt.Sprintf("%+v", s.volumes.Rows); strings.Contains(got, secret) {
 		t.Fatalf("the projection holds the secret: %s", got)
 	}
 	body, err := json.Marshal(s.Overview())

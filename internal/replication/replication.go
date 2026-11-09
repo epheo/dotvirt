@@ -18,7 +18,6 @@ import (
 	"sync/atomic"
 	"time"
 
-	"k8s.io/apimachinery/pkg/api/equality"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -71,10 +70,10 @@ type Snapshot struct {
 	served func() bool
 
 	mu      sync.RWMutex
-	volumes *table[model.ReplicatedVolume]
-	pools   *table[model.ReplicationPool]
-	hosts   *table[host]
-	claims  *table[claim]
+	volumes *reflect.Table[model.ReplicatedVolume]
+	pools   *reflect.Table[model.ReplicationPool]
+	hosts   *reflect.Table[host]
+	claims  *reflect.Table[claim]
 	// gens counts each namespace's moves, so a tenant's watermark moves with
 	// its own disks only; total counts every move, for an operator's.
 	gens  map[string]uint64
@@ -88,43 +87,24 @@ type Snapshot struct {
 // discovery, so a cluster without r-drbd pays no API call here.
 func New(src Source, bus *eventbus.Bus, served func() bool) *Snapshot {
 	s := &Snapshot{src: src, bus: bus, served: served, gens: map[string]uint64{}}
-	s.volumes = &table[model.ReplicatedVolume]{s: s, decode: decodeVolume, touch: s.touchVolume}
-	s.pools = &table[model.ReplicationPool]{s: s, decode: decodePool, touch: touchTotal[model.ReplicationPool](s)}
-	s.hosts = &table[host]{s: s, decode: decodeHost, touch: touchTotal[host](s)}
-	s.claims = &table[claim]{s: s, decode: decodeClaim, touch: s.touchClaim, key: claimKey}
+	s.volumes = newTable(s, decodeVolume, s.touchVolume, nil)
+	s.pools = newTable(s, decodePool, touchTotal[model.ReplicationPool](s), nil)
+	s.hosts = newTable(s, decodeHost, touchTotal[host](s), nil)
+	s.claims = newTable(s, decodeClaim, s.touchClaim, claimKey)
 	for i := range s.healthy {
 		s.healthy[i].Store(true)
 	}
 	return s
 }
 
+func newTable[V any](s *Snapshot, decode func(*unstructured.Unstructured) (V, bool), touch func(string, *V, *V), key func(*unstructured.Unstructured) string) *reflect.Table[V] {
+	return &reflect.Table[V]{Lock: &s.mu, Decode: decode, Touch: touch, Key: key, Publish: s.publish}
+}
+
 // Run keeps one reflector per kind running while the module is on, and returns
 // at once. Off stops them, so an uninstalled r-drbd leaves no watch retrying.
 func (s *Snapshot) Run(ctx context.Context) {
-	go func() {
-		t := time.NewTicker(pace)
-		defer t.Stop()
-		until := func(cond func() bool) bool {
-			for !cond() {
-				select {
-				case <-ctx.Done():
-					return false
-				case <-t.C:
-				}
-			}
-			return true
-		}
-		for until(func() bool { return s.ready(ctx) }) {
-			run, stop := context.WithCancel(ctx)
-			s.start(run)
-			off := until(func() bool { return !s.served() })
-			stop()
-			s.clear()
-			if !off {
-				return
-			}
-		}
-	}()
+	reflect.RunWhile(ctx, pace, func() bool { return s.ready(ctx) }, s.served, s.start, s.clear)
 }
 
 // start gates each kind on its own: a release older than one of them must not
@@ -143,14 +123,13 @@ func (s *Snapshot) start(ctx context.Context) {
 // clear forgets what a stopped module's watches left.
 func (s *Snapshot) clear() {
 	s.started.Store(false)
+	s.volumes.Clear()
+	s.pools.Clear()
+	s.hosts.Clear()
+	s.claims.Clear()
 	s.mu.Lock()
-	s.volumes.rows, s.pools.rows, s.hosts.rows, s.claims.rows = nil, nil, nil, nil
 	s.total++
 	s.mu.Unlock()
-	s.volumes.synced.Store(false)
-	s.pools.synced.Store(false)
-	s.hosts.synced.Store(false)
-	s.claims.synced.Store(false)
 	s.publish()
 }
 
@@ -190,7 +169,7 @@ func (s *Snapshot) flipped() {
 }
 
 func (s *Snapshot) touchVolume(name string, _, _ *model.ReplicatedVolume) {
-	s.gens[s.claims.rows[name].Namespace]++
+	s.gens[s.claims.Rows[name].Namespace]++
 	s.total++
 }
 
@@ -222,127 +201,6 @@ func (s *Snapshot) Gen(namespace string) uint64 {
 	defer s.mu.RUnlock()
 	return s.gens[namespace]
 }
-
-// table is one kind's projection. Only what decode names is kept, which is why
-// the Volume's DRBD secret is never held past the reflector's hand-off, and a
-// write that moves none of it publishes nothing. It is a cache.Store because
-// a reflector needs one; nothing reads it through that interface.
-type table[V any] struct {
-	s      *Snapshot
-	decode func(*unstructured.Unstructured) (V, bool)
-	touch  func(name string, old, now *V)
-	key    func(*unstructured.Unstructured) string // a row's name when not the object's; empty skips it
-	rows   map[string]V
-	synced atomic.Bool
-}
-
-func (t *table[V]) Add(obj any) error    { t.put(obj); return nil }
-func (t *table[V]) Update(obj any) error { t.put(obj); return nil }
-
-func (t *table[V]) keyOf(u *unstructured.Unstructured) string {
-	if t.key != nil {
-		return t.key(u)
-	}
-	return u.GetName()
-}
-
-func (t *table[V]) Delete(obj any) error {
-	if u, ok := obj.(*unstructured.Unstructured); ok && t.keyOf(u) != "" {
-		t.s.mu.Lock()
-		moved := t.drop(t.keyOf(u))
-		t.s.mu.Unlock()
-		if moved {
-			t.s.publish()
-		}
-	}
-	return nil
-}
-
-func (t *table[V]) put(obj any) {
-	u, ok := obj.(*unstructured.Unstructured)
-	if !ok {
-		return
-	}
-	name := t.keyOf(u)
-	if name == "" {
-		return
-	}
-	now, keep := t.decode(u)
-	t.s.mu.Lock()
-	var moved bool
-	if keep {
-		moved = t.set(name, now)
-	} else {
-		moved = t.drop(name)
-	}
-	t.s.mu.Unlock()
-	if moved {
-		t.s.publish()
-	}
-}
-
-// set and drop run under the snapshot's lock.
-func (t *table[V]) set(name string, now V) bool {
-	if t.rows == nil {
-		t.rows = map[string]V{}
-	}
-	old, had := t.rows[name]
-	if had && equality.Semantic.DeepEqual(old, now) {
-		return false
-	}
-	t.rows[name] = now
-	if had {
-		t.touch(name, &old, &now)
-	} else {
-		t.touch(name, nil, &now)
-	}
-	return true
-}
-
-func (t *table[V]) drop(name string) bool {
-	old, had := t.rows[name]
-	if !had {
-		return false
-	}
-	delete(t.rows, name)
-	t.touch(name, &old, nil)
-	return true
-}
-
-// Replace applies a relist as the moves it amounts to, so one that changed
-// nothing publishes nothing.
-func (t *table[V]) Replace(list []any, _ string) error {
-	next := make(map[string]V, len(list))
-	for _, obj := range list {
-		if u, ok := obj.(*unstructured.Unstructured); ok && t.keyOf(u) != "" {
-			if v, keep := t.decode(u); keep {
-				next[t.keyOf(u)] = v
-			}
-		}
-	}
-	t.s.mu.Lock()
-	moved := false
-	for name := range t.rows {
-		if _, ok := next[name]; !ok {
-			moved = t.drop(name) || moved
-		}
-	}
-	for name, v := range next {
-		moved = t.set(name, v) || moved
-	}
-	t.s.mu.Unlock()
-	first := t.synced.CompareAndSwap(false, true)
-	if moved || first {
-		t.s.publish()
-	}
-	return nil
-}
-
-func (t *table[V]) Resync() error                      { return nil }
-func (t *table[V]) List() []any                        { return nil }
-func (t *table[V]) ListKeys() []string                 { return nil }
-func (t *table[V]) Get(any) (any, bool, error)         { return nil, false, nil }
-func (t *table[V]) GetByKey(string) (any, bool, error) { return nil, false, nil }
 
 // volumeDoc names the fields the console shows. Not spec.assignment.secret.
 type volumeDoc struct {
@@ -577,27 +435,27 @@ func (s *Snapshot) Overview() model.Replication {
 	defer s.mu.RUnlock()
 	out := model.Replication{
 		// Not NodeDisks: blank disks only enrich, and an older r-drbd has none.
-		Synced:  s.volumes.synced.Load() && s.pools.synced.Load() && s.claims.synced.Load(),
+		Synced:  s.volumes.Synced() && s.pools.Synced() && s.claims.Synced(),
 		Stale:   !reflect.AllHealthy(s.healthy[:]),
-		Pools:   make([]model.ReplicationPool, 0, len(s.pools.rows)),
-		Volumes: make([]model.ReplicatedVolume, 0, len(s.volumes.rows)),
-		Hosts:   make([]model.ReplicationHost, 0, len(s.hosts.rows)),
+		Pools:   make([]model.ReplicationPool, 0, len(s.pools.Rows)),
+		Volumes: make([]model.ReplicatedVolume, 0, len(s.volumes.Rows)),
+		Hosts:   make([]model.ReplicationHost, 0, len(s.hosts.Rows)),
 	}
-	for _, p := range s.pools.rows {
+	for _, p := range s.pools.Rows {
 		out.Pools = append(out.Pools, p)
 	}
 	slices.SortFunc(out.Pools, func(a, b model.ReplicationPool) int {
 		return strings.Compare(a.Node+"\x00"+a.Name, b.Node+"\x00"+b.Name)
 	})
-	for name, v := range s.volumes.rows {
-		c := s.claims.rows[name]
+	for name, v := range s.volumes.Rows {
+		c := s.claims.Rows[name]
 		v.Namespace, v.Claim = c.Namespace, c.Name
 		out.Volumes = append(out.Volumes, v)
 	}
 	slices.SortFunc(out.Volumes, func(a, b model.ReplicatedVolume) int {
 		return strings.Compare(a.Namespace+"\x00"+a.Claim+"\x00"+a.Name, b.Namespace+"\x00"+b.Claim+"\x00"+b.Name)
 	})
-	for name, h := range s.hosts.rows {
+	for name, h := range s.hosts.Rows {
 		out.Hosts = append(out.Hosts, model.ReplicationHost{Name: name, Blank: h.Blank})
 	}
 	slices.SortFunc(out.Hosts, func(a, b model.ReplicationHost) int { return strings.Compare(a.Name, b.Name) })
@@ -615,11 +473,11 @@ func (s *Snapshot) Protection(namespaces []string) []model.DiskProtection {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	out := []model.DiskProtection{}
-	for name, c := range s.claims.rows {
+	for name, c := range s.claims.Rows {
 		if c.Name == "" || !wanted[c.Namespace] {
 			continue
 		}
-		v, ok := s.volumes.rows[name]
+		v, ok := s.volumes.Rows[name]
 		if !ok {
 			continue
 		}
@@ -638,9 +496,9 @@ func (s *Snapshot) Protection(namespaces []string) []model.DiskProtection {
 func (s *Snapshot) Volume(name string) (model.ReplicatedVolume, bool) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	v, ok := s.volumes.rows[name]
+	v, ok := s.volumes.Rows[name]
 	if ok {
-		c := s.claims.rows[name]
+		c := s.claims.Rows[name]
 		v.Namespace, v.Claim = c.Namespace, c.Name
 	}
 	return v, ok
@@ -652,14 +510,14 @@ func (s *Snapshot) Volume(name string) (model.ReplicatedVolume, bool) {
 func (s *Snapshot) Evictions(node string) (moving []model.ReplicatedVolume, skipped []model.ReplicationSkip) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	for _, v := range s.volumes.rows {
+	for _, v := range s.volumes.Rows {
 		held := slices.ContainsFunc(v.Replicas, func(r model.VolumeReplica) bool {
 			return r.Node == node && r.Role != "diskless"
 		})
 		if !held {
 			continue
 		}
-		pinned := v.PinnedNode == node || (v.PinnedPool != "" && s.pools.rows[v.PinnedPool].Node == node)
+		pinned := v.PinnedNode == node || (v.PinnedPool != "" && s.pools.Rows[v.PinnedPool].Node == node)
 		if why := evictBlock(v, node, pinned); why != "" {
 			skipped = append(skipped, model.ReplicationSkip{Volume: v.Name, Reason: why})
 			continue

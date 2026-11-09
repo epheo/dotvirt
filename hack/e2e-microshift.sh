@@ -470,6 +470,11 @@ if [ "${KUBEVIRT}" = "0" ]; then
 	retry "a namespace admin sees and may author its project" 180 tenant_sees_project
 	warnings="$(api "${BASE}/api/inventory" | jq -c '.warnings // []')"
 	[ "${warnings}" = "[]" ] || { echo "ERROR: inventory warnings without KubeVirt: ${warnings}" >&2; exit 1; }
+	# On by default; community Argo CD has no ArgoCD resource for the operator to set it on.
+	sync_waits_on_argocd_cm() {
+		[ "$(kc -n dotvirt get dotvirt dotvirt -o jsonpath='{.status.conditions[?(@.type=="SyncImpersonationReady")].reason}')" = "ManualStep" ]
+	}
+	retry "sync impersonation is asked for and waits on argocd-cm" 360 sync_waits_on_argocd_cm
 	log "no-KubeVirt install complete"
 	exit 0
 fi

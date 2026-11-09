@@ -97,6 +97,10 @@ func (s *Server) routes(mux *http.ServeMux) {
 	if s.modules != nil {
 		mux.HandleFunc("GET /api/modules", s.handleModules)
 	}
+	if s.frontDoor != nil {
+		mux.HandleFunc("GET /api/networking/gateways", s.handleGateways)
+		mux.HandleFunc("GET /api/networking/routes", s.handleRoutes)
+	}
 	if s.replication != nil {
 		mux.HandleFunc("GET /api/storage/replication", s.handleReplication)
 		mux.HandleFunc("GET /api/storage/protection", s.handleProtection)
