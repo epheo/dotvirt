@@ -20,6 +20,9 @@ spec:
     # (forge, oauth, ArgoCD) is VERIFIED. Set forge.insecureTLS only for a
     # bring-your-own forge with a certificate nothing on the cluster can trust.
   ingress:
-    type: auto # Route on OpenShift (host auto-assigned), Ingress on vanilla Kubernetes
+    type: auto # a Gateway if named below, else Route on OpenShift (host auto-assigned), else Ingress
+    # Where no router serves Routes (MicroShift with its ingress Removed):
+    # host: dotvirt.example.com
+    # gateway: {name: edge, namespace: gateway-system}
   metrics:
     url: https://thanos-querier.openshift-monitoring.svc.cluster.local:9091

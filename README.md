@@ -31,7 +31,9 @@ as a pull request a human (or policy) approves.
   the networking tier, and image upload. The install proceeds without them.
 
 dotvirt runs on OpenShift (Route) and vanilla Kubernetes (Ingress) — the operator
-detects the distribution and renders accordingly.
+detects the distribution and renders accordingly. Name a Gateway in
+`spec.ingress.gateway` to be served through HTTPRoutes instead, as on MicroShift with
+its router removed.
 
 ## Install
 

@@ -96,7 +96,7 @@ spec:
           - description: 'The ArgoCD (OpenShift GitOps) instance dotvirt drives: its namespace and application-controller service account.'
             displayName: ArgoCD
             path: argocd
-          - description: How the UI is exposed (a Route on OpenShift or an Ingress on vanilla Kubernetes) and at which host.
+          - description: How the UI is exposed (a Route on OpenShift, an Ingress on vanilla Kubernetes or an HTTPRoute on a Gateway) and at which host.
             displayName: Ingress
             path: ingress
           - description: Prometheus/Thanos query API backing the Performance tab.
@@ -373,6 +373,23 @@ spec:
                 - get
                 - patch
                 - update
+            - apiGroups:
+                - gateway.networking.k8s.io
+              resources:
+                - httproutes
+              verbs:
+                - create
+                - list
+                - patch
+            - apiGroups:
+                - gateway.networking.k8s.io
+              resourceNames:
+                - dotvirt
+                - dotvirt-forgejo
+              resources:
+                - httproutes
+              verbs:
+                - delete
             - apiGroups:
                 - networking.k8s.io
               resources:

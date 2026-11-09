@@ -19,8 +19,9 @@ container image).
 ## Platform-agnostic, OpenShift as a profile
 
 The controller detects the distribution (`internal/platform`) and renders
-accordingly: a **Route** on OpenShift, an **Ingress** on vanilla Kubernetes
-(`spec.ingress.type` pins one; `auto` follows the platform). It picks the ArgoCD
+accordingly: a **Route** on OpenShift, an **Ingress** on vanilla Kubernetes, an
+**HTTPRoute** when `spec.ingress.gateway` names a Gateway (`spec.ingress.type` pins
+one; `auto` takes a named Gateway, else follows the platform). It picks the ArgoCD
 namespace/SA defaults the same way (`openshift-gitops` vs `argocd`). It installs
 either as **plain manifests** (any cluster, no OLM: `make deploy`) or as an **OLM
 bundle** (OperatorHub, OpenShift): same binary, two packagings.
@@ -67,8 +68,8 @@ owns one status condition; a phase that fails or waits records why there, so
 3. **Secrets** (`SecretsReady`): generates the session key, the ApplicationSet-plugin
    token, the webhook secrets and, with SSO, the OAuth client secret. Create-once:
    they survive restarts and are never regenerated.
-4. **Workload** (`WorkloadReady`): the ServiceAccount, drafts PVC, Service, Route or
-   Ingress, NetworkPolicy (below) and the Deployment, owner-referenced to the CR for
+4. **Workload** (`WorkloadReady`): the ServiceAccount, drafts PVC, Service, Route,
+   Ingress or HTTPRoute, NetworkPolicy (below) and the Deployment, owner-referenced to the CR for
    automatic cleanup. `True` only once the dotvirt pod is ready; `Progressing` until
    then, without holding back the later phases. Single replica, see below.
 5. **GitOps wiring** (`ArgoReady`): mirrors the plugin token into the ArgoCD
@@ -156,6 +157,19 @@ against a real cluster. Phases whose work dry-run cannot model (the secrets, the
 forge bootstrap, the workload rollout, both webhooks, the platform repo) record a
 `DryRun` condition instead, and so does `Available`: nothing serves.
 
+## Serving through a Gateway
+
+With `spec.ingress.gateway` the operator attaches HTTPRoutes for the UI and a managed
+forge to a Gateway someone else runs. Two things stay with whoever runs it:
+
+- The listener must allow routes from the Dotvirt's namespace and no other. dotvirt's
+  HTTPRoute matches every path, and the longest path wins across routes on one
+  hostname: a route another namespace attaches there with `/api/login` takes the
+  login and the tokens. Gateway API has no hostname ownership check, unlike Routes.
+- The operator adds no trust for the Gateway's certificate. A managed forge behind a
+  private CA fails x509 at ArgoCD: use a publicly trusted certificate, or keep
+  `spec.forge.url` on the in-cluster Service.
+
 ## Network policies
 
 On OpenShift the dotvirt and managed Forgejo pods get an ingress NetworkPolicy
@@ -165,6 +179,8 @@ admitting their HTTP port only from:
 - the ArgoCD namespace (the ApplicationSet plugin generator; repo-server on an
   in-cluster forge URL);
 - the operator namespace (the forge bootstrap calls Forgejo's Service);
+- a Gateway named in another namespace: that namespace, where its data plane runs.
+  A host-network data plane needs its own policy beside this one.
 - the router: the `policy-group.network.openshift.io/ingress` and `/host-network`
   namespace groups, and `openshift-ingress` by name for MicroShift. Browsers, a
   bring-your-own forge's webhooks, ArgoCD clones of a Route-exposed forge and the
