@@ -6,6 +6,7 @@ import (
 	"sort"
 	"time"
 
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -55,6 +56,9 @@ func (c *Client) ListVMSnapshots(ctx context.Context, namespaces []string) ([]mo
 	out := []model.Snapshot{}
 	err = eachNamespace(ctx, namespaces, func(ctx context.Context, ns string) (func(), error) {
 		list, err := dyn.Resource(gvrSnapshots).Namespace(ns).List(ctx, metav1.ListOptions{})
+		if apierrors.IsNotFound(err) { // no KubeVirt: Storage still opens
+			return func() {}, nil
+		}
 		if err != nil {
 			return nil, fmt.Errorf("list snapshots in %s: %w", ns, err)
 		}

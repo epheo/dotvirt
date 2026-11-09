@@ -7,7 +7,8 @@ import (
 )
 
 // Ready is a one-shot latch for a store's initial relist: Mark it from the
-// store's onSynced, poll Done on the hot path, Wait on it at startup. The zero
+// store's onSynced, or when discovery says the API is absent, so the store is
+// truthfully empty. Poll Done on the hot path, Wait on it at startup. The zero
 // value is usable.
 type Ready struct {
 	done atomic.Bool

@@ -25,10 +25,10 @@ as a pull request a human (or policy) approves.
 
 ## Prerequisites
 
-- **ArgoCD** (OpenShift GitOps) and **KubeVirt** — hard prerequisites the operator
-  never installs; it waits and reports if either is absent.
-- **OVN-Kubernetes, NMState, and CDI** — soft: they unlock the networking tier and
-  image upload. The install proceeds without them.
+- **ArgoCD** (OpenShift GitOps) — a hard prerequisite the operator never installs;
+  it waits and reports if it is absent.
+- **KubeVirt, OVN-Kubernetes, NMState, and CDI** — soft: they unlock virtual machines,
+  the networking tier, and image upload. The install proceeds without them.
 
 dotvirt runs on OpenShift (Route) and vanilla Kubernetes (Ingress) — the operator
 detects the distribution and renders accordingly. Name a Gateway in

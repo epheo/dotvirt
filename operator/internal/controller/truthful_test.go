@@ -179,7 +179,7 @@ func TestPruneSkippedWhenPassHalts(t *testing.T) {
 	stale := &networkingv1.Ingress{ObjectMeta: metav1.ObjectMeta{Name: "stale", Namespace: dv.Namespace, Labels: install.Labels(dv)}}
 	c := testBuilder(t).WithObjects(dv, stale).Build()
 	r := newReconciler(c, func(*rest.Config) (deps.Result, error) {
-		return deps.Result{MissingHard: []string{"KubeVirt"}}, nil
+		return deps.Result{MissingHard: []string{"Argo CD"}}, nil
 	})
 	reconcileOnce(t, r, dv)
 	if !exists(t, c, &networkingv1.Ingress{}, dv.Namespace, "stale") {

@@ -136,8 +136,11 @@ type State struct {
 	// Per-store readiness: each reflector's initial LIST (first Replace) landing.
 	// Tracked per store (not a single counter) so a consumer gates on exactly the
 	// stores it reads: drift must not stall on a failing VMI reflector, and
-	// nobody waits on the RBAC signal watches.
-	vmsReady, vmisReady, nssReady, namesReady reflect.Ready
+	// nobody waits on the RBAC signal watches. vmsReady and vmisReady also latch
+	// on a definite absence of KubeVirt, which is enough to start serving;
+	// vmsListed latches on a real LIST alone, for whoever reads a missing VM as
+	// meaning.
+	vmsReady, vmisReady, nssReady, namesReady, vmsListed reflect.Ready
 
 	bus *eventbus.Bus // reflectors publish their kind here on every mutation
 }
@@ -189,14 +192,14 @@ func New(sa *cluster.Client, projectLabel string, bus *eventbus.Bus) *State {
 	// the candidates each token's visibility is reviewed over.
 	s.names = newNamespaceSink(project, reflect.NewStore(s.nss, namespace, s.nssReady.Mark), forget, s.namesReady.Mark)
 	s.specs = []reflectorSpec{
-		{s.live.store(s.vms, s.vmsReady.Mark), &kubevirtcorev1.VirtualMachine{}, sa.VMListWatch()},
-		{s.live.store(s.vmis, s.vmisReady.Mark), &kubevirtcorev1.VirtualMachineInstance{}, sa.VMIListWatch()},
-		{s.names, &corev1.Namespace{}, sa.NamespaceListWatch()},
+		{s.live.store(s.vms, func() { s.vmsListed.Mark(); s.vmsReady.Mark() }), &kubevirtcorev1.VirtualMachine{}, sa.VMListWatch(), &optionalAPI{gvrVMs, &s.vmsReady}},
+		{s.live.store(s.vmis, s.vmisReady.Mark), &kubevirtcorev1.VirtualMachineInstance{}, sa.VMIListWatch(), &optionalAPI{gvrVMIs, &s.vmisReady}},
+		{s.names, &corev1.Namespace{}, sa.NamespaceListWatch(), nil},
 	}
 	// Every operand role grants RoleBindings, so their signal watch starts with
 	// the snapshot; the other RBAC kinds wait for their grant (signals).
 	s.rbSink, s.rbHealth = newRBACSignal(rbac, refs, roleBindingDigest), len(s.specs)
-	s.specs = append(s.specs, reflectorSpec{s.rbSink, &rbacv1.RoleBinding{}, sa.RoleBindingListWatch()})
+	s.specs = append(s.specs, reflectorSpec{s.rbSink, &rbacv1.RoleBinding{}, sa.RoleBindingListWatch(), nil})
 	s.healthy = make([]atomic.Bool, len(s.specs))
 	sources := map[schema.GroupVersionResource]*cache.ListWatch{
 		gvrRoles:               sa.RoleListWatch(),
@@ -207,6 +210,12 @@ func New(sa *cluster.Client, projectLabel string, bus *eventbus.Bus) *State {
 	s.signals = signalWatches(func(gvr schema.GroupVersionResource) *cache.ListWatch { return sources[gvr] }, rbac, refs)
 	return s
 }
+
+// KubeVirt's kinds: a cluster may have desktops or storage and no VMs.
+var (
+	gvrVMs  = kubevirtcorev1.SchemeGroupVersion.WithResource("virtualmachines")
+	gvrVMIs = kubevirtcorev1.SchemeGroupVersion.WithResource("virtualmachineinstances")
+)
 
 // The RBAC kinds watched once the SA may list them. Groups are OpenShift's
 // (user.openshift.io), absent on other clusters.
@@ -251,16 +260,45 @@ type reflectorSpec struct {
 	store    cache.Store // already wrapped to fire the right Publishes + readiness
 	expected any
 	lw       *cache.ListWatch
+	optional *optionalAPI // nil: the API is always served
+}
+
+// optionalAPI is the API a reflector waits for. Its absence satisfies ready:
+// no store fed by an API the cluster does not serve can have an initial LIST.
+type optionalAPI struct {
+	gvr   schema.GroupVersionResource
+	ready *reflect.Ready
 }
 
 // Run starts one reflector per resource; each owns its own relist/backoff and
 // stops when ctx is cancelled. Returns immediately - call WaitForSync to block
 // until the initial LIST has populated the snapshot.
 func (s *State) Run(ctx context.Context) {
-	for i, spec := range s.specs {
-		reflect.RunTyped(ctx, reflect.TrackHealth(spec.lw, &s.healthy[i], s.publishLive), spec.expected, spec.store)
-	}
+	s.runReflectors(ctx, s.sa.ServesAPIResource)
 	s.runSignals(ctx, listable(ctx, s.sa))
+}
+
+func (s *State) runReflectors(ctx context.Context, served func(schema.GroupVersionResource) (bool, error)) {
+	for i, spec := range s.specs {
+		if spec.optional == nil {
+			reflect.RunTyped(ctx, reflect.TrackHealth(spec.lw, &s.healthy[i], s.publishLive), spec.expected, spec.store)
+			continue
+		}
+		s.healthy[i].Store(true) // absence is not staleness (AllHealthy)
+		has := func(gvr schema.GroupVersionResource) bool {
+			ok, err := served(gvr)
+			// Only a definite answer settles the store. A failed read leaves the
+			// inventory empty for a discovery interval, so it reads as stale.
+			if err == nil && !ok {
+				spec.optional.ready.Mark()
+			}
+			if s.healthy[i].Swap(err == nil) != (err == nil) {
+				s.publishLive()
+			}
+			return ok
+		}
+		reflect.RunTypedWhenServed(ctx, has, spec.optional.gvr, spec.lw, spec.expected, spec.store, &s.healthy[i], s.publishLive)
+	}
 }
 
 // runSignals starts each signal watch once gate admits its kind, re-asking on
@@ -412,8 +450,9 @@ func (s *State) publishLive() { s.bus.Publish(eventbus.LiveChanged) }
 // outage isn't silent.
 func (s *State) Healthy() bool { return reflect.AllHealthy(s.healthy) }
 
-// WaitForSync blocks until every READABLE reflector's initial LIST has landed (the
-// VM, VMI and namespace stores - not the RBAC signal watches), or ctx is done.
+// WaitForSync blocks until every READABLE reflector's initial LIST has landed, or
+// KubeVirt is known absent (the VM, VMI and namespace stores - not the RBAC signal
+// watches), or ctx is done.
 // Returns ctx.Err() on cancellation, nil once synced.
 func (s *State) WaitForSync(ctx context.Context) error {
 	for _, r := range []*reflect.Ready{&s.vmsReady, &s.vmisReady, &s.nssReady, &s.namesReady} {
@@ -424,13 +463,16 @@ func (s *State) WaitForSync(ctx context.Context) error {
 	return nil
 }
 
-// VMSnapshotReady reports whether the VM and namespace stores have synced. Drift and
-// adoption read absence as meaning: a VM missing from the snapshot reads as not running.
-// They never read VMIs, so a permanently failing VMI reflector (e.g. a removed RBAC
-// verb) must NOT wedge them. (Whole-snapshot readiness, incl. VMIs, is what
-// WaitForSync gates.)
+// VMSnapshotReady reports whether a real LIST of VMs has landed, and the
+// namespace store synced: only then is a VM missing from the snapshot known
+// absent. Authorization weighs a create on that answer and drift and adoption
+// read it as not running, so discovery saying KubeVirt is absent never counts:
+// a CRD group can be missing from discovery for a moment at apiserver start.
+// They never read VMIs, so a permanently failing VMI reflector (e.g. a removed
+// RBAC verb) must NOT wedge them. (Whole-snapshot readiness, incl. VMIs, is
+// what WaitForSync gates.)
 func (s *State) VMSnapshotReady() bool {
-	return s.vmsReady.Done() && s.nssReady.Done()
+	return s.vmsListed.Done() && s.nssReady.Done()
 }
 
 // VMObjects returns deep copies of the full VirtualMachine objects in the given
