@@ -73,65 +73,75 @@ test('the old security path redirects and keeps its tenant', async ({ page }) =>
 	await expect(page.getByLabel('Filter by tenant')).toHaveValue('team-web');
 });
 
-test('catalog: kinds are tabs, the tree lists items, selection rides the URL', async ({ page }) => {
-	await setScenario(page, 'base');
-	await login(page);
-	await page.goto('/catalog');
-	const main = page.locator('main');
-	const aside = page.locator('aside');
-	await expect(main.getByRole('link', { name: /^Instance types\s*3$/ })).toBeVisible();
-	await main.getByRole('link', { name: /^Instance types/ }).click();
-	await expect(page).toHaveURL(/\/catalog\?kind=instancetypes$/);
-	// The tree carries the kind's items; clicking one selects it in the pane.
-	const item = aside.locator('a[href^="/catalog?kind=instancetypes&item="]').first();
-	const name = (await item.textContent())!.trim();
-	await item.click();
-	await expect(page).toHaveURL(new RegExp(`item=${encodeURIComponent(name)}$`));
-	await expect(main.locator('aside').getByRole('heading', { name })).toBeVisible();
-	// A reload keeps the selection: the item is URL state, not component state.
-	await page.reload();
-	await expect(main.locator('aside').getByRole('heading', { name })).toBeVisible();
-});
-
-test('catalog: a template or a boot image makes a VM; images link their disks', async ({
+test('templates: a tab of Compute, with a rail row; the open template rides the URL', async ({
 	page,
 }) => {
 	await setScenario(page, 'base');
 	await login(page);
-	await page.goto('/catalog');
+	await page.goto('/compute');
 	const main = page.locator('main');
-	await expect(
-		main.getByText('6 templates in 2 libraries, 5 boot images, 3 instance types'),
-	).toBeVisible();
-	// Where templates live is the card's own note.
+	const rail = page.locator('aside').first();
+	await rail.getByRole('link', { name: 'VM templates' }).click();
+	await expect(page).toHaveURL(/\/compute\?tab=templates$/);
 	await expect(main.getByText('In git, under templates/ in each library repo')).toBeVisible();
-	await main.getByRole('button', { name: 'Create VM from web-node' }).click();
+	await expect(main.locator('tbody tr')).toHaveCount(6);
+
+	await main.getByRole('button', { name: 'web-node', exact: true }).click();
+	await expect(page).toHaveURL(/tab=templates&item=team-web%2Fweb-node$/);
+	const panel = main.locator('aside');
+	await expect(panel.getByRole('heading', { name: 'web-node' })).toBeVisible();
+	await expect(panel.getByRole('button', { name: 'Edit template' })).toBeEnabled();
+	// A reload keeps the selection: the item is URL state, not component state.
+	await page.reload();
+	await expect(panel.getByRole('heading', { name: 'web-node' })).toBeVisible();
+
+	// All VMs leaves the tab; every other rail row keeps it.
+	await rail.getByRole('link', { name: /^All VMs/ }).click();
+	await expect(page).toHaveURL(/\/compute\?tab=summary$/);
+	await expect(main.getByText('Issues in All VMs')).toBeVisible();
+});
+
+test('templates: a project lists its own library and the shared one', async ({ page }) => {
+	await setScenario(page, 'base');
+	await login(page);
+	await page.goto('/compute/team-web?tab=templates');
+	const main = page.locator('main');
+	await expect(main.getByRole('button', { name: 'web-node', exact: true })).toBeVisible();
+	await expect(main.getByRole('button', { name: 'fedora-server', exact: true })).toBeVisible();
+
+	await page.goto('/compute/team-db?tab=templates');
+	await expect(main.getByRole('button', { name: 'fedora-server', exact: true })).toBeVisible();
+	await expect(main.getByRole('button', { name: 'web-node', exact: true })).toHaveCount(0);
+
+	// A library belongs to a project: a namespace has no such tab.
+	await page.goto('/compute/team-web/web-prod');
+	await expect(main.getByRole('link', { name: 'Templates' })).toHaveCount(0);
+});
+
+test('templates: Create VM opens the sheet with the template picked', async ({ page }) => {
+	await setScenario(page, 'base');
+	await login(page);
+	await page.goto('/compute?tab=templates');
+	await page.locator('main').getByRole('button', { name: 'Create VM from web-node' }).click();
 	const sheet = page.getByRole('dialog');
 	await expect(sheet.getByRole('heading', { name: 'New VM from template' })).toBeVisible();
 	await expect(sheet.getByRole('radio', { name: /web-node/ })).toBeChecked();
-	await sheet.getByRole('button', { name: 'Close' }).click();
-
-	await main.getByRole('link', { name: /^Boot images\s*5$/ }).click();
-	// An image not ready yet stays offered, disabled, with the reason.
-	await expect(main.getByRole('button', { name: 'Create VM from debian-13' })).toBeDisabled();
-	await expect(main.getByRole('button', { name: 'Create VM from debian-13' })).toHaveAttribute(
-		'title',
-		'The image is not ready yet',
-	);
-	const fedora = main.locator('tbody tr', { hasText: 'fedora-42' });
-	await fedora.getByRole('link', { name: /^\d+ disks?$/ }).click();
-	await expect(page).toHaveURL(/\/storage\?tab=disks&image=dotvirt-images%2Ffedora-42$/);
 });
 
-test('catalog: a shared network is one row that opens its page in Networking', async ({ page }) => {
+test('the switcher has five tiles, and links to /catalog open Templates', async ({ page }) => {
 	await setScenario(page, 'base');
 	await login(page);
-	await page.goto('/catalog?kind=networks');
-	const main = page.locator('main');
-	const row = main.locator('tbody tr', { hasText: 'lan-101' });
-	await expect(row).toContainText('VLAN network, in web-prod');
-	await row.getByRole('link', { name: 'Open lan-101 in Networking' }).click();
-	await expect(page).toHaveURL(/\/networking\/lan-101$/);
+	await page.goto('/compute');
+	const tiles = page.locator('aside').first().locator('nav a');
+	await expect(tiles).toHaveText(['Compute', 'Hosts', 'Networking', 'Storage', 'Changes']);
+
+	await page.goto('/catalog');
+	await expect(page).toHaveURL(/\/compute\?tab=templates$/);
+	await page.goto('/catalog?kind=templates&item=team-web%2Fweb-node');
+	await expect(page).toHaveURL(/\/compute\?tab=templates&item=team-web%2Fweb-node$/);
+	await expect(page.locator('main aside').getByRole('heading', { name: 'web-node' })).toBeVisible();
+	await page.goto('/catalog?kind=instancetypes&item=u1.medium');
+	await expect(page).toHaveURL(/\/compute\?tab=templates$/);
 });
 
 test('Changes is a section: the tree scopes the review, a VM opens its own tab', async ({

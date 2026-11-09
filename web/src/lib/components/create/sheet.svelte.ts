@@ -80,7 +80,7 @@ export function newFromHere(
 		return { kind: 'newNetwork', namespace: ns };
 	}
 	if (path.startsWith('/storage')) return { kind: 'upload', namespace: ns };
-	if (path.startsWith('/catalog')) return { kind: 'deployTemplate', namespace: ns };
+	if (/[?&]tab=templates/.test(path)) return { kind: 'deployTemplate', namespace: ns };
 	return { kind: 'newVM', namespaces, namespace: ns };
 }
 

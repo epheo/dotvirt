@@ -10,6 +10,7 @@
 	import { dismiss } from '#lib/dismiss.js';
 	import type { VM } from '#lib/api.js';
 	import { vmActions, type VMAction } from '#lib/actions.js';
+	import { clusterGate } from '#lib/gates.js';
 	import { vmStorageKeys, NO_STORAGE } from '#lib/lenses.js';
 	import { inventory } from '#lib/state/inventory.svelte.js';
 	import { ui } from '#lib/state/ui.svelte.js';
@@ -134,7 +135,9 @@
 						out.push({ kind: 'namespace', project: p.name, namespace: n.namespace });
 				}
 			}
-			const nodes = [...new Set(vms.map((v) => v.nodeName).filter(Boolean))] as string[];
+			const nodes = clusterGate.hosts().ok
+				? ([...new Set(vms.map((v) => v.nodeName).filter(Boolean))] as string[])
+				: [];
 			for (const node of nodes) {
 				if (node.toLowerCase().includes(q)) out.push({ kind: 'node', node });
 			}

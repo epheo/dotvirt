@@ -3,17 +3,11 @@
 // tab flips). The VM route is section-agnostic - every section's tree opens VMs.
 import type { Scope } from './lenses';
 
-export type Section = 'compute' | 'hosts' | 'networking' | 'storage' | 'catalog' | 'changes';
+export type Section = 'compute' | 'hosts' | 'networking' | 'storage' | 'changes';
 
 // The inventory sections: where "/" may land, and what carries an object tree
 // of its own. Changes is a section too, but never a home.
-export const INVENTORY_SECTIONS: Section[] = [
-	'compute',
-	'hosts',
-	'networking',
-	'storage',
-	'catalog',
-];
+export const INVENTORY_SECTIONS: Section[] = ['compute', 'hosts', 'networking', 'storage'];
 
 const enc = encodeURIComponent;
 
@@ -54,7 +48,6 @@ export function sectionOf(pathname: string): Section | null {
 		case 'hosts':
 		case 'networking':
 		case 'storage':
-		case 'catalog':
 		case 'changes':
 			return head;
 	}
@@ -85,6 +78,10 @@ export const changesTab = (v: string | null): ChangesTab | null =>
 	CHANGES_TABS.find((t) => t.id === v)?.id ?? null;
 
 export const sectionRoot = (s: Section): string => `/${s}`;
+
+/** Compute's Templates tab, with one template open when item names it. */
+export const templatesHref = (item?: string): string =>
+	`/compute?tab=templates${item ? `&item=${enc(item)}` : ''}`;
 
 // The VM detail tabs: rendered by the page, validated by the route guard and
 // by keepTab.
@@ -151,6 +148,7 @@ export function storageHref(
 const CONTAINER_TABS = [
 	{ id: 'summary', label: 'Summary' },
 	{ id: 'vms', label: 'VMs' },
+	{ id: 'templates', label: 'Templates' },
 	{ id: 'monitor', label: 'Monitor' },
 	{ id: 'configure', label: 'Configure' },
 	{ id: 'security', label: 'Security' },
@@ -169,19 +167,20 @@ export function containerTabs(scope: Scope, section: Section): typeof CONTAINER_
 		case 'networking':
 			return scope.kind === 'all' ? NETWORKING_TABS : NETWORK_TABS;
 	}
-	// Effective policy evaluates against exactly one namespace.
-	return scope.kind === 'namespace'
-		? CONTAINER_TABS
-		: CONTAINER_TABS.filter((t) => t.id !== 'security');
+	// Effective policy evaluates against exactly one namespace; a template
+	// library belongs to a project.
+	return CONTAINER_TABS.filter(
+		(t) => t.id !== (scope.kind === 'namespace' ? 'templates' : 'security'),
+	);
 }
 
-// The tabs an href lands on; null for anything else (catalog).
+// The tabs an href lands on; null for anything else.
 function tabsAt(href: string): string[] | null {
 	const path = href.split('?')[0];
 	if (path.split('/')[1] === 'vm') return VM_TABS.map((t) => t.id);
 	const section = sectionOf(path);
 	if (section === 'changes') return CHANGES_TABS.map((t) => t.id);
-	if (!section || section === 'catalog') return null;
+	if (!section) return null;
 	const scope = scopeFromPath(path);
 	// A class drill-in is one page without tabs.
 	if (section === 'storage') return scope.kind === 'all' ? STORAGE_TABS.map((t) => t.id) : [];
@@ -224,7 +223,7 @@ export function trailForScope(s: Scope): { label: string; href?: string }[] {
 }
 
 // The inverse of hrefForScope: the Scope a path focuses (the section roots and
-// non-scope routes - /vm, /catalog - read as 'all').
+// non-scope routes like /vm read as 'all').
 export function scopeFromPath(pathname: string): Scope {
 	const parts = pathname.split('/').slice(1).map(decodeURIComponent);
 	switch (parts[0]) {

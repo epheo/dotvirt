@@ -71,10 +71,10 @@ test('a VM opens by keyboard alone', async ({ page }) => {
 	await expect(page.getByRole('button', { name: /Edit Settings/ })).toBeVisible();
 });
 
-test('hosts, storage, catalog and trouble states are accessible', async ({ page }) => {
+test('hosts, storage, templates and trouble states are accessible', async ({ page }) => {
 	await setScenario(page, 'drift');
 	await login(page);
-	for (const path of ['/hosts', '/storage', '/catalog']) {
+	for (const path of ['/hosts', '/storage', '/compute?tab=templates']) {
 		await page.goto(path);
 		await page.waitForTimeout(300);
 		await checkA11y(page, path);

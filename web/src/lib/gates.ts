@@ -136,6 +136,7 @@ export function objectAdoptGate(ref: { resource: string; namespace: string }): G
 
 // The platform tier and the cluster-wide actions.
 export const clusterGate = {
+	hosts: () => cluster((c) => c.hosts, 'list hosts'),
 	platform: () => cluster((c) => c.platform, 'change the platform'),
 	platformRead: () => cluster((c) => c.platformRead, "read the platform's changes"),
 	namespaceCreate: () => cluster((c) => c.namespaceCreate, 'create projects or namespaces'),

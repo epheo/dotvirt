@@ -3,6 +3,7 @@
 	import { bytes, quantity } from '#lib/format.js';
 	import type { Headroom } from '#lib/headroom.js';
 	import { metricsGap } from '#lib/metrics.js';
+	import { clusterGate } from '#lib/gates.js';
 	import Button from './Button.svelte';
 	import InfoCard from './InfoCard.svelte';
 	import MetricsGap from './MetricsGap.svelte';
@@ -86,7 +87,9 @@
 
 <InfoCard title="Capacity">
 	{#snippet action()}
-		<Button variant="link" size="sm" href="/hosts">See hosts</Button>
+		{#if clusterGate.hosts().ok}
+			<Button variant="link" size="sm" href="/hosts">See hosts</Button>
+		{/if}
 	{/snippet}
 	<div class="space-y-4 px-card py-3">
 		{#if room}

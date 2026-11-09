@@ -3,7 +3,7 @@
 	import { Folder, Layers } from '@lucide/svelte';
 	import type { Project, ProjectNamespace } from '#lib/api.js';
 	import { issueCountByProject } from '#lib/issues.js';
-	import { hrefForScope, scopeFromPath } from '#lib/nav.js';
+	import { hrefForScope, scopeFromPath, templatesHref } from '#lib/nav.js';
 	import {
 		bySize,
 		fold,
@@ -32,6 +32,9 @@
 	const projects = $derived(inventory.projects);
 	const small = $derived(inventory.vmCount <= SMALL_FLEET);
 	const fmt = (n: number) => n.toLocaleString('en-US');
+	const onTemplates = $derived(
+		page.url.pathname === '/compute' && page.url.searchParams.get('tab') === 'templates',
+	);
 
 	// The VM page in view, and the project and namespace holding it: their rows
 	// open by default so the VM's leaf is on screen.
@@ -134,13 +137,17 @@
 		placeholder="Filter {projects.length} projects"
 	/>
 
+	<!-- A row keeps the tab in view (keepTab), so All VMs names its tab to leave Templates. -->
 	<TreeRow
-		active={scope.kind === 'all' && page.url.pathname.startsWith('/compute')}
-		href="/compute"
+		active={scope.kind === 'all' && page.url.pathname.startsWith('/compute') && !onTemplates}
+		href={onTemplates ? '/compute?tab=summary' : '/compute'}
 	>
 		<span class="truncate text-side-ink">All VMs</span>
 		{#snippet trailing()}<span class="text-xs text-side-dim">{fmt(inventory.vmCount)}</span
 			>{/snippet}
+	</TreeRow>
+	<TreeRow active={onTemplates} href={templatesHref()}>
+		<span class="truncate text-side-ink">VM templates</span>
 	</TreeRow>
 
 	{#if projects.length > 0}

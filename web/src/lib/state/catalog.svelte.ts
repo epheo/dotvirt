@@ -1,8 +1,8 @@
 import { api, Unauthorized, type Template } from '#lib/api.js';
 import { friendlyError } from '#lib/format.js';
 
-// The template library, shared by the Catalog tree and workspace so both list
-// the same items from one fetch. The platform kinds come from inventory.options.
+// The template library, shared by the Templates tab, the deploy sheet and
+// Storage's image usage so they list the same items.
 class Catalog {
 	templates = $state<Template[] | null>(null);
 	error = $state('');
@@ -11,7 +11,7 @@ class Catalog {
 	// response instead of repopulating the reset store.
 	#gen = 0;
 
-	// Concurrent callers (tree + workspace mounting together) share one request.
+	// Concurrent callers share one request.
 	load(): Promise<void> {
 		if (this.#inflight) return this.#inflight;
 		const gen = this.#gen;

@@ -96,8 +96,9 @@ test('deep links survive a hard reload', async ({ page }) => {
 	await expect(page.getByRole('button', { name: /Edit Settings/ })).toBeVisible();
 	await page.reload();
 	await expect(page.getByRole('button', { name: /Edit Settings/ })).toBeVisible();
-	await page.goto('/catalog?kind=instancetypes');
-	await expect(page.getByText('Managed by the cluster platform, not dotvirt')).toBeVisible();
+	await page.goto('/compute?tab=templates&item=team-web%2Fweb-node');
+	await page.reload();
+	await expect(page.locator('main aside').getByRole('heading', { name: 'web-node' })).toBeVisible();
 });
 
 test('base: the summary shows changes in scope; the table names open PRs per VM', async ({

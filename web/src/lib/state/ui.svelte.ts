@@ -76,8 +76,8 @@ export type AppModal =
 			bootImage?: boolean;
 			download?: ImageDownload;
 	  }
-	| { kind: 'deployTemplate'; library?: string; template?: string; namespace?: string } // Deploy from Template (Catalog / New ▾)
-	| { kind: 'editTemplate'; template: Template } // edit a library item's manifest (Catalog)
+	| { kind: 'deployTemplate'; library?: string; template?: string; namespace?: string } // Deploy from Template (Templates tab, New menu)
+	| { kind: 'editTemplate'; template: Template } // edit a library item's manifest (Templates tab)
 	// Edit a declared object's manifest verbatim, when its form has no field for it.
 	| {
 			kind: 'editManifest';

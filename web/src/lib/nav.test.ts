@@ -21,7 +21,7 @@ describe('keepTab', () => {
 	it('leaves summary, non-inventory routes and explicit queries alone', () => {
 		expect(keepTab('/compute', 'summary')).toBe('/compute');
 		expect(keepTab('/compute', null)).toBe('/compute');
-		expect(keepTab('/catalog?kind=images', 'vms')).toBe('/catalog?kind=images');
+		expect(keepTab('/storage?tab=images', 'vms')).toBe('/storage?tab=images');
 		expect(keepTab('/changes', 'vms')).toBe('/changes');
 	});
 	it('keeps a Changes tab across scopes', () => {

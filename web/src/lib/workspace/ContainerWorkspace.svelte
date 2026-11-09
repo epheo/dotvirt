@@ -36,6 +36,7 @@
 	import BulkDeleteConfirm from './BulkDeleteConfirm.svelte';
 	import HostsRootSummary from './HostsRootSummary.svelte';
 	import NodeConfigure from './NodeConfigure.svelte';
+	import TemplatesTab from './TemplatesTab.svelte';
 
 	// The container workspace: every inventory level, section roots included,
 	// gets the same breadcrumb, header and tab chrome over the grey ground.
@@ -408,6 +409,8 @@
 						hosts={section === 'hosts' ? facts : undefined}
 					/>
 				{/if}
+			{:else if tab === 'templates'}
+				<TemplatesTab project={scope.kind === 'project' ? scope.project : undefined} />
 			{:else if tab === 'monitor'}
 				<ContainerMonitor namespaces={scopedNamespaces} scope={containerScope} onselect={openVM} />
 			{:else if tab === 'permissions'}

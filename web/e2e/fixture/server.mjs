@@ -414,7 +414,10 @@ async function handleAPI(req, res, url) {
 		if (failing('events')) return sendText(res, 503, 'events read failed: fixture failure hook');
 		return sendJSON(res, 200, s.events);
 	}
-	if (path === '/api/nodes') return sendJSON(res, 200, s.nodes);
+	if (path === '/api/nodes') {
+		if (!clusterCaps(s).hosts) return sendText(res, 403, 'forbidden: not authorized to list nodes');
+		return sendJSON(res, 200, s.nodes);
+	}
 	if (path === '/api/quotas') return sendJSON(res, 200, s.quotas ?? []);
 	if (path === '/api/templates') return sendJSON(res, 200, s.templates ?? { templates: [] });
 	if (path === '/api/drs') return sendJSON(res, 200, s.rebalancing);
@@ -882,6 +885,7 @@ function clusterCaps(s) {
 		drsDisable: !!s.rebalancing?.canManage,
 		oauthClient: !!n.canManage,
 		imageUpload: true,
+		hosts: true,
 		...s.capabilities?.cluster,
 	};
 }

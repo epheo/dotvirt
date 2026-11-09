@@ -63,9 +63,9 @@ test('Snapshots tab shows the take control', async ({ page }) => {
 });
 
 test('views are deep-linkable and refresh-safe', async ({ page }) => {
-	// Catalog is a routed workspace, not a drawer.
-	await page.goto('/catalog?kind=instancetypes');
-	await expect(page.getByText('Managed by the cluster platform, not dotvirt')).toBeVisible();
+	// Templates are a routed tab of Compute, not a drawer.
+	await page.goto('/compute?tab=templates');
+	await expect(page.getByText('In git, under templates/ in each library repo')).toBeVisible();
 	// The map is the Networking root's first tab.
 	await page.goto('/networking');
 	await expect(page.getByRole('heading', { name: 'Cluster map' })).toBeVisible();

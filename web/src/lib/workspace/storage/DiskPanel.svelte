@@ -9,7 +9,7 @@
 		X,
 	} from '@lucide/svelte';
 	import { api } from '#lib/api.js';
-	import { vmGate } from '#lib/gates.js';
+	import { clusterGate, vmGate } from '#lib/gates.js';
 	import { quantity } from '#lib/format.js';
 	import { hrefForScope, storageHref } from '#lib/nav.js';
 	import { itemKey } from '#lib/review.js';
@@ -260,10 +260,12 @@
 							? `, and ${row.host} is in maintenance`
 							: ''}.
 					{/if}
-					<a
-						href={hrefForScope({ kind: 'node', node: row.host })}
-						class="text-accent-ink hover:underline">Open {row.host}</a
-					>
+					{#if clusterGate.hosts().ok}
+						<a
+							href={hrefForScope({ kind: 'node', node: row.host })}
+							class="text-accent-ink hover:underline">Open {row.host}</a
+						>
+					{/if}
 				</div>
 			</div>
 		{/if}

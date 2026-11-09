@@ -13,6 +13,7 @@
 	import ActionMenu from './ActionMenu.svelte';
 	import Button from './Button.svelte';
 	import HeaderMenu from './HeaderMenu.svelte';
+	import HostLink from './HostLink.svelte';
 	import Row from './Row.svelte';
 	import StagedBadge from './StagedBadge.svelte';
 	import StatusDot from './StatusDot.svelte';
@@ -131,10 +132,10 @@
 	</div>
 	<dl class="divide-y divide-line-soft border-b border-line-soft text-[13px]">
 		<Row label="Host">
-			{#if vm.nodeName}<a
-					href="/hosts/{encodeURIComponent(vm.nodeName)}"
-					class="text-accent-ink hover:underline">{vm.nodeName}</a
-				>{:else}—{/if}
+			{#if vm.nodeName}<HostLink
+					node={vm.nodeName}
+					class="text-accent-ink hover:underline"
+				/>{:else}—{/if}
 		</Row>
 		<Row label="Guest IP" value={vm.guestIP ?? ''} mono />
 		<Row label="Uptime" value={vm.startedAt && vm.power === 'On' ? duration(vm.startedAt) : ''} />
