@@ -89,7 +89,7 @@ func (s *Server) clusterCaps(ctx context.Context, id auth.Identity, c *cluster.C
 	out := model.ClusterCaps{ImageUpload: s.cfg.UploadProxyURL != ""}
 	fields := []capField{{&out.Hosts, ask(verbList, ssarNodes, "")}}
 	if s.replication != nil && s.replication.Started() {
-		fields = append(fields, capField{&out.Replication, replicationRead})
+		fields = append(fields, capField{&out.Replication, replicationRead}, capField{&out.ReplicationRepair, replicationRepair})
 	}
 	if s.cfg.PlatformRepo != "" {
 		fields = append(fields, objectFields(&out.Network, model.KindCUDN, "")...)
