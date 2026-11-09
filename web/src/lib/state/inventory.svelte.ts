@@ -120,6 +120,8 @@ class InventoryStore {
 	taskFeed = $state<TaskEntry[]>([]);
 	tasksError = $state(''); // the last feed pull's failure; '' once one succeeds
 	readonly tasksVersion = $derived(this.inventory?.tasksVersion ?? 0);
+	// The replication pulls' watermark; absent while no r-drbd is served.
+	readonly replicationVersion = $derived(this.inventory?.replicationVersion ?? 0);
 	// Namespaces in projects that have a repo, whether or not the caller may author there.
 	readonly repoNamespaces = $derived(
 		this.projects.filter((p) => p.repo).flatMap((p) => p.namespaces.map((n) => n.namespace)),

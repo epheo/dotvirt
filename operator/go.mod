@@ -5,7 +5,7 @@ go 1.27.3
 require (
 	github.com/epheo/dotvirt/pkg/forge v0.0.0
 	github.com/epheo/dotvirt/pkg/tenancy v0.0.0
-	golang.org/x/sync v0.24.0
+	golang.org/x/sync v0.25.0
 	k8s.io/api v0.35.10
 	k8s.io/apiextensions-apiserver v0.35.10
 	k8s.io/apimachinery v0.35.10
