@@ -1179,7 +1179,10 @@ const server = createServer((req, res) => {
 	const url = new URL(req.url, `http://localhost:${port}`);
 	if (url.pathname.startsWith('/__fixture/')) return handleControl(req, res, url);
 	if (url.pathname.startsWith('/api/')) {
-		handleAPI(req, res, url).catch((e) => sendText(res, 500, String(e)));
+		handleAPI(req, res, url).catch((e) => {
+			console.error(e);
+			sendText(res, 500, 'fixture: the handler failed, see its log');
+		});
 		return;
 	}
 	serveStatic(req, res, url);
