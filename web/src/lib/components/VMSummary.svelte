@@ -23,6 +23,7 @@
 	import SyncBadge from './SyncBadge.svelte';
 	import InfoCard from './InfoCard.svelte';
 	import VMConfigCard from './VMConfigCard.svelte';
+	import VMReplicationCard from './VMReplicationCard.svelte';
 	import Note from './Note.svelte';
 	import Row from './Row.svelte';
 	import StatusDot from './StatusDot.svelte';
@@ -201,6 +202,7 @@
 				<Row label="Uptime" value={vm.power === 'On' ? duration(vm.startedAt) : ''} />
 			</dl>
 		</InfoCard>
+		<VMReplicationCard {vm} />
 		<InfoCard title="Placement">
 			{#snippet action()}
 				{#if onmigrate && vm.phase === 'Running'}

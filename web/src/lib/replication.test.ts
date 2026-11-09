@@ -1,10 +1,18 @@
 import { describe, expect, it } from 'vitest';
-import type { DiskProtection, ReplicatedVolume, ReplicationPool, VolumeReplica } from '#lib/api.js';
+import type {
+	DiskProtection,
+	ReplicatedVolume,
+	ReplicationPool,
+	VM,
+	VolumeReplica,
+} from '#lib/api.js';
 import type { DiskRow } from '#lib/storage.js';
 import {
 	cellFor,
+	copySquares,
 	diskIfDown,
 	diskNow,
+	hostLosses,
 	hostsOf,
 	mapRows,
 	protectionOf,
@@ -12,6 +20,7 @@ import {
 	rowIfDown,
 	standingOf,
 	tierRooms,
+	vmRow,
 	type MapRow,
 } from './replication';
 
@@ -281,6 +290,63 @@ describe('the map', () => {
 			'risk disk: the copy on h2 is catching up, 64%. Until then, losing h1 takes it offline.',
 		);
 		expect(p.notes[1]).toBe('1 disk keeps one copy by choice: solo.');
+	});
+});
+
+describe('one VM', () => {
+	const vm = {
+		namespace: 'ns',
+		name: 'vm',
+		nodeName: 'h1',
+		disks: [{ name: 'root', claim: 'c1' }, { name: 'data', claim: 'c2' }, { name: 'cidata' }],
+	} as unknown as VM;
+	const safe = vol('a', [copy('h1'), copy('h2'), witness('h3')], { namespace: 'ns', claim: 'c1' });
+
+	it('finds its disks by claim, in its own namespace only', () => {
+		const row = vmRow(vm, [safe, vol('b', [copy('h1')], { namespace: 'other', claim: 'c2' })]);
+		expect(row?.disks.map((d) => d.label)).toEqual(['root']);
+		expect(row?.runsOn).toBe('h1');
+	});
+
+	it('has no row without a replicated disk', () => {
+		expect(vmRow(vm, [])).toBeNull();
+	});
+
+	it('lists only the hosts whose loss would touch it', () => {
+		const row = vmRow(vm, [safe])!;
+		expect(hostLosses(row)).toEqual([
+			{ host: 'h1', fate: 'restart', text: 'Restarts, data on h2' },
+			{ host: 'h2', fate: 'weak', text: 'Keeps running, less protected' },
+		]);
+	});
+
+	it('says nothing when no host would touch a stopped VM', () => {
+		const three = vol('a', [copy('h2'), copy('h3'), copy('h4')], { namespace: 'ns', claim: 'c1' });
+		expect(hostLosses(vmRow({ ...vm, nodeName: '' } as VM, [three])!)).toEqual([]);
+	});
+});
+
+describe('copy squares', () => {
+	const p = (extra: Partial<DiskProtection>) =>
+		({
+			namespace: 'n',
+			claim: 'c',
+			copies: 2,
+			inSync: 2,
+			standing: 'protected',
+			...extra,
+		}) as DiskProtection;
+
+	it('draws one per copy', () => {
+		expect(copySquares(p({})).map((c) => c.kind)).toEqual(['copy', 'copy']);
+	});
+
+	it('draws the one catching up and what is missing', () => {
+		expect(copySquares(p({ copies: 3, inSync: 1, syncPercent: 64 }))).toEqual([
+			{ kind: 'copy', percent: 0 },
+			{ kind: 'catching', percent: 64 },
+			{ kind: 'pending', percent: 0 },
+		]);
 	});
 });
 

@@ -2,7 +2,7 @@
 // takes with it, and what is left of each tier. Pure, so a rehearsal never
 // asks the cluster anything and adds no authority: it reads the copies the
 // caller may already see.
-import type { DiskProtection, ReplicatedVolume, ReplicationPool } from '#lib/api.js';
+import type { DiskProtection, ReplicatedVolume, ReplicationPool, VM } from '#lib/api.js';
 import { size, type DiskRow } from '#lib/storage.js';
 import type { Tone } from '#lib/status.js';
 
@@ -330,6 +330,48 @@ export function protectionOf(rows: MapRow[]): Protection {
 		),
 		notes,
 	};
+}
+
+// One VM's replicated disks as a row of the map, or null when it has none.
+export function vmRow(vm: VM, volumes: ReplicatedVolume[]): MapRow | null {
+	const disks = (vm.disks ?? []).flatMap((d) => {
+		const volume = d.claim
+			? volumes.find((v) => v.namespace === vm.namespace && v.claim === d.claim)
+			: undefined;
+		return volume ? [{ label: d.name, volume }] : [];
+	});
+	if (disks.length === 0) return null;
+	return {
+		key: `${vm.namespace}/${vm.name}`,
+		name: vm.name,
+		project: '',
+		vm: { namespace: vm.namespace, name: vm.name },
+		runsOn: vm.nodeName || disks.find((d) => d.volume.primary)?.volume.primary || '',
+		disks,
+	};
+}
+
+// What losing each host would do to this VM, leaving out the hosts that would
+// not touch it: calm by exception.
+export function hostLosses(row: MapRow): { host: string; fate: RowFate; text: string }[] {
+	return hostsOf(
+		row.disks.map((d) => d.volume),
+		[],
+		[row.runsOn],
+	)
+		.map((host) => ({ host, ...rowIfDown(row, host) }))
+		.filter((l) => l.fate !== 'ok');
+}
+
+// One square per copy, never a place: all a tenant may know of where they are.
+export function copySquares(p: DiskProtection): { kind: CellKind; percent: number }[] {
+	return Array.from({ length: p.copies }, (_, i) =>
+		i < p.inSync
+			? { kind: 'copy', percent: 0 }
+			: p.syncPercent !== undefined && i === p.inSync
+				? { kind: 'catching', percent: p.syncPercent }
+				: { kind: 'pending', percent: 0 },
+	);
 }
 
 export type Standing = { tone: Tone; label: string; detail: string };
