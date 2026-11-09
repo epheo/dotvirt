@@ -522,9 +522,19 @@ YAML
 ADMIN_READER_TOK="$(kc -n "${PROJECT}" create token e2e-admin-reader --duration=1h)"
 NARROW_TOK="$(kc -n "${PROJECT}" create token e2e-narrow --duration=1h)"
 history_answers() {
-	[ "$(curl -s -o /dev/null -w '%{http_code}' --max-time 30 -H "Authorization: Bearer $1" \
-		"${BASE}/api/projects/${PROJECT}/history")" = "$2" ]
+	local got
+	got="$(curl -s -o /dev/null -w '%{http_code}' --max-time 30 -H "Authorization: Bearer $1" \
+		"${BASE}/api/projects/${PROJECT}/history")"
+	echo "history answered ${got}, wanted $2"
+	[ "${got}" = "$2" ]
 }
+# Until the mirror holds the merge the repo declares nothing, so nothing is
+# refused. The poll is the backstop when no webhook lands.
+mirror_holds_anchor() {
+	curl -fsS --max-time 30 -H "Authorization: Bearer ${ADMIN_READER_TOK}" \
+		"${BASE}/api/projects/${PROJECT}/history" | grep -q 'e2e: anchor'
+}
+retry "the mirror holds the anchor merge" 400 mirror_holds_anchor
 retry "a namespace admin reads its project's repo" 180 history_answers "${ADMIN_READER_TOK}" 200
 retry "a role listing VMs alone is refused the repo" 180 history_answers "${NARROW_TOK}" 403
 
