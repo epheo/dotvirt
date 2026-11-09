@@ -6,6 +6,7 @@
 	import { STORAGE_TABS, storageHref, storageTab } from '#lib/nav.js';
 	import { inventory } from '#lib/state/inventory.svelte.js';
 	import { vmsOff } from '#lib/state/modules.svelte.js';
+	import { replicationOff } from '#lib/state/replication.svelte.js';
 	import { storage } from '#lib/state/storage.svelte.js';
 	import { storageContext } from '#lib/storage.js';
 	import Breadcrumb from '#lib/components/Breadcrumb.svelte';
@@ -15,6 +16,7 @@
 	import DisksTab from './DisksTab.svelte';
 	import ImagesTab from './ImagesTab.svelte';
 	import LibraryTab from './LibraryTab.svelte';
+	import ReplicationTab from './ReplicationTab.svelte';
 	import SnapshotsTab from './SnapshotsTab.svelte';
 
 	// The Storage section root: one header over five tabs, each one job. The
@@ -24,9 +26,12 @@
 	storage.ensure();
 	$effect(() => storage.catchUp());
 
-	// Library, Disks, Images and Snapshots all read VM disks.
+	// Library, Disks, Images and Snapshots all read VM disks; Replication
+	// follows r-drbd.
 	const available = $derived(
-		vmsOff() ? STORAGE_TABS.filter((t) => t.id === 'classes') : STORAGE_TABS,
+		STORAGE_TABS.filter((t) =>
+			t.id === 'replication' ? !replicationOff() : t.id === 'classes' || !vmsOff(),
+		),
 	);
 	const tab = $derived(storageTab(page.url.searchParams.get('tab'), available));
 	const project = $derived(page.url.searchParams.get('project') ?? '');
@@ -146,6 +151,8 @@
 			<ImagesTab {rows} {project} {go} />
 		{:else if tab === 'snapshots'}
 			<SnapshotsTab snapshots={snapshots ?? []} loaded={snapshots !== null} {go} />
+		{:else if tab === 'replication'}
+			<ReplicationTab rows={storage.rows} {project} {go} />
 		{:else}
 			<ClassesTab {rows} />
 		{/if}
