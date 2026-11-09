@@ -27,16 +27,22 @@
 		overview,
 		rows,
 		project,
+		namespaces,
 		go,
 	}: {
 		overview: Replication;
 		rows: DiskRow[];
 		project: string;
+		namespaces: Set<string>;
 		go: (params: Record<string, string | undefined>, opts?: { replace?: boolean }) => void;
 	} = $props();
 
+	// By namespace: a claim no VM holds has no project of its own to compare.
 	const mapped = $derived(
-		mapRows(overview.volumes, rows).filter((r) => !project || r.project === project),
+		mapRows(
+			overview.volumes.filter((v) => !project || namespaces.has(v.namespace ?? '')),
+			rows,
+		),
 	);
 	const hosts = $derived(
 		hostsOf(
@@ -94,8 +100,8 @@
 		neutral: 'border-line bg-panel text-ink-muted',
 	};
 	const SEGMENT = {
-		two: 'bg-glyph',
-		syncing: 'bg-glyph-2',
+		safe: 'bg-glyph',
+		thin: 'bg-glyph-2',
 		local: 'bg-line-strong',
 		trouble: 'bg-danger',
 	};

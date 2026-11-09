@@ -25,6 +25,7 @@ const witness = (node: string, state = 'standby'): VolumeReplica => ({
 const vol = (name: string, replicas: VolumeReplica[], extra: Partial<ReplicatedVolume> = {}) =>
 	({
 		name,
+		phase: 'Ready',
 		sizeBytes: 1024 ** 3,
 		copies: replicas.filter((r) => r.role === 'diskful').length,
 		tier: 'nvme',
@@ -80,6 +81,26 @@ describe('losing a host', () => {
 		});
 		expect(diskIfDown(v, 'h1').fate).toBe('off');
 		expect(diskIfDown(v, 'h2').fate).toBe('weak');
+	});
+
+	it('never reads a disk that is already down as unaffected', () => {
+		for (const v of [
+			vol('a', [copy('h1'), copy('h2'), witness('h3')], { quorumLost: true, phase: 'Degraded' }),
+			vol('b', [copy('h1')], { phase: 'Failed' }),
+			vol('c', [copy('h1', 'unreachable'), copy('h2', 'behind')], { phase: 'Degraded' }),
+		]) {
+			expect(diskIfDown(v, 'h9')).toEqual({ fate: 'off', text: 'Already offline' });
+		}
+		expect(rowIfDown(row('vm', 'h2', vol('b', [copy('h1')], { phase: 'Failed' })), 'h9').text).toBe(
+			'Already offline',
+		);
+	});
+
+	it('does not count a disk still being set up as lost', () => {
+		expect(diskIfDown(vol('a', [copy('h1', 'unknown')], { phase: 'Provisioning' }), 'h1')).toEqual({
+			fate: 'ok',
+			text: 'Still being set up',
+		});
 	});
 
 	it('restarts a VM next to its data', () => {
@@ -217,6 +238,20 @@ describe('the map', () => {
 		).toBe('Copy on h2 is out of reach');
 	});
 
+	it('does not count a disk whose witness is gone as surviving a host', () => {
+		const p = protectionOf([
+			row('thin', 'h1', vol('a', [copy('h1'), copy('h2'), witness('h3', 'unreachable')])),
+		]);
+		expect(p).toMatchObject({ survive: 0, segments: ['thin'] });
+	});
+
+	it('does not count two copies with no witness as surviving a host', () => {
+		expect(protectionOf([row('pair', 'h1', vol('a', [copy('h1'), copy('h2')]))])).toMatchObject({
+			survive: 0,
+			segments: ['thin'],
+		});
+	});
+
 	it('never counts a disk whose copies disagree as safe', () => {
 		const p = protectionOf([
 			row('split', 'h1', vol('a', [copy('h1'), copy('h2')], { splitBrain: true })),
@@ -227,14 +262,14 @@ describe('the map', () => {
 
 	it('counts only what survives a host and warns while a copy catches up', () => {
 		const p = protectionOf([
-			row('good', 'h1', vol('b', [copy('h1'), copy('h2')])),
+			row('good', 'h1', vol('b', [copy('h1'), copy('h2'), witness('h3')])),
 			row('risk', 'h1', {
 				...two,
 				replicas: [copy('h1'), { ...copy('h2', 'catching-up'), syncPercent: 64 }],
 			}),
 			row('solo', 'h1', vol('c', [copy('h1')])),
 		]);
-		expect(p).toMatchObject({ survive: 1, total: 3, segments: ['two', 'syncing', 'local'] });
+		expect(p).toMatchObject({ survive: 1, total: 3, segments: ['safe', 'thin', 'local'] });
 		expect(p.notes[0]).toBe(
 			'risk disk: the copy on h2 is catching up, 64%. Until then, losing h1 takes it offline.',
 		);
@@ -247,8 +282,15 @@ describe('what a tenant reads', () => {
 		({ namespace: 'n', claim: 'c', copies: 2, inSync: 2, standing, ...extra }) as DiskProtection;
 
 	it('states what the protection means', () => {
-		expect(standingOf(p('protected')).detail).toBe('Survives losing any one host.');
-		expect(standingOf(p('protected', { copies: 3 })).detail).toBe('Survives losing any 2 hosts.');
+		const said = (copies: number) => standingOf(p('protected', { copies })).detail;
+		expect(said(2)).toBe('Survives losing any one host.');
+		expect(said(3)).toBe('Survives losing any one host.');
+		expect(said(5)).toBe('Survives losing any 2 hosts.');
+	});
+
+	it('does not call a full set of copies safe when a majority is one host away', () => {
+		const out = standingOf(p('exposed', { copies: 2, inSync: 2 }));
+		expect(out.detail).toContain('would not survive losing a host');
 	});
 
 	it('carries a next step on every problem and names no host', () => {

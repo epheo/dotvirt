@@ -39,9 +39,16 @@ function keepsQuorum(v: ReplicatedVolume, host: string): boolean {
 	return left.length * 2 > voters.length;
 }
 
+const ALREADY_OFFLINE = 'Already offline';
+const settingUp = (v: ReplicatedVolume) =>
+	!v.phase || v.phase === 'Pending' || v.phase === 'Provisioning';
+
 export function diskIfDown(v: ReplicatedVolume, host: string): { fate: DiskFate; text: string } {
 	const held = copies(v).some((r) => r.node === host);
 	const left = inSync(v).filter((n) => n !== host);
+	if (v.quorumLost || v.phase === 'Failed' || (!settingUp(v) && inSync(v).length === 0))
+		return { fate: 'off', text: ALREADY_OFFLINE };
+	if (settingUp(v)) return { fate: 'ok', text: 'Still being set up' };
 	if (held && copies(v).length === 1) return { fate: 'off', text: `Its only copy is on ${host}` };
 	// The other side stopped accepting this one's writes: nothing can take over.
 	if (v.splitBrain && (v.primary === host || !v.primary))
@@ -60,8 +67,14 @@ export function diskIfDown(v: ReplicatedVolume, host: string): { fate: DiskFate;
 
 export function rowIfDown(row: MapRow, host: string): { fate: RowFate; text: string } {
 	const disks = row.disks.map((d) => diskIfDown(d.volume, host));
-	if (disks.some((d) => d.fate === 'off'))
-		return { fate: 'off', text: `Offline until ${host} returns` };
+	const off = disks.filter((d) => d.fate === 'off');
+	if (off.length)
+		return {
+			fate: 'off',
+			text: off.every((d) => d.text === ALREADY_OFFLINE)
+				? ALREADY_OFFLINE
+				: `Offline until ${host} returns`,
+		};
 	if (row.runsOn === host) {
 		const nearest = homeFor(row, host);
 		return { fate: 'restart', text: nearest ? `Restarts, data on ${nearest}` : 'Restarts' };
@@ -216,8 +229,7 @@ export function diskNow(v: ReplicatedVolume, runsOn: string): { tone: Tone; text
 	if (v.splitBrain) return { tone: 'danger', text: 'Two copies disagree' };
 	if (v.quorumLost) return { tone: 'danger', text: 'Lost its majority, writes stopped' };
 	if (v.phase === 'Failed') return { tone: 'danger', text: 'Failed' };
-	if (v.phase === 'Pending' || v.phase === 'Provisioning' || !v.phase)
-		return { tone: 'neutral', text: 'Being set up' };
+	if (settingUp(v)) return { tone: 'neutral', text: 'Being set up' };
 	const out = copies(v).find((r) => r.state === 'unreachable');
 	if (out) return { tone: 'warn', text: `Copy on ${out.node} is out of reach` };
 	const catching = copies(v).find((r) => r.state === 'catching-up');
@@ -274,7 +286,7 @@ export function cellFor(v: ReplicatedVolume, host: string, runsOn: string): Cell
 export type Protection = {
 	survive: number;
 	total: number;
-	segments: ('two' | 'syncing' | 'local' | 'trouble')[];
+	segments: ('safe' | 'thin' | 'local' | 'trouble')[];
 	notes: string[];
 };
 
@@ -304,18 +316,15 @@ export function protectionOf(rows: MapRow[]): Protection {
 			`${locals.length} ${locals.length === 1 ? 'disk keeps' : 'disks keep'} one copy by choice: ${someOf([...new Set(locals)])}.`,
 		);
 	const broken = (v: ReplicatedVolume) => v.splitBrain || v.quorumLost || v.phase === 'Failed';
+	// The rehearsal's own answer, asked of every host holding a replica, so the
+	// summary can never disagree with what a click on a host shows.
+	const survives = (v: ReplicatedVolume) =>
+		!broken(v) && v.replicas.every((r) => diskIfDown(v, r.node).fate !== 'off');
 	return {
-		survive: disks.filter((d) => !broken(d.v) && copies(d.v).length > 1 && inSync(d.v).length >= 2)
-			.length,
+		survive: disks.filter((d) => survives(d.v)).length,
 		total: disks.length,
 		segments: disks.map((d) =>
-			broken(d.v)
-				? 'trouble'
-				: copies(d.v).length <= 1
-					? 'local'
-					: inSync(d.v).length >= 2
-						? 'two'
-						: 'syncing',
+			broken(d.v) ? 'trouble' : copies(d.v).length <= 1 ? 'local' : survives(d.v) ? 'safe' : 'thin',
 		),
 		notes,
 	};
@@ -323,14 +332,17 @@ export function protectionOf(rows: MapRow[]): Protection {
 
 export type Standing = { tone: Tone; label: string; detail: string };
 
+// r-drbd suspends IO without a majority of its voters, so a third copy buys
+// more ways to stay in sync, not a second host lost.
+function survivesText(copies: number): string {
+	const hosts = Math.max(1, Math.floor((copies - 1) / 2));
+	return `Survives losing ${hosts === 1 ? 'any one host' : `any ${hosts} hosts`}.`;
+}
+
 export function standingOf(p: DiskProtection): Standing {
 	switch (p.standing) {
 		case 'protected':
-			return {
-				tone: 'ok',
-				label: 'Protected',
-				detail: `Survives losing ${p.copies >= 3 ? `any ${p.copies - 1} hosts` : 'any one host'}.`,
-			};
+			return { tone: 'ok', label: 'Protected', detail: survivesText(p.copies) };
 		case 'local':
 			return {
 				tone: 'neutral',
@@ -347,7 +359,11 @@ export function standingOf(p: DiskProtection): Standing {
 			return {
 				tone: 'warn',
 				label: 'Less protected',
-				detail: `${p.inSync} of ${p.copies} copies in sync. Tell your platform team if it lasts.`,
+				detail: `${
+					p.inSync >= p.copies
+						? 'It would not survive losing a host right now.'
+						: `${p.inSync} of ${p.copies} copies in sync.`
+				} Tell your platform team if it lasts.`,
 			};
 		case 'needs-operator':
 			return {

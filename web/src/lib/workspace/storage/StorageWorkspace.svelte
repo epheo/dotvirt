@@ -152,7 +152,7 @@
 		{:else if tab === 'snapshots'}
 			<SnapshotsTab snapshots={snapshots ?? []} loaded={snapshots !== null} {go} />
 		{:else if tab === 'replication'}
-			<ReplicationTab rows={storage.rows} {project} {go} />
+			<ReplicationTab rows={storage.rows} {project} {namespaces} {go} />
 		{:else}
 			<ClassesTab {rows} />
 		{/if}

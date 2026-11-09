@@ -13,15 +13,22 @@
 		protection,
 		rows,
 		project,
-	}: { protection: DiskProtection[]; rows: DiskRow[]; project: string } = $props();
+		namespaces,
+	}: {
+		protection: DiskProtection[];
+		rows: DiskRow[];
+		project: string;
+		namespaces: Set<string>;
+	} = $props();
 
 	const owner = $derived(
 		new Map(rows.filter((d) => d.disk.claim).map((d) => [`${d.vm.namespace}/${d.disk.claim}`, d])),
 	);
+	// By namespace: a claim no VM holds still belongs to its project.
 	const list = $derived(
 		protection
-			.map((p) => ({ p, d: owner.get(`${p.namespace}/${p.claim}`), s: standingOf(p) }))
-			.filter((x) => !project || x.d?.project === project),
+			.filter((p) => !project || namespaces.has(p.namespace))
+			.map((p) => ({ p, d: owner.get(`${p.namespace}/${p.claim}`), s: standingOf(p) })),
 	);
 	const safe = $derived(list.filter((x) => x.p.standing === 'protected').length);
 

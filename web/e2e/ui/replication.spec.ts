@@ -46,6 +46,20 @@ test('a tenant reads its own disks and no host', async ({ page }) => {
 	);
 });
 
+test('a project shows its claims that no VM holds', async ({ page }) => {
+	await setScenario(page, 'replicated');
+	await login(page);
+	await page.goto('/storage?tab=replication&project=team-db');
+	const main = page.locator('main');
+	await expect(main.getByText('ledger-export', { exact: true })).toBeVisible();
+	await expect(main.getByRole('link', { name: 'web-1' })).toHaveCount(0);
+
+	await setScenario(page, 'replicatedtenant');
+	await page.goto('/storage?tab=replication&project=team-db');
+	await expect(main.getByText('ledger-export', { exact: true })).toBeVisible();
+	await expect(main.getByRole('link', { name: 'web-1' })).toHaveCount(0);
+});
+
 test('without r-drbd there is no Replication tab', async ({ page }) => {
 	await setScenario(page, 'base');
 	await login(page);

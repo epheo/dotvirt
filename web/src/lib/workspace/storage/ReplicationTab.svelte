@@ -15,10 +15,12 @@
 	let {
 		rows,
 		project,
+		namespaces,
 		go,
 	}: {
 		rows: DiskRow[];
 		project: string;
+		namespaces: Set<string>;
 		go: (params: Record<string, string | undefined>, opts?: { replace?: boolean }) => void;
 	} = $props();
 
@@ -45,10 +47,10 @@
 	{#if !replication.overview?.synced}
 		<p class="text-sm text-ink-muted">Reading replicated storage...</p>
 	{:else}
-		<ReplicationMap overview={replication.overview} {rows} {project} {go} />
+		<ReplicationMap overview={replication.overview} {rows} {project} {namespaces} {go} />
 	{/if}
 {:else if replication.protection}
-	<ProtectionList protection={replication.protection} {rows} {project} />
+	<ProtectionList protection={replication.protection} {rows} {project} {namespaces} />
 {:else if !replication.error}
 	<p class="text-sm text-ink-muted">Reading your disks...</p>
 {/if}
