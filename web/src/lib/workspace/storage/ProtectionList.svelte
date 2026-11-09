@@ -1,7 +1,7 @@
 <script lang="ts">
 	import type { DiskProtection } from '#lib/api.js';
 	import { vmHref } from '#lib/nav.js';
-	import { standingOf } from '#lib/replication.js';
+	import { copySquares, standingOf } from '#lib/replication.js';
 	import type { DiskRow } from '#lib/storage.js';
 	import Card from '#lib/components/Card.svelte';
 	import StatusPill from '#lib/components/StatusPill.svelte';
@@ -31,17 +31,6 @@
 			.map((p) => ({ p, d: owner.get(`${p.namespace}/${p.claim}`), s: standingOf(p) })),
 	);
 	const safe = $derived(list.filter((x) => x.p.standing === 'protected').length);
-
-	// Each square is one copy, never a place.
-	function squares(p: DiskProtection) {
-		return Array.from({ length: p.copies }, (_, i) =>
-			i < p.inSync
-				? { kind: 'copy' as const, percent: 0 }
-				: p.syncPercent !== undefined && i === p.inSync
-					? { kind: 'catching' as const, percent: p.syncPercent }
-					: { kind: 'pending' as const, percent: 0 },
-		);
-	}
 </script>
 
 {#if list.length === 0}
@@ -75,7 +64,7 @@
 						role="img"
 						aria-label="{p.inSync} of {p.copies} {p.copies === 1 ? 'copy' : 'copies'} in sync"
 					>
-						{#each squares(p) as c, i (i)}<CopyGlyph kind={c.kind} percent={c.percent} />{/each}
+						{#each copySquares(p) as c, i (i)}<CopyGlyph kind={c.kind} percent={c.percent} />{/each}
 					</span>
 					<div class="flex min-w-[260px] flex-[1.4] flex-col items-start gap-0.5">
 						<StatusPill tone={s.tone} label={s.label} />

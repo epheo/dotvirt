@@ -1715,7 +1715,12 @@ const placement = {
 			250,
 			'hdd',
 			[copy('worker-1'), copy('worker-3'), witness('worker-2')],
-			{ phase: 'Degraded', splitBrain: true, primary: 'worker-1' },
+			{
+				phase: 'Degraded',
+				splitBrain: true,
+				splitSince: '2026-11-09T10:00:00Z',
+				primary: 'worker-1',
+			},
 		),
 	],
 };
@@ -1723,8 +1728,49 @@ const replicated = {
 	...base,
 	name: 'replicated',
 	modules: { replicatedStorage: true },
-	capabilities: { ...base.capabilities, cluster: { replication: true } },
+	capabilities: { ...base.capabilities, cluster: { replication: true, replicationRepair: true } },
 	replication: placement,
+};
+const replicatedsplit = {
+	...replicated,
+	name: 'replicatedsplit',
+	replication: {
+		...placement,
+		volumes: placement.volumes.map((v) =>
+			v.name === 'pvc-db1a' || v.name === 'pvc-db1b'
+				? {
+						...v,
+						phase: 'Degraded',
+						splitBrain: true,
+						splitSince: '2026-11-09T10:00:00Z',
+						primary: 'worker-1',
+						replicas: v.replicas.map((r) =>
+							r.state === 'catching-up' ? { ...r, state: 'in-sync', syncPercent: undefined } : r,
+						),
+					}
+				: v,
+		),
+	},
+};
+// Two claims no VM holds, named alike in different namespaces.
+const replicatedalike = {
+	...replicated,
+	name: 'replicatedalike',
+	replication: {
+		...placement,
+		volumes: ['web-prod', 'db-prod'].map((ns) =>
+			volume(`pvc-${ns}`, ns, 'data', 10, 'nvme', [
+				copy('worker-1'),
+				copy('worker-2'),
+				witness('worker-3'),
+			]),
+		),
+	},
+};
+const replicatedreadonly = {
+	...replicated,
+	name: 'replicatedreadonly',
+	capabilities: { ...base.capabilities, cluster: { replication: true, replicationRepair: false } },
 };
 const replicatedtenant = {
 	...replicated,
@@ -1751,8 +1797,104 @@ const replicatedtenant = {
 	],
 };
 
+// ── the front door: two of them, a route of each state ─────────────────────
+const listener = (name, port, protocol, hostname, attachedRoutes = 1) => ({
+	name,
+	port,
+	protocol,
+	...(hostname ? { hostname } : {}),
+	attachedRoutes,
+	ready: true,
+});
+const onPublic = (section, attached = true, reason, message) => ({
+	namespace: 'edge',
+	name: 'public',
+	section,
+	attached,
+	...(reason ? { reason } : {}),
+	...(message ? { message } : {}),
+});
+const webRoute = (namespace, name, parent, backends) => ({
+	kind: 'HTTPRoute',
+	namespace,
+	name,
+	hostnames: [`${name}.apps.example.com`],
+	parents: [parent],
+	backends,
+});
+const service = (namespace, name, port = 8080, weight = 1) => ({ namespace, name, port, weight });
+const doors = {
+	synced: true,
+	gateways: [
+		{
+			namespace: 'edge',
+			name: 'public',
+			class: 'portail',
+			addresses: ['192.0.2.10'],
+			ready: true,
+			listeners: [
+				listener('https', 443, 'HTTPS', '*.apps.example.com', 3),
+				listener('ssh', 2222, 'TCP'),
+				listener('http', 80, 'HTTP'),
+			],
+			rateLimits: [{ listener: 'https', requestsPerSecond: 20, burst: 40 }],
+		},
+		{
+			namespace: 'edge',
+			name: 'internal',
+			class: 'portail',
+			addresses: ['10.20.0.5'],
+			ready: true,
+			listeners: [listener('https', 443, 'HTTPS', '*.int.example.com', 0)],
+		},
+	],
+	routes: [
+		webRoute('web-prod', 'shop', onPublic('https'), [
+			service('web-prod', 'shop-a', 8080, 1),
+			service('web-prod', 'shop-b', 8080, 3),
+		]),
+		webRoute('db-prod', 'api', onPublic('https'), [service('db-prod', 'api')]),
+		webRoute(
+			'batch-prod',
+			'blog',
+			onPublic('https', false, 'HostnameConflict', 'Taken by route web-prod/shop'),
+			[service('batch-prod', 'blog')],
+		),
+		{
+			kind: 'TCPRoute',
+			namespace: 'web-prod',
+			name: 'git-ssh',
+			parents: [onPublic('ssh')],
+			backends: [service('web-prod', 'git', 22)],
+		},
+	],
+};
+const fronted = {
+	...base,
+	name: 'fronted',
+	modules: { routes: true },
+	capabilities: { ...base.capabilities, cluster: { gateways: true } },
+	gateways: doors,
+};
+const frontedtenant = {
+	...fronted,
+	name: 'frontedtenant',
+	capabilities: { ...base.capabilities, cluster: { gateways: false } },
+	tenantRoutes: [
+		webRoute('web-prod', 'shop', onPublic('https'), [service('web-prod', 'shop-a')]),
+		webRoute('web-prod', 'blog', onPublic('https', false, 'HostnameConflict'), [
+			service('web-prod', 'blog'),
+		]),
+	],
+};
+
 export const scenarios = {
+	fronted,
+	frontedtenant,
 	replicated,
+	replicatedalike,
+	replicatedsplit,
+	replicatedreadonly,
 	replicatedtenant,
 	novms,
 	residue,

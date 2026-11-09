@@ -407,6 +407,12 @@ async function handleAPI(req, res, url) {
 	if (path === '/api/inventory') return sendJSON(res, 200, s.inventory);
 	if (path === '/api/options') return sendJSON(res, 200, s.options);
 	if (path === '/api/storage/classes') return sendJSON(res, 200, s.storageClasses ?? []);
+	if (req.method === 'POST') {
+		const repair = await handleRepair(req, res, path, url, s);
+		if (repair) return;
+	}
+	if (path === '/api/networking/gateways') return sendJSON(res, 200, s.gateways);
+	if (path === '/api/networking/routes') return sendJSON(res, 200, s.tenantRoutes ?? []);
 	if (path === '/api/storage/replication') return sendJSON(res, 200, s.replication);
 	if (path === '/api/storage/protection') return sendJSON(res, 200, s.protection ?? []);
 	if (path === '/api/networks') return sendJSON(res, 200, s.networks);
@@ -799,6 +805,44 @@ async function handleAPI(req, res, url) {
 // Answers the storage routes; a request it leaves unanswered goes on to the
 // rest of the API. A scenario's null listing answers 503, like an unreachable
 // cluster read.
+
+// The replication repairs write the scenario's clone, so a switch forgets them.
+function evictPlan(s, node) {
+	const moving = [];
+	const skipped = [];
+	for (const v of s.replication.volumes) {
+		if (!v.replicas.some((r) => r.node === node)) continue;
+		let reason = '';
+		if (v.copies <= 1)
+			reason = 'One copy: it cannot move. Recreate it on replicated storage first.';
+		else if (v.splitBrain) reason = 'Its copies disagree: resolve that first.';
+		else if (v.replicas.some((r) => r.state === 'catching-up'))
+			reason = 'A copy is still catching up.';
+		if (reason) skipped.push({ volume: v.name, reason });
+		else moving.push(v.name);
+	}
+	return { moving, skipped };
+}
+
+async function handleRepair(req, res, path, url, s) {
+	let m = path.match(/^\/api\/storage\/replication\/volumes\/([^/]+)\/resolve$/);
+	if (m) {
+		const body = await readBody(req);
+		const volume = s.replication.volumes.find((v) => v.name === m[1]);
+		if (volume) volume.resolving = body.survivor;
+		sendText(res, 204, '');
+		return true;
+	}
+	m = path.match(/^\/api\/storage\/replication\/hosts\/([^/]+)\/evict$/);
+	if (m) {
+		const plan = evictPlan(s, m[1]);
+		if (url.searchParams.get('dryRun') !== 'true')
+			for (const v of s.replication.volumes) if (plan.moving.includes(v.name)) v.evicting = [m[1]];
+		sendJSON(res, 200, plan);
+		return true;
+	}
+	return false;
+}
 
 const newestFirst = (a, b) => (b.created ?? '').localeCompare(a.created ?? '');
 
