@@ -13,6 +13,7 @@ import (
 	"github.com/epheo/dotvirt/internal/cluster"
 	"github.com/epheo/dotvirt/internal/drs"
 	"github.com/epheo/dotvirt/internal/model"
+	"github.com/epheo/dotvirt/internal/replication"
 )
 
 // interval is reflect's discovery pace: a module installed later appears
@@ -34,7 +35,7 @@ var served = []struct {
 	{schema.GroupVersionResource{Group: "vdi.desku.be", Version: "v1alpha1", Resource: "vdiinstances"}, func(m *model.Modules) *bool { return &m.Desktops }},
 	{cluster.GVR(model.KindUDN), func(m *model.Modules) *bool { return &m.Networks }},
 	{drs.GVR, func(m *model.Modules) *bool { return &m.Rebalancing }},
-	{schema.GroupVersionResource{Group: "r-drbd.io", Version: "v1alpha1", Resource: "volumes"}, func(m *model.Modules) *bool { return &m.ReplicatedStorage }},
+	{replication.GVRVolume, func(m *model.Modules) *bool { return &m.ReplicatedStorage }},
 }
 
 // gatewayClasses turn on routes. Not the CRDs: our MicroShift ships those with
