@@ -131,3 +131,31 @@ func TestAppSetPluginParams(t *testing.T) {
 		t.Errorf("after namespaces joined: destinations = %v, want %v", got, want)
 	}
 }
+
+// The ApplicationSet renders with missingkey=error: every project needs a path.
+func TestAppSetPluginPath(t *testing.T) {
+	fc := newFakeCluster(t)
+	fc.namespaces = append(fc.namespaces, corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "in-folder",
+		Labels:      map[string]string{"dotvirt.io/project": "folded"},
+		Annotations: map[string]string{"dotvirt.io/repo": "https://forge/folded.git", "dotvirt.io/path": "clusters/a"}}})
+	s := fc.server(nil, Config{AppSetPluginToken: "tok"})
+	r := httptest.NewRequest(http.MethodPost, "/api/v1/getparams.execute", strings.NewReader(`{"input":{"parameters":{"reservedNamespaces":[]}}}`))
+	r.Header.Set("Authorization", "Bearer tok")
+	rec := httptest.NewRecorder()
+	s.handleAppSetPlugin(rec, r)
+	var out struct {
+		Output struct {
+			Parameters []map[string]string `json:"parameters"`
+		} `json:"output"`
+	}
+	if err := json.NewDecoder(rec.Body).Decode(&out); err != nil {
+		t.Fatal(err)
+	}
+	got := map[string]string{}
+	for _, p := range out.Output.Parameters {
+		got[p["project"]] = p["path"]
+	}
+	if got["folded"] != "clusters/a" || got["team-a"] != "." {
+		t.Errorf("paths = %v", got)
+	}
+}

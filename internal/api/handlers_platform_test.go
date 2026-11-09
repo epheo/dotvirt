@@ -408,7 +408,7 @@ func TestReleaseProject(t *testing.T) {
 	if len(res.Released) != 1 || res.Released[0] != "orphans-ns" || len(res.Staged) != 1 || res.Draft == nil {
 		t.Errorf("release = %+v", res)
 	}
-	if patch != `{"metadata":{"labels":{"dotvirt.io/project":null},"annotations":{"dotvirt.io/repo":null}}}` {
+	if patch != `{"metadata":{"labels":{"dotvirt.io/project":null},"annotations":{"dotvirt.io/repo":null,"dotvirt.io/path":null}}}` {
 		t.Errorf("namespace patch = %s", patch)
 	}
 }
