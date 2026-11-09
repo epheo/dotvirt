@@ -176,6 +176,22 @@ func watchedState(t *testing.T, bus *eventbus.Bus, objs ...runtime.Object) (st *
 		t.Fatal(err)
 	}
 	waitUntil(t, "the namespace store's first publish", func() bool { return bus.Version(eventbus.NamespaceChanged) > 0 })
+	// The gates above pass once a list landed; a reflector opens its watch only
+	// after that. An apiserver replays the gap from the list's resourceVersion,
+	// the fake drops it, so a write in the gap would never reach a sink. The
+	// fake holds its lock across a Watch, so a recorded one has its watcher.
+	waitUntil(t, "every watch open", func() bool {
+		missing := map[string]bool{"namespaces": true}
+		for _, r := range rbac {
+			missing[r.Name] = true
+		}
+		for _, a := range kube.Actions() {
+			if a.GetVerb() == "watch" {
+				delete(missing, a.GetResource().Resource)
+			}
+		}
+		return len(missing) == 0
+	})
 	return st, kube, func() {
 		down.Store(true)
 		mu.Lock()
