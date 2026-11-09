@@ -11,24 +11,34 @@
 # TLS scaffolding: the operator already targets webhook delivery at dotvirt's
 # own Service, and spec.forge.url/argocd.serverURL pin the rest.
 #
+# KUBEVIRT=0 proves the other shape dotvirt installs on: no KubeVirt, served
+# through a portail Gateway, with the modules reporting what the cluster has.
+# APP_IMAGE_TAR and OPERATOR_IMAGE_TAR (docker archives of images built from this
+# tree) replace the published images, for what no release carries yet.
+#
 # Requires root privileges (MicroShift needs OVS + cgroups), podman, kubectl.
 #   sudo hack/e2e-microshift.sh          # full run
 #   CLEAN=1 sudo hack/e2e-microshift.sh  # tear down container + loopback VG
 set -euo pipefail
 
-MS_IMAGE="${MS_IMAGE:-ghcr.io/epheo/microshift:4.22}"
+MS_IMAGE="${MS_IMAGE:-ghcr.io/epheo/microshift:5.0}"
 NAME="${NAME:-dotvirt-e2e-microshift}"
-# The loopback VG backing TopoLVM; the VG name must match the lvmd device-class
-# packaged in the MicroShift image.
+KUBEVIRT="${KUBEVIRT:-1}"
+APP_IMAGE_TAR="${APP_IMAGE_TAR:-}"
+OPERATOR_IMAGE_TAR="${OPERATOR_IMAGE_TAR:-}"
+# The loopback VG behind r-drbd. The image turns a VG of this name with a thin
+# pool of that name into a Pool and a default StorageClass by itself.
 LVM_DISK="${LVM_DISK:-/var/lib/${NAME}/lvmdisk.image}"
 VG_NAME="myvg1"
+THIN_POOL="thin"
 WORKDIR="${WORKDIR:-$(mktemp -d /tmp/dotvirt-e2e.XXXXXX)}"
 mkdir -p "${WORKDIR}" # an env-supplied WORKDIR (CI) arrives uncreated
 PROJECT="${PROJECT:-team-a}"
 TIMEOUT_INSTALL="${TIMEOUT_INSTALL:-900}" # per-phase ceiling, seconds
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-# ARGOCD_VERSION and KUBEVIRT_VERSION, each beside the digest of the manifest it installs.
+# ARGOCD_VERSION and KUBEVIRT_VERSION, each beside the digest of the manifest it
+# installs, and PORTAIL_COMMIT.
 source "${REPO_ROOT}/hack/versions.env"
 export KUBECONFIG="${WORKDIR}/kubeconfig"
 
@@ -69,9 +79,13 @@ diagnostics() {
 		--sort-by=.lastTimestamp 2>/dev/null | tail -15 || true
 	log "pvcs"
 	kc get pvc -A 2>&1 | head -8 || true
-	log "topolvm logs"
-	kc -n topolvm-system logs deploy/topolvm-controller --tail=15 --all-containers 2>&1 | tail -15 || true
-	kc -n topolvm-system logs ds/topolvm-lvmd-0 --tail=10 2>&1 | tail -10 || true
+	log "r-drbd state and logs"
+	kc get pools,volumes.r-drbd.io -o wide 2>&1 | head -12 || true
+	kc -n r-drbd-system get pods -o wide 2>&1 | head -8 || true
+	kc -n r-drbd-system logs --all-containers --tail=15 --prefix -l app.kubernetes.io/name=r-drbd 2>&1 | tail -30 || true
+	log "gateway state and logs"
+	kc get gateways,httproutes -A -o wide 2>&1 | head -10 || true
+	kc -n portail-system logs deploy/portail-controller --tail=20 2>&1 | tail -20 || true
 	log "dotvirt namespace state"
 	kc get pods,deploy -n dotvirt -o wide 2>&1 | head -12 || true
 	log "forgejo logs"
@@ -127,9 +141,10 @@ log "host prerequisites"
 modprobe openvswitch || true
 if [ ! -f "${LVM_DISK}" ]; then
 	mkdir -p "$(dirname "${LVM_DISK}")"
-	truncate --size=24G "${LVM_DISK}" # sparse; the distro lvmd reserves spare-gb:10, forgejo 5Gi + drafts 1Gi ride what remains
+	truncate --size=24G "${LVM_DISK}" # sparse; forgejo 5Gi + drafts 1Gi are thin
 	dev="$(losetup --find --show --nooverlap "${LVM_DISK}")"
 	vgcreate -f -y "${VG_NAME}" "${dev}"
+	lvcreate -q -y --type thin-pool -l 90%FREE -n "${THIN_POOL}" "${VG_NAME}"
 fi
 
 podman rm -f "${NAME}" 2>/dev/null || true
@@ -203,14 +218,17 @@ no_router() { [ -z "$(kc get namespace openshift-ingress --ignore-not-found -o n
 retry "router removed" 600 no_router
 retry "gateway api crds established" 600 kc wait --for=condition=Established --timeout=5s \
 	crd/tcproutes.gateway.networking.k8s.io crd/udproutes.gateway.networking.k8s.io
-retry "storage class present" 600 sh -c 'kubectl get storageclass -o name | grep -q .'
-# TopoLVM must be fully up before anything claims a PVC: lvmd (DaemonSet)
-# mints /run/topolvm for the node plugin, and the controller provisions.
-topolvm_ready() {
-	[ "$(kc -n topolvm-system get pods --no-headers 2>/dev/null | awk '$3!="Running"' | wc -l)" = "0" ] \
-		&& [ "$(kc -n topolvm-system get pods --no-headers 2>/dev/null | wc -l)" -ge 3 ]
+# r-drbd serves replicas=1 volumes without the DRBD module this runner's kernel
+# lacks: this lane proves dotvirt on r-drbd-local, not replication.
+pool_available() {
+	kc get pools -o jsonpath='{range .items[*]}{.spec.vg}={.status.conditions[?(@.type=="Available")].status}{"\n"}{end}' \
+		| grep -qx "${VG_NAME}=True"
 }
-retry "topolvm ready" 600 topolvm_ready
+retry "r-drbd Pool available" 600 pool_available
+default_class() {
+	[ "$(kc get storageclass -o jsonpath='{range .items[?(@.metadata.annotations.storageclass\.kubernetes\.io/is-default-class=="true")]}{.metadata.name}{end}')" = "r-drbd-local" ]
+}
+retry "r-drbd-local is the default class" 300 default_class
 
 # ── 2. ArgoCD (hard dependency; dotvirt never installs it) ─────────────────────
 log "installing Argo CD ${ARGOCD_VERSION}"
@@ -261,11 +279,12 @@ appctrl_ready() {
 retry "argocd application-controller ready" "${TIMEOUT_INSTALL}" appctrl_ready
 
 # ── 3. KubeVirt (emulation: the loop applies VM objects, none needs to boot) ──
-log "installing KubeVirt ${KUBEVIRT_VERSION}"
-fetch "https://github.com/kubevirt/kubevirt/releases/download/${KUBEVIRT_VERSION}/kubevirt-operator.yaml" \
-	"${WORKDIR}/kubevirt-operator.yaml" "${KUBEVIRT_OPERATOR_SHA256}"
-kc apply -f "${WORKDIR}/kubevirt-operator.yaml"
-kc apply -f - <<EOF
+if [ "${KUBEVIRT}" = "1" ]; then
+	log "installing KubeVirt ${KUBEVIRT_VERSION}"
+	fetch "https://github.com/kubevirt/kubevirt/releases/download/${KUBEVIRT_VERSION}/kubevirt-operator.yaml" \
+		"${WORKDIR}/kubevirt-operator.yaml" "${KUBEVIRT_OPERATOR_SHA256}"
+	kc apply -f "${WORKDIR}/kubevirt-operator.yaml"
+	kc apply -f - <<EOF
 apiVersion: kubevirt.io/v1
 kind: KubeVirt
 metadata:
@@ -276,22 +295,69 @@ spec:
     developerConfiguration:
       useEmulation: true
 EOF
-retry "kubevirt Available" "${TIMEOUT_INSTALL}" \
-	kc -n kubevirt wait kubevirt/kubevirt --for=condition=Available --timeout=10s
-# The roundtrip references u1.medium/fedora; recent KubeVirt deploys the common
-# instancetypes itself — install the bundle only when this one doesn't.
-if ! kc get virtualmachineclusterinstancetype u1.medium >/dev/null 2>&1; then
-	log "installing common-instancetypes bundle"
-	kc apply -f "https://github.com/kubevirt/common-instancetypes/releases/latest/download/common-clusterinstancetypes-bundle.yaml"
-	kc apply -f "https://github.com/kubevirt/common-instancetypes/releases/latest/download/common-clusterpreferences-bundle.yaml"
+	retry "kubevirt Available" "${TIMEOUT_INSTALL}" \
+		kc -n kubevirt wait kubevirt/kubevirt --for=condition=Available --timeout=10s
+	# The roundtrip references u1.medium/fedora; recent KubeVirt deploys the common
+	# instancetypes itself — install the bundle only when this one doesn't.
+	if ! kc get virtualmachineclusterinstancetype u1.medium >/dev/null 2>&1; then
+		log "installing common-instancetypes bundle"
+		kc apply -f "https://github.com/kubevirt/common-instancetypes/releases/latest/download/common-clusterinstancetypes-bundle.yaml"
+		kc apply -f "https://github.com/kubevirt/common-instancetypes/releases/latest/download/common-clusterpreferences-bundle.yaml"
+	fi
 fi
 
-# ── 4. dotvirt operator (published digest-pinned images) + CR ─────────────────
+# ── 4. Edge: portail, with a Gateway only dotvirt's namespace may attach to ───
+if [ "${KUBEVIRT}" = "0" ]; then
+	log "installing portail ${PORTAIL_COMMIT}"
+	kc apply --server-side --force-conflicts -k "https://github.com/epheo/portail//deploy/install?ref=${PORTAIL_COMMIT}"
+	retry "portail controller available" "${TIMEOUT_INSTALL}" \
+		kc -n portail-system wait deploy/portail-controller --for=condition=Available --timeout=10s
+	kc create namespace gateway-e2e --dry-run=client -o yaml | kc apply -f -
+	kc apply -f - <<EOF
+apiVersion: gateway.networking.k8s.io/v1
+kind: Gateway
+metadata:
+  name: edge
+  namespace: gateway-e2e
+spec:
+  gatewayClassName: portail
+  listeners:
+    - name: http
+      port: 8080
+      protocol: HTTP
+      allowedRoutes:
+        namespaces:
+          from: Selector
+          selector:
+            matchLabels:
+              kubernetes.io/metadata.name: dotvirt
+EOF
+fi
+
+# ── 5. dotvirt operator + CR ───────────────────────────────────────────────────
+# load_image <archive> <ref>: into cri-o's store, past the registry nobody has.
+load_image() {
+	podman cp "$1" "${NAME}:/tmp/e2e-image.tar" \
+		&& timeout 300 podman exec "${NAME}" skopeo copy -q docker-archive:/tmp/e2e-image.tar \
+			"containers-storage:[overlay@/var/lib/containers/storage+/run/containers/storage]$2"
+}
+if [ -n "${APP_IMAGE_TAR}" ]; then
+	retry "app image loaded" 900 load_image "${APP_IMAGE_TAR}" localhost/dotvirt:e2e
+	retry "operator image loaded" 900 load_image "${OPERATOR_IMAGE_TAR}" localhost/dotvirt-operator:e2e
+fi
+
 log "deploying the dotvirt operator"
 make -C "${REPO_ROOT}/operator" deploy >/dev/null
+if [ -n "${APP_IMAGE_TAR}" ]; then
+	kc -n dotvirt-operator set image deploy/dotvirt-operator-controller manager=localhost/dotvirt-operator:e2e
+	kc -n dotvirt-operator set env deploy/dotvirt-operator-controller RELATED_IMAGE_DOTVIRT=localhost/dotvirt:e2e
+fi
+retry "operator rolled out" "${TIMEOUT_INSTALL}" \
+	kc -n dotvirt-operator rollout status deploy/dotvirt-operator-controller --timeout=10s
 retry "operator available" "${TIMEOUT_INSTALL}" \
 	kc -n dotvirt-operator wait deploy --all --for=condition=Available --timeout=10s
 
+GATEWAY_HOST="dotvirt.e2e.test"
 log "applying the Dotvirt CR"
 kc create namespace dotvirt --dry-run=client -o yaml | kc apply -f -
 kc apply -f - <<EOF
@@ -310,17 +376,26 @@ spec:
     namespace: argocd
     serverURL: http://argocd-server.argocd.svc.cluster.local
   ingress:
-    type: route
+$(if [ "${KUBEVIRT}" = "0" ]; then
+	printf '    host: %s\n    gateway: {name: edge, namespace: gateway-e2e}\n' "${GATEWAY_HOST}"
+else
+	echo '    type: route'
+fi)
 EOF
 retry "Dotvirt Available" "${TIMEOUT_INSTALL}" sh -c \
 	"kubectl -n dotvirt get dotvirt dotvirt -o jsonpath='{.status.conditions[?(@.type==\"Available\")].status}' | grep -q True"
 retry "dotvirt deployment ready" "${TIMEOUT_INSTALL}" \
 	kc -n dotvirt wait deploy/dotvirt --for=condition=Available --timeout=10s
 
-# ── 5. Reach the API from the host ────────────────────────────────────────────
+# ── 6. Reach the API from the host ────────────────────────────────────────────
 log "port-forwarding dotvirt + forge"
 kc -n dotvirt port-forward svc/dotvirt 18080:8080 >/dev/null 2>&1 &
 kc -n dotvirt port-forward svc/dotvirt-forgejo 13000:3000 >/dev/null 2>&1 &
+if [ "${KUBEVIRT}" = "0" ]; then
+	retry "gateway data plane available" "${TIMEOUT_INSTALL}" \
+		kc -n gateway-e2e wait deploy/portail-edge --for=condition=Available --timeout=10s
+	kc -n gateway-e2e port-forward svc/portail-edge 18081:8080 >/dev/null 2>&1 &
+fi
 PF_PIDS="$(jobs -p)"
 trap 'rc=$?; kill ${PF_PIDS} 2>/dev/null || true; [ ${rc} -ne 0 ] && diagnostics ${rc}; exit ${rc}' EXIT
 BASE="http://127.0.0.1:18080"
@@ -337,7 +412,7 @@ FTOK="$(kc get secret dotvirt-forge -n dotvirt -o jsonpath='{.data.token}' | bas
 api() { curl -fsS --max-time 30 -H "Authorization: Bearer ${TOK}" "$@"; }
 forge() { curl -fsS --max-time 30 -H "Authorization: token ${FTOK}" -H 'Content-Type: application/json' "$@"; }
 
-# ── 6. Create the tenant project through dotvirt itself ───────────────────────
+# ── 7. Create the tenant project through dotvirt itself ───────────────────────
 log "creating project ${PROJECT} via the dotvirt API"
 api -X POST "${BASE}/api/projects" -H 'Content-Type: application/json' \
 	-d "{\"name\":\"${PROJECT}\"}" >/dev/null
@@ -361,7 +436,24 @@ retry "tenant repo exists" 300 forge -o /dev/null "${FORGE}/api/v1/repos/dotvirt
 retry "project in inventory" 300 sh -c \
 	"curl -fsS -H 'Authorization: Bearer ${TOK}' '${BASE}/api/inventory' | grep -q '\"${PROJECT}\"'"
 
-# ── 6b. Anchor VM: the repo must never render EMPTY ───────────────────────────
+# ── 8. Without KubeVirt the loop ends here: nothing to stage, what matters is
+# that the install came up and says what this cluster has.
+if [ "${KUBEVIRT}" = "0" ]; then
+	through_gateway() {
+		curl -fsS --max-time 10 -H "Host: ${GATEWAY_HOST}" http://127.0.0.1:18081/api/healthz
+	}
+	retry "dotvirt answers through the portail Gateway" "${TIMEOUT_INSTALL}" through_gateway
+	modules_right() {
+		api "${BASE}/api/modules" | jq -e '.vms == false and .routes == true and .replicatedStorage == true'
+	}
+	retry "modules report no VMs, routes and r-drbd" 180 modules_right
+	warnings="$(api "${BASE}/api/inventory" | jq -c '.warnings // []')"
+	[ "${warnings}" = "[]" ] || { echo "ERROR: inventory warnings without KubeVirt: ${warnings}" >&2; exit 1; }
+	log "no-KubeVirt install complete"
+	exit 0
+fi
+
+# ── 9. Anchor VM: the repo must never render EMPTY ───────────────────────────
 # Argo's automated.allowEmpty stays false by design (an emptied repo cannot
 # wipe a tier), so the round-trip's delete would never prune if its VM were the
 # repo's only manifest. One permanent anchor VM keeps the source non-empty —
@@ -377,7 +469,7 @@ merge_pr "${PROJECT}" "${PR}"
 anchor_in_cluster() { kc get vm anchor -n "${PROJECT}"; }
 retry "anchor VM in cluster" 400 anchor_in_cluster
 
-# ── 7. The round-trip itself ───────────────────────────────────────────────────
+# ── 10. The round-trip itself ───────────────────────────────────────────────────
 log "running the GitOps round-trip"
 OUT="${WORKDIR}/roundtrip.txt"
 BASE="${BASE}" FORGE="${FORGE}" PROJECT="${PROJECT}" NS="${PROJECT}" \
