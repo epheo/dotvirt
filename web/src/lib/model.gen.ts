@@ -55,6 +55,11 @@ export interface ClusterCaps {
    */
   replicationRepair: boolean;
   /**
+   * Gateways reads every Gateway and route: list, cluster-wide, on Gateways
+   * and HTTPRoutes.
+   */
+  gateways: boolean;
+  /**
    * Network is the shared networks (ClusterUserDefinedNetwork).
    */
   network: ObjectCaps;
@@ -1071,6 +1076,96 @@ export interface NetworkCaps {
    * (its history, proposals and revert).
    */
   platform: boolean;
+}
+/**
+ * Gateways is GET /api/networking/gateways: every Gateway and route. Operator
+ * only: it reaches across every tenant's namespaces.
+ */
+export interface Gateways {
+  /**
+   * Synced is false until the Gateways' and HTTPRoutes' first lists landed.
+   */
+  synced: boolean;
+  /**
+   * Stale: a watch is down and this is its last known state.
+   */
+  stale?: boolean;
+  gateways: GatewayInfo[];
+  routes: Route[];
+}
+/**
+ * GatewayInfo is one Gateway as its controller reports it.
+ */
+export interface GatewayInfo {
+  namespace: string;
+  name: string;
+  class: string;
+  addresses?: string[];
+  ready: boolean;
+  /**
+   * Reason and Message are the first condition that does not hold.
+   */
+  reason?: string;
+  message?: string;
+  listeners: GatewayListener[];
+  rateLimits?: GatewayRateLimit[];
+}
+/**
+ * GatewayListener is one port a Gateway serves.
+ */
+export interface GatewayListener {
+  name: string;
+  port: number /* int32 */;
+  protocol: string;
+  hostname?: string;
+  attachedRoutes: number /* int32 */;
+  ready: boolean;
+  reason?: string;
+  message?: string;
+}
+/**
+ * GatewayRateLimit is one per-client budget on a Gateway; Listener is empty
+ * for the whole Gateway.
+ */
+export interface GatewayRateLimit {
+  listener?: string;
+  requestsPerSecond: number /* int32 */;
+  burst: number /* int32 */;
+}
+/**
+ * Route is one HTTP, TLS, TCP or UDP route.
+ */
+export interface Route {
+  kind: string;
+  namespace: string;
+  name: string;
+  hostnames?: string[];
+  parents?: RouteParent[];
+  backends?: RouteBackend[];
+}
+/**
+ * RouteParent is a Gateway a route asks to attach to.
+ */
+export interface RouteParent {
+  namespace: string;
+  name: string;
+  section?: string;
+  attached: boolean;
+  reason?: string;
+  /**
+   * Message is the controller's text, which can name another tenant's route.
+   * Empty on GET /api/networking/routes.
+   */
+  message?: string;
+}
+/**
+ * RouteBackend is a Service a route sends traffic to.
+ */
+export interface RouteBackend {
+  namespace: string;
+  name: string;
+  port?: number /* int32 */;
+  weight: number /* int32 */;
 }
 
 //////////
@@ -2100,6 +2195,11 @@ export interface Inventory {
    * and /api/storage/protection. Absent while the cluster serves no r-drbd.
    */
   replicationVersion?: number /* uint64 */;
+  /**
+   * RoutesVersion is the same contract for GET /api/networking/gateways and
+   * /api/networking/routes. Absent while no GatewayClass exists.
+   */
+  routesVersion?: number /* uint64 */;
   /**
    * Adoptable proposes existing tenants: namespaces with VMs but no project
    * label. Present only for callers with namespace-create authority (the

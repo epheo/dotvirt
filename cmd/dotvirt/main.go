@@ -33,6 +33,7 @@ import (
 	"github.com/epheo/dotvirt/internal/netstate"
 	"github.com/epheo/dotvirt/internal/project"
 	"github.com/epheo/dotvirt/internal/replication"
+	"github.com/epheo/dotvirt/internal/routes"
 	"github.com/epheo/dotvirt/internal/stream"
 	"github.com/epheo/dotvirt/internal/tasks"
 	"github.com/epheo/dotvirt/pkg/forge"
@@ -145,6 +146,13 @@ func run() error {
 	})
 	replicationSnapshot.Run(ctx)
 
+	// The front door's read plane: nothing runs until a GatewayClass exists.
+	routesSnapshot := routes.New(saCluster, bus, func() bool {
+		m, ok := moduleSnapshot.Get()
+		return ok && m.Routes
+	})
+	routesSnapshot.Run(ctx)
+
 	var argoSnapshot *argo.Snapshot
 	var resyncer changeset.Resyncer
 	if cfg.ArgoEnabled {
@@ -213,6 +221,7 @@ func run() error {
 		Netstate:       netSnapshot,
 		Modules:        moduleSnapshot,
 		Replication:    replicationSnapshot,
+		FrontDoor:      routesSnapshot,
 		Bus:            bus,
 		Resolver:       resolver,
 		Repos:          repos,
@@ -247,7 +256,7 @@ func run() error {
 	inventoryKinds := []eventbus.Kind{
 		eventbus.LiveChanged, eventbus.NamespaceChanged,
 		eventbus.RBACChanged, eventbus.DriftChanged, eventbus.GitChanged, eventbus.ProposalsChanged,
-		eventbus.NetworkChanged, eventbus.TaskChanged, eventbus.ReplicationChanged, eventbus.TTLBackstop,
+		eventbus.NetworkChanged, eventbus.TaskChanged, eventbus.ReplicationChanged, eventbus.RoutesChanged, eventbus.TTLBackstop,
 	}
 	// SessionEnded only wakes the hub to close ended sessions' streams; no frame
 	// depends on it, so it stays out of the levels.

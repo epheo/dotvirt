@@ -19,6 +19,7 @@ import (
 	"github.com/epheo/dotvirt/internal/project"
 	"github.com/epheo/dotvirt/internal/replication"
 	"github.com/epheo/dotvirt/internal/restfactory"
+	"github.com/epheo/dotvirt/internal/routes"
 	"github.com/epheo/dotvirt/internal/ttlcache"
 )
 
@@ -583,6 +584,13 @@ var replicationRead = action{
 // it acts on, and the patch the apiserver then asks of the caller.
 var replicationRepair = append(slices.Clone(replicationRead),
 	refQ(verbPatch, ssarRef{replication.GVRVolume.Group, replication.GVRVolume.Resource}, ""))
+
+// gatewaysRead is reading the front door across namespaces. The kinds a
+// cluster may not serve are asked one by one, as the answer includes them.
+var gatewaysRead = action{
+	refQ(verbList, ssarRef{routes.GVRGateway.Group, routes.GVRGateway.Resource}, ""),
+	refQ(verbList, ssarRef{routes.Group, "httproutes"}, ""),
+}
 
 // ssarDataSources is the boot images: listed for the options catalog, created
 // when an upload registers one.

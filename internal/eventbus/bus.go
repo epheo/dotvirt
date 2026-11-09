@@ -72,6 +72,9 @@ const (
 	// ReplicationChanged: what the replicated-storage pulls read moved, or one of
 	// their watches' health flipped.
 	ReplicationChanged
+	// RoutesChanged: what the Gateway and route pulls read moved, or one of
+	// their watches' health flipped.
+	RoutesChanged
 	// TTLBackstop: TTL-cached authorization no RBAC watch observes (see
 	// api.RunTTLBackstop) may have expired - published on a fixed cadence while a
 	// stream is open so frames re-evaluate it. Keep it out of every cache's

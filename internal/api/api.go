@@ -39,6 +39,7 @@ import (
 	"github.com/epheo/dotvirt/internal/netstate"
 	"github.com/epheo/dotvirt/internal/project"
 	"github.com/epheo/dotvirt/internal/replication"
+	"github.com/epheo/dotvirt/internal/routes"
 	"github.com/epheo/dotvirt/internal/tasks"
 	"github.com/epheo/dotvirt/internal/ttlcache"
 )
@@ -216,6 +217,7 @@ type Server struct {
 	netstate    *netstate.Snapshot    // SA-owned, watch-fed networking catalog (networks + fabric)
 	modules     *modules.Snapshot     // what the cluster serves; nil leaves GET /api/modules unmounted
 	replication *replication.Snapshot // r-drbd's SA-held read model; nil leaves its routes unmounted
+	frontDoor   *routes.Snapshot      // Gateways and routes, SA-held; nil leaves their routes unmounted
 	bus         *eventbus.Bus         // change-version source for the version-stamped auth caches
 	resolver    *project.Resolver
 	repos       *git.RepoSet
@@ -272,6 +274,7 @@ type Deps struct {
 	Netstate       *netstate.Snapshot    // SA-owned networking catalog snapshot (watch-fed)
 	Modules        *modules.Snapshot     // what the cluster serves; nil leaves GET /api/modules unmounted
 	Replication    *replication.Snapshot // r-drbd's SA-held read model; nil leaves its routes unmounted
+	FrontDoor      *routes.Snapshot      // Gateways and routes, SA-held; nil leaves their routes unmounted
 	Bus            *eventbus.Bus         // change-version source for version-stamped caches
 	Resolver       *project.Resolver
 	Repos          *git.RepoSet
@@ -299,6 +302,7 @@ func NewServer(d Deps) *Server {
 		netstate:    d.Netstate,
 		modules:     d.Modules,
 		replication: d.Replication,
+		frontDoor:   d.FrontDoor,
 		bus:         d.Bus,
 		resolver:    d.Resolver,
 		repos:       d.Repos,

@@ -39,6 +39,9 @@ type ClusterCaps struct {
 	// ReplicationRepair resolves a split brain and moves copies off a host:
 	// Replication, and patch on r-drbd's Volumes.
 	ReplicationRepair bool `json:"replicationRepair"`
+	// Gateways reads every Gateway and route: list, cluster-wide, on Gateways
+	// and HTTPRoutes.
+	Gateways bool `json:"gateways"`
 	// Network is the shared networks (ClusterUserDefinedNetwork).
 	Network                    ObjectCaps `json:"network"`
 	Uplink                     ObjectCaps `json:"uplink"`
