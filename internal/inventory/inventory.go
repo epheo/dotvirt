@@ -93,7 +93,7 @@ func buildProject(in Inputs, p project.ProjectInfo) model.Project {
 	if p.Repo != "" {
 		// The badge names the failure only: git errors carry the forge URL and
 		// transport detail, and every subscriber of the project sees this text.
-		read, _, err := in.Repos.Get(p.Repo)
+		read, _, err := in.Repos.Get(p.Repo, p.Path)
 		if err != nil {
 			out.Error = "repo unavailable"
 			err = fmt.Errorf("open repo: %w", err)

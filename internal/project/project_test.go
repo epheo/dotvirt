@@ -103,3 +103,98 @@ func TestOwners(t *testing.T) {
 		t.Errorf("owners = %v", got)
 	}
 }
+
+func withPath(n Namespace, p string) Namespace {
+	n.Annotations["dotvirt.io/path"] = p
+	return n
+}
+
+func TestCleanPath(t *testing.T) {
+	for in, want := range map[string]string{"": "", ".": "", "clusters/a": "clusters/a", "clusters/a/": "clusters/a", "a/./b": "a/b", "a/b/..": "a"} {
+		if got, ok := CleanPath(in); !ok || got != want {
+			t.Errorf("CleanPath(%q) = %q, %v; want %q", in, got, ok, want)
+		}
+	}
+	for _, in := range []string{"/etc", "..", "../x", "a/../../x", ".git", "a/.git/hooks", `a\b`} {
+		if got, ok := CleanPath(in); ok {
+			t.Errorf("CleanPath(%q) = %q, accepted", in, got)
+		}
+	}
+}
+
+func TestResolvePath(t *testing.T) {
+	repo := "https://forge/team-a.git"
+	resolve := func(nss ...Namespace) ProjectInfo {
+		t.Helper()
+		infos := resolver().Resolve(nss, nil)
+		if len(infos) != 1 {
+			t.Fatalf("got %d projects", len(infos))
+		}
+		return infos[0]
+	}
+	if p := resolve(withPath(nsInfo("a", "team-a", repo), "clusters/a/")); p.Path != "clusters/a" || p.Repo != repo || p.Error != "" {
+		t.Errorf("a folder: %+v", p)
+	}
+	// A namespace added later through dotvirt carries the repo alone.
+	if p := resolve(withPath(nsInfo("a", "team-a", repo), "clusters/a"), nsInfo("b", "team-a", repo)); p.Path != "clusters/a" || p.Error != "" {
+		t.Errorf("a namespace with no opinion: %+v", p)
+	}
+	for name, nss := range map[string][]Namespace{
+		"conflict": {withPath(nsInfo("a", "team-a", repo), "x"), withPath(nsInfo("b", "team-a", repo), "y")},
+		"invalid":  {withPath(nsInfo("a", "team-a", repo), "../x")},
+	} {
+		if p := resolve(nss...); p.Error == "" || p.Repo != "" || p.Path != "" {
+			t.Errorf("%s: %+v, want an Error and no repo", name, p)
+		}
+	}
+}
+
+// Reading a project as the whole repo would let its writes land outside the folder.
+func TestAFolderHoldsForACallerWhoSeesOnlyOtherNamespaces(t *testing.T) {
+	repo := "https://forge/team-a.git"
+	nss := []Namespace{withPath(nsInfo("a", "team-a", repo), "clusters/a"), nsInfo("b", "team-a", repo)}
+	infos := resolver().Resolve(nss, map[string]bool{"b": true})
+	if len(infos) != 1 || infos[0].Path != "clusters/a" || infos[0].Error != "" {
+		t.Errorf("filtered view: %+v", infos)
+	}
+}
+
+// Two spellings of one URL are one repo, as the mirror cache keys them.
+func TestASharedRepoIsFoundUnderAnySpelling(t *testing.T) {
+	nss := []Namespace{withPath(nsInfo("a", "team-a", "https://forge/shared.git"), "a"), nsInfo("b", "team-b", "https://forge/shared")}
+	for _, p := range resolver().Resolve(nss, nil) {
+		if p.Error == "" {
+			t.Errorf("%s: %+v, want it refused", p.Name, p)
+		}
+	}
+}
+
+// A repo is one tenant: Argo and the forge grant by repo, folder or no folder.
+func TestARepoIsOneProject(t *testing.T) {
+	repo := "https://forge/shared.git"
+	refused := func(name string, nss []Namespace, visible map[string]bool) {
+		t.Helper()
+		infos := resolver().Resolve(nss, visible)
+		if len(infos) == 0 {
+			t.Fatalf("%s: no projects", name)
+		}
+		for _, p := range infos {
+			if p.Error == "" || p.Repo != "" {
+				t.Errorf("%s: %s = %+v, want it refused", name, p.Name, p)
+			}
+		}
+	}
+	plain := []Namespace{nsInfo("a", "team-a", repo), nsInfo("b", "team-b", repo)}
+	refused("no folder", plain, nil)
+	refused("a folder", []Namespace{withPath(nsInfo("a", "team-a", repo), "a"), nsInfo("b", "team-b", repo)}, nil)
+	refused("a caller who sees one of them", plain, map[string]bool{"b": true})
+}
+
+// One project over several namespaces is the normal shape, not sharing.
+func TestOneProjectMayHoldManyNamespaces(t *testing.T) {
+	repo := "https://forge/team-a.git"
+	infos := resolver().Resolve([]Namespace{nsInfo("a", "team-a", repo), nsInfo("b", "team-a", repo)}, nil)
+	if len(infos) != 1 || infos[0].Repo != repo || infos[0].Error != "" {
+		t.Errorf("infos = %+v", infos)
+	}
+}

@@ -1,3 +1,4 @@
+import { untrack } from 'svelte';
 import {
 	api,
 	Unauthorized,
@@ -11,6 +12,7 @@ import { diskRows, imageUsage, uploadAbility, type UploadAbility } from '#lib/st
 import { caps } from './caps.svelte';
 import { templates } from './templates.svelte';
 import { inventory } from './inventory.svelte';
+import { vmsOff } from './modules.svelte';
 
 // The Storage section's reads beside the live inventory: the class sheet (SA,
 // cached server-side), and the caller's snapshots, claims and hosts (live
@@ -32,6 +34,7 @@ class StorageStore {
 	#uploadKey = '';
 	#gen = 0;
 	#loaded = false;
+	#skippedVMs = false;
 
 	readonly rows = $derived(
 		diskRows({
@@ -69,8 +72,13 @@ class StorageStore {
 
 	async refresh() {
 		const gen = this.#gen;
-		inventory.loadOptions();
-		templates.load();
+		// Options, templates, snapshots and claims all read VM disks.
+		const vms = !vmsOff();
+		this.#skippedVMs = !vms;
+		if (vms) {
+			inventory.loadOptions();
+			templates.load();
+		}
 		await Promise.all([
 			this.#pull(
 				api.storageClasses,
@@ -78,13 +86,14 @@ class StorageStore {
 				(e) => (this.classesError = e),
 				gen,
 			),
-			this.refreshSnapshots(),
-			this.#pull(
-				api.storageClaims,
-				(v) => (this.claims = v),
-				() => {},
-				gen,
-			),
+			vms && this.refreshSnapshots(),
+			vms &&
+				this.#pull(
+					api.storageClaims,
+					(v) => (this.claims = v),
+					() => {},
+					gen,
+				),
 			// Node rights are cluster-scoped; without them hosts stay unnamed.
 			this.#pull(
 				api.nodes,
@@ -93,6 +102,11 @@ class StorageStore {
 				gen,
 			),
 		]);
+	}
+
+	// KubeVirt installed while Storage stays open: the reads refresh skipped.
+	catchUp() {
+		if (this.#skippedVMs && !vmsOff()) untrack(() => this.refresh());
 	}
 
 	async ensureUpload(namespaces: string[]) {
@@ -139,6 +153,7 @@ class StorageStore {
 	reset() {
 		this.#gen++;
 		this.#loaded = false;
+		this.#skippedVMs = false;
 		this.classes = null;
 		this.snapshots = null;
 		this.claims = null;

@@ -12,6 +12,8 @@ import (
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	dynamicfake "k8s.io/client-go/dynamic/fake"
 	clienttesting "k8s.io/client-go/testing"
+
+	"github.com/epheo/dotvirt/pkg/tenancy"
 )
 
 // adoptableListKinds registers every kind the sweep visits. The fake panics on an
@@ -193,5 +195,19 @@ func TestAdoptManifestStripsRevisionName(t *testing.T) {
 	}
 	if !strings.Contains(s, "name: u1.medium") || !strings.Contains(s, "name: fedora") {
 		t.Errorf("matcher names lost while stripping:\n%s", s)
+	}
+}
+
+// Adoption stages into the platform repo: a kind its AppProject refuses would
+// fail the whole sync.
+func TestClusterAdoptableKindsAreDeclarableOnThePlatform(t *testing.T) {
+	platform := map[schema.GroupVersionResource]bool{}
+	for _, k := range tenancy.PlatformKinds(true) {
+		platform[schema.GroupVersionResource{Group: k.Group, Version: k.Version, Resource: k.Resource}] = true
+	}
+	for _, gvr := range clusterAdoptableKinds {
+		if !platform[gvr] {
+			t.Errorf("%s is adopted but not in tenancy.PlatformKinds(true)", gvr)
+		}
 	}
 }

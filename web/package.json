@@ -20,12 +20,12 @@
 	"devDependencies": {
 		"@axe-core/playwright": "^4.14.0",
 		"@eslint/js": "^10.0.1",
-		"@playwright/test": "^1.64.1",
+		"@playwright/test": "^1.65.0",
 		"@sveltejs/adapter-static": "^4.0.1",
 		"@sveltejs/kit": "^3.1.1",
 		"@sveltejs/load-config": "^0.2.2",
 		"@sveltejs/vite-plugin-svelte": "^7.3.1",
-		"@tailwindcss/vite": "^4.3.4",
+		"@tailwindcss/vite": "^4.3.5",
 		"@testing-library/svelte": "^5.4.2",
 		"@types/node": "^26.6.6",
 		"eslint": "^10.14.0",
@@ -47,7 +47,7 @@
 	"dependencies": {
 		"@fontsource/red-hat-mono": "^5.3.0",
 		"@fontsource/red-hat-text": "^5.3.0",
-		"@lucide/svelte": "^1.69.0",
+		"@lucide/svelte": "^1.70.0",
 		"@novnc/novnc": "^1.7.0",
 		"uplot": "^1.6.32"
 	},

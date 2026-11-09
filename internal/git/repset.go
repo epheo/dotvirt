@@ -98,15 +98,23 @@ func NewRepoSet(ctx context.Context, forgeURL, forgeUser string, tokenFn forge.T
 // first call (and starting that repo's background poll). Subsequent calls return
 // the cached pair. The read clone can fail (network/auth/bad URL); the write view
 // is lazy (clones per commit) so OpenWrite itself never errors.
-func (s *RepoSet) Get(repoURL string) (*Repo, *WriteRepo, error) {
+//
+// root scopes the pair to a folder of the repo, "" being all of it: every path
+// read or written through the pair is relative to it. A required argument, since
+// one project per repo means one pair per URL: a caller naming another folder
+// replaces the pair, and a re-clone on every alternation.
+func (s *RepoSet) Get(repoURL, root string) (*Repo, *WriteRepo, error) {
 	key := forge.NormalizeRepoURL(repoURL)
 	var done chan struct{}
 	for done == nil {
 		s.mu.Lock()
 		if p, ok := s.cache[key]; ok {
-			p.used = s.now()
-			s.mu.Unlock()
-			return p.read, p.write, nil
+			if p.read.root == root {
+				p.used = s.now()
+				s.mu.Unlock()
+				return p.read, p.write, nil
+			}
+			delete(s.cache, key)
 		}
 		if f, ok := s.failed[key]; ok && s.now().Before(f.until) {
 			s.mu.Unlock()
@@ -141,10 +149,13 @@ func (s *RepoSet) Get(repoURL string) (*Repo, *WriteRepo, error) {
 	}
 	_, recovered := s.failed[key]
 	delete(s.failed, key)
+	read.root = root
+	write := OpenWrite(repoURL, s.user, tokenFn, s.push)
+	write.root = root
 	pair := &repoPair{
 		key:   key,
 		read:  read,
-		write: OpenWrite(repoURL, s.user, tokenFn, s.push),
+		write: write,
 		poke:  make(chan struct{}, 1),
 		used:  s.now(),
 	}

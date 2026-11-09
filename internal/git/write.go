@@ -23,7 +23,8 @@ import (
 // Repo so writes never disturb inventory reads.
 type WriteRepo struct {
 	creds
-	push bool // push commits to the remote (false for local/offline testing)
+	push bool   // push commits to the remote (false for local/offline testing)
+	root string // the folder writes land in, "" for the whole repo; set before first use
 
 	mu sync.Mutex
 }

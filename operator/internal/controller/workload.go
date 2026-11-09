@@ -93,10 +93,15 @@ func (r *DotvirtReconciler) operandReady(ctx context.Context, dv *dotvirtv1alpha
 }
 
 // resolveExposureType picks the exposure kind for the configured/detected ingress type:
-// the explicit spec value, or Route on OpenShift / Ingress on vanilla when auto/unset.
+// the explicit spec value, or when auto/unset a named Gateway, else Route on OpenShift /
+// Ingress on vanilla. A named Gateway wins over the platform: MicroShift serves the Route
+// API with no router behind it once its ingress is Removed.
 func (r *DotvirtReconciler) resolveExposureType(dv *dotvirtv1alpha1.Dotvirt) dotvirtv1alpha1.IngressType {
 	if t := dv.Spec.Ingress.Type; t != "" && t != dotvirtv1alpha1.IngressAuto {
 		return t
+	}
+	if dv.Spec.Ingress.Gateway != nil {
+		return dotvirtv1alpha1.IngressGateway
 	}
 	if r.Platform == platform.OpenShift {
 		return dotvirtv1alpha1.IngressRoute
@@ -106,7 +111,7 @@ func (r *DotvirtReconciler) resolveExposureType(dv *dotvirtv1alpha1.Dotvirt) dot
 
 // exposureFor builds the external exposure of the named Service for the resolved
 // type: a Route on OpenShift (host may be empty - the router then assigns one), an
-// Ingress on vanilla Kubernetes (host required).
+// Ingress on vanilla Kubernetes or an HTTPRoute on a Gateway (host required).
 func (r *DotvirtReconciler) exposureFor(dv *dotvirtv1alpha1.Dotvirt, name string, port int32, host string) client.Object {
 	switch r.resolveExposureType(dv) {
 	case dotvirtv1alpha1.IngressRoute:
@@ -114,6 +119,10 @@ func (r *DotvirtReconciler) exposureFor(dv *dotvirtv1alpha1.Dotvirt, name string
 	case dotvirtv1alpha1.IngressIngress:
 		if host != "" {
 			return install.Ingress(dv, name, port, host)
+		}
+	case dotvirtv1alpha1.IngressGateway:
+		if host != "" {
+			return install.HTTPRoute(dv, name, port, host)
 		}
 	}
 	return nil

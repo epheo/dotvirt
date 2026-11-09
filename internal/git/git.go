@@ -63,6 +63,10 @@ type Repo struct {
 	repo atomic.Pointer[git.Repository]
 
 	memos memoTable
+
+	// root is the folder of the repo this mirror reads, "" for all of it. Every
+	// path in and out is relative to it. Set before the mirror is first used.
+	root string
 }
 
 // Open clones url's branches into memory (bare) and returns a Repo. username +
@@ -266,7 +270,7 @@ func (r *Repo) headsSignature() (string, error) {
 // WalkYAML visits branch's .yaml/.yml files passing include: the one tree
 // walk behind every per-branch index.
 func (r *Repo) WalkYAML(branch string, include func(path string) bool, visit func(path string, content []byte) error) error {
-	tree, err := treeFor(r.repo.Load(), branch)
+	tree, err := r.treeAt(branch)
 	if err != nil {
 		return err
 	}
@@ -286,7 +290,7 @@ func (r *Repo) WalkYAML(branch string, include func(path string) bool, visit fun
 // with a nil error means the branch resolves but holds no such file - the
 // release path branches on exactly that.
 func (r *Repo) LookupOnBranch(branch, path string) (content []byte, ok bool, err error) {
-	tree, err := treeFor(r.repo.Load(), branch)
+	tree, err := r.treeAt(branch)
 	if err != nil {
 		return nil, false, err
 	}
@@ -304,7 +308,7 @@ func (r *Repo) LookupOnBranch(branch, path string) (content []byte, ok bool, err
 // Pins is each of paths' blob ID on branch, AbsentBlob for a path the
 // branch does not hold: the versions whole-file content is made from.
 func (r *Repo) Pins(branch string, paths ...string) (map[string]string, error) {
-	tree, err := treeFor(r.repo.Load(), branch)
+	tree, err := r.treeAt(branch)
 	if err != nil {
 		return nil, err
 	}
@@ -320,7 +324,7 @@ func (r *Repo) Pins(branch string, paths ...string) (map[string]string, error) {
 // FileOnBranch returns one file's raw content on branch - e.g. a base-branch
 // manifest for the raw-YAML view.
 func (r *Repo) FileOnBranch(branch, path string) ([]byte, error) {
-	tree, err := treeFor(r.repo.Load(), branch)
+	tree, err := r.treeAt(branch)
 	if err != nil {
 		return nil, err
 	}

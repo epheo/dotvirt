@@ -452,3 +452,60 @@ func TestTenantAppProjectsAdmitNoNAD(t *testing.T) {
 		t.Error("the platform AppProject lost NetworkAttachmentDefinitions")
 	}
 }
+
+func TestHTTPRouteAttachesToTheNamedGateway(t *testing.T) {
+	dv := testDotvirt()
+	dv.Spec.Ingress.Gateway = &dotvirtv1alpha1.GatewayRef{Name: "edge", Namespace: "gateway-system", SectionName: "https"}
+	r := HTTPRoute(dv, AppName, HTTPPort, "dotvirt.example.com")
+	if r.GetNamespace() != dv.Namespace || r.GetName() != AppName || r.GroupVersionKind() != HTTPRouteGVK {
+		t.Errorf("rendered %s %s/%s", r.GroupVersionKind(), r.GetNamespace(), r.GetName())
+	}
+	parents, _, _ := unstructured.NestedSlice(r.Object, "spec", "parentRefs")
+	want := map[string]any{"name": "edge", "namespace": "gateway-system", "sectionName": "https"}
+	if len(parents) != 1 || !reflect.DeepEqual(parents[0], want) {
+		t.Errorf("parentRefs = %v, want [%v]", parents, want)
+	}
+	hosts, _, _ := unstructured.NestedStringSlice(r.Object, "spec", "hostnames")
+	if len(hosts) != 1 || hosts[0] != "dotvirt.example.com" {
+		t.Errorf("hostnames = %v", hosts)
+	}
+	rules, _, _ := unstructured.NestedSlice(r.Object, "spec", "rules")
+	backend := rules[0].(map[string]any)["backendRefs"].([]any)[0].(map[string]any)
+	if backend["name"] != AppName || backend["port"] != int64(HTTPPort) {
+		t.Errorf("backend = %v", backend)
+	}
+}
+
+// Without this peer the fence the operator draws on OpenShift-like clusters
+// would cut the console off from the Gateway that serves it.
+func TestNetworkPolicyAdmitsTheGatewayNamespace(t *testing.T) {
+	admits := func(dv *dotvirtv1alpha1.Dotvirt, ns string) bool {
+		for _, peer := range OperandNetworkPolicy(dv, "argocd", "").Spec.Ingress[0].From {
+			if peer.NamespaceSelector != nil && peer.NamespaceSelector.MatchLabels[corev1.LabelMetadataName] == ns {
+				return true
+			}
+		}
+		return false
+	}
+	dv := testDotvirt()
+	if admits(dv, "gateway-system") {
+		t.Error("admits a Gateway namespace nobody named")
+	}
+	dv.Spec.Ingress.Gateway = &dotvirtv1alpha1.GatewayRef{Name: "edge", Namespace: "gateway-system"}
+	if !admits(dv, "gateway-system") {
+		t.Error("the Gateway's namespace is not admitted")
+	}
+}
+
+// A tenant's folder comes from the plugin; the platform repo is always whole.
+func TestArgoSourcePaths(t *testing.T) {
+	dv := testDotvirt()
+	set := ApplicationSet(dv, "argocd", []string{"argocd"}, nil)
+	if got, _, _ := unstructured.NestedString(set.Object, "spec", "template", "spec", "source", "path"); got != "{{.path}}" {
+		t.Errorf("tenant source path = %q", got)
+	}
+	app := PlatformApplication(dv, "argocd", "https://forge/platform.git")
+	if got, _, _ := unstructured.NestedString(app.Object, "spec", "source", "path"); got != "." {
+		t.Errorf("platform source path = %q", got)
+	}
+}

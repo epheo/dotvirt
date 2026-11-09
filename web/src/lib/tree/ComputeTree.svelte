@@ -14,6 +14,7 @@
 		TOP_GROUPS,
 	} from '#lib/rail.js';
 	import { inventory } from '#lib/state/inventory.svelte.js';
+	import { vmsOff } from '#lib/state/modules.svelte.js';
 	import { persisted } from '#lib/state/persisted.svelte.js';
 	import { ui } from '#lib/state/ui.svelte.js';
 	import ProjectSyncBadge from '#lib/components/ProjectSyncBadge.svelte';
@@ -137,18 +138,27 @@
 		placeholder="Filter {projects.length} projects"
 	/>
 
-	<!-- A row keeps the tab in view (keepTab), so All VMs names its tab to leave Templates. -->
-	<TreeRow
-		active={scope.kind === 'all' && page.url.pathname.startsWith('/compute') && !onTemplates}
-		href={onTemplates ? '/compute?tab=summary' : '/compute'}
-	>
-		<span class="truncate text-side-ink">All VMs</span>
-		{#snippet trailing()}<span class="text-xs text-side-dim">{fmt(inventory.vmCount)}</span
-			>{/snippet}
-	</TreeRow>
-	<TreeRow active={onTemplates} href={templatesHref()}>
-		<span class="truncate text-side-ink">VM templates</span>
-	</TreeRow>
+	{#if vmsOff()}
+		<TreeRow active={scope.kind === 'all'} href="/compute">
+			<span class="truncate text-side-ink">All projects</span>
+			{#snippet trailing()}<span class="text-xs text-side-dim"
+					>{fmt(inventory.projects.length)}</span
+				>{/snippet}
+		</TreeRow>
+	{:else}
+		<!-- A row keeps the tab in view (keepTab), so All VMs names its tab to leave Templates. -->
+		<TreeRow
+			active={scope.kind === 'all' && page.url.pathname.startsWith('/compute') && !onTemplates}
+			href={onTemplates ? '/compute?tab=summary' : '/compute'}
+		>
+			<span class="truncate text-side-ink">All VMs</span>
+			{#snippet trailing()}<span class="text-xs text-side-dim">{fmt(inventory.vmCount)}</span
+				>{/snippet}
+		</TreeRow>
+		<TreeRow active={onTemplates} href={templatesHref()}>
+			<span class="truncate text-side-ink">VM templates</span>
+		</TreeRow>
+	{/if}
 
 	{#if projects.length > 0}
 		<div class="px-2 pt-2 pb-1 text-[11px] font-bold tracking-[.06em] text-side-dim uppercase">

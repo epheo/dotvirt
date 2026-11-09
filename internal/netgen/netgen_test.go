@@ -681,6 +681,7 @@ kind: Namespace
 metadata:
   annotations:
     dotvirt.io/repo: acme/tenant-a.git
+    dotvirt.io/path: clusters/a
     openshift.io/description: roundtable
   labels:
     dotvirt.io/project: tenant-a
@@ -691,7 +692,7 @@ metadata:
 		t.Fatal(err)
 	}
 	y := string(out)
-	for _, gone := range []string{"dotvirt.io/project", "dotvirt.io/repo"} {
+	for _, gone := range []string{"dotvirt.io/project", "dotvirt.io/repo", "dotvirt.io/path"} {
 		if strings.Contains(y, gone) {
 			t.Errorf("release must drop %s:\n%s", gone, y)
 		}

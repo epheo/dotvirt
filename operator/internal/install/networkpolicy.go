@@ -28,8 +28,8 @@ func nsPeer(match map[string]string) networkingv1.NetworkPolicyPeer {
 // networkPolicy admits ingress to the selected pods' HTTP port only from the
 // install namespace, the operator namespace (the forge bootstrap calls the
 // Service), the ArgoCD namespace (plugin generator, repo-server on an
-// in-cluster forge URL) and the router. operatorNS "" omits that peer (an
-// out-of-cluster `make run`).
+// in-cluster forge URL), the router and a named Gateway. operatorNS "" omits
+// that peer (an out-of-cluster `make run`).
 func networkPolicy(dv *dotvirtv1alpha1.Dotvirt, name string, selector map[string]string, port int32, argoNS, operatorNS string) *networkingv1.NetworkPolicy {
 	from := []networkingv1.NetworkPolicyPeer{
 		{PodSelector: &metav1.LabelSelector{}},
@@ -39,6 +39,11 @@ func networkPolicy(dv *dotvirtv1alpha1.Dotvirt, name string, selector map[string
 		from = append(from, nsPeer(map[string]string{corev1.LabelMetadataName: operatorNS}))
 	}
 	from = append(from, routerPeers()...)
+	// A Gateway's data plane runs in the Gateway's namespace (portail, and most
+	// implementations that provision one per Gateway).
+	if g := dv.Spec.Ingress.Gateway; g != nil && g.Namespace != "" && g.Namespace != dv.Namespace {
+		from = append(from, nsPeer(map[string]string{corev1.LabelMetadataName: g.Namespace}))
+	}
 	tcp := corev1.ProtocolTCP
 	p := intstr.FromInt32(port)
 	return &networkingv1.NetworkPolicy{
