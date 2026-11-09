@@ -14,15 +14,21 @@
 	import PlatformAdoptBanner from '#lib/components/PlatformAdoptBanner.svelte';
 	import TabBar from '#lib/components/TabBar.svelte';
 	import { vmsOff } from '#lib/state/modules.svelte.js';
+	import { frontDoorOff } from '#lib/state/frontdoor.svelte.js';
 	import FirewallTab from './FirewallTab.svelte';
+	import FrontDoorTab from './FrontDoorTab.svelte';
 	import MapTab from './MapTab.svelte';
 	import NetworksTab from './NetworksTab.svelte';
 	import NetworkVMs from './NetworkVMs.svelte';
 	import UplinksTab from './UplinksTab.svelte';
 
-	// The Networking section's root: one header, five tabs. The map answers
+	// The Networking section's root: one header, a tab per job. The map answers
 	// what connects to what; the other tabs list everything at scale.
-	const available = $derived(NETWORKING_TABS.filter((t) => t.id !== 'vms' || !vmsOff()));
+	const available = $derived(
+		NETWORKING_TABS.filter((t) =>
+			t.id === 'vms' ? !vmsOff() : t.id === 'front-door' ? !frontDoorOff() : true,
+		),
+	);
 	const tab = $derived(networkingTab(page.url.searchParams.get('tab'), available));
 	const counts: Record<string, number> = $derived({
 		networks: inventory.networks.length,
@@ -111,6 +117,8 @@
 				<NetworksTab />
 			{:else if tab === 'firewall'}
 				<FirewallTab />
+			{:else if tab === 'front-door'}
+				<FrontDoorTab />
 			{:else}
 				<UplinksTab />
 			{/if}
