@@ -136,8 +136,11 @@ type State struct {
 	// Per-store readiness: each reflector's initial LIST (first Replace) landing.
 	// Tracked per store (not a single counter) so a consumer gates on exactly the
 	// stores it reads: drift must not stall on a failing VMI reflector, and
-	// nobody waits on the RBAC signal watches.
-	vmsReady, vmisReady, nssReady, namesReady reflect.Ready
+	// nobody waits on the RBAC signal watches. vmsReady and vmisReady also latch
+	// on a definite absence of KubeVirt, which is enough to start serving;
+	// vmsListed latches on a real LIST alone, for whoever reads a missing VM as
+	// meaning.
+	vmsReady, vmisReady, nssReady, namesReady, vmsListed reflect.Ready
 
 	bus *eventbus.Bus // reflectors publish their kind here on every mutation
 }
@@ -189,7 +192,7 @@ func New(sa *cluster.Client, projectLabel string, bus *eventbus.Bus) *State {
 	// the candidates each token's visibility is reviewed over.
 	s.names = newNamespaceSink(project, reflect.NewStore(s.nss, namespace, s.nssReady.Mark), forget, s.namesReady.Mark)
 	s.specs = []reflectorSpec{
-		{s.live.store(s.vms, s.vmsReady.Mark), &kubevirtcorev1.VirtualMachine{}, sa.VMListWatch(), &optionalAPI{gvrVMs, &s.vmsReady}},
+		{s.live.store(s.vms, func() { s.vmsListed.Mark(); s.vmsReady.Mark() }), &kubevirtcorev1.VirtualMachine{}, sa.VMListWatch(), &optionalAPI{gvrVMs, &s.vmsReady}},
 		{s.live.store(s.vmis, s.vmisReady.Mark), &kubevirtcorev1.VirtualMachineInstance{}, sa.VMIListWatch(), &optionalAPI{gvrVMIs, &s.vmisReady}},
 		{s.names, &corev1.Namespace{}, sa.NamespaceListWatch(), nil},
 	}
@@ -284,10 +287,13 @@ func (s *State) runReflectors(ctx context.Context, served func(schema.GroupVersi
 		s.healthy[i].Store(true) // absence is not staleness (AllHealthy)
 		has := func(gvr schema.GroupVersionResource) bool {
 			ok, err := served(gvr)
-			// Only a definite answer: drift reads an empty store as every VM
-			// stopped, which a failed discovery read must not claim.
+			// Only a definite answer settles the store. A failed read leaves the
+			// inventory empty for a discovery interval, so it reads as stale.
 			if err == nil && !ok {
 				spec.optional.ready.Mark()
+			}
+			if s.healthy[i].Swap(err == nil) != (err == nil) {
+				s.publishLive()
 			}
 			return ok
 		}
@@ -444,8 +450,9 @@ func (s *State) publishLive() { s.bus.Publish(eventbus.LiveChanged) }
 // outage isn't silent.
 func (s *State) Healthy() bool { return reflect.AllHealthy(s.healthy) }
 
-// WaitForSync blocks until every READABLE reflector's initial LIST has landed (the
-// VM, VMI and namespace stores - not the RBAC signal watches), or ctx is done.
+// WaitForSync blocks until every READABLE reflector's initial LIST has landed, or
+// KubeVirt is known absent (the VM, VMI and namespace stores - not the RBAC signal
+// watches), or ctx is done.
 // Returns ctx.Err() on cancellation, nil once synced.
 func (s *State) WaitForSync(ctx context.Context) error {
 	for _, r := range []*reflect.Ready{&s.vmsReady, &s.vmisReady, &s.nssReady, &s.namesReady} {
@@ -456,13 +463,16 @@ func (s *State) WaitForSync(ctx context.Context) error {
 	return nil
 }
 
-// VMSnapshotReady reports whether the VM and namespace stores have synced. Drift and
-// adoption read absence as meaning: a VM missing from the snapshot reads as not running.
-// They never read VMIs, so a permanently failing VMI reflector (e.g. a removed RBAC
-// verb) must NOT wedge them. (Whole-snapshot readiness, incl. VMIs, is what
-// WaitForSync gates.)
+// VMSnapshotReady reports whether a real LIST of VMs has landed, and the
+// namespace store synced: only then is a VM missing from the snapshot known
+// absent. Authorization weighs a create on that answer and drift and adoption
+// read it as not running, so discovery saying KubeVirt is absent never counts:
+// a CRD group can be missing from discovery for a moment at apiserver start.
+// They never read VMIs, so a permanently failing VMI reflector (e.g. a removed
+// RBAC verb) must NOT wedge them. (Whole-snapshot readiness, incl. VMIs, is
+// what WaitForSync gates.)
 func (s *State) VMSnapshotReady() bool {
-	return s.vmsReady.Done() && s.nssReady.Done()
+	return s.vmsListed.Done() && s.nssReady.Done()
 }
 
 // VMObjects returns deep copies of the full VirtualMachine objects in the given
