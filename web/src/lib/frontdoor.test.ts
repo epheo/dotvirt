@@ -64,6 +64,40 @@ describe('where a route arrives', () => {
 		expect(listenersOf(r, gw()).map((l) => l.name)).toEqual(['http']);
 	});
 
+	it('meets a listener when the wildcard is on the route', () => {
+		const g = gw({
+			listeners: [
+				{
+					name: 'shop',
+					port: 443,
+					protocol: 'HTTPS',
+					hostname: 'shop.example.com',
+					attachedRoutes: 0,
+					ready: true,
+				},
+			],
+		});
+		expect(listenersOf(route('a', { hostnames: ['*.example.com'] }), g)).toHaveLength(1);
+		expect(listenersOf(route('a', { hostnames: ['*.other.org'] }), g)).toHaveLength(0);
+	});
+
+	it('does not read a bare domain as under its own wildcard', () => {
+		expect(
+			listenersOf(route('a', { hostnames: ['apps.example.com'] }), gw()).map((l) => l.name),
+		).toEqual(['http']);
+	});
+
+	it('reads a refused section over an accepted one', () => {
+		const r = route('a', {
+			parents: [
+				parent({ section: 'https' }),
+				parent({ section: 'http', attached: false, reason: 'NotAllowedByListeners' }),
+			],
+		});
+		expect(parentOn(r, gw())).toMatchObject({ section: 'http', attached: false });
+		expect(layoutMap(gw(), [r]).routes[0].state.live).toBe(false);
+	});
+
 	it('goes by kind for a TCP route', () => {
 		const r = route('ssh', { kind: 'TCPRoute', hostnames: undefined });
 		expect(listenersOf(r, gw()).map((l) => l.name)).toEqual(['ssh']);

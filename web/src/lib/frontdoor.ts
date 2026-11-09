@@ -13,20 +13,33 @@ const SERVED_ON: Record<string, string[]> = {
 	UDPRoute: ['UDP'],
 };
 
-export const parentOn = (r: Route, g: GatewayInfo): RouteParent | undefined =>
-	r.parents?.find((p) => p.namespace === g.namespace && p.name === g.name);
+// A route can name several sections of one front door: a refused one wins, so
+// the map never reads Live over a refusal.
+export function parentOn(r: Route, g: GatewayInfo): RouteParent | undefined {
+	const on = r.parents?.filter((p) => p.namespace === g.namespace && p.name === g.name) ?? [];
+	return on.find((p) => !p.attached) ?? on[0];
+}
 
 export const routesOn = (routes: Route[], g: GatewayInfo): Route[] =>
 	routes.filter((r) => parentOn(r, g));
 
+const wildcard = (host: string) => (host.startsWith('*.') ? host.slice(1) : '');
+
+// Either side may be the wildcard: a route for *.example.com does attach to a
+// listener for shop.example.com.
+function hostsMeet(a: string, b: string): boolean {
+	const [wa, wb] = [wildcard(a), wildcard(b)];
+	return a === b || (wa !== '' && b.endsWith(wa)) || (wb !== '' && a.endsWith(wb));
+}
+
 function hostFits(listener: string | undefined, hosts: string[] | undefined): boolean {
-	if (!listener || !hosts?.length) return true;
-	const suffix = listener.startsWith('*.') ? listener.slice(1) : '';
-	return hosts.some((h) => h === listener || (suffix !== '' && h.endsWith(suffix)));
+	return !listener || !hosts?.length || hosts.some((h) => hostsMeet(listener, h));
 }
 
 // The listeners a route arrives on: the one it names, or every one it could
-// bind by protocol and hostname.
+// bind by protocol and hostname. A listener's allowedRoutes can still refuse a
+// route that names no section; the read model does not carry it, so such a
+// route may be drawn into a listener that does not take it.
 export function listenersOf(r: Route, g: GatewayInfo): GatewayListener[] {
 	const parents = r.parents?.filter((p) => p.namespace === g.namespace && p.name === g.name) ?? [];
 	if (parents.some((p) => !p.section))
