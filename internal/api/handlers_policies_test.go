@@ -360,6 +360,9 @@ func TestTraceViewIsTheCallers(t *testing.T) {
 	if inRange, outside := raw(tenantToken, "10.200.0.7"), raw(tenantToken, "203.0.113.9"); inRange != outside {
 		t.Errorf("a tenant tells another tenant's range apart:\n%s\nwant\n%s", inRange, outside)
 	}
+	if admin := trace(adminToken, "10.200.0.7"); !strings.Contains(note(admin, "10.200.0.7"), "no in-cluster path") {
+		t.Errorf("a caller who sees the namespace reads the overlay answer: %+v", admin)
+	}
 
 	// Beside primary UDNs, a default-network pod address is certain only as a
 	// default-network VM the caller sees.
