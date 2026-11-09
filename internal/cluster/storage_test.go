@@ -127,3 +127,19 @@ func TestListStorageClassesWithoutOptionalKinds(t *testing.T) {
 		t.Errorf("got %+v", got)
 	}
 }
+
+func TestClassReplicationReadsOnlyR_DRBD(t *testing.T) {
+	class := func(params map[string]any) *unstructured.Unstructured {
+		return &unstructured.Unstructured{Object: map[string]any{"parameters": params}}
+	}
+	if got := classReplication(class(map[string]any{"replicas": "2", "tier": "nvme"}), "other.csi"); got != nil {
+		t.Fatalf("another provisioner read as r-drbd: %+v", got)
+	}
+	got := classReplication(class(map[string]any{"replicas": "3", "tier": "hdd"}), "r-drbd.io")
+	if got == nil || got.Copies != 3 || got.Tier != "hdd" {
+		t.Fatalf("got %+v", got)
+	}
+	if got := classReplication(class(map[string]any{"tier": "nvme"}), "r-drbd.io"); got == nil || got.Copies != 1 {
+		t.Fatalf("absent replicas should read as r-drbd's default of one: %+v", got)
+	}
+}
