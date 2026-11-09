@@ -23,6 +23,9 @@ on:
       - 'hack/e2e-microshift.sh'
       - 'hack/e2e-roundtrip.sh'
 
+permissions:
+  contents: read
+
 jobs:
   microshift-roundtrip:
     runs-on: ubuntu-latest

@@ -82,7 +82,8 @@ diagnostics() {
 	log "r-drbd state and logs"
 	kc get pools,volumes.r-drbd.io -o wide 2>&1 | head -12 || true
 	kc -n r-drbd-system get pods -o wide 2>&1 | head -8 || true
-	kc -n r-drbd-system logs --all-containers --tail=15 --prefix -l app.kubernetes.io/name=r-drbd 2>&1 | tail -30 || true
+	kc -n r-drbd-system logs deploy/r-drbd-controller --all-containers --tail=15 2>&1 | tail -15 || true
+	kc -n r-drbd-system logs ds/r-drbd-agent --all-containers --tail=15 2>&1 | tail -15 || true
 	log "gateway state and logs"
 	kc get gateways,httproutes -A -o wide 2>&1 | head -10 || true
 	kc -n portail-system logs deploy/portail-controller --tail=20 2>&1 | tail -20 || true
