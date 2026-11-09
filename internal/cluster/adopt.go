@@ -15,7 +15,6 @@ import (
 
 	"github.com/epheo/dotvirt/internal/model"
 	"github.com/epheo/dotvirt/internal/netgen"
-	"github.com/epheo/dotvirt/pkg/tenancy"
 )
 
 // GVR is the dynamic-client address of one managed kind.
@@ -37,18 +36,12 @@ var adoptableKinds = append([]schema.GroupVersionResource{
 	{Group: "cdi.kubevirt.io", Version: "v1beta1", Resource: "datavolumes"},
 }, networkFamilyGVRs(false)...)
 
-// clusterAdoptableKinds are the cluster-scoped kinds the platform repo may
-// declare, less the two that join another way: a Namespace through AdoptProject
-// with its tenancy labels, a MachineConfig as part of the rebalancing file set.
-var clusterAdoptableKinds = func() []schema.GroupVersionResource {
-	var out []schema.GroupVersionResource
-	for _, k := range tenancy.PlatformKinds(true) {
-		if k.Kind != model.KindNS.Kind && k.Kind != model.KindMachCfg.Kind {
-			out = append(out, schema.GroupVersionResource{Group: k.Group, Version: k.Version, Resource: k.Resource})
-		}
-	}
-	return out
-}()
+// clusterAdoptableKinds are the cluster-scoped kinds adoption captures. Opt-in
+// through the network family, not every platform kind: a capture takes each
+// object of a kind the caller can read, which a MachineConfig or the next
+// module's kind must not get by default. A Namespace joins through AdoptProject
+// with its tenancy labels.
+var clusterAdoptableKinds = networkFamilyGVRs(true)
 
 func networkFamilyGVRs(clusterScoped bool) []schema.GroupVersionResource {
 	var out []schema.GroupVersionResource

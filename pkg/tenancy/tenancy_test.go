@@ -137,3 +137,14 @@ func TestTenantKindsAreNamespaced(t *testing.T) {
 		}
 	}
 }
+
+// LookupKind and TenantKind take the first match by name.
+func TestKindNamesAreUnique(t *testing.T) {
+	seen := map[string]bool{}
+	for _, k := range Kinds {
+		if seen[k.Kind] {
+			t.Errorf("%s is in the table twice", k.Kind)
+		}
+		seen[k.Kind] = true
+	}
+}

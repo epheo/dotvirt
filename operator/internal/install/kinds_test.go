@@ -13,15 +13,15 @@ import (
 	"github.com/epheo/dotvirt/pkg/tenancy"
 )
 
-// Argo gets its apply rights from two static roles. A kind a repo may declare
-// and neither role grants passes every other check, then fails its first sync.
+// Argo gets its apply rights from static roles. A kind a repo may declare and
+// no role grants passes every other check, then fails its first sync.
 func TestApplyRolesCoverEveryDeclarableKind(t *testing.T) {
 	f, err := os.Open("../../config/rbac/operand_roles.yaml")
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer func() { _ = f.Close() }()
-	var rules []rbacv1.PolicyRule
+	roles := map[string][]rbacv1.PolicyRule{}
 	dec := utilyaml.NewYAMLOrJSONDecoder(f, 4096)
 	for {
 		role := &rbacv1.ClusterRole{}
@@ -30,26 +30,28 @@ func TestApplyRolesCoverEveryDeclarableKind(t *testing.T) {
 		} else if err != nil {
 			t.Fatal(err)
 		}
-		if role.Name == "dotvirt-argocd-apply" || role.Name == "dotvirt-platform-sync" {
-			rules = append(rules, role.Rules...)
-		}
+		roles[role.Name] = role.Rules
 	}
-	if len(rules) == 0 {
+	// The shared controller holds the first alone, so a tenant kind must be there.
+	apply, sync := roles["dotvirt-argocd-apply"], roles["dotvirt-platform-sync"]
+	if len(apply) == 0 || len(sync) == 0 {
 		t.Fatal("the apply roles are gone from operand_roles.yaml")
 	}
-	grants := func(k tenancy.Kind) bool {
+	grants := func(rules []rbacv1.PolicyRule, k tenancy.Kind) bool {
 		return slices.ContainsFunc(rules, func(r rbacv1.PolicyRule) bool {
 			return slices.Contains(r.APIGroups, k.Group) && slices.Contains(r.Resources, k.Resource) && slices.Contains(r.Verbs, "create")
 		})
 	}
 	for _, k := range tenancy.Kinds {
-		// A DataVolume's create comes with the project's admin grant, through
-		// CDI's aggregated role.
-		if (!k.Tenant && !k.Platform) || k.Kind == "DataVolume" {
-			continue
-		}
-		if !grants(k) {
-			t.Errorf("%s/%s: no apply role grants create on it", k.Group, k.Resource)
+		switch {
+		// Known gap, not a design: only sync impersonation, off by default,
+		// gives Argo this create, through the project's admin grant. Without it
+		// a DataVolume a tenant repo declares alone fails to sync.
+		case k.Kind == "DataVolume":
+		case k.Tenant && !grants(apply, k):
+			t.Errorf("%s/%s: tenant kind without create in dotvirt-argocd-apply", k.Group, k.Resource)
+		case k.Platform && !grants(apply, k) && !grants(sync, k):
+			t.Errorf("%s/%s: platform kind no apply role grants", k.Group, k.Resource)
 		}
 	}
 }
