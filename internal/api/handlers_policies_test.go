@@ -344,6 +344,14 @@ func TestTraceViewIsTheCallers(t *testing.T) {
 		wantStatus(t, rec, http.StatusOK)
 		return strings.ReplaceAll(rec.Body.String(), ip, "<ip>")
 	}
+	// In this order. The catalog can fill from the NADs alone, and until the UDNs
+	// are read web counts as on the default network, where an outside address
+	// answers Allow with the cluster's ranges still unread.
+	for deadline := time.Now().Add(10 * time.Second); !strings.Contains(note(trace(adminToken, "10.200.0.7"), "10.200.0.7"), "no in-cluster path"); time.Sleep(10 * time.Millisecond) {
+		if time.Now().After(deadline) {
+			t.Fatal("a caller who sees the namespace never read the overlay answer")
+		}
+	}
 	for deadline := time.Now().Add(10 * time.Second); trace(tenantToken, "203.0.113.9").Verdict != "Allow"; time.Sleep(10 * time.Millisecond) {
 		if time.Now().After(deadline) {
 			t.Fatal("the cluster's pod and service networks never placed an outside address")
