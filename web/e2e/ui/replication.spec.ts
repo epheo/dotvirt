@@ -124,6 +124,17 @@ test('moving copies off a host shows what stays and why first', async ({ page })
 	await expect(page.getByText(/moving off worker-1/)).toBeVisible();
 });
 
+test('two claims named alike each keep their row in the move', async ({ page }) => {
+	await setScenario(page, 'replicatedalike');
+	await login(page);
+	await page.goto('/storage?tab=replication&down=worker-1');
+	await page.locator('main').getByRole('button', { name: 'Move copies off worker-1' }).click();
+	const dialog = page.getByRole('dialog');
+	await expect(dialog.getByRole('button', { name: 'Move 2 copies' })).toBeVisible();
+	await expect(dialog.getByRole('listitem')).toHaveCount(2);
+	await expect(dialog.getByRole('listitem').filter({ hasText: 'data' })).toHaveCount(2);
+});
+
 test('a caller who may read but not repair is offered no repair', async ({ page }) => {
 	await setScenario(page, 'replicatedreadonly');
 	await login(page);

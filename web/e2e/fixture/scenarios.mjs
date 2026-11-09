@@ -1752,6 +1752,21 @@ const replicatedsplit = {
 		),
 	},
 };
+// Two claims no VM holds, named alike in different namespaces.
+const replicatedalike = {
+	...replicated,
+	name: 'replicatedalike',
+	replication: {
+		...placement,
+		volumes: ['web-prod', 'db-prod'].map((ns) =>
+			volume(`pvc-${ns}`, ns, 'data', 10, 'nvme', [
+				copy('worker-1'),
+				copy('worker-2'),
+				witness('worker-3'),
+			]),
+		),
+	},
+};
 const replicatedreadonly = {
 	...replicated,
 	name: 'replicatedreadonly',
@@ -1784,6 +1799,7 @@ const replicatedtenant = {
 
 export const scenarios = {
 	replicated,
+	replicatedalike,
 	replicatedsplit,
 	replicatedreadonly,
 	replicatedtenant,

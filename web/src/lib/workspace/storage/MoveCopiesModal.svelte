@@ -33,9 +33,9 @@
 
 	const count = $derived(plan?.moving.length ?? 0);
 	const copies = $derived(plural(count, 'copy', 'copies'));
-	const leaves = $derived((plan?.moving ?? []).map((v) => ({ name: nameOf(v) })));
+	const leaves = $derived((plan?.moving ?? []).map((v) => ({ volume: v, name: nameOf(v) })));
 	const stayed = $derived(
-		(plan?.skipped ?? []).map((s) => ({ name: nameOf(s.volume), why: s.reason })),
+		(plan?.skipped ?? []).map((s) => ({ volume: s.volume, name: nameOf(s.volume), why: s.reason })),
 	);
 
 	async function move() {
@@ -54,12 +54,12 @@
 	}
 </script>
 
-{#snippet listing(title: string, rows: { name: string; why?: string }[])}
+{#snippet listing(title: string, rows: { volume: string; name: string; why?: string }[])}
 	{#if rows.length}
 		<div class="flex flex-col gap-1.5">
 			<h3 class="text-xs font-bold text-ink-muted">{title}</h3>
 			<ul class="flex max-h-32 flex-col gap-1 overflow-y-auto text-xs">
-				{#each rows as r (r.name)}
+				{#each rows as r (r.volume)}
 					<li>
 						<strong class="text-ink">{r.name}</strong>{#if r.why}: {r.why}{/if}
 					</li>

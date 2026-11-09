@@ -194,7 +194,7 @@
 				{/if}
 				{#if protection.notes.length}
 					<ul class="flex flex-col gap-1 text-[13px] text-ink-muted">
-						{#each protection.notes as note (note)}<li>{note}</li>{/each}
+						{#each protection.notes as note, i (i)}<li>{note}</li>{/each}
 					</ul>
 				{/if}
 			</div>
