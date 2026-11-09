@@ -421,6 +421,17 @@ async function handleAPI(req, res, url) {
 	if (path === '/api/quotas') return sendJSON(res, 200, s.quotas ?? []);
 	if (path === '/api/templates') return sendJSON(res, 200, s.templates ?? { templates: [] });
 	if (path === '/api/drs') return sendJSON(res, 200, s.rebalancing);
+	if (path === '/api/modules') {
+		return sendJSON(res, 200, {
+			vms: true,
+			desktops: false,
+			networks: true,
+			rebalancing: true,
+			routes: false,
+			replicatedStorage: false,
+			...s.modules,
+		});
+	}
 	if (path === '/api/alarms') {
 		return s.alarms ? sendJSON(res, 200, s.alarms) : sendText(res, 503, 'alerts feed unavailable');
 	}

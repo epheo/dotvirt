@@ -16,6 +16,7 @@
 	import { drafts } from '#lib/state/drafts.svelte.js';
 	import { hostFacts } from '#lib/state/hosts.svelte.js';
 	import { inventory } from '#lib/state/inventory.svelte.js';
+	import { vmsOff } from '#lib/state/modules.svelte.js';
 	import { reviewCache } from '#lib/state/reviewCache.svelte.js';
 	import { ui } from '#lib/state/ui.svelte.js';
 	import AdoptBanner from '#lib/components/AdoptBanner.svelte';
@@ -58,7 +59,11 @@
 	} = $props();
 	const root = $derived(scope.kind === 'all');
 
-	const tabSet = $derived(containerTabs(scope, section));
+	const tabSet = $derived(
+		containerTabs(scope, section).filter(
+			(t) => !vmsOff() || (t.id !== 'vms' && t.id !== 'templates'),
+		),
+	);
 	const tab = $derived.by(() => {
 		const t = page.url.searchParams.get('tab');
 		return tabSet.some((x) => x.id === t) ? t! : 'summary';

@@ -5,6 +5,7 @@
 	import { clusterGate } from '#lib/gates.js';
 	import { scopeFromPath } from '#lib/nav.js';
 	import { inventory } from '#lib/state/inventory.svelte.js';
+	import { vmsOff } from '#lib/state/modules.svelte.js';
 	import { ui } from '#lib/state/ui.svelte.js';
 	import Button from './Button.svelte';
 	import { newFromHere } from './create/sheet.svelte.js';
@@ -43,7 +44,9 @@
 		(ui.modal = newFromHere(page.url.pathname + page.url.search, scopeNamespace, scopeNamespaces))}
 	disabled={!canCreate}
 	title={canCreate
-		? 'Create a VM, network, rule or project'
+		? vmsOff()
+			? 'Create a network, rule or project'
+			: 'Create a VM, network, rule or project'
 		: inventory.accessUnknown || platform.why === ACCESS_UNKNOWN
 			? ACCESS_UNKNOWN
 			: 'No project you may change yet'}

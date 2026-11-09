@@ -114,9 +114,9 @@ export const NETWORK_TABS = [
 
 // The Networking root's tab for a ?tab= value: the old names still deep-link
 // (its Summary was the topology, its Security the policy plane).
-export function networkingTab(raw: string | null): string {
+export function networkingTab(raw: string | null, tabs = NETWORKING_TABS): string {
 	if (raw === 'security') return 'firewall';
-	return NETWORKING_TABS.some((t) => t.id === raw) ? raw! : 'map';
+	return tabs.some((t) => t.id === raw) ? raw! : 'map';
 }
 
 // The Storage root's tabs: one section page, each tab one job. Disks, Images
@@ -130,8 +130,10 @@ export const STORAGE_TABS = [
 ] as const;
 export type StorageTab = (typeof STORAGE_TABS)[number]['id'];
 
-export const storageTab = (v: string | null): StorageTab =>
-	STORAGE_TABS.find((t) => t.id === v)?.id ?? 'library';
+export const storageTab = (
+	v: string | null,
+	tabs: readonly { id: StorageTab }[] = STORAGE_TABS,
+): StorageTab => tabs.find((t) => t.id === v)?.id ?? tabs[0].id;
 
 // A Storage root view: the tab plus its query (project scope, disk filters,
 // the open disk). The tab is always explicit so the breadcrumb and the tree,

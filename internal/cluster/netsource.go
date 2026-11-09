@@ -39,6 +39,18 @@ func (c *Client) HasAPIResource(gvr schema.GroupVersionResource) bool {
 	return ok
 }
 
+// HasAny reports whether any object of gvr exists; false when it is not served.
+func (c *Client) HasAny(ctx context.Context, gvr schema.GroupVersionResource) (bool, error) {
+	list, err := c.dyn.Resource(gvr).List(ctx, metav1.ListOptions{Limit: 1})
+	if apierrors.IsNotFound(err) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	return len(list.Items) > 0, nil
+}
+
 // ServesAPIResource is HasAPIResource that tells a definite absence (the group
 // version or the resource is not served) from a failed discovery read, which
 // returns its error.
