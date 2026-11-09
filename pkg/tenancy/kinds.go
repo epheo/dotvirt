@@ -19,8 +19,9 @@ type Kind struct {
 }
 
 // Kinds is every kind dotvirt's repos declare, spelled once. The app's
-// vocabulary, the AppProject whitelists and the adoption capture derive from it,
-// so a module adds its kinds here and nowhere else. Order is the whitelists'.
+// vocabulary and the AppProject whitelists derive from it. Adoption is opt-in:
+// a kind it should capture also needs a network-family row in model's resources.
+// Order is the whitelists'.
 var Kinds = []Kind{
 	{Group: "kubevirt.io", Version: "v1", Kind: "VirtualMachine", Resource: "virtualmachines", Tenant: true},
 	{Group: "cdi.kubevirt.io", Version: "v1beta1", Kind: "DataVolume", Resource: "datavolumes", Tenant: true},
