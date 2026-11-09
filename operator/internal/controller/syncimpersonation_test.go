@@ -109,8 +109,26 @@ func syncCond(t *testing.T, c client.Client, dv *dotvirtv1alpha1.Dotvirt) *metav
 }
 
 func optIn(dv *dotvirtv1alpha1.Dotvirt, ignoreForeign bool) *dotvirtv1alpha1.Dotvirt {
-	dv.Spec.ArgoCD.SyncImpersonation = dotvirtv1alpha1.SyncImpersonationSpec{Enabled: true, IgnoreForeignApplications: ignoreForeign}
+	dv.Spec.ArgoCD.SyncImpersonation = dotvirtv1alpha1.SyncImpersonationSpec{Enabled: new(true), IgnoreForeignApplications: ignoreForeign}
 	return dv
+}
+
+func optOut(dv *dotvirtv1alpha1.Dotvirt) *dotvirtv1alpha1.Dotvirt {
+	dv.Spec.ArgoCD.SyncImpersonation.Enabled = new(false)
+	return dv
+}
+
+// A CR that says nothing gets impersonation: only an explicit false opts out.
+func TestSyncImpersonationIsOnWhenUnset(t *testing.T) {
+	dv := testCR()
+	var n atomic.Int64
+	c := testBuilder(t).WithObjects(dv, argoCDInstance(nil), projectNS("b", "team-b", "dotvirt/team-b.git")).
+		WithInterceptorFuncs(reviews(granted(map[string][]string{"dotvirt-p-team-b": {"b"}}), &n)).
+		WithReturnManagedFields().Build()
+	reconcileOnce(t, newReconciler(c, depsOK), dv)
+	if got := extraConfig(t, c)[install.SyncImpersonationKey]; got != "true" {
+		t.Errorf("%s = %v, want true", install.SyncImpersonationKey, got)
+	}
 }
 
 func foreignApp(ns, name, project, destNS string) *unstructured.Unstructured {
@@ -166,6 +184,7 @@ func TestSyncAccountsRendered(t *testing.T) {
 	}))
 	defer forgeDown.Close()
 	dv, creds := byoForgeCR(forgeDown.URL)
+	optOut(dv)
 	var n atomic.Int64
 	c := testBuilder(t).WithObjects(dv, creds, projectNS("team-a", "team-a", "dotvirt/team-a.git")).
 		WithInterceptorFuncs(reviews(granted(nil), &n)).Build()
@@ -301,7 +320,7 @@ func TestSyncImpersonationFlipAndRollback(t *testing.T) {
 		t.Errorf("%d reviews once the verdict aged out, want 36", got)
 	}
 
-	stored := setSpec(t, c, dv, func(d *dotvirtv1alpha1.Dotvirt) { d.Spec.ArgoCD.SyncImpersonation.Enabled = false })
+	stored := setSpec(t, c, dv, func(d *dotvirtv1alpha1.Dotvirt) { d.Spec.ArgoCD.SyncImpersonation.Enabled = new(false) })
 	reconcileOnce(t, r, stored)
 	if extra := extraConfig(t, c); extra[install.SyncImpersonationKey] != nil {
 		t.Errorf("opted out, extraConfig = %v", extra)
@@ -497,7 +516,7 @@ func TestSyncImpersonationStaysOn(t *testing.T) {
 		t.Errorf("requeue = %v; Degraded waits for the drift timer", res.RequeueAfter)
 	}
 
-	stored := setSpec(t, c, dv, func(d *dotvirtv1alpha1.Dotvirt) { d.Spec.ArgoCD.SyncImpersonation.Enabled = false })
+	stored := setSpec(t, c, dv, func(d *dotvirtv1alpha1.Dotvirt) { d.Spec.ArgoCD.SyncImpersonation.Enabled = new(false) })
 	reconcileOnce(t, r, stored)
 	if extraConfig(t, c)[install.SyncImpersonationKey] != "true" {
 		t.Error("removed a key the operator did not set")
@@ -642,7 +661,7 @@ func TestSyncImpersonationFollowsInstance(t *testing.T) {
 // tenant repo's DataVolume could clone a disk out of any namespace, so the
 // condition says so.
 func TestSyncImpersonationWarnsCloneAnywhere(t *testing.T) {
-	dv := testCR()
+	dv := optOut(testCR())
 	var n atomic.Int64
 	c := testBuilder(t).WithObjects(dv, projectNS("team-a", "team-a", "dotvirt/team-a.git")).
 		WithInterceptorFuncs(reviews(func(account string, a *authzv1.ResourceAttributes) bool {

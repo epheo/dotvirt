@@ -100,8 +100,8 @@ owns one status condition; a phase that fails or waits records why there, so
    impersonation is on (below): `<argoNS>/dotvirt-p-<project>` for a tenant,
    `<argoNS>/dotvirt-platform-sync` for the platform tier. Names only: Argo
    impersonates by username and RBAC binds by name, so no object is created.
-6. **Sync impersonation** (`SyncImpersonationReady`): opt-in, see
-   [Sync impersonation](#sync-impersonation-optional). Best-effort: never a halt,
+6. **Sync impersonation** (`SyncImpersonationReady`): on unless opted out, see
+   [Sync impersonation](#sync-impersonation). Best-effort: never a halt,
    never `Available`.
 7. **Platform repo** (`ForgeRepoReady`): ensures the platform git repo exists
    (`forge.EnsureRepo`, the imperative step a declarative installer can't do) and,
@@ -219,13 +219,14 @@ Namespaces that repo declares and `bind` on `admin` and `dotvirt-tenant-egress`,
 roles project grants name. The controller stays a subject while impersonation is
 optional, since it applies every tier while it is off.
 
-## Sync impersonation (optional)
+## Sync impersonation
 
-Off by default, Argo applies every repo with its controller's own account.
+Without it, Argo applies every repo with its controller's own account.
 A project's AppProject keeps its repo to its own namespaces and kinds, but inside
 them Argo writes with the controller's rights, not the project's.
-`spec.argocd.syncImpersonation.enabled: true` turns on Argo CD's sync
-impersonation, so each Application syncs as its tier's ServiceAccount:
+So the operator turns on Argo CD's sync impersonation unless
+`spec.argocd.syncImpersonation.enabled: false` opts out, and each Application syncs
+as its tier's ServiceAccount:
 
 - `dotvirt-p-<project>` holds what the platform repo grants the project in each
   of its namespaces, beside the project's people: `<ns>-admins` (the `admin` role,
@@ -295,7 +296,7 @@ not manage, and the argocd-operator copies `extraConfig` into `argocd-cm`.
 `argocd-cm` by hand.
 
 `status.syncImpersonationInstance` records the resource the operator set it on. The
-operator takes the key off there when `enabled` turns false, when `spec.argocd`
+operator takes the key off there when `enabled` is set to false, when `spec.argocd`
 moves to another instance, and when the CR is deleted, before prune removes
 dotvirt's AppProjects. A cleanup that fails keeps the CR, and `Available` says why
 (`CleanupFailed`).
@@ -327,7 +328,10 @@ seen within that, or at once after a spec edit. A pass held back on something a
 person fixes comes back every 5 minutes; one that set the key, each minute until
 `argocd-cm` carries it. While off, one review per 5 minutes.
 
-### Turning it on
+### Upgrading an install that had it off
+
+Nothing changes until every condition above holds: until then `SyncImpersonationReady`
+says `NotReady` and lists what is missing, and the controller keeps syncing.
 
 1. Upgrade the operator and the app image together: the app stages the sync grants
    only once the operator hands it the ArgoCD namespace.
@@ -339,11 +343,11 @@ person fixes comes back every 5 minutes; one that set the key, each minute until
    other objects is refused: edit it in git.
 3. Move Applications off the shared `dotvirt-tenants` AppProject (the upgrade does
    this), and map an account for every other Application on the instance.
-4. Set `spec.argocd.syncImpersonation.enabled: true` and read
-   `SyncImpersonationReady`: `NotReady` lists what is missing, `Pending` means set,
-   `Enabled` means on.
+4. Read `SyncImpersonationReady`: `NotReady` lists what is missing, `Pending` means
+   set, `Enabled` means on. Without an ArgoCD resource, as with community Argo CD
+   installed from its manifests, it stops at `ManualStep` until the key is set by hand.
 
-To roll back, set `enabled: false`, or delete the CR.
+To stay off, or roll back, set `enabled: false`.
 
 ### Real-loop scenario (not enabled in the nightly)
 
@@ -351,14 +355,13 @@ On the MicroShift real loop (`hack/e2e-microshift.sh`: community Argo CD, whose
 controller holds every right, and no ArgoCD resource):
 
 1. After the project create and merge, expect `SyncImpersonationReady`
-   `False`/`CloneAnywhere`.
-2. Set `enabled: true`; expect `ManualStep`, the project's grants having come with it.
-3. Set `application.sync.impersonation.enabled: "true"` in `argocd/argocd-cm`;
+   `False`/`ManualStep`, the project's grants having come with it.
+2. Set `application.sync.impersonation.enabled: "true"` in `argocd/argocd-cm`;
    expect `Enabled`.
-4. Run `hack/e2e-roundtrip.sh`: the VM syncs.
-5. Commit a DataVolume cloning a PVC from a namespace outside the project: CDI
+3. Run `hack/e2e-roundtrip.sh`: the VM syncs.
+4. Commit a DataVolume cloning a PVC from a namespace outside the project: CDI
    refuses it, since it authorizes `datavolumes/source` as the project's account.
-6. Delete the project's `<ns>-admins` RoleBinding: the next VM sync fails and
+5. Delete the project's `<ns>-admins` RoleBinding: the next VM sync fails and
    `SyncImpersonationReady` turns `Degraded` naming the project (within 10 minutes,
    or at once after a CR spec edit).
 

@@ -104,7 +104,7 @@ func (r *DotvirtReconciler) syncImpersonation(ctx context.Context, dv *dotvirtv1
 	}
 	where := "ArgoCD " + target
 	opt := dv.Spec.ArgoCD.SyncImpersonation
-	if !opt.Enabled {
+	if !opt.On() {
 		if owned {
 			if err := r.applyShared(ctx, install.ArgoCDSyncImpersonation(inst.GetName(), inst.GetNamespace(), false)); err != nil {
 				return failed(fmt.Errorf("remove %s from %s: %w", install.SyncImpersonationKey, where, err))
