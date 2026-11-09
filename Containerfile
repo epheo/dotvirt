@@ -4,7 +4,7 @@
 # --- Stage 1: build the SPA (adapter-static → /web/build) ---
 # Pinned to the build host's arch (the SPA output is arch-neutral static assets, so there's
 # no point emulating it per target platform).
-FROM --platform=$BUILDPLATFORM docker.io/library/node:26-alpine@sha256:c6ad9e9c1d80f6eb607c26b4b0a132ff7a2344fad1c78ea3baa2a7d4c8de6d94 AS web
+FROM --platform=$BUILDPLATFORM docker.io/library/node:26-alpine@sha256:8996bb5821d62a8fd9bb27c1cb07462f3fdce6e47d640c6a881ead0b064ce216 AS web
 WORKDIR /web
 COPY web/package.json web/package-lock.json ./
 RUN --mount=type=cache,target=/root/.npm npm ci
@@ -14,7 +14,7 @@ RUN npm run build
 # --- Stage 2: build the static Go binary ---
 # CGO is disabled, so the Go toolchain cross-compiles for $TARGETARCH on the native build
 # host (no QEMU); buildx sets TARGETOS/TARGETARCH per target platform.
-FROM --platform=$BUILDPLATFORM docker.io/library/golang:1.27.3@sha256:f20d83a83e18dbd2a4714b8ffd4b30b287b6243962dd75608e86abcc63ba4efc AS build
+FROM --platform=$BUILDPLATFORM docker.io/library/golang:1.27.3@sha256:e519d3b0a5b285e5aa53ab9eef02bc6bbb9cb04608389b743a136a9ce75f0d1e AS build
 ENV GOTOOLCHAIN=auto CGO_ENABLED=0 GOFLAGS="-buildvcs=false -mod=readonly" \
     GOPROXY="https://proxy.golang.org|direct"
 WORKDIR /src

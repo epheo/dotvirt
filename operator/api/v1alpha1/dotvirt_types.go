@@ -104,25 +104,29 @@ type ArgoCDSpec struct {
 	ServerURL string `json:"serverURL,omitempty"`
 	// SyncImpersonation makes ArgoCD sync each dotvirt Application as its
 	// project's own ServiceAccount, which holds exactly the project's grants,
-	// instead of the shared controller's account. Off by default.
+	// instead of the shared controller's account. On by default.
 	SyncImpersonation SyncImpersonationSpec `json:"syncImpersonation,omitempty"`
 }
 
-// SyncImpersonationSpec opts the ArgoCD instance into Argo CD's sync
-// impersonation (application.sync.impersonation.enabled).
+// SyncImpersonationSpec is the ArgoCD instance's Argo CD sync impersonation
+// (application.sync.impersonation.enabled).
 type SyncImpersonationSpec struct {
-	// Enabled turns impersonation on once every project's sync account holds its
-	// grants and nothing else on the instance would stop syncing; the
-	// SyncImpersonationReady condition says what is missing. The setting is
-	// instance-wide: every Application on that ArgoCD then syncs as the
-	// ServiceAccount its AppProject names, or not at all. Turning it off removes
-	// the setting.
-	Enabled bool `json:"enabled,omitempty"`
+	// Enabled, true when unset, turns impersonation on once every project's sync
+	// account holds its grants and nothing else on the instance would stop
+	// syncing; the SyncImpersonationReady condition says what is missing. The
+	// setting is instance-wide: every Application on that ArgoCD then syncs as
+	// the ServiceAccount its AppProject names, or not at all. false removes the
+	// setting.
+	Enabled *bool `json:"enabled,omitempty"`
 	// IgnoreForeignApplications turns impersonation on although the instance
 	// also syncs Applications outside dotvirt's AppProjects. Those fail to sync
 	// until their AppProjects name a ServiceAccount (destinationServiceAccounts).
 	IgnoreForeignApplications bool `json:"ignoreForeignApplications,omitempty"`
 }
+
+// On reports whether impersonation is asked for: unset is. A tenant repo should
+// apply only what its project may without anyone having to ask for that.
+func (s SyncImpersonationSpec) On() bool { return s.Enabled == nil || *s.Enabled }
 
 // IngressSpec controls how the UI is exposed.
 // +kubebuilder:validation:XValidation:rule="!has(self.type) || self.type != 'gateway' || has(self.gateway)",message="type gateway needs spec.ingress.gateway"
