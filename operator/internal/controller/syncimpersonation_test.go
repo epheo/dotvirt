@@ -131,6 +131,22 @@ func TestSyncImpersonationIsOnWhenUnset(t *testing.T) {
 	}
 }
 
+// Another team's Application must not stop syncing on a flip nobody chose.
+func TestAnUnsetFlipWaitsOnApplicationsItCannotCheck(t *testing.T) {
+	dv := testCR()
+	var n atomic.Int64
+	c := testBuilder(t).WithObjects(dv, remote("default"), argoCDInstance(nil), projectNS("team-a", "team-a", "dotvirt/team-a.git"),
+		appProject("default", map[string]any{"server": "https://edge.example", "namespace": "*", "defaultServiceAccount": "argocd:edge-sync"})).
+		WithInterceptorFuncs(reviews(granted(map[string][]string{"dotvirt-p-team-a": {"team-a"}}), &n)).Build()
+	reconcileOnce(t, newReconciler(c, depsOK), dv)
+	if got := extraConfig(t, c)[install.SyncImpersonationKey]; got != nil {
+		t.Errorf("%s = %v, want it left unset", install.SyncImpersonationKey, got)
+	}
+	if got := syncCond(t, c, dv); got.Reason != "NotReady" || !strings.Contains(got.Message, "enabled: true") {
+		t.Errorf("condition = %+v, want NotReady naming how to accept it", got)
+	}
+}
+
 func foreignApp(ns, name, project, destNS string) *unstructured.Unstructured {
 	app := argoObj("Application", ns, name, nil)
 	app.Object["spec"] = map[string]any{"project": project, "destination": map[string]any{"server": install.InClusterServer, "namespace": destNS}}

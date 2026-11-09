@@ -284,7 +284,8 @@ ServiceAccount for it stops syncing. So the operator turns it on only when:
   any other when its AppProject maps nothing for its namespace, or maps it on every
   server (`*`). When the only entries for its namespace name specific servers, it
   is said, not counted: its server is in a cluster Secret, which the operator does
-  not read.
+  not read. With `enabled` unset it holds the flip back, since nobody has read that;
+  `enabled: true` accepts it.
 
 It then server-side-applies that one key into the ArgoCD resource's
 `spec.extraConfig` (`openshift-gitops` on OpenShift, `argocd` elsewhere), owning
@@ -331,7 +332,13 @@ person fixes comes back every 5 minutes; one that set the key, each minute until
 ### Upgrading an install that had it off
 
 Nothing changes until every condition above holds: until then `SyncImpersonationReady`
-says `NotReady` and lists what is missing, and the controller keeps syncing.
+says `NotReady` and lists what is missing, and the controller keeps syncing. Once they
+hold, an install that never set `enabled` flips by itself. Before upgrading:
+
+- Check clone sources, the one thing the conditions cannot read (see above): one that
+  syncs today and fails once on will not be held back.
+- If you opted out, read the CR: `enabled: false` set when the CR was created was
+  dropped when the operator added its finalizer, and reads as unset. Set it again.
 
 1. Upgrade the operator and the app image together: the app stages the sync grants
    only once the operator hands it the ArgoCD namespace.

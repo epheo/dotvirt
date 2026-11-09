@@ -155,6 +155,10 @@ func (r *DotvirtReconciler) syncImpersonation(ctx context.Context, dv *dotvirtv1
 	}
 	if !opt.IgnoreForeignApplications {
 		blockers = append(blockers, foreignProblem(v.foreign)...)
+		// An explicit true has read the unchecked note; on the default nobody has.
+		if opt.Enabled == nil && len(v.unresolved) > 0 {
+			blockers = append(blockers, fmt.Sprintf("Applications naming their cluster by name (%s) may stop syncing and cannot be checked: set spec.argocd.syncImpersonation.enabled: true to accept that", listSome(v.unresolved)))
+		}
 	}
 	blockers = append(append(blockers, v.missing...), v.leaks...)
 	if len(blockers) > 0 {
