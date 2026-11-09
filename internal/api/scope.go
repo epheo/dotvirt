@@ -416,6 +416,9 @@ type ssarRef struct{ group, resource string }
 // metrics, node ops in the task feed).
 var ssarNodes = ssarRef{resource: "nodes"}
 
+// ssarClaims is reading a namespace's PersistentVolumeClaims.
+var ssarClaims = ssarRef{resource: "persistentvolumeclaims"}
+
 // replicationRead is everything GET /api/storage/replication shows. Those
 // kinds are cluster-scoped and the snapshot behind it is the SA's, so each is
 // asked of the caller.

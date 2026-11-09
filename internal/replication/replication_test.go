@@ -1,12 +1,21 @@
 package replication
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
+	"time"
 
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/apimachinery/pkg/watch"
+	"k8s.io/client-go/tools/cache"
 
 	"github.com/epheo/dotvirt/internal/eventbus"
 	"github.com/epheo/dotvirt/internal/model"
@@ -53,10 +62,16 @@ func ready(reports ...any) map[string]any {
 	return map[string]any{"phase": "Ready", "primary": "host-1", "replicas": reports}
 }
 
+// pv is a PersistentVolume whose name is its CSI handle, as a CSI name that
+// fits leaves it.
 func pv(name, driver, phase, ns, claimName string) *unstructured.Unstructured {
+	return pvHandle(name, name, driver, phase, ns, claimName)
+}
+
+func pvHandle(name, handle, driver, phase, ns, claimName string) *unstructured.Unstructured {
 	return obj(name, map[string]any{
 		"spec": map[string]any{
-			"csi":      map[string]any{"driver": driver},
+			"csi":      map[string]any{"driver": driver, "volumeHandle": handle},
 			"claimRef": map[string]any{"namespace": ns, "name": claimName},
 		},
 		"status": map[string]any{"phase": phase},
@@ -228,6 +243,39 @@ func TestAnotherDriversVolumeIsNotJoined(t *testing.T) {
 	}
 }
 
+// The documented key is the handle: a PV's name is the provisioner's choice.
+func TestAClaimJoinsItsVolumeByTheHandle(t *testing.T) {
+	s, _ := newSnapshot(t)
+	mustAdd(t, s.volumes, healthyTwoCopies("mapped-name-1a2b"))
+	mustAdd(t, s.volumes, healthyTwoCopies("pvc-other"))
+	mustAdd(t, s.claims, pvHandle("pvc-other", "mapped-name-1a2b", driver, "Bound", "team-a", "root"))
+
+	got := s.Protection([]string{"team-a"})
+	if len(got) != 1 || got[0].Claim != "root" {
+		t.Fatalf("protection = %+v", got)
+	}
+	for _, v := range s.Overview().Volumes {
+		if v.Name == "pvc-other" && v.Claim != "" {
+			t.Fatalf("a PV's name joined another Volume: %+v", v)
+		}
+		if v.Name == "mapped-name-1a2b" && v.Claim != "root" {
+			t.Fatalf("the handle's Volume lost its claim: %+v", v)
+		}
+	}
+}
+
+func TestDeletingAnotherDriversPVLeavesTheJoin(t *testing.T) {
+	s, _ := newSnapshot(t)
+	mustAdd(t, s.volumes, healthyTwoCopies("pvc-a"))
+	mustAdd(t, s.claims, pv("pvc-a", driver, "Bound", "team-a", "root"))
+	if err := s.claims.Delete(pvHandle("elsewhere", "pvc-a", "other.csi", "Bound", "team-b", "x")); err != nil {
+		t.Fatal(err)
+	}
+	if got := s.Protection([]string{"team-a"}); len(got) != 1 {
+		t.Fatalf("protection = %+v", got)
+	}
+}
+
 func TestOnlyAMoveTheConsoleShowsPublishes(t *testing.T) {
 	s, bus := newSnapshot(t)
 	if err := s.volumes.Add(healthyTwoCopies("pvc-a")); err != nil {
@@ -319,13 +367,14 @@ func TestOverviewJoinsTheClaimAndPools(t *testing.T) {
 	}
 }
 
-func TestSyncedWaitsForEveryKind(t *testing.T) {
+// An r-drbd older than NodeDisks never lists it: it must not hold the tab back.
+func TestSyncedWaitsForEveryKindBesidesNodeDisks(t *testing.T) {
 	s, _ := newSnapshot(t)
 	for i, table := range []interface {
 		Replace([]any, string) error
-	}{s.volumes, s.pools, s.hosts, s.claims} {
+	}{s.volumes, s.pools, s.claims} {
 		if s.Overview().Synced {
-			t.Fatalf("synced after %d of 4 lists", i)
+			t.Fatalf("synced after %d of 3 lists", i)
 		}
 		if err := table.Replace(nil, "1"); err != nil {
 			t.Fatal(err)
@@ -333,5 +382,81 @@ func TestSyncedWaitsForEveryKind(t *testing.T) {
 	}
 	if !s.Overview().Synced {
 		t.Fatal("not synced after every list")
+	}
+}
+
+type fakeSource struct {
+	mu     sync.Mutex
+	starts map[string]int
+	ended  map[string]int
+}
+
+func (f *fakeSource) HasAPIResource(schema.GroupVersionResource) bool { return true }
+
+func (f *fakeSource) Can(context.Context, string, string, string, string) (bool, error) {
+	return true, nil
+}
+
+func (f *fakeSource) DynamicListWatch(gvr schema.GroupVersionResource) *cache.ListWatch {
+	return &cache.ListWatch{
+		ListWithContextFunc: func(context.Context, metav1.ListOptions) (runtime.Object, error) {
+			return &unstructured.UnstructuredList{Object: map[string]any{"apiVersion": "v1", "kind": "List"}}, nil
+		},
+		WatchFuncWithContext: func(ctx context.Context, _ metav1.ListOptions) (watch.Interface, error) {
+			f.mu.Lock()
+			f.starts[gvr.Resource]++
+			f.mu.Unlock()
+			w := watch.NewFake()
+			go func() {
+				<-ctx.Done()
+				f.mu.Lock()
+				f.ended[gvr.Resource]++
+				f.mu.Unlock()
+				w.Stop()
+			}()
+			return w, nil
+		},
+	}
+}
+
+func (f *fakeSource) running() bool {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return len(f.starts) == 4
+}
+
+func (f *fakeSource) stopped() bool {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return len(f.ended) == 4
+}
+
+func eventually(t *testing.T, what string, cond func() bool) {
+	t.Helper()
+	for deadline := time.Now().Add(5 * time.Second); !cond(); {
+		if time.Now().After(deadline) {
+			t.Fatalf("never: %s", what)
+		}
+		time.Sleep(time.Millisecond)
+	}
+}
+
+func TestTheModuleGoingOffStopsTheWatches(t *testing.T) {
+	src := &fakeSource{starts: map[string]int{}, ended: map[string]int{}}
+	var on atomic.Bool
+	on.Store(true)
+	saved := pace
+	pace = time.Millisecond
+	t.Cleanup(func() { pace = saved })
+	s := New(src, eventbus.New(), on.Load)
+	s.Run(t.Context())
+	eventually(t, "every watch started", src.running)
+	eventually(t, "synced", func() bool { return s.Overview().Synced })
+
+	on.Store(false)
+	eventually(t, "every watch ended", src.stopped)
+	eventually(t, "not started", func() bool { return !s.Started() })
+	if s.Overview().Synced {
+		t.Fatal("a stopped module reads as synced")
 	}
 }

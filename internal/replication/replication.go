@@ -46,6 +46,7 @@ var (
 
 // Source is the cluster as the snapshot reads it; *cluster.Client in production.
 type Source interface {
+	HasAPIResource(schema.GroupVersionResource) bool
 	DynamicListWatch(schema.GroupVersionResource) *cache.ListWatch
 	Can(ctx context.Context, verb, group, resource, namespace string) (bool, error)
 }
@@ -53,7 +54,7 @@ type Source interface {
 // pace is how often an idle snapshot rereads the module flag: an in-memory read
 // on a cluster without r-drbd, one review of the SA's rights where an operator
 // release has not granted them yet.
-const pace = 10 * time.Second
+var pace = 10 * time.Second
 
 // claim is who a bound PersistentVolume serves.
 type claim struct{ Namespace, Name string }
@@ -90,36 +91,67 @@ func New(src Source, bus *eventbus.Bus, served func() bool) *Snapshot {
 	s.volumes = &table[model.ReplicatedVolume]{s: s, decode: decodeVolume, touch: s.touchVolume}
 	s.pools = &table[model.ReplicationPool]{s: s, decode: decodePool, touch: touchTotal[model.ReplicationPool](s)}
 	s.hosts = &table[host]{s: s, decode: decodeHost, touch: touchTotal[host](s)}
-	s.claims = &table[claim]{s: s, decode: decodeClaim, touch: s.touchClaim}
+	s.claims = &table[claim]{s: s, decode: decodeClaim, touch: s.touchClaim, key: claimKey}
 	for i := range s.healthy {
 		s.healthy[i].Store(true)
 	}
 	return s
 }
 
-// Run waits for the module and the SA's rights, then starts one reflector per
-// kind for the rest of the process, and returns at once.
+// Run keeps one reflector per kind running while the module is on, and returns
+// at once. Off stops them, so an uninstalled r-drbd leaves no watch retrying.
 func (s *Snapshot) Run(ctx context.Context) {
 	go func() {
 		t := time.NewTicker(pace)
 		defer t.Stop()
-		for !s.ready(ctx) {
-			select {
-			case <-ctx.Done():
+		until := func(cond func() bool) bool {
+			for !cond() {
+				select {
+				case <-ctx.Done():
+					return false
+				case <-t.C:
+				}
+			}
+			return true
+		}
+		for until(func() bool { return s.ready(ctx) }) {
+			run, stop := context.WithCancel(ctx)
+			s.start(run)
+			off := until(func() bool { return !s.served() })
+			stop()
+			s.clear()
+			if !off {
 				return
-			case <-t.C:
 			}
 		}
-		s.started.Store(true)
-		s.publish()
-		for i, w := range []struct {
-			gvr   schema.GroupVersionResource
-			store cache.Store
-		}{{GVRVolume, s.volumes}, {GVRPool, s.pools}, {GVRNodeDisks, s.hosts}, {GVRPV, s.claims}} {
-			lw := reflect.TrackHealth(s.src.DynamicListWatch(w.gvr), &s.healthy[i], s.flipped)
-			reflect.Run(ctx, lw, w.store)
-		}
 	}()
+}
+
+// start gates each kind on its own: a release older than one of them must not
+// leave that watch failing.
+func (s *Snapshot) start(ctx context.Context) {
+	s.started.Store(true)
+	s.publish()
+	for i, w := range []struct {
+		gvr   schema.GroupVersionResource
+		store cache.Store
+	}{{GVRVolume, s.volumes}, {GVRPool, s.pools}, {GVRNodeDisks, s.hosts}, {GVRPV, s.claims}} {
+		reflect.RunWhenServed(ctx, s.src.HasAPIResource, w.gvr, s.src.DynamicListWatch(w.gvr), w.store, &s.healthy[i], s.flipped)
+	}
+}
+
+// clear forgets what a stopped module's watches left.
+func (s *Snapshot) clear() {
+	s.started.Store(false)
+	s.mu.Lock()
+	s.volumes.rows, s.pools.rows, s.hosts.rows, s.claims.rows = nil, nil, nil, nil
+	s.total++
+	s.mu.Unlock()
+	s.volumes.synced.Store(false)
+	s.pools.synced.Store(false)
+	s.hosts.synced.Store(false)
+	s.claims.synced.Store(false)
+	s.publish()
 }
 
 func (s *Snapshot) ready(ctx context.Context) bool {
@@ -199,6 +231,7 @@ type table[V any] struct {
 	s      *Snapshot
 	decode func(*unstructured.Unstructured) (V, bool)
 	touch  func(name string, old, now *V)
+	key    func(*unstructured.Unstructured) string // a row's name when not the object's; empty skips it
 	rows   map[string]V
 	synced atomic.Bool
 }
@@ -206,10 +239,17 @@ type table[V any] struct {
 func (t *table[V]) Add(obj any) error    { t.put(obj); return nil }
 func (t *table[V]) Update(obj any) error { t.put(obj); return nil }
 
+func (t *table[V]) keyOf(u *unstructured.Unstructured) string {
+	if t.key != nil {
+		return t.key(u)
+	}
+	return u.GetName()
+}
+
 func (t *table[V]) Delete(obj any) error {
-	if m, ok := obj.(*unstructured.Unstructured); ok {
+	if u, ok := obj.(*unstructured.Unstructured); ok && t.keyOf(u) != "" {
 		t.s.mu.Lock()
-		moved := t.drop(m.GetName())
+		moved := t.drop(t.keyOf(u))
 		t.s.mu.Unlock()
 		if moved {
 			t.s.publish()
@@ -223,13 +263,17 @@ func (t *table[V]) put(obj any) {
 	if !ok {
 		return
 	}
+	name := t.keyOf(u)
+	if name == "" {
+		return
+	}
 	now, keep := t.decode(u)
 	t.s.mu.Lock()
 	var moved bool
 	if keep {
-		moved = t.set(u.GetName(), now)
+		moved = t.set(name, now)
 	} else {
-		moved = t.drop(u.GetName())
+		moved = t.drop(name)
 	}
 	t.s.mu.Unlock()
 	if moved {
@@ -270,9 +314,9 @@ func (t *table[V]) drop(name string) bool {
 func (t *table[V]) Replace(list []any, _ string) error {
 	next := make(map[string]V, len(list))
 	for _, obj := range list {
-		if u, ok := obj.(*unstructured.Unstructured); ok {
+		if u, ok := obj.(*unstructured.Unstructured); ok && t.keyOf(u) != "" {
 			if v, keep := t.decode(u); keep {
-				next[u.GetName()] = v
+				next[t.keyOf(u)] = v
 			}
 		}
 	}
@@ -478,7 +522,8 @@ func decodeHost(u *unstructured.Unstructured) (host, bool) {
 type pvDoc struct {
 	Spec struct {
 		CSI struct {
-			Driver string `json:"driver"`
+			Driver       string `json:"driver"`
+			VolumeHandle string `json:"volumeHandle"`
 		} `json:"csi"`
 		ClaimRef struct {
 			Namespace string `json:"namespace"`
@@ -490,14 +535,23 @@ type pvDoc struct {
 	} `json:"status"`
 }
 
-// decodeClaim keeps r-drbd's PersistentVolumes. Only a Bound one names a
+// claimKey joins a PersistentVolume to its Volume by the CSI handle. The PV's
+// own name is the provisioner's: r-drbd maps a CSI name that does not fit, and
+// an admin may name a PV after another Volume. Empty for another driver's PV,
+// whose handle may equal a Volume's name.
+func claimKey(u *unstructured.Unstructured) string {
+	doc := decode[pvDoc](u)
+	if doc.Spec.CSI.Driver != driver {
+		return ""
+	}
+	return doc.Spec.CSI.VolumeHandle
+}
+
+// decodeClaim reads who a PersistentVolume serves. Only a Bound one names a
 // claim: a Released one still carries the old claimRef, and its namespace may
 // have changed hands since.
 func decodeClaim(u *unstructured.Unstructured) (claim, bool) {
 	doc := decode[pvDoc](u)
-	if doc.Spec.CSI.Driver != driver {
-		return claim{}, false
-	}
 	if doc.Status.Phase != "Bound" {
 		return claim{}, true
 	}
@@ -510,7 +564,8 @@ func (s *Snapshot) Overview() model.Replication {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	out := model.Replication{
-		Synced:  s.volumes.synced.Load() && s.pools.synced.Load() && s.hosts.synced.Load() && s.claims.synced.Load(),
+		// Not NodeDisks: blank disks only enrich, and an older r-drbd has none.
+		Synced:  s.volumes.synced.Load() && s.pools.synced.Load() && s.claims.synced.Load(),
 		Stale:   !reflect.AllHealthy(s.healthy[:]),
 		Pools:   make([]model.ReplicationPool, 0, len(s.pools.rows)),
 		Volumes: make([]model.ReplicatedVolume, 0, len(s.volumes.rows)),
