@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -28,6 +29,7 @@ import (
 type replicationSource struct {
 	mu      sync.Mutex
 	volumes *watch.FakeWatcher
+	listed  *unstructured.Unstructured // the Volume served; nil is one in sync
 }
 
 func (*replicationSource) HasAPIResource(schema.GroupVersionResource) bool { return true }
@@ -55,6 +57,9 @@ func (f *replicationSource) DynamicListWatch(gvr schema.GroupVersionResource) *c
 	switch gvr {
 	case replication.GVRVolume:
 		items = []unstructured.Unstructured{*replicatedVolume("UpToDate")}
+		if f.listed != nil {
+			items = []unstructured.Unstructured{*f.listed}
+		}
 	case replication.GVRPV:
 		pv := unstructured.Unstructured{Object: map[string]any{
 			"apiVersion": "v1", "kind": "PersistentVolume",
@@ -196,5 +201,155 @@ func TestProtectionNeedsTheRightToListClaims(t *testing.T) {
 				t.Fatalf("version %d then %d, want moved=%v", before, after, c.moves)
 			}
 		})
+	}
+}
+
+func twoCopies(splitBrain bool) *unstructured.Unstructured {
+	status := map[string]any{"phase": "Ready", "replicas": []any{
+		map[string]any{"node": "host-1", "present": true, "diskState": "UpToDate"},
+		map[string]any{"node": "host-2", "present": true, "diskState": "UpToDate"},
+	}}
+	if splitBrain {
+		status["conditions"] = []any{map[string]any{"type": "SplitBrain", "status": "True"}}
+	}
+	u := &unstructured.Unstructured{Object: map[string]any{
+		"apiVersion": "r-drbd.io/v1alpha1", "kind": "Volume",
+		"spec": map[string]any{"sizeBytes": int64(1), "replicas": int64(2), "assignment": map[string]any{
+			"replicas": []any{
+				map[string]any{"node": "host-1", "role": "diskful"},
+				map[string]any{"node": "host-2", "role": "diskful"},
+			},
+		}},
+		"status": status,
+	}}
+	u.SetName("pvc-1")
+	return u
+}
+
+const volumePath = "/apis/r-drbd.io/v1alpha1/volumes/pvc-1"
+
+// patchRecorder answers the caller's patch and keeps its body and token.
+func patchRecorder(fc *fakeCluster) (bodies *[]string, tokens *[]string) {
+	var b, t []string
+	var mu sync.Mutex
+	fc.on(http.MethodPatch, volumePath, func(w http.ResponseWriter, r *http.Request) {
+		data, _ := io.ReadAll(r.Body)
+		mu.Lock()
+		b, t = append(b, string(data)), append(t, bearer(r))
+		mu.Unlock()
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"apiVersion":"r-drbd.io/v1alpha1","kind":"Volume","metadata":{"name":"pvc-1"}}`))
+	})
+	return &b, &t
+}
+
+func TestResolveSplitBrainPatchesAsTheCaller(t *testing.T) {
+	fc := newFakeCluster(t)
+	bodies, tokens := patchRecorder(fc)
+	s := replicationServer(t, fc, &replicationSource{listed: twoCopies(true)})
+
+	wantStatus(t, do(s, adminToken, http.MethodPost, "/api/storage/replication/volumes/pvc-1/resolve", `{"survivor":"host-2"}`), http.StatusNoContent)
+	if len(*bodies) != 1 || (*bodies)[0] != `{"spec":{"resolve":{"survivor":"host-2"}}}` {
+		t.Fatalf("patches = %q", *bodies)
+	}
+	if (*tokens)[0] != adminToken {
+		t.Fatalf("patched as %q, want the caller", (*tokens)[0])
+	}
+}
+
+func TestResolveRefusesWhatWouldDiscardTheWrongData(t *testing.T) {
+	for _, c := range []struct {
+		name     string
+		split    bool
+		survivor string
+		want     int
+	}{
+		{"no split brain any more", false, "host-1", http.StatusConflict},
+		{"a host holding no copy", true, "host-9", http.StatusConflict},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			fc := newFakeCluster(t)
+			bodies, _ := patchRecorder(fc)
+			s := replicationServer(t, fc, &replicationSource{listed: twoCopies(c.split)})
+			wantStatus(t, do(s, adminToken, http.MethodPost, "/api/storage/replication/volumes/pvc-1/resolve", `{"survivor":"`+c.survivor+`"}`), c.want)
+			if len(*bodies) != 0 {
+				t.Fatalf("patched anyway: %q", *bodies)
+			}
+		})
+	}
+}
+
+func TestRepairsNeedPatchAndSayNothingOfWhatExists(t *testing.T) {
+	fc := newFakeCluster(t)
+	readOnly := "reader-token"
+	fc.ssar = func(token string, a *authzv1.ResourceAttributes) bool {
+		return token == adminToken || (token == readOnly && a.Verb == "list")
+	}
+	bodies, _ := patchRecorder(fc)
+	s := replicationServer(t, fc, &replicationSource{listed: twoCopies(true)})
+
+	for _, token := range []string{readOnly, tenantToken} {
+		for _, target := range []string{
+			"/api/storage/replication/volumes/pvc-1/resolve",
+			"/api/storage/replication/volumes/no-such/resolve",
+			"/api/storage/replication/hosts/host-1/evict?dryRun=true",
+		} {
+			wantStatus(t, do(s, token, http.MethodPost, target, `{"survivor":"host-1"}`), http.StatusForbidden)
+		}
+	}
+	if len(*bodies) != 0 {
+		t.Fatalf("patched anyway: %q", *bodies)
+	}
+}
+
+func TestEvictHostDryRunTouchesNothing(t *testing.T) {
+	fc := newFakeCluster(t)
+	bodies, _ := patchRecorder(fc)
+	s := replicationServer(t, fc, &replicationSource{listed: twoCopies(false)})
+
+	rec := do(s, adminToken, http.MethodPost, "/api/storage/replication/hosts/host-1/evict?dryRun=true", "")
+	wantStatus(t, rec, http.StatusOK)
+	var plan model.ReplicationEvict
+	if err := json.Unmarshal(rec.Body.Bytes(), &plan); err != nil {
+		t.Fatal(err)
+	}
+	if len(plan.Moving) != 1 || plan.Moving[0] != "pvc-1" {
+		t.Fatalf("plan = %+v", plan)
+	}
+	if len(*bodies) != 0 {
+		t.Fatalf("a dry run patched: %q", *bodies)
+	}
+}
+
+func TestEvictHostPatchesEachVolumeAsTheCaller(t *testing.T) {
+	fc := newFakeCluster(t)
+	bodies, tokens := patchRecorder(fc)
+	s := replicationServer(t, fc, &replicationSource{listed: twoCopies(false)})
+
+	rec := do(s, adminToken, http.MethodPost, "/api/storage/replication/hosts/host-1/evict", "")
+	wantStatus(t, rec, http.StatusOK)
+	if len(*bodies) != 1 || (*bodies)[0] != `{"spec":{"evict":["host-1"]}}` {
+		t.Fatalf("patches = %q", *bodies)
+	}
+	if (*tokens)[0] != adminToken {
+		t.Fatalf("patched as %q, want the caller", (*tokens)[0])
+	}
+}
+
+func TestEvictHostReportsAPatchTheClusterRefuses(t *testing.T) {
+	fc := newFakeCluster(t)
+	fc.on(http.MethodPatch, volumePath, func(w http.ResponseWriter, _ *http.Request) {
+		writeStatus(w, http.StatusForbidden, metav1.StatusReasonForbidden)
+	})
+	s := replicationServer(t, fc, &replicationSource{listed: twoCopies(false)})
+
+	rec := do(s, adminToken, http.MethodPost, "/api/storage/replication/hosts/host-1/evict", "")
+	wantStatus(t, rec, http.StatusOK)
+	var out model.ReplicationEvict
+	if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
+		t.Fatal(err)
+	}
+	if len(out.Moving) != 0 || len(out.Skipped) != 1 || out.Skipped[0].Volume != "pvc-1" {
+		t.Fatalf("out = %+v", out)
 	}
 }

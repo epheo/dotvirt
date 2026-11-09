@@ -385,6 +385,84 @@ func TestSyncedWaitsForEveryKindBesidesNodeDisks(t *testing.T) {
 	}
 }
 
+func TestEvictionsSayWhatCannotMove(t *testing.T) {
+	s, _ := newSnapshot(t)
+	two := func(name string, extra func(spec, status map[string]any)) *unstructured.Unstructured {
+		o := volume(name, 2, ready(
+			report("host-1", "UpToDate", connected("host-2"), nil),
+			report("host-2", "UpToDate", connected("host-1"), nil),
+		), "host-1", "diskful", "host-2", "diskful", "host-3", "tiebreaker")
+		o.Object["status"].(map[string]any)["primary"] = ""
+		if extra != nil {
+			extra(o.Object["spec"].(map[string]any), o.Object["status"].(map[string]any))
+		}
+		return o
+	}
+	mustAdd(t, s.pools, obj("pinned-pool", map[string]any{"spec": map[string]any{"node": "host-1", "tier": "nvme"}}))
+	mustAdd(t, s.volumes, two("free", nil))
+	mustAdd(t, s.volumes, volume("local", 1, ready(report("host-1", "UpToDate", nil, nil)), "host-1", "diskful"))
+	mustAdd(t, s.volumes, two("split", func(_, st map[string]any) {
+		st["conditions"] = []any{map[string]any{"type": "SplitBrain", "status": "True"}}
+	}))
+	mustAdd(t, s.volumes, two("attached", func(sp, _ map[string]any) { sp["attachments"] = []any{"host-1"} }))
+	mustAdd(t, s.volumes, two("primary", func(_, st map[string]any) { st["primary"] = "host-1" }))
+	mustAdd(t, s.volumes, two("pin-node", func(sp, _ map[string]any) { sp["node"] = "host-1" }))
+	mustAdd(t, s.volumes, two("pin-pool", func(sp, _ map[string]any) { sp["pool"] = "pinned-pool" }))
+	closed := func(reports ...any) map[string]any {
+		st := ready(reports...)
+		st["primary"] = ""
+		return st
+	}
+	mustAdd(t, s.volumes, volume("rebuilding", 2, closed(
+		report("host-1", "UpToDate", connected("host-2"), nil),
+		report("host-2", "Inconsistent", connected("host-1"), map[string]any{"syncPercent": int64(10)}),
+	), "host-1", "diskful", "host-2", "diskful"))
+	mustAdd(t, s.volumes, volume("alone", 2, closed(
+		report("host-1", "UpToDate", connected("host-2"), nil),
+		report("host-2", "Outdated", connected("host-1"), nil),
+	), "host-1", "diskful", "host-2", "diskful"))
+	mustAdd(t, s.volumes, volume("elsewhere", 2, ready(), "host-2", "diskful", "host-3", "diskful"))
+
+	moving, skipped := s.Evictions("host-1")
+	if len(moving) != 1 || moving[0].Name != "free" {
+		t.Fatalf("moving = %+v", moving)
+	}
+	reasons := map[string]string{}
+	for _, sk := range skipped {
+		reasons[sk.Volume] = sk.Reason
+	}
+	for vol, want := range map[string]string{
+		"local":      "One copy",
+		"split":      "disagree",
+		"attached":   "In use on host-1",
+		"primary":    "In use on host-1",
+		"pin-node":   "Pinned to host-1",
+		"pin-pool":   "Pinned to host-1",
+		"rebuilding": "catching up",
+		"alone":      "No other copy",
+	} {
+		if !strings.Contains(reasons[vol], want) {
+			t.Errorf("%s: reason %q, want %q", vol, reasons[vol], want)
+		}
+	}
+	if _, listed := reasons["elsewhere"]; listed {
+		t.Error("a volume with nothing on the host was listed")
+	}
+}
+
+// A witness holds no data, so what limits a copy does not limit it.
+func TestAWitnessCanMoveWhileACopyCatchesUp(t *testing.T) {
+	s, _ := newSnapshot(t)
+	mustAdd(t, s.volumes, volume("v", 2, ready(
+		report("host-1", "UpToDate", connected("host-2", "host-3"), nil),
+		report("host-2", "Inconsistent", connected("host-1", "host-3"), map[string]any{"syncPercent": int64(10)}),
+		report("host-3", "Diskless", connected("host-1", "host-2"), nil),
+	), "host-1", "diskful", "host-2", "diskful", "host-3", "tiebreaker"))
+	if moving, skipped := s.Evictions("host-3"); len(moving) != 1 || len(skipped) != 0 {
+		t.Fatalf("moving = %+v, skipped = %+v", moving, skipped)
+	}
+}
+
 type fakeSource struct {
 	mu     sync.Mutex
 	starts map[string]int

@@ -90,18 +90,21 @@ type BlankDisk struct {
 
 // ReplicatedVolume is one r-drbd Volume and the claim it serves.
 type ReplicatedVolume struct {
-	Name       string          `json:"name"`
-	Namespace  string          `json:"namespace,omitempty"`
-	Claim      string          `json:"claim,omitempty"`
-	SizeBytes  int64           `json:"sizeBytes"`
-	Copies     int             `json:"copies"` // the copies asked for
-	Tier       string          `json:"tier"`
-	Phase      string          `json:"phase,omitempty"`
-	Primary    string          `json:"primary,omitempty"` // the host the device is open on
-	SplitBrain bool            `json:"splitBrain,omitempty"`
-	QuorumLost bool            `json:"quorumLost,omitempty"`
-	Evicting   []string        `json:"evicting,omitempty"` // hosts whose copy is being moved off
-	Replicas   []VolumeReplica `json:"replicas"`
+	Name        string          `json:"name"`
+	Namespace   string          `json:"namespace,omitempty"`
+	Claim       string          `json:"claim,omitempty"`
+	SizeBytes   int64           `json:"sizeBytes"`
+	Copies      int             `json:"copies"` // the copies asked for
+	Tier        string          `json:"tier"`
+	Phase       string          `json:"phase,omitempty"`
+	Primary     string          `json:"primary,omitempty"` // the host the device is open on
+	PinnedNode  string          `json:"pinnedNode,omitempty"`
+	PinnedPool  string          `json:"pinnedPool,omitempty"`
+	Attachments []string        `json:"attachments,omitempty"` // hosts the device is published to
+	SplitBrain  bool            `json:"splitBrain,omitempty"`
+	QuorumLost  bool            `json:"quorumLost,omitempty"`
+	Evicting    []string        `json:"evicting,omitempty"` // hosts whose copy is being moved off
+	Replicas    []VolumeReplica `json:"replicas"`
 }
 
 // What a replica is doing, read from every replica's report.
@@ -134,6 +137,19 @@ const (
 	StandingPending       = "pending"
 	StandingNeedsOperator = "needs-operator"
 )
+
+// ReplicationEvict is what moving the copies off a host does, or would do on a
+// dry run: the replicas leaving, and what stays and why.
+type ReplicationEvict struct {
+	Moving  []string          `json:"moving"`
+	Skipped []ReplicationSkip `json:"skipped,omitempty"`
+}
+
+// ReplicationSkip is one volume that keeps its replica on the host.
+type ReplicationSkip struct {
+	Volume string `json:"volume"`
+	Reason string `json:"reason"`
+}
 
 // DiskProtection is GET /api/storage/protection's row: a replicated disk's
 // standing as its owner may read it. Never a host or a pool.

@@ -347,11 +347,14 @@ func (t *table[V]) GetByKey(string) (any, bool, error) { return nil, false, nil 
 // volumeDoc names the fields the console shows. Not spec.assignment.secret.
 type volumeDoc struct {
 	Spec struct {
-		SizeBytes  int64    `json:"sizeBytes"`
-		Replicas   int      `json:"replicas"`
-		Tier       string   `json:"tier"`
-		Evict      []string `json:"evict"`
-		Assignment struct {
+		SizeBytes   int64    `json:"sizeBytes"`
+		Replicas    int      `json:"replicas"`
+		Tier        string   `json:"tier"`
+		Pool        string   `json:"pool"`
+		Node        string   `json:"node"`
+		Attachments []string `json:"attachments"`
+		Evict       []string `json:"evict"`
+		Assignment  struct {
 			Replicas []struct {
 				Node string `json:"node"`
 				Pool string `json:"pool"`
@@ -390,13 +393,16 @@ func decode[T any](u *unstructured.Unstructured) T {
 func decodeVolume(u *unstructured.Unstructured) (model.ReplicatedVolume, bool) {
 	doc := decode[volumeDoc](u)
 	v := model.ReplicatedVolume{
-		Name:      u.GetName(),
-		SizeBytes: doc.Spec.SizeBytes,
-		Copies:    doc.Spec.Replicas,
-		Tier:      doc.Spec.Tier,
-		Phase:     doc.Status.Phase,
-		Primary:   doc.Status.Primary,
-		Evicting:  doc.Spec.Evict,
+		Name:        u.GetName(),
+		SizeBytes:   doc.Spec.SizeBytes,
+		Copies:      doc.Spec.Replicas,
+		Tier:        doc.Spec.Tier,
+		Phase:       doc.Status.Phase,
+		Primary:     doc.Status.Primary,
+		Evicting:    doc.Spec.Evict,
+		PinnedNode:  doc.Spec.Node,
+		PinnedPool:  doc.Spec.Pool,
+		Attachments: doc.Spec.Attachments,
 	}
 	for _, c := range doc.Status.Conditions {
 		if c.Status != "True" {
@@ -619,6 +625,72 @@ func (s *Snapshot) Protection(namespaces []string) []model.DiskProtection {
 		return strings.Compare(a.Namespace+"\x00"+a.Claim, b.Namespace+"\x00"+b.Claim)
 	})
 	return out
+}
+
+// Volume is one volume by name, with its claim. The result shares slices with
+// the snapshot: read it, do not append to it.
+func (s *Snapshot) Volume(name string) (model.ReplicatedVolume, bool) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	v, ok := s.volumes.rows[name]
+	if ok {
+		c := s.claims.rows[name]
+		v.Namespace, v.Claim = c.Namespace, c.Name
+	}
+	return v, ok
+}
+
+// Evictions splits the volumes with a replica on node into those whose replica
+// can move and why the others cannot, so the answer is r-drbd's own refusals
+// said before it blocks on them.
+func (s *Snapshot) Evictions(node string) (moving []model.ReplicatedVolume, skipped []model.ReplicationSkip) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	for _, v := range s.volumes.rows {
+		held := slices.ContainsFunc(v.Replicas, func(r model.VolumeReplica) bool {
+			return r.Node == node && r.Role != "diskless"
+		})
+		if !held {
+			continue
+		}
+		pinned := v.PinnedNode == node || (v.PinnedPool != "" && s.pools.rows[v.PinnedPool].Node == node)
+		if why := evictBlock(v, node, pinned); why != "" {
+			skipped = append(skipped, model.ReplicationSkip{Volume: v.Name, Reason: why})
+			continue
+		}
+		moving = append(moving, v)
+	}
+	slices.SortFunc(moving, func(a, b model.ReplicatedVolume) int { return strings.Compare(a.Name, b.Name) })
+	slices.SortFunc(skipped, func(a, b model.ReplicationSkip) int { return strings.Compare(a.Volume, b.Volume) })
+	return moving, skipped
+}
+
+func evictBlock(v model.ReplicatedVolume, node string, pinned bool) string {
+	diskful := slices.ContainsFunc(v.Replicas, func(r model.VolumeReplica) bool {
+		return r.Node == node && r.Role == "diskful"
+	})
+	switch {
+	case v.Copies <= 1:
+		return "One copy: it cannot move. Recreate it on replicated storage first."
+	case v.SplitBrain:
+		return "Its copies disagree: resolve that first."
+	case v.Phase == "" || v.Phase == "Pending" || v.Phase == "Provisioning":
+		return "Still being set up."
+	case slices.Contains(v.Attachments, node) || v.Primary == node ||
+		slices.ContainsFunc(v.Replicas, func(r model.VolumeReplica) bool { return r.Node == node && r.InUse }):
+		return "In use on " + node + ": move what runs there away first."
+	case !diskful:
+		return ""
+	case pinned:
+		return "Pinned to " + node + "."
+	case slices.ContainsFunc(v.Replicas, func(r model.VolumeReplica) bool { return r.State == model.ReplicaCatchingUp }):
+		return "A copy is still catching up."
+	case !slices.ContainsFunc(v.Replicas, func(r model.VolumeReplica) bool {
+		return r.Node != node && r.Role == "diskful" && r.State == model.ReplicaInSync
+	}):
+		return "No other copy is in sync."
+	}
+	return ""
 }
 
 // standing folds a volume into what its owner can act on.

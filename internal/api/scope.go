@@ -429,6 +429,11 @@ var replicationRead = action{
 	refQ(verbList, ssarRef{replication.GVRPV.Group, replication.GVRPV.Resource}, ""),
 }
 
+// replicationRepair is resolving a split brain or moving copies: the placement
+// it acts on, and the patch the apiserver then asks of the caller.
+var replicationRepair = append(slices.Clone(replicationRead),
+	refQ(verbPatch, ssarRef{replication.GVRVolume.Group, replication.GVRVolume.Resource}, ""))
+
 // ssarDataSources is the boot images: listed for the options catalog, created
 // when an upload registers one.
 var ssarDataSources = ssarRef{group: "cdi.kubevirt.io", resource: "datasources"}
