@@ -1,17 +1,23 @@
 package clusterstate
 
 import (
+	"context"
+	"errors"
 	"maps"
 	"slices"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/client-go/tools/cache"
 	kubevirtcorev1 "kubevirt.io/api/core/v1"
 
 	"github.com/epheo/dotvirt/internal/cluster"
+	"github.com/epheo/dotvirt/internal/eventbus"
 	"github.com/epheo/dotvirt/internal/reflect"
 )
 
@@ -311,4 +317,69 @@ func TestStoredVMExportsUnchanged(t *testing.T) {
 	if string(got) != string(want) {
 		t.Errorf("export moved:\n%s\nwant:\n%s", got, want)
 	}
+}
+
+func answering(ok bool, err error) func(schema.GroupVersionResource) (bool, error) {
+	return func(schema.GroupVersionResource) (bool, error) { return ok, err }
+}
+
+func kubevirtState(src *fakeSource) *State {
+	s := stateWithIndexers()
+	s.bus = eventbus.New()
+	s.nssReady.Mark()
+	store := s.live.store(s.vms, func() { s.vmsListed.Mark(); s.vmsReady.Mark() })
+	s.specs = []reflectorSpec{{store, &kubevirtcorev1.VirtualMachine{}, src.lw(), &optionalAPI{gvrVMs, &s.vmsReady}}}
+	s.healthy = make([]atomic.Bool, len(s.specs))
+	return s
+}
+
+// A cluster without KubeVirt is synced, healthy and never listed: dotvirt must
+// start and serve there as on any other. It is not a known-empty snapshot:
+// authorization weighs a create on that, and discovery can miss a CRD group
+// for a moment at apiserver start.
+func TestAbsentKubeVirtReadsAsSynced(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	src := &fakeSource{}
+	s := kubevirtState(src)
+	s.runReflectors(ctx, answering(false, nil))
+	eventually(t, "VMs synced", s.vmsReady.Done)
+	if s.VMSnapshotReady() {
+		t.Error("discovery alone made a missing VM known absent")
+	}
+	if !s.Healthy() {
+		t.Error("an API the cluster does not serve reads as stale")
+	}
+	if got := src.lists.Load(); got != 0 {
+		t.Errorf("VMs listed %d times on a cluster that does not serve them", got)
+	}
+}
+
+// A failed discovery read proves nothing: reading it as absence would report
+// every VM stopped on a cluster that has them.
+func TestFailedDiscoveryIsNotAbsence(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	asked := make(chan struct{})
+	var once sync.Once
+	s := kubevirtState(&fakeSource{})
+	s.runReflectors(ctx, func(schema.GroupVersionResource) (bool, error) {
+		defer once.Do(func() { close(asked) })
+		return false, errors.New("discovery failed")
+	})
+	<-asked
+	eventually(t, "the failure to read as stale", func() bool { return !s.Healthy() })
+	if s.vmsReady.Done() {
+		t.Error("a failed discovery read marked the VM store synced")
+	}
+}
+
+func TestServedKubeVirtIsWatched(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	src := &fakeSource{}
+	s := kubevirtState(src)
+	s.runReflectors(ctx, answering(true, nil))
+	eventually(t, "the VM watch", func() bool { return src.watcher() != nil })
+	eventually(t, "a LIST to make the snapshot ready", s.VMSnapshotReady)
 }
