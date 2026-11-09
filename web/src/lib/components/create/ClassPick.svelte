@@ -1,6 +1,7 @@
 <script lang="ts">
 	import type { StorageClass, StorageClassInfo } from '#lib/api.js';
 	import { liveMigrates } from '#lib/create.js';
+	import { classPromise } from '#lib/replication.js';
 	import { bytes } from '#lib/format.js';
 	import { inventory } from '#lib/state/inventory.svelte.js';
 	import { LABEL } from './sheet.svelte.js';
@@ -53,6 +54,13 @@
 						{#if info?.free}<span class="text-[13px] text-ink-soft">{bytes(info.free)} free</span
 							>{/if}
 					</span>
+					{#if info?.replication}
+						{@const promise = classPromise(info.replication)}
+						<span class="flex items-center gap-1.5 text-xs text-ink-muted">
+							<span class="size-[7px] rounded-full {promise.ok ? 'bg-ok' : 'bg-warn'}"></span>
+							{promise.text}
+						</span>
+					{/if}
 					{#if info}
 						<span class="flex items-center gap-1.5 text-xs text-ink-muted">
 							<span class="size-[7px] rounded-full {liveMigrates(info) ? 'bg-ok' : 'bg-warn'}"

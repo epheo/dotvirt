@@ -20,6 +20,7 @@
 		usualPreference,
 		vmCountByNetwork,
 	} from '#lib/create.js';
+	import { classPromise } from '#lib/replication.js';
 	import { bytes, plural, quantity, quantityBytes } from '#lib/format.js';
 	import { placement } from '#lib/headroom.js';
 	import { attachRef, attachableNetworks } from '#lib/networks.js';
@@ -788,6 +789,10 @@
 						>
 					{:else if rootClass}
 						<Consequence tone="ok">{name || 'The VM'} can live-migrate.</Consequence>
+					{/if}
+					{#if rootClass?.replication}
+						{@const promise = classPromise(rootClass.replication)}
+						<Consequence tone={promise.ok ? 'ok' : 'warn'}>Root disk: {promise.text}</Consequence>
 					{/if}
 					{#if addressed.length}
 						<Consequence tone="info"

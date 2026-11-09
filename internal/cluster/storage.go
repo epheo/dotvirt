@@ -78,6 +78,7 @@ func (c *Client) ListStorageClasses(ctx context.Context) ([]model.StorageClassIn
 			ReclaimPolicy: reclaim,
 			BindingMode:   binding,
 			Expandable:    expandable,
+			Replication:   classReplication(sc, provisioner),
 		}
 		if ts := sc.GetCreationTimestamp(); !ts.IsZero() {
 			info.Created = ts.UTC().Format(time.RFC3339)

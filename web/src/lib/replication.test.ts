@@ -9,6 +9,7 @@ import type {
 import type { DiskRow } from '#lib/storage.js';
 import {
 	cellFor,
+	classPromise,
 	copySquares,
 	diskIfDown,
 	diskNow,
@@ -347,6 +348,21 @@ describe('copy squares', () => {
 			{ kind: 'catching', percent: 64 },
 			{ kind: 'pending', percent: 0 },
 		]);
+	});
+});
+
+describe('what a class promises', () => {
+	it('says a single copy goes with its host', () => {
+		expect(classPromise({ copies: 1, tier: 'nvme' })).toEqual({
+			ok: false,
+			text: 'One copy, nvme: lost with its host',
+		});
+	});
+
+	it('does not promise two hosts for three copies', () => {
+		expect(classPromise({ copies: 3, tier: 'hdd' }).text).toBe(
+			'3 copies, hdd: survives losing any one host',
+		);
 	});
 });
 
