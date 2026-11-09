@@ -21,7 +21,7 @@ func TestRepoSetCachesByURL(t *testing.T) {
 	defer cancel()
 	rs := NewRepoSet(ctx, "", "", nil, false, nil, time.Hour) // long interval: poll won't fire in-test
 
-	read1, write1, err := rs.Get(bareA)
+	read1, write1, err := rs.Get(bareA, "")
 	if err != nil {
 		t.Fatalf("Get(A): %v", err)
 	}
@@ -30,7 +30,7 @@ func TestRepoSetCachesByURL(t *testing.T) {
 	}
 
 	// Same URL -> same cached instances.
-	read2, write2, err := rs.Get(bareA)
+	read2, write2, err := rs.Get(bareA, "")
 	if err != nil {
 		t.Fatalf("Get(A) again: %v", err)
 	}
@@ -39,7 +39,7 @@ func TestRepoSetCachesByURL(t *testing.T) {
 	}
 
 	// Different URL -> different instances.
-	readB, _, err := rs.Get(bareB)
+	readB, _, err := rs.Get(bareB, "")
 	if err != nil {
 		t.Fatalf("Get(B): %v", err)
 	}
@@ -67,7 +67,7 @@ func TestRepoSetPeekNeverOpens(t *testing.T) {
 	if r, ok := rs.Peek(bare); ok || r != nil {
 		t.Fatal("Peek opened the repo")
 	}
-	read, _, err := rs.Get(bare)
+	read, _, err := rs.Get(bare, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -84,7 +84,7 @@ func TestRepoSetGetBadURLErrors(t *testing.T) {
 	defer cancel()
 	rs := NewRepoSet(ctx, "", "", nil, false, nil, time.Hour)
 
-	if _, _, err := rs.Get("/nonexistent/repo.git"); err == nil {
+	if _, _, err := rs.Get("/nonexistent/repo.git", ""); err == nil {
 		t.Error("expected an error opening a nonexistent repo")
 	}
 }
@@ -111,7 +111,7 @@ func TestRepoSetBacksOffFailedOpen(t *testing.T) {
 	}
 
 	for range 3 {
-		if _, _, err := rs.Get("https://forge/o/r.git"); err == nil {
+		if _, _, err := rs.Get("https://forge/o/r.git", ""); err == nil {
 			t.Fatal("expected the open error")
 		}
 	}
@@ -119,17 +119,17 @@ func TestRepoSetBacksOffFailedOpen(t *testing.T) {
 		t.Fatalf("opens within backoff = %d, want 1", n)
 	}
 	clock.advance(openBackoff + time.Second)
-	_, _, _ = rs.Get("https://forge/o/r")
+	_, _, _ = rs.Get("https://forge/o/r", "")
 	if n := opens.Load(); n != 2 {
 		t.Fatalf("opens after backoff = %d, want 2", n)
 	}
 	rs.Poke("https://forge/o/r")
-	_, _, _ = rs.Get("https://forge/o/r")
+	_, _, _ = rs.Get("https://forge/o/r", "")
 	if n := opens.Load(); n != 3 {
 		t.Fatalf("opens after poke = %d, want 3", n)
 	}
 	rs.Created("https://forge/o/r.git")
-	_, _, _ = rs.Get("https://forge/o/r")
+	_, _, _ = rs.Get("https://forge/o/r", "")
 	if n := opens.Load(); n != 4 {
 		t.Fatalf("opens after Created = %d, want 4", n)
 	}
@@ -155,17 +155,17 @@ func TestRepoSetPublishesRecoveredOpen(t *testing.T) {
 	}
 	ver := func(url string) uint64 { return bus.KeyVersion(eventbus.GitChanged, forge.NormalizeRepoURL(url)) }
 
-	if _, _, err := rs.Get("https://forge/o/fresh.git"); err != nil || ver("https://forge/o/fresh") != 0 {
+	if _, _, err := rs.Get("https://forge/o/fresh.git", ""); err != nil || ver("https://forge/o/fresh") != 0 {
 		t.Fatalf("a first open published: err=%v ver=%d", err, ver("https://forge/o/fresh"))
 	}
 
 	fail.Store(true)
-	if _, _, err := rs.Get("https://forge/o/r.git"); err == nil {
+	if _, _, err := rs.Get("https://forge/o/r.git", ""); err == nil {
 		t.Fatal("expected the open error")
 	}
 	fail.Store(false)
 	clock.advance(openBackoff + time.Second)
-	if _, _, err := rs.Get("https://forge/o/r"); err != nil {
+	if _, _, err := rs.Get("https://forge/o/r", ""); err != nil {
 		t.Fatal(err)
 	}
 	if ver("https://forge/o/r") != 1 {
@@ -173,12 +173,12 @@ func TestRepoSetPublishesRecoveredOpen(t *testing.T) {
 	}
 
 	fail.Store(true)
-	if _, _, err := rs.Get("https://forge/o/p.git"); err == nil {
+	if _, _, err := rs.Get("https://forge/o/p.git", ""); err == nil {
 		t.Fatal("expected the open error")
 	}
 	fail.Store(false)
 	rs.Poke("https://forge/o/p")
-	if _, _, err := rs.Get("https://forge/o/p"); err != nil {
+	if _, _, err := rs.Get("https://forge/o/p", ""); err != nil {
 		t.Fatal(err)
 	}
 	if ver("https://forge/o/p") != 1 {
@@ -204,7 +204,7 @@ func TestRepoSetSharesConcurrentOpen(t *testing.T) {
 	reads := make([]*Repo, 5)
 	for i := range reads {
 		wg.Go(func() {
-			r, _, err := rs.Get(bare)
+			r, _, err := rs.Get(bare, "")
 			if err != nil {
 				t.Errorf("Get: %v", err)
 			}
@@ -248,14 +248,14 @@ func TestRepoSetEvictsIdleRepo(t *testing.T) {
 	clock := &fakeClock{}
 	rs.now = clock.now
 
-	first, _, err := rs.Get(bare)
+	first, _, err := rs.Get(bare, "")
 	if err != nil {
 		t.Fatalf("Get: %v", err)
 	}
 	clock.advance(idleTimeout + time.Second)
 	waitEvicted(t, rs, bare)
 
-	again, _, err := rs.Get(bare)
+	again, _, err := rs.Get(bare, "")
 	if err != nil {
 		t.Fatalf("Get after eviction: %v", err)
 	}
@@ -269,7 +269,7 @@ func TestRepoSetEvictsGoneRepo(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	rs := NewRepoSet(ctx, "", "", nil, false, nil, time.Hour)
-	if _, _, err := rs.Get(bare); err != nil {
+	if _, _, err := rs.Get(bare, ""); err != nil {
 		t.Fatalf("Get: %v", err)
 	}
 	if err := os.RemoveAll(bare); err != nil {
@@ -296,7 +296,7 @@ func TestRepoSetTokenOnlyToTheForge(t *testing.T) {
 		"https://evil.example/dotvirt/team-a.git":  false,
 		"http://forge.example/dotvirt/team-b.git":  false,
 	} {
-		_, write, err := rs.Get(url)
+		_, write, err := rs.Get(url, "")
 		if err != nil {
 			t.Fatalf("Get(%s): %v", url, err)
 		}

@@ -29,8 +29,10 @@ import (
 	"github.com/epheo/dotvirt/internal/git"
 	"github.com/epheo/dotvirt/internal/metrics"
 	"github.com/epheo/dotvirt/internal/model"
+	"github.com/epheo/dotvirt/internal/modules"
 	"github.com/epheo/dotvirt/internal/netstate"
 	"github.com/epheo/dotvirt/internal/project"
+	"github.com/epheo/dotvirt/internal/replication"
 	"github.com/epheo/dotvirt/internal/stream"
 	"github.com/epheo/dotvirt/internal/tasks"
 	"github.com/epheo/dotvirt/pkg/forge"
@@ -132,6 +134,17 @@ func run() error {
 	netSnapshot := netstate.New(saCluster, bus)
 	netSnapshot.Run(ctx)
 
+	// Which parts of the console this cluster serves, from discovery.
+	moduleSnapshot := modules.New(saCluster)
+	moduleSnapshot.Run(ctx)
+
+	// r-drbd's read plane: nothing runs until the module is on.
+	replicationSnapshot := replication.New(saCluster, bus, func() bool {
+		m, ok := moduleSnapshot.Get()
+		return ok && m.ReplicatedStorage
+	})
+	replicationSnapshot.Run(ctx)
+
 	var argoSnapshot *argo.Snapshot
 	var resyncer changeset.Resyncer
 	if cfg.ArgoEnabled {
@@ -198,6 +211,8 @@ func run() error {
 		Drift:          argoSnapshot,
 		DRS:            drsSnapshot,
 		Netstate:       netSnapshot,
+		Modules:        moduleSnapshot,
+		Replication:    replicationSnapshot,
 		Bus:            bus,
 		Resolver:       resolver,
 		Repos:          repos,
@@ -232,7 +247,7 @@ func run() error {
 	inventoryKinds := []eventbus.Kind{
 		eventbus.LiveChanged, eventbus.NamespaceChanged,
 		eventbus.RBACChanged, eventbus.DriftChanged, eventbus.GitChanged, eventbus.ProposalsChanged,
-		eventbus.NetworkChanged, eventbus.TaskChanged, eventbus.TTLBackstop,
+		eventbus.NetworkChanged, eventbus.TaskChanged, eventbus.ReplicationChanged, eventbus.TTLBackstop,
 	}
 	// SessionEnded only wakes the hub to close ended sessions' streams; no frame
 	// depends on it, so it stays out of the levels.

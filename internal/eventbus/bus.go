@@ -69,6 +69,9 @@ const (
 	// TaskChanged: the recent-tasks feed moved - an imperative op was recorded or a
 	// merged PR landed. The feed is fetched out-of-band, like the network catalog.
 	TaskChanged
+	// ReplicationChanged: what the replicated-storage pulls read moved, or one of
+	// their watches' health flipped.
+	ReplicationChanged
 	// TTLBackstop: TTL-cached authorization no RBAC watch observes (see
 	// api.RunTTLBackstop) may have expired - published on a fixed cadence while a
 	// stream is open so frames re-evaluate it. Keep it out of every cache's

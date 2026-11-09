@@ -4,13 +4,16 @@ import { expect, type Page } from '@playwright/test';
 // walk to one VM's detail page, and unfolding the change tray.
 
 // signIn pastes a token and waits for the shell: the section links in the
-// sidebar exist only once authenticated.
+// sidebar exist only once authenticated. Changes, the one tile every cluster
+// and caller has under one name.
 export async function signIn(page: Page, token: string) {
 	await page.goto('/');
 	await page.waitForSelector('textarea');
 	await page.fill('textarea', token);
 	await page.click('button[type="submit"]');
-	await expect(page.locator('aside').getByRole('link', { name: 'Compute' })).toBeVisible();
+	await expect(
+		page.locator('aside').getByRole('link', { name: 'Changes', exact: true }),
+	).toBeVisible();
 }
 
 // openVM switches to the VMs tab and opens a VM's detail route through its

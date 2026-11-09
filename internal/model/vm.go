@@ -183,8 +183,8 @@ func InterfaceName(networkRef string) string {
 type ProjectNamespace struct {
 	Namespace string `json:"namespace"`
 	VMs       []VM   `json:"vms"`
-	// CanAuthor is the caller's update right on VMs here: the gate every
-	// stage, propose and revert route enforces, so the UI hides what would 403.
+	// CanAuthor is the caller's update right on VMs here, or on NetworkPolicies
+	// on a cluster with no VMs: the UI hides what would 403.
 	// Nil when the review failed this frame: unknown, and the UI fails closed,
 	// offering nothing and saying the access could not be checked.
 	CanAuthor *bool `json:"canAuthor,omitempty"`
@@ -276,6 +276,9 @@ type Inventory struct {
 	// TasksVersion is the same contract for the recent-tasks feed (GET
 	// /api/tasks): the entries this caller's pull returns.
 	TasksVersion uint64 `json:"tasksVersion,omitempty"`
+	// ReplicationVersion is the same contract for GET /api/storage/replication
+	// and /api/storage/protection. Absent while the cluster serves no r-drbd.
+	ReplicationVersion uint64 `json:"replicationVersion,omitempty"`
 	// Adoptable proposes existing tenants: namespaces with VMs but no project
 	// label. Present only for callers with namespace-create authority (the
 	// adoption gate) - the candidate scan is cluster-wide, so the SSAR is what

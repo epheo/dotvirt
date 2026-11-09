@@ -318,10 +318,9 @@ func (r *DotvirtReconciler) newReconcileCtx(ctx context.Context, dv *dotvirtv1al
 	return rc
 }
 
-// reconcileDependencies gates on the hard prerequisites: ArgoCD + KubeVirt are
-// PREREQUISITES we never install; if either is absent, record why and requeue (the
-// admin may install the prereq operator). OVN-K/NMState/CDI are soft - note them
-// and proceed.
+// reconcileDependencies gates on the hard prerequisite: ArgoCD is a PREREQUISITE
+// we never install; if absent, record why and requeue (the admin may install the
+// prereq operator). KubeVirt/OVN-K/NMState/CDI are soft - note them and proceed.
 func (r *DotvirtReconciler) reconcileDependencies(ctx context.Context, dv *dotvirtv1alpha1.Dotvirt, _ *reconcileCtx) (*ctrl.Result, error) {
 	probe := r.probe
 	if probe == nil {

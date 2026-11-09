@@ -30,6 +30,9 @@ on:
         required: false
         default: ''
 
+permissions:
+  contents: read
+
 jobs:
   install:
     runs-on: ubuntu-latest

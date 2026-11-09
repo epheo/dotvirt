@@ -4,9 +4,9 @@
 //
 // ArgoCD (OpenShift GitOps or community Argo CD) is a hard PREREQUISITE the dotvirt
 // operator never installs: it's a cluster-singleton orgs run and manage centrally,
-// and dotvirt's whole apply path rides it. KubeVirt is hard too (no VMs without it).
-// The networking tier's OVN-K + NMState - and CDI for disk import - are SOFT: when
-// absent, dotvirt simply hides those affordances (it already degrades at runtime).
+// and dotvirt's whole apply path rides it. KubeVirt, the networking tier's OVN-K +
+// NMState and CDI for disk import are SOFT: when absent, dotvirt simply hides those
+// affordances (it already degrades at runtime).
 package deps
 
 import (
@@ -30,7 +30,7 @@ type Dependency struct {
 // Required is the full dependency set, in report order.
 var Required = []Dependency{
 	{Label: "OpenShift GitOps / Argo CD", Group: "argoproj.io", Resource: "applications", Hard: true},
-	{Label: "KubeVirt / OpenShift Virtualization", Group: "kubevirt.io", Resource: "virtualmachines", Hard: true},
+	{Label: "KubeVirt / OpenShift Virtualization", Group: "kubevirt.io", Resource: "virtualmachines", Enables: "virtual machines"},
 	{Label: "CDI", Group: "cdi.kubevirt.io", Resource: "datavolumes", Enables: "disk import + image upload"},
 	{Label: "OVN-Kubernetes UDN", Group: "k8s.ovn.org", Resource: "userdefinednetworks", Enables: "the networking tier (networks)"},
 	{Label: "NMState", Group: "nmstate.io", Resource: "nodenetworkconfigurationpolicies", Enables: "uplinks / physical adapters"},

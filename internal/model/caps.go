@@ -33,6 +33,9 @@ type ClusterCaps struct {
 	// so it needs list, cluster-wide, on namespaces and on every kind the
 	// repo declares that the cluster serves.
 	PlatformRead bool `json:"platformRead"`
+	// Replication reads where replicated disks' copies live and the room left:
+	// list, cluster-wide, on every kind GET /api/storage/replication shows.
+	Replication bool `json:"replication"`
 	// Network is the shared networks (ClusterUserDefinedNetwork).
 	Network                    ObjectCaps `json:"network"`
 	Uplink                     ObjectCaps `json:"uplink"`

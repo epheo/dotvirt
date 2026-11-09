@@ -1,18 +1,20 @@
 <script lang="ts">
-	import { Database, GitBranch, Monitor, Network, Server } from '@lucide/svelte';
+	import { Database, Folder, GitBranch, Monitor, Network, Server } from '@lucide/svelte';
 	import { clusterGate } from '#lib/gates.js';
 	import type { Section } from '#lib/nav.js';
+	import { computeOff } from '#lib/state/modules.svelte.js';
 
 	// The section switcher: each section has its own tree below, all rendering
 	// into the same center workspace. Work in flight lives in the change tray,
 	// not on the switcher. Hosts shows on a known yes only: an unread or failed
-	// capability answer offers no tile.
+	// capability answer offers no tile. Compute is named for what it holds: a
+	// cluster with neither VMs nor desktops still has its projects there.
 	let { active }: { active: Section } = $props();
 
 	const tiles = $derived(
 		(
 			[
-				{ id: 'compute', label: 'Compute', href: '/compute' },
+				{ id: 'compute', label: computeOff() ? 'Projects' : 'Compute', href: '/compute' },
 				{ id: 'hosts', label: 'Hosts', href: '/hosts' },
 				{ id: 'networking', label: 'Networking', href: '/networking' },
 				{ id: 'storage', label: 'Storage', href: '/storage' },
@@ -36,7 +38,12 @@
 				? 'bg-side-active text-side-ink'
 				: 'text-side-dim hover:bg-side-hover hover:text-side-ink'}"
 		>
-			{#if s.id === 'compute'}<Monitor size={22} strokeWidth={1.75} class="shrink-0" />
+			{#if s.id === 'compute' && computeOff()}<Folder
+					size={22}
+					strokeWidth={1.75}
+					class="shrink-0"
+				/>
+			{:else if s.id === 'compute'}<Monitor size={22} strokeWidth={1.75} class="shrink-0" />
 			{:else if s.id === 'hosts'}<Server size={22} strokeWidth={1.75} class="shrink-0" />
 			{:else if s.id === 'networking'}<Network size={22} strokeWidth={1.75} class="shrink-0" />
 			{:else if s.id === 'storage'}<Database size={22} strokeWidth={1.75} class="shrink-0" />
