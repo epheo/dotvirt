@@ -266,6 +266,15 @@ func TestEnvtest(t *testing.T) {
 				t.Errorf("%s: got %v, want Invalid", name, err)
 			}
 		}
+		// Unstructured: the typed client drops an empty host before it is sent.
+		empty := &unstructured.Unstructured{Object: map[string]any{
+			"apiVersion": "dotvirt.io/v1alpha1", "kind": "Dotvirt",
+			"metadata": map[string]any{"name": "empty-host", "namespace": "dotvirt"},
+			"spec":     map[string]any{"ingress": map[string]any{"host": "", "gateway": map[string]any{"name": "edge"}}},
+		}}
+		if err := admin.Create(ctx, empty, client.DryRunAll); !apierrors.IsInvalid(err) {
+			t.Errorf("a Gateway with an empty host: got %v, want Invalid", err)
+		}
 		dv := testCR()
 		dv.Spec.Ingress = dotvirtv1alpha1.IngressSpec{Host: "h.example.com", Gateway: gw}
 		if err := admin.Create(ctx, dv, client.DryRunAll); client.IgnoreAlreadyExists(err) != nil {

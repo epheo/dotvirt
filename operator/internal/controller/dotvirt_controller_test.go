@@ -772,6 +772,20 @@ func TestGatewayForgeNeedsNoIngressCA(t *testing.T) {
 	}
 }
 
+// The router serves an Ingress on OpenShift with a certificate the ingress CA
+// signs: only a Gateway skips the trust.
+func TestIngressForgeStillNeedsTheIngressCA(t *testing.T) {
+	dv := testCR()
+	dv.Spec.Forge.Managed = true
+	dv.Spec.Forge.URL = "https://git.example.com"
+	dv.Spec.Ingress = dotvirtv1alpha1.IngressSpec{Type: dotvirtv1alpha1.IngressIngress, Host: "dotvirt.example.com"}
+	r := &DotvirtReconciler{Platform: platform.OpenShift}
+	rc := &reconcileCtx{ingressCAErr: errors.New("no default-ingress-cert")}
+	if err := r.ensureForgeTLSTrust(context.Background(), dv, rc); err == nil {
+		t.Error("an Ingress forge skipped the ingress CA")
+	}
+}
+
 func TestGatewayRendersAnHTTPRouteThatPruneSweeps(t *testing.T) {
 	dv := testCR()
 	dv.Spec.Ingress = dotvirtv1alpha1.IngressSpec{Host: "dotvirt.example.com", Gateway: &dotvirtv1alpha1.GatewayRef{Name: "edge", Namespace: "gateway-system"}}

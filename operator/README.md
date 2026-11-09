@@ -157,6 +157,19 @@ against a real cluster. Phases whose work dry-run cannot model (the secrets, the
 forge bootstrap, the workload rollout, both webhooks, the platform repo) record a
 `DryRun` condition instead, and so does `Available`: nothing serves.
 
+## Serving through a Gateway
+
+With `spec.ingress.gateway` the operator attaches HTTPRoutes for the UI and a managed
+forge to a Gateway someone else runs. Two things stay with whoever runs it:
+
+- The listener must allow routes from the Dotvirt's namespace and no other. dotvirt's
+  HTTPRoute matches every path, and the longest path wins across routes on one
+  hostname: a route another namespace attaches there with `/api/login` takes the
+  login and the tokens. Gateway API has no hostname ownership check, unlike Routes.
+- The operator adds no trust for the Gateway's certificate. A managed forge behind a
+  private CA fails x509 at ArgoCD: use a publicly trusted certificate, or keep
+  `spec.forge.url` on the in-cluster Service.
+
 ## Network policies
 
 On OpenShift the dotvirt and managed Forgejo pods get an ingress NetworkPolicy

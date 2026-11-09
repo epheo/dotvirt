@@ -236,7 +236,7 @@ func (r *DotvirtReconciler) ensureForgeTLSTrust(ctx context.Context, dv *dotvirt
 	}
 	// The ingress CA signs what the router serves; a Gateway holds its own
 	// certificate, and MicroShift publishes no ingress CA at all.
-	if r.resolveExposureType(dv) != dotvirtv1alpha1.IngressRoute {
+	if r.resolveExposureType(dv) == dotvirtv1alpha1.IngressGateway {
 		return nil
 	}
 	host := install.ForgejoHost(dv)

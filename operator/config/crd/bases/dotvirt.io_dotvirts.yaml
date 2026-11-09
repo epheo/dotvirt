@@ -170,7 +170,9 @@ spec:
                       namespace:
                         description: |-
                           Namespace of the Gateway; empty is this Dotvirt's. Its listener must allow
-                          routes from the Dotvirt's namespace.
+                          routes from the Dotvirt's namespace and no other: dotvirt's HTTPRoute
+                          matches every path, so a route another namespace attaches on the same
+                          hostname with a longer path takes that path, /api/login included.
                         type: string
                       sectionName:
                         description: |-
@@ -202,7 +204,8 @@ spec:
                 - message: type gateway needs spec.ingress.gateway
                   rule: '!has(self.type) || self.type != ''gateway'' || has(self.gateway)'
                 - message: 'a Gateway serves named hosts: set spec.ingress.host'
-                  rule: '!has(self.gateway) || has(self.host)'
+                  rule: '!has(self.gateway) || (has(self.host) && size(self.host)
+                    > 0)'
               metrics:
                 description: |-
                   MetricsSpec points the Performance tab at a Prometheus/Thanos query API; empty

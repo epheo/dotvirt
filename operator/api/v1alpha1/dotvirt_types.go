@@ -126,7 +126,7 @@ type SyncImpersonationSpec struct {
 
 // IngressSpec controls how the UI is exposed.
 // +kubebuilder:validation:XValidation:rule="!has(self.type) || self.type != 'gateway' || has(self.gateway)",message="type gateway needs spec.ingress.gateway"
-// +kubebuilder:validation:XValidation:rule="!has(self.gateway) || has(self.host)",message="a Gateway serves named hosts: set spec.ingress.host"
+// +kubebuilder:validation:XValidation:rule="!has(self.gateway) || (has(self.host) && size(self.host) > 0)",message="a Gateway serves named hosts: set spec.ingress.host"
 type IngressSpec struct {
 	Type IngressType `json:"type,omitempty"`
 	// Host is the external hostname the UI is served on. Leave empty on OpenShift for a
@@ -144,7 +144,9 @@ type GatewayRef struct {
 	// +kubebuilder:validation:MinLength=1
 	Name string `json:"name"`
 	// Namespace of the Gateway; empty is this Dotvirt's. Its listener must allow
-	// routes from the Dotvirt's namespace.
+	// routes from the Dotvirt's namespace and no other: dotvirt's HTTPRoute
+	// matches every path, so a route another namespace attaches on the same
+	// hostname with a longer path takes that path, /api/login included.
 	Namespace string `json:"namespace,omitempty"`
 	// SectionName attaches to one listener; empty attaches to every listener
 	// that admits the hostname.
