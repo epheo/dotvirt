@@ -78,3 +78,24 @@ func TestAFailedReadKeepsTheLastAnswer(t *testing.T) {
 		t.Errorf("a failed read turned VMs off: %+v, %v", got, ok)
 	}
 }
+
+// A CRD group can be missing from discovery for a moment at apiserver start.
+func TestAModuleGoesOffOnlyOnASecondNoInARow(t *testing.T) {
+	src := &fakeSource{served: map[string]bool{"virtualmachines": true}}
+	s := New(src)
+	on := func(want bool, when string) {
+		t.Helper()
+		s.probe(context.Background())
+		if got, _ := s.Get(); got.VMs != want {
+			t.Errorf("%s: VMs = %v, want %v", when, got.VMs, want)
+		}
+	}
+	on(true, "served")
+	src.served["virtualmachines"] = false
+	on(true, "first no")
+	src.served["virtualmachines"] = true
+	on(true, "back")
+	src.served["virtualmachines"] = false
+	on(true, "a new first no")
+	on(false, "second no in a row")
+}

@@ -27,18 +27,20 @@ type Source interface {
 
 // served are the modules a served API turns on.
 var served = []struct {
-	gvr schema.GroupVersionResource
-	set func(*model.Modules, bool)
+	gvr   schema.GroupVersionResource
+	field func(*model.Modules) *bool
 }{
-	{cluster.GVR(model.KindVM), func(m *model.Modules, on bool) { m.VMs = on }},
-	{schema.GroupVersionResource{Group: "vdi.desku.be", Version: "v1alpha1", Resource: "vdiinstances"}, func(m *model.Modules, on bool) { m.Desktops = on }},
-	{cluster.GVR(model.KindUDN), func(m *model.Modules, on bool) { m.Networks = on }},
-	{drs.GVR, func(m *model.Modules, on bool) { m.Rebalancing = on }},
-	{schema.GroupVersionResource{Group: "r-drbd.io", Version: "v1alpha1", Resource: "volumes"}, func(m *model.Modules, on bool) { m.ReplicatedStorage = on }},
+	{cluster.GVR(model.KindVM), func(m *model.Modules) *bool { return &m.VMs }},
+	{schema.GroupVersionResource{Group: "vdi.desku.be", Version: "v1alpha1", Resource: "vdiinstances"}, func(m *model.Modules) *bool { return &m.Desktops }},
+	{cluster.GVR(model.KindUDN), func(m *model.Modules) *bool { return &m.Networks }},
+	{drs.GVR, func(m *model.Modules) *bool { return &m.Rebalancing }},
+	{schema.GroupVersionResource{Group: "r-drbd.io", Version: "v1alpha1", Resource: "volumes"}, func(m *model.Modules) *bool { return &m.ReplicatedStorage }},
 }
 
 // gatewayClasses turn on routes. Not the CRDs: our MicroShift ships those with
-// no controller behind them until portail runs.
+// no controller behind them until portail runs. The one answer past what
+// discovery tells any authenticated user: from the SA's LIST, a tenant with no
+// right on GatewayClasses learns that one exists. One boolean, no names.
 var gatewayClasses = schema.GroupVersionResource{Group: "gateway.networking.k8s.io", Version: "v1", Resource: "gatewayclasses"}
 
 // Snapshot is the probe's latest answer: the API layer reads it per request,
@@ -46,9 +48,13 @@ var gatewayClasses = schema.GroupVersionResource{Group: "gateway.networking.k8s.
 type Snapshot struct {
 	src   Source
 	value atomic.Pointer[model.Modules]
+	// doubted are the modules on at their last no; the probe goroutine's alone.
+	doubted map[schema.GroupVersionResource]bool
 }
 
-func New(src Source) *Snapshot { return &Snapshot{src: src} }
+func New(src Source) *Snapshot {
+	return &Snapshot{src: src, doubted: map[schema.GroupVersionResource]bool{}}
+}
 
 // Run probes now and on the discovery pace until ctx is cancelled. It returns
 // at once: an unreachable apiserver must not hold up startup.
@@ -78,7 +84,9 @@ func (s *Snapshot) Get() (model.Modules, bool) {
 	return *v, true
 }
 
-// probe keeps a module's last answer when its read fails.
+// probe keeps a module's last answer when its read fails, and a module that
+// was on goes off only on a second no in a row: a CRD group can be missing from
+// discovery for a moment at apiserver start, and off unmounts what a user is on.
 func (s *Snapshot) probe(ctx context.Context) {
 	var next model.Modules
 	prev := s.value.Load()
@@ -86,19 +94,24 @@ func (s *Snapshot) probe(ctx context.Context) {
 		next = *prev
 	}
 	complete := true
-	read := func(what schema.GroupVersionResource, set func(*model.Modules, bool), ask func() (bool, error)) {
+	read := func(what schema.GroupVersionResource, field func(*model.Modules) *bool, ask func() (bool, error)) {
 		on, err := ask()
 		if err != nil {
 			log.Printf("modules: read %s: %v", what.GroupResource(), err)
 			complete = false
 			return
 		}
-		set(&next, on)
+		if !on && *field(&next) && !s.doubted[what] {
+			s.doubted[what] = true
+			return
+		}
+		delete(s.doubted, what)
+		*field(&next) = on
 	}
 	for _, m := range served {
-		read(m.gvr, m.set, func() (bool, error) { return s.src.ServesAPIResource(m.gvr) })
+		read(m.gvr, m.field, func() (bool, error) { return s.src.ServesAPIResource(m.gvr) })
 	}
-	read(gatewayClasses, func(m *model.Modules, on bool) { m.Routes = on }, func() (bool, error) { return s.src.HasAny(ctx, gatewayClasses) })
+	read(gatewayClasses, func(m *model.Modules) *bool { return &m.Routes }, func() (bool, error) { return s.src.HasAny(ctx, gatewayClasses) })
 	if prev != nil || complete {
 		s.value.Store(&next)
 	}
