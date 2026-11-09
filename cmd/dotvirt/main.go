@@ -220,6 +220,7 @@ func run() error {
 		DRS:            drsSnapshot,
 		Netstate:       netSnapshot,
 		Modules:        moduleSnapshot,
+		IndexBindings:  true,
 		Replication:    replicationSnapshot,
 		FrontDoor:      routesSnapshot,
 		Bus:            bus,

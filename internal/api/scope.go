@@ -306,7 +306,7 @@ func (s *Server) viewFor(ctx context.Context, id auth.Identity, c *cluster.Clien
 	}
 	e, err := review(ctx, s.visible, key, lv, func(ctx context.Context) (visibleSet, error) {
 		prev, had := s.visible.Get(key)
-		e, err := s.reconcile(ctx, c, prev, had, lv)
+		e, err := s.reconcile(ctx, id, c, prev, had, lv)
 		if err != nil {
 			return visibleSet{}, err
 		}
@@ -344,11 +344,11 @@ func (s *Server) fresh(e visibleSet, now time.Time) bool {
 // moved since prev, the project namespaces new since prev, and those whose
 // short TTL ran out are reviewed again, and the ones no longer projects
 // dropped.
-func (s *Server) reconcile(ctx context.Context, c *cluster.Client, prev visibleSet, had bool, lv visLevels) (visibleSet, error) {
+func (s *Server) reconcile(ctx context.Context, id auth.Identity, c *cluster.Client, prev visibleSet, had bool, lv visLevels) (visibleSet, error) {
 	cands := s.candidates(lv.ns)
 	now := time.Now()
 	if !had || prev.cands == nil || prev.lv.cluster != lv.cluster || now.Sub(prev.swept) >= s.maxAge(prev.sweptUnsettled) {
-		return s.sweep(ctx, c, cands, lv)
+		return s.sweep(ctx, id, c, cands, lv)
 	}
 	next := prev
 	next.lv, next.cands = lv, cands
@@ -380,11 +380,11 @@ func (s *Server) reconcile(ctx context.Context, c *cluster.Client, prev visibleS
 	}
 	if prev.wide {
 		next.ns = cands.names
-		return s.refreshReads(ctx, c, next, prev, due)
+		return s.refreshReads(ctx, id, c, next, prev, due)
 	}
 	start := time.Now()
 	see := s.visibilityRef()
-	allowed, err := c.CanIn(ctx, "list", see.group, see.resource, slices.Sorted(maps.Keys(due)))
+	allowed, err := c.CanIn(ctx, "list", see.group, see.resource, s.boundOnly(id, slices.Sorted(maps.Keys(due))))
 	if err != nil {
 		return visibleSet{}, err
 	}
@@ -408,12 +408,12 @@ func (s *Server) reconcile(ctx context.Context, c *cluster.Client, prev visibleS
 			next.unsettled[ns] = start
 		}
 	}
-	return s.refreshReads(ctx, c, next, prev, due)
+	return s.refreshReads(ctx, id, c, next, prev, due)
 }
 
 // refreshReads re-asks what the token may list where its visibility or grants
 // moved, keeping the rest of prev.
-func (s *Server) refreshReads(ctx context.Context, c *cluster.Client, next, prev visibleSet, due map[string]bool) (visibleSet, error) {
+func (s *Server) refreshReads(ctx context.Context, id auth.Identity, c *cluster.Client, next, prev visibleSet, due map[string]bool) (visibleSet, error) {
 	ask := make([]string, 0, len(due))
 	reads := make(map[string]readSet, len(next.ns))
 	for ns := range next.ns {
@@ -423,7 +423,7 @@ func (s *Server) refreshReads(ctx context.Context, c *cluster.Client, next, prev
 			ask = append(ask, ns)
 		}
 	}
-	fresh, err := askReads(ctx, c, ask, next.wideReads)
+	fresh, err := askReads(ctx, c, s.boundOnly(id, ask), next.wideReads)
 	if err != nil {
 		return visibleSet{}, err
 	}
@@ -432,10 +432,25 @@ func (s *Server) refreshReads(ctx context.Context, c *cluster.Client, next, prev
 	return next, nil
 }
 
+// boundOnly narrows namespaces to those a RoleBinding names id in, so a user
+// costs reviews for where they belong, not for every namespace on the cluster.
+// A ClusterRoleBinding reaches everywhere and is the sweep's cluster-wide
+// review. Not narrowed while the RoleBinding watch is incomplete.
+func (s *Server) boundOnly(id auth.Identity, namespaces []string) []string {
+	if !s.indexBindings || s.state == nil {
+		return namespaces
+	}
+	bound, ok := s.state.BoundNamespaces(id.Username, id.Groups)
+	if !ok {
+		return namespaces
+	}
+	return slices.DeleteFunc(slices.Clone(namespaces), func(ns string) bool { return !bound[ns] })
+}
+
 // sweep reviews the token's visibility from scratch: whether it may list VMs
 // in every namespace (and namespaces too), else each candidate. The cluster-
 // wide review goes first, so a token holding it costs no per-namespace one.
-func (s *Server) sweep(ctx context.Context, c *cluster.Client, cands *candidates, lv visLevels) (visibleSet, error) {
+func (s *Server) sweep(ctx context.Context, id auth.Identity, c *cluster.Client, cands *candidates, lv visLevels) (visibleSet, error) {
 	e := visibleSet{cands: cands, lv: lv, swept: time.Now()}
 	see := s.visibilityRef()
 	wide, err := c.Can(ctx, "list", see.group, see.resource, "")
@@ -448,7 +463,7 @@ func (s *Server) sweep(ctx context.Context, c *cluster.Client, cands *candidates
 			return visibleSet{}, err
 		}
 	} else {
-		allowed, err := c.CanIn(ctx, "list", see.group, see.resource, cands.list)
+		allowed, err := c.CanIn(ctx, "list", see.group, see.resource, s.boundOnly(id, cands.list))
 		if err != nil {
 			return visibleSet{}, err
 		}
@@ -463,7 +478,7 @@ func (s *Server) sweep(ctx context.Context, c *cluster.Client, cands *candidates
 		}
 	}
 	if e.wideReads != allReads {
-		if e.reads, err = askReads(ctx, c, slices.Collect(maps.Keys(e.ns)), e.wideReads); err != nil {
+		if e.reads, err = askReads(ctx, c, s.boundOnly(id, slices.Collect(maps.Keys(e.ns))), e.wideReads); err != nil {
 			return visibleSet{}, err
 		}
 	}
