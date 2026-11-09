@@ -411,6 +411,8 @@ async function handleAPI(req, res, url) {
 		const repair = await handleRepair(req, res, path, url, s);
 		if (repair) return;
 	}
+	if (path === '/api/networking/gateways') return sendJSON(res, 200, s.gateways);
+	if (path === '/api/networking/routes') return sendJSON(res, 200, s.tenantRoutes ?? []);
 	if (path === '/api/storage/replication') return sendJSON(res, 200, s.replication);
 	if (path === '/api/storage/protection') return sendJSON(res, 200, s.protection ?? []);
 	if (path === '/api/networks') return sendJSON(res, 200, s.networks);
