@@ -196,7 +196,7 @@ func policyViews(t testing.TB, s *Snapshot, all []NamespaceLabels) map[string]st
 // networkViews renders every view the network memos back.
 func networkViews(t testing.TB, s *Snapshot) map[string]string {
 	t.Helper()
-	view := &TraceView{Namespace: func(ns string) bool { return ns < scaleNS(20) }}
+	view := &TraceView{Namespace: func(ns string) bool { return ns < scaleNS(20) }, UDNs: func(ns string) bool { return ns < scaleNS(20) }}
 	src := scaleWorkload(150, "10.128.0.10", scaleNS(150)+"/shared-007")
 	dst := scaleWorkload(151, "10.128.0.11", scaleNS(151)+"/shared-007")
 	views := map[string]string{

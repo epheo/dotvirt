@@ -267,12 +267,12 @@ func (s *Server) handleNetworkTraffic(w http.ResponseWriter, r *http.Request) {
 		fail(w, unavailable(err))
 		return
 	}
-	visible, err := s.visibleFor(r.Context(), id, c)
+	v, err := s.viewFor(r.Context(), id, c)
 	if err != nil {
 		fail(w, err)
 		return
 	}
-	nets := s.callerNetworks(r.Context(), id, c, visible)
+	nets := s.callerNetworks(r.Context(), id, c, v)
 	key := r.URL.Query().Get("network")
 	target, ok := model.Network{}, key == podNetworkKey
 	if !ok {
@@ -285,9 +285,9 @@ func (s *Server) handleNetworkTraffic(w http.ResponseWriter, r *http.Request) {
 	if limit <= 0 || limit > 50 {
 		limit = 5
 	}
-	nss := make([]string, 0, len(visible))
-	for ns, ok := range visible {
-		if ok {
+	nss := make([]string, 0, len(v.names))
+	for ns, ok := range v.names {
+		if ok && v.lists(ssarVM, ns) {
 			nss = append(nss, ns)
 		}
 	}

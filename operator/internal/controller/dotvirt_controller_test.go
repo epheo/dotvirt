@@ -246,7 +246,7 @@ func TestReconcileHaltsOnMissingHardDependency(t *testing.T) {
 // a drift requeue. This pins the pipeline's happy path, including that the
 // server-side applies in workload/argo phases succeed and converge.
 func TestReconcileMinimalCRToReady(t *testing.T) {
-	dv := testCR()
+	dv := optOut(testCR())
 	c := testBuilder(t).WithObjects(dv).Build()
 	r := newReconciler(c, depsOK)
 

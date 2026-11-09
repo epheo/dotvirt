@@ -165,6 +165,9 @@ func TestEnvtest(t *testing.T) {
 
 	t.Run("install reconciles to ready as the operator", func(t *testing.T) {
 		dv := &dotvirtv1alpha1.Dotvirt{ObjectMeta: metav1.ObjectMeta{Name: "x", Namespace: "dotvirt"}}
+		// The stub ArgoCD's controller holds no rights, and its own subtest below
+		// turns impersonation on.
+		dv.Spec.ArgoCD.SyncImpersonation.Enabled = new(false)
 		mustCreate(t, admin, dv)
 		key := types.NamespacedName{Namespace: "dotvirt", Name: install.AppName}
 
@@ -443,7 +446,7 @@ func TestEnvtest(t *testing.T) {
 			if err := admin.Get(ctx, client.ObjectKeyFromObject(dv), dv); err != nil {
 				t.Fatal(err)
 			}
-			dv.Spec.ArgoCD.SyncImpersonation.Enabled = on
+			dv.Spec.ArgoCD.SyncImpersonation.Enabled = new(on)
 			if err := admin.Update(ctx, dv); err != nil {
 				t.Fatal(err)
 			}
