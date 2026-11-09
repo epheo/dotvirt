@@ -29,6 +29,7 @@ import (
 
 	"github.com/epheo/dotvirt/internal/model"
 	"github.com/epheo/dotvirt/internal/restfactory"
+	"github.com/epheo/dotvirt/pkg/tenancy"
 )
 
 // Client reads VM and namespace state from the cluster under one identity (one
@@ -412,11 +413,11 @@ func (c *Client) NodeInfo(ctx context.Context, name string) (model.NodeInfo, err
 	}, nil
 }
 
-// ReleaseNamespace strips dotvirt's tenancy claim (the project label and repo
-// annotation) from a namespace under the caller's token - residue cleanup for
+// ReleaseNamespace strips dotvirt's tenancy claim (the project label and the repo
+// and path annotations) from a namespace under the caller's token - residue cleanup for
 // a labeled namespace no manifest describes. Cluster RBAC is the sole gate.
 func (c *Client) ReleaseNamespace(ctx context.Context, name, projectLabel, repoAnnotation string) error {
-	patch := fmt.Appendf(nil, `{"metadata":{"labels":{%q:null},"annotations":{%q:null}}}`, projectLabel, repoAnnotation)
+	patch := fmt.Appendf(nil, `{"metadata":{"labels":{%q:null},"annotations":{%q:null,%q:null}}}`, projectLabel, repoAnnotation, tenancy.PathAnnotation)
 	_, err := c.kube.CoreV1().Namespaces().Patch(ctx, name, types.StrategicMergePatchType, patch, metav1.PatchOptions{})
 	return err
 }

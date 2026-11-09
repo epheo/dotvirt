@@ -103,3 +103,70 @@ func TestOwners(t *testing.T) {
 		t.Errorf("owners = %v", got)
 	}
 }
+
+func withPath(n Namespace, p string) Namespace {
+	n.Annotations["dotvirt.io/path"] = p
+	return n
+}
+
+func TestCleanPath(t *testing.T) {
+	for in, want := range map[string]string{"": "", ".": "", "clusters/a": "clusters/a", "clusters/a/": "clusters/a", "a/./b": "a/b", "a/b/..": "a"} {
+		if got, ok := CleanPath(in); !ok || got != want {
+			t.Errorf("CleanPath(%q) = %q, %v; want %q", in, got, ok, want)
+		}
+	}
+	for _, in := range []string{"/etc", "..", "../x", "a/../../x", ".git", "a/.git/hooks", `a\b`} {
+		if got, ok := CleanPath(in); ok {
+			t.Errorf("CleanPath(%q) = %q, accepted", in, got)
+		}
+	}
+}
+
+func TestResolvePath(t *testing.T) {
+	repo := "https://forge/team-a.git"
+	resolve := func(nss ...Namespace) ProjectInfo {
+		t.Helper()
+		infos := resolver().Resolve(nss, nil)
+		if len(infos) != 1 {
+			t.Fatalf("got %d projects", len(infos))
+		}
+		return infos[0]
+	}
+	if p := resolve(withPath(nsInfo("a", "team-a", repo), "clusters/a/")); p.Path != "clusters/a" || p.Repo != repo || p.Error != "" {
+		t.Errorf("a folder: %+v", p)
+	}
+	// A namespace added later through dotvirt carries the repo alone.
+	if p := resolve(withPath(nsInfo("a", "team-a", repo), "clusters/a"), nsInfo("b", "team-a", repo)); p.Path != "clusters/a" || p.Error != "" {
+		t.Errorf("a namespace with no opinion: %+v", p)
+	}
+	for name, nss := range map[string][]Namespace{
+		"conflict": {withPath(nsInfo("a", "team-a", repo), "x"), withPath(nsInfo("b", "team-a", repo), "y")},
+		"invalid":  {withPath(nsInfo("a", "team-a", repo), "../x")},
+	} {
+		if p := resolve(nss...); p.Error == "" || p.Repo != "" || p.Path != "" {
+			t.Errorf("%s: %+v, want an Error and no repo", name, p)
+		}
+	}
+}
+
+// Argo and the forge grant by repo, so a folder cannot separate two tenants.
+func TestAFolderCannotShareARepo(t *testing.T) {
+	repo := "https://forge/shared.git"
+	nss := []Namespace{withPath(nsInfo("a", "team-a", repo), "a"), nsInfo("b", "team-b", repo)}
+	for _, p := range resolver().Resolve(nss, nil) {
+		if p.Error == "" || p.Repo != "" {
+			t.Errorf("%s: %+v, want it refused", p.Name, p)
+		}
+	}
+	// A caller who sees only one of them gets the same answer.
+	only := resolver().Resolve(nss, map[string]bool{"b": true})
+	if len(only) != 1 || only[0].Error == "" {
+		t.Errorf("filtered view: %+v", only)
+	}
+	// Sharing with no folder at all predates folders and keeps working.
+	for _, p := range resolver().Resolve([]Namespace{nsInfo("a", "team-a", repo), nsInfo("b", "team-b", repo)}, nil) {
+		if p.Error != "" || p.Repo != repo {
+			t.Errorf("%s: %+v, want it unchanged", p.Name, p)
+		}
+	}
+}

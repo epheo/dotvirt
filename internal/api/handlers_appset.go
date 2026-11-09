@@ -12,7 +12,7 @@ import (
 )
 
 // handleAppSetPlugin serves the ArgoCD ApplicationSet plugin generator: it returns
-// one {project,repo,namespace} parameter per repo-backed project (1 app = 1 project =
+// one {project,repo,path,namespace} parameter per repo-backed project (1 app = 1 project =
 // its N labeled namespaces), derived from the dotvirt.io/project labels (read from the
 // SA snapshot). Every emitted app lands in its project's own AppProject, which the
 // operator derives from the same labels and confines to those namespaces and that
@@ -50,6 +50,7 @@ func (s *Server) handleAppSetPlugin(w http.ResponseWriter, r *http.Request) {
 	type param struct {
 		Project   string `json:"project"`
 		Repo      string `json:"repo"`
+		Path      string `json:"path"`
 		Namespace string `json:"namespace"`
 	}
 	all := s.state.Namespaces()
@@ -75,7 +76,11 @@ func (s *Server) handleAppSetPlugin(w http.ResponseWriter, r *http.Request) {
 		if !ok {
 			continue
 		}
-		params = append(params, param{Project: p.Name, Repo: p.Repo, Namespace: dest})
+		root := p.Path
+		if root == "" {
+			root = "."
+		}
+		params = append(params, param{Project: p.Name, Repo: p.Repo, Path: root, Namespace: dest})
 	}
 	writeJSON(w, map[string]any{"output": map[string]any{"parameters": params}})
 }

@@ -32,6 +32,11 @@ const PlatformSyncAccount = "dotvirt-platform-sync"
 // same subjects as its admin grant (EgressBinding).
 const TenantEgressRole = "dotvirt-tenant-egress"
 
+// PathAnnotation names the folder of the repo a project lives in, beside the
+// repo annotation. It only locates content: Argo and the forge grant by repo, so
+// a repo stays one tenant's.
+const PathAnnotation = "dotvirt.io/path"
+
 var dnsLabel = regexp.MustCompile(`^[a-z0-9]([-a-z0-9]*[a-z0-9])?$`)
 
 // AppProjectName is the AppProject confining project's Application. ok=false

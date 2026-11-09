@@ -496,3 +496,16 @@ func TestNetworkPolicyAdmitsTheGatewayNamespace(t *testing.T) {
 		t.Error("the Gateway's namespace is not admitted")
 	}
 }
+
+// A tenant's folder comes from the plugin; the platform repo is always whole.
+func TestArgoSourcePaths(t *testing.T) {
+	dv := testDotvirt()
+	set := ApplicationSet(dv, "argocd", []string{"argocd"}, nil)
+	if got, _, _ := unstructured.NestedString(set.Object, "spec", "template", "spec", "source", "path"); got != "{{.path}}" {
+		t.Errorf("tenant source path = %q", got)
+	}
+	app := PlatformApplication(dv, "argocd", "https://forge/platform.git")
+	if got, _, _ := unstructured.NestedString(app.Object, "spec", "source", "path"); got != "." {
+		t.Errorf("platform source path = %q", got)
+	}
+}

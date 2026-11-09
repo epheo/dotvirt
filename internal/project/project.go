@@ -7,7 +7,9 @@ package project
 
 import (
 	"log"
+	"path"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -21,6 +23,7 @@ import (
 type ProjectInfo struct {
 	Name       string
 	Repo       string
+	Path       string // folder of Repo the project lives in; "" is all of it
 	Namespaces []string
 	Error      string
 }
@@ -67,6 +70,7 @@ func NewResolver(projectLabel, repoAnno, forgeBase string) *Resolver {
 type accum struct {
 	namespaces []string
 	repos      map[string]struct{}
+	paths      map[string]struct{}
 }
 
 // Resolve groups the project-labeled namespaces into projects, keeping only those
@@ -82,6 +86,7 @@ type accum struct {
 // what they're labeled) come from the shared snapshot; the only per-user input is
 // the visible set, computed once per token and cached by the caller.
 func (r *Resolver) Resolve(namespaces []Namespace, visible map[string]bool) []ProjectInfo {
+	shared := r.sharedRepos(namespaces)
 	byProject := map[string]*accum{}
 	for _, ns := range namespaces {
 		if visible != nil && !visible[ns.Name] {
@@ -99,7 +104,7 @@ func (r *Resolver) Resolve(namespaces []Namespace, visible map[string]bool) []Pr
 		}
 		a := byProject[name]
 		if a == nil {
-			a = &accum{repos: map[string]struct{}{}}
+			a = &accum{repos: map[string]struct{}{}, paths: map[string]struct{}{}}
 			byProject[name] = a
 		}
 		a.namespaces = append(a.namespaces, ns.Name)
@@ -107,6 +112,10 @@ func (r *Resolver) Resolve(namespaces []Namespace, visible map[string]bool) []Pr
 		// one repo rather than a conflict.
 		if repo := ns.Annotations[r.repoAnno]; repo != "" {
 			a.repos[forge.ResolveRef(r.forgeBase, repo)] = struct{}{}
+		}
+		// Absent is no opinion, like the repo: a namespace added later need not repeat it.
+		if p, ok := ns.Annotations[tenancy.PathAnnotation]; ok {
+			a.paths[p] = struct{}{}
 		}
 	}
 
@@ -128,10 +137,90 @@ func (r *Resolver) Resolve(namespaces []Namespace, visible map[string]bool) []Pr
 		default:
 			info.Error = "conflicting dotvirt.io/repo annotations across the project's namespaces"
 		}
+		if info.Error == "" {
+			info.Path, info.Error = a.path()
+		}
+		if info.Error == "" && shared[info.Repo] {
+			info.Error = "this repo is also another project's: a folder does not separate tenants, give each project its own repo"
+		}
+		if info.Error != "" {
+			info.Repo, info.Path = "", ""
+		}
 		out = append(out, info)
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
 	return out
+}
+
+// path is the project's one folder, or why it has none.
+func (a *accum) path() (string, string) {
+	if len(a.paths) > 1 {
+		return "", "conflicting dotvirt.io/path annotations across the project's namespaces"
+	}
+	for p := range a.paths {
+		clean, ok := CleanPath(p)
+		if !ok {
+			return "", "invalid dotvirt.io/path annotation"
+		}
+		return clean, ""
+	}
+	return "", ""
+}
+
+// CleanPath is the repo folder p names, "" for the whole repo. ok=false for
+// one that could leave the repo or reach into its metadata.
+func CleanPath(p string) (string, bool) {
+	if p == "" || p == "." {
+		return "", true
+	}
+	if strings.HasPrefix(p, "/") || strings.Contains(p, "\\") {
+		return "", false
+	}
+	clean := path.Clean(p)
+	if clean == "." {
+		return "", true
+	}
+	for _, seg := range strings.Split(clean, "/") {
+		if seg == ".." || seg == ".git" {
+			return "", false
+		}
+	}
+	return clean, true
+}
+
+// sharedRepos are the repos more than one project names where any of them uses
+// a folder: Argo and the forge grant by repo, so whoever may change one folder
+// may change the other. Read across every namespace, whatever the caller may
+// see. Projects sharing a repo with no folder at all are left as they were.
+func (r *Resolver) sharedRepos(namespaces []Namespace) map[string]bool {
+	type use struct {
+		projects map[string]bool
+		folder   bool
+	}
+	byRepo := map[string]*use{}
+	for _, ns := range namespaces {
+		name, ref := ns.Labels[r.projectLabel], ns.Annotations[r.repoAnno]
+		if name == "" || name == PlatformName || ref == "" {
+			continue
+		}
+		repo := forge.ResolveRef(r.forgeBase, ref)
+		u := byRepo[repo]
+		if u == nil {
+			u = &use{projects: map[string]bool{}}
+			byRepo[repo] = u
+		}
+		u.projects[name] = true
+		if p, _ := CleanPath(ns.Annotations[tenancy.PathAnnotation]); p != "" {
+			u.folder = true
+		}
+	}
+	shared := map[string]bool{}
+	for repo, u := range byRepo {
+		if len(u.projects) > 1 && u.folder {
+			shared[repo] = true
+		}
+	}
+	return shared
 }
 
 // Owners maps every project-labeled namespace to its project, unfiltered: what

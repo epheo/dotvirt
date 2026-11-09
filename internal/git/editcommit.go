@@ -94,7 +94,7 @@ func (w *WriteRepo) ProposeChangeset(base, branch, message string, items []Chang
 	if err := checkoutBranch(repo, wt, base); err != nil {
 		return CommitResult{}, fmt.Errorf("checkout base %q: %w", base, err)
 	}
-	if err := checkPins(repo, items); err != nil {
+	if err := w.checkPins(repo, items); err != nil {
 		return CommitResult{}, err
 	}
 	lease := plumbing.NewHash(plan.Lease)
@@ -125,7 +125,7 @@ func (w *WriteRepo) ProposeChangeset(base, branch, message string, items []Chang
 // the tree.
 func (w *WriteRepo) commitItems(repo *git.Repository, wt *git.Worktree, branch, message string, items []ChangesetItem, by Author, lease plumbing.Hash, beforePush func(string) error) (CommitResult, error) {
 	for _, it := range items {
-		if err := applyItem(wt, it); err != nil {
+		if err := w.applyItem(wt, it); err != nil {
 			return CommitResult{}, err
 		}
 	}
@@ -156,12 +156,16 @@ func (w *WriteRepo) commitItems(repo *git.Repository, wt *git.Worktree, branch, 
 // applyItem writes one item into the worktree and stages it. Staging is
 // explicit: Commit{All:true} only stages already-tracked files, so a new file
 // would otherwise be left out.
-func applyItem(wt *git.Worktree, it ChangesetItem) error {
+func (w *WriteRepo) applyItem(wt *git.Worktree, it ChangesetItem) error {
+	full, err := inRoot(w.root, it.Path)
+	if err != nil {
+		return err
+	}
 	var content []byte
 	switch {
 	case it.Delete:
 		// wt.Remove deletes the file and stages the removal; nothing to write.
-		if _, err := wt.Remove(it.Path); err != nil {
+		if _, err := wt.Remove(full); err != nil {
 			if errors.Is(err, index.ErrEntryNotFound) {
 				// Already absent on base: the intent - this manifest must not
 				// be in git - is satisfied. A delete staged against a stale
@@ -173,7 +177,7 @@ func applyItem(wt *git.Worktree, it ChangesetItem) error {
 		}
 		return nil
 	case it.Transform != nil:
-		current, err := readWorktree(wt, it.Path)
+		current, err := readWorktree(wt, full)
 		if errors.Is(err, fs.ErrNotExist) {
 			return fmt.Errorf("%w: %s is no longer on the base branch; unstage the change to it", model.ErrConflict, it.Path)
 		}
@@ -188,10 +192,10 @@ func applyItem(wt *git.Worktree, it ChangesetItem) error {
 	default:
 		return nil
 	}
-	if err := writeWorktreeFile(wt, model.File{Path: it.Path, Content: content}); err != nil {
+	if err := writeWorktreeFile(wt, model.File{Path: full, Content: content}); err != nil {
 		return err
 	}
-	if _, err := wt.Add(it.Path); err != nil {
+	if _, err := wt.Add(full); err != nil {
 		return fmt.Errorf("stage %s: %w", it.Path, err)
 	}
 	return nil
@@ -200,7 +204,7 @@ func applyItem(wt *git.Worktree, it ChangesetItem) error {
 // checkPins refuses the changeset when an item's file no longer holds its
 // BaseBlob on the checked-out base: the fresh clone is the authority, where
 // the mirror the draft was staged from may lag.
-func checkPins(repo *git.Repository, items []ChangesetItem) error {
+func (w *WriteRepo) checkPins(repo *git.Repository, items []ChangesetItem) error {
 	head, err := repo.Head()
 	if err != nil {
 		return err
@@ -217,7 +221,11 @@ func checkPins(repo *git.Repository, items []ChangesetItem) error {
 		if it.BaseBlob == "" {
 			continue
 		}
-		pin, err := pinIn(tree, it.Path)
+		full, err := inRoot(w.root, it.Path)
+		if err != nil {
+			return err
+		}
+		pin, err := pinIn(tree, full)
 		if err != nil {
 			return fmt.Errorf("file %s on base: %w", it.Path, err)
 		}
