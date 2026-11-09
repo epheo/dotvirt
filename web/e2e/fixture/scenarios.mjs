@@ -1731,6 +1731,27 @@ const replicated = {
 	capabilities: { ...base.capabilities, cluster: { replication: true, replicationRepair: true } },
 	replication: placement,
 };
+const replicatedsplit = {
+	...replicated,
+	name: 'replicatedsplit',
+	replication: {
+		...placement,
+		volumes: placement.volumes.map((v) =>
+			v.name === 'pvc-db1a' || v.name === 'pvc-db1b'
+				? {
+						...v,
+						phase: 'Degraded',
+						splitBrain: true,
+						splitSince: '2026-11-09T10:00:00Z',
+						primary: 'worker-1',
+						replicas: v.replicas.map((r) =>
+							r.state === 'catching-up' ? { ...r, state: 'in-sync', syncPercent: undefined } : r,
+						),
+					}
+				: v,
+		),
+	},
+};
 const replicatedreadonly = {
 	...replicated,
 	name: 'replicatedreadonly',
@@ -1763,6 +1784,7 @@ const replicatedtenant = {
 
 export const scenarios = {
 	replicated,
+	replicatedsplit,
 	replicatedreadonly,
 	replicatedtenant,
 	novms,

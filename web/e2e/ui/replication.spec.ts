@@ -82,6 +82,29 @@ test('keeping one copy of a split disk means typing its name', async ({ page }) 
 	await expect(main.getByRole('button', { name: /^Keep one copy/ })).toHaveCount(0);
 });
 
+test('two split disks of one VM are confirmed one disk at a time', async ({ page }) => {
+	await setScenario(page, 'replicatedsplit');
+	await login(page);
+	await page.goto('/storage?tab=replication');
+	const main = page.locator('main');
+	await main.getByRole('button', { name: 'Keep one copy of db-1 rootdisk' }).click();
+	const dialog = page.getByRole('dialog');
+	await expect(dialog.getByText('Two copies of db-1 rootdisk disagree')).toBeVisible();
+	await expect(dialog).toContainText('pvc-db1a');
+	const confirm = dialog.getByRole('button', { name: 'Keep worker-1, discard the rest' });
+	await dialog.getByRole('textbox').fill('db-1');
+	await expect(confirm).toBeDisabled();
+	await dialog.getByRole('textbox').fill('db-1 data');
+	await expect(confirm).toBeDisabled();
+	await dialog.getByRole('textbox').fill('db-1 rootdisk');
+	await expect(confirm).toBeEnabled();
+	await dialog.getByRole('button', { name: 'Cancel' }).click();
+
+	await main.getByRole('button', { name: 'Keep one copy of db-1 data' }).click();
+	await expect(dialog.getByText('Two copies of db-1 data disagree')).toBeVisible();
+	await expect(dialog).toContainText('pvc-db1b');
+});
+
 test('moving copies off a host shows what stays and why first', async ({ page }) => {
 	await setScenario(page, 'replicated');
 	await login(page);
@@ -91,6 +114,8 @@ test('moving copies off a host shows what stays and why first', async ({ page })
 	const dialog = page.getByRole('dialog');
 	await expect(dialog.getByText('Its copies disagree: resolve that first.')).toBeVisible();
 	await expect(dialog.getByText('A copy is still catching up.')).toBeVisible();
+	await expect(dialog.getByRole('heading', { name: 'Leaves worker-1' })).toBeVisible();
+	await expect(dialog.getByText('web-1 rootdisk', { exact: true })).toBeVisible();
 	const confirm = dialog.getByRole('button', { name: /^Move \d+ cop/ });
 	await expect(confirm).toBeDisabled();
 	await dialog.getByRole('textbox').fill('worker-1');

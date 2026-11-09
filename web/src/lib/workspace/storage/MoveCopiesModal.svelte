@@ -33,6 +33,10 @@
 
 	const count = $derived(plan?.moving.length ?? 0);
 	const copies = $derived(plural(count, 'copy', 'copies'));
+	const leaves = $derived((plan?.moving ?? []).map((v) => ({ name: nameOf(v) })));
+	const stayed = $derived(
+		(plan?.skipped ?? []).map((s) => ({ name: nameOf(s.volume), why: s.reason })),
+	);
 
 	async function move() {
 		let out: ReplicationEvict | undefined;
@@ -50,13 +54,15 @@
 	}
 </script>
 
-{#snippet stays()}
-	{#if plan?.skipped?.length}
+{#snippet listing(title: string, rows: { name: string; why?: string }[])}
+	{#if rows.length}
 		<div class="flex flex-col gap-1.5">
-			<h3 class="text-xs font-bold text-ink-muted">Stays on {host}</h3>
-			<ul class="flex max-h-48 flex-col gap-1 overflow-y-auto text-xs">
-				{#each plan.skipped as s (s.volume)}
-					<li><strong class="text-ink">{nameOf(s.volume)}</strong>: {s.reason}</li>
+			<h3 class="text-xs font-bold text-ink-muted">{title}</h3>
+			<ul class="flex max-h-32 flex-col gap-1 overflow-y-auto text-xs">
+				{#each rows as r (r.name)}
+					<li>
+						<strong class="text-ink">{r.name}</strong>{#if r.why}: {r.why}{/if}
+					</li>
 				{/each}
 			</ul>
 		</div>
@@ -83,7 +89,8 @@
 				</Consequence>
 				<Consequence>Runs now, under your account. It is not a pull request.</Consequence>
 			</div>
-			{@render stays()}
+			{@render listing(`Leaves ${host}`, leaves)}
+			{@render listing(`Stays on ${host}`, stayed)}
 		</div>
 	</ConfirmDelete>
 {:else}
@@ -94,7 +101,7 @@
 				<p class="text-ink-muted">Working out what can move...</p>
 			{:else if plan}
 				<p>Nothing can move off {host} right now.</p>
-				{@render stays()}
+				{@render listing(`Stays on ${host}`, stayed)}
 			{/if}
 		</div>
 		{#snippet footer()}

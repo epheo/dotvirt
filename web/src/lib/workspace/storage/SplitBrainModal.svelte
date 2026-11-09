@@ -11,8 +11,9 @@
 	import Consequence from '#lib/components/Consequence.svelte';
 
 	// Which copy wins a split. The other copies' writes since the split are
-	// gone for good, so the name is typed, and the copy in use is only a
-	// suggestion: with no copy in use there is no default at all.
+	// gone for good, so the disk's name is typed, not its VM's: one VM can have
+	// two split disks. The copy in use is only a suggestion: with none in use
+	// there is no default at all.
 	let { volume, name, onclose }: { volume: ReplicatedVolume; name: string; onclose: () => void } =
 		$props();
 

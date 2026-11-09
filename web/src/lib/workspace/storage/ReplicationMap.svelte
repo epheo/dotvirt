@@ -356,8 +356,9 @@
 											<button
 												type="button"
 												class="ml-2 cursor-pointer font-medium text-accent-ink hover:underline"
-												aria-label="Keep one copy of {r.name} {d.label}"
-												onclick={() => (splitOpen = { volume: d.volume, name: r.name })}
+												aria-label="Keep one copy of {nameOf(d.volume.name)}"
+												onclick={() =>
+													(splitOpen = { volume: d.volume, name: nameOf(d.volume.name) })}
 											>
 												Keep one
 											</button>
