@@ -24,6 +24,7 @@ import (
 
 	dotvirtv1alpha1 "github.com/epheo/dotvirt/operator/api/v1alpha1"
 	"github.com/epheo/dotvirt/operator/internal/install"
+	"github.com/epheo/dotvirt/operator/internal/platform"
 	"github.com/epheo/dotvirt/pkg/tenancy"
 )
 
@@ -144,6 +145,49 @@ func TestAnUnsetFlipWaitsOnApplicationsItCannotCheck(t *testing.T) {
 	}
 	if got := syncCond(t, c, dv); got.Reason != "NotReady" || !strings.Contains(got.Message, "enabled: true") {
 		t.Errorf("condition = %+v, want NotReady naming how to accept it", got)
+	}
+}
+
+// MicroShift reads as OpenShift and runs community Argo CD: the namespace says
+// whose install this is, not the platform.
+func TestArgoDefaultsFollowTheNamespace(t *testing.T) {
+	for name, c := range map[string]struct {
+		platform     platform.Platform
+		ns, sa       string
+		wantNS, want string
+	}{
+		"OpenShift GitOps":             {platform.OpenShift, "", "", openShiftGitOpsNS, "openshift-gitops-argocd-application-controller"},
+		"community Argo on MicroShift": {platform.OpenShift, "argocd", "", "argocd", "argocd-application-controller"},
+		"vanilla":                      {platform.Kubernetes, "", "", "argocd", "argocd-application-controller"},
+		"an explicit account wins":     {platform.OpenShift, "argocd", "mine", "argocd", "mine"},
+	} {
+		dv := testCR()
+		dv.Spec.ArgoCD.Namespace, dv.Spec.ArgoCD.ControllerServiceAccount = c.ns, c.sa
+		ns, sa := (&DotvirtReconciler{Platform: c.platform}).argoTarget(dv)
+		if ns != c.wantNS || sa != c.want {
+			t.Errorf("%s: %s, %s; want %s, %s", name, ns, sa, c.wantNS, c.want)
+		}
+	}
+	if got := argoInstance("argocd"); got != "argocd" {
+		t.Errorf("instance in argocd = %q", got)
+	}
+	if got := argoInstance(openShiftGitOpsNS); got != openShiftGitOpsNS {
+		t.Errorf("instance in %s = %q", openShiftGitOpsNS, got)
+	}
+}
+
+// Without KubeVirt an admin grant carries no VM rights, and is a grant all the same.
+func TestAGrantCountsWithoutKubeVirt(t *testing.T) {
+	dv := optIn(testCR(), false)
+	var n atomic.Int64
+	own := granted(map[string][]string{"dotvirt-p-team-a": {"team-a"}})
+	c := testBuilder(t).WithObjects(dv, argoCDInstance(nil), projectNS("team-a", "team-a", "dotvirt/team-a.git")).
+		WithInterceptorFuncs(reviews(func(account string, a *authzv1.ResourceAttributes) bool {
+			return a.Group != "kubevirt.io" && own(account, a)
+		}, &n)).WithReturnManagedFields().Build()
+	reconcileOnce(t, newReconciler(c, depsOK), dv)
+	if got := extraConfig(t, c)[install.SyncImpersonationKey]; got != "true" {
+		t.Errorf("%s = %v, condition %+v", install.SyncImpersonationKey, got, syncCond(t, c, dv))
 	}
 }
 

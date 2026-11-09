@@ -25,7 +25,6 @@ import (
 
 	dotvirtv1alpha1 "github.com/epheo/dotvirt/operator/api/v1alpha1"
 	"github.com/epheo/dotvirt/operator/internal/install"
-	"github.com/epheo/dotvirt/operator/internal/platform"
 	"github.com/epheo/dotvirt/pkg/tenancy"
 )
 
@@ -55,13 +54,13 @@ const syncProbeAccount = "dotvirt-sync-probe"
 // accessProbeLimit bounds the API calls one verdict has in flight at once.
 const accessProbeLimit = 8
 
-// argoInstance names the ArgoCD resource the operator sets
-// install.SyncImpersonationKey on: the GitOps operator's default instance on
-// OpenShift, the argocd-operator's conventional one elsewhere. The operator
+// argoInstance names the ArgoCD resource in argoNS the operator sets
+// install.SyncImpersonationKey on: the GitOps operator's default instance in
+// its namespace, the argocd-operator's conventional one elsewhere. The operator
 // may get and patch these two names only.
-func (r *DotvirtReconciler) argoInstance() string {
-	if r.Platform == platform.OpenShift {
-		return "openshift-gitops"
+func argoInstance(argoNS string) string {
+	if argoNS == openShiftGitOpsNS {
+		return openShiftGitOpsNS
 	}
 	return "argocd"
 }
@@ -82,7 +81,7 @@ func (r *DotvirtReconciler) syncImpersonation(ctx context.Context, dv *dotvirtv1
 	failed := func(err error) (metav1.ConditionStatus, string, string) {
 		return metav1.ConditionFalse, "Error", err.Error()
 	}
-	target := rc.argoNS + "/" + r.argoInstance()
+	target := rc.argoNS + "/" + argoInstance(rc.argoNS)
 	// The setting stays with the instance it was set on: one spec.argocd no
 	// longer names gets it back off.
 	if prev := dv.Status.SyncImpersonationInstance; prev != "" && prev != target {
@@ -520,7 +519,8 @@ func syncChecks(rc *reconcileCtx, declared map[string][]declaredKind) []accessCh
 		for _, ns := range rc.sync.accounts[account] {
 			projectNS[ns] = true
 			checks = append(checks, accessCheck{account: account,
-				attrs: authzv1.ResourceAttributes{Verb: "get", Group: "kubevirt.io", Resource: "virtualmachines", Namespace: ns}, want: true,
+				// Any grant in a namespace reads the namespace itself, VMs or no VMs.
+				attrs: authzv1.ResourceAttributes{Verb: "get", Resource: "namespaces", Namespace: ns, Name: ns}, want: true,
 				problem: fmt.Sprintf("project %s's sync account holds no grant in %s: stage its grants (POST /api/projects/%s/sync-access) and merge them", project, ns, project)})
 		}
 		for _, d := range declared[account] {

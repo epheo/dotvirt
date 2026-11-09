@@ -443,6 +443,8 @@ func (r *DotvirtReconciler) argoServerURL(ctx context.Context, dv *dotvirtv1alph
 	return "https://" + host, nil
 }
 
+const openShiftGitOpsNS = "openshift-gitops"
+
 // argoTarget resolves the ArgoCD namespace + controller ServiceAccount from the
 // spec, defaulting to the platform's conventional install (OpenShift GitOps vs
 // community Argo CD).
@@ -450,13 +452,15 @@ func (r *DotvirtReconciler) argoTarget(dv *dotvirtv1alpha1.Dotvirt) (ns, sa stri
 	ns, sa = dv.Spec.ArgoCD.Namespace, dv.Spec.ArgoCD.ControllerServiceAccount
 	if ns == "" {
 		if r.Platform == platform.OpenShift {
-			ns = "openshift-gitops"
+			ns = openShiftGitOpsNS
 		} else {
 			ns = "argocd"
 		}
 	}
 	if sa == "" {
-		if r.Platform == platform.OpenShift {
+		// By the namespace, not the platform: MicroShift reads as OpenShift and
+		// runs community Argo CD.
+		if ns == openShiftGitOpsNS {
 			sa = "openshift-gitops-argocd-application-controller"
 		} else {
 			sa = "argocd-application-controller"
