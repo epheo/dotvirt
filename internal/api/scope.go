@@ -17,6 +17,7 @@ import (
 	"github.com/epheo/dotvirt/internal/eventbus"
 	"github.com/epheo/dotvirt/internal/model"
 	"github.com/epheo/dotvirt/internal/project"
+	"github.com/epheo/dotvirt/internal/replication"
 	"github.com/epheo/dotvirt/internal/restfactory"
 	"github.com/epheo/dotvirt/internal/ttlcache"
 )
@@ -440,6 +441,19 @@ type ssarRef struct{ group, resource string }
 // ssarNodes is node read: the gate on node-level data (physical fabric, host
 // metrics, node ops in the task feed).
 var ssarNodes = ssarRef{resource: "nodes"}
+
+// ssarClaims is reading a namespace's PersistentVolumeClaims.
+var ssarClaims = ssarRef{resource: "persistentvolumeclaims"}
+
+// replicationRead is everything GET /api/storage/replication shows. Those
+// kinds are cluster-scoped and the snapshot behind it is the SA's, so each is
+// asked of the caller.
+var replicationRead = action{
+	refQ(verbList, ssarRef{replication.GVRVolume.Group, replication.GVRVolume.Resource}, ""),
+	refQ(verbList, ssarRef{replication.GVRPool.Group, replication.GVRPool.Resource}, ""),
+	refQ(verbList, ssarRef{replication.GVRNodeDisks.Group, replication.GVRNodeDisks.Resource}, ""),
+	refQ(verbList, ssarRef{replication.GVRPV.Group, replication.GVRPV.Resource}, ""),
+}
 
 // ssarDataSources is the boot images: listed for the options catalog, created
 // when an upload registers one.
