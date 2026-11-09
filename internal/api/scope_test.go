@@ -909,7 +909,7 @@ func TestReadsAreKeptWhereNothingMoved(t *testing.T) {
 	prev := visibleSet{reads: map[string]readSet{"kept": 1, "moved": 1}}
 	next := visibleSet{ns: map[string]bool{"kept": true, "moved": true}}
 	token := newAsking(func(*authzv1.ResourceAttributes) bool { return false })
-	got, err := (&Server{}).refreshReads(context.Background(), token.c, next, prev, map[string]bool{"moved": true})
+	got, err := (&Server{}).refreshReads(context.Background(), auth.Identity{}, token.c, next, prev, map[string]bool{"moved": true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -943,4 +943,40 @@ func TestVMRoutesNeedVMRights(t *testing.T) {
 		reads: map[string]readSet{"team-a-dev": 0},
 	})
 	wantStatus(t, do(s, tenantToken, http.MethodGet, "/api/vms/team-a-dev/web/manifest", ""), http.StatusNotFound)
+}
+
+// A user costs reviews for where they belong, not every namespace on the cluster.
+func TestASweepAsksOnlyWhereABindingNamesTheCaller(t *testing.T) {
+	ctx := context.Background()
+	bus := eventbus.New()
+	st, _, _ := watchedState(t, bus, projectNS("mine"), projectNS("theirs"), userBinding("mine", "owners", "alice"))
+	waitUntil(t, "the RBAC watches", func() bool {
+		_, ok := st.BoundNamespaces("alice", nil)
+		return ok
+	})
+	waitUntil(t, "the namespaces", func() bool { return len(st.Namespaces()) == 2 })
+	s := scopeServer(bus)
+	s.state, s.indexBindings = st, true
+	token := newAsking(func(a *authzv1.ResourceAttributes) bool { return a.Namespace == "mine" })
+	v, err := s.viewFor(ctx, auth.Identity{Token: "t", Username: "alice"}, token.c)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !v.names["mine"] || v.names["theirs"] {
+		t.Errorf("visible = %v", v.names)
+	}
+	if got := token.where(); !slices.Equal(got, []string{"", "mine"}) {
+		t.Errorf("asked %q, want the cluster-wide review and the bound namespace", got)
+	}
+
+	// Wide but lacking a kind: a kind it lacks everywhere can only be held
+	// where a RoleBinding names it.
+	reader := newAsking(func(a *authzv1.ResourceAttributes) bool { return a.Resource == "virtualmachines" })
+	if _, err := s.viewFor(ctx, auth.Identity{Token: "w", Username: "alice"}, reader.c); err != nil {
+		t.Fatal(err)
+	}
+	want := slices.Concat(slices.Repeat([]string{""}, wideSweep), slices.Repeat([]string{"mine"}, len(readKinds)-1))
+	if got := reader.take(); !slices.Equal(got, want) {
+		t.Errorf("a wide reader asked %q, want the wide sweep and the bound namespace", got)
+	}
 }
