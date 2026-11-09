@@ -137,7 +137,7 @@ func (r *Resolver) Resolve(namespaces []Namespace, visible map[string]bool) []Pr
 			info.Path, info.Error = folderOf(folders[name])
 		}
 		if info.Error == "" && shared[forge.NormalizeRepoURL(info.Repo)] {
-			info.Error = "this repo is also another project's: a folder does not separate tenants, give each project its own repo"
+			info.Error = "this repo is also another project's: give each project its own repo"
 		}
 		if info.Error != "" {
 			info.Repo, info.Path = "", ""
@@ -204,16 +204,12 @@ func CleanPath(p string) (string, bool) {
 	return clean, true
 }
 
-// sharedRepos are the repos more than one project names where any of them uses
-// a folder: Argo and the forge grant by repo, so whoever may change one folder
-// may change the other. Read across every namespace, whatever the caller may
-// see. Projects sharing a repo with no folder at all are left as they were.
+// sharedRepos are the repos more than one project names. A repo is one tenant:
+// Argo and the forge grant by repo, and each project's Application applies all of
+// it, which fails on whatever the other project declares. Read across every
+// namespace, whatever the caller may see.
 func (r *Resolver) sharedRepos(namespaces []Namespace) map[string]bool {
-	type use struct {
-		projects map[string]bool
-		folder   bool
-	}
-	byRepo := map[string]*use{}
+	byRepo := map[string]map[string]bool{}
 	for _, ns := range namespaces {
 		name, ref := ns.Labels[r.projectLabel], ns.Annotations[r.repoAnno]
 		if name == "" || name == PlatformName || ref == "" {
@@ -221,19 +217,14 @@ func (r *Resolver) sharedRepos(namespaces []Namespace) map[string]bool {
 		}
 		// Normalized as RepoSet keys them: .../r and .../r.git are one repo.
 		repo := forge.NormalizeRepoURL(forge.ResolveRef(r.forgeBase, ref))
-		u := byRepo[repo]
-		if u == nil {
-			u = &use{projects: map[string]bool{}}
-			byRepo[repo] = u
+		if byRepo[repo] == nil {
+			byRepo[repo] = map[string]bool{}
 		}
-		u.projects[name] = true
-		if p, _ := CleanPath(ns.Annotations[tenancy.PathAnnotation]); p != "" {
-			u.folder = true
-		}
+		byRepo[repo][name] = true
 	}
 	shared := map[string]bool{}
-	for repo, u := range byRepo {
-		if len(u.projects) > 1 && u.folder {
+	for repo, projects := range byRepo {
+		if len(projects) > 1 {
 			shared[repo] = true
 		}
 	}
