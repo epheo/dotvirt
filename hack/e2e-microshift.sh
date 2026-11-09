@@ -26,6 +26,10 @@ NAME="${NAME:-dotvirt-e2e-microshift}"
 KUBEVIRT="${KUBEVIRT:-1}"
 APP_IMAGE_TAR="${APP_IMAGE_TAR:-}"
 OPERATOR_IMAGE_TAR="${OPERATOR_IMAGE_TAR:-}"
+if [ -n "${APP_IMAGE_TAR}${OPERATOR_IMAGE_TAR}" ] && { [ -z "${APP_IMAGE_TAR}" ] || [ -z "${OPERATOR_IMAGE_TAR}" ]; }; then
+	echo "ERROR: set both APP_IMAGE_TAR and OPERATOR_IMAGE_TAR, or neither" >&2
+	exit 1
+fi
 # The loopback VG behind r-drbd. The image turns a VG of this name with a thin
 # pool of that name into a Pool and a default StorageClass by itself.
 LVM_DISK="${LVM_DISK:-/var/lib/${NAME}/lvmdisk.image}"
@@ -337,6 +341,8 @@ fi
 
 # ── 5. dotvirt operator + CR ───────────────────────────────────────────────────
 # load_image <archive> <ref>: into cri-o's store, past the registry nobody has.
+# The store is spelled out so the image lands where cri-o reads, whatever
+# skopeo's own storage.conf says.
 load_image() {
 	podman cp "$1" "${NAME}:/tmp/e2e-image.tar" \
 		&& timeout 300 podman exec "${NAME}" skopeo copy -q docker-archive:/tmp/e2e-image.tar \
@@ -389,12 +395,15 @@ retry "dotvirt deployment ready" "${TIMEOUT_INSTALL}" \
 	kc -n dotvirt wait deploy/dotvirt --for=condition=Available --timeout=10s
 
 # ── 6. Reach the API from the host ────────────────────────────────────────────
+# Before any port-forward: a failure here is past the trap that stops them.
+if [ "${KUBEVIRT}" = "0" ]; then
+	retry "gateway data plane available" "${TIMEOUT_INSTALL}" \
+		kc -n gateway-e2e wait deploy/portail-edge --for=condition=Available --timeout=10s
+fi
 log "port-forwarding dotvirt + forge"
 kc -n dotvirt port-forward svc/dotvirt 18080:8080 >/dev/null 2>&1 &
 kc -n dotvirt port-forward svc/dotvirt-forgejo 13000:3000 >/dev/null 2>&1 &
 if [ "${KUBEVIRT}" = "0" ]; then
-	retry "gateway data plane available" "${TIMEOUT_INSTALL}" \
-		kc -n gateway-e2e wait deploy/portail-edge --for=condition=Available --timeout=10s
 	kc -n gateway-e2e port-forward svc/portail-edge 18081:8080 >/dev/null 2>&1 &
 fi
 PF_PIDS="$(jobs -p)"
