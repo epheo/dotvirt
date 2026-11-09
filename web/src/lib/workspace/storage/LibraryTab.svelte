@@ -10,7 +10,7 @@
 	} from '@lucide/svelte';
 	import { storageHref } from '#lib/nav.js';
 	import { caps } from '#lib/state/caps.svelte.js';
-	import { catalog } from '#lib/state/catalog.svelte.js';
+	import { templates } from '#lib/state/templates.svelte.js';
 	import { inventory } from '#lib/state/inventory.svelte.js';
 	import { storage } from '#lib/state/storage.svelte.js';
 	import { ui } from '#lib/state/ui.svelte.js';
@@ -49,9 +49,7 @@
 
 	const p = $derived(project || undefined);
 	const tiles = $derived(libraryTiles(rows, storage.classes ?? [], snapshotsLoaded));
-	const uses = $derived(
-		imageUsage(rows, inventory.options?.osImages ?? [], catalog.templates ?? []),
-	);
+	const uses = $derived(imageUsage(rows, inventory.options?.osImages ?? [], templates.list ?? []));
 	const summary = $derived(topImages(uses, 4));
 	const imports = $derived(importUsage(rows));
 	const noDataVMs = $derived(new Set(rows.filter((r) => r.ephemeral).map((r) => r.vmKey)).size);

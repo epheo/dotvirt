@@ -1,10 +1,11 @@
 <script lang="ts">
-	import { hrefForScope, storageHref, trailForScope } from '#lib/nav.js';
+	import { storageHref, trailForScope } from '#lib/nav.js';
 	import { storage } from '#lib/state/storage.svelte.js';
 	import { FRESH_DAYS, ago, classFacts, classTag, num, size } from '#lib/storage.js';
 	import Breadcrumb from '#lib/components/Breadcrumb.svelte';
 	import Button from '#lib/components/Button.svelte';
 	import Card from '#lib/components/Card.svelte';
+	import HostLink from '#lib/components/HostLink.svelte';
 	import PageHeader from '#lib/components/PageHeader.svelte';
 
 	// One class as a drill-in: what a disk on it gets, where its free space
@@ -169,10 +170,12 @@
 									class="flex justify-between gap-3 border-t border-line-soft py-1.5 first:border-t-0"
 								>
 									{#if seg.topology}
-										<a
-											class="text-accent-ink hover:underline"
-											href={hrefForScope({ kind: 'node', node: seg.topology })}
-											>Free on {seg.topology}</a
+										<span
+											><HostLink
+												node={seg.topology}
+												label="Free on {seg.topology}"
+												class="text-accent-ink hover:underline"
+											/></span
 										>
 									{:else}<span>Free cluster-wide</span>{/if}
 									<span>{size(seg.free)}</span>

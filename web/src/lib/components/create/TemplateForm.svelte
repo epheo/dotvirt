@@ -2,10 +2,10 @@
 	import { untrack } from 'svelte';
 	import { Check, TriangleAlert } from '@lucide/svelte';
 	import { api, type DeployTemplateRequest, type Template } from '#lib/api.js';
-	import { libraryLabel } from '#lib/catalog.js';
+	import { libraryLabel } from '#lib/templates.js';
 	import { plural } from '#lib/format.js';
 	import { action } from '#lib/resource.svelte.js';
-	import { catalog } from '#lib/state/catalog.svelte.js';
+	import { templates } from '#lib/state/templates.svelte.js';
 	import { vmGate } from '#lib/gates.js';
 	import { inventory } from '#lib/state/inventory.svelte.js';
 	import { ui } from '#lib/state/ui.svelte.js';
@@ -49,14 +49,14 @@
 	// The library re-pulls on open, so a template merged since the last visit
 	// is deployable; ones that failed to parse are not offered.
 	$effect(() => {
-		catalog.load();
+		templates.load();
 	});
-	const templates = $derived(catalog.templates?.filter((t) => !t.error) ?? null);
+	const offered = $derived(templates.list?.filter((t) => !t.error) ?? null);
 	const key = (t: Template) => `${t.library}/${t.name}`;
 	// svelte-ignore state_referenced_locally
 	let picked = $state(library && template ? `${library}/${template}` : '');
 	$effect(() => {
-		const list = templates;
+		const list = offered;
 		untrack(() => {
 			if (list?.length && !list.some((t) => key(t) === picked)) {
 				// The project's own library first, then the shared one.
@@ -64,10 +64,10 @@
 			}
 		});
 	});
-	const tpl = $derived(templates?.find((t) => key(t) === picked) ?? null);
+	const tpl = $derived(offered?.find((t) => key(t) === picked) ?? null);
 	let query = $state('');
 	const shown = $derived(
-		(templates ?? [])
+		(offered ?? [])
 			.filter(
 				(t) =>
 					!query ||
@@ -146,11 +146,11 @@
 	sheet.submit = stage;
 </script>
 
-<SheetBody error={op.error || catalog.error}>
+<SheetBody error={op.error || templates.error}>
 	{#snippet form()}
-		{#if !templates}
+		{#if !offered}
 			<p class="text-sm text-ink-faint">Loading templates...</p>
-		{:else if !templates.length}
+		{:else if !offered.length}
 			<p class="text-sm text-ink-soft">
 				No saved setups yet. Save one from a VM's menu (Save as template) and it shows up here.
 			</p>
@@ -162,10 +162,10 @@
 				{key}
 				selected={(t) => key(t) === picked}
 				ontoggle={(t) => (picked = key(t))}
-				search={templates.length > 6}
+				search={offered.length > 6}
 				note={query
-					? `${shown.length} of ${templates.length} templates match.`
-					: `${plural(templates.length, 'template')}. ${project}'s come first.`}
+					? `${shown.length} of ${offered.length} templates match.`
+					: `${plural(offered.length, 'template')}. ${project}'s come first.`}
 				limit={6}
 			>
 				{#snippet row(t)}

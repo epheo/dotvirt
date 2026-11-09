@@ -76,6 +76,10 @@ export interface ClusterCaps {
    */
   oauthClient: boolean;
   /**
+   * Hosts is listing the cluster's nodes, the read behind the Hosts section.
+   */
+  hosts: boolean;
+  /**
    * ImageUpload is this dotvirt knowing an upload proxy: without one every
    * upload is refused whatever the caller's rights, and the namespace
    * fields DataVolumeCreate and BootImageCreate read false.

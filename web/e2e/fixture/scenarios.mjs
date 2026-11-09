@@ -1442,6 +1442,7 @@ function tenantView(sc, project) {
 	return {
 		...sc,
 		name: 'tenant',
+		capabilities: { ...sc.capabilities, cluster: { ...sc.capabilities?.cluster, hosts: false } },
 		inventory: {
 			...sc.inventory,
 			projects,

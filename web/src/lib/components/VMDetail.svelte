@@ -43,6 +43,7 @@
 	import Console from './Console.svelte';
 	import EffectivePolicyPanel from './EffectivePolicyPanel.svelte';
 	import HeaderMenu from './HeaderMenu.svelte';
+	import HostLink from './HostLink.svelte';
 	import TracePanel from './TracePanel.svelte';
 	import MetricsPanel from './MetricsPanel.svelte';
 	import Permissions from './Permissions.svelte';
@@ -233,11 +234,10 @@
 				<span class="size-2 shrink-0 rounded-full {TONE_DOT[phaseTone(vm.phase, vm.paused)]}"
 				></span>
 				<span
-					>{`${runState}${vm.nodeName ? ' on ' : ''}`}{#if vm.nodeName}<a
-							href="/hosts/{encodeURIComponent(vm.nodeName)}"
+					>{`${runState}${vm.nodeName ? ' on ' : ''}`}{#if vm.nodeName}<HostLink
+							node={vm.nodeName}
 							class="text-accent-ink underline decoration-line-strong underline-offset-2 hover:decoration-current"
-							>{vm.nodeName}</a
-						>{/if}{uptime ? `, up ${uptime}` : ''}</span
+						/>{/if}{uptime ? `, up ${uptime}` : ''}</span
 				>
 			</span>
 			<span class="ml-auto flex flex-wrap items-center gap-2">

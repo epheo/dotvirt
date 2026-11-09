@@ -6,7 +6,7 @@
 	import { imageGate } from '#lib/gates.js';
 	import { storageHref } from '#lib/nav.js';
 	import { action, resource } from '#lib/resource.svelte.js';
-	import { catalog } from '#lib/state/catalog.svelte.js';
+	import { templates } from '#lib/state/templates.svelte.js';
 	import { inventory } from '#lib/state/inventory.svelte.js';
 	import { storage } from '#lib/state/storage.svelte.js';
 	import { ui } from '#lib/state/ui.svelte.js';
@@ -42,7 +42,7 @@
 
 	const p = $derived(project || undefined);
 	const images = $derived(
-		imageUsage(rows, inventory.options?.osImages ?? [], catalog.templates ?? []).filter(
+		imageUsage(rows, inventory.options?.osImages ?? [], templates.list ?? []).filter(
 			(u) => u.image,
 		),
 	);

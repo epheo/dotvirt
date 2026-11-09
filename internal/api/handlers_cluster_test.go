@@ -559,6 +559,20 @@ func TestImageUploadCapabilityFollowsTheProxy(t *testing.T) {
 	}
 }
 
+// Hosts answers with or without a platform repo: it is not a platform field.
+func TestHostsCapabilityIsListingNodes(t *testing.T) {
+	for _, repo := range []string{"", "https://forge.example/platform.git"} {
+		s := newFakeCluster(t).server(nil, Config{PlatformRepo: repo})
+		for token, want := range map[string]bool{adminToken: true, tenantToken: false} {
+			rec := do(s, token, http.MethodGet, "/api/capabilities", "")
+			wantStatus(t, rec, http.StatusOK)
+			if cl := decodeBody[model.Capabilities](t, rec).Cluster; cl == nil || cl.Hosts != want {
+				t.Errorf("repo %q, %s: hosts %+v, want %v", repo, token, cl, want)
+			}
+		}
+	}
+}
+
 // The class sheet is read with the SA once and shared; a later caller is a
 // cache hit, and optional sources that 404 never fail the list.
 func TestStorageClasses(t *testing.T) {

@@ -22,8 +22,8 @@
 	const fmt = (n: number) => n.toLocaleString('en-US');
 
 	// Hosts exist without VMs: seed the groups from the host list so an empty
-	// (fresh, or fully drained) host still has a row. Caller RBAC gates the
-	// list; a tenant without node-read keeps the VM-derived groups only.
+	// (fresh, or fully drained) host still has a row. A VM names its host too,
+	// which holds the rows while the list loads and keeps a host that left it.
 	const nodesRes = resource<Node[]>(() => 'nodes', api.nodes);
 	const nodeOf = $derived(new Map((nodesRes.data ?? []).map((n) => [n.name, n])));
 

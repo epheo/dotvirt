@@ -1,17 +1,17 @@
 import { api, Unauthorized, type Template } from '#lib/api.js';
 import { friendlyError } from '#lib/format.js';
 
-// The template library, shared by the Catalog tree and workspace so both list
-// the same items from one fetch. The platform kinds come from inventory.options.
-class Catalog {
-	templates = $state<Template[] | null>(null);
+// The template library, shared by the Templates tab, the deploy sheet and
+// Storage's image usage so they list the same items.
+class Templates {
+	list = $state<Template[] | null>(null);
 	error = $state('');
 	#inflight: Promise<void> | null = null;
 	// Bumped by reset(), so a load started before a sign-out drops its late
 	// response instead of repopulating the reset store.
 	#gen = 0;
 
-	// Concurrent callers (tree + workspace mounting together) share one request.
+	// Concurrent callers share one request.
 	load(): Promise<void> {
 		if (this.#inflight) return this.#inflight;
 		const gen = this.#gen;
@@ -19,7 +19,7 @@ class Catalog {
 			.templates()
 			.then((t) => {
 				if (gen !== this.#gen) return;
-				this.templates = t.templates;
+				this.list = t.templates;
 				this.error = '';
 			})
 			.catch((e) => {
@@ -36,9 +36,9 @@ class Catalog {
 	reset() {
 		this.#gen++;
 		this.#inflight = null;
-		this.templates = null;
+		this.list = null;
 		this.error = '';
 	}
 }
 
-export const catalog = new Catalog();
+export const templates = new Templates();

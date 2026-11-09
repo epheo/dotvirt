@@ -54,6 +54,8 @@ type ClusterCaps struct {
 	DRSDisable bool `json:"drsDisable"`
 	// OAuthClient registers the SSO OAuthClient (finish SSO).
 	OAuthClient bool `json:"oauthClient"`
+	// Hosts is listing the cluster's nodes, the read behind the Hosts section.
+	Hosts bool `json:"hosts"`
 	// ImageUpload is this dotvirt knowing an upload proxy: without one every
 	// upload is refused whatever the caller's rights, and the namespace
 	// fields DataVolumeCreate and BootImageCreate read false.

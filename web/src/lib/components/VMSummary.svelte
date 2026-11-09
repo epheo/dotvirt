@@ -19,6 +19,7 @@
 	import ChangeList from './ChangeList.svelte';
 	import ConsolePreview from './ConsolePreview.svelte';
 	import GitOpsStepper from './GitOpsStepper.svelte';
+	import HostLink from './HostLink.svelte';
 	import SyncBadge from './SyncBadge.svelte';
 	import InfoCard from './InfoCard.svelte';
 	import VMConfigCard from './VMConfigCard.svelte';
@@ -209,10 +210,7 @@
 			<dl class="divide-y divide-line-soft text-[13px]">
 				<Row label="Host">
 					{#if vm.nodeName}
-						<a
-							href="/hosts/{encodeURIComponent(vm.nodeName)}"
-							class="text-accent-ink hover:underline">{vm.nodeName}</a
-						>
+						<HostLink node={vm.nodeName} class="text-accent-ink hover:underline" />
 					{:else}<span class="text-ink">—</span>{/if}
 				</Row>
 				<Row label="Pinned hosts" value={vm.scheduling?.pin?.join(', ') ?? ''} />

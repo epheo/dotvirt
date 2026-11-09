@@ -9,7 +9,7 @@ import {
 import { friendlyError } from '#lib/format.js';
 import { diskRows, imageUsage, uploadAbility, type UploadAbility } from '#lib/storage.js';
 import { caps } from './caps.svelte';
-import { catalog } from './catalog.svelte';
+import { templates } from './templates.svelte';
 import { inventory } from './inventory.svelte';
 
 // The Storage section's reads beside the live inventory: the class sheet (SA,
@@ -44,7 +44,7 @@ class StorageStore {
 		}),
 	);
 	readonly images = $derived(
-		imageUsage(this.rows, inventory.options?.osImages ?? [], catalog.templates ?? []),
+		imageUsage(this.rows, inventory.options?.osImages ?? [], templates.list ?? []),
 	);
 	// Every class name: the cluster's, and any a disk names that it lacks.
 	readonly classNames = $derived(
@@ -70,7 +70,7 @@ class StorageStore {
 	async refresh() {
 		const gen = this.#gen;
 		inventory.loadOptions();
-		catalog.load();
+		templates.load();
 		await Promise.all([
 			this.#pull(
 				api.storageClasses,

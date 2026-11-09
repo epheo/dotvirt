@@ -80,3 +80,41 @@ test("a host's Configure tab lists its fabric", async ({ page }) => {
 		main.getByText('Host configuration is managed by the cluster platform'),
 	).toBeVisible();
 });
+
+test('a caller who cannot list nodes gets no Hosts section and no dead host link', async ({
+	page,
+}) => {
+	await setScenario(page, 'tenant');
+	await login(page);
+	let reads = 0;
+	page.on('request', (r) => {
+		if (new URL(r.url()).pathname === '/api/nodes') reads++;
+	});
+	const main = page.locator('main');
+	const tiles = page.locator('aside').first().locator('nav a');
+	await expect(tiles).toHaveText(['Compute', 'Networking', 'Storage', 'Changes']);
+	await expect(main.getByRole('link', { name: 'See hosts' })).toHaveCount(0);
+
+	// A link kept from before lands on Compute and says why.
+	await page.goto('/hosts/worker-1');
+	await expect(page).toHaveURL(/\/compute$/);
+	await expect(page.getByText('You may not list hosts.')).toBeVisible();
+
+	// A VM's host is named, not linked.
+	await page.goto('/vm/web-prod/web-1');
+	await expect(main.getByText(/ on worker-\d/).first()).toBeVisible();
+	await expect(main.locator('a[href^="/hosts"]')).toHaveCount(0);
+	expect(reads).toBe(0);
+});
+
+test('an unanswered capability read offers no Hosts tile and keeps the page', async ({ page }) => {
+	await setScenario(page, 'base');
+	await login(page);
+	await page.route('**/api/capabilities*', (r) => r.abort());
+	await page.goto('/hosts');
+	await expect(
+		page.locator('main').getByText('Your access could not be checked. Try again in a moment.'),
+	).toBeVisible();
+	await expect(page).toHaveURL(/\/hosts$/);
+	await expect(page.locator('aside').first().getByRole('link', { name: 'Hosts' })).toHaveCount(0);
+});

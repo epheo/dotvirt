@@ -7,6 +7,7 @@
 		type Node,
 		type VM,
 	} from '#lib/api.js';
+	import { clusterGate } from '#lib/gates.js';
 	import { headroom } from '#lib/headroom.js';
 	import { metricsGap } from '#lib/metrics.js';
 	import { resource } from '#lib/resource.svelte.js';
@@ -54,7 +55,7 @@
 		{ poll: () => (hosts ? 0 : 30000) },
 	);
 	const ownNodes = resource<Node[] | null>(
-		() => (hosts ? '' : 'nodes'),
+		() => (hosts || !clusterGate.hosts().ok ? '' : 'nodes'),
 		(k) => (k ? api.nodes() : Promise.resolve(null)),
 	);
 	const capRes = $derived(hosts?.cap ?? ownCap);

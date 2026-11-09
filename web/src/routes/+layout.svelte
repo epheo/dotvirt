@@ -17,7 +17,7 @@
 	import { resource } from '#lib/resource.svelte.js';
 	import { INVENTORY_SECTIONS, sectionOf, vmHref, type Section } from '#lib/nav.js';
 	import { drafts } from '#lib/state/drafts.svelte.js';
-	import { catalog } from '#lib/state/catalog.svelte.js';
+	import { templates } from '#lib/state/templates.svelte.js';
 	import { inventory } from '#lib/state/inventory.svelte.js';
 	import { reviewCache } from '#lib/state/reviewCache.svelte.js';
 	import { storage } from '#lib/state/storage.svelte.js';
@@ -39,7 +39,6 @@
 	import Skeleton from '#lib/components/Skeleton.svelte';
 	import TaskDock from '#lib/components/TaskDock.svelte';
 	import ToastHost from '#lib/components/ToastHost.svelte';
-	import CatalogTree from '#lib/tree/CatalogTree.svelte';
 	import ChangesTree from '#lib/tree/ChangesTree.svelte';
 	import ComputeTree from '#lib/tree/ComputeTree.svelte';
 	import HostsTree from '#lib/tree/HostsTree.svelte';
@@ -76,7 +75,7 @@
 			drafts.reset();
 			reviewCache.reset();
 			ui.reset();
-			catalog.reset();
+			templates.reset();
 			storage.reset();
 			caps.reset();
 			tray.reset();
@@ -274,7 +273,7 @@
 				<div class="min-h-0 flex-1 overflow-y-auto">
 					{#if !inventory.inventory}
 						<div class="p-3"><Skeleton rows={5} class="h-5" bg="bg-side-hover" /></div>
-					{:else if inventory.projects.length === 0 && inventory.adoptable.length === 0 && treeSection !== 'catalog' && treeSection !== 'changes'}
+					{:else if inventory.projects.length === 0 && inventory.adoptable.length === 0 && treeSection !== 'changes'}
 						<div class="space-y-3 p-6 text-center">
 							<p class="text-xs text-side-dim">No projects visible.</p>
 							{#if clusterGate.namespaceCreate().ok}
@@ -286,15 +285,13 @@
 					{:else if treeSection === 'compute'}
 						<ComputeTree />
 					{:else if treeSection === 'hosts'}
-						<HostsTree />
+						{#if clusterGate.hosts().ok}<HostsTree />{/if}
 					{:else if treeSection === 'networking'}
 						<NetworkingTree />
 					{:else if treeSection === 'storage'}
 						<StorageTree />
-					{:else if treeSection === 'changes'}
-						<ChangesTree />
 					{:else}
-						<CatalogTree />
+						<ChangesTree />
 					{/if}
 				</div>
 			</aside>
