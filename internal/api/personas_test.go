@@ -241,10 +241,11 @@ func TestPersonas(t *testing.T) {
 		"microshift": {pViewerToken: project, pAuthorToken: author, pProjectAdminToken: admin,
 			pNetworkAdminToken: network, pClusterAdminToken: all, pSignedInToken: signedIn},
 	}
-	// MicroShift serves no UserDefinedNetworks and its stock roles grant none.
-	for _, token := range []string{pAuthorToken, pProjectAdminToken} {
+	// MicroShift serves no UserDefinedNetworks and no EgressFirewalls: whatever
+	// RBAC allows, nobody is offered a new one there.
+	for _, token := range []string{pAuthorToken, pProjectAdminToken, pClusterAdminToken} {
 		fp := want["microshift"][token]
-		fp.NetworkCreate = false
+		fp.NetworkCreate, fp.EgressFWCreate = false, false
 		want["microshift"][token] = fp
 	}
 	for platform, personas := range want {

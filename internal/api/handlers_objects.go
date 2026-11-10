@@ -34,6 +34,17 @@ func (s *Server) objectScope(w http.ResponseWriter, r *http.Request, verbs ...st
 		fail(w, invalid(fmt.Errorf("object routes do not take %s", model.ResourceNoun(resource))))
 		return sc, "", "", "", false
 	}
+	if slices.Contains(verbs, verbCreate) || slices.Contains(verbs, verbUpdate) {
+		var kinds []model.Kind
+		for _, k := range res.Kinds {
+			if k.ClusterScoped == (ns == model.ClusterScopeNS) {
+				kinds = append(kinds, k)
+			}
+		}
+		if !s.gateServed(w, r, kinds...) {
+			return sc, "", "", "", false
+		}
+	}
 	if ns == model.ClusterScopeNS {
 		kind, clusterScoped := res.ClusterKind()
 		if !clusterScoped {
