@@ -29,7 +29,10 @@ test('at scale the map aggregates and problems carry their fix', async ({ page }
 	await login(page);
 	await page.goto('/networking');
 	const main = page.locator('main');
-	await expect(main.getByText('Showing 6 of 27 networks and 5 of 52 projects.')).toBeVisible();
+	// The map counts every network the header does; the lane its own.
+	await expect(main.getByText('2,846 VMs, 131 networks, 5 uplinks')).toBeVisible();
+	await expect(main.getByText('Showing 17 of 131 networks and 5 of 52 projects.')).toBeVisible();
+	await expect(main.getByText('6 most used of 27')).toBeVisible();
 	await expect(main.getByText('47 more projects')).toBeVisible();
 	await expect(main.getByText('Fails on host-41')).toBeVisible();
 	await expect(

@@ -398,7 +398,8 @@ func TestPlatformReadsNeedAClusterWideSignal(t *testing.T) {
 	for _, k := range append(served, model.KindMachCfg) {
 		g.d.kinds = append(g.d.kinds, schema.GroupKind{Group: k.Group, Kind: k.Kind})
 	}
-	g.fc.serveKinds(served...)
+	// OLM is served, as on OpenShift, so rebalancing's install can be staged.
+	g.fc.serveKinds(append(slices.Clone(served), model.KindSub, model.KindOpGroup)...)
 	var listing, butRB, butANP []grant
 	for _, k := range served {
 		q := grant{verb: verbList, group: k.Group, resource: k.Plural}

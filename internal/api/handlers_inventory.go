@@ -114,12 +114,15 @@ func (s *Server) InventoryForIdentity(ctx context.Context, id auth.Identity) (mo
 			nss = append(nss, pn.Namespace)
 		}
 	}
-	author := s.authorNamespaces(ctx, id, userCluster, nss)
+	vms, author := s.authorNamespaces(ctx, id, userCluster, nss)
 	for i := range inv.Projects {
 		for j := range inv.Projects[i].Namespaces {
 			pn := &inv.Projects[i].Namespaces[j]
 			if ok, known := author[pn.Namespace]; known {
 				pn.CanAuthor = &ok
+			}
+			if ok, known := vms[pn.Namespace]; known {
+				pn.CanAuthorVMs = &ok
 			}
 		}
 	}

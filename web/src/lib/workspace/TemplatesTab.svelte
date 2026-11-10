@@ -34,7 +34,7 @@
 	const invalid = $derived(rows?.filter((t) => t.error).length ?? 0);
 	// A VM stages into a namespace the caller authors in; the sheet then asks
 	// vmGate.create of the one picked.
-	const canCreate = $derived(inventory.namespaces.length > 0);
+	const canCreate = $derived(inventory.vmNamespaces.length > 0);
 
 	// A template opened from a link lands on the page that holds it.
 	const picked = $derived(page.url.searchParams.get('item'));
