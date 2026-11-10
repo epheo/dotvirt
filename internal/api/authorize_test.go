@@ -396,8 +396,10 @@ func TestAuthorNamespaces(t *testing.T) {
 	t.Run("per namespace", func(t *testing.T) {
 		c, reviews := ssarCountingClient(func(a *authzv1.ResourceAttributes) bool { return a.Namespace == "b" })
 		got := s.authorNamespaces(ctx, auth.Identity{Token: "tenant"}, c, nss)
-		if *reviews != 4 || got["a"] || !got["b"] || got["c"] || len(got) != 3 {
-			t.Fatalf("got %v after %d reviews", got, *reviews)
+		// Every kind cluster-wide, every kind in a and c, the first one in b.
+		k := len(s.authoredKinds(ctx))
+		if *reviews != 3*k+1 || got["a"] || !got["b"] || got["c"] || len(got) != 3 {
+			t.Fatalf("got %v after %d reviews, want %d", got, *reviews, 3*k+1)
 		}
 	})
 	t.Run("a failed review is unknown", func(t *testing.T) {

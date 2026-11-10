@@ -914,26 +914,45 @@ func TestRightsOnPodsAloneOpenNothing(t *testing.T) {
 	}
 }
 
-// A namespace admin of a cluster with KubeVirt but none of its roles sees the
-// namespace and authors no VMs in it.
-func TestWithKubeVirtAuthoringStillAsksAboutVMs(t *testing.T) {
-	fc := newFakeCluster(t)
-	fc.ssar = namespaceAdmin(false)
-	s := fc.server(nil, Config{})
-	s.modules = knownModules(t, true)
-	if visible, author := tenantView(t, s); !visible["team-a-dev"] || author["team-a-dev"] {
-		t.Errorf("visible = %v, author = %v, want the namespace and no authoring", visible, author)
+// A namespace admin of a cluster with KubeVirt but none of its roles authors
+// in the namespace: NetworkPolicies are a kind its repo holds. So while
+// discovery has not answered yet, when every kind counts.
+func TestAuthoringFollowsAnyTenantKind(t *testing.T) {
+	for name, mods := range map[string]func(*testing.T) *modules.Snapshot{
+		"with KubeVirt":        func(t *testing.T) *modules.Snapshot { return knownModules(t, true) },
+		"discovery unanswered": func(*testing.T) *modules.Snapshot { return modules.New(fakeModules{}) },
+	} {
+		t.Run(name, func(t *testing.T) {
+			fc := newFakeCluster(t)
+			fc.ssar = namespaceAdmin(false)
+			s := fc.server(nil, Config{})
+			s.modules = mods(t)
+			if visible, author := tenantView(t, s); !visible["team-a-dev"] || !author["team-a-dev"] {
+				t.Errorf("visible = %v, author = %v, want the namespace and authoring", visible, author)
+			}
+		})
 	}
 }
 
-// Until discovery answers, authoring keeps the VM question.
-func TestUnknownModulesKeepTheVMQuestion(t *testing.T) {
-	fc := newFakeCluster(t)
-	fc.ssar = namespaceAdmin(false)
-	s := fc.server(nil, Config{})
-	s.modules = modules.New(fakeModules{})
-	if visible, author := tenantView(t, s); !visible["team-a-dev"] || author["team-a-dev"] {
-		t.Errorf("visible = %v, author = %v, want the namespace and no authoring", visible, author)
+// A right on a kind the cluster does not serve authors nothing: git would
+// hold what nothing syncs.
+func TestAuthoringIgnoresUnservedKinds(t *testing.T) {
+	for _, served := range []bool{false, true} {
+		fc := newFakeCluster(t)
+		fc.ssar = func(token string, a *authzv1.ResourceAttributes) bool {
+			return token == tenantToken && a.Namespace == "team-a-dev" &&
+				(a.Resource == "namespaces" || a.Resource == "pods" || a.Resource == "egressfirewalls")
+		}
+		kinds := []model.Kind{model.KindVM, model.KindNetpol, model.KindNS}
+		if served {
+			kinds = append(kinds, model.KindEgressFW)
+		}
+		fc.serveKinds(kinds...)
+		s := fc.server(nil, Config{})
+		s.modules = knownModules(t, false)
+		if _, author := tenantView(t, s); author["team-a-dev"] != served {
+			t.Errorf("EgressFirewalls served = %v: author = %v", served, author)
+		}
 	}
 }
 

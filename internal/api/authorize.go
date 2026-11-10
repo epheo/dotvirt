@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -813,18 +814,24 @@ func (s *Server) readsRepo(ctx context.Context, sc scope, namespace string) erro
 	return s.require(ctx, sc.id, sc.cluster, act)
 }
 
-// authorNamespaces is the UI's authoring signal for nss. One cluster-wide
-// review answers for every namespace when it allows; otherwise each namespace
-// is reviewed, at most authConcurrency at once. A namespace whose review
-// fails is left out of the map, so a timeout reads as unknown, never as no.
+// authorNamespaces is the UI's authoring signal for nss: a namespace takes
+// changes when the caller may update any kind a tenant repo may hold that the
+// cluster serves (authoredKinds). Cluster-wide reviews answer for every
+// namespace when one allows; otherwise each namespace is reviewed kind by kind
+// until one allows, at most authConcurrency namespaces at once. A namespace
+// whose reviews fail is left out of the map, so a timeout reads as unknown,
+// never as no.
 func (s *Server) authorNamespaces(ctx context.Context, id auth.Identity, c *cluster.Client, nss []string) map[string]bool {
 	out := make(map[string]bool, len(nss))
-	authorIn := vmAction
-	if s.noVMs() {
-		// KubeVirt's aggregated roles are absent: admin and edit hold this instead.
-		authorIn = func(verb, ns string) action { return ask(verb, ssarNetpol, ns) }
+	kinds := s.authoredKinds(ctx)
+	updates := func(ns string) []action {
+		acts := make([]action, len(kinds))
+		for i, k := range kinds {
+			acts[i] = kindAction(verbUpdate, k, ns)
+		}
+		return acts
 	}
-	if _, all, err := s.allowed(ctx, id, c, authorIn(verbUpdate, "")); err == nil && all {
+	if all, err := s.anyAllowed(ctx, id, c, updates("")); err == nil && all {
 		for _, ns := range nss {
 			out[ns] = true
 		}
@@ -839,8 +846,8 @@ func (s *Server) authorNamespaces(ctx context.Context, id auth.Identity, c *clus
 		wg.Go(func() {
 			sem <- struct{}{}
 			defer func() { <-sem }()
-			_, ok, err := s.allowed(ctx, id, c, authorIn(verbUpdate, ns))
-			if err != nil {
+			ok, err := s.anyAllowed(ctx, id, c, updates(ns))
+			if !ok && err != nil {
 				return
 			}
 			mu.Lock()
@@ -850,4 +857,12 @@ func (s *Server) authorNamespaces(ctx context.Context, id auth.Identity, c *clus
 	}
 	wg.Wait()
 	return out
+}
+
+// authoredKinds are the kinds a tenant repo may hold that the cluster serves,
+// VMs first: the grant most authors hold ends the review there.
+func (s *Server) authoredKinds(ctx context.Context) []model.Kind {
+	kinds := model.TenantKinds()
+	un := s.unserved(ctx, kinds...)
+	return slices.DeleteFunc(kinds, func(k model.Kind) bool { return un[k] })
 }
