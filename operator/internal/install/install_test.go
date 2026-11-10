@@ -8,6 +8,7 @@ import (
 
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 
@@ -517,5 +518,59 @@ func TestArgoSourcePaths(t *testing.T) {
 	app := PlatformApplication(dv, "argocd", "https://forge/platform.git")
 	if got, _, _ := unstructured.NestedString(app.Object, "spec", "source", "path"); got != "." {
 		t.Errorf("platform source path = %q", got)
+	}
+}
+
+// A project's repo applies any namespaced kind but the denied ones only while
+// tenantKinds is Any, sync impersonation is asked for and in effect; otherwise
+// it keeps the listed kinds, and the shared tier always does.
+func TestTenantKindsAnyNeedsImpersonation(t *testing.T) {
+	denies := func(ap *unstructured.Unstructured) (bool, bool) {
+		spec := ap.Object["spec"].(map[string]any)
+		_, black := spec["namespaceResourceBlacklist"]
+		_, white := spec["namespaceResourceWhitelist"]
+		return black, white
+	}
+	ready := metav1.Condition{Type: dotvirtv1alpha1.ConditionSyncImpersonationReady, Status: metav1.ConditionTrue, Reason: "Enabled"}
+	off := false
+	for _, c := range []struct {
+		name     string
+		set      func(dv *dotvirtv1alpha1.Dotvirt)
+		anyKinds bool
+	}{
+		{"listed", func(dv *dotvirtv1alpha1.Dotvirt) { meta.SetStatusCondition(&dv.Status.Conditions, ready) }, false},
+		{"any, impersonation not ready", func(dv *dotvirtv1alpha1.Dotvirt) { dv.Spec.ArgoCD.TenantKinds = "Any" }, false},
+		{"any, impersonation ready", func(dv *dotvirtv1alpha1.Dotvirt) {
+			dv.Spec.ArgoCD.TenantKinds = "Any"
+			meta.SetStatusCondition(&dv.Status.Conditions, ready)
+		}, true},
+		{"any, impersonation turned off while still ready", func(dv *dotvirtv1alpha1.Dotvirt) {
+			dv.Spec.ArgoCD.TenantKinds = "Any"
+			dv.Spec.ArgoCD.SyncImpersonation.Enabled = &off
+			meta.SetStatusCondition(&dv.Status.Conditions, ready)
+		}, false},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			dv := testDotvirt()
+			c.set(dv)
+			dv.Spec.ArgoCD.TenantKindsDenied = []dotvirtv1alpha1.GroupKind{{Group: "capsule.clastix.io", Kind: "*"}}
+			ap := TenantAppProject(dv, "argocd", "dotvirt-p-a", "a", []string{"a"}, nil)
+			if black, white := denies(ap); black != c.anyKinds || white == c.anyKinds {
+				t.Fatalf("blacklist %v, whitelist %v; want any kinds %v", black, white, c.anyKinds)
+			}
+			if c.anyKinds {
+				list := ap.Object["spec"].(map[string]any)["namespaceResourceBlacklist"].([]any)
+				want := map[string]any{"group": "capsule.clastix.io", "kind": "*"}
+				if !slices.ContainsFunc(list, func(e any) bool { return reflect.DeepEqual(e, want) }) {
+					t.Errorf("the provider's denied kinds are missing: %v", list)
+				}
+			}
+			if black, _ := denies(TenantsAppProject(dv, "argocd", "https://forge/dotvirt/platform.git", "ns")); black {
+				t.Error("the shared tier, which reaches any namespace, applies any kind")
+			}
+			if v, _, _ := unstructured.NestedSlice(ap.Object, "spec", "clusterResourceWhitelist"); v == nil || len(v) != 0 {
+				t.Errorf("clusterResourceWhitelist = %v, want empty", v)
+			}
+		})
 	}
 }

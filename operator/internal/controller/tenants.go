@@ -93,6 +93,9 @@ type tenantTier struct {
 // leave the render and prune deletes them.
 func (r *DotvirtReconciler) tenantAppProjects(ctx context.Context, dv *dotvirtv1alpha1.Dotvirt, argoNS string, platformNS []string) (tenantTier, error) {
 	t := tenantTier{accounts: map[string][]string{}}
+	if dv.Spec.ArgoCD.AnyTenantKinds() && install.TenantDenied(dv) == nil {
+		t.notes = append(t.notes, "tenant repos keep the listed kinds until sync impersonation is on (tenantKinds Any)")
+	}
 	var nsList corev1.NamespaceList
 	if err := r.List(ctx, &nsList, client.HasLabels{install.ProjectLabel}); err != nil {
 		return t, fmt.Errorf("list project namespaces: %w", err)

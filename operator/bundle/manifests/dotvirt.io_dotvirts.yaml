@@ -102,7 +102,44 @@ spec:
                           until their AppProjects name a ServiceAccount (destinationServiceAccounts).
                         type: boolean
                     type: object
+                  tenantKinds:
+                    description: |-
+                      TenantKinds is what a tenant repo may apply. Listed, the default: the
+                      kinds dotvirt has a UI for. Any: every namespaced kind but the denied
+                      ones (grants, quotas, the platform tier's kinds, OLM, KubeVirt's own
+                      configuration, and TenantKindsDenied). Any holds only while sync
+                      impersonation is on, the project's sync account then being the ceiling;
+                      until then tenant repos keep the listed kinds.
+                    enum:
+                    - Listed
+                    - Any
+                    type: string
+                  tenantKindsDenied:
+                    description: |-
+                      TenantKindsDenied adds kinds no tenant repo may apply under Any; it never
+                      removes one. Kind "*" denies the whole group.
+                    items:
+                      description: |-
+                        GroupKind names a kind by API group ("" for the core group); kind "*" is the
+                        whole group.
+                      properties:
+                        group:
+                          type: string
+                        kind:
+                          minLength: 1
+                          type: string
+                      required:
+                      - group
+                      - kind
+                      type: object
+                    type: array
                 type: object
+                x-kubernetes-validations:
+                - message: 'tenantKinds Any needs sync impersonation: the project''s
+                    sync account is the only ceiling on what its repo applies'
+                  rule: '!has(self.tenantKinds) || self.tenantKinds != ''Any'' ||
+                    !has(self.syncImpersonation) || !has(self.syncImpersonation.enabled)
+                    || self.syncImpersonation.enabled'
               auth:
                 description: AuthSpec enables OpenShift SSO beside the always-present
                   token login.

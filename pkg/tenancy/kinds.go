@@ -93,3 +93,50 @@ func TenantKind(kind string) bool {
 	k, ok := LookupKind(kind)
 	return ok && k.Tenant
 }
+
+// GroupKind names a kind by API group ("" for the core group); Kind "*" is the
+// whole group.
+type GroupKind struct{ Group, Kind string }
+
+// Covers reports whether g names k: its kind, or its whole group.
+func (g GroupKind) Covers(group, kind string) bool {
+	return g.Group == group && (g.Kind == "*" || g.Kind == kind)
+}
+
+// deniedBase is what no tenant repo applies even when it may apply any
+// namespaced kind: grants and quotas, which a merge would use to widen the
+// project, and what installs or configures with rights beyond it (OLM, which
+// installs operators with cluster rights; KubeVirt's own configuration).
+var deniedBase = []GroupKind{
+	{"rbac.authorization.k8s.io", "Role"},
+	{"rbac.authorization.k8s.io", "RoleBinding"},
+	{"", "ResourceQuota"},
+	{"", "LimitRange"},
+	{"operators.coreos.com", "*"},
+	{"kubevirt.io", "KubeVirt"},
+}
+
+// DeniedTenantKinds is the deny list of a tenant repo that may apply any
+// namespaced kind: deniedBase, every namespaced kind of the platform tier, and
+// extra, which only ever adds. Each kind appears once, and none a whole-group
+// entry already covers.
+func DeniedTenantKinds(extra ...GroupKind) []GroupKind {
+	var out []GroupKind
+	add := func(g GroupKind) {
+		if !slices.ContainsFunc(out, func(o GroupKind) bool { return o.Covers(g.Group, g.Kind) }) {
+			out = append(out, g)
+		}
+	}
+	for _, g := range deniedBase {
+		add(g)
+	}
+	for _, k := range Kinds {
+		if k.Platform && !k.Tenant && !k.ClusterScoped {
+			add(GroupKind{k.Group, k.Kind})
+		}
+	}
+	for _, g := range extra {
+		add(g)
+	}
+	return out
+}
