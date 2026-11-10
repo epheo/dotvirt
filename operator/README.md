@@ -482,3 +482,19 @@ its password in `status.forgeAdminHint`; the value itself stays in the Secret:
 $ oc -n <install ns> get dotvirt dotvirt -o jsonpath='{.status.forgeAdminHint}'
 # copy-paste and run the printed `oc extract` command
 ```
+
+## Who opens pull requests
+
+By default dotvirt opens each proposal's pull request with its forge account.
+Then the forge sees that account as the poster, and the requester may approve
+their own change.
+
+`spec.forge.pullRequests: Users` leaves the pull request to the requester:
+
+- dotvirt pushes the branch and answers with the forge's compare link;
+- the requester opens the PR there, as themselves: the forge refuses their own approval;
+- the PR they open on that branch is adopted: its changes leave their draft, and later proposes extend it;
+- dotvirt never opens, reopens or edits a PR.
+
+Protect `dotvirt/proposed/**` in the forge so only dotvirt's account pushes there:
+otherwise anyone who may push could put content into a PR and approve it.
