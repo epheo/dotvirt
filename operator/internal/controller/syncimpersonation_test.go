@@ -18,6 +18,7 @@ import (
 	rbacv1 "k8s.io/api/rbac/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
@@ -839,5 +840,55 @@ func TestAnyTenantKindsFlipBackBeforeTheSettingGoes(t *testing.T) {
 	last := slices.Index(order, "instance")
 	if first < 0 || last < 0 || first > last {
 		t.Errorf("write order %v: the AppProject must go back to the listed kinds before the setting is removed", order)
+	}
+}
+
+// The dotvirt pod reads what tenant repos may apply from the pass that writes
+// the AppProjects: Any, with the provider's additions, only while they carry
+// the deny list, and the listed kinds again once they do not.
+func TestTenantKindsEnvFollowsTheAppProjects(t *testing.T) {
+	dv := optIn(testCR(), false)
+	dv.Spec.ArgoCD.TenantKinds = "Any"
+	dv.Spec.ArgoCD.TenantKindsDenied = []dotvirtv1alpha1.GroupKind{{Group: "capsule.clastix.io", Kind: "*"}}
+	var n atomic.Int64
+	c := testBuilder(t).WithObjects(dv, argoCDInstance(nil), projectNS("a", "team-a", "dotvirt/team-a.git")).
+		WithInterceptorFuncs(reviews(granted(map[string][]string{"dotvirt-p-team-a": {"a"}}), &n)).WithReturnManagedFields().Build()
+	r := newReconciler(c, depsOK)
+	env := func() map[string]string {
+		var d appsv1.Deployment
+		if err := c.Get(context.Background(), types.NamespacedName{Namespace: dv.Namespace, Name: install.AppName}, &d); err != nil {
+			t.Fatal(err)
+		}
+		out := map[string]string{}
+		for _, e := range d.Spec.Template.Spec.Containers[0].Env {
+			out[e.Name] = e.Value
+		}
+		return out
+	}
+	blacklisted := func() bool {
+		ap := argoObj("AppProject", "", "", nil)
+		if !exists(t, c, ap, "argocd", "dotvirt-p-team-a") {
+			t.Fatal("AppProject missing")
+		}
+		_, ok := ap.Object["spec"].(map[string]any)["namespaceResourceBlacklist"]
+		return ok
+	}
+
+	reconcileOnce(t, r, dv)
+	if e := env(); e["DOTVIRT_TENANT_KINDS"] != "" || blacklisted() {
+		t.Fatalf("not impersonating yet: env %v, blacklist %v", e["DOTVIRT_TENANT_KINDS"], blacklisted())
+	}
+	if err := c.Create(context.Background(), argoCM(true)); err != nil {
+		t.Fatal(err)
+	}
+	reconcileOnce(t, r, getCR(t, c, dv))
+	if e := env(); e["DOTVIRT_TENANT_KINDS"] != "Any" || e["DOTVIRT_TENANT_KINDS_DENIED"] != "capsule.clastix.io/*" || !blacklisted() {
+		t.Errorf("impersonating: env %v / %v, blacklist %v", e["DOTVIRT_TENANT_KINDS"], e["DOTVIRT_TENANT_KINDS_DENIED"], blacklisted())
+	}
+
+	stored := setSpec(t, c, dv, func(d *dotvirtv1alpha1.Dotvirt) { d.Spec.ArgoCD.SyncImpersonation.Enabled = new(false) })
+	reconcileOnce(t, r, stored)
+	if e := env(); e["DOTVIRT_TENANT_KINDS"] != "" || e["DOTVIRT_TENANT_KINDS_DENIED"] != "" || blacklisted() {
+		t.Errorf("asked off: env %v, blacklist %v", e, blacklisted())
 	}
 }

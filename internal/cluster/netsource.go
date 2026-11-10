@@ -134,12 +134,13 @@ func (c *Client) ClusterNetworks(ctx context.Context) (pod, service []string, er
 
 // KindResources is the resource serving each of kinds in any version, by
 // discovery: the group list, then the group's versions until the kind turns
-// up. A kind missing from served is not served; failed names the groups whose
-// resources discovery could not read, whose kinds are unknown.
-func (c *Client) KindResources(kinds []schema.GroupKind) (served map[schema.GroupKind]string, failed map[string]bool, err error) {
+// up. A kind missing from served is not served; clusterScoped holds the served
+// ones without a namespace; failed names the groups whose resources discovery
+// could not read, whose kinds are unknown.
+func (c *Client) KindResources(kinds []schema.GroupKind) (served map[schema.GroupKind]string, clusterScoped map[schema.GroupKind]bool, failed map[string]bool, err error) {
 	groups, err := c.kube.Discovery().ServerGroups()
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 	versions := map[string][]string{}
 	for _, g := range groups.Groups {
@@ -147,7 +148,7 @@ func (c *Client) KindResources(kinds []schema.GroupKind) (served map[schema.Grou
 			versions[g.Name] = append(versions[g.Name], v.GroupVersion)
 		}
 	}
-	served, failed = map[schema.GroupKind]string{}, map[string]bool{}
+	served, clusterScoped, failed = map[schema.GroupKind]string{}, map[schema.GroupKind]bool{}, map[string]bool{}
 	read := map[string]*metav1.APIResourceList{}
 	for _, gk := range kinds {
 		for _, gv := range versions[gk.Group] {
@@ -160,24 +161,27 @@ func (c *Client) KindResources(kinds []schema.GroupKind) (served map[schema.Grou
 				}
 				read[gv] = rl
 			}
-			if res := kindResource(rl, gk.Kind); res != "" {
+			if res, namespaced := kindResource(rl, gk.Kind); res != "" {
 				served[gk] = res
+				if !namespaced {
+					clusterScoped[gk] = true
+				}
 				break
 			}
 		}
 	}
-	return served, failed, nil
+	return served, clusterScoped, failed, nil
 }
 
 // kindResource is the resource of rl serving kind, subresources aside.
-func kindResource(rl *metav1.APIResourceList, kind string) string {
+func kindResource(rl *metav1.APIResourceList, kind string) (resource string, namespaced bool) {
 	if rl == nil {
-		return ""
+		return "", false
 	}
 	for _, r := range rl.APIResources {
 		if r.Kind == kind && !strings.Contains(r.Name, "/") {
-			return r.Name
+			return r.Name, r.Namespaced
 		}
 	}
-	return ""
+	return "", false
 }

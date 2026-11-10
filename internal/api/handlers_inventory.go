@@ -69,6 +69,7 @@ func (s *Server) InventoryForIdentity(ctx context.Context, id auth.Identity) (mo
 		Live:      s.state.Live(),
 		Visible:   visible,
 		Owners:    s.resolver.Owners(all),
+		Kinds:     s.tenantKindRule(),
 		ListsVMs:  func(ns string) bool { return v.lists(ssarVM, ns) },
 		ListsVMIs: func(ns string) bool { return v.lists(ssarVMI, ns) },
 		ScopeSync: func(p project.ProjectInfo, ps model.ProjectSync) *model.ProjectSync {

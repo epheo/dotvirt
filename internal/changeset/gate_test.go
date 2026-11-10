@@ -24,6 +24,7 @@ import (
 type allowAll struct{}
 
 func (allowAll) Authorize(auth.Identity, []Access) error { return nil }
+func (allowAll) ClusterScoped(string, string) bool       { return false }
 
 // rbac grants every access deny does not, recording what it was asked.
 type rbac struct {
@@ -31,6 +32,8 @@ type rbac struct {
 	deny  func(Access) bool
 	asked []Access
 }
+
+func (*rbac) ClusterScoped(string, string) bool { return false }
 
 func (r *rbac) Authorize(_ auth.Identity, need []Access) error {
 	r.mu.Lock()
@@ -228,10 +231,10 @@ func TestArgoObjectsRefusesWhatTheParsersReadApart(t *testing.T) {
 func TestSettingsEditKeepsWhatTheFileDeclares(t *testing.T) {
 	vm := "apiVersion: kubevirt.io/v1\nkind: VirtualMachine\nmetadata:\n  name: web\n  namespace: alpha\nspec:\n  runStrategy: Always\n"
 	proj := project.ProjectInfo{Name: "p", Namespaces: []string{"alpha"}}
-	if err := keepsDeclared(proj, "web.yaml", []byte(vm), []byte(vm+"---\n"+ownerRB)); !errors.Is(err, model.ErrInvalid) {
+	if err := keepsDeclared(KindRule{}, proj, "web.yaml", []byte(vm), []byte(vm+"---\n"+ownerRB)); !errors.Is(err, model.ErrInvalid) {
 		t.Errorf("a result declaring a RoleBinding: err = %v, want ErrInvalid", err)
 	}
-	if err := keepsDeclared(proj, "web.yaml", []byte(vm), []byte(strings.Replace(vm, "Always", "Halted", 1))); err != nil {
+	if err := keepsDeclared(KindRule{}, proj, "web.yaml", []byte(vm), []byte(strings.Replace(vm, "Always", "Halted", 1))); err != nil {
 		t.Errorf("a plain edit: %v", err)
 	}
 

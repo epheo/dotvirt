@@ -59,7 +59,7 @@ func (r *DotvirtReconciler) reconcileWorkload(ctx context.Context, dv *dotvirtv1
 		// OAuthClient forever.
 		dv.Status.SSOOAuthClient = ""
 	}
-	if err := r.applyOwned(ctx, dv, install.Deployment(dv, rc.argoNS)); err != nil {
+	if err := r.applyOwned(ctx, dv, install.Deployment(dv, rc.argoNS, r.tenantKinds(ctx, dv, rc, nil))); err != nil {
 		return nil, applyFailed(err)
 	}
 	if r.DryRun {

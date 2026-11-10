@@ -15,6 +15,7 @@ import (
 	"github.com/epheo/dotvirt/internal/netgen"
 	"github.com/epheo/dotvirt/internal/project"
 	"github.com/epheo/dotvirt/internal/vmgen"
+	"github.com/epheo/dotvirt/pkg/tenancy"
 )
 
 // A namespaced document without metadata.namespace keeps its directory reading
@@ -50,8 +51,8 @@ func TestPlacementOnBranch(t *testing.T) {
 		{Kind: "NetworkAttachmentDefinition", Namespace: "alpha", Name: "vlan"},
 		{Kind: "ClusterUserDefinedNetwork", Name: "wan"},
 	}
-	if !slices.Equal(got.PlatformKinds, platform) {
-		t.Errorf("platform kinds = %+v, want %+v", got.PlatformKinds, platform)
+	if listed := got.Undeclarable(KindRule{}); !slices.Equal(listed, platform) {
+		t.Errorf("platform kinds = %+v, want %+v", listed, platform)
 	}
 	if !slices.Equal(got.Namespaces, []string{"alpha", "beta"}) ||
 		!slices.Equal(got.Named["alpha"], []model.ObjectRef{{Kind: "NetworkAttachmentDefinition", Namespace: "alpha", Name: "vlan"}, {Kind: "VirtualMachine", Namespace: "alpha", Name: "web"}}) ||
@@ -151,7 +152,7 @@ func TestRenderedTenantManifestsCarryNamespace(t *testing.T) {
 		if name == "namespace with primary network" || name == "rolebinding" {
 			continue
 		}
-		if err := requirePlacement(tenant, path, content); err != nil {
+		if err := requirePlacement(KindRule{}, tenant, path, content); err != nil {
 			t.Errorf("%s renders what a tenant repo may not hold: %v", name, err)
 		}
 	}
@@ -205,7 +206,76 @@ func TestTenantRepoRefusesNAD(t *testing.T) {
 
 	// The platform repo keeps them.
 	plat := project.ProjectInfo{Name: project.PlatformName, Repo: bare}
-	if err := requirePlacement(plat, live.Path, live.Manifest); err != nil {
+	if err := requirePlacement(KindRule{}, plat, live.Path, live.Manifest); err != nil {
 		t.Errorf("platform repo refused a NAD: %v", err)
 	}
 }
+
+// Under Any a tenant repo declares any namespaced kind dotvirt has no row for,
+// and still none a deny entry covers, nor one the cluster serves without a
+// namespace. The listed kinds refuse what Any admits. The rule is read where
+// the placement is, so one branch index answers both.
+func TestKindRuleUnderAny(t *testing.T) {
+	doc := func(apiVersion, kind, name string) string {
+		return "apiVersion: " + apiVersion + "\nkind: " + kind + "\nmetadata:\n  name: " + name + "\n  namespace: alpha\n"
+	}
+	files := map[string]string{
+		"alpha/deploy.yaml":  doc("apps/v1", "Deployment", "web"),
+		"alpha/role.yaml":    doc("rbac.authorization.k8s.io/v1", "Role", "widen"),
+		"alpha/sub.yaml":     doc("operators.coreos.com/v1alpha1", "Subscription", "op"),
+		"alpha/catalog.yaml": doc("operators.coreos.com/v1alpha1", "CatalogSource", "cat"),
+		"alpha/tenant.yaml":  doc("capsule.clastix.io/v1beta2", "Tenant", "t"),
+		"alpha/prio.yaml":    doc("scheduling.k8s.io/v1", "PriorityClass", "high"),
+		"alpha/vm.yaml":      liveVMYAML("vm", "alpha"),
+	}
+	seed := map[string][]byte{}
+	for p, c := range files {
+		seed[p] = []byte(c)
+	}
+	bare := seedBareFiles(t, seed)
+	c := newTestCoordinator(t, false)
+	read := mustRead(t, c, project.ProjectInfo{Name: "p", Repo: bare})
+	pl, err := PlacementOnBranch(read, "main")
+	if err != nil {
+		t.Fatal(err)
+	}
+	scoped := func(group, kind string) bool { return group == "scheduling.k8s.io" && kind == "PriorityClass" }
+	anyKinds := KindRule{Policy: tenancy.AnyPolicy(tenancy.GroupKind{Group: "capsule.clastix.io", Kind: "*"}), ClusterScoped: scoped}
+	names := func(refs []model.ObjectRef) []string {
+		var out []string
+		for _, r := range refs {
+			out = append(out, r.Name)
+		}
+		slices.Sort(out)
+		return out
+	}
+	if got := names(pl.Undeclarable(anyKinds)); !slices.Equal(got, []string{"cat", "high", "op", "t", "widen"}) {
+		t.Errorf("any: undeclarable %v", got)
+	}
+	if got := names(pl.Undeclarable(KindRule{})); !slices.Equal(got, []string{"cat", "high", "op", "t", "web", "widen"}) {
+		t.Errorf("listed: undeclarable %v", got)
+	}
+
+	tenant := project.ProjectInfo{Name: "p"}
+	for path, content := range files {
+		err := requirePlacement(anyKinds, tenant, path, []byte(content))
+		if admitted := path == "alpha/deploy.yaml" || path == "alpha/vm.yaml"; admitted != (err == nil) {
+			t.Errorf("any: %s: %v", path, err)
+		}
+	}
+	if err := requirePlacement(KindRule{}, tenant, "alpha/deploy.yaml", []byte(files["alpha/deploy.yaml"])); err == nil {
+		t.Error("listed: a Deployment staged into a tenant repo")
+	}
+	// The coordinator reads the policy it was given and its authorizer's scope.
+	c.WithTenantKinds(anyKinds.Policy)
+	c.UseAuthorizer(scopeOnly(scoped))
+	if rule := c.kindRule(); !rule.Declarable("apps", "Deployment") || rule.Declarable("scheduling.k8s.io", "PriorityClass") {
+		t.Error("the coordinator's rule is not the install's")
+	}
+}
+
+// scopeOnly answers scope and nothing else.
+type scopeOnly func(group, kind string) bool
+
+func (scopeOnly) Authorize(auth.Identity, []Access) error { return nil }
+func (f scopeOnly) ClusterScoped(group, kind string) bool { return f(group, kind) }

@@ -82,7 +82,7 @@ func (c *Coordinator) toChangesetItems(proj project.ProjectInfo, entries []draft
 					if err != nil {
 						return nil, &staleEdit{entry: e, base: c.baseBranch, err: err}
 					}
-					return out, keepsDeclared(proj, e.SourceFile, current, out)
+					return out, keepsDeclared(c.kindRule(), proj, e.SourceFile, current, out)
 				},
 			})
 		case removal:

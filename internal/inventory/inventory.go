@@ -46,6 +46,9 @@ type Inputs struct {
 	// about a tenant namespace hidden from them.
 	Visible map[string]bool
 	Owners  map[string]string
+	// Kinds is what a tenant repo may declare on this install: a repo object
+	// it refuses is a PlatformKinds issue.
+	Kinds changeset.KindRule
 	// ListsVMs reports whether the caller may list VMs in a namespace it sees;
 	// nil is yes.
 	ListsVMs func(namespace string) bool
@@ -178,7 +181,7 @@ func placementIssues(out *model.Project, in Inputs, read *git.Repo) error {
 			out.Unnamespaced = append(out.Unnamespaced, ref)
 		}
 	}
-	for _, ref := range pl.PlatformKinds {
+	for _, ref := range pl.Undeclarable(in.Kinds) {
 		if shown(ref.Namespace) {
 			out.PlatformKinds = append(out.PlatformKinds, ref)
 		}

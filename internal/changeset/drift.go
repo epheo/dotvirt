@@ -148,7 +148,8 @@ func (c *Coordinator) AdoptObjects(id auth.Identity, proj project.ProjectInfo, w
 		}
 		// A raw NetworkAttachmentDefinition beside the VMs is the platform's to
 		// declare: left out, so the rest of the namespace still comes under git.
-		if err := tenantDeclarable(proj, o.Kind, o.Name); err != nil {
+		_, k, _ := model.LookupKind(o.Kind)
+		if err := tenantDeclarable(c.kindRule(), proj, k.Group, o.Kind, o.Name); err != nil {
 			platformTier = err
 			continue
 		}

@@ -13,6 +13,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	dotvirtv1alpha1 "github.com/epheo/dotvirt/operator/api/v1alpha1"
+	"github.com/epheo/dotvirt/pkg/tenancy"
 )
 
 // defaultImage is deployed when the Dotvirt spec doesn't pin one.
@@ -163,8 +164,21 @@ func svcURL(name, namespace string, port int32) string {
 // dotvirtEnv assembles the app container's env from the effective spec: the
 // platform-repo + metrics config and the secret-backed credentials. argoNS
 // holds the per-project sync accounts the app's project grants name.
-func dotvirtEnv(dv *dotvirtv1alpha1.Dotvirt, argoNS string) []corev1.EnvVar {
+func dotvirtEnv(dv *dotvirtv1alpha1.Dotvirt, argoNS string, tenantDenied []tenancy.GroupKind) []corev1.EnvVar {
 	env := []corev1.EnvVar{{Name: "DOTVIRT_ARGO_NAMESPACE", Value: argoNS}}
+	// What tenant repos may apply, as the AppProjects say it (TenantDenied):
+	// absent, the listed kinds. The provider's additions only; dotvirt holds
+	// the base list itself.
+	if tenantDenied != nil {
+		env = append(env, corev1.EnvVar{Name: "DOTVIRT_TENANT_KINDS", Value: "Any"})
+		extra := make([]tenancy.GroupKind, len(dv.Spec.ArgoCD.TenantKindsDenied))
+		for i, g := range dv.Spec.ArgoCD.TenantKindsDenied {
+			extra[i] = tenancy.GroupKind{Group: g.Group, Kind: g.Kind}
+		}
+		if len(extra) > 0 {
+			env = append(env, corev1.EnvVar{Name: "DOTVIRT_TENANT_KINDS_DENIED", Value: tenancy.FormatGroupKinds(extra)})
+		}
+	}
 	if dv.Spec.Forge.PlatformRepo != "" {
 		env = append(env, corev1.EnvVar{Name: "DOTVIRT_PLATFORM_REPO", Value: dv.Spec.Forge.PlatformRepo})
 	}
@@ -296,7 +310,9 @@ func dotvirtVolumes(dv *dotvirtv1alpha1.Dotvirt) ([]corev1.VolumeMount, []corev1
 
 // Deployment runs the dotvirt binary (which also serves the SPA), with the forge
 // token mounted so a re-mint reaches the app without a restart.
-func Deployment(dv *dotvirtv1alpha1.Dotvirt, argoNS string) *appsv1.Deployment {
+// tenantDenied is TenantDenied's answer for this pass: nil keeps the listed
+// kinds.
+func Deployment(dv *dotvirtv1alpha1.Dotvirt, argoNS string, tenantDenied []tenancy.GroupKind) *appsv1.Deployment {
 	image := dv.Spec.Image
 	if image == "" {
 		image = imageFromEnv("RELATED_IMAGE_DOTVIRT", defaultImage)
@@ -323,7 +339,7 @@ func Deployment(dv *dotvirtv1alpha1.Dotvirt, argoNS string) *appsv1.Deployment {
 						Name:            AppName,
 						Image:           image,
 						Args:            dotvirtArgs(dv),
-						Env:             dotvirtEnv(dv, argoNS),
+						Env:             dotvirtEnv(dv, argoNS, tenantDenied),
 						Ports:           []corev1.ContainerPort{{Name: "http", ContainerPort: HTTPPort}},
 						VolumeMounts:    volumeMounts,
 						SecurityContext: hardenedContainerSecurityContext(),

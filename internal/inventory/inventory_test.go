@@ -10,11 +10,13 @@ import (
 	"time"
 
 	"github.com/epheo/dotvirt/internal/argo"
+	"github.com/epheo/dotvirt/internal/changeset"
 	"github.com/epheo/dotvirt/internal/clusterstate"
 	"github.com/epheo/dotvirt/internal/git"
 	"github.com/epheo/dotvirt/internal/model"
 	"github.com/epheo/dotvirt/internal/project"
 	"github.com/epheo/dotvirt/pkg/forge"
+	"github.com/epheo/dotvirt/pkg/tenancy"
 )
 
 // seedRepo makes a bare repo on main holding two VMs in different namespaces.
@@ -440,5 +442,40 @@ func TestBuildHidesVMsFromWhoMayNotListThem(t *testing.T) {
 	})
 	if got := inv.Projects[0].Namespaces; len(got) != 1 || len(got[0].VMs) != 0 {
 		t.Errorf("namespaces = %+v, want tenant-a with no VMs", got)
+	}
+}
+
+// Under Any a project's repo is flagged for what the install's tenant repos may
+// not apply, not for every kind dotvirt has no row for.
+func TestBuildFlagsKindsByTheInstallPolicy(t *testing.T) {
+	doc := func(apiVersion, kind, name string) string {
+		return "apiVersion: " + apiVersion + "\nkind: " + kind + "\nmetadata:\n  name: " + name + "\n  namespace: a-dev\n"
+	}
+	bare := seedRepoFiles(t, map[string]string{
+		"a-dev/web.yaml":  doc("apps/v1", "Deployment", "web"),
+		"a-dev/role.yaml": doc("rbac.authorization.k8s.io/v1", "Role", "widen"),
+		"a-dev/vlan.yaml": doc("k8s.cni.cncf.io/v1", "NetworkAttachmentDefinition", "vlan"),
+		"a-dev/vm.yaml":   vmYAML("vm", "a-dev"),
+	})
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	repos := git.NewRepoSet(ctx, "", "", nil, false, nil, time.Hour)
+	build := func(rule changeset.KindRule) []string {
+		p := Build(Inputs{
+			Branch: "main", Repos: repos, Kinds: rule,
+			Projects: []project.ProjectInfo{{Name: "team-a", Repo: bare, Namespaces: []string{"a-dev"}}},
+		}).Projects[0]
+		var out []string
+		for _, r := range p.PlatformKinds {
+			out = append(out, r.Name)
+		}
+		slices.Sort(out)
+		return out
+	}
+	if got := build(changeset.KindRule{Policy: tenancy.AnyPolicy()}); !slices.Equal(got, []string{"vlan", "widen"}) {
+		t.Errorf("any: %v", got)
+	}
+	if got := build(changeset.KindRule{}); !slices.Equal(got, []string{"vlan", "web", "widen"}) {
+		t.Errorf("listed: %v", got)
 	}
 }

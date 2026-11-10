@@ -4,6 +4,7 @@ import (
 	"slices"
 	"testing"
 
+	"github.com/epheo/dotvirt/internal/model"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 )
 
@@ -43,5 +44,22 @@ func TestKinds(t *testing.T) {
 	want := []schema.GroupKind{{Kind: "Namespace"}, {Group: "rbac.authorization.k8s.io", Kind: "RoleBinding"}}
 	if !slices.Equal(got, want) {
 		t.Errorf("Kinds = %v, want %v", got, want)
+	}
+}
+
+// Docs names what Headers names, each with its apiVersion's group, and counts
+// the same documents.
+func TestDocs(t *testing.T) {
+	content := "apiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: web\n  namespace: a\n---\n" +
+		"apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: c\n---\n" +
+		"apiVersion: rbac.authorization.k8s.io/v1\nkind: RoleBinding\n---\n"
+	got, docs := Docs([]byte(content))
+	want := []Doc{
+		{ObjectRef: model.ObjectRef{Kind: "Deployment", Namespace: "a", Name: "web"}, Group: "apps"},
+		{ObjectRef: model.ObjectRef{Kind: "ConfigMap", Name: "c"}},
+	}
+	heads, hdocs := Headers([]byte(content))
+	if !slices.Equal(got, want) || docs != 3 || docs != hdocs || len(heads) != len(got) {
+		t.Errorf("Docs = %v, %d; want %v, 3 (Headers %v, %d)", got, docs, want, heads, hdocs)
 	}
 }
