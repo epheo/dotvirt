@@ -692,6 +692,7 @@ func (s *Server) vmNamespaces(ctx context.Context, sc scope, nss []string) []str
 var (
 	ssarCUDN        = ssarFor(model.KindCUDN)
 	ssarUplink      = ssarFor(model.KindNNCP)
+	ssarNNS         = ssarRef{group: "nmstate.io", resource: "nodenetworkstates"}
 	ssarNamespace   = ssarFor(model.KindNS)
 	ssarEgressIP    = ssarFor(model.KindEgressIP)
 	ssarExtRoute    = ssarFor(model.KindExtRoute)

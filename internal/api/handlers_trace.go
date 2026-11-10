@@ -119,9 +119,9 @@ func (s *Server) traceView(r *http.Request, sc scope) *netstate.TraceView {
 	v, _ := s.viewFor(ctx, sc.id, sc.cluster)
 	visible := v.names
 	return &netstate.TraceView{
-		Namespace: func(ns string) bool { return visible[ns] },
-		UDNs:      func(ns string) bool { return visible[ns] && v.lists(ssarFor(model.KindUDN), ns) },
-		Shared:    s.seesAllNetworks(ctx, sc.id, sc.cluster),
+		NADs:   func(ns string) bool { return visible[ns] && v.lists(ssarFor(model.KindNAD), ns) },
+		UDNs:   func(ns string) bool { return visible[ns] && v.lists(ssarFor(model.KindUDN), ns) },
+		Shared: s.seesAllNetworks(ctx, sc.id, sc.cluster),
 		Workloads: func(addr netip.Addr) []netstate.TraceWorkload {
 			var out []netstate.TraceWorkload
 			live := s.state.Live()

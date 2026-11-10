@@ -125,22 +125,21 @@ func (s *Server) InventoryForIdentity(ctx context.Context, id auth.Identity) (mo
 	}
 	// The platform tier has no project row; its Application rollup rides the frame
 	// on its own so the issues plane names what it failed to apply or keeps
-	// unhealthy. Every user sees its verdict (a user scoped to no project must not
-	// mask a broken platform sync); only platform readers (canReadPlatform) see
-	// its detail, its open proposals and its merges, anyone else only their own
-	// draft's proposal and merges. That is asked only when the frame holds one
-	// of those: a quiet platform costs a caller with no platform right nothing.
+	// unhealthy. Only platform readers (canReadPlatform) see its verdict, detail,
+	// open proposals and merges: the verdict moves with other tenants' changes.
+	// Anyone else gets the rows about objects Kubernetes shows them, and their
+	// own draft's proposal and merges.
 	var platformAuthor bool
 	var platformErr error
 	if s.cfg.PlatformRepo != "" {
-		inv.Platform = platformRollup(in.ProjectDrift, s.cfg.PlatformRepo)
-		if s.platformBusy() || rollupDetail(inv.Platform) {
+		rollup := platformRollup(in.ProjectDrift, s.cfg.PlatformRepo)
+		if s.platformBusy() || rollup != nil {
 			platformAuthor, platformErr = s.canReadPlatform(ctx, id, userCluster)
 		}
 		if platformAuthor {
-			inv.Platform = s.readerPlatformView(ctx, id, userCluster, inv.Platform)
+			inv.Platform = s.readerPlatformView(ctx, id, userCluster, rollup)
 		} else {
-			inv.Platform = tenantPlatformView(inv.Platform, visible)
+			inv.Platform = s.tenantPlatformView(ctx, id, userCluster, visible, rollup)
 		}
 	}
 	// Propose existing tenants (namespaces with VMs, no project label) to callers
@@ -149,7 +148,8 @@ func (s *Server) InventoryForIdentity(ctx context.Context, id auth.Identity) (mo
 	// object, which the coordinator's dry run finds running. Rides the frame,
 	// so the list drains as adoptions merge.
 	if s.cfg.PlatformRepo != "" {
-		if s.capable(ctx, id, userCluster, claimAction("")) {
+		if s.capable(ctx, id, userCluster, claimAction("")) && s.capable(ctx, id, userCluster, ask(verbList, ssarVM, "")) &&
+			s.capable(ctx, id, userCluster, ask(verbList, ssarNamespace, "")) {
 			inv.Adoptable = inventory.Adoptable(in.Live, s.state.Namespaces())
 		}
 	}
@@ -210,34 +210,36 @@ func (s *Server) platformBusy() bool {
 	return busy
 }
 
-// rollupDetail reports whether the platform rollup carries detail beyond its
-// verdict, which only platform authors read.
-func rollupDetail(ps *model.ProjectSync) bool {
-	return ps != nil && (ps.SyncError != "" || len(ps.Unhealthy) > 0)
-}
-
 // tenantPlatformView is the platform rollup for a caller without platform
-// authority: the verdict, the unhealthy objects in namespaces they can see
-// (their own Namespace objects included), and a generic line for the apply
-// error, whose text can name any tenant's namespace.
-func tenantPlatformView(ps *model.ProjectSync, visible map[string]bool) *model.ProjectSync {
-	if ps == nil {
+// read: only the rows about objects Kubernetes shows them, their own Namespace
+// objects included. No verdict or apply error: those move with, and can name,
+// other tenants.
+func (s *Server) tenantPlatformView(ctx context.Context, id auth.Identity, c *cluster.Client, visible map[string]bool, ps *model.ProjectSync) *model.ProjectSync {
+	namespaces, namespaced := tenantPlatformRows(ps, visible)
+	listed := s.listedRows(ctx, id, c, model.ProjectSync{Unhealthy: namespaced}, func(o model.ObjectHealth) string { return o.Namespace }, "")
+	rows := append(namespaces, listed.Unhealthy...)
+	if len(rows) == 0 {
 		return nil
 	}
-	out := &model.ProjectSync{Sync: ps.Sync, Health: ps.Health, Operation: ps.Operation}
-	if ps.SyncError != "" {
-		out.SyncError = platformErrorForTenants
+	return &model.ProjectSync{Unhealthy: rows}
+}
+
+// tenantPlatformRows splits ps's rows in visible namespaces: the Namespace
+// objects themselves, which seeing the namespace answers, and the objects
+// inside, whose kind is still to ask.
+func tenantPlatformRows(ps *model.ProjectSync, visible map[string]bool) (namespaces, namespaced []model.ObjectHealth) {
+	if ps == nil {
+		return nil, nil
 	}
 	for _, o := range ps.Unhealthy {
-		ns := o.Namespace
-		if ns == "" && o.Kind == model.KindNS.Kind {
-			ns = o.Name
-		}
-		if visible[ns] {
-			out.Unhealthy = append(out.Unhealthy, o)
+		switch {
+		case o.Namespace == "" && o.Kind == model.KindNS.Kind && visible[o.Name]:
+			namespaces = append(namespaces, o)
+		case o.Namespace != "" && visible[o.Namespace]:
+			namespaced = append(namespaced, o)
 		}
 	}
-	return out
+	return namespaces, namespaced
 }
 
 const platformErrorForTenants = "the platform repo failed to apply; a platform administrator can see why"

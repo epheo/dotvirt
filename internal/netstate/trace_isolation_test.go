@@ -150,7 +150,8 @@ func TestTraceOverlayRangeIsNeverUnreachable(t *testing.T) {
 // VMs in namespaces they see.
 func seeing(vms ...TraceWorkload) *TraceView {
 	return &TraceView{
-		Namespace: func(string) bool { return true },
+		NADs: func(string) bool { return true },
+		UDNs: func(string) bool { return true },
 		Workloads: func(addr netip.Addr) []TraceWorkload {
 			var out []TraceWorkload
 			for _, w := range vms {
@@ -259,7 +260,7 @@ func TestTraceServiceAddressFromIsolatedNetwork(t *testing.T) {
 func TestTraceForeignRangeReadsAsOutside(t *testing.T) {
 	s := isolated(t, true)
 	a := wl("tenant-a", "web", nil, nil, "10.100.0.5")
-	tenant := &TraceView{Namespace: func(ns string) bool { return ns == "tenant-a" }, UDNs: func(ns string) bool { return ns == "tenant-a" }, Shared: false}
+	tenant := &TraceView{NADs: func(ns string) bool { return ns == "tenant-a" }, UDNs: func(ns string) bool { return ns == "tenant-a" }, Shared: false}
 	bytesFor := func(view *TraceView, ip string) string {
 		t.Helper()
 		b, err := json.Marshal(s.Trace(view, a, nil, ip, "TCP", 443))
@@ -412,7 +413,7 @@ func TestTraceViewOwnScope(t *testing.T) {
 	sees := func(nss ...string) func(string) bool {
 		return func(ns string) bool { return slices.Contains(nss, ns) }
 	}
-	tenant := &TraceView{Namespace: sees("tenant-a"), UDNs: sees("tenant-a"), Shared: false}
+	tenant := &TraceView{NADs: sees("tenant-a"), UDNs: sees("tenant-a"), Shared: false}
 	tenant.Workloads = seeing(wl("tenant-a", "db", nil, nil, "10.100.0.7")).Workloads
 	if res := s.Trace(tenant, a, nil, "10.100.0.7", "TCP", 443); res.Verdict != "Allow" {
 		t.Errorf("own network: verdict = %s (%v)", res.Verdict, stepKinds(t, res))
@@ -421,8 +422,8 @@ func TestTraceViewOwnScope(t *testing.T) {
 		t.Errorf("the default network, for any caller: verdict = %s (%v)", res.Verdict, stepKinds(t, res))
 	}
 	for name, view := range map[string]*TraceView{
-		"published to them": {Namespace: sees("tenant-a", "tenant-c"), Shared: false},
-		"every shared one":  {Namespace: sees("tenant-a"), Shared: true},
+		"published to them": {NADs: sees("tenant-a", "tenant-c"), Shared: false},
+		"every shared one":  {NADs: sees("tenant-a"), Shared: true},
 	} {
 		res := s.Trace(view, a, nil, "10.50.0.9", "TCP", 443)
 		if st := connectivityStep(t, res); !strings.Contains(st.Note, "no in-cluster path") {
@@ -617,11 +618,11 @@ func TestTraceReadsFollowsTheCatalog(t *testing.T) {
 		r    primaryRange
 		want bool
 	}{
-		"udn, may list":         {&TraceView{Namespace: yes, UDNs: yes}, udn, true},
-		"udn, sees but no list": {&TraceView{Namespace: yes, UDNs: no}, udn, false},
-		"cudn published":        {&TraceView{Namespace: yes, UDNs: no}, cudn, true},
-		"cudn elsewhere":        {&TraceView{Namespace: no, UDNs: yes}, cudn, false},
-		"cudn, catalog has all": {&TraceView{Namespace: no, Shared: true}, cudn, true},
+		"udn, may list":         {&TraceView{NADs: yes, UDNs: yes}, udn, true},
+		"udn, sees but no list": {&TraceView{NADs: yes, UDNs: no}, udn, false},
+		"cudn published":        {&TraceView{NADs: yes, UDNs: no}, cudn, true},
+		"cudn elsewhere":        {&TraceView{NADs: no, UDNs: yes}, cudn, false},
+		"cudn, catalog has all": {&TraceView{NADs: no, Shared: true}, cudn, true},
 	} {
 		if got := c.view.reads(c.r); got != c.want {
 			t.Errorf("%s: reads = %v, want %v", name, got, c.want)

@@ -27,8 +27,8 @@
 	// it replaces the header Propose button, the Changes dot and the pending
 	// banners. Every lane names what happens next and who acts. Hidden on
 	// /changes, which is the full view of the same pipeline.
-	// A platform stager without platform read gets the platform's verdict but
-	// not its revision or history: their merge cannot be followed past git.
+	// A platform stager without platform read gets no verdict, revision or
+	// history of the platform: their merge cannot be followed past git.
 	const unfollowable = (p: string) =>
 		p === PLATFORM_PROJECT && caps.cluster?.platformRead === false;
 	const syncOf = (p: string) =>

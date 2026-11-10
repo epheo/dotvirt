@@ -14,6 +14,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime/schema"
 
 	"github.com/epheo/dotvirt/internal/argo"
+	"github.com/epheo/dotvirt/internal/auth"
 	"github.com/epheo/dotvirt/internal/model"
 	"github.com/epheo/dotvirt/pkg/forge"
 )
@@ -38,38 +39,47 @@ func TestPlatformRollup(t *testing.T) {
 	}
 }
 
-// TestTenantPlatformView pins LIVE-3: a caller without platform authority
-// keeps the platform verdict but learns no other tenant's names - unhealthy
-// objects outside their namespaces and the apply error text are withheld.
-func TestTenantPlatformView(t *testing.T) {
-	if tenantPlatformView(nil, nil) != nil {
-		t.Fatal("no rollup stays no rollup")
+// A caller without platform authority gets the rows about objects in its own
+// namespaces and no verdict: that moves with other tenants' changes.
+func TestTenantPlatformViewCarriesNoVerdict(t *testing.T) {
+	np := func(ns, name string) model.ObjectHealth {
+		return model.ObjectHealth{Group: model.KindNetpol.Group, Kind: model.KindNetpol.Kind, Namespace: ns, Name: name, Health: "Degraded"}
 	}
 	full := &model.ProjectSync{
 		Sync: model.SyncOutOfSync, Health: "Degraded", Operation: "Failed", Revision: "abc1234",
 		SyncError: `namespaces "team-b" is forbidden`,
 		Unhealthy: []model.ObjectHealth{
-			{Kind: "RoleBinding", Namespace: "team-a", Name: "edit", Health: "Degraded"},
-			{Kind: "RoleBinding", Namespace: "team-b", Name: "edit", Health: "Degraded"},
-			{Kind: "Namespace", Name: "team-a", Health: "Missing"},
+			np("team-a-dev", "listed"),
+			np("team-b", "theirs"),
+			{Kind: "Namespace", Name: "team-a-dev", Health: "Missing"},
 			{Kind: "Namespace", Name: "team-b", Health: "Missing"},
 			{Kind: "NodeNetworkConfigurationPolicy", Name: "dc-vlan-bridge", Health: "Degraded"},
-			{Kind: "AdminNetworkPolicy", Name: "acme-lockdown", Message: `AdminNetworkPolicy "acme-lockdown" is invalid`},
 		},
 	}
-	got := tenantPlatformView(full, map[string]bool{"team-a": true})
-	if got.Sync != full.Sync || got.Health != full.Health || got.Operation != full.Operation {
-		t.Errorf("the verdict must stay: %+v", got)
+	fc := newFakeCluster(t)
+	fc.serveKinds(model.KindNetpol)
+	s := fc.server(&planeDraft{}, Config{BaseBranch: "main"})
+	lists := func(a *authzv1.ResourceAttributes) bool { return a.Verb == verbList && a.Namespace == "team-a-dev" }
+	visible := map[string]bool{"team-a-dev": true}
+	id := auth.Identity{Token: "t", Username: "u"}
+
+	if s.tenantPlatformView(context.Background(), id, newAsking(lists).c, visible, nil) != nil {
+		t.Fatal("no rollup stays no rollup")
 	}
-	if got.SyncError == "" || strings.Contains(got.SyncError, "team-b") || got.Revision != "" {
-		t.Errorf("apply error = %q, revision = %q; want a generic line and no detail", got.SyncError, got.Revision)
+	got := s.tenantPlatformView(context.Background(), id, newAsking(lists).c, visible, full)
+	if got.Sync != "" || got.Health != "" || got.Operation != "" || got.SyncError != "" || got.Revision != "" {
+		t.Errorf("a verdict reached a tenant: %+v", got)
 	}
-	want := []model.ObjectHealth{full.Unhealthy[0], full.Unhealthy[2]}
-	if len(got.Unhealthy) != len(want) || got.Unhealthy[0] != want[0] || got.Unhealthy[1] != want[1] {
-		t.Errorf("unhealthy = %+v, want only team-a's objects", got.Unhealthy)
+	if len(got.Unhealthy) != 2 || got.Unhealthy[0] != full.Unhealthy[2] || got.Unhealthy[1] != full.Unhealthy[0] {
+		t.Errorf("unhealthy = %+v, want its own Namespace and what it lists", got.Unhealthy)
 	}
-	if len(full.Unhealthy) != 6 {
+	if len(full.Unhealthy) != 5 {
 		t.Error("the shared rollup was mutated")
+	}
+	id.Token = "t2"
+	none := func(*authzv1.ResourceAttributes) bool { return false }
+	if got := s.tenantPlatformView(context.Background(), id, newAsking(none).c, map[string]bool{"elsewhere": true}, full); got != nil {
+		t.Errorf("nothing of theirs still sent %+v", got)
 	}
 }
 
@@ -137,8 +147,8 @@ func TestPlatformRollupNamesWhatTheCallerMayList(t *testing.T) {
 		}
 		return rec.Body.String()
 	}
-	if body := frame(reader); strings.Contains(body, "acme-lockdown") || !strings.Contains(body, platformErrorForTenants) {
-		t.Errorf("a namespace lister without list on cluster rules reads the rollup: %s", body)
+	if body := frame(reader); strings.Contains(body, "acme-lockdown") || strings.Contains(body, platformErrorForTenants) || strings.Contains(body, `"platform"`) {
+		t.Errorf("a caller who is no platform reader got its rollup: %s", body)
 	}
 	if body := frame(platform); !strings.Contains(body, "acme-lockdown") {
 		t.Errorf("a caller listing every platform kind must read the rollup: %s", body)

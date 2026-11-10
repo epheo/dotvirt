@@ -77,6 +77,7 @@ type netGrants struct {
 var (
 	netPolicyRefs = []ssarRef{ssarANP, ssarBANP, ssarEgressIP, ssarExtRoute}
 	netGrantRefs  = append([]ssarRef{ssarCUDN}, netPolicyRefs...)
+	netListRefs   = append([]ssarRef{ssarCUDN, ssarUplink, ssarNNS}, netPolicyRefs...)
 	netCapRefs    = []ssarRef{ssarUplink, ssarNamespace}
 	netGrantKinds = []model.Kind{model.KindCUDN, model.KindNNCP, model.KindANP, model.KindBANP, model.KindEgressIP, model.KindExtRoute}
 )
@@ -93,7 +94,7 @@ func (s *Server) netGrants(ctx context.Context, id auth.Identity, c *cluster.Cli
 		g.create[r], _ = s.can(ctx, id, c, refQ(verbCreate, r, ""))
 		verdicts = append(verdicts, g.create[r])
 	}
-	for _, r := range netPolicyRefs {
+	for _, r := range netListRefs {
 		g.list[r], _ = s.can(ctx, id, c, refQ(verbList, r, ""))
 		verdicts = append(verdicts, g.list[r])
 	}
@@ -105,20 +106,22 @@ func (s *Server) netGrants(ctx context.Context, id auth.Identity, c *cluster.Cli
 	return g
 }
 
-// sees admits the cluster-scoped kinds the caller's pulls show: shared
-// networks to everyone, each cluster-tier policy kind to who may create and
-// list it, and the fabric (uplink policies, any other cluster-scoped kind) to
-// node readers.
+// sees admits the cluster-scoped kinds the caller's pulls show: each by its own
+// list right, each cluster-tier policy kind also needing create. A tenant's
+// shared network moves its NAD, which the namespaced half of the watermark sees.
 func (g netGrants) sees(gvr schema.GroupVersionResource) bool {
 	switch gvr {
 	case cluster.GVR(model.KindCUDN):
-		return true
+		return g.list[ssarCUDN]
 	case cluster.GVR(model.KindANP), cluster.GVR(model.KindBANP), cluster.GVR(model.KindEgressIP), cluster.GVR(model.KindExtRoute):
 		ref := ssarRef{gvr.Group, gvr.Resource}
 		return g.create[ref] && g.list[ref]
 	}
-	return g.nodes
+	return g.list[ssarUplink]
 }
+
+// fabric reports whether the caller is shown any of the node-level fabric.
+func (g netGrants) fabric() bool { return g.list[ssarUplink] || g.list[ssarNNS] }
 
 // networksWatermark covers what the caller's networks and policies pulls
 // read: the catalog objects in its visible namespaces and the cluster-scoped
@@ -133,7 +136,7 @@ func (s *Server) networksWatermark(v callerView, g netGrants) uint64 {
 		lists := func(gvr schema.GroupVersionResource, ns string) bool {
 			return v.lists(ssarRef{gvr.Group, gvr.Resource}, ns)
 		}
-		sum = s.netstate.Watermark(visible, g.sees, lists, g.nodes)
+		sum = s.netstate.Watermark(visible, g.sees, lists, g.fabric())
 	}
 	drift := func(scope string) uint64 {
 		if s.drift == nil {

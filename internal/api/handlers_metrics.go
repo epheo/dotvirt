@@ -169,7 +169,7 @@ func (s *Server) handleHostLoad(w http.ResponseWriter, r *http.Request) {
 		fail(w, err)
 		return
 	}
-	if s.cfg.PlatformRepo != "" && len(load.Nodes) > 0 {
+	if s.cfg.PlatformRepo != "" && len(load.Nodes) > 0 && s.listsDescheduler(r) {
 		platform := s.platformProject()
 		if st, err := s.reader.DRSState(platform); err == nil && st.Configured && st.Config != nil {
 			foldDRSBand(&load, st.Config.Threshold)

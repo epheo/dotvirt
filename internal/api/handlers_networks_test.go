@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -324,5 +325,20 @@ func TestScopeNetworksAsksTheBackingKind(t *testing.T) {
 	got := scopeNetworks(in, map[string]bool{"a": true}, onlyUDN, false)
 	if len(got) != 1 || got[0].Name != "udn" {
 		t.Errorf("networks = %+v, want the udn alone", got)
+	}
+}
+
+// What a tenant reads of a shared network is its NAD: published to a namespace
+// they see but may not list NADs in, it is not theirs.
+func TestSharedNetworksFollowTheNADRight(t *testing.T) {
+	shared := []model.Network{{Name: "s", Scope: model.ScopeShared, Namespaces: []string{"a", "b"}}}
+	visible := map[string]bool{"a": true, "b": true}
+	listsInA := func(backing, ns string) bool { return backing == model.KindNAD.Kind && ns == "a" }
+	got := scopeNetworks(shared, visible, listsInA, false)
+	if len(got) != 1 || !slices.Equal(got[0].Namespaces, []string{"a"}) {
+		t.Errorf("got %+v, want the row narrowed to a", got)
+	}
+	if got := scopeNetworks(shared, visible, func(string, string) bool { return false }, false); len(got) != 0 {
+		t.Errorf("no NAD right still shows %+v", got)
 	}
 }

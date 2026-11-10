@@ -428,7 +428,7 @@ func BenchmarkTrace(b *testing.B) {
 	})
 	b.Run("external", func(b *testing.B) {
 		src := scaleWorkload(10, "10.64.10.10", scaleNS(10)+"/shared-000")
-		view := &TraceView{Namespace: func(ns string) bool { return ns < scaleNS(20) }, UDNs: func(ns string) bool { return ns < scaleNS(20) }}
+		view := &TraceView{NADs: func(ns string) bool { return ns < scaleNS(20) }, UDNs: func(ns string) bool { return ns < scaleNS(20) }}
 		b.ReportAllocs()
 		for b.Loop() {
 			_ = s.Trace(view, src, nil, "203.0.113.5", "TCP", 443)
