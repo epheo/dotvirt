@@ -101,6 +101,10 @@ type NamespaceCaps struct {
 	// BootImageDelete removes a boot image that never finished: its
 	// DataSource and DataVolume, whose claim goes with it.
 	BootImageDelete bool `json:"bootImageDelete"`
+	// RepoRead is this namespace's history in the project's repo. Seeing the
+	// namespace is not enough: it needs list here on every kind the repo
+	// declares.
+	RepoRead bool `json:"repoRead"`
 	// The namespaced network family, staged through git. Network is the
 	// project networks (UserDefinedNetwork).
 	Network ObjectCaps `json:"network"`
@@ -116,6 +120,11 @@ type NamespaceCaps struct {
 // of its namespaces, those hidden from the caller included.
 type ProjectCaps struct {
 	Name string `json:"name"`
+	// RepoRead is the whole repo: the project's history, a past change's
+	// review and its Undo, and pull requests other than the caller's own. It
+	// needs every namespace of the project in view, and list on every kind
+	// the repo declares in each.
+	RepoRead bool `json:"repoRead"`
 	// TemplateEdit writes the project's template library.
 	TemplateEdit bool `json:"templateEdit"`
 	// NewNamespace joins a new namespace to the project (with a VM Network,

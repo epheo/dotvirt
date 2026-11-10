@@ -11,9 +11,11 @@ import {
 	clusterGate,
 	hostGate,
 	imageGate,
+	namespaceHistoryGate,
 	objectGate,
 	projectGate,
 	repoGate,
+	repoReadGate,
 	templateSaveGate,
 	vmEditGate,
 	vmGate,
@@ -48,6 +50,25 @@ describe('imageGate', () => {
 		expect(imageGate.delete('web').why).toBe('You may not delete boot images in web.');
 		await answer({ namespace: { namespace: 'web', bootImageDelete: true } });
 		expect(imageGate.delete('web').ok).toBe(true);
+	});
+});
+
+describe('repoReadGate', () => {
+	it("reads a tenant project's whole repo apart from one namespace's history", async () => {
+		await answer({
+			cluster: { platformRead: false },
+			namespace: { namespace: 'web', repoRead: true, project: { name: 'team', repoRead: false } },
+		});
+		expect(namespaceHistoryGate('web').ok).toBe(true);
+		expect(repoReadGate('team', 'web').why).toBe('You may not read all of team.');
+		expect(repoReadGate('platform', 'web').why).toBe("You may not read the platform's changes.");
+		await answer({
+			cluster: { platformRead: true },
+			namespace: { namespace: 'web', repoRead: false, project: { name: 'team', repoRead: true } },
+		});
+		expect(namespaceHistoryGate('web').why).toBe('You may not read the history in web.');
+		expect(repoReadGate('team', 'web').ok).toBe(true);
+		expect(repoReadGate('platform', '').ok).toBe(true);
 	});
 });
 

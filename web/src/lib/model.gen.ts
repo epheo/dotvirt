@@ -146,6 +146,12 @@ export interface NamespaceCaps {
    */
   bootImageDelete: boolean;
   /**
+   * RepoRead is this namespace's history in the project's repo. Seeing the
+   * namespace is not enough: it needs list here on every kind the repo
+   * declares.
+   */
+  repoRead: boolean;
+  /**
    * The namespaced network family, staged through git. Network is the
    * project networks (UserDefinedNetwork).
    */
@@ -165,6 +171,13 @@ export interface NamespaceCaps {
  */
 export interface ProjectCaps {
   name: string;
+  /**
+   * RepoRead is the whole repo: the project's history, a past change's
+   * review and its Undo, and pull requests other than the caller's own. It
+   * needs every namespace of the project in view, and list on every kind
+   * the repo declares in each.
+   */
+  repoRead: boolean;
   /**
    * TemplateEdit writes the project's template library.
    */
