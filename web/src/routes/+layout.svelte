@@ -21,7 +21,7 @@
 	import { templates } from '#lib/state/templates.svelte.js';
 	import { inventory } from '#lib/state/inventory.svelte.js';
 	import { reviewCache } from '#lib/state/reviewCache.svelte.js';
-	import { frontDoor } from '#lib/state/frontdoor.svelte.js';
+	import { gateways } from '#lib/state/gateways.svelte.js';
 	import { replication } from '#lib/state/replication.svelte.js';
 	import { storage } from '#lib/state/storage.svelte.js';
 	import { clusterGate } from '#lib/gates.js';
@@ -82,7 +82,7 @@
 			templates.reset();
 			storage.reset();
 			replication.reset();
-			frontDoor.reset();
+			gateways.reset();
 			caps.reset();
 			modules.value = null;
 			tray.reset();

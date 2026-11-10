@@ -25,7 +25,7 @@ rules:
   - apiGroups: ["gateway.networking.k8s.io"]
     resources: ["gatewayclasses"]
     verbs: ["list"]
-  # The front door, read in memory and filtered per caller. The experimental
+  # Gateways and routes, read in memory and filtered per caller. The experimental
   # route kinds and portail's rate limits may not be served.
   - apiGroups: ["gateway.networking.k8s.io"]
     resources: ["gateways", "httproutes", "tlsroutes", "tcproutes", "udproutes"]

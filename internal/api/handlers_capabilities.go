@@ -105,7 +105,7 @@ func (s *Server) clusterCaps(ctx context.Context, id auth.Identity, c *cluster.C
 		fields = append(fields, objectFields(&out.BaselineAdminNetworkPolicy, model.KindBANP, "", un)...)
 		fields = append(fields, capField{&out.SharedLibrary, ask(verbCreate, ssarVMTemplate, "")})
 	}
-	if s.frontDoor != nil && s.frontDoor.Started() {
+	if s.gateways != nil && s.gateways.Started() {
 		fields = append(fields, capField{&out.Gateways, gatewaysRead})
 	}
 	s.fill(ctx, id, c, fields)

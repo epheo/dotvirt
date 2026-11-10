@@ -628,7 +628,7 @@ var replicationRead = action{
 var replicationRepair = append(slices.Clone(replicationRead),
 	refQ(verbPatch, ssarRef{replication.GVRVolume.Group, replication.GVRVolume.Resource}, ""))
 
-// gatewaysRead is reading the front door across namespaces. The kinds a
+// gatewaysRead is reading every Gateway and route across namespaces. The kinds a
 // cluster may not serve are asked one by one, as the answer includes them.
 var gatewaysRead = action{
 	refQ(verbList, ssarRef{routes.GVRGateway.Group, routes.GVRGateway.Resource}, ""),

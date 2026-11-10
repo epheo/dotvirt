@@ -14,9 +14,9 @@
 	import PlatformAdoptBanner from '#lib/components/PlatformAdoptBanner.svelte';
 	import TabBar from '#lib/components/TabBar.svelte';
 	import { vmsOff } from '#lib/state/modules.svelte.js';
-	import { frontDoorOff } from '#lib/state/frontdoor.svelte.js';
+	import { gatewaysOff } from '#lib/state/gateways.svelte.js';
 	import FirewallTab from './FirewallTab.svelte';
-	import FrontDoorTab from './FrontDoorTab.svelte';
+	import GatewayTab from './GatewayTab.svelte';
 	import MapTab from './MapTab.svelte';
 	import NetworksTab from './NetworksTab.svelte';
 	import NetworkVMs from './NetworkVMs.svelte';
@@ -26,7 +26,7 @@
 	// what connects to what; the other tabs list everything at scale.
 	const available = $derived(
 		NETWORKING_TABS.filter((t) =>
-			t.id === 'vms' ? !vmsOff() : t.id === 'front-door' ? !frontDoorOff() : true,
+			t.id === 'vms' ? !vmsOff() : t.id === 'gateway' ? !gatewaysOff() : true,
 		),
 	);
 	const tab = $derived(networkingTab(page.url.searchParams.get('tab'), available));
@@ -117,8 +117,8 @@
 				<NetworksTab />
 			{:else if tab === 'firewall'}
 				<FirewallTab />
-			{:else if tab === 'front-door'}
-				<FrontDoorTab />
+			{:else if tab === 'gateway'}
+				<GatewayTab />
 			{:else}
 				<UplinksTab />
 			{/if}

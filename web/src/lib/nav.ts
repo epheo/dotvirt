@@ -103,7 +103,7 @@ export const NETWORKING_TABS = [
 	{ id: 'networks', label: 'Networks' },
 	{ id: 'firewall', label: 'Firewall' },
 	{ id: 'uplinks', label: 'Uplinks' },
-	{ id: 'front-door', label: 'Front door' },
+	{ id: 'gateway', label: 'Gateway' },
 	{ id: 'vms', label: 'VMs' },
 ];
 export const NETWORK_TABS = [

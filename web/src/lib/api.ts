@@ -386,7 +386,7 @@ export const api = {
 	// reads under the caller's token, fetched when the Storage section opens.
 	storageSnapshots: () => get<gen.Snapshot[]>('/api/storage/snapshots'),
 	storageClaims: () => get<gen.Claim[]>('/api/storage/claims'),
-	// Every front door: answers only a caller who may list them across namespaces.
+	// Every Gateway: answers only a caller who may list them across namespaces.
 	gateways: () => get<gen.Gateways>('/api/networking/gateways'),
 	// The routes the caller may list, without the controllers' messages.
 	routes: () => get<gen.Route[]>('/api/networking/routes'),

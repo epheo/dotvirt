@@ -1,6 +1,6 @@
 <script lang="ts">
 	import type { Route } from '#lib/api.js';
-	import { backendLabel, routeKey, routeState } from '#lib/frontdoor.js';
+	import { backendLabel, routeKey, routeState } from '#lib/gateways.js';
 	import Card from '#lib/components/Card.svelte';
 	import StatusPill from '#lib/components/StatusPill.svelte';
 

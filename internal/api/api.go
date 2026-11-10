@@ -218,7 +218,7 @@ type Server struct {
 	modules       *modules.Snapshot   // what the cluster serves; nil leaves GET /api/modules unmounted
 	indexBindings bool
 	replication   *replication.Snapshot // r-drbd's SA-held read model; nil leaves its routes unmounted
-	frontDoor     *routes.Snapshot      // Gateways and routes, SA-held; nil leaves their routes unmounted
+	gateways      *routes.Snapshot      // Gateways and routes, SA-held; nil leaves their routes unmounted
 	bus           *eventbus.Bus         // change-version source for the version-stamped auth caches
 	resolver      *project.Resolver
 	repos         *git.RepoSet
@@ -276,7 +276,7 @@ type Deps struct {
 	Modules        *modules.Snapshot     // what the cluster serves; nil leaves GET /api/modules unmounted
 	IndexBindings  bool                  // ask only the namespaces a RoleBinding names the caller in (Server.boundOnly)
 	Replication    *replication.Snapshot // r-drbd's SA-held read model; nil leaves its routes unmounted
-	FrontDoor      *routes.Snapshot      // Gateways and routes, SA-held; nil leaves their routes unmounted
+	Gateways       *routes.Snapshot      // Gateways and routes, SA-held; nil leaves their routes unmounted
 	Bus            *eventbus.Bus         // change-version source for version-stamped caches
 	Resolver       *project.Resolver
 	Repos          *git.RepoSet
@@ -305,7 +305,7 @@ func NewServer(d Deps) *Server {
 		modules:       d.Modules,
 		indexBindings: d.IndexBindings,
 		replication:   d.Replication,
-		frontDoor:     d.FrontDoor,
+		gateways:      d.Gateways,
 		bus:           d.Bus,
 		resolver:      d.Resolver,
 		repos:         d.Repos,

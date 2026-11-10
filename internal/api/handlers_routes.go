@@ -23,7 +23,7 @@ func (s *Server) handleGateways(w http.ResponseWriter, r *http.Request) {
 		fail(w, fmt.Errorf("%w: reading every route needs list on routes across namespaces", model.ErrForbidden))
 		return
 	}
-	writeJSON(w, s.frontDoor.Overview(func(group, resource string) bool {
+	writeJSON(w, s.gateways.Overview(func(group, resource string) bool {
 		return s.capable(r.Context(), id, c, ask(verbList, ssarRef{group, resource}, ""))
 	}))
 }
@@ -35,13 +35,13 @@ func (s *Server) handleRoutes(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	writeJSON(w, s.frontDoor.Routes(s.routesReadable(r.Context(), sc.id, sc.cluster, nss)))
+	writeJSON(w, s.gateways.Routes(s.routesReadable(r.Context(), sc.id, sc.cluster, nss)))
 }
 
 // routesReadable reviews each route kind present in namespaces. Seeing a
 // namespace means listing its VMs, which says nothing of its routes.
 func (s *Server) routesReadable(ctx context.Context, id auth.Identity, c *cluster.Client, namespaces []string) map[routes.Held]bool {
-	held := s.frontDoor.HeldIn(namespaces)
+	held := s.gateways.HeldIn(namespaces)
 	acts := make([]action, len(held))
 	for i, h := range held {
 		acts[i] = ask(verbList, ssarRef{routes.Group, h.Resource}, h.Namespace)
