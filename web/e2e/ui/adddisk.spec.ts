@@ -103,3 +103,54 @@ test('without r-drbd a disk added to a VM keeps its class select', async ({ page
 	await expect(dialog.getByRole('combobox')).toHaveCount(1);
 	await expect(dialog.getByText(ASK)).toHaveCount(0);
 });
+
+test('one-copy disks of a new VM are weighed together, as they share a host', async ({ page }) => {
+	const sheet = await diskEditor(page, 'replicated');
+	await sheet.locator('#vm-disk').fill('600Gi');
+	await sheet.getByRole('radio', { name: /^One copy/ }).check();
+	await expect(sheet.getByText('Fits. Room on nvme: 1.2 TiB at one copy.')).toBeVisible();
+
+	await sheet.getByRole('button', { name: 'Add a disk' }).click();
+	await sheet.getByLabel('Disk 2 size').fill('600Gi');
+	await sheet
+		.getByRole('group', { name: ASK })
+		.nth(1)
+		.getByRole('radio', { name: /^One copy/ })
+		.check();
+	// worker-3 takes both, but the scheduler may pick worker-1, which takes each alone.
+	await expect(
+		sheet.getByText("May not fit on one host with the VM's other one-copy disks."),
+	).toHaveCount(2);
+});
+
+test("a disk added to a VM with a one-copy disk is judged on that disk's host", async ({
+	page,
+}) => {
+	await setScenario(page, 'replicated');
+	await login(page);
+	await openVM(page, 'web-2');
+	await page.getByRole('button', { name: /Edit Settings/ }).click();
+	const dialog = page.getByRole('dialog');
+	await dialog.getByRole('button', { name: /Storage/ }).click();
+	await dialog.getByRole('button', { name: '+ Add hard disk' }).click();
+	await dialog.getByLabel('New disk size').fill('700Gi');
+	await dialog.getByRole('radio', { name: /^One copy/ }).check();
+	await expect(
+		dialog.getByText(
+			"Fits on worker-3, where the VM's one-copy disk lives. Room on nvme there: 1.2 TiB.",
+		),
+	).toBeVisible();
+
+	await dialog.getByRole('button', { name: '+ Add hard disk' }).click();
+	await dialog.getByLabel('New disk size').nth(1).fill('700Gi');
+	await dialog
+		.getByRole('group', { name: ASK })
+		.nth(1)
+		.getByRole('radio', { name: /^One copy/ })
+		.check();
+	await expect(
+		dialog.getByText(
+			'Too big for worker-3 with the other new one-copy disks. Room on nvme there: 1.2 TiB.',
+		),
+	).toHaveCount(2);
+});

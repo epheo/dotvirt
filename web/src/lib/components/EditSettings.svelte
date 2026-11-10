@@ -124,7 +124,7 @@
 {/snippet}
 
 {#snippet stepStorage()}
-	<StorageStep bind:form {options} />
+	<StorageStep bind:form {options} {vm} />
 {/snippet}
 
 {#snippet stepNetworks()}

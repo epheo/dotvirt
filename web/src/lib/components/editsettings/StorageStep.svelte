@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { api, type Options, type StorageClassInfo } from '#lib/api.js';
+	import { api, type Options, type StorageClassInfo, type VM } from '#lib/api.js';
 	import { freeName } from '#lib/devices.js';
 	import { diskError, diskErrors, type DiskRow, type EditForm } from '#lib/editform.js';
 	import { quantityBytes } from '#lib/format.js';
@@ -11,7 +11,11 @@
 	import StorageClassSelect from '../StorageClassSelect.svelte';
 	import TextInput from '../TextInput.svelte';
 
-	let { form = $bindable(), options }: { form: EditForm; options: Options | null } = $props();
+	let {
+		form = $bindable(),
+		options,
+		vm,
+	}: { form: EditForm; options: Options | null; vm: VM } = $props();
 
 	const errors = $derived(diskErrors(form));
 
@@ -23,6 +27,9 @@
 	const classes = $derived(classesRes.data ?? []);
 	const cards = $derived(protectionCards(classes));
 	const added = $derived(form.disks.filter((d) => d.isNew && !d.removed));
+	const sizes = $derived(
+		added.map((d) => ({ storageClass: d.storageClass ?? '', bytes: quantityBytes(d.size ?? '') })),
+	);
 
 	function addDisk() {
 		form.disks = [
@@ -53,7 +60,7 @@
 			aria-invalid={!!err}
 			title={err}
 		/>
-		<TextInput bind:value={disk.size} size="sm" width="w-16" />
+		<TextInput bind:value={disk.size} size="sm" width="w-16" aria-label="New disk size" />
 		{#if !cards}
 			<StorageClassSelect
 				options={options?.storageClasses ?? []}
@@ -89,6 +96,8 @@
 				onpick={(c) => (disk.storageClass = c)}
 				{classes}
 				bytes={quantityBytes(disk.size ?? '')}
+				peers={sizes.filter((_, j) => j !== i)}
+				{vm}
 			/>
 		</div>
 	{/each}
