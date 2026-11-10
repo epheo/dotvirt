@@ -15,11 +15,12 @@ import (
 // generate-expression default derived from the source name. DataVolume names
 // prefixed with the VM's name are re-anchored to ${NAME} too: DataVolumes are
 // namespace-unique, so a second deploy of the template must not collide with
-// the first. A NIC naming a network in the source VM's namespace names it bare,
-// so a deploy attaches to the same-named network in its own namespace: Multus
-// isolation (OpenShift, MicroShift) refuses another namespace's. Everything
-// else (disks, other networks, cloud-init) carries verbatim; parameterizing
-// further fields is a template-editing concern.
+// the first. A NIC or a disk source naming the source VM's namespace names it
+// bare, so a deploy uses the same-named network or source in its own
+// namespace: Multus isolation refuses another namespace's network, and a clone
+// from the source's namespace would copy that project's data into others.
+// Everything else (other namespaces, cloud-init) carries verbatim;
+// parameterizing further fields is a template-editing concern.
 func Derive(vmYAML []byte, name, description string) ([]byte, error) {
 	var vm map[string]any
 	if err := yaml.Unmarshal(vmYAML, &vm); err != nil {
@@ -42,6 +43,7 @@ func Derive(vmYAML []byte, name, description string) ([]byte, error) {
 	meta["name"] = "${NAME}"
 	reanchorDataVolumes(vm, base)
 	unanchorNetworks(vm, ns)
+	unanchorSources(vm, ns)
 
 	tplMeta := map[string]any{"name": name}
 	if description != "" {
@@ -121,6 +123,27 @@ func unanchorNetworks(vm map[string]any, ns string) {
 		if m, ok := n["multus"].(map[string]any); ok {
 			if ref, _ := m["networkName"].(string); strings.HasPrefix(ref, ns+"/") {
 				m["networkName"] = strings.TrimPrefix(ref, ns+"/")
+			}
+		}
+	}
+}
+
+// unanchorSources drops ns from each dataVolumeTemplate source naming it: a
+// PVC, a snapshot or a DataSource then resolves in the deploy's namespace.
+func unanchorSources(vm map[string]any, ns string) {
+	if ns == "" {
+		return
+	}
+	spec, _ := vm["spec"].(map[string]any)
+	tmpls, _ := spec["dataVolumeTemplates"].([]any)
+	for _, t := range tmpls {
+		tm, _ := t.(map[string]any)
+		dv, _ := tm["spec"].(map[string]any)
+		source, _ := dv["source"].(map[string]any)
+		refs := []any{dv["sourceRef"], source["pvc"], source["snapshot"]}
+		for _, r := range refs {
+			if m, ok := r.(map[string]any); ok && m["namespace"] == ns {
+				delete(m, "namespace")
 			}
 		}
 	}
