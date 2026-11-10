@@ -1,0 +1,4 @@
+{"name":"system:basic-user","rules":[
+  {"apiGroups":["authorization.k8s.io"],"resources":["selfsubjectaccessreviews","selfsubjectrulesreviews"],"verbs":["create"]},
+  {"apiGroups":["authentication.k8s.io"],"resources":["selfsubjectreviews"],"verbs":["create"]}
+]}

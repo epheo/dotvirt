@@ -1,0 +1,3 @@
+{"name":"cdi.kubevirt.io:config-reader","rules":[
+  {"apiGroups":["cdi.kubevirt.io"],"resources":["cdiconfigs","storageprofiles"],"verbs":["get","list","watch"]}
+]}

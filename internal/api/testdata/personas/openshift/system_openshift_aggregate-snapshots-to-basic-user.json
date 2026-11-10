@@ -1,0 +1,3 @@
+{"name":"system:openshift:aggregate-snapshots-to-basic-user","rules":[
+  {"apiGroups":["snapshot.storage.k8s.io"],"resources":["volumesnapshotclasses"],"verbs":["get","list","watch"]}
+]}
