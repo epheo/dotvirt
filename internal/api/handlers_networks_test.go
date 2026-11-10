@@ -424,7 +424,22 @@ func TestViewsListProjectNamespacesOnly(t *testing.T) {
 	t.Cleanup(cancel)
 	ns.Run(ctx)
 	s.netstate = ns
-	for deadline := time.Now().Add(10 * time.Second); len(ns.Catalog().Networks) < 3 || len(ns.Policies()) < 5; time.Sleep(10 * time.Millisecond) {
+	// Each kind's watch must hold what the test seeds: a NAD read before its
+	// CUDN is an unowned network of its own, which the count alone passes.
+	seeded := [][4]string{
+		{"k8s.ovn.org", "clusteruserdefinednetworks", "", "blue-secondary"},
+		{"k8s.ovn.org", "userdefinednetworks", "team-a-dev", "vm-net"},
+		{"k8s.cni.cncf.io", "network-attachment-definitions", "team-a-dev", "blue-secondary"},
+	}
+	synced := func() bool {
+		for _, o := range seeded {
+			if !ns.Holds(o[0], o[1], o[2], o[3]) {
+				return false
+			}
+		}
+		return len(ns.Policies()) >= 5
+	}
+	for deadline := time.Now().Add(10 * time.Second); !synced(); time.Sleep(10 * time.Millisecond) {
 		if time.Now().After(deadline) {
 			t.Fatalf("netstate never synced: networks %+v, policies %+v", ns.Catalog().Networks, ns.Policies())
 		}

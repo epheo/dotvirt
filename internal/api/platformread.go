@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
 	"net/http"
@@ -170,6 +171,9 @@ func (s *Server) servedKinds(ctx context.Context, kinds []schema.GroupKind) (*ki
 					want = append(want, k)
 				}
 			}
+		}
+		if s.clusterF == nil {
+			return nil, unavailable(errors.New("cluster not configured"))
 		}
 		sa, err := s.clusterF.SA()
 		if err != nil {
