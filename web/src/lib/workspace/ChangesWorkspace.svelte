@@ -95,6 +95,14 @@
 	// namespace when there is one: its answer is already held.
 	const repoRead = (project: string) =>
 		inventory.repoRead(project, project === scopeProject ? scopeNS : '');
+	// Nothing opens by default when the first PR in view is another's that
+	// only the forge opens.
+	const forgeOnly = $derived.by(() => {
+		const f = visibleProposals[0];
+		if (!f || f.mine) return false;
+		const g = repoRead(f.project);
+		return !g.ok && g.why !== CHECKING;
+	});
 	// Under a scope, whether its commits open for review.
 	const scopeReads = $derived(scopeProject ? repoRead(scopeProject) : null);
 	const scopeRefused = $derived(!!scopeReads && !scopeReads.ok && scopeReads.why !== CHECKING);
@@ -297,7 +305,13 @@
 				);
 				if (p) return { kind: 'proposal' as const, proposal: p };
 			}
-			if (visibleProposals[0]) return { kind: 'proposal' as const, proposal: visibleProposals[0] };
+			// The first in view, unless only the forge opens it: then the caller's own.
+			const first = visibleProposals[0];
+			const open =
+				first && (first.mine || repoRead(first.project).ok)
+					? first
+					: visibleProposals.find((p) => p.mine);
+			if (open) return { kind: 'proposal' as const, proposal: open };
 			return null;
 		}
 		if (sel?.kind === 'commit') {
@@ -527,7 +541,7 @@
 					{history}
 					{repoProjects}
 					{scopeNS}
-					reviewable={!scopeReads || scopeReads.ok}
+					{repoRead}
 					{active}
 					onselect={select}
 					ontogglehistory={toggleHistory}
@@ -546,7 +560,31 @@
 							onproposed={(r) => proposed(project, r)}
 						/>
 					{:else if selected?.kind === 'proposal'}
-						<ReviewProposal proposal={selected.proposal} />
+						{@const pr = selected.proposal}
+						{@const reads = pr.mine ? null : repoRead(pr.project)}
+						{#if !reads || reads.ok}
+							<ReviewProposal proposal={pr} />
+						{:else}
+							<Card title="Review">
+								{#if reads.why === CHECKING}
+									<Skeleton rows={2} class="h-6" />
+								{:else}
+									<div class="flex max-w-2xl flex-col gap-2">
+										<p class="font-medium text-ink">{reads.why}</p>
+										<p class="text-ink-soft">
+											Another's pull request reads everything in {pr.project}'s repo.
+										</p>
+										<a
+											href={pr.prURL}
+											target="_blank"
+											rel="noopener"
+											class="text-[13px] text-accent-ink hover:underline"
+											>Open PR #{pr.prNumber} in the forge</a
+										>
+									</div>
+								{/if}
+							</Card>
+						{/if}
 					{:else if selected?.kind === 'commit'}
 						{@const { project, hash } = selected}
 						{@const reads = repoRead(project)}
@@ -580,6 +618,11 @@
 									</p>
 								{:else if tab === 'review'}
 									<p class="text-ink-soft">Pick a pull request to review its changes here.</p>
+									{#if forgeOnly}
+										<p class="text-ink-soft">
+											Others' pull requests in a repo you cannot read all of open in the forge.
+										</p>
+									{/if}
 								{:else}
 									<p class="text-ink-soft">
 										Pick a staged change to review it here and propose its project's draft.

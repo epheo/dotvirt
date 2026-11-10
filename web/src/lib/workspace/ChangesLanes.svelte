@@ -3,6 +3,7 @@
 	import {
 		ChevronDown,
 		ChevronRight,
+		ExternalLink,
 		GitPullRequest,
 		Pencil,
 		Plus,
@@ -23,6 +24,8 @@
 		sameReview,
 		type ReviewSel,
 	} from '#lib/review.js';
+	import { namespaceHistoryGate, projectNS, type Gate } from '#lib/gates.js';
+	import { CHECKING } from '#lib/state/caps.svelte.js';
 	import { drafts } from '#lib/state/drafts.svelte.js';
 	import { inventory } from '#lib/state/inventory.svelte.js';
 	import Button from '#lib/components/Button.svelte';
@@ -58,7 +61,7 @@
 		history,
 		repoProjects,
 		scopeNS = '',
-		reviewable = true,
+		repoRead,
 		active,
 		onselect,
 		ontogglehistory,
@@ -76,8 +79,9 @@
 		history: Record<string, HistoryLane>;
 		repoProjects: string[];
 		scopeNS?: string;
-		// Whether a listed commit opens for review: it reads the whole repo.
-		reviewable?: boolean;
+		// A project's whole repo, which a commit's review and another's pull
+		// request read.
+		repoRead: (project: string) => Gate;
 		active: ReviewSel | null;
 		onselect: (s: ReviewSel) => void;
 		ontogglehistory: (project: string) => void;
@@ -207,7 +211,7 @@
 		{#if c.prNumber}<span class="shrink-0 text-ink-faint">#{c.prNumber}</span>{/if}
 		<span class="ml-auto shrink-0 text-xs text-ink-faint">{shortDate(c.when)}</span>
 	{/snippet}
-	{#if reviewable}
+	{#if repoRead(project).ok}
 		<button
 			onclick={() => onselect(sel)}
 			class="{ROW} min-h-10 py-2 text-[13px] {indent ? INDENT : 'px-card'} {tint(on(sel))}"
@@ -221,19 +225,23 @@
 	{/if}
 {/snippet}
 
-<!-- A whole repo the caller may not read: what they see of it opens one
-namespace at a time. -->
+<!-- A whole repo the caller may not read, and where its history opens instead. -->
 {#snippet deniedBody(project: string, denied: string, inline: boolean)}
-	{@const seen = scopeNS
-		? []
-		: (inventory.projects.find((p) => p.name === project)?.namespaces ?? [])}
+	{@const p = scopeNS ? undefined : inventory.projects.find((x) => x.name === project)}
+	<!-- The namespace the whole-repo answer was asked of: when it cannot read
+	its own history either, the repo holds a kind the caller may not list,
+	and the namespace links would be refused too. -->
+	{@const own = p ? namespaceHistoryGate(projectNS(p)) : undefined}
+	{@const seen = own?.ok && p ? p.namespaces : []}
 	<div
 		class="flex flex-col gap-1.5 border-t border-line-soft py-2.5 text-[13px] {inline
 			? INDENT
 			: 'px-card'}"
 	>
 		<p class="text-ink-soft">{denied}</p>
-		{#if seen.length}
+		{#if own && !own.ok && own.why !== CHECKING}
+			<p class="text-ink-soft">Its repo holds kinds you may not list.</p>
+		{:else if seen.length}
 			<p class="text-ink-soft">Its history opens one namespace at a time:</p>
 			<ul class="flex flex-wrap gap-x-4 gap-y-1">
 				{#each seen as n (n.namespace)}
@@ -426,15 +434,23 @@ namespace at a time. -->
 				{@const sel = { kind: 'proposal', project: p.project, prNumber: p.prNumber } as const}
 				{@const appr = approvalLine(p)}
 				{@const chk = checksPill(p)}
-				<button
-					onclick={() => onselect(sel)}
-					class="flex w-full flex-col gap-1 border-t border-line-soft px-card py-2.5 text-left {tint(
-						on(sel),
-					)}"
-				>
+				<!-- Another's pull request reads the whole repo here; the forge
+				serves it to whoever it lets in. -->
+				{@const here = p.mine || repoRead(p.project).ok}
+				{#snippet cells()}
 					<span class="flex items-center gap-2">
 						<GitPullRequest size={14} class="shrink-0 text-accent-ink" />
-						<span class="text-[13px] font-medium text-ink">PR #{p.prNumber}</span>
+						{#if here}
+							<span class="text-[13px] font-medium text-ink">PR #{p.prNumber}</span>
+						{:else}
+							<a
+								href={p.prURL}
+								target="_blank"
+								rel="noopener"
+								class="inline-flex items-center gap-1 text-[13px] font-medium text-accent-ink hover:underline"
+								>PR #{p.prNumber} <ExternalLink size={12} /></a
+							>
+						{/if}
 						<span class="text-[13px] text-ink-muted">{p.project}</span>
 						{#if p.by && !p.mine}<span class="text-[13px] text-ink-faint">by {p.by}</span>{/if}
 						{#if chk}<span class="ml-auto"><StatusPill tone={chk.tone} label={chk.text} /></span
@@ -446,7 +462,21 @@ namespace at a time. -->
 							{#if appr}<StatusPill tone={appr.tone} label={appr.text} />{/if}
 						</span>
 					{/if}
-				</button>
+				{/snippet}
+				{#if here}
+					<button
+						onclick={() => onselect(sel)}
+						class="flex w-full flex-col gap-1 border-t border-line-soft px-card py-2.5 text-left {tint(
+							on(sel),
+						)}"
+					>
+						{@render cells()}
+					</button>
+				{:else}
+					<div class="flex flex-col gap-1 border-t border-line-soft px-card py-2.5">
+						{@render cells()}
+					</div>
+				{/if}
 			{/each}
 			<!-- Push-only propose outcomes (no PR yet): keep the compare link visible. -->
 			{#each pushed as [project, r] (project)}
