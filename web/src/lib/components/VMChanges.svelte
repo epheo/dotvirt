@@ -28,7 +28,8 @@
 	// Open PRs of the project, kept when their diff names this VM. A PR's
 	// items are the review the Changes section renders, loaded once per PR;
 	// the load re-runs only when the set of open PRs moves.
-	const projectPRs = $derived(inventory.proposals.filter((p) => p.project === project));
+	// A PR with no branch in the repo (a fork's) has no review to read here.
+	const projectPRs = $derived(inventory.proposals.filter((p) => p.project === project && p.branch));
 	$effect(() => {
 		inventory.proposalsKey;
 		untrack(() => reviewCache.loadProposals(projectPRs));

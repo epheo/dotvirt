@@ -1581,6 +1581,28 @@ const kindrepo = {
 	capabilities: { 'web-prod': { repoRead: false, project: { repoRead: false } } },
 };
 
+// --- forkpr: team-web's one open PR comes from a fork ---
+// It has no branch in the repo: listed by its poster, reviewed in the forge.
+const forkpr = {
+	...base,
+	name: 'forkpr',
+	inventory: {
+		...base.inventory,
+		proposals: [
+			...base.inventory.proposals.filter((p) => p.project !== 'team-web'),
+			{
+				project: 'team-web',
+				prNumber: 43,
+				prURL: 'https://forge.example/dotvirt/team-web/pulls/43',
+				title: 'web-1: resize from a fork',
+				by: 'mallory',
+				approvals: 0,
+				requiredApprovals: 1,
+			},
+		],
+	},
+};
+
 // --- platstager: stages to the platform, cannot read it ---
 // The server lists only the caller's own platform PRs, serves the review of
 // the ones that still match what dotvirt proposed, refuses the platform's
@@ -1960,4 +1982,5 @@ export const scenarios = {
 	platstager,
 	partialrepo,
 	kindrepo,
+	forkpr,
 };

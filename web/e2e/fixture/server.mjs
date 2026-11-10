@@ -644,6 +644,12 @@ async function handleAPI(req, res, url) {
 			(p) => p.project === m[1] && p.prNumber === Number(m[2]),
 		);
 		if (!pr) return sendText(res, 404, `not found: pull request #${m[2]}`);
+		if (!pr.branch)
+			return sendText(
+				res,
+				400,
+				`pull request #${m[2]} has no branch in this repository; review it in the forge`,
+			);
 		const denied = s.proposalDenied?.[`${m[1]}#${m[2]}`];
 		if (denied) return sendText(res, 403, denied);
 		const items = {

@@ -40,6 +40,29 @@ test('the PR lane shows checks and approval state, merge stays in the forge', as
 	await expect(bobs).toBeVisible();
 });
 
+test('a PR from a fork is reviewed in the forge, and leaves no VM waiting', async ({ page }) => {
+	await setScenario(page, 'forkpr');
+	await login(page);
+	await page.goto('/changes');
+
+	// Its row links the forge: it has no branch here to render.
+	const main = page.locator('main');
+	const fork = main.getByRole('link', { name: /PR #43/ });
+	await expect(fork).toHaveAttribute('href', /pulls\/43/);
+	await expect(main.getByText('by mallory')).toBeVisible();
+	await expect(main.getByRole('button', { name: /PR #43/ })).toHaveCount(0);
+
+	// Reached by URL, the review says where it is.
+	await page.goto('/changes?project=team-web&pr=43');
+	await expect(
+		main.getByText('This pull request has no branch in this repository; review it in the forge.'),
+	).toBeVisible();
+
+	// The VM's Changes tab settles without a review it will never load.
+	await page.goto('/vm/web-prod/web-2?tab=changes');
+	await expect(main.getByText('No open pull request touches this VM.')).toBeVisible();
+});
+
 test('the route explains the write model when nothing is in flight', async ({ page }) => {
 	await setScenario(page, 'empty');
 	await login(page);
