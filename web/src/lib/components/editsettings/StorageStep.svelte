@@ -1,7 +1,12 @@
 <script lang="ts">
-	import type { Options } from '#lib/api.js';
+	import { api, type Options, type StorageClassInfo } from '#lib/api.js';
 	import { freeName } from '#lib/devices.js';
 	import { diskError, diskErrors, type DiskRow, type EditForm } from '#lib/editform.js';
+	import { quantityBytes } from '#lib/format.js';
+	import { resource } from '#lib/resource.svelte.js';
+	import { modules } from '#lib/state/modules.svelte.js';
+	import { protectionCards } from '#lib/state/replication.svelte.js';
+	import ProtectionPick from '../create/ProtectionPick.svelte';
 	import RowListEditor from '../RowListEditor.svelte';
 	import StorageClassSelect from '../StorageClassSelect.svelte';
 	import TextInput from '../TextInput.svelte';
@@ -9,6 +14,15 @@
 	let { form = $bindable(), options }: { form: EditForm; options: Options | null } = $props();
 
 	const errors = $derived(diskErrors(form));
+
+	// The class facts the protection cards need, read only where r-drbd serves.
+	const classesRes = resource<StorageClassInfo[] | null>(
+		() => (modules.value?.replicatedStorage ? 'storage-classes' : ''),
+		(k) => (k ? api.storageClasses() : Promise.resolve(null)),
+	);
+	const classes = $derived(classesRes.data ?? []);
+	const cards = $derived(protectionCards(classes));
+	const added = $derived(form.disks.filter((d) => d.isNew && !d.removed));
 
 	function addDisk() {
 		form.disks = [
@@ -40,11 +54,13 @@
 			title={err}
 		/>
 		<TextInput bind:value={disk.size} size="sm" width="w-16" />
-		<StorageClassSelect
-			options={options?.storageClasses ?? []}
-			bind:value={disk.storageClass}
-			class="min-w-0 flex-1 py-1! text-xs"
-		/>
+		{#if !cards}
+			<StorageClassSelect
+				options={options?.storageClasses ?? []}
+				bind:value={disk.storageClass}
+				class="min-w-0 flex-1 py-1! text-xs"
+			/>
+		{/if}
 	{:else}
 		<span class="text-xs text-ink-muted"
 			>{disk.name} ({disk.type}{disk.size ? ` · ${disk.size}` : ''}{disk.storageClass
@@ -64,3 +80,16 @@
 	row={diskRow}
 />
 {#each errors as e (e)}<p class="mt-1 text-xs text-danger-ink">{e}</p>{/each}
+{#if cards}
+	{#each added as disk, i (i)}
+		<div class="mt-3">
+			<ProtectionPick
+				disk={disk.name}
+				value={disk.storageClass ?? ''}
+				onpick={(c) => (disk.storageClass = c)}
+				{classes}
+				bytes={quantityBytes(disk.size ?? '')}
+			/>
+		</div>
+	{/each}
+{/if}

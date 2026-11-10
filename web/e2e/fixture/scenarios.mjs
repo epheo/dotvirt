@@ -1814,9 +1814,33 @@ const placement = {
 		),
 	],
 };
+// r-drbd's classes: one copy on nvme, two on nvme or hdd, none asks three.
+const rdrbdClass = (name, copies, tier) => ({
+	name,
+	provisioner: 'r-drbd.io',
+	reclaimPolicy: 'Delete',
+	bindingMode: 'WaitForFirstConsumer',
+	expandable: true,
+	created: iso(30 * 1440),
+	snapshotClass: 'r-drbd',
+	profile: {
+		accessModes: [copies > 1 ? 'ReadWriteMany' : 'ReadWriteOnce'],
+		volumeMode: 'Block',
+		shared: copies > 1,
+		cloneStrategy: 'snapshot',
+		recognized: true,
+	},
+	replication: { copies, tier },
+});
 const replicated = {
 	...base,
 	name: 'replicated',
+	storageClasses: [
+		...storageClasses,
+		rdrbdClass('r-drbd-local', 1, 'nvme'),
+		rdrbdClass('r-drbd-replicated', 2, 'nvme'),
+		rdrbdClass('bulk-replicated', 2, 'hdd'),
+	],
 	modules: { replicatedStorage: true },
 	capabilities: { ...base.capabilities, cluster: { replication: true, replicationRepair: true } },
 	replication: placement,

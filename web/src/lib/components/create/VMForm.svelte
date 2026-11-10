@@ -37,7 +37,7 @@
 	import Card from '../Card.svelte';
 	import Consequence from '../Consequence.svelte';
 	import Button from '../Button.svelte';
-	import ClassPick from './ClassPick.svelte';
+	import ProtectionPick from './ProtectionPick.svelte';
 	import PickList from './PickList.svelte';
 	import PlacePicker from './PlacePicker.svelte';
 	import SetupRow from './SetupRow.svelte';
@@ -836,11 +836,12 @@
 				>Done</button
 			>
 		</div>
-		<ClassPick
-			label="Root disk class"
+		<ProtectionPick
+			disk="Root disk"
 			value={storageClass}
 			onpick={(c) => (storageClass = c)}
 			classes={classRows}
+			bytes={quantityBytes(diskSize)}
 		/>
 		{#each disks.rows as d, i (i)}
 			<div class="flex flex-col gap-2 rounded-md border border-line p-2.5">
@@ -865,11 +866,12 @@
 					>
 				</div>
 				{#if diskError(i)}<p class="text-xs text-danger-ink">{diskError(i)}</p>{/if}
-				<ClassPick
-					label="{d.name} class"
+				<ProtectionPick
+					disk={d.name}
 					value={d.storageClass}
 					onpick={(c) => (d.storageClass = c)}
 					classes={classRows}
+					bytes={quantityBytes(d.size)}
 				/>
 			</div>
 		{/each}
