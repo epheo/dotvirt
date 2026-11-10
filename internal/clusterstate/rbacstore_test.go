@@ -86,7 +86,7 @@ func signalStores(t *testing.T) (map[string]cache.Store, *published) {
 	p := &published{}
 	refs := newRoleRefs()
 	stores := map[string]cache.Store{"rolebindings": newRBACSignal(p.record, refs, roleBindingDigest)}
-	for _, w := range signalWatches(func(schema.GroupVersionResource) *cache.ListWatch { return nil }, p.record, refs) {
+	for _, w := range signalWatches(func(schema.GroupVersionResource) *cache.ListWatch { return nil }, p.record, refs, newBindingIndex()) {
 		stores[w.gvr.Resource] = w.sink
 	}
 	return stores, p
@@ -403,7 +403,7 @@ func runSignalsWith(t *testing.T, gate func(schema.GroupVersionResource) admissi
 	s.signals = signalWatches(func(gvr schema.GroupVersionResource) *cache.ListWatch {
 		sources[gvr.Resource] = &fakeSource{}
 		return sources[gvr.Resource].lw()
-	}, func(string) { bus.Publish(eventbus.RBACChanged) }, refs)
+	}, func(string) { bus.Publish(eventbus.RBACChanged) }, refs, newBindingIndex())
 	s.runSignals(ctx, gate)
 	return bus, sources, s
 }
