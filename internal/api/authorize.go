@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -813,22 +814,58 @@ func (s *Server) readsRepo(ctx context.Context, sc scope, namespace string) erro
 	return s.require(ctx, sc.id, sc.cluster, act)
 }
 
-// authorNamespaces is the UI's authoring signal for nss. One cluster-wide
-// review answers for every namespace when it allows; otherwise each namespace
-// is reviewed, at most authConcurrency at once. A namespace whose review
-// fails is left out of the map, so a timeout reads as unknown, never as no.
-func (s *Server) authorNamespaces(ctx context.Context, id auth.Identity, c *cluster.Client, nss []string) map[string]bool {
-	out := make(map[string]bool, len(nss))
-	authorIn := vmAction
-	if s.noVMs() {
-		// KubeVirt's aggregated roles are absent: admin and edit hold this instead.
-		authorIn = func(verb, ns string) action { return ask(verb, ssarNetpol, ns) }
+// authorNamespaces is the UI's two authoring signals for nss: vms where the
+// caller may update VMs, any where it may update any kind a tenant repo may
+// hold that the cluster serves (authoredKinds, VMs first, so one pass answers
+// both). Each kind is asked cluster-wide first. A namespace is then asked only
+// where a RoleBinding names the caller (boundOnly): without one, only the
+// cluster-wide grant reaches it. At most authConcurrency namespaces are asked
+// at once. A namespace whose reviews fail is left out of a map, so a timeout
+// reads as unknown, never as no.
+func (s *Server) authorNamespaces(ctx context.Context, id auth.Identity, c *cluster.Client, nss []string) (vms, any map[string]bool) {
+	vms, any = make(map[string]bool, len(nss)), make(map[string]bool, len(nss))
+	kinds := s.authoredKinds(ctx)
+	hasVMs := slices.Contains(kinds, model.KindVM)
+	type verdict struct{ ok, known bool }
+	update := func(k model.Kind, ns string) verdict {
+		_, ok, err := s.allowed(ctx, id, c, kindAction(verbUpdate, k, ns))
+		return verdict{ok, err == nil || ok}
 	}
-	if _, all, err := s.allowed(ctx, id, c, authorIn(verbUpdate, "")); err == nil && all {
-		for _, ns := range nss {
-			out[ns] = true
+	join := func(vs []verdict) verdict {
+		out := verdict{known: true}
+		for _, v := range vs {
+			if v.ok {
+				return verdict{true, true}
+			}
+			out.known = out.known && v.known
 		}
 		return out
+	}
+	// The cluster-wide verdicts, which answer every namespace no RoleBinding
+	// reaches; VMs first, until one kind allows.
+	vmWide, anyWide := verdict{known: true}, verdict{known: true}
+	for _, k := range kinds {
+		v := update(k, "")
+		if k == model.KindVM {
+			vmWide = v
+		}
+		if anyWide = join([]verdict{anyWide, v}); anyWide.ok {
+			break
+		}
+	}
+	set := func(ns string, vm, a verdict) {
+		if vm.known {
+			vms[ns] = vm.ok
+		}
+		if a.known {
+			any[ns] = a.ok
+		}
+	}
+	bound := map[string]bool{}
+	if !vmWide.ok || !anyWide.ok {
+		for _, ns := range s.boundOnly(id, nss) {
+			bound[ns] = true
+		}
 	}
 	var (
 		mu  sync.Mutex
@@ -836,18 +873,45 @@ func (s *Server) authorNamespaces(ctx context.Context, id auth.Identity, c *clus
 		sem = make(chan struct{}, authConcurrency)
 	)
 	for _, ns := range nss {
+		if !bound[ns] {
+			set(ns, vmWide, anyWide)
+			continue
+		}
 		wg.Go(func() {
 			sem <- struct{}{}
 			defer func() { <-sem }()
-			_, ok, err := s.allowed(ctx, id, c, authorIn(verbUpdate, ns))
-			if err != nil {
-				return
+			vm := vmWide
+			if hasVMs && !vm.ok {
+				vm = update(model.KindVM, ns)
+			}
+			a := anyWide
+			if !a.ok {
+				// The VM verdict counts toward any; the other kinds are asked
+				// until one allows.
+				seen := []verdict{vm}
+				for _, k := range kinds {
+					if join(seen).ok {
+						break
+					}
+					if k != model.KindVM {
+						seen = append(seen, update(k, ns))
+					}
+				}
+				a = join(seen)
 			}
 			mu.Lock()
-			out[ns] = ok
+			set(ns, vm, a)
 			mu.Unlock()
 		})
 	}
 	wg.Wait()
-	return out
+	return vms, any
+}
+
+// authoredKinds are the kinds a tenant repo may hold that the cluster serves,
+// VMs first: the grant most authors hold ends the review there.
+func (s *Server) authoredKinds(ctx context.Context) []model.Kind {
+	kinds := model.TenantKinds()
+	un := s.unserved(ctx, kinds...)
+	return slices.DeleteFunc(kinds, func(k model.Kind) bool { return un[k] })
 }

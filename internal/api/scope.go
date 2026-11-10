@@ -283,16 +283,6 @@ func review[V any](ctx context.Context, cache *ttlcache.Cache[V], key string, ve
 	})
 }
 
-// noVMs reports a known absence of KubeVirt. Until discovery has answered, VMs
-// are assumed: a namespace admin sees nothing for a moment, never too much.
-func (s *Server) noVMs() bool {
-	if s.modules == nil {
-		return false
-	}
-	m, ok := s.modules.Get()
-	return ok && !m.VMs
-}
-
 // visibleFor is the namespaces viewFor shows.
 func (s *Server) visibleFor(ctx context.Context, id auth.Identity, c *cluster.Client) (map[string]bool, error) {
 	v, err := s.viewFor(ctx, id, c)

@@ -22,6 +22,7 @@ import { share } from '#lib/share.js';
 // Only the server's yes authors: an absent verdict (the review failed this
 // frame) fails closed, like the stage routes behind it.
 const authorable = (n: { canAuthor?: boolean }) => n.canAuthor === true;
+const vmAuthorable = (n: { canAuthorVMs?: boolean }) => n.canAuthorVMs === true;
 
 // The live cluster read layer: the WS inventory snapshot plus the once-per-
 // session networking inventory (GET /api/networks). Everything else the UI
@@ -74,7 +75,7 @@ class InventoryStore {
 		}),
 	);
 	// What is worth doing but not wrong: adoptable namespaces and VMs.
-	readonly suggestions = $derived(deriveSuggestions(this.inventory, (ns) => this.canAuthor(ns)));
+	readonly suggestions = $derived(deriveSuggestions(this.inventory, (ns) => this.canAuthorVMs(ns)));
 	// Open PRs across the user's projects ride the live inventory stream, so a PR
 	// merged anywhere repaints the dock + Changes pane with no manual refresh.
 	readonly proposals = $derived(this.inventory?.proposals ?? []);
@@ -137,6 +138,15 @@ class InventoryStore {
 			.flatMap((p) => p.namespaces.filter(authorable).map((n) => n.namespace)),
 	);
 	readonly #authorSet = $derived(new Set(this.namespaces));
+	// Of those, where the caller may change VMs: what writes a VM (the VM and
+	// template forms, adopting, restoring) reads this set, through canAuthorVMs
+	// or here.
+	readonly vmNamespaces = $derived(
+		this.projects
+			.filter((p) => p.repo)
+			.flatMap((p) => p.namespaces.filter(vmAuthorable).map((n) => n.namespace)),
+	);
+	readonly #vmSet = $derived(new Set(this.vmNamespaces));
 	// The verdict behind each namespace, for saying why an action is not offered.
 	readonly #authoring = $derived(
 		new Map<string, Authoring>(
@@ -240,6 +250,10 @@ class InventoryStore {
 
 	findVM(namespace: string, name: string): VM | null {
 		return this.allVMs.find((v) => v.namespace === namespace && v.name === name) ?? null;
+	}
+
+	canAuthorVMs(namespace: string): boolean {
+		return this.#vmSet.has(namespace);
 	}
 
 	canAuthor(namespace: string): boolean {
