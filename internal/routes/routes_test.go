@@ -337,7 +337,8 @@ func TestAKindIsWatchedAtTheVersionServedAndStopsWithTheModule(t *testing.T) {
 	}
 }
 
-// Only portail's condition, True, says a class's Gateways are isolated.
+// Only portail's condition, True for the class's current generation, says a
+// class's Gateways are isolated.
 func TestDecodeIsolated(t *testing.T) {
 	class := func(conds ...map[string]any) *unstructured.Unstructured {
 		list := make([]any, len(conds))
@@ -345,18 +346,23 @@ func TestDecodeIsolated(t *testing.T) {
 			list[i] = c
 		}
 		return &unstructured.Unstructured{Object: map[string]any{
-			"metadata": map[string]any{"name": "portail"},
+			"metadata": map[string]any{"name": "portail", "generation": int64(3)},
 			"status":   map[string]any{"conditions": list},
 		}}
+	}
+	cond := func(kind, status string, gen int64) map[string]any {
+		return map[string]any{"type": kind, "status": status, "observedGeneration": gen}
 	}
 	for name, c := range map[string]struct {
 		u    *unstructured.Unstructured
 		want bool
 	}{
-		"true":       {class(map[string]any{"type": "Accepted", "status": "True"}, map[string]any{"type": Isolated, "status": "True"}), true},
-		"false":      {class(map[string]any{"type": Isolated, "status": "False"}), false},
-		"absent":     {class(map[string]any{"type": "Accepted", "status": "True"}), false},
-		"other kind": {class(map[string]any{"type": "GatewaysIsolated", "status": "True"}), false},
+		"true":       {class(cond("Accepted", "True", 3), cond(Isolated, "True", 3)), true},
+		"stale":      {class(cond(Isolated, "True", 2)), false},
+		"no gen":     {class(map[string]any{"type": Isolated, "status": "True"}), false},
+		"false":      {class(cond(Isolated, "False", 3)), false},
+		"absent":     {class(cond("Accepted", "True", 3)), false},
+		"other kind": {class(cond("GatewaysIsolated", "True", 3)), false},
 	} {
 		if got, keep := decodeIsolated(c.u); got != c.want || !keep {
 			t.Errorf("%s: %v %v, want %v", name, got, keep, c.want)

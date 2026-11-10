@@ -343,10 +343,11 @@ func decode[T any](u *unstructured.Unstructured) T {
 }
 
 type conditionDoc struct {
-	Type    string `json:"type"`
-	Status  string `json:"status"`
-	Reason  string `json:"reason"`
-	Message string `json:"message"`
+	Type               string `json:"type"`
+	Status             string `json:"status"`
+	Reason             string `json:"reason"`
+	Message            string `json:"message"`
+	ObservedGeneration int64  `json:"observedGeneration"`
 }
 
 // verdict folds conditions into whether every wanted one holds, and the first
@@ -396,8 +397,10 @@ type gatewayDoc struct {
 // controller, and tokens are verified before any shared budget is spent.
 const Isolated = "portail.epheo.eu/GatewaysIsolated"
 
-// GatewaysIsolated reports whether GatewayClass class says Isolated is True;
-// false while it is unknown.
+// GatewaysIsolated reports whether GatewayClass class says Isolated is True
+// for its current generation; false while it is unknown. A True left from an
+// older generation is a controller that stopped reconciling the class, or one
+// that no longer writes the condition.
 func (s *Snapshot) GatewaysIsolated(class string) bool {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -411,7 +414,7 @@ func decodeIsolated(u *unstructured.Unstructured) (bool, bool) {
 		} `json:"status"`
 	}](u)
 	return slices.ContainsFunc(doc.Status.Conditions, func(c conditionDoc) bool {
-		return c.Type == Isolated && c.Status == "True"
+		return c.Type == Isolated && c.Status == "True" && c.ObservedGeneration == u.GetGeneration()
 	}), true
 }
 
