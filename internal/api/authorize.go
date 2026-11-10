@@ -106,13 +106,24 @@ const (
 	needForRead   = "reading this needs that right"
 )
 
+// refused is ErrForbidden naming what was denied of acts. It ends with what
+// the caller lacked: a read when every question of acts only reads, a change
+// otherwise, the get a change also asks included.
+func refused(what string, acts ...action) error {
+	need := needForRead
+	for _, act := range acts {
+		for _, q := range act {
+			if q.Verb != verbGet && q.Verb != verbList && q.Verb != "watch" {
+				need = needForChange
+			}
+		}
+	}
+	return fmt.Errorf("%w: you may not %s; %s", model.ErrForbidden, what, need)
+}
+
 // require is allowed as a gate: nil, ErrForbidden naming the question denied,
 // or the failed weighing.
 func (s *Server) require(ctx context.Context, id auth.Identity, c *cluster.Client, act action) error {
-	return s.requireFor(ctx, id, c, act, needForChange)
-}
-
-func (s *Server) requireFor(ctx context.Context, id auth.Identity, c *cluster.Client, act action, need string) error {
 	q, ok, err := s.allowed(ctx, id, c, act)
 	switch {
 	case errors.Is(err, model.ErrInvalid), errors.Is(err, model.ErrForbidden):
@@ -120,7 +131,7 @@ func (s *Server) requireFor(ctx context.Context, id auth.Identity, c *cluster.Cl
 	case err != nil:
 		return s.reviewFailed(ctx, id, err)
 	case !ok:
-		return fmt.Errorf("%w: you may not %s; %s", model.ErrForbidden, q, need)
+		return refused(q.String(), act)
 	}
 	return nil
 }
@@ -137,10 +148,6 @@ func (s *Server) gate(w http.ResponseWriter, r *http.Request, sc scope, act acti
 // gateAny gates a route on any of acts: the coordinator then checks the one
 // the change turns out to need (create or update, the kind git declares).
 func (s *Server) gateAny(w http.ResponseWriter, r *http.Request, sc scope, acts []action) bool {
-	return s.gateAnyFor(w, r, sc, acts, needForChange)
-}
-
-func (s *Server) gateAnyFor(w http.ResponseWriter, r *http.Request, sc scope, acts []action, need string) bool {
 	ok, err := s.anyAllowed(r.Context(), sc.id, sc.cluster, acts)
 	if err != nil {
 		fail(w, s.reviewFailed(r.Context(), sc.id, err))
@@ -153,7 +160,7 @@ func (s *Server) gateAnyFor(w http.ResponseWriter, r *http.Request, sc scope, ac
 				asked = append(asked, act[0].String())
 			}
 		}
-		fail(w, fmt.Errorf("%w: you may not %s; %s", model.ErrForbidden, strings.Join(asked, " or "), need))
+		fail(w, refused(strings.Join(asked, " or "), acts...))
 		return false
 	}
 	return true
@@ -798,7 +805,7 @@ func (s *Server) readsRepo(ctx context.Context, sc scope, namespace string) erro
 	if err != nil || len(act) == 0 {
 		return err
 	}
-	return s.requireFor(ctx, sc.id, sc.cluster, act, needForRead)
+	return s.require(ctx, sc.id, sc.cluster, act)
 }
 
 // authorNamespaces is the UI's authoring signal for nss. One cluster-wide

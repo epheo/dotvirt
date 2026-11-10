@@ -377,3 +377,19 @@ func TestRepoReadCapsAnswerAsTheReads(t *testing.T) {
 		})
 	}
 }
+
+// A refusal says what the caller lacked, from the whole action: one that also
+// changes something is a change, whatever question was denied.
+func TestRefusalWordingFollowsTheAction(t *testing.T) {
+	read := action{refQ(verbList, ssarVM, "a"), refQ(verbGet, ssarNamespace, "")}
+	if err := refused("x", read); !strings.Contains(err.Error(), needForRead) {
+		t.Errorf("a read refused as %q", err)
+	}
+	claim := action{refQ(verbGet, ssarNamespace, "a"), refQ(verbUpdate, ssarNamespace, "a")}
+	if err := refused("get namespaces", claim); !strings.Contains(err.Error(), needForChange) {
+		t.Errorf("a change refused on its get as %q", err)
+	}
+	if err := refused("x", read, claim); !strings.Contains(err.Error(), needForChange) {
+		t.Errorf("any of a read and a change refused as %q", err)
+	}
+}
