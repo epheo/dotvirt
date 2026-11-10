@@ -194,3 +194,75 @@ test('a platform stager without platform read reviews their own platform PRs', a
 	await main.getByRole('link', { name: '2 pull requests in review' }).click();
 	await expect(main.getByRole('button', { name: /PR #7/ })).toBeVisible();
 });
+
+test('a caller who sees part of a project reads its history one namespace at a time', async ({
+	page,
+}) => {
+	await setScenario(page, 'partialrepo');
+	await login(page);
+	const refused: string[] = [];
+	page.on('response', (r) => {
+		if (r.status() === 403) refused.push(r.url());
+	});
+	const main = page.locator('main');
+
+	// The project's whole history is not asked for: its lane points at the namespace.
+	await page.goto('/changes/team-web?tab=history');
+	await expect(main.getByText('You may not read all of team-web.')).toBeVisible();
+	await expect(main.getByText('Pick a change')).toHaveCount(0);
+	await main.getByRole('link', { name: 'web-prod', exact: true }).click();
+	await expect(page).toHaveURL(/\/changes\/team-web\/web-prod\?tab=history$/);
+
+	// The namespace lists its commits; none opens a review that reads the whole repo.
+	await expect(main.getByText('web-2: add data disk')).toBeVisible();
+	await expect(main.getByRole('button', { name: /web-2: add data disk/ })).toHaveCount(0);
+	await expect(main.getByText('You may not read all of team-web.')).toBeVisible();
+
+	// A deep link to one says the same instead of asking.
+	await page.goto(`/changes?project=team-web&commit=${MERGE_HASH}`);
+	await expect(
+		main.getByText("A past change's review and its Undo read everything in team-web's repo."),
+	).toBeVisible();
+
+	// The VM's versions still restore; their diffs and reviews read the whole repo.
+	await page.goto('/vm/web-prod/web-2?tab=changes');
+	await expect(main.getByText('web-2: add data disk')).toBeVisible();
+	await expect(main.getByRole('link', { name: /web-2: add data disk/ })).toHaveCount(0);
+	await expect(main.getByRole('button', { name: 'Diff', exact: true })).toHaveCount(0);
+	await expect(main.getByRole('button', { name: 'Restore this version' })).toBeVisible();
+	expect(refused).toEqual([]);
+});
+
+test('a caller who may not list a kind the repo holds opens only their own pull requests there', async ({
+	page,
+}) => {
+	await setScenario(page, 'kindrepo');
+	await login(page);
+	// What this page asks; the sign-in landing's own reads carry its referer.
+	const asked: string[] = [];
+	page.on('request', (r) => {
+		if (/\/changes/.test(r.headers()['referer'] ?? '')) asked.push(r.url());
+	});
+	const main = page.locator('main');
+
+	// No namespace of team-web opens its history, so the lane names no namespace to try.
+	await page.goto('/changes/team-web?tab=history');
+	await expect(main.getByText('Its repo holds kinds you may not list.')).toBeVisible();
+	await expect(main.getByRole('link', { name: 'web-prod', exact: true })).toHaveCount(0);
+
+	// Another's PR there opens in the forge; the caller's own still reviews here.
+	await page.goto('/changes?tab=review');
+	await expect(main.getByRole('button', { name: /PR #42/ })).toHaveCount(0);
+	await expect(main.getByRole('link', { name: 'PR #42', exact: true })).toHaveAttribute(
+		'href',
+		/pulls\/42/,
+	);
+	await main.getByRole('button', { name: /PR #41/ }).click();
+	await expect(page).toHaveURL(/\/changes\?project=team-db&pr=41$/);
+
+	// A deep link to another's PR says why instead of asking.
+	await page.goto('/changes?project=team-web&pr=42');
+	await expect(main.getByText('You may not read all of team-web.')).toBeVisible();
+	await expect(main.getByRole('link', { name: 'Open PR #42 in the forge' })).toBeVisible();
+	expect(asked.filter((u) => /\/api\/projects\/team-web\//.test(u))).toEqual([]);
+});

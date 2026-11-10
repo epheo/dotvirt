@@ -5,6 +5,7 @@
 	import { changesHref } from '#lib/nav.js';
 	import { action, resource } from '#lib/resource.svelte.js';
 	import { itemKey, reviewURL } from '#lib/review.js';
+	import { CHECKING } from '#lib/state/caps.svelte.js';
 	import { inventory } from '#lib/state/inventory.svelte.js';
 	import { reviewCache } from '#lib/state/reviewCache.svelte.js';
 	import { ui } from '#lib/state/ui.svelte.js';
@@ -48,6 +49,8 @@
 		},
 	);
 	const commits = $derived(historyRes.data ?? []);
+	// A version's diff and its review at the project read the whole repo.
+	const reads = $derived(inventory.repoRead(project));
 
 	// One version's diff, opened inline: the commit's items narrowed to this object.
 	let open = $state<string | null>(null);
@@ -100,22 +103,31 @@
 								? 'bg-accent'
 								: 'bg-panel'}"
 						></span>
-						<a
-							href={reviewURL({ kind: 'commit', project, hash: c.hash })}
-							class="min-w-0 truncate font-medium text-ink hover:text-accent-ink"
-							title="Review this change at the project, with Undo"
-						>
+						{#snippet label()}
 							{c.title}{#if c.prNumber}<span class="ml-1 font-normal text-ink-faint"
 									>#{c.prNumber}</span
 								>{/if}
-						</a>
+						{/snippet}
+						{#if reads.ok}
+							<a
+								href={reviewURL({ kind: 'commit', project, hash: c.hash })}
+								class="min-w-0 truncate font-medium text-ink hover:text-accent-ink"
+								title="Review this change at the project, with Undo"
+							>
+								{@render label()}
+							</a>
+						{:else}
+							<span class="min-w-0 truncate font-medium text-ink">{@render label()}</span>
+						{/if}
 						{#if current}<span class="shrink-0 text-xs text-ink-faint">· current</span>{/if}
 						<span class="ml-auto shrink-0 text-xs text-ink-faint"
 							>{relativeAge(c.when)} · {c.author}</span
 						>
-						<Button variant="link" size="sm" class="shrink-0" onclick={() => toggle(c.hash)}
-							>{shown ? 'Hide diff' : 'Diff'}</Button
-						>
+						{#if reads.ok}
+							<Button variant="link" size="sm" class="shrink-0" onclick={() => toggle(c.hash)}
+								>{shown ? 'Hide diff' : 'Diff'}</Button
+							>
+						{/if}
 						{#if current}
 							<span class="shrink-0 rounded border border-line px-2 py-0.5 text-xs text-ink-faint"
 								>Current version</span
@@ -173,9 +185,13 @@
 		>
 			<History size={12} />
 			<span>
-				Showing {commits.length} version{commits.length === 1 ? '' : 's'}. Undo of a whole pull
-				request lives under
-				<Button variant="link" href={changesHref(project)}>Changes</Button>, at the project.
+				Showing {commits.length} version{commits.length === 1 ? '' : 's'}.
+				{#if reads.ok}
+					Undo of a whole pull request lives under
+					<Button variant="link" href={changesHref(project)}>Changes</Button>, at the project.
+				{:else if reads.why !== CHECKING}
+					Diffs, and Undo of a whole pull request, read everything in {project}'s repo.
+				{/if}
 			</span>
 		</p>
 	{/if}

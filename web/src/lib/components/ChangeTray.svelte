@@ -358,7 +358,7 @@
 								{/if}
 							</div>
 							<footer class="flex items-center gap-3 border-t border-line-soft px-3 py-2">
-								{#if lane.pr.hash}
+								{#if lane.pr.hash && inventory.canRevert(lane.project)}
 									<Button
 										size="sm"
 										variant="secondary"
@@ -393,12 +393,12 @@
 										: hrefForScope({ kind: 'project', project: lane.project })}
 									>Fix and propose again</Button
 								>
-								{#if lane.pr.hash}
+								{#if lane.pr.hash && inventory.canRevert(lane.project)}
 									<button
 										class="text-ink-soft hover:underline"
 										onclick={() => undo(lane.project, lane.pr.hash ?? '')}>Undo the merge</button
 									>
-								{:else}
+								{:else if !lane.pr.hash && inventory.repoRead(lane.project).ok}
 									<a class="text-ink-soft hover:underline" href={changesHref(lane.project)}
 										>Undo in Changes</a
 									>

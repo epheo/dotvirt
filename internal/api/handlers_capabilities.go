@@ -152,7 +152,8 @@ func (s *Server) drsCaps(ctx context.Context, id auth.Identity, c *cluster.Clien
 
 // namespaceCaps answers namespace ns of sc's project, and that project over
 // all its namespaces. The tenancy fields need a platform repo, resync ArgoCD,
-// an upload the upload proxy.
+// an upload the upload proxy. The repo reads ask what their routes' gateRepo
+// asks.
 func (s *Server) namespaceCaps(ctx context.Context, sc scope, ns string) model.NamespaceCaps {
 	out := model.NamespaceCaps{Namespace: ns, Project: model.ProjectCaps{Name: sc.proj.Name}}
 	fields := []capField{
@@ -186,6 +187,8 @@ func (s *Server) namespaceCaps(ctx context.Context, sc scope, ns string) model.N
 	fields = append(fields, objectFields(&out.NetworkPolicy, model.KindNetpol, ns)...)
 	fields = append(fields, objectFields(&out.EgressFirewall, model.KindEgressFW, ns)...)
 	s.fill(ctx, sc.id, sc.cluster, fields)
+	out.RepoRead = s.readsRepo(ctx, sc, ns) == nil
+	out.Project.RepoRead = s.readsRepo(ctx, sc, "") == nil
 	out.Project.TemplateEdit, _ = s.projectAuthor(ctx, sc.id, sc.cluster, sc.proj.Namespaces)
 	if full, ok := s.projectByName(sc.proj.Name); ok && s.cfg.PlatformRepo != "" {
 		s.projectCaps(ctx, sc, full, &out.Project)

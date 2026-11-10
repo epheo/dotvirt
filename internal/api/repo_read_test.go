@@ -332,3 +332,48 @@ func TestTraceNeedsTheInstances(t *testing.T) {
 		t.Errorf("trace = %q, want the VM read's refusal", rec.Body.String())
 	}
 }
+
+// The repo-read caps answer as the reads they stand for: a namespace's
+// history for NamespaceCaps.RepoRead, the whole repo's for ProjectCaps.RepoRead.
+func TestRepoReadCapsAnswerAsTheReads(t *testing.T) {
+	teamAProd := corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "team-a-prod"}}
+	for _, tc := range []struct {
+		name           string
+		kinds          []schema.GroupKind
+		prod           bool
+		token          string
+		wantNS, wantPr bool
+	}{
+		{"lists every kind", []schema.GroupKind{declaresNP}, false, tenantToken, true, true},
+		{"misses a kind", []schema.GroupKind{declaresNP, declaresDV}, false, tenantToken, false, false},
+		{"sees part of the project", []schema.GroupKind{declaresNP}, true, tenantToken, true, false},
+		{"admin", []schema.GroupKind{declaresNP, declaresDV}, true, adminToken, true, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			fc := newFakeCluster(t)
+			if tc.prod {
+				prod := teamAProd
+				prod.Labels, prod.Annotations = fc.namespaces[0].Labels, fc.namespaces[0].Annotations
+				fc.namespaces = append(fc.namespaces, prod)
+			}
+			fc.readsVMs = tenantReadsTeamA
+			fc.serveKinds(model.KindNetpol, model.KindDV)
+			s := fc.server(gitReads{&planeDraft{kinds: tc.kinds}}, Config{BaseBranch: "main"})
+
+			rec := do(s, tc.token, http.MethodGet, "/api/capabilities?namespace=team-a-dev", "")
+			wantStatus(t, rec, http.StatusOK)
+			c := decodeBody[model.Capabilities](t, rec).Namespace
+			opens := func(path string) bool {
+				return do(s, tc.token, http.MethodGet, path, "").Code != http.StatusForbidden
+			}
+			if c.RepoRead != tc.wantNS || opens(historyPath+"?namespace=team-a-dev") != tc.wantNS {
+				t.Errorf("namespace: cap %v, want %v as its history route", c.RepoRead, tc.wantNS)
+			}
+			for _, path := range []string{historyPath, historyPath + "/" + someCommit} {
+				if c.Project.RepoRead != tc.wantPr || opens(path) != tc.wantPr {
+					t.Errorf("project: cap %v, want %v as %s", c.Project.RepoRead, tc.wantPr, path)
+				}
+			}
+		})
+	}
+}

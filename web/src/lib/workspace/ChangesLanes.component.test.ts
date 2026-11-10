@@ -32,6 +32,7 @@ function setup() {
 		results: {},
 		history: {},
 		repoProjects: [],
+		repoRead: () => ({ ok: true, why: '' }),
 		active: null,
 		onselect: vi.fn(),
 		ontogglehistory: vi.fn(),

@@ -584,9 +584,21 @@ async function handleAPI(req, res, url) {
 		return sendJSON(res, 200, draftFor('platform'));
 	}
 
-	m = path.match(/^\/api\/projects\/([^/]+)\/history(\/|$)/);
-	if (m && m[1] === 'platform' && !clusterCaps(s).platformRead)
+	m = path.match(/^\/api\/projects\/([^/]+)\/(history(\/|$)|revert$|proposals\/(\d+)$)/);
+	if (m && m[1] === 'platform' && !m[4] && !clusterCaps(s).platformRead)
 		return sendText(res, 403, 'forbidden: not authorized to read the platform repo');
+	// A tenant repo's reads answer as the server's gateRepo does: the whole
+	// repo on ProjectCaps.repoRead, one namespace on its own repoRead. The
+	// caller's own PR opens either way (ownProposal).
+	const repoProject = m && s.inventory.projects.find((p) => p.name === m[1]);
+	const ownPR = (n) =>
+		(s.inventory.proposals ?? []).some((p) => p.project === m[1] && p.prNumber === n && p.mine);
+	if (repoProject && !(m[4] && ownPR(Number(m[4])))) {
+		const ns = path.endsWith('/history') ? url.searchParams.get('namespace') : null;
+		const c = namespaceCaps(s, repoProject, ns ?? repoProject.namespaces[0]?.namespace);
+		if (!(ns ? c.repoRead : c.project.repoRead))
+			return sendText(res, 403, `forbidden: this needs every namespace of ${m[1]} in your view`);
+	}
 	m = path.match(/^\/api\/projects\/([^/]+)\/history$/);
 	if (m) {
 		// ?namespace= narrows to the commits under that directory: the merge
@@ -877,9 +889,11 @@ function namespaceCaps(s, project, ns) {
 		networkAttachment: objects,
 		networkPolicy: objects,
 		egressFirewall: objects,
+		repoRead: true,
 		...override,
 		project: {
 			name: project.name,
+			repoRead: true,
 			templateEdit: author,
 			newNamespace: true,
 			adopt: author,

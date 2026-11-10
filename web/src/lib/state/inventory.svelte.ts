@@ -13,7 +13,7 @@ import {
 } from '#lib/api.js';
 import type { Authoring } from '#lib/authoring.js';
 import { friendlyError } from '#lib/format.js';
-import { clusterGate, repoGate } from '#lib/gates.js';
+import { projectNS, repoGate, repoReadGate, type Gate } from '#lib/gates.js';
 import { deriveIssues, deriveSuggestions } from '#lib/issues.js';
 import { membership, networkProblems } from '#lib/netmap.js';
 import { prKey } from '#lib/review.js';
@@ -250,10 +250,18 @@ class InventoryStore {
 		return this.#authoring.get(namespace) ?? 'no';
 	}
 
-	// Revert rewrites any file of the project, so the backend wants authoring
-	// rights in every namespace of it.
+	// repoRead is repoReadGate over project, asked of namespace when the
+	// caller already holds its answer, else of the first one they see.
+	repoRead(project: string, namespace = ''): Gate {
+		const p = namespace ? null : this.projects.find((x) => x.name === project);
+		return repoReadGate(project, namespace || (p ? projectNS(p) : ''));
+	}
+
+	// Revert reads the whole repo and rewrites any file of it, so the backend
+	// wants that read and authoring rights in every namespace of the project.
 	canRevert(project: string): boolean {
-		if (project === 'platform') return clusterGate.platformRead().ok;
+		if (!this.repoRead(project).ok) return false;
+		if (project === 'platform') return true;
 		const p = this.projects.find((x) => x.name === project);
 		return !!p?.namespaces.length && p.namespaces.every(authorable);
 	}

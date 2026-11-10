@@ -4,7 +4,7 @@
 	import { page } from '$app/state';
 	import { api, Unauthorized, type Proposal, type ProposeResult } from '#lib/api.js';
 	import { friendlyError, plural } from '#lib/format.js';
-	import { clusterGate } from '#lib/gates.js';
+	import { clusterGate, namespaceHistoryGate } from '#lib/gates.js';
 	import { opStands } from '#lib/gitops.js';
 	import { CHANGES_TABS, changesHref, changesTab, type ChangesTab } from '#lib/nav.js';
 	import { bySize } from '#lib/rail.js';
@@ -17,7 +17,7 @@
 		sameReview,
 		type ReviewSel,
 	} from '#lib/review.js';
-	import { caps } from '#lib/state/caps.svelte.js';
+	import { caps, CHECKING } from '#lib/state/caps.svelte.js';
 	import { drafts, PLATFORM_PROJECT } from '#lib/state/drafts.svelte.js';
 	import { inventory } from '#lib/state/inventory.svelte.js';
 	import { persisted } from '#lib/state/persisted.svelte.js';
@@ -27,6 +27,7 @@
 	import Card from '#lib/components/Card.svelte';
 	import PageHeader from '#lib/components/PageHeader.svelte';
 	import RepoBanner from '#lib/components/RepoBanner.svelte';
+	import Skeleton from '#lib/components/Skeleton.svelte';
 	import TabBar from '#lib/components/TabBar.svelte';
 	import ChangesLanes, { type HistoryLane } from './ChangesLanes.svelte';
 	import ReviewCommit from './ReviewCommit.svelte';
@@ -86,16 +87,46 @@
 		project === PLATFORM_PROJECT
 			? inventory.inventory?.platform
 			: inventory.projects.find((p) => p.name === project)?.gitOps;
-	// A lane's content is a function of the namespace scope and the project's
-	// applied revision (a merge that reaches the cluster moves it).
-	const laneKey = (project: string) => `${scopeNS}|${syncOf(project)?.revision ?? ''}`;
-	const historyKeys = $derived(repoProjects.map((p) => `${p}|${laneKey(p)}`).join('\0'));
+	// A lane reads the project's whole repo, or under a namespace scope that
+	// namespace's history.
+	const readGate = (project: string) =>
+		scopeNS ? namespaceHistoryGate(scopeNS) : inventory.repoRead(project);
+	// Reviewing a past change reads the whole repo. Asked of the scope's
+	// namespace when there is one: its answer is already held.
+	const repoRead = (project: string) =>
+		inventory.repoRead(project, project === scopeProject ? scopeNS : '');
+	// Nothing opens by default when the first PR in view is another's that
+	// only the forge opens.
+	const forgeOnly = $derived.by(() => {
+		const f = visibleProposals[0];
+		if (!f || f.mine) return false;
+		const g = repoRead(f.project);
+		return !g.ok && g.why !== CHECKING;
+	});
+	// Under a scope, whether its commits open for review.
+	const scopeReads = $derived(scopeProject ? repoRead(scopeProject) : null);
+	const scopeRefused = $derived(!!scopeReads && !scopeReads.ok && scopeReads.why !== CHECKING);
+	// A lane's content is a function of the namespace scope, the project's
+	// applied revision (a merge that reaches the cluster moves it) and whether
+	// the caller may read it.
+	const laneKey = (project: string) => {
+		const g = readGate(project);
+		return `${scopeNS}|${syncOf(project)?.revision ?? ''}|${g.ok ? '' : g.why}`;
+	};
+	// Open lanes only: a closed one asks nothing, its gate included.
+	const historyKeys = $derived(
+		Object.entries(history)
+			.filter(([, l]) => l.open)
+			.map(([p]) => `${p}|${laneKey(p)}`)
+			.join('\0'),
+	);
 	// Only a lane's newest load writes: scope switches and revision moves
 	// overlap, and a late response would paint another scope's commits.
 	let historySeq = 0;
 	const latest = new Map<string, { seq: number; key: string }>();
 	function openHistory(project: string) {
-		if (!history[project]) history[project] = { open: true, busy: false, error: '', commits: [] };
+		if (!history[project])
+			history[project] = { open: true, busy: false, error: '', denied: '', commits: [] };
 		history[project].open = true;
 		loadHistory(project);
 	}
@@ -111,8 +142,16 @@
 		if (latest.get(project)?.key.split('|')[0] !== scopeNS) lane.commits = [];
 		latest.set(project, { seq, key });
 		const mine = () => latest.get(project)?.seq === seq;
-		lane.busy = true;
 		lane.error = '';
+		// Read only once the caller may: the gate's answer re-keys the lane.
+		const gate = readGate(project);
+		lane.denied = gate.ok || gate.why === CHECKING ? '' : gate.why;
+		if (!gate.ok) {
+			lane.busy = gate.why === CHECKING;
+			lane.commits = [];
+			return;
+		}
+		lane.busy = true;
 		try {
 			const commits = await api.history(project, scopeNS || undefined);
 			if (mine()) lane.commits = commits;
@@ -232,7 +271,10 @@
 					? stagedTotal
 					: t.id === 'review'
 						? proposedLane.length
-						: scopeTracked && history[scopeProject] && !history[scopeProject].busy
+						: scopeTracked &&
+							  history[scopeProject] &&
+							  !history[scopeProject].busy &&
+							  !history[scopeProject].denied
 							? history[scopeProject].commits.length
 							: undefined,
 		})),
@@ -263,7 +305,13 @@
 				);
 				if (p) return { kind: 'proposal' as const, proposal: p };
 			}
-			if (visibleProposals[0]) return { kind: 'proposal' as const, proposal: visibleProposals[0] };
+			// The first in view, unless only the forge opens it: then the caller's own.
+			const first = visibleProposals[0];
+			const open =
+				first && (first.mine || repoRead(first.project).ok)
+					? first
+					: visibleProposals.find((p) => p.mine);
+			if (open) return { kind: 'proposal' as const, proposal: open };
 			return null;
 		}
 		if (sel?.kind === 'commit') {
@@ -391,6 +439,16 @@
 	{/if}
 {/snippet}
 
+{#snippet wholeRepo(project: string, why: string)}
+	<div class="flex max-w-2xl flex-col gap-2">
+		{#if why}<p class="font-medium text-ink">{why}</p>{/if}
+		<p class="text-ink-soft">
+			A past change's review and its Undo read everything in {project}'s repo.
+		</p>
+		<p class="text-ink-soft">A VM restores its own earlier versions from its page.</p>
+	</div>
+{/snippet}
+
 {#snippet nextLinks()}
 	{#if tab === 'staged' && stagedTotal === 0 && proposedLane.length === 0 && inventory.vmCount > 0}
 		<a href="/compute" class="text-accent-ink hover:underline">Change a VM in Compute</a>
@@ -482,6 +540,8 @@
 					{results}
 					{history}
 					{repoProjects}
+					{scopeNS}
+					{repoRead}
 					{active}
 					onselect={select}
 					ontogglehistory={toggleHistory}
@@ -500,26 +560,69 @@
 							onproposed={(r) => proposed(project, r)}
 						/>
 					{:else if selected?.kind === 'proposal'}
-						<ReviewProposal proposal={selected.proposal} />
+						{@const pr = selected.proposal}
+						{@const reads = pr.mine ? null : repoRead(pr.project)}
+						{#if !reads || reads.ok}
+							<ReviewProposal proposal={pr} />
+						{:else}
+							<Card title="Review">
+								{#if reads.why === CHECKING}
+									<Skeleton rows={2} class="h-6" />
+								{:else}
+									<div class="flex max-w-2xl flex-col gap-2">
+										<p class="font-medium text-ink">{reads.why}</p>
+										<p class="text-ink-soft">
+											Another's pull request reads everything in {pr.project}'s repo.
+										</p>
+										<a
+											href={pr.prURL}
+											target="_blank"
+											rel="noopener"
+											class="text-[13px] text-accent-ink hover:underline"
+											>Open PR #{pr.prNumber} in the forge</a
+										>
+									</div>
+								{/if}
+							</Card>
+						{/if}
 					{:else if selected?.kind === 'commit'}
 						{@const { project, hash } = selected}
-						<ReviewCommit
-							{project}
-							{hash}
-							commit={selected.commit}
-							done={reverts[commitKey(project, hash)]}
-							onundo={() => (confirmUndo = { project, hash })}
-						/>
+						{@const reads = repoRead(project)}
+						{#if reads.ok}
+							<ReviewCommit
+								{project}
+								{hash}
+								commit={selected.commit}
+								done={reverts[commitKey(project, hash)]}
+								onundo={() => (confirmUndo = { project, hash })}
+							/>
+						{:else}
+							<Card title="Review">
+								{#if reads.why === CHECKING}
+									<Skeleton rows={2} class="h-6" />
+								{:else}
+									{@render wholeRepo(project, reads.why)}
+								{/if}
+							</Card>
+						{/if}
 					{:else}
 						<Card title="Review">
 							<div class="flex flex-col gap-2">
-								{#if tab === 'history'}
+								{#if tab === 'history' && scopeRefused}
+									<!-- Without a namespace, the lane already says why. -->
+									{@render wholeRepo(scopeProject, scopeNS ? scopeReads!.why : '')}
+								{:else if tab === 'history'}
 									<p class="text-ink-soft">
 										{scopeProject ? 'Pick a change' : 'Open a project and pick a change'} to review it
 										here: what it did, and Undo, which opens a pull request that reverts it.
 									</p>
 								{:else if tab === 'review'}
 									<p class="text-ink-soft">Pick a pull request to review its changes here.</p>
+									{#if forgeOnly}
+										<p class="text-ink-soft">
+											Others' pull requests in a repo you cannot read all of open in the forge.
+										</p>
+									{/if}
 								{:else}
 									<p class="text-ink-soft">
 										Pick a staged change to review it here and propose its project's draft.

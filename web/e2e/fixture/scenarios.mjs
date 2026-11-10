@@ -1557,6 +1557,30 @@ const withheld = {
 };
 // --- end withheld ---
 
+// --- partialrepo: sees part of team-web ---
+// web-prod is in view but not every namespace of team-web, so its repo opens
+// only under web-prod: the whole repo's history, a past change's review and
+// Undo are refused, as the server refuses them. The server lists such a
+// caller only their own PRs there, so bob's is gone.
+const partialrepo = {
+	...base,
+	name: 'partialrepo',
+	inventory: {
+		...base.inventory,
+		proposals: base.inventory.proposals.filter((p) => p.project !== 'team-web' || p.mine),
+	},
+	capabilities: { 'web-prod': { project: { repoRead: false } } },
+};
+
+// --- kindrepo: every namespace of team-web, but not every kind its repo holds ---
+// No history of team-web opens, not even web-prod's. Every PR there is
+// listed; another's is refused, the caller's own would still open.
+const kindrepo = {
+	...base,
+	name: 'kindrepo',
+	capabilities: { 'web-prod': { repoRead: false, project: { repoRead: false } } },
+};
+
 // --- platstager: stages to the platform, cannot read it ---
 // The server lists only the caller's own platform PRs, serves the review of
 // the ones that still match what dotvirt proposed, refuses the platform's
@@ -1922,4 +1946,6 @@ export const scenarios = {
 	withheld,
 	draftsdown,
 	platstager,
+	partialrepo,
+	kindrepo,
 };
