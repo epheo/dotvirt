@@ -61,7 +61,7 @@ func (s *Server) objectScope(w http.ResponseWriter, r *http.Request, verbs ...st
 		return sc, "", "", "", false
 	}
 	if len(verbs) == 0 {
-		verbs = []string{verbList}
+		return sc, resource, ns, name, s.gateAnyFor(w, r, sc, objectActions([]string{verbList}, resource, ns), needForRead)
 	}
 	return sc, resource, ns, name, s.gateAny(w, r, sc, objectActions(verbs, resource, ns))
 }

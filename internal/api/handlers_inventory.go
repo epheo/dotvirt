@@ -261,10 +261,8 @@ const projectErrorForPartialViewers = "this project's repo failed to apply; some
 // generic once a row is dropped or the caller sees part of the project.
 func (s *Server) projectSyncView(ctx context.Context, id auth.Identity, c *cluster.Client, p project.ProjectInfo, ps model.ProjectSync) *model.ProjectSync {
 	out := s.listedRows(ctx, id, c, ps, func(o model.ObjectHealth) string { return o.Namespace }, projectErrorForPartialViewers)
-	if out.SyncError != "" {
-		if full, ok := s.projectByName(p.Name); !ok || len(full.Namespaces) > len(p.Namespaces) {
-			out.SyncError = projectErrorForPartialViewers
-		}
+	if out.SyncError != "" && seesPartOf(s.AllProjects(), p) {
+		out.SyncError = projectErrorForPartialViewers
 	}
 	return out
 }

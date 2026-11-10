@@ -419,15 +419,21 @@ func (s *Server) handleCommit(w http.ResponseWriter, r *http.Request) {
 
 // handleProposal renders what merging one open PR would change - the Changes
 // pane's review of a proposal, read from the mirrored head branch. A caller
-// who may not read the platform repo reviews their own proposals there alone
-// (ownPlatformProposal).
+// who may not read the repo reviews their own proposals there alone
+// (ownProposal).
 func (s *Server) handleProposal(w http.ResponseWriter, r *http.Request) {
-	var sc scope
-	ok, reads := false, true
+	var (
+		sc      scope
+		ok      bool
+		refused error
+	)
 	if p := r.PathValue("project"); p == platformProjectName {
-		sc, reads, ok = s.platformReadScope(w, r)
-	} else {
-		sc, ok = s.pickProject(w, r, p)
+		var reads bool
+		if sc, reads, ok = s.platformReadScope(w, r); ok && !reads {
+			refused = fmt.Errorf("%w: %s", model.ErrForbidden, platformReadDenied)
+		}
+	} else if sc, ok = s.pickProject(w, r, p); ok {
+		refused = s.readsRepo(r.Context(), sc, "")
 	}
 	if !ok {
 		return
@@ -437,11 +443,8 @@ func (s *Server) handleProposal(w http.ResponseWriter, r *http.Request) {
 		fail(w, invalid(errors.New("pull request number must be a positive integer")))
 		return
 	}
-	if !reads {
-		s.ownPlatformProposal(w, sc, n)
-		return
-	}
-	if !s.gateRepo(w, r, sc, "") {
+	if refused != nil {
+		s.ownProposal(w, sc, n, refused)
 		return
 	}
 	detail, err := s.reader.Proposal(sc.proj, n)
@@ -451,21 +454,24 @@ func (s *Server) handleProposal(w http.ResponseWriter, r *http.Request) {
 	respond(w, detail, err)
 }
 
-// ownPlatformProposal answers a platform review to a caller who may not read
-// the platform repo. Their own draft's open proposal opens, off the cached lane;
-// anything else is the platform repo's refusal, the same for another's PR, a
-// closed one or none, before any forge call. The items show only while
-// dotvirt wrote every commit on the branch for them: anyone else's push may
-// name what they cannot read.
-func (s *Server) ownPlatformProposal(w http.ResponseWriter, sc scope, n int) {
-	row, ok := s.ownPlatformRow(sc.id, n)
+// ownProposal answers a review of a repo the caller may not read. Their own
+// draft's open proposal opens, off the cached lane; anything else is the
+// repo's refusal, the same for another's PR, a closed one or none, before any
+// forge call. The items show only while dotvirt wrote every commit on the
+// branch for them: anyone else's push may name what they cannot read.
+func (s *Server) ownProposal(w http.ResponseWriter, sc scope, n int, refused error) {
+	if !errors.Is(refused, model.ErrForbidden) {
+		fail(w, refused)
+		return
+	}
+	row, ok := s.ownRow(sc.id, sc.proj, n)
 	if !ok {
-		fail(w, fmt.Errorf("%w: %s", model.ErrForbidden, platformReadDenied))
+		fail(w, refused)
 		return
 	}
 	detail, err := s.reader.OwnProposal(sc.id, sc.proj, row)
 	if errors.Is(err, git.ErrForeignCommit) {
-		err = fmt.Errorf("%w: pull request #%d changed outside dotvirt since you proposed it; a platform administrator can review it", model.ErrForbidden, n)
+		err = fmt.Errorf("%w: pull request #%d changed outside dotvirt since you proposed it; someone who can read the whole repo can review it", model.ErrForbidden, n)
 	}
 	detail.Proposal.Mine = true
 	respond(w, detail, err)

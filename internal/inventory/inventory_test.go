@@ -199,9 +199,6 @@ func TestBuildSurfacesPlacementIssues(t *testing.T) {
 	}
 }
 
-// The per-project GitOps rollup attaches to the project whose repo matches the
-// managing Application, keyed by canonical repoURL - and a project with no matching
-// Application (or when Argo is disabled) keeps GitOps nil, so nothing alarms.
 // The rollup a project shows passes through the caller's view of it.
 func TestBuildScopesProjectGitOps(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
@@ -222,6 +219,9 @@ func TestBuildScopesProjectGitOps(t *testing.T) {
 	}
 }
 
+// The per-project GitOps rollup attaches to the project whose repo matches the
+// managing Application, keyed by canonical repoURL - and a project with no matching
+// Application (or when Argo is disabled) keeps GitOps nil, so nothing alarms.
 func TestBuildAttachesProjectGitOps(t *testing.T) {
 	bare := seedRepo(t)
 	ctx, cancel := context.WithCancel(context.Background())

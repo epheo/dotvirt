@@ -810,6 +810,28 @@ func (s *Server) projectByName(name string) (project.ProjectInfo, bool) {
 	return findProject(s.AllProjects(), name)
 }
 
+// seesPartOf reports whether p, as the caller sees it, lacks a namespace of
+// its project. A project no longer known counts: nothing says it is whole.
+func seesPartOf(all []project.ProjectInfo, p project.ProjectInfo) bool {
+	full, ok := findProject(all, p.Name)
+	return !ok || len(full.Namespaces) > len(p.Namespaces)
+}
+
+// partialProjects names those of projects the caller sees part of: what their
+// repos show narrows to the caller's own. Memory only.
+func (s *Server) partialProjects(projects []project.ProjectInfo) map[string]bool {
+	if s.state == nil || s.resolver == nil {
+		return nil
+	}
+	all, out := s.AllProjects(), map[string]bool{}
+	for _, p := range projects {
+		if p.Name != platformProjectName && seesPartOf(all, p) {
+			out[p.Name] = true
+		}
+	}
+	return out
+}
+
 // draftScope resolves the whole-draft routes (GET/DELETE/propose) that carry the
 // project via ?project= rather than a VM namespace.
 func (s *Server) draftScope(w http.ResponseWriter, r *http.Request) (scope, bool) {

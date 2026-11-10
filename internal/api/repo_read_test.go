@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"net/http/httptest"
+	"slices"
 	"strings"
 	"testing"
 
@@ -15,6 +17,8 @@ import (
 	"github.com/epheo/dotvirt/internal/auth"
 	"github.com/epheo/dotvirt/internal/model"
 	"github.com/epheo/dotvirt/internal/project"
+	"github.com/epheo/dotvirt/internal/tasks"
+	"github.com/epheo/dotvirt/pkg/forge"
 )
 
 var (
@@ -151,5 +155,96 @@ func TestProjectSyncViewKeepsWhatTheCallerLists(t *testing.T) {
 	quiet := model.ProjectSync{SyncError: ps.SyncError}
 	if got = view(listsInDev, partial, quiet); got.SyncError != projectErrorForPartialViewers {
 		t.Errorf("partial viewer read %q", got.SyncError)
+	}
+}
+
+func teamALane(rows ...model.Proposal) []model.Proposal {
+	for i := range rows {
+		rows[i].Project = "team-a"
+	}
+	return rows
+}
+
+// A caller the repo refuses still opens their own open PR, and nothing else:
+// another's, a revert of theirs, or one someone else pushed to.
+func TestAProposalOpensForItsAuthorWhenTheRepoIsRefused(t *testing.T) {
+	fc := newFakeCluster(t)
+	fc.readsVMs = tenantReadsTeamA
+	fc.serveKinds(model.KindNetpol, model.KindDV)
+	d := &laneDraft{gatedDraft: &gatedDraft{planeDraft: &planeDraft{kinds: []schema.GroupKind{declaresNP, declaresDV}}}, foreign: 4}
+	s := fc.server(d, Config{BaseBranch: "main"})
+	s.proposals.Put("team-a", teamALane(
+		model.Proposal{PRNumber: 1, Branch: "alice"},
+		model.Proposal{PRNumber: 2, Branch: "bob"},
+		model.Proposal{PRNumber: 3, Branch: "revert/alice"},
+		model.Proposal{PRNumber: 4, Branch: "alice"},
+	))
+	id := auth.Identity{Token: tenantToken, Username: "alice"}
+	open := func(n int) *httptest.ResponseRecorder {
+		return doAs(s, id, http.MethodGet, fmt.Sprintf("/api/projects/team-a/proposals/%d", n))
+	}
+	rec := open(1)
+	wantStatus(t, rec, http.StatusOK)
+	if v := decodeBody[model.ProposalDetail](t, rec); !v.Proposal.Mine {
+		t.Errorf("own proposal = %+v, want it marked theirs", v.Proposal)
+	}
+	for _, n := range []int{2, 3, 4, 99} {
+		wantStatus(t, open(n), http.StatusForbidden)
+	}
+}
+
+// What a repo shows of its PRs and merges narrows to the caller's own while
+// they see part of the project. Seeing all of it keeps the rows, a missing
+// kind or not: only opening one weighs the kinds.
+func TestRowsNarrowForAPartialViewer(t *testing.T) {
+	fc := newFakeCluster(t)
+	second := corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "team-a-prod", Labels: fc.namespaces[0].Labels, Annotations: fc.namespaces[0].Annotations}}
+	fc.namespaces = append(fc.namespaces, second)
+	s := fc.server(gitReads{&planeDraft{}}, Config{BaseBranch: "main"})
+	s.proposals.Put("team-a", teamALane(model.Proposal{PRNumber: 1, Branch: "alice"}, model.Proposal{PRNumber: 2, Branch: "bob"}))
+	full, ok := s.projectByName("team-a")
+	if !ok || len(full.Namespaces) != 2 || full.Repo == "" {
+		t.Fatalf("project = %+v", full)
+	}
+	part := full
+	part.Namespaces = []string{"team-a-dev"}
+	alice := auth.Identity{Token: "tok", Username: "alice"}
+	numbers := func(rows []model.Proposal) (out []int) {
+		for _, r := range rows {
+			out = append(out, r.PRNumber)
+		}
+		return out
+	}
+	if got := numbers(s.proposalsFor(alice, []project.ProjectInfo{part}, false)); !slices.Equal(got, []int{1}) {
+		t.Errorf("partial viewer's rows = %v, want their own", got)
+	}
+	if got := numbers(s.proposalsFor(alice, []project.ProjectInfo{full}, false)); !slices.Equal(got, []int{1, 2}) {
+		t.Errorf("a viewer of the whole project got %v", got)
+	}
+
+	repo := forge.NormalizeRepoURL(full.Repo)
+	theirs, others := tasks.Merge{RepoURL: repo, Branch: "alice"}, tasks.Merge{RepoURL: repo, Branch: "bob"}
+	sc := s.taskScope(alice, []project.ProjectInfo{part}, false, false)
+	if p, ok := sc.merge(theirs); !ok || p != "team-a" {
+		t.Errorf("own merge = %q, %v", p, ok)
+	}
+	if _, ok := sc.merge(others); ok {
+		t.Error("a partial viewer sees another's merge")
+	}
+	if _, ok := s.taskScope(alice, []project.ProjectInfo{full}, false, false).merge(others); !ok {
+		t.Error("a viewer of the whole project lost a merge")
+	}
+}
+
+// A read refused says so, in the words the Changes pane shows.
+func TestReadRefusalsSpeakOfReading(t *testing.T) {
+	fc := newFakeCluster(t)
+	fc.readsVMs = tenantReadsTeamA
+	fc.serveKinds(model.KindNetpol, model.KindDV)
+	s := fc.server(gitReads{&planeDraft{kinds: []schema.GroupKind{declaresDV}}}, Config{BaseBranch: "main"})
+	rec := do(s, tenantToken, http.MethodGet, historyPath, "")
+	wantStatus(t, rec, http.StatusForbidden)
+	if body := rec.Body.String(); !strings.Contains(body, needForRead) || strings.Contains(body, needForChange) {
+		t.Errorf("refusal = %q", body)
 	}
 }
