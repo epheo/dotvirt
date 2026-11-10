@@ -8,6 +8,8 @@ import (
 	"net/http"
 	"strings"
 
+	"sigs.k8s.io/yaml"
+
 	"github.com/epheo/dotvirt/internal/auth"
 	"github.com/epheo/dotvirt/internal/cluster"
 	"github.com/epheo/dotvirt/internal/draft"
@@ -92,20 +94,53 @@ func (s *Server) namespacedCreate(what string, resource draft.Resource, kind mod
 // resolver, the only one that takes a wildcard dnsName.
 var kindDNSNameResolver = model.Kind{Kind: "DNSNameResolver", Group: "network.openshift.io", Version: "v1alpha1", Plural: "dnsnameresolvers"}
 
-// resolvesWildcards refuses an egress rule to a wildcard DNS name where the
-// cluster serves no DNSNameResolver: OVN-Kubernetes would refuse the whole
-// firewall. A body that does not parse is left to the render.
+// wildcardsResolved refuses an egress firewall whose rules, in order (""
+// for a CIDR), name a wildcard DNS name where the cluster serves no
+// DNSNameResolver. OVN-Kubernetes refuses the whole firewall then: a new one
+// leaves egress open, an edited one keeps its old rules.
+func (s *Server) wildcardsResolved(ctx context.Context, dnsNames []string) error {
+	for i, n := range dnsNames {
+		if strings.HasPrefix(n, "*.") && s.unserved(ctx, kindDNSNameResolver)[kindDNSNameResolver] {
+			return fmt.Errorf("%w: rule %d: this cluster resolves no wildcard DNS names, so OVN-Kubernetes would refuse the firewall; name each host instead of %s", model.ErrConflict, i+1, n)
+		}
+	}
+	return nil
+}
+
+// resolvesWildcards is wildcardsResolved over the create form's rules. A body
+// that does not parse is left to the render.
 func (s *Server) resolvesWildcards(ctx context.Context, raw []byte) error {
 	var spec netgen.EgressFirewallSpec
 	if json.Unmarshal(raw, &spec) != nil {
 		return nil
 	}
+	names := make([]string, len(spec.Rules))
 	for i, rule := range spec.Rules {
-		if strings.HasPrefix(rule.DNSName, "*.") && s.unserved(ctx, kindDNSNameResolver)[kindDNSNameResolver] {
-			return fmt.Errorf("%w: rule %d: this cluster resolves no wildcard DNS names, so OVN-Kubernetes would refuse the firewall; name each host instead of %s", model.ErrConflict, i+1, rule.DNSName)
-		}
+		names[i] = rule.DNSName
 	}
-	return nil
+	return s.wildcardsResolved(ctx, names)
+}
+
+// egressDNSNames are an EgressFirewall manifest's rule destinations by DNS
+// name, in order; nil when it does not parse, which the stage answers.
+func egressDNSNames(manifest string) []string {
+	var ef struct {
+		Spec struct {
+			Egress []struct {
+				To struct {
+					DNSName string `json:"dnsName"`
+				} `json:"to"`
+			} `json:"egress"`
+		} `json:"spec"`
+	}
+	if yaml.Unmarshal([]byte(manifest), &ef) != nil {
+		return nil
+	}
+	names := make([]string, len(ef.Spec.Egress))
+	for i, rule := range ef.Spec.Egress {
+		names[i] = rule.To.DNSName
+	}
+	return names
 }
 
 // handleCreateNetwork stages a new network, proposed as a PR (the

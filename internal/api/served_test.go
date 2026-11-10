@@ -1,7 +1,9 @@
 package api
 
 import (
+	"encoding/json"
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 
@@ -184,6 +186,20 @@ func TestWildcardEgressNeedsTheDNSNameResolver(t *testing.T) {
 		}
 		if rec := do(s, adminToken, http.MethodPost, "/api/egressfirewalls", named); rec.Code != http.StatusOK {
 			t.Errorf("resolver=%v: a named host = %d %s", resolver, rec.Code, rec.Body.String())
+		}
+		// The manifest editor alike: an edit OVN-K refuses keeps the old rules.
+		edit := func(dns string) *httptest.ResponseRecorder {
+			manifest := "kind: EgressFirewall\nspec:\n  egress:\n  - type: Allow\n    to:\n      cidrSelector: 10.0.0.0/8\n  - type: Allow\n    to:\n      dnsName: '" + dns + "'\n"
+			body, _ := json.Marshal(model.UpdateManifestRequest{YAML: manifest})
+			return do(s, adminToken, http.MethodPut, "/api/objects/egressfirewall/team-a-dev/default", string(body))
+		}
+		rec = edit("*.example.com")
+		refused = rec.Code == http.StatusConflict && strings.Contains(rec.Body.String(), "rule 2: this cluster resolves no wildcard DNS names")
+		if refused == resolver || resolver && rec.Code != http.StatusOK {
+			t.Errorf("resolver=%v: an edit to a wildcard = %d %s", resolver, rec.Code, rec.Body.String())
+		}
+		if rec := edit("api.example.com"); rec.Code != http.StatusOK {
+			t.Errorf("resolver=%v: an edit to a named host = %d %s", resolver, rec.Code, rec.Body.String())
 		}
 	}
 }
