@@ -306,6 +306,11 @@ func TestSyncOperandRoles(t *testing.T) {
 	if egress == nil || len(egress.Rules) != 1 || !slices.Equal(egress.Rules[0].Resources, []string{"egressfirewalls"}) {
 		t.Errorf("%s = %+v, want EgressFirewall writes alone", tenancy.TenantEgressRole, egress)
 	}
+	view := roles[tenancy.TenantEgressViewRole]
+	if view == nil || len(view.Rules) != 1 || !slices.Equal(view.Rules[0].Resources, []string{"egressfirewalls"}) ||
+		!slices.Equal(view.Rules[0].Verbs, []string{"get", "list", "watch"}) {
+		t.Errorf("%s = %+v, want EgressFirewall reads alone", tenancy.TenantEgressViewRole, view)
+	}
 	platformSync := roles[tenancy.PlatformSyncAccount]
 	if platformSync == nil {
 		t.Fatalf("no %s role", tenancy.PlatformSyncAccount)
@@ -319,7 +324,7 @@ func TestSyncOperandRoles(t *testing.T) {
 			bind = append(bind, rule.ResourceNames...)
 		}
 	}
-	if !slices.Equal(bind, []string{"admin", tenancy.TenantEgressRole}) {
+	if !slices.Equal(bind, tenancy.ProjectGrantRoles) {
 		t.Errorf("%s binds %v, want exactly the roles project grants name", tenancy.PlatformSyncAccount, bind)
 	}
 }
@@ -523,24 +528,24 @@ func TestSyncImpersonationPlatformRoles(t *testing.T) {
 	platformApp := argoObj("Application", "argocd", install.PlatformApplicationName, nil)
 	platformApp.Object["status"] = map[string]any{"resources": []any{
 		map[string]any{"group": "rbac.authorization.k8s.io", "kind": "RoleBinding", "namespace": "team-a", "name": "team-a-admins"},
-		map[string]any{"group": "rbac.authorization.k8s.io", "kind": "RoleBinding", "namespace": "team-a", "name": "team-a-viewers"},
+		map[string]any{"group": "rbac.authorization.k8s.io", "kind": "RoleBinding", "namespace": "team-a", "name": "team-a-readers"},
 	}}
 	rb := func(name, role string) *rbacv1.RoleBinding {
 		return &rbacv1.RoleBinding{ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: "team-a"},
 			RoleRef: rbacv1.RoleRef{APIGroup: rbacv1.GroupName, Kind: "ClusterRole", Name: role}}
 	}
 	var n atomic.Int64
-	c := testBuilder(t).WithObjects(dv, creds, platformApp, rb("team-a-admins", "admin"), rb("team-a-viewers", "view"),
+	c := testBuilder(t).WithObjects(dv, creds, platformApp, rb("team-a-admins", "admin"), rb("team-a-readers", "cluster-reader"),
 		argoCDInstance(nil), projectNS("team-a", "team-a", "dotvirt/team-a.git")).
 		WithInterceptorFuncs(reviews(func(account string, a *authzv1.ResourceAttributes) bool {
 			if account == tenancy.PlatformSyncAccount && a.Verb == "bind" {
-				return a.Name != "view"
+				return a.Name != "cluster-reader"
 			}
 			return granted(map[string][]string{"dotvirt-p-team-a": {"team-a"}})(account, a)
 		}, &n)).Build()
 	reconcileOnce(t, newReconciler(c, depsOK), dv)
-	if got := syncCond(t, c, dv); got.Reason != "NotReady" || !strings.Contains(got.Message, "cannot bind ClusterRole view, which RoleBinding team-a/team-a-viewers") {
-		t.Errorf("condition = %+v, want the view binding named", got)
+	if got := syncCond(t, c, dv); got.Reason != "NotReady" || !strings.Contains(got.Message, "cannot bind ClusterRole cluster-reader, which RoleBinding team-a/team-a-readers") {
+		t.Errorf("condition = %+v, want the cluster-reader binding named", got)
 	}
 
 	// Once on, a newly merged binding the account cannot apply never exists:

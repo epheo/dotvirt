@@ -32,6 +32,17 @@ const PlatformSyncAccount = "dotvirt-platform-sync"
 // same subjects as its admin grant (EgressBinding).
 const TenantEgressRole = "dotvirt-tenant-egress"
 
+// TenantEgressViewRole reads EgressFirewalls, which view and edit lack: a
+// tenant kind, so without it a viewer or author loses the repo read once their
+// repo declares one.
+const TenantEgressViewRole = "dotvirt-tenant-egress-view"
+
+// ProjectGrantRoles are the ClusterRoles a project grant in the platform repo
+// binds, the parts of the project personas: admin with TenantEgressRole,
+// view or edit with TenantEgressViewRole. The platform sync account may bind
+// these and no other.
+var ProjectGrantRoles = []string{"admin", TenantEgressRole, "view", "edit", TenantEgressViewRole}
+
 // PathAnnotation names the folder of the repo a project lives in, beside the
 // repo annotation. It only locates content: Argo and the forge grant by repo, so
 // a repo stays one tenant's.

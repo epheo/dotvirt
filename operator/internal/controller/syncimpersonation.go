@@ -546,16 +546,19 @@ func syncChecks(rc *reconcileCtx, declared map[string][]declaredKind) []accessCh
 			problem: fmt.Sprintf("namespace %s lets every ServiceAccount of %s create VirtualMachines, other projects' sync accounts included", ns, rc.argoNS)})
 	}
 	if rc.sync.platform {
-		for _, c := range []struct {
+		type need struct {
 			attrs authzv1.ResourceAttributes
 			what  string
-		}{
+		}
+		needs := []need{
 			{createAttrs("", "namespaces", ""), "create Namespaces"},
 			{createAttrs("k8s.ovn.org", "clusteruserdefinednetworks", ""), "create ClusterUserDefinedNetworks"},
 			{createAttrs(rbacv1.GroupName, "rolebindings", ""), "create RoleBindings"},
-			{bindAttrs("ClusterRole", "admin", ""), "bind the admin role"},
-			{bindAttrs("ClusterRole", tenancy.TenantEgressRole, ""), "bind " + tenancy.TenantEgressRole},
-		} {
+		}
+		for _, role := range tenancy.ProjectGrantRoles {
+			needs = append(needs, need{bindAttrs("ClusterRole", role, ""), "bind " + role})
+		}
+		for _, c := range needs {
 			checks = append(checks, accessCheck{account: tenancy.PlatformSyncAccount, attrs: c.attrs, want: true,
 				problem: fmt.Sprintf("the platform sync account %s cannot %s (its operand ClusterRoles are not bound)", tenancy.PlatformSyncAccount, c.what)})
 		}
@@ -605,7 +608,10 @@ func (r *DotvirtReconciler) platformRoleChecks(ctx context.Context, rc *reconcil
 	if err := g.Wait(); err != nil {
 		return nil, nil, fmt.Errorf("read the platform tier's RoleBindings: %w", err)
 	}
-	seen := map[string]bool{"ClusterRole//admin": true, "ClusterRole//" + tenancy.TenantEgressRole: true}
+	seen := map[string]bool{}
+	for _, role := range tenancy.ProjectGrantRoles {
+		seen["ClusterRole//"+role] = true
+	}
 	for i, rb := range bindings {
 		if rb == nil {
 			absent = append(absent, fmt.Sprintf("RoleBinding %s/%s the platform repo declares is not on the cluster; if the platform sync refuses it, %s may not bind its role (see the %s Application)",
