@@ -8,8 +8,8 @@ import (
 	"testing"
 )
 
-// EnsureRepo creates the repo (under its owner org, auto-initialised) only when it
-// is absent, and is a no-op when it already exists.
+// EnsureRepo creates the repo (under its owner org, auto-initialised, private)
+// only when it is absent, and is a no-op when it already exists.
 func TestEnsureRepoCreatesWhenAbsent(t *testing.T) {
 	var posted bool
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -17,6 +17,12 @@ func TestEnsureRepoCreatesWhenAbsent(t *testing.T) {
 		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/repos/dotvirt/platform":
 			w.WriteHeader(http.StatusNotFound)
 		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/orgs/dotvirt/repos":
+			var body struct {
+				Private *bool `json:"private"`
+			}
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.Private == nil || !*body.Private {
+				t.Errorf("repo created without private:true (decode err %v)", err)
+			}
 			posted = true
 			w.WriteHeader(http.StatusCreated)
 			_, _ = w.Write([]byte(`{}`))
@@ -237,5 +243,44 @@ func TestRepoExistsKeepsTheStatus(t *testing.T) {
 	var se *StatusError
 	if !errors.As(err, &se) || se.Status != http.StatusForbidden {
 		t.Fatalf("err = %v, want a *StatusError with 403", err)
+	}
+}
+
+// PrivatizeOrgRepos pages through the org, makes only its public repos
+// private, and goes on past a repo that refuses the change.
+func TestPrivatizeOrgRepos(t *testing.T) {
+	pages := map[string]string{
+		"1": `[{"name":"a","private":false},{"name":"b","private":true},{"name":"locked","private":false}]`,
+		"2": `[{"name":"c","private":false}]`,
+	}
+	var patched []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/orgs/dotvirt/repos":
+			w.Header().Set("X-Total-Count", "4")
+			_, _ = w.Write([]byte(pages[r.URL.Query().Get("page")]))
+		case r.Method == http.MethodPatch && r.URL.Path == "/api/v1/repos/dotvirt/locked":
+			w.WriteHeader(http.StatusForbidden)
+		case r.Method == http.MethodPatch:
+			patched = append(patched, r.URL.Path)
+			_, _ = w.Write([]byte(`{}`))
+		default:
+			t.Errorf("unexpected %s %s", r.Method, r.URL.String())
+			w.WriteHeader(http.StatusInternalServerError)
+		}
+	}))
+	defer srv.Close()
+
+	c := NewFactory(srv.URL, StaticToken("tok"), false, "").For("http://forge/dotvirt/platform.git")
+	n, failed, err := c.PrivatizeOrgRepos()
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"/api/v1/repos/dotvirt/a", "/api/v1/repos/dotvirt/c"}
+	if n != 2 || len(patched) != 2 || patched[0] != want[0] || patched[1] != want[1] {
+		t.Errorf("changed %d, patched %v, want %v", n, patched, want)
+	}
+	if len(failed) != 1 || failed["locked"] == nil {
+		t.Errorf("failed = %v, want only locked", failed)
 	}
 }
