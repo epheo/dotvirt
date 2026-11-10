@@ -23,6 +23,16 @@ const row = (name: string, volume: ReplicatedVolume): MapRow => ({
 	disks: [{ label: 'disk', volume }],
 });
 const safe = (name: string) => row(name, vol([copy('h1'), copy('h2'), witness('h3')]));
+// Two copies, one still catching up: not surviving h1 yet, mending by itself.
+const mending = (name: string) =>
+	row(
+		name,
+		vol([
+			copy('h1'),
+			{ node: 'h2', role: 'diskful', state: 'catching-up', syncPercent: 40 },
+			witness('h3'),
+		]),
+	);
 
 describe('the replication tile', () => {
 	it('says what survives and stays untinted when all does', () => {
@@ -34,20 +44,32 @@ describe('the replication tile', () => {
 		});
 	});
 
-	it('lands on the disk in trouble before one a lost host takes offline', () => {
+	it('lands on the disk in trouble and says what is wrong with that disk', () => {
 		const t = replicationTile([
+			mending('mending'),
 			row('thin', vol([copy('h1'), copy('h2')])),
 			row('split', vol([copy('h1'), copy('h2')], { splitBrain: true })),
 			safe('ok'),
 		]);
-		expect(t).toMatchObject({ value: '1 of 3', tone: 'danger', link: { label: 'Show split' } });
+		expect(t).toMatchObject({ value: '1 of 4', tone: 'danger', link: { label: 'Show split' } });
 		expect(t.link.href).toBe('/storage?tab=replication&focus=ns%2Fsplit');
-		expect(t.body).toContain('two copies disagree');
+		expect(t.body).toBe('split disk: Two copies disagree.');
 	});
 
-	it('warns on a disk that does not survive a host', () => {
+	it('warns on a disk a lost host takes offline, saying which host', () => {
 		const t = replicationTile([safe('ok'), row('thin', vol([copy('h1'), copy('h2')]))]);
 		expect(t).toMatchObject({ tone: 'warn', link: { label: 'Show thin' } });
+		expect(t.body).toBe('thin disk: Loses its majority with h1.');
+	});
+
+	it('counts a copy catching up short, untinted, as the owners read it', () => {
+		const t = replicationTile([safe('ok'), mending('mending')]);
+		expect(t).toMatchObject({
+			value: '1 of 2',
+			tone: 'none',
+			link: { href: '/storage?tab=replication' },
+		});
+		expect(t.body).toContain('catching up, 40%');
 	});
 
 	it('claims nothing about no disk', () => {
@@ -82,6 +104,11 @@ describe('the protection tile', () => {
 		expect(t.body).toMatch(/^b: /);
 	});
 
+	it('says why the count is short when only a choice made it so', () => {
+		const t = protectionTile([disk('a', 'protected'), disk('b', 'local')], name);
+		expect(t).toMatchObject({ value: '1 of 2', tone: 'none', body: 'b: One copy.' });
+	});
+
 	it('claims nothing about no disk', () => {
 		expect(protectionTile([], name)).toMatchObject({ label: 'No replicated disks' });
 	});
@@ -112,6 +139,18 @@ describe('the routes tile', () => {
 		expect(routesTile(routes, false).link.href).toBe(
 			'/networking?tab=gateway&route=HTTPRoute%2Fweb%2Fblog',
 		);
+	});
+
+	it('says how many more are refused', () => {
+		const t = routesTile(
+			[
+				route('shop', true),
+				route('blog', false, 'HostnameConflict'),
+				route('wiki', false, 'BackendNotFound'),
+			],
+			true,
+		);
+		expect(t.body).toMatch(/^blog\.example\.com: Taken\. .* 1 more refused\.$/);
 	});
 
 	it('counts a route waiting for its Gateway without tint', () => {

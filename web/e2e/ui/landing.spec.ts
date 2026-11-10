@@ -16,9 +16,7 @@ test('an operator reads replication on the Library and lands on the split disk',
 		.first();
 	await expect(tile).toContainText('4 of 7');
 	await expect(tile).toContainText('disks survive losing a host');
-	await expect(tile).toContainText(
-		'ledger-export disk: two copies disagree. Pick the one to keep.',
-	);
+	await expect(tile).toContainText('ledger-export disk: Two copies disagree.');
 	await tile.getByRole('link', { name: 'Show ledger-export' }).click();
 	await expect(page).toHaveURL(/tab=replication&focus=volume%2Fpvc-orphan/);
 	const row = page.locator('main tr[aria-current="true"]');
