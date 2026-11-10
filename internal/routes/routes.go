@@ -1,4 +1,4 @@
-// Package routes is the read side of the cluster's front door: an SA-held
+// Package routes is the read side of the cluster's Gateways: an SA-held
 // snapshot of Gateway API Gateways and routes, and portail's rate limits, so a
 // caller's pull filters in memory and no request reaches the cluster.
 //

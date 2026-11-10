@@ -177,16 +177,16 @@ func (s *Server) replicationWatermark(ctx context.Context, id auth.Identity, c *
 // route for an operator, the kinds it may list in its visible namespaces for
 // anyone else.
 func (s *Server) routesWatermark(ctx context.Context, id auth.Identity, c *cluster.Client, visible map[string]bool) uint64 {
-	if s.frontDoor == nil || !s.frontDoor.Started() {
+	if s.gateways == nil || !s.gateways.Started() {
 		return 0
 	}
 	var t term
 	if s.capable(ctx, id, c, gatewaysRead) {
-		return t.start("routes-operator").num(s.frontDoor.Total()).sum() & wireMask
+		return t.start("routes-operator").num(s.gateways.Total()).sum() & wireMask
 	}
 	var sum uint64
 	for h := range s.routesReadable(ctx, id, c, slices.Collect(maps.Keys(visible))) {
-		sum += t.start("routes").str(h.Namespace, h.Resource).num(s.frontDoor.Gen(h.Namespace, h.Resource)).sum()
+		sum += t.start("routes").str(h.Namespace, h.Resource).num(s.gateways.Gen(h.Namespace, h.Resource)).sum()
 	}
 	return sum & wireMask
 }

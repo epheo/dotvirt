@@ -146,7 +146,7 @@ func run() error {
 	})
 	replicationSnapshot.Run(ctx)
 
-	// The front door's read plane: nothing runs until a GatewayClass exists.
+	// Gateways' read plane: nothing runs until a GatewayClass exists.
 	routesSnapshot := routes.New(saCluster, bus, func() bool {
 		m, ok := moduleSnapshot.Get()
 		return ok && m.Routes
@@ -222,7 +222,7 @@ func run() error {
 		Modules:        moduleSnapshot,
 		IndexBindings:  true,
 		Replication:    replicationSnapshot,
-		FrontDoor:      routesSnapshot,
+		Gateways:       routesSnapshot,
 		Bus:            bus,
 		Resolver:       resolver,
 		Repos:          repos,

@@ -1821,7 +1821,7 @@ const replicatedtenant = {
 	],
 };
 
-// ── the front door: two of them, a route of each state ─────────────────────
+// ── Gateways: two of them, a route of each state ───────────────────────────
 const listener = (name, port, protocol, hostname, attachedRoutes = 1) => ({
 	name,
 	port,

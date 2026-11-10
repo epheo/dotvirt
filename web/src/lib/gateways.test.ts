@@ -9,7 +9,7 @@ import {
 	routeState,
 	shares,
 	urlFor,
-} from './frontdoor';
+} from './gateways';
 
 const gw = (extra: Partial<GatewayInfo> = {}) =>
 	({
@@ -137,7 +137,7 @@ describe('a route state', () => {
 	it('still has a next step for a reason it does not know', () => {
 		expect(routeState(parent({ attached: false, reason: 'Odd' }))).toMatchObject({
 			label: 'Odd',
-			detail: 'The front door did not accept it. Ask your platform team.',
+			detail: 'The Gateway did not accept it. Ask your platform team.',
 		});
 	});
 });

@@ -122,7 +122,7 @@ class InventoryStore {
 	readonly tasksVersion = $derived(this.inventory?.tasksVersion ?? 0);
 	// The replication pulls' watermark; absent while no r-drbd is served.
 	readonly replicationVersion = $derived(this.inventory?.replicationVersion ?? 0);
-	// The front door pulls' watermark; absent while no GatewayClass exists.
+	// The Gateway pulls' watermark; absent while no GatewayClass exists.
 	readonly routesVersion = $derived(this.inventory?.routesVersion ?? 0);
 	// Namespaces in projects that have a repo, whether or not the caller may author there.
 	readonly repoNamespaces = $derived(

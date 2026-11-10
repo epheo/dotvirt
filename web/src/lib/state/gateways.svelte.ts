@@ -3,11 +3,11 @@ import { friendlyError } from '#lib/format.js';
 import { modules } from './modules.svelte';
 
 // Only a known no hides the tab, as with every module.
-export const frontDoorOff = () => modules.value !== null && !modules.value.routes;
+export const gatewaysOff = () => modules.value !== null && !modules.value.routes;
 
 // Pulled when the tab opens and when the frame's watermark moves, never polled.
-// An operator reads every front door, anyone else their own routes.
-class FrontDoorStore {
+// An operator reads every Gateway, anyone else their own routes.
+class GatewayStore {
 	overview = $state.raw<Gateways | null>(null);
 	routes = $state.raw<Route[] | null>(null);
 	error = $state('');
@@ -38,4 +38,4 @@ class FrontDoorStore {
 	}
 }
 
-export const frontDoor = new FrontDoorStore();
+export const gateways = new GatewayStore();

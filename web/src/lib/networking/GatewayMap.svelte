@@ -15,14 +15,14 @@
 		routeState,
 		shares,
 		urlFor,
-	} from '#lib/frontdoor.js';
+	} from '#lib/gateways.js';
 	import { plural } from '#lib/format.js';
 	import { inventory } from '#lib/state/inventory.svelte.js';
 	import Card from '#lib/components/Card.svelte';
 	import Note from '#lib/components/Note.svelte';
 	import StatusPill from '#lib/components/StatusPill.svelte';
 
-	// Every front door: what arrives on which port, which route takes it, and
+	// Every Gateway: what arrives on which port, which route takes it, and
 	// where it goes. The view is the URL, so a shared link opens the same route.
 	let { overview }: { overview: Gateways } = $props();
 
@@ -30,7 +30,7 @@
 	const MAP_ROUTES = 60;
 
 	const current = $derived(
-		overview.gateways.find((g) => gatewayKey(g) === page.url.searchParams.get('door')) ??
+		overview.gateways.find((g) => gatewayKey(g) === page.url.searchParams.get('gateway')) ??
 			overview.gateways[0],
 	);
 	const on = $derived(current ? routesOn(overview.routes, current) : []);
@@ -59,9 +59,9 @@
 		for (const [k, v] of Object.entries(params)) q.set(k, v);
 		goto(`?${q}`, { replace: true, reset: false });
 	}
-	const pickDoor = (key: string) => {
+	const pickGateway = (key: string) => {
 		const q = new URLSearchParams(page.url.search);
-		q.set('door', key);
+		q.set('gateway', key);
 		q.delete('route');
 		goto(`?${q}`, { replace: true, reset: false });
 	};
@@ -74,17 +74,17 @@
 
 {#if !current}
 	<p class="text-sm text-ink-muted">
-		No front door yet. Your platform team declares one in the platform repo.
+		No Gateway yet. Your platform team declares one in the platform repo.
 	</p>
 {:else}
 	{#if overview.gateways.length > 1}
-		<div class="flex flex-wrap gap-2" role="tablist" aria-label="Front doors">
+		<div class="flex flex-wrap gap-2" role="tablist" aria-label="Gateways">
 			{#each overview.gateways as g (gatewayKey(g))}
 				<button
 					type="button"
 					role="tab"
 					aria-selected={g === current}
-					onclick={() => pickDoor(gatewayKey(g))}
+					onclick={() => pickGateway(gatewayKey(g))}
 					class="cursor-pointer rounded-md border px-3 py-1.5 text-[13px] {g === current
 						? 'border-accent bg-select-soft font-bold text-accent-ink'
 						: 'border-line-strong bg-panel text-ink-soft hover:bg-inset'}"
@@ -201,7 +201,7 @@
 				<p class="p-4 text-[13px] text-ink-muted">
 					{on.length
 						? `${on.length} routes: see the list below.`
-						: 'No route uses this front door yet.'}
+						: 'No route uses this Gateway yet.'}
 				</p>
 			{/if}
 		</Card>

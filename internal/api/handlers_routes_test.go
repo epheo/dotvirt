@@ -94,10 +94,10 @@ func (f *routesSource) write(t *testing.T, o *unstructured.Unstructured) {
 func routesServer(t *testing.T, fc *fakeCluster, src *routesSource) *Server {
 	t.Helper()
 	s := fc.server(nil, Config{})
-	s.frontDoor = routes.New(src, s.bus, func() bool { return true })
-	s.frontDoor.Run(t.Context())
+	s.gateways = routes.New(src, s.bus, func() bool { return true })
+	s.gateways.Run(t.Context())
 	for deadline := time.Now().Add(5 * time.Second); ; time.Sleep(time.Millisecond) {
-		if len(s.frontDoor.HeldIn([]string{"team-a-dev"})) == 1 {
+		if len(s.gateways.HeldIn([]string{"team-a-dev"})) == 1 {
 			return s
 		}
 		if time.Now().After(deadline) {
@@ -118,7 +118,7 @@ func routesVersion(t *testing.T, s *Server, token string) uint64 {
 
 func TestGatewaysAreAskedOfTheCaller(t *testing.T) {
 	s := newFakeCluster(t).server(nil, Config{})
-	s.frontDoor = routes.New(nil, eventbus.New(), func() bool { return false })
+	s.gateways = routes.New(nil, eventbus.New(), func() bool { return false })
 
 	wantStatus(t, do(s, adminToken, http.MethodGet, "/api/networking/gateways", ""), http.StatusOK)
 	wantStatus(t, do(s, viewerToken, http.MethodGet, "/api/networking/gateways", ""), http.StatusForbidden)
@@ -158,9 +158,9 @@ func TestRoutesNeedTheRightToListThem(t *testing.T) {
 			}
 
 			before := routesVersion(t, s, tenantToken)
-			gen := s.frontDoor.Gen("team-a-dev", "httproutes")
+			gen := s.gateways.Gen("team-a-dev", "httproutes")
 			src.write(t, tenantRoute("NotAllowedByListeners"))
-			for deadline := time.Now().Add(5 * time.Second); s.frontDoor.Gen("team-a-dev", "httproutes") == gen; time.Sleep(time.Millisecond) {
+			for deadline := time.Now().Add(5 * time.Second); s.gateways.Gen("team-a-dev", "httproutes") == gen; time.Sleep(time.Millisecond) {
 				if time.Now().After(deadline) {
 					t.Fatal("the write never reached the snapshot")
 				}

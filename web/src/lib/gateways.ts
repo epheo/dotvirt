@@ -1,4 +1,4 @@
-// What the Front door tab derives from the Gateways and routes it is handed.
+// What the Gateway tab derives from the Gateways and routes it is handed.
 // Pure, so the map can be tested without a browser.
 import type { GatewayInfo, GatewayListener, Route, RouteBackend, RouteParent } from '#lib/api.js';
 import type { Tone } from '#lib/status.js';
@@ -13,7 +13,7 @@ const SERVED_ON: Record<string, string[]> = {
 	UDPRoute: ['UDP'],
 };
 
-// A route can name several sections of one front door: a refused one wins, so
+// A route can name several sections of one Gateway: a refused one wins, so
 // the map never reads Live over a refusal.
 export function parentOn(r: Route, g: GatewayInfo): RouteParent | undefined {
 	const on = r.parents?.filter((p) => p.namespace === g.namespace && p.name === g.name) ?? [];
@@ -52,18 +52,18 @@ export function listenersOf(r: Route, g: GatewayInfo): GatewayListener[] {
 export type RouteState = { tone: Tone; label: string; detail: string; live: boolean };
 
 const WHY: Record<string, { label: string; detail: string }> = {
-	Pending: { label: 'Waiting', detail: 'The front door has not picked this up yet.' },
+	Pending: { label: 'Waiting', detail: 'The Gateway has not picked this up yet.' },
 	NotAllowedByListeners: {
 		label: 'Not allowed',
-		detail: 'This front door does not take routes from this project. Ask your platform team.',
+		detail: 'This Gateway does not take routes from this project. Ask your platform team.',
 	},
 	NoMatchingListenerHostname: {
 		label: 'Hostname not served',
-		detail: 'This hostname is outside what the front door serves. Use one it serves.',
+		detail: 'This hostname is outside what the Gateway serves. Use one it serves.',
 	},
 	NoMatchingParent: {
 		label: 'No such port',
-		detail: 'The port or section it names does not exist on this front door.',
+		detail: 'The port or section it names does not exist on this Gateway.',
 	},
 	HostnameConflict: { label: 'Taken', detail: 'Another route holds this hostname. Pick another.' },
 	BackendNotFound: {
@@ -75,15 +75,15 @@ const WHY: Record<string, { label: string; detail: string }> = {
 		detail: 'It sends to a service in another project, which has not allowed it.',
 	},
 	InvalidKind: { label: 'Unsupported', detail: 'It sends to something that is not a service.' },
-	UnsupportedValue: { label: 'Unsupported', detail: 'The front door cannot serve it as written.' },
+	UnsupportedValue: { label: 'Unsupported', detail: 'The Gateway cannot serve it as written.' },
 };
 
 export function routeState(p: RouteParent | undefined): RouteState {
 	if (p?.attached)
-		return { tone: 'ok', label: 'Live', detail: 'Reachable through the front door.', live: true };
+		return { tone: 'ok', label: 'Live', detail: 'Reachable through the Gateway.', live: true };
 	const why = WHY[p?.reason ?? 'Pending'] ?? {
 		label: p?.reason ?? 'Not live',
-		detail: 'The front door did not accept it. Ask your platform team.',
+		detail: 'The Gateway did not accept it. Ask your platform team.',
 	};
 	return { tone: p?.reason === 'Pending' || !p ? 'neutral' : 'danger', ...why, live: false };
 }
