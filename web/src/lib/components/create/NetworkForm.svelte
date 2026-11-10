@@ -8,6 +8,7 @@
 	import { nodeTargets } from '#lib/state/hosts.svelte.js';
 	import { CLUSTER_NS, clusterGate, objectGate } from '#lib/gates.js';
 	import { inventory } from '#lib/state/inventory.svelte.js';
+	import { vmsOff } from '#lib/state/modules.svelte.js';
 	import { ui } from '#lib/state/ui.svelte.js';
 	import { canMeet, nearestFree, overlapping, suggestSubnet } from '#lib/subnets.js';
 	import { NAME_HINT, validName } from '#lib/validate.js';
@@ -251,14 +252,21 @@
 	);
 	const selectedOrHere = $derived(who === 'project' ? [namespace] : selectedNs);
 
+	// What joins a network: VMs, or without KubeVirt the project's workloads.
+	// An unknown state keeps VMs.
+	const joiners = $derived(vmsOff() ? 'Workloads' : 'VMs');
 	const CHOICES: { id: Who; label: string; text: () => string }[] = [
 		{
 			id: 'project',
 			label: 'Project network',
-			text: () => `Only VMs in ${owner || 'one project'}.`,
+			text: () => `Only ${joiners.toLowerCase()} in ${owner || 'one project'}.`,
 		},
-		{ id: 'shared', label: 'Shared network', text: () => 'VMs from the projects you pick.' },
-		{ id: 'vlan', label: 'VLAN network', text: () => 'VMs join a VLAN on your physical network.' },
+		{ id: 'shared', label: 'Shared network', text: () => `${joiners} from the projects you pick.` },
+		{
+			id: 'vlan',
+			label: 'VLAN network',
+			text: () => `${joiners} join a VLAN on your physical network.`,
+		},
 	];
 	const choices = $derived(CHOICES.filter((c) => c.id === 'project' || shared.ok || c.id === who));
 </script>
@@ -487,7 +495,7 @@
 										: ''}<span class="font-mono font-medium">{n.name}</span>{/each}.</span
 							>
 							<span class="text-[13px] text-ink-soft"
-								>Addresses would repeat on any VM or route that joins them.</span
+								>Addresses would repeat on any {vmsOff() ? 'workload' : 'VM'} or route that joins them.</span
 							>
 							{#if fixes.length}
 								<div class="mt-2 flex flex-wrap items-center gap-2">
@@ -528,11 +536,13 @@
 					>
 						{#snippet value()}{addresses ? 'Handed out automatically' : 'None handed out'}{/snippet}
 						{#snippet sub()}{addresses
-								? 'VMs keep theirs across restarts'
-								: 'VMs set their own addresses'}{/snippet}
+								? vmsOff()
+									? 'Each workload gets one from the subnet'
+									: 'VMs keep theirs across restarts'
+								: `${joiners} set their own addresses`}{/snippet}
 						{#snippet editor(done)}
 							<div class="flex flex-col gap-2">
-								{#each [{ v: true, t: 'Hand out addresses from the subnet', s: 'VMs keep theirs across restarts and live migration.' }, { v: false, t: 'None', s: 'A plain switch: VMs set their own addresses.' }] as o (o.t)}
+								{#each [{ v: true, t: 'Hand out addresses from the subnet', s: vmsOff() ? 'Each workload gets one from the subnet.' : 'VMs keep theirs across restarts and live migration.' }, { v: false, t: 'None', s: `A plain switch: ${joiners.toLowerCase()} set their own addresses.` }] as o (o.t)}
 									<label class="flex cursor-pointer items-start gap-3 text-sm">
 										<input
 											type="radio"
@@ -566,7 +576,7 @@
 					<SetupRow label="Outbound" onopen={() => {}} onclose={() => {}}>
 						{#snippet value()}
 							{#if who === 'vlan'}Onto VLAN {vlan ?? '?'} through {physnet ||
-									'its uplink'}{:else}Through each VM's default network{/if}
+									'its uplink'}{:else}Through each {vmsOff() ? "workload's" : "VM's"} default network{/if}
 						{/snippet}
 						{#snippet sub()}
 							{#if who === 'vlan'}Your physical network routes it{:else if egressIP}Leaves through
@@ -593,20 +603,37 @@
 				{/if}
 				{#if who === 'vlan' && chosenUplink && failing(chosenUplink)}
 					<Consequence tone="danger"
-						>{chosenUplink.name} is failing: VMs on its broken hosts cannot reach the VLAN.</Consequence
+						>{chosenUplink.name} is failing: {joiners} on its broken hosts cannot reach the VLAN.</Consequence
 					>
 				{/if}
-				<Consequence tone="ok">Nothing restarts. No VM joins until you attach one.</Consequence>
-				{#if who === 'project'}
-					<Consequence tone="info"
-						>Shows up in the network picker of every {project} VM{owner.includes('/')
-							? ` in ${namespace}`
-							: ''}.</Consequence
+				{#if vmsOff()}
+					<!-- No VM picker without KubeVirt: a workload attaches the network by name. -->
+					<Consequence tone="ok"
+						>Nothing restarts. Nothing joins until a workload attaches it.</Consequence
 					>
-				{:else if selectedNs.length}
-					<Consequence tone="info"
-						>Shows up for VMs in the {projectsPicked} project{projectsPicked === 1 ? '' : 's'} you picked.</Consequence
-					>
+					{#if who === 'project'}
+						<Consequence tone="info"
+							>{project} workloads{owner.includes('/') ? ` in ${namespace}` : ''} can attach it.</Consequence
+						>
+					{:else if selectedNs.length}
+						<Consequence tone="info"
+							>Workloads in the {projectsPicked} project{projectsPicked === 1 ? '' : 's'} you picked can
+							attach it.</Consequence
+						>
+					{/if}
+				{:else}
+					<Consequence tone="ok">Nothing restarts. No VM joins until you attach one.</Consequence>
+					{#if who === 'project'}
+						<Consequence tone="info"
+							>Shows up in the network picker of every {project} VM{owner.includes('/')
+								? ` in ${namespace}`
+								: ''}.</Consequence
+						>
+					{:else if selectedNs.length}
+						<Consequence tone="info"
+							>Shows up for VMs in the {projectsPicked} project{projectsPicked === 1 ? '' : 's'} you picked.</Consequence
+						>
+					{/if}
 				{/if}
 			{/snippet}
 		</StagesPanel>

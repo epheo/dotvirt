@@ -343,6 +343,7 @@ describe('library', () => {
 	it('words the header context', () => {
 		expect(storageContext(r, 3, 48)).toBe('5 disks on 3 classes, 48 hosts');
 		expect(storageContext(r.slice(0, 1), 1, 0)).toBe('1 disk on 1 class');
+		expect(storageContext([], 2, 3, false)).toBe('2 classes, 3 hosts');
 	});
 });
 

@@ -133,3 +133,151 @@ test('without MachineConfig rebalancing offers no PSI', async ({ page }) => {
 		await expect(dialog.getByText('Enable PSI on worker nodes')).toHaveCount(offered);
 	}
 });
+
+// Each no-KubeVirt surface against base: the VM wording and VM-only numbers go
+// only on a known no.
+const scenarios = [
+	['base', true],
+	['novms', false],
+] as const;
+
+test('without VMs a project summary drops VM usage and counts', async ({ page }) => {
+	await setScenario(page, 'base');
+	await login(page);
+	for (const [scenario, vms] of scenarios) {
+		await setScenario(page, scenario);
+		await page.goto('/compute/team-web');
+		const main = page.locator('main');
+		await expect(main.getByText(vms ? /^\d+ VMs? in 1 namespace$/ : /^1 namespace$/)).toBeVisible();
+		await expect(main.getByText('Capacity', { exact: true })).toHaveCount(vms ? 1 : 0);
+		await expect(main.getByText('Top consumers', { exact: true })).toHaveCount(vms ? 1 : 0);
+		await expect(
+			main.getByText(
+				vms
+					? 'everything untracked here (VMs, networks, policies, disks)'
+					: 'everything untracked here (networks, policies, volumes)',
+				{ exact: false },
+			),
+		).toBeVisible();
+	}
+});
+
+test('without VMs the hosts say nothing of VMs', async ({ page }) => {
+	await setScenario(page, 'base');
+	await login(page);
+	for (const [scenario, vms] of scenarios) {
+		await setScenario(page, scenario);
+		await page.goto('/hosts');
+		const main = page.locator('main');
+		// The header's context line, beside the title.
+		const context = main.getByRole('heading', { level: 1 }).locator('..').locator('span');
+		await expect(
+			context.filter({ hasText: vms ? /^3 hosts, \d+ VMs$/ : /^3 hosts$/ }),
+		).toBeVisible();
+		for (const col of ['VMs', 'vCPU committed', 'Memory committed'])
+			await expect(main.getByRole('columnheader', { name: col, exact: true })).toHaveCount(
+				vms ? 1 : 0,
+			);
+		await expect(main.getByRole('link', { name: 'Enable Dynamic Rescheduling' })).toHaveCount(
+			vms ? 1 : 0,
+		);
+
+		await page.goto('/hosts/worker-1');
+		await expect(
+			main.getByText(
+				vms
+					? 'Maintenance moves its running VMs to other hosts. Cordon only stops new ones.'
+					: 'Both stop new workloads. Maintenance holds until you exit it; nothing running here moves.',
+			),
+		).toBeVisible();
+		// The context nests its count in a span of its own.
+		const sized = (re: RegExp) => context.filter({ hasText: re });
+		if (vms) await expect(sized(/^\d+ VMs?, \d+ cores, /).first()).toBeVisible();
+		else {
+			await expect(sized(/^\d+ cores, /).first()).toBeVisible();
+			await expect(sized(/\bVMs?\b/)).toHaveCount(0);
+		}
+		await expect(main.getByText('Capacity', { exact: true })).toHaveCount(vms ? 1 : 0);
+	}
+});
+
+test('without VMs storage speaks of volumes and drops VM disk counts', async ({ page }) => {
+	await setScenario(page, 'base');
+	await login(page);
+	for (const [scenario, vms] of scenarios) {
+		await setScenario(page, scenario);
+		await page.goto('/storage?tab=classes');
+		const main = page.locator('main');
+		await expect(
+			main.getByText(vms ? /^\d+ disks on 2 classes, 3 hosts$/ : /^2 classes, 3 hosts$/),
+		).toBeVisible();
+		for (const col of ['VM disks hold', 'Disks', 'VMs', 'Live migration'])
+			await expect(main.getByRole('columnheader', { name: col, exact: true })).toHaveCount(
+				vms ? 1 : 0,
+			);
+		await expect(main.getByRole('columnheader', { name: 'Access', exact: true })).toHaveCount(
+			vms ? 0 : 1,
+		);
+		await expect(main.getByPlaceholder('Find a disk, VM or image')).toHaveCount(vms ? 1 : 0);
+
+		await page.goto('/storage/fast-ssd');
+		await expect(
+			main.getByText(vms ? 'What a disk here gets' : 'What a volume here gets', { exact: true }),
+		).toBeVisible();
+		await expect(main.getByText(vms ? 'Live migration' : 'Access', { exact: true })).toBeVisible();
+		await expect(main.getByText('Disks', { exact: true })).toHaveCount(vms ? 1 : 0);
+	}
+});
+
+test('without VMs the network and project forms speak of workloads', async ({ page }) => {
+	await setScenario(page, 'base');
+	await login(page);
+	for (const [scenario, vms] of scenarios) {
+		await setScenario(page, scenario);
+		await page.goto('/compute');
+		await page.getByRole('button', { name: 'New', exact: true }).click();
+		const sheet = page.getByRole('dialog');
+		await sheet.getByRole('radio', { name: 'Network', exact: true }).click();
+		await expect(
+			sheet.getByText(
+				vms ? 'VMs from the projects you pick.' : 'Workloads from the projects you pick.',
+			),
+		).toBeVisible();
+		await expect(
+			sheet.getByText(
+				vms
+					? 'Nothing restarts. No VM joins until you attach one.'
+					: 'Nothing restarts. Nothing joins until a workload attaches it.',
+			),
+		).toBeVisible();
+		if (!vms) await expect(sheet.getByText(/\bVMs?\b/)).toHaveCount(0);
+
+		await sheet.getByRole('radio', { name: 'Project', exact: true }).click();
+		await sheet.getByLabel('Name', { exact: true }).fill('team-c');
+		await expect(
+			sheet.getByRole('checkbox', {
+				name: vms
+					? 'Give it a default network its VMs start on'
+					: 'Give it a default network its workloads start on',
+			}),
+		).toBeVisible();
+		await expect(
+			sheet.getByText(vms ? /^Its VMs start on / : /^Its workloads start on /),
+		).toBeVisible();
+	}
+});
+
+test('an unanswered module read keeps the VM wording', async ({ page }) => {
+	await setScenario(page, 'novms');
+	await page.route('**/api/modules', (r) => r.abort());
+	await login(page);
+	await page.goto('/hosts');
+	const main = page.locator('main');
+	await expect(
+		main.getByRole('columnheader', { name: 'vCPU committed', exact: true }),
+	).toBeVisible();
+	await page.goto('/storage?tab=classes');
+	await expect(
+		main.getByRole('columnheader', { name: 'Live migration', exact: true }),
+	).toBeVisible();
+});

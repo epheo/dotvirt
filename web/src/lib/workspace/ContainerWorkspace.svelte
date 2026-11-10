@@ -157,7 +157,8 @@
 	// hosts that need a person.
 	const head = $derived.by((): { title: string; status: Headline | null; context: string } => {
 		const sc = scope;
-		const vms = plural(scopedVMs.length, 'VM');
+		// Without KubeVirt there are no VMs to count, so no count is said.
+		const vms = vmsOff() ? '' : plural(scopedVMs.length, 'VM');
 		if (sc.kind === 'node') {
 			const listed = nodes?.find((n) => n.name === sc.node);
 			const flags = {
@@ -187,19 +188,20 @@
 			return {
 				title: 'Hosts',
 				status: nodes ? hostsAttention(nodes) : null,
-				context: `${plural(names.size, 'host')}, ${vms}`,
+				context: [plural(names.size, 'host'), vms].filter(Boolean).join(', '),
 			};
 		}
 		const status = stats && vmHeadline(stats);
 		if (sc.kind === 'namespace')
-			return { title: sc.namespace, status, context: `${vms} in ${sc.project}` };
+			return {
+				title: sc.namespace,
+				status,
+				context: vms ? `${vms} in ${sc.project}` : `In project ${sc.project}`,
+			};
 		if (sc.kind === 'project') {
 			const p = inventory.projects.find((x) => x.name === sc.project);
-			return {
-				title: sc.project,
-				status,
-				context: `${vms} in ${plural(p?.namespaces.length ?? 0, 'namespace')}`,
-			};
+			const nss = plural(p?.namespaces.length ?? 0, 'namespace');
+			return { title: sc.project, status, context: vms ? `${vms} in ${nss}` : nss };
 		}
 		const projects = plural(inventory.projects.length, 'project');
 		return {

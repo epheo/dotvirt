@@ -2,6 +2,7 @@
 	import { type StorageClassInfo } from '#lib/api.js';
 	import { hrefForScope } from '#lib/nav.js';
 	import { inventory } from '#lib/state/inventory.svelte.js';
+	import { vmsOff } from '#lib/state/modules.svelte.js';
 	import { storage } from '#lib/state/storage.svelte.js';
 	import { classTag, num, size, type DiskRow } from '#lib/storage.js';
 	import type { Tone } from '#lib/status.js';
@@ -63,6 +64,10 @@
 	}
 
 	const defaults = $derived((storage.classes ?? []).filter((c) => c.default).length);
+	// Without KubeVirt the rows (VM disks) are empty, so their columns go, and
+	// a claim here is a volume. An unknown state keeps VM terms.
+	const vmTerms = $derived(!vmsOff());
+	const things = $derived(vmTerms ? 'Disks' : 'Volumes');
 	const TH =
 		'border-b border-line px-3 py-2 text-left text-xs font-bold whitespace-nowrap text-ink-muted';
 	const TD = 'border-b border-line-soft px-3 py-2.5 whitespace-nowrap';
@@ -71,11 +76,11 @@
 {#if facts && defaults !== 1}
 	<Note tone="warn" class="px-3 py-2 text-xs">
 		{#if defaults === 0}
-			No default storage class. Disks that name no class stay pending until the platform marks one
+			No default storage class. {things} that name no class stay pending until the platform marks one
 			as default.
 		{:else}
-			{defaults} storage classes are marked default. Kubernetes picks the newest, so disks that name no
-			class may not land where expected.
+			{defaults} storage classes are marked default. Kubernetes picks the newest, so {things.toLowerCase()}
+			that name no class may not land where expected.
 		{/if}
 	</Note>
 {/if}
@@ -92,12 +97,20 @@
 						class="{TH} text-right"
 						title="Unallocated capacity the storage driver reports">Free</th
 					>
-					<th scope="col" class="{TH} text-right" title="Capacity VM disks request on this class"
-						>VM disks hold</th
-					>
-					<th scope="col" class="{TH} text-right">Disks</th>
-					<th scope="col" class="{TH} text-right">VMs</th>
-					<th scope="col" class={TH}>Live migration</th>
+					{#if vmTerms}
+						<th scope="col" class="{TH} text-right" title="Capacity VM disks request on this class"
+							>VM disks hold</th
+						>
+						<th scope="col" class="{TH} text-right">Disks</th>
+						<th scope="col" class="{TH} text-right">VMs</th>
+						<th scope="col" class={TH}>Live migration</th>
+					{:else}
+						<th
+							scope="col"
+							class={TH}
+							title="Whether a volume here can attach to many hosts at once">Access</th
+						>
+					{/if}
 					<th scope="col" class={TH}>Snapshots</th>
 					<th scope="col" class="{TH} pr-card">Provisioner</th>
 				</tr>
@@ -124,20 +137,24 @@
 						<td class="{TD} text-right"
 							>{c.info?.free != null ? size(c.info.free) : 'Not reported'}</td
 						>
-						<td class="{TD} text-right">{c.disks ? size(c.held) : '-'}</td>
-						<td class="{TD} text-right">{num(c.disks)}</td>
-						<td class="{TD} text-right">{num(c.vms)}</td>
+						{#if vmTerms}
+							<td class="{TD} text-right">{c.disks ? size(c.held) : '-'}</td>
+							<td class="{TD} text-right">{num(c.disks)}</td>
+							<td class="{TD} text-right">{num(c.vms)}</td>
+						{/if}
 						<td class={TD}>
 							{#if !c.info?.profile}
 								<span class="text-ink-faint">-</span>
 							{:else if c.info.profile.accessModes.includes('ReadWriteMany')}
-								<span class="text-ok-ink">Possible</span>
-							{:else}
+								<span class="text-ok-ink">{vmTerms ? 'Possible' : 'Many hosts'}</span>
+							{:else if vmTerms}
 								<span
 									class="text-warn-ink"
 									title="Disks here attach to one host: their VMs cannot live-migrate"
 									>Not possible</span
 								>
+							{:else}
+								<span class="text-ink-soft">One host at a time</span>
 							{/if}
 						</td>
 						<td class={TD}>
@@ -154,7 +171,7 @@
 					</tr>
 				{:else}
 					<tr>
-						<td colspan="9" class="px-card py-6 text-center text-ink-faint">
+						<td colspan={vmTerms ? 9 : 6} class="px-card py-6 text-center text-ink-faint">
 							{storage.classesError ||
 								(storage.classes === null && inventory.inventory
 									? 'Reading storage classes.'

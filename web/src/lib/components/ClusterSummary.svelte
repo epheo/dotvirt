@@ -13,6 +13,7 @@
 	import { resource } from '#lib/resource.svelte.js';
 	import type { HostFacts } from '#lib/state/hosts.svelte.js';
 	import { inventory } from '#lib/state/inventory.svelte.js';
+	import { computeRoot, vmsOff } from '#lib/state/modules.svelte.js';
 	import CapacityCard from './CapacityCard.svelte';
 	import IssuesCard from './IssuesCard.svelte';
 	import QuotaBand from './QuotaBand.svelte';
@@ -37,12 +38,17 @@
 		hosts?: HostFacts;
 	} = $props();
 
+	// Usage and top consumers are KubeVirt's VM metrics: without KubeVirt they
+	// could only read zero against the hosts' totals, so neither card shows and
+	// neither is read. An unknown state keeps both.
+	const vmMetrics = $derived(!vmsOff());
+
 	// Keyed on a stable scope string; old data stays up while a scope switch loads.
 	const scopeKey = $derived(`${scope.project ?? ''}|${scope.namespace ?? ''}|${scope.node ?? ''}`);
-	const summary = resource<ClusterSummary>(
-		() => scopeKey,
-		() => api.clusterSummary(scope),
-		{ poll: 30000 },
+	const summary = resource<ClusterSummary | null>(
+		() => (vmMetrics ? scopeKey : ''),
+		(k) => (k ? api.clusterSummary(scope) : Promise.resolve(null)),
+		{ poll: () => (vmMetrics ? 30000 : 0) },
 	);
 	const data = $derived(summary.data);
 
@@ -50,12 +56,12 @@
 	// state decides which hosts take new VMs; without node read rights every
 	// capacity host counts.
 	const ownCap = resource<HostCapacity | null>(
-		() => (hosts ? '' : 'capacity'),
+		() => (hosts || !vmMetrics ? '' : 'capacity'),
 		(k) => (k ? api.capacity() : Promise.resolve(null)),
-		{ poll: () => (hosts ? 0 : 30000) },
+		{ poll: () => (hosts || !vmMetrics ? 0 : 30000) },
 	);
 	const ownNodes = resource<Node[] | null>(
-		() => (hosts || !clusterGate.hosts().ok ? '' : 'nodes'),
+		() => (hosts || !vmMetrics || !clusterGate.hosts().ok ? '' : 'nodes'),
 		(k) => (k ? api.nodes() : Promise.resolve(null)),
 	);
 	const capRes = $derived(hosts?.cap ?? ownCap);
@@ -81,11 +87,13 @@
 	<IssuesCard
 		scope={{ project: scope.project, namespace: scope.namespace }}
 		{host}
-		label={scope.namespace ?? scope.project ?? scope.node ?? 'All VMs'}
+		label={scope.namespace ?? scope.project ?? scope.node ?? computeRoot()}
 	/>
-	<CapacityCard {data} loading={summary.loading} failed={summary.failed} {room} cap={capData} />
-	{#if data && !metricsGap(data.unavailable)}
-		<TopConsumers topCpu={data.topCpu} topMemory={data.topMemory} {vms} {onselect} />
+	{#if vmMetrics}
+		<CapacityCard {data} loading={summary.loading} failed={summary.failed} {room} cap={capData} />
+		{#if data && !metricsGap(data.unavailable)}
+			<TopConsumers topCpu={data.topCpu} topMemory={data.topMemory} {vms} {onselect} />
+		{/if}
 	{/if}
 	<ScopeChanges scope={{ project: scope.project, namespace: scope.namespace }} />
 	<!-- Quota-aware capacity: ResourceQuota bars at project/namespace scope -

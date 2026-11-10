@@ -6,6 +6,7 @@
 	import { hrefForScope } from '#lib/nav.js';
 	import { DEFAULT_PAGE_SIZE, pageSlice } from '#lib/paging.js';
 	import type { HostFacts } from '#lib/state/hosts.svelte.js';
+	import { vmsOff } from '#lib/state/modules.svelte.js';
 	import { TONE_DOT, type Tone } from '#lib/status.js';
 	import Card from '#lib/components/Card.svelte';
 	import CountTile from '#lib/components/CountTile.svelte';
@@ -76,8 +77,11 @@
 	});
 	const ratio = (m: { used: number; total: number }) => (m.total > 0 ? m.used / m.total : 0);
 	const pct = (r: number) => Math.min(100, Math.max(0, r * 100));
+	// Placement and commitments are VMs': without KubeVirt every row would read
+	// zero, so their columns go. An unknown state keeps them.
+	const vmCols = $derived(!vmsOff());
 	const hasLoad = $derived(workers.size > 0);
-	const hasCap = $derived(capacity.size > 0);
+	const hasCap = $derived(vmCols && capacity.size > 0);
 	const loading = $derived(facts.nodes.loading || facts.load.loading || facts.cap.loading);
 
 	// The numbers that are problems, each with the hosts behind it.
@@ -120,7 +124,10 @@
 					label={notReady.length === 1 ? 'host not ready' : 'hosts not ready'}
 					tone="danger"
 				>
-					{@render hostLinks(notReady, 'VMs cannot start there and new VMs skip them:')}
+					{@render hostLinks(
+						notReady,
+						vmCols ? 'VMs cannot start there and new VMs skip them:' : 'New workloads skip them:',
+					)}
 				</CountTile>
 			{/if}
 			{#if draining.length}
@@ -143,7 +150,9 @@
 				>
 					{@render hostLinks(
 						memHot,
-						'New VMs may not fit; rebalancing or a live migration frees room:',
+						vmCols
+							? 'New VMs may not fit; rebalancing or a live migration frees room:'
+							: 'New workloads may not fit:',
 					)}
 				</CountTile>
 			{/if}
@@ -156,10 +165,12 @@
 				<thead>
 					<tr>
 						<th scope="col" class="{TH} w-0 pl-card">Host</th>
-						<th scope="col" class="{TH} w-0">State</th>
-						<th scope="col" class="{TH} w-0 pr-6 text-right {hasLoad || hasCap ? '' : 'pr-card'}"
-							>VMs</th
-						>
+						<th scope="col" class="{TH} w-0 {vmCols || hasLoad ? '' : 'pr-card'}">State</th>
+						{#if vmCols}
+							<th scope="col" class="{TH} w-0 pr-6 text-right {hasLoad || hasCap ? '' : 'pr-card'}"
+								>VMs</th
+							>
+						{/if}
 						{#if hasLoad}
 							<th scope="col" class={TH}>CPU</th>
 							<th scope="col" class="{TH} {hasCap ? '' : 'pr-card'}">Memory</th>
@@ -183,7 +194,7 @@
 									class="font-mono font-medium text-ink hover:text-accent-ink">{r.name}</a
 								>
 							</td>
-							<td class="{TD} whitespace-nowrap">
+							<td class="{TD} whitespace-nowrap {vmCols || hasLoad ? '' : 'pr-card'}">
 								{#if r.state}
 									<span class="inline-flex items-center gap-1.5 text-ink-soft">
 										<span class="size-2 rounded-full {TONE_DOT[r.state.tone]}"></span>{r.state
@@ -193,11 +204,13 @@
 									<span class="text-ink-muted">-</span>
 								{/if}
 							</td>
-							<td
-								class="{TD} pr-6 text-right whitespace-nowrap text-ink-soft {hasLoad || hasCap
-									? ''
-									: 'pr-card'}">{r.vms.toLocaleString('en-US')}</td
-							>
+							{#if vmCols}
+								<td
+									class="{TD} pr-6 text-right whitespace-nowrap text-ink-soft {hasLoad || hasCap
+										? ''
+										: 'pr-card'}">{r.vms.toLocaleString('en-US')}</td
+								>
+							{/if}
 							{#if hasLoad}
 								<td class={TD}>
 									{#if r.cpuPct !== undefined}
@@ -272,8 +285,9 @@
 			<p class="px-card py-6 text-center text-[13px] text-ink-muted">Loading hosts...</p>
 		{:else}
 			<p class="px-card py-6 text-center text-[13px] text-ink-muted">
-				No hosts visible. Listing hosts needs node read access; VMs still group by placement in the
-				tree.
+				{vmCols
+					? 'No hosts visible. Listing hosts needs node read access; VMs still group by placement in the tree.'
+					: 'No hosts visible. Listing hosts needs node read access.'}
 			</p>
 		{/if}
 	</Card>

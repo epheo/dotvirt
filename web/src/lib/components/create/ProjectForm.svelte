@@ -6,7 +6,7 @@
 	import { action } from '#lib/resource.svelte.js';
 	import { clusterGate } from '#lib/gates.js';
 	import { inventory } from '#lib/state/inventory.svelte.js';
-	import { networksOff } from '#lib/state/modules.svelte.js';
+	import { networksOff, vmsOff } from '#lib/state/modules.svelte.js';
 	import { ui } from '#lib/state/ui.svelte.js';
 	import { nearestFree, overlapping, suggestSubnet } from '#lib/subnets.js';
 	import { NAME_HINT, validCIDR, validName } from '#lib/validate.js';
@@ -38,6 +38,10 @@
 	const offerNetwork = $derived(!adopt && !networksOff());
 	let withNetwork = $state(true);
 	const network = $derived(offerNetwork && withNetwork);
+	// What runs in it: VMs, or without KubeVirt its workloads, and what an
+	// adopted namespace brings. An unknown state keeps VMs.
+	const runs = $derived(vmsOff() ? 'workloads' : 'VMs');
+	const brings = $derived(vmsOff() ? 'objects' : 'VMs');
 	let netName = $state('');
 	let netTouched = false;
 	// svelte-ignore state_referenced_locally
@@ -180,7 +184,7 @@
 		{#if offerNetwork}
 			<label class="flex cursor-pointer items-center gap-2 text-sm text-ink">
 				<input type="checkbox" class="size-4 accent-accent" bind:checked={withNetwork} />
-				Give it a default network its VMs start on
+				Give it a default network its {runs} start on
 			</label>
 			{#if withNetwork}
 				<div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
@@ -259,9 +263,9 @@
 			{#snippet consequences()}
 				<Consequence tone="info"
 					>{joining
-						? `${namespace} joins ${joinProject}; its VMs show up there, ready to bring into git.`
+						? `${namespace} joins ${joinProject}; its ${brings} show up there, ready to bring into git.`
 						: adopt
-							? `${namespace} becomes a project; its VMs show up there, ready to bring into git.`
+							? `${namespace} becomes a project; its ${brings} show up there, ready to bring into git.`
 							: namespace
 								? `The namespace ${namespace} is created and joins ${name || 'the project'}.`
 								: 'Its first namespace is created with it.'}</Consequence
@@ -273,7 +277,7 @@
 					<Consequence tone={clash.length ? 'warn' : 'ok'}
 						>{clash.length
 							? `Its network overlaps ${clash.map((n) => n.name).join(' and ')}.`
-							: `Its VMs start on ${netName || 'its network'}, ${subnet || 'no range yet'}.`}</Consequence
+							: `Its ${runs} start on ${netName || 'its network'}, ${subnet || 'no range yet'}.`}</Consequence
 					>
 				{/if}
 			{/snippet}
