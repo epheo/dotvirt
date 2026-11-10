@@ -10,11 +10,13 @@ import (
 // The catalog's cluster-scoped kinds, each shown to a caller who may list it
 // cluster-wide. KubeVirt (instancetype.kubevirt.io:view) and CDI
 // (cdi.kubevirt.io:config-reader) grant the first three to every
-// authenticated user wherever they run.
+// authenticated user wherever they run; storage classes come from OpenShift's
+// basic-user or, elsewhere, the operator's dotvirt-storage-catalog.
 var (
 	ssarInstancetypes   = ssarRef{"instancetype.kubevirt.io", "virtualmachineclusterinstancetypes"}
 	ssarPreferences     = ssarRef{"instancetype.kubevirt.io", "virtualmachineclusterpreferences"}
 	ssarStorageProfiles = ssarRef{"cdi.kubevirt.io", "storageprofiles"}
+	ssarStorageClasses  = ssarRef{"storage.k8s.io", "storageclasses"}
 	ssarSnapshotClasses = ssarRef{"snapshot.storage.k8s.io", "volumesnapshotclasses"}
 	// Namespaced, but asked cluster-wide: free capacity is a sum over every
 	// segment, and a partial sum would misstate it.
@@ -28,9 +30,8 @@ var (
 // profile that names none when the caller may list those; free capacity when
 // they may list CSIStorageCapacities. A capacity segment's topology is
 // usually a node's hostname, so the per-segment split also needs nodes. The
-// classes themselves show to every caller: MicroShift, unlike OpenShift,
-// grants authenticated users none, so narrowing them would empty its
-// pickers. The cached sheet is never mutated.
+// classes themselves need list on StorageClasses. The cached sheet is never
+// mutated.
 func (s *Server) handleStorageClasses(w http.ResponseWriter, r *http.Request) {
 	id, c, classes, ok := saCached(s, w, r, s.storage, (*cluster.Client).ListStorageClasses)
 	if !ok {
@@ -43,12 +44,17 @@ func (s *Server) handleStorageClasses(w http.ResponseWriter, r *http.Request) {
 	}
 	// Cluster-wide questions only, so no view; a failed review reads as no.
 	lists, _, _ := s.askEach(r.Context(), id, c, []question{
+		refQ(verbList, ssarStorageClasses, ""),
 		refQ(verbList, ssarStorageProfiles, ""),
 		refQ(verbList, ssarSnapshotClasses, ""),
 		refQ(verbList, ssarCSICapacities, ""),
 		refQ(verbList, ssarNodes, ""),
 	})
-	profiles, snapshots, free, nodes := lists[0], lists[1], lists[2], lists[3]
+	if !lists[0] {
+		writeJSON(w, out)
+		return
+	}
+	profiles, snapshots, free, nodes := lists[1], lists[2], lists[3], lists[4]
 	for _, sc := range classes {
 		c := sc.StorageClassInfo
 		if !profiles {

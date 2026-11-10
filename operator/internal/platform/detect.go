@@ -4,6 +4,10 @@
 package platform
 
 import (
+	"slices"
+
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/discovery"
 	"k8s.io/client-go/rest"
 )
@@ -36,4 +40,24 @@ func Detect(cfg *rest.Config) (Platform, error) {
 		}
 	}
 	return Kubernetes, nil
+}
+
+// ServesClusterVersion reports whether the cluster serves
+// config.openshift.io/v1 clusterversions: a full OpenShift, which its cluster
+// version operator runs. Detect reads MicroShift as OpenShift (it serves
+// route.openshift.io, and some config.openshift.io kinds), but MicroShift has
+// no cluster version.
+func ServesClusterVersion(cfg *rest.Config) (bool, error) {
+	dc, err := discovery.NewDiscoveryClientForConfig(cfg)
+	if err != nil {
+		return false, err
+	}
+	list, err := dc.ServerResourcesForGroupVersion("config.openshift.io/v1")
+	if apierrors.IsNotFound(err) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	return slices.ContainsFunc(list.APIResources, func(r metav1.APIResource) bool { return r.Name == "clusterversions" }), nil
 }

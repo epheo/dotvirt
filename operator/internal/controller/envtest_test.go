@@ -197,8 +197,8 @@ func TestEnvtest(t *testing.T) {
 		if err := admin.List(ctx, &crbs, client.MatchingLabels{install.InstanceLabel: dv.Name}); err != nil {
 			t.Fatal(err)
 		}
-		if len(crbs.Items) != 3 {
-			t.Errorf("instance ClusterRoleBindings = %d, want 3", len(crbs.Items))
+		if len(crbs.Items) != 4 {
+			t.Errorf("instance ClusterRoleBindings = %d, want 4", len(crbs.Items))
 		}
 		appset := install.ApplicationSet(got, "argocd", nil, nil)
 		if err := admin.Get(ctx, client.ObjectKeyFromObject(appset), argoObj("ApplicationSet", "", "", nil)); err != nil {
