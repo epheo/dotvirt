@@ -16,9 +16,9 @@ import (
 // listing parses the SA mirrors, deploying renders in-process and stages the
 // VM into the caller's draft - the PR merge stays the apply boundary.
 
-// handleTemplates lists the caller's libraries: their RBAC-visible projects
-// plus the shared platform library. The shared library lists for every
-// authenticated caller - catalog stance, like /api/options.
+// handleTemplates lists the caller's libraries: the projects whose repo they
+// may read (readsRepo, the RepoRead cap) plus the shared platform library,
+// which lists for every authenticated caller.
 func (s *Server) handleTemplates(w http.ResponseWriter, r *http.Request) {
 	id, c, err := s.userCluster(r)
 	if err != nil {
@@ -35,7 +35,7 @@ func (s *Server) handleTemplates(w http.ResponseWriter, r *http.Request) {
 		s.appendTemplates(&list, platformProjectName, s.cfg.PlatformRepo)
 	}
 	for _, p := range projs {
-		if p.Repo != "" {
+		if p.Repo != "" && s.readsRepo(r.Context(), scope{id, c, p}, "") == nil {
 			s.appendTemplates(&list, p.Name, p.Repo)
 		}
 	}
@@ -81,11 +81,12 @@ func (s *Server) handleDeployTemplate(w http.ResponseWriter, r *http.Request) {
 
 // libraryFor resolves the library a request names: empty or the target's own
 // name -> the target project; "platform" -> the shared library; any other name ->
-// one of the caller's visible projects (never a repo the caller can't read).
+// one of the caller's visible projects. A project library is its repo's
+// content, so it needs the repo read (gateRepo).
 func (s *Server) libraryFor(w http.ResponseWriter, r *http.Request, sc scope, library string) (project.ProjectInfo, bool) {
 	switch library {
 	case "", sc.proj.Name:
-		return sc.proj, true
+		return sc.proj, s.gateRepo(w, r, sc, "")
 	case platformProjectName:
 		if s.cfg.PlatformRepo == "" {
 			fail(w, fmt.Errorf("%w: platform repo not configured (set -platform-repo)", model.ErrUnavailable))
@@ -100,7 +101,7 @@ func (s *Server) libraryFor(w http.ResponseWriter, r *http.Request, sc scope, li
 	}
 	for _, p := range projs {
 		if p.Name == library {
-			return p, true
+			return p, s.gateRepo(w, r, scope{sc.id, sc.cluster, p}, "")
 		}
 	}
 	fail(w, fmt.Errorf("%w: library %q", model.ErrNotFound, library))
