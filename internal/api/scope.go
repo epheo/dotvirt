@@ -135,6 +135,14 @@ func (v callerView) shows(backing, namespace string) bool {
 	return v.names[namespace] && v.listsBacking(backing, namespace)
 }
 
+// showsInProject is shows in a project namespace. The views listing
+// namespaced objects (networks, policies) show those in projects only,
+// whatever else the caller may see: the cluster's own namespaces are not
+// customers'.
+func (v callerView) showsInProject(backing, namespace string) bool {
+	return v.memo.ns[namespace] && v.shows(backing, namespace)
+}
+
 // listsBacking is lists by the Kubernetes kind that backs a row. A kind the
 // table does not name is not shown: unknown never opens anything.
 func (v callerView) listsBacking(backing, namespace string) bool {
@@ -273,16 +281,6 @@ func review[V any](ctx context.Context, cache *ttlcache.Cache[V], key string, ve
 		defer cancel()
 		return fill(ctx)
 	})
-}
-
-// noVMs reports a known absence of KubeVirt. Until discovery has answered, VMs
-// are assumed: a namespace admin sees nothing for a moment, never too much.
-func (s *Server) noVMs() bool {
-	if s.modules == nil {
-		return false
-	}
-	m, ok := s.modules.Get()
-	return ok && !m.VMs
 }
 
 // visibleFor is the namespaces viewFor shows.

@@ -224,9 +224,9 @@ func (s *Server) handleNetworks(w http.ResponseWriter, r *http.Request) {
 }
 
 // scopeNetworks is the catalog one caller sees: project networks in the
-// namespaces they can see, and shared networks published to at least one of
-// them, its Namespaces narrowed to those (a shared network's name and its
-// other namespaces echo other tenants). A caller with platform networking
+// project namespaces they can see, and shared networks published to at least
+// one of them, its Namespaces narrowed to those (a shared network's name and
+// its other namespaces echo other tenants). A caller with platform networking
 // authority (all) sees every shared network, published or not, to fix it.
 func scopeNetworks(nets []model.Network, v callerView, all bool) []model.Network {
 	out := make([]model.Network, 0, len(nets))
@@ -237,7 +237,7 @@ func scopeNetworks(nets []model.Network, v callerView, all bool) []model.Network
 			// fresh slice: the cached catalog's is never written.
 			var published []string
 			for _, ns := range n.Namespaces {
-				if v.shows(model.KindNAD.Kind, ns) {
+				if v.showsInProject(model.KindNAD.Kind, ns) {
 					published = append(published, ns)
 				}
 			}
@@ -245,7 +245,7 @@ func scopeNetworks(nets []model.Network, v callerView, all bool) []model.Network
 			if all || len(n.Namespaces) > 0 {
 				out = append(out, n)
 			}
-		case v.shows(n.Backing, n.Namespace):
+		case v.showsInProject(n.Backing, n.Namespace):
 			out = append(out, n)
 		}
 	}
@@ -357,8 +357,8 @@ func findNetwork(nets []model.Network, key string) (model.Network, bool) {
 // scopeNetworkRules applies the policy plane's visibility to one network's
 // rules. A binding governs the caller's own VMs, so it stays, redacted like
 // the effective view. A peer rule in another namespace shows only where the
-// caller sees that namespace; a cluster rule naming these VMs governs them
-// too, so it stays, redacted. drift attaches each kept policy's apply state
+// policy plane lists it, a project namespace the caller sees; a cluster rule
+// naming these VMs governs them too, so it stays, redacted. drift attaches each kept policy's apply state
 // first, so the redactor sees, and hides, a cluster rule's apply error.
 func scopeNetworkRules(in model.NetworkRules, v callerView, drift func(*model.Policy), redact func(*model.Policy, *model.PolicyRuleView)) model.NetworkRules {
 	for i := range in.Applies {
@@ -367,7 +367,7 @@ func scopeNetworkRules(in model.NetworkRules, v callerView, drift func(*model.Po
 	}
 	reaches := make([]model.PeerRule, 0, len(in.Reaches))
 	for _, pr := range in.Reaches {
-		if ns := pr.Policy.Namespace; ns != "" && !v.shows(pr.Policy.Backing, ns) {
+		if ns := pr.Policy.Namespace; ns != "" && !v.showsInProject(pr.Policy.Backing, ns) {
 			continue
 		}
 		drift(&pr.Policy)

@@ -43,6 +43,27 @@ describe('inventory.apply', () => {
 });
 
 describe('inventory authoring signal', () => {
+	it('offers what writes a VM only where the caller may change VMs', () => {
+		inventory.apply({
+			projects: [
+				{
+					name: 'p',
+					repo: 'https://forge/p.git',
+					namespaces: [
+						{ namespace: 'web', vms: [], canAuthor: true, canAuthorVMs: true },
+						// Rules and networks only: it takes changes, but not VM ones.
+						{ namespace: 'net', vms: [], canAuthor: true, canAuthorVMs: false },
+						{ namespace: 'tmp', vms: [], canAuthor: true },
+					],
+				},
+			],
+		} as unknown as Inventory);
+		expect(inventory.namespaces).toEqual(['web', 'net', 'tmp']);
+		expect(inventory.vmNamespaces).toEqual(['web']);
+		expect(inventory.canAuthorVMs('web')).toBe(true);
+		expect(inventory.canAuthorVMs('net')).toBe(false);
+		expect(inventory.canAuthorVMs('tmp')).toBe(false);
+	});
 	it('offers staging only where the frame grants it, failing closed on no verdict', () => {
 		inventory.apply({
 			projects: [

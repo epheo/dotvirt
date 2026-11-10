@@ -37,7 +37,7 @@
 	const sheet = useSheet();
 	// svelte-ignore state_referenced_locally
 	const opener = inventory.projectOf(namespace);
-	const places = $derived(inventory.namespaces);
+	const places = $derived(inventory.vmNamespaces);
 	$effect(() => {
 		const list = places;
 		untrack(() => {

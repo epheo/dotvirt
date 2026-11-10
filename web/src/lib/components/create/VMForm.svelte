@@ -68,7 +68,7 @@
 	const options = $derived(inventory.options);
 	// Every place the caller may stage into, the opener's project first; an
 	// opener that narrowed the list (a project's "New VM here") picks the start.
-	const places = $derived(inventory.namespaces);
+	const places = $derived(inventory.vmNamespaces);
 	// svelte-ignore state_referenced_locally
 	const opener = inventory.projectOf(namespace || namespaces?.[0] || '');
 	$effect(() => {

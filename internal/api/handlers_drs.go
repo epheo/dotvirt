@@ -63,12 +63,23 @@ func (s *Server) listsDescheduler(r *http.Request) bool {
 	return err == nil && s.capable(r.Context(), id, c, descheduleRead)
 }
 
+// drsKinds are what enabling stages that a cluster may not serve: the operator
+// install goes through OLM, PSI through the machine-config operator. The
+// KubeDescheduler kind itself arrives with that install, so it is not asked.
+var drsKinds = []model.Kind{model.KindSub, model.KindOpGroup, model.KindMachCfg}
+
 // handleDRSEnable stages the DRS (descheduler) file set - operator install +
 // KubeDescheduler CR, optionally the PSI MachineConfig, which reboots the
 // worker pool when merged - into the platform draft.
 func (s *Server) handleDRSEnable(w http.ResponseWriter, r *http.Request) {
-	raw, _, ok := readBody[struct{}](w, r, false)
+	raw, spec, ok := readBody[struct {
+		InstallPSI bool `json:"installPSI"`
+	}](w, r, false)
 	if !ok {
+		return
+	}
+	if !s.gateServed(w, r, model.KindSub) || !s.gateServed(w, r, model.KindOpGroup) ||
+		spec.InstallPSI && !s.gateServed(w, r, model.KindMachCfg) {
 		return
 	}
 	sc, ok := s.platformScopeGated(w, r)

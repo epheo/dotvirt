@@ -19,7 +19,7 @@
 	// Only namespaces the caller may stage into: adopting anywhere else 403s.
 	const scoped = $derived(
 		(namespace ? [namespace] : (p?.namespaces.map((n) => n.namespace) ?? [])).filter((ns) =>
-			inventory.canAuthor(ns),
+			inventory.canAuthorVMs(ns),
 		),
 	);
 	// Untracked VMs, project networks and rules in the scope; the capture itself
