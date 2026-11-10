@@ -3,7 +3,6 @@ package api
 import (
 	"context"
 	"log"
-	"sync"
 	"time"
 
 	"github.com/epheo/dotvirt/internal/auth"
@@ -64,7 +63,7 @@ func (s *Server) proposalsFor(id auth.Identity, projects []project.ProjectInfo, 
 	out := []model.Proposal{}
 	hit, cold := false, false
 	tracked, readsPlatform := s.trackProposals(id, projects, keepPlatform)
-	partial := sync.OnceValue(func() map[string]bool { return s.partialProjects(tracked) })
+	partial := s.partialProjects(tracked)
 	for _, p := range tracked {
 		rows, ok := s.proposals.Get(p.Name)
 		if !ok {
@@ -72,7 +71,7 @@ func (s *Server) proposalsFor(id auth.Identity, projects []project.ProjectInfo, 
 			continue
 		}
 		hit = true
-		if len(rows) > 0 && partial()[p.Name] {
+		if partial[p.Name] {
 			out = append(out, s.ownRows(id, p, rows)...)
 			continue
 		}

@@ -15,6 +15,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime/schema"
 
 	"github.com/epheo/dotvirt/internal/auth"
+	"github.com/epheo/dotvirt/internal/eventbus"
 	"github.com/epheo/dotvirt/internal/model"
 	"github.com/epheo/dotvirt/internal/project"
 	"github.com/epheo/dotvirt/internal/tasks"
@@ -247,4 +248,41 @@ func TestReadRefusalsSpeakOfReading(t *testing.T) {
 	if body := rec.Body.String(); !strings.Contains(body, needForRead) || strings.Contains(body, needForChange) {
 		t.Errorf("refusal = %q", body)
 	}
+}
+
+// The shared project list costs one Resolve per namespace change and follows
+// every one: a repo annotation and a project label included.
+func TestProjectsResolveOncePerNamespaceChange(t *testing.T) {
+	bus := eventbus.New()
+	st, kube, _ := watchedState(t, bus, &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{
+		Name:        "a",
+		Labels:      map[string]string{"dotvirt.io/project": "p"},
+		Annotations: map[string]string{"dotvirt.io/repo": "https://x/one.git"},
+	}})
+	s := NewServer(Deps{State: st, Bus: bus, Reader: &fakeDraft{}, Draft: &fakeDraft{}, Resolver: project.NewResolver("dotvirt.io/project", "dotvirt.io/repo", "")})
+	if first, second := s.AllProjects(), s.AllProjects(); len(first) != 1 || &first[0] != &second[0] {
+		t.Errorf("a quiet cluster resolved twice: %+v", first)
+	}
+	update := func(change func(*corev1.Namespace)) {
+		t.Helper()
+		ns, err := kube.CoreV1().Namespaces().Get(context.Background(), "a", metav1.GetOptions{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		change(ns)
+		if _, err := kube.CoreV1().Namespaces().Update(context.Background(), ns, metav1.UpdateOptions{}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	update(func(ns *corev1.Namespace) { ns.Annotations["dotvirt.io/repo"] = "https://x/two.git" })
+	waitUntil(t, "the new repo", func() bool {
+		p, ok := s.projectByName("p")
+		return ok && p.Repo == "https://x/two.git"
+	})
+	update(func(ns *corev1.Namespace) { ns.Labels["dotvirt.io/project"] = "q" })
+	waitUntil(t, "the new project", func() bool {
+		_, gone := s.projectByName("p")
+		_, there := s.projectByName("q")
+		return !gone && there
+	})
 }

@@ -789,7 +789,7 @@ func (s *Server) readsRepo(ctx context.Context, sc scope, namespace string) erro
 	}
 	namespaces := []string{namespace}
 	if namespace == "" {
-		if seesPartOf(s.AllProjects(), sc.proj) {
+		if s.seesPartOf(sc.proj) {
 			return fmt.Errorf("%w: this needs every namespace of %s in your view", model.ErrForbidden, sc.proj.Name)
 		}
 		namespaces = sc.proj.Namespaces
