@@ -92,11 +92,12 @@ func (s *Server) tenancyCap(ctx context.Context, id auth.Identity, c *cluster.Cl
 func (s *Server) clusterCaps(ctx context.Context, id auth.Identity, c *cluster.Client) model.ClusterCaps {
 	out := model.ClusterCaps{ImageUpload: s.cfg.UploadProxyURL != ""}
 	fields := []capField{{&out.Hosts, ask(verbList, ssarNodes, "")}}
+	var un map[model.Kind]bool
 	if s.replication != nil && s.replication.Started() {
 		fields = append(fields, capField{&out.Replication, replicationRead}, capField{&out.ReplicationRepair, replicationRepair})
 	}
 	if s.cfg.PlatformRepo != "" {
-		un := s.unserved(ctx, model.KindCUDN, model.KindNNCP, model.KindEgressIP, model.KindExtRoute, model.KindANP, model.KindBANP)
+		un = s.unserved(ctx, model.KindCUDN, model.KindNNCP, model.KindEgressIP, model.KindExtRoute, model.KindANP, model.KindBANP, model.KindUDN)
 		fields = append(fields, objectFields(&out.Network, model.KindCUDN, "", un)...)
 		fields = append(fields, objectFields(&out.Uplink, model.KindNNCP, "", un)...)
 		fields = append(fields, objectFields(&out.EgressIP, model.KindEgressIP, "", un)...)
@@ -117,7 +118,9 @@ func (s *Server) clusterCaps(ctx context.Context, id auth.Identity, c *cluster.C
 		return out
 	}
 	out.NamespaceCreate = s.newProjectCap(ctx, id, c, `{"name":"`+newNamespace+`"}`)
-	out.VMNetwork = s.newProjectCap(ctx, id, c, `{"name":"`+newNamespace+`","vmNetwork":{"name":"vm-network","subnet":"10.0.0.0/24"}}`)
+	if !un[model.KindUDN] {
+		out.VMNetwork = s.newProjectCap(ctx, id, c, `{"name":"`+newNamespace+`","vmNetwork":{"name":"vm-network","subnet":"10.0.0.0/24"}}`)
+	}
 	owners, _ := json.Marshal([]string{id.Username})
 	out.GrantAdmin = s.newProjectCap(ctx, id, c, `{"name":"`+newNamespace+`","owners":`+string(owners)+`}`)
 	out.DRSEnable, out.DRSPSI, out.DRSDisable = s.drsCaps(ctx, id, c)
