@@ -31,7 +31,7 @@
 	const projectPRs = $derived(inventory.proposals.filter((p) => p.project === project));
 	$effect(() => {
 		inventory.proposalsKey;
-		for (const p of untrack(() => projectPRs)) reviewCache.loadProposal(p.project, p.prNumber);
+		untrack(() => reviewCache.loadProposals(projectPRs));
 	});
 	const reviewOf = (p: { project: string; prNumber: number }) =>
 		reviewCache.proposal(p.project, p.prNumber);

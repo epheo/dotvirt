@@ -435,8 +435,9 @@
 				{@const appr = approvalLine(p)}
 				{@const chk = checksPill(p)}
 				<!-- Another's pull request reads the whole repo here; the forge
-				serves it to whoever it lets in. -->
-				{@const here = p.mine || repoRead(p.project).ok}
+				serves it to whoever it lets in. A PR with no branch in the repo
+				(a fork's) has no review here. -->
+				{@const here = !!p.branch && (p.mine || repoRead(p.project).ok)}
 				{#snippet cells()}
 					<span class="flex items-center gap-2">
 						<GitPullRequest size={14} class="shrink-0 text-accent-ink" />

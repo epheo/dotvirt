@@ -113,7 +113,7 @@ func (r *Reader) Proposal(proj project.ProjectInfo, number int) (model.ProposalD
 		return model.ProposalDetail{}, forgeFailed(fmt.Sprintf("pull request #%d", number), err)
 	}
 	if pr.HeadBranch() == "" {
-		return model.ProposalDetail{}, fmt.Errorf("%w: pull request #%d comes from another repository; review it in the forge", model.ErrInvalid, number)
+		return model.ProposalDetail{}, fmt.Errorf("%w: pull request #%d has no branch in this repository; review it in the forge", model.ErrInvalid, number)
 	}
 	files, err := read.BranchDiff(r.baseBranch, pr.HeadBranch())
 	if errors.Is(err, git.ErrNoBranch) {
