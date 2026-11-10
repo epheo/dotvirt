@@ -49,7 +49,7 @@ export function deriveIssues(
 		alerts?: Alert[];
 		canRepair?: (p: Project) => boolean;
 		network?: NetProblem[];
-		// Tenant repos may apply any namespaced kind but the denied ones.
+		// Tenant repos may apply kinds a provider allowed beyond the listed ones.
 		extraTenantKinds?: boolean;
 	} = {},
 ): Issue[] {

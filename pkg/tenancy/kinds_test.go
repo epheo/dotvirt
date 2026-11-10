@@ -22,6 +22,8 @@ func TestAllowTenantKinds(t *testing.T) {
 		GroupKind{"", "LimitRange"},
 		GroupKind{"operators.coreos.com", "CatalogSource"},
 		GroupKind{"kubevirt.io", "KubeVirt"},
+		GroupKind{"hco.kubevirt.io", "HyperConverged"},
+		GroupKind{"ssp.kubevirt.io", "SSP"},
 		GroupKind{"argoproj.io", "Application"},
 		GroupKind{"external-secrets.io", "ExternalSecret"},
 		GroupKind{"forklift.konveyor.io", "Plan"},
@@ -35,8 +37,8 @@ func TestAllowTenantKinds(t *testing.T) {
 	if want := []GroupKind{{"apps", "Deployment"}, {"", "Service"}}; !slices.Equal(allowed, want) {
 		t.Errorf("allowed = %v, want %v", allowed, want)
 	}
-	if len(refused) != 16 {
-		t.Errorf("refused %d kinds, want 16 (each once): %v", len(refused), refused)
+	if len(refused) != 18 {
+		t.Errorf("refused %d kinds, want 18 (each once): %v", len(refused), refused)
 	}
 	if a, r := AllowTenantKinds(); a != nil || r != nil {
 		t.Errorf("none named: %v, %v", a, r)

@@ -108,7 +108,8 @@ func (g GroupKind) Covers(group, kind string) bool {
 //     RBAC APIs (OpenShift's authorization.openshift.io still writes real
 //     bindings);
 //   - what installs or configures with rights beyond the project: OLM, which
-//     installs operators with cluster rights; KubeVirt's own configuration;
+//     installs operators with cluster rights; KubeVirt's own configuration,
+//     its HyperConverged and SSP operators included;
 //     Argo CD's own objects, which an instance reading Applications in any
 //     namespace would run;
 //   - controllers that act with their own cluster rights on a namespaced
@@ -122,6 +123,8 @@ var deniedBase = []GroupKind{
 	{"", "LimitRange"},
 	{"operators.coreos.com", "*"},
 	{"kubevirt.io", "KubeVirt"},
+	{"hco.kubevirt.io", "*"},
+	{"ssp.kubevirt.io", "*"},
 	{"argoproj.io", "*"},
 	{"external-secrets.io", "*"},
 	{"forklift.konveyor.io", "*"},
