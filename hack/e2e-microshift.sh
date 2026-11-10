@@ -411,6 +411,16 @@ trap 'rc=$?; kill ${PF_PIDS} 2>/dev/null || true; [ ${rc} -ne 0 ] && diagnostics
 BASE="http://127.0.0.1:18080"
 FORGE="http://127.0.0.1:13000"
 retry "dotvirt healthz" 120 curl -fsS --max-time 10 "${BASE}/api/healthz"
+# The node's network is where a HostNetwork router or Gateway sits: the operand
+# NetworkPolicy admits it only through openshift-host-network's policy group,
+# without which such an edge answers 502. The ceiling outlasts a few hung execs.
+host_reaches_dotvirt() {
+	local ip
+	ip="$(kc -n dotvirt get pod -l app=dotvirt --field-selector=status.phase=Running \
+		-o jsonpath='{.items[0].status.podIP}')" && [ -n "${ip}" ] \
+		&& pexec curl -fsS -o /dev/null --max-time 10 "http://${ip}:8080/api/healthz"
+}
+retry "dotvirt answers the node's host network" 300 host_reaches_dotvirt
 
 # Caller token: the loop runs as a real (admin) user, exactly like production.
 kc -n dotvirt create serviceaccount e2e-admin --dry-run=client -o yaml | kc apply -f -
