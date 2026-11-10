@@ -1,11 +1,12 @@
 // Package publish renders what turning publishing on stages into the platform
-// repo for a project namespace: its Gateway and, with an issuer, the wildcard
+// repo for a project: its Gateway and, with an issuer, the wildcard
 // certificate the Gateway's HTTPS listener serves.
 //
-// The Gateway sits in the namespace it publishes. A namespace's VMs may be
-// on its own primary network, which only a gateway joined to it reaches, and
-// a Gateway per namespace owns its hostnames by construction: its listeners
-// take only *.<namespace>.<domain>, and only routes from that namespace.
+// The Gateway sits in one project namespace and serves the others on its
+// network: a primary network is reached only by a gateway joined to it. A
+// Gateway per project owns its hostnames by construction: its listeners take
+// only *.<project>.<domain>, and only routes from namespaces labeled with the
+// project, a label no tenant role may change.
 package publish
 
 import (
@@ -25,9 +26,11 @@ import (
 type Settings struct {
 	Domain       string
 	GatewayClass string
-	// Issuer is a cert-manager ClusterIssuer able to issue each namespace's
+	// Issuer is a cert-manager ClusterIssuer able to issue each project's
 	// wildcard (DNS-01); "" serves HTTP only.
 	Issuer string
+	// ProjectLabel is the namespace label naming a project.
+	ProjectLabel string
 }
 
 // On reports whether the install offers publishing at all.
@@ -40,8 +43,8 @@ const (
 	Certificate = "publish-tls"
 )
 
-// Hostname is ns's listener hostname: *.<ns>.<domain>.
-func Hostname(ns, domain string) string { return "*." + ns + "." + domain }
+// Hostname is a project's listener hostname: *.<project>.<domain>.
+func Hostname(project, domain string) string { return "*." + project + "." + domain }
 
 // File is one platform-repo file publishing stages.
 type File struct {
@@ -51,26 +54,36 @@ type File struct {
 	Content []byte
 }
 
-// Manifests renders ns's Gateway, then its Certificate when s names an issuer.
-func Manifests(s Settings, ns string) ([]File, error) {
+// Manifests renders project's Gateway in ns, then its Certificate when s
+// names an issuer.
+func Manifests(s Settings, project, ns string) ([]File, error) {
 	if !s.On() {
 		return nil, errors.New("publishing needs a domain and a GatewayClass")
 	}
+	if err := validate.RequireDNS1123("project", project); err != nil {
+		return nil, err
+	}
 	if err := validate.RequireDNS1123("namespace", ns); err != nil {
+		return nil, err
+	}
+	if err := validate.RequireLabelKey("project label", s.ProjectLabel); err != nil {
 		return nil, err
 	}
 	if errs := validation.IsDNS1123Subdomain(s.Domain); len(errs) > 0 {
 		return nil, fmt.Errorf("publish domain %q: %s", s.Domain, strings.Join(errs, "; "))
 	}
-	host := Hostname(ns, s.Domain)
+	host := Hostname(project, s.Domain)
 	if errs := validation.IsWildcardDNS1123Subdomain(host); len(errs) > 0 {
 		return nil, fmt.Errorf("hostname %q: %s", host, strings.Join(errs, "; "))
 	}
-	// Same namespace and HTTPRoute only: another namespace's route, or a TCP
-	// or TLS route, never attaches here.
+	// The project's namespaces and HTTPRoute only: another project's route,
+	// or a TCP or TLS route, never attaches here.
 	allowed := map[string]any{
-		"namespaces": map[string]any{"from": "Same"},
-		"kinds":      []any{map[string]any{"kind": "HTTPRoute"}},
+		"namespaces": map[string]any{
+			"from":     "Selector",
+			"selector": map[string]any{"matchLabels": map[string]any{s.ProjectLabel: project}},
+		},
+		"kinds": []any{map[string]any{"kind": "HTTPRoute"}},
 	}
 	listeners := []any{map[string]any{
 		"name": "http", "protocol": "HTTP", "port": 80, "hostname": host, "allowedRoutes": allowed,

@@ -175,39 +175,46 @@ forge to a Gateway someone else runs. Two things stay with whoever runs it:
 
 ## Publishing
 
-With `spec.publishing` a platform admin may turn publishing on for a project
-namespace. The platform repo then gains, for that namespace:
+With `spec.publishing` a platform admin may turn publishing on for a project. The
+platform repo then gains:
 
-- a Gateway `publish` of `gatewayClassName`, whose listeners take only
-  `*.<namespace>.<domain>` and only HTTPRoutes from that namespace;
+- one Gateway `publish` of `gatewayClassName`, in a project namespace, whose
+  listeners take only `*.<project>.<domain>` and only HTTPRoutes from namespaces
+  labeled with the project (`dotvirt.io/project`), a label no tenant role may change;
 - with `clusterIssuer`, a cert-manager Certificate for that wildcard and an HTTPS
   listener serving it;
-- `<namespace>-routes`, binding `dotvirt-tenant-routes` (HTTPRoute writes) to the
-  subjects of the namespace's admin grant and the project's sync account. It is left
-  out where the cluster's `admin` role already writes HTTPRoutes (OpenShift).
+- `<namespace>-routes` in each namespace the Gateway reaches, binding
+  `dotvirt-tenant-routes` (HTTPRoute writes) to the subjects of that namespace's
+  admin grant and the project's sync account. It is left out where the cluster's
+  `admin` role already writes HTTPRoutes (OpenShift).
+
+The Gateway reaches the project namespaces on its network: it goes in the first
+namespace of the project's largest network, and stays where git holds it. A
+namespace with a VM Network of its own is not reached; a customer who wants a
+gateway there runs their own, which is outside dotvirt for now (Gateway stays a
+platform kind: a tenant listener could claim any hostname). A namespace that joins
+the project later gets its grant from "Update publishing" on the project card.
 
 Settings:
 
-- `domain`: the zone each namespace gets a subdomain of.
-- `gatewayClassName`: the class of each namespace's Gateway.
-- `clusterIssuer` (optional): a ClusterIssuer able to issue each namespace's
+- `domain`: the zone each project gets a subdomain of.
+- `gatewayClassName`: the class of each project's Gateway.
+- `clusterIssuer` (optional): a ClusterIssuer able to issue each project's
   wildcard, so DNS-01. Without it the Gateways serve HTTP only.
 
 Publishing is off until `domain` and `gatewayClassName` are both set.
 
 What stays with the platform:
 
-- DNS. Each namespace's Gateway has its own address, so `*.<domain>` cannot point
-  at one IP. Point `*.<namespace>.<domain>` at that namespace's Gateway: by hand
-  per publishing namespace, or with external-dns reading Gateway API routes.
-  dotvirt writes no DNS records.
-- The Gateway's address. Its Service is the GatewayClass's default; whether a
-  LoadBalancer Service is reachable on a namespace with its own VM Network is not
-  verified yet.
-- A namespace with its own VM Network is not offered publishing yet. Its gateway
-  reaches portail's controller only through the apiserver, where portail counts
-  polls per source address: one namespace could delay the others' route changes.
-  It waits on a portail release that limits polls per Gateway.
+- DNS and addresses. Point `*.<domain>` at your edge, which routes each project's
+  hostnames to its Gateway; a project with its own address gets its DNS pointed
+  straight at it. Giving a project's Gateway an address is a platform-repo change a
+  platform admin stages, never the tenant's. dotvirt writes no DNS records.
+- The Gateway's Service is the GatewayClass's default; whether a LoadBalancer
+  Service is reachable on a VM Network is not verified yet.
+- A project on a VM Network is not offered publishing yet. Its gateway reaches
+  portail's controller only through the apiserver, where one project could delay
+  the others' route changes. It waits on a portail release that isolates Gateways.
 - Shared Gateways. HTTPRoute write lets a namespace attach routes to any Gateway
   whose listeners admit its namespace. A Gateway shared across projects must keep
   `allowedRoutes` at `Same` or a selector of platform namespaces, or it serves

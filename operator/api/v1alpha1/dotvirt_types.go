@@ -208,21 +208,21 @@ type AuthSpec struct {
 	OpenShiftSSO bool `json:"openShiftSSO,omitempty"`
 }
 
-// PublishingSpec lets a platform admin turn publishing on for a project
-// namespace: a Gateway there whose listeners take only that namespace's
-// routes, on *.<namespace>.<domain>. The platform names the domain, so no
-// project can ask for another's hostnames. Domain or GatewayClassName empty
-// leaves publishing off.
+// PublishingSpec lets a platform admin turn publishing on for a project: one
+// Gateway in a project namespace, whose listeners take only routes from the
+// project's namespaces, on *.<project>.<domain>. The platform names the
+// domain, so no project can ask for another's hostnames. Domain or
+// GatewayClassName empty leaves publishing off.
 type PublishingSpec struct {
-	// Domain is the DNS zone each publishing namespace gets a subdomain of.
-	// The platform points each *.<namespace>.<domain> at that namespace's
+	// Domain is the DNS zone each publishing project gets a subdomain of.
+	// The platform points each *.<project>.<domain> at that project's
 	// Gateway address; dotvirt writes no DNS.
 	// +kubebuilder:validation:Pattern=`^([a-z0-9]([-a-z0-9]*[a-z0-9])?\.)*[a-z0-9]([-a-z0-9]*[a-z0-9])?$`
 	Domain string `json:"domain,omitempty"`
-	// GatewayClassName is the GatewayClass of each namespace's Gateway.
+	// GatewayClassName is the GatewayClass of each project's Gateway.
 	GatewayClassName string `json:"gatewayClassName,omitempty"`
 	// ClusterIssuer is a cert-manager ClusterIssuer able to issue each
-	// namespace's wildcard (DNS-01). Empty: the Gateways serve HTTP only.
+	// project's wildcard (DNS-01). Empty: the Gateways serve HTTP only.
 	ClusterIssuer string `json:"clusterIssuer,omitempty"`
 }
 

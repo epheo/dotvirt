@@ -39,8 +39,8 @@ const TenantEgressViewRole = "dotvirt-tenant-egress-view"
 
 // TenantRoutesRole is the ClusterRole granting HTTPRoute writes where the
 // admin role lacks them (Gateway API ships no tenant role), bound in a
-// publishing namespace to the same subjects as its admin grant
-// (RoutesBinding). Never aggregated: only a namespace with publishing on
+// namespace a project's Gateway reaches to the same subjects as its admin
+// grant (RoutesBinding). Never aggregated: only a namespace publishing reaches
 // holds it.
 const TenantRoutesRole = "dotvirt-tenant-routes"
 
@@ -90,8 +90,8 @@ func AdminBinding(ns string) string { return ns + "-admins" }
 // TenantEgressRole: the project's people and its repo hold the same rights.
 func EgressBinding(ns string) string { return ns + "-egress" }
 
-// RoutesBinding is the platform repo's RoleBinding granting a publishing
-// namespace's admin-grant subjects TenantRoutesRole.
+// RoutesBinding is the platform repo's RoleBinding granting the admin-grant
+// subjects of a namespace its project's Gateway reaches TenantRoutesRole.
 func RoutesBinding(ns string) string { return ns + "-routes" }
 
 // Reserved reports whether ns is platform space no tenant Application may

@@ -44,9 +44,17 @@ func (s *Snapshot) primaryDomain(ns string) (key, display string) {
 	return "default", "the cluster default network"
 }
 
-// DeclaresPrimaryUDN reports whether ns holds a Primary-role UDN, realized or
+// declaresPrimaryUDN reports whether ns holds a Primary-role UDN, realized or
 // not.
-func (s *Snapshot) DeclaresPrimaryUDN(ns string) bool { return s.netView().declares[ns] }
+func (s *Snapshot) declaresPrimaryUDN(ns string) bool { return s.netView().declares[ns] }
+
+// PrimaryNetwork names the primary network ns's pods sit on, as primaryDomain
+// keys it: "default" for the cluster's own; namespaces with the same name
+// reach each other's Services.
+func (s *Snapshot) PrimaryNetwork(ns string) string {
+	key, _ := s.primaryDomain(ns)
+	return key
+}
 
 // realized reports whether OVN-K generated the UDN's NAD. It refuses a
 // primary UDN in a namespace created without the primary-UDN label, whose VMs
@@ -258,7 +266,7 @@ func (s *Snapshot) place(src TraceWorkload, key string, addr netip.Addr, view *T
 // namespace declares no primary UDN.
 func (s *Snapshot) onOwn(src TraceWorkload, key string, own []netip.Prefix) bool {
 	if key == "default" && (own == nil || len(src.IPs) == 0) {
-		return !s.DeclaresPrimaryUDN(src.Namespace)
+		return !s.declaresPrimaryUDN(src.Namespace)
 	}
 	return slices.ContainsFunc(src.IPs, func(ip string) bool { return containsIP(own, ip) })
 }

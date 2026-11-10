@@ -596,33 +596,32 @@ async function handleAPI(req, res, url) {
 		return sendJSON(res, 200, draftFor('platform'));
 	}
 
-	// Publishing on in one of the project's namespaces: its Gateway, its
-	// certificate and its route grant, staged in the platform draft; refused
-	// on the capability the UI gates it by.
+	// Publishing for a project: its Gateway and certificate in its first
+	// namespace and each reached namespace's route grant, staged in the
+	// platform draft; refused on the capability the UI gates it by.
 	m = path.match(/^\/api\/projects\/([^/]+)\/publishing$/);
 	if (m && req.method === 'POST') {
 		const p = state.scenario.inventory.projects.find((x) => x.name === m[1]);
-		if (!p) return sendText(res, 404, 'project not found');
-		const { namespace } = (await readBody(req)) ?? {};
-		if (!p.namespaces.some((n) => n.namespace === namespace))
-			return sendText(res, 400, 'namespace not in project');
-		if (!namespaceCaps(s, p, namespace).publishing)
-			return sendText(res, 403, `you may not create gateways in ${namespace}`);
+		if (!p?.namespaces.length) return sendText(res, 404, 'project not found');
+		const first = p.namespaces[0].namespace;
+		const caps = namespaceCaps(s, p, first).project;
+		if (!caps.publishing) return sendText(res, 403, `you may not create gateways in ${first}`);
 		for (const name of ['publish', 'publish-tls'])
 			stageInto('platform', {
 				kind: 'create',
 				resource: 'publishing',
-				namespace,
+				namespace: first,
 				name,
 				changes: [],
 			});
-		stageInto('platform', {
-			kind: 'create',
-			resource: 'rolebinding',
-			namespace,
-			name: `${namespace}-routes`,
-			changes: [],
-		});
+		for (const namespace of caps.publishingReach ?? [first])
+			stageInto('platform', {
+				kind: 'create',
+				resource: 'rolebinding',
+				namespace,
+				name: `${namespace}-routes`,
+				changes: [],
+			});
 		return sendJSON(res, 200, draftFor('platform'));
 	}
 
@@ -938,7 +937,6 @@ function namespaceCaps(s, project, ns) {
 		networkPolicy: objects,
 		egressFirewall: objects,
 		repoRead: true,
-		publishing: false,
 		...override,
 		project: {
 			name: project.name,
@@ -949,6 +947,7 @@ function namespaceCaps(s, project, ns) {
 			grantAdmin: author,
 			release: !project.repo,
 			syncAccess: author && !!project.repo,
+			publishing: false,
 			...override?.project,
 		},
 	};

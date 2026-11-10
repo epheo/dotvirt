@@ -80,35 +80,43 @@
 				</div>
 			{/if}
 			{#if domain && p.namespaces.length}
-				<div class="flex flex-col gap-1.5 border-t border-line-soft px-card py-3">
+				{@const c = caps.ns(projectNS(p))?.project}
+				{@const gate = publishGate.on(projectNS(p))}
+				{@const reach = c?.publishingReach ?? []}
+				{@const apart = p.namespaces
+					.map((n) => n.namespace)
+					.filter((n) => reach.length && !reach.includes(n))}
+				<div class="flex flex-col gap-1.5 border-t border-line-soft px-card py-3 text-[13px]">
 					<span class="text-xs font-semibold text-ink-soft">Publishing</span>
-					{#each p.namespaces as n (n.namespace)}
-						{@const c = caps.ns(n.namespace)}
-						{@const gate = publishGate.on(n.namespace)}
-						<div class="flex flex-wrap items-center gap-2 text-[13px]">
-							<span class="font-mono text-xs">{n.namespace}</span>
-							{#if c?.publishingOn}
-								<span class="text-ink-soft"
-									>On, at <span class="font-mono">*.{n.namespace}.{domain}</span></span
-								>
-							{:else if c?.publishingWaits}
-								<span class="text-ink-muted"
-									>Not yet: a namespace with its own VM Network waits on a portail update.</span
-								>
-							{:else}
-								<Button
-									variant="outline"
-									size="sm"
-									disabled={!gate.ok}
-									title={gate.why}
-									onclick={() =>
-										(ui.modal = { kind: 'publishing', project: p.name, namespace: n.namespace })}
-									>Turn publishing on</Button
-								>
-								<StageChip kind="pr" />
-							{/if}
+					{#if c?.publishingOn}
+						<span class="text-ink-soft"
+							>On, at <span class="font-mono">*.{p.name}.{domain}</span></span
+						>
+					{:else if c?.publishingWaits}
+						<span class="text-ink-muted"
+							>Not yet: a project on a VM Network waits on a portail update.</span
+						>
+					{/if}
+					{#if !c?.publishingWaits && (!c?.publishingOn || c.publishing)}
+						<div class="flex flex-wrap items-center gap-2">
+							<Button
+								variant="outline"
+								size="sm"
+								disabled={!gate.ok}
+								title={gate.why}
+								onclick={() => (ui.modal = { kind: 'publishing', project: p.name })}
+								>{c?.publishingOn ? 'Update publishing' : 'Turn publishing on'}</Button
+							>
+							<StageChip kind="pr" />
 						</div>
-					{/each}
+					{/if}
+					{#if apart.length}
+						<span class="text-ink-muted"
+							>Not reached: {apart.join(', ')}, on a VM Network of {apart.length === 1
+								? 'its'
+								: 'their'} own.</span
+						>
+					{/if}
 				</div>
 			{/if}
 			<!-- Quota-aware capacity: the project's ResourceQuotas. -->

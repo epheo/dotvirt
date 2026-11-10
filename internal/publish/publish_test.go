@@ -7,11 +7,12 @@ import (
 	"sigs.k8s.io/yaml"
 )
 
-// Each listener takes *.<namespace>.<domain> and only that namespace's
-// HTTPRoutes; HTTPS and its certificate come only with an issuer.
+var settings = Settings{Domain: "apps.example.com", GatewayClass: "portail", ProjectLabel: "dotvirt.io/project"}
+
+// Each listener takes *.<project>.<domain> and only HTTPRoutes from the
+// project's namespaces; HTTPS and its certificate come only with an issuer.
 func TestManifests(t *testing.T) {
-	s := Settings{Domain: "apps.example.com", GatewayClass: "portail"}
-	files, err := Manifests(s, "web")
+	files, err := Manifests(settings, "shop", "web")
 	if err != nil || len(files) != 1 || files[0].Path != "publishing/web/publish.yaml" {
 		t.Fatalf("HTTP only: %+v %v", files, err)
 	}
@@ -22,8 +23,13 @@ func TestManifests(t *testing.T) {
 			Listeners        []struct {
 				Name, Hostname, Protocol string
 				AllowedRoutes            struct {
-					Namespaces struct{ From string }
-					Kinds      []struct{ Kind string }
+					Namespaces struct {
+						From     string
+						Selector struct {
+							MatchLabels map[string]string `json:"matchLabels"`
+						}
+					}
+					Kinds []struct{ Kind string }
 				} `json:"allowedRoutes"`
 			}
 		}
@@ -35,18 +41,21 @@ func TestManifests(t *testing.T) {
 		t.Fatalf("Gateway = %+v", gw)
 	}
 	l := gw.Spec.Listeners[0]
-	if l.Hostname != "*.web.apps.example.com" || l.AllowedRoutes.Namespaces.From != "Same" ||
+	ns := l.AllowedRoutes.Namespaces
+	if l.Hostname != "*.shop.apps.example.com" || ns.From != "Selector" || len(ns.Selector.MatchLabels) != 1 ||
+		ns.Selector.MatchLabels["dotvirt.io/project"] != "shop" ||
 		len(l.AllowedRoutes.Kinds) != 1 || l.AllowedRoutes.Kinds[0].Kind != "HTTPRoute" {
 		t.Errorf("listener = %+v", l)
 	}
 
+	s := settings
 	s.Issuer = "letsencrypt"
-	files, err = Manifests(s, "web")
+	files, err = Manifests(s, "shop", "web")
 	if err != nil || len(files) != 2 || files[1].Path != "publishing/web/publish-tls.yaml" {
 		t.Fatalf("with an issuer: %+v %v", files, err)
 	}
 	cert := string(files[1].Content)
-	for _, want := range []string{"secretName: publish-tls", "- '*.web.apps.example.com'", "kind: ClusterIssuer", "name: letsencrypt"} {
+	for _, want := range []string{"secretName: publish-tls", "- '*.shop.apps.example.com'", "kind: ClusterIssuer", "name: letsencrypt"} {
 		if !strings.Contains(cert, want) {
 			t.Errorf("Certificate lacks %q:\n%s", want, cert)
 		}
@@ -54,16 +63,24 @@ func TestManifests(t *testing.T) {
 }
 
 func TestManifestsRefuse(t *testing.T) {
+	long := settings
+	long.Domain = strings.Repeat("a.", 123) + "com"
+	bad := settings
+	bad.Domain = "Apps_Example"
+	nolabel := settings
+	nolabel.ProjectLabel = ""
 	for name, c := range map[string]struct {
-		s  Settings
-		ns string
+		s           Settings
+		project, ns string
 	}{
-		"off":        {Settings{GatewayClass: "portail"}, "web"},
-		"bad domain": {Settings{Domain: "Apps_Example", GatewayClass: "portail"}, "web"},
-		"bad ns":     {Settings{Domain: "apps.example.com", GatewayClass: "portail"}, "Web"},
-		"too long":   {Settings{Domain: strings.Repeat("a.", 123) + "com", GatewayClass: "portail"}, "web"},
+		"off":           {Settings{GatewayClass: "portail", ProjectLabel: "p"}, "shop", "web"},
+		"bad domain":    {bad, "shop", "web"},
+		"bad project":   {settings, "Shop", "web"},
+		"bad ns":        {settings, "shop", "Web"},
+		"no label":      {nolabel, "shop", "web"},
+		"host too long": {long, "shop", "web"},
 	} {
-		if _, err := Manifests(c.s, c.ns); err == nil {
+		if _, err := Manifests(c.s, c.project, c.ns); err == nil {
 			t.Errorf("%s: rendered", name)
 		}
 	}

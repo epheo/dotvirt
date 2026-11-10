@@ -62,7 +62,7 @@ export type AppModal =
 	| { kind: 'adoptProject'; project: string; namespaces: string[]; recover?: boolean }
 	| { kind: 'releaseProject'; project: string; namespaces: string[] }
 	| { kind: 'syncAccess'; project: string }
-	| { kind: 'publishing'; project: string; namespace: string }
+	| { kind: 'publishing'; project: string }
 	| { kind: 'egressFw'; namespaces: string[]; namespace?: string; initial?: EgressFirewallCreate }
 	| { kind: 'projectRule'; namespaces: string[]; namespace?: string; initial?: NetworkPolicyCreate }
 	| { kind: 'clusterEdge'; initial?: EdgeInitial }

@@ -598,10 +598,9 @@ export const api = {
 	// Grant the project's sync account its namespaces' admin binding, in the
 	// platform repo, so ArgoCD may sync the project as that account.
 	syncAccess: (project: string) => post<DraftView>(`/api/projects/${enc(project)}/sync-access`, {}),
-	// Turn publishing on in one of the project's namespaces: its Gateway, its
-	// certificate and its route grant, in the platform repo.
-	publishing: (project: string, namespace: string) =>
-		post<DraftView>(`/api/projects/${enc(project)}/publishing`, { namespace }),
+	// Stage what the project's publishing lacks: its Gateway and certificate,
+	// and the route grant of each namespace it reaches, in the platform repo.
+	publishing: (project: string) => post<DraftView>(`/api/projects/${enc(project)}/publishing`, {}),
 
 	// The template library. Deploy renders server-side
 	// and stages the VM into the draft; save derives a template from a VM's git

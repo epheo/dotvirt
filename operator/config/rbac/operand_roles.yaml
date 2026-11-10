@@ -155,7 +155,7 @@ rules:
   - apiGroups: ["machineconfiguration.openshift.io"]
     resources: ["machineconfigs"]
     verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
-  # Publishing: a namespace's Gateway and its certificate, from the platform repo.
+  # Publishing: a project's Gateway and its certificate, from the platform repo.
   - apiGroups: ["gateway.networking.k8s.io"]
     resources: ["gateways"]
     verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
@@ -200,7 +200,7 @@ rules:
   - apiGroups: ["template.kubevirt.io"]
     resources: ["virtualmachinetemplates"]
     verbs: ["create"]
-  # Turning publishing on for a namespace: its Gateway and certificate.
+  # Turning publishing on for a project: its Gateway and certificate.
   - apiGroups: ["gateway.networking.k8s.io"]
     resources: ["gateways"]
     verbs: ["create"]
@@ -241,8 +241,8 @@ rules:
     verbs: ["get", "list", "watch"]
 ---
 # HTTPRoute writes where the admin role lacks them: Gateway API ships no tenant role.
-# The platform repo binds it in a namespace with publishing on, to the subjects of that
-# namespace's admin grant (<ns>-routes), and re-renders it with that grant. Never
+# The platform repo binds it in each namespace a project's Gateway reaches, to the subjects
+# of that namespace's admin grant (<ns>-routes), and re-renders it with that grant. Never
 # aggregated, so a namespace without publishing holds no route writes. The operator
 # never binds it.
 apiVersion: rbac.authorization.k8s.io/v1

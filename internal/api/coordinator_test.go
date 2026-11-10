@@ -93,7 +93,7 @@ func newCoordinatorRig(t *testing.T, extra ...map[string]string) *gateRig {
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
 	repos := git.NewRepoSet(ctx, "", "", nil, false, nil, time.Hour)
-	publishing := publish.Settings{Domain: "apps.example.com", GatewayClass: "portail", Issuer: "letsencrypt"}
+	publishing := publish.Settings{Domain: "apps.example.com", GatewayClass: "portail", Issuer: "letsencrypt", ProjectLabel: "dotvirt.io/project"}
 	c := changeset.New(store, repos, forge.NewFactory(forgeSrv.URL, forge.StaticToken("tok"), false, ""), nil, nil, nil, "main", "dotvirt/proposed").
 		WithSyncNamespace("dotvirt-sync").WithPublishing(publishing)
 	// The release strips label residue under the caller's token.
@@ -166,10 +166,10 @@ func TestCapabilitiesEqualTheCoordinatorsGate(t *testing.T) {
 			pr(func(p model.ProjectCaps) bool { return p.Adopt })},
 		{"sync access", "team-a-dev", http.MethodPost, "/api/projects/team-a/sync-access", ``,
 			pr(func(p model.ProjectCaps) bool { return p.SyncAccess })},
-		// The Gateway, its certificate and the route grant to team-a-dev's
-		// admin-grant subjects.
-		{"publishing", "team-a-dev", http.MethodPost, "/api/projects/team-a/publishing", `{"namespace":"team-a-dev"}`,
-			func(_ model.ClusterCaps, n model.NamespaceCaps) bool { return n.Publishing }},
+		// The project's Gateway, its certificate and the route grant to
+		// team-a-dev's admin-grant subjects.
+		{"publishing", "team-a-dev", http.MethodPost, "/api/projects/team-a/publishing", ``,
+			pr(func(p model.ProjectCaps) bool { return p.Publishing })},
 		// Reconfiguring: the committed KubeDescheduler is updated, the rest of
 		// the set created.
 		{"drs enable", "", http.MethodPost, "/api/drs", `{"mode":"Predictive"}`,
@@ -312,7 +312,7 @@ func TestNamespaceRightsInsideTheNamespaceCount(t *testing.T) {
 // a namespace whose publishing git holds is told it is on, whatever else it
 // may do there.
 func TestPublishingOnFollowsGatewayReads(t *testing.T) {
-	files, err := publish.Manifests(publish.Settings{Domain: "apps.example.com", GatewayClass: "portail", Issuer: "letsencrypt"}, "team-a-dev")
+	files, err := publish.Manifests(publish.Settings{Domain: "apps.example.com", GatewayClass: "portail", Issuer: "letsencrypt", ProjectLabel: "dotvirt.io/project"}, "team-a", "team-a-dev")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -329,11 +329,11 @@ func TestPublishingOnFollowsGatewayReads(t *testing.T) {
 		published[f.Path] = string(f.Content)
 	}
 	g := newCoordinatorRig(t, published)
-	if _, nc := g.caps(g.token(nil), "team-a-dev"); nc.PublishingOn {
+	if _, nc := g.caps(g.token(nil), "team-a-dev"); nc.Project.PublishingOn {
 		t.Error("on, told to a caller who may not list gateways")
 	}
-	if _, nc := g.caps(g.token([]grant{kind(verbList, model.KindGateway, "team-a-dev")}), "team-a-dev"); !nc.PublishingOn || nc.Publishing {
-		t.Errorf("publishingOn %v, publishing %v: want on, nothing to stage", nc.PublishingOn, nc.Publishing)
+	if _, nc := g.caps(g.token([]grant{kind(verbList, model.KindGateway, "team-a-dev")}), "team-a-dev"); !nc.Project.PublishingOn || nc.Project.Publishing {
+		t.Errorf("publishingOn %v, publishing %v: want on, nothing to stage", nc.Project.PublishingOn, nc.Project.Publishing)
 	}
 }
 
