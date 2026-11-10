@@ -25,6 +25,7 @@ type allowAll struct{}
 
 func (allowAll) Authorize(auth.Identity, []Access) error { return nil }
 func (allowAll) ClusterScoped(string, string) bool       { return false }
+func (allowAll) ProjectNamespace(string) bool            { return false }
 
 // rbac grants every access deny does not, recording what it was asked.
 type rbac struct {
@@ -34,6 +35,11 @@ type rbac struct {
 }
 
 func (*rbac) ClusterScoped(string, string) bool { return false }
+
+// ProjectNamespace reads the test projects' namespaces: alpha, beta, gamma.
+func (*rbac) ProjectNamespace(ns string) bool {
+	return slices.Contains([]string{"alpha", "beta", "gamma"}, ns)
+}
 
 func (r *rbac) Authorize(_ auth.Identity, need []Access) error {
 	r.mu.Lock()
@@ -579,5 +585,32 @@ func TestGateAsksToCloneFromAnotherNamespace(t *testing.T) {
 	}
 	if got := clones(r.questions()); !slices.Equal(got, []Access{clone("gamma")}) {
 		t.Errorf("an edit adding a source: asked %+v, want gamma alone", got)
+	}
+}
+
+// A VM joins networks of its own namespace only: a NIC naming another
+// project namespace's network is refused with the fix, a shared namespace's
+// is Multus's to allow, and a bare name is the VM's own.
+func TestGateKeepsAVMOnItsOwnNamespacesNetworks(t *testing.T) {
+	vm := func(ref string) string {
+		return "apiVersion: kubevirt.io/v1\nkind: VirtualMachine\nmetadata:\n  name: web\n  namespace: alpha\nspec:\n  runStrategy: Halted\n" +
+			"  template:\n    spec:\n      networks:\n      - name: nic\n        multus:\n          networkName: " + ref + "\n"
+	}
+	bare := seedBareFiles(t, map[string][]byte{"README.md": []byte("seed\n")})
+	c := newTestCoordinator(t, false)
+	c.UseAuthorizer(&rbac{})
+	id := auth.Identity{Username: "alice"}
+	proj := project.ProjectInfo{Name: "p", Repo: bare, Namespaces: []string{"alpha"}}
+	stage := func(ref string) error {
+		return c.gate(id, proj, []draft.Entry{{Kind: draft.KindCreate, Resource: draft.ResourceVM, Namespace: "alpha", Name: "web", SourceFile: "alpha/web.yaml", Manifest: vm(ref)}})
+	}
+	err := stage("beta/vm-net")
+	if !errors.Is(err, model.ErrConflict) || !strings.Contains(err.Error(), "use alpha's network vm-net, or one in a shared namespace") {
+		t.Errorf("another project namespace's network: err = %v", err)
+	}
+	for _, ok := range []string{"alpha/vm-net", "vm-net", "openshift-cnv/shared"} {
+		if err := stage(ok); err != nil {
+			t.Errorf("%s: %v", ok, err)
+		}
 	}
 }

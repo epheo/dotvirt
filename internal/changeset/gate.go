@@ -68,6 +68,9 @@ type Authorizer interface {
 	// ClusterScoped reports whether the cluster serves group/kind without a
 	// namespace, for a kind the table does not know; reading nothing new.
 	ClusterScoped(group, kind string) bool
+	// ProjectNamespace reports whether namespace belongs to a project,
+	// from the API's snapshot; reading nothing new.
+	ProjectNamespace(namespace string) bool
 }
 
 // UseAuthorizer attaches the caller's RBAC to every stage, propose, restore
@@ -89,6 +92,7 @@ func (c *Coordinator) kindRule() KindRule {
 	rule := KindRule{Policy: c.tenantKinds}
 	if c.authz != nil {
 		rule.ClusterScoped = c.authz.ClusterScoped
+		rule.ProjectNamespace = c.authz.ProjectNamespace
 	}
 	return rule
 }
@@ -349,6 +353,9 @@ func fileAccess(rule KindRule, proj project.ProjectInfo, idx declaredIndex, ch f
 		if inFile && reflect.DeepEqual(prev.body, o.body) {
 			continue
 		}
+		if err := ownNetworks(rule, o); err != nil {
+			return nil, err
+		}
 		a, err := objectAccess(o, inFile || onBranch)
 		if err != nil {
 			return nil, err
@@ -399,6 +406,32 @@ func objectAccess(o object, declared bool) ([]Access, error) {
 		a.Object = string(raw)
 	}
 	return append(need, a), nil
+}
+
+// ownNetworks refuses a VM whose NIC names a network in another project's
+// namespace, or the same project's other one: Multus isolation (OpenShift,
+// MicroShift) refuses it when the VM starts, and where isolation is off it
+// would attach the VM across the boundary. A non-project namespace (a shared
+// one such as openshift-cnv) is Multus's to allow.
+func ownNetworks(rule KindRule, o object) error {
+	if o.kind != model.KindVM || rule.ProjectNamespace == nil {
+		return nil
+	}
+	spec, _ := o.body["spec"].(map[string]any)
+	tmpl, _ := spec["template"].(map[string]any)
+	tspec, _ := tmpl["spec"].(map[string]any)
+	nets, _ := tspec["networks"].([]any)
+	for _, e := range nets {
+		n, _ := e.(map[string]any)
+		m, _ := n["multus"].(map[string]any)
+		ref, _ := m["networkName"].(string)
+		ns, name, ok := strings.Cut(ref, "/")
+		if ok && ns != o.ref.Namespace && rule.ProjectNamespace(ns) {
+			return fmt.Errorf("%w: %s attaches to network %s of namespace %s, which a VM in %s cannot join; use %s's network %s, or one in a shared namespace",
+				model.ErrConflict, o.ref.Name, name, ns, o.ref.Namespace, o.ref.Namespace, name)
+		}
+	}
+	return nil
 }
 
 // cloneSources are the other namespaces o's DataVolumes clone from: a VM's

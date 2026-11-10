@@ -111,10 +111,16 @@ func (s *Server) ClusterScoped(group, kind string) bool {
 	return x != nil && x.cluster[schema.GroupKind{Group: group, Kind: kind}]
 }
 
+// ProjectNamespace reports whether namespace belongs to a project: the
+// snapshot watches project namespaces alone. It reads nothing new.
+func (s *Server) ProjectNamespace(namespace string) bool {
+	return s.state != nil && s.state.Holds(model.KindNS.Group, model.KindNS.Plural, "", namespace)
+}
+
 // tenantKindRule is what a tenant repo may declare on this install, with the
 // scope discovery gave: the rule the frame's placement issues are read by.
 func (s *Server) tenantKindRule() changeset.KindRule {
-	return changeset.KindRule{Policy: s.cfg.TenantKinds, ClusterScoped: s.ClusterScoped}
+	return changeset.KindRule{Policy: s.cfg.TenantKinds, ClusterScoped: s.ClusterScoped, ProjectNamespace: s.ProjectNamespace}
 }
 
 // unserved are those of kinds discovery found not served, from one read. git
