@@ -40,8 +40,9 @@ func (s *Server) handlePolicies(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, model.PolicyInventory{Policies: out})
 }
 
-// scopePolicies keeps namespace-tier policies the caller may list where they
-// live and cluster-tier policies of each kind it lists. The kept rows are
+// scopePolicies keeps namespace-tier policies the caller may list in the
+// project namespaces they live in and cluster-tier policies of each kind it
+// lists. The kept rows are
 // copies, so drift enrichment may set their fields; the slices inside them
 // are the snapshot's, never written.
 func scopePolicies(all []model.Policy, v callerView, listsCluster func(model.PolicyKind) bool) []model.Policy {
@@ -49,7 +50,7 @@ func scopePolicies(all []model.Policy, v callerView, listsCluster func(model.Pol
 	for _, p := range all {
 		switch {
 		case p.Namespace != "":
-			if v.shows(p.Backing, p.Namespace) {
+			if v.showsInProject(p.Backing, p.Namespace) {
 				out = append(out, p)
 			}
 		case listsCluster(p.Kind):

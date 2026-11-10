@@ -2067,12 +2067,14 @@ export interface ProjectNamespace {
   namespace: string;
   vms: VM[];
   /**
-   * CanAuthor is the caller's update right on VMs here, or on NetworkPolicies
-   * on a cluster with no VMs: the UI hides what would 403.
-   * Nil when the review failed this frame: unknown, and the UI fails closed,
-   * offering nothing and saying the access could not be checked.
+   * CanAuthor is the caller's update right here on any kind a tenant repo may
+   * hold that the cluster serves: the namespace takes changes. CanAuthorVMs
+   * is the update right on VMs alone, for what writes a VM. The UI hides what
+   * would 403. Nil when the review failed this frame: unknown, and the UI
+   * fails closed, offering nothing and saying the access could not be checked.
    */
   canAuthor?: boolean;
+  canAuthorVMs?: boolean;
 }
 /**
  * Project is a tenant in the inventory tree: a named set of
