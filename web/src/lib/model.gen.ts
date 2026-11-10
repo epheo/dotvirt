@@ -430,6 +430,11 @@ export interface DraftView {
    */
   defaultTitle?: string;
   defaultBody?: string;
+  /**
+   * CompareURL is set while Branch holds what dotvirt pushed with no pull
+   * request on it: where the user opens one.
+   */
+  compareURL?: string;
 }
 /**
  * DraftsView is every draft of the caller's that the per-project draft route

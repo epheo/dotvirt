@@ -1604,6 +1604,20 @@ const forkpr = {
 	},
 };
 
+// --- pushedbranch: team-web's draft is pushed, its pull request not opened ---
+// Where users open their own PRs: the link outlives a reload.
+const pushedbranch = {
+	...drift,
+	name: 'pushedbranch',
+	drafts: {
+		'team-web': {
+			...drift.drafts['team-web'],
+			compareURL:
+				'https://forge.example/dotvirt/team-web/compare/main...dotvirt/proposed/admin/team-web',
+		},
+	},
+};
+
 // --- platstager: stages to the platform, cannot read it ---
 // The server lists only the caller's own platform PRs, serves the review of
 // the ones that still match what dotvirt proposed, refuses the platform's
@@ -1984,4 +1998,5 @@ export const scenarios = {
 	partialrepo,
 	kindrepo,
 	forkpr,
+	pushedbranch,
 };

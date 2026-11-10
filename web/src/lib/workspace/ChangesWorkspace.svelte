@@ -244,7 +244,26 @@
 	const visibleProposals = $derived(
 		mineOnly.value ? proposedLane.filter((p) => p.mine) : proposedLane,
 	);
-	const pushed = $derived(Object.values(results).filter((r) => !r.prURL).length);
+	// Branches pushed with no PR on them yet: this session's propose outcomes,
+	// and drafts whose pushed branch still waits for one, which outlive a reload.
+	const pushed = $derived([
+		...Object.entries(results)
+			.filter(([, r]) => !r.prURL)
+			.map(([project, r]) => ({
+				project,
+				branch: r.branch,
+				compareURL: r.compareURL,
+				dismissable: true,
+			})),
+		...lanes
+			.filter((l) => l.draft.compareURL && !results[l.project])
+			.map((l) => ({
+				project: l.project,
+				branch: l.draft.branch,
+				compareURL: l.draft.compareURL,
+				dismissable: false,
+			})),
+	]);
 
 	const stagedTotal = $derived(lanes.reduce((n, l) => n + l.draft.count, 0));
 	const stagedProjects = $derived(lanes.filter((l) => l.draft.count > 0).length);
@@ -266,7 +285,7 @@
 		if (q.get('project')) return 'history';
 		if (!drafts.loaded || drafts.error || lanes.length > 0 || failedLanes.length > 0)
 			return 'staged';
-		if (proposedLane.length > 0 || pushed > 0) return 'review';
+		if (proposedLane.length > 0 || pushed.length > 0) return 'review';
 		return scopeProject ? 'history' : 'staged';
 	});
 	const tabLabel = $derived(CHANGES_TABS.find((t) => t.id === tab)!.label);
@@ -417,7 +436,7 @@
 		tab === 'staged'
 			? drafts.loaded && !drafts.error && lanes.length === 0 && failedLanes.length === 0
 			: tab === 'review'
-				? proposedLane.length === 0 && pushed === 0
+				? proposedLane.length === 0 && pushed.length === 0
 				: platformHidden || (!scopeProject && repoProjects.length === 0),
 	);
 	const tabHref = (id: string) => `${page.url.pathname}?tab=${id}`;
@@ -541,7 +560,7 @@
 					{proposedLane}
 					{visibleProposals}
 					{mineOnly}
-					{results}
+					{pushed}
 					{history}
 					{repoProjects}
 					{scopeNS}

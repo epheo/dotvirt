@@ -19,7 +19,9 @@ const draft = (count: number): DraftView => ({
 	})),
 });
 
-function setup() {
+type Props = Parameters<typeof render<typeof ChangesLanes>>[1];
+
+function setup(over: Partial<NonNullable<Props>> = {}) {
 	return render(ChangesLanes, {
 		scopeProject: '',
 		lanes: [
@@ -29,7 +31,7 @@ function setup() {
 		proposedLane: [],
 		visibleProposals: [],
 		mineOnly: { value: false },
-		results: {},
+		pushed: [],
 		history: {},
 		repoProjects: [],
 		repoRead: () => ({ ok: true, why: '' }),
@@ -38,6 +40,7 @@ function setup() {
 		ontogglehistory: vi.fn(),
 		onretryhistory: vi.fn(),
 		ondismiss: vi.fn(),
+		...over,
 	});
 }
 
@@ -89,5 +92,30 @@ describe('ChangesLanes discard all', () => {
 		expect((discardBeta as HTMLButtonElement).disabled).toBe(false);
 		expect(within(discardBeta.parentElement!).getByText('Discard 1 staged change?')).toBeTruthy();
 		answer(new Response(null, { status: 204 }));
+	});
+});
+
+// A branch pushed with no pull request keeps its link to open one: from this
+// session's propose, dismissable; from the draft itself, until a PR carries it.
+describe('ChangesLanes pushed branches', () => {
+	it("links each to its compare page, dismissing only this session's", async () => {
+		const ondismiss = vi.fn();
+		setup({
+			tab: 'review',
+			ondismiss,
+			pushed: [
+				{ project: 'alpha', branch: 'b-alpha', compareURL: 'https://forge/a', dismissable: true },
+				{ project: 'beta', branch: 'b-beta', compareURL: 'https://forge/b', dismissable: false },
+			],
+		});
+		const links = screen.getAllByRole('link', { name: 'Open the pull request' });
+		expect(links.map((a) => a.getAttribute('href'))).toEqual([
+			'https://forge/a',
+			'https://forge/b',
+		]);
+		const dismiss = screen.getAllByRole('button', { name: 'Dismiss' });
+		expect(dismiss).toHaveLength(1);
+		await fireEvent.click(dismiss[0]);
+		expect(ondismiss).toHaveBeenCalledWith('alpha');
 	});
 });

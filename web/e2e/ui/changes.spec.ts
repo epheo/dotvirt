@@ -67,6 +67,21 @@ test('a PR from a fork is reviewed in the forge, and leaves no VM waiting', asyn
 	await expect(main.getByText('No open pull request touches this VM.')).toBeVisible();
 });
 
+test('a branch pushed without a pull request keeps its link to open one', async ({ page }) => {
+	await setScenario(page, 'pushedbranch');
+	await login(page);
+	await page.goto('/changes?tab=review');
+
+	const main = page.locator('main');
+	await expect(main.getByText('dotvirt/proposed/admin/team-web', { exact: true })).toBeVisible();
+	await expect(main.getByRole('link', { name: 'Open the pull request' })).toHaveAttribute(
+		'href',
+		/compare\/main\.\.\.dotvirt\/proposed\/admin\/team-web$/,
+	);
+	// The draft holds it until a PR carries it: nothing to dismiss.
+	await expect(main.getByRole('button', { name: 'Dismiss' })).toHaveCount(0);
+});
+
 test('the route explains the write model when nothing is in flight', async ({ page }) => {
 	await setScenario(page, 'empty');
 	await login(page);
