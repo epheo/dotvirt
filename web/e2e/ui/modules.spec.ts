@@ -116,6 +116,20 @@ test('without OLM rebalancing says the cluster cannot install it, never a missin
 	await expect(main.getByText(/You may not/)).toHaveCount(0);
 });
 
+test('without KubeVirt rebalancing says there is nothing to move, never a missing right', async ({
+	page,
+}) => {
+	await setScenario(page, 'novms');
+	await login(page);
+	await page.goto('/hosts?tab=configure');
+	const main = page.locator('main');
+	await expect(
+		main.getByText('This cluster runs no VMs (no KubeVirt), so there is nothing to rebalance.'),
+	).toBeVisible();
+	await expect(main.getByRole('button', { name: 'Enable Dynamic Rescheduling' })).toHaveCount(0);
+	await expect(main.getByText(/You may not/)).toHaveCount(0);
+});
+
 test('without MachineConfig rebalancing offers no PSI', async ({ page }) => {
 	await setScenario(page, 'base');
 	await login(page);

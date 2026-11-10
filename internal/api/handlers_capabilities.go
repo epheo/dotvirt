@@ -147,7 +147,7 @@ func (s *Server) drsCaps(ctx context.Context, id auth.Identity, c *cluster.Clien
 	platform := s.platformProject()
 	un := s.unserved(ctx, drsKinds...)
 	olm := !un[model.KindSub] && !un[model.KindOpGroup]
-	if ok, _ := s.anyAllowed(ctx, id, c, drsSchedulerActions()); ok && olm {
+	if ok, _ := s.anyAllowed(ctx, id, c, drsSchedulerActions()); ok && olm && !s.noVMs() {
 		need, err := s.draft.EnableDRSNeeds(platform, json.RawMessage(`{"mode":"Predictive"}`))
 		enable = s.needsAllowed(ctx, id, c, need, err)
 		if !un[model.KindMachCfg] {
@@ -250,6 +250,16 @@ func (s *Server) projectCaps(ctx context.Context, sc scope, full project.Project
 		patches = append(patches, question{Verb: verbPatch, Group: ssarNamespace.group, Resource: ssarNamespace.resource, Name: ns})
 	}
 	out.Release = (len(patches) == 0 || s.capable(ctx, id, c, patches)) && s.needsAllowed(ctx, id, c, need, err) && (len(need) > 0 || len(patches) > 0)
+}
+
+// noVMs is a known no for KubeVirt: the modules snapshot, as the UI reads
+// it, says the cluster serves no VirtualMachines. Unknown is not no.
+func (s *Server) noVMs() bool {
+	if s.modules == nil {
+		return false
+	}
+	m, ok := s.modules.Get()
+	return ok && !m.VMs
 }
 
 // handleModules answers GET /api/modules from the SA's discovery snapshot.
