@@ -219,7 +219,7 @@ func (r *DotvirtReconciler) applyShared(ctx context.Context, obj client.Object) 
 // sync impersonation on.
 func (r *DotvirtReconciler) impersonationConfigured(ctx context.Context, argoNS string) (bool, error) {
 	var cm corev1.ConfigMap
-	err := r.Get(ctx, types.NamespacedName{Namespace: argoNS, Name: "argocd-cm"}, &cm)
+	err := r.Get(ctx, types.NamespacedName{Namespace: argoNS, Name: argoSettings}, &cm)
 	if apierrors.IsNotFound(err) {
 		return false, nil
 	}
