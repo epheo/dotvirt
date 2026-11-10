@@ -5,6 +5,8 @@ import (
 	"strings"
 	"testing"
 
+	"sigs.k8s.io/yaml"
+
 	"github.com/epheo/dotvirt/internal/model"
 )
 
@@ -97,9 +99,10 @@ func TestDeriveParameterizesIdentity(t *testing.T) {
 func TestDeriveUnanchorsOwnNamespaceSources(t *testing.T) {
 	own := strings.Replace(sourceVM, "          name: fedora\n          namespace: images\n",
 		"          name: fedora\n          namespace: tenant-a\n", 1)
-	own = strings.Replace(own, "  template:\n", "    - metadata:\n        name: web-01-data\n      spec:\n        source:\n          pvc:\n            name: golden\n            namespace: tenant-a\n        storage: {}\n  template:\n", 1)
-	if n := strings.Count(own, "namespace: tenant-a"); n != 3 {
-		t.Fatalf("fixture names tenant-a %d times, want the VM, the DataSource and the PVC", n)
+	own = strings.Replace(own, "  template:\n", "    - metadata:\n        name: web-01-data\n      spec:\n        source:\n          pvc:\n            name: golden\n            namespace: tenant-a\n        storage: {}\n"+
+		"    - metadata:\n        name: web-01-snap\n      spec:\n        source:\n          snapshot:\n            name: golden-snap\n            namespace: tenant-a\n        storage: {}\n  template:\n", 1)
+	if n := strings.Count(own, "namespace: tenant-a"); n != 4 {
+		t.Fatalf("fixture names tenant-a %d times, want the VM, the DataSource, the PVC and the snapshot", n)
 	}
 	out, err := Derive([]byte(own), "web-template", "")
 	if err != nil {
@@ -107,6 +110,37 @@ func TestDeriveUnanchorsOwnNamespaceSources(t *testing.T) {
 	}
 	if strings.Contains(string(out), "tenant-a") {
 		t.Errorf("the source namespace survived:\n%s", out)
+	}
+	// Deployed, the PVC and the snapshot name the deploy's namespace, as CDI
+	// requires; the DataSource stays bare, which CDI reads as the same.
+	r, err := EngineRenderer{}.Render(out, nil, "tenant-b")
+	if err != nil {
+		t.Fatalf("render: %v", err)
+	}
+	var vm struct {
+		Spec struct {
+			DataVolumeTemplates []struct {
+				Spec struct {
+					Source *struct {
+						PVC, Snapshot *struct{ Namespace string }
+					}
+					SourceRef *struct{ Namespace *string }
+				}
+			} `json:"dataVolumeTemplates"`
+		}
+	}
+	if err := yaml.Unmarshal(r.Manifest, &vm); err != nil || len(vm.Spec.DataVolumeTemplates) != 3 {
+		t.Fatalf("rendered: %v\n%s", err, r.Manifest)
+	}
+	dvts := vm.Spec.DataVolumeTemplates
+	if ns := dvts[0].Spec.SourceRef; ns == nil || ns.Namespace != nil {
+		t.Errorf("DataSource ref = %+v, want bare", ns)
+	}
+	if got := dvts[1].Spec.Source.PVC.Namespace; got != "tenant-b" {
+		t.Errorf("PVC source namespace = %q, want tenant-b", got)
+	}
+	if got := dvts[2].Spec.Source.Snapshot.Namespace; got != "tenant-b" {
+		t.Errorf("snapshot source namespace = %q, want tenant-b", got)
 	}
 	kept, err := Derive([]byte(sourceVM), "web-template", "")
 	if err != nil || !strings.Contains(string(kept), "namespace: images") {

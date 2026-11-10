@@ -54,6 +54,18 @@ func (EngineRenderer) Render(raw []byte, params map[string]string, targetNamespa
 	// The engine removes any hardcoded namespace: placement is the deployer's
 	// choice, made here.
 	vm.Namespace = targetNamespace
+	// A PVC or snapshot clone source left bare (Derive writes one so) clones
+	// in the VM's own namespace, which CDI requires spelled out.
+	for i := range vm.Spec.DataVolumeTemplates {
+		if src := vm.Spec.DataVolumeTemplates[i].Spec.Source; src != nil {
+			if src.PVC != nil && src.PVC.Namespace == "" {
+				src.PVC.Namespace = targetNamespace
+			}
+			if src.Snapshot != nil && src.Snapshot.Namespace == "" {
+				src.Snapshot.Namespace = targetNamespace
+			}
+		}
+	}
 
 	obj, err := runtime.DefaultUnstructuredConverter.ToUnstructured(vm)
 	if err != nil {
