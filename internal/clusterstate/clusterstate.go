@@ -210,12 +210,7 @@ func New(sa *cluster.Client, projectLabel string, bus *eventbus.Bus) *State {
 		gvrClusterRoles:        sa.ClusterRoleListWatch(),
 		gvrGroups:              sa.DynamicListWatch(gvrGroups),
 	}
-	s.signals = signalWatches(func(gvr schema.GroupVersionResource) *cache.ListWatch { return sources[gvr] }, rbac, refs)
-	for _, w := range s.signals {
-		if w.gvr == gvrClusterRoleBindings {
-			w.store = indexedBindings{w.sink, s.clusterBindings}
-		}
-	}
+	s.signals = signalWatches(func(gvr schema.GroupVersionResource) *cache.ListWatch { return sources[gvr] }, rbac, refs, s.clusterBindings)
 	return s
 }
 
@@ -248,14 +243,16 @@ type signalWatch struct {
 
 // signalWatches wires the gated RBAC watches; refs is shared with the
 // RoleBinding sink, so a role signals while any relevant binding binds it.
-func signalWatches(lw func(schema.GroupVersionResource) *cache.ListWatch, onChange func(string), refs *roleRefs) []*signalWatch {
+func signalWatches(lw func(schema.GroupVersionResource) *cache.ListWatch, onChange func(string), refs *roleRefs, clusterBindings *bindingIndex) []*signalWatch {
 	watch := func(gvr schema.GroupVersionResource, expected any, binds *roleRefs, digest func(any) (grant, bool)) *signalWatch {
 		sink := newRBACSignal(onChange, binds, digest)
 		return &signalWatch{gvr: gvr, expected: expected, lw: lw(gvr), sink: sink, store: sink}
 	}
+	crbs := watch(gvrClusterRoleBindings, &rbacv1.ClusterRoleBinding{}, refs, clusterRoleBindingDigest)
+	crbs.store = indexedBindings{crbs.sink, clusterBindings}
 	return []*signalWatch{
 		watch(gvrRoles, &rbacv1.Role{}, nil, roleDigest(refs)),
-		watch(gvrClusterRoleBindings, &rbacv1.ClusterRoleBinding{}, refs, clusterRoleBindingDigest),
+		crbs,
 		watch(gvrClusterRoles, &rbacv1.ClusterRole{}, nil, clusterRoleDigest(refs)),
 		watch(gvrGroups, &unstructured.Unstructured{}, nil, groupDigest),
 	}
