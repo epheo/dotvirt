@@ -10,10 +10,11 @@
 		LoaderCircle,
 		TriangleAlert,
 	} from '@lucide/svelte';
+	import { ACCESS_UNKNOWN } from '#lib/authoring.js';
 	import { changesHref, hrefForScope } from '#lib/nav.js';
 	import { approvalLine, checksPill, reviewURL } from '#lib/review.js';
 	import { TONE_PILL, TONE_TEXT } from '#lib/status.js';
-	import { caps } from '#lib/state/caps.svelte.js';
+	import { CHECKING } from '#lib/state/caps.svelte.js';
 	import { drafts, PLATFORM_PROJECT } from '#lib/state/drafts.svelte.js';
 	import { inventory } from '#lib/state/inventory.svelte.js';
 	import { reviewCache } from '#lib/state/reviewCache.svelte.js';
@@ -27,16 +28,21 @@
 	// it replaces the header Propose button, the Changes dot and the pending
 	// banners. Every lane names what happens next and who acts. Hidden on
 	// /changes, which is the full view of the same pipeline.
-	// A platform stager without platform read gets no verdict, revision or
-	// history of the platform: their merge cannot be followed past git.
-	const unfollowable = (p: string) =>
-		p === PLATFORM_PROJECT && caps.cluster?.platformRead === false;
+	// A merge is placed against its project's whole history. A caller refused
+	// it (a platform stager without platform read, a viewer of part of a
+	// project) gets no verdict here, and no read is sent: their merge cannot
+	// be followed past git. Until the answer lands nothing is read either.
+	const reads = (p: string) => inventory.repoRead(p).ok;
+	const unfollowable = (p: string) => {
+		const g = inventory.repoRead(p);
+		return !g.ok && g.why !== CHECKING && g.why !== ACCESS_UNKNOWN;
+	};
 	const syncOf = (p: string) =>
-		p === PLATFORM_PROJECT
-			? unfollowable(p)
-				? undefined
-				: inventory.inventory?.platform
-			: inventory.projects.find((x) => x.name === p)?.gitOps;
+		unfollowable(p)
+			? undefined
+			: p === PLATFORM_PROJECT
+				? inventory.inventory?.platform
+				: inventory.projects.find((x) => x.name === p)?.gitOps;
 	const lanes = $derived(
 		trayLanes({
 			drafts: drafts.drafts,
@@ -52,7 +58,7 @@
 	const waitingKey = $derived(
 		lanes
 			.flatMap((l) =>
-				l.kind === 'applying' && !l.picked
+				l.kind === 'applying' && !l.picked && reads(l.project)
 					? [`${l.project}@${syncOf(l.project)?.revision ?? ''}`]
 					: [],
 			)
@@ -72,7 +78,7 @@
 	$effect(() => {
 		inventory.proposalsKey;
 		inventory.taskFeed;
-		if (streamed) untrack(() => tray.update(inventory.proposals, inventory.taskFeed));
+		if (streamed) untrack(() => tray.update(inventory.proposals, inventory.taskFeed, reads));
 	});
 
 	// A live merge has said what it had to; it leaves by itself, with the
@@ -411,9 +417,11 @@
 						{:else}
 							<div class="flex items-center gap-3 px-3 py-2">
 								<p class="min-w-0 flex-1 text-ink-soft">
-									{unfollowable(lane.project)
-										? "You cannot read the platform's history, so dotvirt cannot follow it to the cluster."
-										: 'GitOps status is not available, so dotvirt cannot follow it to the cluster.'}
+									{!unfollowable(lane.project)
+										? 'GitOps status is not available, so dotvirt cannot follow it to the cluster.'
+										: lane.project === PLATFORM_PROJECT
+											? "You cannot read the platform's history, so dotvirt cannot follow it to the cluster."
+											: `You cannot read all of ${lane.project}, so dotvirt cannot follow it to the cluster.`}
 								</p>
 								<button class="text-ink-soft hover:underline" onclick={() => tray.dismiss(lane.key)}
 									>Dismiss</button

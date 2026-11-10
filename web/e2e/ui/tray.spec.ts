@@ -133,3 +133,25 @@ test('a platform merge the caller cannot read stops at merged, with no history p
 	await page.getByRole('button', { name: /^Recent tasks/ }).click();
 	await expect(page.getByText('Add network dc-vlan-110').last()).toBeVisible();
 });
+
+test('a merge in a project the caller cannot read all of is not followed past git, and asks nothing', async ({
+	page,
+}) => {
+	await setScenario(page, 'partialrepo');
+	await login(page);
+	await page.goto('/vm/web-prod/web-1');
+	// This page's reads only: the sign-in landing's own carry its referer.
+	const reads: string[] = [];
+	page.on('request', (r) => {
+		if (/\/vm\//.test(r.headers()['referer'] ?? '') && r.url().includes('/team-web/history'))
+			reads.push(r.url());
+	});
+	await following(page, [merged({ hash: undefined })]);
+	const tray = trayOf(page);
+	await tray.getByRole('button', { name: 'Show' }).click();
+	const lane = tray.locator('section', { hasText: 'PR #40 merged' });
+	await expect(
+		lane.getByText('You cannot read all of team-web, so dotvirt cannot follow it'),
+	).toBeVisible();
+	expect(reads).toEqual([]);
+});

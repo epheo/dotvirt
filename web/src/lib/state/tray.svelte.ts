@@ -20,8 +20,8 @@ class TrayStore {
 	#commits = $state<Record<string, string[]>>({});
 	#readAt = new Map<string, number>();
 	#timers = new Map<string, ReturnType<typeof setTimeout>>();
-	// Projects whose history answered 403 (a platform stager without platform
-	// read): no later read can find their merges, so none is made.
+	// Projects whose history answered 403 although the read check allowed it:
+	// no later read can find their merges, so none is made.
 	#denied = new Set<string>();
 
 	get open(): boolean {
@@ -37,12 +37,19 @@ class TrayStore {
 		return this.#commits[project];
 	}
 
-	// Called when the open PRs or the merge feed move.
-	update(proposals: Proposal[], feed: TaskEntry[]) {
+	// Called when the open PRs or the merge feed move. reads says whether the
+	// caller may read a project's whole history; one they may not, or not yet
+	// known to, is not asked.
+	update(
+		proposals: Proposal[],
+		feed: TaskEntry[],
+		reads: (project: string) => boolean = () => true,
+	) {
 		const merges = feed.filter((t) => t.kind === 'merge');
 		const next = follow(this.#followed.value, proposals, merges);
 		if (next !== this.#followed.value) this.#followed.value = next;
-		for (const p of new Set(next.filter((f) => f.mergedAt).map((f) => f.project))) this.want(p);
+		for (const p of new Set(next.filter((f) => f.mergedAt).map((f) => f.project)))
+			if (reads(p)) this.want(p);
 	}
 
 	// want reads a project's history now, or once the last read is old enough.
