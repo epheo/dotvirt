@@ -21,7 +21,8 @@ import (
 func TestOptionsFilteredPerCaller(t *testing.T) {
 	f := ssarFactory(t, func(_ *http.Request, review *authzv1.SelfSubjectAccessReview) bool {
 		a := review.Spec.ResourceAttributes
-		return a.Namespace == "os-images" || a.Verb == verbList && a.Resource == ssarInstancetypes.resource && a.Namespace == ""
+		return a.Namespace == "os-images" || a.Namespace == "list-only" && a.Resource == ssarDataSources.resource ||
+			a.Verb == verbList && a.Resource == ssarInstancetypes.resource && a.Namespace == ""
 	})
 	s := NewServer(Deps{ClusterFactory: f, Reader: &fakeDraft{}, Draft: &fakeDraft{}, Bus: eventbus.New()})
 	all := model.Options{
@@ -31,6 +32,8 @@ func TestOptionsFilteredPerCaller(t *testing.T) {
 		OSImages: []model.OSImage{
 			{Name: "fedora", Namespace: "os-images"},
 			{Name: "private", Namespace: "team-b"},
+			// Listed, but booting it clones it, which the caller may not.
+			{Name: "uncloneable", Namespace: "list-only"},
 		},
 	}
 	s.options.Put("all", all)
@@ -61,7 +64,7 @@ func TestOptionsFilteredPerCaller(t *testing.T) {
 		t.Errorf("storage classes the caller may not list = %+v", got.StorageClasses)
 	}
 	cached, _ := s.options.Get("all")
-	if len(cached.OSImages) != 2 {
+	if len(cached.OSImages) != len(all.OSImages) {
 		t.Errorf("shared cache narrowed by one caller: %+v", cached)
 	}
 }

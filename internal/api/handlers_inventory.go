@@ -319,15 +319,38 @@ func (s *Server) handleOptions(w http.ResponseWriter, r *http.Request) {
 		fail(w, err)
 		return
 	}
-	writeJSON(w, optionsFor(v, all))
+	writeJSON(w, optionsFor(v, all, s.clonesFrom(r.Context(), id, c, v, all.OSImages)))
+}
+
+// clonesFrom is, for each namespace outside the caller's projects holding an
+// OS image they may list, whether they may clone from it: a VM booting that
+// image clones it across namespaces, which CDI and the staging gate allow
+// only with datavolumes/source there. One review per namespace.
+func (s *Server) clonesFrom(ctx context.Context, id auth.Identity, c *cluster.Client, v callerView, imgs []model.OSImage) map[string]bool {
+	var nss []string
+	for _, img := range imgs {
+		if !v.memo.ns[img.Namespace] && !slices.Contains(nss, img.Namespace) && v.lists(ssarDataSources, img.Namespace) {
+			nss = append(nss, img.Namespace)
+		}
+	}
+	acts := make([]action, len(nss))
+	for i, ns := range nss {
+		acts[i] = action{{Verb: verbCreate, Group: model.KindDV.Group, Resource: model.KindDV.Plural, Subresource: "source", Namespace: ns}}
+	}
+	out := make(map[string]bool, len(nss))
+	for i, ok := range s.capableAll(ctx, id, c, acts) {
+		out[nss[i]] = ok
+	}
+	return out
 }
 
 // optionsFor narrows the shared catalog to what the caller may list: each
 // cluster-scoped kind cluster-wide, an OS image where it lives, outside the
 // view too (a shared golden-image namespace grants that to every
-// authenticated user). The cached catalog is never mutated - fresh, non-nil
-// slices so they serialize as [].
-func optionsFor(v callerView, all model.Options) model.Options {
+// authenticated user), and there only where they may also clone from it
+// (clones, by namespace). The cached catalog is never mutated - fresh,
+// non-nil slices so they serialize as [].
+func optionsFor(v callerView, all model.Options, clones map[string]bool) model.Options {
 	out := model.Options{
 		Instancetypes:  listed(v, ssarInstancetypes, all.Instancetypes),
 		Preferences:    listed(v, ssarPreferences, all.Preferences),
@@ -335,7 +358,7 @@ func optionsFor(v callerView, all model.Options) model.Options {
 		StorageClasses: listed(v, ssarStorageClasses, all.StorageClasses),
 	}
 	for _, img := range all.OSImages {
-		if v.lists(ssarDataSources, img.Namespace) {
+		if v.lists(ssarDataSources, img.Namespace) && (v.memo.ns[img.Namespace] || clones[img.Namespace]) {
 			out.OSImages = append(out.OSImages, img)
 		}
 	}
