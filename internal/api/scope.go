@@ -652,23 +652,30 @@ func (s *Server) platformProject() project.ProjectInfo {
 	return project.ProjectInfo{Name: platformProjectName, Repo: s.cfg.PlatformRepo}
 }
 
+// vmReads is who reads what a VM route serves. The zero value is the gated
+// one, so a route that names neither still asks.
+type vmReads int
+
+const (
+	// dotvirtReads: dotvirt reads it from git or its own account, so the
+	// caller must be able to list the VM there (gateVMRead).
+	dotvirtReads vmReads = iota
+	// callerReads: the caller's own token reads or acts, so the apiserver
+	// answers for the object and nothing is asked here.
+	callerReads
+)
+
 // vmScope is the preamble of every route addressing {namespace}/{name} by
 // path (name is empty on the namespace-only routes): resolve the tenant project
-// owning the path's namespace (the authorization point) and hand back the pair.
-func (s *Server) vmScope(w http.ResponseWriter, r *http.Request) (sc scope, ns, name string, ok bool) {
-	sc, ns, name, ok = s.vmCallerScope(w, r)
-	if !ok || name == "" {
+// owning the path's namespace (the authorization point) and hand back the
+// pair, gated as reads says.
+func (s *Server) vmScope(w http.ResponseWriter, r *http.Request, reads vmReads) (sc scope, ns, name string, ok bool) {
+	ns, name = r.PathValue("namespace"), r.PathValue("name")
+	sc, ok = s.resolveProject(w, r, byNamespace(ns))
+	if !ok || name == "" || reads == callerReads {
 		return sc, ns, name, ok
 	}
 	return sc, ns, name, s.gateVMRead(w, r, sc, ns, name)
-}
-
-// vmCallerScope is vmScope for a route that reads and acts with the caller's own
-// token: the apiserver answers for the object, so nothing is asked here.
-func (s *Server) vmCallerScope(w http.ResponseWriter, r *http.Request) (sc scope, ns, name string, ok bool) {
-	ns, name = r.PathValue("namespace"), r.PathValue("name")
-	sc, ok = s.resolveProject(w, r, byNamespace(ns))
-	return sc, ns, name, ok
 }
 
 // gateVMRead answers 404 unless the caller may list VMs in ns: what dotvirt

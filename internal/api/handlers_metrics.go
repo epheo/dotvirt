@@ -56,7 +56,7 @@ func (s *Server) metricsReady(w http.ResponseWriter) bool {
 
 // handleMetrics returns a VM's performance time-series (the Performance tab).
 func (s *Server) handleMetrics(w http.ResponseWriter, r *http.Request) {
-	sc, ns, name, ok := s.vmScope(w, r)
+	sc, ns, name, ok := s.vmScope(w, r, dotvirtReads)
 	if !ok {
 		return
 	}
@@ -68,7 +68,7 @@ func (s *Server) handleMetrics(w http.ResponseWriter, r *http.Request) {
 // handleVMUsage returns a VM's point-in-time capacity-and-usage (the Summary tab's
 // "Capacity and Usage" bars).
 func (s *Server) handleVMUsage(w http.ResponseWriter, r *http.Request) {
-	sc, ns, name, ok := s.vmScope(w, r)
+	sc, ns, name, ok := s.vmScope(w, r, dotvirtReads)
 	if !ok {
 		return
 	}

@@ -124,7 +124,7 @@ func (s *Server) handleCreateImport(w http.ResponseWriter, r *http.Request) {
 // whole first, so a refusal deletes nothing. The cluster call refuses a
 // ready boot image and any shape dotvirt does not make.
 func (s *Server) handleDeleteBootImage(w http.ResponseWriter, r *http.Request) {
-	sc, ns, name, ok := s.vmCallerScope(w, r)
+	sc, ns, name, ok := s.vmScope(w, r, callerReads)
 	if !ok {
 		return
 	}
@@ -142,7 +142,7 @@ func (s *Server) handleDeleteBootImage(w http.ResponseWriter, r *http.Request) {
 
 // handleUploadStatus reports the upload DataVolume's phase + import progress.
 func (s *Server) handleUploadStatus(w http.ResponseWriter, r *http.Request) {
-	sc, ns, name, ok := s.vmCallerScope(w, r)
+	sc, ns, name, ok := s.vmScope(w, r, callerReads)
 	if !ok {
 		return
 	}
@@ -157,7 +157,7 @@ func (s *Server) handleUploadToken(w http.ResponseWriter, r *http.Request) {
 		fail(w, fmt.Errorf("%w: image upload not configured", model.ErrUnavailable))
 		return
 	}
-	sc, ns, name, ok := s.vmCallerScope(w, r)
+	sc, ns, name, ok := s.vmScope(w, r, callerReads)
 	if !ok {
 		return
 	}
