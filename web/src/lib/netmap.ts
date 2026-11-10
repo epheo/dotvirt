@@ -172,7 +172,17 @@ export interface ClusterMap {
 	moreNetworks: { count: number; vms: number; shared: number; vlan: number } | null;
 	projects: ProjectNode[];
 	moreProjects: { count: number; vms: number; networks: number; problems: NetProblem[] } | null;
-	shown: { networks: number; networksTotal: number; projects: number; projectsTotal: number };
+	// lane: the shared and VLAN networks drawn, of those the lane holds.
+	// networks: those the drawn lane and shown projects hold, of every network
+	// the caller sees, the set the header counts.
+	shown: {
+		lane: number;
+		laneTotal: number;
+		networks: number;
+		networksTotal: number;
+		projects: number;
+		projectsTotal: number;
+	};
 }
 
 export interface MapInput {
@@ -313,8 +323,10 @@ export function clusterMap(input: MapInput): ClusterMap {
 					}
 				: null,
 		shown: {
-			networks: picked.size,
-			networksTotal: all.length,
+			lane: picked.size,
+			laneTotal: all.length,
+			networks: picked.size + projects.reduce((s, p) => s + p.networks, 0),
+			networksTotal: networks.length,
 			projects: projects.length,
 			projectsTotal: pnodes.length,
 		},
