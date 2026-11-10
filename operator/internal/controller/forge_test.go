@@ -13,7 +13,6 @@ import (
 
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/types"
@@ -452,10 +451,10 @@ func TestPlatformRepoEnsuresManagedOrg(t *testing.T) {
 	}
 }
 
-// A managed forge's org holds only dotvirt's repos: once the workload is
-// ready, the public ones are made private, once per operator process. A repo
-// that refuses is left, a failed listing is retried, and neither touches the
-// platform repo's condition.
+// A managed forge's org holds only dotvirt's repos: once the operand's
+// rollout has finished, the public ones are made private, once per operator
+// process. A repo that refuses is left, a failed listing is retried, and
+// neither touches the platform repo's condition.
 func TestManagedForgeReposMadePrivateOnce(t *testing.T) {
 	dv := managedForgeCR()
 	var listings int
@@ -491,7 +490,12 @@ func TestManagedForgeReposMadePrivateOnce(t *testing.T) {
 		ObjectMeta: metav1.ObjectMeta{Name: install.ForgeSecretName(dv), Namespace: dv.Namespace},
 		Data:       map[string][]byte{"token": []byte("tok")},
 	}
-	r := newReconciler(testBuilder(t).WithObjects(dv, cred).Build(), depsOK)
+	rolling := &appsv1.Deployment{
+		ObjectMeta: metav1.ObjectMeta{Name: install.AppName, Namespace: dv.Namespace, Generation: 2},
+		Status:     appsv1.DeploymentStatus{ObservedGeneration: 1, Replicas: 2, UpdatedReplicas: 1, ReadyReplicas: 2},
+	}
+	c := testBuilder(t).WithObjects(dv, cred).Build()
+	r := newReconciler(c, depsOK)
 	r.forgeAPIBase = func(*dotvirtv1alpha1.Dotvirt) string { return srv.URL }
 	pass := func() {
 		t.Helper()
@@ -504,10 +508,17 @@ func TestManagedForgeReposMadePrivateOnce(t *testing.T) {
 	}
 
 	pass()
-	if listings != 0 {
-		t.Errorf("listed %d times before the workload was ready, want none", listings)
+	if err := c.Create(context.Background(), rolling); err != nil {
+		t.Fatal(err)
 	}
-	meta.SetStatusCondition(&dv.Status.Conditions, metav1.Condition{Type: dotvirtv1alpha1.ConditionWorkloadReady, Status: metav1.ConditionTrue, Reason: "Ready"})
+	pass()
+	if listings != 0 {
+		t.Errorf("listed %d times before the rollout finished, want none", listings)
+	}
+	rolling.Status = appsv1.DeploymentStatus{ObservedGeneration: 2, Replicas: 1, UpdatedReplicas: 1, ReadyReplicas: 1}
+	if err := c.Status().Update(context.Background(), rolling); err != nil {
+		t.Fatal(err)
+	}
 	pass()
 	listFails = false
 	pass()

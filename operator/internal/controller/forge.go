@@ -227,6 +227,23 @@ func (r *DotvirtReconciler) ensurePlatformRepo(ctx context.Context, dv *dotvirtv
 	return nil
 }
 
+// rolledOut reports whether the operand Deployment finished its rollout: every
+// replica runs the applied template and no pod of an older one is left. Read
+// past the cache, which can still hold the Deployment as it was before this
+// pass applied it.
+func (r *DotvirtReconciler) rolledOut(ctx context.Context, dv *dotvirtv1alpha1.Dotvirt) bool {
+	var d appsv1.Deployment
+	if err := r.reader().Get(ctx, types.NamespacedName{Namespace: dv.Namespace, Name: install.AppName}, &d); err != nil {
+		return false
+	}
+	want := int32(1)
+	if d.Spec.Replicas != nil {
+		want = *d.Spec.Replicas
+	}
+	s := d.Status
+	return s.ObservedGeneration >= d.Generation && s.UpdatedReplicas == want && s.Replicas == want && s.ReadyReplicas == want
+}
+
 // privatizeKey is one managed install's forge org.
 type privatizeKey struct {
 	install types.NamespacedName
@@ -236,16 +253,13 @@ type privatizeKey struct {
 // privatizeOnce makes every repo of a managed forge's owner org private, once
 // per operator process and org: the org holds only dotvirt's repos, and a
 // public one is readable by anyone who reaches the forge. It waits for the
-// workload to be ready, so an operand still creating public repos is gone
-// first. It never fails the platform repo's condition: a failed listing is
-// retried on a later pass, a repo that refuses the change is logged and left.
-// An external forge's repos are its admins' to set.
+// operand's rollout to finish, so no pod still creating public repos is left.
+// It never fails the platform repo's condition: a failed listing is retried
+// on a later pass, a repo that refuses the change is logged and left. An
+// external forge's repos are its admins' to set.
 func (r *DotvirtReconciler) privatizeOnce(ctx context.Context, dv *dotvirtv1alpha1.Dotvirt, client *forge.Client) {
-	if !meta.IsStatusConditionTrue(dv.Status.Conditions, dotvirtv1alpha1.ConditionWorkloadReady) {
-		return
-	}
 	key := privatizeKey{types.NamespacedName{Namespace: dv.Namespace, Name: dv.Name}, client.Owner()}
-	if _, done := r.privatized.Load(key); done {
+	if _, done := r.privatized.Load(key); done || !r.rolledOut(ctx, dv) {
 		return
 	}
 	log := logf.FromContext(ctx)
