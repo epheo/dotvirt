@@ -127,6 +127,14 @@ func (m viewMemo) lists(ref ssarRef, namespace string) (ok, held bool) {
 	return asked && r&(1<<i) != 0, asked
 }
 
+// shows reports whether a row of kind backing in namespace is the caller's:
+// they see the namespace and may list the kind there. The one row filter of
+// every view; optionsFor alone asks outside the view, where a binding names
+// the caller (a golden-image namespace).
+func (v callerView) shows(backing, namespace string) bool {
+	return v.names[namespace] && v.listsBacking(backing, namespace)
+}
+
 // listsBacking is lists by the Kubernetes kind that backs a row. A kind the
 // table does not name is not shown: unknown never opens anything.
 func (v callerView) listsBacking(backing, namespace string) bool {
