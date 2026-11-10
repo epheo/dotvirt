@@ -171,6 +171,16 @@ var (
 // adoption stages one under the VM resource.
 var KindDV = kindOf("DataVolume")
 
+// TenantKinds are the kinds a tenant repo may declare (tenancy.TenantKinds), in
+// the table's order.
+func TenantKinds() []Kind {
+	out := make([]Kind, len(tenancy.TenantKinds))
+	for i, k := range tenancy.TenantKinds {
+		out[i] = kindOf(k.Kind)
+	}
+	return out
+}
+
 // kindOf panics on a name the table does not hold: a typo fails at init, in
 // every test, rather than as an empty kind on one code path.
 func kindOf(name string) Kind {

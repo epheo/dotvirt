@@ -882,7 +882,8 @@ func tenantView(t *testing.T, s *Server) (map[string]bool, map[string]bool) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	return visible, s.authorNamespaces(context.Background(), id, c, []string{"team-a-dev"})
+	_, author := s.authorNamespaces(context.Background(), id, c, []string{"team-a-dev"})
+	return visible, author
 }
 
 func TestANamespaceAdminSeesItsNamespaceWithoutKubeVirt(t *testing.T) {
@@ -914,26 +915,45 @@ func TestRightsOnPodsAloneOpenNothing(t *testing.T) {
 	}
 }
 
-// A namespace admin of a cluster with KubeVirt but none of its roles sees the
-// namespace and authors no VMs in it.
-func TestWithKubeVirtAuthoringStillAsksAboutVMs(t *testing.T) {
-	fc := newFakeCluster(t)
-	fc.ssar = namespaceAdmin(false)
-	s := fc.server(nil, Config{})
-	s.modules = knownModules(t, true)
-	if visible, author := tenantView(t, s); !visible["team-a-dev"] || author["team-a-dev"] {
-		t.Errorf("visible = %v, author = %v, want the namespace and no authoring", visible, author)
+// A namespace admin of a cluster with KubeVirt but none of its roles authors
+// in the namespace: NetworkPolicies are a kind its repo holds. So while
+// discovery has not answered yet, when every kind counts.
+func TestAuthoringFollowsAnyTenantKind(t *testing.T) {
+	for name, mods := range map[string]func(*testing.T) *modules.Snapshot{
+		"with KubeVirt":        func(t *testing.T) *modules.Snapshot { return knownModules(t, true) },
+		"discovery unanswered": func(*testing.T) *modules.Snapshot { return modules.New(fakeModules{}) },
+	} {
+		t.Run(name, func(t *testing.T) {
+			fc := newFakeCluster(t)
+			fc.ssar = namespaceAdmin(false)
+			s := fc.server(nil, Config{})
+			s.modules = mods(t)
+			if visible, author := tenantView(t, s); !visible["team-a-dev"] || !author["team-a-dev"] {
+				t.Errorf("visible = %v, author = %v, want the namespace and authoring", visible, author)
+			}
+		})
 	}
 }
 
-// Until discovery answers, authoring keeps the VM question.
-func TestUnknownModulesKeepTheVMQuestion(t *testing.T) {
-	fc := newFakeCluster(t)
-	fc.ssar = namespaceAdmin(false)
-	s := fc.server(nil, Config{})
-	s.modules = modules.New(fakeModules{})
-	if visible, author := tenantView(t, s); !visible["team-a-dev"] || author["team-a-dev"] {
-		t.Errorf("visible = %v, author = %v, want the namespace and no authoring", visible, author)
+// A right on a kind the cluster does not serve authors nothing: git would
+// hold what nothing syncs.
+func TestAuthoringIgnoresUnservedKinds(t *testing.T) {
+	for _, served := range []bool{false, true} {
+		fc := newFakeCluster(t)
+		fc.ssar = func(token string, a *authzv1.ResourceAttributes) bool {
+			return token == tenantToken && a.Namespace == "team-a-dev" &&
+				(a.Resource == "namespaces" || a.Resource == "pods" || a.Resource == "egressfirewalls")
+		}
+		kinds := []model.Kind{model.KindVM, model.KindNetpol, model.KindNS}
+		if served {
+			kinds = append(kinds, model.KindEgressFW)
+		}
+		fc.serveKinds(kinds...)
+		s := fc.server(nil, Config{})
+		s.modules = knownModules(t, false)
+		if _, author := tenantView(t, s); author["team-a-dev"] != served {
+			t.Errorf("EgressFirewalls served = %v: author = %v", served, author)
+		}
 	}
 }
 
@@ -1116,5 +1136,43 @@ func TestASweepAsksOnlyWhereABindingNamesTheCaller(t *testing.T) {
 	want := slices.Concat(slices.Repeat([]string{""}, wideSweep), slices.Repeat([]string{"mine"}, len(readKinds)-1))
 	if got := reader.take(); !slices.Equal(got, want) {
 		t.Errorf("a wide reader asked %q, want the wide sweep and the bound namespace", got)
+	}
+}
+
+// The two authoring signals: a namespace takes changes on any served tenant
+// kind, VM changes on VMs alone. Without a RoleBinding only a cluster-wide
+// grant reaches a namespace, so one with none is answered by the cluster-wide
+// reviews and never asked itself.
+func TestAuthoringAsksOnlyBoundNamespaces(t *testing.T) {
+	bus := eventbus.New()
+	st, _, _ := watchedState(t, bus, projectNS("mine"), projectNS("theirs"), userBinding("mine", "editors", "alice"))
+	waitUntil(t, "the RBAC watches", func() bool { b, ok := st.BoundNamespaces("alice", nil); return ok && b["mine"] })
+	s := scopeServer(bus)
+	s.state, s.indexBindings = st, true
+	var mu sync.Mutex
+	asked := map[string]int{}
+	kube := fake.NewSimpleClientset()
+	kube.PrependReactor("create", "selfsubjectaccessreviews", func(action k8stesting.Action) (bool, runtime.Object, error) {
+		ssar := action.(k8stesting.CreateAction).GetObject().(*authzv1.SelfSubjectAccessReview).DeepCopy()
+		a := ssar.Spec.ResourceAttributes
+		mu.Lock()
+		asked[a.Namespace]++
+		mu.Unlock()
+		ssar.Status.Allowed = a.Namespace == "mine" && a.Resource == "networkpolicies"
+		return true, ssar, nil
+	})
+	alice := auth.Identity{Username: "alice", Token: "alice-token"}
+	vms, any := s.authorNamespaces(context.Background(), alice, cluster.NewClient(kube, nil, nil), []string{"mine", "theirs"})
+	if !any["mine"] || vms["mine"] {
+		t.Errorf("mine: any = %v, vms = %v; want changes but no VM changes", any, vms)
+	}
+	if v, known := any["theirs"]; !known || v {
+		t.Errorf("theirs: any = %v; want a known no from the cluster-wide reviews", any)
+	}
+	if v, known := vms["theirs"]; !known || v {
+		t.Errorf("theirs: vms = %v; want a known no", vms)
+	}
+	if asked["theirs"] != 0 {
+		t.Errorf("asked %d reviews in a namespace no RoleBinding names alice in", asked["theirs"])
 	}
 }

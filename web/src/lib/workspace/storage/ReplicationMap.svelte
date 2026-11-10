@@ -58,6 +58,8 @@
 		return hosts.includes(raw) ? raw : '';
 	});
 	const rehearsal = $derived(down ? rehearse(mapped, down) : null);
+	// The row a landing tile sent the reader to.
+	const focus = $derived(page.url.searchParams.get('focus') ?? '');
 	const repair = $derived(clusterGate.replicationRepair());
 	let splitOpen = $state<{ volume: ReplicatedVolume; name: string } | null>(null);
 	let moveOff = $state('');
@@ -284,10 +286,16 @@
 				{#each mapped as r (r.key)}
 					{@const fate = down ? rowIfDown(r, down) : null}
 					<tbody>
-						<tr class="bg-inset">
+						<tr
+							class={r.key === focus ? 'bg-select-soft' : 'bg-inset'}
+							aria-current={r.key === focus ? 'true' : undefined}
+							{@attach r.key === focus && ((el) => el.scrollIntoView({ block: 'center' }))}
+						>
 							<th
 								scope="rowgroup"
-								class="sticky left-0 z-10 bg-inset px-3 py-1.5 text-left font-normal"
+								class="sticky left-0 z-10 {r.key === focus
+									? 'bg-select-soft'
+									: 'bg-inset'} px-3 py-1.5 text-left font-normal"
 							>
 								{#if r.vm}
 									<a

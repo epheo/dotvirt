@@ -201,8 +201,18 @@ function readBody(req) {
 	});
 }
 
+// A frame as the server sends it: a scenario's authors may change VMs too,
+// unless it says otherwise (canAuthorVMs).
+function inventoryFrame() {
+	const inv = state.scenario.inventory;
+	for (const p of inv?.projects ?? [])
+		for (const n of p.namespaces ?? [])
+			if ('canAuthor' in n && !('canAuthorVMs' in n)) n.canAuthorVMs = n.canAuthor;
+	return JSON.stringify(inv);
+}
+
 function broadcastInventory() {
-	const frame = JSON.stringify(state.scenario.inventory);
+	const frame = inventoryFrame();
 	for (const ws of state.sockets) ws.send(frame);
 }
 
@@ -437,6 +447,8 @@ async function handleAPI(req, res, url) {
 			rebalancing: true,
 			routes: false,
 			replicatedStorage: false,
+			olm: true,
+			machineConfig: true,
 			...s.modules,
 		});
 	}
@@ -1265,7 +1277,7 @@ server.on('upgrade', (req, socket, head) => {
 	wss.handleUpgrade(req, socket, head, (ws) => {
 		state.sockets.add(ws);
 		ws.on('close', () => state.sockets.delete(ws));
-		ws.send(JSON.stringify(state.scenario.inventory));
+		ws.send(inventoryFrame());
 	});
 });
 

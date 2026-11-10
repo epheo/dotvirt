@@ -94,7 +94,7 @@
 			if ('edit' in a) return { label: a.label, run: () => void openEdit(a.edit) };
 			return { label: a.label, run: () => void adoptVM(vm) };
 		}
-		if (vm.sync === 'NotTracked' && inventory.canAuthor(vm.namespace))
+		if (vm.sync === 'NotTracked' && inventory.canAuthorVMs(vm.namespace))
 			return { label: 'Adopt into git', run: () => void adoptVM(vm) };
 		return null;
 	}

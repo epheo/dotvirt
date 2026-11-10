@@ -324,9 +324,9 @@
 				{@render lane('Uplinks', `All ${model.rows.length}`)}
 				{@render lane(
 					'Shared and VLAN networks',
-					model.shown.networks === model.shown.networksTotal
-						? `All ${model.shown.networksTotal}`
-						: `${model.shown.networks} most used of ${fmt(model.shown.networksTotal)}`,
+					model.shown.lane === model.shown.laneTotal
+						? `All ${model.shown.laneTotal}`
+						: `${model.shown.lane} most used of ${fmt(model.shown.laneTotal)}`,
 				)}
 
 				<!-- the builtin uplink's row: internet and the cluster edge -->

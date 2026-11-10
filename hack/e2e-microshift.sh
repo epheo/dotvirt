@@ -604,10 +604,31 @@ YAML
 		'{"repoRead":true,"vmCreate":false,"console":false,"egressFirewallCreate":false}'
 	retry "a project author authors VMs and opens consoles" 180 offered "${AUTHOR_TOK}" \
 		'{"repoRead":true,"vmCreate":'"${vms}"',"console":'"${vms}"',"egressFirewallCreate":false}'
-	# MicroShift serves no EgressFirewalls: the admin's grant on them offers no
-	# new one.
-	retry "a project admin authors VMs and is offered no egress firewall" 180 offered "${PROJECT_ADMIN_TOK}" \
-		'{"repoRead":true,"vmCreate":'"${vms}"',"console":'"${vms}"',"egressFirewallCreate":false}'
+	# The admin's grant on EgressFirewalls offers a new one only where the
+	# cluster serves them (epheo.39 on): a kind nothing syncs is never offered.
+	# Only a NotFound means not served; any other failure is asked again, as
+	# the server counts a failed read as served.
+	egress_served() {
+		local out err
+		err="$(mktemp)"
+		if out="$(kc get --raw /apis/k8s.ovn.org/v1 2>"${err}")"; then
+			rm -f "${err}"
+			# A body that does not parse is asked again.
+			egress="$(jq -r '[.resources[].name] | index("egressfirewalls") != null' <<<"${out}")" || return 1
+			return 0
+		fi
+		if grep -q 'NotFound' "${err}"; then
+			rm -f "${err}"
+			egress=false
+			return 0
+		fi
+		cat "${err}"
+		rm -f "${err}"
+		return 1
+	}
+	retry "the cluster's answer on EgressFirewalls" 120 egress_served
+	retry "a project admin authors VMs and is offered an egress firewall only where served" 180 offered "${PROJECT_ADMIN_TOK}" \
+		'{"repoRead":true,"vmCreate":'"${vms}"',"console":'"${vms}"',"egressFirewallCreate":'"${egress}"'}'
 	platform_offered() {
 		local got
 		got="$(curl -fsS --max-time 30 -H "Authorization: Bearer ${NETWORK_ADMIN_TOK}" "${BASE}/api/capabilities" |
