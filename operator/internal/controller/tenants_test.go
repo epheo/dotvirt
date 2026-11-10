@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"slices"
 	"strings"
 	"testing"
@@ -363,12 +364,12 @@ func erroredAppSet(dv *dotvirtv1alpha1.Dotvirt, msg string) *unstructured.Unstru
 	return appset
 }
 
-// With tenantKinds Any, the Argo phase decides whether the instance
+// With kinds allowed, the Argo phase decides whether the instance
 // impersonates where Argo reads it, whatever SyncImpersonationReady says: the
 // argocd-cm key, and an AppProject this install applied keeping
 // destinationServiceAccounts (an Argo CD older than 2.13 prunes it and ignores
-// the key). Only both carry the deny list; otherwise the listed kinds stay and
-// ArgoReady says why.
+// the key). Only both whitelist the allowed kinds; otherwise the listed kinds
+// stay and ArgoReady says why.
 func TestTenantKindsFollowTheImpersonationSetting(t *testing.T) {
 	for _, c := range []struct {
 		name               string
@@ -381,7 +382,7 @@ func TestTenantKindsFollowTheImpersonationSetting(t *testing.T) {
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			dv, creds := byoForgeCR("https://forge.byo.example")
-			dv.Spec.ArgoCD.TenantKinds = "Any"
+			dv.Spec.ArgoCD.TenantKindsAllowed = []dotvirtv1alpha1.GroupKind{{Group: "apps", Kind: "Deployment"}}
 			meta.SetStatusCondition(&dv.Status.Conditions, metav1.Condition{Type: dotvirtv1alpha1.ConditionSyncImpersonationReady, Status: metav1.ConditionFalse, Reason: "Degraded"})
 			cm := &corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Name: "argocd-cm", Namespace: "argocd"}, Data: map[string]string{}}
 			if c.key {
@@ -405,8 +406,10 @@ func TestTenantKindsFollowTheImpersonationSetting(t *testing.T) {
 			}
 			want := c.key && c.field && !c.pinned
 			spec := tier.objs[0].(*unstructured.Unstructured).Object["spec"].(map[string]any)
-			if _, black := spec["namespaceResourceBlacklist"]; black != want {
-				t.Errorf("blacklist = %v, want %v", black, want)
+			list, _ := spec["namespaceResourceWhitelist"].([]any)
+			deploy := map[string]any{"group": "apps", "kind": "Deployment"}
+			if allowed := slices.ContainsFunc(list, func(e any) bool { return reflect.DeepEqual(e, deploy) }); allowed != want {
+				t.Errorf("Deployment whitelisted = %v, want %v", allowed, want)
 			}
 			noted := slices.ContainsFunc(tier.notes, func(n string) bool { return strings.Contains(n, "keep the listed kinds") })
 			if noted == want {

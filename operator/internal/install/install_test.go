@@ -522,16 +522,19 @@ func TestArgoSourcePaths(t *testing.T) {
 	}
 }
 
-// A project's repo applies any namespaced kind but the denied ones only while
-// tenantKinds is Any, impersonation is asked for, and the instance impersonates
-// (whatever SyncImpersonationReady says: one project's missing grant degrades
-// it); otherwise it keeps the listed kinds, and the shared tier always does.
-func TestTenantKindsAnyNeedsImpersonation(t *testing.T) {
-	denies := func(ap *unstructured.Unstructured) (bool, bool) {
-		spec := ap.Object["spec"].(map[string]any)
-		_, black := spec["namespaceResourceBlacklist"]
-		_, white := spec["namespaceResourceWhitelist"]
-		return black, white
+// A project's repo applies the allowed kinds only while impersonation is
+// asked for and the instance impersonates (whatever SyncImpersonationReady
+// says: one project's missing grant degrades it); otherwise it keeps the
+// listed kinds, and the shared tier always does. A kind no tenant repo may
+// apply never reaches a whitelist.
+func TestTenantKindsAllowedNeedImpersonation(t *testing.T) {
+	whitelisted := func(ap *unstructured.Unstructured, group, kind string) bool {
+		list, _, _ := unstructured.NestedSlice(ap.Object, "spec", "namespaceResourceWhitelist")
+		want := map[string]any{"group": group, "kind": kind}
+		return slices.ContainsFunc(list, func(e any) bool { return reflect.DeepEqual(e, want) })
+	}
+	allow := func(dv *dotvirtv1alpha1.Dotvirt) {
+		dv.Spec.ArgoCD.TenantKindsAllowed = []dotvirtv1alpha1.GroupKind{{Group: "apps", Kind: "Deployment"}, {Group: "rbac.authorization.k8s.io", Kind: "Role"}}
 	}
 	degraded := metav1.Condition{Type: dotvirtv1alpha1.ConditionSyncImpersonationReady, Status: metav1.ConditionFalse, Reason: "Degraded"}
 	off := false
@@ -539,38 +542,38 @@ func TestTenantKindsAnyNeedsImpersonation(t *testing.T) {
 		name          string
 		set           func(dv *dotvirtv1alpha1.Dotvirt)
 		impersonating bool
-		anyKinds      bool
+		allowed       bool
 	}{
-		{"listed", func(*dotvirtv1alpha1.Dotvirt) {}, true, false},
-		{"any, not impersonating", func(dv *dotvirtv1alpha1.Dotvirt) { dv.Spec.ArgoCD.TenantKinds = "Any" }, false, false},
-		{"any, impersonating", func(dv *dotvirtv1alpha1.Dotvirt) { dv.Spec.ArgoCD.TenantKinds = "Any" }, true, true},
-		{"any, impersonating, one project degraded", func(dv *dotvirtv1alpha1.Dotvirt) {
-			dv.Spec.ArgoCD.TenantKinds = "Any"
+		{"none named", func(*dotvirtv1alpha1.Dotvirt) {}, true, false},
+		{"not impersonating", allow, false, false},
+		{"impersonating", allow, true, true},
+		{"impersonating, one project degraded", func(dv *dotvirtv1alpha1.Dotvirt) {
+			allow(dv)
 			meta.SetStatusCondition(&dv.Status.Conditions, degraded)
 		}, true, true},
-		{"any, asked off while still impersonating", func(dv *dotvirtv1alpha1.Dotvirt) {
-			dv.Spec.ArgoCD.TenantKinds = "Any"
+		{"asked off while still impersonating", func(dv *dotvirtv1alpha1.Dotvirt) {
+			allow(dv)
 			dv.Spec.ArgoCD.SyncImpersonation.Enabled = &off
 		}, true, false},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			dv := testDotvirt()
 			c.set(dv)
-			dv.Spec.ArgoCD.TenantKindsDenied = []dotvirtv1alpha1.GroupKind{{Group: "capsule.clastix.io", Kind: "*"}}
-			denied := TenantDenied(dv, c.impersonating)
-			ap := TenantAppProject(dv, "argocd", "dotvirt-p-a", "a", []string{"a"}, nil, denied)
-			if black, white := denies(ap); black != c.anyKinds || white == c.anyKinds {
-				t.Fatalf("blacklist %v, whitelist %v; want any kinds %v", black, white, c.anyKinds)
+			ap := TenantAppProject(dv, "argocd", "dotvirt-p-a", "a", []string{"a"}, nil, TenantAllowed(dv, c.impersonating))
+			if got := whitelisted(ap, "apps", "Deployment"); got != c.allowed {
+				t.Errorf("Deployment whitelisted = %v, want %v", got, c.allowed)
 			}
-			if c.anyKinds {
-				list := ap.Object["spec"].(map[string]any)["namespaceResourceBlacklist"].([]any)
-				want := map[string]any{"group": "capsule.clastix.io", "kind": "*"}
-				if !slices.ContainsFunc(list, func(e any) bool { return reflect.DeepEqual(e, want) }) {
-					t.Errorf("the provider's denied kinds are missing: %v", list)
-				}
+			if !whitelisted(ap, "kubevirt.io", "VirtualMachine") {
+				t.Error("the listed kinds are missing")
 			}
-			if black, _ := denies(TenantsAppProject(dv, "argocd", "https://forge/dotvirt/platform.git", "ns")); black {
-				t.Error("the shared tier, which reaches any namespace, applies any kind")
+			if whitelisted(ap, "rbac.authorization.k8s.io", "Role") {
+				t.Error("a kind no tenant repo may apply is whitelisted")
+			}
+			if _, black := ap.Object["spec"].(map[string]any)["namespaceResourceBlacklist"]; black {
+				t.Error("a tenant AppProject carries a deny list")
+			}
+			if whitelisted(TenantsAppProject(dv, "argocd", "https://forge/dotvirt/platform.git", "ns"), "apps", "Deployment") {
+				t.Error("the shared tier, which reaches any namespace, applies an allowed kind")
 			}
 			if v, _, _ := unstructured.NestedSlice(ap.Object, "spec", "clusterResourceWhitelist"); v == nil || len(v) != 0 {
 				t.Errorf("clusterResourceWhitelist = %v, want empty", v)
@@ -579,26 +582,19 @@ func TestTenantKindsAnyNeedsImpersonation(t *testing.T) {
 	}
 }
 
-// dotvirt reads what tenant repos may apply from its env: nothing for the
-// listed kinds; Any, and only the provider's additions, under a deny list.
+// dotvirt reads what tenant repos may apply beyond the listed kinds from its
+// env: nothing while they keep the listed kinds, the allowed ones else.
 func TestDeploymentCarriesTheTenantKinds(t *testing.T) {
 	dv := testDotvirt()
-	dv.Spec.ArgoCD.TenantKinds = "Any"
-	env := func(denied []tenancy.GroupKind) (string, string) {
-		e := Deployment(dv, "argocd", denied).Spec.Template.Spec.Containers[0].Env
-		kinds, _ := envValue(e, "DOTVIRT_TENANT_KINDS")
-		extra, _ := envValue(e, "DOTVIRT_TENANT_KINDS_DENIED")
-		return kinds, extra
+	env := func(allowed []tenancy.GroupKind) (string, bool) {
+		return envValue(Deployment(dv, "argocd", allowed).Spec.Template.Spec.Containers[0].Env, "DOTVIRT_TENANT_KINDS_ALLOWED")
 	}
-	if kinds, extra := env(nil); kinds != "" || extra != "" {
-		t.Errorf("listed: %q %q", kinds, extra)
+	if v, ok := env(nil); ok {
+		t.Errorf("listed: %q", v)
 	}
-	if kinds, extra := env(TenantDenied(dv, true)); kinds != "Any" || extra != "" {
-		t.Errorf("any, no additions: %q %q", kinds, extra)
-	}
-	dv.Spec.ArgoCD.TenantKindsDenied = []dotvirtv1alpha1.GroupKind{{Group: "capsule.clastix.io", Kind: "*"}, {Kind: "Secret"}}
-	if kinds, extra := env(TenantDenied(dv, true)); kinds != "Any" || extra != "capsule.clastix.io/*,/Secret" {
-		t.Errorf("any with additions: %q %q", kinds, extra)
+	dv.Spec.ArgoCD.TenantKindsAllowed = []dotvirtv1alpha1.GroupKind{{Group: "apps", Kind: "Deployment"}, {Kind: "Service"}, {Group: "rbac.authorization.k8s.io", Kind: "Role"}}
+	if v, _ := env(TenantAllowed(dv, true)); v != "apps/Deployment,/Service" {
+		t.Errorf("allowed: %q", v)
 	}
 }
 

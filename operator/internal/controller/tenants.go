@@ -112,12 +112,14 @@ func (r *DotvirtReconciler) tenantAppProjects(ctx context.Context, dv *dotvirtv1
 			foreign[o.GetName()] = true
 		}
 	}
-	denied := r.tenantKinds(ctx, dv, rc, held.Items)
-	if dv.Spec.ArgoCD.AnyTenantKinds() {
-		if denied == nil {
-			t.notes = append(t.notes, "tenant repos keep the listed kinds until the ArgoCD instance impersonates: argocd-cm sets "+
-				install.SyncImpersonationKey+", its AppProjects keep destinationServiceAccounts (Argo CD 2.13 or later) and its ArgoCD resource pins no image or version")
-		}
+	allowed := r.tenantKinds(ctx, dv, rc, held.Items)
+	want, refused := install.NamedTenantKinds(dv)
+	if len(refused) > 0 {
+		t.degraded = append(t.degraded, "spec.argocd.tenantKindsAllowed names kinds no tenant repo may apply, left out: "+tenancy.FormatGroupKinds(refused))
+	}
+	if len(want) > 0 && allowed == nil {
+		t.notes = append(t.notes, "tenant repos keep the listed kinds until the ArgoCD instance impersonates: argocd-cm sets "+
+			install.SyncImpersonationKey+", its AppProjects keep destinationServiceAccounts (Argo CD 2.13 or later) and its ArgoCD resource pins no image or version")
 	}
 
 	projects := deriveTenantProjects(nsList.Items, forgeBase)
@@ -152,7 +154,7 @@ func (r *DotvirtReconciler) tenantAppProjects(ctx context.Context, dv *dotvirtv1
 		} else if len(p.repos) > 0 {
 			t.notes = append(t.notes, fmt.Sprintf("project %s names no single resolvable repo; its AppProject admits no source", name))
 		}
-		t.objs = append(t.objs, install.TenantAppProject(dv, argoNS, apName, name, destinations, sources, denied))
+		t.objs = append(t.objs, install.TenantAppProject(dv, argoNS, apName, name, destinations, sources, allowed))
 		t.accounts[apName] = destinations
 		rendered[apName] = true
 	}
@@ -182,7 +184,7 @@ func (r *DotvirtReconciler) tenantAppProjects(ctx context.Context, dv *dotvirtv1
 			t.sharedInUse = true
 			continue
 		}
-		t.objs = append(t.objs, install.TenantAppProject(dv, argoNS, o.GetName(), o.GetLabels()[install.ProjectLabel], nil, nil, denied))
+		t.objs = append(t.objs, install.TenantAppProject(dv, argoNS, o.GetName(), o.GetLabels()[install.ProjectLabel], nil, nil, allowed))
 	}
 	return t, nil
 }
@@ -262,16 +264,16 @@ func (r *DotvirtReconciler) setArgoReady(dv *dotvirtv1alpha1.Dotvirt, t tenantTi
 	r.setCondition(dv, dotvirtv1alpha1.ConditionArgoReady, metav1.ConditionTrue, "Ready", msg)
 }
 
-// tenantKinds is install.TenantDenied for this pass, decided once, so the
+// tenantKinds is install.TenantAllowed for this pass, decided once, so the
 // dotvirt pod (the workload phase) and the AppProjects (the Argo phase, after
 // it) read the same answer. held are the ArgoCD namespace's AppProjects,
 // listed here when nil. A failed read is unknown, so no: the listed kinds.
 func (r *DotvirtReconciler) tenantKinds(ctx context.Context, dv *dotvirtv1alpha1.Dotvirt, rc *reconcileCtx, held []unstructured.Unstructured) []tenancy.GroupKind {
 	if rc.tenantKindsRead {
-		return rc.tenantDenied
+		return rc.tenantAllowed
 	}
 	rc.tenantKindsRead = true
-	if !dv.Spec.ArgoCD.AnyTenantKinds() {
+	if allowed, _ := install.NamedTenantKinds(dv); len(allowed) == 0 {
 		return nil
 	}
 	if held == nil {
@@ -281,8 +283,8 @@ func (r *DotvirtReconciler) tenantKinds(ctx context.Context, dv *dotvirtv1alpha1
 		}
 		held = list.Items
 	}
-	rc.tenantDenied = install.TenantDenied(dv, r.impersonating(ctx, dv, rc.argoNS, held))
-	return rc.tenantDenied
+	rc.tenantAllowed = install.TenantAllowed(dv, r.impersonating(ctx, dv, rc.argoNS, held))
+	return rc.tenantAllowed
 }
 
 // impersonating reports whether the instance syncs dotvirt's Applications as

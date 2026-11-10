@@ -73,7 +73,7 @@ class InventoryStore {
 			alerts: this.alerts ?? [],
 			canRepair: (p) => repoGate(p).ok,
 			network: this.netProblems,
-			anyTenantKinds: modules.value?.anyTenantKinds === true,
+			extraTenantKinds: modules.value?.extraTenantKinds === true,
 		}),
 	);
 	// What is worth doing but not wrong: adoptable namespaces and VMs.

@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"strings"
 	"sync/atomic"
@@ -16,6 +17,7 @@ import (
 	authzv1 "k8s.io/api/authorization/v1"
 	corev1 "k8s.io/api/core/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
+	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/types"
@@ -790,13 +792,26 @@ func TestArgoMatch(t *testing.T) {
 	}
 }
 
-// Asking impersonation off with tenantKinds Any closes the window: the pass
+// allowsDeploy reports whether project team-a's AppProject whitelists
+// Deployments.
+func allowsDeploy(t *testing.T, c client.Client) bool {
+	t.Helper()
+	ap := argoObj("AppProject", "", "", nil)
+	if !exists(t, c, ap, "argocd", "dotvirt-p-team-a") {
+		t.Fatal("AppProject missing")
+	}
+	list, _, _ := unstructured.NestedSlice(ap.Object, "spec", "namespaceResourceWhitelist")
+	want := map[string]any{"group": "apps", "kind": "Deployment"}
+	return slices.ContainsFunc(list, func(e any) bool { return reflect.DeepEqual(e, want) })
+}
+
+// Asking impersonation off with kinds allowed closes the window: the pass
 // writes the project's AppProject back to the listed kinds before it takes the
-// setting off the ArgoCD instance, so a tenant repo never applies any kind as
-// the controller's account.
-func TestAnyTenantKindsFlipBackBeforeTheSettingGoes(t *testing.T) {
+// setting off the ArgoCD instance, so a tenant repo never applies an allowed
+// kind as the controller's account.
+func TestAllowedTenantKindsFlipBackBeforeTheSettingGoes(t *testing.T) {
 	dv := optIn(testCR(), false)
-	dv.Spec.ArgoCD.TenantKinds = "Any"
+	dv.Spec.ArgoCD.TenantKindsAllowed = []dotvirtv1alpha1.GroupKind{{Group: "apps", Kind: "Deployment"}}
 	var n atomic.Int64
 	var order []string
 	f := reviews(granted(map[string][]string{"dotvirt-p-team-a": {"a"}}), &n)
@@ -818,23 +833,15 @@ func TestAnyTenantKindsFlipBackBeforeTheSettingGoes(t *testing.T) {
 		t.Fatal(err)
 	}
 	reconcileOnce(t, r, getCR(t, c, dv))
-	blacklisted := func() bool {
-		ap := argoObj("AppProject", "", "", nil)
-		if !exists(t, c, ap, "argocd", "dotvirt-p-team-a") {
-			t.Fatal("AppProject missing")
-		}
-		_, ok := ap.Object["spec"].(map[string]any)["namespaceResourceBlacklist"]
-		return ok
-	}
-	if !blacklisted() {
-		t.Fatal("impersonating with tenantKinds Any: the AppProject carries no deny list")
+	if !allowsDeploy(t, c) {
+		t.Fatal("impersonating with Deployments allowed: the AppProject does not whitelist them")
 	}
 
 	order = nil
 	stored := setSpec(t, c, dv, func(d *dotvirtv1alpha1.Dotvirt) { d.Spec.ArgoCD.SyncImpersonation.Enabled = new(false) })
 	reconcileOnce(t, r, stored)
-	if blacklisted() {
-		t.Error("asked off: the AppProject still carries the deny list")
+	if allowsDeploy(t, c) {
+		t.Error("asked off: the AppProject still whitelists Deployments")
 	}
 	first := slices.Index(order, "appproject")
 	last := slices.Index(order, "instance")
@@ -844,51 +851,48 @@ func TestAnyTenantKindsFlipBackBeforeTheSettingGoes(t *testing.T) {
 }
 
 // The dotvirt pod reads what tenant repos may apply from the pass that writes
-// the AppProjects: Any, with the provider's additions, only while they carry
-// the deny list, and the listed kinds again once they do not.
+// the AppProjects: the allowed kinds only while they carry them, and the
+// listed kinds again once they do not. A named kind no tenant repo may apply
+// is left out of both, and ArgoReady names it.
 func TestTenantKindsEnvFollowsTheAppProjects(t *testing.T) {
 	dv := optIn(testCR(), false)
-	dv.Spec.ArgoCD.TenantKinds = "Any"
-	dv.Spec.ArgoCD.TenantKindsDenied = []dotvirtv1alpha1.GroupKind{{Group: "capsule.clastix.io", Kind: "*"}}
+	dv.Spec.ArgoCD.TenantKindsAllowed = []dotvirtv1alpha1.GroupKind{{Group: "apps", Kind: "Deployment"}, {Group: "rbac.authorization.k8s.io", Kind: "Role"}}
 	var n atomic.Int64
 	c := testBuilder(t).WithObjects(dv, argoCDInstance(nil), projectNS("a", "team-a", "dotvirt/team-a.git")).
 		WithInterceptorFuncs(reviews(granted(map[string][]string{"dotvirt-p-team-a": {"a"}}), &n)).WithReturnManagedFields().Build()
 	r := newReconciler(c, depsOK)
-	env := func() map[string]string {
+	env := func() string {
 		var d appsv1.Deployment
 		if err := c.Get(context.Background(), types.NamespacedName{Namespace: dv.Namespace, Name: install.AppName}, &d); err != nil {
 			t.Fatal(err)
 		}
-		out := map[string]string{}
 		for _, e := range d.Spec.Template.Spec.Containers[0].Env {
-			out[e.Name] = e.Value
+			if e.Name == "DOTVIRT_TENANT_KINDS_ALLOWED" {
+				return e.Value
+			}
 		}
-		return out
-	}
-	blacklisted := func() bool {
-		ap := argoObj("AppProject", "", "", nil)
-		if !exists(t, c, ap, "argocd", "dotvirt-p-team-a") {
-			t.Fatal("AppProject missing")
-		}
-		_, ok := ap.Object["spec"].(map[string]any)["namespaceResourceBlacklist"]
-		return ok
+		return ""
 	}
 
 	reconcileOnce(t, r, dv)
-	if e := env(); e["DOTVIRT_TENANT_KINDS"] != "" || blacklisted() {
-		t.Fatalf("not impersonating yet: env %v, blacklist %v", e["DOTVIRT_TENANT_KINDS"], blacklisted())
+	if e := env(); e != "" || allowsDeploy(t, c) {
+		t.Fatalf("not impersonating yet: env %q, whitelisted %v", e, allowsDeploy(t, c))
 	}
 	if err := c.Create(context.Background(), argoCM(true)); err != nil {
 		t.Fatal(err)
 	}
 	reconcileOnce(t, r, getCR(t, c, dv))
-	if e := env(); e["DOTVIRT_TENANT_KINDS"] != "Any" || e["DOTVIRT_TENANT_KINDS_DENIED"] != "capsule.clastix.io/*" || !blacklisted() {
-		t.Errorf("impersonating: env %v / %v, blacklist %v", e["DOTVIRT_TENANT_KINDS"], e["DOTVIRT_TENANT_KINDS_DENIED"], blacklisted())
+	if e := env(); e != "apps/Deployment" || !allowsDeploy(t, c) {
+		t.Errorf("impersonating: env %q, whitelisted %v", e, allowsDeploy(t, c))
+	}
+	argo := meta.FindStatusCondition(getCR(t, c, dv).Status.Conditions, dotvirtv1alpha1.ConditionArgoReady)
+	if argo == nil || argo.Status != metav1.ConditionFalse || !strings.Contains(argo.Message, "rbac.authorization.k8s.io/Role") {
+		t.Errorf("ArgoReady = %+v, want False naming the refused Role", argo)
 	}
 
 	stored := setSpec(t, c, dv, func(d *dotvirtv1alpha1.Dotvirt) { d.Spec.ArgoCD.SyncImpersonation.Enabled = new(false) })
 	reconcileOnce(t, r, stored)
-	if e := env(); e["DOTVIRT_TENANT_KINDS"] != "" || e["DOTVIRT_TENANT_KINDS_DENIED"] != "" || blacklisted() {
-		t.Errorf("asked off: env %v, blacklist %v", e, blacklisted())
+	if e := env(); e != "" || allowsDeploy(t, c) {
+		t.Errorf("asked off: env %q, whitelisted %v", e, allowsDeploy(t, c))
 	}
 }

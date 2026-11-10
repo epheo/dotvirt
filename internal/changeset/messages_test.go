@@ -38,7 +38,7 @@ func TestRefusalsSpeakTheUIsWords(t *testing.T) {
 		{noForm, model.ErrInvalid, "invalid request: there is no create form for rebalancing"},
 		{tenantDeclarable(KindRule{}, project.ProjectInfo{Name: "p"}, "k8s.cni.cncf.io", "NetworkAttachmentDefinition", "raw"), model.ErrInvalid,
 			"invalid request: only the platform repo may declare NetworkAttachmentDefinition raw, not project p"},
-		{tenantDeclarable(KindRule{Policy: tenancy.AnyPolicy()}, project.ProjectInfo{Name: "p"}, "rbac.authorization.k8s.io", "Role", "widen"), model.ErrInvalid,
+		{tenantDeclarable(KindRule{Policy: tenancy.Policy{Allowed: []tenancy.GroupKind{{Group: "apps", Kind: "Deployment"}}}}, project.ProjectInfo{Name: "p"}, "rbac.authorization.k8s.io", "Role", "widen"), model.ErrInvalid,
 			"invalid request: Role widen is a kind this install's tenant repos may not apply, so project p may not declare it"},
 	}
 	for _, tc := range cases {

@@ -140,12 +140,10 @@ type KindRule struct {
 	ProjectNamespace func(namespace string) bool
 }
 
-// Declarable reports whether a tenant repo may declare group/kind.
+// Declarable reports whether a tenant repo may declare group/kind: a listed
+// kind, or a namespaced one the provider allowed.
 func (r KindRule) Declarable(group, kind string) bool {
-	if !r.Policy.Any {
-		return tenancy.TenantKind(kind)
-	}
-	return r.Policy.Declarable(group, kind, r.clusterScoped(group, kind))
+	return tenancy.Listed(group, kind) || r.Policy.Allows(group, kind) && !r.clusterScoped(group, kind)
 }
 
 func (r KindRule) clusterScoped(group, kind string) bool {
@@ -246,13 +244,13 @@ func requirePlacement(rule KindRule, proj project.ProjectInfo, path string, cont
 }
 
 // tenantDeclarable refuses a kind a tenant repo may not declare, saying why:
-// under the listed kinds it belongs in the platform repo; under any kind it is
-// one this install's tenant repos may not apply.
+// under the listed kinds alone it belongs in the platform repo; with kinds
+// allowed beyond them it is one this install's tenant repos may not apply.
 func tenantDeclarable(rule KindRule, proj project.ProjectInfo, group, kind, name string) error {
 	if proj.Name == project.PlatformName || rule.Declarable(group, kind) {
 		return nil
 	}
-	if rule.Policy.Any {
+	if len(rule.Policy.Allowed) > 0 {
 		return fmt.Errorf("%w: %s %s is a kind this install's tenant repos may not apply, so project %s may not declare it",
 			model.ErrInvalid, kind, name, proj.Name)
 	}
