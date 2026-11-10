@@ -493,16 +493,16 @@ func (c *Coordinator) SettlePushed(repo, branch string, number int, head string,
 	if err != nil || !ok || !match(rec) || !rec.Settle(head) {
 		return err
 	}
-	if merged {
-		err = c.store.DropProposal(who.User, who.Project)
-	} else {
-		rec.PR = number
-		err = c.store.SetProposal(who.User, who.Project, rec)
-	}
-	if err != nil {
+	// The entries go first: if the record write then fails, the record still
+	// matches, and the next settle retries with nothing left to remove.
+	if err := c.store.Remove(who.User, who.Project, rec.Entries...); err != nil {
 		return err
 	}
-	return c.store.Remove(who.User, who.Project, rec.Entries...)
+	if merged {
+		return c.store.DropProposal(who.User, who.Project)
+	}
+	rec.PR = number
+	return c.store.SetProposal(who.User, who.Project, rec)
 }
 
 // proposal is the record of number carrying entries at head on this run's
