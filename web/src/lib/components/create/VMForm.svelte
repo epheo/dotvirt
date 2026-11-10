@@ -233,6 +233,12 @@
 	const classOf = (c: string) =>
 		classes.find((x) => x.name === (c || inventory.defaultStorageClass));
 	const rootClass = $derived(classOf(storageClass));
+	// Every disk the VM is made with, root first: one-copy disks share a host.
+	const diskSizes = $derived([
+		{ storageClass, bytes: quantityBytes(diskSize) },
+		...disks.rows.map((d) => ({ storageClass: d.storageClass, bytes: quantityBytes(d.size) })),
+	]);
+	const peersOf = (i: number) => diskSizes.filter((_, j) => j !== i);
 	const rootClassName = $derived(
 		storageClass || inventory.defaultStorageClass || 'the default class',
 	);
@@ -842,6 +848,7 @@
 			onpick={(c) => (storageClass = c)}
 			classes={classRows}
 			bytes={quantityBytes(diskSize)}
+			peers={peersOf(0)}
 		/>
 		{#each disks.rows as d, i (i)}
 			<div class="flex flex-col gap-2 rounded-md border border-line p-2.5">
@@ -872,6 +879,7 @@
 					onpick={(c) => (d.storageClass = c)}
 					classes={classRows}
 					bytes={quantityBytes(d.size)}
+					peers={peersOf(i + 1)}
 				/>
 			</div>
 		{/each}

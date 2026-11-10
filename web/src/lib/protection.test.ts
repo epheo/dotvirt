@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import type { ReplicationPool, StorageClassInfo } from '#lib/api.js';
-import { protectionChoices, roomText, tierRooms } from './replication';
+import type { ReplicatedVolume, ReplicationPool, StorageClassInfo, VM } from '#lib/api.js';
+import { localFit, pinnedHost, protectionChoices, roomText, tierRooms } from './replication';
 
 const GIB = 1024 ** 3;
 const cls = (name: string, copies?: number, tier = 'nvme', extra: Partial<StorageClassInfo> = {}) =>
@@ -104,5 +104,125 @@ describe('roomText', () => {
 			ok: false,
 			text: 'No room on hdd for a new disk at 2 copies today.',
 		});
+	});
+});
+
+// Two hosts for one-copy disks: h1 has one big pool, h2 two smaller ones.
+const local = tierRooms([
+	pool('h1', 'nvme', 300),
+	{ ...pool('h2', 'nvme', 200), name: 'nvme-h2-a' },
+	{ ...pool('h2', 'nvme', 150), name: 'nvme-h2-b' },
+	{ ...pool('h3', 'nvme', 900), available: false },
+])[0];
+
+describe('tierRooms hosts', () => {
+	it('keeps each host its largest pool and all its pools together', () => {
+		expect(local.hosts).toEqual([
+			{ node: 'h1', largest: 300 * GIB, total: 300 * GIB },
+			{ node: 'h2', largest: 200 * GIB, total: 350 * GIB },
+		]);
+	});
+});
+
+describe('localFit', () => {
+	it('fits a host only when its largest pool holds every one-copy disk', () => {
+		expect(localFit(local.hosts, [100 * GIB, 100 * GIB], 'h2')).toBe('fits');
+		// Two pools might take them, depending on which disk lands first.
+		expect(localFit(local.hosts, [150 * GIB, 150 * GIB], 'h2')).toBe('maybe');
+		expect(localFit(local.hosts, [200 * GIB, 200 * GIB], 'h2')).toBe('too-big');
+		expect(localFit(local.hosts, [250 * GIB], 'h2')).toBe('too-big');
+	});
+
+	it('refuses a host without a pool of the tier', () => {
+		expect(localFit(local.hosts, [GIB], 'h9')).toBe('too-big');
+	});
+
+	it('holds unpinned only when every host the scheduler may pick holds them', () => {
+		expect(localFit(local.hosts, [100 * GIB, 100 * GIB])).toBe('fits');
+		// h2 takes each alone, so the scheduler may pick it, and its pools may not take both.
+		expect(localFit(local.hosts, [150 * GIB, 150 * GIB])).toBe('maybe');
+		// Only h1 takes the larger one alone, and it cannot take both.
+		expect(localFit(local.hosts, [250 * GIB, 100 * GIB])).toBe('too-big');
+	});
+});
+
+describe('one-copy roomText', () => {
+	const [one, two] = protectionChoices([cls('l', 1), cls('r', 2)], [local]);
+	const l = one.classes[0];
+
+	it('keeps the single-disk verdict when the VM has no other one-copy disk', () => {
+		expect(roomText(l, 1, 100 * GIB, { others: [] })).toEqual({
+			ok: true,
+			text: 'Fits. Room on nvme: 300 GiB at one copy.',
+		});
+	});
+
+	it("weighs the VM's other one-copy disks, as they share its host", () => {
+		expect(roomText(l, 1, 100 * GIB, { others: [100 * GIB] })).toEqual({
+			ok: true,
+			text: "Fits with the VM's other one-copy disks, which share its host.",
+		});
+		expect(roomText(l, 1, 150 * GIB, { others: [150 * GIB] })).toEqual({
+			ok: false,
+			text: "May not fit on one host with the VM's other one-copy disks.",
+		});
+		expect(roomText(l, 1, 250 * GIB, { others: [100 * GIB] })).toEqual({
+			ok: false,
+			text: "Too big. No host has room on nvme for the VM's one-copy disks together.",
+		});
+	});
+
+	it("judges a VM that already holds a one-copy disk on that disk's host", () => {
+		expect(roomText(l, 1, 250 * GIB, { others: [], host: 'h1' })).toEqual({
+			ok: true,
+			text: "Fits on h1, where the VM's one-copy disk lives. Room on nvme there: 300 GiB.",
+		});
+		// The roomiest host would take it; the VM's own host cannot.
+		expect(roomText(l, 1, 250 * GIB, { others: [], host: 'h2' })).toEqual({
+			ok: false,
+			text: "Too big for h2, where the VM's one-copy disk lives. Room on nvme there: 200 GiB.",
+		});
+		expect(roomText(l, 1, 150 * GIB, { others: [150 * GIB], host: 'h2' })).toEqual({
+			ok: false,
+			text: 'May not fit on h2 with the other new one-copy disks. Room on nvme there: 200 GiB.',
+		});
+		expect(roomText(l, 1, GIB, { others: [], host: 'h3' })).toEqual({
+			ok: false,
+			text: "No room on nvme on h3, where the VM's one-copy disk lives.",
+		});
+	});
+
+	it('leaves disks with more copies to the Nth-roomiest host', () => {
+		expect(roomText(two.classes[0], 2, 100 * GIB, { others: [GIB], host: 'h2' })?.text).toBe(
+			'Fits. Room on nvme: 200 GiB at 2 copies.',
+		);
+	});
+});
+
+describe('pinnedHost', () => {
+	const vol = (claim: string, nodes: string[]) =>
+		({
+			name: `pvc-${claim}`,
+			namespace: 'web',
+			claim,
+			copies: nodes.length,
+			tier: 'nvme',
+			sizeBytes: GIB,
+			replicas: nodes.map((node) => ({ node, role: 'diskful', state: 'in-sync' })),
+		}) as ReplicatedVolume;
+	const vm = (...claims: string[]) =>
+		({
+			name: 'db',
+			namespace: 'web',
+			disks: claims.map((claim) => ({ name: claim, claim })),
+		}) as VM;
+
+	it("names the host of the VM's one-copy disk", () => {
+		const volumes = [vol('root', ['h1', 'h2']), vol('scratch', ['h3'])];
+		expect(pinnedHost(vm('root', 'scratch'), volumes)).toBe('h3');
+	});
+
+	it('names none when every disk keeps more copies', () => {
+		expect(pinnedHost(vm('root'), [vol('root', ['h1', 'h2'])])).toBeUndefined();
 	});
 });

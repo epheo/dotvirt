@@ -1,9 +1,10 @@
 <script lang="ts">
 	import { untrack } from 'svelte';
-	import type { StorageClass, StorageClassInfo } from '#lib/api.js';
+	import type { StorageClass, StorageClassInfo, VM } from '#lib/api.js';
 	import { liveMigrates } from '#lib/create.js';
 	import { clusterGate } from '#lib/gates.js';
 	import {
+		pinnedHost,
 		protectionChoices,
 		roomText,
 		tierRooms,
@@ -20,18 +21,23 @@
 	// survive, one card per copy count, each landing on a class the caller may
 	// list; other classes stay below. Anywhere else it is the class list.
 	// value '' is the cluster default. bytes: the disk's size, for the room.
+	// peers: the VM's other new disks; vm: the VM a disk is added to.
 	let {
 		disk,
 		value,
 		onpick,
 		classes,
 		bytes = 0,
+		peers = [],
+		vm,
 	}: {
 		disk: string;
 		value: string;
 		onpick: (name: string) => void;
 		classes: (StorageClassInfo | StorageClass)[];
 		bytes?: number;
+		peers?: { storageClass: string; bytes: number }[];
+		vm?: VM;
 	} = $props();
 
 	const id = $props.id();
@@ -55,6 +61,23 @@
 	const pickedClass = $derived(picked?.classes.find((c) => c.info.name === current));
 
 	const pick = (c: ProtectionClass) => onpick(c.info.default ? '' : c.info.name);
+
+	// One-copy disks of one VM share a host, so this one's room counts the
+	// others in its tier, and the host one it already holds pins it to.
+	const local = $derived.by(() => {
+		if (!pickedClass?.hosts || picked?.copies !== 1) return undefined;
+		const tier = pickedClass.tier;
+		const others = peers
+			.filter((p) => {
+				const r = infos.find(
+					(i) => i.name === (p.storageClass || inventory.defaultStorageClass),
+				)?.replication;
+				return r?.copies === 1 && r.tier === tier && p.bytes > 0;
+			})
+			.map((p) => p.bytes);
+		const volumes = replication.overview?.volumes;
+		return { others, host: vm && volumes ? pinnedHost(vm, volumes) : undefined };
+	});
 	const GLYPHS: Record<number, CellKind[]> = {
 		1: ['copy'],
 		2: ['copy', 'copy', 'witness'],
@@ -129,7 +152,7 @@
 		{/if}
 
 		{#if pickedClass && picked}
-			{@const room = roomText(pickedClass, picked.copies, bytes)}
+			{@const room = roomText(pickedClass, picked.copies, bytes, local)}
 			<div class="flex flex-col gap-1">
 				<span class="text-xs text-ink-muted"
 					>Class <span class="font-mono">{pickedClass.info.name}</span>, tier {pickedClass.tier}.</span

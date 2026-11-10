@@ -207,7 +207,12 @@ export type TierRoom = {
 	usedBytes: number;
 	room: number[]; // each host's room for one new copy, largest first
 	largest: number; // the largest new two-copy disk
+	hosts: HostRoom[];
 };
+
+// A host's room in one tier: its largest pool takes one new disk, and all its
+// pools together bound several.
+export type HostRoom = { node: string; largest: number; total: number };
 
 // Placement wants each copy on its own host, so the room for an N-copy disk
 // is the Nth-roomiest host's.
@@ -216,10 +221,16 @@ export function tierRooms(pools: ReplicationPool[]): TierRoom[] {
 	for (const p of pools) tiers.set(p.tier, [...(tiers.get(p.tier) ?? []), p]);
 	return [...tiers]
 		.map(([tier, list]) => {
-			const best = new Map<string, number>();
-			for (const p of list)
-				if (p.available) best.set(p.node, Math.max(best.get(p.node) ?? 0, p.placeableBytes));
-			const room = [...best.values()].sort((a, b) => b - a);
+			const byNode = new Map<string, HostRoom>();
+			for (const p of list) {
+				if (!p.available) continue;
+				const h = byNode.get(p.node) ?? { node: p.node, largest: 0, total: 0 };
+				h.largest = Math.max(h.largest, p.placeableBytes);
+				h.total += p.placeableBytes;
+				byNode.set(p.node, h);
+			}
+			const hosts = [...byNode.values()];
+			const room = hosts.map((h) => h.largest).sort((a, b) => b - a);
 			const totalBytes = list.reduce((n, p) => n + p.totalBytes, 0);
 			return {
 				tier,
@@ -228,6 +239,7 @@ export function tierRooms(pools: ReplicationPool[]): TierRoom[] {
 				usedBytes: totalBytes - list.reduce((n, p) => n + p.freeBytes, 0),
 				room,
 				largest: room[1] ?? 0,
+				hosts,
 			};
 		})
 		.sort((a, b) => a.tier.localeCompare(b.tier));
@@ -424,7 +436,13 @@ const CHOICES: { copies: number; title: string; lines: string[] }[] = [
 	},
 ];
 
-export type ProtectionClass = { info: StorageClassInfo; tier: string; room?: number };
+// hosts: each host's room in the class's tier, for one-copy disks that share one.
+export type ProtectionClass = {
+	info: StorageClassInfo;
+	tier: string;
+	room?: number;
+	hosts?: HostRoom[];
+};
 export type ProtectionChoice = {
 	copies: number;
 	title: string;
@@ -444,8 +462,10 @@ export function protectionChoices(
 			.filter((x) => x.replication?.copies === c.copies)
 			.map((info) => {
 				const tier = info.replication!.tier;
-				const room = rooms && (rooms.find((t) => t.tier === tier)?.room[c.copies - 1] ?? 0);
-				return { info, tier, room: room ?? undefined };
+				const t = rooms?.find((x) => x.tier === tier);
+				return rooms
+					? { info, tier, room: t?.room[c.copies - 1] ?? 0, hosts: t?.hosts ?? [] }
+					: { info, tier };
 			})
 			.sort(
 				(a, b) =>
@@ -456,21 +476,88 @@ export function protectionChoices(
 	}));
 }
 
+// One-copy disks of one VM share its host: each is pinned to its node
+// (r-drbd docs/volumes.md), the scheduler weighs each alone against a host's
+// largest pool, and placement takes the pool with the most room. So a set
+// surely fits a host whose largest pool holds it all, surely not one whose
+// pools together cannot, and may not in between.
+export type LocalFit = 'fits' | 'maybe' | 'too-big';
+function fitOn(h: HostRoom, disks: number[]): LocalFit {
+	const sum = disks.reduce((n, b) => n + b, 0);
+	if (Math.max(...disks) > h.largest || sum > h.total) return 'too-big';
+	return sum <= h.largest ? 'fits' : 'maybe';
+}
+
+// host: where a one-copy disk the VM already holds pins it. Without one, the
+// verdict holds for every host the scheduler may pick.
+export function localFit(hosts: HostRoom[], disks: number[], host?: string): LocalFit {
+	if (host) {
+		const h = hosts.find((x) => x.node === host);
+		return h ? fitOn(h, disks) : 'too-big';
+	}
+	const big = Math.max(...disks);
+	const each = hosts.filter((h) => h.largest >= big).map((h) => fitOn(h, disks));
+	if (each.every((v) => v === 'too-big')) return 'too-big';
+	return each.every((v) => v === 'fits') ? 'fits' : 'maybe';
+}
+
+// The host a one-copy disk of this VM pins it to, if it holds one.
+export function pinnedHost(vm: VM, volumes: ReplicatedVolume[]): string | undefined {
+	const local = vmRow(vm, volumes)?.disks.find((d) => d.volume.copies === 1);
+	return local && (copies(local.volume)[0]?.node ?? local.volume.pinnedNode);
+}
+
 // Whether a new disk fits the tier today; null when the room is unknown.
 // bytes: NaN or 0 while the size is unreadable, then only the room is said.
+// local: for one copy, the sizes of the VM's other new one-copy disks in this
+// tier, and the host one it already holds pins it to.
 export function roomText(
 	c: ProtectionClass,
 	copies: number,
 	bytes: number,
+	local?: { others: number[]; host?: string },
 ): { ok: boolean; text: string } | null {
 	if (c.room === undefined) return null;
 	const at = copies === 1 ? 'one copy' : `${copies} copies`;
+	if (copies === 1 && c.hosts && local?.host) return pinnedText(c, bytes, local.others, local.host);
 	if (!c.room) return { ok: false, text: `No room on ${c.tier} for a new disk at ${at} today.` };
 	const room = `Room on ${c.tier}: ${size(c.room)} at ${at}.`;
 	if (!(bytes > 0)) return { ok: true, text: room };
-	return bytes > c.room
-		? { ok: false, text: `Too big. ${room}` }
-		: { ok: true, text: `Fits. ${room}` };
+	if (bytes > c.room) return { ok: false, text: `Too big. ${room}` };
+	if (copies !== 1 || !c.hosts || !local?.others.length) return { ok: true, text: `Fits. ${room}` };
+	switch (localFit(c.hosts, [bytes, ...local.others])) {
+		case 'fits':
+			return { ok: true, text: `Fits with the VM's other one-copy disks, which share its host.` };
+		case 'maybe':
+			return { ok: false, text: `May not fit on one host with the VM's other one-copy disks.` };
+		default:
+			return {
+				ok: false,
+				text: `Too big. No host has room on ${c.tier} for the VM's one-copy disks together.`,
+			};
+	}
+}
+
+function pinnedText(
+	c: ProtectionClass,
+	bytes: number,
+	others: number[],
+	host: string,
+): { ok: boolean; text: string } {
+	const where = `${host}, where the VM's one-copy disk lives`;
+	const h = c.hosts!.find((x) => x.node === host);
+	if (!h?.largest) return { ok: false, text: `No room on ${c.tier} on ${where}.` };
+	const room = `Room on ${c.tier} there: ${size(h.largest)}.`;
+	if (!(bytes > 0)) return { ok: true, text: `Goes on ${where}. ${room}` };
+	const on = others.length ? `${host} with the other new one-copy disks` : where;
+	switch (localFit(c.hosts!, [bytes, ...others], host)) {
+		case 'fits':
+			return { ok: true, text: `Fits on ${where}. ${room}` };
+		case 'maybe':
+			return { ok: false, text: `May not fit on ${on}. ${room}` };
+		default:
+			return { ok: false, text: `Too big for ${on}. ${room}` };
+	}
 }
 
 // What a class promises a disk, before it exists.
