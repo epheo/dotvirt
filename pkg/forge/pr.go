@@ -99,11 +99,17 @@ func (c *Client) pairPR(head, base string) (PR, error) {
 	return pr, err
 }
 
-// HeadBranch is the branch p was opened from. A PR whose branch was deleted
-// reports its own refs/pull/<n>/head as the ref and keeps the branch name
-// only in the label.
+// HeadBranch is the base-repo branch p was opened from, "" when it has none.
+// A fork's head (repo_id -1 once the fork is gone) may carry any name, a
+// proposal branch's included, and the base repo's branch of that name is not
+// what the PR merges. A PR whose branch was deleted reports its own
+// refs/pull/<n>/head as the ref and keeps the branch name only in the label;
+// an AGit PR reports that ref with no label, never having had a branch.
 func (p PR) HeadBranch() string {
-	if p.Head.Label != "" && p.Head.Ref == fmt.Sprintf("refs/pull/%d/head", p.Number) {
+	switch {
+	case p.Head.RepoID != p.Base.RepoID:
+		return ""
+	case p.Head.Ref == fmt.Sprintf("refs/pull/%d/head", p.Number):
 		return p.Head.Label
 	}
 	return p.Head.Ref

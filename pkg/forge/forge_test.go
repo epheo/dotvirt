@@ -139,6 +139,10 @@ func TestHeadBranch(t *testing.T) {
 	other := listedPR(7, "closed", "refs/pull/8/head", "main", true)
 	other.Head.Label = head
 	bare := listedPR(7, "closed", "refs/pull/7/head", "main", true)
+	fork := listedPR(3, "open", head, "main", false)
+	fork.Head.RepoID, fork.Base.RepoID = 2, 1
+	forkDeleted := deleted
+	forkDeleted.Head.RepoID, forkDeleted.Base.RepoID = -1, 1
 	for _, c := range []struct {
 		name string
 		pr   PR
@@ -147,7 +151,9 @@ func TestHeadBranch(t *testing.T) {
 		{"live branch", listedPR(3, "open", head, "main", false), head},
 		{"deleted branch keeps its name in the label", deleted, head},
 		{"another PR's ref is no deletion", other, "refs/pull/8/head"},
-		{"no label to fall back on", bare, "refs/pull/7/head"},
+		{"an AGit PR has no branch", bare, ""},
+		{"a fork's branch is not the base repo's", fork, ""},
+		{"a deleted fork's label is not the base repo's", forkDeleted, ""},
 	} {
 		if got := c.pr.HeadBranch(); got != c.want {
 			t.Errorf("%s: HeadBranch = %q, want %q", c.name, got, c.want)

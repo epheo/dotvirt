@@ -56,8 +56,9 @@ class ReviewCache {
 		});
 		this.#fill(this.#proposals, key, () => api.proposal(project, prNumber), retry);
 	}
+	// A PR with no branch in the repo (a fork's) is reviewed in the forge only.
 	loadProposals(proposals: Proposal[]) {
-		for (const p of proposals) this.loadProposal(p.project, p.prNumber);
+		for (const p of proposals) if (p.branch) this.loadProposal(p.project, p.prNumber);
 	}
 
 	// Open PRs whose diff names a VM, by "ns/name", each with its change in a
