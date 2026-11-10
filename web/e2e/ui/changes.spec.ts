@@ -199,12 +199,21 @@ test('a caller who sees part of a project reads its history one namespace at a t
 	page,
 }) => {
 	await setScenario(page, 'partialrepo');
-	await login(page);
+	// From before sign-in: the landing page's own reads count too.
 	const refused: string[] = [];
 	page.on('response', (r) => {
 		if (r.status() === 403) refused.push(r.url());
 	});
+	await login(page);
 	const main = page.locator('main');
+
+	// The summary's change card places a merge against its project's whole
+	// history, which this caller may not read: the row settles without that
+	// state, and nothing was asked.
+	await page.goto('/compute');
+	const merge = main.getByRole('listitem').filter({ hasText: 'PR #40' });
+	await expect(merge).toHaveAttribute('aria-busy', 'false');
+	expect(refused).toEqual([]);
 
 	// The project's whole history is not asked for: its lane points at the namespace.
 	await page.goto('/changes/team-web?tab=history');

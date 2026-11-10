@@ -4,6 +4,7 @@
 	import { changesHref } from '#lib/nav.js';
 	import { resource } from '#lib/resource.svelte.js';
 	import { approvalLine } from '#lib/review.js';
+	import { CHECKING } from '#lib/state/caps.svelte.js';
 	import { drafts } from '#lib/state/drafts.svelte.js';
 	import { inventory } from '#lib/state/inventory.svelte.js';
 	import { ui } from '#lib/state/ui.svelte.js';
@@ -42,10 +43,17 @@
 	// Each merge is placed by mergeState against its project's history, which
 	// the poll re-reads, so a merge missing from the first read still lands.
 	// Only a project with a GitOps row can place one: the platform has none
-	// here, and a stager without platform read is refused its history.
+	// here. History is the whole repo's, so it is asked only of a project the
+	// caller may read whole; any other merge shows without a state.
 	const gitOpsOf = (project?: string) => inventory.projects.find((p) => p.name === project)?.gitOps;
 	const historyKey = $derived(
-		[...new Set(merges.filter((t) => gitOpsOf(t.project)).map((t) => t.project ?? ''))]
+		[
+			...new Set(
+				merges
+					.filter((t) => t.project && gitOpsOf(t.project) && inventory.repoRead(t.project).ok)
+					.map((t) => t.project ?? ''),
+			),
+		]
 			.sort()
 			.join(' '),
 	);
@@ -72,6 +80,13 @@
 		applying: { tone: 'info', text: 'Applying' },
 	} as const;
 
+	// A merge's state is still being worked out: before the first frame says
+	// which projects have a GitOps row, while the read check is pending, or
+	// while its history loads.
+	const placing = (project?: string) =>
+		!inventory.inventory ||
+		(!!gitOpsOf(project) &&
+			(inventory.repoRead(project ?? '').why === CHECKING || history.loading));
 	const merged = $derived(
 		merges.map((t) => {
 			const g = gitOpsOf(t.project);
@@ -84,7 +99,7 @@
 						commits!.map((c) => c.hash),
 					).kind
 				: 'merged';
-			return { t, state: m === 'merged' ? null : STATE[m] };
+			return { t, state: m === 'merged' ? null : STATE[m], busy: placing(t.project) };
 		}),
 	);
 
@@ -139,8 +154,8 @@
 					>
 				</li>
 			{/each}
-			{#each merged as { t, state } (`${t.project}#${t.prNumber}@${t.at}`)}
-				<li class="flex items-start gap-3 px-card py-2.5">
+			{#each merged as { t, state, busy } (`${t.project}#${t.prNumber}@${t.at}`)}
+				<li class="flex items-start gap-3 px-card py-2.5" aria-busy={busy ? 'true' : 'false'}>
 					{#if state?.tone === 'danger'}
 						<TriangleAlert size={14} class="mt-0.5 shrink-0 text-danger-ink" />
 					{:else if state?.tone === 'info'}
