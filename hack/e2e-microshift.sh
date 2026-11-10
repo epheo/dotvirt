@@ -423,9 +423,15 @@ HOST_GROUP=policy-group.network.openshift.io/host-network
 node_reaches_dotvirt() {
 	nsenter --net="${NODE_NET}" curl -fsS -o /dev/null --max-time 10 "http://${SVC_IP}:8080/api/healthz"
 }
-node_refused() { ! node_reaches_dotvirt; }
+# A policy refusal is a drop, so curl's timeout (28): a broken nsenter or a
+# restarting dotvirt fails otherwise and proves nothing.
+node_refused() {
+	local rc=0
+	node_reaches_dotvirt || rc=$?
+	[ "${rc}" -eq 28 ]
+}
 retry "dotvirt answers the node's host network" 120 node_reaches_dotvirt
-# The check proves itself: without the group the same call must fail.
+# The check proves itself: without the group the same call must time out.
 kc label namespace openshift-host-network "${HOST_GROUP}-" >/dev/null
 retry "the node's host network refused without its policy group" 120 node_refused
 kc label namespace openshift-host-network "${HOST_GROUP}=" >/dev/null
