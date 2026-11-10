@@ -73,6 +73,25 @@ const (
 // listsAll leaves a scope filter to the namespaces alone.
 func listsAll(string, string) bool { return true }
 
+// viewReading is a view of visible where the caller may list each kind of
+// reads in the namespaces given for it.
+func viewReading(visible map[string]bool, reads map[model.Kind][]string) callerView {
+	m := viewMemo{reads: map[string]readSet{}}
+	for ns := range visible {
+		m.reads[ns] = 0
+	}
+	for k, nss := range reads {
+		i := slices.Index(readKinds, ssarFor(k))
+		if i < 0 {
+			panic("not a read kind: " + k.Kind)
+		}
+		for _, ns := range nss {
+			m.reads[ns] |= 1 << i
+		}
+	}
+	return callerView{names: visible, memo: m}
+}
+
 // tenantReadsTeamA is the readsVMs of a tenant scoped to team-a-dev.
 func tenantReadsTeamA(token, ns string) bool { return token == tenantToken && ns == "team-a-dev" }
 

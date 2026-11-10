@@ -34,7 +34,7 @@ func (s *Server) handlePolicies(w http.ResponseWriter, r *http.Request) {
 	// without one still audits the live policy plane.
 	create := s.clusterAuthority(r.Context(), id, c, verbCreate)
 	list := s.clusterAuthority(r.Context(), id, c, verbList)
-	out := scopePolicies(all, v.names, v.listsBacking, func(k model.PolicyKind) bool { return create(k) && list(k) })
+	out := scopePolicies(all, v, func(k model.PolicyKind) bool { return create(k) && list(k) })
 	s.enrichPolicyDrift(out)
 	// Which file declares each policy: the edit/delete affordance. Cluster-tier
 	// rows are already gated on the caller's authority over their kind.
@@ -50,12 +50,12 @@ func (s *Server) handlePolicies(w http.ResponseWriter, r *http.Request) {
 // cluster-tier policies the caller has authority over. The kept rows are
 // copies, so drift enrichment may set their fields; the slices inside them
 // are the snapshot's, never written.
-func scopePolicies(all []model.Policy, visible map[string]bool, lists func(backing, namespace string) bool, canCluster func(model.PolicyKind) bool) []model.Policy {
+func scopePolicies(all []model.Policy, v callerView, canCluster func(model.PolicyKind) bool) []model.Policy {
 	out := make([]model.Policy, 0, len(all))
 	for _, p := range all {
 		switch {
 		case p.Namespace != "":
-			if visible[p.Namespace] && lists(p.Backing, p.Namespace) {
+			if v.shows(p.Backing, p.Namespace) {
 				out = append(out, p)
 			}
 		case canCluster(p.Kind):

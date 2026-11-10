@@ -28,14 +28,14 @@ import (
 // an admin policy's rules name namespaces across tenants.
 func TestScopePolicies(t *testing.T) {
 	all := []model.Policy{
-		{Name: "mine", Kind: model.PolicyProjectRule, Namespace: "team-a"},
-		{Name: "theirs", Kind: model.PolicyProjectRule, Namespace: "team-b"},
+		{Name: "mine", Kind: model.PolicyProjectRule, Namespace: "team-a", Backing: model.KindNetpol.Kind},
+		{Name: "theirs", Kind: model.PolicyProjectRule, Namespace: "team-b", Backing: model.KindNetpol.Kind},
 		{Name: "block-dev", Kind: model.PolicyAdmin},
 		{Name: "prod-egress", Kind: model.PolicyEgressIP},
 	}
 	visible := map[string]bool{"team-a": true}
 
-	got := scopePolicies(all, visible, listsAll, func(k model.PolicyKind) bool { return k == model.PolicyEgressIP })
+	got := scopePolicies(all, wideView(visible), func(k model.PolicyKind) bool { return k == model.PolicyEgressIP })
 	names := map[string]bool{}
 	for _, p := range got {
 		names[p.Name] = true
@@ -685,8 +685,8 @@ func TestClusterObjectReadsNeedList(t *testing.T) {
 
 func TestScopePoliciesAsksTheBackingKind(t *testing.T) {
 	all := []model.Policy{{Name: "fw", Namespace: "a", Backing: model.KindEgressFW.Kind}, {Name: "np", Namespace: "a", Backing: model.KindNetpol.Kind}}
-	only := func(backing, _ string) bool { return backing == model.KindNetpol.Kind }
-	got := scopePolicies(all, map[string]bool{"a": true}, only, func(model.PolicyKind) bool { return false })
+	only := viewReading(map[string]bool{"a": true}, map[model.Kind][]string{model.KindNetpol: {"a"}})
+	got := scopePolicies(all, only, func(model.PolicyKind) bool { return false })
 	if len(got) != 1 || got[0].Name != "np" {
 		t.Errorf("policies = %+v, want the NetworkPolicy alone", got)
 	}
