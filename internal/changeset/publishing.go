@@ -26,6 +26,10 @@ type PublishTarget struct {
 	RoutesGranted bool
 }
 
+// ErrPublishingOn answers a namespace whose publishing files the platform
+// repo already holds as rendered: nothing to stage.
+var ErrPublishingOn = fmt.Errorf("%w: publishing is already on", model.ErrInvalid)
+
 // ErrPrimaryNetwork refuses publishing on a namespace with its own VM
 // Network.
 var ErrPrimaryNetwork = fmt.Errorf("%w: publishing on a namespace with its own VM Network needs a newer portail: today one such namespace could delay the others' route changes", model.ErrInvalid)
@@ -106,7 +110,7 @@ func (c *Coordinator) publishingEntries(commitProj, target project.ProjectInfo, 
 		entries = append(entries, routes...)
 	}
 	if len(entries) == 0 {
-		return nil, fmt.Errorf("%w: publishing is already on in %s", model.ErrInvalid, pt.Namespace)
+		return nil, fmt.Errorf("%w in %s", ErrPublishingOn, pt.Namespace)
 	}
 	return entries, nil
 }

@@ -18,4 +18,8 @@ type Modules struct {
 	// so a kind they may not apply is this install's rule, not the platform
 	// repo's alone.
 	ExtraTenantKinds bool `json:"extraTenantKinds"`
+	// PublishDomain: a platform admin may turn publishing on for a project
+	// namespace, which then answers *.<namespace>.<PublishDomain>. "" while
+	// the install or the cluster offers no publishing.
+	PublishDomain string `json:"publishDomain,omitempty"`
 }

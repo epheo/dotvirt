@@ -61,6 +61,32 @@ func TestStagePublishing(t *testing.T) {
 	}
 }
 
+// Once the platform repo holds what publishing renders, there is nothing to
+// stage, and the answer says publishing is on.
+func TestPublishingOnceInGit(t *testing.T) {
+	settings := publish.Settings{Domain: "apps.example.com", GatewayClass: "portail", Issuer: "letsencrypt"}
+	files, err := publish.Manifests(settings, "web")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, routes, err := netgen.RoutesManifest(netgen.RoleBindingSpec{Namespace: "web", Project: "shop", Kept: []netgen.Subject{user("alice")}, SyncAccount: ptr(syncSA("shop"))})
+	if err != nil {
+		t.Fatal(err)
+	}
+	seed := map[string][]byte{
+		"rbac/web.yaml":            grantYAML("web", "admin", user("alice")),
+		"rbac/web/web-routes.yaml": routes,
+	}
+	for _, f := range files {
+		seed[f.Path] = f.Content
+	}
+	c, plat := publishingCoordinator(t, seed)
+	shop := project.ProjectInfo{Name: "shop", Namespaces: []string{"web"}}
+	if _, err := c.PublishingNeeds(plat, shop, PublishTarget{Namespace: "web"}); !errors.Is(err, ErrPublishingOn) {
+		t.Errorf("PublishingNeeds = %v, want ErrPublishingOn", err)
+	}
+}
+
 // A namespace with its own VM Network waits on portail; one outside the
 // project, or an install without publishing, is refused; where the admin role
 // writes HTTPRoutes already, no route grant is staged.

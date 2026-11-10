@@ -123,6 +123,9 @@ type NamespaceCaps struct {
 	// PublishingWaits: the caller could turn publishing on here but for the
 	// namespace's own VM Network, which waits on a newer portail.
 	PublishingWaits bool `json:"publishingWaits,omitempty"`
+	// PublishingOn: the platform repo holds this namespace's publishing as
+	// rendered, merged or not, whoever asks.
+	PublishingOn bool `json:"publishingOn,omitempty"`
 }
 
 // ProjectCaps are the actions on a namespace's whole project, over every one

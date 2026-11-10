@@ -228,6 +228,7 @@ func (s *Server) publishingCaps(ctx context.Context, sc scope, full project.Proj
 	waits := pt.PrimaryNetwork
 	pt.PrimaryNetwork = false
 	need, err := s.draft.PublishingNeeds(s.platformProject(), full, pt)
+	out.PublishingOn = errors.Is(err, changeset.ErrPublishingOn)
 	allowed := s.needsAllowed(ctx, id, c, need, err)
 	out.Publishing = allowed && !waits
 	out.PublishingWaits = allowed && waits
@@ -297,5 +298,8 @@ func (s *Server) handleModules(w http.ResponseWriter, r *http.Request) {
 	m.OLM = !un[model.KindSub] && !un[model.KindOpGroup]
 	m.MachineConfig = !un[model.KindMachCfg]
 	m.ExtraTenantKinds = len(s.cfg.TenantKinds.Allowed) > 0
+	if s.cfg.Publish.On() && len(s.unserved(r.Context(), s.publishingKinds()...)) == 0 {
+		m.PublishDomain = s.cfg.Publish.Domain
+	}
 	writeJSON(w, m)
 }

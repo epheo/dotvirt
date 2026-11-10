@@ -2002,7 +2002,28 @@ const frontedtenant = {
 	],
 };
 
+// --- publishing ---
+// The install publishes under apps.example.com: web-prod may be turned on,
+// db-prod may not by this caller, batch-prod is on in git.
+const publishing = {
+	...base,
+	name: 'publishing',
+	modules: { routes: true, publishDomain: 'apps.example.com' },
+	capabilities: {
+		'web-prod': { publishing: true },
+		'batch-prod': { publishingOn: true },
+	},
+};
+// db-prod has its own VM Network: the caller could turn it on, but it waits.
+const publishingwaits = {
+	...publishing,
+	name: 'publishingwaits',
+	capabilities: { ...publishing.capabilities, 'db-prod': { publishingWaits: true } },
+};
+
 export const scenarios = {
+	publishing,
+	publishingwaits,
 	fronted,
 	frontedtenant,
 	replicated,
