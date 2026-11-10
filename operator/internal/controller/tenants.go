@@ -115,7 +115,7 @@ func (r *DotvirtReconciler) tenantAppProjects(ctx context.Context, dv *dotvirtv1
 	if dv.Spec.ArgoCD.AnyTenantKinds() {
 		if denied = install.TenantDenied(dv, r.impersonating(ctx, dv, argoNS, held.Items)); denied == nil {
 			t.notes = append(t.notes, "tenant repos keep the listed kinds until the ArgoCD instance impersonates: argocd-cm sets "+
-				install.SyncImpersonationKey+" and its AppProjects keep destinationServiceAccounts (Argo CD 2.13 or later)")
+				install.SyncImpersonationKey+", its AppProjects keep destinationServiceAccounts (Argo CD 2.13 or later) and its ArgoCD resource pins no image or version")
 		}
 	}
 
@@ -264,11 +264,24 @@ func (r *DotvirtReconciler) setArgoReady(dv *dotvirtv1alpha1.Dotvirt, t tenantTi
 // impersonating reports whether the instance syncs dotvirt's Applications as
 // their projects' own accounts: argocd-cm sets the key, and an AppProject this
 // install applied kept destinationServiceAccounts, which an Argo CD older than
-// 2.13 neither knows nor honors (its schema prunes the field). Read where Argo
-// reads it; unknown is no.
+// 2.13 neither knows nor honors (its schema prunes the field). The field proves
+// the CRD, not the controller: an ArgoCD resource pinning its own image or
+// version may run an older one under newer CRDs, so it proves nothing. Read
+// where Argo reads it; unknown is no.
 func (r *DotvirtReconciler) impersonating(ctx context.Context, dv *dotvirtv1alpha1.Dotvirt, argoNS string, held []unstructured.Unstructured) bool {
 	if set, err := r.impersonationConfigured(ctx, argoNS); err != nil || !set {
 		return false
+	}
+	inst, _, err := r.argoInstanceState(ctx, argoNS+"/"+argoInstance(argoNS))
+	if err != nil {
+		return false
+	}
+	if inst != nil {
+		version, _, _ := unstructured.NestedString(inst.Object, "spec", "version")
+		image, _, _ := unstructured.NestedString(inst.Object, "spec", "image")
+		if version != "" || image != "" {
+			return false
+		}
 	}
 	return slices.ContainsFunc(held, func(o unstructured.Unstructured) bool {
 		accounts, _, _ := unstructured.NestedSlice(o.Object, "spec", "destinationServiceAccounts")

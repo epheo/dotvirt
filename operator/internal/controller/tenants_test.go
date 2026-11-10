@@ -363,12 +363,13 @@ func erroredAppSet(dv *dotvirtv1alpha1.Dotvirt, msg string) *unstructured.Unstru
 // ArgoReady says why.
 func TestTenantKindsFollowTheImpersonationSetting(t *testing.T) {
 	for _, c := range []struct {
-		name       string
-		key, field bool
+		name               string
+		key, field, pinned bool
 	}{
-		{"key unset", false, true},
-		{"key set, old Argo pruned the field", true, false},
-		{"key set, field kept", true, true},
+		{"key unset", false, true, false},
+		{"key set, old Argo pruned the field", true, false, false},
+		{"key set, field kept, the ArgoCD resource pins its version", true, true, true},
+		{"key set, field kept", true, true, false},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			dv, creds := byoForgeCR("https://forge.byo.example")
@@ -382,13 +383,19 @@ func TestTenantKindsFollowTheImpersonationSetting(t *testing.T) {
 			if !c.field {
 				unstructured.RemoveNestedField(applied.Object, "spec", "destinationServiceAccounts")
 			}
-			c2 := testBuilder(t).WithObjects(dv, creds, cm, applied, projectNS("a", "team-a", "dotvirt/team-a.git")).Build()
+			objs := []client.Object{dv, creds, cm, applied, projectNS("a", "team-a", "dotvirt/team-a.git")}
+			if c.pinned {
+				inst := argoCDInstance(nil)
+				_ = unstructured.SetNestedField(inst.Object, "v2.12.0", "spec", "version")
+				objs = append(objs, inst)
+			}
+			c2 := testBuilder(t).WithObjects(objs...).Build()
 			r := newReconciler(c2, depsOK)
 			tier, err := r.tenantAppProjects(context.Background(), dv, "argocd", nil)
 			if err != nil {
 				t.Fatal(err)
 			}
-			want := c.key && c.field
+			want := c.key && c.field && !c.pinned
 			spec := tier.objs[0].(*unstructured.Unstructured).Object["spec"].(map[string]any)
 			if _, black := spec["namespaceResourceBlacklist"]; black != want {
 				t.Errorf("blacklist = %v, want %v", black, want)
