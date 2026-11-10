@@ -1,6 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import type { ReplicatedVolume, ReplicationPool, StorageClassInfo, VM } from '#lib/api.js';
-import { localFit, pinnedHost, protectionChoices, roomText, tierRooms } from './replication';
+import {
+	crossTierFit,
+	localFit,
+	pinnedHost,
+	protectionChoices,
+	roomText,
+	tierRooms,
+} from './replication';
 
 const GIB = 1024 ** 3;
 const cls = (name: string, copies?: number, tier = 'nvme', extra: Partial<StorageClassInfo> = {}) =>
@@ -146,6 +153,34 @@ describe('localFit', () => {
 	});
 });
 
+describe('crossTierFit', () => {
+	const nvme = { hosts: local.hosts, disks: [100 * GIB] };
+	const hdd = (h2: [number, number], ...disks: number[]) => ({
+		disks: disks.map((d) => d * GIB),
+		hosts: [
+			{ node: 'h1', largest: 500 * GIB, total: 500 * GIB },
+			{ node: 'h2', largest: h2[0] * GIB, total: h2[1] * GIB },
+		],
+	});
+
+	it("weighs only the hosts the scheduler may pick: room for each tier's biggest", () => {
+		// h2 cannot take the hdd disk alone, so the scheduler never picks it.
+		expect(crossTierFit([nvme, hdd([50, 50], 100)])).toBe('fits');
+	});
+
+	it('fits only when every candidate holds every tier', () => {
+		expect(crossTierFit([nvme, hdd([500, 500], 100)])).toBe('fits');
+		expect(crossTierFit([nvme, hdd([100, 400], 100, 100)])).toBe('maybe');
+	});
+
+	it('is too big without a candidate, or when none holds them together', () => {
+		expect(crossTierFit([nvme, { disks: [GIB], hosts: [] }])).toBe('too-big');
+		expect(
+			crossTierFit([{ hosts: local.hosts, disks: [200 * GIB, 200 * GIB] }, hdd([500, 500], 1)]),
+		).toBe('too-big');
+	});
+});
+
 describe('one-copy roomText', () => {
 	const [one, two] = protectionChoices([cls('l', 1), cls('r', 2)], [local]);
 	const l = one.classes[0];
@@ -172,19 +207,45 @@ describe('one-copy roomText', () => {
 		});
 	});
 
-	it("never says fits when the VM's one-copy disks span tiers that need one host", () => {
-		expect(roomText(l, 1, 100 * GIB, { others: [], tiers: ['hdd'] })).toEqual({
-			ok: false,
-			text: "May not fit: the VM's one-copy disks on nvme and hdd need one host with room on each.",
+	// hdd room by host, in GiB: [largest, total].
+	const hdd = (rooms: Record<string, [number, number]>, ...disks: number[]) => ({
+		tier: 'hdd',
+		disks: disks.map((d) => d * GIB),
+		hosts: Object.entries(rooms).map(([node, [largest, total]]) => ({
+			node,
+			largest: largest * GIB,
+			total: total * GIB,
+		})),
+	});
+
+	it('fits across tiers when every host the scheduler may pick has room on each', () => {
+		const tiers = [hdd({ h1: [500, 500], h2: [500, 500] }, 100)];
+		expect(roomText(l, 1, 100 * GIB, { others: [], tiers })).toEqual({
+			ok: true,
+			text: "Fits with the VM's other one-copy disks, which share its host.",
 		});
-		// Too big stays sure: no host takes the nvme ones together.
-		expect(roomText(l, 1, 250 * GIB, { others: [100 * GIB], tiers: ['hdd'] })?.text).toBe(
-			"Too big. No host has room on nvme for the VM's one-copy disks together.",
-		);
+	});
+
+	it('may not fit across tiers when a host the scheduler may pick might not hold them', () => {
+		// h2 takes each hdd disk alone, so it is a candidate, and its pools may not take both.
+		const tiers = [hdd({ h1: [500, 500], h2: [100, 400] }, 100, 100)];
+		expect(roomText(l, 1, 100 * GIB, { others: [], tiers })).toEqual({
+			ok: false,
+			text: "May not fit on one host with the VM's other one-copy disks.",
+		});
+	});
+
+	it('is too big across tiers when no host has room on every tier', () => {
+		const tiers = [hdd({ h3: [500, 500] }, 100)];
+		expect(roomText(l, 1, 100 * GIB, { others: [], tiers })).toEqual({
+			ok: false,
+			text: "Too big. No host has room on nvme and hdd for the VM's one-copy disks together.",
+		});
 	});
 
 	it('judges every tier on the host a one-copy disk already pins', () => {
-		expect(roomText(l, 1, 100 * GIB, { others: [], tiers: ['hdd'], host: 'h1' })?.text).toBe(
+		const tiers = [hdd({}, 1)];
+		expect(roomText(l, 1, 100 * GIB, { others: [], tiers, host: 'h1' })?.text).toBe(
 			"Fits on h1, where the VM's one-copy disk lives. Room on nvme there: 300 GiB.",
 		);
 	});

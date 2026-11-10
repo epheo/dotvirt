@@ -489,14 +489,33 @@ function fitOn(h: HostRoom, disks: number[]): LocalFit {
 }
 
 // host: where a one-copy disk the VM already holds pins it. Without one, the
-// verdict holds for every host the scheduler may pick.
+// verdict holds for every host the scheduler may pick (crossTierFit).
 export function localFit(hosts: HostRoom[], disks: number[], host?: string): LocalFit {
-	if (host) {
-		const h = hosts.find((x) => x.node === host);
-		return h ? fitOn(h, disks) : 'too-big';
-	}
-	const big = Math.max(...disks);
-	const each = hosts.filter((h) => h.largest >= big).map((h) => fitOn(h, disks));
+	if (!host) return crossTierFit([{ hosts, disks }]);
+	const h = hosts.find((x) => x.node === host);
+	return h ? fitOn(h, disks) : 'too-big';
+}
+
+// One tier's hosts, and the VM's one-copy disks in that tier.
+export type TierSet = { hosts: HostRoom[]; disks: number[] };
+
+const WORST: LocalFit[] = ['fits', 'maybe', 'too-big'];
+
+// Unpinned one-copy disks of one VM land on one host, in every tier. The
+// scheduler weighs each claim alone, so it may pick any host whose largest
+// pool in each tier holds that tier's biggest disk: the verdict must hold on
+// all of them. None: too big.
+export function crossTierFit(sets: TierSet[]): LocalFit {
+	const nodes = new Set(sets.flatMap((s) => s.hosts.map((h) => h.node)));
+	const each = [...nodes].flatMap((node) => {
+		const on = sets.map((s) => s.hosts.find((h) => h.node === node));
+		if (on.some((h, i) => !h || h.largest < Math.max(...sets[i].disks))) return [];
+		return [
+			on
+				.map((h, i) => fitOn(h!, sets[i].disks))
+				.reduce((a, b) => (WORST.indexOf(b) > WORST.indexOf(a) ? b : a)),
+		];
+	});
 	if (each.every((v) => v === 'too-big')) return 'too-big';
 	return each.every((v) => v === 'fits') ? 'fits' : 'maybe';
 }
@@ -510,13 +529,13 @@ export function pinnedHost(vm: VM, volumes: ReplicatedVolume[]): string | undefi
 // Whether a new disk fits the tier today; null when the room is unknown.
 // bytes: NaN or 0 while the size is unreadable, then only the room is said.
 // local: for one copy, the sizes of the VM's other new one-copy disks in this
-// tier, the other tiers its one-copy disks use, and the host one it already
-// holds pins it to.
+// tier, its one-copy disks in other tiers with those tiers' hosts, and the
+// host one it already holds pins it to.
 export function roomText(
 	c: ProtectionClass,
 	copies: number,
 	bytes: number,
-	local?: { others: number[]; tiers?: string[]; host?: string },
+	local?: { others: number[]; tiers?: (TierSet & { tier: string })[]; host?: string },
 ): { ok: boolean; text: string } | null {
 	if (c.room === undefined) return null;
 	const at = copies === 1 ? 'one copy' : `${copies} copies`;
@@ -527,13 +546,9 @@ export function roomText(
 	if (bytes > c.room) return { ok: false, text: `Too big. ${room}` };
 	if (copies !== 1 || !c.hosts || (!local?.others.length && !local?.tiers?.length))
 		return { ok: true, text: `Fits. ${room}` };
-	const fit = local.others.length ? localFit(c.hosts, [bytes, ...local.others]) : 'fits';
-	// Each tier fitting alone does not find one host with room in all of them.
-	if (fit === 'fits' && local.tiers?.length)
-		return {
-			ok: false,
-			text: `May not fit: the VM's one-copy disks on ${join([c.tier, ...local.tiers])} need one host with room on each.`,
-		};
+	const tiers = local.tiers ?? [];
+	const fit = crossTierFit([{ hosts: c.hosts, disks: [bytes, ...local.others] }, ...tiers]);
+	const on = join([c.tier, ...tiers.map((t) => t.tier)]);
 	switch (fit) {
 		case 'fits':
 			return { ok: true, text: `Fits with the VM's other one-copy disks, which share its host.` };
@@ -542,7 +557,7 @@ export function roomText(
 		default:
 			return {
 				ok: false,
-				text: `Too big. No host has room on ${c.tier} for the VM's one-copy disks together.`,
+				text: `Too big. No host has room on ${on} for the VM's one-copy disks together.`,
 			};
 	}
 }
