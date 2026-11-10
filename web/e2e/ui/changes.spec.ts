@@ -80,6 +80,14 @@ test('a branch pushed without a pull request keeps its link to open one', async 
 	);
 	// The draft holds it until a PR carries it: nothing to dismiss.
 	await expect(main.getByRole('button', { name: 'Dismiss' })).toHaveCount(0);
+
+	// The Staged tab says the next step is the forge's, not a propose.
+	await page.goto('/changes?tab=staged');
+	await expect(main.getByText(/^Pushed to dotvirt\/proposed\/admin\/team-web\./)).toBeVisible();
+	await expect(main.getByRole('link', { name: 'Open the pull request' })).toHaveAttribute(
+		'href',
+		/compare\/main\.\.\./,
+	);
 });
 
 test('the route explains the write model when nothing is in flight', async ({ page }) => {

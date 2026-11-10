@@ -52,11 +52,11 @@ type Config struct {
 	// Changeset / PR workflow
 	BaseBranch     string // branch the inventory reads + PRs target (the GitOps trunk)
 	ProposedBranch string // dotvirt-owned working branch holding a draft
+	DraftDir       string // root dir for persisted drafts (<dir>/<user>/<project>.json)
 	// UsersOpenPRs leaves every pull request to the user: dotvirt pushes the
 	// branch and links the forge's compare page, so the forge's review rules
 	// see the requester as the PR's poster, not dotvirt's account.
 	UsersOpenPRs bool
-	DraftDir       string // root dir for persisted drafts (<dir>/<user>/<project>.json)
 
 	// Forge (Forgejo) for PR creation; empty url/token degrades to push-only. The
 	// per-project owner/repo are derived from each project's repo URL, not config.

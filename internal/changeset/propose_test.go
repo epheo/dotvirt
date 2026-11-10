@@ -397,11 +397,11 @@ func TestUsersOpenTheirPRs(t *testing.T) {
 	if err != nil || rec.Head == "" {
 		t.Fatalf("record: %v %+v", err, rec)
 	}
-	if err := f.c.AdoptPR(f.id, f.proj, 7, "another-head"); err != nil || f.draftCount(t) != 1 {
+	if err := f.c.SettlePushed(f.proj.Repo, head, 7, "another-head", false); err != nil || f.draftCount(t) != 1 {
 		t.Fatalf("a PR on another head adopts nothing: %v, %d entries", err, f.draftCount(t))
 	}
-	if err := f.c.AdoptPR(f.id, f.proj, 7, rec.Head); err != nil {
-		t.Fatalf("AdoptPR: %v", err)
+	if err := f.c.SettlePushed(f.proj.Repo, head, 7, rec.Head, false); err != nil {
+		t.Fatalf("SettlePushed: %v", err)
 	}
 	if n := f.draftCount(t); n != 0 {
 		t.Fatalf("the adopted PR carries the draft, got %d entries", n)
@@ -422,6 +422,36 @@ func TestUsersOpenTheirPRs(t *testing.T) {
 	}
 	if w := append(f.sentTo("POST", "/pulls"), f.sentTo("PATCH", "")...); len(w) != 0 {
 		t.Fatalf("dotvirt wrote to a pull request: %q", w)
+	}
+}
+
+// The user's PR may merge before dotvirt sees it open: its merge settles the
+// draft and drops the record. A merged PR of the reused branch's earlier
+// cycle carries another head and settles nothing.
+func TestAUsersPRMergedBeforeAdoptionSettlesTheDraft(t *testing.T) {
+	f := newProposeFixture(t, when("GET", "/pulls", http.StatusOK, "[]"))
+	f.c.WithUsersOpeningPRs(true)
+	f.stageAndPropose(t)
+	branch := proposedBranchFor("alice", "p")
+	rec, _, err := f.c.store.Proposal("alice", "p")
+	if err != nil || rec.Head == "" {
+		t.Fatalf("record: %v %+v", err, rec)
+	}
+
+	if err := f.c.SettlePushed(f.proj.Repo, branch, 3, "earlier-cycle", true); err != nil || f.draftCount(t) != 1 {
+		t.Fatalf("an earlier cycle's merge settled the draft: %v, %d entries", err, f.draftCount(t))
+	}
+	if err := f.c.SettlePushed(f.proj.Repo, branch, 9, rec.Head, true); err != nil {
+		t.Fatalf("SettlePushed: %v", err)
+	}
+	if n := f.draftCount(t); n != 0 {
+		t.Fatalf("the merged PR carried the draft, %d entries left", n)
+	}
+	if _, ok, _ := f.c.store.Proposal("alice", "p"); ok {
+		t.Error("the merged PR's record must go")
+	}
+	if view, _ := f.c.Get(f.id, f.proj); view.CompareURL != "" {
+		t.Errorf("a merged branch keeps its compare link: %q", view.CompareURL)
 	}
 }
 

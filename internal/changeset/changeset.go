@@ -126,8 +126,8 @@ func (c *Coordinator) WithSyncNamespace(ns string) *Coordinator {
 
 // WithUsersOpeningPRs makes dotvirt push branches only: it never opens,
 // reopens or edits a pull request, and answers with the compare URL the user
-// opens one from. A PR they open on the pushed head is adopted (Adopt, and
-// any later propose). Set once, before serving.
+// opens one from. A PR they open on the pushed head is adopted (SettlePushed,
+// and any later propose). Set once, before serving.
 func (c *Coordinator) WithUsersOpeningPRs(on bool) *Coordinator {
 	c.usersOpenPRs = on
 	return c

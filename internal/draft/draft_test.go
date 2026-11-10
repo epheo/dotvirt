@@ -346,3 +346,47 @@ func TestProposalRecord(t *testing.T) {
 		t.Fatalf("the look-alike project's draft must stand, got %+v", d)
 	}
 }
+
+// PushedOn finds the draft whose branch was pushed with no PR, from the
+// records on disk after a restart, and follows each record write after.
+func TestPushedOnFollowsTheRecords(t *testing.T) {
+	dir := t.TempDir()
+	const user, project, repo, branch = "system:serviceaccount:ns:sa", "team/a", "forge/dotvirt/team-a", "dotvirt/proposed/x"
+	pushed := Proposal{Repo: repo, Branch: branch, Head: "h1"}
+	first, _ := Open(dir)
+	if err := first.SetProposal(user, project, pushed); err != nil {
+		t.Fatal(err)
+	}
+	s, _ := Open(dir)
+	at := func() (Pair, bool) {
+		t.Helper()
+		p, ok, err := s.PushedOn(repo, branch)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return p, ok
+	}
+	if p, ok := at(); !ok || p != (Pair{user, project}) {
+		t.Fatalf("after reopen: %+v %v", p, ok)
+	}
+	withPR := pushed
+	withPR.PR = 7
+	if err := s.SetProposal(user, project, withPR); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := at(); ok {
+		t.Error("a record with its PR is no longer pushed alone")
+	}
+	if err := s.SetProposal(user, project, pushed); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := at(); !ok {
+		t.Error("pushed again with no PR")
+	}
+	if err := s.DropProposal(user, project); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := at(); ok {
+		t.Error("a dropped record is still found")
+	}
+}

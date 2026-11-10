@@ -244,26 +244,29 @@
 	const visibleProposals = $derived(
 		mineOnly.value ? proposedLane.filter((p) => p.mine) : proposedLane,
 	);
-	// Branches pushed with no PR on them yet: this session's propose outcomes,
-	// and drafts whose pushed branch still waits for one, which outlive a reload.
-	const pushed = $derived([
-		...Object.entries(results)
-			.filter(([, r]) => !r.prURL)
-			.map(([project, r]) => ({
-				project,
-				branch: r.branch,
-				compareURL: r.compareURL,
-				dismissable: true,
-			})),
-		...lanes
-			.filter((l) => l.draft.compareURL && !results[l.project])
+	// Branches pushed with no PR on them yet: drafts whose pushed branch waits
+	// for one, which outlive a reload, then this session's propose outcomes
+	// for projects no such draft speaks for (a revert's, a push with no forge).
+	const pushed = $derived.by(() => {
+		const fromDrafts = lanes
+			.filter((l) => l.draft.compareURL)
 			.map((l) => ({
 				project: l.project,
 				branch: l.draft.branch,
 				compareURL: l.draft.compareURL,
 				dismissable: false,
-			})),
-	]);
+			}));
+		const drafted = new Set(fromDrafts.map((r) => r.project));
+		const fromSession = Object.entries(results)
+			.filter(([project, r]) => !r.prURL && !drafted.has(project))
+			.map(([project, r]) => ({
+				project,
+				branch: r.branch,
+				compareURL: r.compareURL,
+				dismissable: true,
+			}));
+		return [...fromDrafts, ...fromSession];
+	});
 
 	const stagedTotal = $derived(lanes.reduce((n, l) => n + l.draft.count, 0));
 	const stagedProjects = $derived(lanes.filter((l) => l.draft.count > 0).length);

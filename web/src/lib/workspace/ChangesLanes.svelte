@@ -356,6 +356,18 @@
 							</p>
 						</div>
 					{/if}
+					{#if draft.compareURL}
+						<!-- Pushed with no PR yet: the next step is the forge's. -->
+						<p class="text-[13px] text-ink-soft">
+							Pushed to <code class="font-mono text-xs">{draft.branch}</code>.
+							<a
+								href={draft.compareURL}
+								target="_blank"
+								rel="noopener"
+								class="text-accent-ink underline underline-offset-2">Open the pull request</a
+							> to send it for review.
+						</p>
+					{/if}
 					{#if draft.warning}
 						<Note tone="warn" class="flex items-start gap-2">
 							<TriangleAlert size={14} class="mt-0.5 shrink-0" />

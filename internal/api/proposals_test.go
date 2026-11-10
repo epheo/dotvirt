@@ -41,6 +41,14 @@ type fakeDraft struct {
 	merged      []tasks.Merge // what the forge lists as merged
 	mergedFail  bool
 	mergedCalls int
+	settled     []string // each SettlePushed, as "repo branch #n head merged"
+}
+
+func (f *fakeDraft) SettlePushed(repo, branch string, number int, head string, merged bool) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.settled = append(f.settled, fmt.Sprintf("%s %s #%d %s %v", repo, branch, number, head, merged))
+	return nil
 }
 
 func (f *fakeDraft) RecentlyMerged(project.ProjectInfo, time.Time) ([]tasks.Merge, error) {
@@ -745,5 +753,37 @@ func TestPlatformReviewOpensToItsOwnerAlone(t *testing.T) {
 	}
 	if got := d.takeReviews(); len(got) != 0 {
 		t.Errorf("a failed review read %q", got)
+	}
+}
+
+// The refreshers are the backstop behind the webhook: each open row and each
+// recent merge goes to SettlePushed, a row the mirror holds no head for yet
+// does not.
+func TestRefreshersSettleWhatTheyRead(t *testing.T) {
+	bus := eventbus.New()
+	fd := &fakeDraft{
+		prs: map[string]model.Proposal{
+			"team-a": {Project: "team-a", PRNumber: 9, Branch: "dotvirt/proposed/alice/team-a-1", Head: "h9"},
+			"team-b": {Project: "team-b", PRNumber: 3, Branch: "dotvirt/proposed/bob/team-b-2"},
+		},
+		merged: []tasks.Merge{{RepoURL: "https://forge/o/a", Number: 8, Branch: "dotvirt/proposed/carol/team-a-3", Head: "h8", At: time.Now()}},
+	}
+	s := NewServer(Deps{Reader: fd, Draft: fd, Bus: bus, Tasks: tasks.New(bus)})
+	s.trackProposals(auth.Identity{Token: "tok-alice", Username: "alice"}, []project.ProjectInfo{
+		{Name: "team-a", Repo: "https://forge/o/a.git"},
+		{Name: "team-b", Repo: "https://forge/o/b.git"},
+	}, false)
+	s.refreshProposals(true)
+	s.refreshMerged(mergedReads{}, true)
+	fd.mu.Lock()
+	defer fd.mu.Unlock()
+	// The fake lists its merges for every repo: what counts is which calls.
+	got := slices.Compact(slices.Sorted(slices.Values(fd.settled)))
+	want := []string{
+		"https://forge/o/a dotvirt/proposed/alice/team-a-1 #9 h9 false",
+		"https://forge/o/a dotvirt/proposed/carol/team-a-3 #8 h8 true",
+	}
+	if !slices.Equal(got, want) {
+		t.Errorf("settled %q, want %q", got, want)
 	}
 }

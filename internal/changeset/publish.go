@@ -391,7 +391,7 @@ func (r *proposeRun) fresh(prior forge.PR, found bool) (model.ProposeResult, err
 		return out, r.c.store.Remove(r.id.Username, r.proj.Name, r.entries...)
 	case !ok:
 		// Kept staged until a PR carries them: one the user opens on this head
-		// is adopted (Adopt), else the next propose pushes them again.
+		// settles them (SettlePushed), else the next propose pushes them again.
 		return out, r.record(r.proposal(0, head, r.entries))
 	}
 	return out, r.done(r.proposal(out.PRNumber, head, r.entries))
@@ -468,22 +468,41 @@ func (c *Coordinator) createPR(fc *forge.Client, out *model.ProposeResult, branc
 	return true
 }
 
-// AdoptPR records number, an open pull request on id's branch of proj at
-// head, as that branch's PR when head is what dotvirt pushed there with no PR
-// recorded, and unstages what the push carried: the user opened it in the
-// forge. Any other record is left as it is.
-func (c *Coordinator) AdoptPR(id auth.Identity, proj project.ProjectInfo, number int, head string) error {
-	defer c.proposing.lock(pairOf(id, proj))()
-	rec, ok, err := c.store.Proposal(id.Username, proj.Name)
-	if err != nil || !ok || rec.PR != 0 || number <= 0 || rec.Repo != forge.NormalizeRepoURL(proj.Repo) ||
-		rec.Branch != c.proposedBranch(id.Username, proj.Name) || !rec.Settle(head) {
+// SettlePushed takes the forge's word on pull request number from branch of
+// repo, at head: on a head dotvirt pushed with no PR recorded, it is the PR
+// the user opened. Open, it becomes the branch's PR; merged, its changes are
+// in base and the record goes. Either way what it carried leaves the draft.
+// A closed, unmerged one changes nothing: the user may open another. An
+// earlier PR of the reused branch carries another head and is no match.
+func (c *Coordinator) SettlePushed(repo, branch string, number int, head string, merged bool) error {
+	repo = forge.NormalizeRepoURL(repo)
+	who, ok, err := c.store.PushedOn(repo, branch)
+	if err != nil || !ok || number <= 0 {
 		return err
 	}
-	rec.PR = number
-	if err := c.store.SetProposal(id.Username, proj.Name, rec); err != nil {
+	match := func(rec draft.Proposal) bool {
+		return rec.PR == 0 && rec.Repo == repo && rec.Branch == branch && rec.Pushed(head)
+	}
+	// Unlocked first: the refresher must not wait on a propose in flight
+	// for a PR this record does not match.
+	if rec, ok, err := c.store.Proposal(who.User, who.Project); err != nil || !ok || !match(rec) {
 		return err
 	}
-	return c.store.Remove(id.Username, proj.Name, rec.Entries...)
+	defer c.proposing.lock(userPair(who.User, who.Project))()
+	rec, ok, err := c.store.Proposal(who.User, who.Project)
+	if err != nil || !ok || !match(rec) || !rec.Settle(head) {
+		return err
+	}
+	if merged {
+		err = c.store.DropProposal(who.User, who.Project)
+	} else {
+		rec.PR = number
+		err = c.store.SetProposal(who.User, who.Project, rec)
+	}
+	if err != nil {
+		return err
+	}
+	return c.store.Remove(who.User, who.Project, rec.Entries...)
 }
 
 // proposal is the record of number carrying entries at head on this run's
@@ -652,8 +671,10 @@ func (r *Reader) forgeFor(repo string) *forge.Client {
 }
 
 func pairOf(id auth.Identity, proj project.ProjectInfo) string {
-	return id.Username + "\x00" + proj.Name
+	return userPair(id.Username, proj.Name)
 }
+
+func userPair(user, project string) string { return user + "\x00" + project }
 
 // keyedMutex serializes work per key; keys are (user, project) pairs, a set
 // that stays small.

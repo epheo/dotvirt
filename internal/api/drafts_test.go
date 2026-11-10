@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -178,44 +179,50 @@ func TestDraftsAnswerEveryDraftOfTheCaller(t *testing.T) {
 	}
 }
 
-// A PR the user opened in the forge on the head dotvirt pushed takes the
-// changes off their draft once the lane lists it; one on another head does
-// not.
-func TestDraftsAdoptThePROpenedOnThePushedHead(t *testing.T) {
-	g := newDraftsRig(t, false)
-	g.stage(t, "tenant", "team-a")
-	entries, err := g.store.List("tenant", "team-a")
-	if err != nil || len(entries) != 1 {
-		t.Fatalf("staged: %v %+v", err, entries)
-	}
-	branch := g.s.reader.ProposedBranch(auth.Identity{Username: "tenant"}, project.ProjectInfo{Name: "team-a"})
-	if err := g.store.SetProposal("tenant", "team-a", draft.Proposal{
-		Repo: forge.NormalizeRepoURL(g.repo["team-a"]), Branch: branch, Head: "pushed", Entries: entries,
-	}); err != nil {
-		t.Fatal(err)
-	}
-	lane := func(head string) {
-		g.s.proposals.Put("team-a", []model.Proposal{{Project: "team-a", PRNumber: 9, Branch: branch, Head: head}})
-	}
-
-	// team-a's prune warning keeps it listed: the count is what moves.
-	staged := func() int {
-		for _, d := range g.drafts(t, "tenant").Drafts {
-			if d.Project == "team-a" {
-				return d.Draft.Count
+// The forge's word on a PR the user opened on the head dotvirt pushed takes
+// the changes off their draft, whether or not they look: opened, it becomes
+// the branch's PR; merged first, the record goes. A PR on another head, or
+// into another base, settles nothing.
+func TestTheForgeWebhookSettlesTheDraftItsPRCarries(t *testing.T) {
+	for _, merged := range []bool{false, true} {
+		g := newDraftsRig(t, false)
+		g.s.cfg.WebhookSecret = "hooksecret"
+		g.stage(t, "tenant", "team-a")
+		entries, err := g.store.List("tenant", "team-a")
+		if err != nil || len(entries) != 1 {
+			t.Fatalf("staged: %v %+v", err, entries)
+		}
+		branch := g.s.reader.ProposedBranch(auth.Identity{Username: "tenant"}, project.ProjectInfo{Name: "team-a"})
+		if err := g.store.SetProposal("tenant", "team-a", draft.Proposal{
+			Repo: forge.NormalizeRepoURL(g.repo["team-a"]), Branch: branch, Head: "pushed", Entries: entries,
+		}); err != nil {
+			t.Fatal(err)
+		}
+		event := func(head, base string) {
+			t.Helper()
+			body := []byte(fmt.Sprintf(`{"action":"opened","pull_request":{"number":9,"state":%q,"merged":%v,`+
+				`"head":{"ref":%q,"sha":%q},"base":{"ref":%q}},"repository":{"clone_url":%q}}`,
+				map[bool]string{false: "open", true: "closed"}[merged], merged, branch, head, base, g.repo["team-a"]))
+			if w := deliver(t, g.s, body, sign(body, "hooksecret")); w.Code != http.StatusNoContent {
+				t.Fatalf("delivery: %d", w.Code)
 			}
 		}
-		return 0
-	}
-	lane("moved")
-	if n := staged(); n != 1 {
-		t.Fatalf("a PR on another head adopted the draft: %d staged", n)
-	}
-	lane("pushed")
-	if n := staged(); n != 0 {
-		t.Fatalf("the PR on the pushed head left %d staged", n)
-	}
-	if rec, _, _ := g.store.Proposal("tenant", "team-a"); rec.PR != 9 {
-		t.Errorf("record PR = %d, want 9", rec.PR)
+		staged := func() int {
+			n, _ := g.store.List("tenant", "team-a")
+			return len(n)
+		}
+		event("moved", "main")
+		event("pushed", "release")
+		if n := staged(); n != 1 {
+			t.Fatalf("merged=%v: a PR on another head or base settled the draft: %d staged", merged, n)
+		}
+		event("pushed", "main")
+		if n := staged(); n != 0 {
+			t.Fatalf("merged=%v: the PR on the pushed head left %d staged", merged, n)
+		}
+		rec, ok, _ := g.store.Proposal("tenant", "team-a")
+		if merged && ok || !merged && rec.PR != 9 {
+			t.Errorf("merged=%v: record %+v (present %v), want PR 9 while open and none once merged", merged, rec, ok)
+		}
 	}
 }

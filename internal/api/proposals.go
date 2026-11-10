@@ -113,22 +113,15 @@ func (s *Server) ownRows(id auth.Identity, proj project.ProjectInfo, rows []mode
 	return out
 }
 
-// adoptOpened hands each open PR the lane lists on id's draft branch to
-// AdoptPR, so one the user opened in the forge on what dotvirt pushed takes
-// its changes off the draft. The lane changing is what refreshes the drafts,
-// so this runs when such a PR appears. A cache read, then one record read
-// per such PR.
-func (s *Server) adoptOpened(id auth.Identity, projects []project.ProjectInfo) {
-	for _, p := range projects {
-		rows, _ := s.proposals.Get(p.Name)
-		for _, row := range s.ownRows(id, p, rows) {
-			if row.Head == "" {
-				continue
-			}
-			if err := s.draft.AdoptPR(id, p, row.PRNumber, row.Head); err != nil {
-				log.Printf("proposals: %s: adopt PR #%d: %v", p.Name, row.PRNumber, err)
-			}
-		}
+// settlePushed hands the forge's word on a PR to the draft it may carry: a
+// user who opened their PR in the forge, on a branch dotvirt pushed with no
+// PR, has it adopted, or settled once merged, whether or not they look.
+func (s *Server) settlePushed(repo, branch string, number int, head string, merged bool) {
+	if branch == "" || head == "" {
+		return
+	}
+	if err := s.draft.SettlePushed(repo, branch, number, head, merged); err != nil {
+		log.Printf("proposals: %s PR #%d: settle the pushed draft: %v", repo, number, err)
 	}
 }
 
@@ -316,6 +309,9 @@ func (s *Server) refreshProposals(all bool) bool {
 		if rows == nil {
 			rows = []model.Proposal{}
 		}
+		for _, row := range rows {
+			s.settlePushed(repo, row.Branch, row.PRNumber, row.Head, false)
+		}
 		if cached {
 			if !proposalsEqual(prev, rows) {
 				anyChanged = true
@@ -392,6 +388,7 @@ func (s *Server) refreshMerged(reads mergedReads, settle bool) {
 		}
 		for _, m := range merges {
 			s.tasks.RecordMerge(m)
+			s.settlePushed(m.RepoURL, m.Branch, m.Number, m.Head, true)
 		}
 	}
 }
