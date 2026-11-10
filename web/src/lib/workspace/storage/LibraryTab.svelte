@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { untrack } from 'svelte';
+	import { untrack, type Snippet } from 'svelte';
 	import {
 		ChevronRight,
 		CircleDot,
@@ -41,11 +41,13 @@
 	// The Library: what needs doing about the disks (four tiles, tinted only
 	// when the number is a problem) and where they came from, counted per boot
 	// image so the page keeps its size as disks grow.
+	// lead: a tile the landing tab carries for another tab, first in the row.
 	let {
 		rows,
 		project,
 		snapshotsLoaded,
-	}: { rows: DiskRow[]; project: string; snapshotsLoaded: boolean } = $props();
+		lead,
+	}: { rows: DiskRow[]; project: string; snapshotsLoaded: boolean; lead?: Snippet } = $props();
 
 	const p = $derived(project || undefined);
 	const tiles = $derived(libraryTiles(rows, storage.classes ?? [], snapshotsLoaded));
@@ -174,6 +176,7 @@
 	aria-label="Needs attention"
 	class="grid grid-cols-[repeat(auto-fit,minmax(min(220px,100%),1fr))] gap-3"
 >
+	{@render lead?.()}
 	{#if tiles.noLiveMigrate > 0}
 		<CountTile
 			value={tiles.noLiveMigrate}

@@ -17,6 +17,7 @@
 	import { gatewaysOff } from '#lib/state/gateways.svelte.js';
 	import FirewallTab from './FirewallTab.svelte';
 	import GatewayTab from './GatewayTab.svelte';
+	import GatewayTile from './GatewayTile.svelte';
 	import MapTab from './MapTab.svelte';
 	import NetworksTab from './NetworksTab.svelte';
 	import NetworkVMs from './NetworkVMs.svelte';
@@ -112,6 +113,10 @@
 		>
 			{#if tab === 'map'}
 				<PlatformAdoptBanner />
+				{#if !gatewaysOff()}
+					<!-- The Gateway lives on its own tab; the landing tab carries its state. -->
+					<section aria-label="Gateway" class="mb-4 max-w-[360px]"><GatewayTile /></section>
+				{/if}
 				<MapTab />
 			{:else if tab === 'networks'}
 				<NetworksTab />

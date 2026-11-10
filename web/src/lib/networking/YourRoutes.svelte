@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { page } from '$app/state';
 	import type { Route } from '#lib/api.js';
 	import { backendLabel, routeKey, routeState } from '#lib/gateways.js';
 	import Card from '#lib/components/Card.svelte';
@@ -16,6 +17,8 @@
 		})),
 	);
 	const live = $derived(rows.filter((x) => x.s.live).length);
+	// The route a landing tile sent the reader to.
+	const focus = $derived(page.url.searchParams.get('route') ?? '');
 </script>
 
 {#if rows.length === 0}
@@ -24,8 +27,13 @@
 	<Card title="Your routes" meta="{live} of {rows.length} live" flush>
 		<ul>
 			{#each rows as { r, s } (routeKey(r))}
+				{@const focused = routeKey(r) === focus}
 				<li
-					class="flex flex-wrap items-center gap-x-5 gap-y-1.5 border-b border-line-soft px-card py-3 last:border-b-0"
+					class="flex flex-wrap items-center gap-x-5 gap-y-1.5 border-b border-line-soft px-card py-3 last:border-b-0 {focused
+						? 'bg-select-soft'
+						: ''}"
+					aria-current={focused ? 'true' : undefined}
+					{@attach focused && ((el) => el.scrollIntoView({ block: 'center' }))}
 				>
 					<div class="flex min-w-[260px] flex-1 flex-col">
 						{#if r.hostnames?.length}
