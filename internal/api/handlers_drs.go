@@ -32,7 +32,7 @@ func (s *Server) handleDRS(w http.ResponseWriter, r *http.Request) {
 		view.Live = s.drs.Live()
 	}
 	if s.cfg.PlatformRepo != "" {
-		view.CanManage, view.CanPSI, view.CanDisable = s.drsCaps(ctx, id, c)
+		enable, psi, disable := s.drsCaps(ctx, id, c)
 		platform := s.platformProject()
 		if lists {
 			if git, err := s.reader.DRSState(platform); err != nil {
@@ -42,10 +42,10 @@ func (s *Server) handleDRS(w http.ResponseWriter, r *http.Request) {
 				view.Configured, view.Config = git.Configured, git.Config
 				// A delegate may author the PSI file without listing rendered
 				// MachineConfigs, which hold node secrets: it is a fact of git.
-				view.PSIConfigured = git.PSIConfigured && (view.CanPSI || s.capable(ctx, id, c, ask(verbList, ssarMachineCfg, "")))
+				view.PSIConfigured = git.PSIConfigured && (psi || s.capable(ctx, id, c, ask(verbList, ssarMachineCfg, "")))
 			}
 		}
-		if view.CanManage || view.CanDisable {
+		if enable || disable {
 			if d, err := s.draft.DRSDraft(id, platform); err == nil && (d.Config != nil || d.PSI || d.DisableStaged) {
 				view.Draft = &d
 			}

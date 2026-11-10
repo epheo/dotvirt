@@ -303,11 +303,11 @@ func (s *Server) handleInventory(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleOptions lists the wizard/editor choices (instancetypes, preferences, OS
-// images, networks, storage classes). The cluster is read once with dotvirt's SA
-// and cached - a scoped tenant usually lacks cluster-scoped list on these CRDs,
-// which would otherwise yield silently-empty dropdowns. The namespaced entries
-// (OS images, networks) are then narrowed per caller by optionsFor, so another
-// tenant's namespace and network names never leave the process.
+// images, storage classes). The cluster is read once with dotvirt's SA and
+// cached - a scoped tenant usually lacks cluster-scoped list on these CRDs,
+// which would otherwise yield silently-empty dropdowns. The OS images are then
+// narrowed per caller by optionsFor, so another tenant's namespace names never
+// leave the process.
 func (s *Server) handleOptions(w http.ResponseWriter, r *http.Request) {
 	id, c, all, ok := saCached(s, w, r, s.options, (*cluster.Client).ListOptions)
 	if !ok {
@@ -332,12 +332,6 @@ func optionsFor(v callerView, all model.Options) model.Options {
 	for _, img := range all.OSImages {
 		if allowed(img.Namespace, ssarDataSources) {
 			out.OSImages = append(out.OSImages, img)
-		}
-	}
-	out.Networks = make([]model.NetworkOption, 0, len(all.Networks))
-	for _, n := range all.Networks {
-		if allowed(n.Namespace, ssarFor(model.KindNAD)) {
-			out.Networks = append(out.Networks, n)
 		}
 	}
 	return out

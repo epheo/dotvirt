@@ -198,24 +198,10 @@ func (s *Server) handleNetworks(w http.ResponseWriter, r *http.Request) {
 	if !cudn {
 		redactSharedErrors(out.Networks)
 	}
-	// Per-action authoring authority: the same SSARs the create handlers enforce, so
-	// the UI gates each button precisely. CanManage stays the coarse CUDN signal that
-	// gates the platform-draft view. All false when no platform repo is configured.
-	if s.cfg.PlatformRepo != "" {
-		out.CanManage = cudn
-		out.Caps = model.NetworkCaps{
-			Uplink:                     can(model.KindNNCP),
-			Namespace:                  s.newProjectCap(ctx, id, c, `{"name":"`+newNamespace+`"}`),
-			EgressIP:                   can(model.KindEgressIP),
-			ExternalRoute:              can(model.KindExtRoute),
-			AdminNetworkPolicy:         can(model.KindANP),
-			BaselineAdminNetworkPolicy: can(model.KindBANP),
-		}
-		out.Caps.Platform, _ = s.canReadPlatform(ctx, id, c)
-	}
 	// Which file declares each network: the edit/delete affordance. A shared
 	// network's platform file shows only to callers who may author that tier.
-	declared := s.sourceFiles(r.Context(), id, c, out.CanManage)
+	authors := s.cfg.PlatformRepo != ""
+	declared := s.sourceFiles(r.Context(), id, c, authors && cudn)
 	for i := range out.Networks {
 		n := &out.Networks[i]
 		n.SourceFile = declared(n.Backing, n.Namespace, n.Name)
@@ -226,7 +212,7 @@ func (s *Server) handleNetworks(w http.ResponseWriter, r *http.Request) {
 	}
 	if s.capable(r.Context(), id, c, ask(verbList, ssarUplink, "")) {
 		out.Uplinks = full.Uplinks
-		if out.Caps.Uplink {
+		if authors && can(model.KindNNCP) {
 			for i := range out.Uplinks {
 				u := &out.Uplinks[i]
 				u.SourceFile = declared(model.KindNNCP.Kind, "", u.Policy)

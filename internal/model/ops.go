@@ -150,11 +150,10 @@ type ResyncResult struct {
 
 // Options are the cluster-provided choices for the wizard/editor.
 type Options struct {
-	Instancetypes  []Instancetype  `json:"instancetypes"`
-	Preferences    []Preference    `json:"preferences"`
-	OSImages       []OSImage       `json:"osImages"`
-	Networks       []NetworkOption `json:"networks"`
-	StorageClasses []StorageClass  `json:"storageClasses"`
+	Instancetypes  []Instancetype `json:"instancetypes"`
+	Preferences    []Preference   `json:"preferences"`
+	OSImages       []OSImage      `json:"osImages"`
+	StorageClasses []StorageClass `json:"storageClasses"`
 }
 
 type Instancetype struct {
@@ -183,11 +182,6 @@ type OSImage struct {
 	// the claim of its own name, that no scheduled import keeps. Until it is
 	// Ready, DELETE /api/images removes it.
 	Removable bool `json:"removable,omitempty"`
-}
-
-type NetworkOption struct {
-	Name      string `json:"name"`
-	Namespace string `json:"namespace"`
 }
 
 type StorageClass struct {

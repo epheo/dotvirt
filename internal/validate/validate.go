@@ -192,12 +192,3 @@ func RepoPath(s string) bool {
 	}
 	return true
 }
-
-// RequireRepoPath refuses s as the caller's input (model.ErrInvalid) when it
-// fails RepoPath, naming field.
-func RequireRepoPath(field, s string) error {
-	if !RepoPath(s) {
-		return fmt.Errorf("%w: %s %q must be a clean repo-relative path", model.ErrInvalid, field, s)
-	}
-	return nil
-}

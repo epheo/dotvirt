@@ -108,31 +108,6 @@ type NetworkInventory struct {
 	Uplinks          []Uplink          `json:"uplinks"`
 	PhysicalAdapters []PhysicalAdapter `json:"physicalAdapters"`
 	NMStatePresent   bool              `json:"nmstatePresent"`
-	// CanManage is true when the caller may author platform-tier networking
-	// (cluster-scoped CUDN): a platform repo is configured AND the caller passes the
-	// CUDN-create SSAR. The coarse "any platform authoring" signal that gates the
-	// platform-draft view; per-button gating uses Caps.
-	CanManage bool `json:"canManage"`
-	// Caps is the caller's per-action authoring authority - each field the same SSAR
-	// the matching create handler enforces, so a button gated on its field can never
-	// offer an action the backend would 403.
-	Caps NetworkCaps `json:"caps"`
-}
-
-// NetworkCaps mirrors each platform-tier create handler's platformScope SSAR, so the
-// UI can show only the authoring buttons the caller can actually use. All false when
-// no platform repo is configured.
-type NetworkCaps struct {
-	Uplink             bool `json:"uplink"`             // nmstate NNCP
-	Namespace          bool `json:"namespace"`          // namespaces (New Project / Namespace)
-	EgressIP           bool `json:"egressIP"`           // fixed outbound IP
-	ExternalRoute      bool `json:"externalRoute"`      // external route
-	AdminNetworkPolicy bool `json:"adminNetworkPolicy"` // cluster rules (AdminNetworkPolicy)
-	// BaselineAdminNetworkPolicy is the cluster's baseline default policy.
-	BaselineAdminNetworkPolicy bool `json:"baselineAdminNetworkPolicy"`
-	// Platform is ClusterCaps.PlatformRead: the platform tier's shared reads
-	// (its history, proposals and revert).
-	Platform bool `json:"platform"`
 }
 
 // Gateways is GET /api/networking/gateways: every Gateway and route. Operator

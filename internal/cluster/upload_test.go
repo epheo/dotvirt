@@ -60,7 +60,6 @@ func TestImportBootImage(t *testing.T) {
 		gvrInstancetypes:  "VirtualMachineClusterInstancetypeList",
 		gvrPreferences:    "VirtualMachineClusterPreferenceList",
 		gvrDataSources:    "DataSourceList",
-		gvrNADs:           "NetworkAttachmentDefinitionList",
 		gvrStorageClasses: "StorageClassList",
 	})
 	c := NewClient(nil, nil, dyn)
@@ -136,7 +135,6 @@ func TestOptionsMarkRemovable(t *testing.T) {
 		gvrInstancetypes:  "VirtualMachineClusterInstancetypeList",
 		gvrPreferences:    "VirtualMachineClusterPreferenceList",
 		gvrDataSources:    "DataSourceList",
-		gvrNADs:           "NetworkAttachmentDefinitionList",
 		gvrStorageClasses: "StorageClassList",
 	}, objs...)
 	opts, err := NewClient(nil, nil, dyn).ListOptions(ctx)

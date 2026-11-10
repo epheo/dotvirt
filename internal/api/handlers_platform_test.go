@@ -49,7 +49,7 @@ func TestDRSView(t *testing.T) {
 	rec := do(s, adminToken, http.MethodGet, "/api/drs", "")
 	wantStatus(t, rec, http.StatusOK)
 	v := decodeBody[model.DRSView](t, rec)
-	if !v.Configured || !v.PSIConfigured || !v.CanManage || !v.CanPSI || v.Draft == nil || !v.Draft.DisableStaged || v.Warning != "" {
+	if !v.Configured || !v.PSIConfigured || v.Draft == nil || !v.Draft.DisableStaged || v.Warning != "" {
 		t.Errorf("admin view = %+v", v)
 	}
 
@@ -57,14 +57,14 @@ func TestDRSView(t *testing.T) {
 	// it) is weighed against a real coordinator in coordinator_test.go.
 	rec = do(s, "drs-token", http.MethodGet, "/api/drs", "")
 	wantStatus(t, rec, http.StatusOK)
-	if v := decodeBody[model.DRSView](t, rec); !v.CanManage || !v.CanDisable {
-		t.Errorf("drs author view = %+v, want manage", v)
+	if v := decodeBody[model.DRSView](t, rec); v.Draft == nil {
+		t.Errorf("drs author view = %+v, want their draft", v)
 	}
 
 	// A tenant who may not list KubeDeschedulers reads neither plane.
 	rec = do(s, tenantToken, http.MethodGet, "/api/drs", "")
 	wantStatus(t, rec, http.StatusOK)
-	if v := decodeBody[model.DRSView](t, rec); v.CanManage || v.Draft != nil || v.Configured || v.PSIConfigured {
+	if v := decodeBody[model.DRSView](t, rec); v.Draft != nil || v.Configured || v.PSIConfigured {
 		t.Errorf("tenant view = %+v", v)
 	}
 
@@ -72,7 +72,7 @@ func TestDRSView(t *testing.T) {
 	// listing the rendered MachineConfigs.
 	rec = do(s, "psi-author", http.MethodGet, "/api/drs", "")
 	wantStatus(t, rec, http.StatusOK)
-	if v := decodeBody[model.DRSView](t, rec); !v.CanPSI || !v.PSIConfigured {
+	if v := decodeBody[model.DRSView](t, rec); !v.PSIConfigured {
 		t.Errorf("PSI author view = %+v", v)
 	}
 
@@ -91,7 +91,7 @@ func TestDRSViewNoPlatform(t *testing.T) {
 	s := fc.server(nil, Config{})
 	rec := do(s, adminToken, http.MethodGet, "/api/drs", "")
 	wantStatus(t, rec, http.StatusOK)
-	if v := decodeBody[model.DRSView](t, rec); v.CanManage || v.Configured {
+	if v := decodeBody[model.DRSView](t, rec); v.Draft != nil || v.Configured {
 		t.Errorf("view = %+v", v)
 	}
 	wantStatus(t, do(s, adminToken, http.MethodPost, "/api/drs", `{}`), http.StatusServiceUnavailable)
