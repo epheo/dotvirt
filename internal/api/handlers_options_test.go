@@ -16,7 +16,7 @@ import (
 // TestOptionsFilteredPerCaller pins the tenant boundary on the SA-read catalog:
 // a namespaced entry outside the caller's view is served only when the
 // caller could list that kind there itself (the shared golden-image case), so
-// another tenant's namespace and network names never leave the process. The
+// another tenant's namespace names never leave the process. The
 // cached catalog must stay whole for the next caller.
 func TestOptionsFilteredPerCaller(t *testing.T) {
 	f := ssarFactory(t, func(_ *http.Request, review *authzv1.SelfSubjectAccessReview) bool {

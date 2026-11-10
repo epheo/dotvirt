@@ -14,7 +14,7 @@ import (
 )
 
 // GVRs for the cluster-provided wizard/editor choices: sizes (instancetypes),
-// OS tuning (preferences), boot images (DataSources), networks (NADs).
+// OS tuning (preferences), boot images (DataSources), storage classes.
 var (
 	gvrInstancetypes  = schema.GroupVersionResource{Group: "instancetype.kubevirt.io", Version: "v1beta1", Resource: "virtualmachineclusterinstancetypes"}
 	gvrNSInstancetype = schema.GroupVersionResource{Group: "instancetype.kubevirt.io", Version: "v1beta1", Resource: "virtualmachineinstancetypes"}
