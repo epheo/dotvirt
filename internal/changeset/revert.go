@@ -109,7 +109,7 @@ func (c *Coordinator) revertAccess(read *git.Repo, proj project.ProjectInfo, ite
 			before = nil
 		}
 		items[i].BaseBlob = pinOf(before, ok)
-		a, err := fileAccess(proj, idx, fileChange{path: it.Path, before: before, after: it.NewContent, remove: it.Delete}, nil)
+		a, err := fileAccess(c.kindRule(), proj, idx, fileChange{path: it.Path, before: before, after: it.NewContent, remove: it.Delete}, nil)
 		if err != nil {
 			return nil, err
 		}

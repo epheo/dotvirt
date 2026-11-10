@@ -10,6 +10,7 @@ import (
 
 	"k8s.io/apimachinery/pkg/runtime/schema"
 
+	"github.com/epheo/dotvirt/internal/changeset"
 	"github.com/epheo/dotvirt/internal/model"
 	"github.com/epheo/dotvirt/internal/project"
 )
@@ -25,6 +26,7 @@ type kindIndex struct {
 	at       time.Time
 	asked    map[schema.GroupKind]bool
 	resource map[schema.GroupKind]string
+	cluster  map[schema.GroupKind]bool // served without a namespace
 	failed   map[string]bool
 }
 
@@ -99,6 +101,21 @@ func (x *kindIndex) ref(k schema.GroupKind) (ref ssarRef, served bool, err error
 	return ssarRef{}, false, fmt.Errorf("%w: discovery could not tell which resource serves %s", model.ErrUnavailable, k)
 }
 
+// ClusterScoped reports whether discovery serves group/kind without a
+// namespace, from the served-kinds index as the repo reads left it: it reads
+// nothing. A kind the index has not seen reads as namespaced; a tenant
+// AppProject, which admits no cluster-scoped kind, still refuses it if not.
+func (s *Server) ClusterScoped(group, kind string) bool {
+	x := s.kinds.Load()
+	return x != nil && x.cluster[schema.GroupKind{Group: group, Kind: kind}]
+}
+
+// tenantKindRule is what a tenant repo may declare on this install, with the
+// scope discovery gave: the rule the frame's placement issues are read by.
+func (s *Server) tenantKindRule() changeset.KindRule {
+	return changeset.KindRule{Policy: s.cfg.TenantKinds, ClusterScoped: s.ClusterScoped}
+}
+
 // unserved are those of kinds discovery found not served, from one read. git
 // may declare one, but nothing syncs it, so dotvirt stages no new or changed
 // one; removing one stays open. A failed read, or a kind discovery could not
@@ -159,12 +176,12 @@ func (s *Server) servedKinds(ctx context.Context, kinds []schema.GroupKind) (*ki
 			return nil, err
 		}
 		at := time.Now()
-		served, failed, err := sa.KindResources(want)
+		served, cluster, failed, err := sa.KindResources(want)
 		if err != nil {
 			log.Printf("api: discovery for the repos' kinds: %v", err) // SA-side detail stays in the log
 			return nil, fmt.Errorf("%w: cluster discovery failed", model.ErrUnavailable)
 		}
-		x := &kindIndex{at: at, asked: make(map[schema.GroupKind]bool, len(want)), resource: served, failed: failed}
+		x := &kindIndex{at: at, asked: make(map[schema.GroupKind]bool, len(want)), resource: served, cluster: cluster, failed: failed}
 		for _, k := range want {
 			x.asked[k] = true
 		}

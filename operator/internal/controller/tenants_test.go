@@ -138,7 +138,7 @@ func TestTenantAppProjectResolvesAgainstBYOForge(t *testing.T) {
 	dv.Spec.Forge.URL = "https://spec.example"
 	c := testBuilder(t).WithObjects(dv, creds, projectNS("a", "team-a", "dotvirt/team-a.git")).Build()
 	r := newReconciler(c, depsOK)
-	tier, err := r.tenantAppProjects(context.Background(), dv, "argocd", nil)
+	tier, err := r.tenantAppProjects(context.Background(), dv, &reconcileCtx{argoNS: "argocd"}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -399,7 +399,7 @@ func TestTenantKindsFollowTheImpersonationSetting(t *testing.T) {
 			}
 			c2 := testBuilder(t).WithObjects(objs...).Build()
 			r := newReconciler(c2, depsOK)
-			tier, err := r.tenantAppProjects(context.Background(), dv, "argocd", nil)
+			tier, err := r.tenantAppProjects(context.Background(), dv, &reconcileCtx{argoNS: "argocd"}, nil)
 			if err != nil {
 				t.Fatal(err)
 			}

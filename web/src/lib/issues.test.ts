@@ -347,6 +347,22 @@ describe('network problems in the issues plane', () => {
 });
 
 describe('objects a project repo cannot keep', () => {
+	it("says a kind is this install's rule when tenant repos may apply any kind", () => {
+		const inv: Inventory = {
+			projects: [
+				{
+					name: 'team-web',
+					namespaces: [{ namespace: 'web-prod', vms: [] }],
+					platformKinds: [{ kind: 'Role', namespace: 'web-prod', name: 'widen' }],
+				},
+			],
+		};
+		expect(deriveIssues(inv, { anyTenantKinds: true }).map((i) => i.label)).toEqual([
+			"Role this install's tenant repos may not apply",
+		]);
+		expect(deriveIssues(inv).map((i) => i.label)).toEqual(['Role only the platform repo may hold']);
+	});
+
 	it('names each by object, with its next action', () => {
 		const inv: Inventory = {
 			projects: [

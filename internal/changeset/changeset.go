@@ -23,6 +23,7 @@ import (
 	"github.com/epheo/dotvirt/internal/project"
 	"github.com/epheo/dotvirt/internal/vmtemplate"
 	"github.com/epheo/dotvirt/pkg/forge"
+	"github.com/epheo/dotvirt/pkg/tenancy"
 )
 
 // Resyncer triggers an ArgoCD sync of the Application managing a VM, for the
@@ -97,6 +98,8 @@ type Coordinator struct {
 	// syncNS holds the per-project sync accounts the project grants name; ""
 	// stages owner grants only.
 	syncNS string
+	// tenantKinds is what a tenant repo may declare (WithTenantKinds).
+	tenantKinds tenancy.Policy
 }
 
 // New builds a Coordinator. forge and resyncer may be nil (PR creation degrades

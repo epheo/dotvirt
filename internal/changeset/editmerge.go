@@ -69,7 +69,7 @@ func (c *Coordinator) stageEdit(id auth.Identity, proj project.ProjectInfo, e dr
 		if err != nil {
 			return err
 		}
-		if err := keepsDeclared(proj, target.path, target.content, out); err != nil {
+		if err := keepsDeclared(c.kindRule(), proj, target.path, target.content, out); err != nil {
 			return err
 		}
 		d[key] = next

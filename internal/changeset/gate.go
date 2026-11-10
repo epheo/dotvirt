@@ -20,6 +20,7 @@ import (
 	"github.com/epheo/dotvirt/internal/manifest"
 	"github.com/epheo/dotvirt/internal/model"
 	"github.com/epheo/dotvirt/internal/project"
+	"github.com/epheo/dotvirt/pkg/tenancy"
 )
 
 // The gate every write to a repo passes, at stage and again at propose: what
@@ -61,12 +62,33 @@ func (a Access) String() string {
 // access reviews.
 type Authorizer interface {
 	Authorize(id auth.Identity, need []Access) error
+	// ClusterScoped reports whether the cluster serves group/kind without a
+	// namespace, for a kind the table does not know; reading nothing new.
+	ClusterScoped(group, kind string) bool
 }
 
 // UseAuthorizer attaches the caller's RBAC to every stage, propose, restore
 // and revert. Set after construction: the API server implementing it is built
 // over the coordinator. Until it is set every write is refused.
 func (c *Coordinator) UseAuthorizer(a Authorizer) { c.authz = a }
+
+// WithTenantKinds sets what a tenant repo may declare on this install, as the
+// operator put it on the tenant AppProjects. Set once, before serving; the
+// zero Policy keeps the listed kinds.
+func (c *Coordinator) WithTenantKinds(p tenancy.Policy) *Coordinator {
+	c.tenantKinds = p
+	return c
+}
+
+// kindRule is the install's tenant kind rule, with the authorizer's view of
+// what the cluster serves without a namespace.
+func (c *Coordinator) kindRule() KindRule {
+	rule := KindRule{Policy: c.tenantKinds}
+	if c.authz != nil {
+		rule.ClusterScoped = c.authz.ClusterScoped
+	}
+	return rule
+}
 
 func (c *Coordinator) authorize(id auth.Identity, need []Access) error {
 	if c.authz == nil {
@@ -150,13 +172,13 @@ func (c *Coordinator) entryAccess(read *git.Repo, idx declaredIndex, proj projec
 		if err != nil {
 			return nil, err
 		}
-		return fileAccess(proj, idx, fileChange{path: e.SourceFile, before: before, after: []byte(e.Manifest)}, expected(*e))
+		return fileAccess(c.kindRule(), proj, idx, fileChange{path: e.SourceFile, before: before, after: []byte(e.Manifest)}, expected(*e))
 	case removal:
 		before, err := c.based(read, e)
 		if err != nil || before == nil {
 			return nil, err
 		}
-		return fileAccess(proj, idx, fileChange{path: e.SourceFile, before: before, remove: true}, nil)
+		return fileAccess(c.kindRule(), proj, idx, fileChange{path: e.SourceFile, before: before, remove: true}, nil)
 	case fieldWrite:
 		ref, ok := declaredRef(idx, draft.ResourceVM, e.Namespace, e.Name)
 		if !ok {
@@ -241,7 +263,7 @@ func fieldEditAccess(path string, content []byte, namespace, name string) ([]Acc
 // manifest.ApplyEdit already holds the edit to the VM's own fields in its own
 // decoding; this is Argo's, so a value breaking into another document adds no
 // object no gate weighed.
-func keepsDeclared(proj project.ProjectInfo, path string, content, out []byte) error {
+func keepsDeclared(rule KindRule, proj project.ProjectInfo, path string, content, out []byte) error {
 	before, err := argoObjects(path, content)
 	if err != nil {
 		return fmt.Errorf("%w: %s as it stands %v; change it in git", model.ErrConflict, path, err)
@@ -257,7 +279,7 @@ func keepsDeclared(proj project.ProjectInfo, path string, content, out []byte) e
 	if err != nil || len(after) != len(before) {
 		return fmt.Errorf("%w: the settings edit would change what %s declares", model.ErrInvalid, path)
 	}
-	return requirePlacement(proj, path, out)
+	return requirePlacement(rule, proj, path, out)
 }
 
 const (
@@ -281,7 +303,7 @@ type fileChange struct {
 // rather than patches (see replaced) is deleted and created. want, when set,
 // is the identity the write claims; a revert claims none and may restore any
 // managed object.
-func fileAccess(proj project.ProjectInfo, idx declaredIndex, ch fileChange, want func(after []object) error) ([]Access, error) {
+func fileAccess(rule KindRule, proj project.ProjectInfo, idx declaredIndex, ch fileChange, want func(after []object) error) ([]Access, error) {
 	var before, after []object
 	if ch.before != nil {
 		var err error
@@ -299,7 +321,7 @@ func fileAccess(proj project.ProjectInfo, idx declaredIndex, ch fileChange, want
 		return libraryAccess(proj, ch, before, after, want)
 	}
 	if !ch.remove {
-		if err := requirePlacement(proj, ch.path, ch.after); err != nil {
+		if err := requirePlacement(rule, proj, ch.path, ch.after); err != nil {
 			return nil, err
 		}
 	}

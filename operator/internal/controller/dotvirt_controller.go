@@ -34,6 +34,7 @@ import (
 	"github.com/epheo/dotvirt/operator/internal/install"
 	"github.com/epheo/dotvirt/operator/internal/platform"
 	"github.com/epheo/dotvirt/pkg/forge"
+	"github.com/epheo/dotvirt/pkg/tenancy"
 )
 
 // DotvirtReconciler provisions a dotvirt install from a Dotvirt resource (see the
@@ -316,6 +317,11 @@ type reconcileCtx struct {
 	// sync is what the Argo phase rendered for sync impersonation, read by the
 	// phase after it.
 	sync syncTier
+	// tenantDenied is install.TenantDenied for this pass, decided once by
+	// tenantKinds (tenantKindsRead) so the dotvirt pod and the AppProjects
+	// read the same answer.
+	tenantDenied    []tenancy.GroupKind
+	tenantKindsRead bool
 }
 
 func (r *DotvirtReconciler) newReconcileCtx(ctx context.Context, dv *dotvirtv1alpha1.Dotvirt) *reconcileCtx {

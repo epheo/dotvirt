@@ -91,7 +91,8 @@ type tenantTier struct {
 // the ApplicationSet moves its Applications off it, and a vanished project's,
 // admitting nothing, until its Application is removed. Unreferenced, they
 // leave the render and prune deletes them.
-func (r *DotvirtReconciler) tenantAppProjects(ctx context.Context, dv *dotvirtv1alpha1.Dotvirt, argoNS string, platformNS []string) (tenantTier, error) {
+func (r *DotvirtReconciler) tenantAppProjects(ctx context.Context, dv *dotvirtv1alpha1.Dotvirt, rc *reconcileCtx, platformNS []string) (tenantTier, error) {
+	argoNS := rc.argoNS
 	t := tenantTier{accounts: map[string][]string{}}
 	var nsList corev1.NamespaceList
 	if err := r.List(ctx, &nsList, client.HasLabels{install.ProjectLabel}); err != nil {
@@ -111,9 +112,9 @@ func (r *DotvirtReconciler) tenantAppProjects(ctx context.Context, dv *dotvirtv1
 			foreign[o.GetName()] = true
 		}
 	}
-	var denied []tenancy.GroupKind
+	denied := r.tenantKinds(ctx, dv, rc, held.Items)
 	if dv.Spec.ArgoCD.AnyTenantKinds() {
-		if denied = install.TenantDenied(dv, r.impersonating(ctx, dv, argoNS, held.Items)); denied == nil {
+		if denied == nil {
 			t.notes = append(t.notes, "tenant repos keep the listed kinds until the ArgoCD instance impersonates: argocd-cm sets "+
 				install.SyncImpersonationKey+", its AppProjects keep destinationServiceAccounts (Argo CD 2.13 or later) and its ArgoCD resource pins no image or version")
 		}
@@ -259,6 +260,29 @@ func (r *DotvirtReconciler) setArgoReady(dv *dotvirtv1alpha1.Dotvirt, t tenantTi
 		return
 	}
 	r.setCondition(dv, dotvirtv1alpha1.ConditionArgoReady, metav1.ConditionTrue, "Ready", msg)
+}
+
+// tenantKinds is install.TenantDenied for this pass, decided once, so the
+// dotvirt pod (the workload phase) and the AppProjects (the Argo phase, after
+// it) read the same answer. held are the ArgoCD namespace's AppProjects,
+// listed here when nil. A failed read is unknown, so no: the listed kinds.
+func (r *DotvirtReconciler) tenantKinds(ctx context.Context, dv *dotvirtv1alpha1.Dotvirt, rc *reconcileCtx, held []unstructured.Unstructured) []tenancy.GroupKind {
+	if rc.tenantKindsRead {
+		return rc.tenantDenied
+	}
+	rc.tenantKindsRead = true
+	if !dv.Spec.ArgoCD.AnyTenantKinds() {
+		return nil
+	}
+	if held == nil {
+		list := unstructuredList(install.ArgoGVK("AppProject"))().(*unstructured.UnstructuredList)
+		if err := r.reader().List(ctx, list, client.InNamespace(rc.argoNS)); err != nil {
+			return nil
+		}
+		held = list.Items
+	}
+	rc.tenantDenied = install.TenantDenied(dv, r.impersonating(ctx, dv, rc.argoNS, held))
+	return rc.tenantDenied
 }
 
 // impersonating reports whether the instance syncs dotvirt's Applications as

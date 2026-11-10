@@ -53,6 +53,24 @@ func Headers(content []byte) (heads []model.ObjectRef, docs int) {
 	return heads, docs
 }
 
+// Doc is one document's identity with its API group, which ObjectRef leaves
+// out: ObjectRef keys the declared index, where a kind's group never varies.
+type Doc struct {
+	model.ObjectRef
+	Group string
+}
+
+// Docs is Headers with each identity's API group, from the same walk.
+func Docs(content []byte) (out []Doc, docs int) {
+	docs = eachHeader(content, func(h header) {
+		if h.Kind != "" && h.Metadata.Name != "" {
+			gv, _ := schema.ParseGroupVersion(h.APIVersion)
+			out = append(out, Doc{ObjectRef: h.ref(), Group: gv.Group})
+		}
+	})
+	return out, docs
+}
+
 // Kinds is the group and kind of every document of a file naming both an
 // apiVersion and a kind, in order, through the first that fails to parse.
 func Kinds(content []byte) []schema.GroupKind {

@@ -7,6 +7,7 @@ import (
 
 	"github.com/epheo/dotvirt/internal/model"
 	"github.com/epheo/dotvirt/pkg/tenancy"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 )
 
 // A kind the cluster does not serve takes no new or changed object, whatever
@@ -134,5 +135,29 @@ func TestDRSNeedsOLMAndMachineConfigServed(t *testing.T) {
 				t.Errorf("turning rebalancing off is refused: %s", rec.Body.String())
 			}
 		})
+	}
+}
+
+// What a frame flags in a tenant repo follows the install's policy, with the
+// scope the served-kinds index holds and without reading discovery for it: a
+// kind the index has not seen reads as namespaced.
+func TestTenantKindRuleReadsTheIndexOnly(t *testing.T) {
+	fc := newFakeCluster(t)
+	s := fc.server(nil, Config{TenantKinds: tenancy.AnyPolicy(tenancy.GroupKind{Group: "capsule.clastix.io", Kind: "*"})})
+	prio := schema.GroupKind{Group: "scheduling.k8s.io", Kind: "PriorityClass"}
+	rule := s.tenantKindRule()
+	if !rule.Declarable("apps", "Deployment") || !rule.Declarable(prio.Group, prio.Kind) ||
+		rule.Declarable("rbac.authorization.k8s.io", "Role") || rule.Declarable("capsule.clastix.io", "Tenant") {
+		t.Error("before discovery: a namespaced reading of unknown kinds, the deny list kept")
+	}
+	if calls := fc.seen(); len(calls) != 0 {
+		t.Errorf("the rule read the cluster: %v", calls)
+	}
+	s.kinds.Store(&kindIndex{asked: map[schema.GroupKind]bool{prio: true}, cluster: map[schema.GroupKind]bool{prio: true}})
+	if s.tenantKindRule().Declarable(prio.Group, prio.Kind) {
+		t.Error("a kind discovery serves without a namespace is declarable")
+	}
+	if listed := (&Server{}).tenantKindRule(); listed.Declarable("apps", "Deployment") {
+		t.Error("the listed kinds admit a Deployment")
 	}
 }

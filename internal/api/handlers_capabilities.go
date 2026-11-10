@@ -264,5 +264,6 @@ func (s *Server) handleModules(w http.ResponseWriter, r *http.Request) {
 	un := s.unserved(r.Context(), model.KindSub, model.KindOpGroup, model.KindMachCfg)
 	m.OLM = !un[model.KindSub] && !un[model.KindOpGroup]
 	m.MachineConfig = !un[model.KindMachCfg]
+	m.AnyTenantKinds = s.cfg.TenantKinds.Any
 	writeJSON(w, m)
 }

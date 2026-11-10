@@ -13,6 +13,7 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 
 	dotvirtv1alpha1 "github.com/epheo/dotvirt/operator/api/v1alpha1"
+	"github.com/epheo/dotvirt/pkg/tenancy"
 )
 
 func testDotvirt() *dotvirtv1alpha1.Dotvirt {
@@ -36,12 +37,12 @@ func envValue(env []corev1.EnvVar, name string) (string, bool) {
 func TestWebhookURLGatedOnManagedForge(t *testing.T) {
 	managed := testDotvirt()
 	managed.Spec.Forge.Managed = true
-	if got, ok := envValue(Deployment(managed, "argocd").Spec.Template.Spec.Containers[0].Env, "DOTVIRT_WEBHOOK_URL"); !ok || got != ServiceURL(managed) {
+	if got, ok := envValue(Deployment(managed, "argocd", nil).Spec.Template.Spec.Containers[0].Env, "DOTVIRT_WEBHOOK_URL"); !ok || got != ServiceURL(managed) {
 		t.Errorf("managed forge: DOTVIRT_WEBHOOK_URL = (%q, ok=%v), want %q", got, ok, ServiceURL(managed))
 	}
 
 	byo := testDotvirt() // Forge.Managed defaults to false
-	if got, ok := envValue(Deployment(byo, "argocd").Spec.Template.Spec.Containers[0].Env, "DOTVIRT_WEBHOOK_URL"); ok {
+	if got, ok := envValue(Deployment(byo, "argocd", nil).Spec.Template.Spec.Containers[0].Env, "DOTVIRT_WEBHOOK_URL"); ok {
 		t.Errorf("BYO forge: DOTVIRT_WEBHOOK_URL must be unset (app falls back to public URL), got %q", got)
 	}
 }
@@ -60,7 +61,7 @@ func hasVolume(d *appsv1.Deployment, name string) bool {
 // credential env AND the forge-token secret mount, or the pod wedges on a dotvirt-forge
 // secret that is never written (the `forge: {}` failure). A managed forge restores both.
 func TestForgelessDeploymentOmitsForgeCredential(t *testing.T) {
-	bare := Deployment(testDotvirt(), "argocd") // no managed / url / credentialsSecret
+	bare := Deployment(testDotvirt(), "argocd", nil) // no managed / url / credentialsSecret
 	if _, ok := envValue(bare.Spec.Template.Spec.Containers[0].Env, "DOTVIRT_FORGE_URL"); ok {
 		t.Error("forge-less: DOTVIRT_FORGE_URL must be unset")
 	}
@@ -71,7 +72,7 @@ func TestForgelessDeploymentOmitsForgeCredential(t *testing.T) {
 	managed := testDotvirt()
 	managed.Spec.Forge.Managed = true
 	managed.Spec.Forge.URL = "https://forgejo.apps.example"
-	d := Deployment(managed, "argocd")
+	d := Deployment(managed, "argocd", nil)
 	// Managed emits the URL as a literal (a URL change rolls the app), not a secret ref.
 	if got, ok := envValue(d.Spec.Template.Spec.Containers[0].Env, "DOTVIRT_FORGE_URL"); !ok || got != managed.Spec.Forge.URL {
 		t.Errorf("managed: DOTVIRT_FORGE_URL = (%q, ok=%v), want the literal resolved url", got, ok)
@@ -84,12 +85,12 @@ func TestForgelessDeploymentOmitsForgeCredential(t *testing.T) {
 // OpenShift SSO wiring is gated on auth.openShiftSSO: the OAuth client id is a literal
 // and the client secret refs the operator-generated dotvirt-oauth Secret; both absent otherwise.
 func TestDeploymentSSOEnvGatedOnFlag(t *testing.T) {
-	if _, ok := envValue(Deployment(testDotvirt(), "argocd").Spec.Template.Spec.Containers[0].Env, "DOTVIRT_OAUTH_CLIENT_ID"); ok {
+	if _, ok := envValue(Deployment(testDotvirt(), "argocd", nil).Spec.Template.Spec.Containers[0].Env, "DOTVIRT_OAUTH_CLIENT_ID"); ok {
 		t.Error("SSO off: DOTVIRT_OAUTH_CLIENT_ID must be unset")
 	}
 	sso := testDotvirt()
 	sso.Spec.Auth.OpenShiftSSO = true
-	env := Deployment(sso, "argocd").Spec.Template.Spec.Containers[0].Env
+	env := Deployment(sso, "argocd", nil).Spec.Template.Spec.Containers[0].Env
 	// The OAuthClient is cluster-scoped, so its name must be per-install: a shared one
 	// lets a second install overwrite the first's redirect URI and secret.
 	want := OAuthClientName(sso.Namespace)
@@ -114,7 +115,7 @@ func TestDeploymentSSOEnvGatedOnFlag(t *testing.T) {
 // escalation, all capabilities dropped, bounded resources, and a liveness probe - so
 // OpenShift's restricted SCC admits it WITHOUT the anyuid grant.
 func TestDeploymentSecurityHardening(t *testing.T) {
-	d := Deployment(testDotvirt(), "argocd")
+	d := Deployment(testDotvirt(), "argocd", nil)
 
 	ps := d.Spec.Template.Spec.SecurityContext
 	if ps == nil || ps.RunAsNonRoot == nil || !*ps.RunAsNonRoot {
@@ -242,7 +243,7 @@ func TestOperandImageRollsWithOperatorUpgrade(t *testing.T) {
 	}
 
 	// Unpinned CR, no env (e.g. `make run`): the operand is the compiled-in defaultImage.
-	if got := Deployment(testDotvirt(), "argocd").Spec.Template.Spec.Containers[0].Image; got != defaultImage {
+	if got := Deployment(testDotvirt(), "argocd", nil).Spec.Template.Spec.Containers[0].Image; got != defaultImage {
 		t.Errorf("unpinned CR, no env: operand image = %q, want defaultImage %q", got, defaultImage)
 	}
 
@@ -250,7 +251,7 @@ func TestOperandImageRollsWithOperatorUpgrade(t *testing.T) {
 	// over defaultImage - this is the edge OLM bumps on upgrade to roll the operand.
 	const upgraded = "quay.io/epheo/dotvirt@sha256:" + "0000000000000000000000000000000000000000000000000000000000000000"
 	t.Setenv("RELATED_IMAGE_DOTVIRT", upgraded)
-	if got := Deployment(testDotvirt(), "argocd").Spec.Template.Spec.Containers[0].Image; got != upgraded {
+	if got := Deployment(testDotvirt(), "argocd", nil).Spec.Template.Spec.Containers[0].Image; got != upgraded {
 		t.Errorf("unpinned CR + RELATED_IMAGE_DOTVIRT: operand image = %q, want %q (operand must follow the operator's pinned env)", got, upgraded)
 	}
 
@@ -258,7 +259,7 @@ func TestOperandImageRollsWithOperatorUpgrade(t *testing.T) {
 	// pins opts out of the auto-roll.
 	pinned := testDotvirt()
 	pinned.Spec.Image = "quay.io/example/custom@sha256:" + strings.Repeat("a", 64)
-	if got := Deployment(pinned, "argocd").Spec.Template.Spec.Containers[0].Image; got != pinned.Spec.Image {
+	if got := Deployment(pinned, "argocd", nil).Spec.Template.Spec.Containers[0].Image; got != pinned.Spec.Image {
 		t.Errorf("spec.image override: operand image = %q, want %q", got, pinned.Spec.Image)
 	}
 }
@@ -316,7 +317,7 @@ func TestDeploymentVerifiedTLSByDefault(t *testing.T) {
 	dv.Spec.Forge.Managed = true
 	dv.Spec.Auth.OpenShiftSSO = true
 	dv.Spec.Metrics.URL = "https://thanos-querier.openshift-monitoring.svc.cluster.local:9091"
-	d := Deployment(dv, "argocd")
+	d := Deployment(dv, "argocd", nil)
 	c := d.Spec.Template.Spec.Containers[0]
 	for _, arg := range c.Args {
 		if arg == "-insecure-tls" {
@@ -347,7 +348,7 @@ func TestDeploymentMetricsTenancyURL(t *testing.T) {
 	} {
 		dv := testDotvirt()
 		dv.Spec.Metrics.URL = url
-		got, ok := envValue(Deployment(dv, "argocd").Spec.Template.Spec.Containers[0].Env, "DOTVIRT_METRICS_TENANCY_URL")
+		got, ok := envValue(Deployment(dv, "argocd", nil).Spec.Template.Spec.Containers[0].Env, "DOTVIRT_METRICS_TENANCY_URL")
 		if got != want || ok != (want != "") {
 			t.Errorf("%s: tenancy URL = %q (set %t), want %q", url, got, ok, want)
 		}
@@ -435,7 +436,7 @@ func TestApplicationSetExcludesUnconfinedProjects(t *testing.T) {
 
 // The app reads tenancy from the keys the AppProjects are derived from.
 func TestDeploymentPinsTenancyKeys(t *testing.T) {
-	args := Deployment(testDotvirt(), "argocd").Spec.Template.Spec.Containers[0].Args
+	args := Deployment(testDotvirt(), "argocd", nil).Spec.Template.Spec.Containers[0].Args
 	for _, want := range []string{"-project-label=" + ProjectLabel, "-repo-annotation=" + RepoAnnotation} {
 		if !slices.Contains(args, want) {
 			t.Errorf("args %v lack %s", args, want)
@@ -575,5 +576,28 @@ func TestTenantKindsAnyNeedsImpersonation(t *testing.T) {
 				t.Errorf("clusterResourceWhitelist = %v, want empty", v)
 			}
 		})
+	}
+}
+
+// dotvirt reads what tenant repos may apply from its env: nothing for the
+// listed kinds; Any, and only the provider's additions, under a deny list.
+func TestDeploymentCarriesTheTenantKinds(t *testing.T) {
+	dv := testDotvirt()
+	dv.Spec.ArgoCD.TenantKinds = "Any"
+	env := func(denied []tenancy.GroupKind) (string, string) {
+		e := Deployment(dv, "argocd", denied).Spec.Template.Spec.Containers[0].Env
+		kinds, _ := envValue(e, "DOTVIRT_TENANT_KINDS")
+		extra, _ := envValue(e, "DOTVIRT_TENANT_KINDS_DENIED")
+		return kinds, extra
+	}
+	if kinds, extra := env(nil); kinds != "" || extra != "" {
+		t.Errorf("listed: %q %q", kinds, extra)
+	}
+	if kinds, extra := env(TenantDenied(dv, true)); kinds != "Any" || extra != "" {
+		t.Errorf("any, no additions: %q %q", kinds, extra)
+	}
+	dv.Spec.ArgoCD.TenantKindsDenied = []dotvirtv1alpha1.GroupKind{{Group: "capsule.clastix.io", Kind: "*"}, {Kind: "Secret"}}
+	if kinds, extra := env(TenantDenied(dv, true)); kinds != "Any" || extra != "capsule.clastix.io/*,/Secret" {
+		t.Errorf("any with additions: %q %q", kinds, extra)
 	}
 }

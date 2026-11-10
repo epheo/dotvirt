@@ -18,6 +18,7 @@ import { deriveIssues, deriveSuggestions } from '#lib/issues.js';
 import { membership, networkProblems } from '#lib/netmap.js';
 import { prKey } from '#lib/review.js';
 import { share } from '#lib/share.js';
+import { modules } from './modules.svelte';
 
 // Only the server's yes authors: an absent verdict (the review failed this
 // frame) fails closed, like the stage routes behind it.
@@ -72,6 +73,7 @@ class InventoryStore {
 			alerts: this.alerts ?? [],
 			canRepair: (p) => repoGate(p).ok,
 			network: this.netProblems,
+			anyTenantKinds: modules.value?.anyTenantKinds === true,
 		}),
 	);
 	// What is worth doing but not wrong: adoptable namespaces and VMs.

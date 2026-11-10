@@ -43,7 +43,7 @@ func (r *DotvirtReconciler) reconcileArgo(ctx context.Context, dv *dotvirtv1alph
 		}
 	}
 	platformNS := r.platformNamespaces(dv, argoNS)
-	tenants, err := r.tenantAppProjects(ctx, dv, argoNS, platformNS)
+	tenants, err := r.tenantAppProjects(ctx, dv, rc, platformNS)
 	if err != nil {
 		return nil, err
 	}
