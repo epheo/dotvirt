@@ -99,9 +99,20 @@ func (s *Server) allowed(ctx context.Context, id auth.Identity, c *cluster.Clien
 	return question{}, true, nil
 }
 
+// needForChange and needForRead end a refusal: the first is what a change was
+// missing, the second what a read was.
+const (
+	needForChange = "this change needs that right, read access is not enough"
+	needForRead   = "reading this needs that right"
+)
+
 // require is allowed as a gate: nil, ErrForbidden naming the question denied,
 // or the failed weighing.
 func (s *Server) require(ctx context.Context, id auth.Identity, c *cluster.Client, act action) error {
+	return s.requireFor(ctx, id, c, act, needForChange)
+}
+
+func (s *Server) requireFor(ctx context.Context, id auth.Identity, c *cluster.Client, act action, need string) error {
 	q, ok, err := s.allowed(ctx, id, c, act)
 	switch {
 	case errors.Is(err, model.ErrInvalid), errors.Is(err, model.ErrForbidden):
@@ -109,7 +120,7 @@ func (s *Server) require(ctx context.Context, id auth.Identity, c *cluster.Clien
 	case err != nil:
 		return s.reviewFailed(ctx, id, err)
 	case !ok:
-		return fmt.Errorf("%w: you may not %s; this change needs that right, read access is not enough", model.ErrForbidden, q)
+		return fmt.Errorf("%w: you may not %s; %s", model.ErrForbidden, q, need)
 	}
 	return nil
 }
@@ -126,6 +137,10 @@ func (s *Server) gate(w http.ResponseWriter, r *http.Request, sc scope, act acti
 // gateAny gates a route on any of acts: the coordinator then checks the one
 // the change turns out to need (create or update, the kind git declares).
 func (s *Server) gateAny(w http.ResponseWriter, r *http.Request, sc scope, acts []action) bool {
+	return s.gateAnyFor(w, r, sc, acts, needForChange)
+}
+
+func (s *Server) gateAnyFor(w http.ResponseWriter, r *http.Request, sc scope, acts []action, need string) bool {
 	ok, err := s.anyAllowed(r.Context(), sc.id, sc.cluster, acts)
 	if err != nil {
 		fail(w, s.reviewFailed(r.Context(), sc.id, err))
@@ -138,8 +153,7 @@ func (s *Server) gateAny(w http.ResponseWriter, r *http.Request, sc scope, acts 
 				asked = append(asked, act[0].String())
 			}
 		}
-		fail(w, fmt.Errorf("%w: you may not %s; this change needs that right, read access is not enough",
-			model.ErrForbidden, strings.Join(asked, " or ")))
+		fail(w, fmt.Errorf("%w: you may not %s; %s", model.ErrForbidden, strings.Join(asked, " or "), need))
 		return false
 	}
 	return true
@@ -755,16 +769,36 @@ func (s *Server) projectAuthor(ctx context.Context, id auth.Identity, c *cluster
 	return s.anyAllowed(ctx, id, c, acts)
 }
 
-// authorizeRepo gates a revert before the coordinator weighs it: a commit may
-// touch any namespace of a tenant project, so the caller must see every one -
-// one they cannot read is refused without being named. The coordinator then
-// checks each object the revert changes with its exact verb.
-func (s *Server) authorizeRepo(w http.ResponseWriter, r *http.Request, sc scope) bool {
-	if full, ok := s.projectByName(sc.proj.Name); ok && len(full.Namespaces) > len(sc.proj.Namespaces) {
-		fail(w, fmt.Errorf("%w: reverting needs every namespace of %s in your view", model.ErrForbidden, sc.proj.Name))
+// gateRepo refuses a caller who may not read what a tenant project's repo holds
+// in namespace, or in every namespace of the project when it is "": the repo
+// holds those objects, so the apiserver's answer on each declared kind is the
+// answer on the repo. A namespace they cannot read is refused without being
+// named. The platform tier answered this at its own scope (canReadPlatform).
+func (s *Server) gateRepo(w http.ResponseWriter, r *http.Request, sc scope, namespace string) bool {
+	if err := s.readsRepo(r.Context(), sc, namespace); err != nil {
+		fail(w, err)
 		return false
 	}
 	return true
+}
+
+// readsRepo is gateRepo's verdict: nil, ErrForbidden, or the failed weighing.
+func (s *Server) readsRepo(ctx context.Context, sc scope, namespace string) error {
+	if sc.proj.Name == platformProjectName {
+		return nil
+	}
+	namespaces := []string{namespace}
+	if namespace == "" {
+		if s.seesPartOf(sc.proj) {
+			return fmt.Errorf("%w: this needs every namespace of %s in your view", model.ErrForbidden, sc.proj.Name)
+		}
+		namespaces = sc.proj.Namespaces
+	}
+	act, err := s.repoListing(ctx, sc.proj, namespaces)
+	if err != nil || len(act) == 0 {
+		return err
+	}
+	return s.requireFor(ctx, sc.id, sc.cluster, act, needForRead)
 }
 
 // authorNamespaces is the UI's authoring signal for nss. One cluster-wide

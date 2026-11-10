@@ -51,12 +51,13 @@ func (s *Server) recordTask(verb, namespace, name, by string, ok bool) {
 // (namespace-less node ops behind the node-read signal), merges in a repo
 // backing one of their projects. The served feed and the frame's TasksVersion
 // both read through it, so the watermark moves exactly when the feed does.
-// ownRepo is the platform repo of a caller who does not read it: its merges
-// show only from ownBranch, their draft branch.
+// own is, by repo, the project and draft branch of a caller who may not see
+// all of it: the platform repo when they do not read it, a project's when they
+// see part of it. Its merges show only from that branch.
 type taskScope struct {
 	nsProject, repoProject map[string]string
 	canNodes               bool
-	ownRepo, ownBranch     string
+	own                    map[string]ownLane
 }
 
 // taskScope is id's view of the feed over their projects: every platform
@@ -68,14 +69,23 @@ func (s *Server) taskScope(id auth.Identity, projects []project.ProjectInfo, rea
 	}
 	sc := newTaskScope(projects, canNodes)
 	if !readsPlatform && platform.Repo != "" {
-		sc.ownRepo = forge.NormalizeRepoURL(platform.Repo)
-		sc.ownBranch = s.reader.ProposedBranch(id, platform)
+		sc.own[forge.NormalizeRepoURL(platform.Repo)] = ownLane{platform.Name, s.reader.ProposedBranch(id, platform)}
+	}
+	partial := s.partialProjects(projects)
+	for _, p := range projects {
+		if partial[p.Name] && p.Repo != "" {
+			repo := forge.NormalizeRepoURL(p.Repo)
+			delete(sc.repoProject, repo)
+			sc.own[repo] = ownLane{p.Name, s.reader.ProposedBranch(id, p)}
+		}
 	}
 	return sc
 }
 
+type ownLane struct{ project, branch string }
+
 func newTaskScope(projects []project.ProjectInfo, canNodes bool) taskScope {
-	sc := taskScope{nsProject: map[string]string{}, repoProject: map[string]string{}, canNodes: canNodes}
+	sc := taskScope{nsProject: map[string]string{}, repoProject: map[string]string{}, own: map[string]ownLane{}, canNodes: canNodes}
 	for _, p := range projects {
 		for _, ns := range p.Namespaces {
 			sc.nsProject[ns] = p.Name
@@ -101,8 +111,8 @@ func (sc taskScope) merge(m tasks.Merge) (project string, ok bool) {
 	if project, ok = sc.repoProject[m.RepoURL]; ok {
 		return project, true
 	}
-	if sc.ownBranch != "" && m.RepoURL == sc.ownRepo && m.Branch == sc.ownBranch {
-		return platformProjectName, true
+	if own, ok := sc.own[m.RepoURL]; ok && own.branch != "" && m.Branch == own.branch {
+		return own.project, true
 	}
 	return "", false
 }

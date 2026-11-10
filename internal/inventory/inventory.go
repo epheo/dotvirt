@@ -49,6 +49,9 @@ type Inputs struct {
 	// ListsVMs reports whether the caller may list VMs in a namespace it sees;
 	// nil is yes.
 	ListsVMs func(namespace string) bool
+	// ScopeSync narrows a project's GitOps rollup to what the caller may read;
+	// nil leaves it whole.
+	ScopeSync func(project.ProjectInfo, model.ProjectSync) *model.ProjectSync
 }
 
 // Build produces the inventory. A project whose repo can't be read (or that has
@@ -86,6 +89,9 @@ func buildProject(in Inputs, p project.ProjectInfo) model.Project {
 	if in.ProjectDrift != nil && p.Repo != "" {
 		if ps, ok := in.ProjectDrift[forge.NormalizeRepoURL(p.Repo)]; ok {
 			out.GitOps = &ps
+			if in.ScopeSync != nil {
+				out.GitOps = in.ScopeSync(p, ps)
+			}
 		}
 	}
 	// A dead or unresolved repo must not blind the inventory: live objects are

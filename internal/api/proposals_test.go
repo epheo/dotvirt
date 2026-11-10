@@ -724,7 +724,7 @@ func TestPlatformReviewOpensToItsOwnerAlone(t *testing.T) {
 
 	rec = get(alice, "4")
 	if body := rec.Body.String(); rec.Code != http.StatusForbidden ||
-		!strings.Contains(body, "changed outside dotvirt since you proposed it; a platform administrator can review it") || strings.Contains(body, "items") {
+		!strings.Contains(body, "changed outside dotvirt since you proposed it; someone who can read the whole repo can review it") || strings.Contains(body, "items") {
 		t.Errorf("own PR someone pushed to = %d %q, want the guided refusal without items", rec.Code, body)
 	}
 

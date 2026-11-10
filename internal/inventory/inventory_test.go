@@ -199,6 +199,26 @@ func TestBuildSurfacesPlacementIssues(t *testing.T) {
 	}
 }
 
+// The rollup a project shows passes through the caller's view of it.
+func TestBuildScopesProjectGitOps(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	repo := "https://forge.example/other.git"
+	inv := Build(Inputs{
+		Branch:       "main",
+		Repos:        git.NewRepoSet(ctx, "", "", nil, false, nil, time.Hour),
+		Projects:     []project.ProjectInfo{{Name: "team-b", Repo: repo, Namespaces: []string{"tenant-b"}}},
+		ProjectDrift: map[string]model.ProjectSync{forge.NormalizeRepoURL(repo): {SyncError: "boom"}},
+		ScopeSync: func(_ project.ProjectInfo, ps model.ProjectSync) *model.ProjectSync {
+			ps.SyncError = "scoped"
+			return &ps
+		},
+	})
+	if got := inv.Projects[0].GitOps; got == nil || got.SyncError != "scoped" {
+		t.Errorf("GitOps = %+v, want the scoped rollup", got)
+	}
+}
+
 // The per-project GitOps rollup attaches to the project whose repo matches the
 // managing Application, keyed by canonical repoURL - and a project with no matching
 // Application (or when Argo is disabled) keeps GitOps nil, so nothing alarms.

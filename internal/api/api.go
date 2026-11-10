@@ -225,7 +225,7 @@ type Server struct {
 	visible       *ttlcache.Cache[visibleSet]       // per-token visible-namespace set, RBAC-version-stamped
 	cands         atomic.Pointer[candidates]        // the project namespaces every visible set is reviewed over
 	ssar          *ttlcache.Cache[ssarVerdict]      // per-(token, question) SSAR verdict, RBAC-version-stamped
-	kinds         atomic.Pointer[kindIndex]         // discovery's answer for the platform repo's kinds
+	kinds         atomic.Pointer[kindIndex]         // discovery's answer for the repos' kinds
 	kindFill      *ttlcache.Cache[*kindIndex]       // single-flights its refresh
 	proposals     *ttlcache.Cache[[]model.Proposal] // per-project open-PR set; written by the refresher, read on broadcast
 	options       *ttlcache.Cache[model.Options]    // shared wizard catalog (SA-read, identical for all)

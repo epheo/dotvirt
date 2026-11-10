@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"slices"
 	"strings"
+	"sync"
 	"time"
 
 	authzv1 "k8s.io/api/authorization/v1"
@@ -501,6 +502,15 @@ type candidates struct {
 	ver   uint64
 	list  []string
 	names map[string]bool // never mutated once built
+	// projects is every project at ver, resolved once, on first use.
+	projects func() resolvedProjects
+}
+
+// resolvedProjects is every project at one namespace version, shared by every
+// caller, none of whom may modify it.
+type resolvedProjects struct {
+	list   []project.ProjectInfo
+	byName map[string]project.ProjectInfo
 }
 
 // candidates is the snapshot's project namespaces at ver, a
@@ -515,6 +525,14 @@ func (s *Server) candidates(ver uint64) *candidates {
 		c.list = append(c.list, ns.Name)
 		c.names[ns.Name] = true
 	}
+	c.projects = sync.OnceValue(func() resolvedProjects {
+		list := s.resolver.Resolve(nss, nil)
+		byName := make(map[string]project.ProjectInfo, len(list))
+		for _, p := range list {
+			byName[p.Name] = p
+		}
+		return resolvedProjects{list: list, byName: byName}
+	})
 	s.cands.Store(c)
 	return c
 }
@@ -802,12 +820,41 @@ func byName(want string) projectPicker {
 // or in dotvirt's own background acts: it's how the platform tier addresses a
 // tenant it's about to adopt, and the view the webhook sweep and the
 // ApplicationSet plugin enumerate.
-func (s *Server) AllProjects() []project.ProjectInfo {
-	return s.resolver.Resolve(s.state.Namespaces(), nil)
-}
+func (s *Server) AllProjects() []project.ProjectInfo { return s.resolved().list }
 
 func (s *Server) projectByName(name string) (project.ProjectInfo, bool) {
-	return findProject(s.AllProjects(), name)
+	p, ok := s.resolved().byName[name]
+	return p, ok
+}
+
+func (s *Server) resolved() resolvedProjects {
+	return s.candidates(s.bus.Version(eventbus.NamespaceChanged)).projects()
+}
+
+// seesPartOf reports whether p, as the caller sees it, lacks a namespace of
+// its project. A project no longer known counts: nothing says it is whole.
+func (s *Server) seesPartOf(p project.ProjectInfo) bool {
+	full, ok := s.projectByName(p.Name)
+	return !ok || len(full.Namespaces) > len(p.Namespaces)
+}
+
+// partialProjects names those of projects the caller sees part of: what their
+// repos show narrows to the caller's own. A map lookup per project, on the
+// frame's hot path.
+func (s *Server) partialProjects(projects []project.ProjectInfo) map[string]bool {
+	if s.state == nil || s.resolver == nil {
+		return nil
+	}
+	var out map[string]bool
+	for _, p := range projects {
+		if p.Name != platformProjectName && s.seesPartOf(p) {
+			if out == nil {
+				out = map[string]bool{}
+			}
+			out[p.Name] = true
+		}
+	}
+	return out
 }
 
 // draftScope resolves the whole-draft routes (GET/DELETE/propose) that carry the

@@ -10,14 +10,15 @@ import (
 	"k8s.io/apimachinery/pkg/runtime/schema"
 
 	"github.com/epheo/dotvirt/internal/model"
+	"github.com/epheo/dotvirt/internal/project"
 )
 
 // kindProbe is how long discovery's word that a kind is not served, or could
 // not be read, stands before it is asked again. A served kind stays served.
 const kindProbe = time.Minute
 
-// kindIndex is discovery's answer for the kinds the platform repo declared
-// when it was asked: the resource serving each served one, and the groups it
+// kindIndex is discovery's answer for the kinds repos declared when it was
+// asked: the resource serving each served one, and the groups it
 // could not read, whose kinds are unknown.
 type kindIndex struct {
 	at       time.Time
@@ -49,7 +50,13 @@ func (x *kindIndex) covers(kinds []schema.GroupKind, now time.Time) bool {
 // all the same. The kinds are memoized per repo head, discovery's answer
 // until a kind it found missing is due again.
 func (s *Server) platformListing(ctx context.Context) (action, error) {
-	kinds, err := s.reader.DeclaredKinds(s.platformProject())
+	return s.repoListing(ctx, s.platformProject(), []string{""})
+}
+
+// repoListing is listing every kind proj's repo declares in each of
+// namespaces, "" being cluster-wide.
+func (s *Server) repoListing(ctx context.Context, proj project.ProjectInfo, namespaces []string) (action, error) {
+	kinds, err := s.reader.DeclaredKinds(proj)
 	if err != nil || len(kinds) == 0 {
 		return nil, err
 	}
@@ -64,7 +71,9 @@ func (s *Server) platformListing(ctx context.Context) (action, error) {
 			return nil, err
 		}
 		if served {
-			act = append(act, refQ(verbList, ref, ""))
+			for _, ns := range namespaces {
+				act = append(act, refQ(verbList, ref, ns))
+			}
 		}
 	}
 	return act, nil
@@ -95,7 +104,7 @@ func (s *Server) servedKinds(ctx context.Context, kinds []schema.GroupKind) (*ki
 	if x := s.kinds.Load(); x.covers(kinds, time.Now()) {
 		return x, nil
 	}
-	return s.kindFill.Do(ctx, "platform", func(context.Context) (*kindIndex, error) {
+	return s.kindFill.Do(ctx, "kinds", func(context.Context) (*kindIndex, error) {
 		prev := s.kinds.Load()
 		if prev.covers(kinds, time.Now()) {
 			return prev, nil
@@ -117,7 +126,7 @@ func (s *Server) servedKinds(ctx context.Context, kinds []schema.GroupKind) (*ki
 		at := time.Now()
 		served, failed, err := sa.KindResources(want)
 		if err != nil {
-			log.Printf("api: discovery for the platform repo's kinds: %v", err) // SA-side detail stays in the log
+			log.Printf("api: discovery for the repos' kinds: %v", err) // SA-side detail stays in the log
 			return nil, fmt.Errorf("%w: cluster discovery failed", model.ErrUnavailable)
 		}
 		x := &kindIndex{at: at, asked: make(map[schema.GroupKind]bool, len(want)), resource: served, failed: failed}

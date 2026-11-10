@@ -14,6 +14,7 @@ import (
 	"github.com/epheo/dotvirt/internal/eventbus"
 	"github.com/epheo/dotvirt/internal/inventory"
 	"github.com/epheo/dotvirt/internal/model"
+	"github.com/epheo/dotvirt/internal/project"
 	"github.com/epheo/dotvirt/internal/tasks"
 	"github.com/epheo/dotvirt/pkg/forge"
 )
@@ -69,6 +70,9 @@ func (s *Server) InventoryForIdentity(ctx context.Context, id auth.Identity) (mo
 		Visible:  visible,
 		Owners:   s.resolver.Owners(all),
 		ListsVMs: func(ns string) bool { return v.lists(ssarVM, ns) },
+		ScopeSync: func(p project.ProjectInfo, ps model.ProjectSync) *model.ProjectSync {
+			return s.projectSyncView(ctx, id, userCluster, p, ps)
+		},
 	}
 	// Drift comes from the SA-owned Application snapshot (lock-free, watch-fed).
 	// Three states the inventory must NOT conflate: Argo off (s.drift nil: no
@@ -244,8 +248,33 @@ const platformErrorForTenants = "the platform repo failed to apply; a platform a
 // on its own, a kind discovery cannot place read as unlisted. The apply error
 // can name a dropped row, so it turns generic once one is dropped.
 func (s *Server) readerPlatformView(ctx context.Context, id auth.Identity, c *cluster.Client, ps *model.ProjectSync) *model.ProjectSync {
-	if ps == nil || len(ps.Unhealthy) == 0 {
-		return ps
+	if ps == nil {
+		return nil
+	}
+	return s.listedRows(ctx, id, c, *ps, func(model.ObjectHealth) string { return "" }, platformErrorForTenants)
+}
+
+const projectErrorForPartialViewers = "this project's repo failed to apply; someone who can read all of it can see why"
+
+// projectSyncView is a tenant project's rollup for one caller: the rows it may
+// list where they live. The apply error can name what it may not, so it turns
+// generic once a row is dropped or the caller sees part of the project.
+func (s *Server) projectSyncView(ctx context.Context, id auth.Identity, c *cluster.Client, p project.ProjectInfo, ps model.ProjectSync) *model.ProjectSync {
+	out := s.listedRows(ctx, id, c, ps, func(o model.ObjectHealth) string { return o.Namespace }, projectErrorForPartialViewers)
+	if out.SyncError != "" && s.seesPartOf(p) {
+		out.SyncError = projectErrorForPartialViewers
+	}
+	return out
+}
+
+// listedRows keeps the Unhealthy rows whose kind the caller may list in
+// where(row). Each kind is asked on its own, cached per token, and only when a
+// row exists: a quiet rollup costs nothing. A kind discovery cannot place reads
+// as unlisted. The apply error can name a dropped row, so it becomes generic
+// once one is dropped.
+func (s *Server) listedRows(ctx context.Context, id auth.Identity, c *cluster.Client, ps model.ProjectSync, where func(model.ObjectHealth) string, generic string) *model.ProjectSync {
+	if len(ps.Unhealthy) == 0 {
+		return &ps
 	}
 	var kinds []schema.GroupKind
 	for _, o := range ps.Unhealthy {
@@ -254,16 +283,16 @@ func (s *Server) readerPlatformView(ctx context.Context, id auth.Identity, c *cl
 		}
 	}
 	x, _ := s.servedKinds(ctx, kinds)
-	out := *ps
+	out := ps
 	out.Unhealthy = nil
 	for _, o := range ps.Unhealthy {
 		ref, served, err := x.ref(schema.GroupKind{Group: o.Group, Kind: o.Kind})
-		if err == nil && served && s.capable(ctx, id, c, ask(verbList, ref, "")) {
+		if err == nil && served && s.capable(ctx, id, c, ask(verbList, ref, where(o))) {
 			out.Unhealthy = append(out.Unhealthy, o)
 		}
 	}
 	if len(out.Unhealthy) < len(ps.Unhealthy) && out.SyncError != "" {
-		out.SyncError = platformErrorForTenants
+		out.SyncError = generic
 	}
 	return &out
 }

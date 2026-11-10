@@ -54,13 +54,16 @@ type propTarget struct {
 // of this frame (the refresher wakes the hub when its lane lands). Nil when no
 // project has a lane yet, so a cold frame ships without one. keepPlatform
 // carries a platform reader's lane through a build whose platform review
-// failed. A caller who does not read the platform tier gets their own draft's
-// platform row alone, off the lane the refresher reads whenever anyone looks:
-// no forge call, and no tracked entry for a rebuild to drop.
+// failed. A caller who does not read the platform tier, or sees part of a
+// project, gets their own draft's row there alone, off the lane the refresher
+// reads whenever anyone looks: no forge call, and no tracked entry for a
+// rebuild to drop. A caller who sees every namespace but lacks a kind keeps
+// the rows: only opening a PR weighs the kinds.
 func (s *Server) proposalsFor(id auth.Identity, projects []project.ProjectInfo, keepPlatform bool) []model.Proposal {
 	out := []model.Proposal{}
 	hit, cold := false, false
 	tracked, readsPlatform := s.trackProposals(id, projects, keepPlatform)
+	partial := s.partialProjects(tracked)
 	for _, p := range tracked {
 		rows, ok := s.proposals.Get(p.Name)
 		if !ok {
@@ -68,6 +71,10 @@ func (s *Server) proposalsFor(id auth.Identity, projects []project.ProjectInfo, 
 			continue
 		}
 		hit = true
+		if partial[p.Name] {
+			out = append(out, s.ownRows(id, p, rows)...)
+			continue
+		}
 		for _, row := range rows {
 			row.Mine = s.reader.OwnsProposal(id, p, row.Branch)
 			out = append(out, row)
@@ -76,7 +83,7 @@ func (s *Server) proposalsFor(id auth.Identity, projects []project.ProjectInfo, 
 	if !readsPlatform && s.cfg.PlatformRepo != "" {
 		if rows, ok := s.proposals.Get(platformProjectName); ok {
 			hit = true
-			out = append(out, s.ownPlatformRows(id, rows)...)
+			out = append(out, s.ownRows(id, s.platformProject(), rows)...)
 		} else {
 			cold = true
 		}
@@ -90,12 +97,12 @@ func (s *Server) proposalsFor(id auth.Identity, projects []project.ProjectInfo, 
 	return out
 }
 
-// ownPlatformRows is the rows of a platform lane on id's draft branch, marked
-// theirs. Their revert branches are left out: opening a revert takes platform
-// read, and its diff restores others' files.
-func (s *Server) ownPlatformRows(id auth.Identity, rows []model.Proposal) []model.Proposal {
+// ownRows is the rows of proj's lane on id's draft branch, marked theirs.
+// Their revert branches are left out: opening a revert takes reading the repo,
+// and its diff restores others' files.
+func (s *Server) ownRows(id auth.Identity, proj project.ProjectInfo, rows []model.Proposal) []model.Proposal {
 	var out []model.Proposal
-	branch := s.reader.ProposedBranch(id, s.platformProject())
+	branch := s.reader.ProposedBranch(id, proj)
 	for _, row := range rows {
 		if row.Branch == branch {
 			row.Mine = true
@@ -105,12 +112,12 @@ func (s *Server) ownPlatformRows(id auth.Identity, rows []model.Proposal) []mode
 	return out
 }
 
-// ownPlatformRow is id's own open platform PR numbered n, off the cached
-// lane: another's PR, a closed one and none at all answer alike, before
-// anything reads the forge or the repo.
-func (s *Server) ownPlatformRow(id auth.Identity, n int) (model.Proposal, bool) {
-	rows, _ := s.proposals.Get(platformProjectName)
-	for _, row := range s.ownPlatformRows(id, rows) {
+// ownRow is id's own open PR numbered n in proj, off the cached lane: another's
+// PR, a closed one and none at all answer alike, before anything reads the
+// forge or the repo.
+func (s *Server) ownRow(id auth.Identity, proj project.ProjectInfo, n int) (model.Proposal, bool) {
+	rows, _ := s.proposals.Get(proj.Name)
+	for _, row := range s.ownRows(id, proj, rows) {
 		if row.PRNumber == n {
 			return row, true
 		}
