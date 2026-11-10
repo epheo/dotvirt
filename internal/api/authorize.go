@@ -862,7 +862,7 @@ func (s *Server) authorNamespaces(ctx context.Context, id auth.Identity, c *clus
 		}
 	}
 	bound := map[string]bool{}
-	if !(vmWide.ok && anyWide.ok) {
+	if !vmWide.ok || !anyWide.ok {
 		for _, ns := range s.boundOnly(id, nss) {
 			bound[ns] = true
 		}
