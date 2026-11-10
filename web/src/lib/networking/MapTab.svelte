@@ -6,6 +6,7 @@
 	import { clusterMap, searchMap, wayOut, type MapFocus } from '#lib/netmap.js';
 	import { networkKey } from '#lib/networks.js';
 	import { inventory } from '#lib/state/inventory.svelte.js';
+	import { vmsOff } from '#lib/state/modules.svelte.js';
 	import { networking } from '#lib/state/networking.svelte.js';
 	import Card from '#lib/components/Card.svelte';
 	import ClusterMap from './ClusterMap.svelte';
@@ -99,6 +100,7 @@
 	const hit = $derived(selVM ? { vm: selVM, project: inventory.projectOf(selVM.namespace) } : null);
 	const showList = $derived(!!search && search.total > 1 && !sel);
 	const fmt = (n: number) => n.toLocaleString('en-US');
+	const findWhat = $derived(vmsOff() ? 'Find a network or IP' : 'Find a VM, network or IP');
 	const fit = () => (zoom = Math.min(1, Math.max(0.5, (boxWidth - 32) / 744)));
 </script>
 
@@ -113,8 +115,8 @@
 					type="text"
 					bind:value={find}
 					oninput={typed}
-					aria-label="Find a VM, network or IP"
-					placeholder="Find a VM, network or IP"
+					aria-label={findWhat}
+					placeholder={findWhat}
 					class="min-w-0 flex-1 border-0 bg-transparent text-sm text-ink outline-0"
 				/>
 				{#if search}
@@ -263,9 +265,11 @@
 					><span class="inline-block h-3 w-4 rounded-[3px] border border-dashed border-ink-faint/60"
 					></span>Group, expand for more</span
 				>
-				<span class="inline-flex items-center gap-1.5"
-					><b>{fmt(model.projects[0]?.vms ?? 0)}</b>Numbers are VMs</span
-				>
+				{#if !vmsOff()}
+					<span class="inline-flex items-center gap-1.5"
+						><b>{fmt(model.projects[0]?.vms ?? 0)}</b>Numbers are VMs</span
+					>
+				{/if}
 			</div>
 		</Card>
 

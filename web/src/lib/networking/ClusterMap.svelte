@@ -6,6 +6,7 @@
 	import type { ClusterMap, NetNode, NetProblem, UplinkRow, WayOut } from '#lib/netmap.js';
 	import { canEditUplink, openEdit, uplinkRef } from '#lib/objects.js';
 	import { networkHref } from '#lib/nav.js';
+	import { vmsOff } from '#lib/state/modules.svelte.js';
 	import Button from '#lib/components/Button.svelte';
 	import StageChip from '#lib/components/StageChip.svelte';
 
@@ -37,6 +38,8 @@
 	const builtin = $derived(model.rows.find((r) => r.uplink.builtin)!);
 	const vlanRows = $derived(model.rows.filter((r) => !r.uplink.builtin));
 	const fmt = (n: number) => n.toLocaleString('en-US');
+	// The numbers count VMs only, so without KubeVirt they would all read 0.
+	const counts = $derived(!vmsOff());
 
 	// The nodes the way out runs through, lit blue.
 	const onPath = $derived.by(() => {
@@ -284,7 +287,8 @@
 	<div data-node={id} class={nodeClass(id, n.cutOff.length ? 'bad' : '')}>
 		<div class="flex min-w-0 items-center gap-1.5">
 			{@render name(id, n.net.name)}
-			<span class="ml-auto text-xs leading-4 font-bold text-ink">{fmt(n.vms)}</span>
+			{#if counts}<span class="ml-auto text-xs leading-4 font-bold text-ink">{fmt(n.vms)}</span
+				>{/if}
 		</div>
 		<span class="truncate text-xs leading-4 text-ink-muted">
 			{netSub(n)}{#if n.net.kind !== 'vlan' && n.net.subnets?.length},
@@ -326,7 +330,7 @@
 					'Shared and VLAN networks',
 					model.shown.lane === model.shown.laneTotal
 						? `All ${model.shown.laneTotal}`
-						: `${model.shown.lane} most used of ${fmt(model.shown.laneTotal)}`,
+						: `${model.shown.lane} ${counts ? 'most used ' : ''}of ${fmt(model.shown.laneTotal)}`,
 				)}
 
 				<!-- the builtin uplink's row: internet and the cluster edge -->
@@ -360,9 +364,12 @@
 					<div data-node="pod" class={nodeClass('pod')}>
 						{@render name('pod', 'Pod network', false)}
 						<span class="text-xs leading-4 text-ink-muted">Built in, every project.</span>
-						<span class="text-xs leading-4 text-ink-muted"
-							>{plural(model.podOnly, 'VM')} {model.podOnly === 1 ? 'uses' : 'use'} only this.</span
-						>
+						{#if counts}
+							<span class="text-xs leading-4 text-ink-muted"
+								>{plural(model.podOnly, 'VM')}
+								{model.podOnly === 1 ? 'uses' : 'use'} only this.</span
+							>
+						{/if}
 					</div>
 					{#each builtin.nets as n (n.key)}{@render netNode(n)}{/each}
 				</div>
@@ -378,7 +385,7 @@
 							{@render name('fabric', 'Datacenter fabric', false)}
 							<span class="text-xs leading-4 text-ink-muted">Physical switches and VLANs.</span>
 							<span class="mt-auto text-xs leading-4 text-ink-muted"
-								>VLAN networks skip the cluster edge. VMs keep their own IP.</span
+								>VLAN networks skip the cluster edge.{counts ? ' VMs keep their own IP.' : ''}</span
 							>
 						</div>
 					{/if}
@@ -419,14 +426,16 @@
 					'Projects',
 					model.shown.projects === model.shown.projectsTotal
 						? `All ${model.shown.projectsTotal}`
-						: `${model.shown.projects} biggest of ${fmt(model.shown.projectsTotal)}`,
+						: `${model.shown.projects} ${counts ? 'biggest ' : ''}of ${fmt(model.shown.projectsTotal)}`,
 				)}
 				{#each model.projects as p (p.name)}
 					{@const id = `proj:${p.name}`}
 					<div data-node={id} class={nodeClass(id)}>
 						<div class="flex min-w-0 items-center gap-1.5">
 							{@render name(id, p.name)}
-							<span class="ml-auto text-xs leading-4 font-bold text-ink">{fmt(p.vms)}</span>
+							{#if counts}<span class="ml-auto text-xs leading-4 font-bold text-ink"
+									>{fmt(p.vms)}</span
+								>{/if}
 						</div>
 						<span class="text-xs leading-4 text-ink-muted"
 							>{p.networks} network{p.networks === 1 ? '' : 's'}</span
@@ -448,7 +457,9 @@
 									size={12}
 								/></button
 							>
-							<span class="ml-auto text-xs leading-4 font-bold text-ink">{fmt(m.vms)}</span>
+							{#if counts}<span class="ml-auto text-xs leading-4 font-bold text-ink"
+									>{fmt(m.vms)}</span
+								>{/if}
 						</div>
 						<span class="text-xs leading-4 text-ink-muted"
 							>{fmt(m.networks)} network{m.networks === 1 ? '' : 's'}</span

@@ -19,6 +19,7 @@
 	import { vmSizing } from '#lib/sizing.js';
 	import { vmState } from '#lib/status.js';
 	import { inventory } from '#lib/state/inventory.svelte.js';
+	import { vmsOff } from '#lib/state/modules.svelte.js';
 	import { networking } from '#lib/state/networking.svelte.js';
 	import { ui } from '#lib/state/ui.svelte.js';
 	import Button from '#lib/components/Button.svelte';
@@ -107,6 +108,8 @@
 	);
 	const mono = $derived(['vm', 'network', 'uplink', 'project'].includes(target.kind));
 	const fmt = (n: number) => n.toLocaleString('en-US');
+	// VM counts read 0 without KubeVirt, so they drop rather than mislead.
+	const vmRow = (n: number): [string, string][] => (vmsOff() ? [] : [['VMs', fmt(n)]]);
 </script>
 
 {#snippet head()}
@@ -230,7 +233,7 @@
 					{@const k = networking.vmsOn(networkKey(n))}
 					{@render kv([
 						['Subnet', n.subnets?.join(', ') || 'None', !!n.subnets?.length],
-						['VMs', fmt(k.length)],
+						...vmRow(k.length),
 						...(n.kind === 'vlan'
 							? ([['VLAN', `${n.vlan ?? 'untagged'} on ${n.uplink ?? 'an uplink'}`]] as [
 									string,
@@ -279,7 +282,7 @@
 					{@const p = inventory.projects.find((x) => x.name === target.name)}
 					{@const nets = p ? networking.netsOfProject(p) : []}
 					{@render kv([
-						['VMs', fmt(p?.namespaces.reduce((s, n) => s + n.vms.length, 0) ?? 0)],
+						...vmRow(p?.namespaces.reduce((s, n) => s + n.vms.length, 0) ?? 0),
 						['Networks', fmt(nets.length)],
 					])}
 					{#if nets.length}
@@ -318,16 +321,17 @@
 					</div>
 				{:else if target.kind === 'fabric'}
 					<p class="text-[13px] text-ink-soft">
-						The physical switches. VLAN networks reach it through their uplink, skip the cluster
-						edge, and VMs keep their own address.
+						{vmsOff()
+							? 'The physical switches. VLAN networks reach it through their uplink and skip the cluster edge.'
+							: 'The physical switches. VLAN networks reach it through their uplink, skip the cluster edge, and VMs keep their own address.'}
 					</p>
 					{@render kv([['VLANs', fmt(networking.vlanNets.length)]])}
 				{:else}
 					<p class="text-[13px] text-ink-soft">
-						Built in to every project. VMs without another network leave through the default uplink
-						and the cluster edge.
+						Built in to every project. {vmsOff() ? 'Workloads' : 'VMs'} without another network leave
+						through the default uplink and the cluster edge.
 					</p>
-					{@render kv([['Only this', fmt(networking.members.podOnly)]])}
+					{#if !vmsOff()}{@render kv([['Only this', fmt(networking.members.podOnly)]])}{/if}
 					<div class="border-t border-line-soft pt-4">
 						<Button variant="secondary" href={networkHref('Pod network')}>Open Pod network</Button>
 					</div>
