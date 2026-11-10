@@ -12,7 +12,7 @@ var settings = Settings{Domain: "apps.example.com", GatewayClass: "portail", Pro
 // Each listener takes *.<project>.<domain> and only HTTPRoutes from the
 // project's namespaces; HTTPS and its certificate come only with an issuer.
 func TestManifests(t *testing.T) {
-	files, err := Manifests(settings, "shop", "web")
+	files, err := Manifests(settings, "shop", "web", false)
 	if err != nil || len(files) != 1 || files[0].Path != "publishing/web/publish.yaml" {
 		t.Fatalf("HTTP only: %+v %v", files, err)
 	}
@@ -50,7 +50,7 @@ func TestManifests(t *testing.T) {
 
 	s := settings
 	s.Issuer = "letsencrypt"
-	files, err = Manifests(s, "shop", "web")
+	files, err = Manifests(s, "shop", "web", false)
 	if err != nil || len(files) != 2 || files[1].Path != "publishing/web/publish-tls.yaml" {
 		t.Fatalf("with an issuer: %+v %v", files, err)
 	}
@@ -59,6 +59,36 @@ func TestManifests(t *testing.T) {
 		if !strings.Contains(cert, want) {
 			t.Errorf("Certificate lacks %q:\n%s", want, cert)
 		}
+	}
+}
+
+// On a VM Network the Gateway polls through the apiserver: it takes
+// parameters saying so, and its pods' account is bound to portail's proxy
+// Role in portail's namespace, and nowhere else.
+func TestManifestsProxied(t *testing.T) {
+	s := settings
+	s.PortailNamespace = "portail-system"
+	files, err := Manifests(s, "vpc", "web", true)
+	if err != nil || len(files) != 3 {
+		t.Fatalf("proxied: %+v %v", files, err)
+	}
+	if !strings.Contains(string(files[0].Content), "name: publish-parameters") {
+		t.Errorf("Gateway names no parameters:\n%s", files[0].Content)
+	}
+	if files[1].Path != "publishing/web/publish-parameters.yaml" || !strings.Contains(string(files[1].Content), "controllerTransport: APIServerProxy") {
+		t.Errorf("parameters = %s\n%s", files[1].Path, files[1].Content)
+	}
+	rb := string(files[2].Content)
+	if files[2].Path != "rbac/portail-system/publish-vpc.yaml" {
+		t.Errorf("binding path = %s", files[2].Path)
+	}
+	for _, want := range []string{"namespace: portail-system", "kind: Role", "name: portail-controller-proxy", "name: portail-publish", "namespace: web"} {
+		if !strings.Contains(rb, want) {
+			t.Errorf("binding lacks %q:\n%s", want, rb)
+		}
+	}
+	if _, err := Manifests(settings, "vpc", "web", true); err == nil {
+		t.Error("proxied without portail's namespace: rendered")
 	}
 }
 
@@ -80,7 +110,7 @@ func TestManifestsRefuse(t *testing.T) {
 		"no label":      {nolabel, "shop", "web"},
 		"host too long": {long, "shop", "web"},
 	} {
-		if _, err := Manifests(c.s, c.project, c.ns); err == nil {
+		if _, err := Manifests(c.s, c.project, c.ns, false); err == nil {
 			t.Errorf("%s: rendered", name)
 		}
 	}

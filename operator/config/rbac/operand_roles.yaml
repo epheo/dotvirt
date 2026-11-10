@@ -21,10 +21,11 @@ rules:
   - apiGroups: [""]
     resources: ["namespaces"]
     verbs: ["get", "list", "watch"]
-  # Whether routes are on: a GatewayClass exists.
+  # Whether routes are on (a GatewayClass exists), and whether the publishing
+  # class says its Gateways are isolated.
   - apiGroups: ["gateway.networking.k8s.io"]
     resources: ["gatewayclasses"]
-    verbs: ["list"]
+    verbs: ["list", "watch"]
   # Gateways and routes, read in memory and filtered per caller. The experimental
   # route kinds and portail's rate limits may not be served.
   - apiGroups: ["gateway.networking.k8s.io"]
@@ -162,6 +163,9 @@ rules:
   - apiGroups: ["cert-manager.io"]
     resources: ["certificates"]
     verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: ["portail.epheo.eu"]
+    resources: ["gatewayparameters"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
 ---
 # The authoring SIGNAL the UI's SSAR-gate reads (create cudn/nncp/namespaces), and list,
 # so a delegate is shown what they author. The user never creates these: Argo applies
@@ -206,6 +210,9 @@ rules:
     verbs: ["create"]
   - apiGroups: ["cert-manager.io"]
     resources: ["certificates"]
+    verbs: ["create"]
+  - apiGroups: ["portail.epheo.eu"]
+    resources: ["gatewayparameters"]
     verbs: ["create"]
 ---
 # EgressFirewall writes: a tenant kind the built-in admin role lacks. The platform
@@ -275,6 +282,13 @@ rules:
   - apiGroups: ["rbac.authorization.k8s.io"]
     resources: ["clusterroles"]
     resourceNames: ["admin", "dotvirt-tenant-egress", "view", "edit", "dotvirt-tenant-egress-view", "dotvirt-tenant-routes"]
+    verbs: ["bind"]
+  # A Gateway on a VM Network polls portail's controller through the apiserver:
+  # its pods' account is bound to portail's Role there, which grants
+  # services/proxy on the controller's sync port alone.
+  - apiGroups: ["rbac.authorization.k8s.io"]
+    resources: ["roles"]
+    resourceNames: ["portail-controller-proxy"]
     verbs: ["bind"]
 ---
 # Storage classes for every signed-in user: OpenShift grants them through

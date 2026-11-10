@@ -237,6 +237,7 @@ func (s *Server) publishTarget(p project.ProjectInfo) changeset.PublishTarget {
 	pt := changeset.PublishTarget{
 		Networks:      map[string]string{},
 		RoutesGranted: s.state != nil && s.state.AdminWritesRoutes(),
+		Isolated:      s.gateways != nil && s.gateways.GatewaysIsolated(s.cfg.Publish.GatewayClass),
 	}
 	for _, ns := range p.Namespaces {
 		pt.Networks[ns] = changeset.DefaultNetwork

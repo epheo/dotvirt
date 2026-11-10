@@ -336,3 +336,30 @@ func TestAKindIsWatchedAtTheVersionServedAndStopsWithTheModule(t *testing.T) {
 		t.Fatal("a stopped module reads as synced")
 	}
 }
+
+// Only portail's condition, True, says a class's Gateways are isolated.
+func TestDecodeIsolated(t *testing.T) {
+	class := func(conds ...map[string]any) *unstructured.Unstructured {
+		list := make([]any, len(conds))
+		for i, c := range conds {
+			list[i] = c
+		}
+		return &unstructured.Unstructured{Object: map[string]any{
+			"metadata": map[string]any{"name": "portail"},
+			"status":   map[string]any{"conditions": list},
+		}}
+	}
+	for name, c := range map[string]struct {
+		u    *unstructured.Unstructured
+		want bool
+	}{
+		"true":       {class(map[string]any{"type": "Accepted", "status": "True"}, map[string]any{"type": Isolated, "status": "True"}), true},
+		"false":      {class(map[string]any{"type": Isolated, "status": "False"}), false},
+		"absent":     {class(map[string]any{"type": "Accepted", "status": "True"}), false},
+		"other kind": {class(map[string]any{"type": "GatewaysIsolated", "status": "True"}), false},
+	} {
+		if got, keep := decodeIsolated(c.u); got != c.want || !keep {
+			t.Errorf("%s: %v %v, want %v", name, got, keep, c.want)
+		}
+	}
+}

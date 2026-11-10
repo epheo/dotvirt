@@ -22,6 +22,10 @@ type PublishTarget struct {
 	// RoutesGranted: the cluster's admin role already writes HTTPRoutes, so
 	// no namespace needs a route grant of its own.
 	RoutesGranted bool
+	// Isolated: the publishing GatewayClass says one Gateway can never
+	// delay another's configuration, so a Gateway on a VM Network may poll
+	// its controller through the apiserver.
+	Isolated bool
 }
 
 // DefaultNetwork is the cluster's own network in PublishTarget.Networks.
@@ -39,7 +43,8 @@ type PublishPlan struct {
 	// On: git holds the project's Gateway.
 	On bool
 	// Primary: that network is a VM Network, whose pods reach portail's
-	// controller only through the apiserver.
+	// controller only through the apiserver: the Gateway takes parameters
+	// and a binding saying so.
 	Primary bool
 }
 
@@ -47,7 +52,8 @@ type PublishPlan struct {
 // as rendered: nothing to stage.
 var ErrPublishingOn = fmt.Errorf("%w: publishing is already on", model.ErrInvalid)
 
-// ErrPrimaryNetwork refuses publishing for a project on a VM Network.
+// ErrPrimaryNetwork refuses publishing for a project on a VM Network while
+// the publishing GatewayClass does not say its Gateways are isolated.
 var ErrPrimaryNetwork = fmt.Errorf("%w: publishing on a VM Network needs a newer portail: today one project could delay the others' route changes", model.ErrInvalid)
 
 // StagePublishing stages, into the platform draft, what target's publishing
@@ -113,7 +119,7 @@ func (c *Coordinator) publishPlan(commitProj, target project.ProjectInfo, pt Pub
 		}
 	}
 	plan.Primary = network(plan.Namespace) != DefaultNetwork
-	files, err := publish.Manifests(c.publishing, target.Name, plan.Namespace)
+	files, err := publish.Manifests(c.publishing, target.Name, plan.Namespace, plan.Primary)
 	if err != nil {
 		return plan, nil, invalid(err)
 	}
@@ -126,7 +132,7 @@ func (c *Coordinator) publishPlan(commitProj, target project.ProjectInfo, pt Pub
 		if ok && bytes.Equal(current, f.Content) {
 			continue
 		}
-		entries = append(entries, draft.Entry{
+		e := draft.Entry{
 			Kind:       draft.KindCreate,
 			Resource:   draft.ResourcePublishing,
 			Namespace:  plan.Namespace,
@@ -134,7 +140,11 @@ func (c *Coordinator) publishPlan(commitProj, target project.ProjectInfo, pt Pub
 			SourceFile: f.Path,
 			Manifest:   string(f.Content),
 			BaseBlob:   pinOf(current, ok),
-		})
+		}
+		if f.Kind == model.KindRB {
+			e.Resource, e.Namespace = draft.ResourceRoleBinding, c.publishing.PortailNamespace
+		}
+		entries = append(entries, e)
 	}
 	if !pt.RoutesGranted {
 		grants, err := c.grantSource(commitProj)
@@ -152,7 +162,7 @@ func (c *Coordinator) publishPlan(commitProj, target project.ProjectInfo, pt Pub
 	if len(entries) == 0 {
 		return plan, nil, fmt.Errorf("%w for %s", ErrPublishingOn, target.Name)
 	}
-	if plan.Primary {
+	if plan.Primary && !pt.Isolated {
 		return plan, entries, ErrPrimaryNetwork
 	}
 	return plan, entries, nil

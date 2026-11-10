@@ -27,6 +27,7 @@ rules:
   - gatewayclasses
   verbs:
   - list
+  - watch
 - apiGroups:
   - gateway.networking.k8s.io
   resources:

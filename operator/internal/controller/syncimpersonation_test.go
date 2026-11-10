@@ -328,7 +328,7 @@ func TestSyncOperandRoles(t *testing.T) {
 		if slices.Contains(rule.Verbs, "escalate") || slices.Contains(rule.Resources, "*") {
 			t.Errorf("%s grants %+v", tenancy.PlatformSyncAccount, rule)
 		}
-		if slices.Contains(rule.Verbs, "bind") {
+		if slices.Contains(rule.Verbs, "bind") && slices.Contains(rule.Resources, "clusterroles") {
 			bind = append(bind, rule.ResourceNames...)
 		}
 	}

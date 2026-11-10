@@ -194,6 +194,9 @@ func dotvirtEnv(dv *dotvirtv1alpha1.Dotvirt, argoNS string, tenantAllowed []tena
 		if p.ClusterIssuer != "" {
 			env = append(env, corev1.EnvVar{Name: "DOTVIRT_PUBLISH_ISSUER", Value: p.ClusterIssuer})
 		}
+		if p.PortailNamespace != "" {
+			env = append(env, corev1.EnvVar{Name: "DOTVIRT_PUBLISH_PORTAIL_NAMESPACE", Value: p.PortailNamespace})
+		}
 	}
 	if dv.Spec.Metrics.URL != "" {
 		env = append(env, corev1.EnvVar{Name: "DOTVIRT_METRICS_URL", Value: dv.Spec.Metrics.URL})

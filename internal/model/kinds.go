@@ -74,7 +74,7 @@ func (k Kind) RepoPath(namespace, name string) string {
 			return "rbac/" + namespace + ".yaml"
 		}
 		return "rbac/" + namespace + "/" + name + ".yaml"
-	case KindGateway.Kind, KindCert.Kind:
+	case KindGateway.Kind, KindCert.Kind, KindGWParams.Kind:
 		return "publishing/" + namespace + "/" + name + ".yaml"
 	case KindNS.Kind:
 		return "namespaces/" + name + ".yaml"
@@ -169,6 +169,7 @@ var (
 	KindTemplate = kindOf("VirtualMachineTemplate")
 	KindGateway  = kindOf("Gateway")
 	KindCert     = kindOf("Certificate")
+	KindGWParams = kindOf("GatewayParameters")
 )
 
 // KindDV is a VM's disk, declared beside it in a tenant repo. It has no row:
@@ -214,7 +215,7 @@ var resources = []Resource{
 	{Name: "template", Kinds: []Kind{KindTemplate}, CreateLabel: "Save as template", EditLabel: "Edit template", Noun: "a template"},
 	// A namespace's Gateway and its certificate; the route grant beside them
 	// is the rolebinding resource.
-	{Name: "publishing", Kinds: []Kind{KindGateway, KindCert}, CreateLabel: "Turn publishing on", EditLabel: "Edit publishing", Noun: "publishing"},
+	{Name: "publishing", Kinds: []Kind{KindGateway, KindCert, KindGWParams}, CreateLabel: "Turn publishing on", EditLabel: "Edit publishing", Noun: "publishing"},
 }
 
 // ResourceNoun names a draft resource in a message: the persisted name is

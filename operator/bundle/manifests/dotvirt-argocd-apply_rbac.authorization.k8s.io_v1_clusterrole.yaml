@@ -157,3 +157,15 @@ rules:
   - update
   - patch
   - delete
+- apiGroups:
+  - portail.epheo.eu
+  resources:
+  - gatewayparameters
+  verbs:
+  - get
+  - list
+  - watch
+  - create
+  - update
+  - patch
+  - delete

@@ -68,3 +68,9 @@ rules:
   - certificates
   verbs:
   - create
+- apiGroups:
+  - portail.epheo.eu
+  resources:
+  - gatewayparameters
+  verbs:
+  - create

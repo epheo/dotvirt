@@ -284,6 +284,11 @@ spec:
                     description: GatewayClassName is the GatewayClass of each project's
                       Gateway.
                     type: string
+                  portailNamespace:
+                    description: |-
+                      PortailNamespace holds portail's controller and its proxy Role, which a
+                      Gateway on a VM Network is bound to. Default portail-system.
+                    type: string
                 type: object
             type: object
           status:

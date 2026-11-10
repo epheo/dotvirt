@@ -107,6 +107,9 @@ type Config struct {
 	PublishDomain       string
 	PublishGatewayClass string
 	PublishIssuer       string
+	// PublishPortailNamespace holds portail's proxy Role, bound for a
+	// Gateway on a VM Network.
+	PublishPortailNamespace string
 
 	// AppSetPluginToken is the shared bearer the ArgoCD ApplicationSet plugin
 	// generator presents to dotvirt's /api/v1/getparams.execute endpoint, which
@@ -174,6 +177,7 @@ func Load(args []string) (*Config, error) {
 	fs.StringVar(&c.PublicURL, "public-url", os.Getenv("DOTVIRT_PUBLIC_URL"), "dotvirt's externally reachable base URL, for webhook auto-registration (empty disables)")
 	fs.StringVar(&c.PublishDomain, "publish-domain", os.Getenv("DOTVIRT_PUBLISH_DOMAIN"), "DNS zone each publishing project gets *.<project>. of (empty: publishing off)")
 	fs.StringVar(&c.PublishGatewayClass, "publish-gateway-class", os.Getenv("DOTVIRT_PUBLISH_GATEWAY_CLASS"), "GatewayClass of each publishing project's Gateway (empty: publishing off)")
+	fs.StringVar(&c.PublishPortailNamespace, "publish-portail-namespace", envOr("DOTVIRT_PUBLISH_PORTAIL_NAMESPACE", "portail-system"), "namespace of portail's controller and its proxy Role, for Gateways on a VM Network")
 	fs.StringVar(&c.PublishIssuer, "publish-issuer", os.Getenv("DOTVIRT_PUBLISH_ISSUER"), "cert-manager ClusterIssuer for each publishing project's wildcard (empty: HTTP only)")
 	fs.StringVar(&c.WebhookURL, "webhook-url", os.Getenv("DOTVIRT_WEBHOOK_URL"), "base URL the forge delivers webhooks to (defaults to -public-url; set to the in-cluster Service URL when the forge can't reach/TLS-trust the external Route)")
 	fs.StringVar(&c.AppSetPluginToken, "appset-plugin-token", os.Getenv("DOTVIRT_APPSET_PLUGIN_TOKEN"), "shared bearer for the ArgoCD ApplicationSet plugin-generator endpoint (empty disables it)")
