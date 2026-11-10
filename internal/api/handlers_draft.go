@@ -22,7 +22,7 @@ import (
 // complete the changeset lifecycle. All are project-scoped via resolveProject.
 
 func (s *Server) handleEdit(w http.ResponseWriter, r *http.Request) {
-	sc, ns, name, ok := s.vmScope(w, r)
+	sc, ns, name, ok := s.vmScope(w, r, dotvirtReads)
 	if !ok || !s.gate(w, r, sc, vmAction(verbUpdate, ns)) {
 		return
 	}
@@ -37,7 +37,7 @@ func (s *Server) handleEdit(w http.ResponseWriter, r *http.Request) {
 // handleEditPreview answers what staging an edit would change, without staging
 // it. Same gates as handleEdit: only someone who may stage asks.
 func (s *Server) handleEditPreview(w http.ResponseWriter, r *http.Request) {
-	sc, ns, name, ok := s.vmScope(w, r)
+	sc, ns, name, ok := s.vmScope(w, r, dotvirtReads)
 	if !ok || !s.gate(w, r, sc, vmAction(verbUpdate, ns)) {
 		return
 	}
@@ -77,7 +77,7 @@ func (s *Server) handleCreate(w http.ResponseWriter, r *http.Request) {
 // edit/adopt it only mutates the user's own draft; Argo prunes the VM on merge
 // under its own RBAC, so the gate is the caller's own delete right.
 func (s *Server) handleDelete(w http.ResponseWriter, r *http.Request) {
-	sc, ns, name, ok := s.vmScope(w, r)
+	sc, ns, name, ok := s.vmScope(w, r, dotvirtReads)
 	if !ok || !s.gate(w, r, sc, vmAction(verbDelete, ns)) {
 		return
 	}
@@ -179,7 +179,7 @@ func (s *Server) handlePropose(w http.ResponseWriter, r *http.Request) {
 // handleDrift answers the VM detail's drift, with the caller's verdict on
 // resyncing the VM, weighed on the resync route's own path.
 func (s *Server) handleDrift(w http.ResponseWriter, r *http.Request) {
-	sc, ns, name, ok := s.vmScope(w, r)
+	sc, ns, name, ok := s.vmScope(w, r, dotvirtReads)
 	if !ok {
 		return
 	}
@@ -192,7 +192,7 @@ func (s *Server) handleDrift(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleAdopt(w http.ResponseWriter, r *http.Request) {
-	sc, ns, name, ok := s.vmScope(w, r)
+	sc, ns, name, ok := s.vmScope(w, r, dotvirtReads)
 	if !ok || !s.gate(w, r, sc, vmAction(verbUpdate, ns)) {
 		return
 	}
@@ -206,7 +206,7 @@ func (s *Server) handleAdopt(w http.ResponseWriter, r *http.Request) {
 // exactly what their RBAC lets them read, of the objects the gate would let
 // them bring under git (adoptableByRight). One draft, proposed as one PR.
 func (s *Server) handleAdoptNamespace(w http.ResponseWriter, r *http.Request) {
-	sc, ns, _, ok := s.vmScope(w, r)
+	sc, ns, _, ok := s.vmScope(w, r, dotvirtReads)
 	if !ok {
 		return
 	}
@@ -288,7 +288,7 @@ func (s *Server) handleResync(w http.ResponseWriter, r *http.Request) {
 	// authority over what the sync applies (not just namespace read), weighed
 	// inside Resync beside the escalation, so no other caller can reach it
 	// unchecked.
-	sc, ns, name, ok := s.vmScope(w, r)
+	sc, ns, name, ok := s.vmScope(w, r, dotvirtReads)
 	if !ok {
 		return
 	}
@@ -301,7 +301,7 @@ func (s *Server) handleResync(w http.ResponseWriter, r *http.Request) {
 // the "Download manifest" action. The git file IS the VM's full definition, so
 // this is dotvirt's VM-export path.
 func (s *Server) handleManifest(w http.ResponseWriter, r *http.Request) {
-	sc, ns, name, ok := s.vmScope(w, r)
+	sc, ns, name, ok := s.vmScope(w, r, dotvirtReads)
 	if !ok {
 		return
 	}
@@ -348,7 +348,7 @@ func (s *Server) handleHistory(w http.ResponseWriter, r *http.Request) {
 // handleRestore stages one VM's manifest as a past commit held it - the VM
 // page's Restore, which lands in the draft and is proposed like any edit.
 func (s *Server) handleRestore(w http.ResponseWriter, r *http.Request) {
-	sc, ns, name, ok := s.vmScope(w, r)
+	sc, ns, name, ok := s.vmScope(w, r, dotvirtReads)
 	if !ok || !s.gate(w, r, sc, vmAction(verbUpdate, ns)) {
 		return
 	}
@@ -389,7 +389,7 @@ func hashBody(w http.ResponseWriter, r *http.Request) (string, bool) {
 // handleVMHistory lists the merged changes to one VM's manifest - the VM page's
 // change history, each row deep-linking into the Changes pane's review.
 func (s *Server) handleVMHistory(w http.ResponseWriter, r *http.Request) {
-	sc, ns, name, ok := s.vmScope(w, r)
+	sc, ns, name, ok := s.vmScope(w, r, dotvirtReads)
 	if !ok {
 		return
 	}

@@ -14,7 +14,7 @@ import (
 // handleClones lists the VirtualMachineClones whose source is this VM, for the
 // Clone modal's progress rows.
 func (s *Server) handleClones(w http.ResponseWriter, r *http.Request) {
-	sc, ns, name, ok := s.vmCallerScope(w, r)
+	sc, ns, name, ok := s.vmScope(w, r, callerReads)
 	if !ok {
 		return
 	}
@@ -24,7 +24,7 @@ func (s *Server) handleClones(w http.ResponseWriter, r *http.Request) {
 
 // handleCreateClone clones this VM into a new VM named by the request body.
 func (s *Server) handleCreateClone(w http.ResponseWriter, r *http.Request) {
-	sc, ns, name, ok := s.vmCallerScope(w, r)
+	sc, ns, name, ok := s.vmScope(w, r, callerReads)
 	if !ok {
 		return
 	}

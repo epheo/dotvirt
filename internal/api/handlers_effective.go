@@ -20,7 +20,7 @@ import (
 // handleVMPolicy answers for one VM, matching pod selectors against the labels
 // its virt-launcher pod carries (live VMI, else the manifest template's).
 func (s *Server) handleVMPolicy(w http.ResponseWriter, r *http.Request) {
-	sc, ns, name, ok := s.vmScope(w, r)
+	sc, ns, name, ok := s.vmScope(w, r, dotvirtReads)
 	if !ok {
 		return
 	}
@@ -38,7 +38,7 @@ func (s *Server) handleVMPolicy(w http.ResponseWriter, r *http.Request) {
 // handleNamespacePolicy answers for a whole namespace: pod-selecting policies
 // come back conditional rather than resolved.
 func (s *Server) handleNamespacePolicy(w http.ResponseWriter, r *http.Request) {
-	sc, ns, _, ok := s.vmScope(w, r)
+	sc, ns, _, ok := s.vmScope(w, r, dotvirtReads)
 	if !ok {
 		return
 	}
