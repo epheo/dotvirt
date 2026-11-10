@@ -52,6 +52,10 @@ type Config struct {
 	// Changeset / PR workflow
 	BaseBranch     string // branch the inventory reads + PRs target (the GitOps trunk)
 	ProposedBranch string // dotvirt-owned working branch holding a draft
+	// UsersOpenPRs leaves every pull request to the user: dotvirt pushes the
+	// branch and links the forge's compare page, so the forge's review rules
+	// see the requester as the PR's poster, not dotvirt's account.
+	UsersOpenPRs bool
 	DraftDir       string // root dir for persisted drafts (<dir>/<user>/<project>.json)
 
 	// Forge (Forgejo) for PR creation; empty url/token degrades to push-only. The
@@ -148,6 +152,7 @@ func Load(args []string) (*Config, error) {
 
 	fs.StringVar(&c.BaseBranch, "base-branch", envOr("DOTVIRT_BASE_BRANCH", "main"), "branch the inventory reads + PRs target")
 	fs.StringVar(&c.ProposedBranch, "proposed-branch", envOr("DOTVIRT_PROPOSED_BRANCH", "dotvirt/proposed"), "working branch holding the draft changeset")
+	fs.BoolVar(&c.UsersOpenPRs, "users-open-prs", envBool("DOTVIRT_USERS_OPEN_PRS", false), "push proposal and revert branches without opening, reopening or editing their pull requests; users open them in the forge")
 	fs.StringVar(&c.DraftDir, "draft-dir", envOr("DOTVIRT_DRAFT_DIR", "./.dotvirt-drafts"), "root dir for persisted drafts (<dir>/<user>/<project>.json)")
 	fs.StringVar(&c.ForgeURL, "forge-url", os.Getenv("DOTVIRT_FORGE_URL"), "Forgejo base URL (empty = push-only, no PR, anonymous git)")
 	fs.StringVar(&c.ForgeToken, "forge-token", os.Getenv("DOTVIRT_FORGE_TOKEN"), "Forgejo API token (git https + API)")

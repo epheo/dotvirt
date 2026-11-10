@@ -113,6 +113,25 @@ func (s *Server) ownRows(id auth.Identity, proj project.ProjectInfo, rows []mode
 	return out
 }
 
+// adoptOpened hands each open PR the lane lists on id's draft branch to
+// AdoptPR, so one the user opened in the forge on what dotvirt pushed takes
+// its changes off the draft. The lane changing is what refreshes the drafts,
+// so this runs when such a PR appears. A cache read, then one record read
+// per such PR.
+func (s *Server) adoptOpened(id auth.Identity, projects []project.ProjectInfo) {
+	for _, p := range projects {
+		rows, _ := s.proposals.Get(p.Name)
+		for _, row := range s.ownRows(id, p, rows) {
+			if row.Head == "" {
+				continue
+			}
+			if err := s.draft.AdoptPR(id, p, row.PRNumber, row.Head); err != nil {
+				log.Printf("proposals: %s: adopt PR #%d: %v", p.Name, row.PRNumber, err)
+			}
+		}
+	}
+}
+
 // ownRow is id's own open PR numbered n in proj, off the cached lane: another's
 // PR, a closed one and none at all answer alike, before anything reads the
 // forge or the repo.

@@ -99,6 +99,7 @@ func (s *Server) handleDrafts(w http.ResponseWriter, r *http.Request) {
 			projects = append(projects, s.platformProject())
 		}
 	}
+	s.adoptOpened(sc.id, projects)
 	rendered, err := s.draft.Drafts(sc.id, projects)
 	if err != nil {
 		fail(w, err)

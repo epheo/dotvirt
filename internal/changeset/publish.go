@@ -250,8 +250,10 @@ func (r *proposeRun) extend(pr forge.PR, rec draft.Proposal, hasRec bool) (model
 		_ = c.store.DropProposal(r.id.Username, r.proj.Name)
 		return model.ProposeResult{}, fmt.Errorf("%w: pull request #%d was closed while this was proposed; the draft is kept, so propose again to reopen it with the draft alone", model.ErrConflict, pr.Number)
 	}
-	if _, err := r.fc.EditPR(pr.Number, forge.PREdit{Title: title, Body: body}); err != nil {
-		log.Printf("changeset: PR #%d: describe: %v", pr.Number, err)
+	if !c.usersOpenPRs {
+		if _, err := r.fc.EditPR(pr.Number, forge.PREdit{Title: title, Body: body}); err != nil {
+			log.Printf("changeset: PR #%d: describe: %v", pr.Number, err)
+		}
 	}
 	return out, r.done(rec)
 }
@@ -388,7 +390,8 @@ func (r *proposeRun) fresh(prior forge.PR, found bool) (model.ProposeResult, err
 	case r.fc == nil:
 		return out, r.c.store.Remove(r.id.Username, r.proj.Name, r.entries...)
 	case !ok:
-		// Kept staged so the user can retry once the forge answers.
+		// Kept staged until a PR carries them: one the user opens on this head
+		// is adopted (Adopt), else the next propose pushes them again.
 		return out, r.record(r.proposal(0, head, r.entries))
 	}
 	return out, r.done(r.proposal(out.PRNumber, head, r.entries))
@@ -398,7 +401,8 @@ func (r *proposeRun) fresh(prior forge.PR, found bool) (model.ProposeResult, err
 // it a PR; found is the branch's PR as the forge last reported it. An open
 // one is reused; a closed, unmerged one is reopened just before the push,
 // since Forgejo syncs a PR's head only while it is open, and closed again
-// when the push then fails; otherwise one is created after it. ok is false
+// when the push then fails; otherwise one is created after it. Where users
+// open their own PRs, none is reopened or created. ok is false
 // when the branch has no PR in the end, and out then carries the compare
 // URL. fc nil pushes the branch alone. ahead, when set, runs with the built
 // commit's hash before anything else touches the forge or the branch.
@@ -410,7 +414,7 @@ func (c *Coordinator) publish(fc *forge.Client, write *git.WriteRepo, branch, me
 				return err
 			}
 		}
-		if fc == nil || !found || prior.State == "open" || prior.Merged {
+		if fc == nil || c.usersOpenPRs || !found || prior.State == "open" || prior.Merged {
 			return nil
 		}
 		if _, err := fc.EditPR(prior.Number, forge.PREdit{State: "open", Title: title, Body: body}); err != nil {
@@ -446,10 +450,14 @@ func (c *Coordinator) publish(fc *forge.Client, write *git.WriteRepo, branch, me
 }
 
 // createPR opens branch's PR and records it on out. When the forge will not,
-// out carries the compare URL instead and the result is false: the branch IS
-// pushed, so the user can still open the PR by hand. That is a 200, not an
-// error - an error would make the handler drop the result body.
+// or users open their own, out carries the compare URL instead and the result
+// is false: the branch IS pushed, so the user opens the PR there. That is a
+// 200, not an error - an error would make the handler drop the result body.
 func (c *Coordinator) createPR(fc *forge.Client, out *model.ProposeResult, branch, title, body string) bool {
+	if c.usersOpenPRs {
+		out.CompareURL = fc.CompareURL(branch, c.baseBranch)
+		return false
+	}
 	pr, err := fc.CreatePR(title, body, branch, c.baseBranch)
 	if err != nil {
 		log.Printf("changeset: %s: branch pushed but PR unavailable: %v", branch, err)
@@ -458,6 +466,24 @@ func (c *Coordinator) createPR(fc *forge.Client, out *model.ProposeResult, branc
 	}
 	out.PRURL, out.PRNumber = pr.HTMLURL, pr.Number
 	return true
+}
+
+// AdoptPR records number, an open pull request on id's branch of proj at
+// head, as that branch's PR when head is what dotvirt pushed there with no PR
+// recorded, and unstages what the push carried: the user opened it in the
+// forge. Any other record is left as it is.
+func (c *Coordinator) AdoptPR(id auth.Identity, proj project.ProjectInfo, number int, head string) error {
+	defer c.proposing.lock(pairOf(id, proj))()
+	rec, ok, err := c.store.Proposal(id.Username, proj.Name)
+	if err != nil || !ok || rec.PR != 0 || number <= 0 || rec.Repo != forge.NormalizeRepoURL(proj.Repo) ||
+		rec.Branch != c.proposedBranch(id.Username, proj.Name) || !rec.Settle(head) {
+		return err
+	}
+	rec.PR = number
+	if err := c.store.SetProposal(id.Username, proj.Name, rec); err != nil {
+		return err
+	}
+	return c.store.Remove(id.Username, proj.Name, rec.Entries...)
 }
 
 // proposal is the record of number carrying entries at head on this run's

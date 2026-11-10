@@ -11,6 +11,7 @@ import (
 	"github.com/epheo/dotvirt/internal/manifest"
 	"github.com/epheo/dotvirt/internal/model"
 	"github.com/epheo/dotvirt/internal/project"
+	"github.com/epheo/dotvirt/pkg/forge"
 )
 
 // Get renders (id, proj)'s draft as semantic diff items against the base branch.
@@ -58,6 +59,19 @@ func (c *Coordinator) Drafts(id auth.Identity, projs []project.ProjectInfo) ([]D
 	return out, nil
 }
 
+// pushedWithoutPR is the compare URL of id's branch of proj while dotvirt
+// pushed it and no pull request is recorded on it: where the user opens one.
+func (c *Coordinator) pushedWithoutPR(id auth.Identity, proj project.ProjectInfo, branch string) string {
+	rec, ok, err := c.store.Proposal(id.Username, proj.Name)
+	if err != nil || !ok || rec.PR != 0 || rec.Head == "" || rec.Branch != branch || rec.Repo != forge.NormalizeRepoURL(proj.Repo) {
+		return ""
+	}
+	if fc := c.forgeFor(proj.Repo); fc != nil {
+		return fc.CompareURL(branch, c.baseBranch)
+	}
+	return ""
+}
+
 // Holds reports whether id's draft of proj holds an entry.
 func (c *Coordinator) Holds(id auth.Identity, proj project.ProjectInfo) (bool, error) {
 	entries, err := c.store.List(id.Username, proj.Name)
@@ -72,6 +86,7 @@ func (c *Coordinator) render(id auth.Identity, proj project.ProjectInfo, entries
 	if len(entries) == 0 {
 		return view, nil
 	}
+	view.CompareURL = c.pushedWithoutPR(id, proj, view.Branch)
 	read, err := c.read(proj)
 	if err != nil {
 		return model.DraftView{}, err

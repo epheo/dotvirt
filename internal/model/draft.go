@@ -208,6 +208,9 @@ type DraftView struct {
 	// let the user accept or edit it instead of guessing.
 	DefaultTitle string `json:"defaultTitle,omitempty"`
 	DefaultBody  string `json:"defaultBody,omitempty"`
+	// CompareURL is set while Branch holds what dotvirt pushed with no pull
+	// request on it: where the user opens one.
+	CompareURL string `json:"compareURL,omitempty"`
 }
 
 // DraftsView is every draft of the caller's that the per-project draft route
