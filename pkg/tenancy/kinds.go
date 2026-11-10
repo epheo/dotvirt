@@ -37,6 +37,11 @@ var Kinds = []Kind{
 	{Group: "k8s.cni.cncf.io", Version: "v1", Kind: "NetworkAttachmentDefinition", Resource: "network-attachment-definitions", Platform: true},
 	// A project's owners: the namespace-admin grant.
 	{Group: "rbac.authorization.k8s.io", Version: "v1", Kind: "RoleBinding", Resource: "rolebindings", Platform: true},
+	// Publishing: a namespace's Gateway and its certificate. The platform
+	// holds them: a project that wrote its own listener could claim any
+	// hostname.
+	{Group: "gateway.networking.k8s.io", Version: "v1", Kind: "Gateway", Resource: "gateways", Platform: true},
+	{Group: "cert-manager.io", Version: "v1", Kind: "Certificate", Resource: "certificates", Platform: true},
 	// Rebalancing: the descheduler operator install and its configuration.
 	{Group: "operators.coreos.com", Version: "v1alpha1", Kind: "Subscription", Resource: "subscriptions", Platform: true},
 	{Group: "operators.coreos.com", Version: "v1", Kind: "OperatorGroup", Resource: "operatorgroups", Platform: true},

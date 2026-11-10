@@ -165,6 +165,18 @@ export interface NamespaceCaps {
   networkPolicy: ObjectCaps;
   egressFirewall: ObjectCaps;
   project: ProjectCaps;
+  /**
+   * Publishing turns publishing on here: the platform repo gains this
+   * namespace's Gateway, its certificate and its HTTPRoute grant. False
+   * once on, on an install without publishing, and on a namespace with its
+   * own VM Network.
+   */
+  publishing: boolean;
+  /**
+   * PublishingWaits: the caller could turn publishing on here but for the
+   * namespace's own VM Network, which waits on a newer portail.
+   */
+  publishingWaits?: boolean;
 }
 /**
  * ProjectCaps are the actions on a namespace's whole project, over every one

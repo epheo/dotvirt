@@ -32,6 +32,7 @@ import (
 	"github.com/epheo/dotvirt/internal/modules"
 	"github.com/epheo/dotvirt/internal/netstate"
 	"github.com/epheo/dotvirt/internal/project"
+	"github.com/epheo/dotvirt/internal/publish"
 	"github.com/epheo/dotvirt/internal/replication"
 	"github.com/epheo/dotvirt/internal/routes"
 	"github.com/epheo/dotvirt/internal/stream"
@@ -201,9 +202,10 @@ func run() error {
 	if argoSnapshot != nil {
 		pruneSource = argoSnapshot
 	}
+	publishing := publish.Settings{Domain: cfg.PublishDomain, GatewayClass: cfg.PublishGatewayClass, Issuer: cfg.PublishIssuer}
 	coordinator := changeset.New(draftStore, repos, forgeFactory, resyncer,
 		liveVMs{clusterSnapshot}, pruneSource, cfg.BaseBranch, cfg.ProposedBranch).WithSyncNamespace(cfg.ArgoNamespace).
-		WithTenantKinds(cfg.TenantKinds).WithUsersOpeningPRs(cfg.UsersOpenPRs)
+		WithTenantKinds(cfg.TenantKinds).WithUsersOpeningPRs(cfg.UsersOpenPRs).WithPublishing(publishing)
 
 	metricsClient, err := metrics.New(cfg.MetricsURL, cfg.MetricsTenancyURL, cfg.MetricsCA, cfg.InsecureTLS)
 	if err != nil {
@@ -245,6 +247,7 @@ func run() error {
 			ProjectLabel:      cfg.ProjectLabel,
 			RepoAnnotation:    cfg.RepoAnnotation,
 			TenantKinds:       cfg.TenantKinds,
+			Publish:           publishing,
 		},
 	})
 

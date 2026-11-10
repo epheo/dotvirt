@@ -38,6 +38,7 @@ import (
 	"github.com/epheo/dotvirt/internal/modules"
 	"github.com/epheo/dotvirt/internal/netstate"
 	"github.com/epheo/dotvirt/internal/project"
+	"github.com/epheo/dotvirt/internal/publish"
 	"github.com/epheo/dotvirt/internal/replication"
 	"github.com/epheo/dotvirt/internal/routes"
 	"github.com/epheo/dotvirt/internal/tasks"
@@ -144,6 +145,9 @@ type Draft interface {
 	// StageSyncAccess stages target's grants to its Argo sync account into the
 	// platform draft: the PR a project made before sync impersonation needs.
 	StageSyncAccess(id auth.Identity, commitProj, target project.ProjectInfo) (model.DraftView, error)
+	// StagePublishing stages turning publishing on in one of target's
+	// namespaces into the platform draft.
+	StagePublishing(id auth.Identity, commitProj, target project.ProjectInfo, pt changeset.PublishTarget) (model.DraftView, error)
 	// Resync runs with dotvirt's SA (Argo operations carry no user context);
 	// the implementation weighs what the sync applies under id's own token
 	// before escalating, so no future caller can reach the SA-privileged patch
@@ -155,6 +159,7 @@ type Draft interface {
 	NamespaceNeeds(commitProj, joinProj project.ProjectInfo, spec json.RawMessage) ([]changeset.Access, error)
 	AdoptNeeds(commitProj, target project.ProjectInfo, owners []string) ([]changeset.Access, error)
 	SyncAccessNeeds(commitProj, target project.ProjectInfo) ([]changeset.Access, error)
+	PublishingNeeds(commitProj, target project.ProjectInfo, pt changeset.PublishTarget) ([]changeset.Access, error)
 	ReleaseNeeds(commitProj, target project.ProjectInfo) (need []changeset.Access, residue []string, err error)
 	EnableDRSNeeds(proj project.ProjectInfo, spec json.RawMessage) ([]changeset.Access, error)
 	DisableDRSNeeds(proj project.ProjectInfo) ([]changeset.Access, error)
@@ -177,17 +182,18 @@ type VNCHandler interface {
 
 // Config carries the non-collaborator settings the handlers need.
 type Config struct {
-	BaseBranch        string         // repo branch the inventory reads + drafts target
-	ProposedBranch    string         // proposal-branch prefix; attributes merged PRs to their proposing user
-	AllowOrigin       string         // CORS origin for the SvelteKit frontend; empty disables CORS
-	AppSetPluginToken string         // bearer for the ArgoCD ApplicationSet plugin endpoint; empty disables it
-	StaticDir         string         // built SPA dir to serve at the same origin; empty = dev (SPA on Vite)
-	WebhookSecret     string         // HMAC secret for the Forgejo webhook endpoint; empty disables it
-	UploadProxyURL    string         // cdi-uploadproxy base for image uploads; empty disables it
-	PlatformRepo      string         // platform-tier repo for cluster-scoped + tenancy manifests; empty disables those creates
-	ProjectLabel      string         // namespace label naming the project (release strips it)
-	RepoAnnotation    string         // namespace annotation holding the repo URL (release strips it)
-	TenantKinds       tenancy.Policy // what a tenant repo may declare, as the tenant AppProjects carry it
+	BaseBranch        string           // repo branch the inventory reads + drafts target
+	ProposedBranch    string           // proposal-branch prefix; attributes merged PRs to their proposing user
+	AllowOrigin       string           // CORS origin for the SvelteKit frontend; empty disables CORS
+	AppSetPluginToken string           // bearer for the ArgoCD ApplicationSet plugin endpoint; empty disables it
+	StaticDir         string           // built SPA dir to serve at the same origin; empty = dev (SPA on Vite)
+	WebhookSecret     string           // HMAC secret for the Forgejo webhook endpoint; empty disables it
+	UploadProxyURL    string           // cdi-uploadproxy base for image uploads; empty disables it
+	PlatformRepo      string           // platform-tier repo for cluster-scoped + tenancy manifests; empty disables those creates
+	ProjectLabel      string           // namespace label naming the project (release strips it)
+	RepoAnnotation    string           // namespace annotation holding the repo URL (release strips it)
+	TenantKinds       tenancy.Policy   // what a tenant repo may declare, as the tenant AppProjects carry it
+	Publish           publish.Settings // the platform's publishing settings; zero: publishing off
 }
 
 // visibleTTL bounds a token's cached verdicts, and the view derived from them,

@@ -173,6 +173,49 @@ forge to a Gateway someone else runs. Two things stay with whoever runs it:
   private CA fails x509 at ArgoCD: use a publicly trusted certificate, or keep
   `spec.forge.url` on the in-cluster Service.
 
+## Publishing
+
+With `spec.publishing` a platform admin may turn publishing on for a project
+namespace. The platform repo then gains, for that namespace:
+
+- a Gateway `publish` of `gatewayClassName`, whose listeners take only
+  `*.<namespace>.<domain>` and only HTTPRoutes from that namespace;
+- with `clusterIssuer`, a cert-manager Certificate for that wildcard and an HTTPS
+  listener serving it;
+- `<namespace>-routes`, binding `dotvirt-tenant-routes` (HTTPRoute writes) to the
+  subjects of the namespace's admin grant and the project's sync account. It is left
+  out where the cluster's `admin` role already writes HTTPRoutes (OpenShift).
+
+Settings:
+
+- `domain`: the zone each namespace gets a subdomain of.
+- `gatewayClassName`: the class of each namespace's Gateway.
+- `clusterIssuer` (optional): a ClusterIssuer able to issue each namespace's
+  wildcard, so DNS-01. Without it the Gateways serve HTTP only.
+
+Publishing is off until `domain` and `gatewayClassName` are both set.
+
+What stays with the platform:
+
+- DNS. Each namespace's Gateway has its own address, so `*.<domain>` cannot point
+  at one IP. Point `*.<namespace>.<domain>` at that namespace's Gateway: by hand
+  per publishing namespace, or with external-dns reading Gateway API routes.
+  dotvirt writes no DNS records.
+- The Gateway's address. Its Service is the GatewayClass's default; whether a
+  LoadBalancer Service is reachable on a namespace with its own VM Network is not
+  verified yet.
+- A namespace with its own VM Network is not offered publishing yet. Its gateway
+  reaches portail's controller only through the apiserver, where portail counts
+  polls per source address: one namespace could delay the others' route changes.
+  It waits on a portail release that limits polls per Gateway.
+- Shared Gateways. HTTPRoute write lets a namespace attach routes to any Gateway
+  whose listeners admit its namespace. A Gateway shared across projects must keep
+  `allowedRoutes` at `Same` or a selector of platform namespaces, or it serves
+  tenant hostnames. That is Gateway API, but this grant turns it on.
+- cert-manager. Where tenants hold Certificate writes (cert-manager aggregates
+  them into `admin` by default), they can edit the staged Certificate and request
+  any name the issuer can prove. Keep them from tenants on clusters that publish.
+
 ## Network policies
 
 On OpenShift the dotvirt and managed Forgejo pods get an ingress NetworkPolicy

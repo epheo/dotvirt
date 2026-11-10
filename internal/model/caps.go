@@ -115,6 +115,14 @@ type NamespaceCaps struct {
 	NetworkPolicy     ObjectCaps  `json:"networkPolicy"`
 	EgressFirewall    ObjectCaps  `json:"egressFirewall"`
 	Project           ProjectCaps `json:"project"`
+	// Publishing turns publishing on here: the platform repo gains this
+	// namespace's Gateway, its certificate and its HTTPRoute grant. False
+	// once on, on an install without publishing, and on a namespace with its
+	// own VM Network.
+	Publishing bool `json:"publishing"`
+	// PublishingWaits: the caller could turn publishing on here but for the
+	// namespace's own VM Network, which waits on a newer portail.
+	PublishingWaits bool `json:"publishingWaits,omitempty"`
 }
 
 // ProjectCaps are the actions on a namespace's whole project, over every one

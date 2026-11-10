@@ -21,6 +21,7 @@ import (
 	"github.com/epheo/dotvirt/internal/draft"
 	"github.com/epheo/dotvirt/internal/git"
 	"github.com/epheo/dotvirt/internal/model"
+	"github.com/epheo/dotvirt/internal/publish"
 	"github.com/epheo/dotvirt/pkg/forge"
 	"github.com/epheo/dotvirt/pkg/tenancy"
 )
@@ -74,6 +75,8 @@ func newCoordinatorRig(t *testing.T) *gateRig {
 	g.fc.namespaces[0].Annotations["dotvirt.io/repo"] = forgeSrv.URL + "/o/team-a.git"
 	platform := seedPlatformRepo(t, map[string]string{
 		"descheduler/kubedescheduler.yaml": "apiVersion: operator.openshift.io/v1\nkind: KubeDescheduler\nmetadata:\n  name: cluster\n  namespace: " + descheduler + "\nspec:\n  mode: Automatic\n",
+		// team-a-dev's admin grant: publishing grants route writes to its subjects.
+		"rbac/team-a-dev.yaml": "apiVersion: rbac.authorization.k8s.io/v1\nkind: RoleBinding\nmetadata:\n  name: team-a-dev-admins\n  namespace: team-a-dev\nroleRef:\n  apiGroup: rbac.authorization.k8s.io\n  kind: ClusterRole\n  name: admin\nsubjects:\n- apiGroup: rbac.authorization.k8s.io\n  kind: User\n  name: alice\n",
 	})
 	store, err := draft.Open(t.TempDir())
 	if err != nil {
@@ -82,8 +85,9 @@ func newCoordinatorRig(t *testing.T) *gateRig {
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
 	repos := git.NewRepoSet(ctx, "", "", nil, false, nil, time.Hour)
+	publishing := publish.Settings{Domain: "apps.example.com", GatewayClass: "portail", Issuer: "letsencrypt"}
 	c := changeset.New(store, repos, forge.NewFactory(forgeSrv.URL, forge.StaticToken("tok"), false, ""), nil, nil, nil, "main", "dotvirt/proposed").
-		WithSyncNamespace("dotvirt-sync")
+		WithSyncNamespace("dotvirt-sync").WithPublishing(publishing)
 	// The release strips label residue under the caller's token.
 	g.fc.on(http.MethodPatch, "/api/v1/namespaces/orphans-ns", func(w http.ResponseWriter, r *http.Request) {
 		if !g.fc.ssar(bearer(r), &authzv1.ResourceAttributes{Verb: verbPatch, Resource: "namespaces", Namespace: "orphans-ns", Name: "orphans-ns"}) {
@@ -92,7 +96,7 @@ func newCoordinatorRig(t *testing.T) *gateRig {
 		}
 		writeObj(w, map[string]any{"apiVersion": "v1", "kind": "Namespace", "metadata": map[string]any{"name": "orphans-ns"}})
 	})
-	g.s = g.fc.server(c, Config{PlatformRepo: platform, BaseBranch: "main"})
+	g.s = g.fc.server(c, Config{PlatformRepo: platform, BaseBranch: "main", Publish: publishing})
 	c.UseAuthorizer(g.s)
 	return g
 }
@@ -114,7 +118,10 @@ func TestCapabilitiesEqualTheCoordinatorsGate(t *testing.T) {
 		{verb: verbUpdate, group: rbac, resource: "rolebindings"},
 		{verb: verbBind, group: rbac, resource: "clusterroles", name: "admin"},
 		{verb: verbBind, group: rbac, resource: "clusterroles", name: tenancy.TenantEgressRole},
+		{verb: verbBind, group: rbac, resource: "clusterroles", name: tenancy.TenantRoutesRole},
 		kind(verbCreate, model.KindUDN, ""),
+		kind(verbCreate, model.KindGateway, ""),
+		kind(verbCreate, model.KindCert, ""),
 		{verb: verbCreate, group: "operator.openshift.io", resource: "kubedeschedulers", ns: descheduler},
 		{verb: verbUpdate, group: "operator.openshift.io", resource: "kubedeschedulers", ns: descheduler},
 		{verb: verbDelete, group: "operator.openshift.io", resource: "kubedeschedulers", ns: descheduler},
@@ -151,6 +158,10 @@ func TestCapabilitiesEqualTheCoordinatorsGate(t *testing.T) {
 			pr(func(p model.ProjectCaps) bool { return p.Adopt })},
 		{"sync access", "team-a-dev", http.MethodPost, "/api/projects/team-a/sync-access", ``,
 			pr(func(p model.ProjectCaps) bool { return p.SyncAccess })},
+		// The Gateway, its certificate and the route grant to team-a-dev's
+		// admin-grant subjects.
+		{"publishing", "team-a-dev", http.MethodPost, "/api/projects/team-a/publishing", `{"namespace":"team-a-dev"}`,
+			func(_ model.ClusterCaps, n model.NamespaceCaps) bool { return n.Publishing }},
 		// Reconfiguring: the committed KubeDescheduler is updated, the rest of
 		// the set created.
 		{"drs enable", "", http.MethodPost, "/api/drs", `{"mode":"Predictive"}`,
@@ -300,6 +311,7 @@ func TestSyncAccessNeedsOnlyItsGrants(t *testing.T) {
 	}
 	tok := g.token([]grant{
 		in(verbCreate, "rolebindings", ""),
+		in(verbUpdate, "rolebindings", ""),
 		in(verbBind, "clusterroles", "admin"),
 		in(verbBind, "clusterroles", tenancy.TenantEgressRole),
 	})

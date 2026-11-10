@@ -598,6 +598,33 @@ func TestDeploymentCarriesTheTenantKinds(t *testing.T) {
 	}
 }
 
+// Publishing reaches dotvirt only with both its domain and class; the issuer
+// rides along when set.
+func TestDeploymentCarriesPublishing(t *testing.T) {
+	dv := testDotvirt()
+	env := func(name string) (string, bool) {
+		return envValue(Deployment(dv, "argocd", nil).Spec.Template.Spec.Containers[0].Env, name)
+	}
+	dv.Spec.Publishing.Domain = "apps.example.com"
+	if _, ok := env("DOTVIRT_PUBLISH_DOMAIN"); ok {
+		t.Error("a domain without a class turned publishing on")
+	}
+	dv.Spec.Publishing.GatewayClassName = "portail"
+	if d, _ := env("DOTVIRT_PUBLISH_DOMAIN"); d != "apps.example.com" {
+		t.Errorf("domain = %q", d)
+	}
+	if c, _ := env("DOTVIRT_PUBLISH_GATEWAY_CLASS"); c != "portail" {
+		t.Errorf("class = %q", c)
+	}
+	if _, ok := env("DOTVIRT_PUBLISH_ISSUER"); ok {
+		t.Error("an issuer without one set")
+	}
+	dv.Spec.Publishing.ClusterIssuer = "letsencrypt"
+	if i, _ := env("DOTVIRT_PUBLISH_ISSUER"); i != "letsencrypt" {
+		t.Errorf("issuer = %q", i)
+	}
+}
+
 // Users opening their own pull requests reaches dotvirt as one env var; the
 // default leaves it out.
 func TestDeploymentCarriesWhoOpensPullRequests(t *testing.T) {
