@@ -232,6 +232,9 @@ func dotvirtEnv(dv *dotvirtv1alpha1.Dotvirt, argoNS string, tenantDenied []tenan
 			env = append(env, secretEnv("DOTVIRT_FORGE_URL", forgeSecret, "url", false))
 		}
 		env = append(env, corev1.EnvVar{Name: "DOTVIRT_FORGE_TOKEN_FILE", Value: forgeTokenMountPath})
+		if dv.Spec.Forge.PullRequests == "Users" {
+			env = append(env, corev1.EnvVar{Name: "DOTVIRT_USERS_OPEN_PRS", Value: "true"})
+		}
 		if dv.Spec.Forge.Managed {
 			// Verified TLS instead of insecureTLS; an explicit insecureTLS still wins
 			// inside the app, and CA loads are tolerant of a lagging mount.

@@ -601,3 +601,23 @@ func TestDeploymentCarriesTheTenantKinds(t *testing.T) {
 		t.Errorf("any with additions: %q %q", kinds, extra)
 	}
 }
+
+// Users opening their own pull requests reaches dotvirt as one env var; the
+// default leaves it out.
+func TestDeploymentCarriesWhoOpensPullRequests(t *testing.T) {
+	dv := testDotvirt()
+	dv.Spec.Forge.Managed = true
+	users := func() (string, bool) {
+		return envValue(Deployment(dv, "argocd", nil).Spec.Template.Spec.Containers[0].Env, "DOTVIRT_USERS_OPEN_PRS")
+	}
+	for _, who := range []string{"", "Dotvirt"} {
+		dv.Spec.Forge.PullRequests = who
+		if v, ok := users(); ok {
+			t.Errorf("pullRequests %q: DOTVIRT_USERS_OPEN_PRS = %q, want unset", who, v)
+		}
+	}
+	dv.Spec.Forge.PullRequests = "Users"
+	if v, _ := users(); v != "true" {
+		t.Errorf("pullRequests Users: DOTVIRT_USERS_OPEN_PRS = %q, want true", v)
+	}
+}
