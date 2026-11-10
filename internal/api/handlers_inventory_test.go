@@ -61,26 +61,39 @@ func TestTenantPlatformViewCarriesNoVerdict(t *testing.T) {
 	s := fc.server(&planeDraft{}, Config{BaseBranch: "main"})
 	lists := func(a *authzv1.ResourceAttributes) bool { return a.Verb == verbList && a.Namespace == "team-a-dev" }
 	visible := map[string]bool{"team-a-dev": true}
-	id := auth.Identity{Token: "t", Username: "u"}
 
-	if s.tenantPlatformView(context.Background(), id, newAsking(lists).c, visible, nil) != nil {
+	if s.tenantPlatformView(context.Background(), viewAsking(s, "t", visible, lists), nil) != nil {
 		t.Fatal("no rollup stays no rollup")
 	}
-	got := s.tenantPlatformView(context.Background(), id, newAsking(lists).c, visible, full)
+	got := s.tenantPlatformView(context.Background(), viewAsking(s, "t", visible, lists), full)
 	if got.Sync != "" || got.Health != "" || got.Operation != "" || got.SyncError != "" || got.Revision != "" {
 		t.Errorf("a verdict reached a tenant: %+v", got)
 	}
-	if len(got.Unhealthy) != 2 || got.Unhealthy[0] != full.Unhealthy[2] || got.Unhealthy[1] != full.Unhealthy[0] {
-		t.Errorf("unhealthy = %+v, want its own Namespace and what it lists", got.Unhealthy)
+	if len(got.Unhealthy) != 2 || got.Unhealthy[0] != full.Unhealthy[0] || got.Unhealthy[1] != full.Unhealthy[2] {
+		t.Errorf("unhealthy = %+v, want what it lists and its own Namespace", got.Unhealthy)
 	}
 	if len(full.Unhealthy) != 5 {
 		t.Error("the shared rollup was mutated")
 	}
-	id.Token = "t2"
 	none := func(*authzv1.ResourceAttributes) bool { return false }
-	if got := s.tenantPlatformView(context.Background(), id, newAsking(none).c, map[string]bool{"elsewhere": true}, full); got != nil {
+	if got := s.tenantPlatformView(context.Background(), viewAsking(s, "t2", map[string]bool{"elsewhere": true}, none), full); got != nil {
 		t.Errorf("nothing of theirs still sent %+v", got)
 	}
+
+	// Who gains: listing a kind in a namespace it may not get shows its rows
+	// there, as kubectl get -n would.
+	alsoTeamB := func(a *authzv1.ResourceAttributes) bool {
+		return a.Verb == verbList && (a.Namespace == "team-a-dev" || a.Namespace == "team-b")
+	}
+	got = s.tenantPlatformView(context.Background(), viewAsking(s, "t3", visible, alsoTeamB), full)
+	if len(got.Unhealthy) != 3 || got.Unhealthy[1] != full.Unhealthy[1] {
+		t.Errorf("unhealthy = %+v, want team-b's NetworkPolicy among them", got.Unhealthy)
+	}
+}
+
+// viewAsking is a view of visible whose list reviews tok answers by allow.
+func viewAsking(s *Server, tok string, visible map[string]bool, allow func(*authzv1.ResourceAttributes) bool) callerView {
+	return callerView{names: visible, s: s, ctx: context.Background(), id: auth.Identity{Token: tok, Username: "u"}, c: newAsking(allow).c}
 }
 
 // Through the frame: the platform rollup names a cluster-scoped object only
