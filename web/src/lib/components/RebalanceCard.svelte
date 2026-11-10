@@ -139,7 +139,9 @@
 			{/if}
 			{#if noVMs}
 				<p class="text-xs leading-4 text-ink-muted">
-					This cluster runs no VMs (no KubeVirt), so there is nothing to rebalance.
+					This cluster runs no VMs (no KubeVirt), so there is nothing to rebalance{view.configured
+						? '; disable it to stop the descheduler.'
+						: '.'}
 				</p>
 			{:else if noCatalog}
 				<p class="text-xs leading-4 text-ink-muted">
