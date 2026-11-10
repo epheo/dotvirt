@@ -266,6 +266,12 @@ func TestKindRuleUnderAny(t *testing.T) {
 	if err := requirePlacement(KindRule{}, tenant, "alpha/deploy.yaml", []byte(files["alpha/deploy.yaml"])); err == nil {
 		t.Error("listed: a Deployment staged into a tenant repo")
 	}
+	// A cluster-scoped kind the rule refuses is told why, not to set a
+	// namespace it cannot have.
+	loose := "apiVersion: scheduling.k8s.io/v1\nkind: PriorityClass\nmetadata:\n  name: high\n"
+	if err := requirePlacement(anyKinds, tenant, "alpha/prio.yaml", []byte(loose)); err == nil || !strings.Contains(err.Error(), "may not apply") {
+		t.Errorf("any: a namespace-less PriorityClass: %v", err)
+	}
 	// The coordinator reads the policy it was given and its authorizer's scope.
 	c.WithTenantKinds(anyKinds.Policy)
 	c.UseAuthorizer(scopeOnly(scoped))

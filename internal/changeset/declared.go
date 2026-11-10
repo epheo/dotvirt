@@ -224,16 +224,20 @@ func PlacementOnBranch(read *git.Repo, branch string) (Placement, error) {
 // namespace while Argo applies it to the Application's destination; and, in a
 // tenant repo, a kind rule refuses, which the project's AppProject refuses too
 // because Argo would apply it with more rights than the project holds.
+//
+// The kind rule is judged first: the namespace rule reads a kind the table
+// does not know as namespaced, so asking a refused cluster-scoped kind for a
+// namespace would be the wrong advice.
 func requirePlacement(rule KindRule, proj project.ProjectInfo, path string, content []byte) error {
 	objs, implied, _ := declared(path, content)
-	if len(implied) > 0 {
-		r := implied[0]
-		return fmt.Errorf("%w: %s %s must set metadata.namespace", model.ErrInvalid, r.Kind, r.Name)
-	}
 	for _, o := range objs {
 		if err := tenantDeclarable(rule, proj, o.Group, o.Kind, o.Name); err != nil {
 			return err
 		}
+	}
+	if len(implied) > 0 {
+		r := implied[0]
+		return fmt.Errorf("%w: %s %s must set metadata.namespace", model.ErrInvalid, r.Kind, r.Name)
 	}
 	return nil
 }
