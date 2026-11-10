@@ -287,6 +287,16 @@ func TestRepoCredsNeverEmitsIgnoredInsecure(t *testing.T) {
 	}
 }
 
+// The template URL ends at the org's slash, so it serves that org's repos and
+// never an org whose name merely starts the same way.
+func TestRepoCredsURLEndsAtTheOrg(t *testing.T) {
+	for _, prefix := range []string{"https://forge.example/dotvirt", "https://forge.example/dotvirt/"} {
+		if got := RepoCredsSecret(testDotvirt(), "argocd", prefix, "bot", "tok").StringData["url"]; got != "https://forge.example/dotvirt/" {
+			t.Errorf("RepoCredsSecret(%q) url = %q, want https://forge.example/dotvirt/", prefix, got)
+		}
+	}
+}
+
 // A rotated admin secret must roll the pod (initContainer reconciles the DB
 // password), never wait on a human runbook.
 func TestForgejoRollsOnAdminSecretChange(t *testing.T) {
