@@ -604,10 +604,14 @@ YAML
 		'{"repoRead":true,"vmCreate":false,"console":false,"egressFirewallCreate":false}'
 	retry "a project author authors VMs and opens consoles" 180 offered "${AUTHOR_TOK}" \
 		'{"repoRead":true,"vmCreate":'"${vms}"',"console":'"${vms}"',"egressFirewallCreate":false}'
-	# MicroShift serves no EgressFirewalls: the admin's grant on them offers no
-	# new one.
-	retry "a project admin authors VMs and is offered no egress firewall" 180 offered "${PROJECT_ADMIN_TOK}" \
-		'{"repoRead":true,"vmCreate":'"${vms}"',"console":'"${vms}"',"egressFirewallCreate":false}'
+	# The admin's grant on EgressFirewalls offers a new one only where the
+	# cluster serves them (epheo.39 on): a kind nothing syncs is never offered.
+	egress=false
+	if kc get --raw /apis/k8s.ovn.org/v1 2>/dev/null | jq -e '.resources[] | select(.name == "egressfirewalls")' >/dev/null; then
+		egress=true
+	fi
+	retry "a project admin authors VMs and is offered an egress firewall only where served" 180 offered "${PROJECT_ADMIN_TOK}" \
+		'{"repoRead":true,"vmCreate":'"${vms}"',"console":'"${vms}"',"egressFirewallCreate":'"${egress}"'}'
 	platform_offered() {
 		local got
 		got="$(curl -fsS --max-time 30 -H "Authorization: Bearer ${NETWORK_ADMIN_TOK}" "${BASE}/api/capabilities" |
