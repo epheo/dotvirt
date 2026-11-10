@@ -1,7 +1,9 @@
 <script lang="ts">
 	import type { Project } from '#lib/api.js';
 	import { plural } from '#lib/format.js';
-	import { projectGate, projectNS } from '#lib/gates.js';
+	import { projectGate, projectNS, publishGate } from '#lib/gates.js';
+	import { caps } from '#lib/state/caps.svelte.js';
+	import { modules } from '#lib/state/modules.svelte.js';
 	import { ui } from '#lib/state/ui.svelte.js';
 	import Button from './Button.svelte';
 	import Consequence from './Consequence.svelte';
@@ -22,6 +24,8 @@
 		projects: Project[];
 		cluster?: boolean;
 	} = $props();
+
+	const domain = $derived(modules.value?.publishDomain ?? '');
 </script>
 
 <div class="grid items-start gap-4 lg:grid-cols-2">
@@ -73,6 +77,38 @@
 					<Consequence size="sm"
 						>ArgoCD syncs {p.name} as its own account once the platform PR merges.</Consequence
 					>
+				</div>
+			{/if}
+			{#if domain && p.namespaces.length}
+				<div class="flex flex-col gap-1.5 border-t border-line-soft px-card py-3">
+					<span class="text-xs font-semibold text-ink-soft">Publishing</span>
+					{#each p.namespaces as n (n.namespace)}
+						{@const c = caps.ns(n.namespace)}
+						{@const gate = publishGate.on(n.namespace)}
+						<div class="flex flex-wrap items-center gap-2 text-[13px]">
+							<span class="font-mono text-xs">{n.namespace}</span>
+							{#if c?.publishingOn}
+								<span class="text-ink-soft"
+									>On, at <span class="font-mono">*.{n.namespace}.{domain}</span></span
+								>
+							{:else if c?.publishingWaits}
+								<span class="text-ink-muted"
+									>Not yet: a namespace with its own VM Network waits on a portail update.</span
+								>
+							{:else}
+								<Button
+									variant="outline"
+									size="sm"
+									disabled={!gate.ok}
+									title={gate.why}
+									onclick={() =>
+										(ui.modal = { kind: 'publishing', project: p.name, namespace: n.namespace })}
+									>Turn publishing on</Button
+								>
+								<StageChip kind="pr" />
+							{/if}
+						</div>
+					{/each}
 				</div>
 			{/if}
 			<!-- Quota-aware capacity: the project's ResourceQuotas. -->

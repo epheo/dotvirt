@@ -177,6 +177,11 @@ export interface NamespaceCaps {
    * namespace's own VM Network, which waits on a newer portail.
    */
   publishingWaits?: boolean;
+  /**
+   * PublishingOn: the platform repo holds this namespace's publishing as
+   * rendered, told only to a caller who may list gateways here.
+   */
+  publishingOn?: boolean;
 }
 /**
  * ProjectCaps are the actions on a namespace's whole project, over every one
@@ -959,6 +964,12 @@ export interface Modules {
    * repo's alone.
    */
   extraTenantKinds: boolean;
+  /**
+   * PublishDomain: a platform admin may turn publishing on for a project
+   * namespace, which then answers *.<namespace>.<PublishDomain>. "" while
+   * the install or the cluster offers no publishing.
+   */
+  publishDomain?: string;
 }
 
 //////////

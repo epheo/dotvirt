@@ -61,6 +61,11 @@ export const projectGate = {
 	syncAccess: (n: string) => proj(n, (c) => c.project.syncAccess, 'grant sync access'),
 };
 
+// Publishing: a namespace's Gateway, staged by a platform admin.
+export const publishGate = {
+	on: (n: string) => ns(n, (c) => c.publishing, 'turn publishing on'),
+};
+
 // templateGate is writing one template library: the shared one ('platform'),
 // or the project's that namespace belongs to.
 export function templateGate(library: string, namespace: string): Gate {
