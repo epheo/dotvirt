@@ -224,7 +224,7 @@ func TestTenantMigrationOrder(t *testing.T) {
 // while its Application is still being removed, then it is pruned.
 func TestEmptiedProjectAppProject(t *testing.T) {
 	dv := testCR()
-	gone := install.TenantAppProject(dv, "argocd", "dotvirt-p-gone", "gone", []string{"gone-ns"}, []string{"https://forge/dotvirt/gone.git"})
+	gone := install.TenantAppProject(dv, "argocd", "dotvirt-p-gone", "gone", []string{"gone-ns"}, []string{"https://forge/dotvirt/gone.git"}, nil)
 	app := application("dotvirt-gone", gone.GetName())
 	c := testBuilder(t).WithObjects(dv, gone, app).Build()
 	r := newReconciler(c, depsOK)
@@ -353,4 +353,57 @@ func erroredAppSet(dv *dotvirtv1alpha1.Dotvirt, msg string) *unstructured.Unstru
 		map[string]any{"type": "ErrorOccurred", "status": "True", "message": msg},
 	}}
 	return appset
+}
+
+// With tenantKinds Any, the Argo phase decides whether the instance
+// impersonates where Argo reads it, whatever SyncImpersonationReady says: the
+// argocd-cm key, and an AppProject this install applied keeping
+// destinationServiceAccounts (an Argo CD older than 2.13 prunes it and ignores
+// the key). Only both carry the deny list; otherwise the listed kinds stay and
+// ArgoReady says why.
+func TestTenantKindsFollowTheImpersonationSetting(t *testing.T) {
+	for _, c := range []struct {
+		name               string
+		key, field, pinned bool
+	}{
+		{"key unset", false, true, false},
+		{"key set, old Argo pruned the field", true, false, false},
+		{"key set, field kept, the ArgoCD resource pins its version", true, true, true},
+		{"key set, field kept", true, true, false},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			dv, creds := byoForgeCR("https://forge.byo.example")
+			dv.Spec.ArgoCD.TenantKinds = "Any"
+			meta.SetStatusCondition(&dv.Status.Conditions, metav1.Condition{Type: dotvirtv1alpha1.ConditionSyncImpersonationReady, Status: metav1.ConditionFalse, Reason: "Degraded"})
+			cm := &corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Name: "argocd-cm", Namespace: "argocd"}, Data: map[string]string{}}
+			if c.key {
+				cm.Data[install.SyncImpersonationKey] = "true"
+			}
+			applied := install.TenantAppProject(dv, "argocd", "dotvirt-p-team-a", "team-a", []string{"a"}, nil, nil)
+			if !c.field {
+				unstructured.RemoveNestedField(applied.Object, "spec", "destinationServiceAccounts")
+			}
+			objs := []client.Object{dv, creds, cm, applied, projectNS("a", "team-a", "dotvirt/team-a.git")}
+			if c.pinned {
+				inst := argoCDInstance(nil)
+				_ = unstructured.SetNestedField(inst.Object, "v2.12.0", "spec", "version")
+				objs = append(objs, inst)
+			}
+			c2 := testBuilder(t).WithObjects(objs...).Build()
+			r := newReconciler(c2, depsOK)
+			tier, err := r.tenantAppProjects(context.Background(), dv, "argocd", nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			want := c.key && c.field && !c.pinned
+			spec := tier.objs[0].(*unstructured.Unstructured).Object["spec"].(map[string]any)
+			if _, black := spec["namespaceResourceBlacklist"]; black != want {
+				t.Errorf("blacklist = %v, want %v", black, want)
+			}
+			noted := slices.ContainsFunc(tier.notes, func(n string) bool { return strings.Contains(n, "keep the listed kinds") })
+			if noted == want {
+				t.Errorf("notes = %v", tier.notes)
+			}
+		})
+	}
 }

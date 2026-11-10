@@ -285,6 +285,25 @@ func TestEnvtest(t *testing.T) {
 		}
 	})
 
+	t.Run("admission refuses any tenant kind without sync impersonation", func(t *testing.T) {
+		off, on := false, true
+		dv := testCR()
+		dv.Spec.ArgoCD.TenantKinds = "Any"
+		dv.Spec.ArgoCD.SyncImpersonation.Enabled = &off
+		if err := admin.Create(ctx, dv, client.DryRunAll); !apierrors.IsInvalid(err) {
+			t.Errorf("Any with impersonation off: got %v, want Invalid", err)
+		}
+		for name, enabled := range map[string]*bool{"unset": nil, "on": &on} {
+			dv := testCR()
+			dv.Spec.ArgoCD.TenantKinds = "Any"
+			dv.Spec.ArgoCD.SyncImpersonation.Enabled = enabled
+			dv.Spec.ArgoCD.TenantKindsDenied = []dotvirtv1alpha1.GroupKind{{Group: "capsule.clastix.io", Kind: "*"}}
+			if err := admin.Create(ctx, dv, client.DryRunAll); client.IgnoreAlreadyExists(err) != nil {
+				t.Errorf("Any with impersonation %s: %v", name, err)
+			}
+		}
+	})
+
 	t.Run("apply reclaims owned fields and keeps foreign ones", func(t *testing.T) {
 		key := types.NamespacedName{Namespace: "dotvirt", Name: install.AppName}
 		var dep appsv1.Deployment

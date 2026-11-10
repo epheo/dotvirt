@@ -90,6 +90,7 @@ type ForgeSpec struct {
 // GitOps (openshift-gitops); override for community ArgoCD (argocd /
 // argocd-application-controller). The operator binds the apply RBAC + AppProjects
 // to this controller ServiceAccount.
+// +kubebuilder:validation:XValidation:rule="!has(self.tenantKinds) || self.tenantKinds != 'Any' || !has(self.syncImpersonation) || !has(self.syncImpersonation.enabled) || self.syncImpersonation.enabled",message="tenantKinds Any needs sync impersonation: the project's sync account is the only ceiling on what its repo applies"
 type ArgoCDSpec struct {
 	// Namespace is where the ArgoCD instance runs; empty = the platform default
 	// (openshift-gitops on OpenShift, argocd elsewhere).
@@ -106,6 +107,34 @@ type ArgoCDSpec struct {
 	// project's own ServiceAccount, which holds exactly the project's grants,
 	// instead of the shared controller's account. On by default.
 	SyncImpersonation SyncImpersonationSpec `json:"syncImpersonation,omitempty"`
+	// TenantKinds is what a tenant repo may apply. Listed, the default: the
+	// kinds dotvirt has a UI for. Any: every namespaced kind but the denied
+	// ones (grants, quotas, the platform tier's kinds, OLM, KubeVirt's own
+	// configuration, and TenantKindsDenied). Any holds only while sync
+	// impersonation is on, the project's sync account then being the ceiling;
+	// until then tenant repos keep the listed kinds.
+	// +kubebuilder:validation:Enum=Listed;Any
+	// +optional
+	TenantKinds string `json:"tenantKinds,omitempty"`
+	// TenantKindsDenied adds kinds no tenant repo may apply under Any; it never
+	// removes one. Kind "*" denies the whole group. List here every operator
+	// the cluster runs that acts with its own rights on a namespaced request
+	// that can name another namespace or a cluster-wide resource: a tenant
+	// repo could otherwise reach past its project through it.
+	// +optional
+	TenantKindsDenied []GroupKind `json:"tenantKindsDenied,omitempty"`
+}
+
+// AnyTenantKinds reports whether tenant repos are asked to apply any
+// namespaced kind but the denied ones.
+func (a ArgoCDSpec) AnyTenantKinds() bool { return a.TenantKinds == "Any" }
+
+// GroupKind names a kind by API group ("" for the core group); kind "*" is the
+// whole group.
+type GroupKind struct {
+	Group string `json:"group"`
+	// +kubebuilder:validation:MinLength=1
+	Kind string `json:"kind"`
 }
 
 // SyncImpersonationSpec is the ArgoCD instance's Argo CD sync impersonation

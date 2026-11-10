@@ -101,14 +101,45 @@ func RepoCredsSecret(dv *dotvirtv1alpha1.Dotvirt, argoNS, urlPrefix, username, t
 	}
 }
 
-// tenantWhitelist is what a tenant repo may hold: tenancy.TenantKinds, the
-// list dotvirt stages by, so neither side admits what the other refuses.
-// clusterResourceWhitelist stays empty, so a tenant repo cannot reconcile a
-// CUDN/NNCP/Namespace even though the shared Argo controller SA could.
-func tenantWhitelist(spec map[string]any) map[string]any {
+// tenantKinds is what a tenant repo may hold: with denied nil, the listed
+// kinds, tenancy.TenantKinds, which dotvirt stages by, so neither side admits
+// what the other refuses; else every namespaced kind but denied (TenantDenied).
+// clusterResourceWhitelist stays empty either way, so a tenant repo cannot
+// reconcile a CUDN/NNCP/Namespace even though the shared Argo controller SA
+// could.
+func tenantKinds(spec map[string]any, denied []tenancy.GroupKind) map[string]any {
 	spec["clusterResourceWhitelist"] = []any{}
+	if denied != nil {
+		list := make([]any, 0, len(denied))
+		for _, g := range denied {
+			list = append(list, map[string]any{"group": g.Group, "kind": g.Kind})
+		}
+		spec["namespaceResourceBlacklist"] = list
+		return spec
+	}
 	spec["namespaceResourceWhitelist"] = whitelist(tenancy.TenantKinds)
 	return spec
+}
+
+// TenantDenied is the deny list a project's repo applies under, nil while it
+// keeps the listed kinds. Any kind needs spec.argocd.tenantKinds Any, sync
+// impersonation asked for, and impersonating: the instance syncing dotvirt's
+// Applications as their projects' own accounts, so the project's sync account,
+// never the controller's, applies what a merge declares. It gates on
+// impersonation being in effect, not on SyncImpersonationReady: one project's
+// missing grant degrades that condition, and must fail that project's sync,
+// not flip every project back to the listed kinds. Asking for impersonation
+// off flips back in the pass that removes the setting, before it does.
+func TenantDenied(dv *dotvirtv1alpha1.Dotvirt, impersonating bool) []tenancy.GroupKind {
+	a := dv.Spec.ArgoCD
+	if !a.AnyTenantKinds() || !a.SyncImpersonation.On() || !impersonating {
+		return nil
+	}
+	extra := make([]tenancy.GroupKind, len(a.TenantKindsDenied))
+	for i, g := range a.TenantKindsDenied {
+		extra[i] = tenancy.GroupKind{Group: g.Group, Kind: g.Kind}
+	}
+	return tenancy.DeniedTenantKinds(extra...)
 }
 
 func whitelist(kinds []tenancy.Kind) []any {
@@ -125,7 +156,7 @@ func whitelist(kinds []tenancy.Kind) []any {
 // Application still references it, which keeps those Applications syncing
 // until the ApplicationSet moves them to their own TenantAppProject.
 func TenantsAppProject(dv *dotvirtv1alpha1.Dotvirt, argoNS, platformRepo, operatorNS string) *unstructured.Unstructured {
-	return argoObject("AppProject", TenantsProjectName, argoNS, dv, tenantWhitelist(map[string]any{
+	return argoObject("AppProject", TenantsProjectName, argoNS, dv, tenantKinds(map[string]any{
 		"description": "dotvirt tenant projects — namespaced workloads only.",
 		"sourceRepos": []any{repoPrefix(platformRepo)},
 		"destinations": []any{
@@ -135,7 +166,7 @@ func TenantsAppProject(dv *dotvirtv1alpha1.Dotvirt, argoNS, platformRepo, operat
 			map[string]any{"server": InClusterServer, "namespace": "!" + operatorNS},
 			map[string]any{"server": InClusterServer, "namespace": "!" + argoNS},
 		},
-	}))
+	}, nil))
 }
 
 // ProjectLabel and RepoAnnotation are the namespace keys naming a project and
@@ -157,19 +188,20 @@ const (
 //
 // Its sync account (tenancy.SyncAccount, named like the AppProject) is the
 // ServiceAccount Argo syncs the project's Application as once sync
-// impersonation is on (syncAccounts).
-func TenantAppProject(dv *dotvirtv1alpha1.Dotvirt, argoNS, name, project string, namespaces, sourceRepos []string) *unstructured.Unstructured {
+// impersonation is on (syncAccounts). denied is TenantDenied's answer: nil
+// keeps the listed kinds.
+func TenantAppProject(dv *dotvirtv1alpha1.Dotvirt, argoNS, name, project string, namespaces, sourceRepos []string, denied []tenancy.GroupKind) *unstructured.Unstructured {
 	destinations := make([]any, 0, len(namespaces))
 	for _, ns := range namespaces {
 		destinations = append(destinations, map[string]any{"server": InClusterServer, "namespace": ns})
 	}
 	repos := toAny(sourceRepos)
-	u := argoObject("AppProject", name, argoNS, dv, tenantWhitelist(map[string]any{
+	u := argoObject("AppProject", name, argoNS, dv, tenantKinds(map[string]any{
 		"description":                "dotvirt project " + project + ": its own namespaces and repo only.",
 		"sourceRepos":                repos,
 		"destinations":               destinations,
 		"destinationServiceAccounts": syncAccounts(argoNS, name),
-	}))
+	}, denied))
 	labels := u.GetLabels()
 	labels[ProjectLabel] = project
 	u.SetLabels(labels)

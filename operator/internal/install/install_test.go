@@ -8,6 +8,7 @@ import (
 
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 
@@ -374,7 +375,7 @@ func TestForgejoVerifiesWebhookTLS(t *testing.T) {
 // it and a destination the plugin picks among those namespaces.
 func TestTenantAppProjectConfinesOneProject(t *testing.T) {
 	dv := testDotvirt()
-	ap := TenantAppProject(dv, "argocd", "dotvirt-p-team-a", "team-a", []string{"a-dev", "a-prod"}, []string{"https://forge/dotvirt/team-a.git"})
+	ap := TenantAppProject(dv, "argocd", "dotvirt-p-team-a", "team-a", []string{"a-dev", "a-prod"}, []string{"https://forge/dotvirt/team-a.git"}, nil)
 	if ap.GetName() != "dotvirt-p-team-a" || ap.GetLabels()[ProjectLabel] != "team-a" || !OwnedBy(ap.GetLabels(), dv) {
 		t.Fatalf("name %s labels %v", ap.GetName(), ap.GetLabels())
 	}
@@ -395,7 +396,7 @@ func TestTenantAppProjectConfinesOneProject(t *testing.T) {
 			t.Errorf("%s differs from the shared tier's", f)
 		}
 	}
-	empty := TenantAppProject(dv, "argocd", "dotvirt-p-gone", "gone", nil, nil)
+	empty := TenantAppProject(dv, "argocd", "dotvirt-p-gone", "gone", nil, nil, nil)
 	for _, f := range []string{"destinations", "sourceRepos"} {
 		if v, _, _ := unstructured.NestedSlice(empty.Object, "spec", f); v == nil || len(v) != 0 {
 			t.Errorf("a project with nothing to admit must render an empty %s, got %v", f, v)
@@ -455,7 +456,7 @@ func TestTenantAppProjectsAdmitNoNAD(t *testing.T) {
 		}
 		return false
 	}
-	if nad(TenantAppProject(dv, "argocd", "dotvirt-p-a", "a", []string{"a"}, nil)) || nad(TenantsAppProject(dv, "argocd", "https://forge/dotvirt/platform.git", "ns")) {
+	if nad(TenantAppProject(dv, "argocd", "dotvirt-p-a", "a", []string{"a"}, nil, nil)) || nad(TenantsAppProject(dv, "argocd", "https://forge/dotvirt/platform.git", "ns")) {
 		t.Error("a tenant AppProject admits NetworkAttachmentDefinitions")
 	}
 	if !nad(PlatformAppProject(dv, "argocd", "https://forge/dotvirt/platform.git")) {
@@ -517,5 +518,62 @@ func TestArgoSourcePaths(t *testing.T) {
 	app := PlatformApplication(dv, "argocd", "https://forge/platform.git")
 	if got, _, _ := unstructured.NestedString(app.Object, "spec", "source", "path"); got != "." {
 		t.Errorf("platform source path = %q", got)
+	}
+}
+
+// A project's repo applies any namespaced kind but the denied ones only while
+// tenantKinds is Any, impersonation is asked for, and the instance impersonates
+// (whatever SyncImpersonationReady says: one project's missing grant degrades
+// it); otherwise it keeps the listed kinds, and the shared tier always does.
+func TestTenantKindsAnyNeedsImpersonation(t *testing.T) {
+	denies := func(ap *unstructured.Unstructured) (bool, bool) {
+		spec := ap.Object["spec"].(map[string]any)
+		_, black := spec["namespaceResourceBlacklist"]
+		_, white := spec["namespaceResourceWhitelist"]
+		return black, white
+	}
+	degraded := metav1.Condition{Type: dotvirtv1alpha1.ConditionSyncImpersonationReady, Status: metav1.ConditionFalse, Reason: "Degraded"}
+	off := false
+	for _, c := range []struct {
+		name          string
+		set           func(dv *dotvirtv1alpha1.Dotvirt)
+		impersonating bool
+		anyKinds      bool
+	}{
+		{"listed", func(*dotvirtv1alpha1.Dotvirt) {}, true, false},
+		{"any, not impersonating", func(dv *dotvirtv1alpha1.Dotvirt) { dv.Spec.ArgoCD.TenantKinds = "Any" }, false, false},
+		{"any, impersonating", func(dv *dotvirtv1alpha1.Dotvirt) { dv.Spec.ArgoCD.TenantKinds = "Any" }, true, true},
+		{"any, impersonating, one project degraded", func(dv *dotvirtv1alpha1.Dotvirt) {
+			dv.Spec.ArgoCD.TenantKinds = "Any"
+			meta.SetStatusCondition(&dv.Status.Conditions, degraded)
+		}, true, true},
+		{"any, asked off while still impersonating", func(dv *dotvirtv1alpha1.Dotvirt) {
+			dv.Spec.ArgoCD.TenantKinds = "Any"
+			dv.Spec.ArgoCD.SyncImpersonation.Enabled = &off
+		}, true, false},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			dv := testDotvirt()
+			c.set(dv)
+			dv.Spec.ArgoCD.TenantKindsDenied = []dotvirtv1alpha1.GroupKind{{Group: "capsule.clastix.io", Kind: "*"}}
+			denied := TenantDenied(dv, c.impersonating)
+			ap := TenantAppProject(dv, "argocd", "dotvirt-p-a", "a", []string{"a"}, nil, denied)
+			if black, white := denies(ap); black != c.anyKinds || white == c.anyKinds {
+				t.Fatalf("blacklist %v, whitelist %v; want any kinds %v", black, white, c.anyKinds)
+			}
+			if c.anyKinds {
+				list := ap.Object["spec"].(map[string]any)["namespaceResourceBlacklist"].([]any)
+				want := map[string]any{"group": "capsule.clastix.io", "kind": "*"}
+				if !slices.ContainsFunc(list, func(e any) bool { return reflect.DeepEqual(e, want) }) {
+					t.Errorf("the provider's denied kinds are missing: %v", list)
+				}
+			}
+			if black, _ := denies(TenantsAppProject(dv, "argocd", "https://forge/dotvirt/platform.git", "ns")); black {
+				t.Error("the shared tier, which reaches any namespace, applies any kind")
+			}
+			if v, _, _ := unstructured.NestedSlice(ap.Object, "spec", "clusterResourceWhitelist"); v == nil || len(v) != 0 {
+				t.Errorf("clusterResourceWhitelist = %v, want empty", v)
+			}
+		})
 	}
 }
