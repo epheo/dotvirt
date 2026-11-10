@@ -57,8 +57,8 @@ func (s *Server) clusterAuthority(ctx context.Context, id auth.Identity, c *clus
 	}
 }
 
-// clusterPolicyRefs is each cluster-tier policy kind's resource: create on it
-// reads a policy's full text, list its identity, as the apiserver would.
+// clusterPolicyRefs is each cluster-tier policy kind's resource: list on it
+// reads a policy, as the apiserver would.
 var clusterPolicyRefs = map[model.PolicyKind]ssarRef{
 	model.PolicyAdmin:    ssarANP,
 	model.PolicyBaseline: ssarBANP,
@@ -66,21 +66,19 @@ var clusterPolicyRefs = map[model.PolicyKind]ssarRef{
 	model.PolicyRoute:    ssarExtRoute,
 }
 
-// policyRedactor hides, from a caller without authority over a cluster-tier
-// policy's kind, what that policy says beyond the caller's own namespaces:
-// its subject namespaces, every selector value its text spells that reaches
-// outside the caller's view, and its apply error. The rules stay - a rule
-// that governs the caller's workload is never hidden - while the full rollup
-// is what /api/policies gates on the same authority. From a caller who may
-// not list the kind, as a namespace admin may not, it withholds the policy's
-// identity too. One serves one response.
+// policyRedactor hides, from a caller who may not list a policy's kind where
+// it lives, as a namespace admin may not list a cluster-tier one, what that
+// policy says beyond the caller's own namespaces: its subject namespaces,
+// every selector value its text spells that reaches outside the caller's
+// view, its apply error, and its identity. The rules stay - a rule that
+// governs the caller's workload is never hidden - while the full rollup is
+// what /api/policies gates on the same list. One serves one response.
 type policyRedactor struct {
-	can   func(model.PolicyKind) bool   // create on the kind
-	named func(model.PolicyKind) bool   // list on the kind
-	lists func(backing, ns string) bool // list on a namespaced row's kind, where it lives
-	view  *netstate.Redaction
-	snap  *netstate.Snapshot
-	anon  withheld
+	cluster func(model.PolicyKind) bool   // list on a cluster-tier kind
+	lists   func(backing, ns string) bool // list on a namespaced row's kind, where it lives
+	view    *netstate.Redaction
+	snap    *netstate.Snapshot
+	anon    withheld
 }
 
 // policyRedactor is the caller's redactor: their visible namespaces, the
@@ -98,10 +96,9 @@ func (s *Server) policyRedactor(ctx context.Context, id auth.Identity, c *cluste
 		}
 	}
 	return &policyRedactor{
-		lists: v.listsBacking,
-		can:   s.clusterAuthority(ctx, id, c, verbCreate),
-		named: s.clusterAuthority(ctx, id, c, verbList),
-		snap:  s.netstate,
+		lists:   v.listsBacking,
+		cluster: s.clusterAuthority(ctx, id, c, verbList),
+		snap:    s.netstate,
 		view: &netstate.Redaction{
 			ProjectLabel: s.cfg.ProjectLabel,
 			Namespace:    func(ns string) bool { return visible[ns] },
@@ -141,19 +138,18 @@ func (s *Server) namespaceLabels() []netstate.NamespaceLabels {
 
 // apply redacts p, and rule when it is one of p's rows (a trace step's).
 func (pr *policyRedactor) apply(p *model.Policy, rule *model.PolicyRuleView) {
-	if _, cluster := clusterPolicyRefs[p.Kind]; !cluster {
-		if p.Namespace != "" && !pr.lists(p.Backing, p.Namespace) {
-			pr.redact(p, rule)
-			pr.withhold(p)
-		}
-		return
-	}
-	if !pr.can(p.Kind) {
+	if !pr.shows(p) {
 		pr.redact(p, rule)
-	}
-	if !pr.named(p.Kind) {
 		pr.withhold(p)
 	}
+}
+
+// shows reports whether the caller may list p's kind where p lives.
+func (pr *policyRedactor) shows(p *model.Policy) bool {
+	if _, cluster := clusterPolicyRefs[p.Kind]; cluster {
+		return pr.cluster(p.Kind)
+	}
+	return p.Namespace == "" || pr.lists(p.Backing, p.Namespace)
 }
 
 // redact leaves what p and rule do, without what they name.

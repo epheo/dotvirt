@@ -336,7 +336,7 @@ func scaleWorkload(i int, ip string, nets ...string) TraceWorkload {
 }
 
 // redactEffective redacts eff's cluster-tier bindings as the api does for a
-// caller without authority over them.
+// caller who may not list them.
 func (s *Snapshot) redactEffective(eff *model.EffectivePolicy, red *Redaction) {
 	for _, bs := range [][]model.PolicyBinding{eff.EastWest, eff.Gateway, eff.SNAT, eff.Routes} {
 		for i := range bs {
