@@ -388,14 +388,14 @@ func TestAuthorNamespaces(t *testing.T) {
 
 	t.Run("cluster-wide allow short-circuits", func(t *testing.T) {
 		c, reviews := ssarCountingClient(func(a *authzv1.ResourceAttributes) bool { return a.Namespace == "" })
-		got := s.authorNamespaces(ctx, auth.Identity{Token: "admin"}, c, nss)
+		_, got := s.authorNamespaces(ctx, auth.Identity{Token: "admin"}, c, nss)
 		if *reviews != 1 || len(got) != 3 || !got["a"] || !got["b"] || !got["c"] {
 			t.Fatalf("got %v after %d reviews, want all true after 1", got, *reviews)
 		}
 	})
 	t.Run("per namespace", func(t *testing.T) {
 		c, reviews := ssarCountingClient(func(a *authzv1.ResourceAttributes) bool { return a.Namespace == "b" })
-		got := s.authorNamespaces(ctx, auth.Identity{Token: "tenant"}, c, nss)
+		_, got := s.authorNamespaces(ctx, auth.Identity{Token: "tenant"}, c, nss)
 		// Every kind cluster-wide, every kind in a and c, the first one in b.
 		k := len(s.authoredKinds(ctx))
 		if *reviews != 3*k+1 || got["a"] || !got["b"] || got["c"] || len(got) != 3 {
@@ -407,8 +407,8 @@ func TestAuthorNamespaces(t *testing.T) {
 		kube.PrependReactor("create", "selfsubjectaccessreviews", func(k8stesting.Action) (bool, runtime.Object, error) {
 			return true, nil, errors.New("timeout")
 		})
-		got := s.authorNamespaces(ctx, auth.Identity{Token: "flaky"}, cluster.NewClient(kube, nil, nil), nss)
-		if len(got) != 0 {
+		vms, got := s.authorNamespaces(ctx, auth.Identity{Token: "flaky"}, cluster.NewClient(kube, nil, nil), nss)
+		if len(got) != 0 || len(vms) != 0 {
 			t.Fatalf("got %v, want no verdicts", got)
 		}
 	})

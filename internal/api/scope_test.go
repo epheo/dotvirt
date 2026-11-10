@@ -882,7 +882,8 @@ func tenantView(t *testing.T, s *Server) (map[string]bool, map[string]bool) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	return visible, s.authorNamespaces(context.Background(), id, c, []string{"team-a-dev"})
+	_, author := s.authorNamespaces(context.Background(), id, c, []string{"team-a-dev"})
+	return visible, author
 }
 
 func TestANamespaceAdminSeesItsNamespaceWithoutKubeVirt(t *testing.T) {
@@ -1135,5 +1136,43 @@ func TestASweepAsksOnlyWhereABindingNamesTheCaller(t *testing.T) {
 	want := slices.Concat(slices.Repeat([]string{""}, wideSweep), slices.Repeat([]string{"mine"}, len(readKinds)-1))
 	if got := reader.take(); !slices.Equal(got, want) {
 		t.Errorf("a wide reader asked %q, want the wide sweep and the bound namespace", got)
+	}
+}
+
+// The two authoring signals: a namespace takes changes on any served tenant
+// kind, VM changes on VMs alone. Without a RoleBinding only a cluster-wide
+// grant reaches a namespace, so one with none is answered by the cluster-wide
+// reviews and never asked itself.
+func TestAuthoringAsksOnlyBoundNamespaces(t *testing.T) {
+	bus := eventbus.New()
+	st, _, _ := watchedState(t, bus, projectNS("mine"), projectNS("theirs"), userBinding("mine", "editors", "alice"))
+	waitUntil(t, "the RBAC watches", func() bool { b, ok := st.BoundNamespaces("alice", nil); return ok && b["mine"] })
+	s := scopeServer(bus)
+	s.state, s.indexBindings = st, true
+	var mu sync.Mutex
+	asked := map[string]int{}
+	kube := fake.NewSimpleClientset()
+	kube.PrependReactor("create", "selfsubjectaccessreviews", func(action k8stesting.Action) (bool, runtime.Object, error) {
+		ssar := action.(k8stesting.CreateAction).GetObject().(*authzv1.SelfSubjectAccessReview).DeepCopy()
+		a := ssar.Spec.ResourceAttributes
+		mu.Lock()
+		asked[a.Namespace]++
+		mu.Unlock()
+		ssar.Status.Allowed = a.Namespace == "mine" && a.Resource == "networkpolicies"
+		return true, ssar, nil
+	})
+	alice := auth.Identity{Username: "alice", Token: "alice-token"}
+	vms, any := s.authorNamespaces(context.Background(), alice, cluster.NewClient(kube, nil, nil), []string{"mine", "theirs"})
+	if !any["mine"] || vms["mine"] {
+		t.Errorf("mine: any = %v, vms = %v; want changes but no VM changes", any, vms)
+	}
+	if v, known := any["theirs"]; !known || v {
+		t.Errorf("theirs: any = %v; want a known no from the cluster-wide reviews", any)
+	}
+	if v, known := vms["theirs"]; !known || v {
+		t.Errorf("theirs: vms = %v; want a known no", vms)
+	}
+	if asked["theirs"] != 0 {
+		t.Errorf("asked %d reviews in a namespace no RoleBinding names alice in", asked["theirs"])
 	}
 }
