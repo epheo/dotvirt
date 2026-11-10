@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { page } from '$app/state';
 	import type { DiskProtection } from '#lib/api.js';
 	import { vmHref } from '#lib/nav.js';
 	import { copySquares, standingOf } from '#lib/replication.js';
@@ -31,6 +32,8 @@
 			.map((p) => ({ p, d: owner.get(`${p.namespace}/${p.claim}`), s: standingOf(p) })),
 	);
 	const safe = $derived(list.filter((x) => x.p.standing === 'protected').length);
+	// The disk a landing tile sent the reader to.
+	const focus = $derived(page.url.searchParams.get('focus') ?? '');
 </script>
 
 {#if list.length === 0}
@@ -42,8 +45,13 @@
 	<Card title="Your replicated disks" meta="{safe} of {list.length} survive losing a host" flush>
 		<ul>
 			{#each list as { p, d, s } (`${p.namespace}/${p.claim}`)}
+				{@const focused = `${p.namespace}/${p.claim}` === focus}
 				<li
-					class="flex flex-wrap items-center gap-x-5 gap-y-1.5 border-b border-line-soft px-card py-3 last:border-b-0"
+					class="flex flex-wrap items-center gap-x-5 gap-y-1.5 border-b border-line-soft px-card py-3 last:border-b-0 {focused
+						? 'bg-select-soft'
+						: ''}"
+					aria-current={focused ? 'true' : undefined}
+					{@attach focused && ((el) => el.scrollIntoView({ block: 'center' }))}
 				>
 					<div class="flex min-w-[220px] flex-1 flex-col">
 						{#if d}

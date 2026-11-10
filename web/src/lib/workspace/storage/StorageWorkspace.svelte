@@ -17,6 +17,7 @@
 	import ImagesTab from './ImagesTab.svelte';
 	import LibraryTab from './LibraryTab.svelte';
 	import ReplicationTab from './ReplicationTab.svelte';
+	import ReplicationTile from './ReplicationTile.svelte';
 	import SnapshotsTab from './SnapshotsTab.svelte';
 
 	// The Storage section root: one header over five tabs, each one job. The
@@ -34,6 +35,8 @@
 		),
 	);
 	const tab = $derived(storageTab(page.url.searchParams.get('tab'), available));
+	// Replication lives on its own tab; the landing tab carries its state.
+	const replicationLead = $derived(tab === available[0].id && !replicationOff());
 	const project = $derived(page.url.searchParams.get('project') ?? '');
 	const rows = $derived(project ? storage.rows.filter((r) => r.project === project) : storage.rows);
 	const disks = $derived(storage.rows.filter((r) => !r.ephemeral).length);
@@ -143,8 +146,14 @@
 			</p>
 		{/if}
 
+		{#snippet replicationTile()}<ReplicationTile {project} {namespaces} />{/snippet}
 		{#if tab === 'library'}
-			<LibraryTab {rows} {project} snapshotsLoaded={snapshots !== null} />
+			<LibraryTab
+				{rows}
+				{project}
+				snapshotsLoaded={snapshots !== null}
+				lead={replicationLead ? replicationTile : undefined}
+			/>
 		{:else if tab === 'disks'}
 			<DisksTab rows={storage.rows} {go} />
 		{:else if tab === 'images'}
@@ -154,6 +163,11 @@
 		{:else if tab === 'replication'}
 			<ReplicationTab rows={storage.rows} {project} {namespaces} {go} />
 		{:else}
+			{#if replicationLead}
+				<section aria-label="Replication" class="max-w-[360px]">
+					{@render replicationTile()}
+				</section>
+			{/if}
 			<ClassesTab {rows} />
 		{/if}
 	</div>
