@@ -462,3 +462,12 @@ test('with upload off, a boot image still comes from a URL or a registry', async
 	await expect(dialog.getByRole('textbox', { name: 'Name', exact: true })).toHaveValue('fedora-42');
 	await expect(dialog.getByRole('button', { name: 'Add boot image' })).toBeEnabled();
 });
+
+test('with no disks the library judges none', async ({ page }) => {
+	await setScenario(page, 'empty');
+	await page.goto('/storage');
+	const main = page.locator('main');
+	await expect(main.getByText('No disks yet', { exact: true })).toBeVisible();
+	await expect(main.getByText('No disks to snapshot', { exact: true })).toBeVisible();
+	await expect(main.getByText(/^Every disk/)).toHaveCount(0);
+});

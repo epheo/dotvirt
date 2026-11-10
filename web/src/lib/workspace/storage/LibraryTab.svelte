@@ -185,6 +185,11 @@
 				href: storageHref('disks', { f: 'nolm', project: p }),
 			}}
 		/>
+	{:else if !tiles.disks}
+		<CountTile
+			label="No disks yet"
+			body="Once a VM has a disk, this says whether maintenance can move it live."
+		/>
 	{:else}
 		<CountTile
 			label="Every disk can live-migrate"
@@ -193,7 +198,12 @@
 		/>
 	{/if}
 
-	{#if tiles.stale === null}
+	{#if !tiles.disks}
+		<CountTile
+			label="No disks to snapshot"
+			body="Once a VM has a disk, this counts those without a snapshot in {FRESH_DAYS} days."
+		/>
+	{:else if tiles.stale === null}
 		<CountTile
 			label={storage.snapshotsError ? 'Snapshots unavailable' : 'Reading snapshots'}
 			body={storage.snapshotsError || 'Counting the disks without a recent snapshot.'}

@@ -3,8 +3,10 @@ package controller
 import (
 	"context"
 	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -424,6 +426,8 @@ func TestPlatformRepoEnsuresManagedOrg(t *testing.T) {
 			}
 			repoCreated = true
 			w.WriteHeader(http.StatusCreated)
+		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/orgs/dotvirt/repos":
+			_, _ = w.Write([]byte(`[]`))
 		default:
 			t.Errorf("unexpected %s %s", r.Method, r.URL.Path)
 		}
@@ -447,6 +451,86 @@ func TestPlatformRepoEnsuresManagedOrg(t *testing.T) {
 	}
 }
 
+// A managed forge's org holds only dotvirt's repos: once the operand's
+// rollout has finished, the public ones are made private, once per operator
+// process. A repo that refuses is left, a failed listing is retried, and
+// neither touches the platform repo's condition.
+func TestManagedForgeReposMadePrivateOnce(t *testing.T) {
+	dv := managedForgeCR()
+	var listings int
+	listFails := true
+	var patched []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && (r.URL.Path == "/api/v1/orgs/dotvirt" || r.URL.Path == "/api/v1/repos/dotvirt/platform"):
+			_, _ = w.Write([]byte(`{}`))
+		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/orgs/dotvirt/repos":
+			listings++
+			if listFails {
+				w.WriteHeader(http.StatusBadGateway)
+				return
+			}
+			w.Header().Set("X-Total-Count", "4")
+			_, _ = w.Write([]byte(`[{"name":"platform","private":false},{"name":"team-a","private":true},{"name":"locked","private":false},{"name":"team-b","private":false}]`))
+		case r.Method == http.MethodPatch && r.URL.Path == "/api/v1/repos/dotvirt/locked":
+			w.WriteHeader(http.StatusForbidden)
+		case r.Method == http.MethodPatch:
+			body, _ := io.ReadAll(r.Body)
+			if string(body) != `{"private":true}` {
+				t.Errorf("PATCH %s body %s", r.URL.Path, body)
+			}
+			patched = append(patched, r.URL.Path)
+			_, _ = w.Write([]byte(`{}`))
+		default:
+			t.Errorf("unexpected %s %s", r.Method, r.URL.Path)
+		}
+	}))
+	defer srv.Close()
+	cred := &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{Name: install.ForgeSecretName(dv), Namespace: dv.Namespace},
+		Data:       map[string][]byte{"token": []byte("tok")},
+	}
+	rolling := &appsv1.Deployment{
+		ObjectMeta: metav1.ObjectMeta{Name: install.AppName, Namespace: dv.Namespace, Generation: 2},
+		Status:     appsv1.DeploymentStatus{ObservedGeneration: 1, Replicas: 2, UpdatedReplicas: 1, ReadyReplicas: 2},
+	}
+	c := testBuilder(t).WithObjects(dv, cred).Build()
+	r := newReconciler(c, depsOK)
+	r.forgeAPIBase = func(*dotvirtv1alpha1.Dotvirt) string { return srv.URL }
+	pass := func() {
+		t.Helper()
+		if _, err := r.reconcilePlatformRepo(context.Background(), dv, nil); err != nil {
+			t.Fatal(err)
+		}
+		if repo := cond(dv, dotvirtv1alpha1.ConditionForgeRepoReady); repo == nil || repo.Status != metav1.ConditionTrue {
+			t.Errorf("ForgeRepoReady = %+v, want True", repo)
+		}
+	}
+
+	pass()
+	if err := c.Create(context.Background(), rolling); err != nil {
+		t.Fatal(err)
+	}
+	pass()
+	if listings != 0 {
+		t.Errorf("listed %d times before the rollout finished, want none", listings)
+	}
+	rolling.Status = appsv1.DeploymentStatus{ObservedGeneration: 2, Replicas: 1, UpdatedReplicas: 1, ReadyReplicas: 1}
+	if err := c.Status().Update(context.Background(), rolling); err != nil {
+		t.Fatal(err)
+	}
+	pass()
+	listFails = false
+	pass()
+	pass()
+	if want := []string{"/api/v1/repos/dotvirt/platform", "/api/v1/repos/dotvirt/team-b"}; !slices.Equal(patched, want) {
+		t.Errorf("patched %v, want %v", patched, want)
+	}
+	if listings != 2 {
+		t.Errorf("listed the org's repos %d times, want the failed listing and one more", listings)
+	}
+}
+
 // On a fresh managed forge the org the ArgoCD webhook registers on is created
 // by the platform-repo phase, so that phase must run first: otherwise the
 // first full pass defers the hook until some later event re-runs the pipeline.
@@ -467,7 +551,7 @@ func TestManagedOrgExistsBeforeOrgWebhook(t *testing.T) {
 			w.WriteHeader(http.StatusOK)
 		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/repos/dotvirt/platform":
 			w.WriteHeader(http.StatusNotFound)
-		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/orgs/dotvirt/hooks":
+		case r.Method == http.MethodGet && (r.URL.Path == "/api/v1/orgs/dotvirt/hooks" || r.URL.Path == "/api/v1/orgs/dotvirt/repos"):
 			_, _ = w.Write([]byte(`[]`))
 		case r.Method == http.MethodPost:
 			w.WriteHeader(http.StatusCreated)
