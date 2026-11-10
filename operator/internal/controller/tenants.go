@@ -93,9 +93,6 @@ type tenantTier struct {
 // leave the render and prune deletes them.
 func (r *DotvirtReconciler) tenantAppProjects(ctx context.Context, dv *dotvirtv1alpha1.Dotvirt, argoNS string, platformNS []string) (tenantTier, error) {
 	t := tenantTier{accounts: map[string][]string{}}
-	if dv.Spec.ArgoCD.AnyTenantKinds() && install.TenantDenied(dv) == nil {
-		t.notes = append(t.notes, "tenant repos keep the listed kinds until sync impersonation is on (tenantKinds Any)")
-	}
 	var nsList corev1.NamespaceList
 	if err := r.List(ctx, &nsList, client.HasLabels{install.ProjectLabel}); err != nil {
 		return t, fmt.Errorf("list project namespaces: %w", err)
@@ -112,6 +109,13 @@ func (r *DotvirtReconciler) tenantAppProjects(ctx context.Context, dv *dotvirtv1
 	for _, o := range held.Items {
 		if !install.OwnedBy(o.GetLabels(), dv) {
 			foreign[o.GetName()] = true
+		}
+	}
+	var denied []tenancy.GroupKind
+	if dv.Spec.ArgoCD.AnyTenantKinds() {
+		if denied = install.TenantDenied(dv, r.impersonating(ctx, dv, argoNS, held.Items)); denied == nil {
+			t.notes = append(t.notes, "tenant repos keep the listed kinds until the ArgoCD instance impersonates: argocd-cm sets "+
+				install.SyncImpersonationKey+" and its AppProjects keep destinationServiceAccounts (Argo CD 2.13 or later)")
 		}
 	}
 
@@ -147,7 +151,7 @@ func (r *DotvirtReconciler) tenantAppProjects(ctx context.Context, dv *dotvirtv1
 		} else if len(p.repos) > 0 {
 			t.notes = append(t.notes, fmt.Sprintf("project %s names no single resolvable repo; its AppProject admits no source", name))
 		}
-		t.objs = append(t.objs, install.TenantAppProject(dv, argoNS, apName, name, destinations, sources))
+		t.objs = append(t.objs, install.TenantAppProject(dv, argoNS, apName, name, destinations, sources, denied))
 		t.accounts[apName] = destinations
 		rendered[apName] = true
 	}
@@ -177,7 +181,7 @@ func (r *DotvirtReconciler) tenantAppProjects(ctx context.Context, dv *dotvirtv1
 			t.sharedInUse = true
 			continue
 		}
-		t.objs = append(t.objs, install.TenantAppProject(dv, argoNS, o.GetName(), o.GetLabels()[install.ProjectLabel], nil, nil))
+		t.objs = append(t.objs, install.TenantAppProject(dv, argoNS, o.GetName(), o.GetLabels()[install.ProjectLabel], nil, nil, denied))
 	}
 	return t, nil
 }
@@ -255,4 +259,19 @@ func (r *DotvirtReconciler) setArgoReady(dv *dotvirtv1alpha1.Dotvirt, t tenantTi
 		return
 	}
 	r.setCondition(dv, dotvirtv1alpha1.ConditionArgoReady, metav1.ConditionTrue, "Ready", msg)
+}
+
+// impersonating reports whether the instance syncs dotvirt's Applications as
+// their projects' own accounts: argocd-cm sets the key, and an AppProject this
+// install applied kept destinationServiceAccounts, which an Argo CD older than
+// 2.13 neither knows nor honors (its schema prunes the field). Read where Argo
+// reads it; unknown is no.
+func (r *DotvirtReconciler) impersonating(ctx context.Context, dv *dotvirtv1alpha1.Dotvirt, argoNS string, held []unstructured.Unstructured) bool {
+	if set, err := r.impersonationConfigured(ctx, argoNS); err != nil || !set {
+		return false
+	}
+	return slices.ContainsFunc(held, func(o unstructured.Unstructured) bool {
+		accounts, _, _ := unstructured.NestedSlice(o.Object, "spec", "destinationServiceAccounts")
+		return install.OwnedBy(o.GetLabels(), dv) && len(accounts) > 0
+	})
 }

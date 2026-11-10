@@ -104,16 +104,30 @@ func (g GroupKind) Covers(group, kind string) bool {
 }
 
 // deniedBase is what no tenant repo applies even when it may apply any
-// namespaced kind: grants and quotas, which a merge would use to widen the
-// project, and what installs or configures with rights beyond it (OLM, which
-// installs operators with cluster rights; KubeVirt's own configuration).
+// namespaced kind:
+//   - grants and quotas, which a merge would use to widen the project, in both
+//     RBAC APIs (OpenShift's authorization.openshift.io still writes real
+//     bindings);
+//   - what installs or configures with rights beyond the project: OLM, which
+//     installs operators with cluster rights; KubeVirt's own configuration;
+//     Argo CD's own objects, which an instance reading Applications in any
+//     namespace would run;
+//   - controllers that act with their own cluster rights on a namespaced
+//     request that can name elsewhere: external secrets against a cluster
+//     store, Forklift plans with a target namespace, Velero restores, template
+//     instances. A provider names the others it runs (TenantKindsDenied).
 var deniedBase = []GroupKind{
-	{"rbac.authorization.k8s.io", "Role"},
-	{"rbac.authorization.k8s.io", "RoleBinding"},
+	{"rbac.authorization.k8s.io", "*"},
+	{"authorization.openshift.io", "*"},
 	{"", "ResourceQuota"},
 	{"", "LimitRange"},
 	{"operators.coreos.com", "*"},
 	{"kubevirt.io", "KubeVirt"},
+	{"argoproj.io", "*"},
+	{"external-secrets.io", "*"},
+	{"forklift.konveyor.io", "*"},
+	{"velero.io", "*"},
+	{"template.openshift.io", "TemplateInstance"},
 }
 
 // DeniedTenantKinds is the deny list of a tenant repo that may apply any

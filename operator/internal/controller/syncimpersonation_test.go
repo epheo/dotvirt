@@ -788,3 +788,56 @@ func TestArgoMatch(t *testing.T) {
 		}
 	}
 }
+
+// Asking impersonation off with tenantKinds Any closes the window: the pass
+// writes the project's AppProject back to the listed kinds before it takes the
+// setting off the ArgoCD instance, so a tenant repo never applies any kind as
+// the controller's account.
+func TestAnyTenantKindsFlipBackBeforeTheSettingGoes(t *testing.T) {
+	dv := optIn(testCR(), false)
+	dv.Spec.ArgoCD.TenantKinds = "Any"
+	var n atomic.Int64
+	var order []string
+	f := reviews(granted(map[string][]string{"dotvirt-p-team-a": {"a"}}), &n)
+	f.Patch = func(ctx context.Context, cl client.WithWatch, obj client.Object, patch client.Patch, opts ...client.PatchOption) error {
+		switch {
+		case obj.GetName() == "dotvirt-p-team-a":
+			order = append(order, "appproject")
+		case obj.GetName() == "argocd" && obj.GetObjectKind().GroupVersionKind() == install.ArgoCDGVK:
+			order = append(order, "instance")
+		}
+		return cl.Patch(ctx, obj, patch, opts...)
+	}
+	c := testBuilder(t).WithObjects(dv, argoCDInstance(nil), projectNS("a", "team-a", "dotvirt/team-a.git")).
+		WithInterceptorFuncs(f).WithReturnManagedFields().Build()
+	r := newReconciler(c, depsOK)
+	reconcileOnce(t, r, dv)
+	// The argocd-operator copies the key the operator set into argocd-cm: on.
+	if err := c.Create(context.Background(), argoCM(true)); err != nil {
+		t.Fatal(err)
+	}
+	reconcileOnce(t, r, getCR(t, c, dv))
+	blacklisted := func() bool {
+		ap := argoObj("AppProject", "", "", nil)
+		if !exists(t, c, ap, "argocd", "dotvirt-p-team-a") {
+			t.Fatal("AppProject missing")
+		}
+		_, ok := ap.Object["spec"].(map[string]any)["namespaceResourceBlacklist"]
+		return ok
+	}
+	if !blacklisted() {
+		t.Fatal("impersonating with tenantKinds Any: the AppProject carries no deny list")
+	}
+
+	order = nil
+	stored := setSpec(t, c, dv, func(d *dotvirtv1alpha1.Dotvirt) { d.Spec.ArgoCD.SyncImpersonation.Enabled = new(false) })
+	reconcileOnce(t, r, stored)
+	if blacklisted() {
+		t.Error("asked off: the AppProject still carries the deny list")
+	}
+	first := slices.Index(order, "appproject")
+	last := slices.Index(order, "instance")
+	if first < 0 || last < 0 || first > last {
+		t.Errorf("write order %v: the AppProject must go back to the listed kinds before the setting is removed", order)
+	}
+}

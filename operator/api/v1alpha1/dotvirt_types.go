@@ -117,7 +117,10 @@ type ArgoCDSpec struct {
 	// +optional
 	TenantKinds string `json:"tenantKinds,omitempty"`
 	// TenantKindsDenied adds kinds no tenant repo may apply under Any; it never
-	// removes one. Kind "*" denies the whole group.
+	// removes one. Kind "*" denies the whole group. List here every operator
+	// the cluster runs that acts with its own rights on a namespaced request
+	// that can name another namespace or a cluster-wide resource: a tenant
+	// repo could otherwise reach past its project through it.
 	// +optional
 	TenantKindsDenied []GroupKind `json:"tenantKindsDenied,omitempty"`
 }
