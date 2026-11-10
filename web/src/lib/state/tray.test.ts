@@ -76,6 +76,15 @@ describe('tray history reads', () => {
 		expect(api.api.history).toHaveBeenCalledTimes(1);
 	});
 
+	it('asks nothing of a project whose whole history the caller may not read', async () => {
+		vi.useFakeTimers();
+		tray.remember({ project: 'web', prNumber: 40, title: 't', prURL: 'u' });
+		tray.update([], mergedFeed, () => false);
+		await vi.advanceTimersByTimeAsync(120_000);
+		expect(api.api.history).not.toHaveBeenCalled();
+		expect(tray.followed[0].mergedAt).toBeDefined();
+	});
+
 	it('stops asking once the history answers 403', async () => {
 		vi.useFakeTimers();
 		tray.remember({ project: 'platform', prNumber: 6, title: 't', prURL: 'u' });
