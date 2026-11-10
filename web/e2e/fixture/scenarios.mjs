@@ -1581,24 +1581,25 @@ const kindrepo = {
 	capabilities: { 'web-prod': { repoRead: false, project: { repoRead: false } } },
 };
 
-// --- forkpr: team-web's one open PR comes from a fork ---
+// --- forkpr: team-db's one open PR comes from a fork ---
 // It has no branch in the repo: listed by its poster, reviewed in the forge.
+// It sorts first, ahead of team-web's reviewable PR.
 const forkpr = {
 	...base,
 	name: 'forkpr',
 	inventory: {
 		...base.inventory,
 		proposals: [
-			...base.inventory.proposals.filter((p) => p.project !== 'team-web'),
 			{
-				project: 'team-web',
+				project: 'team-db',
 				prNumber: 43,
-				prURL: 'https://forge.example/dotvirt/team-web/pulls/43',
-				title: 'web-1: resize from a fork',
+				prURL: 'https://forge.example/dotvirt/team-db/pulls/43',
+				title: 'db-1: resize from a fork',
 				by: 'mallory',
 				approvals: 0,
 				requiredApprovals: 1,
 			},
+			...base.inventory.proposals.filter((p) => p.project !== 'team-db'),
 		],
 	},
 };

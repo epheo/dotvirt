@@ -50,6 +50,11 @@ export function sameReview(a: ReviewSel | null, b: ReviewSel | null): boolean {
 
 // Review-state summary for a PR: approvals against the branch rule when it
 // is known; zero values are unknown planes and render nothing.
+// Whether the app reviews p: a PR with a branch in the repo (never a fork's),
+// the caller's own or in a repo they read. Any other opens in the forge.
+export const reviewableHere = (p: Proposal, repoRead: (project: string) => { ok: boolean }) =>
+	!!p.branch && (p.mine || repoRead(p.project).ok);
+
 export function approvalLine(p: Proposal): { tone: 'ok' | 'warn'; text: string } | null {
 	const req = p.requiredApprovals ?? 0;
 	const got = p.approvals ?? 0;

@@ -13,6 +13,7 @@
 		itemKey,
 		parseReview,
 		prKey,
+		reviewableHere,
 		reviewURL,
 		sameReview,
 		type ReviewSel,
@@ -312,12 +313,8 @@
 				);
 				if (p) return { kind: 'proposal' as const, proposal: p };
 			}
-			// The first in view, unless only the forge opens it: then the caller's own.
-			const first = visibleProposals[0];
-			const open =
-				first && (first.mine || repoRead(first.project).ok)
-					? first
-					: visibleProposals.find((p) => p.mine);
+			// The first in view the app reviews; the forge opens the others.
+			const open = visibleProposals.find((p) => reviewableHere(p, repoRead));
 			if (open) return { kind: 'proposal' as const, proposal: open };
 			return null;
 		}

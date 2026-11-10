@@ -52,14 +52,18 @@ test('a PR from a fork is reviewed in the forge, and leaves no VM waiting', asyn
 	await expect(main.getByText('by mallory')).toBeVisible();
 	await expect(main.getByRole('button', { name: /PR #43/ })).toHaveCount(0);
 
-	// Reached by URL, the review says where it is.
-	await page.goto('/changes?project=team-web&pr=43');
-	await expect(
-		main.getByText('This pull request has no branch in this repository; review it in the forge.'),
-	).toBeVisible();
+	// In review opens on the first PR the app reviews, past the fork's.
+	const note = 'This pull request has no branch in this repository; review it in the forge.';
+	await page.goto('/changes?tab=review');
+	await expect(main.getByText('Excluded', { exact: true })).toBeVisible();
+	await expect(main.getByText(note)).toHaveCount(0);
+
+	// Reached by URL, the fork's review says where it is.
+	await page.goto('/changes?project=team-db&pr=43');
+	await expect(main.getByText(note)).toBeVisible();
 
 	// The VM's Changes tab settles without a review it will never load.
-	await page.goto('/vm/web-prod/web-2?tab=changes');
+	await page.goto('/vm/db-prod/db-1?tab=changes');
 	await expect(main.getByText('No open pull request touches this VM.')).toBeVisible();
 });
 
