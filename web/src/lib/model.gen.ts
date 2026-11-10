@@ -70,7 +70,8 @@ export interface ClusterCaps {
   baselineAdminNetworkPolicy: ObjectCaps;
   /**
    * NamespaceCreate is a new namespace, for New Namespace and New Project;
-   * VMNetwork gives it a primary VM Network, GrantAdmin names its owners.
+   * VMNetwork gives it a primary VM Network, false on a cluster that serves
+   * no UserDefinedNetwork; GrantAdmin names its owners.
    */
   namespaceCreate: boolean;
   vmNetwork: boolean;

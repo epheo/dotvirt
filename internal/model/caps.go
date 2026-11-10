@@ -50,7 +50,8 @@ type ClusterCaps struct {
 	AdminNetworkPolicy         ObjectCaps `json:"adminNetworkPolicy"`
 	BaselineAdminNetworkPolicy ObjectCaps `json:"baselineAdminNetworkPolicy"`
 	// NamespaceCreate is a new namespace, for New Namespace and New Project;
-	// VMNetwork gives it a primary VM Network, GrantAdmin names its owners.
+	// VMNetwork gives it a primary VM Network, false on a cluster that serves
+	// no UserDefinedNetwork; GrantAdmin names its owners.
 	NamespaceCreate bool `json:"namespaceCreate"`
 	VMNetwork       bool `json:"vmNetwork"`
 	GrantAdmin      bool `json:"grantAdmin"`
