@@ -411,16 +411,25 @@ trap 'rc=$?; kill ${PF_PIDS} 2>/dev/null || true; [ ${rc} -ne 0 ] && diagnostics
 BASE="http://127.0.0.1:18080"
 FORGE="http://127.0.0.1:13000"
 retry "dotvirt healthz" 120 curl -fsS --max-time 10 "${BASE}/api/healthz"
-# The node's network is where a HostNetwork router or Gateway sits: the operand
-# NetworkPolicy admits it only through openshift-host-network's policy group,
-# without which such an edge answers 502. The ceiling outlasts a few hung execs.
-host_reaches_dotvirt() {
-	local ip
-	ip="$(kc -n dotvirt get pod -l app=dotvirt --field-selector=status.phase=Running \
-		-o jsonpath='{.items[0].status.podIP}')" && [ -n "${ip}" ] \
-		&& pexec curl -fsS -o /dev/null --max-time 10 "http://${ip}:8080/api/healthz"
+# A HostNetwork edge (portail, a router) dials the Service from the node's
+# network. OVN-Kubernetes SNATs that to the gateway router's join IP, which the
+# operand NetworkPolicy admits only through openshift-host-network's policy
+# group: without it the edge answers 502. A pod IP would not tell, as a node's
+# own traffic to its local pods is admitted whatever the policy. nsenter, not
+# podman exec: no exec session to hang.
+NODE_NET="/proc/$(podman inspect -f '{{.State.Pid}}' "${NAME}")/ns/net"
+SVC_IP="$(kc -n dotvirt get svc dotvirt -o jsonpath='{.spec.clusterIP}')"
+HOST_GROUP=policy-group.network.openshift.io/host-network
+node_reaches_dotvirt() {
+	nsenter --net="${NODE_NET}" curl -fsS -o /dev/null --max-time 10 "http://${SVC_IP}:8080/api/healthz"
 }
-retry "dotvirt answers the node's host network" 300 host_reaches_dotvirt
+node_refused() { ! node_reaches_dotvirt; }
+retry "dotvirt answers the node's host network" 120 node_reaches_dotvirt
+# The check proves itself: without the group the same call must fail.
+kc label namespace openshift-host-network "${HOST_GROUP}-" >/dev/null
+retry "the node's host network refused without its policy group" 120 node_refused
+kc label namespace openshift-host-network "${HOST_GROUP}=" >/dev/null
+retry "dotvirt answers the node's host network again" 120 node_reaches_dotvirt
 
 # Caller token: the loop runs as a real (admin) user, exactly like production.
 kc -n dotvirt create serviceaccount e2e-admin --dry-run=client -o yaml | kc apply -f -
