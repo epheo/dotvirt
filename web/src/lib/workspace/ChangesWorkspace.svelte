@@ -212,7 +212,14 @@
 		const seen = new Set(out.map((p) => prKey(p.project, p.prNumber)));
 		for (const [project, r] of Object.entries(results)) {
 			if (!r.prURL || !r.prNumber || seen.has(prKey(project, r.prNumber))) continue;
-			out.push({ project, prNumber: r.prNumber, prURL: r.prURL, title: r.title ?? '', mine: true });
+			out.push({
+				project,
+				prNumber: r.prNumber,
+				prURL: r.prURL,
+				title: r.title ?? '',
+				branch: r.branch,
+				mine: true,
+			});
 		}
 		return out.sort((a, b) => a.project.localeCompare(b.project));
 	});
