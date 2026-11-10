@@ -402,8 +402,9 @@ func TestRefusalWordingFollowsTheAction(t *testing.T) {
 	}
 }
 
-// A project's template library is its repo's content: listed and deployed
-// from only by a caller who may read the repo. The shared library stays open.
+// A project's template library is its repo's content: listed, deployed from,
+// edited and saved into only by a caller who may read the repo. The shared
+// library stays open.
 func TestTemplateLibrariesAreRepoReads(t *testing.T) {
 	fc := newFakeCluster(t)
 	fc.readsVMs = tenantReadsTeamA
@@ -430,6 +431,14 @@ func TestTemplateLibrariesAreRepoReads(t *testing.T) {
 		body := fmt.Sprintf(`{"namespace":"team-a-dev","template":"web","library":%q}`, library)
 		return do(s, tenantToken, http.MethodPost, "/api/templates/deploy", body).Code
 	}
+	writes := map[string]func() int{
+		"edit": func() int {
+			return do(s, tenantToken, http.MethodPut, "/api/templates", `{"library":"team-a","name":"web","yaml":"kind: VirtualMachineTemplate"}`).Code
+		},
+		"save": func() int {
+			return do(s, tenantToken, http.MethodPost, "/api/templates", `{"sourceNamespace":"team-a-dev","sourceName":"web"}`).Code
+		},
+	}
 
 	if got := libraries(tenantToken); got != "platform/rhel9,team-a/web" {
 		t.Errorf("a caller reading the repo lists %s", got)
@@ -437,6 +446,11 @@ func TestTemplateLibrariesAreRepoReads(t *testing.T) {
 	for _, lib := range []string{"", "team-a", "platform"} {
 		if code := deploy(lib); code == http.StatusForbidden {
 			t.Errorf("a caller reading the repo deploys from %q: 403", lib)
+		}
+	}
+	for name, write := range writes {
+		if code := write(); code == http.StatusForbidden {
+			t.Errorf("a caller reading the repo may not %s its library: 403", name)
 		}
 	}
 
@@ -447,6 +461,11 @@ func TestTemplateLibrariesAreRepoReads(t *testing.T) {
 	for _, lib := range []string{"", "team-a"} {
 		if code := deploy(lib); code != http.StatusForbidden {
 			t.Errorf("a caller refused the repo deploys from %q: %d", lib, code)
+		}
+	}
+	for name, write := range writes {
+		if code := write(); code != http.StatusForbidden {
+			t.Errorf("a caller refused the repo may %s its library: %d", name, code)
 		}
 	}
 	if code := deploy("platform"); code == http.StatusForbidden {

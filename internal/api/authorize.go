@@ -751,7 +751,9 @@ func apiVersionOf(raw string) string {
 
 // authorizeLibrary gates a write to a project's template library, which no
 // gate weighs: blueprints Argo never applies, so the project's authoring
-// right (projectAuthor) stands for it.
+// right (projectAuthor) stands for it. The library is the repo's content and
+// a staged edit renders the file it replaces, so a write needs the repo read
+// (gateRepo) too.
 func (s *Server) authorizeLibrary(w http.ResponseWriter, r *http.Request, sc scope) bool {
 	ok, err := s.projectAuthor(r.Context(), sc.id, sc.cluster, sc.proj.Namespaces)
 	if err != nil {
@@ -763,7 +765,7 @@ func (s *Server) authorizeLibrary(w http.ResponseWriter, r *http.Request, sc sco
 			model.ErrForbidden, sc.proj.Name))
 		return false
 	}
-	return true
+	return s.gateRepo(w, r, sc, "")
 }
 
 // projectAuthor is authoring rights in any of nss: the gate on a project's
