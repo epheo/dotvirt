@@ -656,8 +656,8 @@ func (d *planeDraft) StageSyncAccess(_ auth.Identity, commit, target project.Pro
 	return stagedView, nil
 }
 
-func (d *planeDraft) StagePublishing(_ auth.Identity, commit, target project.ProjectInfo, pt changeset.PublishTarget) (model.DraftView, error) {
-	d.record("StagePublishing "+commit.Name+","+target.Name+" "+pt.Namespace, nil)
+func (d *planeDraft) StagePublishing(_ auth.Identity, commit, target project.ProjectInfo, _ changeset.PublishTarget) (model.DraftView, error) {
+	d.record("StagePublishing "+commit.Name+","+target.Name, nil)
 	return stagedView, nil
 }
 
@@ -703,8 +703,8 @@ func (d *planeDraft) AdoptNeeds(project.ProjectInfo, project.ProjectInfo, []stri
 func (d *planeDraft) SyncAccessNeeds(project.ProjectInfo, project.ProjectInfo) ([]changeset.Access, error) {
 	return nil, nil
 }
-func (d *planeDraft) PublishingNeeds(project.ProjectInfo, project.ProjectInfo, changeset.PublishTarget) ([]changeset.Access, error) {
-	return nil, nil
+func (d *planeDraft) PublishingNeeds(project.ProjectInfo, project.ProjectInfo, changeset.PublishTarget) (changeset.PublishPlan, []changeset.Access, error) {
+	return changeset.PublishPlan{}, nil, nil
 }
 func (d *planeDraft) ReleaseNeeds(project.ProjectInfo, project.ProjectInfo) ([]changeset.Access, []string, error) {
 	return nil, d.releaseResidue, nil

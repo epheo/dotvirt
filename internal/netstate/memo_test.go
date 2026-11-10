@@ -208,7 +208,7 @@ func networkViews(t testing.TB, s *Snapshot) map[string]string {
 	}
 	for _, ns := range []string{scaleNS(5), scaleNS(1005), scaleNS(3000), scaleNS(3001), scaleNS(4999)} {
 		key, display := s.primaryDomain(ns)
-		views["primary "+ns] = fmt.Sprint(key, display, s.DeclaresPrimaryUDN(ns))
+		views["primary "+ns] = fmt.Sprint(key, display, s.declaresPrimaryUDN(ns))
 	}
 	return views
 }

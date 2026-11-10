@@ -202,7 +202,7 @@ func run() error {
 	if argoSnapshot != nil {
 		pruneSource = argoSnapshot
 	}
-	publishing := publish.Settings{Domain: cfg.PublishDomain, GatewayClass: cfg.PublishGatewayClass, Issuer: cfg.PublishIssuer}
+	publishing := publish.Settings{Domain: cfg.PublishDomain, GatewayClass: cfg.PublishGatewayClass, Issuer: cfg.PublishIssuer, ProjectLabel: cfg.ProjectLabel}
 	coordinator := changeset.New(draftStore, repos, forgeFactory, resyncer,
 		liveVMs{clusterSnapshot}, pruneSource, cfg.BaseBranch, cfg.ProposedBranch).WithSyncNamespace(cfg.ArgoNamespace).
 		WithTenantKinds(cfg.TenantKinds).WithUsersOpeningPRs(cfg.UsersOpenPRs).WithPublishing(publishing)

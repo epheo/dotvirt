@@ -85,7 +85,7 @@
 {:else if m?.kind === 'syncAccess'}
 	<SyncAccessModal project={m.project} onclose={close} />
 {:else if m?.kind === 'publishing'}
-	<PublishingModal project={m.project} namespace={m.namespace} onclose={close} />
+	<PublishingModal project={m.project} onclose={close} />
 {:else if m?.kind === 'deleteObject'}
 	<DeleteObjectModal
 		resource={m.resource}

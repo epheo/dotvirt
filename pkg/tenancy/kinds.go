@@ -37,7 +37,7 @@ var Kinds = []Kind{
 	{Group: "k8s.cni.cncf.io", Version: "v1", Kind: "NetworkAttachmentDefinition", Resource: "network-attachment-definitions", Platform: true},
 	// A project's owners: the namespace-admin grant.
 	{Group: "rbac.authorization.k8s.io", Version: "v1", Kind: "RoleBinding", Resource: "rolebindings", Platform: true},
-	// Publishing: a namespace's Gateway and its certificate. The platform
+	// Publishing: a project's Gateway and its certificate. The platform
 	// holds them: a project that wrote its own listener could claim any
 	// hostname.
 	{Group: "gateway.networking.k8s.io", Version: "v1", Kind: "Gateway", Resource: "gateways", Platform: true},

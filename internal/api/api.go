@@ -145,8 +145,8 @@ type Draft interface {
 	// StageSyncAccess stages target's grants to its Argo sync account into the
 	// platform draft: the PR a project made before sync impersonation needs.
 	StageSyncAccess(id auth.Identity, commitProj, target project.ProjectInfo) (model.DraftView, error)
-	// StagePublishing stages turning publishing on in one of target's
-	// namespaces into the platform draft.
+	// StagePublishing stages what target's publishing lacks into the
+	// platform draft.
 	StagePublishing(id auth.Identity, commitProj, target project.ProjectInfo, pt changeset.PublishTarget) (model.DraftView, error)
 	// Resync runs with dotvirt's SA (Argo operations carry no user context);
 	// the implementation weighs what the sync applies under id's own token
@@ -159,7 +159,7 @@ type Draft interface {
 	NamespaceNeeds(commitProj, joinProj project.ProjectInfo, spec json.RawMessage) ([]changeset.Access, error)
 	AdoptNeeds(commitProj, target project.ProjectInfo, owners []string) ([]changeset.Access, error)
 	SyncAccessNeeds(commitProj, target project.ProjectInfo) ([]changeset.Access, error)
-	PublishingNeeds(commitProj, target project.ProjectInfo, pt changeset.PublishTarget) ([]changeset.Access, error)
+	PublishingNeeds(commitProj, target project.ProjectInfo, pt changeset.PublishTarget) (changeset.PublishPlan, []changeset.Access, error)
 	ReleaseNeeds(commitProj, target project.ProjectInfo) (need []changeset.Access, residue []string, err error)
 	EnableDRSNeeds(proj project.ProjectInfo, spec json.RawMessage) ([]changeset.Access, error)
 	DisableDRSNeeds(proj project.ProjectInfo) ([]changeset.Access, error)

@@ -165,23 +165,6 @@ export interface NamespaceCaps {
   networkPolicy: ObjectCaps;
   egressFirewall: ObjectCaps;
   project: ProjectCaps;
-  /**
-   * Publishing turns publishing on here: the platform repo gains this
-   * namespace's Gateway, its certificate and its HTTPRoute grant. False
-   * once on, on an install without publishing, and on a namespace with its
-   * own VM Network.
-   */
-  publishing: boolean;
-  /**
-   * PublishingWaits: the caller could turn publishing on here but for the
-   * namespace's own VM Network, which waits on a newer portail.
-   */
-  publishingWaits?: boolean;
-  /**
-   * PublishingOn: the platform repo holds this namespace's publishing as
-   * rendered, told only to a caller who may list gateways here.
-   */
-  publishingOn?: boolean;
 }
 /**
  * ProjectCaps are the actions on a namespace's whole project, over every one
@@ -219,6 +202,29 @@ export interface ProjectCaps {
    * RoleBindings; false once it holds them, or with no sync namespace.
    */
   syncAccess: boolean;
+  /**
+   * Publishing stages what the project's publishing lacks: its Gateway and
+   * certificate, or a reached namespace's HTTPRoute grant. False when
+   * nothing is missing, on an install without publishing, and while its
+   * network waits (PublishingWaits).
+   */
+  publishing: boolean;
+  /**
+   * PublishingWaits: the caller could stage it but for the project's VM
+   * Network, which waits on a newer portail.
+   */
+  publishingWaits?: boolean;
+  /**
+   * PublishingOn: git holds the project's Gateway, told only to a caller
+   * who may list gateways in its namespace.
+   */
+  publishingOn?: boolean;
+  /**
+   * PublishingReach is the namespaces its Gateway serves, those on its
+   * namespace's network; one with a VM Network of its own is not among
+   * them. Set with PublishingOn or an allowed stage.
+   */
+  publishingReach?: string[];
 }
 
 //////////

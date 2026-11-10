@@ -204,20 +204,10 @@ func (s *Server) handleProjectSyncAccess(w http.ResponseWriter, r *http.Request)
 	respond(w, view, err)
 }
 
-// handlePublishing stages turning publishing on in one of a project's
-// namespaces: its Gateway, its certificate and its HTTPRoute grant land in the
-// platform repo, each weighed by the coordinator as the caller.
+// handlePublishing stages what a project's publishing lacks: its Gateway,
+// its certificate and the HTTPRoute grant of each namespace it reaches land in
+// the platform repo, each weighed by the coordinator as the caller.
 func (s *Server) handlePublishing(w http.ResponseWriter, r *http.Request) {
-	_, body, ok := readBody[struct {
-		Namespace string `json:"namespace"`
-	}](w, r, false)
-	if !ok {
-		return
-	}
-	if body.Namespace == "" {
-		fail(w, invalid(errors.New("the namespace to publish from is required")))
-		return
-	}
 	if !s.gateServed(w, r, s.publishingKinds()...) {
 		return
 	}
@@ -229,7 +219,7 @@ func (s *Server) handlePublishing(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	view, err := s.draft.StagePublishing(plat.id, plat.proj, target, s.publishTarget(body.Namespace))
+	view, err := s.draft.StagePublishing(plat.id, plat.proj, target, s.publishTarget(target))
 	respond(w, view, err)
 }
 
@@ -242,13 +232,19 @@ func (s *Server) publishingKinds() []model.Kind {
 	return []model.Kind{model.KindGateway}
 }
 
-// publishTarget is ns as the snapshots see it.
-func (s *Server) publishTarget(ns string) changeset.PublishTarget {
-	return changeset.PublishTarget{
-		Namespace:      ns,
-		PrimaryNetwork: s.netstate != nil && s.netstate.DeclaresPrimaryUDN(ns),
-		RoutesGranted:  s.state != nil && s.state.AdminWritesRoutes(),
+// publishTarget is the project's namespaces as the snapshots see them.
+func (s *Server) publishTarget(p project.ProjectInfo) changeset.PublishTarget {
+	pt := changeset.PublishTarget{
+		Networks:      map[string]string{},
+		RoutesGranted: s.state != nil && s.state.AdminWritesRoutes(),
 	}
+	for _, ns := range p.Namespaces {
+		pt.Networks[ns] = changeset.DefaultNetwork
+		if s.netstate != nil {
+			pt.Networks[ns] = s.netstate.PrimaryNetwork(ns)
+		}
+	}
+	return pt
 }
 
 // handleReleaseProject dissolves a repoless project back into a plain
