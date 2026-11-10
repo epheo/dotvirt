@@ -357,8 +357,8 @@ func findNetwork(nets []model.Network, key string) (model.Network, bool) {
 // scopeNetworkRules applies the policy plane's visibility to one network's
 // rules. A binding governs the caller's own VMs, so it stays, redacted like
 // the effective view. A peer rule in another namespace shows only where the
-// caller sees that namespace; a cluster rule naming these VMs governs them
-// too, so it stays, redacted. drift attaches each kept policy's apply state
+// policy plane lists it, a project namespace the caller sees; a cluster rule
+// naming these VMs governs them too, so it stays, redacted. drift attaches each kept policy's apply state
 // first, so the redactor sees, and hides, a cluster rule's apply error.
 func scopeNetworkRules(in model.NetworkRules, v callerView, drift func(*model.Policy), redact func(*model.Policy, *model.PolicyRuleView)) model.NetworkRules {
 	for i := range in.Applies {
@@ -367,7 +367,7 @@ func scopeNetworkRules(in model.NetworkRules, v callerView, drift func(*model.Po
 	}
 	reaches := make([]model.PeerRule, 0, len(in.Reaches))
 	for _, pr := range in.Reaches {
-		if ns := pr.Policy.Namespace; ns != "" && !v.shows(pr.Policy.Backing, ns) {
+		if ns := pr.Policy.Namespace; ns != "" && !v.showsInProject(pr.Policy.Backing, ns) {
 			continue
 		}
 		drift(&pr.Policy)

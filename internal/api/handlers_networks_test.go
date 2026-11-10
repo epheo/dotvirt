@@ -345,8 +345,9 @@ func TestSharedNetworksFollowTheNADRight(t *testing.T) {
 }
 
 // Through the routes: the Networking and Security views list namespaced
-// objects in project namespaces only, to an admin too. Cluster-scoped ones
-// stay, and a shared network names only the project namespaces it reaches.
+// objects in project namespaces only, to an admin too: networks, rules, and a
+// network's peer rules. Cluster-scoped ones stay, and a shared network names
+// only the project namespaces it reaches.
 func TestViewsListProjectNamespacesOnly(t *testing.T) {
 	fc := newFakeCluster(t)
 	fc.namespaces = append(fc.namespaces, corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "argocd"}})
@@ -382,6 +383,20 @@ func TestViewsListProjectNamespacesOnly(t *testing.T) {
 			"spec":     map[string]any{"podSelector": map[string]any{}},
 		}
 	}
+	// A rule elsewhere whose other end is team-a-dev: a peer rule on vm-net.
+	reach := func(ns string) map[string]any {
+		return map[string]any{
+			"apiVersion": "networking.k8s.io/v1", "kind": "NetworkPolicy",
+			"metadata": map[string]any{"name": "reach-" + ns, "namespace": ns, "resourceVersion": "1"},
+			"spec": map[string]any{
+				"podSelector": map[string]any{},
+				"policyTypes": []any{"Egress"},
+				"egress": []any{map[string]any{"to": []any{map[string]any{
+					"namespaceSelector": map[string]any{"matchLabels": map[string]any{"dotvirt.io/project": "team-a"}},
+				}}}},
+			},
+		}
+	}
 	anpGV := "policy.networking.k8s.io/v1alpha1"
 	fc.on(http.MethodGet, "/apis/k8s.ovn.org/v1", resources("k8s.ovn.org/v1", "clusteruserdefinednetworks", "userdefinednetworks"))
 	fc.on(http.MethodGet, "/apis/k8s.cni.cncf.io/v1", resources("k8s.cni.cncf.io/v1", "network-attachment-definitions"))
@@ -397,7 +412,7 @@ func TestViewsListProjectNamespacesOnly(t *testing.T) {
 	fc.on(http.MethodGet, "/apis/k8s.cni.cncf.io/v1/network-attachment-definitions", unstructuredList("k8s.cni.cncf.io/v1", "NetworkAttachmentDefinition",
 		nad("team-a-dev"), nad("argocd")))
 	fc.on(http.MethodGet, "/apis/networking.k8s.io/v1/networkpolicies", unstructuredList("networking.k8s.io/v1", "NetworkPolicy",
-		netpol("team-a-dev"), netpol("argocd")))
+		netpol("team-a-dev"), netpol("argocd"), reach("orphans-ns"), reach("argocd")))
 	fc.on(http.MethodGet, "/apis/"+anpGV+"/adminnetworkpolicies", unstructuredList(anpGV, "AdminNetworkPolicy", map[string]any{
 		"apiVersion": anpGV, "kind": "AdminNetworkPolicy",
 		"metadata": map[string]any{"name": "lockdown", "resourceVersion": "1"},
@@ -409,7 +424,7 @@ func TestViewsListProjectNamespacesOnly(t *testing.T) {
 	t.Cleanup(cancel)
 	ns.Run(ctx)
 	s.netstate = ns
-	for deadline := time.Now().Add(10 * time.Second); len(ns.Catalog().Networks) < 3 || len(ns.Policies()) < 3; time.Sleep(10 * time.Millisecond) {
+	for deadline := time.Now().Add(10 * time.Second); len(ns.Catalog().Networks) < 3 || len(ns.Policies()) < 5; time.Sleep(10 * time.Millisecond) {
 		if time.Now().After(deadline) {
 			t.Fatalf("netstate never synced: networks %+v, policies %+v", ns.Catalog().Networks, ns.Policies())
 		}
@@ -429,6 +444,16 @@ func TestViewsListProjectNamespacesOnly(t *testing.T) {
 	}
 	wantStatus(t, do(s, adminToken, http.MethodGet, "/api/networks/rules?network=argocd/r-drbd-l2", ""), http.StatusNotFound)
 
+	rec = do(s, adminToken, http.MethodGet, "/api/networks/rules?network=team-a-dev/vm-net", "")
+	wantStatus(t, rec, http.StatusOK)
+	var peers []string
+	for _, pr := range decodeBody[model.NetworkRules](t, rec).Reaches {
+		peers = append(peers, pr.Policy.Name)
+	}
+	if strings.Join(peers, ",") != "reach-orphans-ns" {
+		t.Errorf("vm-net's peer rules = %v, want reach-orphans-ns alone", peers)
+	}
+
 	rec = do(s, adminToken, http.MethodGet, "/api/policies", "")
 	wantStatus(t, rec, http.StatusOK)
 	var pols []string
@@ -436,7 +461,7 @@ func TestViewsListProjectNamespacesOnly(t *testing.T) {
 		pols = append(pols, p.Name)
 	}
 	slices.Sort(pols)
-	if strings.Join(pols, ",") != "deny-team-a-dev,lockdown" {
-		t.Errorf("policies = %v, want deny-team-a-dev and lockdown", pols)
+	if strings.Join(pols, ",") != "deny-team-a-dev,lockdown,reach-orphans-ns" {
+		t.Errorf("policies = %v, want deny-team-a-dev, lockdown and reach-orphans-ns", pols)
 	}
 }
