@@ -7,6 +7,7 @@ import type {
 	DiskProtection,
 	ReplicatedVolume,
 	ReplicationPool,
+	StorageClassInfo,
 	VM,
 } from '#lib/api.js';
 import { size, type DiskRow } from '#lib/storage.js';
@@ -204,11 +205,12 @@ export type TierRoom = {
 	pools: number;
 	totalBytes: number;
 	usedBytes: number;
+	room: number[]; // each host's room for one new copy, largest first
 	largest: number; // the largest new two-copy disk
 };
 
-// Placement wants each copy on its own host, so the room for a two-copy disk
-// is the second-roomiest host's.
+// Placement wants each copy on its own host, so the room for an N-copy disk
+// is the Nth-roomiest host's.
 export function tierRooms(pools: ReplicationPool[]): TierRoom[] {
 	const tiers = new Map<string, ReplicationPool[]>();
 	for (const p of pools) tiers.set(p.tier, [...(tiers.get(p.tier) ?? []), p]);
@@ -224,6 +226,7 @@ export function tierRooms(pools: ReplicationPool[]): TierRoom[] {
 				pools: list.length,
 				totalBytes,
 				usedBytes: totalBytes - list.reduce((n, p) => n + p.freeBytes, 0),
+				room,
 				largest: room[1] ?? 0,
 			};
 		})
@@ -387,6 +390,87 @@ export type Standing = { tone: Tone; label: string; detail: string };
 function survivesText(copies: number): string {
 	const hosts = Math.max(1, Math.floor((copies - 1) / 2));
 	return `Survives losing ${hosts === 1 ? 'any one host' : `any ${hosts} hosts`}.`;
+}
+
+// What each number of copies gets a new disk, as r-drbd places and replicates
+// it (docs/concepts.md): one card per count a class may ask, 1 to 3.
+const CHOICES: { copies: number; title: string; lines: string[] }[] = [
+	{
+		copies: 1,
+		title: 'One copy',
+		lines: [
+			'Lost with its host.',
+			'Writes stay on its host, with no copy to wait for.',
+			'Its VM stays on that host: no live migration.',
+		],
+	},
+	{
+		copies: 2,
+		title: 'Two copies',
+		lines: [
+			survivesText(2),
+			'A third host keeps a tiebreaker, with no data.',
+			'Each write waits for both copies.',
+		],
+	},
+	{
+		copies: 3,
+		title: 'Three copies',
+		lines: [
+			survivesText(3),
+			'Two copies remain after losing a host.',
+			'Each write waits for all three copies.',
+		],
+	},
+];
+
+export type ProtectionClass = { info: StorageClassInfo; tier: string; room?: number };
+export type ProtectionChoice = {
+	copies: number;
+	title: string;
+	lines: string[];
+	classes: ProtectionClass[]; // none: no class the caller may list asks this many
+};
+
+// rooms: each tier's room, or null where the caller may not read the pools,
+// so a tenant is never shown a number it could not read itself.
+export function protectionChoices(
+	classes: StorageClassInfo[],
+	rooms: TierRoom[] | null,
+): ProtectionChoice[] {
+	return CHOICES.map((c) => ({
+		...c,
+		classes: classes
+			.filter((x) => x.replication?.copies === c.copies)
+			.map((info) => {
+				const tier = info.replication!.tier;
+				const room = rooms && (rooms.find((t) => t.tier === tier)?.room[c.copies - 1] ?? 0);
+				return { info, tier, room: room ?? undefined };
+			})
+			.sort(
+				(a, b) =>
+					Number(!!b.info.default) - Number(!!a.info.default) ||
+					(b.room ?? 0) - (a.room ?? 0) ||
+					a.info.name.localeCompare(b.info.name),
+			),
+	}));
+}
+
+// Whether a new disk fits the tier today; null when the room is unknown.
+// bytes: NaN or 0 while the size is unreadable, then only the room is said.
+export function roomText(
+	c: ProtectionClass,
+	copies: number,
+	bytes: number,
+): { ok: boolean; text: string } | null {
+	if (c.room === undefined) return null;
+	const at = copies === 1 ? 'one copy' : `${copies} copies`;
+	if (!c.room) return { ok: false, text: `No room on ${c.tier} for a new disk at ${at} today.` };
+	const room = `Room on ${c.tier}: ${size(c.room)} at ${at}.`;
+	if (!(bytes > 0)) return { ok: true, text: room };
+	return bytes > c.room
+		? { ok: false, text: `Too big. ${room}` }
+		: { ok: true, text: `Fits. ${room}` };
 }
 
 // What a class promises a disk, before it exists.

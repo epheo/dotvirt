@@ -1,9 +1,22 @@
-import { api, Unauthorized, type DiskProtection, type Replication } from '#lib/api.js';
+import {
+	api,
+	Unauthorized,
+	type DiskProtection,
+	type Replication,
+	type StorageClass,
+	type StorageClassInfo,
+} from '#lib/api.js';
 import { friendlyError } from '#lib/format.js';
 import { modules } from './modules.svelte';
 
 // Only a known no hides the tab, as with every module.
 export const replicationOff = () => modules.value !== null && !modules.value.replicatedStorage;
+
+// Add disk offers protection as outcomes only on a known yes, and only from
+// replicated classes the caller may list; anything less keeps the class list.
+export const protectionCards = (classes: (StorageClass | StorageClassInfo)[]) =>
+	modules.value?.replicatedStorage === true &&
+	classes.some((c) => 'replication' in c && !!c.replication);
 
 // Pulled when the tab opens and when the frame's watermark moves, never polled.
 // An operator reads the placement, anyone else their own disks' standing.
