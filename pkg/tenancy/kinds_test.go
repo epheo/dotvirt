@@ -5,46 +5,40 @@ import (
 	"testing"
 )
 
-// The deny list of an any-kind tenant repo: grants, quotas, OLM and KubeVirt's
-// own configuration, every namespaced platform kind, and what a provider adds.
-// It never denies a listed tenant kind, and holds each kind once.
-func TestDeniedTenantKinds(t *testing.T) {
-	denied := DeniedTenantKinds(GroupKind{"capsule.clastix.io", "*"}, GroupKind{"rbac.authorization.k8s.io", "Role"})
-	covered := func(group, kind string) bool {
-		return slices.ContainsFunc(denied, func(g GroupKind) bool { return g.Covers(group, kind) })
+// A provider's named kinds: each allowed once, a listed one dropped as
+// already held, and grants, quotas, OLM, Argo, KubeVirt's configuration, the
+// platform tier's kinds and a whole group refused.
+func TestAllowTenantKinds(t *testing.T) {
+	allowed, refused := AllowTenantKinds(
+		GroupKind{"apps", "Deployment"},
+		GroupKind{"", "Service"},
+		GroupKind{"apps", "Deployment"},
+		GroupKind{"kubevirt.io", "VirtualMachine"},
+		GroupKind{"capsule.clastix.io", "*"},
+		GroupKind{"apps", ""},
+		GroupKind{"rbac.authorization.k8s.io", "Role"},
+		GroupKind{"authorization.openshift.io", "RoleBinding"},
+		GroupKind{"", "ResourceQuota"},
+		GroupKind{"", "LimitRange"},
+		GroupKind{"operators.coreos.com", "CatalogSource"},
+		GroupKind{"kubevirt.io", "KubeVirt"},
+		GroupKind{"argoproj.io", "Application"},
+		GroupKind{"external-secrets.io", "ExternalSecret"},
+		GroupKind{"forklift.konveyor.io", "Plan"},
+		GroupKind{"velero.io", "Restore"},
+		GroupKind{"template.openshift.io", "TemplateInstance"},
+		GroupKind{"k8s.cni.cncf.io", "NetworkAttachmentDefinition"},
+		GroupKind{"operator.openshift.io", "KubeDescheduler"},
+		GroupKind{"template.kubevirt.io", "VirtualMachineTemplate"},
+		GroupKind{"", "ResourceQuota"},
+	)
+	if want := []GroupKind{{"apps", "Deployment"}, {"", "Service"}}; !slices.Equal(allowed, want) {
+		t.Errorf("allowed = %v, want %v", allowed, want)
 	}
-	for _, c := range []struct{ group, kind string }{
-		{"rbac.authorization.k8s.io", "Role"},
-		{"rbac.authorization.k8s.io", "RoleBinding"},
-		{"rbac.authorization.k8s.io", "ClusterRoleBinding"},
-		{"authorization.openshift.io", "RoleBinding"},
-		{"authorization.openshift.io", "RoleBindingRestriction"},
-		{"argoproj.io", "Application"},
-		{"external-secrets.io", "ExternalSecret"},
-		{"forklift.konveyor.io", "Plan"},
-		{"velero.io", "Restore"},
-		{"template.openshift.io", "TemplateInstance"},
-		{"", "ResourceQuota"},
-		{"", "LimitRange"},
-		{"operators.coreos.com", "Subscription"},
-		{"operators.coreos.com", "CatalogSource"},
-		{"kubevirt.io", "KubeVirt"},
-		{"k8s.cni.cncf.io", "NetworkAttachmentDefinition"},
-		{"operator.openshift.io", "KubeDescheduler"},
-		{"capsule.clastix.io", "Tenant"},
-	} {
-		if !covered(c.group, c.kind) {
-			t.Errorf("%s/%s is not denied", c.group, c.kind)
-		}
+	if len(refused) != 16 {
+		t.Errorf("refused %d kinds, want 16 (each once): %v", len(refused), refused)
 	}
-	for _, k := range TenantKinds {
-		if covered(k.Group, k.Kind) {
-			t.Errorf("listed tenant kind %s is denied", k.Kind)
-		}
-	}
-	for i, g := range denied {
-		if slices.ContainsFunc(denied[:i], func(o GroupKind) bool { return o.Covers(g.Group, g.Kind) }) {
-			t.Errorf("%s/%s is listed twice or under a whole-group entry", g.Group, g.Kind)
-		}
+	if a, r := AllowTenantKinds(); a != nil || r != nil {
+		t.Errorf("none named: %v, %v", a, r)
 	}
 }

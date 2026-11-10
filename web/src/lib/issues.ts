@@ -50,7 +50,7 @@ export function deriveIssues(
 		canRepair?: (p: Project) => boolean;
 		network?: NetProblem[];
 		// Tenant repos may apply any namespaced kind but the denied ones.
-		anyTenantKinds?: boolean;
+		extraTenantKinds?: boolean;
 	} = {},
 ): Issue[] {
 	if (!inv) return [];
@@ -106,7 +106,7 @@ export function deriveIssues(
 				const issue = vmIssue(p.name, vm);
 				if (issue) out.push(issue);
 			}
-		out.push(...placementIssues(inv, p, opts.anyTenantKinds));
+		out.push(...placementIssues(inv, p, opts.extraTenantKinds));
 	}
 	// A refused apply or an unreachable repo on the platform tier stands like a
 	// project's; the Changes lane is where the merged PR behind it lives.
@@ -281,7 +281,7 @@ const EDITABLE: Record<string, string> = {
 // without a namespace (Argo applies them to the project's default namespace
 // instead), in a namespace outside the project, or of a kind only the
 // platform repo may hold (both refuse the project's whole sync).
-function placementIssues(inv: Inventory, p: Project, anyTenantKinds = false): Issue[] {
+function placementIssues(inv: Inventory, p: Project, extraTenantKinds = false): Issue[] {
 	const at = (o: GitObject) => (o.namespace ? `${o.namespace}/${o.name}` : o.name);
 	const view = (o: GitObject) =>
 		objectHref(inv, { kind: o.kind, namespace: o.namespace, name: o.name });
@@ -318,7 +318,7 @@ function placementIssues(inv: Inventory, p: Project, anyTenantKinds = false): Is
 		out.push({
 			severity: 'danger',
 			scope: at(o),
-			label: anyTenantKinds
+			label: extraTenantKinds
 				? `${o.kind} this install's tenant repos may not apply`
 				: `${o.kind} only the platform repo may hold`,
 			detail: `${p.name}'s sync fails until its repo no longer declares it.`,

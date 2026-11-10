@@ -347,7 +347,7 @@ describe('network problems in the issues plane', () => {
 });
 
 describe('objects a project repo cannot keep', () => {
-	it("says a kind is this install's rule when tenant repos may apply any kind", () => {
+	it("says a kind is this install's rule when tenant repos may apply kinds beyond the listed ones", () => {
 		const inv: Inventory = {
 			projects: [
 				{
@@ -357,7 +357,7 @@ describe('objects a project repo cannot keep', () => {
 				},
 			],
 		};
-		expect(deriveIssues(inv, { anyTenantKinds: true }).map((i) => i.label)).toEqual([
+		expect(deriveIssues(inv, { extraTenantKinds: true }).map((i) => i.label)).toEqual([
 			"Role this install's tenant repos may not apply",
 		]);
 		expect(deriveIssues(inv).map((i) => i.label)).toEqual(['Role only the platform repo may hold']);

@@ -99,7 +99,7 @@ type ForgeSpec struct {
 // GitOps (openshift-gitops); override for community ArgoCD (argocd /
 // argocd-application-controller). The operator binds the apply RBAC + AppProjects
 // to this controller ServiceAccount.
-// +kubebuilder:validation:XValidation:rule="!has(self.tenantKinds) || self.tenantKinds != 'Any' || !has(self.syncImpersonation) || !has(self.syncImpersonation.enabled) || self.syncImpersonation.enabled",message="tenantKinds Any needs sync impersonation: the project's sync account is the only ceiling on what its repo applies"
+// +kubebuilder:validation:XValidation:rule="!has(self.tenantKindsAllowed) || size(self.tenantKindsAllowed) == 0 || !has(self.syncImpersonation) || !has(self.syncImpersonation.enabled) || self.syncImpersonation.enabled",message="tenantKindsAllowed needs sync impersonation: beyond the listed kinds, the project's sync account is what keeps its repo within the project's rights"
 type ArgoCDSpec struct {
 	// Namespace is where the ArgoCD instance runs; empty = the platform default
 	// (openshift-gitops on OpenShift, argocd elsewhere).
@@ -116,33 +116,28 @@ type ArgoCDSpec struct {
 	// project's own ServiceAccount, which holds exactly the project's grants,
 	// instead of the shared controller's account. On by default.
 	SyncImpersonation SyncImpersonationSpec `json:"syncImpersonation,omitempty"`
-	// TenantKinds is what a tenant repo may apply. Listed, the default: the
-	// kinds dotvirt has a UI for. Any: every namespaced kind but the denied
-	// ones (grants, quotas, the platform tier's kinds, OLM, KubeVirt's own
-	// configuration, and TenantKindsDenied). Any holds only while sync
-	// impersonation is on, the project's sync account then being the ceiling;
-	// until then tenant repos keep the listed kinds.
-	// +kubebuilder:validation:Enum=Listed;Any
+	// TenantKindsAllowed are kinds a tenant repo may apply beyond the ones
+	// dotvirt has a UI for, each named by group and kind. They hold only while
+	// sync impersonation is in effect, the project's sync account then being
+	// the ceiling on what its repo applies; until then tenant repos keep the
+	// listed kinds. Grants, quotas, OLM, Argo CD's own kinds, KubeVirt's
+	// configuration and the platform tier's kinds are never allowed: one named
+	// here is left out, and ArgoReady names it. Name no kind whose operator
+	// acts with its own rights on a request that can name another namespace
+	// or a cluster-wide resource: a tenant repo could reach past its project
+	// through it.
+	// +kubebuilder:validation:MaxItems=64
 	// +optional
-	TenantKinds string `json:"tenantKinds,omitempty"`
-	// TenantKindsDenied adds kinds no tenant repo may apply under Any; it never
-	// removes one. Kind "*" denies the whole group. List here every operator
-	// the cluster runs that acts with its own rights on a namespaced request
-	// that can name another namespace or a cluster-wide resource: a tenant
-	// repo could otherwise reach past its project through it.
-	// +optional
-	TenantKindsDenied []GroupKind `json:"tenantKindsDenied,omitempty"`
+	TenantKindsAllowed []GroupKind `json:"tenantKindsAllowed,omitempty"`
 }
 
-// AnyTenantKinds reports whether tenant repos are asked to apply any
-// namespaced kind but the denied ones.
-func (a ArgoCDSpec) AnyTenantKinds() bool { return a.TenantKinds == "Any" }
-
-// GroupKind names a kind by API group ("" for the core group); kind "*" is the
-// whole group.
+// GroupKind names one kind by API group, the core group being empty.
 type GroupKind struct {
-	Group string `json:"group"`
+	// +kubebuilder:validation:Pattern=`^([a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*)?$`
+	// +optional
+	Group string `json:"group,omitempty"`
 	// +kubebuilder:validation:MinLength=1
+	// +kubebuilder:validation:Pattern=`^[A-Za-z][A-Za-z0-9]*$`
 	Kind string `json:"kind"`
 }
 

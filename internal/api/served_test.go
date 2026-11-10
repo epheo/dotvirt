@@ -144,16 +144,15 @@ func TestDRSNeedsOLMAndMachineConfigServed(t *testing.T) {
 }
 
 // What a frame flags in a tenant repo follows the install's policy, with the
-// scope the served-kinds index holds and without reading discovery for it: a
-// kind the index has not seen reads as namespaced.
+// scope the served-kinds index holds and without reading discovery for it: an
+// allowed kind the index has not seen reads as namespaced.
 func TestTenantKindRuleReadsTheIndexOnly(t *testing.T) {
 	fc := newFakeCluster(t)
-	s := fc.server(nil, Config{TenantKinds: tenancy.AnyPolicy(tenancy.GroupKind{Group: "capsule.clastix.io", Kind: "*"})})
 	prio := schema.GroupKind{Group: "scheduling.k8s.io", Kind: "PriorityClass"}
+	s := fc.server(nil, Config{TenantKinds: tenancy.Policy{Allowed: []tenancy.GroupKind{{Group: "apps", Kind: "Deployment"}, {Group: prio.Group, Kind: prio.Kind}}}})
 	rule := s.tenantKindRule()
-	if !rule.Declarable("apps", "Deployment") || !rule.Declarable(prio.Group, prio.Kind) ||
-		rule.Declarable("rbac.authorization.k8s.io", "Role") || rule.Declarable("capsule.clastix.io", "Tenant") {
-		t.Error("before discovery: a namespaced reading of unknown kinds, the deny list kept")
+	if !rule.Declarable("apps", "Deployment") || !rule.Declarable(prio.Group, prio.Kind) || rule.Declarable("apps", "StatefulSet") {
+		t.Error("before discovery: the allowed kinds read as namespaced, no other")
 	}
 	if calls := fc.seen(); len(calls) != 0 {
 		t.Errorf("the rule read the cluster: %v", calls)

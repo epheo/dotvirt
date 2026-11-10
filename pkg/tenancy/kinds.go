@@ -87,11 +87,11 @@ func LookupKind(kind string) (Kind, bool) {
 	return Kinds[i], true
 }
 
-// TenantKind reports whether a tenant repo may declare kind. It matches by
-// kind name alone, as a manifest header names it.
-func TenantKind(kind string) bool {
-	k, ok := LookupKind(kind)
-	return ok && k.Tenant
+// Listed reports whether group/kind is one of the listed tenant kinds, which
+// every tenant repo may declare. It matches group and kind, as the AppProject
+// whitelist does: another group's kind of the same name is not listed.
+func Listed(group, kind string) bool {
+	return slices.ContainsFunc(TenantKinds, func(k Kind) bool { return k.Group == group && k.Kind == kind })
 }
 
 // GroupKind names a kind by API group ("" for the core group); Kind "*" is the
@@ -103,8 +103,7 @@ func (g GroupKind) Covers(group, kind string) bool {
 	return g.Group == group && (g.Kind == "*" || g.Kind == kind)
 }
 
-// deniedBase is what no tenant repo applies even when it may apply any
-// namespaced kind:
+// deniedBase is what no tenant repo applies, whoever names it:
 //   - grants and quotas, which a merge would use to widen the project, in both
 //     RBAC APIs (OpenShift's authorization.openshift.io still writes real
 //     bindings);
@@ -115,7 +114,7 @@ func (g GroupKind) Covers(group, kind string) bool {
 //   - controllers that act with their own cluster rights on a namespaced
 //     request that can name elsewhere: external secrets against a cluster
 //     store, Forklift plans with a target namespace, Velero restores, template
-//     instances. A provider names the others it runs (TenantKindsDenied).
+//     instances.
 var deniedBase = []GroupKind{
 	{"rbac.authorization.k8s.io", "*"},
 	{"authorization.openshift.io", "*"},
@@ -130,27 +129,24 @@ var deniedBase = []GroupKind{
 	{"template.openshift.io", "TemplateInstance"},
 }
 
-// DeniedTenantKinds is the deny list of a tenant repo that may apply any
-// namespaced kind: deniedBase, every namespaced kind of the platform tier, and
-// extra, which only ever adds. Each kind appears once, and none a whole-group
-// entry already covers.
-func DeniedTenantKinds(extra ...GroupKind) []GroupKind {
-	var out []GroupKind
-	add := func(g GroupKind) {
-		if !slices.ContainsFunc(out, func(o GroupKind) bool { return o.Covers(g.Group, g.Kind) }) {
-			out = append(out, g)
+// AllowTenantKinds splits the kinds a provider names into those a tenant repo
+// may apply beyond the listed ones, each once, and those it never may
+// (refused): a whole group, a kind deniedBase covers, or one the kinds table
+// keeps from tenant repos. A listed kind is in neither: it holds already.
+func AllowTenantKinds(named ...GroupKind) (allowed, refused []GroupKind) {
+	for _, g := range named {
+		switch {
+		case Listed(g.Group, g.Kind), slices.Contains(allowed, g), slices.Contains(refused, g):
+		case g.Kind == "" || g.Kind == "*" || neverTenant(g):
+			refused = append(refused, g)
+		default:
+			allowed = append(allowed, g)
 		}
 	}
-	for _, g := range deniedBase {
-		add(g)
-	}
-	for _, k := range Kinds {
-		if k.Platform && !k.Tenant && !k.ClusterScoped {
-			add(GroupKind{k.Group, k.Kind})
-		}
-	}
-	for _, g := range extra {
-		add(g)
-	}
-	return out
+	return allowed, refused
+}
+
+func neverTenant(g GroupKind) bool {
+	return slices.ContainsFunc(deniedBase, func(d GroupKind) bool { return d.Covers(g.Group, g.Kind) }) ||
+		slices.ContainsFunc(Kinds, func(k Kind) bool { return !k.Tenant && k.Group == g.Group && k.Kind == g.Kind })
 }

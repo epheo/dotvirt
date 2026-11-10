@@ -126,10 +126,9 @@ type Config struct {
 	// stages owner grants only.
 	ArgoNamespace string
 
-	// TenantKinds is what a tenant repo may declare, as the operator put it on
-	// the tenant AppProjects: the listed kinds, or any namespaced kind but the
-	// denied ones. The AppProjects enforce it; dotvirt reads it to stage
-	// nothing they would refuse.
+	// TenantKinds is what a tenant repo may declare beyond the listed kinds, as
+	// the operator put it on the tenant AppProjects. The AppProjects enforce
+	// it; dotvirt reads it to stage nothing they would refuse.
 	TenantKinds tenancy.Policy
 }
 
@@ -177,29 +176,23 @@ func Load(args []string) (*Config, error) {
 	fs.BoolVar(&c.ArgoEnabled, "argo", envBool("DOTVIRT_ARGO", true), "enable ArgoCD drift reads (set -argo=false on clusters without ArgoCD)")
 	fs.StringVar(&c.ArgoNamespace, "argo-namespace", os.Getenv("DOTVIRT_ARGO_NAMESPACE"), "ArgoCD namespace holding the per-project sync ServiceAccounts the project grants name (empty: owner grants only)")
 
-	var tenantKinds, tenantDenied string
-	fs.StringVar(&tenantKinds, "tenant-kinds", envOr("DOTVIRT_TENANT_KINDS", "Listed"), "what tenant repos may declare: Listed, or Any namespaced kind but the denied ones (set by the operator)")
-	fs.StringVar(&tenantDenied, "tenant-kinds-denied", os.Getenv("DOTVIRT_TENANT_KINDS_DENIED"), "under -tenant-kinds=Any, kinds denied beyond dotvirt's own list, as group/kind,... (the core group is /kind)")
+	var tenantAllowed string
+	fs.StringVar(&tenantAllowed, "tenant-kinds-allowed", os.Getenv("DOTVIRT_TENANT_KINDS_ALLOWED"), "kinds tenant repos may declare beyond the listed ones, as group/kind,... (the core group is /kind; set by the operator)")
 
 	if err := fs.Parse(args); err != nil {
 		return nil, err
 	}
 	// A value read wrong would stage what the AppProjects refuse, or refuse
 	// what they admit: both fail here.
-	switch tenantKinds {
-	case "Listed":
-		if tenantDenied != "" {
-			return nil, fmt.Errorf("-tenant-kinds-denied (DOTVIRT_TENANT_KINDS_DENIED) needs -tenant-kinds=Any")
-		}
-	case "Any":
-		extra, err := tenancy.ParseGroupKinds(tenantDenied)
-		if err != nil {
-			return nil, fmt.Errorf("-tenant-kinds-denied (DOTVIRT_TENANT_KINDS_DENIED): %w", err)
-		}
-		c.TenantKinds = tenancy.AnyPolicy(extra...)
-	default:
-		return nil, fmt.Errorf("-tenant-kinds (DOTVIRT_TENANT_KINDS) %q is neither Listed nor Any", tenantKinds)
+	named, err := tenancy.ParseGroupKinds(tenantAllowed)
+	if err != nil {
+		return nil, fmt.Errorf("-tenant-kinds-allowed (DOTVIRT_TENANT_KINDS_ALLOWED): %w", err)
 	}
+	allowed, refused := tenancy.AllowTenantKinds(named...)
+	if len(refused) > 0 {
+		return nil, fmt.Errorf("-tenant-kinds-allowed (DOTVIRT_TENANT_KINDS_ALLOWED) names kinds no tenant repo may apply: %s", tenancy.FormatGroupKinds(refused))
+	}
+	c.TenantKinds = tenancy.Policy{Allowed: allowed}
 	// The snapshot selects project namespaces by this key: a malformed one
 	// would select none and look like an empty cluster, so it fails here.
 	if errs := validation.IsQualifiedName(c.ProjectLabel); len(errs) > 0 {

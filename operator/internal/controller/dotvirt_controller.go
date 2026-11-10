@@ -317,10 +317,10 @@ type reconcileCtx struct {
 	// sync is what the Argo phase rendered for sync impersonation, read by the
 	// phase after it.
 	sync syncTier
-	// tenantDenied is install.TenantDenied for this pass, decided once by
+	// tenantAllowed is install.TenantAllowed for this pass, decided once by
 	// tenantKinds (tenantKindsRead) so the dotvirt pod and the AppProjects
 	// read the same answer.
-	tenantDenied    []tenancy.GroupKind
+	tenantAllowed   []tenancy.GroupKind
 	tenantKindsRead bool
 }
 
@@ -587,7 +587,7 @@ func (r *DotvirtReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		Watches(&corev1.Namespace{}, handler.EnqueueRequestsFromMapFunc(r.installs),
 			builder.WithPredicates(predicate.Funcs{UpdateFunc: tenancyChanged})).
 		// Sync impersonation turned on or off in argocd-cm, by dotvirt or by
-		// hand, decides what tenant repos may apply (tenantKinds Any): the
+		// hand, decides what tenant repos may apply (tenantKindsAllowed): the
 		// pass re-renders their AppProjects at once, not on the next drift
 		// requeue.
 		Watches(&corev1.ConfigMap{}, handler.EnqueueRequestsFromMapFunc(r.installs),

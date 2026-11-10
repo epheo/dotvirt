@@ -445,8 +445,8 @@ func TestBuildHidesVMsFromWhoMayNotListThem(t *testing.T) {
 	}
 }
 
-// Under Any a project's repo is flagged for what the install's tenant repos may
-// not apply, not for every kind dotvirt has no row for.
+// A project's repo is flagged for what the install's tenant repos may not
+// apply, not for a kind the install allowed.
 func TestBuildFlagsKindsByTheInstallPolicy(t *testing.T) {
 	doc := func(apiVersion, kind, name string) string {
 		return "apiVersion: " + apiVersion + "\nkind: " + kind + "\nmetadata:\n  name: " + name + "\n  namespace: a-dev\n"
@@ -472,8 +472,8 @@ func TestBuildFlagsKindsByTheInstallPolicy(t *testing.T) {
 		slices.Sort(out)
 		return out
 	}
-	if got := build(changeset.KindRule{Policy: tenancy.AnyPolicy()}); !slices.Equal(got, []string{"vlan", "widen"}) {
-		t.Errorf("any: %v", got)
+	if got := build(changeset.KindRule{Policy: tenancy.Policy{Allowed: []tenancy.GroupKind{{Group: "apps", Kind: "Deployment"}}}}); !slices.Equal(got, []string{"vlan", "widen"}) {
+		t.Errorf("allowed: %v", got)
 	}
 	if got := build(changeset.KindRule{}); !slices.Equal(got, []string{"vlan", "web", "widen"}) {
 		t.Errorf("listed: %v", got)

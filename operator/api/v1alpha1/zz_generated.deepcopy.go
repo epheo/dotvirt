@@ -15,8 +15,8 @@ import (
 func (in *ArgoCDSpec) DeepCopyInto(out *ArgoCDSpec) {
 	*out = *in
 	in.SyncImpersonation.DeepCopyInto(&out.SyncImpersonation)
-	if in.TenantKindsDenied != nil {
-		in, out := &in.TenantKindsDenied, &out.TenantKindsDenied
+	if in.TenantKindsAllowed != nil {
+		in, out := &in.TenantKindsAllowed, &out.TenantKindsAllowed
 		*out = make([]GroupKind, len(*in))
 		copy(*out, *in)
 	}

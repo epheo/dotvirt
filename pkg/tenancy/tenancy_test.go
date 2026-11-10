@@ -76,8 +76,9 @@ func TestTenantKindsExcludeNAD(t *testing.T) {
 			t.Fatal("NetworkAttachmentDefinition is platform tier")
 		}
 	}
-	if TenantKind("NetworkAttachmentDefinition") || !TenantKind("VirtualMachine") {
-		t.Error("TenantKind disagrees with TenantKinds")
+	if Listed("k8s.cni.cncf.io", "NetworkAttachmentDefinition") || !Listed("kubevirt.io", "VirtualMachine") ||
+		Listed("example.com", "VirtualMachine") {
+		t.Error("Listed disagrees with TenantKinds")
 	}
 }
 
