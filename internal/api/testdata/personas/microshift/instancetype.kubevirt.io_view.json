@@ -1,0 +1,3 @@
+{"name":"instancetype.kubevirt.io:view","rules":[
+  {"apiGroups":["instancetype.kubevirt.io"],"resources":["virtualmachineclusterinstancetypes","virtualmachineclusterpreferences"],"verbs":["get","list","watch"]}
+]}
