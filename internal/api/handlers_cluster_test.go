@@ -604,11 +604,16 @@ func TestStorageClasses(t *testing.T) {
 	}
 }
 
-// A capacity segment names the node it sits on: a caller who may read nodes
-// sees the per-node split, anyone else the summed free capacity alone, and the
+// Free capacity shows to a caller who may list CSIStorageCapacities. A
+// segment names the node it sits on: a caller who may also read nodes sees
+// the per-node split, anyone else the summed free capacity alone, and the
 // shared cached sheet keeps its segments for the next node reader.
 func TestStorageClassesSegmentsNeedNodeRead(t *testing.T) {
 	fc := newFakeCluster(t)
+	// tenant lists capacities, stranger nothing.
+	fc.ssar = func(token string, a *authzv1.ResourceAttributes) bool {
+		return token == adminToken || token == tenantToken && a.Verb == verbList && a.Namespace == "" && a.Resource == "csistoragecapacities"
+	}
 	fc.on(http.MethodGet, "/apis/storage.k8s.io/v1/storageclasses", unstructuredList("storage.k8s.io/v1", "StorageClass",
 		map[string]any{"apiVersion": "storage.k8s.io/v1", "kind": "StorageClass", "metadata": map[string]any{"name": "local"}, "provisioner": "topolvm.io"}))
 	capacity := func(node, free string) map[string]any {
@@ -626,12 +631,13 @@ func TestStorageClassesSegmentsNeedNodeRead(t *testing.T) {
 
 	for _, tc := range []struct {
 		token    string
+		free     bool
 		segments int
-	}{{tenantToken, 0}, {adminToken, 2}, {tenantToken, 0}} {
+	}{{tenantToken, true, 0}, {adminToken, true, 2}, {"stranger", false, 0}, {tenantToken, true, 0}} {
 		rec := do(s, tc.token, http.MethodGet, "/api/storage/classes", "")
 		wantStatus(t, rec, http.StatusOK)
 		got := decodeBody[[]model.StorageClassInfo](t, rec)
-		if len(got) != 1 || got[0].Free == nil || *got[0].Free != 4<<40 || len(got[0].Segments) != tc.segments {
+		if len(got) != 1 || (got[0].Free != nil) != tc.free || tc.free && *got[0].Free != 4<<40 || len(got[0].Segments) != tc.segments {
 			t.Fatalf("%s: classes = %+v", tc.token, got)
 		}
 		if tc.segments == 0 && strings.Contains(rec.Body.String(), "host-0") {
@@ -783,5 +789,54 @@ func TestStorageClaims(t *testing.T) {
 	want := model.Claim{Namespace: "team-a-dev", Name: "web-rootdisk", Node: "host-07", StorageClass: class, Capacity: "30Gi", Phase: "Bound"}
 	if len(got) != 1 || !reflect.DeepEqual(got[0], want) {
 		t.Errorf("claims = %+v", got)
+	}
+}
+
+// Each part of a class's sheet follows the kind it is read from: CDI's
+// profile, and the snapshot class it names, follow StorageProfiles; the
+// provisioner's VolumeSnapshotClass, for a profile naming none, follows
+// VolumeSnapshotClasses.
+func TestStorageSheetPartsFollowTheirKinds(t *testing.T) {
+	fc := newFakeCluster(t)
+	// tenant lists profiles, stranger snapshot classes.
+	fc.ssar = func(token string, a *authzv1.ResourceAttributes) bool {
+		switch {
+		case token == adminToken:
+			return true
+		case a.Verb != verbList || a.Namespace != "":
+			return false
+		case token == tenantToken:
+			return a.Resource == "storageprofiles"
+		}
+		return token == "stranger" && a.Resource == "volumesnapshotclasses"
+	}
+	class := func(name string) map[string]any {
+		return map[string]any{"apiVersion": "storage.k8s.io/v1", "kind": "StorageClass", "metadata": map[string]any{"name": name}, "provisioner": "csi.example"}
+	}
+	fc.on(http.MethodGet, "/apis/storage.k8s.io/v1/storageclasses", unstructuredList("storage.k8s.io/v1", "StorageClass", class("fast"), class("slow")))
+	fc.on(http.MethodGet, "/apis/cdi.kubevirt.io/v1beta1/storageprofiles", unstructuredList("cdi.kubevirt.io/v1beta1", "StorageProfile",
+		map[string]any{"apiVersion": "cdi.kubevirt.io/v1beta1", "kind": "StorageProfile", "metadata": map[string]any{"name": "fast"},
+			"status": map[string]any{"cloneStrategy": "csi-clone", "snapshotClass": "cdi-pick"}},
+		map[string]any{"apiVersion": "cdi.kubevirt.io/v1beta1", "kind": "StorageProfile", "metadata": map[string]any{"name": "slow"},
+			"status": map[string]any{"cloneStrategy": "copy"}}))
+	fc.on(http.MethodGet, "/apis/snapshot.storage.k8s.io/v1/volumesnapshotclasses", unstructuredList("snapshot.storage.k8s.io/v1", "VolumeSnapshotClass",
+		map[string]any{"apiVersion": "snapshot.storage.k8s.io/v1", "kind": "VolumeSnapshotClass", "metadata": map[string]any{"name": "registered"}, "driver": "csi.example"}))
+	s := fc.server(nil, Config{})
+
+	for _, tc := range []struct {
+		token      string
+		profile    bool
+		fast, slow string
+	}{
+		{adminToken, true, "cdi-pick", "registered"},
+		{tenantToken, true, "cdi-pick", ""},
+		{"stranger", false, "", "registered"},
+	} {
+		rec := do(s, tc.token, http.MethodGet, "/api/storage/classes", "")
+		wantStatus(t, rec, http.StatusOK)
+		got := decodeBody[[]model.StorageClassInfo](t, rec)
+		if len(got) != 2 || (got[0].Profile != nil) != tc.profile || got[0].SnapshotClass != tc.fast || got[1].SnapshotClass != tc.slow {
+			t.Errorf("%s: classes = %+v, want profile %v, snapshot classes %q and %q", tc.token, got, tc.profile, tc.fast, tc.slow)
+		}
 	}
 }

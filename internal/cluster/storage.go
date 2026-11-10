@@ -23,11 +23,21 @@ var (
 	gvrCSICapacities   = schema.GroupVersionResource{Group: "storage.k8s.io", Version: "v1", Resource: "csistoragecapacities"}
 )
 
+// SheetClass is one class of the Storage section's fact sheet as dotvirt's SA
+// reads it. Each part comes from its own kind, which a caller may or may not
+// list, so the snapshot class keeps its source: SnapshotClass is CDI's pick
+// from the profile, SnapshotFallback the first VolumeSnapshotClass registered
+// for the provisioner, set only when the profile names none.
+type SheetClass struct {
+	model.StorageClassInfo
+	SnapshotFallback string
+}
+
 // ListStorageClasses gathers the Storage section's fact sheet. Only the
 // StorageClass list is required; the profile, snapshot-class and capacity
 // sources are optional layers, so a cluster without CDI, without the snapshot
 // CRDs, or with a driver that publishes no capacity still lists its classes.
-func (c *Client) ListStorageClasses(ctx context.Context) ([]model.StorageClassInfo, error) {
+func (c *Client) ListStorageClasses(ctx context.Context) ([]SheetClass, error) {
 	dyn, err := c.dynamic()
 	if err != nil {
 		return nil, err
@@ -62,7 +72,7 @@ func (c *Client) ListStorageClasses(ctx context.Context) ([]model.StorageClassIn
 		}
 	}
 
-	out := make([]model.StorageClassInfo, 0, len(classes))
+	out := make([]SheetClass, 0, len(classes))
 	for i := range classes {
 		sc := &classes[i]
 		name := sc.GetName()
@@ -87,8 +97,9 @@ func (c *Client) ListStorageClasses(ctx context.Context) ([]model.StorageClassIn
 			info.Profile = storageProfile(p)
 			info.SnapshotClass, _, _ = unstructured.NestedString(p.Object, "status", "snapshotClass")
 		}
+		var fallback string
 		if info.SnapshotClass == "" && len(snapClasses[provisioner]) > 0 {
-			info.SnapshotClass = snapClasses[provisioner][0]
+			fallback = snapClasses[provisioner][0]
 		}
 		if segs := segments[name]; len(segs) > 0 {
 			sort.Slice(segs, func(a, b int) bool { return segs[a].Topology < segs[b].Topology })
@@ -99,7 +110,7 @@ func (c *Client) ListStorageClasses(ctx context.Context) ([]model.StorageClassIn
 			info.Free = &free
 			info.Segments = segs
 		}
-		out = append(out, info)
+		out = append(out, SheetClass{StorageClassInfo: info, SnapshotFallback: fallback})
 	}
 	sort.Slice(out, func(a, b int) bool { return out[a].Name < out[b].Name })
 	return out, nil
