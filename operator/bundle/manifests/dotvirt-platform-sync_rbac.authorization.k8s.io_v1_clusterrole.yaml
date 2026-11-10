@@ -32,3 +32,11 @@ rules:
   - clusterroles
   verbs:
   - bind
+- apiGroups:
+  - rbac.authorization.k8s.io
+  resourceNames:
+  - portail-controller-proxy
+  resources:
+  - roles
+  verbs:
+  - bind

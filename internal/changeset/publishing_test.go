@@ -15,7 +15,7 @@ import (
 	"github.com/epheo/dotvirt/pkg/tenancy"
 )
 
-var pubSettings = publish.Settings{Domain: "apps.example.com", GatewayClass: "portail", Issuer: "letsencrypt", ProjectLabel: "dotvirt.io/project"}
+var pubSettings = publish.Settings{Domain: "apps.example.com", GatewayClass: "portail", Issuer: "letsencrypt", ProjectLabel: "dotvirt.io/project", PortailNamespace: "portail-system"}
 
 func publishingCoordinator(t *testing.T, files map[string][]byte) (*Coordinator, project.ProjectInfo) {
 	t.Helper()
@@ -84,9 +84,25 @@ func TestPublishingPlan(t *testing.T) {
 	if plan.Namespace != "c" || !plan.On || !slices.Equal(plan.Reach, []string{"b", "c"}) {
 		t.Errorf("held in git: %+v, want c, on, reaching b and c", plan)
 	}
-	plan, need, err := c.PublishingNeeds(plat, project.ProjectInfo{Name: "vpc", Namespaces: []string{"x", "y"}}, on(map[string]string{"x": "cudn:vpc", "y": "cudn:vpc"}))
+	vpc := project.ProjectInfo{Name: "vpc", Namespaces: []string{"x", "y"}}
+	cudn := on(map[string]string{"x": "cudn:vpc", "y": "cudn:vpc"})
+	plan, need, err := c.PublishingNeeds(plat, vpc, cudn)
 	if !errors.Is(err, ErrPrimaryNetwork) || !plan.Primary || !slices.Equal(plan.Reach, []string{"x", "y"}) || len(need) == 0 {
 		t.Errorf("VM Network: %+v %d accesses %v, want primary, both reached, the accesses it would ask", plan, len(need), err)
+	}
+	cudn.Isolated = true
+	view, err := c.StagePublishing(auth.Identity{Username: "admin"}, plat, vpc, cudn)
+	if err != nil {
+		t.Fatalf("VM Network, Gateways isolated: %v", err)
+	}
+	var proxied []string
+	for _, it := range view.Items {
+		if it.Name == publish.Parameters || it.Name == publish.ProxyBinding("vpc") {
+			proxied = append(proxied, it.Namespace+"/"+it.Name)
+		}
+	}
+	if want := []string{"x/" + publish.Parameters, "portail-system/" + publish.ProxyBinding("vpc")}; !slices.Equal(slices.Sorted(slices.Values(proxied)), slices.Sorted(slices.Values(want))) {
+		t.Errorf("staged %v, want the parameters in x and the binding in portail's namespace", proxied)
 	}
 }
 
@@ -127,7 +143,7 @@ func TestPublishingRefusals(t *testing.T) {
 // route grant, nothing is left to stage; a namespace that joined since
 // lacks its grant, and only that grant is staged.
 func TestPublishingOnceInGit(t *testing.T) {
-	files, err := publish.Manifests(pubSettings, "shop", "db")
+	files, err := publish.Manifests(pubSettings, "shop", "db", false)
 	if err != nil {
 		t.Fatal(err)
 	}

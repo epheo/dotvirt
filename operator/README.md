@@ -201,6 +201,8 @@ Settings:
 - `gatewayClassName`: the class of each project's Gateway.
 - `clusterIssuer` (optional): a ClusterIssuer able to issue each project's
   wildcard, so DNS-01. Without it the Gateways serve HTTP only.
+- `portailNamespace` (optional, default `portail-system`): where portail's
+  controller and its proxy Role live.
 
 Publishing is off until `domain` and `gatewayClassName` are both set.
 
@@ -212,9 +214,13 @@ What stays with the platform:
   platform admin stages, never the tenant's. dotvirt writes no DNS records.
 - The Gateway's Service is the GatewayClass's default; whether a LoadBalancer
   Service is reachable on a VM Network is not verified yet.
-- A project on a VM Network is not offered publishing yet. Its gateway reaches
-  portail's controller only through the apiserver, where one project could delay
-  the others' route changes. It waits on a portail release that isolates Gateways.
+- A project on a VM Network is offered publishing once the publishing
+  GatewayClass carries `portail.epheo.eu/GatewaysIsolated=True` (portail with
+  per-Gateway poll caps and local token verification): until then one project could
+  delay the others' route changes. Its Gateway reaches portail's controller only
+  through the apiserver, so dotvirt stages its GatewayParameters and binds portail's
+  `portail-controller-proxy` Role, in `portailNamespace`, to its pods' account. That
+  Role comes with portail's `deploy/components/apiserver-proxy`.
 - Shared Gateways. HTTPRoute write lets a namespace attach routes to any Gateway
   whose listeners admit its namespace. A Gateway shared across projects must keep
   `allowedRoutes` at `Same` or a selector of platform namespaces, or it serves

@@ -224,6 +224,9 @@ type PublishingSpec struct {
 	// ClusterIssuer is a cert-manager ClusterIssuer able to issue each
 	// project's wildcard (DNS-01). Empty: the Gateways serve HTTP only.
 	ClusterIssuer string `json:"clusterIssuer,omitempty"`
+	// PortailNamespace holds portail's controller and its proxy Role, which a
+	// Gateway on a VM Network is bound to. Default portail-system.
+	PortailNamespace string `json:"portailNamespace,omitempty"`
 }
 
 // DotvirtSpec is the desired dotvirt install.

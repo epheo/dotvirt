@@ -31,17 +31,28 @@ type Settings struct {
 	Issuer string
 	// ProjectLabel is the namespace label naming a project.
 	ProjectLabel string
+	// PortailNamespace holds portail's controller and the Role letting a
+	// Gateway's pods poll it through the apiserver (ProxyRole).
+	PortailNamespace string
 }
 
 // On reports whether the install offers publishing at all.
 func (s Settings) On() bool { return s.Domain != "" && s.GatewayClass != "" }
 
-// Gateway names each namespace's Gateway; Certificate names its certificate
-// and the Secret that certificate fills.
+// Gateway names each project's Gateway; Certificate names its certificate
+// and the Secret that certificate fills; Parameters its GatewayParameters.
 const (
 	Gateway     = "publish"
 	Certificate = "publish-tls"
+	Parameters  = "publish-parameters"
 )
+
+// ProxyRole is portail's Role granting services/proxy on its controller's
+// sync port, and only that (deploy/components/apiserver-proxy).
+const ProxyRole = "portail-controller-proxy"
+
+// ServiceAccount is the account portail runs Gateway's pods as.
+const ServiceAccount = "portail-" + Gateway
 
 // Hostname is a project's listener hostname: *.<project>.<domain>.
 func Hostname(project, domain string) string { return "*." + project + "." + domain }
@@ -55,8 +66,10 @@ type File struct {
 }
 
 // Manifests renders project's Gateway in ns, then its Certificate when s
-// names an issuer.
-func Manifests(s Settings, project, ns string) ([]File, error) {
+// names an issuer. proxied: ns is on a VM Network, whose pods reach portail's
+// controller only through the apiserver; the Gateway then takes parameters
+// saying so, and a RoleBinding in PortailNamespace lets its pods.
+func Manifests(s Settings, project, ns string, proxied bool) ([]File, error) {
 	if !s.On() {
 		return nil, errors.New("publishing needs a domain and a GatewayClass")
 	}
@@ -97,14 +110,24 @@ func Manifests(s Settings, project, ns string) ([]File, error) {
 			},
 		})
 	}
-	gw, err := render(model.KindGateway, ns, Gateway, map[string]any{
-		"gatewayClassName": s.GatewayClass,
-		"listeners":        listeners,
-	})
+	spec := map[string]any{"gatewayClassName": s.GatewayClass, "listeners": listeners}
+	if proxied {
+		spec["infrastructure"] = map[string]any{"parametersRef": map[string]any{
+			"group": model.KindGWParams.Group, "kind": model.KindGWParams.Kind, "name": Parameters,
+		}}
+	}
+	gw, err := render(model.KindGateway, ns, Gateway, spec)
 	if err != nil {
 		return nil, err
 	}
 	files := []File{gw}
+	if proxied {
+		more, err := proxyFiles(s, project, ns)
+		if err != nil {
+			return nil, err
+		}
+		files = append(files, more...)
+	}
 	if s.Issuer == "" {
 		return files, nil
 	}
@@ -118,6 +141,33 @@ func Manifests(s Settings, project, ns string) ([]File, error) {
 	}
 	return append(files, cert), nil
 }
+
+// proxyFiles are the parameters sending ns's Gateway through the apiserver,
+// and the binding letting its pods do it.
+func proxyFiles(s Settings, project, ns string) ([]File, error) {
+	if err := validate.RequireDNS1123("portail namespace", s.PortailNamespace); err != nil {
+		return nil, err
+	}
+	params, err := render(model.KindGWParams, ns, Parameters, map[string]any{"controllerTransport": "APIServerProxy"})
+	if err != nil {
+		return nil, err
+	}
+	name := ProxyBinding(project)
+	rb, err := yaml.Marshal(map[string]any{
+		"apiVersion": model.KindRB.APIVersion(),
+		"kind":       model.KindRB.Kind,
+		"metadata":   map[string]any{"name": name, "namespace": s.PortailNamespace},
+		"roleRef":    map[string]any{"apiGroup": model.KindRB.Group, "kind": "Role", "name": ProxyRole},
+		"subjects":   []any{map[string]any{"kind": "ServiceAccount", "name": ServiceAccount, "namespace": ns}},
+	})
+	if err != nil {
+		return nil, err
+	}
+	return []File{params, {Kind: model.KindRB, Name: name, Path: model.KindRB.RepoPath(s.PortailNamespace, name), Content: rb}}, nil
+}
+
+// ProxyBinding names project's RoleBinding in portail's namespace.
+func ProxyBinding(project string) string { return "publish-" + project }
 
 func render(k model.Kind, ns, name string, spec map[string]any) (File, error) {
 	content, err := yaml.Marshal(map[string]any{

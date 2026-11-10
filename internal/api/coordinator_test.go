@@ -312,7 +312,7 @@ func TestNamespaceRightsInsideTheNamespaceCount(t *testing.T) {
 // a namespace whose publishing git holds is told it is on, whatever else it
 // may do there.
 func TestPublishingOnFollowsGatewayReads(t *testing.T) {
-	files, err := publish.Manifests(publish.Settings{Domain: "apps.example.com", GatewayClass: "portail", Issuer: "letsencrypt", ProjectLabel: "dotvirt.io/project"}, "team-a", "team-a-dev")
+	files, err := publish.Manifests(publish.Settings{Domain: "apps.example.com", GatewayClass: "portail", Issuer: "letsencrypt", ProjectLabel: "dotvirt.io/project"}, "team-a", "team-a-dev", false)
 	if err != nil {
 		t.Fatal(err)
 	}

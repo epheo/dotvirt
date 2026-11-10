@@ -118,6 +118,7 @@ func TestWhatEachRepoMayDeclare(t *testing.T) {
 		{"rbac.authorization.k8s.io", "RoleBinding"},
 		{"gateway.networking.k8s.io", "Gateway"},
 		{"cert-manager.io", "Certificate"},
+		{"portail.epheo.eu", "GatewayParameters"},
 		{"operators.coreos.com", "Subscription"},
 		{"operators.coreos.com", "OperatorGroup"},
 		{"operator.openshift.io", "KubeDescheduler"},

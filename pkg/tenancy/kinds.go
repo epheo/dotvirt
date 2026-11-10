@@ -42,6 +42,9 @@ var Kinds = []Kind{
 	// hostname.
 	{Group: "gateway.networking.k8s.io", Version: "v1", Kind: "Gateway", Resource: "gateways", Platform: true},
 	{Group: "cert-manager.io", Version: "v1", Kind: "Certificate", Resource: "certificates", Platform: true},
+	// A Gateway on a VM Network polls portail's controller through the
+	// apiserver: its parameters say so.
+	{Group: "portail.epheo.eu", Version: "v1alpha1", Kind: "GatewayParameters", Resource: "gatewayparameters", Platform: true},
 	// Rebalancing: the descheduler operator install and its configuration.
 	{Group: "operators.coreos.com", Version: "v1alpha1", Kind: "Subscription", Resource: "subscriptions", Platform: true},
 	{Group: "operators.coreos.com", Version: "v1", Kind: "OperatorGroup", Resource: "operatorgroups", Platform: true},

@@ -623,6 +623,13 @@ func TestDeploymentCarriesPublishing(t *testing.T) {
 	if i, _ := env("DOTVIRT_PUBLISH_ISSUER"); i != "letsencrypt" {
 		t.Errorf("issuer = %q", i)
 	}
+	if _, ok := env("DOTVIRT_PUBLISH_PORTAIL_NAMESPACE"); ok {
+		t.Error("portail's namespace without one set")
+	}
+	dv.Spec.Publishing.PortailNamespace = "edge"
+	if n, _ := env("DOTVIRT_PUBLISH_PORTAIL_NAMESPACE"); n != "edge" {
+		t.Errorf("portail namespace = %q", n)
+	}
 }
 
 // Users opening their own pull requests reaches dotvirt as one env var; the
