@@ -249,11 +249,16 @@ func (s *Server) projectCaps(ctx context.Context, sc scope, full project.Project
 }
 
 // handleModules answers GET /api/modules from the SA's discovery snapshot.
-func (s *Server) handleModules(w http.ResponseWriter, _ *http.Request) {
+// What the cluster can install comes from the served-kinds index the
+// capabilities already fill, so it asks discovery nothing more.
+func (s *Server) handleModules(w http.ResponseWriter, r *http.Request) {
 	m, ok := s.modules.Get()
 	if !ok {
 		fail(w, unavailable(errors.New("the cluster's APIs have not all answered yet")))
 		return
 	}
+	un := s.unserved(r.Context(), model.KindSub, model.KindOpGroup, model.KindMachCfg)
+	m.OLM = !un[model.KindSub] && !un[model.KindOpGroup]
+	m.MachineConfig = !un[model.KindMachCfg]
 	writeJSON(w, m)
 }

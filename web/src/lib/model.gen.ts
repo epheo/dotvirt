@@ -929,6 +929,13 @@ export interface Modules {
   rebalancing: boolean;
   routes: boolean;
   replicatedStorage: boolean;
+  /**
+   * OLM and MachineConfig are what this cluster can install, not show:
+   * rebalancing installs its operator through OLM (Subscriptions and
+   * OperatorGroups), host pressure readings add a MachineConfig.
+   */
+  olm: boolean;
+  machineConfig: boolean;
 }
 
 //////////

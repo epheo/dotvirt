@@ -8,6 +8,7 @@
 		type DRSView,
 	} from '#lib/api.js';
 	import { clusterGate } from '#lib/gates.js';
+	import { machineConfigOff } from '#lib/state/modules.svelte.js';
 	import ChoiceCards from './ChoiceCards.svelte';
 	import Button from './Button.svelte';
 	import StageModal from './StageModal.svelte';
@@ -42,6 +43,8 @@
 	let installPSI = $state(view.draft?.psi ?? false);
 	let showAdvanced = $state(false);
 	const psi = $derived(clusterGate.rebalancePSI());
+	// PSI is a MachineConfig: a cluster that serves none is not offered it.
+	const withPSI = $derived(installPSI && !machineConfigOff());
 
 	const inBounds = (v: number, b: { min: number; max: number }) => v >= b.min && v <= b.max;
 	const missing = $derived.by(() => {
@@ -58,7 +61,7 @@
 	const valid = $derived(missing.length === 0);
 	const summary = $derived(
 		valid
-			? `Stages ${mode} rescheduling (${threshold}, every ${intervalSeconds}s)${installPSI ? ' + PSI MachineConfig' : ''} -> platform repo`
+			? `Stages ${mode} rescheduling (${threshold}, every ${intervalSeconds}s)${withPSI ? ' + PSI MachineConfig' : ''} -> platform repo`
 			: '',
 	);
 
@@ -71,7 +74,7 @@
 			evictionNodeLimit,
 			evictionTotalLimit,
 		};
-		if (installPSI) req.installPSI = true;
+		if (withPSI) req.installPSI = true;
 		await api.enableRebalancing(req);
 	}
 </script>
@@ -161,7 +164,7 @@
 		</div>
 	{/if}
 
-	{#if !view.psiConfigured}
+	{#if !view.psiConfigured && !machineConfigOff()}
 		<label class="flex items-start gap-2 rounded border border-warn-soft bg-warn-soft/60 p-3">
 			<input type="checkbox" bind:checked={installPSI} disabled={!psi.ok} class="mt-0.5" />
 			<span class:opacity-50={!psi.ok}>

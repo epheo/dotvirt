@@ -437,6 +437,8 @@ async function handleAPI(req, res, url) {
 			rebalancing: true,
 			routes: false,
 			replicatedStorage: false,
+			olm: true,
+			machineConfig: true,
 			...s.modules,
 		});
 	}
