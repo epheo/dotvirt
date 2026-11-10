@@ -574,9 +574,13 @@ func TestHostsCapabilityIsListingNodes(t *testing.T) {
 }
 
 // The class sheet is read with the SA once and shared; a later caller is a
-// cache hit, and optional sources that 404 never fail the list.
+// cache hit, and optional sources that 404 never fail the list. It shows to
+// a caller who may list storage classes.
 func TestStorageClasses(t *testing.T) {
 	fc := newFakeCluster(t)
+	fc.ssar = func(token string, a *authzv1.ResourceAttributes) bool {
+		return token == adminToken || token == tenantToken && a.Verb == verbList && a.Resource == "storageclasses" && a.Namespace == ""
+	}
 	var lists atomic.Int32
 	fc.on(http.MethodGet, "/apis/storage.k8s.io/v1/storageclasses", func(w http.ResponseWriter, r *http.Request) {
 		lists.Add(1)
@@ -599,6 +603,11 @@ func TestStorageClasses(t *testing.T) {
 			t.Errorf("%s: classes = %+v", token, got)
 		}
 	}
+	rec := do(s, "stranger", http.MethodGet, "/api/storage/classes", "")
+	wantStatus(t, rec, http.StatusOK)
+	if body := strings.TrimSpace(rec.Body.String()); body != "[]" {
+		t.Errorf("a caller who may not list storage classes reads %s", body)
+	}
 	if lists.Load() != 1 {
 		t.Errorf("storage classes listed %d times, want 1", lists.Load())
 	}
@@ -610,9 +619,12 @@ func TestStorageClasses(t *testing.T) {
 // shared cached sheet keeps its segments for the next node reader.
 func TestStorageClassesSegmentsNeedNodeRead(t *testing.T) {
 	fc := newFakeCluster(t)
-	// tenant lists capacities, stranger nothing.
+	// Everyone lists the classes; tenant lists capacities too.
 	fc.ssar = func(token string, a *authzv1.ResourceAttributes) bool {
-		return token == adminToken || token == tenantToken && a.Verb == verbList && a.Namespace == "" && a.Resource == "csistoragecapacities"
+		if token == adminToken {
+			return true
+		}
+		return a.Verb == verbList && a.Namespace == "" && (a.Resource == "storageclasses" || token == tenantToken && a.Resource == "csistoragecapacities")
 	}
 	fc.on(http.MethodGet, "/apis/storage.k8s.io/v1/storageclasses", unstructuredList("storage.k8s.io/v1", "StorageClass",
 		map[string]any{"apiVersion": "storage.k8s.io/v1", "kind": "StorageClass", "metadata": map[string]any{"name": "local"}, "provisioner": "topolvm.io"}))
@@ -798,13 +810,15 @@ func TestStorageClaims(t *testing.T) {
 // VolumeSnapshotClasses.
 func TestStorageSheetPartsFollowTheirKinds(t *testing.T) {
 	fc := newFakeCluster(t)
-	// tenant lists profiles, stranger snapshot classes.
+	// Everyone lists the classes; tenant lists profiles, stranger snapshot classes.
 	fc.ssar = func(token string, a *authzv1.ResourceAttributes) bool {
 		switch {
 		case token == adminToken:
 			return true
 		case a.Verb != verbList || a.Namespace != "":
 			return false
+		case a.Resource == "storageclasses":
+			return true
 		case token == tenantToken:
 			return a.Resource == "storageprofiles"
 		}

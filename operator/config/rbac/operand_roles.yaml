@@ -230,3 +230,20 @@ rules:
     resources: ["clusterroles"]
     resourceNames: ["admin", "dotvirt-tenant-egress"]
     verbs: ["bind"]
+---
+# Storage classes for every signed-in user: OpenShift grants them through
+# system:openshift:aggregate-to-basic-user (get, list); MicroShift and plain Kubernetes
+# do not, and dotvirt shows a caller only what the apiserver lets them list. The
+# operator binds it to system:authenticated only where the cluster serves no
+# clusterversions: on a full OpenShift the cluster's own policy rules.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: dotvirt-storage-catalog
+  labels:
+    app.kubernetes.io/name: dotvirt
+    app.kubernetes.io/managed-by: dotvirt-operator
+rules:
+  - apiGroups: ["storage.k8s.io"]
+    resources: ["storageclasses"]
+    verbs: ["get", "list"]

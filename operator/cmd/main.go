@@ -65,6 +65,11 @@ func main() {
 		setupLog.Error(err, "unable to detect platform")
 		os.Exit(1)
 	}
+	clusterVersioned, err := platform.ServesClusterVersion(cfg)
+	if err != nil {
+		setupLog.Error(err, "unable to detect platform")
+		os.Exit(1)
+	}
 
 	mgr, err := ctrl.NewManager(cfg, ctrl.Options{
 		Scheme:                 scheme,
@@ -87,11 +92,12 @@ func main() {
 	}
 
 	if err := (&controller.DotvirtReconciler{
-		Client:   mgr.GetClient(),
-		Scheme:   mgr.GetScheme(),
-		Config:   mgr.GetConfig(),
-		Platform: plat,
-		DryRun:   dryRun,
+		Client:           mgr.GetClient(),
+		Scheme:           mgr.GetScheme(),
+		Config:           mgr.GetConfig(),
+		Platform:         plat,
+		ClusterVersioned: clusterVersioned,
+		DryRun:           dryRun,
 
 		APIReader:         mgr.GetAPIReader(),
 		OperatorNamespace: operatorNamespace(),

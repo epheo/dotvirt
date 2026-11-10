@@ -44,7 +44,11 @@ type DotvirtReconciler struct {
 	Scheme   *runtime.Scheme
 	Config   *rest.Config      // discovery for the dependency probe
 	Platform platform.Platform // detected once at startup (cmd/main.go)
-	DryRun   bool              // -dry-run: validate via server-side dry-run apply; persist nothing
+	// ClusterVersioned: a full OpenShift (platform.ServesClusterVersion), whose
+	// own RBAC policy grants signed-in users the storage catalog; the operator
+	// never binds it there.
+	ClusterVersioned bool
+	DryRun           bool // -dry-run: validate via server-side dry-run apply; persist nothing
 	// APIReader bypasses the cache: the pass's read of the CR and prune's
 	// cluster-wide lists.
 	APIReader client.Reader

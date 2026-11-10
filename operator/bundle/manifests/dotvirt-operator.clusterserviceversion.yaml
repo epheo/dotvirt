@@ -424,6 +424,7 @@ spec:
                 - dotvirt-argocd-apply
                 - dotvirt-platform-network-admin
                 - dotvirt-platform-sync
+                - dotvirt-storage-catalog
               resources:
                 - clusterrolebindings
               verbs:
@@ -435,6 +436,7 @@ spec:
                 - dotvirt-argocd-apply
                 - dotvirt-platform-network-admin
                 - dotvirt-platform-sync
+                - dotvirt-storage-catalog
               resources:
                 - clusterroles
               verbs:

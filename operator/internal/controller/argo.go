@@ -53,6 +53,9 @@ func (r *DotvirtReconciler) reconcileArgo(ctx context.Context, dv *dotvirtv1alph
 		install.ArgocdApplyClusterRoleBinding(dv, argoNS, argoSA, platformRepo != ""),
 		install.PlatformNetworkAdminBinding(dv),
 	}
+	if !r.ClusterVersioned {
+		objs = append(objs, install.StorageCatalogBinding(dv))
+	}
 	// The tenant AppProjects precede the ApplicationSet whose template names
 	// them, and apply stops at the first failure: the template never switches
 	// an Application to a project that does not exist yet.

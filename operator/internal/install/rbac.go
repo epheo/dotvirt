@@ -67,3 +67,12 @@ func PlatformNetworkAdminBinding(dv *dotvirtv1alpha1.Dotvirt) *rbacv1.ClusterRol
 		{Kind: "Group", APIGroup: "rbac.authorization.k8s.io", Name: "dotvirt-platform-admins"},
 	})
 }
+
+// StorageCatalogBinding gives every authenticated user the storage classes
+// (dotvirt-storage-catalog), as OpenShift's basic-user does; it is bound only
+// where the cluster's own policy does not (no clusterversions).
+func StorageCatalogBinding(dv *dotvirtv1alpha1.Dotvirt) *rbacv1.ClusterRoleBinding {
+	return crb("dotvirt-storage-catalog", "dotvirt-storage-catalog", dv, []rbacv1.Subject{
+		{Kind: "Group", APIGroup: "rbac.authorization.k8s.io", Name: "system:authenticated"},
+	})
+}

@@ -318,18 +318,17 @@ func (s *Server) handleOptions(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, optionsFor(v, all))
 }
 
-// optionsFor narrows the shared catalog to what the caller may list:
-// instancetypes and preferences cluster-wide, an OS image where it lives,
-// outside the view too (a shared golden-image namespace grants that to every
-// authenticated user). Storage classes stay whole, as handleStorageClasses
-// says why. The cached catalog is never mutated - fresh, non-nil slices so
-// they serialize as [].
+// optionsFor narrows the shared catalog to what the caller may list: each
+// cluster-scoped kind cluster-wide, an OS image where it lives, outside the
+// view too (a shared golden-image namespace grants that to every
+// authenticated user). The cached catalog is never mutated - fresh, non-nil
+// slices so they serialize as [].
 func optionsFor(v callerView, all model.Options) model.Options {
 	out := model.Options{
 		Instancetypes:  listed(v, ssarInstancetypes, all.Instancetypes),
 		Preferences:    listed(v, ssarPreferences, all.Preferences),
 		OSImages:       make([]model.OSImage, 0, len(all.OSImages)),
-		StorageClasses: all.StorageClasses,
+		StorageClasses: listed(v, ssarStorageClasses, all.StorageClasses),
 	}
 	for _, img := range all.OSImages {
 		if v.lists(ssarDataSources, img.Namespace) {

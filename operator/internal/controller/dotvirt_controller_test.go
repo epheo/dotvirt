@@ -315,8 +315,26 @@ func TestReconcileMinimalCRToReady(t *testing.T) {
 	if err := c.List(context.Background(), &crbs, client.MatchingLabels{"dotvirt.io/instance": dv.Name}); err != nil {
 		t.Fatal(err)
 	}
-	if len(crbs.Items) != 3 {
-		t.Errorf("instance-labeled ClusterRoleBindings = %d, want 3", len(crbs.Items))
+	if len(crbs.Items) != 4 {
+		t.Errorf("instance-labeled ClusterRoleBindings = %d, want 4", len(crbs.Items))
+	}
+}
+
+// The storage catalog binding goes where the cluster grants signed-in users
+// no storage classes; on a full OpenShift its own policy does, and the
+// operator leaves it be.
+func TestStorageCatalogBindsOffOpenShiftOnly(t *testing.T) {
+	for _, versioned := range []bool{false, true} {
+		dv := optOut(testCR())
+		c := testBuilder(t).WithObjects(dv).Build()
+		r := newReconciler(c, depsOK)
+		r.ClusterVersioned = versioned
+		reconcileOnce(t, r, dv)
+		markOperandReady(t, c, dv)
+		reconcileOnce(t, r, dv)
+		if bound := exists(t, c, &rbacv1.ClusterRoleBinding{}, "", "dotvirt-storage-catalog"); bound == versioned {
+			t.Errorf("clusterversions served %v: storage catalog bound %v", versioned, bound)
+		}
 	}
 }
 

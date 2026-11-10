@@ -55,3 +55,37 @@ func TestDetect(t *testing.T) {
 		})
 	}
 }
+
+// Only a full OpenShift serves clusterversions; MicroShift serves other
+// config.openshift.io kinds, plain Kubernetes not the group at all.
+func TestServesClusterVersion(t *testing.T) {
+	for _, c := range []struct {
+		name      string
+		resources []string // nil: config.openshift.io/v1 not served
+		want      bool
+	}{
+		{"openshift", []string{"clusterversions", "infrastructures"}, true},
+		{"microshift", []string{"certmanagers"}, false},
+		{"kubernetes", nil, false},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path != "/apis/config.openshift.io/v1" || c.resources == nil {
+					w.WriteHeader(http.StatusNotFound)
+					return
+				}
+				list := metav1.APIResourceList{GroupVersion: "config.openshift.io/v1"}
+				for _, n := range c.resources {
+					list.APIResources = append(list.APIResources, metav1.APIResource{Name: n})
+				}
+				w.Header().Set("Content-Type", "application/json")
+				_ = json.NewEncoder(w).Encode(list)
+			}))
+			defer srv.Close()
+			got, err := ServesClusterVersion(&rest.Config{Host: srv.URL})
+			if err != nil || got != c.want {
+				t.Errorf("ServesClusterVersion = %v, %v, want %v", got, err, c.want)
+			}
+		})
+	}
+}

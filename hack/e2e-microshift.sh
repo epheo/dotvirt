@@ -563,6 +563,12 @@ YAML
 		[ "${admin}" = "${plain}" ] || { echo "admin ${admin}"; echo "plain ${plain}"; return 1; }
 	}
 	retry "any authenticated user reads KubeVirt's and CDI's catalogs" 180 same_catalog
+	# MicroShift grants signed-in users no storage classes; the operator's
+	# dotvirt-storage-catalog binding does, as OpenShift's basic-user role.
+	reads_storage_classes() {
+		curl -fsS --max-time 30 -H "Authorization: Bearer ${NO_GET_TOK}" "${BASE}/api/storage/classes" | jq -e 'length > 0'
+	}
+	retry "any authenticated user reads the storage classes" 180 reads_storage_classes
 fi
 
 # ── 10. The round-trip itself ───────────────────────────────────────────────────

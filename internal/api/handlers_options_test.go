@@ -57,8 +57,8 @@ func TestOptionsFilteredPerCaller(t *testing.T) {
 	if got.Preferences == nil || len(got.Preferences) != 0 {
 		t.Errorf("preferences the caller may not list = %+v", got.Preferences)
 	}
-	if len(got.StorageClasses) != 1 {
-		t.Errorf("storage classes go to every caller, got %+v", got.StorageClasses)
+	if got.StorageClasses == nil || len(got.StorageClasses) != 0 {
+		t.Errorf("storage classes the caller may not list = %+v", got.StorageClasses)
 	}
 	cached, _ := s.options.Get("all")
 	if len(cached.OSImages) != 2 {
