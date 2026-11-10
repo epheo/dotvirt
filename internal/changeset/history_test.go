@@ -455,6 +455,8 @@ func TestProposalRendersBranchDiff(t *testing.T) {
 			_, _ = w.Write([]byte(`{"number":5,"state":"open","html_url":"http://forge/pulls/5","title":"grow db","base":{"ref":"main"},"head":{"ref":"` + head + `","sha":"eee"}}`))
 		case strings.HasSuffix(r.URL.Path, "/pulls/6"):
 			_, _ = w.Write([]byte(`{"number":6,"state":"open","html_url":"http://forge/pulls/6","title":"unfetched","base":{"ref":"main"},"head":{"ref":"dotvirt/proposed/bob/p-ffff","sha":"fff"}}`))
+		case strings.HasSuffix(r.URL.Path, "/pulls/8"):
+			_, _ = w.Write([]byte(`{"number":8,"state":"open","html_url":"http://forge/pulls/8","title":"fork","base":{"ref":"main","repo_id":1},"head":{"ref":"` + head + `","sha":"ddd","repo_id":2}}`))
 		default:
 			http.Error(w, "not found", http.StatusNotFound)
 		}
@@ -487,6 +489,10 @@ func TestProposalRendersBranchDiff(t *testing.T) {
 	}
 	if _, err := c.Proposal(proj, 7); !errors.Is(err, model.ErrNotFound) {
 		t.Errorf("unknown PR should be ErrNotFound, got %v", err)
+	}
+	// A fork's branch named after alice's must not render alice's branch.
+	if _, err := c.Proposal(proj, 8); !errors.Is(err, model.ErrInvalid) {
+		t.Errorf("a fork's PR should be refused, got %v", err)
 	}
 }
 

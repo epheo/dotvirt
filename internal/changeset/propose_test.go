@@ -544,6 +544,37 @@ func TestRecentlyMergedKeepsADeletedBranch(t *testing.T) {
 	}
 }
 
+// A fork may name its branch after anyone's proposal branch: its PR is the
+// poster's, in the open lane and the merge feed alike.
+func TestAForkPRIsItsPosters(t *testing.T) {
+	head := proposedBranchFor("alice", "p")
+	at := time.Now().UTC().Format(time.RFC3339)
+	pr := func(state string, merged bool) string {
+		return `[{"number":9,"state":"` + state + `","merged":` + boolStr(merged) + `,"merged_at":"` + at +
+			`","html_url":"http://forge/pulls/9","title":"x","user":{"login":"mallory"},` +
+			`"base":{"ref":"main","repo_id":1},"head":{"ref":"` + head + `","sha":"aaa","repo_id":2}}]`
+	}
+	open := newProposeFixture(t, when("GET", "/pulls", http.StatusOK, pr("open", false)),
+		when("GET", "/branch_protections", http.StatusOK, `[]`),
+		when("GET", "/reviews", http.StatusOK, `[]`),
+		when("GET", "/status", http.StatusOK, `{"state":"success","total_count":1}`))
+	rows, err := open.c.OpenProposals(open.proj)
+	if err != nil || len(rows) != 1 {
+		t.Fatalf("OpenProposals: %v %+v", err, rows)
+	}
+	if r := rows[0]; r.By != "mallory" || r.Branch != "" || r.Head != "" || r.Revert {
+		t.Errorf("fork row = %+v, want mallory's with no branch", r)
+	}
+	merged := newProposeFixture(t, when("GET", "/pulls", http.StatusOK, pr("closed", true)))
+	ms, err := merged.c.RecentlyMerged(merged.proj, time.Now().Add(-time.Hour))
+	if err != nil || len(ms) != 1 {
+		t.Fatalf("RecentlyMerged: %v %+v", err, ms)
+	}
+	if ms[0].By != "mallory" || ms[0].Branch != "" {
+		t.Errorf("fork merge = %+v, want mallory's with no branch", ms[0])
+	}
+}
+
 func TestOpenProposalsRefreshesUnchangedHead(t *testing.T) {
 	head := proposedBranchFor("alice", "p")
 	var reviews, status, updated string
