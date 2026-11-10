@@ -57,7 +57,7 @@ func (t *term) num(n uint64) *term {
 func (t *term) sum() uint64 { return t.h.Sum64() }
 
 // netGrants are the verdicts the network and policy pulls apply beyond the
-// visible set: node read (the fabric, uplinks and node ops), platform
+// view: node read (the fabric, uplinks and node ops), platform
 // authoring, the create authorities behind CanManage, Caps, the cluster-tier
 // policy rows, shared-error redaction and platform source files, and list on
 // each cluster-tier policy kind, which those rows also need and which names a
@@ -126,7 +126,7 @@ func (g netGrants) fabric() bool { return g.list[ssarUplink] || g.list[ssarNNS] 
 // networksWatermark covers what the caller's networks and policies pulls
 // read: the catalog objects in its visible namespaces and the cluster-scoped
 // kinds it is shown (netstate.Watermark), their drift by the same scopes, the
-// visible set itself, which filters both pulls, and the verdicts that shape
+// view itself, which filters both pulls, and the verdicts that shape
 // them.
 func (s *Server) networksWatermark(v callerView, g netGrants) uint64 {
 	visible := v.names
@@ -161,7 +161,7 @@ func (s *Server) networksWatermark(v callerView, g netGrants) uint64 {
 // disk for an operator, the disks of the namespaces whose claims it may list
 // for anyone else. The reviews are the cached ones the pull itself makes, so a
 // grant moves it.
-func (s *Server) replicationWatermark(ctx context.Context, id auth.Identity, c *cluster.Client, visible map[string]bool) uint64 {
+func (s *Server) replicationWatermark(ctx context.Context, id auth.Identity, c *cluster.Client, v callerView) uint64 {
 	if s.replication == nil || !s.replication.Started() {
 		return 0
 	}
@@ -170,7 +170,7 @@ func (s *Server) replicationWatermark(ctx context.Context, id auth.Identity, c *
 		return t.start("replication-operator").num(s.replication.Total()).sum() & wireMask
 	}
 	var sum uint64
-	for _, ns := range s.pvcNamespaces(ctx, id, c, slices.Collect(maps.Keys(visible))) {
+	for _, ns := range v.listsIn(ssarClaims, slices.Collect(maps.Keys(v.names))) {
 		sum += t.start("replication").str(ns).num(s.replication.Gen(ns)).sum()
 	}
 	return sum & wireMask

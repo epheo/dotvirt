@@ -218,7 +218,7 @@ func BenchmarkFrameWatermarks(b *testing.B) {
 	}
 }
 
-// A grant or a revocation that leaves the visible set alone still moves the
+// A grant or a revocation that leaves the view alone still moves the
 // networks watermark: the pulls it covers read those verdicts too.
 func TestNetworksWatermarkFollowsGrants(t *testing.T) {
 	fc := newFakeCluster(t)
@@ -318,5 +318,5 @@ func TestFrameRejectsARevokedToken(t *testing.T) {
 
 // wideView is a caller who sees visible and may list every read kind there.
 func wideView(visible map[string]bool) callerView {
-	return callerView{names: visible, set: visibleSet{wideReads: allReads}}
+	return callerView{names: visible, memo: viewMemo{wideReads: allReads}}
 }

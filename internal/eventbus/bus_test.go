@@ -1,7 +1,6 @@
 package eventbus
 
 import (
-	"slices"
 	"testing"
 	"time"
 )
@@ -177,17 +176,16 @@ func TestPublishKeyConcurrent(t *testing.T) {
 	}
 }
 
-// A key published after a KeySeq reading is reported by MovedSince with that
-// reading, one published before it is not, and an unkeyed publish moves
-// BroadVersion and every key but no mark.
-func TestMovedSince(t *testing.T) {
+// A keyed publish moves KeySeq and its own mark, not another key's, and an
+// unkeyed publish moves BroadVersion and every key but no mark.
+func TestKeySeqAndMarks(t *testing.T) {
 	b := New()
 	b.PublishKey(RBACChanged, "x")
-	since, broad := b.KeySeq(RBACChanged), b.BroadVersion(RBACChanged)
+	since, broad, x0 := b.KeySeq(RBACChanged), b.BroadVersion(RBACChanged), b.KeyMark(RBACChanged, "x")
 	b.PublishKey(RBACChanged, "y")
 	b.PublishKey(RBACChanged, "y")
-	if got := b.MovedSince(RBACChanged, since, []string{"x", "y", "z"}); !slices.Equal(got, []string{"y"}) {
-		t.Errorf("MovedSince = %v, want [y]", got)
+	if b.KeySeq(RBACChanged) == since || b.KeyMark(RBACChanged, "y") <= since || b.KeyMark(RBACChanged, "x") != x0 {
+		t.Errorf("seq %d, marks x %d y %d after a reading of %d", b.KeySeq(RBACChanged), b.KeyMark(RBACChanged, "x"), b.KeyMark(RBACChanged, "y"), since)
 	}
 	if b.BroadVersion(RBACChanged) != broad {
 		t.Error("a keyed publish moved BroadVersion")
@@ -197,8 +195,8 @@ func TestMovedSince(t *testing.T) {
 	if b.BroadVersion(RBACChanged) == broad || b.KeyVersion(RBACChanged, "x") == x {
 		t.Error("an unkeyed publish must move BroadVersion and every key")
 	}
-	if got := b.MovedSince(RBACChanged, b.KeySeq(RBACChanged), []string{"x", "y"}); got != nil {
-		t.Errorf("MovedSince the current reading = %v, want none", got)
+	if b.KeyMark(RBACChanged, "x") != x0 {
+		t.Error("an unkeyed publish moved a mark")
 	}
 }
 
@@ -263,7 +261,7 @@ func TestForgetNeverReequalsAMark(t *testing.T) {
 	b.PublishKey(RBACChanged, "x")
 	stamp := b.KeyMark(RBACChanged, "x")
 	b.Forget(RBACChanged, "x")
-	if b.KeyMark(RBACChanged, "x") != 0 || b.MovedSince(RBACChanged, 0, []string{"x"}) != nil {
+	if b.KeyMark(RBACChanged, "x") != 0 {
 		t.Fatal("a forgotten key still reads published")
 	}
 	b.PublishKey(RBACChanged, "x")

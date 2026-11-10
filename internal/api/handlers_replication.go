@@ -1,7 +1,6 @@
 package api
 
 import (
-	"context"
 	"errors"
 	"fmt"
 	"net/http"
@@ -36,24 +35,14 @@ func (s *Server) handleProtection(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	writeJSON(w, s.replication.Protection(s.pvcNamespaces(r.Context(), sc.id, sc.cluster, nss)))
-}
-
-// pvcNamespaces narrows namespaces to those the caller may list claims in.
-// Seeing a namespace means listing its VMs, which says nothing of its claims,
-// and every row here is a claim's name and standing.
-func (s *Server) pvcNamespaces(ctx context.Context, id auth.Identity, c *cluster.Client, namespaces []string) []string {
-	acts := make([]action, len(namespaces))
-	for i, ns := range namespaces {
-		acts[i] = ask(verbList, ssarClaims, ns)
+	v, err := s.viewFor(r.Context(), sc.id, sc.cluster)
+	if err != nil {
+		fail(w, err)
+		return
 	}
-	var out []string
-	for i, ok := range s.capableAll(ctx, id, c, acts) {
-		if ok {
-			out = append(out, namespaces[i])
-		}
-	}
-	return out
+	// Every row is a claim's name and standing: the claims' list right, not
+	// the namespace's, decides.
+	writeJSON(w, s.replication.Protection(v.listsIn(ssarClaims, nss)))
 }
 
 // repairCaller is the shared gate of the repairs: asked before anything about

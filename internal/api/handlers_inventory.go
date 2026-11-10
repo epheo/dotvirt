@@ -168,7 +168,7 @@ func (s *Server) InventoryForIdentity(ctx context.Context, id auth.Identity) (mo
 	grants := s.netGrants(ctx, id, userCluster, platformAuthor)
 	inv.NetworksVersion = s.networksWatermark(v, grants)
 	inv.TasksVersion = s.tasksWatermark(s.taskScope(id, projects, v, platformAuthor, grants.nodes))
-	inv.ReplicationVersion = s.replicationWatermark(ctx, id, userCluster, visible)
+	inv.ReplicationVersion = s.replicationWatermark(ctx, id, userCluster, v)
 	inv.RoutesVersion = s.routesWatermark(ctx, id, userCluster, visible)
 	return inv, nil
 }
@@ -330,26 +330,15 @@ func (s *Server) handleOptions(w http.ResponseWriter, r *http.Request) {
 		fail(w, err)
 		return
 	}
-	writeJSON(w, s.optionsFor(r.Context(), id, c, v, all))
+	writeJSON(w, optionsFor(v, all))
 }
 
-// ssarNADs is, with ssarDataSources, the list authority over the namespaced
-// option kinds (cluster.ListOptions reads the same resources).
-var ssarNADs = ssarFor(model.KindNAD)
-
-// optionsFor narrows the shared catalog to what id may see: a namespaced entry
-// passes when the caller may list that kind there, read off the caller's view
-// or, outside it, asked where a binding names them (a shared golden-image
-// namespace grants that to every authenticated user; the verdict is SSAR-cached
-// per token). The cached
-// catalog is never mutated - fresh, non-nil slices so they serialize as [].
-func (s *Server) optionsFor(ctx context.Context, id auth.Identity, c *cluster.Client, v callerView, all model.Options) model.Options {
-	allowed := func(ns string, ref ssarRef) bool {
-		if v.names[ns] || v.lists(ref, ns) {
-			return v.lists(ref, ns)
-		}
-		return len(s.boundOnly(id, []string{ns})) == 1 && s.capable(ctx, id, c, ask(verbList, ref, ns))
-	}
+// optionsFor narrows the shared catalog to what the caller may list: outside
+// the view too, where a binding names them (a shared golden-image namespace
+// grants that to every authenticated user). The cached catalog is never
+// mutated - fresh, non-nil slices so they serialize as [].
+func optionsFor(v callerView, all model.Options) model.Options {
+	allowed := func(ns string, ref ssarRef) bool { return v.lists(ref, ns) }
 	out := all
 	out.OSImages = make([]model.OSImage, 0, len(all.OSImages))
 	for _, img := range all.OSImages {
@@ -359,7 +348,7 @@ func (s *Server) optionsFor(ctx context.Context, id auth.Identity, c *cluster.Cl
 	}
 	out.Networks = make([]model.NetworkOption, 0, len(all.Networks))
 	for _, n := range all.Networks {
-		if allowed(n.Namespace, ssarNADs) {
+		if allowed(n.Namespace, ssarFor(model.KindNAD)) {
 			out.Networks = append(out.Networks, n)
 		}
 	}

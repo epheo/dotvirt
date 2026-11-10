@@ -14,7 +14,7 @@ import (
 )
 
 // TestOptionsFilteredPerCaller pins the tenant boundary on the SA-read catalog:
-// a namespaced entry outside the caller's visible set is served only when the
+// a namespaced entry outside the caller's view is served only when the
 // caller could list that kind there itself (the shared golden-image case), so
 // another tenant's namespace and network names never leave the process. The
 // cached catalog must stay whole for the next caller.

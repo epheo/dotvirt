@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"maps"
 	"slices"
-	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -161,7 +160,7 @@ func TestRevokeOutsideAProjectInvalidates(t *testing.T) {
 	waitUntil(t, "the revocation to reach the cached verdict", func() bool { return !g.ask("tok-alice", alice, q) })
 }
 
-// A new project namespace is the only one a visible set reviews, and one that
+// A new project namespace is the only one a view reviews, and one that
 // stops being a project leaves the set with no review at all.
 func TestNamespaceMovesAreDeltas(t *testing.T) {
 	g := newGrantRig(t, []string{"a", "b"})
@@ -395,7 +394,7 @@ func TestWideReaderFollowsTheProjects(t *testing.T) {
 }
 
 // A review right after a grant move in its namespace serves the short TTL,
-// and one in another namespace the long one: the visible set marks the moved
+// and one in another namespace the long one: the view marks the moved
 // namespace alone, re-asks it once that TTL ran out, and a verdict in it is
 // cached unsettled while one elsewhere is not. It waits out the settle window
 // of the snapshot's own first lists, which move every grant.
@@ -407,8 +406,8 @@ func TestUnsettledIsPerNamespace(t *testing.T) {
 	tenant := newAsking(readsVMsIn("x", "y"))
 	visibleOf(t, g.s, "tok", tenant.c)
 	key := restfactory.TokenKey("tok")
-	if e, _ := g.s.visible.Get(key); e.sweptUnsettled || len(e.unsettled) != 0 {
-		t.Fatalf("a sweep long after any move cached unsettled=%v %v", e.sweptUnsettled, e.unsettled)
+	if m, _ := g.s.views.Get(key); m.until.Sub(m.built) <= unwatchedTTL {
+		t.Fatalf("a sweep long after any move serves %s", m.until.Sub(m.built))
 	}
 
 	g.bind("x", "rb")
@@ -417,13 +416,11 @@ func TestUnsettledIsPerNamespace(t *testing.T) {
 	if got := tenant.take(); !slices.Equal(got, slices.Repeat([]string{"x"}, 1+len(readKinds))) {
 		t.Fatalf("a move in x asked %q", got)
 	}
-	e, _ := g.s.visible.Get(key)
-	if _, ok := e.unsettled["x"]; !ok || len(e.unsettled) != 1 || e.sweptUnsettled {
-		t.Fatalf("after a move in x the set marks %v (swept %v), want x alone", e.unsettled, e.sweptUnsettled)
+	if m, _ := g.s.views.Get(key); m.until.Sub(m.built) > unwatchedTTL+time.Second {
+		t.Fatalf("after a move in x the view serves %s, want x's short TTL", m.until.Sub(m.built))
 	}
 
-	e.unsettled = map[string]time.Time{"x": time.Now().Add(-unwatchedTTL)}
-	g.s.visible.Put(key, e)
+	ageVerdicts(g.s, "tok", unwatchedTTL, nsQuestions("x")...)
 	visibleOf(t, g.s, "tok", tenant.c)
 	if got := tenant.where(); !slices.Equal(got, []string{"x"}) {
 		t.Fatalf("x's short TTL ran out, yet the read asked %q", got)
@@ -432,7 +429,7 @@ func TestUnsettledIsPerNamespace(t *testing.T) {
 	for ns, want := range map[string]bool{"x": true, "y": false} {
 		q := vmUpdate(ns)
 		g.ask("tok", tenant, q)
-		k := strings.Join([]string{key, q.Verb, q.Group, q.Resource, q.Subresource, q.Namespace, q.Name}, "\x00")
+		k := verdictKey(restfactory.TokenKey("tok"), q)
 		if v, ok := g.s.ssar.Get(k); !ok || v.unsettled != want {
 			t.Errorf("a verdict in %s cached unsettled=%v (ok=%v), want %v", ns, v.unsettled, ok, want)
 		}
@@ -485,7 +482,7 @@ func relabel(t *testing.T, g *grantRig, ns string, project bool) {
 
 // A namespace leaves the projects, its grant is revoked there (published as
 // OtherRBACChanged), and it comes back: with or without a read between,
-// neither the visible set nor a verdict cached in it keeps the old allow.
+// neither the view nor a verdict cached in it keeps the old allow.
 func TestCrossKindRevocation(t *testing.T) {
 	for _, between := range []bool{false, true} {
 		g := newGrantRig(t, []string{"z", "y"}, userBinding("z", "carol-edit", "carol"))
@@ -507,7 +504,7 @@ func TestCrossKindRevocation(t *testing.T) {
 		waitUntil(t, "the revocation's publish", func() bool { return g.bus.KeySeq(eventbus.OtherRBACChanged) != other })
 		relabel(t, g, "z", true)
 		if got := visibleOf(t, g.s, "tok", tenant.c); got["z"] {
-			t.Errorf("between=%v: the visible set kept the revoked z: %v", between, got)
+			t.Errorf("between=%v: the view kept the revoked z: %v", between, got)
 		}
 		if g.ask("tok", tenant, q) {
 			t.Errorf("between=%v: the verdict cached in z kept the revoked allow", between)

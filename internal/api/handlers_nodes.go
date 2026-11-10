@@ -154,22 +154,17 @@ func (s *Server) handleNodeEvacuate(w http.ResponseWriter, r *http.Request) {
 
 // readableFailures keeps the evacuation failures in namespaces whose VMs the
 // caller may read, and counts the rest: a sweep must not read as complete, nor
-// name a VM RBAC hides.
+// name a VM RBAC hides. A failed read of the view hides them all.
 func (s *Server) readableFailures(ctx context.Context, id auth.Identity, c *cluster.Client, failures []model.EvacuationFailure) ([]model.EvacuationFailure, int) {
-	readable := map[string]bool{}
+	v, err := s.viewFor(ctx, id, c)
+	if err != nil {
+		return []model.EvacuationFailure{}, len(failures)
+	}
 	kept := make([]model.EvacuationFailure, 0, len(failures))
-	hidden := 0
 	for _, f := range failures {
-		ok, asked := readable[f.Namespace]
-		if !asked {
-			ok = s.capable(ctx, id, c, vmAction(verbList, f.Namespace))
-			readable[f.Namespace] = ok
-		}
-		if ok {
+		if v.lists(ssarVM, f.Namespace) {
 			kept = append(kept, f)
-		} else {
-			hidden++
 		}
 	}
-	return kept, hidden
+	return kept, len(failures) - len(kept)
 }

@@ -195,7 +195,7 @@ func tenantServer(t *testing.T, d *reachedDraft, nss []string, visible []string)
 	if err := state.WaitForSync(wait); err != nil {
 		t.Fatalf("snapshot sync: %v", err)
 	}
-	// The seeded visible sets are stamped with the RBAC levels, which the first
+	// The seeded views are stamped with the RBAC levels, which the first
 	// namespace and RoleBinding relists bump after WaitForSync returns; a later
 	// bump would send visibleFor to the fake apiserver, which serves no list.
 	for bus.Version(eventbus.NamespaceChanged) == 0 || bus.Version(eventbus.RBACChanged) == 0 {
