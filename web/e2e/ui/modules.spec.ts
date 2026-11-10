@@ -280,4 +280,34 @@ test('an unanswered module read keeps the VM wording', async ({ page }) => {
 	await expect(
 		main.getByRole('columnheader', { name: 'Live migration', exact: true }),
 	).toBeVisible();
+	await page.goto('/networking');
+	await expect(main.getByText('Numbers are VMs')).toBeVisible();
+});
+
+test('the map counts VMs only where KubeVirt runs', async ({ page }) => {
+	await setScenario(page, 'base');
+	await login(page);
+	for (const [scenario, vms] of scenarios) {
+		await setScenario(page, scenario);
+		await page.goto('/networking');
+		const main = page.locator('main');
+		await expect(
+			main.getByLabel(vms ? 'Find a VM, network or IP' : 'Find a network or IP', { exact: true }),
+		).toBeVisible();
+		await expect(main.getByText('Numbers are VMs')).toHaveCount(vms ? 1 : 0);
+		await expect(main.getByText(/ only this\.$/)).toHaveCount(vms ? 1 : 0);
+		await expect(main.getByText(/VMs keep their own IP/)).toHaveCount(vms ? 1 : 0);
+		// A project node's first line: its name, then its VM count.
+		await expect(main.locator('[data-node="proj:team-web"] > div').first()).toHaveText(
+			vms ? /^team-web\s*\d+$/ : 'team-web',
+		);
+		await main.getByRole('button', { name: 'Pod network', exact: true }).click();
+		const inspector = page.getByRole('complementary', { name: 'Inspector, Pod network' });
+		await expect(
+			inspector.getByText(
+				vms ? /VMs without another network/ : /Workloads without another network/,
+			),
+		).toBeVisible();
+		await expect(inspector.getByText('Only this')).toHaveCount(vms ? 1 : 0);
+	}
 });
