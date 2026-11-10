@@ -179,7 +179,7 @@ export interface NamespaceCaps {
   publishingWaits?: boolean;
   /**
    * PublishingOn: the platform repo holds this namespace's publishing as
-   * rendered, merged or not, whoever asks.
+   * rendered, told only to a caller who may list gateways here.
    */
   publishingOn?: boolean;
 }

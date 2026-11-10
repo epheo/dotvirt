@@ -124,7 +124,7 @@ type NamespaceCaps struct {
 	// namespace's own VM Network, which waits on a newer portail.
 	PublishingWaits bool `json:"publishingWaits,omitempty"`
 	// PublishingOn: the platform repo holds this namespace's publishing as
-	// rendered, merged or not, whoever asks.
+	// rendered, told only to a caller who may list gateways here.
 	PublishingOn bool `json:"publishingOn,omitempty"`
 }
 

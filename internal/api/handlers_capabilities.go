@@ -216,19 +216,21 @@ func (s *Server) namespaceCaps(ctx context.Context, sc scope, ns string) model.N
 // would: every kind served, the whole project in view or any namespace
 // claimable, and the gate's accesses allowed. A namespace with its own VM
 // Network is weighed as if it had none, so the UI can say what it waits on.
+// PublishingOn is what Kubernetes shows the caller: the namespace's Gateway,
+// so only one who may list gateways there learns it, whatever else they see.
 func (s *Server) publishingCaps(ctx context.Context, sc scope, full project.ProjectInfo, ns string, out *model.NamespaceCaps) {
 	if !s.cfg.Publish.On() || len(s.unserved(ctx, s.publishingKinds()...)) > 0 {
 		return
 	}
 	id, c := sc.id, sc.cluster
-	if len(sc.proj.Namespaces) < len(full.Namespaces) && !s.capable(ctx, id, c, claimAction("")) {
-		return
-	}
 	pt := s.publishTarget(ns)
 	waits := pt.PrimaryNetwork
 	pt.PrimaryNetwork = false
 	need, err := s.draft.PublishingNeeds(s.platformProject(), full, pt)
-	out.PublishingOn = errors.Is(err, changeset.ErrPublishingOn)
+	out.PublishingOn = errors.Is(err, changeset.ErrPublishingOn) && s.capable(ctx, id, c, kindAction(verbList, model.KindGateway, ns))
+	if len(sc.proj.Namespaces) < len(full.Namespaces) && !s.capable(ctx, id, c, claimAction("")) {
+		return
+	}
 	allowed := s.needsAllowed(ctx, id, c, need, err)
 	out.Publishing = allowed && !waits
 	out.PublishingWaits = allowed && waits
