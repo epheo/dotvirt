@@ -127,7 +127,7 @@ func pullsServer(t *testing.T, maxPage int, prs ...PR) (srv *httptest.Server, ca
 }
 
 func listedPR(number int, state, head, base string, merged bool) PR {
-	p := PR{Number: number, State: state, Merged: merged, HTMLURL: fmt.Sprintf("u%d", number)}
+	p := PR{Number: number, State: state, Merged: merged}
 	p.Head.Ref, p.Base.Ref = head, base
 	return p
 }
@@ -317,7 +317,7 @@ func TestEditPR(t *testing.T) {
 		if len(body) != 2 || body["state"] != "open" || body["title"] != "t" {
 			t.Errorf("body = %v, want state=open and the title alone", body)
 		}
-		writeJSON(t, w, PR{Number: 4, State: "open", HTMLURL: "u4"})
+		writeJSON(t, w, PR{Number: 4, State: "open"})
 	}))
 	defer srv.Close()
 
@@ -586,5 +586,41 @@ func TestCarriesToken(t *testing.T) {
 		if got := CarriesToken(c.forge, c.repo); got != c.want {
 			t.Errorf("CarriesToken(%q, %q) = %v, want %v", c.forge, c.repo, got, c.want)
 		}
+	}
+}
+
+func TestBrowserLinksUseTheWebBase(t *testing.T) {
+	api := "http://forgejo.dotvirt.svc:3000"
+	repo := api + "/dotvirt/team-a.git"
+	f := NewFactory(api, StaticToken("t"), false, "")
+	if got := f.For(repo).PullURL(7); got != api+"/dotvirt/team-a/pulls/7" {
+		t.Errorf("no web base: pull link %q, want the API base's", got)
+	}
+
+	f.WithWebURL("https://c.example/forge/ ")
+	web := "https://c.example/forge/dotvirt/team-a"
+	for name, got := range map[string]string{
+		"pull":    f.For(repo).PullURL(7),
+		"page":    f.PullPage(repo, 7),
+		"compare": f.For(repo).CompareURL("dotvirt/proposed/u", "main"),
+		"repo":    f.RepoPage(repo),
+		"pathref": f.RepoPage("dotvirt/team-a.git"),
+	} {
+		want := map[string]string{
+			"pull": web + "/pulls/7", "page": web + "/pulls/7",
+			"compare": web + "/compare/main...dotvirt/proposed/u",
+			"repo":    web, "pathref": web,
+		}[name]
+		if got != want {
+			t.Errorf("%s = %q, want %q", name, got, want)
+		}
+	}
+	// A repo another forge hosts keeps its own address.
+	if other := "https://elsewhere.example/o/r.git"; f.RepoPage(other) != other {
+		t.Errorf("foreign repo page = %q", f.RepoPage(other))
+	}
+	var none *Factory
+	if none.RepoPage(repo) != repo || none.PullPage(repo, 7) != "" || none.WithWebURL("https://x") != nil {
+		t.Error("a nil factory links the repo as written and no pull request")
 	}
 }

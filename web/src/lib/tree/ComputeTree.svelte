@@ -124,7 +124,13 @@
 
 	function ctxContainer(
 		e: MouseEvent,
-		c: { project: string; repo?: string; namespace?: string; namespaces: string[] },
+		c: {
+			project: string;
+			repo?: string;
+			repoPage?: string;
+			namespace?: string;
+			namespaces: string[];
+		},
 	) {
 		e.preventDefault();
 		ui.ctx = { x: e.clientX, y: e.clientY, kind: 'container', ...c };
@@ -178,6 +184,7 @@
 				ctxContainer(e, {
 					project: project.name,
 					repo: project.repo,
+					repoPage: project.repoPage,
 					namespaces: project.namespaces.map((n) => n.namespace),
 				})}
 		>
@@ -229,6 +236,7 @@
 						ctxContainer(e, {
 							project: project.name,
 							repo: project.repo,
+							repoPage: project.repoPage,
 							namespace: ns.namespace,
 							namespaces: [ns.namespace],
 						})}

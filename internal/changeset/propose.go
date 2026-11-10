@@ -40,7 +40,7 @@ func (r *Reader) RecentlyMerged(proj project.ProjectInfo, since time.Time) ([]ta
 		out = append(out, tasks.Merge{
 			RepoURL: repo,
 			Number:  pr.Number,
-			URL:     pr.HTMLURL,
+			URL:     fc.PullURL(pr.Number),
 			Title:   pr.Title,
 			By:      tasks.MergeAuthor(pr.HeadBranch(), r.proposed, pr.User.Login),
 			Branch:  pr.HeadBranch(),
@@ -216,7 +216,7 @@ func (r *Reader) proposalRow(proj project.ProjectInfo, pr forge.PR, read *git.Re
 		head = read.BranchHash(branch)
 	}
 	return model.Proposal{
-		Project: proj.Name, PRNumber: pr.Number, PRURL: pr.HTMLURL, Title: pr.Title,
+		Project: proj.Name, PRNumber: pr.Number, PRURL: r.forge.PullPage(proj.Repo, pr.Number), Title: pr.Title,
 		Branch: branch, Head: head,
 		By:     tasks.MergeAuthor(branch, r.proposed, pr.User.Login),
 		Revert: strings.HasPrefix(branch, r.proposed+"/"+tasks.RevertSegment+"/"),

@@ -75,6 +75,7 @@ func (s *Server) InventoryForIdentity(ctx context.Context, id auth.Identity) (mo
 		ScopeSync: func(p project.ProjectInfo, ps model.ProjectSync) *model.ProjectSync {
 			return s.projectSyncView(ctx, v, p, ps)
 		},
+		RepoPage: s.forge.RepoPage,
 	}
 	// Drift comes from the SA-owned Application snapshot (lock-free, watch-fed).
 	// Three states the inventory must NOT conflate: Argo off (s.drift nil: no

@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"net/url"
 	"os"
 	"strings"
 	"time"
@@ -63,6 +64,10 @@ type Config struct {
 	// The token rides git only to ForgeURL's host, so without it git is anonymous.
 	ForgeURL   string
 	ForgeToken string
+	// ForgeWebURL is where browsers open the forge's pages (pull requests,
+	// compare pages, repositories) when it is not ForgeURL: a forge the pod
+	// reaches in-cluster, or one a provider's app fronts on the same paths.
+	ForgeWebURL string
 	// ForgeTokenFile, when set, is a mounted-secret path read on EVERY forge/git
 	// call (see ForgeTokenSource) - kubelet updates it in place, so an operator
 	// re-mint/rotation takes effect with no pod restart. Takes precedence over the
@@ -154,6 +159,7 @@ func Load(args []string) (*Config, error) {
 	fs.BoolVar(&c.UsersOpenPRs, "users-open-prs", envBool("DOTVIRT_USERS_OPEN_PRS", false), "push proposal and revert branches without opening, reopening or editing their pull requests; users open them in the forge")
 	fs.StringVar(&c.DraftDir, "draft-dir", envOr("DOTVIRT_DRAFT_DIR", "./.dotvirt-drafts"), "root dir for persisted drafts (<dir>/<user>/<project>.json)")
 	fs.StringVar(&c.ForgeURL, "forge-url", os.Getenv("DOTVIRT_FORGE_URL"), "Forgejo base URL (empty = push-only, no PR, anonymous git)")
+	fs.StringVar(&c.ForgeWebURL, "forge-web-url", os.Getenv("DOTVIRT_FORGE_WEB_URL"), "base URL browsers open forge pages at, when not -forge-url (empty = -forge-url)")
 	fs.StringVar(&c.ForgeToken, "forge-token", os.Getenv("DOTVIRT_FORGE_TOKEN"), "Forgejo API token (git https + API)")
 	fs.StringVar(&c.ForgeTokenFile, "forge-token-file", os.Getenv("DOTVIRT_FORGE_TOKEN_FILE"), "path to a mounted secret holding the forge token, re-read per call (rotation-safe; overrides -forge-token)")
 	fs.BoolVar(&c.InsecureTLS, "insecure-tls", envBool("DOTVIRT_INSECURE_TLS", false), "skip TLS verification for git+forge (dev only)")
@@ -193,6 +199,13 @@ func Load(args []string) (*Config, error) {
 		return nil, fmt.Errorf("-tenant-kinds-allowed (DOTVIRT_TENANT_KINDS_ALLOWED) names kinds no tenant repo may apply: %s", tenancy.FormatGroupKinds(refused))
 	}
 	c.TenantKinds = tenancy.Policy{Allowed: allowed}
+	// Every forge link the UI renders starts with it, so only an absolute
+	// http(s) URL may.
+	if c.ForgeWebURL != "" {
+		if u, err := url.Parse(c.ForgeWebURL); err != nil || (u.Scheme != "https" && u.Scheme != "http") || u.Host == "" {
+			return nil, fmt.Errorf("-forge-web-url (DOTVIRT_FORGE_WEB_URL) %q is not an absolute http(s) URL", c.ForgeWebURL)
+		}
+	}
 	// The snapshot selects project namespaces by this key: a malformed one
 	// would select none and look like an empty cluster, so it fails here.
 	if errs := validation.IsQualifiedName(c.ProjectLabel); len(errs) > 0 {

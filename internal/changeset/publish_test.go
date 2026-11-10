@@ -3,7 +3,6 @@ package changeset
 import (
 	"encoding/json"
 	"errors"
-	"fmt"
 	"net/http"
 	"os"
 	"os/exec"
@@ -49,7 +48,6 @@ func (p *forgePRs) route(m, path string) (int, string, bool) {
 		var in struct{ Title, Body string }
 		_ = json.Unmarshal([]byte(p.f.lastBody()), &in)
 		pr := forge.PR{Number: len(p.prs) + 1, State: "open", Title: in.Title, Body: in.Body}
-		pr.HTMLURL = fmt.Sprintf("http://forge/pulls/%d", pr.Number)
 		pr.Head.Ref, pr.Base.Ref = p.head, "main"
 		p.prs = append(p.prs, pr)
 		return p.json(http.StatusCreated, pr)
@@ -746,7 +744,7 @@ func TestProposeAdoptsAPROpenedByHand(t *testing.T) {
 	mu.Lock()
 	refuse = false
 	mu.Unlock()
-	byHand := forge.PR{Number: 1, State: "open", HTMLURL: "http://forge/pulls/1"}
+	byHand := forge.PR{Number: 1, State: "open"}
 	byHand.Head.Ref, byHand.Head.Sha, byHand.Base.Ref = prs.head, head, "main"
 	prs.mu.Lock()
 	prs.prs = append(prs.prs, byHand)
@@ -783,7 +781,7 @@ func TestPublishRecloseAfterAFailedPush(t *testing.T) {
 			_ = os.Rename(broken, f.proj.Repo)
 		}
 	})
-	closed := forge.PR{Number: 1, State: "closed", HTMLURL: "http://forge/pulls/1"}
+	closed := forge.PR{Number: 1, State: "closed"}
 	closed.Head.Ref, closed.Base.Ref = prs.head, "main"
 	prs.prs = append(prs.prs, closed)
 	_, write, err := f.c.write(f.proj)

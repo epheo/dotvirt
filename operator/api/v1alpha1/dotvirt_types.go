@@ -70,6 +70,14 @@ type ForgeSpec struct {
 	// exposes Forgejo on a router-assigned host and reports it in status.forgeURL. Set it
 	// for a bring-your-own forge, or to pin the managed forge's host.
 	URL string `json:"url,omitempty"`
+	// WebURL is where browsers open the forge's pages: pull requests, compare
+	// pages and repositories. Empty: the forge's URL. Set it when that URL is
+	// in-cluster, or when an app of yours fronts the forge on the same paths
+	// (<owner>/<repo>, .../pulls/<n>, .../compare/<base>...<head>); dotvirt's
+	// own API and git calls still go to the forge's URL.
+	// +kubebuilder:validation:Pattern=`^https?://[^/\s]+(/\S*)?$`
+	// +optional
+	WebURL string `json:"webURL,omitempty"`
 	// PlatformRepo is the cluster-scoped + tenancy repo (CUDN/NNCP/Namespace). The
 	// operator ensures it exists; dotvirt routes platform creates here by kind. Defaults
 	// to <forge URL>/dotvirt/platform.git for a managed forge.

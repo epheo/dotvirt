@@ -115,6 +115,7 @@ type CtxState =
 			kind: 'container';
 			project: string;
 			repo?: string;
+			repoPage?: string;
 			namespace?: string;
 			namespaces: string[];
 	  };

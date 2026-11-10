@@ -34,8 +34,9 @@
 				<Row label="Repository">
 					{#if p.repo}
 						<a
-							href={p.repo}
+							href={p.repoPage || p.repo}
 							target="_blank"
+							rel="noopener"
 							class="font-mono text-xs text-accent-ink hover:underline">{p.repo}</a
 						>
 					{:else}

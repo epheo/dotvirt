@@ -198,8 +198,11 @@ type ProjectNamespace struct {
 // left empty) when a project's namespaces are labeled but have no usable repo -
 // surfaced as a warning in the UI rather than failing the whole inventory.
 type Project struct {
-	Name       string             `json:"name"`
-	Repo       string             `json:"repo,omitempty"`
+	Name string `json:"name"`
+	Repo string `json:"repo,omitempty"`
+	// RepoPage is where a browser opens Repo: its page under the forge's web
+	// base, which may differ from the base git and the API reach it at.
+	RepoPage   string             `json:"repoPage,omitempty"`
 	Namespaces []ProjectNamespace `json:"namespaces"`
 	Error      string             `json:"error,omitempty"`
 	// GitOps is the project's ArgoCD Application rollup - the sync/health Argo already

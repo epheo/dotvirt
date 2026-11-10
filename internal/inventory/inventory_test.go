@@ -99,6 +99,7 @@ func TestBuildFiltersAndEnriches(t *testing.T) {
 		Live: clusterstate.LiveView{
 			"tenant-a": {"web": {Phase: "Running", GuestIP: "10.0.0.1"}},
 		},
+		RepoPage: func(repo string) string { return "https://web/" + repo },
 	}
 
 	inv := Build(in)
@@ -107,6 +108,9 @@ func TestBuildFiltersAndEnriches(t *testing.T) {
 	}
 
 	teamA := inv.Projects[0]
+	if teamA.RepoPage != "https://web/"+bare || inv.Projects[1].RepoPage != "" {
+		t.Errorf("repo pages: %q, %q; want team-a's alone", teamA.RepoPage, inv.Projects[1].RepoPage)
+	}
 	if teamA.Name != "team-a" || teamA.Repo != bare {
 		t.Fatalf("team-a wrong: %+v", teamA)
 	}
