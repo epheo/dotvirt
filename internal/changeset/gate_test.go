@@ -528,3 +528,55 @@ func TestArgoObjectsRefusesAnAPIVersionOfMoreThanGroupAndVersion(t *testing.T) {
 		t.Errorf("kubevirt.io/v1: %v", err)
 	}
 }
+
+// A clone of another namespace's data needs the right CDI asks for there,
+// datavolumes/source: asked per namespace a VM newly clones from, never for
+// its own, and not again for an edit that keeps the source.
+func TestGateAsksToCloneFromAnotherNamespace(t *testing.T) {
+	vm := func(runStrategy, extra string) string {
+		return "apiVersion: kubevirt.io/v1\nkind: VirtualMachine\nmetadata:\n  name: web\n  namespace: alpha\nspec:\n  runStrategy: " + runStrategy + "\n" +
+			"  dataVolumeTemplates:\n" +
+			"  - metadata: {name: web-root}\n    spec:\n      sourceRef: {kind: DataSource, name: fedora, namespace: images}\n" +
+			"  - metadata: {name: web-data}\n    spec:\n      source:\n        pvc: {name: golden, namespace: beta}\n" +
+			"  - metadata: {name: web-own}\n    spec:\n      source:\n        pvc: {name: mine, namespace: alpha}\n" + extra
+	}
+	clone := func(ns string) Access {
+		return Access{Verb: "create", Group: "cdi.kubevirt.io", Resource: "datavolumes", Subresource: "source", Namespace: ns}
+	}
+	clones := func(asked []Access) []Access {
+		return slices.DeleteFunc(slices.Clone(asked), func(a Access) bool { return a.Subresource != "source" })
+	}
+	bare := seedBareFiles(t, map[string][]byte{"alpha/web.yaml": []byte(vm("Halted", ""))})
+	c := newTestCoordinator(t, false)
+	r := &rbac{}
+	c.UseAuthorizer(r)
+	id := auth.Identity{Username: "alice"}
+	proj := project.ProjectInfo{Name: "p", Repo: bare, Namespaces: []string{"alpha"}}
+
+	fresh := draft.Entry{Kind: draft.KindCreate, Resource: draft.ResourceVM, Namespace: "alpha", Name: "web2", SourceFile: "alpha/web2.yaml",
+		Manifest: strings.Replace(vm("Halted", ""), "name: web\n", "name: web2\n", 1)}
+	if err := c.gate(id, proj, []draft.Entry{fresh}); err != nil {
+		t.Fatal(err)
+	}
+	if got := clones(r.questions()); !slices.Equal(got, []Access{clone("images"), clone("beta")}) {
+		t.Errorf("a new VM: asked %+v, want images and beta", got)
+	}
+
+	r.asked = nil
+	if _, err := c.StageUpdateManifest(id, proj, "vm", "alpha", "web", model.UpdateManifestRequest{YAML: vm("Always", "")}); err != nil {
+		t.Fatal(err)
+	}
+	if got := clones(r.questions()); len(got) != 0 {
+		t.Errorf("an edit keeping its sources: asked %+v", got)
+	}
+
+	r.asked = nil
+	r.refuse(func(a Access) bool { return a == clone("gamma") })
+	more := vm("Halted", "  - metadata: {name: web-more}\n    spec:\n      source:\n        snapshot: {name: snap, namespace: gamma}\n")
+	if _, err := c.StageUpdateManifest(id, proj, "vm", "alpha", "web", model.UpdateManifestRequest{YAML: more}); !errors.Is(err, model.ErrForbidden) {
+		t.Errorf("a new source the caller may not clone from: err = %v, want ErrForbidden", err)
+	}
+	if got := clones(r.questions()); !slices.Equal(got, []Access{clone("gamma")}) {
+		t.Errorf("an edit adding a source: asked %+v, want gamma alone", got)
+	}
+}
