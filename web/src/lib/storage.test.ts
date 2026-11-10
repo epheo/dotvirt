@@ -322,8 +322,9 @@ describe('library', () => {
 	it('derives the tiles, with no stale answer before snapshots land', () => {
 		const withData = [...r, ...rows([vm('s', { disks: [{ name: 'c', type: 'containerDisk' }] })])];
 		const t = libraryTiles(withData, classes, true);
-		expect(t).toMatchObject({ noLiveMigrate: 4, stale: 3, noData: 1 });
+		expect(t).toMatchObject({ disks: 5, noLiveMigrate: 4, stale: 3, noData: 1 });
 		expect(libraryTiles(withData, classes, false).stale).toBeNull();
+		expect(libraryTiles([], classes, true)).toMatchObject({ disks: 0, noLiveMigrate: 0, stale: 0 });
 		const fast = t.free.find((f) => f.name === 'lvms-vgfast')!;
 		expect(fast).toMatchObject({ free: 2 ** 30, held: 0, nearFull: false });
 		expect(t.free.find((f) => f.name === 'bulk-hdd')!.free).toBeNull();

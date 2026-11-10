@@ -87,13 +87,17 @@ func (s *Server) tenancyTarget(w http.ResponseWriter, r *http.Request, sc scope)
 // once the capture knows whether it exists.
 func (s *Server) handleCreateNamespace(w http.ResponseWriter, r *http.Request) {
 	raw, p, ok := readBody[struct {
-		Project string `json:"project"`
+		Project   string    `json:"project"`
+		VMNetwork *struct{} `json:"vmNetwork"`
 	}](w, r, false)
 	if !ok {
 		return
 	}
 	if p.Project == "" {
 		fail(w, invalid(errors.New("the project the namespace joins is required")))
+		return
+	}
+	if p.VMNetwork != nil && !s.gateServed(w, r, model.KindUDN) {
 		return
 	}
 	// The tenant project it joins: annotation source + authz (the caller must see it).
@@ -123,13 +127,17 @@ func (s *Server) handleCreateNamespace(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleCreateProject(w http.ResponseWriter, r *http.Request) {
 	// Peek the name for an early 400; the Coordinator re-decodes the full spec.
 	raw, p, ok := readBody[struct {
-		Name string `json:"name"`
+		Name      string    `json:"name"`
+		VMNetwork *struct{} `json:"vmNetwork"`
 	}](w, r, false)
 	if !ok {
 		return
 	}
 	if p.Name == "" {
 		fail(w, invalid(errors.New("a project name is required")))
+		return
+	}
+	if p.VMNetwork != nil && !s.gateServed(w, r, model.KindUDN) {
 		return
 	}
 	plat, ok := s.platformScopeGated(w, r)

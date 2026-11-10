@@ -78,3 +78,24 @@ test('an unanswered module read keeps the whole console', async ({ page }) => {
 	await login(page);
 	await expect(tiles(page).first()).toHaveText('Compute');
 });
+
+test('without project networks New Project neither offers nor stages one', async ({ page }) => {
+	await setScenario(page, 'nonetworks');
+	await login(page);
+	await page.goto('/compute');
+	await page.getByRole('button', { name: 'New', exact: true }).click();
+	const sheet = page.getByRole('dialog');
+	await sheet.getByRole('radio', { name: 'Project', exact: true }).click();
+	await sheet.getByLabel('Name', { exact: true }).fill('team-c');
+	await expect(sheet.getByRole('checkbox', { name: /default network/ })).toHaveCount(0);
+
+	const posted = page.waitForRequest(
+		(r) =>
+			r.method() === 'POST' &&
+			new URL(r.url()).pathname === '/api/projects' &&
+			!r.url().includes('dryRun'),
+	);
+	await sheet.getByRole('button', { name: 'Stage project' }).click();
+	const body = (await posted).postDataJSON();
+	expect(body).toEqual({ name: 'team-c', namespace: 'team-c' });
+});
