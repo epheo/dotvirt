@@ -3,6 +3,7 @@ package install
 import (
 	"encoding/json"
 	"slices"
+	"strings"
 
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -90,8 +91,10 @@ func RepoCredsSecret(dv *dotvirtv1alpha1.Dotvirt, argoNS, urlPrefix, username, t
 		TypeMeta:   metav1.TypeMeta{APIVersion: "v1", Kind: "Secret"},
 		ObjectMeta: metav1.ObjectMeta{Name: repoCredsName, Namespace: argoNS, Labels: labels},
 		StringData: map[string]string{
-			"type":     "git",
-			"url":      urlPrefix,
+			"type": "git",
+			// Argo matches a template by plain string prefix: without the
+			// slash, https://forge/dotvirt would also serve https://forge/dotvirtx.
+			"url":      strings.TrimSuffix(urlPrefix, "/") + "/",
 			"username": username,
 			"password": token,
 		},
