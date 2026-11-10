@@ -24,6 +24,9 @@ rules:
   resourceNames:
   - admin
   - dotvirt-tenant-egress
+  - view
+  - edit
+  - dotvirt-tenant-egress-view
   resources:
   - clusterroles
   verbs:

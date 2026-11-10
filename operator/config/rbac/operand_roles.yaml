@@ -211,6 +211,21 @@ rules:
     resources: ["egressfirewalls"]
     verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
 ---
+# EgressFirewall reads for the project viewer and author personas: view and edit lack
+# them, and a repo declaring one is then unreadable to them. The platform repo binds it
+# next to view or edit; the operator never binds it.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: dotvirt-tenant-egress-view
+  labels:
+    app.kubernetes.io/name: dotvirt
+    app.kubernetes.io/managed-by: dotvirt-operator
+rules:
+  - apiGroups: ["k8s.ovn.org"]
+    resources: ["egressfirewalls"]
+    verbs: ["get", "list", "watch"]
+---
 # What the platform tier's Argo sync account needs beyond dotvirt-argocd-apply once
 # Argo syncs the platform repo as it: the Namespaces that repo declares, and `bind` on
 # the roles its project grants name, which is what lets it apply those RoleBindings
@@ -228,7 +243,7 @@ rules:
     verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
   - apiGroups: ["rbac.authorization.k8s.io"]
     resources: ["clusterroles"]
-    resourceNames: ["admin", "dotvirt-tenant-egress"]
+    resourceNames: ["admin", "dotvirt-tenant-egress", "view", "edit", "dotvirt-tenant-egress-view"]
     verbs: ["bind"]
 ---
 # Storage classes for every signed-in user: OpenShift grants them through
