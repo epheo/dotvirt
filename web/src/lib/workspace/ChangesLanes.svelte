@@ -24,6 +24,7 @@
 		type ReviewSel,
 	} from '#lib/review.js';
 	import { drafts } from '#lib/state/drafts.svelte.js';
+	import { inventory } from '#lib/state/inventory.svelte.js';
 	import Button from '#lib/components/Button.svelte';
 	import Card from '#lib/components/Card.svelte';
 	import DiscardDraft from '#lib/components/DiscardDraft.svelte';
@@ -37,7 +38,14 @@
 	// project. Selection and history state belong to the workspace: the URL
 	// mirrors the one, the review card resolves against the other. Lists that
 	// grow with the fleet page; a short one shows whole.
-	export type HistoryLane = { open: boolean; busy: boolean; error: string; commits: Commit[] };
+	// denied is the gate's no, set instead of a read the server would refuse.
+	export type HistoryLane = {
+		open: boolean;
+		busy: boolean;
+		error: string;
+		denied: string;
+		commits: Commit[];
+	};
 
 	let {
 		tab = 'staged',
@@ -49,6 +57,8 @@
 		results,
 		history,
 		repoProjects,
+		scopeNS = '',
+		reviewable = true,
 		active,
 		onselect,
 		ontogglehistory,
@@ -65,6 +75,9 @@
 		results: Record<string, ProposeResult>;
 		history: Record<string, HistoryLane>;
 		repoProjects: string[];
+		scopeNS?: string;
+		// Whether a listed commit opens for review: it reads the whole repo.
+		reviewable?: boolean;
 		active: ReviewSel | null;
 		onselect: (s: ReviewSel) => void;
 		ontogglehistory: (project: string) => void;
@@ -188,20 +201,59 @@
 
 {#snippet commitRow(project: string, c: Commit, indent: boolean)}
 	{@const sel = { kind: 'commit', project, hash: c.hash } as const}
-	<button
-		onclick={() => onselect(sel)}
-		class="{ROW} min-h-10 py-2 text-[13px] {indent ? INDENT : 'px-card'} {tint(on(sel))}"
-	>
+	{#snippet cells()}
 		<code class="shrink-0 font-mono text-xs text-ink-faint">{c.shortHash}</code>
 		<span class="min-w-0 truncate text-ink" title={c.message}>{c.title}</span>
 		{#if c.prNumber}<span class="shrink-0 text-ink-faint">#{c.prNumber}</span>{/if}
 		<span class="ml-auto shrink-0 text-xs text-ink-faint">{shortDate(c.when)}</span>
-	</button>
+	{/snippet}
+	{#if reviewable}
+		<button
+			onclick={() => onselect(sel)}
+			class="{ROW} min-h-10 py-2 text-[13px] {indent ? INDENT : 'px-card'} {tint(on(sel))}"
+		>
+			{@render cells()}
+		</button>
+	{:else}
+		<div class="{ROW} min-h-10 py-2 text-[13px] {indent ? INDENT : 'px-card'}">
+			{@render cells()}
+		</div>
+	{/if}
+{/snippet}
+
+<!-- A whole repo the caller may not read: what they see of it opens one
+namespace at a time. -->
+{#snippet deniedBody(project: string, denied: string, inline: boolean)}
+	{@const seen = scopeNS
+		? []
+		: (inventory.projects.find((p) => p.name === project)?.namespaces ?? [])}
+	<div
+		class="flex flex-col gap-1.5 border-t border-line-soft py-2.5 text-[13px] {inline
+			? INDENT
+			: 'px-card'}"
+	>
+		<p class="text-ink-soft">{denied}</p>
+		{#if seen.length}
+			<p class="text-ink-soft">Its history opens one namespace at a time:</p>
+			<ul class="flex flex-wrap gap-x-4 gap-y-1">
+				{#each seen as n (n.namespace)}
+					<li>
+						<a
+							href="{changesHref(project, n.namespace)}?tab=history"
+							class="text-accent-ink hover:underline">{n.namespace}</a
+						>
+					</li>
+				{/each}
+			</ul>
+		{/if}
+	</div>
 {/snippet}
 
 {#snippet laneBody(project: string, lane: HistoryLane | undefined, inline: boolean)}
 	{#if !lane || (lane.busy && !lane.commits.length)}
 		<div class="border-t border-line-soft px-card py-3"><Skeleton rows={2} class="h-6" /></div>
+	{:else if lane.denied}
+		{@render deniedBody(project, lane.denied, inline)}
 	{:else if lane.error}
 		<div class="border-t border-line-soft px-card py-2.5">
 			<Note tone="danger" class="flex items-center gap-2">

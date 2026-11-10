@@ -5,6 +5,7 @@
 import type { ClusterCaps, NamespaceCaps, ObjectCaps } from '#lib/api.js';
 import { NOT_IN_GIT } from '#lib/authoring.js';
 import { caps, type Gate } from '#lib/state/caps.svelte.js';
+import { PLATFORM_PROJECT } from '#lib/state/drafts.svelte.js';
 
 export type { Gate };
 export type Verb = keyof ObjectCaps;
@@ -85,6 +86,19 @@ export function repoGate(p: { repo?: string; namespaces: { namespace: string }[]
 		? proj(n, (c) => c.project.adopt, "recover this project's repo")
 		: projectGate.adopt(n);
 }
+
+// repoReadGate is reading project's whole repo: its history, a past change's
+// review and Undo. Asked of namespace, one the caller sees there; the
+// platform's is its readers'.
+export function repoReadGate(project: string, namespace: string): Gate {
+	return project === PLATFORM_PROJECT
+		? clusterGate.platformRead()
+		: proj(namespace, (c) => c.project.repoRead, `read all of ${project}`);
+}
+
+// One namespace's history in its project's repo.
+export const namespaceHistoryGate = (namespace: string) =>
+	ns(namespace, (c) => c.repoRead, 'read the history');
 
 // Namespaced network objects, by draft resource. A network attachment git
 // still declares is its own kind on the network routes.
