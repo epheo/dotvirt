@@ -7,6 +7,9 @@ import (
 	"strings"
 	"testing"
 
+	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+
 	"github.com/epheo/dotvirt/internal/model"
 	"github.com/epheo/dotvirt/pkg/tenancy"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -201,5 +204,17 @@ func TestWildcardEgressNeedsTheDNSNameResolver(t *testing.T) {
 		if rec := edit("api.example.com"); rec.Code != http.StatusOK {
 			t.Errorf("resolver=%v: an edit to a named host = %d %s", resolver, rec.Code, rec.Body.String())
 		}
+	}
+}
+
+// The gate's project-namespace fact is the snapshot's: a labelled namespace
+// is a project's, any other is not.
+func TestProjectNamespaceReadsTheSnapshot(t *testing.T) {
+	fc := newFakeCluster(t)
+	fc.namespaces = append(fc.namespaces, corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "openshift-cnv"}})
+	s := fc.server(nil, Config{BaseBranch: "main"})
+	if !s.ProjectNamespace("team-a-dev") || s.ProjectNamespace("openshift-cnv") || s.ProjectNamespace("nowhere") {
+		t.Errorf("team-a-dev %v, openshift-cnv %v, nowhere %v; want only team-a-dev",
+			s.ProjectNamespace("team-a-dev"), s.ProjectNamespace("openshift-cnv"), s.ProjectNamespace("nowhere"))
 	}
 }
