@@ -42,9 +42,19 @@ spec:
           interfaces:
             - name: default
               masquerade: {}
+            - name: vm-net
+              bridge: {}
+            - name: shared
+              bridge: {}
       networks:
         - name: default
           pod: {}
+        - name: vm-net
+          multus:
+            networkName: tenant-a/vm-net
+        - name: shared
+          multus:
+            networkName: openshift-cnv/shared
       volumes:
         - name: rootdisk
           dataVolume:
@@ -100,6 +110,11 @@ func TestDeriveRenderRoundTrip(t *testing.T) {
 	m := string(r.Manifest)
 	if !strings.Contains(m, "namespace: tenant-b") || !strings.Contains(m, r.Name+"-rootdisk") {
 		t.Fatalf("round-tripped manifest wrong:\n%s", m)
+	}
+	// The source namespace's network is the target's same-named one; another
+	// namespace's (a global one) is kept.
+	if strings.Contains(m, "tenant-a/") || !strings.Contains(m, "networkName: vm-net") || !strings.Contains(m, "networkName: openshift-cnv/shared") {
+		t.Fatalf("network references wrong:\n%s", m)
 	}
 }
 

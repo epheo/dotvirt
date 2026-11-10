@@ -15,8 +15,11 @@ import (
 // generate-expression default derived from the source name. DataVolume names
 // prefixed with the VM's name are re-anchored to ${NAME} too: DataVolumes are
 // namespace-unique, so a second deploy of the template must not collide with
-// the first. Everything else (disks, networks, cloud-init) carries verbatim;
-// parameterizing further fields is a template-editing concern.
+// the first. A NIC naming a network in the source VM's namespace names it bare,
+// so a deploy attaches to the same-named network in its own namespace: Multus
+// isolation (OpenShift, MicroShift) refuses another namespace's. Everything
+// else (disks, other networks, cloud-init) carries verbatim; parameterizing
+// further fields is a template-editing concern.
 func Derive(vmYAML []byte, name, description string) ([]byte, error) {
 	var vm map[string]any
 	if err := yaml.Unmarshal(vmYAML, &vm); err != nil {
@@ -33,10 +36,12 @@ func Derive(vmYAML []byte, name, description string) ([]byte, error) {
 	if base == "" {
 		return nil, fmt.Errorf("%w: VM manifest has no name", model.ErrInvalid)
 	}
+	ns, _ := meta["namespace"].(string)
 	delete(meta, "namespace")
 	delete(vm, "status")
 	meta["name"] = "${NAME}"
 	reanchorDataVolumes(vm, base)
+	unanchorNetworks(vm, ns)
 
 	tplMeta := map[string]any{"name": name}
 	if description != "" {
@@ -97,6 +102,25 @@ func reanchorDataVolumes(vm map[string]any, vmName string) {
 			}
 			if dv, ok := vol["dataVolume"].(map[string]any); ok {
 				rename(dv, "name")
+			}
+		}
+	}
+}
+
+// unanchorNetworks drops ns from each Multus network reference that names it.
+func unanchorNetworks(vm map[string]any, ns string) {
+	if ns == "" {
+		return
+	}
+	spec, _ := vm["spec"].(map[string]any)
+	tmpl, _ := spec["template"].(map[string]any)
+	tspec, _ := tmpl["spec"].(map[string]any)
+	nets, _ := tspec["networks"].([]any)
+	for _, e := range nets {
+		n, _ := e.(map[string]any)
+		if m, ok := n["multus"].(map[string]any); ok {
+			if ref, _ := m["networkName"].(string); strings.HasPrefix(ref, ns+"/") {
+				m["networkName"] = strings.TrimPrefix(ref, ns+"/")
 			}
 		}
 	}
