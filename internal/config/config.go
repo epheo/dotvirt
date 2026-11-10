@@ -199,12 +199,10 @@ func Load(args []string) (*Config, error) {
 		return nil, fmt.Errorf("-tenant-kinds-allowed (DOTVIRT_TENANT_KINDS_ALLOWED) names kinds no tenant repo may apply: %s", tenancy.FormatGroupKinds(refused))
 	}
 	c.TenantKinds = tenancy.Policy{Allowed: allowed}
-	// Every forge link the UI renders starts with it, so only an absolute
-	// http(s) URL may.
-	if c.ForgeWebURL != "" {
-		if u, err := url.Parse(c.ForgeWebURL); err != nil || (u.Scheme != "https" && u.Scheme != "http") || u.Host == "" {
-			return nil, fmt.Errorf("-forge-web-url (DOTVIRT_FORGE_WEB_URL) %q is not an absolute http(s) URL", c.ForgeWebURL)
-		}
+	// Every forge link the UI renders starts with it: credentials would show
+	// in each, and a path appended after a query or fragment opens the base.
+	if c.ForgeWebURL != "" && !webBase(c.ForgeWebURL) {
+		return nil, fmt.Errorf("-forge-web-url (DOTVIRT_FORGE_WEB_URL) %q is not an http(s) base URL: a host, no credentials, query or fragment", c.ForgeWebURL)
 	}
 	// The snapshot selects project namespaces by this key: a malformed one
 	// would select none and look like an empty cluster, so it fails here.
@@ -263,4 +261,12 @@ func envBool(key string, def bool) bool {
 	default:
 		return def
 	}
+}
+
+// webBase reports whether raw is an absolute http(s) URL with a host and
+// neither credentials, a query nor a fragment.
+func webBase(raw string) bool {
+	u, err := url.Parse(raw)
+	return err == nil && (u.Scheme == "https" || u.Scheme == "http") && u.Hostname() != "" &&
+		u.User == nil && u.RawQuery == "" && !u.ForceQuery && u.Fragment == "" && !strings.ContainsAny(raw, "?#@ \t\n")
 }

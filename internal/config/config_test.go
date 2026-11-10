@@ -37,7 +37,10 @@ func TestLoadRejectsInvalidProjectLabel(t *testing.T) {
 // Every forge link the UI renders starts with the web base, so only an
 // absolute http(s) URL is taken.
 func TestLoadChecksTheForgeWebURL(t *testing.T) {
-	for _, u := range []string{"javascript:alert(1)", "/forge", "c.example/forge", "ftp://c.example"} {
+	for _, u := range []string{
+		"javascript:alert(1)", "/forge", "c.example/forge", "ftp://c.example", "https:///forge",
+		"https://?x", "https://@", "https://host:abc", "https://u:p@host", "https://host?x", "https://host?", "https://host#f", "https://host/a b",
+	} {
 		_, err := Load([]string{"-forge-web-url", u, "-session-secret", "s"})
 		if err == nil || !strings.Contains(err.Error(), "-forge-web-url") {
 			t.Errorf("forge-web-url %q: err %v, want one naming the flag", u, err)

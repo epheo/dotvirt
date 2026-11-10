@@ -492,7 +492,7 @@ Set `spec.forge.webURL` when browsers must open the forge elsewhere:
 - an app of yours fronts the forge, serving `<owner>/<repo>`, `.../pulls/<n>` and `.../compare/<base>...<head>`.
 
 dotvirt's API and git calls still go to `spec.forge.url`.
-Unset, nothing changes.
+Unset, links start with `spec.forge.url`.
 
 ## Who opens pull requests
 
