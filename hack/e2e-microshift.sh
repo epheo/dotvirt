@@ -609,19 +609,21 @@ YAML
 	# Only a NotFound means not served; any other failure is asked again, as
 	# the server counts a failed read as served.
 	egress_served() {
-		local out
-		if out="$(kc get --raw /apis/k8s.ovn.org/v1 2>&1)"; then
-			egress=false
-			if jq -e '.resources[] | select(.name == "egressfirewalls")' >/dev/null <<<"${out}"; then
-				egress=true
-			fi
+		local out err
+		err="$(mktemp)"
+		if out="$(kc get --raw /apis/k8s.ovn.org/v1 2>"${err}")"; then
+			rm -f "${err}"
+			# A body that does not parse is asked again.
+			egress="$(jq -r '[.resources[].name] | index("egressfirewalls") != null' <<<"${out}")" || return 1
 			return 0
 		fi
-		if grep -q 'NotFound' <<<"${out}"; then
+		if grep -q 'NotFound' "${err}"; then
+			rm -f "${err}"
 			egress=false
 			return 0
 		fi
-		echo "${out}"
+		cat "${err}"
+		rm -f "${err}"
 		return 1
 	}
 	retry "the cluster's answer on EgressFirewalls" 120 egress_served
