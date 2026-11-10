@@ -210,15 +210,15 @@ func (r *Reader) setReviewed(repo string, prs map[int]reviewed) {
 // posts every proposal. read is the project's mirror, nil when it is
 // unavailable.
 func (r *Reader) proposalRow(proj project.ProjectInfo, pr forge.PR, read *git.Repo) model.Proposal {
-	head := ""
-	if read != nil {
-		head = read.BranchHash(pr.HeadBranch())
+	branch, head := pr.HeadBranch(), ""
+	if read != nil && branch != "" {
+		head = read.BranchHash(branch)
 	}
 	return model.Proposal{
 		Project: proj.Name, PRNumber: pr.Number, PRURL: pr.HTMLURL, Title: pr.Title,
-		Branch: pr.HeadBranch(), Head: head,
-		By:     tasks.MergeAuthor(pr.HeadBranch(), r.proposed, pr.User.Login),
-		Revert: strings.HasPrefix(pr.HeadBranch(), r.proposed+"/"+tasks.RevertSegment+"/"),
+		Branch: branch, Head: head,
+		By:     tasks.MergeAuthor(branch, r.proposed, pr.User.Login),
+		Revert: strings.HasPrefix(branch, r.proposed+"/"+tasks.RevertSegment+"/"),
 	}
 }
 

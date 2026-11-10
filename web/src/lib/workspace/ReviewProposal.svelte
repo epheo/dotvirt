@@ -19,8 +19,9 @@
 
 	const appr = $derived(approvalLine(p));
 	const chk = $derived(checksPill(p));
+	// A PR with no branch in the repo (a fork's) is reviewed in the forge only.
 	$effect(() => {
-		reviewCache.loadProposal(p.project, p.prNumber);
+		if (p.branch) reviewCache.loadProposal(p.project, p.prNumber);
 	});
 	const review = $derived(reviewCache.proposal(p.project, p.prNumber));
 </script>
@@ -43,7 +44,11 @@
 	{/snippet}
 
 	<ReviewSection title="Changes in this pull request">
-		{#if review?.denied}
+		{#if !p.branch}
+			<p class="text-ink-soft">
+				This pull request has no branch in this repository; review it in the forge.
+			</p>
+		{:else if review?.denied}
 			<!-- The server's answer, one clause per line. -->
 			{#each serverReason(review.error).split('; ') as line (line)}
 				<p class="text-ink-soft">{line.charAt(0).toUpperCase() + line.slice(1)}.</p>

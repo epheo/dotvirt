@@ -3,6 +3,7 @@ package controller
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -461,12 +462,11 @@ func TestEnvtest(t *testing.T) {
 		app := argoObj("Application", "argocd", "billing", nil)
 		app.Object["spec"] = map[string]any{"project": "billing", "destination": map[string]any{"name": "in-cluster", "namespace": "billing"}}
 		mustCreate(t, admin, app)
+		// A merge patch carries no resourceVersion: the operator writing the CR
+		// between a read and an update cannot make the flip conflict.
 		setEnabled := func(on bool) {
-			if err := admin.Get(ctx, client.ObjectKeyFromObject(dv), dv); err != nil {
-				t.Fatal(err)
-			}
-			dv.Spec.ArgoCD.SyncImpersonation.Enabled = new(on)
-			if err := admin.Update(ctx, dv); err != nil {
+			patch := fmt.Appendf(nil, `{"spec":{"argocd":{"syncImpersonation":{"enabled":%t}}}}`, on)
+			if err := admin.Patch(ctx, dv, client.RawPatch(types.MergePatchType, patch)); err != nil {
 				t.Fatal(err)
 			}
 		}

@@ -411,6 +411,31 @@ trap 'rc=$?; kill ${PF_PIDS} 2>/dev/null || true; [ ${rc} -ne 0 ] && diagnostics
 BASE="http://127.0.0.1:18080"
 FORGE="http://127.0.0.1:13000"
 retry "dotvirt healthz" 120 curl -fsS --max-time 10 "${BASE}/api/healthz"
+# A HostNetwork edge (portail, a router) dials the Service from the node's
+# network. OVN-Kubernetes SNATs that to the gateway router's join IP, which the
+# operand NetworkPolicy admits only through openshift-host-network's policy
+# group: without it the edge answers 502. A pod IP would not tell, as a node's
+# own traffic to its local pods is admitted whatever the policy. nsenter, not
+# podman exec: no exec session to hang.
+NODE_NET="/proc/$(podman inspect -f '{{.State.Pid}}' "${NAME}")/ns/net"
+SVC_IP="$(kc -n dotvirt get svc dotvirt -o jsonpath='{.spec.clusterIP}')"
+HOST_GROUP=policy-group.network.openshift.io/host-network
+node_reaches_dotvirt() {
+	nsenter --net="${NODE_NET}" curl -fsS -o /dev/null --max-time 10 "http://${SVC_IP}:8080/api/healthz"
+}
+# A policy refusal is a drop, so curl's timeout (28): a broken nsenter or a
+# restarting dotvirt fails otherwise and proves nothing.
+node_refused() {
+	local rc=0
+	node_reaches_dotvirt || rc=$?
+	[ "${rc}" -eq 28 ]
+}
+retry "dotvirt answers the node's host network" 120 node_reaches_dotvirt
+# The check proves itself: without the group the same call must time out.
+kc label namespace openshift-host-network "${HOST_GROUP}-" >/dev/null
+retry "the node's host network refused without its policy group" 120 node_refused
+kc label namespace openshift-host-network "${HOST_GROUP}=" >/dev/null
+retry "dotvirt answers the node's host network again" 120 node_reaches_dotvirt
 
 # Caller token: the loop runs as a real (admin) user, exactly like production.
 kc -n dotvirt create serviceaccount e2e-admin --dry-run=client -o yaml | kc apply -f -

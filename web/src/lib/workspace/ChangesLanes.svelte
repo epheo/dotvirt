@@ -21,6 +21,7 @@
 		checksPill,
 		itemKey,
 		prKey,
+		reviewableHere,
 		sameReview,
 		type ReviewSel,
 	} from '#lib/review.js';
@@ -435,8 +436,9 @@
 				{@const appr = approvalLine(p)}
 				{@const chk = checksPill(p)}
 				<!-- Another's pull request reads the whole repo here; the forge
-				serves it to whoever it lets in. -->
-				{@const here = p.mine || repoRead(p.project).ok}
+				serves it to whoever it lets in, and every PR with no branch in
+				the repo (a fork's). -->
+				{@const here = reviewableHere(p, repoRead)}
 				{#snippet cells()}
 					<span class="flex items-center gap-2">
 						<GitPullRequest size={14} class="shrink-0 text-accent-ink" />
