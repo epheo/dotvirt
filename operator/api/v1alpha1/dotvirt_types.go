@@ -214,8 +214,9 @@ type AuthSpec struct {
 // project can ask for another's hostnames. Domain or GatewayClassName empty
 // leaves publishing off.
 type PublishingSpec struct {
-	// Domain is the DNS zone each publishing namespace gets a subdomain of;
-	// its wildcard points at the gateways' addresses.
+	// Domain is the DNS zone each publishing namespace gets a subdomain of.
+	// The platform points each *.<namespace>.<domain> at that namespace's
+	// Gateway address; dotvirt writes no DNS.
 	// +kubebuilder:validation:Pattern=`^([a-z0-9]([-a-z0-9]*[a-z0-9])?\.)*[a-z0-9]([-a-z0-9]*[a-z0-9])?$`
 	Domain string `json:"domain,omitempty"`
 	// GatewayClassName is the GatewayClass of each namespace's Gateway.

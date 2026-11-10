@@ -27,6 +27,7 @@ rules:
   - view
   - edit
   - dotvirt-tenant-egress-view
+  - dotvirt-tenant-routes
   resources:
   - clusterroles
   verbs:
