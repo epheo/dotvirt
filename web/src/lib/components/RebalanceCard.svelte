@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { api, rebalanceThresholdLabel, type DRSView } from '#lib/api.js';
 	import { clusterGate } from '#lib/gates.js';
-	import { olmOff } from '#lib/state/modules.svelte.js';
+	import { olmOff, vmsOff } from '#lib/state/modules.svelte.js';
 	import { action, resource } from '#lib/resource.svelte.js';
 	import { ui } from '#lib/state/ui.svelte.js';
 	import Button from './Button.svelte';
@@ -27,9 +27,11 @@
 	const error = $derived(disableOp.error || rebalance.error);
 	const enable = $derived(clusterGate.rebalanceOn());
 	const off = $derived(clusterGate.rebalanceOff());
-	// The descheduler installs through OLM: without it the cluster cannot take
-	// rebalancing, whatever the caller may do.
+	// The descheduler installs through OLM, and it moves VMs alone: without
+	// either the cluster cannot take rebalancing, whatever the caller may do.
 	const noCatalog = $derived(olmOff());
+	const noVMs = $derived(vmsOff());
+	const cannot = $derived(noCatalog || noVMs);
 
 	// One status line for the committed state.
 	const status = $derived.by(() => {
@@ -111,9 +113,9 @@
 			</p>
 		{/if}
 		<div class="flex flex-col gap-1.5 border-t border-line-soft px-card py-3">
-			{#if view.configured || (enable.ok && !noCatalog)}
+			{#if view.configured || (enable.ok && !cannot)}
 				<div class="flex flex-wrap items-center gap-2">
-					{#if !noCatalog}
+					{#if !cannot}
 						<Button
 							variant="outline"
 							size="sm"
@@ -135,7 +137,11 @@
 					<StageChip kind="pr" />
 				</div>
 			{/if}
-			{#if noCatalog}
+			{#if noVMs}
+				<p class="text-xs leading-4 text-ink-muted">
+					This cluster runs no VMs (no KubeVirt), so there is nothing to rebalance.
+				</p>
+			{:else if noCatalog}
 				<p class="text-xs leading-4 text-ink-muted">
 					{view.configured ? '' : 'VMs are placed once at start and stay put. '}This cluster has no
 					operator catalog (OLM), so rebalancing cannot be installed here.

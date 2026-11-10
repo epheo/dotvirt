@@ -218,3 +218,39 @@ func TestProjectNamespaceReadsTheSnapshot(t *testing.T) {
 			s.ProjectNamespace("team-a-dev"), s.ProjectNamespace("openshift-cnv"), s.ProjectNamespace("nowhere"))
 	}
 }
+
+// Rescheduling moves VMs alone: on a cluster known to run no KubeVirt it is
+// not offered and the route says why, while turning it off stays open. An
+// unknown answer takes nothing away.
+func TestDRSNeedsVMs(t *testing.T) {
+	olm := []model.Kind{model.KindNS, model.KindSub, model.KindOpGroup}
+	for _, c := range []struct {
+		name   string
+		vms    *bool
+		enable bool
+	}{
+		{"no KubeVirt", new(false), false},
+		{"KubeVirt", new(true), true},
+		{"unknown", nil, true},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			fc := newFakeCluster(t)
+			fc.serveKinds(olm...)
+			s := fc.server(&planeDraft{}, Config{PlatformRepo: platformRepo})
+			if c.vms != nil {
+				s.modules = knownModules(t, *c.vms)
+			}
+			caps := decodeBody[model.Capabilities](t, do(s, adminToken, http.MethodGet, "/api/capabilities", "")).Cluster
+			if caps == nil || caps.DRSEnable != c.enable {
+				t.Errorf("caps = %+v, want enable %v", caps, c.enable)
+			}
+			rec := do(s, adminToken, http.MethodPost, "/api/drs", `{"mode":"Predictive"}`)
+			if refused := rec.Code == http.StatusConflict && strings.Contains(rec.Body.String(), "nothing to rebalance"); refused == c.enable {
+				t.Errorf("POST /api/drs = %d %s, want refused %v", rec.Code, rec.Body.String(), !c.enable)
+			}
+			if rec := do(s, adminToken, http.MethodDelete, "/api/drs", ""); rec.Code == http.StatusConflict {
+				t.Errorf("turning rebalancing off is refused: %s", rec.Body.String())
+			}
+		})
+	}
+}
