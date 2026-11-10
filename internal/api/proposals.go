@@ -113,6 +113,18 @@ func (s *Server) ownRows(id auth.Identity, proj project.ProjectInfo, rows []mode
 	return out
 }
 
+// settlePushed hands the forge's word on a PR to the draft it may carry: a
+// user who opened their PR in the forge, on a branch dotvirt pushed with no
+// PR, has it adopted, or settled once merged, whether or not they look.
+func (s *Server) settlePushed(repo, branch string, number int, head string, merged bool) {
+	if branch == "" || head == "" {
+		return
+	}
+	if err := s.draft.SettlePushed(repo, branch, number, head, merged); err != nil {
+		log.Printf("proposals: %s PR #%d: settle the pushed draft: %v", repo, number, err)
+	}
+}
+
 // ownRow is id's own open PR numbered n in proj, off the cached lane: another's
 // PR, a closed one and none at all answer alike, before anything reads the
 // forge or the repo.
@@ -297,6 +309,9 @@ func (s *Server) refreshProposals(all bool) bool {
 		if rows == nil {
 			rows = []model.Proposal{}
 		}
+		for _, row := range rows {
+			s.settlePushed(repo, row.Branch, row.PRNumber, row.Head, false)
+		}
 		if cached {
 			if !proposalsEqual(prev, rows) {
 				anyChanged = true
@@ -373,6 +388,7 @@ func (s *Server) refreshMerged(reads mergedReads, settle bool) {
 		}
 		for _, m := range merges {
 			s.tasks.RecordMerge(m)
+			s.settlePushed(m.RepoURL, m.Branch, m.Number, m.Head, true)
 		}
 	}
 }

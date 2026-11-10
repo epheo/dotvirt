@@ -363,6 +363,98 @@ func TestProposeReopensClosedPR(t *testing.T) {
 	}
 }
 
+// Where users open their own PRs dotvirt writes none: a propose pushes the
+// branch and links its compare page, even past a closed PR it would reopen.
+// The PR the user opens on that head is adopted and takes the changes off the
+// draft; a later propose extends it without editing it.
+func TestUsersOpenTheirPRs(t *testing.T) {
+	head := proposedBranchFor("alice", "p")
+	list := `[{"number":4,"state":"closed","html_url":"http://forge/pulls/4","base":{"ref":"main"},"head":{"ref":"` + head + `"}}]`
+	var opened string
+	f := newProposeFixture(t, func(m, path string) (int, string, bool) {
+		switch {
+		case m == "GET" && strings.HasSuffix(path, "/pulls"):
+			return http.StatusOK, list, true
+		case m == "GET" && strings.HasSuffix(path, "/pulls/7") && opened != "":
+			return http.StatusOK, opened, true
+		}
+		return 0, "", false
+	})
+	f.c.WithUsersOpeningPRs(true)
+
+	out := f.stageAndPropose(t)
+	if out.PRNumber != 0 || out.CompareURL == "" {
+		t.Fatalf("got %+v, want the pushed branch's compare URL", out)
+	}
+	if n := f.draftCount(t); n != 1 {
+		t.Fatalf("the draft stays until a PR carries it, got %d entries", n)
+	}
+	if view, err := f.c.Get(f.id, f.proj); err != nil || view.CompareURL != out.CompareURL {
+		t.Fatalf("the draft view must keep the compare URL: %v %q", err, view.CompareURL)
+	}
+
+	rec, _, err := f.c.store.Proposal("alice", "p")
+	if err != nil || rec.Head == "" {
+		t.Fatalf("record: %v %+v", err, rec)
+	}
+	if err := f.c.SettlePushed(f.proj.Repo, head, 7, "another-head", false); err != nil || f.draftCount(t) != 1 {
+		t.Fatalf("a PR on another head adopts nothing: %v, %d entries", err, f.draftCount(t))
+	}
+	if err := f.c.SettlePushed(f.proj.Repo, head, 7, rec.Head, false); err != nil {
+		t.Fatalf("SettlePushed: %v", err)
+	}
+	if n := f.draftCount(t); n != 0 {
+		t.Fatalf("the adopted PR carries the draft, got %d entries", n)
+	}
+	if rec, _, _ = f.c.store.Proposal("alice", "p"); rec.PR != 7 {
+		t.Fatalf("record PR = %d, want 7", rec.PR)
+	}
+
+	opened = `{"number":7,"state":"open","html_url":"http://forge/pulls/7","base":{"ref":"main"},"head":{"ref":"` + head + `","sha":"` + rec.Head + `"}}`
+	list = "[" + opened + "]"
+	req := model.EditRequest{SourceFile: "web.yaml", VMEdit: model.VMEdit{SetLabels: map[string]string{"tier": "web"}}}
+	if _, err := f.c.StageEdit(f.id, f.proj, "alpha", "web", req); err != nil {
+		t.Fatalf("StageEdit: %v", err)
+	}
+	again, err := f.c.Propose(f.id, f.proj, model.ProposeRequest{})
+	if err != nil || again.PRNumber != 7 || !again.Existing {
+		t.Fatalf("a later propose extends the user's PR: %v %+v", err, again)
+	}
+	if w := append(f.sentTo("POST", "/pulls"), f.sentTo("PATCH", "")...); len(w) != 0 {
+		t.Fatalf("dotvirt wrote to a pull request: %q", w)
+	}
+}
+
+// The user's PR may merge before dotvirt sees it open: its merge settles the
+// draft and drops the record. A merged PR of the reused branch's earlier
+// cycle carries another head and settles nothing.
+func TestAUsersPRMergedBeforeAdoptionSettlesTheDraft(t *testing.T) {
+	f := newProposeFixture(t, when("GET", "/pulls", http.StatusOK, "[]"))
+	f.c.WithUsersOpeningPRs(true)
+	f.stageAndPropose(t)
+	branch := proposedBranchFor("alice", "p")
+	rec, _, err := f.c.store.Proposal("alice", "p")
+	if err != nil || rec.Head == "" {
+		t.Fatalf("record: %v %+v", err, rec)
+	}
+
+	if err := f.c.SettlePushed(f.proj.Repo, branch, 3, "earlier-cycle", true); err != nil || f.draftCount(t) != 1 {
+		t.Fatalf("an earlier cycle's merge settled the draft: %v, %d entries", err, f.draftCount(t))
+	}
+	if err := f.c.SettlePushed(f.proj.Repo, branch, 9, rec.Head, true); err != nil {
+		t.Fatalf("SettlePushed: %v", err)
+	}
+	if n := f.draftCount(t); n != 0 {
+		t.Fatalf("the merged PR carried the draft, %d entries left", n)
+	}
+	if _, ok, _ := f.c.store.Proposal("alice", "p"); ok {
+		t.Error("the merged PR's record must go")
+	}
+	if view, _ := f.c.Get(f.id, f.proj); view.CompareURL != "" {
+		t.Errorf("a merged branch keeps its compare link: %q", view.CompareURL)
+	}
+}
+
 // A merged PR is not reopened; the user gets a compare URL and keeps the draft.
 func TestProposeMergedFallsBackToCompare(t *testing.T) {
 	f := newProposeFixture(t,

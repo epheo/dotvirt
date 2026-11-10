@@ -100,6 +100,8 @@ type Coordinator struct {
 	syncNS string
 	// tenantKinds is what a tenant repo may declare (WithTenantKinds).
 	tenantKinds tenancy.Policy
+	// usersOpenPRs: dotvirt writes no pull request (WithUsersOpeningPRs).
+	usersOpenPRs bool
 }
 
 // New builds a Coordinator. forge and resyncer may be nil (PR creation degrades
@@ -119,6 +121,15 @@ func New(store *draft.Store, repos *git.RepoSet, ff *forge.Factory, rs Resyncer,
 // before serving.
 func (c *Coordinator) WithSyncNamespace(ns string) *Coordinator {
 	c.syncNS = ns
+	return c
+}
+
+// WithUsersOpeningPRs makes dotvirt push branches only: it never opens,
+// reopens or edits a pull request, and answers with the compare URL the user
+// opens one from. A PR they open on the pushed head is adopted (SettlePushed,
+// and any later propose). Set once, before serving.
+func (c *Coordinator) WithUsersOpeningPRs(on bool) *Coordinator {
+	c.usersOpenPRs = on
 	return c
 }
 

@@ -77,9 +77,13 @@ func (s *Server) handleForgeWebhook(w http.ResponseWriter, r *http.Request) {
 				Title:   pr.Title,
 				By:      tasks.MergeAuthor(pr.HeadBranch(), s.cfg.ProposedBranch, pr.User.Login),
 				Branch:  pr.HeadBranch(),
+				Head:    pr.Head.Sha,
 				At:      pr.MergedAt,
 			})
 		}
+	}
+	if pr := event.PullRequest; pr.Base.Ref == s.cfg.BaseBranch && (pr.Merged || pr.State == "open") {
+		s.settlePushed(repo, pr.HeadBranch(), pr.Number, pr.Head.Sha, pr.Merged)
 	}
 	// Drive ArgoCD to pick up the push directly: nudge the Application(s) sourcing
 	// this repo to hard-refresh (auto-sync then reconciles), so a merge applies in

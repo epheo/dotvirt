@@ -123,6 +123,10 @@ type Draft interface {
 	// Drafts renders id's draft of each of projs, in order, that holds an
 	// entry or carries a warning; a failed render is its project's Err.
 	Drafts(id auth.Identity, projs []project.ProjectInfo) ([]changeset.DraftResult, error)
+	// SettlePushed takes the forge's word on a pull request from branch of
+	// repo at head: a PR on what dotvirt pushed with no PR recorded carries
+	// that draft, open or merged.
+	SettlePushed(repo, branch string, number int, head string, merged bool) error
 	// Holds reports whether id's draft of proj holds an entry, without
 	// rendering it.
 	Holds(id auth.Identity, proj project.ProjectInfo) (bool, error)

@@ -84,6 +84,15 @@ type ForgeSpec struct {
 	// Route, e.g. the bundled Forgejo). DEV/EVAL ONLY; never enable against a forge with
 	// a trusted certificate.
 	InsecureTLS bool `json:"insecureTLS,omitempty"`
+	// PullRequests is who opens a proposal's or a revert's pull request:
+	// Dotvirt (the default) opens it with its forge account; Users leaves it
+	// to the requester, who opens it in the forge as themselves from the
+	// branch dotvirt pushed and the link it returns, so the forge's review
+	// rules see them as its poster. Protect dotvirt/proposed/** so only
+	// dotvirt's account pushes there.
+	// +kubebuilder:validation:Enum=Dotvirt;Users
+	// +optional
+	PullRequests string `json:"pullRequests,omitempty"`
 }
 
 // ArgoCDSpec locates the ArgoCD install dotvirt rides. Defaults suit OpenShift

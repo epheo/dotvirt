@@ -11,7 +11,7 @@
 		Trash2,
 		TriangleAlert,
 	} from '@lucide/svelte';
-	import type { Commit, DraftItem, DraftView, Proposal, ProposeResult } from '#lib/api.js';
+	import type { Commit, DraftItem, DraftView, Proposal } from '#lib/api.js';
 	import { plural, shortDate } from '#lib/format.js';
 	import { changesHref, type ChangesTab } from '#lib/nav.js';
 	import { DEFAULT_PAGE_SIZE, PAGE_SIZES, pageOf, pageSlice } from '#lib/paging.js';
@@ -58,7 +58,7 @@
 		proposedLane,
 		visibleProposals,
 		mineOnly,
-		results,
+		pushed,
 		history,
 		repoProjects,
 		scopeNS = '',
@@ -75,8 +75,9 @@
 		proposedLane: Proposal[];
 		visibleProposals: Proposal[];
 		mineOnly: { value: boolean };
-		// Propose outcomes the stream has not carried yet, by project.
-		results: Record<string, ProposeResult>;
+		// Branches pushed with no pull request on them yet; dismissable is a
+		// propose outcome of this session's.
+		pushed: { project: string; branch: string; compareURL?: string; dismissable: boolean }[];
 		history: Record<string, HistoryLane>;
 		repoProjects: string[];
 		scopeNS?: string;
@@ -97,7 +98,6 @@
 	const failedLanes = $derived(
 		drafts.failed.filter((f) => !scopeProject || f.project === scopeProject),
 	);
-	const pushed = $derived(Object.entries(results).filter(([, r]) => !r.prURL));
 
 	// A list pages only past the smallest page size: below it there is nothing
 	// to page, and the card header already counts it.
@@ -356,6 +356,18 @@
 							</p>
 						</div>
 					{/if}
+					{#if draft.compareURL}
+						<!-- Pushed with no PR yet: the next step is the forge's. -->
+						<p class="text-[13px] text-ink-soft">
+							Pushed to <code class="font-mono text-xs">{draft.branch}</code>.
+							<a
+								href={draft.compareURL}
+								target="_blank"
+								rel="noopener"
+								class="text-accent-ink underline underline-offset-2">Open the pull request</a
+							> to send it for review.
+						</p>
+					{/if}
 					{#if draft.warning}
 						<Note tone="warn" class="flex items-start gap-2">
 							<TriangleAlert size={14} class="mt-0.5 shrink-0" />
@@ -480,10 +492,10 @@
 					</div>
 				{/if}
 			{/each}
-			<!-- Push-only propose outcomes (no PR yet): keep the compare link visible. -->
-			{#each pushed as [project, r] (project)}
+			<!-- Pushed branches with no PR yet: keep the compare link visible. -->
+			{#each pushed as r (r.project)}
 				<div class="border-t border-line-soft px-card py-2.5 text-[13px] text-ink-soft">
-					<span class="font-medium text-ink">{project}</span>: branch
+					<span class="font-medium text-ink">{r.project}</span>: branch
 					<code class="font-mono text-xs">{r.branch}</code> pushed.
 					{#if r.compareURL}
 						<a
@@ -495,9 +507,12 @@
 					{:else}
 						No forge is configured to open it.
 					{/if}
-					<button onclick={() => ondismiss(project)} class="ml-1 text-ink-faint hover:text-ink-soft"
-						>Dismiss</button
-					>
+					{#if r.dismissable}
+						<button
+							onclick={() => ondismiss(r.project)}
+							class="ml-1 text-ink-faint hover:text-ink-soft">Dismiss</button
+						>
+					{/if}
 				</div>
 			{/each}
 		</div>

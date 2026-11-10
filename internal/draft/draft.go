@@ -144,7 +144,13 @@ type Store struct {
 
 	mu     sync.Mutex
 	drafts map[string]map[string]Entry // (user/project) -> (ns/name -> entry)
+	// pushed files each record of a branch pushed with no PR on it (PR 0, a
+	// head) under its repo and branch; nil until PushedOn first reads them.
+	pushed map[string]Pair
 }
+
+// Pair names one (user, project) draft.
+type Pair struct{ User, Project string }
 
 // Open roots a Store at dir (created on first write).
 func Open(dir string) (*Store, error) {
@@ -415,6 +421,10 @@ func (s *Store) proposalPath(user, project string) string {
 func (s *Store) Proposal(user, project string) (p Proposal, ok bool, err error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	return s.proposalLocked(user, project)
+}
+
+func (s *Store) proposalLocked(user, project string) (p Proposal, ok bool, err error) {
 	data, err := os.ReadFile(s.proposalPath(user, project))
 	if os.IsNotExist(err) {
 		return Proposal{}, false, nil
@@ -433,14 +443,93 @@ func (s *Store) Proposal(user, project string) (p Proposal, ok bool, err error) 
 func (s *Store) SetProposal(user, project string, p Proposal) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return writeJSON(s.proposalPath(user, project), p)
+	if err := writeJSON(s.proposalPath(user, project), p); err != nil {
+		return err
+	}
+	notePushed(s.pushed, Pair{user, project}, &p)
+	return nil
 }
 
 // DropProposal forgets (user, project)'s proposal: its PR merged or closed.
 func (s *Store) DropProposal(user, project string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return writeJSON(s.proposalPath(user, project), nil)
+	if err := writeJSON(s.proposalPath(user, project), nil); err != nil {
+		return err
+	}
+	notePushed(s.pushed, Pair{user, project}, nil)
+	return nil
+}
+
+// PushedOn is the draft whose record says branch of repo was pushed with no
+// PR on it. The first call reads every record; record writes keep it current.
+func (s *Store) PushedOn(repo, branch string) (Pair, bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.pushed == nil {
+		idx, err := s.scanPushedLocked()
+		if err != nil {
+			return Pair{}, false, err
+		}
+		s.pushed = idx
+	}
+	p, ok := s.pushed[pushedKey(repo, branch)]
+	return p, ok, nil
+}
+
+func pushedKey(repo, branch string) string { return repo + "\x00" + branch }
+
+// scanPushedLocked files every record on disk as notePushed would. Caller
+// holds s.mu.
+func (s *Store) scanPushedLocked() (map[string]Pair, error) {
+	idx := map[string]Pair{}
+	users, err := os.ReadDir(s.dir)
+	if os.IsNotExist(err) {
+		return idx, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("list drafts: %w", err)
+	}
+	for _, u := range users {
+		user, err := url.PathUnescape(u.Name())
+		if !u.IsDir() || err != nil {
+			continue
+		}
+		files, err := os.ReadDir(filepath.Join(s.dir, u.Name()))
+		if err != nil {
+			return nil, fmt.Errorf("list drafts of %s: %w", user, err)
+		}
+		for _, f := range files {
+			seg, ok := strings.CutSuffix(f.Name(), ".proposal")
+			if !ok || f.IsDir() {
+				continue
+			}
+			project, err := url.PathUnescape(seg)
+			if err != nil {
+				continue
+			}
+			p, ok, err := s.proposalLocked(user, project)
+			if err != nil {
+				return nil, err
+			}
+			if ok {
+				notePushed(idx, Pair{user, project}, &p)
+			}
+		}
+	}
+	return idx, nil
+}
+
+// notePushed files pair's record p in idx: under its branch while it is a
+// push with no PR, nowhere otherwise. A nil idx is not built yet.
+func notePushed(idx map[string]Pair, pair Pair, p *Proposal) {
+	if idx == nil {
+		return
+	}
+	maps.DeleteFunc(idx, func(_ string, v Pair) bool { return v == pair })
+	if p != nil && p.PR == 0 && p.Head != "" {
+		idx[pushedKey(p.Repo, p.Branch)] = pair
+	}
 }
 
 // Pushed reports whether head is a push p knows: its head or the pending one.

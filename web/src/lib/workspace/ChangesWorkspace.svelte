@@ -244,7 +244,29 @@
 	const visibleProposals = $derived(
 		mineOnly.value ? proposedLane.filter((p) => p.mine) : proposedLane,
 	);
-	const pushed = $derived(Object.values(results).filter((r) => !r.prURL).length);
+	// Branches pushed with no PR on them yet: drafts whose pushed branch waits
+	// for one, which outlive a reload, then this session's propose outcomes
+	// for projects no such draft speaks for (a revert's, a push with no forge).
+	const pushed = $derived.by(() => {
+		const fromDrafts = lanes
+			.filter((l) => l.draft.compareURL)
+			.map((l) => ({
+				project: l.project,
+				branch: l.draft.branch,
+				compareURL: l.draft.compareURL,
+				dismissable: false,
+			}));
+		const drafted = new Set(fromDrafts.map((r) => r.project));
+		const fromSession = Object.entries(results)
+			.filter(([project, r]) => !r.prURL && !drafted.has(project))
+			.map(([project, r]) => ({
+				project,
+				branch: r.branch,
+				compareURL: r.compareURL,
+				dismissable: true,
+			}));
+		return [...fromDrafts, ...fromSession];
+	});
 
 	const stagedTotal = $derived(lanes.reduce((n, l) => n + l.draft.count, 0));
 	const stagedProjects = $derived(lanes.filter((l) => l.draft.count > 0).length);
@@ -266,7 +288,7 @@
 		if (q.get('project')) return 'history';
 		if (!drafts.loaded || drafts.error || lanes.length > 0 || failedLanes.length > 0)
 			return 'staged';
-		if (proposedLane.length > 0 || pushed > 0) return 'review';
+		if (proposedLane.length > 0 || pushed.length > 0) return 'review';
 		return scopeProject ? 'history' : 'staged';
 	});
 	const tabLabel = $derived(CHANGES_TABS.find((t) => t.id === tab)!.label);
@@ -417,7 +439,7 @@
 		tab === 'staged'
 			? drafts.loaded && !drafts.error && lanes.length === 0 && failedLanes.length === 0
 			: tab === 'review'
-				? proposedLane.length === 0 && pushed === 0
+				? proposedLane.length === 0 && pushed.length === 0
 				: platformHidden || (!scopeProject && repoProjects.length === 0),
 	);
 	const tabHref = (id: string) => `${page.url.pathname}?tab=${id}`;
@@ -541,7 +563,7 @@
 					{proposedLane}
 					{visibleProposals}
 					{mineOnly}
-					{results}
+					{pushed}
 					{history}
 					{repoProjects}
 					{scopeNS}

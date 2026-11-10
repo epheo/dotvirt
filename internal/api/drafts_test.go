@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -19,6 +20,8 @@ import (
 	"github.com/epheo/dotvirt/internal/draft"
 	"github.com/epheo/dotvirt/internal/git"
 	"github.com/epheo/dotvirt/internal/model"
+	"github.com/epheo/dotvirt/internal/project"
+	"github.com/epheo/dotvirt/pkg/forge"
 )
 
 // draftsRig is a server over a real coordinator and its store. The tenant
@@ -173,5 +176,53 @@ func TestDraftsAnswerEveryDraftOfTheCaller(t *testing.T) {
 	}
 	if calls := g.fc.seen(); len(calls) > 0 {
 		t.Errorf("drafts read the cluster beyond its reviews: %q", calls)
+	}
+}
+
+// The forge's word on a PR the user opened on the head dotvirt pushed takes
+// the changes off their draft, whether or not they look: opened, it becomes
+// the branch's PR; merged first, the record goes. A PR on another head, or
+// into another base, settles nothing.
+func TestTheForgeWebhookSettlesTheDraftItsPRCarries(t *testing.T) {
+	for _, merged := range []bool{false, true} {
+		g := newDraftsRig(t, false)
+		g.s.cfg.WebhookSecret = "hooksecret"
+		g.stage(t, "tenant", "team-a")
+		entries, err := g.store.List("tenant", "team-a")
+		if err != nil || len(entries) != 1 {
+			t.Fatalf("staged: %v %+v", err, entries)
+		}
+		branch := g.s.reader.ProposedBranch(auth.Identity{Username: "tenant"}, project.ProjectInfo{Name: "team-a"})
+		if err := g.store.SetProposal("tenant", "team-a", draft.Proposal{
+			Repo: forge.NormalizeRepoURL(g.repo["team-a"]), Branch: branch, Head: "pushed", Entries: entries,
+		}); err != nil {
+			t.Fatal(err)
+		}
+		event := func(head, base string) {
+			t.Helper()
+			body := []byte(fmt.Sprintf(`{"action":"opened","pull_request":{"number":9,"state":%q,"merged":%v,`+
+				`"head":{"ref":%q,"sha":%q},"base":{"ref":%q}},"repository":{"clone_url":%q}}`,
+				map[bool]string{false: "open", true: "closed"}[merged], merged, branch, head, base, g.repo["team-a"]))
+			if w := deliver(t, g.s, body, sign(body, "hooksecret")); w.Code != http.StatusNoContent {
+				t.Fatalf("delivery: %d", w.Code)
+			}
+		}
+		staged := func() int {
+			n, _ := g.store.List("tenant", "team-a")
+			return len(n)
+		}
+		event("moved", "main")
+		event("pushed", "release")
+		if n := staged(); n != 1 {
+			t.Fatalf("merged=%v: a PR on another head or base settled the draft: %d staged", merged, n)
+		}
+		event("pushed", "main")
+		if n := staged(); n != 0 {
+			t.Fatalf("merged=%v: the PR on the pushed head left %d staged", merged, n)
+		}
+		rec, ok, _ := g.store.Proposal("tenant", "team-a")
+		if merged && ok || !merged && rec.PR != 9 {
+			t.Errorf("merged=%v: record %+v (present %v), want PR 9 while open and none once merged", merged, rec, ok)
+		}
 	}
 }

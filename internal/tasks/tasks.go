@@ -48,7 +48,10 @@ type Merge struct {
 	Title   string
 	By      string
 	Branch  string
-	At      time.Time
+	// Head is the PR's head commit: it settles a draft dotvirt pushed there
+	// with no PR (changeset.SettlePushed).
+	Head string
+	At   time.Time
 }
 
 // Feed is the process-wide recent-tasks store. Safe for concurrent use.
