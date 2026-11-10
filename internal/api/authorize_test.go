@@ -397,7 +397,7 @@ func TestAuthorNamespaces(t *testing.T) {
 		c, reviews := ssarCountingClient(func(a *authzv1.ResourceAttributes) bool { return a.Namespace == "b" })
 		_, got := s.authorNamespaces(ctx, auth.Identity{Token: "tenant"}, c, nss)
 		// Every kind cluster-wide, every kind in a and c, the first one in b.
-		k := len(s.authoredKinds(ctx))
+		k := len(s.authoredRefs(ctx))
 		if *reviews != 3*k+1 || got["a"] || !got["b"] || got["c"] || len(got) != 3 {
 			t.Fatalf("got %v after %d reviews, want %d", got, *reviews, 3*k+1)
 		}

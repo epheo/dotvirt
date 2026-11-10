@@ -34,27 +34,22 @@ func TestLoadRejectsInvalidProjectLabel(t *testing.T) {
 	}
 }
 
-// What tenant repos may declare comes from the operator: the listed kinds by
-// default, Any with the provider's additions on top of dotvirt's own list. A
-// value it cannot read fails at startup rather than disagree with the
-// AppProjects.
+// What tenant repos may declare beyond the listed kinds comes from the
+// operator. A value it cannot read, or one naming a kind no tenant repo may
+// apply, fails at startup rather than disagree with the AppProjects.
 func TestLoadReadsTheTenantKinds(t *testing.T) {
 	c, err := Load([]string{"-session-secret", "s"})
-	if err != nil || c.TenantKinds.Any {
+	if err != nil || c.TenantKinds.Allowed != nil {
 		t.Fatalf("default: %+v, %v", c.TenantKinds, err)
 	}
-	c, err = Load([]string{"-session-secret", "s", "-tenant-kinds", "Any", "-tenant-kinds-denied", "capsule.clastix.io/*"})
-	if err != nil || !c.TenantKinds.Any || c.TenantKinds.Declarable("capsule.clastix.io", "Tenant", false) ||
-		c.TenantKinds.Declarable("rbac.authorization.k8s.io", "Role", false) || !c.TenantKinds.Declarable("apps", "Deployment", false) {
-		t.Errorf("any: %+v, %v", c.TenantKinds, err)
+	c, err = Load([]string{"-session-secret", "s", "-tenant-kinds-allowed", "apps/Deployment,/Service"})
+	if err != nil || !c.TenantKinds.Allows("apps", "Deployment") || !c.TenantKinds.Allows("", "Service") ||
+		c.TenantKinds.Allows("apps", "StatefulSet") {
+		t.Errorf("allowed: %+v, %v", c.TenantKinds, err)
 	}
-	for _, bad := range [][]string{
-		{"-tenant-kinds", "All"},
-		{"-tenant-kinds", "Any", "-tenant-kinds-denied", "Deployment"},
-		{"-tenant-kinds-denied", "apps/Deployment"},
-	} {
-		if _, err := Load(append([]string{"-session-secret", "s"}, bad...)); err == nil || !strings.Contains(err.Error(), "-tenant-kinds") {
-			t.Errorf("%v: err %v, want one naming the flag", bad, err)
+	for _, bad := range []string{"Deployment", "apps/*", "rbac.authorization.k8s.io/Role"} {
+		if _, err := Load([]string{"-session-secret", "s", "-tenant-kinds-allowed", bad}); err == nil || !strings.Contains(err.Error(), "-tenant-kinds-allowed") {
+			t.Errorf("%q: err %v, want one naming the flag", bad, err)
 		}
 	}
 }

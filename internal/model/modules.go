@@ -14,8 +14,8 @@ type Modules struct {
 	// OperatorGroups), host pressure readings add a MachineConfig.
 	OLM           bool `json:"olm"`
 	MachineConfig bool `json:"machineConfig"`
-	// AnyTenantKinds: tenant repos may apply any namespaced kind but the
-	// denied ones, so a kind they may not apply is this install's rule, not
-	// the platform repo's alone.
-	AnyTenantKinds bool `json:"anyTenantKinds"`
+	// ExtraTenantKinds: tenant repos may apply kinds beyond the listed ones,
+	// so a kind they may not apply is this install's rule, not the platform
+	// repo's alone.
+	ExtraTenantKinds bool `json:"extraTenantKinds"`
 }

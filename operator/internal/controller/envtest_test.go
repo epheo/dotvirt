@@ -286,21 +286,31 @@ func TestEnvtest(t *testing.T) {
 		}
 	})
 
-	t.Run("admission refuses any tenant kind without sync impersonation", func(t *testing.T) {
+	t.Run("admission refuses allowed tenant kinds without sync impersonation", func(t *testing.T) {
 		off, on := false, true
+		deploy := []dotvirtv1alpha1.GroupKind{{Group: "apps", Kind: "Deployment"}}
 		dv := testCR()
-		dv.Spec.ArgoCD.TenantKinds = "Any"
+		dv.Spec.ArgoCD.TenantKindsAllowed = deploy
 		dv.Spec.ArgoCD.SyncImpersonation.Enabled = &off
 		if err := admin.Create(ctx, dv, client.DryRunAll); !apierrors.IsInvalid(err) {
-			t.Errorf("Any with impersonation off: got %v, want Invalid", err)
+			t.Errorf("allowed kinds with impersonation off: got %v, want Invalid", err)
 		}
 		for name, enabled := range map[string]*bool{"unset": nil, "on": &on} {
 			dv := testCR()
-			dv.Spec.ArgoCD.TenantKinds = "Any"
+			dv.Spec.ArgoCD.TenantKindsAllowed = append(deploy, dotvirtv1alpha1.GroupKind{Kind: "Service"})
 			dv.Spec.ArgoCD.SyncImpersonation.Enabled = enabled
-			dv.Spec.ArgoCD.TenantKindsDenied = []dotvirtv1alpha1.GroupKind{{Group: "capsule.clastix.io", Kind: "*"}}
 			if err := admin.Create(ctx, dv, client.DryRunAll); client.IgnoreAlreadyExists(err) != nil {
-				t.Errorf("Any with impersonation %s: %v", name, err)
+				t.Errorf("allowed kinds with impersonation %s: %v", name, err)
+			}
+		}
+	})
+
+	t.Run("admission refuses a whole group or a malformed kind", func(t *testing.T) {
+		for _, bad := range []dotvirtv1alpha1.GroupKind{{Group: "apps", Kind: "*"}, {Group: "apps"}, {Group: "Apps", Kind: "Deployment"}, {Group: "*", Kind: "Deployment"}} {
+			dv := testCR()
+			dv.Spec.ArgoCD.TenantKindsAllowed = []dotvirtv1alpha1.GroupKind{bad}
+			if err := admin.Create(ctx, dv, client.DryRunAll); !apierrors.IsInvalid(err) {
+				t.Errorf("%+v: got %v, want Invalid", bad, err)
 			}
 		}
 	})

@@ -5,31 +5,14 @@ import (
 	"testing"
 )
 
-// Listed decides by name, as before. Any admits a namespaced kind dotvirt has
-// no row for, and refuses grants, OLM, a cluster-scoped kind and whatever the
-// provider adds.
-func TestPolicyDeclarable(t *testing.T) {
-	listed := Policy{}
-	if !listed.Declarable("kubevirt.io", "VirtualMachine", false) || listed.Declarable("apps", "Deployment", false) {
-		t.Error("Listed: a VirtualMachine and only listed kinds")
+// A policy allows exactly the kinds it holds: none in the zero value.
+func TestPolicyAllows(t *testing.T) {
+	if (Policy{}).Allows("apps", "Deployment") {
+		t.Error("the zero policy allows nothing")
 	}
-	anyKinds := AnyPolicy(GroupKind{"capsule.clastix.io", "*"})
-	for _, c := range []struct {
-		group, kind   string
-		clusterScoped bool
-		want          bool
-	}{
-		{"apps", "Deployment", false, true},
-		{"kubevirt.io", "VirtualMachine", false, true},
-		{"rbac.authorization.k8s.io", "Role", false, false},
-		{"operators.coreos.com", "Subscription", false, false},
-		{"operators.coreos.com", "CatalogSource", false, false},
-		{"capsule.clastix.io", "Tenant", false, false},
-		{"scheduling.k8s.io", "PriorityClass", true, false},
-	} {
-		if got := anyKinds.Declarable(c.group, c.kind, c.clusterScoped); got != c.want {
-			t.Errorf("Any: %s/%s = %v, want %v", c.group, c.kind, got, c.want)
-		}
+	p := Policy{Allowed: []GroupKind{{"apps", "Deployment"}}}
+	if !p.Allows("apps", "Deployment") || p.Allows("apps", "StatefulSet") || p.Allows("example.com", "Deployment") {
+		t.Error("allows the kinds it holds, matching group and kind")
 	}
 }
 

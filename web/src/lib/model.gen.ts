@@ -942,11 +942,11 @@ export interface Modules {
   olm: boolean;
   machineConfig: boolean;
   /**
-   * AnyTenantKinds: tenant repos may apply any namespaced kind but the
-   * denied ones, so a kind they may not apply is this install's rule, not
-   * the platform repo's alone.
+   * ExtraTenantKinds: tenant repos may apply kinds beyond the listed ones,
+   * so a kind they may not apply is this install's rule, not the platform
+   * repo's alone.
    */
-  anyTenantKinds: boolean;
+  extraTenantKinds: boolean;
 }
 
 //////////

@@ -14,6 +14,7 @@ import (
 	"time"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"sigs.k8s.io/yaml"
 
 	"github.com/epheo/dotvirt/internal/auth"
@@ -824,11 +825,12 @@ func (s *Server) readsRepo(ctx context.Context, sc scope, namespace string) erro
 // reads as unknown, never as no.
 func (s *Server) authorNamespaces(ctx context.Context, id auth.Identity, c *cluster.Client, nss []string) (vms, any map[string]bool) {
 	vms, any = make(map[string]bool, len(nss)), make(map[string]bool, len(nss))
-	kinds := s.authoredKinds(ctx)
-	hasVMs := slices.Contains(kinds, model.KindVM)
+	kinds := s.authoredRefs(ctx)
+	vmRef := ssarFor(model.KindVM)
+	hasVMs := slices.Contains(kinds, vmRef)
 	type verdict struct{ ok, known bool }
-	update := func(k model.Kind, ns string) verdict {
-		_, ok, err := s.allowed(ctx, id, c, kindAction(verbUpdate, k, ns))
+	update := func(k ssarRef, ns string) verdict {
+		_, ok, err := s.allowed(ctx, id, c, ask(verbUpdate, k, ns))
 		return verdict{ok, err == nil || ok}
 	}
 	join := func(vs []verdict) verdict {
@@ -846,7 +848,7 @@ func (s *Server) authorNamespaces(ctx context.Context, id auth.Identity, c *clus
 	vmWide, anyWide := verdict{known: true}, verdict{known: true}
 	for _, k := range kinds {
 		v := update(k, "")
-		if k == model.KindVM {
+		if k == vmRef {
 			vmWide = v
 		}
 		if anyWide = join([]verdict{anyWide, v}); anyWide.ok {
@@ -882,7 +884,7 @@ func (s *Server) authorNamespaces(ctx context.Context, id auth.Identity, c *clus
 			defer func() { <-sem }()
 			vm := vmWide
 			if hasVMs && !vm.ok {
-				vm = update(model.KindVM, ns)
+				vm = update(vmRef, ns)
 			}
 			a := anyWide
 			if !a.ok {
@@ -893,7 +895,7 @@ func (s *Server) authorNamespaces(ctx context.Context, id auth.Identity, c *clus
 					if join(seen).ok {
 						break
 					}
-					if k != model.KindVM {
+					if k != vmRef {
 						seen = append(seen, update(k, ns))
 					}
 				}
@@ -908,10 +910,24 @@ func (s *Server) authorNamespaces(ctx context.Context, id auth.Identity, c *clus
 	return vms, any
 }
 
-// authoredKinds are the kinds a tenant repo may hold that the cluster serves,
-// VMs first: the grant most authors hold ends the review there.
-func (s *Server) authoredKinds(ctx context.Context) []model.Kind {
-	kinds := model.TenantKinds()
-	un := s.unserved(ctx, kinds...)
-	return slices.DeleteFunc(kinds, func(k model.Kind) bool { return un[k] })
+// authoredRefs are the resources of the kinds a tenant repo may hold that the
+// cluster serves, namespaced, VMs first: the grant most authors hold ends the
+// review there. A failed discovery read keeps the listed kinds, by the kinds
+// table, and drops the allowed ones, whose resources only discovery names.
+func (s *Server) authoredRefs(ctx context.Context) []ssarRef {
+	var gks []schema.GroupKind
+	for _, k := range model.TenantKinds() {
+		gks = append(gks, schema.GroupKind{Group: k.Group, Kind: k.Kind})
+	}
+	for _, g := range s.cfg.TenantKinds.Allowed {
+		gks = append(gks, schema.GroupKind{Group: g.Group, Kind: g.Kind})
+	}
+	x, _ := s.servedKinds(ctx, gks)
+	var out []ssarRef
+	for _, k := range gks {
+		if ref, served, err := x.ref(k); err == nil && served && (x == nil || !x.cluster[k]) {
+			out = append(out, ref)
+		}
+	}
+	return out
 }

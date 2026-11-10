@@ -101,45 +101,47 @@ func RepoCredsSecret(dv *dotvirtv1alpha1.Dotvirt, argoNS, urlPrefix, username, t
 	}
 }
 
-// tenantKinds is what a tenant repo may hold: with denied nil, the listed
-// kinds, tenancy.TenantKinds, which dotvirt stages by, so neither side admits
-// what the other refuses; else every namespaced kind but denied (TenantDenied).
-// clusterResourceWhitelist stays empty either way, so a tenant repo cannot
-// reconcile a CUDN/NNCP/Namespace even though the shared Argo controller SA
-// could.
-func tenantKinds(spec map[string]any, denied []tenancy.GroupKind) map[string]any {
+// tenantKinds is what a tenant repo may hold: tenancy.TenantKinds, which
+// dotvirt stages by, so neither side admits what the other refuses, and
+// allowed (TenantAllowed). clusterResourceWhitelist stays empty, so a tenant
+// repo cannot reconcile a CUDN/NNCP/Namespace even though the shared Argo
+// controller SA could.
+func tenantKinds(spec map[string]any, allowed []tenancy.GroupKind) map[string]any {
 	spec["clusterResourceWhitelist"] = []any{}
-	if denied != nil {
-		list := make([]any, 0, len(denied))
-		for _, g := range denied {
-			list = append(list, map[string]any{"group": g.Group, "kind": g.Kind})
-		}
-		spec["namespaceResourceBlacklist"] = list
-		return spec
+	list := whitelist(tenancy.TenantKinds)
+	for _, g := range allowed {
+		list = append(list, map[string]any{"group": g.Group, "kind": g.Kind})
 	}
-	spec["namespaceResourceWhitelist"] = whitelist(tenancy.TenantKinds)
+	spec["namespaceResourceWhitelist"] = list
 	return spec
 }
 
-// TenantDenied is the deny list a project's repo applies under, nil while it
-// keeps the listed kinds. Any kind needs spec.argocd.tenantKinds Any, sync
-// impersonation asked for, and impersonating: the instance syncing dotvirt's
-// Applications as their projects' own accounts, so the project's sync account,
-// never the controller's, applies what a merge declares. It gates on
-// impersonation being in effect, not on SyncImpersonationReady: one project's
-// missing grant degrades that condition, and must fail that project's sync,
-// not flip every project back to the listed kinds. Asking for impersonation
-// off flips back in the pass that removes the setting, before it does.
-func TenantDenied(dv *dotvirtv1alpha1.Dotvirt, impersonating bool) []tenancy.GroupKind {
-	a := dv.Spec.ArgoCD
-	if !a.AnyTenantKinds() || !a.SyncImpersonation.On() || !impersonating {
+// NamedTenantKinds splits spec.argocd.tenantKindsAllowed into the kinds a
+// tenant repo may apply beyond the listed ones and those it never may
+// (tenancy.AllowTenantKinds).
+func NamedTenantKinds(dv *dotvirtv1alpha1.Dotvirt) (allowed, refused []tenancy.GroupKind) {
+	named := make([]tenancy.GroupKind, len(dv.Spec.ArgoCD.TenantKindsAllowed))
+	for i, g := range dv.Spec.ArgoCD.TenantKindsAllowed {
+		named[i] = tenancy.GroupKind{Group: g.Group, Kind: g.Kind}
+	}
+	return tenancy.AllowTenantKinds(named...)
+}
+
+// TenantAllowed is what a project's repo may apply beyond the listed kinds,
+// nil while it keeps them. The allowed kinds need sync impersonation asked
+// for and impersonating: the instance syncing dotvirt's Applications as their
+// projects' own accounts, so the project's sync account, never the
+// controller's, applies what a merge declares. It gates on impersonation
+// being in effect, not on SyncImpersonationReady: one project's missing grant
+// degrades that condition, and must fail that project's sync, not flip every
+// project back to the listed kinds. Asking for impersonation off flips back
+// in the pass that removes the setting, before it does.
+func TenantAllowed(dv *dotvirtv1alpha1.Dotvirt, impersonating bool) []tenancy.GroupKind {
+	if !dv.Spec.ArgoCD.SyncImpersonation.On() || !impersonating {
 		return nil
 	}
-	extra := make([]tenancy.GroupKind, len(a.TenantKindsDenied))
-	for i, g := range a.TenantKindsDenied {
-		extra[i] = tenancy.GroupKind{Group: g.Group, Kind: g.Kind}
-	}
-	return tenancy.DeniedTenantKinds(extra...)
+	allowed, _ := NamedTenantKinds(dv)
+	return allowed
 }
 
 func whitelist(kinds []tenancy.Kind) []any {
@@ -188,9 +190,8 @@ const (
 //
 // Its sync account (tenancy.SyncAccount, named like the AppProject) is the
 // ServiceAccount Argo syncs the project's Application as once sync
-// impersonation is on (syncAccounts). denied is TenantDenied's answer: nil
-// keeps the listed kinds.
-func TenantAppProject(dv *dotvirtv1alpha1.Dotvirt, argoNS, name, project string, namespaces, sourceRepos []string, denied []tenancy.GroupKind) *unstructured.Unstructured {
+// impersonation is on (syncAccounts). allowed is TenantAllowed's answer.
+func TenantAppProject(dv *dotvirtv1alpha1.Dotvirt, argoNS, name, project string, namespaces, sourceRepos []string, allowed []tenancy.GroupKind) *unstructured.Unstructured {
 	destinations := make([]any, 0, len(namespaces))
 	for _, ns := range namespaces {
 		destinations = append(destinations, map[string]any{"server": InClusterServer, "namespace": ns})
@@ -201,7 +202,7 @@ func TenantAppProject(dv *dotvirtv1alpha1.Dotvirt, argoNS, name, project string,
 		"sourceRepos":                repos,
 		"destinations":               destinations,
 		"destinationServiceAccounts": syncAccounts(argoNS, name),
-	}, denied))
+	}, allowed))
 	labels := u.GetLabels()
 	labels[ProjectLabel] = project
 	u.SetLabels(labels)

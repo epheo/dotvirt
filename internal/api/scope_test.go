@@ -39,6 +39,7 @@ import (
 	"github.com/epheo/dotvirt/internal/model"
 	"github.com/epheo/dotvirt/internal/modules"
 	"github.com/epheo/dotvirt/internal/restfactory"
+	"github.com/epheo/dotvirt/pkg/tenancy"
 )
 
 // scopeServer builds a Server with only what the scope caches read: the version
@@ -953,6 +954,29 @@ func TestAuthoringIgnoresUnservedKinds(t *testing.T) {
 		s.modules = knownModules(t, false)
 		if _, author := tenantView(t, s); author["team-a-dev"] != served {
 			t.Errorf("EgressFirewalls served = %v: author = %v", served, author)
+		}
+	}
+}
+
+// A right on a kind the install allows beyond the listed ones authors, as the
+// repo may hold it; with no kind allowed, the same right authors nothing.
+func TestAuthoringCountsAllowedKinds(t *testing.T) {
+	deploy := model.Kind{Group: "apps", Version: "v1", Kind: "Deployment", Plural: "deployments"}
+	for _, allow := range []bool{false, true} {
+		fc := newFakeCluster(t)
+		fc.ssar = func(token string, a *authzv1.ResourceAttributes) bool {
+			return token == tenantToken && a.Namespace == "team-a-dev" &&
+				(a.Resource == "namespaces" || a.Resource == "pods" || a.Resource == "deployments")
+		}
+		fc.serveKinds(model.KindVM, model.KindNetpol, model.KindNS, deploy)
+		cfg := Config{}
+		if allow {
+			cfg.TenantKinds = tenancy.Policy{Allowed: []tenancy.GroupKind{{Group: "apps", Kind: "Deployment"}}}
+		}
+		s := fc.server(nil, cfg)
+		s.modules = knownModules(t, false)
+		if _, author := tenantView(t, s); author["team-a-dev"] != allow {
+			t.Errorf("Deployments allowed = %v: author = %v", allow, author)
 		}
 	}
 }
