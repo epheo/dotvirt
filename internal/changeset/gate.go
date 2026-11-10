@@ -43,6 +43,9 @@ type Access struct {
 }
 
 func (a Access) String() string {
+	if a.Group == model.KindDV.Group && a.Resource == model.KindDV.Plural && a.Subresource == "source" {
+		return "clone a disk from " + a.Namespace + " (create datavolumes/source there)"
+	}
 	what := a.Resource
 	if a.Subresource != "" {
 		what += "/" + a.Subresource
@@ -351,6 +354,15 @@ func fileAccess(rule KindRule, proj project.ProjectInfo, idx declaredIndex, ch f
 			return nil, err
 		}
 		need = append(need, a...)
+		var had []string
+		if inFile {
+			had = cloneSources(prev)
+		}
+		for _, ns := range cloneSources(o) {
+			if !slices.Contains(had, ns) {
+				need = append(need, Access{Verb: verbCreate, Group: model.KindDV.Group, Resource: model.KindDV.Plural, Subresource: "source", Namespace: ns})
+			}
+		}
 	}
 	for _, o := range before {
 		if declared[o.ref] {
@@ -387,6 +399,47 @@ func objectAccess(o object, declared bool) ([]Access, error) {
 		a.Object = string(raw)
 	}
 	return append(need, a), nil
+}
+
+// cloneSources are the other namespaces o's DataVolumes clone from: a VM's
+// dataVolumeTemplates and a DataVolume's own spec, each from a PVC, a
+// snapshot or a DataSource (asked where the DataSource lives). CDI lets a
+// clone read another namespace's data only for who may create
+// datavolumes/source there; without sync impersonation Argo's controller
+// would clone for anyone this gate let through.
+func cloneSources(o object) []string {
+	spec, _ := o.body["spec"].(map[string]any)
+	var dvs []map[string]any
+	switch o.kind {
+	case model.KindVM:
+		tmpls, _ := spec["dataVolumeTemplates"].([]any)
+		for _, t := range tmpls {
+			tm, _ := t.(map[string]any)
+			if s, ok := tm["spec"].(map[string]any); ok {
+				dvs = append(dvs, s)
+			}
+		}
+	case model.KindDV:
+		dvs = append(dvs, spec)
+	}
+	var out []string
+	add := func(m map[string]any) {
+		if ns, _ := m["namespace"].(string); ns != "" && ns != o.ref.Namespace && !slices.Contains(out, ns) {
+			out = append(out, ns)
+		}
+	}
+	for _, dv := range dvs {
+		source, _ := dv["source"].(map[string]any)
+		for _, k := range []string{"pvc", "snapshot"} {
+			if m, ok := source[k].(map[string]any); ok {
+				add(m)
+			}
+		}
+		if ref, ok := dv["sourceRef"].(map[string]any); ok {
+			add(ref)
+		}
+	}
+	return out
 }
 
 // replaced reports whether Argo deletes and re-creates o instead of patching
