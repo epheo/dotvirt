@@ -155,6 +155,13 @@ rules:
   - apiGroups: ["machineconfiguration.openshift.io"]
     resources: ["machineconfigs"]
     verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  # Publishing: a namespace's Gateway and its certificate, from the platform repo.
+  - apiGroups: ["gateway.networking.k8s.io"]
+    resources: ["gateways"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: ["cert-manager.io"]
+    resources: ["certificates"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
 ---
 # The authoring SIGNAL the UI's SSAR-gate reads (create cudn/nncp/namespaces), and list,
 # so a delegate is shown what they author. The user never creates these: Argo applies
@@ -193,6 +200,13 @@ rules:
   - apiGroups: ["template.kubevirt.io"]
     resources: ["virtualmachinetemplates"]
     verbs: ["create"]
+  # Turning publishing on for a namespace: its Gateway and certificate.
+  - apiGroups: ["gateway.networking.k8s.io"]
+    resources: ["gateways"]
+    verbs: ["create"]
+  - apiGroups: ["cert-manager.io"]
+    resources: ["certificates"]
+    verbs: ["create"]
 ---
 # EgressFirewall writes: a tenant kind the built-in admin role lacks. The platform
 # repo binds it, per project namespace, to the subjects of that namespace's admin
@@ -226,6 +240,23 @@ rules:
     resources: ["egressfirewalls"]
     verbs: ["get", "list", "watch"]
 ---
+# HTTPRoute writes where the admin role lacks them: Gateway API ships no tenant role.
+# The platform repo binds it in a namespace with publishing on, to the subjects of that
+# namespace's admin grant (<ns>-routes), and re-renders it with that grant. Never
+# aggregated, so a namespace without publishing holds no route writes. The operator
+# never binds it.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: dotvirt-tenant-routes
+  labels:
+    app.kubernetes.io/name: dotvirt
+    app.kubernetes.io/managed-by: dotvirt-operator
+rules:
+  - apiGroups: ["gateway.networking.k8s.io"]
+    resources: ["httproutes"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+---
 # What the platform tier's Argo sync account needs beyond dotvirt-argocd-apply once
 # Argo syncs the platform repo as it: the Namespaces that repo declares, and `bind` on
 # the roles its project grants name, which is what lets it apply those RoleBindings
@@ -243,7 +274,7 @@ rules:
     verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
   - apiGroups: ["rbac.authorization.k8s.io"]
     resources: ["clusterroles"]
-    resourceNames: ["admin", "dotvirt-tenant-egress", "view", "edit", "dotvirt-tenant-egress-view"]
+    resourceNames: ["admin", "dotvirt-tenant-egress", "view", "edit", "dotvirt-tenant-egress-view", "dotvirt-tenant-routes"]
     verbs: ["bind"]
 ---
 # Storage classes for every signed-in user: OpenShift grants them through

@@ -116,6 +116,8 @@ func TestWhatEachRepoMayDeclare(t *testing.T) {
 		{"k8s.ovn.org", "UserDefinedNetwork"},
 		{"k8s.cni.cncf.io", "NetworkAttachmentDefinition"},
 		{"rbac.authorization.k8s.io", "RoleBinding"},
+		{"gateway.networking.k8s.io", "Gateway"},
+		{"cert-manager.io", "Certificate"},
 		{"operators.coreos.com", "Subscription"},
 		{"operators.coreos.com", "OperatorGroup"},
 		{"operator.openshift.io", "KubeDescheduler"},

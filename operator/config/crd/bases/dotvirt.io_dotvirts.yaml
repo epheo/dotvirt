@@ -264,6 +264,26 @@ spec:
                       cluster Thanos querier service).
                     type: string
                 type: object
+              publishing:
+                description: Publishing is off until Domain and GatewayClassName are
+                  set.
+                properties:
+                  clusterIssuer:
+                    description: |-
+                      ClusterIssuer is a cert-manager ClusterIssuer able to issue each
+                      namespace's wildcard (DNS-01). Empty: the Gateways serve HTTP only.
+                    type: string
+                  domain:
+                    description: |-
+                      Domain is the DNS zone each publishing namespace gets a subdomain of;
+                      its wildcard points at the gateways' addresses.
+                    pattern: ^([a-z0-9]([-a-z0-9]*[a-z0-9])?\.)*[a-z0-9]([-a-z0-9]*[a-z0-9])?$
+                    type: string
+                  gatewayClassName:
+                    description: GatewayClassName is the GatewayClass of each namespace's
+                      Gateway.
+                    type: string
+                type: object
             type: object
           status:
             description: DotvirtStatus is the observed install state.

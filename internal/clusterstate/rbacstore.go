@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"hash/maphash"
 	"maps"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -14,7 +15,8 @@ import (
 )
 
 // rbacSignal is the sink of one signal-only RBAC watch: dotvirt never reads
-// these objects, only learns when one can change what a token may see or do.
+// these objects (adminRoutesDigest's one bool aside), only learns when one can
+// change what a token may see or do.
 // It keeps a hashed key and a grant per tracked object, never the object, so
 // it publishes only when a relevant object's grant moves, including the update
 // or delete that ends its relevance (a revocation), and a relist that changed
@@ -277,6 +279,40 @@ func clusterRoleDigest(refs *roleRefs) func(any) (grant, bool) {
 		}
 		return grant{fp: fingerprint(cr.Rules)}, true
 	}
+}
+
+// adminRoutesDigest is digest, keeping into whether ClusterRole admin writes
+// HTTPRoutes. Publishing grants route writes where it does not: OpenShift
+// aggregates them into admin, Gateway API alone ships no tenant role.
+func adminRoutesDigest(digest func(any) (grant, bool), into *atomic.Bool) func(any) (grant, bool) {
+	return func(obj any) (grant, bool) {
+		if cr, ok := obj.(*rbacv1.ClusterRole); ok && cr.Name == "admin" {
+			into.Store(writesRoutes(cr.Rules))
+		}
+		return digest(obj)
+	}
+}
+
+// writesRoutes reports whether rules create, update and delete every
+// HTTPRoute.
+func writesRoutes(rules []rbacv1.PolicyRule) bool {
+	need := map[string]bool{"create": true, "update": true, "delete": true}
+	for _, r := range rules {
+		if len(r.ResourceNames) > 0 || !matches(r.APIGroups, "gateway.networking.k8s.io") || !matches(r.Resources, "httproutes") {
+			continue
+		}
+		for _, v := range r.Verbs {
+			if v == rbacv1.VerbAll {
+				return true
+			}
+			delete(need, v)
+		}
+	}
+	return len(need) == 0
+}
+
+func matches(values []string, want string) bool {
+	return slices.Contains(values, want) || slices.Contains(values, "*")
 }
 
 // groupDigest reads OpenShift Groups through the dynamic client: dotvirt

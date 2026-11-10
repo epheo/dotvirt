@@ -207,8 +207,30 @@ func (s *Server) namespaceCaps(ctx context.Context, sc scope, ns string) model.N
 	out.Project.TemplateEdit, _ = s.projectAuthor(ctx, sc.id, sc.cluster, sc.proj.Namespaces)
 	if full, ok := s.projectByName(sc.proj.Name); ok && s.cfg.PlatformRepo != "" {
 		s.projectCaps(ctx, sc, full, &out.Project)
+		s.publishingCaps(ctx, sc, full, ns, &out)
 	}
 	return out
+}
+
+// publishingCaps answers turning publishing on in ns as handlePublishing
+// would: every kind served, the whole project in view or any namespace
+// claimable, and the gate's accesses allowed. A namespace with its own VM
+// Network is weighed as if it had none, so the UI can say what it waits on.
+func (s *Server) publishingCaps(ctx context.Context, sc scope, full project.ProjectInfo, ns string, out *model.NamespaceCaps) {
+	if !s.cfg.Publish.On() || len(s.unserved(ctx, s.publishingKinds()...)) > 0 {
+		return
+	}
+	id, c := sc.id, sc.cluster
+	if len(sc.proj.Namespaces) < len(full.Namespaces) && !s.capable(ctx, id, c, claimAction("")) {
+		return
+	}
+	pt := s.publishTarget(ns)
+	waits := pt.PrimaryNetwork
+	pt.PrimaryNetwork = false
+	need, err := s.draft.PublishingNeeds(s.platformProject(), full, pt)
+	allowed := s.needsAllowed(ctx, id, c, need, err)
+	out.Publishing = allowed && !waits
+	out.PublishingWaits = allowed && waits
 }
 
 // projectCaps answers the tenancy routes over project full: joining a new

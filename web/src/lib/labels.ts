@@ -41,6 +41,7 @@ export const DRAFT_RESOURCE_LABEL: Record<string, string> = {
 	baselineadminnetworkpolicy: 'Cluster default rule',
 	drs: 'Rebalancing',
 	template: 'Template',
+	publishing: 'Publishing',
 };
 
 const own = (m: Record<string, string>, k: string) =>

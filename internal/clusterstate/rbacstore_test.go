@@ -86,7 +86,7 @@ func signalStores(t *testing.T) (map[string]cache.Store, *published) {
 	p := &published{}
 	refs := newRoleRefs()
 	stores := map[string]cache.Store{"rolebindings": newRBACSignal(p.record, refs, roleBindingDigest)}
-	for _, w := range signalWatches(func(schema.GroupVersionResource) *cache.ListWatch { return nil }, p.record, refs, newBindingIndex()) {
+	for _, w := range signalWatches(func(schema.GroupVersionResource) *cache.ListWatch { return nil }, p.record, refs, newBindingIndex(), new(atomic.Bool)) {
 		stores[w.gvr.Resource] = w.sink
 	}
 	return stores, p
@@ -403,7 +403,7 @@ func runSignalsWith(t *testing.T, gate func(schema.GroupVersionResource) admissi
 	s.signals = signalWatches(func(gvr schema.GroupVersionResource) *cache.ListWatch {
 		sources[gvr.Resource] = &fakeSource{}
 		return sources[gvr.Resource].lw()
-	}, func(string) { bus.Publish(eventbus.RBACChanged) }, refs, newBindingIndex())
+	}, func(string) { bus.Publish(eventbus.RBACChanged) }, refs, newBindingIndex(), &s.adminRoutes)
 	s.runSignals(ctx, gate)
 	return bus, sources, s
 }
@@ -489,5 +489,37 @@ func TestRBACWatched(t *testing.T) {
 	time.Sleep(50 * time.Millisecond)
 	if denied.RBACWatched() {
 		t.Error("watched while a kind waits for its grant")
+	}
+}
+
+// Publishing binds route writes only where admin lacks them: OpenShift
+// aggregates them into admin, a plain cluster does not.
+func TestWritesRoutes(t *testing.T) {
+	gw := "gateway.networking.k8s.io"
+	all := []string{"get", "list", "watch", "create", "update", "patch", "delete", "deletecollection"}
+	for name, c := range map[string]struct {
+		rules []rbacv1.PolicyRule
+		want  bool
+	}{
+		"openshift": {[]rbacv1.PolicyRule{{APIGroups: []string{gw}, Resources: []string{"httproutes", "grpcroutes"}, Verbs: all}}, true},
+		"read only": {[]rbacv1.PolicyRule{{APIGroups: []string{gw}, Resources: []string{"httproutes"}, Verbs: []string{"get", "list", "watch"}}}, false},
+		"split":     {[]rbacv1.PolicyRule{{APIGroups: []string{gw}, Resources: []string{"httproutes"}, Verbs: []string{"create"}}, {APIGroups: []string{gw}, Resources: []string{"*"}, Verbs: []string{"update", "delete"}}}, true},
+		"named":     {[]rbacv1.PolicyRule{{APIGroups: []string{gw}, Resources: []string{"httproutes"}, ResourceNames: []string{"one"}, Verbs: all}}, false},
+		"wildcard":  {[]rbacv1.PolicyRule{{APIGroups: []string{"*"}, Resources: []string{"*"}, Verbs: []string{"*"}}}, true},
+		"none":      {nil, false},
+	} {
+		if got := writesRoutes(c.rules); got != c.want {
+			t.Errorf("%s: writesRoutes = %v, want %v", name, got, c.want)
+		}
+	}
+	var into atomic.Bool
+	digest := adminRoutesDigest(func(any) (grant, bool) { return grant{}, false }, &into)
+	digest(&rbacv1.ClusterRole{ObjectMeta: metav1.ObjectMeta{Name: "edit"}, Rules: []rbacv1.PolicyRule{{APIGroups: []string{"*"}, Resources: []string{"*"}, Verbs: []string{"*"}}}})
+	if into.Load() {
+		t.Error("another role set the admin bit")
+	}
+	digest(&rbacv1.ClusterRole{ObjectMeta: metav1.ObjectMeta{Name: "admin"}, Rules: []rbacv1.PolicyRule{{APIGroups: []string{gw}, Resources: []string{"httproutes"}, Verbs: all}}})
+	if !into.Load() {
+		t.Error("admin's route writes not kept")
 	}
 }

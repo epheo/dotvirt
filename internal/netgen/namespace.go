@@ -218,6 +218,13 @@ func EgressManifest(s RoleBindingSpec) (path string, content []byte, err error) 
 	return grantManifest(s, tenancy.EgressBinding(s.Namespace), tenancy.TenantEgressRole)
 }
 
+// RoutesManifest renders a publishing namespace's HTTPRoute grant
+// (tenancy.TenantRoutesRole) to the same subjects as its
+// RoleBindingManifest. s.Role does not apply.
+func RoutesManifest(s RoleBindingSpec) (path string, content []byte, err error) {
+	return grantManifest(s, tenancy.RoutesBinding(s.Namespace), tenancy.TenantRoutesRole)
+}
+
 // grantManifest renders RoleBinding name binding role to s's kept subjects,
 // each owner (kind User) and the sync account, each once.
 func grantManifest(s RoleBindingSpec, name, role string) (string, []byte, error) {

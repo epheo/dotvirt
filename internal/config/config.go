@@ -99,6 +99,15 @@ type Config struct {
 	PublicURL     string
 	WebhookURL    string
 
+	// Publishing: a platform admin may turn it on for a project namespace,
+	// a Gateway of PublishGatewayClass on *.<namespace>.<PublishDomain>,
+	// with a wildcard from the cert-manager ClusterIssuer PublishIssuer
+	// ("" serves HTTP only). The platform names the domain, so no project
+	// can ask for another's hostnames. Off while domain or class is empty.
+	PublishDomain       string
+	PublishGatewayClass string
+	PublishIssuer       string
+
 	// AppSetPluginToken is the shared bearer the ArgoCD ApplicationSet plugin
 	// generator presents to dotvirt's /api/v1/getparams.execute endpoint, which
 	// emits one {project,repo,namespace} element per labeled namespace so projects
@@ -163,6 +172,9 @@ func Load(args []string) (*Config, error) {
 	fs.StringVar(&c.UploadProxyURL, "upload-proxy-url", os.Getenv("DOTVIRT_UPLOAD_PROXY_URL"), "cdi-uploadproxy base URL for image uploads (empty: the one CDI publishes)")
 	fs.StringVar(&c.WebhookSecret, "webhook-secret", os.Getenv("DOTVIRT_WEBHOOK_SECRET"), "HMAC secret for the Forgejo webhook endpoint (empty disables it)")
 	fs.StringVar(&c.PublicURL, "public-url", os.Getenv("DOTVIRT_PUBLIC_URL"), "dotvirt's externally reachable base URL, for webhook auto-registration (empty disables)")
+	fs.StringVar(&c.PublishDomain, "publish-domain", os.Getenv("DOTVIRT_PUBLISH_DOMAIN"), "DNS zone each publishing namespace gets *.<namespace>. of (empty: publishing off)")
+	fs.StringVar(&c.PublishGatewayClass, "publish-gateway-class", os.Getenv("DOTVIRT_PUBLISH_GATEWAY_CLASS"), "GatewayClass of each publishing namespace's Gateway (empty: publishing off)")
+	fs.StringVar(&c.PublishIssuer, "publish-issuer", os.Getenv("DOTVIRT_PUBLISH_ISSUER"), "cert-manager ClusterIssuer for each publishing namespace's wildcard (empty: HTTP only)")
 	fs.StringVar(&c.WebhookURL, "webhook-url", os.Getenv("DOTVIRT_WEBHOOK_URL"), "base URL the forge delivers webhooks to (defaults to -public-url; set to the in-cluster Service URL when the forge can't reach/TLS-trust the external Route)")
 	fs.StringVar(&c.AppSetPluginToken, "appset-plugin-token", os.Getenv("DOTVIRT_APPSET_PLUGIN_TOKEN"), "shared bearer for the ArgoCD ApplicationSet plugin-generator endpoint (empty disables it)")
 	fs.StringVar(&c.StaticDir, "static-dir", os.Getenv("DOTVIRT_STATIC_DIR"), "directory of the built SPA to serve at the same origin (empty = dev: SPA served by Vite)")

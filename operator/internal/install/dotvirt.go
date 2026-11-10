@@ -186,6 +186,15 @@ func dotvirtEnv(dv *dotvirtv1alpha1.Dotvirt, argoNS string, tenantAllowed []tena
 	if dv.Spec.Forge.Managed {
 		env = append(env, corev1.EnvVar{Name: "DOTVIRT_WEBHOOK_URL", Value: ServiceURL(dv)})
 	}
+	if p := dv.Spec.Publishing; p.Domain != "" && p.GatewayClassName != "" {
+		env = append(env,
+			corev1.EnvVar{Name: "DOTVIRT_PUBLISH_DOMAIN", Value: p.Domain},
+			corev1.EnvVar{Name: "DOTVIRT_PUBLISH_GATEWAY_CLASS", Value: p.GatewayClassName},
+		)
+		if p.ClusterIssuer != "" {
+			env = append(env, corev1.EnvVar{Name: "DOTVIRT_PUBLISH_ISSUER", Value: p.ClusterIssuer})
+		}
+	}
 	if dv.Spec.Metrics.URL != "" {
 		env = append(env, corev1.EnvVar{Name: "DOTVIRT_METRICS_URL", Value: dv.Spec.Metrics.URL})
 		if t := metricsTenancyURL(dv.Spec.Metrics.URL); t != "" {
