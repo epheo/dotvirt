@@ -19,6 +19,9 @@ package controller
 // SSA-merge the managed forge's host into argocd-tls-certs-cm, so Argo VERIFIES the
 // router-served cert instead of x509-failing on every repo.
 // +kubebuilder:rbac:groups="",resources=configmaps,verbs=get;list;create;patch
+// configmaps watch on argocd-cm alone (the cache selects it by name): sync
+// impersonation turned on or off there re-renders what tenant repos may apply.
+// +kubebuilder:rbac:groups="",resources=configmaps,resourceNames=argocd-cm,verbs=watch
 // +kubebuilder:rbac:groups="",resources=services;serviceaccounts,verbs=list;create;patch
 // +kubebuilder:rbac:groups="",resources=persistentvolumeclaims,verbs=create;patch
 // +kubebuilder:rbac:groups=networking.k8s.io,resources=networkpolicies,verbs=list;create;patch

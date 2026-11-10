@@ -12,6 +12,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/fields"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/selection"
@@ -551,6 +552,9 @@ func CacheByObject(plat platform.Platform) map[client.Object]cache.ByObject {
 		&corev1.Secret{}:     instanceOnly,
 		&appsv1.Deployment{}: instanceOnly,
 		&corev1.Namespace{}:  {Label: labels.NewSelector().Add(*hasProject)},
+		// The watch on Argo's settings selects argocd-cm by name, the only
+		// ConfigMap the RBAC lets the operator watch; reads stay direct.
+		&corev1.ConfigMap{}: {Field: fields.OneTermEqualSelector("metadata.name", argoSettings)},
 	}
 	// Registering the Route kind on vanilla Kubernetes fails the cache's REST lookup.
 	if plat == platform.OpenShift {
@@ -581,7 +585,13 @@ func (r *DotvirtReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		// source, so a project namespace appearing, leaving or changing either
 		// re-derives them.
 		Watches(&corev1.Namespace{}, handler.EnqueueRequestsFromMapFunc(r.installs),
-			builder.WithPredicates(predicate.Funcs{UpdateFunc: tenancyChanged}))
+			builder.WithPredicates(predicate.Funcs{UpdateFunc: tenancyChanged})).
+		// Sync impersonation turned on or off in argocd-cm, by dotvirt or by
+		// hand, decides what tenant repos may apply (tenantKinds Any): the
+		// pass re-renders their AppProjects at once, not on the next drift
+		// requeue.
+		Watches(&corev1.ConfigMap{}, handler.EnqueueRequestsFromMapFunc(r.installs),
+			builder.WithPredicates(predicate.Funcs{UpdateFunc: impersonationChanged, GenericFunc: func(event.GenericEvent) bool { return false }}))
 	// Routes exist only where the route API does, so gate the watch on the same
 	// platform detection that gates rendering them; on vanilla Kubernetes the
 	// informer could never sync. Unstructured because the module carries no
@@ -606,6 +616,23 @@ func (r *DotvirtReconciler) installs(ctx context.Context, _ client.Object) []rec
 		reqs = append(reqs, reconcile.Request{NamespacedName: client.ObjectKeyFromObject(&list.Items[i])})
 	}
 	return reqs
+}
+
+// argoSettings is Argo CD's settings ConfigMap, where sync impersonation is
+// turned on.
+const argoSettings = "argocd-cm"
+
+// impersonationChanged passes an argocd-cm update that turns sync
+// impersonation on or off; the rest of its churn says nothing dotvirt renders.
+func impersonationChanged(e event.UpdateEvent) bool {
+	setting := func(o client.Object) string {
+		cm, _ := o.(*corev1.ConfigMap)
+		if cm == nil {
+			return ""
+		}
+		return cm.Data[install.SyncImpersonationKey]
+	}
+	return setting(e.ObjectOld) != setting(e.ObjectNew)
 }
 
 // tenancyChanged passes a namespace update that moves its project or repo; the

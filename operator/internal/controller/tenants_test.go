@@ -14,6 +14,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/fields"
 	"k8s.io/apimachinery/pkg/labels"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -265,14 +266,21 @@ func TestTenancyChanged(t *testing.T) {
 	}
 }
 
-// Only instance-labelled objects and project-labelled namespaces enter the
-// cache, and the Route kind is registered only where the route API exists.
+// Only instance-labelled objects, project-labelled namespaces and argocd-cm
+// enter the cache, and the Route kind is registered only where the route API
+// exists.
 func TestCacheByObjectScope(t *testing.T) {
 	for _, plat := range []platform.Platform{platform.OpenShift, platform.Kubernetes} {
 		routes := 0
 		for obj, opts := range CacheByObject(plat) {
 			if obj.GetObjectKind().GroupVersionKind() == install.RouteGVK {
 				routes++
+			}
+			if _, cm := obj.(*corev1.ConfigMap); cm {
+				if !opts.Field.Matches(fields.Set{"metadata.name": "argocd-cm"}) || opts.Field.Matches(fields.Set{"metadata.name": "other"}) {
+					t.Errorf("%s: ConfigMap selector %q does not select argocd-cm alone", plat, opts.Field)
+				}
+				continue
 			}
 			key := install.InstanceLabel
 			if _, ns := obj.(*corev1.Namespace); ns {
@@ -405,5 +413,25 @@ func TestTenantKindsFollowTheImpersonationSetting(t *testing.T) {
 				t.Errorf("notes = %v", tier.notes)
 			}
 		})
+	}
+}
+
+// Only an argocd-cm update that turns sync impersonation on or off re-runs the
+// pass; the rest of its churn does not.
+func TestImpersonationChanged(t *testing.T) {
+	cm := func(v string) *corev1.ConfigMap {
+		c := &corev1.ConfigMap{Data: map[string]string{"url": "https://argo.example"}}
+		if v != "" {
+			c.Data[install.SyncImpersonationKey] = v
+		}
+		return c
+	}
+	for _, c := range []struct {
+		old, new string
+		want     bool
+	}{{"", "true", true}, {"true", "", true}, {"true", "false", true}, {"true", "true", false}, {"", "", false}} {
+		if got := impersonationChanged(event.UpdateEvent{ObjectOld: cm(c.old), ObjectNew: cm(c.new)}); got != c.want {
+			t.Errorf("%q to %q: %v, want %v", c.old, c.new, got, c.want)
+		}
 	}
 }

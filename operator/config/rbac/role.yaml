@@ -16,6 +16,14 @@ rules:
 - apiGroups:
   - ""
   resourceNames:
+  - argocd-cm
+  resources:
+  - configmaps
+  verbs:
+  - watch
+- apiGroups:
+  - ""
+  resourceNames:
   - dotvirt-appset-plugin
   resources:
   - configmaps
