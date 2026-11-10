@@ -47,8 +47,12 @@ type capField struct {
 	act action
 }
 
-// objectFields are dst's create, update and delete of kind k in ns.
-func objectFields(dst *model.ObjectCaps, k model.Kind, ns string) []capField {
+// objectFields are dst's create, update and delete of kind k in ns; only
+// delete when the cluster does not serve k (Server.unserved).
+func objectFields(dst *model.ObjectCaps, k model.Kind, ns string, unserved map[model.Kind]bool) []capField {
+	if unserved[k] {
+		return []capField{{&dst.Delete, kindAction(verbDelete, k, ns)}}
+	}
 	return []capField{
 		{&dst.Create, kindAction(verbCreate, k, ns)},
 		{&dst.Update, kindAction(verbUpdate, k, ns)},
@@ -92,12 +96,13 @@ func (s *Server) clusterCaps(ctx context.Context, id auth.Identity, c *cluster.C
 		fields = append(fields, capField{&out.Replication, replicationRead}, capField{&out.ReplicationRepair, replicationRepair})
 	}
 	if s.cfg.PlatformRepo != "" {
-		fields = append(fields, objectFields(&out.Network, model.KindCUDN, "")...)
-		fields = append(fields, objectFields(&out.Uplink, model.KindNNCP, "")...)
-		fields = append(fields, objectFields(&out.EgressIP, model.KindEgressIP, "")...)
-		fields = append(fields, objectFields(&out.ExternalRoute, model.KindExtRoute, "")...)
-		fields = append(fields, objectFields(&out.AdminNetworkPolicy, model.KindANP, "")...)
-		fields = append(fields, objectFields(&out.BaselineAdminNetworkPolicy, model.KindBANP, "")...)
+		un := s.unserved(ctx, model.KindCUDN, model.KindNNCP, model.KindEgressIP, model.KindExtRoute, model.KindANP, model.KindBANP)
+		fields = append(fields, objectFields(&out.Network, model.KindCUDN, "", un)...)
+		fields = append(fields, objectFields(&out.Uplink, model.KindNNCP, "", un)...)
+		fields = append(fields, objectFields(&out.EgressIP, model.KindEgressIP, "", un)...)
+		fields = append(fields, objectFields(&out.ExternalRoute, model.KindExtRoute, "", un)...)
+		fields = append(fields, objectFields(&out.AdminNetworkPolicy, model.KindANP, "", un)...)
+		fields = append(fields, objectFields(&out.BaselineAdminNetworkPolicy, model.KindBANP, "", un)...)
 		fields = append(fields, capField{&out.SharedLibrary, ask(verbCreate, ssarVMTemplate, "")})
 	}
 	if s.frontDoor != nil && s.frontDoor.Started() {
@@ -171,8 +176,11 @@ func (s *Server) namespaceCaps(ctx context.Context, sc scope, ns string) model.N
 		{&out.Clone, cloneAction(ns)},
 		{&out.BootImageImport, bootImageImportAction(ns)},
 		{&out.BootImageDelete, bootImageDeleteAction(ns)},
-		{&out.NetworkAttachment.Update, kindAction(verbUpdate, model.KindNAD, ns)},
 		{&out.NetworkAttachment.Delete, kindAction(verbDelete, model.KindNAD, ns)},
+	}
+	un := s.unserved(ctx, model.KindNAD, model.KindUDN, model.KindNetpol, model.KindEgressFW)
+	if !un[model.KindNAD] {
+		fields = append(fields, capField{&out.NetworkAttachment.Update, kindAction(verbUpdate, model.KindNAD, ns)})
 	}
 	if s.cfg.UploadProxyURL != "" {
 		fields = append(fields,
@@ -183,9 +191,9 @@ func (s *Server) namespaceCaps(ctx context.Context, sc scope, ns string) model.N
 	if s.drift != nil {
 		fields = append(fields, capField{&out.Resync, vmAction(verbUpdate, ns)})
 	}
-	fields = append(fields, objectFields(&out.Network, model.KindUDN, ns)...)
-	fields = append(fields, objectFields(&out.NetworkPolicy, model.KindNetpol, ns)...)
-	fields = append(fields, objectFields(&out.EgressFirewall, model.KindEgressFW, ns)...)
+	fields = append(fields, objectFields(&out.Network, model.KindUDN, ns, un)...)
+	fields = append(fields, objectFields(&out.NetworkPolicy, model.KindNetpol, ns, un)...)
+	fields = append(fields, objectFields(&out.EgressFirewall, model.KindEgressFW, ns, un)...)
 	s.fill(ctx, sc.id, sc.cluster, fields)
 	out.RepoRead = s.readsRepo(ctx, sc, ns) == nil
 	out.Project.RepoRead = s.readsRepo(ctx, sc, "") == nil

@@ -338,12 +338,15 @@ func formActions(k model.Kind, ns string) []action {
 
 // gateForm gates a namespaced create form on formActions.
 func (s *Server) gateForm(w http.ResponseWriter, r *http.Request, sc scope, k model.Kind, ns string) bool {
-	return s.gateAny(w, r, sc, formActions(k, ns))
+	return s.gateServed(w, r, k) && s.gateAny(w, r, sc, formActions(k, ns))
 }
 
 // platformForm resolves the platform tier for a cluster-scoped create form on
 // k, opened by formActions.
 func (s *Server) platformForm(w http.ResponseWriter, r *http.Request, k model.Kind) (scope, bool) {
+	if !s.gateServed(w, r, k) {
+		return scope{}, false
+	}
 	return s.platformScopeWith(w, r, func(ctx context.Context, id auth.Identity, c *cluster.Client) (bool, error) {
 		return s.anyAllowed(ctx, id, c, formActions(k, ""))
 	}, "not authorized to create or update "+k.Plural)

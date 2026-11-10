@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"net/http"
 	"slices"
 	"time"
 
@@ -96,6 +97,40 @@ func (x *kindIndex) ref(k schema.GroupKind) (ref ssarRef, served bool, err error
 		return ssarFor(mk), true, nil
 	}
 	return ssarRef{}, false, fmt.Errorf("%w: discovery could not tell which resource serves %s", model.ErrUnavailable, k)
+}
+
+// unserved are those of kinds discovery found not served, from one read. git
+// may declare one, but nothing syncs it, so dotvirt stages no new or changed
+// one; removing one stays open. A failed read, or a kind discovery could not
+// read, counts as served: the apiserver still answers the change at sync.
+func (s *Server) unserved(ctx context.Context, kinds ...model.Kind) map[model.Kind]bool {
+	gks := make([]schema.GroupKind, len(kinds))
+	for i, k := range kinds {
+		gks[i] = schema.GroupKind{Group: k.Group, Kind: k.Kind}
+	}
+	out := map[model.Kind]bool{}
+	x, err := s.servedKinds(ctx, gks)
+	if err != nil {
+		return out
+	}
+	for i, k := range kinds {
+		if _, served, err := x.ref(gks[i]); err == nil && !served {
+			out[k] = true
+		}
+	}
+	return out
+}
+
+// gateServed refuses staging a new or changed object on a cluster that serves
+// none of kinds, the ones the request could write: with any served, the
+// coordinator weighs the kind git declares.
+func (s *Server) gateServed(w http.ResponseWriter, r *http.Request, kinds ...model.Kind) bool {
+	un := s.unserved(r.Context(), kinds...)
+	if len(kinds) == 0 || len(un) < len(kinds) {
+		return true
+	}
+	fail(w, fmt.Errorf("%w: this cluster does not serve %s, so one in git would never sync", model.ErrConflict, kinds[0].Plural))
+	return false
 }
 
 // servedKinds is discovery's answer for kinds, read through the SA once for

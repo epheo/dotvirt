@@ -66,6 +66,11 @@ func newGrantCluster(t *testing.T) *gateRig {
 		return false
 	}
 	g.fc.dryRuns = g.fc.ssar
+	// Every kind dotvirt writes, as OpenShift serves them: an unserved kind
+	// takes no new or changed object, whatever the grants say.
+	g.fc.serveKinds(model.KindVM, model.KindUDN, model.KindCUDN, model.KindNAD, model.KindNNCP, model.KindNS, model.KindRB,
+		model.KindEgressFW, model.KindEgressIP, model.KindExtRoute, model.KindNetpol, model.KindANP, model.KindBANP,
+		model.KindOpGroup, model.KindSub, model.KindDesched, model.KindMachCfg)
 	return g
 }
 
