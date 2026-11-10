@@ -250,3 +250,18 @@ func TestListNodeLabelsCarriesPodSubnets(t *testing.T) {
 		t.Fatalf("ListNodeLabels = %+v, %v", got, err)
 	}
 }
+
+// A ClusterRole's resourceNames answers only a review that names the object.
+func TestCanGetNamespacesNamesTheObject(t *testing.T) {
+	kube := fake.NewSimpleClientset()
+	kube.PrependReactor("create", "selfsubjectaccessreviews", func(a k8stesting.Action) (bool, runtime.Object, error) {
+		ssar := a.(k8stesting.CreateAction).GetObject().(*authzv1.SelfSubjectAccessReview)
+		ra := ssar.Spec.ResourceAttributes
+		ssar.Status.Allowed = ra.Verb == "get" && ra.Group == "" && ra.Resource == "namespaces" && ra.Name == ra.Namespace && ra.Name == "mine"
+		return true, ssar, nil
+	})
+	got, err := (&Client{kube: kube}).CanGetNamespaces(context.Background(), []string{"mine", "theirs"})
+	if err != nil || !reflect.DeepEqual(got, []string{"mine"}) {
+		t.Errorf("got %v, %v", got, err)
+	}
+}

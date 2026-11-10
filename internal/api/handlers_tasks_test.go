@@ -184,3 +184,15 @@ func TestOwnPlatformMergesInTheFeed(t *testing.T) {
 		t.Errorf("reader's feed %q, want every platform merge", rows)
 	}
 }
+
+// Every op acts on a VM: it shows where the caller may list them.
+func TestOpsFollowTheVMRight(t *testing.T) {
+	sc := newTaskScope([]project.ProjectInfo{{Name: "p", Namespaces: []string{"a", "b"}}}, false)
+	sc.listsVMs = func(ns string) bool { return ns == "a" }
+	if _, ok := sc.op(tasks.Op{Namespace: "a"}); !ok {
+		t.Error("an op where the caller lists VMs is hidden")
+	}
+	if _, ok := sc.op(tasks.Op{Namespace: "b"}); ok {
+		t.Error("an op where the caller does not list VMs shows")
+	}
+}

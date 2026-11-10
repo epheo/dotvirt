@@ -7,7 +7,7 @@ import "net/http"
 // token. A non-running VM (or one without a graphics device, or a KubeVirt that
 // doesn't expose the subresource) errors - the UI hides the thumbnail then.
 func (s *Server) handleScreenshot(w http.ResponseWriter, r *http.Request) {
-	sc, ns, name, ok := s.vmScope(w, r)
+	sc, ns, name, ok := s.vmCallerScope(w, r)
 	if !ok {
 		return
 	}

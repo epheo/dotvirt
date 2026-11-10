@@ -98,6 +98,21 @@ func clientsFor(cfg *rest.Config) (*Client, error) {
 // is an error, never a smaller set: a smaller set reads as lost access and
 // would be cached as the answer.
 func (c *Client) CanIn(ctx context.Context, verb, group, resource string, namespaces []string) ([]string, error) {
+	return c.reviewEach(ctx, verb+" "+resource, namespaces, func(ns string) authzv1.ResourceAttributes {
+		return authzv1.ResourceAttributes{Namespace: ns, Verb: verb, Group: group, Resource: resource}
+	})
+}
+
+// CanGetNamespaces returns those of namespaces whose Namespace object the token
+// may get. The review names the object, as kubectl get namespace does: a
+// ClusterRole's resourceNames only answers then.
+func (c *Client) CanGetNamespaces(ctx context.Context, namespaces []string) ([]string, error) {
+	return c.reviewEach(ctx, "get namespaces", namespaces, func(ns string) authzv1.ResourceAttributes {
+		return authzv1.ResourceAttributes{Namespace: ns, Name: ns, Verb: "get", Resource: "namespaces"}
+	})
+}
+
+func (c *Client) reviewEach(ctx context.Context, what string, namespaces []string, attrs func(string) authzv1.ResourceAttributes) ([]string, error) {
 	var (
 		mu       sync.Mutex
 		wg       sync.WaitGroup
@@ -112,7 +127,7 @@ func (c *Client) CanIn(ctx context.Context, verb, group, resource string, namesp
 				if ctx.Err() != nil {
 					continue
 				}
-				ok, err := c.Can(ctx, verb, group, resource, ns)
+				ok, err := c.Review(ctx, attrs(ns))
 				mu.Lock()
 				switch {
 				case err != nil:
@@ -136,7 +151,7 @@ func (c *Client) CanIn(ctx context.Context, verb, group, resource string, namesp
 		return nil, err
 	}
 	if failed > 0 {
-		return nil, fmt.Errorf("%s %s review failed in %d of %d namespaces: %w", verb, resource, failed, len(namespaces), firstErr)
+		return nil, fmt.Errorf("%s review failed in %d of %d namespaces: %w", what, failed, len(namespaces), firstErr)
 	}
 	sort.Strings(out)
 	return out, nil

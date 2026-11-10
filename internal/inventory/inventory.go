@@ -49,6 +49,9 @@ type Inputs struct {
 	// ListsVMs reports whether the caller may list VMs in a namespace it sees;
 	// nil is yes.
 	ListsVMs func(namespace string) bool
+	// ListsVMIs reports whether the caller may list running instances there:
+	// a VM's address, host and guest facts come from them. nil is yes.
+	ListsVMIs func(namespace string) bool
 	// ScopeSync narrows a project's GitOps rollup to what the caller may read;
 	// nil leaves it whole.
 	ScopeSync func(project.ProjectInfo, model.ProjectSync) *model.ProjectSync
@@ -151,7 +154,7 @@ func buildProject(in Inputs, p project.ProjectInfo) model.Project {
 				continue
 			}
 			vm := model.VM{Namespace: ns, Name: name, Power: model.PowerUnknown, Sync: model.SyncNotTracked}
-			applyLive(&vm, live)
+			applyLiveFor(&vm, live, in)
 			byNS[ns] = append(byNS[ns], vm)
 		}
 	}
@@ -230,7 +233,7 @@ func isSystemNamespace(ns string) bool {
 
 func enrich(vm *model.VM, in Inputs) {
 	if s, ok := in.Live[vm.Namespace][vm.Name]; ok {
-		applyLive(vm, s)
+		applyLiveFor(vm, s, in)
 	}
 	if in.Drift != nil { // nil = Argo not wired; non-nil = configured
 		if d, ok := in.Drift[vm.Namespace+"/"+vm.Name]; ok {
@@ -242,6 +245,16 @@ func enrich(vm *model.VM, in Inputs) {
 			vm.Sync = model.SyncPending
 		}
 	}
+}
+
+// applyLiveFor applies what the caller may read of s: without the instances,
+// the phase alone, which the VM's own status carries.
+func applyLiveFor(vm *model.VM, s clusterstate.LiveVM, in Inputs) {
+	if in.ListsVMIs != nil && !in.ListsVMIs(vm.Namespace) {
+		vm.Phase = s.Phase
+		return
+	}
+	applyLive(vm, s)
 }
 
 // applyLive copies one VM's snapshot state onto its inventory row.

@@ -199,6 +199,20 @@ func TestBuildSurfacesPlacementIssues(t *testing.T) {
 	}
 }
 
+// A running instance's address and host are theirs who may list instances.
+func TestLiveFactsFollowTheInstances(t *testing.T) {
+	live := clusterstate.LiveVM{Phase: "Running", GuestIP: "10.0.0.1", NodeName: "n1"}
+	vm := model.VM{Namespace: "a"}
+	applyLiveFor(&vm, live, Inputs{ListsVMIs: func(string) bool { return false }})
+	if vm.Phase != "Running" || vm.GuestIP != "" || vm.NodeName != "" {
+		t.Errorf("without instances: %+v", vm)
+	}
+	applyLiveFor(&vm, live, Inputs{})
+	if vm.GuestIP != "10.0.0.1" || vm.NodeName != "n1" {
+		t.Errorf("with instances: %+v", vm)
+	}
+}
+
 // The rollup a project shows passes through the caller's view of it.
 func TestBuildScopesProjectGitOps(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())

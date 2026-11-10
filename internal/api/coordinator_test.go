@@ -326,9 +326,9 @@ func TestTenancyRefusesAProjectWithAHiddenNamespace(t *testing.T) {
 		{verb: verbBind, group: rbac, resource: "clusterroles", name: "admin"},
 		{verb: verbBind, group: rbac, resource: "clusterroles", name: tenancy.TenantEgressRole},
 	}
+	gs = append(gs, grant{verb: verbGet, resource: "namespaces", name: "orphans-ns"})
 	for _, ns := range []string{"orphans-ns", "orphans-zsecret"} {
-		gs = append(gs, grant{verb: verbGet, resource: "namespaces", name: ns}, grant{verb: verbUpdate, resource: "namespaces", name: ns},
-			grant{verb: verbPatch, resource: "namespaces", name: ns})
+		gs = append(gs, grant{verb: verbUpdate, resource: "namespaces", name: ns}, grant{verb: verbPatch, resource: "namespaces", name: ns})
 	}
 	tok := g.token(gs)
 	for _, path := range []string{"/api/projects/orphans/adopt", "/api/projects/orphans/release", "/api/projects/orphans/sync-access"} {

@@ -36,10 +36,10 @@ func TestWatermarkScopesToTheCaller(t *testing.T) {
 	s.nodes = []cluster.NodeLabels{{Name: "worker-1", Labels: map[string]string{"zone": "a"}}}
 
 	a := map[string]bool{"team-a": true}
-	tenant, reader := s.Watermark(a, sharedOnly, false), s.Watermark(a, everything, true)
+	tenant, reader := s.Watermark(a, sharedOnly, listsEverywhere, false), s.Watermark(a, everything, listsEverywhere, true)
 	check := func(what string, tenantMoves, readerMoves bool) {
 		t.Helper()
-		gotT, gotR := s.Watermark(a, sharedOnly, false), s.Watermark(a, everything, true)
+		gotT, gotR := s.Watermark(a, sharedOnly, listsEverywhere, false), s.Watermark(a, everything, listsEverywhere, true)
 		if (gotT != tenant) != tenantMoves || (gotR != reader) != readerMoves {
 			t.Errorf("%s: tenant moved %v, node reader moved %v; want %v, %v", what, gotT != tenant, gotR != reader, tenantMoves, readerMoves)
 		}
@@ -68,7 +68,7 @@ func TestWatermarkScopesToTheCaller(t *testing.T) {
 	s.nodes = []cluster.NodeLabels{{Name: "worker-1", Labels: map[string]string{"zone": "b"}}}
 	check("a node relabelled", false, true)
 
-	if s.Watermark(map[string]bool{"team-a": true, "team-b": true}, sharedOnly, false) == tenant {
+	if s.Watermark(map[string]bool{"team-a": true, "team-b": true}, sharedOnly, listsEverywhere, false) == tenant {
 		t.Error("gaining a namespace must move the watermark")
 	}
 }
@@ -76,6 +76,24 @@ func TestWatermarkScopesToTheCaller(t *testing.T) {
 // BenchmarkWatermark is the per-frame catalog watermark over 1000 namespaced
 // objects in 50 namespaces plus 50 shared ones: a tenant seeing 5 namespaces,
 // and an admin seeing all 50 who also reads 10 nodes of 30 labels each.
+// A row of a kind the caller may not list moves nothing for them.
+func TestWatermarkFollowsEachKind(t *testing.T) {
+	s := New(nil, nil)
+	a := map[string]bool{"team-a": true}
+	noNetpols := func(gvr schema.GroupVersionResource, _ string) bool { return gvr != gvrNetpol }
+	before := s.Watermark(a, sharedOnly, noNetpols, false)
+	_ = s.netpol.Add(object("team-a", "deny", "1"))
+	if got := s.Watermark(a, sharedOnly, noNetpols, false); got != before {
+		t.Error("a NetworkPolicy moved the watermark of a caller who may not list them")
+	}
+	_ = s.nad.Add(object("team-a", "net", "1"))
+	if got := s.Watermark(a, sharedOnly, noNetpols, false); got == before {
+		t.Error("a NAD the caller may list did not move its watermark")
+	}
+}
+
+func listsEverywhere(schema.GroupVersionResource, string) bool { return true }
+
 func BenchmarkWatermark(b *testing.B) {
 	s := New(nil, nil)
 	stores := []interface{ Add(any) error }{s.udn, s.nad, s.netpol, s.egressfw}
@@ -105,14 +123,14 @@ func BenchmarkWatermark(b *testing.B) {
 		visible := scope(5)
 		b.ReportAllocs()
 		for b.Loop() {
-			_ = s.Watermark(visible, sharedOnly, false)
+			_ = s.Watermark(visible, sharedOnly, listsEverywhere, false)
 		}
 	})
 	b.Run("admin", func(b *testing.B) {
 		visible := scope(50)
 		b.ReportAllocs()
 		for b.Loop() {
-			_ = s.Watermark(visible, everything, true)
+			_ = s.Watermark(visible, everything, listsEverywhere, true)
 		}
 	})
 }

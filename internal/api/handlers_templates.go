@@ -149,7 +149,7 @@ func (s *Server) handleSaveTemplate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	sc, ok := s.resolveProject(w, r, byNamespace(req.SourceNamespace))
-	if !ok {
+	if !ok || !s.gateVMRead(w, r, sc, req.SourceNamespace, req.SourceName) {
 		return
 	}
 	commitProj := sc.proj

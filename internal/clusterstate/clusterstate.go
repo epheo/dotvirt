@@ -124,9 +124,10 @@ type State struct {
 
 	// The RoleBinding watch runs among specs; RBACWatched reads its sink and its
 	// health flag (healthy[rbHealth]) beside the gated ones.
-	rbSink   *rbacSignal
-	rbHealth int
-	bindings *bindingIndex
+	rbSink          *rbacSignal
+	rbHealth        int
+	bindings        *bindingIndex
+	clusterBindings *bindingIndex
 
 	grants grantMoves // when the RBAC sinks last published RBACChanged, by namespace
 
@@ -200,7 +201,7 @@ func New(sa *cluster.Client, projectLabel string, bus *eventbus.Bus) *State {
 	// Every operand role grants RoleBindings, so their signal watch starts with
 	// the snapshot; the other RBAC kinds wait for their grant (signals).
 	s.rbSink, s.rbHealth = newRBACSignal(rbac, refs, roleBindingDigest), len(s.specs)
-	s.bindings = newBindingIndex()
+	s.bindings, s.clusterBindings = newBindingIndex(), newBindingIndex()
 	s.specs = append(s.specs, reflectorSpec{indexedBindings{s.rbSink, s.bindings}, &rbacv1.RoleBinding{}, sa.RoleBindingListWatch(), nil})
 	s.healthy = make([]atomic.Bool, len(s.specs))
 	sources := map[schema.GroupVersionResource]*cache.ListWatch{
@@ -210,6 +211,11 @@ func New(sa *cluster.Client, projectLabel string, bus *eventbus.Bus) *State {
 		gvrGroups:              sa.DynamicListWatch(gvrGroups),
 	}
 	s.signals = signalWatches(func(gvr schema.GroupVersionResource) *cache.ListWatch { return sources[gvr] }, rbac, refs)
+	for _, w := range s.signals {
+		if w.gvr == gvrClusterRoleBindings {
+			w.store = indexedBindings{w.sink, s.clusterBindings}
+		}
+	}
 	return s
 }
 
@@ -235,6 +241,7 @@ type signalWatch struct {
 	expected any
 	lw       *cache.ListWatch
 	sink     *rbacSignal
+	store    cache.Store // what the watch feeds: sink, or sink behind an index
 	healthy  atomic.Bool // reflect.TrackHealth's, once admitted
 	absent   atomic.Bool // the gate found the kind unserved: nothing to watch
 }
@@ -243,7 +250,8 @@ type signalWatch struct {
 // RoleBinding sink, so a role signals while any relevant binding binds it.
 func signalWatches(lw func(schema.GroupVersionResource) *cache.ListWatch, onChange func(string), refs *roleRefs) []*signalWatch {
 	watch := func(gvr schema.GroupVersionResource, expected any, binds *roleRefs, digest func(any) (grant, bool)) *signalWatch {
-		return &signalWatch{gvr: gvr, expected: expected, lw: lw(gvr), sink: newRBACSignal(onChange, binds, digest)}
+		sink := newRBACSignal(onChange, binds, digest)
+		return &signalWatch{gvr: gvr, expected: expected, lw: lw(gvr), sink: sink, store: sink}
 	}
 	return []*signalWatch{
 		watch(gvrRoles, &rbacv1.Role{}, nil, roleDigest(refs)),
@@ -314,7 +322,7 @@ func (s *State) runSignals(ctx context.Context, gate func(schema.GroupVersionRes
 			w.absent.Store(a == absent)
 			return a == admitted
 		}
-		reflect.RunTypedWhenServed(ctx, has, w.gvr, w.lw, w.expected, w.sink, &w.healthy, nil)
+		reflect.RunTypedWhenServed(ctx, has, w.gvr, w.lw, w.expected, w.store, &w.healthy, nil)
 	}
 }
 

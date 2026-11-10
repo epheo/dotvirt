@@ -95,7 +95,7 @@ func (s *Server) handleClusterSummary(w http.ResponseWriter, r *http.Request) {
 		// VMI - so a 3-VM project read "2 Running" with the third invisible.
 		// Fold the snapshot's VMI-less VMs in as stopped. Node scope keeps the
 		// metric view: a stopped VM runs on no node.
-		foldStoppedVMs(&cs, s.state.StoppedVMs(nss))
+		foldStoppedVMs(&cs, s.state.StoppedVMs(s.vmNamespaces(r.Context(), sc, nss)))
 	}
 	respond(w, cs, err)
 }

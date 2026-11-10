@@ -98,7 +98,10 @@ func TestRepoReadsFollowTheNamespacesSeen(t *testing.T) {
 func TestObjectReadsAskTheirKind(t *testing.T) {
 	fc := newFakeCluster(t)
 	fc.ssar = func(token string, a *authzv1.ResourceAttributes) bool {
-		return token == tenantToken && a.Namespace == "team-a-dev" && a.Verb == verbList && a.Resource != "networkpolicies"
+		if token != tenantToken || a.Namespace != "team-a-dev" {
+			return false
+		}
+		return a.Verb == "get" && a.Resource == "namespaces" || a.Verb == verbList && a.Resource != "networkpolicies"
 	}
 	s := fc.server(gitReads{&planeDraft{}}, Config{BaseBranch: "main"})
 	for _, path := range []string{"/api/objects/networkpolicy/team-a-dev/web", "/api/objects/networkpolicy/team-a-dev/web/history"} {
@@ -225,14 +228,14 @@ func TestRowsNarrowForAPartialViewer(t *testing.T) {
 
 	repo := forge.NormalizeRepoURL(full.Repo)
 	theirs, others := tasks.Merge{RepoURL: repo, Branch: "alice"}, tasks.Merge{RepoURL: repo, Branch: "bob"}
-	sc := s.taskScope(alice, []project.ProjectInfo{part}, false, false)
+	sc := s.taskScope(alice, []project.ProjectInfo{part}, wideView(nil), false, false)
 	if p, ok := sc.merge(theirs); !ok || p != "team-a" {
 		t.Errorf("own merge = %q, %v", p, ok)
 	}
 	if _, ok := sc.merge(others); ok {
 		t.Error("a partial viewer sees another's merge")
 	}
-	if _, ok := s.taskScope(alice, []project.ProjectInfo{full}, false, false).merge(others); !ok {
+	if _, ok := s.taskScope(alice, []project.ProjectInfo{full}, wideView(nil), false, false).merge(others); !ok {
 		t.Error("a viewer of the whole project lost a merge")
 	}
 }
@@ -285,4 +288,47 @@ func TestProjectsResolveOncePerNamespaceChange(t *testing.T) {
 		_, there := s.projectByName("q")
 		return !gone && there
 	})
+}
+
+// What dotvirt reads for a VM from git or its own account needs the VM read;
+// what runs on the caller's token is the apiserver's to answer.
+func TestVMRoutesAskOnlyWhereDotvirtReadsForTheCaller(t *testing.T) {
+	fc := newFakeCluster(t)
+	fc.ssar = func(token string, a *authzv1.ResourceAttributes) bool {
+		return token == tenantToken && a.Namespace == "team-a-dev" && a.Verb == "get" && a.Resource == "namespaces"
+	}
+	s := fc.server(gitReads{&planeDraft{}}, Config{BaseBranch: "main"})
+	const gated = "vm team-a-dev/web"
+	rec := do(s, tenantToken, http.MethodGet, "/api/vms/team-a-dev/web/history", "")
+	wantStatus(t, rec, http.StatusNotFound)
+	if !strings.Contains(rec.Body.String(), gated) {
+		t.Errorf("history = %q, want the VM read's refusal", rec.Body.String())
+	}
+	if rec := do(s, tenantToken, http.MethodGet, "/api/vms/team-a-dev/web/snapshots", ""); strings.Contains(rec.Body.String(), gated) {
+		t.Errorf("snapshots stopped at the VM read: %q", rec.Body.String())
+	}
+	rec = do(s, tenantToken, http.MethodPost, "/api/networking/trace", traceFromWeb)
+	wantStatus(t, rec, http.StatusNotFound)
+	if !strings.Contains(rec.Body.String(), gated) {
+		t.Errorf("trace = %q, want the VM read's refusal", rec.Body.String())
+	}
+}
+
+const traceFromWeb = `{"source":{"namespace":"team-a-dev","vm":"web"},"destination":{"ip":"10.0.0.1"},"protocol":"TCP","port":443}`
+
+// A trace places a VM by its address, which only its running instance holds.
+func TestTraceNeedsTheInstances(t *testing.T) {
+	fc := newFakeCluster(t)
+	fc.ssar = func(token string, a *authzv1.ResourceAttributes) bool {
+		if token != tenantToken || a.Namespace != "team-a-dev" {
+			return false
+		}
+		return a.Verb == "get" && a.Resource == "namespaces" || a.Verb == verbList && a.Resource == "virtualmachines"
+	}
+	s := fc.server(gitReads{&planeDraft{}}, Config{BaseBranch: "main"})
+	rec := do(s, tenantToken, http.MethodPost, "/api/networking/trace", traceFromWeb)
+	wantStatus(t, rec, http.StatusNotFound)
+	if !strings.Contains(rec.Body.String(), "vm team-a-dev/web") {
+		t.Errorf("trace = %q, want the VM read's refusal", rec.Body.String())
+	}
 }

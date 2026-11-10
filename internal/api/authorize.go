@@ -809,7 +809,7 @@ func (s *Server) authorNamespaces(ctx context.Context, id auth.Identity, c *clus
 	out := make(map[string]bool, len(nss))
 	authorIn := vmAction
 	if s.noVMs() {
-		// admin and edit grant this on any Kubernetes; see visibilityRef.
+		// KubeVirt's aggregated roles are absent: admin and edit hold this instead.
 		authorIn = func(verb, ns string) action { return ask(verb, ssarNetpol, ns) }
 	}
 	if _, all, err := s.allowed(ctx, id, c, authorIn(verbUpdate, "")); err == nil && all {

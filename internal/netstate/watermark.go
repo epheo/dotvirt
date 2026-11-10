@@ -18,18 +18,21 @@ import (
 // membership only, as its silent watch signals). The stores' per-namespace
 // write counts stand in for their objects, so the cost follows the visible
 // namespaces, never the catalog's size.
-func (s *Snapshot) Watermark(visible map[string]bool, sees func(schema.GroupVersionResource) bool, nodes bool) uint64 {
+func (s *Snapshot) Watermark(visible map[string]bool, sees func(schema.GroupVersionResource) bool, lists func(schema.GroupVersionResource, string) bool, nodes bool) uint64 {
 	scoped := make([]string, 0, len(visible)+1)
-	for ns := range visible {
-		scoped = append(scoped, ns)
-	}
-	withCluster := append(scoped[:len(scoped):len(scoped)], "")
 	var sum uint64
 	for _, w := range s.watches {
 		switch {
-		case w.signal && sees(w.gvr):
-			sum += reflect.Generation(w.idx, withCluster...)
 		case w.signal:
+			scoped = scoped[:0]
+			for ns := range visible {
+				if lists(w.gvr, ns) {
+					scoped = append(scoped, ns)
+				}
+			}
+			if sees(w.gvr) {
+				scoped = append(scoped, "")
+			}
 			sum += reflect.Generation(w.idx, scoped...)
 		case nodes:
 			for _, key := range w.idx.ListKeys() {

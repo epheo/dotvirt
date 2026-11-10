@@ -493,8 +493,8 @@ func TestNodeGateMatchesCanCordon(t *testing.T) {
 }
 
 // Joining a namespace another project holds would take it from that project.
-// The holding project is named only to a caller who sees it, and only once
-// they hold the claim; without the claim the refusal is the claim's.
+// The holding project is named only once they hold the claim, which already
+// lets them get that namespace; without the claim the refusal is the claim's.
 func TestProjectRefusesANamespaceOfAnotherProject(t *testing.T) {
 	g := newGateRig(t)
 	claim := []grant{{verb: verbGet, resource: "namespaces"}, {verb: verbUpdate, resource: "namespaces"}, {verb: verbCreate, resource: "namespaces"}}
@@ -509,14 +509,6 @@ func TestProjectRefusesANamespaceOfAnotherProject(t *testing.T) {
 	}
 	g.d.none(t)
 
-	// A caller who sees only team-a-dev learns no other project's name.
-	g.fc.mu.Lock()
-	g.fc.readsVMs = func(token, ns string) bool { return ns == "team-a-dev" }
-	g.fc.mu.Unlock()
-	rec = do(g.s, g.token(claim), http.MethodPost, "/api/namespaces", `{"project":"team-a","name":"orphans-ns"}`)
-	if rec.Code != http.StatusConflict || strings.Contains(rec.Body.String(), "project orphans") {
-		t.Errorf("hidden holder = %d %q, want an unnamed 409", rec.Code, rec.Body.String())
-	}
 	rec = do(g.s, g.token(claim[:1]), http.MethodPost, "/api/namespaces", `{"project":"team-a","name":"orphans-ns"}`)
 	if rec.Code != http.StatusForbidden || strings.Contains(rec.Body.String(), "project orphans") {
 		t.Errorf("no claim = %d %q, want the claim's 403", rec.Code, rec.Body.String())
