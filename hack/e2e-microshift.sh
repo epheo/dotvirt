@@ -569,6 +569,58 @@ YAML
 		curl -fsS --max-time 30 -H "Authorization: Bearer ${NO_GET_TOK}" "${BASE}/api/storage/classes" | jq -e 'length > 0'
 	}
 	retry "any authenticated user reads the storage classes" 180 reads_storage_classes
+
+	# The supported personas (docs/personas.md), each offered what TestPersonas
+	# pins for MicroShift. The operator binds the network admin role to Group
+	# dotvirt-platform-admins; a ServiceAccount joins no Group, so it is bound here.
+	log "checking the supported personas"
+	persona_token() {
+		local sa=$1 role
+		shift
+		kc -n "${PROJECT}" create serviceaccount "${sa}" --dry-run=client -o yaml | kc apply -f - >/dev/null
+		for role in "$@"; do
+			kc -n "${PROJECT}" create rolebinding "${sa}-${role}" --clusterrole="${role}" \
+				--serviceaccount="${PROJECT}:${sa}" --dry-run=client -o yaml | kc apply -f - >/dev/null
+		done
+		kc -n "${PROJECT}" create token "${sa}" --duration=1h
+	}
+	VIEWER_TOK="$(persona_token e2e-viewer view dotvirt-tenant-egress-view)"
+	AUTHOR_TOK="$(persona_token e2e-author edit dotvirt-tenant-egress-view)"
+	PROJECT_ADMIN_TOK="$(persona_token e2e-project-admin admin dotvirt-tenant-egress)"
+	NETWORK_ADMIN_TOK="$(persona_token e2e-network-admin)"
+	kc create clusterrolebinding e2e-network-admin --clusterrole=dotvirt-platform-network-admin \
+		--serviceaccount="${PROJECT}:e2e-network-admin" --dry-run=client -o yaml | kc apply -f - >/dev/null
+	offered() {
+		local got
+		got="$(curl -fsS --max-time 30 -H "Authorization: Bearer $1" "${BASE}/api/capabilities?namespace=${PROJECT}" |
+			jq -c '.namespace | {repoRead: .project.repoRead, vmCreate: .vm.create, console, egressFirewallCreate: .egressFirewall.create}')" || return 1
+		echo "offered ${got}, wanted $2"
+		[ "${got}" = "$2" ]
+	}
+	# Without KubeVirt, edit and admin aggregate no VM rights.
+	vms=true
+	[ "${KUBEVIRT}" != "0" ] || vms=false
+	retry "a project viewer reads the repo and authors nothing" 180 offered "${VIEWER_TOK}" \
+		'{"repoRead":true,"vmCreate":false,"console":false,"egressFirewallCreate":false}'
+	retry "a project author authors VMs and opens consoles" 180 offered "${AUTHOR_TOK}" \
+		'{"repoRead":true,"vmCreate":'"${vms}"',"console":'"${vms}"',"egressFirewallCreate":false}'
+	# MicroShift serves no EgressFirewalls: the admin's grant on them offers no
+	# new one.
+	retry "a project admin authors VMs and is offered no egress firewall" 180 offered "${PROJECT_ADMIN_TOK}" \
+		'{"repoRead":true,"vmCreate":'"${vms}"',"console":'"${vms}"',"egressFirewallCreate":false}'
+	platform_offered() {
+		local got
+		got="$(curl -fsS --max-time 30 -H "Authorization: Bearer ${NETWORK_ADMIN_TOK}" "${BASE}/api/capabilities" |
+			jq -c '.cluster | {platform, platformRead, hosts}')" || return 1
+		echo "offered ${got}"
+		[ "${got}" = '{"platform":true,"platformRead":false,"hosts":false}' ]
+	}
+	retry "a platform network admin stages platform changes and sees no project" 180 platform_offered
+	no_project_caps() {
+		[ "$(curl -s -o /dev/null -w '%{http_code}' --max-time 30 -H "Authorization: Bearer ${NETWORK_ADMIN_TOK}" \
+			"${BASE}/api/capabilities?namespace=${PROJECT}")" = 404 ]
+	}
+	retry "a platform network admin is not in the project" 180 no_project_caps
 fi
 
 # ── 10. The round-trip itself ───────────────────────────────────────────────────
