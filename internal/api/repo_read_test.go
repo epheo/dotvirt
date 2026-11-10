@@ -291,8 +291,13 @@ func TestProjectsResolveOncePerNamespaceChange(t *testing.T) {
 }
 
 // What dotvirt reads for a VM from git or its own account needs the VM read;
-// what runs on the caller's token is the apiserver's to answer.
+// what runs on the caller's token is the apiserver's to answer. A route that
+// names neither is gated.
 func TestVMRoutesAskOnlyWhereDotvirtReadsForTheCaller(t *testing.T) {
+	var unnamed vmReads
+	if unnamed != dotvirtReads {
+		t.Fatal("the zero vmReads asks nothing")
+	}
 	fc := newFakeCluster(t)
 	fc.ssar = func(token string, a *authzv1.ResourceAttributes) bool {
 		return token == tenantToken && a.Namespace == "team-a-dev" && a.Verb == "get" && a.Resource == "namespaces"

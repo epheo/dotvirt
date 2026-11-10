@@ -14,7 +14,7 @@ type runtimeOp func(ctx context.Context, c *cluster.Client, namespace, name stri
 // These don't mutate the git-managed spec, so ArgoCD self-heal won't revert them.
 // verb labels the act in the shared Recent Tasks feed.
 func (s *Server) handleRuntimeOp(w http.ResponseWriter, r *http.Request, verb string, op runtimeOp) {
-	sc, ns, name, ok := s.vmCallerScope(w, r)
+	sc, ns, name, ok := s.vmScope(w, r, callerReads)
 	if !ok {
 		return
 	}
