@@ -303,11 +303,8 @@ func (s *Server) handleInventory(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleOptions lists the wizard/editor choices (instancetypes, preferences, OS
-// images, storage classes). The cluster is read once with dotvirt's SA and
-// cached - a scoped tenant usually lacks cluster-scoped list on these CRDs,
-// which would otherwise yield silently-empty dropdowns. The OS images are then
-// narrowed per caller by optionsFor, so another tenant's namespace names never
-// leave the process.
+// images, storage classes): read once with dotvirt's SA and cached, then
+// narrowed per caller by optionsFor.
 func (s *Server) handleOptions(w http.ResponseWriter, r *http.Request) {
 	id, c, all, ok := saCached(s, w, r, s.options, (*cluster.Client).ListOptions)
 	if !ok {
@@ -321,18 +318,32 @@ func (s *Server) handleOptions(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, optionsFor(v, all))
 }
 
-// optionsFor narrows the shared catalog to what the caller may list: outside
-// the view too, where a binding names them (a shared golden-image namespace
-// grants that to every authenticated user). The cached catalog is never
-// mutated - fresh, non-nil slices so they serialize as [].
+// optionsFor narrows the shared catalog to what the caller may list:
+// instancetypes and preferences cluster-wide, an OS image where it lives,
+// outside the view too (a shared golden-image namespace grants that to every
+// authenticated user). Storage classes stay whole, as handleStorageClasses
+// says why. The cached catalog is never mutated - fresh, non-nil slices so
+// they serialize as [].
 func optionsFor(v callerView, all model.Options) model.Options {
-	allowed := func(ns string, ref ssarRef) bool { return v.lists(ref, ns) }
-	out := all
-	out.OSImages = make([]model.OSImage, 0, len(all.OSImages))
+	out := model.Options{
+		Instancetypes:  listed(v, ssarInstancetypes, all.Instancetypes),
+		Preferences:    listed(v, ssarPreferences, all.Preferences),
+		OSImages:       make([]model.OSImage, 0, len(all.OSImages)),
+		StorageClasses: all.StorageClasses,
+	}
 	for _, img := range all.OSImages {
-		if allowed(img.Namespace, ssarDataSources) {
+		if v.lists(ssarDataSources, img.Namespace) {
 			out.OSImages = append(out.OSImages, img)
 		}
 	}
 	return out
+}
+
+// listed is rows of a cluster-scoped kind as the caller may list them: all of
+// them, or none.
+func listed[T any](v callerView, ref ssarRef, rows []T) []T {
+	if len(rows) == 0 || !v.lists(ref, "") {
+		return []T{}
+	}
+	return rows
 }

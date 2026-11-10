@@ -229,7 +229,7 @@ type Server struct {
 	kindFill      *ttlcache.Cache[*kindIndex]       // single-flights its refresh
 	proposals     *ttlcache.Cache[[]model.Proposal] // per-project open-PR set; written by the refresher, read on broadcast
 	options       *ttlcache.Cache[model.Options]    // shared wizard catalog (SA-read, identical for all)
-	storage       *ttlcache.Cache[[]model.StorageClassInfo]
+	storage       *ttlcache.Cache[[]cluster.SheetClass]
 	metrics       *metrics.Client // Prometheus/Thanos for the Performance tab; nil disables it
 	tasks         *tasks.Feed     // recent-activity feed (ops + merged PRs); nil disables it
 	reader        Reader
@@ -314,7 +314,7 @@ func NewServer(d Deps) *Server {
 		kindFill:      ttlcache.New[*kindIndex](kindProbe),
 		proposals:     ttlcache.New[[]model.Proposal](proposalsCacheTTL),
 		options:       ttlcache.New[model.Options](optionsTTL),
-		storage:       ttlcache.New[[]model.StorageClassInfo](storageTTL),
+		storage:       ttlcache.New[[]cluster.SheetClass](storageTTL),
 		metrics:       d.Metrics,
 		tasks:         d.Tasks,
 		reader:        d.Reader,

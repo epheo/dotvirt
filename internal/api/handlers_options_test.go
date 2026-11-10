@@ -14,17 +14,20 @@ import (
 )
 
 // TestOptionsFilteredPerCaller pins the tenant boundary on the SA-read catalog:
-// a namespaced entry outside the caller's view is served only when the
-// caller could list that kind there itself (the shared golden-image case), so
-// another tenant's namespace names never leave the process. The
-// cached catalog must stay whole for the next caller.
+// an entry is served only when the caller could list its kind there itself -
+// a namespaced one outside the view too (the shared golden-image case), a
+// cluster-scoped one cluster-wide. The cached catalog must stay whole for the
+// next caller.
 func TestOptionsFilteredPerCaller(t *testing.T) {
 	f := ssarFactory(t, func(_ *http.Request, review *authzv1.SelfSubjectAccessReview) bool {
-		return review.Spec.ResourceAttributes.Namespace == "os-images"
+		a := review.Spec.ResourceAttributes
+		return a.Namespace == "os-images" || a.Verb == verbList && a.Resource == ssarInstancetypes.resource && a.Namespace == ""
 	})
 	s := NewServer(Deps{ClusterFactory: f, Reader: &fakeDraft{}, Draft: &fakeDraft{}, Bus: eventbus.New()})
 	all := model.Options{
-		Instancetypes: []model.Instancetype{{Name: "u1.small"}},
+		Instancetypes:  []model.Instancetype{{Name: "u1.small"}},
+		Preferences:    []model.Preference{{Name: "fedora"}},
+		StorageClasses: []model.StorageClass{{Name: "fast"}},
 		OSImages: []model.OSImage{
 			{Name: "fedora", Namespace: "os-images"},
 			{Name: "private", Namespace: "team-b"},
@@ -49,7 +52,13 @@ func TestOptionsFilteredPerCaller(t *testing.T) {
 		t.Errorf("osImages = %+v, want only the shared golden image", got.OSImages)
 	}
 	if len(got.Instancetypes) != 1 {
-		t.Errorf("cluster-scoped instancetypes must pass through unfiltered, got %+v", got.Instancetypes)
+		t.Errorf("instancetypes the caller lists = %+v", got.Instancetypes)
+	}
+	if got.Preferences == nil || len(got.Preferences) != 0 {
+		t.Errorf("preferences the caller may not list = %+v", got.Preferences)
+	}
+	if len(got.StorageClasses) != 1 {
+		t.Errorf("storage classes go to every caller, got %+v", got.StorageClasses)
 	}
 	cached, _ := s.options.Get("all")
 	if len(cached.OSImages) != 2 {

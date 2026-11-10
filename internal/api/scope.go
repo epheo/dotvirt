@@ -578,9 +578,9 @@ func verdictKey(tk string, q question) string {
 
 // saCached is the preamble of a catalog route: the caller's identity first
 // (the normal gate, so a missing identity or cluster answers like every other
-// route), then one SA-read value cached under a single key for everyone - a
-// scoped tenant can't list these cluster-scoped kinds itself. ok=false means
-// the response is written.
+// route), then one SA-read value cached under a single key for everyone, which
+// the route narrows to what the caller may list. ok=false means the response
+// is written.
 func saCached[T any](s *Server, w http.ResponseWriter, r *http.Request, cache *ttlcache.Cache[T], fetch func(*cluster.Client, context.Context) (T, error)) (id auth.Identity, c *cluster.Client, v T, ok bool) {
 	id, c, err := s.userCluster(r)
 	if err != nil {

@@ -155,12 +155,10 @@ func (s *Server) handleCreateAdminNetworkPolicy(w http.ResponseWriter, r *http.R
 	s.stageCreate(w, r, sc, draft.ResourceAdminNetworkPolicy, raw)
 }
 
-// handleNetworks lists the networks the caller may
-// attach a VM to, plus the physical fabric (Uplinks + Physical adapters) for
-// callers who can read nodes. The network catalog is read with dotvirt's SA -
-// a scoped tenant usually can't list these cluster CRDs, which would yield a
-// silently-empty picker - then project-scoped networks are filtered to the
-// caller's visible namespaces so nothing leaks across tenants.
+// handleNetworks lists the networks the caller may list (scopeNetworks), plus
+// each half of the physical fabric (uplinks, physical adapters) to a caller
+// who may list its kind. The rows come from dotvirt's SA-fed netstate
+// snapshot, so they are narrowed per caller here.
 func (s *Server) handleNetworks(w http.ResponseWriter, r *http.Request) {
 	id, c, err := s.userCluster(r)
 	if err != nil {

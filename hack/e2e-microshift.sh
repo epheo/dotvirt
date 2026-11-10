@@ -550,6 +550,19 @@ YAML
 		curl -fsS --max-time 30 -H "Authorization: Bearer ${NO_GET_TOK}" "${BASE}/api/inventory" | jq -e '.projects | length == 0'
 	}
 	retry "a token that may not get the namespace sees no project" 180 sees_no_project
+	# KubeVirt (instancetype.kubevirt.io:view) and CDI (cdi.kubevirt.io:config-reader)
+	# grant these to every authenticated user, so a token with no grant reads them
+	# as the admin does.
+	catalog_as() {
+		curl -fsS --max-time 30 -H "Authorization: Bearer $1" "${BASE}/api/options" | jq -c '[.instancetypes, .preferences]' &&
+			curl -fsS --max-time 30 -H "Authorization: Bearer $1" "${BASE}/api/storage/classes" | jq -c '[.[] | .profile]'
+	}
+	same_catalog() {
+		local admin plain
+		admin="$(catalog_as "${TOK}")" && plain="$(catalog_as "${NO_GET_TOK}")" || return 1
+		[ "${admin}" = "${plain}" ] || { echo "admin ${admin}"; echo "plain ${plain}"; return 1; }
+	}
+	retry "any authenticated user reads KubeVirt's and CDI's catalogs" 180 same_catalog
 fi
 
 # ── 10. The round-trip itself ───────────────────────────────────────────────────

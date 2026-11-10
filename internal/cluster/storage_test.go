@@ -104,8 +104,8 @@ func TestListStorageClassesJoinsLayers(t *testing.T) {
 	if n.Profile != nil || n.Free != nil || n.Segments != nil {
 		t.Errorf("a class without profile/capacity must carry neither: %+v", n)
 	}
-	if n.SnapshotClass != "nfs-snap" {
-		t.Errorf("snapshotClass = %q, want the provisioner's registered class as fallback", n.SnapshotClass)
+	if n.SnapshotClass != "" || n.SnapshotFallback != "nfs-snap" {
+		t.Errorf("snapshotClass = %q, fallback %q, want the provisioner's registered class as fallback alone", n.SnapshotClass, n.SnapshotFallback)
 	}
 }
 

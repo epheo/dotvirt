@@ -7,34 +7,65 @@ import (
 	"github.com/epheo/dotvirt/internal/model"
 )
 
-// handleStorageClasses serves the Storage section's class fact sheet. Every
-// source is cluster-scoped platform truth a scoped tenant can't list itself,
-// so it is read once with dotvirt's SA and cached - catalog stance, like
-// /api/options. The cache is short because free capacity moves.
-//
-// A capacity segment's topology is usually a node's hostname, so the
-// per-segment split shows only to callers who may read nodes; everyone else
-// gets the class's summed free capacity.
+// The catalog's cluster-scoped kinds, each shown to a caller who may list it
+// cluster-wide. KubeVirt (instancetype.kubevirt.io:view) and CDI
+// (cdi.kubevirt.io:config-reader) grant the first three to every
+// authenticated user wherever they run.
+var (
+	ssarInstancetypes   = ssarRef{"instancetype.kubevirt.io", "virtualmachineclusterinstancetypes"}
+	ssarPreferences     = ssarRef{"instancetype.kubevirt.io", "virtualmachineclusterpreferences"}
+	ssarStorageProfiles = ssarRef{"cdi.kubevirt.io", "storageprofiles"}
+	ssarSnapshotClasses = ssarRef{"snapshot.storage.k8s.io", "volumesnapshotclasses"}
+	// Namespaced, but asked cluster-wide: free capacity is a sum over every
+	// segment, and a partial sum would misstate it.
+	ssarCSICapacities = ssarRef{"storage.k8s.io", "csistoragecapacities"}
+)
+
+// handleStorageClasses serves the Storage section's class fact sheet, read
+// once with dotvirt's SA and cached (short: free capacity moves). Each class's
+// CDI profile, and the snapshot class it names, show when the caller may list
+// StorageProfiles; the provisioner's VolumeSnapshotClass stands in for a
+// profile that names none when the caller may list those; free capacity when
+// they may list CSIStorageCapacities. A capacity segment's topology is
+// usually a node's hostname, so the per-segment split also needs nodes. The
+// classes themselves show to every caller: MicroShift, unlike OpenShift,
+// grants authenticated users none, so narrowing them would empty its
+// pickers. The cached sheet is never mutated.
 func (s *Server) handleStorageClasses(w http.ResponseWriter, r *http.Request) {
 	id, c, classes, ok := saCached(s, w, r, s.storage, (*cluster.Client).ListStorageClasses)
 	if !ok {
 		return
 	}
-	if !s.capable(r.Context(), id, c, ask(verbList, ssarNodes, "")) {
-		classes = withoutSegments(classes)
+	out := make([]model.StorageClassInfo, 0, len(classes))
+	if len(classes) == 0 {
+		writeJSON(w, out)
+		return
 	}
-	writeJSON(w, classes)
-}
-
-// withoutSegments copies the shared cached sheet without the per-segment
-// split, leaving the summed free capacity.
-func withoutSegments(classes []model.StorageClassInfo) []model.StorageClassInfo {
-	out := make([]model.StorageClassInfo, len(classes))
-	for i, c := range classes {
-		c.Segments = nil
-		out[i] = c
+	// Cluster-wide questions only, so no view; a failed review reads as no.
+	lists, _, _ := s.askEach(r.Context(), id, c, []question{
+		refQ(verbList, ssarStorageProfiles, ""),
+		refQ(verbList, ssarSnapshotClasses, ""),
+		refQ(verbList, ssarCSICapacities, ""),
+		refQ(verbList, ssarNodes, ""),
+	})
+	profiles, snapshots, free, nodes := lists[0], lists[1], lists[2], lists[3]
+	for _, sc := range classes {
+		c := sc.StorageClassInfo
+		if !profiles {
+			c.Profile, c.SnapshotClass = nil, ""
+		}
+		if c.SnapshotClass == "" && snapshots {
+			c.SnapshotClass = sc.SnapshotFallback
+		}
+		if !free {
+			c.Free = nil
+		}
+		if !free || !nodes {
+			c.Segments = nil
+		}
+		out = append(out, c)
 	}
-	return out
+	writeJSON(w, out)
 }
 
 // handleStorageSnapshots lists the VM snapshots across the caller's managed
