@@ -76,6 +76,7 @@ type asking struct {
 	asked []string
 	allow func(*authzv1.ResourceAttributes) bool
 	fail  func(*authzv1.ResourceAttributes) bool
+	attrs []authzv1.ResourceAttributes
 }
 
 func newAsking(allow func(*authzv1.ResourceAttributes) bool) *asking {
@@ -87,6 +88,7 @@ func newAsking(allow func(*authzv1.ResourceAttributes) bool) *asking {
 		a.mu.Lock()
 		defer a.mu.Unlock()
 		a.asked = append(a.asked, attrs.Namespace)
+		a.attrs = append(a.attrs, *attrs)
 		if a.fail != nil && a.fail(attrs) {
 			return true, nil, apierrors.NewServiceUnavailable("review backend down")
 		}
@@ -975,6 +977,75 @@ func createCRB(t *testing.T, ctx context.Context, kube *fake.Clientset, name str
 	}, metav1.CreateOptions{})
 	if err != nil {
 		t.Fatal(err)
+	}
+}
+
+// A kind listed cluster-wide is not asked again per namespace.
+func TestAKindListedClusterWideIsNotAskedPerNamespace(t *testing.T) {
+	bus := eventbus.New()
+	st, _, _ := watchedState(t, bus, projectNS("tenant-a"), projectNS("tenant-b"))
+	s := NewServer(Deps{State: st, Bus: bus, Reader: &fakeDraft{}, Draft: &fakeDraft{}})
+	vms := newAsking(func(a *authzv1.ResourceAttributes) bool {
+		return a.Verb == "get" && a.Resource == "namespaces" || a.Resource == "virtualmachines"
+	})
+	visibleOf(t, s, "tok", vms.c)
+	vms.mu.Lock()
+	defer vms.mu.Unlock()
+	for _, a := range vms.attrs {
+		if a.Resource == "virtualmachines" && a.Namespace != "" {
+			t.Errorf("asked to list VMs in %s after allowing them cluster-wide", a.Namespace)
+		}
+	}
+}
+
+// What the view does not hold is asked cluster-wide first: a ClusterRoleBinding
+// opens every namespace with no RoleBinding to index, while a tenant is asked
+// where it is bound alone.
+func TestAskedListsGoClusterWideFirst(t *testing.T) {
+	ctx := context.Background()
+	bus := eventbus.New()
+	st, _, _ := watchedState(t, bus, projectNS("mine"), projectNS("theirs"), userBinding("mine", "owners", "alice"))
+	waitUntil(t, "the RBAC watches", func() bool {
+		_, ok := st.BoundNamespaces("alice", nil)
+		return ok
+	})
+	s := NewServer(Deps{State: st, Bus: bus, Reader: &fakeDraft{}, Draft: &fakeDraft{}})
+	s.indexBindings = true
+	both := []string{"mine", "theirs"}
+	view := func(id auth.Identity, allow func(*authzv1.ResourceAttributes) bool) (callerView, *asking) {
+		t.Helper()
+		token := newAsking(allow)
+		v, err := s.viewFor(ctx, id, token.c)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return v, token
+	}
+
+	admin, _ := view(auth.Identity{Token: "admin", Username: "root"}, func(*authzv1.ResourceAttributes) bool { return true })
+	if got := admin.listsIn(ssarClaims, both); !slices.Equal(got, both) {
+		t.Errorf("an admin bound by a ClusterRoleBinding lists claims in %v", got)
+	}
+
+	nodes := auth.Identity{Token: "nodes", Username: "ops"}
+	vmsEverywhere := func(a *authzv1.ResourceAttributes) bool { return a.Resource == "virtualmachines" && a.Namespace == "" }
+	if v, _ := view(nodes, vmsEverywhere); !v.lists(ssarVM, "theirs") {
+		t.Error("a node admin listing VMs cluster-wide was refused them in a namespace it may not get")
+	}
+	failures := []model.EvacuationFailure{{Namespace: "theirs", Name: "web"}}
+	if kept, hidden := s.readableFailures(ctx, nodes, newAsking(vmsEverywhere).c, failures); len(kept) != 1 || hidden != 0 {
+		t.Errorf("evacuation failures kept %v, hidden %d", kept, hidden)
+	}
+
+	tenant, token := view(auth.Identity{Token: "alice", Username: "alice"}, func(a *authzv1.ResourceAttributes) bool {
+		return a.Namespace == "mine" || a.Name == "mine"
+	})
+	token.take()
+	if got := tenant.listsIn(ssarClaims, both); !slices.Equal(got, []string{"mine"}) {
+		t.Errorf("a tenant bound in mine lists claims in %v", got)
+	}
+	if got := token.take(); !slices.Equal(got, []string{"", "mine"}) {
+		t.Errorf("a tenant's claims asked %q, want cluster-wide, then its own namespace alone", got)
 	}
 }
 

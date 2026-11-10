@@ -51,8 +51,8 @@ var allReads = readSet(1<<len(readKinds) - 1)
 
 // callerView is what one token is shown: the namespaces it may get, and what
 // it may list where, off its view for the kinds views read (readKinds) and
-// asked for any other where a RoleBinding names it. A failed review asked here
-// reads as no.
+// asked for anything else: cluster-wide first, then where a RoleBinding names
+// it. A failed review asked here reads as no.
 type callerView struct {
 	names map[string]bool
 	memo  viewMemo
@@ -86,12 +86,18 @@ func (v callerView) listsIn(ref ssarRef, namespaces []string) []string {
 	return append(out, v.ask(ref, rest)...)
 }
 
-// ask is those of namespaces where a review lets the token list ref.
+// ask is those of namespaces where a review lets the token list ref. A list
+// names no object, so a ClusterRoleBinding answers for every namespace or
+// none: the cluster-wide verdict first, then each namespace a RoleBinding
+// names the token in.
 func (v callerView) ask(ref ssarRef, namespaces []string) []string {
 	if v.s == nil || len(namespaces) == 0 {
 		return nil
 	}
-	namespaces = v.s.boundOnly(v.id, namespaces)
+	if all, _, err := v.s.canUntil(v.ctx, v.id, v.c, refQ(verbList, ref, "")); err == nil && all {
+		return namespaces
+	}
+	namespaces = v.s.boundOnly(v.id, slices.DeleteFunc(slices.Clone(namespaces), func(ns string) bool { return ns == "" }))
 	qs := make([]question, len(namespaces))
 	for i, ns := range namespaces {
 		qs[i] = refQ(verbList, ref, ns)
