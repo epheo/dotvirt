@@ -88,3 +88,51 @@ func TestVMNetworkNeedsServedUserDefinedNetworks(t *testing.T) {
 		t.Errorf("a new project without a VM Network = %d %s", rec.Code, rec.Body.String())
 	}
 }
+
+// Rebalancing installs its operator through OLM, and PSI adds a MachineConfig:
+// a cluster that serves neither is offered neither and the route refuses them,
+// while turning rebalancing off, a removal, stays open.
+func TestDRSNeedsOLMAndMachineConfigServed(t *testing.T) {
+	for _, c := range []struct {
+		name        string
+		serves      []model.Kind
+		enable, psi bool
+		refused     string // the kind a refused enable names
+	}{
+		{"no OLM", []model.Kind{model.KindNS}, false, false, "subscriptions"},
+		{"OLM, no machine config", []model.Kind{model.KindNS, model.KindSub, model.KindOpGroup}, true, false, "machineconfigs"},
+		{"OLM and machine config", []model.Kind{model.KindNS, model.KindSub, model.KindOpGroup, model.KindMachCfg}, true, true, ""},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			fc := newFakeCluster(t)
+			fc.serveKinds(c.serves...)
+			s := fc.server(&planeDraft{}, Config{PlatformRepo: platformRepo})
+
+			caps := decodeBody[model.Capabilities](t, do(s, adminToken, http.MethodGet, "/api/capabilities", "")).Cluster
+			if caps == nil || caps.DRSEnable != c.enable || caps.DRSPSI != c.psi {
+				t.Errorf("caps = %+v, want enable %v, psi %v", caps, c.enable, c.psi)
+			}
+			for _, b := range []struct {
+				body string
+				want bool
+			}{{`{"mode":"Predictive"}`, c.enable}, {`{"mode":"Predictive","installPSI":true}`, c.psi}} {
+				rec := do(s, adminToken, http.MethodPost, "/api/drs", b.body)
+				switch {
+				case b.want && rec.Code != http.StatusOK:
+					t.Errorf("POST /api/drs %s = %d %s, want 200", b.body, rec.Code, rec.Body.String())
+				case !b.want && (rec.Code != http.StatusConflict || !strings.Contains(rec.Body.String(), "does not serve")):
+					t.Errorf("POST /api/drs %s = %d %s, want 409", b.body, rec.Code, rec.Body.String())
+				}
+			}
+			if c.refused != "" {
+				rec := do(s, adminToken, http.MethodPost, "/api/drs", `{"mode":"Predictive","installPSI":true}`)
+				if !strings.Contains(rec.Body.String(), c.refused) {
+					t.Errorf("refusal %q does not name %s", rec.Body.String(), c.refused)
+				}
+			}
+			if rec := do(s, adminToken, http.MethodDelete, "/api/drs", ""); rec.Code == http.StatusConflict {
+				t.Errorf("turning rebalancing off is refused: %s", rec.Body.String())
+			}
+		})
+	}
+}

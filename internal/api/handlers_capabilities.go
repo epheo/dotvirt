@@ -145,11 +145,15 @@ func (s *Server) newProjectCap(ctx context.Context, id auth.Identity, c *cluster
 // coordinator asks of the change.
 func (s *Server) drsCaps(ctx context.Context, id auth.Identity, c *cluster.Client) (enable, psi, disable bool) {
 	platform := s.platformProject()
-	if ok, _ := s.anyAllowed(ctx, id, c, drsSchedulerActions()); ok {
+	un := s.unserved(ctx, drsKinds...)
+	olm := !un[model.KindSub] && !un[model.KindOpGroup]
+	if ok, _ := s.anyAllowed(ctx, id, c, drsSchedulerActions()); ok && olm {
 		need, err := s.draft.EnableDRSNeeds(platform, json.RawMessage(`{"mode":"Predictive"}`))
 		enable = s.needsAllowed(ctx, id, c, need, err)
-		need, err = s.draft.EnableDRSNeeds(platform, json.RawMessage(`{"mode":"Predictive","installPSI":true}`))
-		psi = s.needsAllowed(ctx, id, c, need, err)
+		if !un[model.KindMachCfg] {
+			need, err = s.draft.EnableDRSNeeds(platform, json.RawMessage(`{"mode":"Predictive","installPSI":true}`))
+			psi = s.needsAllowed(ctx, id, c, need, err)
+		}
 	}
 	if s.capable(ctx, id, c, drsDisableAction()) {
 		need, err := s.draft.DisableDRSNeeds(platform)

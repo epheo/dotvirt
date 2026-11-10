@@ -76,7 +76,7 @@ func listsAll(string, string) bool { return true }
 // viewReading is a view of visible where the caller may list each kind of
 // reads in the namespaces given for it.
 func viewReading(visible map[string]bool, reads map[model.Kind][]string) callerView {
-	m := viewMemo{reads: map[string]readSet{}}
+	m := viewMemo{ns: visible, reads: map[string]readSet{}}
 	for ns := range visible {
 		m.reads[ns] = 0
 	}

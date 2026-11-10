@@ -232,7 +232,15 @@ describe('clusterMap', () => {
 			['team-web', 2, 1],
 		]);
 		expect(m.moreProjects).toMatchObject({ count: 1, vms: 1, networks: 0 });
-		expect(m.shown).toEqual({ networks: 4, networksTotal: 4, projects: 2, projectsTotal: 3 });
+		// Of every network the header counts: the two in default sit in no project.
+		expect(m.shown).toEqual({
+			lane: 4,
+			laneTotal: 4,
+			networks: 6,
+			networksTotal: 8,
+			projects: 2,
+			projectsTotal: 3,
+		});
 	});
 	it("forces the focused VM's project and networks in", () => {
 		const t1 = projects[2].namespaces[0].vms[0];

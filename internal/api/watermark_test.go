@@ -326,5 +326,5 @@ func TestFrameRejectsARevokedToken(t *testing.T) {
 
 // wideView is a caller who sees visible and may list every read kind there.
 func wideView(visible map[string]bool) callerView {
-	return callerView{names: visible, memo: viewMemo{wideReads: allReads}}
+	return callerView{names: visible, memo: viewMemo{ns: visible, wideReads: allReads}}
 }
