@@ -24,8 +24,8 @@ import (
 func TestScopeNetworks(t *testing.T) {
 	visible := map[string]bool{"tenant-a": true}
 	in := []model.Network{
-		{Name: "vm-net", Scope: model.ScopeProject, Namespace: "tenant-a"},
-		{Name: "secret", Scope: model.ScopeProject, Namespace: "tenant-b"},
+		{Name: "vm-net", Scope: model.ScopeProject, Namespace: "tenant-a", Backing: model.KindUDN.Kind},
+		{Name: "secret", Scope: model.ScopeProject, Namespace: "tenant-b", Backing: model.KindUDN.Kind},
 		{Name: "prod-vlan", Kind: model.NetworkVLAN, Scope: model.ScopeShared, Namespaces: []string{"tenant-a", "tenant-b", "tenant-c"}},
 		{Name: "mt-b", Scope: model.ScopeShared, Namespaces: []string{"tenant-b"}},
 		{Name: "green-secondary", Scope: model.ScopeShared},
@@ -38,7 +38,7 @@ func TestScopeNetworks(t *testing.T) {
 		return m
 	}
 
-	tenant := names(scopeNetworks(in, visible, listsAll, false))
+	tenant := names(scopeNetworks(in, wideView(visible), false))
 	for _, hidden := range []string{"secret", "mt-b", "green-secondary"} {
 		if _, ok := tenant[hidden]; ok {
 			t.Errorf("a tenant sees %s", hidden)
@@ -55,7 +55,7 @@ func TestScopeNetworks(t *testing.T) {
 		t.Errorf("shared network namespaces = %v, want [tenant-a] (foreign namespaces redacted)", shared.Namespaces)
 	}
 
-	platform := names(scopeNetworks(in, visible, listsAll, true))
+	platform := names(scopeNetworks(in, wideView(visible), true))
 	for _, want := range []string{"vm-net", "prod-vlan", "mt-b", "green-secondary"} {
 		if _, ok := platform[want]; !ok {
 			t.Errorf("a platform caller misses %s", want)
@@ -103,8 +103,8 @@ func TestScopeNetworkRules(t *testing.T) {
 		},
 	}
 	var redacted []string
-	lists := func(backing, _ string) bool { return backing == "NetworkPolicy" }
-	got := scopeNetworkRules(in, map[string]bool{"a": true}, lists, func(*model.Policy) {}, func(p *model.Policy, _ *model.PolicyRuleView) {
+	lists := viewReading(map[string]bool{"a": true}, map[model.Kind][]string{model.KindNetpol: {"a"}})
+	got := scopeNetworkRules(in, lists, func(*model.Policy) {}, func(p *model.Policy, _ *model.PolicyRuleView) {
 		redacted = append(redacted, p.Name)
 	})
 	var names []string
@@ -129,7 +129,7 @@ func TestScopeNetworkRulesRedactsDrift(t *testing.T) {
 	drift := func(p *model.Policy) { p.SyncError = "namespace team-b: admission denied" }
 	no := func(model.PolicyKind) bool { return false }
 	tenant := policyRedactor{can: no, named: no, lists: listsAll}
-	got := scopeNetworkRules(in, nil, listsAll, drift, tenant.apply)
+	got := scopeNetworkRules(in, wideView(nil), drift, tenant.apply)
 	for _, p := range []model.Policy{got.Applies[0].Policy, got.Reaches[0].Policy} {
 		if p.SyncError != redactedSyncError {
 			t.Errorf("%s: a tenant reads the apply error %q", p.Name, p.SyncError)
@@ -321,8 +321,8 @@ func TestScopeNetworksAsksTheBackingKind(t *testing.T) {
 		{Name: "udn", Scope: model.ScopeProject, Namespace: "a", Backing: model.KindUDN.Kind},
 		{Name: "nad", Scope: model.ScopeProject, Namespace: "a", Backing: model.KindNAD.Kind},
 	}
-	onlyUDN := func(backing, _ string) bool { return backing == model.KindUDN.Kind }
-	got := scopeNetworks(in, map[string]bool{"a": true}, onlyUDN, false)
+	onlyUDN := viewReading(map[string]bool{"a": true}, map[model.Kind][]string{model.KindUDN: {"a"}})
+	got := scopeNetworks(in, onlyUDN, false)
 	if len(got) != 1 || got[0].Name != "udn" {
 		t.Errorf("networks = %+v, want the udn alone", got)
 	}
@@ -333,12 +333,12 @@ func TestScopeNetworksAsksTheBackingKind(t *testing.T) {
 func TestSharedNetworksFollowTheNADRight(t *testing.T) {
 	shared := []model.Network{{Name: "s", Scope: model.ScopeShared, Namespaces: []string{"a", "b"}}}
 	visible := map[string]bool{"a": true, "b": true}
-	listsInA := func(backing, ns string) bool { return backing == model.KindNAD.Kind && ns == "a" }
-	got := scopeNetworks(shared, visible, listsInA, false)
+	listsInA := viewReading(visible, map[model.Kind][]string{model.KindNAD: {"a"}})
+	got := scopeNetworks(shared, listsInA, false)
 	if len(got) != 1 || !slices.Equal(got[0].Namespaces, []string{"a"}) {
 		t.Errorf("got %+v, want the row narrowed to a", got)
 	}
-	if got := scopeNetworks(shared, visible, func(string, string) bool { return false }, false); len(got) != 0 {
+	if got := scopeNetworks(shared, viewReading(visible, nil), false); len(got) != 0 {
 		t.Errorf("no NAD right still shows %+v", got)
 	}
 }
