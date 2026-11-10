@@ -694,9 +694,6 @@ export interface DRSView {
   draft?: DRSDraftState;
   live: DRSLive;
   warning?: string;
-  canManage: boolean; // enable: creating the rebalancing file set
-  canPSI: boolean; // enable with the PSI MachineConfig
-  canDisable: boolean; // removing the KubeDescheduler
 }
 
 //////////
@@ -1055,40 +1052,6 @@ export interface NetworkInventory {
   uplinks: Uplink[];
   physicalAdapters: PhysicalAdapter[];
   nmstatePresent: boolean;
-  /**
-   * CanManage is true when the caller may author platform-tier networking
-   * (cluster-scoped CUDN): a platform repo is configured AND the caller passes the
-   * CUDN-create SSAR. The coarse "any platform authoring" signal that gates the
-   * platform-draft view; per-button gating uses Caps.
-   */
-  canManage: boolean;
-  /**
-   * Caps is the caller's per-action authoring authority - each field the same SSAR
-   * the matching create handler enforces, so a button gated on its field can never
-   * offer an action the backend would 403.
-   */
-  caps: NetworkCaps;
-}
-/**
- * NetworkCaps mirrors each platform-tier create handler's platformScope SSAR, so the
- * UI can show only the authoring buttons the caller can actually use. All false when
- * no platform repo is configured.
- */
-export interface NetworkCaps {
-  uplink: boolean; // nmstate NNCP
-  namespace: boolean; // namespaces (New Project / Namespace)
-  egressIP: boolean; // fixed outbound IP
-  externalRoute: boolean; // external route
-  adminNetworkPolicy: boolean; // cluster rules (AdminNetworkPolicy)
-  /**
-   * BaselineAdminNetworkPolicy is the cluster's baseline default policy.
-   */
-  baselineAdminNetworkPolicy: boolean;
-  /**
-   * Platform is ClusterCaps.PlatformRead: the platform tier's shared reads
-   * (its history, proposals and revert).
-   */
-  platform: boolean;
 }
 /**
  * Gateways is GET /api/networking/gateways: every Gateway and route. Operator
@@ -1354,7 +1317,6 @@ export interface Options {
   instancetypes: Instancetype[];
   preferences: Preference[];
   osImages: OSImage[];
-  networks: NetworkOption[];
   storageClasses: StorageClass[];
 }
 export interface Instancetype {
@@ -1387,10 +1349,6 @@ export interface OSImage {
    * Ready, DELETE /api/images removes it.
    */
   removable?: boolean;
-}
-export interface NetworkOption {
-  name: string;
-  namespace: string;
 }
 export interface StorageClass {
   name: string;

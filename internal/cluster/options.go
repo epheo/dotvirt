@@ -20,7 +20,6 @@ var (
 	gvrNSInstancetype = schema.GroupVersionResource{Group: "instancetype.kubevirt.io", Version: "v1beta1", Resource: "virtualmachineinstancetypes"}
 	gvrPreferences    = schema.GroupVersionResource{Group: "instancetype.kubevirt.io", Version: "v1beta1", Resource: "virtualmachineclusterpreferences"}
 	gvrDataSources    = schema.GroupVersionResource{Group: "cdi.kubevirt.io", Version: "v1beta1", Resource: "datasources"}
-	gvrNADs           = GVR(model.KindNAD)
 	gvrStorageClasses = schema.GroupVersionResource{Group: "storage.k8s.io", Version: "v1", Resource: "storageclasses"}
 )
 
@@ -47,7 +46,6 @@ func (c *Client) ListOptions(ctx context.Context) (model.Options, error) {
 		Instancetypes:  []model.Instancetype{},
 		Preferences:    []model.Preference{},
 		OSImages:       []model.OSImage{},
-		Networks:       []model.NetworkOption{},
 		StorageClasses: []model.StorageClass{},
 	}
 
@@ -85,12 +83,6 @@ func (c *Client) ListOptions(ctx context.Context) (model.Options, error) {
 				img.Import = model.ImportFrom(kind, src)
 			}
 			opts.OSImages = append(opts.OSImages, img)
-		}
-	}
-
-	if items, err := listAllNS(ctx, dyn, gvrNADs); err == nil {
-		for i := range items {
-			opts.Networks = append(opts.Networks, model.NetworkOption{Name: items[i].GetName(), Namespace: items[i].GetNamespace()})
 		}
 	}
 

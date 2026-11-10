@@ -334,11 +334,5 @@ func optionsFor(v callerView, all model.Options) model.Options {
 			out.OSImages = append(out.OSImages, img)
 		}
 	}
-	out.Networks = make([]model.NetworkOption, 0, len(all.Networks))
-	for _, n := range all.Networks {
-		if allowed(n.Namespace, ssarFor(model.KindNAD)) {
-			out.Networks = append(out.Networks, n)
-		}
-	}
 	return out
 }

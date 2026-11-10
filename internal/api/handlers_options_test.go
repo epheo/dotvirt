@@ -29,10 +29,6 @@ func TestOptionsFilteredPerCaller(t *testing.T) {
 			{Name: "fedora", Namespace: "os-images"},
 			{Name: "private", Namespace: "team-b"},
 		},
-		Networks: []model.NetworkOption{
-			{Name: "vlan10", Namespace: "team-a"},
-			{Name: "secret-net", Namespace: "team-b"},
-		},
 	}
 	s.options.Put("all", all)
 	id := auth.Identity{Token: "tenant-token", Username: "tenant"}
@@ -52,14 +48,11 @@ func TestOptionsFilteredPerCaller(t *testing.T) {
 	if len(got.OSImages) != 1 || got.OSImages[0].Name != "fedora" {
 		t.Errorf("osImages = %+v, want only the shared golden image", got.OSImages)
 	}
-	if len(got.Networks) != 1 || got.Networks[0].Name != "vlan10" {
-		t.Errorf("networks = %+v, want only the visible namespace's NAD", got.Networks)
-	}
 	if len(got.Instancetypes) != 1 {
 		t.Errorf("cluster-scoped instancetypes must pass through unfiltered, got %+v", got.Instancetypes)
 	}
 	cached, _ := s.options.Get("all")
-	if len(cached.OSImages) != 2 || len(cached.Networks) != 2 {
+	if len(cached.OSImages) != 2 {
 		t.Errorf("shared cache narrowed by one caller: %+v", cached)
 	}
 }

@@ -51,7 +51,6 @@ const options: Options = {
 		{ name: 'windows.2k22' },
 	],
 	osImages: [],
-	networks: [],
 	storageClasses: [],
 };
 

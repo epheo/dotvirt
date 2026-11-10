@@ -64,8 +64,8 @@ type Reader interface {
 	// read nothing else of the repo: git.ErrForeignCommit once anyone else's
 	// commit is on its branch.
 	OwnProposal(id auth.Identity, proj project.ProjectInfo, row model.Proposal) (model.ProposalDetail, error)
-	// OpenProposals is project-wide (the lane is shared by the project's
-	// members); OwnsProposal marks the caller's own rows without the forge.
+	// OpenProposals is project-wide (the lane is shared by every reader of the
+	// repo); OwnsProposal marks the caller's own rows without the forge.
 	// ProposedBranch is id's draft branch: the one PR owning opens to a caller
 	// who may not read the repo. A revert is not, as opening one takes read.
 	OpenProposals(proj project.ProjectInfo) ([]model.Proposal, error)

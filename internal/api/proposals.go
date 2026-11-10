@@ -20,8 +20,9 @@ import (
 // its repo's heads move (a propose/merge), when a nudge names its repo or finds
 // its lane never read, and for all of them on a slow backstop tick - then wakes
 // the hub only when some lane actually changed. The lane is project-scoped, not
-// per-token: every member of a project sees the same PRs, and which are theirs
-// is marked at read time.
+// per-token: every caller who reads the project's repo sees the same PRs, one
+// who sees part of the project their own alone, and which are theirs is marked
+// at read time.
 const (
 	// proposalsRefreshEvery is the backstop cadence; real freshness comes from the
 	// git-change signal and explicit nudges.

@@ -63,10 +63,7 @@ type DRSView struct {
 	Config        *DRSConfig `json:"config,omitempty"`
 	PSIConfigured bool       `json:"psiConfigured"`
 
-	Draft      *DRSDraftState `json:"draft,omitempty"`
-	Live       DRSLive        `json:"live"`
-	Warning    string         `json:"warning,omitempty"`
-	CanManage  bool           `json:"canManage"`  // enable: creating the rebalancing file set
-	CanPSI     bool           `json:"canPSI"`     // enable with the PSI MachineConfig
-	CanDisable bool           `json:"canDisable"` // removing the KubeDescheduler
+	Draft   *DRSDraftState `json:"draft,omitempty"`
+	Live    DRSLive        `json:"live"`
+	Warning string         `json:"warning,omitempty"`
 }

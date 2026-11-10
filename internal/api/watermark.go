@@ -58,8 +58,8 @@ func (t *term) sum() uint64 { return t.h.Sum64() }
 
 // netGrants are the verdicts the network and policy pulls apply beyond the
 // view: node read (the fabric, uplinks and node ops), platform
-// authoring, the create authorities behind CanManage, Caps, the cluster-tier
-// policy rows, shared-error redaction and platform source files, and list on
+// authoring, the create authorities behind the cluster-tier policy rows,
+// shared-error redaction and platform source files, and list on
 // each cluster-tier policy kind, which those rows also need and which names a
 // cluster rule on every caller's rules pull. Each is the cached review the
 // pulls themselves make, so a grant or a revocation that leaves the visible
@@ -72,13 +72,13 @@ type netGrants struct {
 }
 
 // netGrantRefs are the create authorities netGrants reads, netPolicyRefs the
-// cluster-tier policy kinds it asks list on too; the Caps ones only matter
-// where a platform repo is configured.
+// cluster-tier policy kinds it asks list on too; netCapRefs only matter where
+// a platform repo is configured: an uplink's source file and drift.
 var (
 	netPolicyRefs = []ssarRef{ssarANP, ssarBANP, ssarEgressIP, ssarExtRoute}
 	netGrantRefs  = append([]ssarRef{ssarCUDN}, netPolicyRefs...)
 	netListRefs   = append([]ssarRef{ssarCUDN, ssarUplink, ssarNNS}, netPolicyRefs...)
-	netCapRefs    = []ssarRef{ssarUplink, ssarNamespace}
+	netCapRefs    = []ssarRef{ssarUplink}
 	netGrantKinds = []model.Kind{model.KindCUDN, model.KindNNCP, model.KindANP, model.KindBANP, model.KindEgressIP, model.KindExtRoute}
 )
 
