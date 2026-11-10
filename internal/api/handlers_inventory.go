@@ -72,7 +72,7 @@ func (s *Server) InventoryForIdentity(ctx context.Context, id auth.Identity) (mo
 		ListsVMs:  func(ns string) bool { return v.lists(ssarVM, ns) },
 		ListsVMIs: func(ns string) bool { return v.lists(ssarVMI, ns) },
 		ScopeSync: func(p project.ProjectInfo, ps model.ProjectSync) *model.ProjectSync {
-			return s.projectSyncView(ctx, id, userCluster, p, ps)
+			return s.projectSyncView(ctx, v, p, ps)
 		},
 	}
 	// Drift comes from the SA-owned Application snapshot (lock-free, watch-fed).
@@ -137,9 +137,9 @@ func (s *Server) InventoryForIdentity(ctx context.Context, id auth.Identity) (mo
 			platformAuthor, platformErr = s.canReadPlatform(ctx, id, userCluster)
 		}
 		if platformAuthor {
-			inv.Platform = s.readerPlatformView(ctx, id, userCluster, rollup)
+			inv.Platform = s.readerPlatformView(ctx, v, rollup)
 		} else {
-			inv.Platform = s.tenantPlatformView(ctx, id, userCluster, visible, rollup)
+			inv.Platform = s.tenantPlatformView(ctx, v, rollup)
 		}
 	}
 	// Propose existing tenants (namespaces with VMs, no project label) to callers
@@ -214,90 +214,78 @@ func (s *Server) platformBusy() bool {
 // read: only the rows about objects Kubernetes shows them, their own Namespace
 // objects included. No verdict or apply error: those move with, and can name,
 // other tenants.
-func (s *Server) tenantPlatformView(ctx context.Context, id auth.Identity, c *cluster.Client, visible map[string]bool, ps *model.ProjectSync) *model.ProjectSync {
-	namespaces, namespaced := tenantPlatformRows(ps, visible)
-	listed := s.listedRows(ctx, id, c, model.ProjectSync{Unhealthy: namespaced}, func(o model.ObjectHealth) string { return o.Namespace }, "")
-	rows := append(namespaces, listed.Unhealthy...)
+func (s *Server) tenantPlatformView(ctx context.Context, v callerView, ps *model.ProjectSync) *model.ProjectSync {
+	if ps == nil {
+		return nil
+	}
+	rows := s.shownRows(ctx, v, ps.Unhealthy)
 	if len(rows) == 0 {
 		return nil
 	}
 	return &model.ProjectSync{Unhealthy: rows}
 }
 
-// tenantPlatformRows splits ps's rows in visible namespaces: the Namespace
-// objects themselves, which seeing the namespace answers, and the objects
-// inside, whose kind is still to ask.
-func tenantPlatformRows(ps *model.ProjectSync, visible map[string]bool) (namespaces, namespaced []model.ObjectHealth) {
-	if ps == nil {
-		return nil, nil
-	}
-	for _, o := range ps.Unhealthy {
-		switch {
-		case o.Namespace == "" && o.Kind == model.KindNS.Kind && visible[o.Name]:
-			namespaces = append(namespaces, o)
-		case o.Namespace != "" && visible[o.Namespace]:
-			namespaced = append(namespaced, o)
-		}
-	}
-	return namespaces, namespaced
-}
-
 const platformErrorForTenants = "the platform repo failed to apply; a platform administrator can see why"
 
-// readerPlatformView is the platform rollup for a platform reader: the rows
-// of kinds they may list cluster-wide. Platform read weighs the kinds git
-// declares, and Argo's live tree can hold others for a while (a mirror behind
-// a merge, a stuck prune, a List Argo unwraps), so each row's kind is asked
-// on its own, a kind discovery cannot place read as unlisted. The apply error
-// can name a dropped row, so it turns generic once one is dropped.
-func (s *Server) readerPlatformView(ctx context.Context, id auth.Identity, c *cluster.Client, ps *model.ProjectSync) *model.ProjectSync {
+// readerPlatformView is the platform rollup for a platform reader. Platform
+// read weighs the kinds git declares, and Argo's live tree can hold others for
+// a while (a mirror behind a merge, a stuck prune, a List Argo unwraps), so
+// each row is shown as any other (shownRows). The apply error can name a
+// dropped row, so it turns generic once one is dropped.
+func (s *Server) readerPlatformView(ctx context.Context, v callerView, ps *model.ProjectSync) *model.ProjectSync {
 	if ps == nil {
 		return nil
 	}
-	return s.listedRows(ctx, id, c, *ps, func(model.ObjectHealth) string { return "" }, platformErrorForTenants)
+	out := *ps
+	out.Unhealthy = s.shownRows(ctx, v, ps.Unhealthy)
+	if len(out.Unhealthy) < len(ps.Unhealthy) && out.SyncError != "" {
+		out.SyncError = platformErrorForTenants
+	}
+	return &out
 }
 
 const projectErrorForPartialViewers = "this project's repo failed to apply; someone who can read all of it can see why"
 
-// projectSyncView is a tenant project's rollup for one caller: the rows it may
-// list where they live. The apply error can name what it may not, so it turns
+// projectSyncView is a tenant project's rollup for one caller: the rows it is
+// shown (shownRows). The apply error can name what it may not, so it turns
 // generic once a row is dropped or the caller sees part of the project.
-func (s *Server) projectSyncView(ctx context.Context, id auth.Identity, c *cluster.Client, p project.ProjectInfo, ps model.ProjectSync) *model.ProjectSync {
-	out := s.listedRows(ctx, id, c, ps, func(o model.ObjectHealth) string { return o.Namespace }, projectErrorForPartialViewers)
-	if out.SyncError != "" && s.seesPartOf(p) {
+func (s *Server) projectSyncView(ctx context.Context, v callerView, p project.ProjectInfo, ps model.ProjectSync) *model.ProjectSync {
+	out := ps
+	out.Unhealthy = s.shownRows(ctx, v, ps.Unhealthy)
+	if out.SyncError != "" && (len(out.Unhealthy) < len(ps.Unhealthy) || s.seesPartOf(p)) {
 		out.SyncError = projectErrorForPartialViewers
 	}
-	return out
+	return &out
 }
 
-// listedRows keeps the Unhealthy rows whose kind the caller may list in
-// where(row). Each kind is asked on its own, cached per token, and only when a
-// row exists: a quiet rollup costs nothing. A kind discovery cannot place reads
-// as unlisted. The apply error can name a dropped row, so it becomes generic
-// once one is dropped.
-func (s *Server) listedRows(ctx context.Context, id auth.Identity, c *cluster.Client, ps model.ProjectSync, where func(model.ObjectHealth) string, generic string) *model.ProjectSync {
-	if len(ps.Unhealthy) == 0 {
-		return &ps
+// shownRows is what of a rollup's rows the caller would read in Kubernetes:
+// an object of a kind it may list where the object lives, cluster-wide for a
+// cluster-scoped one, and a Namespace object it may also get by name.
+// Discovery places each kind; one it cannot place is not shown. Asked only
+// when a row exists, each answer cached.
+func (s *Server) shownRows(ctx context.Context, v callerView, rows []model.ObjectHealth) []model.ObjectHealth {
+	if len(rows) == 0 {
+		return nil
 	}
 	var kinds []schema.GroupKind
-	for _, o := range ps.Unhealthy {
+	for _, o := range rows {
 		if k := (schema.GroupKind{Group: o.Group, Kind: o.Kind}); !slices.Contains(kinds, k) {
 			kinds = append(kinds, k)
 		}
 	}
 	x, _ := s.servedKinds(ctx, kinds)
-	out := ps
-	out.Unhealthy = nil
-	for _, o := range ps.Unhealthy {
+	var out []model.ObjectHealth
+	for _, o := range rows {
+		if o.Group == "" && o.Kind == model.KindNS.Kind && v.names[o.Name] {
+			out = append(out, o)
+			continue
+		}
 		ref, served, err := x.ref(schema.GroupKind{Group: o.Group, Kind: o.Kind})
-		if err == nil && served && s.capable(ctx, id, c, ask(verbList, ref, where(o))) {
-			out.Unhealthy = append(out.Unhealthy, o)
+		if err == nil && served && v.lists(ref, o.Namespace) {
+			out = append(out, o)
 		}
 	}
-	if len(out.Unhealthy) < len(ps.Unhealthy) && out.SyncError != "" {
-		out.SyncError = generic
-	}
-	return &out
+	return out
 }
 
 func (s *Server) handleInventory(w http.ResponseWriter, r *http.Request) {
