@@ -224,9 +224,9 @@ func (s *Server) handleNetworks(w http.ResponseWriter, r *http.Request) {
 }
 
 // scopeNetworks is the catalog one caller sees: project networks in the
-// namespaces they can see, and shared networks published to at least one of
-// them, its Namespaces narrowed to those (a shared network's name and its
-// other namespaces echo other tenants). A caller with platform networking
+// project namespaces they can see, and shared networks published to at least
+// one of them, its Namespaces narrowed to those (a shared network's name and
+// its other namespaces echo other tenants). A caller with platform networking
 // authority (all) sees every shared network, published or not, to fix it.
 func scopeNetworks(nets []model.Network, v callerView, all bool) []model.Network {
 	out := make([]model.Network, 0, len(nets))
@@ -237,7 +237,7 @@ func scopeNetworks(nets []model.Network, v callerView, all bool) []model.Network
 			// fresh slice: the cached catalog's is never written.
 			var published []string
 			for _, ns := range n.Namespaces {
-				if v.shows(model.KindNAD.Kind, ns) {
+				if v.showsInProject(model.KindNAD.Kind, ns) {
 					published = append(published, ns)
 				}
 			}
@@ -245,7 +245,7 @@ func scopeNetworks(nets []model.Network, v callerView, all bool) []model.Network
 			if all || len(n.Namespaces) > 0 {
 				out = append(out, n)
 			}
-		case v.shows(n.Backing, n.Namespace):
+		case v.showsInProject(n.Backing, n.Namespace):
 			out = append(out, n)
 		}
 	}
