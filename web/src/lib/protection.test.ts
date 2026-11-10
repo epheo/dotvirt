@@ -172,6 +172,23 @@ describe('one-copy roomText', () => {
 		});
 	});
 
+	it("never says fits when the VM's one-copy disks span tiers that need one host", () => {
+		expect(roomText(l, 1, 100 * GIB, { others: [], tiers: ['hdd'] })).toEqual({
+			ok: false,
+			text: "May not fit: the VM's one-copy disks on nvme and hdd need one host with room on each.",
+		});
+		// Too big stays sure: no host takes the nvme ones together.
+		expect(roomText(l, 1, 250 * GIB, { others: [100 * GIB], tiers: ['hdd'] })?.text).toBe(
+			"Too big. No host has room on nvme for the VM's one-copy disks together.",
+		);
+	});
+
+	it('judges every tier on the host a one-copy disk already pins', () => {
+		expect(roomText(l, 1, 100 * GIB, { others: [], tiers: ['hdd'], host: 'h1' })?.text).toBe(
+			"Fits on h1, where the VM's one-copy disk lives. Room on nvme there: 300 GiB.",
+		);
+	});
+
 	it("judges a VM that already holds a one-copy disk on that disk's host", () => {
 		expect(roomText(l, 1, 250 * GIB, { others: [], host: 'h1' })).toEqual({
 			ok: true,

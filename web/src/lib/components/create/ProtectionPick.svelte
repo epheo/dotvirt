@@ -67,16 +67,16 @@
 	const local = $derived.by(() => {
 		if (!pickedClass?.hosts || picked?.copies !== 1) return undefined;
 		const tier = pickedClass.tier;
-		const others = peers
-			.filter((p) => {
-				const r = infos.find(
-					(i) => i.name === (p.storageClass || inventory.defaultStorageClass),
-				)?.replication;
-				return r?.copies === 1 && r.tier === tier && p.bytes > 0;
-			})
-			.map((p) => p.bytes);
+		const ones = peers.flatMap((p) => {
+			const r = infos.find(
+				(i) => i.name === (p.storageClass || inventory.defaultStorageClass),
+			)?.replication;
+			return r?.copies === 1 && p.bytes > 0 ? [{ tier: r.tier, bytes: p.bytes }] : [];
+		});
+		const others = ones.filter((p) => p.tier === tier).map((p) => p.bytes);
+		const tiers = [...new Set(ones.map((p) => p.tier).filter((t) => t !== tier))];
 		const volumes = replication.overview?.volumes;
-		return { others, host: vm && volumes ? pinnedHost(vm, volumes) : undefined };
+		return { others, tiers, host: vm && volumes ? pinnedHost(vm, volumes) : undefined };
 	});
 	const GLYPHS: Record<number, CellKind[]> = {
 		1: ['copy'],

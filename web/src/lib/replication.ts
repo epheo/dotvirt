@@ -510,12 +510,13 @@ export function pinnedHost(vm: VM, volumes: ReplicatedVolume[]): string | undefi
 // Whether a new disk fits the tier today; null when the room is unknown.
 // bytes: NaN or 0 while the size is unreadable, then only the room is said.
 // local: for one copy, the sizes of the VM's other new one-copy disks in this
-// tier, and the host one it already holds pins it to.
+// tier, the other tiers its one-copy disks use, and the host one it already
+// holds pins it to.
 export function roomText(
 	c: ProtectionClass,
 	copies: number,
 	bytes: number,
-	local?: { others: number[]; host?: string },
+	local?: { others: number[]; tiers?: string[]; host?: string },
 ): { ok: boolean; text: string } | null {
 	if (c.room === undefined) return null;
 	const at = copies === 1 ? 'one copy' : `${copies} copies`;
@@ -524,8 +525,16 @@ export function roomText(
 	const room = `Room on ${c.tier}: ${size(c.room)} at ${at}.`;
 	if (!(bytes > 0)) return { ok: true, text: room };
 	if (bytes > c.room) return { ok: false, text: `Too big. ${room}` };
-	if (copies !== 1 || !c.hosts || !local?.others.length) return { ok: true, text: `Fits. ${room}` };
-	switch (localFit(c.hosts, [bytes, ...local.others])) {
+	if (copies !== 1 || !c.hosts || (!local?.others.length && !local?.tiers?.length))
+		return { ok: true, text: `Fits. ${room}` };
+	const fit = local.others.length ? localFit(c.hosts, [bytes, ...local.others]) : 'fits';
+	// Each tier fitting alone does not find one host with room in all of them.
+	if (fit === 'fits' && local.tiers?.length)
+		return {
+			ok: false,
+			text: `May not fit: the VM's one-copy disks on ${join([c.tier, ...local.tiers])} need one host with room on each.`,
+		};
+	switch (fit) {
 		case 'fits':
 			return { ok: true, text: `Fits with the VM's other one-copy disks, which share its host.` };
 		case 'maybe':
