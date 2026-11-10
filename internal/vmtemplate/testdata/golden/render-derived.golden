@@ -37,10 +37,20 @@ spec:
           interfaces:
           - masquerade: {}
             name: default
+          - bridge: {}
+            name: vm-net
+          - bridge: {}
+            name: shared
         resources: {}
       networks:
       - name: default
         pod: {}
+      - multus:
+          networkName: vm-net
+        name: vm-net
+      - multus:
+          networkName: openshift-cnv/shared
+        name: shared
       volumes:
       - dataVolume:
           name: web-02-rootdisk
