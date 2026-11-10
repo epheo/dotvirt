@@ -494,6 +494,7 @@ export interface ClassFree {
 }
 
 export interface LibraryTiles {
+	disks: number; // persistent: none leaves nothing to judge
 	noLiveMigrate: number;
 	stale: number | null; // null until snapshots land
 	noData: number; // VMs
@@ -512,6 +513,7 @@ export function libraryTiles(
 	for (const r of persistent)
 		if (!Number.isNaN(r.size)) held.set(r.storageClass, (held.get(r.storageClass) ?? 0) + r.size);
 	return {
+		disks: persistent.length,
 		noLiveMigrate: persistent.filter((r) => r.shared === false).length,
 		stale: snapshotsLoaded ? persistent.filter((r) => !r.fresh).length : null,
 		noData: rows.filter((r) => r.ephemeral).length,
