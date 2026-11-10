@@ -6,6 +6,7 @@
 	import { action } from '#lib/resource.svelte.js';
 	import { clusterGate } from '#lib/gates.js';
 	import { inventory } from '#lib/state/inventory.svelte.js';
+	import { networksOff } from '#lib/state/modules.svelte.js';
 	import { ui } from '#lib/state/ui.svelte.js';
 	import { nearestFree, overlapping, suggestSubnet } from '#lib/subnets.js';
 	import { NAME_HINT, validCIDR, validName } from '#lib/validate.js';
@@ -32,9 +33,11 @@
 	const joinable = $derived(inventory.projects.filter((p) => p.repo).map((p) => p.name));
 	const joining = $derived(!!adopt && !!joinProject);
 	// An adopted namespace already runs on whatever networking it has: a new
-	// default network could break its VMs, so it is not offered.
-	// svelte-ignore state_referenced_locally
-	let withNetwork = $state(!adopt);
+	// default network could break its VMs, so it is not offered. Nor where the
+	// cluster serves no UserDefinedNetwork: git would hold one nothing syncs.
+	const offerNetwork = $derived(!adopt && !networksOff());
+	let withNetwork = $state(true);
+	const network = $derived(offerNetwork && withNetwork);
 	let netName = $state('');
 	let netTouched = false;
 	// svelte-ignore state_referenced_locally
@@ -66,7 +69,7 @@
 		});
 	});
 	const clash = $derived(
-		withNetwork && validCIDR(subnet.trim()) ? overlapping(subnet.trim(), networks) : [],
+		network && validCIDR(subnet.trim()) ? overlapping(subnet.trim(), networks) : [],
 	);
 	const fixes = $derived(
 		[
@@ -87,7 +90,7 @@
 		else if (!validName(namespace)) m.push('The namespace needs lowercase letters, digits and -');
 		if (splitList(owners).length && !clusterGate.grantAdmin().ok)
 			m.push(clusterGate.grantAdmin().why);
-		if (withNetwork) {
+		if (network) {
 			if (!clusterGate.vmNetwork().ok) m.push(clusterGate.vmNetwork().why);
 			if (!netName) m.push('Name its network');
 			if (!subnet.trim()) m.push('Its network needs a subnet');
@@ -99,7 +102,7 @@
 		const req: ProjectCreate = { name, namespace };
 		const o = splitList(owners);
 		if (o.length) req.owners = o;
-		if (withNetwork) req.vmNetwork = { name: netName, subnet: subnet.trim() };
+		if (network) req.vmNetwork = { name: netName, subnet: subnet.trim() };
 		return req;
 	});
 
@@ -174,7 +177,7 @@
 				<span class={HELP}>They can change anything in it. Separate names with spaces.</span>
 			</div>
 		{/if}
-		{#if !adopt}
+		{#if offerNetwork}
 			<label class="flex cursor-pointer items-center gap-2 text-sm text-ink">
 				<input type="checkbox" class="size-4 accent-accent" bind:checked={withNetwork} />
 				Give it a default network its VMs start on
@@ -266,7 +269,7 @@
 				{#if splitList(owners).length && !joining}
 					<Consequence>{splitList(owners).join(', ')} can change anything in it.</Consequence>
 				{/if}
-				{#if withNetwork && !adopt}
+				{#if network}
 					<Consequence tone={clash.length ? 'warn' : 'ok'}
 						>{clash.length
 							? `Its network overlaps ${clash.map((n) => n.name).join(' and ')}.`

@@ -13,6 +13,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -164,13 +165,59 @@ func (c *Client) EnsureRepo() (created bool, err error) {
 		"name":           c.repo,
 		"auto_init":      true,
 		"default_branch": "main",
-		"private":        false,
+		// A public repo is readable by anyone who reaches the forge, past every
+		// grant it holds: one tenant's manifests would be every visitor's.
+		"private": true,
 	}
 	if err := c.do("POST", fmt.Sprintf("/api/v1/orgs/%s/repos", c.owner), payload, nil); err != nil {
 		return false, err
 	}
 	return true, nil
 }
+
+// orgRepoPage is the page an organization's repo listing asks for.
+const orgRepoPage = 50
+
+// PrivatizeOrgRepos makes every public repo of the client's owner organization
+// private. It reports the repos it changed and those whose change failed, each
+// failure leaving the rest to run; err is a failed listing, which ends it.
+// Pages run until the forge's X-Total-Count is reached or a page comes back
+// empty.
+func (c *Client) PrivatizeOrgRepos() (changed int, failed map[string]error, err error) {
+	seen := 0
+	for page := 1; ; page++ {
+		var repos []struct {
+			Name    string `json:"name"`
+			Private bool   `json:"private"`
+		}
+		path := fmt.Sprintf("/api/v1/orgs/%s/repos?limit=%d&page=%d", c.owner, orgRepoPage, page)
+		header, err := c.doRead("GET", path, nil, &repos)
+		if err != nil {
+			return changed, failed, err
+		}
+		for _, r := range repos {
+			if r.Private {
+				continue
+			}
+			if err := c.do("PATCH", fmt.Sprintf("/api/v1/repos/%s/%s", c.owner, r.Name), map[string]any{"private": true}, nil); err != nil {
+				if failed == nil {
+					failed = map[string]error{}
+				}
+				failed[r.Name] = err
+				continue
+			}
+			changed++
+		}
+		seen += len(repos)
+		total, terr := strconv.Atoi(header.Get("X-Total-Count"))
+		if len(repos) == 0 || terr == nil && seen >= total {
+			return changed, failed, nil
+		}
+	}
+}
+
+// Owner is the organization or user the client's repo lives under.
+func (c *Client) Owner() string { return c.owner }
 
 // RepoExists reports whether the client's repo is present on the forge, so a caller
 // can tell a dotvirt.io/repo annotation that still resolves from one the forge has

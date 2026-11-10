@@ -1653,6 +1653,10 @@ const novms = {
 	modules: { vms: false },
 };
 
+// A cluster that serves no UserDefinedNetwork, as MicroShift: VMs, and no
+// project network to create.
+const nonetworks = { ...base, modules: { networks: false } };
+
 // ── replicated storage: a placement with one of each state ─────────────────
 const GIB = 1024 ** 3;
 const copy = (node, state = 'in-sync', extra = {}) => ({
@@ -1921,6 +1925,7 @@ export const scenarios = {
 	replicatedreadonly,
 	replicatedtenant,
 	novms,
+	nonetworks,
 	residue,
 	sso,
 	ssoready,
