@@ -606,10 +606,25 @@ YAML
 		'{"repoRead":true,"vmCreate":'"${vms}"',"console":'"${vms}"',"egressFirewallCreate":false}'
 	# The admin's grant on EgressFirewalls offers a new one only where the
 	# cluster serves them (epheo.39 on): a kind nothing syncs is never offered.
-	egress=false
-	if kc get --raw /apis/k8s.ovn.org/v1 2>/dev/null | jq -e '.resources[] | select(.name == "egressfirewalls")' >/dev/null; then
-		egress=true
-	fi
+	# Only a NotFound means not served; any other failure is asked again, as
+	# the server counts a failed read as served.
+	egress_served() {
+		local out
+		if out="$(kc get --raw /apis/k8s.ovn.org/v1 2>&1)"; then
+			egress=false
+			if jq -e '.resources[] | select(.name == "egressfirewalls")' >/dev/null <<<"${out}"; then
+				egress=true
+			fi
+			return 0
+		fi
+		if grep -q 'NotFound' <<<"${out}"; then
+			egress=false
+			return 0
+		fi
+		echo "${out}"
+		return 1
+	}
+	retry "the cluster's answer on EgressFirewalls" 120 egress_served
 	retry "a project admin authors VMs and is offered an egress firewall only where served" 180 offered "${PROJECT_ADMIN_TOK}" \
 		'{"repoRead":true,"vmCreate":'"${vms}"',"console":'"${vms}"',"egressFirewallCreate":'"${egress}"'}'
 	platform_offered() {
