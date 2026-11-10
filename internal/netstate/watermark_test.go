@@ -19,7 +19,7 @@ func object(ns, name, rv string) *unstructured.Unstructured {
 }
 
 // sharedOnly admits the shared networks alone, as for a tenant without
-// authority over any cluster-tier kind; everything admits them all.
+// list on any cluster-tier kind; everything admits them all.
 func sharedOnly(gvr schema.GroupVersionResource) bool { return gvr == gvrCUDN }
 func everything(schema.GroupVersionResource) bool     { return true }
 

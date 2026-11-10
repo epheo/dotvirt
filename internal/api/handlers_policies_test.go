@@ -24,8 +24,8 @@ import (
 )
 
 // scopePolicies must keep namespace-tier rows only in visible namespaces and
-// cluster-tier rows only for callers with authority over that specific kind -
-// an admin policy's rules name namespaces across tenants.
+// cluster-tier rows only for callers who may list that specific kind - an
+// admin policy's rules name namespaces across tenants.
 func TestScopePolicies(t *testing.T) {
 	all := []model.Policy{
 		{Name: "mine", Kind: model.PolicyProjectRule, Namespace: "team-a", Backing: model.KindNetpol.Kind},
@@ -47,47 +47,38 @@ func TestScopePolicies(t *testing.T) {
 		t.Error("a foreign namespace's policy leaked")
 	}
 	if names["block-dev"] {
-		t.Error("a cluster-tier kind leaked without authority over it")
+		t.Error("a cluster-tier kind leaked to a caller who may not list it")
 	}
 }
 
-// TestPolicyRedactor pins the effective/trace disclosure rule: a cluster-tier
-// policy's subject namespaces and apply error are authoring-tier information,
-// stripped without authority over the kind (its text goes through
-// netstate.Redact, pinned there) - while the binding itself, a namespace-tier
-// policy, and a caller with authority are untouched. Its identity follows
-// list on the kind alone.
+// TestPolicyRedactor pins the effective/trace disclosure rule: a policy the
+// caller may not list where it lives loses its subject namespaces, apply
+// error and identity (its text goes through netstate.Redact, pinned there),
+// while the binding itself and a policy the caller lists are untouched. List
+// on a cluster-tier kind reads its policies whole, as kubectl does.
 func TestPolicyRedactor(t *testing.T) {
 	yes := func(model.PolicyKind) bool { return true }
 	no := func(model.PolicyKind) bool { return false }
-	lister := policyRedactor{can: no, named: yes, lists: listsAll}
 
-	anp := model.Policy{Name: "lockdown", Kind: model.PolicyAdmin, Namespaces: []string{"tenant-a", "tenant-b"}, SyncError: "namespace tenant-b: denied"}
+	lister := policyRedactor{cluster: yes}
+	anp := model.Policy{Name: "lockdown", Kind: model.PolicyAdmin, Namespaces: []string{"tenant-a", "tenant-b"}, SyncError: "namespace tenant-b: denied", SourceFile: "cluster/lockdown.yaml"}
 	lister.apply(&anp, nil)
-	if anp.Namespaces != nil || strings.Contains(anp.SyncError, "tenant-b") || anp.Name != "lockdown" || anp.Withheld {
-		t.Errorf("admin policy without authority = %+v", anp)
+	if len(anp.Namespaces) != 2 || anp.SyncError != "namespace tenant-b: denied" || anp.Name != "lockdown" || anp.Withheld || anp.SourceFile == "" {
+		t.Errorf("a cluster policy the caller lists = %+v", anp)
 	}
 
-	none := policyRedactor{can: no, named: no, lists: listsAll}
+	none := policyRedactor{cluster: no, lists: listsAll}
 	dfw := model.Policy{Name: "allow-web", Kind: model.PolicyProjectRule, Namespace: "team-a", Namespaces: []string{"team-a"}, SourceFile: "team-a/allow-web.yaml"}
 	none.apply(&dfw, nil)
 	if dfw.Namespaces == nil || dfw.Name != "allow-web" || dfw.SourceFile == "" {
 		t.Error("namespace-tier policies are not admin-tier: must keep their namespaces and identity")
 	}
 
-	all := policyRedactor{can: yes, named: yes}
-	allowed := model.Policy{Name: "lockdown", Kind: model.PolicyAdmin, Namespaces: []string{"tenant-a"}, SyncError: "x", SourceFile: "cluster/lockdown.yaml"}
-	all.apply(&allowed, nil)
-	if allowed.Namespaces == nil || allowed.SyncError != "x" || allowed.Name != "lockdown" || allowed.SourceFile == "" {
-		t.Error("authority over the kind keeps the enumeration, the error and the identity")
-	}
-
-	// Creating the kind without listing it reads the text, never the name:
-	// Argo's apply error words the object's name.
-	creator := policyRedactor{can: yes, named: no}
-	held := model.Policy{Name: "lockdown", Kind: model.PolicyAdmin, Priority: 10, SyncError: `AdminNetworkPolicy "lockdown" is invalid`, SourceFile: "cluster/lockdown.yaml"}
-	creator.apply(&held, nil)
-	if held.Name != "cluster rule, priority 10" || !held.Withheld || held.SourceFile != "" || held.SyncError != redactedSyncError {
+	// Argo's apply error words the object's name, so it goes with the name.
+	held := model.Policy{Name: "lockdown", Kind: model.PolicyAdmin, Priority: 10, Namespaces: []string{"tenant-b"}, SyncError: `AdminNetworkPolicy "lockdown" is invalid`, SourceFile: "cluster/lockdown.yaml"}
+	unlisted := policyRedactor{cluster: no}
+	unlisted.apply(&held, nil)
+	if held.Name != "cluster rule, priority 10" || !held.Withheld || held.SourceFile != "" || held.SyncError != redactedSyncError || held.Namespaces != nil {
 		t.Errorf("a cluster policy the caller may not list = %+v", held)
 	}
 
@@ -118,7 +109,7 @@ func TestPolicyRedactor(t *testing.T) {
 // who may not list its kind.
 func TestPolicyRedactorWithholdsRowsTheCallerCannotList(t *testing.T) {
 	no := func(model.PolicyKind) bool { return false }
-	pr := policyRedactor{can: no, named: no, lists: func(backing, _ string) bool { return backing != "EgressFirewall" }}
+	pr := policyRedactor{cluster: no, lists: func(backing, _ string) bool { return backing != "EgressFirewall" }}
 	hidden := model.Policy{Name: "egress", Kind: model.PolicyGateway, Namespace: "a", Backing: "EgressFirewall", SourceFile: "x.yaml", SyncError: "boom"}
 	pr.apply(&hidden, nil)
 	if !hidden.Withheld || hidden.Name != "gateway rule" || hidden.SourceFile != "" || hidden.SyncError != redactedSyncError {
@@ -164,8 +155,8 @@ func TestPolicyRedactorView(t *testing.T) {
 // Through the routes: a tenant reads the cluster rule governing its VM on the
 // effective chain, its network's rules and a trace, and never a selector value
 // that reaches past its own namespace; a value confined to it stays in clear.
-// The policy plane holds no cluster row for it. A caller with authority over
-// the kind reads every value.
+// The policy plane holds no cluster row for it. A caller who may list the
+// kind reads every value.
 func TestTenantReadsOwnScopeOnEveryPolicySurface(t *testing.T) {
 	fc := newFakeCluster(t)
 	fc.readsVMs = tenantReadsTeamA
@@ -251,14 +242,14 @@ func TestTenantReadsOwnScopeOnEveryPolicySurface(t *testing.T) {
 		}
 		admin := read(adminToken, sf.method, sf.path, sf.body)
 		if !strings.Contains(admin, "env=prod") {
-			t.Errorf("%s: authority over the kind must read every value: %s", sf.path, admin)
+			t.Errorf("%s: listing the kind must read every value: %s", sf.path, admin)
 		}
 	}
 	if pols := read(tenantToken, http.MethodGet, "/api/policies", ""); strings.Contains(pols, "platform") {
 		t.Errorf("the policy plane lists a cluster rule to a tenant: %s", pols)
 	}
 	if pols := read(adminToken, http.MethodGet, "/api/policies", ""); !strings.Contains(pols, "tier=gold") || !strings.Contains(pols, "app=billing") {
-		t.Errorf("the policy plane hides values from authority over the kind: %s", pols)
+		t.Errorf("the policy plane hides values from a caller listing the kind: %s", pols)
 	}
 }
 
@@ -402,7 +393,7 @@ func TestTraceViewIsTheCallers(t *testing.T) {
 // cluster rule governing its VMs by a neutral label on every surface, never
 // a name or a source file; a caller who may list them reads them as before;
 // a review that fails withholds them. The policy plane lists a kind's rows
-// only to a caller who may create and list it.
+// to a caller who may list it; create alone reads nothing.
 func TestClusterRuleIdentityFollowsTheCallersRBAC(t *testing.T) {
 	const (
 		listerToken  = "lister-token"
@@ -563,13 +554,15 @@ func TestClusterRuleIdentityFollowsTheCallersRBAC(t *testing.T) {
 	withheld("creator", creatorToken)
 	named("lister", listerToken)
 	named("admin", adminToken)
-	for _, token := range []string{tenantToken, listerToken, creatorToken} {
+	for _, token := range []string{tenantToken, creatorToken} {
 		if body := plane(token); strings.Contains(body, "acme-") || strings.Contains(body, "cluster/") {
 			t.Errorf("%s: the policy plane lists a cluster rule: %s", token, body)
 		}
 	}
-	if body := plane(adminToken); !strings.Contains(body, "cluster/acme-lockdown.yaml") || !strings.Contains(body, "acme-quarantine") {
-		t.Errorf("admin: the policy plane must list every cluster rule and its file: %s", body)
+	for _, token := range []string{listerToken, adminToken} {
+		if body := plane(token); !strings.Contains(body, "cluster/acme-lockdown.yaml") || !strings.Contains(body, "acme-quarantine") {
+			t.Errorf("%s: the policy plane must list every cluster rule and its file: %s", token, body)
+		}
 	}
 
 	down.Store(true)

@@ -8,12 +8,10 @@ import (
 )
 
 // handlePolicies lists the policy plane (the Security view): namespace-tier rows
-// (NetworkPolicy, EgressFirewall) scoped to the caller's visible namespaces, and
-// cluster-tier rows gated per kind on the same create-SSAR the matching modal and
-// create route enforce - an admin policy's rules name namespaces across tenants,
-// so only a caller with authority over that kind may read the rollup - and on
-// list, as each row names its object. The catalog is the SA-maintained
-// netstate snapshot; per-object drift attaches at serve time.
+// where the caller may list their kind (scopePolicies), and cluster-tier rows
+// of each kind the caller may list cluster-wide, as kubectl shows them. The
+// catalog is the SA-maintained netstate snapshot; per-object drift attaches at
+// serve time.
 func (s *Server) handlePolicies(w http.ResponseWriter, r *http.Request) {
 	id, c, err := s.userCluster(r)
 	if err != nil {
@@ -29,15 +27,11 @@ func (s *Server) handlePolicies(w http.ResponseWriter, r *http.Request) {
 		fail(w, err)
 		return
 	}
-	// Visibility is authority over the kind, not platform authoring: unlike the
-	// caps in /api/networks it doesn't require a platform repo - a cluster-admin
-	// without one still audits the live policy plane.
-	create := s.clusterAuthority(r.Context(), id, c, verbCreate)
-	list := s.clusterAuthority(r.Context(), id, c, verbList)
-	out := scopePolicies(all, v, func(k model.PolicyKind) bool { return create(k) && list(k) })
+	// Reading needs no platform repo: a cluster reader without one still audits
+	// the live policy plane.
+	out := scopePolicies(all, v, s.clusterAuthority(r.Context(), id, c, verbList))
 	s.enrichPolicyDrift(out)
-	// Which file declares each policy: the edit/delete affordance. Cluster-tier
-	// rows are already gated on the caller's authority over their kind.
+	// Which file declares each policy: the edit/delete affordance.
 	declared := s.sourceFiles(r.Context(), id, c, true)
 	for i := range out {
 		p := &out[i]
@@ -46,11 +40,11 @@ func (s *Server) handlePolicies(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, model.PolicyInventory{Policies: out})
 }
 
-// scopePolicies keeps namespace-tier policies in visible namespaces and
-// cluster-tier policies the caller has authority over. The kept rows are
+// scopePolicies keeps namespace-tier policies the caller may list where they
+// live and cluster-tier policies of each kind it lists. The kept rows are
 // copies, so drift enrichment may set their fields; the slices inside them
 // are the snapshot's, never written.
-func scopePolicies(all []model.Policy, v callerView, canCluster func(model.PolicyKind) bool) []model.Policy {
+func scopePolicies(all []model.Policy, v callerView, listsCluster func(model.PolicyKind) bool) []model.Policy {
 	out := make([]model.Policy, 0, len(all))
 	for _, p := range all {
 		switch {
@@ -58,7 +52,7 @@ func scopePolicies(all []model.Policy, v callerView, canCluster func(model.Polic
 			if v.shows(p.Backing, p.Namespace) {
 				out = append(out, p)
 			}
-		case canCluster(p.Kind):
+		case listsCluster(p.Kind):
 			out = append(out, p)
 		}
 	}

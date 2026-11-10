@@ -326,10 +326,10 @@ func (s *Server) handleNetworkRules(w http.ResponseWriter, r *http.Request) {
 		nss = []string{n.Namespace}
 	}
 	pr := s.policyRedactor(r.Context(), id, c)
-	// A peer rule's sentence names its subject; a caller without authority
-	// over the cluster tier reads it with other tenants' names hidden.
+	// A peer rule's sentence names its subject; a caller who may not list the
+	// admin policy kinds reads it with other tenants' names hidden.
 	var red *netstate.Redaction
-	if !pr.can(model.PolicyAdmin) || !pr.can(model.PolicyBaseline) {
+	if !pr.cluster(model.PolicyAdmin) || !pr.cluster(model.PolicyBaseline) {
 		red = pr.view
 	}
 	out := s.netstate.NetworkRules(nss, s.state.NamespaceLabels, red, s.cfg.ProjectLabel)

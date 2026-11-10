@@ -318,7 +318,7 @@ func TestRedactOwnScopeEverySurface(t *testing.T) {
 	}
 }
 
-// No Redaction - a caller with authority over the kind - reads every
+// No Redaction - a caller who may list the kind - reads every
 // cluster rule exactly as the policy plane renders it. A caller who sees
 // every namespace and may read nodes reads all of it but a value no
 // namespace carries: platform text no namespace of theirs explains.

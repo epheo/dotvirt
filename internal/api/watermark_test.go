@@ -222,9 +222,11 @@ func BenchmarkFrameWatermarks(b *testing.B) {
 // networks watermark: the pulls it covers read those verdicts too.
 func TestNetworksWatermarkFollowsGrants(t *testing.T) {
 	fc := newFakeCluster(t)
-	var create, list atomic.Bool
+	var create, list, cudn atomic.Bool
 	fc.ssar = func(token string, a *authzv1.ResourceAttributes) bool {
 		switch {
+		case a.Resource == "clusteruserdefinednetworks" && a.Verb == verbCreate:
+			return cudn.Load()
 		case a.Resource != "adminnetworkpolicies":
 			return false
 		case a.Verb == verbCreate:
@@ -255,13 +257,19 @@ func TestNetworksWatermarkFollowsGrants(t *testing.T) {
 	if listed == before {
 		t.Error("gaining list on admin network policies left the watermark")
 	}
+	// Creating them shapes no pull: list reads them.
 	create.Store(true)
+	s.bus.Publish(eventbus.RBACChanged)
+	if mark() != listed {
+		t.Error("gaining create on admin network policies moved the watermark")
+	}
+	// Authoring shared networks shows their apply errors.
+	cudn.Store(true)
 	s.bus.Publish(eventbus.RBACChanged)
 	granted := mark()
 	if granted == listed {
-		t.Error("gaining admin network policy authority left the watermark")
+		t.Error("gaining shared network authoring left the watermark")
 	}
-	// The policy plane lists a cluster rule only to who may list its kind too.
 	list.Store(false)
 	s.bus.Publish(eventbus.RBACChanged)
 	if mark() == granted {

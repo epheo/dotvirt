@@ -58,10 +58,9 @@ func (t *term) sum() uint64 { return t.h.Sum64() }
 
 // netGrants are the verdicts the network and policy pulls apply beyond the
 // view: node read (the fabric, uplinks and node ops), platform
-// authoring, the create authorities behind the cluster-tier policy rows,
-// shared-error redaction and platform source files, and list on
-// each cluster-tier policy kind, which those rows also need and which names a
-// cluster rule on every caller's rules pull. Each is the cached review the
+// authoring, the create authorities behind shared-error redaction and
+// platform source files, and list on each cluster-scoped kind the pulls show,
+// which also names a cluster rule on every caller's rules pull. Each is the cached review the
 // pulls themselves make, so a grant or a revocation that leaves the visible
 // set alone still moves the watermark.
 type netGrants struct {
@@ -71,13 +70,12 @@ type netGrants struct {
 	bits   uint64 // every verdict, platform authoring included, in a fixed order
 }
 
-// netGrantRefs are the create authorities netGrants reads, netPolicyRefs the
-// cluster-tier policy kinds it asks list on too; netCapRefs only matter where
-// a platform repo is configured: an uplink's source file and drift.
+// netGrantRefs are the create authorities netGrants reads, netListRefs the
+// kinds it asks list on; netCapRefs only matter where a platform repo is
+// configured: an uplink's source file and drift.
 var (
-	netPolicyRefs = []ssarRef{ssarANP, ssarBANP, ssarEgressIP, ssarExtRoute}
-	netGrantRefs  = append([]ssarRef{ssarCUDN}, netPolicyRefs...)
-	netListRefs   = append([]ssarRef{ssarCUDN, ssarUplink, ssarNNS}, netPolicyRefs...)
+	netGrantRefs  = []ssarRef{ssarCUDN}
+	netListRefs   = []ssarRef{ssarCUDN, ssarUplink, ssarNNS, ssarANP, ssarBANP, ssarEgressIP, ssarExtRoute}
 	netCapRefs    = []ssarRef{ssarUplink}
 	netGrantKinds = []model.Kind{model.KindCUDN, model.KindNNCP, model.KindANP, model.KindBANP, model.KindEgressIP, model.KindExtRoute}
 )
@@ -106,16 +104,15 @@ func (s *Server) netGrants(ctx context.Context, id auth.Identity, c *cluster.Cli
 	return g
 }
 
-// sees admits the cluster-scoped kinds the caller's pulls show: each by its own
-// list right, each cluster-tier policy kind also needing create. A tenant's
+// sees admits the cluster-scoped kinds the caller's pulls show, each by its own
+// list right. A tenant's
 // shared network moves its NAD, which the namespaced half of the watermark sees.
 func (g netGrants) sees(gvr schema.GroupVersionResource) bool {
 	switch gvr {
 	case cluster.GVR(model.KindCUDN):
 		return g.list[ssarCUDN]
 	case cluster.GVR(model.KindANP), cluster.GVR(model.KindBANP), cluster.GVR(model.KindEgressIP), cluster.GVR(model.KindExtRoute):
-		ref := ssarRef{gvr.Group, gvr.Resource}
-		return g.create[ref] && g.list[ref]
+		return g.list[ssarRef{gvr.Group, gvr.Resource}]
 	}
 	return g.list[ssarUplink]
 }
