@@ -133,8 +133,11 @@ func TestProjectSyncViewKeepsWhatTheCallerLists(t *testing.T) {
 	view := func(allow func(*authzv1.ResourceAttributes) bool, p project.ProjectInfo, in model.ProjectSync) *model.ProjectSync {
 		t.Helper()
 		asked++
-		id := auth.Identity{Token: fmt.Sprint("tok-", asked), Username: "u"}
-		return srv.projectSyncView(context.Background(), id, newAsking(allow).c, p, in)
+		visible := map[string]bool{}
+		for _, ns := range p.Namespaces {
+			visible[ns] = true
+		}
+		return srv.projectSyncView(context.Background(), viewAsking(srv, fmt.Sprint("tok-", asked), visible, allow), p, in)
 	}
 
 	listsInDev := func(a *authzv1.ResourceAttributes) bool {
