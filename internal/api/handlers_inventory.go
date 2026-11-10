@@ -322,14 +322,15 @@ func (s *Server) handleOptions(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, optionsFor(v, all, s.clonesFrom(r.Context(), id, c, v, all.OSImages)))
 }
 
-// clonesFrom is, for each namespace outside the caller's projects holding an
-// OS image they may list, whether they may clone from it: a VM booting that
-// image clones it across namespaces, which CDI and the staging gate allow
-// only with datavolumes/source there. One review per namespace.
+// clonesFrom is, for each namespace holding an OS image the caller may list,
+// whether they may clone from it: a VM booting that image clones it, which
+// CDI and the staging gate allow only with datavolumes/source there. A
+// project namespace is asked too: its viewers may not clone, and the options
+// do not know the VM's namespace. One review per namespace.
 func (s *Server) clonesFrom(ctx context.Context, id auth.Identity, c *cluster.Client, v callerView, imgs []model.OSImage) map[string]bool {
 	var nss []string
 	for _, img := range imgs {
-		if !v.memo.ns[img.Namespace] && !slices.Contains(nss, img.Namespace) && v.lists(ssarDataSources, img.Namespace) {
+		if !slices.Contains(nss, img.Namespace) && v.lists(ssarDataSources, img.Namespace) {
 			nss = append(nss, img.Namespace)
 		}
 	}
@@ -358,7 +359,7 @@ func optionsFor(v callerView, all model.Options, clones map[string]bool) model.O
 		StorageClasses: listed(v, ssarStorageClasses, all.StorageClasses),
 	}
 	for _, img := range all.OSImages {
-		if v.lists(ssarDataSources, img.Namespace) && (v.memo.ns[img.Namespace] || clones[img.Namespace]) {
+		if v.lists(ssarDataSources, img.Namespace) && clones[img.Namespace] {
 			out.OSImages = append(out.OSImages, img)
 		}
 	}

@@ -43,6 +43,9 @@ type Access struct {
 }
 
 func (a Access) String() string {
+	if a.Group == model.KindDV.Group && a.Resource == model.KindDV.Plural && a.Subresource == "source" {
+		return "clone a disk from " + a.Namespace + " (create datavolumes/source there)"
+	}
 	what := a.Resource
 	if a.Subresource != "" {
 		what += "/" + a.Subresource

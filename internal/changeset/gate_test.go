@@ -573,8 +573,9 @@ func TestGateAsksToCloneFromAnotherNamespace(t *testing.T) {
 	r.asked = nil
 	r.refuse(func(a Access) bool { return a == clone("gamma") })
 	more := vm("Halted", "  - metadata: {name: web-more}\n    spec:\n      source:\n        snapshot: {name: snap, namespace: gamma}\n")
-	if _, err := c.StageUpdateManifest(id, proj, "vm", "alpha", "web", model.UpdateManifestRequest{YAML: more}); !errors.Is(err, model.ErrForbidden) {
-		t.Errorf("a new source the caller may not clone from: err = %v, want ErrForbidden", err)
+	if _, err := c.StageUpdateManifest(id, proj, "vm", "alpha", "web", model.UpdateManifestRequest{YAML: more}); !errors.Is(err, model.ErrForbidden) ||
+		!strings.Contains(err.Error(), "clone a disk from gamma") {
+		t.Errorf("a new source the caller may not clone from: err = %v, want ErrForbidden naming the clone", err)
 	}
 	if got := clones(r.questions()); !slices.Equal(got, []Access{clone("gamma")}) {
 		t.Errorf("an edit adding a source: asked %+v, want gamma alone", got)

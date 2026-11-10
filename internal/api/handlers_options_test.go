@@ -34,6 +34,8 @@ func TestOptionsFilteredPerCaller(t *testing.T) {
 			{Name: "private", Namespace: "team-b"},
 			// Listed, but booting it clones it, which the caller may not.
 			{Name: "uncloneable", Namespace: "list-only"},
+			// In a project namespace the caller views, not edits: the same.
+			{Name: "viewed", Namespace: "team-a"},
 		},
 	}
 	s.options.Put("all", all)
