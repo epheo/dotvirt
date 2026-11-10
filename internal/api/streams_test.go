@@ -11,7 +11,7 @@ import (
 	"github.com/epheo/dotvirt/internal/model"
 )
 
-// A cached visible set or verdict serves while younger than authTTL, and only
+// A cached view or verdict serves while younger than authTTL, and only
 // a backstop rebuild re-evaluates it once it ages out. In each mode, wherever
 // the entry was cached between two publishes, the first publish that finds it
 // expired must come within the documented bound; a period of the TTL itself

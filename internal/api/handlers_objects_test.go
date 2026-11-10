@@ -42,7 +42,7 @@ func TestSourceFilesPlatformObject(t *testing.T) {
 		Config:   Config{PlatformRepo: "https://forge/platform.git"},
 	})
 	id := auth.Identity{Token: "admin-token", Username: "admin"}
-	// A seeded visible set keeps projectsFor off the cluster; the platform repo
+	// A seeded view keeps projectsFor off the cluster; the platform repo
 	// needs no tenant namespace to resolve.
 	seedVisible(s, id.Token, map[string]bool{})
 	lookup := func(withPlatform bool) string {

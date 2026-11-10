@@ -184,13 +184,13 @@ type Config struct {
 	RepoAnnotation    string // namespace annotation holding the repo URL (release strips it)
 }
 
-// visibleTTL bounds a token's cached visible-namespace set and SSAR verdicts
+// visibleTTL bounds a token's cached verdicts, and the view derived from them,
 // while every RBAC watch runs. Freshness comes from the RBAC version stamps
 // (grantVersion, visLevels): the RBAC signal watches move them on every grant
 // change they observe, and the entry is invalidated lazily, that token and
 // that namespace only. The TTL is the safety net for what no watch observes (see
 // RunTTLBackstop), so it runs to minutes: each expiry costs a visibility probe
-// of one review per project namespace under the token. While a watch is not
+// of one review per project namespace a binding names the token in. While a watch is not
 // running, entries serve unwatchedTTL instead (authTTL). An expired entry is only
 // re-evaluated by a rebuild, which RunTTLBackstop causes for open streams, so an
 // unwatched change reaches an open frame within backstopBound(authTTL).
@@ -222,8 +222,8 @@ type Server struct {
 	bus           *eventbus.Bus         // change-version source for the version-stamped auth caches
 	resolver      *project.Resolver
 	repos         *git.RepoSet
-	visible       *ttlcache.Cache[visibleSet]       // per-token visible-namespace set, RBAC-version-stamped
-	cands         atomic.Pointer[candidates]        // the project namespaces every visible set is reviewed over
+	views         *ttlcache.Cache[viewMemo]         // per-token view, derived from ssar
+	cands         atomic.Pointer[candidates]        // project namespaces and projects at the last namespace version
 	ssar          *ttlcache.Cache[ssarVerdict]      // per-(token, question) SSAR verdict, RBAC-version-stamped
 	kinds         atomic.Pointer[kindIndex]         // discovery's answer for the repos' kinds
 	kindFill      *ttlcache.Cache[*kindIndex]       // single-flights its refresh
@@ -309,7 +309,7 @@ func NewServer(d Deps) *Server {
 		bus:           d.Bus,
 		resolver:      d.Resolver,
 		repos:         d.Repos,
-		visible:       ttlcache.New[visibleSet](visibleTTL),
+		views:         ttlcache.New[viewMemo](visibleTTL),
 		ssar:          ttlcache.New[ssarVerdict](visibleTTL),
 		kindFill:      ttlcache.New[*kindIndex](kindProbe),
 		proposals:     ttlcache.New[[]model.Proposal](proposalsCacheTTL),

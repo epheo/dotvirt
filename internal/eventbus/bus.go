@@ -195,9 +195,8 @@ func (b *Bus) BroadVersion(k Kind) uint64 {
 }
 
 // KeySeq counts k's keyed publishes, each of which marks its key with the
-// count it reached: a consumer that reads KeySeq, works, then asks MovedSince
-// with that reading learns every key published after it, and none it already
-// saw. Nil-safe (returns 0).
+// count it reached: a reading taken before work moves once any key moves
+// after it. Nil-safe (returns 0).
 func (b *Bus) KeySeq(k Kind) uint64 {
 	if b == nil {
 		return 0
@@ -222,27 +221,9 @@ func (b *Bus) KeyMark(k Kind, key string) uint64 {
 	return l.marks[key]
 }
 
-// MovedSince reports which of keys k published after since, a KeySeq reading.
-// Nil-safe (none).
-func (b *Bus) MovedSince(k Kind, since uint64, keys []string) []string {
-	if b == nil {
-		return nil
-	}
-	l := &b.keys[k]
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	var out []string
-	for _, key := range keys {
-		if l.marks[key] > since {
-			out = append(out, key)
-		}
-	}
-	return out
-}
-
 // Forget drops what k holds of key, so a kind keyed by something short-lived
 // does not grow without bound. Until key is published again it reads as never
-// published: KeyMark 0, KeyVersion restarted, absent from MovedSince. Forget a
+// published: KeyMark 0, KeyVersion restarted. Forget a
 // key only once no stamp of it read before its last publish can still serve,
 // and only of a kind whose consumers stamp KeyMark, which never re-equals.
 // Nil-safe.

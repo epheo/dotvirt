@@ -1,6 +1,7 @@
 package api
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -24,30 +25,19 @@ import (
 	"github.com/epheo/dotvirt/internal/ttlcache"
 )
 
-// visibleSet is a token's visible namespaces and what they were reviewed at,
-// so a grant move re-asks only what it can change: a cluster-wide move, or
-// the age of the last sweep, sweeps every candidate again; a move in one
-// namespace re-asks that namespace; a new project namespace is asked alone.
-// It keeps one verdict per visible namespace, never one per candidate: what
-// moved since comes from the bus (MovedSince).
-type visibleSet struct {
-	ns    map[string]bool // never mutated once cached
-	cands *candidates     // the project namespaces ns was reviewed over
-	wide  bool            // may get every namespace: every candidate is visible
-	// reads is what the token may list in each visible namespace, wideReads in
-	// all of them. Never mutated once cached.
+// viewMemo is a token's view as derived from the verdict cache (can), kept
+// until a level it depends on moves or the first verdict it read expires, so
+// the verdict cache stays the only place an answer is invalidated.
+type viewMemo struct {
+	ns    map[string]bool // the visible project namespaces; never mutated once cached
+	names bool            // may also list namespaces: every namespace is visible (AllNamespaces)
+	// reads is what the token may list in each visible namespace it was asked
+	// in, wideReads in all of them. Never mutated once cached.
 	reads     map[string]readSet
 	wideReads readSet
-	names     bool      // wide, and may list namespaces: every namespace is (AllNamespaces)
-	lv        visLevels // what the set was reconciled at
-
-	// swept is when the last sweep began, and sweptUnsettled whether right
-	// after a cluster-wide grant move: a verdict reviewed since ages from it
-	// all the same. unsettled is when each namespace reviewed right after a
-	// move in it was, which serves the short TTL from then (see unsettled).
-	swept          time.Time
-	sweptUnsettled bool
-	unsettled      map[string]time.Time
+	lv        visLevels
+	built     time.Time
+	until     time.Time
 }
 
 // readSet is the readKinds a token may list, one bit each.
@@ -59,87 +49,95 @@ var readKinds = []ssarRef{ssarVM, ssarFor(model.KindUDN), ssarFor(model.KindNAD)
 
 var allReads = readSet(1<<len(readKinds) - 1)
 
-func (r readSet) has(ref ssarRef) bool {
-	i := slices.Index(readKinds, ref)
-	return i >= 0 && r&(1<<i) != 0
-}
-
-func readSetOf(answer []bool) readSet {
-	var r readSet
-	for i, ok := range answer {
-		if ok {
-			r |= 1 << i
-		}
-	}
-	return r
-}
-
-// askReads is what the token may list in namespaces, past what it may list
-// everywhere (held). SubjectAccessReviews, not one rules review per namespace:
-// this decides what dotvirt serves from its own account, which the API's own
-// docs say a rules review must not.
-func askReads(ctx context.Context, c *cluster.Client, namespaces []string, held readSet) (map[string]readSet, error) {
-	out := make(map[string]readSet, len(namespaces))
-	for _, ns := range namespaces {
-		out[ns] = 0
-	}
-	for i, k := range readKinds {
-		if held&(1<<i) != 0 {
-			continue
-		}
-		allowed, err := c.CanIn(ctx, "list", k.group, k.resource, namespaces)
-		if err != nil {
-			return nil, err
-		}
-		for _, ns := range allowed {
-			out[ns] |= 1 << i
-		}
-	}
-	return out, nil
-}
-
-// askWideReads is what the token may list in every namespace.
-func askWideReads(ctx context.Context, c *cluster.Client) (readSet, error) {
-	answer := make([]bool, len(readKinds))
-	for i, k := range readKinds {
-		ok, err := c.Can(ctx, "list", k.group, k.resource, "")
-		if err != nil {
-			return 0, err
-		}
-		answer[i] = ok
-	}
-	return readSetOf(answer), nil
-}
-
-// callerView is what one token may see: the namespaces, and what it may list in each.
+// callerView is what one token is shown: the namespaces it may get, and what
+// it may list where, off its view for the kinds views read (readKinds) and
+// asked for any other where a RoleBinding names it. A failed review asked here
+// reads as no.
 type callerView struct {
 	names map[string]bool
-	set   visibleSet
+	memo  viewMemo
+	s     *Server // nil asks nothing past the memo
+	ctx   context.Context
+	id    auth.Identity
+	c     *cluster.Client
 }
 
 // lists reports whether the token may list ref in namespace.
 func (v callerView) lists(ref ssarRef, namespace string) bool {
-	return v.set.wideReads.has(ref) || v.set.reads[namespace].has(ref)
+	if ok, held := v.memo.lists(ref, namespace); held {
+		return ok
+	}
+	return len(v.ask(ref, []string{namespace})) == 1
 }
 
-// listsBacking is lists by the Kubernetes kind that backs a row. A kind that
-// narrows nothing here is not shown: unknown never opens anything.
+// listsIn is those of namespaces where the token may list ref, cold ones
+// asked at most authConcurrency at once.
+func (v callerView) listsIn(ref ssarRef, namespaces []string) []string {
+	var out, rest []string
+	for _, ns := range namespaces {
+		ok, held := v.memo.lists(ref, ns)
+		switch {
+		case !held:
+			rest = append(rest, ns)
+		case ok:
+			out = append(out, ns)
+		}
+	}
+	return append(out, v.ask(ref, rest)...)
+}
+
+// ask is those of namespaces where a review lets the token list ref.
+func (v callerView) ask(ref ssarRef, namespaces []string) []string {
+	if v.s == nil || len(namespaces) == 0 {
+		return nil
+	}
+	namespaces = v.s.boundOnly(v.id, namespaces)
+	qs := make([]question, len(namespaces))
+	for i, ns := range namespaces {
+		qs[i] = refQ(verbList, ref, ns)
+	}
+	got, _, _ := v.s.askEach(v.ctx, v.id, v.c, qs)
+	var out []string
+	for i, ok := range got {
+		if ok {
+			out = append(out, namespaces[i])
+		}
+	}
+	return out
+}
+
+// lists is what the view holds of whether the token may list ref in
+// namespace: held=false for a kind views do not read, or a namespace it was
+// not asked in.
+func (m viewMemo) lists(ref ssarRef, namespace string) (ok, held bool) {
+	i := slices.Index(readKinds, ref)
+	if i < 0 {
+		return false, false
+	}
+	if m.wideReads&(1<<i) != 0 {
+		return true, true
+	}
+	r, asked := m.reads[namespace]
+	return asked && r&(1<<i) != 0, asked
+}
+
+// listsBacking is lists by the Kubernetes kind that backs a row. A kind the
+// table does not name is not shown: unknown never opens anything.
 func (v callerView) listsBacking(backing, namespace string) bool {
 	_, k, ok := model.LookupKind(backing)
 	return ok && v.lists(ssarFor(k), namespace)
 }
 
-// visLevels are the bus levels a visible set depends on: cluster-wide grant
-// moves, the keyed grant sequences of both RBAC kinds (which namespaces moved
-// comes from them), and the project namespaces. Each is read before what it
-// covers, so a set stamped with them never misses a move they count.
-type visLevels struct{ cluster, seq, other, ns uint64 }
+// visLevels are the bus levels a view depends on: cluster-wide grant moves,
+// grant moves in project namespaces, and the project namespaces. A move in
+// any other namespace changes no answer a view holds. Each is read before
+// what it covers, so a view stamped with them never misses a move they count.
+type visLevels struct{ cluster, seq, ns uint64 }
 
 func (s *Server) visLevels() visLevels {
 	return visLevels{
 		cluster: s.bus.BroadVersion(eventbus.RBACChanged),
 		seq:     s.bus.KeySeq(eventbus.RBACChanged),
-		other:   s.bus.KeySeq(eventbus.OtherRBACChanged),
 		ns:      s.bus.Version(eventbus.NamespaceChanged),
 	}
 }
@@ -162,12 +160,12 @@ type grantStamp struct{ cluster, mark, other uint64 }
 // Namespace object the namespace itself's (dryRun).
 type grantStamps struct{ ns, obj grantStamp }
 
-// unwatchedTTL is how long a cached visible set or verdict serves while some
+// unwatchedTTL is how long a cached verdict serves while some
 // RBAC watch is not running: a grant move may then publish nothing, and this
 // age is all that bounds a revocation.
 const unwatchedTTL = 30 * time.Second
 
-// authTTL is how long a cached visible set or verdict serves now: visibleTTL
+// authTTL is how long a cached verdict serves now: visibleTTL
 // while every RBAC watch runs (clusterstate.RBACWatched) and RBACChanged
 // reports each grant move, unwatchedTTL otherwise. Read on every use, so a
 // watch failing shortens the entries already cached.
@@ -236,7 +234,7 @@ func (s *Server) userCluster(r *http.Request) (auth.Identity, *cluster.Client, e
 
 // projectsFor resolves the caller's projects: the project topology comes from the
 // SA-owned snapshot (shared, no per-request fetch), filtered to the namespaces the
-// caller's token may see (TTL-cached per token). The visible set is the sole
+// caller's token may see (TTL-cached per token). The view is the sole
 // per-user authorization input - a user never learns a project outside their RBAC.
 func (s *Server) projectsFor(ctx context.Context, id auth.Identity, c *cluster.Client) ([]project.ProjectInfo, error) {
 	visible, err := s.visibleFor(ctx, id, c)
@@ -273,151 +271,168 @@ func (s *Server) noVMs() bool {
 	return ok && !m.VMs
 }
 
-// visibleFor returns the namespaces id's token may get, cached by token: the
-// rule on the namespace itself, as kubectl get namespace answers it. What
-// shows inside one follows each kind's own list right (callerView). A token
-// that may get them all sees every candidate; one that may also list
-// namespaces sees every namespace's name, read off the SA's own watch
-// (AllNamespaces). Any other token's candidates, the snapshot's project
-// namespaces where a binding names it, are reviewed one by one. A failed
-// review is never cached: the next read asks again.
+// visibleFor is the namespaces viewFor shows.
 func (s *Server) visibleFor(ctx context.Context, id auth.Identity, c *cluster.Client) (map[string]bool, error) {
 	v, err := s.viewFor(ctx, id, c)
 	return v.names, err
 }
 
-// viewFor is visibleFor with what the token may list in each namespace.
+// viewFor is what id's token is shown, off its memoized view. A failed review
+// in the view fails the request, as a gate would; a failed one asked for
+// another kind hides what it covers.
 func (s *Server) viewFor(ctx context.Context, id auth.Identity, c *cluster.Client) (callerView, error) {
 	key := restfactory.TokenKey(id.Token)
 	lv := s.visLevels()
-	if e, ok := s.visible.Get(key); ok && e.lv == lv && s.fresh(e, time.Now()) {
-		return callerView{s.visibleNames(e), e}, nil
-	}
-	e, err := review(ctx, s.visible, key, lv, func(ctx context.Context) (visibleSet, error) {
-		prev, had := s.visible.Get(key)
-		e, err := s.reconcile(ctx, id, c, prev, had, lv)
+	m, ok := s.views.Get(key)
+	if now := time.Now(); !ok || m.lv != lv || !now.Before(m.until) || now.Sub(m.built) >= s.authTTL() {
+		var err error
+		m, err = review(ctx, s.views, key, lv, func(ctx context.Context) (viewMemo, error) {
+			m, err := s.deriveView(ctx, id, c, lv)
+			if err == nil {
+				s.views.Put(key, m)
+			}
+			return m, err
+		})
 		if err != nil {
-			return visibleSet{}, err
-		}
-		s.visible.Put(key, e)
-		return e, nil
-	})
-	if err != nil {
-		return callerView{}, s.reviewFailed(ctx, id, err)
-	}
-	return callerView{s.visibleNames(e), e}, nil
-}
-
-func (s *Server) visibleNames(e visibleSet) map[string]bool {
-	if e.names {
-		return s.state.AllNamespaces()
-	}
-	return e.ns
-}
-
-// fresh reports whether every verdict e holds may still serve at now.
-func (s *Server) fresh(e visibleSet, now time.Time) bool {
-	if now.Sub(e.swept) >= s.maxAge(e.sweptUnsettled) {
-		return false
-	}
-	for _, at := range e.unsettled {
-		if now.Sub(at) >= unwatchedTTL {
-			return false
+			return callerView{}, s.reviewFailed(ctx, id, err)
 		}
 	}
-	return true
+	names := m.ns
+	if m.names {
+		names = s.state.AllNamespaces()
+	}
+	return callerView{names: names, memo: m, s: s, ctx: ctx, id: id, c: c}, nil
 }
 
-// reconcile brings prev up to lv: a sweep when there is none, a cluster-wide
-// grant moved, or the sweep aged out; otherwise the namespaces whose grants
-// moved since prev, the project namespaces new since prev, and those whose
-// short TTL ran out are reviewed again, and the ones no longer projects
-// dropped.
-func (s *Server) reconcile(ctx context.Context, id auth.Identity, c *cluster.Client, prev visibleSet, had bool, lv visLevels) (visibleSet, error) {
+// askEach answers qs at most authConcurrency at once: each verdict, when the
+// first of them stops serving, and the first review that failed, whose
+// question reads as no.
+func (s *Server) askEach(ctx context.Context, id auth.Identity, c *cluster.Client, qs []question) ([]bool, time.Time, error) {
+	got := make([]bool, len(qs))
+	var (
+		wg    sync.WaitGroup
+		mu    sync.Mutex
+		first error
+		until = time.Now().Add(s.authTTL())
+		sem   = make(chan struct{}, authConcurrency)
+	)
+	tk := restfactory.TokenKey(id.Token)
+	for i, q := range qs {
+		if ok, served, held := s.cached(tk, q); held {
+			mu.Lock()
+			got[i] = ok
+			if served.Before(until) {
+				until = served
+			}
+			mu.Unlock()
+			continue
+		}
+		wg.Go(func() {
+			sem <- struct{}{}
+			defer func() { <-sem }()
+			ok, served, err := s.canUntil(ctx, id, c, q)
+			mu.Lock()
+			defer mu.Unlock()
+			if err != nil {
+				first = cmp.Or(first, err)
+				return
+			}
+			got[i] = ok
+			if served.Before(until) {
+				until = served
+			}
+		})
+	}
+	wg.Wait()
+	return got, until, first
+}
+
+// deriveView builds id's view at lv from the verdict cache. A namespace is
+// visible if the token may get it, as kubectl get namespace answers: every
+// project namespace for a token that may get them all, and every namespace's
+// name for one that may also list them; otherwise each project namespace a
+// binding may open (gateOnly), asked by name. Then what it may list in each,
+// cluster-wide first for a token that may get every namespace. Questions go
+// out at most authConcurrency at once.
+func (s *Server) deriveView(ctx context.Context, id auth.Identity, c *cluster.Client, lv visLevels) (viewMemo, error) {
+	m := viewMemo{lv: lv, built: time.Now()}
+	m.until = m.built.Add(s.authTTL())
+	ask := func(qs []question) ([]bool, error) {
+		got, until, err := s.askEach(ctx, id, c, qs)
+		if until.Before(m.until) {
+			m.until = until
+		}
+		return got, err
+	}
 	cands := s.candidates(lv.ns)
-	now := time.Now()
-	if !had || prev.cands == nil || prev.lv.cluster != lv.cluster || now.Sub(prev.swept) >= s.maxAge(prev.sweptUnsettled) {
-		return s.sweep(ctx, id, c, cands, lv)
+	wide, err := ask([]question{refQ(verbGet, ssarNamespace, "")})
+	if err != nil {
+		return viewMemo{}, err
 	}
-	next := prev
-	next.lv, next.cands = lv, cands
-	if prev.wide && prev.wideReads == allReads {
-		next.ns = cands.names
-		return next, nil
-	}
-	due := map[string]bool{}
-	for _, ns := range s.bus.MovedSince(eventbus.RBACChanged, prev.lv.seq, cands.list) {
-		due[ns] = true
-	}
-	for _, ns := range s.bus.MovedSince(eventbus.OtherRBACChanged, prev.lv.other, cands.list) {
-		due[ns] = true
-	}
-	if cands != prev.cands {
-		for _, ns := range cands.list {
-			if !prev.cands.names[ns] {
-				due[ns] = true
+	if wide[0] {
+		m.ns = cands.names
+		kinds := []question{refQ(verbList, ssarNamespace, "")}
+		for _, k := range readKinds {
+			kinds = append(kinds, refQ(verbList, k, ""))
+		}
+		got, err := ask(kinds)
+		if err != nil {
+			return viewMemo{}, err
+		}
+		m.names = got[0]
+		for i, ok := range got[1:] {
+			if ok {
+				m.wideReads |= 1 << i
+			}
+		}
+	} else {
+		gate := s.gateOnly(id, cands.list)
+		qs := make([]question, len(gate))
+		for i, ns := range gate {
+			qs[i] = question{Verb: verbGet, Resource: ssarNamespace.resource, Namespace: ns, Name: ns}
+		}
+		got, err := ask(qs)
+		if err != nil {
+			return viewMemo{}, err
+		}
+		m.ns = make(map[string]bool, len(gate))
+		for i, ns := range gate {
+			if got[i] {
+				m.ns[ns] = true
 			}
 		}
 	}
-	for ns, at := range prev.unsettled {
-		if now.Sub(at) >= unwatchedTTL && cands.names[ns] {
-			due[ns] = true
+	if m.wideReads == allReads {
+		return m, nil
+	}
+	type at struct {
+		ns   string
+		kind int
+	}
+	var (
+		qs    []question
+		where []at
+	)
+	m.reads = map[string]readSet{}
+	for _, ns := range s.boundOnly(id, slices.Sorted(maps.Keys(m.ns))) {
+		m.reads[ns] = 0
+		for i, k := range readKinds {
+			if m.wideReads&(1<<i) == 0 {
+				qs = append(qs, refQ(verbList, k, ns))
+				where = append(where, at{ns, i})
+			}
 		}
 	}
-	if len(due) == 0 && cands == prev.cands {
-		return next, nil
-	}
-	if prev.wide {
-		next.ns = cands.names
-		return s.refreshReads(ctx, id, c, next, prev, due)
-	}
-	start := time.Now()
-	allowed, err := c.CanGetNamespaces(ctx, s.gateOnly(id, slices.Sorted(maps.Keys(due))))
+	got, err := ask(qs)
 	if err != nil {
-		return visibleSet{}, err
+		return viewMemo{}, err
 	}
-	next.ns = make(map[string]bool, len(prev.ns)+len(allowed))
-	for ns := range prev.ns {
-		if cands.names[ns] && !due[ns] {
-			next.ns[ns] = true
+	for j, ok := range got {
+		if ok {
+			m.reads[where[j].ns] |= 1 << where[j].kind
 		}
 	}
-	for _, ns := range allowed {
-		next.ns[ns] = true
-	}
-	next.unsettled = make(map[string]time.Time, len(prev.unsettled))
-	for ns, at := range prev.unsettled {
-		if cands.names[ns] && !due[ns] {
-			next.unsettled[ns] = at
-		}
-	}
-	for ns := range due {
-		if s.unsettled(start, ns) {
-			next.unsettled[ns] = start
-		}
-	}
-	return s.refreshReads(ctx, id, c, next, prev, due)
-}
-
-// refreshReads re-asks what the token may list where its visibility or grants
-// moved, keeping the rest of prev.
-func (s *Server) refreshReads(ctx context.Context, id auth.Identity, c *cluster.Client, next, prev visibleSet, due map[string]bool) (visibleSet, error) {
-	ask := make([]string, 0, len(due))
-	reads := make(map[string]readSet, len(next.ns))
-	for ns := range next.ns {
-		if r, kept := prev.reads[ns]; kept && !due[ns] {
-			reads[ns] = r
-		} else {
-			ask = append(ask, ns)
-		}
-	}
-	fresh, err := askReads(ctx, c, s.boundOnly(id, ask), next.wideReads)
-	if err != nil {
-		return visibleSet{}, err
-	}
-	maps.Copy(reads, fresh)
-	next.reads = reads
-	return next, nil
+	return m, nil
 }
 
 // gateOnly is boundOnly for the gate, a review naming the namespace:
@@ -430,71 +445,29 @@ func (s *Server) gateOnly(id auth.Identity, namespaces []string) []string {
 	return s.boundOnly(id, namespaces)
 }
 
-// boundOnly narrows namespaces to those a RoleBinding names id in, so a user
-// costs reviews for where they belong, not for every namespace on the cluster.
-// For a list review, which names no object: a ClusterRoleBinding then reaches
-// everywhere, the cluster-wide review's answer, or nowhere. Not narrowed while
-// the RoleBinding watch is incomplete.
+// boundOnly narrows namespaces to those a RoleBinding names id in (bound).
 func (s *Server) boundOnly(id auth.Identity, namespaces []string) []string {
-	if !s.indexBindings || s.state == nil {
-		return namespaces
-	}
-	bound, ok := s.state.BoundNamespaces(id.Username, id.Groups)
+	b, ok := s.bound(id)
 	if !ok {
 		return namespaces
 	}
-	return slices.DeleteFunc(slices.Clone(namespaces), func(ns string) bool { return !bound[ns] })
+	return slices.DeleteFunc(slices.Clone(namespaces), func(ns string) bool { return !b[ns] })
 }
 
-// sweep reviews the token's visibility from scratch: whether it may get every
-// namespace (and list them too), else each candidate. The cluster-wide review
-// goes first, so a token holding it costs no per-namespace one.
-func (s *Server) sweep(ctx context.Context, id auth.Identity, c *cluster.Client, cands *candidates, lv visLevels) (visibleSet, error) {
-	e := visibleSet{cands: cands, lv: lv, swept: time.Now()}
-	wide, err := c.Can(ctx, "get", "", "namespaces", "")
-	if err != nil {
-		return visibleSet{}, err
+// bound is the namespaces a RoleBinding names id in, so a user costs reviews
+// for where they belong, not for every namespace on the cluster. For a list
+// review, which names no object, a ClusterRoleBinding reaches everywhere, the
+// cluster-wide review's answer, or nowhere. ok=false narrows nothing: no index,
+// or its watch incomplete.
+func (s *Server) bound(id auth.Identity) (map[string]bool, bool) {
+	if !s.indexBindings || s.state == nil {
+		return nil, false
 	}
-	if wide {
-		e.wide, e.ns = true, cands.names
-		if e.names, err = c.Can(ctx, "list", "", "namespaces", ""); err != nil {
-			return visibleSet{}, err
-		}
-	} else {
-		allowed, err := c.CanGetNamespaces(ctx, s.gateOnly(id, cands.list))
-		if err != nil {
-			return visibleSet{}, err
-		}
-		e.ns = make(map[string]bool, len(allowed))
-		for _, ns := range allowed {
-			e.ns[ns] = true
-		}
-	}
-	if e.wide {
-		if e.wideReads, err = askWideReads(ctx, c); err != nil {
-			return visibleSet{}, err
-		}
-	}
-	if e.wideReads != allReads {
-		if e.reads, err = askReads(ctx, c, s.boundOnly(id, slices.Collect(maps.Keys(e.ns))), e.wideReads); err != nil {
-			return visibleSet{}, err
-		}
-	}
-	if e.sweptUnsettled = s.unsettled(e.swept, ""); !e.wide && !e.sweptUnsettled {
-		for _, ns := range cands.list {
-			if s.unsettled(e.swept, ns) {
-				if e.unsettled == nil {
-					e.unsettled = map[string]time.Time{}
-				}
-				e.unsettled[ns] = e.swept
-			}
-		}
-	}
-	return e, nil
+	return s.state.BoundNamespaces(id.Username, id.Groups)
 }
 
-// candidates is the project namespaces visibility is reviewed over, one value
-// shared by every token's set until the namespaces move.
+// candidates is the project namespaces and their projects at one namespace
+// version, one value shared by every caller until the namespaces move.
 type candidates struct {
 	ver   uint64
 	list  []string
@@ -543,11 +516,18 @@ func (s *Server) candidates(ver uint64) *candidates {
 // review is returned, so a blip can never pin a denial. A gate answers the
 // error with s.reviewFailed; a UI signal or a filter reads it as no.
 func (s *Server) can(ctx context.Context, id auth.Identity, c *cluster.Client, q question) (bool, error) {
-	ver := grantStamps{ns: s.grantVersion(q.Namespace)}
-	k := strings.Join([]string{restfactory.TokenKey(id.Token), q.Verb, q.Group, q.Resource, q.Subresource, q.Namespace, q.Name}, "\x00")
-	if e, age, ok := s.ssar.GetAge(k); ok && e.ver == ver && age < s.maxAge(e.unsettled) {
-		return e.ok, nil
+	ok, _, err := s.canUntil(ctx, id, c, q)
+	return ok, err
+}
+
+// canUntil is can with when its verdict stops serving.
+func (s *Server) canUntil(ctx context.Context, id auth.Identity, c *cluster.Client, q question) (bool, time.Time, error) {
+	tk := restfactory.TokenKey(id.Token)
+	if ok, until, held := s.cached(tk, q); held {
+		return ok, until, nil
 	}
+	ver := grantStamps{ns: s.grantVersion(q.Namespace)}
+	k := verdictKey(tk, q)
 	e, err := review(ctx, s.ssar, k, ver, func(ctx context.Context) (ssarVerdict, error) {
 		start := time.Now()
 		ok, err := c.Review(ctx, authzv1.ResourceAttributes{
@@ -560,7 +540,26 @@ func (s *Server) can(ctx context.Context, id auth.Identity, c *cluster.Client, q
 		s.ssar.PutAt(k, e, start)
 		return e, nil
 	})
-	return e.ok, err
+	if err != nil {
+		return false, time.Time{}, err
+	}
+	return e.ok, time.Now().Add(s.maxAge(e.unsettled)), nil
+}
+
+// cached is q's verdict for the token keyed tk while it still serves, and
+// when it stops.
+func (s *Server) cached(tk string, q question) (ok bool, until time.Time, held bool) {
+	e, age, found := s.ssar.GetAge(verdictKey(tk, q))
+	if !found || e.ver != (grantStamps{ns: s.grantVersion(q.Namespace)}) || age >= s.maxAge(e.unsettled) {
+		return false, time.Time{}, false
+	}
+	return e.ok, time.Now().Add(s.maxAge(e.unsettled) - age), true
+}
+
+// verdictKey is where can caches q's verdict for the token keyed tk
+// (restfactory.TokenKey, computed once per batch: it hashes the token).
+func verdictKey(tk string, q question) string {
+	return strings.Join([]string{tk, q.Verb, q.Group, q.Resource, q.Subresource, q.Namespace, q.Name}, "\x00")
 }
 
 // saCached is the preamble of a catalog route: the caller's identity first

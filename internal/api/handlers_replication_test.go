@@ -129,7 +129,8 @@ func replicationVersion(t *testing.T, s *Server, token string) uint64 {
 	if err != nil {
 		t.Fatal(err)
 	}
-	return s.replicationWatermark(r.Context(), id, c, map[string]bool{"team-a-dev": true})
+	v := callerView{names: map[string]bool{"team-a-dev": true}, s: s, ctx: r.Context(), id: id, c: c}
+	return s.replicationWatermark(r.Context(), id, c, v)
 }
 
 func TestReplicationPlacementIsAskedOfTheCaller(t *testing.T) {

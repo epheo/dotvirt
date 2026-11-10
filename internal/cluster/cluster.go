@@ -10,7 +10,6 @@ import (
 	"net"
 	"net/url"
 	"sort"
-	"sync"
 	"time"
 
 	authzv1 "k8s.io/api/authorization/v1"
@@ -92,74 +91,6 @@ func clientsFor(cfg *rest.Config) (*Client, error) {
 	c.cfg = cfg
 	return c, nil
 }
-
-// CanIn reviews verb on group/resource in each of namespaces, at most
-// probeConcurrency at once, and returns those that allow it. A failed review
-// is an error, never a smaller set: a smaller set reads as lost access and
-// would be cached as the answer.
-func (c *Client) CanIn(ctx context.Context, verb, group, resource string, namespaces []string) ([]string, error) {
-	return c.reviewEach(ctx, verb+" "+resource, namespaces, func(ns string) authzv1.ResourceAttributes {
-		return authzv1.ResourceAttributes{Namespace: ns, Verb: verb, Group: group, Resource: resource}
-	})
-}
-
-// CanGetNamespaces returns those of namespaces whose Namespace object the token
-// may get. The review names the object, as kubectl get namespace does: a
-// ClusterRole's resourceNames only answers then.
-func (c *Client) CanGetNamespaces(ctx context.Context, namespaces []string) ([]string, error) {
-	return c.reviewEach(ctx, "get namespaces", namespaces, func(ns string) authzv1.ResourceAttributes {
-		return authzv1.ResourceAttributes{Namespace: ns, Name: ns, Verb: "get", Resource: "namespaces"}
-	})
-}
-
-func (c *Client) reviewEach(ctx context.Context, what string, namespaces []string, attrs func(string) authzv1.ResourceAttributes) ([]string, error) {
-	var (
-		mu       sync.Mutex
-		wg       sync.WaitGroup
-		out      []string
-		failed   int
-		firstErr error
-		next     = make(chan string)
-	)
-	for range min(probeConcurrency, len(namespaces)) {
-		wg.Go(func() {
-			for ns := range next {
-				if ctx.Err() != nil {
-					continue
-				}
-				ok, err := c.Review(ctx, attrs(ns))
-				mu.Lock()
-				switch {
-				case err != nil:
-					failed++
-					if firstErr == nil {
-						firstErr = err
-					}
-				case ok:
-					out = append(out, ns)
-				}
-				mu.Unlock()
-			}
-		})
-	}
-	for _, ns := range namespaces {
-		next <- ns
-	}
-	close(next)
-	wg.Wait()
-	if err := ctx.Err(); err != nil {
-		return nil, err
-	}
-	if failed > 0 {
-		return nil, fmt.Errorf("%s review failed in %d of %d namespaces: %w", what, failed, len(namespaces), firstErr)
-	}
-	sort.Strings(out)
-	return out, nil
-}
-
-// probeConcurrency bounds the per-namespace reviews one CanIn fans out, so a
-// token without cluster-wide VM read cannot burst the apiserver.
-const probeConcurrency = 8
 
 // VMListWatch is the List+Watch source for a cluster-wide VirtualMachine
 // reflector (run on the SA client). It backs clusterstate's snapshot so the read

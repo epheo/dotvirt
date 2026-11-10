@@ -2,127 +2,13 @@ package cluster
 
 import (
 	"context"
-	"errors"
-	"fmt"
-	"io"
-	"net/http"
-	"net/http/httptest"
 	"reflect"
-	"slices"
-	"sync/atomic"
 	"testing"
-	"time"
 
-	authzv1 "k8s.io/api/authorization/v1"
 	corev1 "k8s.io/api/core/v1"
-	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/runtime"
-	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/kubernetes/fake"
-	"k8s.io/client-go/rest"
-	k8stesting "k8s.io/client-go/testing"
 )
-
-// vmReadIn answers each list-virtualmachines SSAR by namespace: allowed in
-// the namespaces of allow, a review failure in those of fail, denied elsewhere
-// (the cluster-wide review included).
-func vmReadIn(kube *fake.Clientset, allow, fail []string) {
-	kube.PrependReactor("create", "selfsubjectaccessreviews", func(action k8stesting.Action) (bool, runtime.Object, error) {
-		ssar := action.(k8stesting.CreateAction).GetObject().(*authzv1.SelfSubjectAccessReview).DeepCopy()
-		ns := ssar.Spec.ResourceAttributes.Namespace
-		if slices.Contains(fail, ns) {
-			return true, nil, apierrors.NewServiceUnavailable("review backend down")
-		}
-		ssar.Status.Allowed = ns != "" && slices.Contains(allow, ns)
-		return true, ssar, nil
-	})
-}
-
-// CanIn keeps only the namespaces whose review allows.
-func TestCanIn(t *testing.T) {
-	kube := fake.NewSimpleClientset()
-	vmReadIn(kube, []string{"tenant-a", "tenant-c"}, nil)
-
-	c := &Client{kube: kube}
-	got, err := c.CanIn(context.Background(), "list", "kubevirt.io", "virtualmachines", []string{"tenant-c", "tenant-a", "tenant-b"})
-	if err != nil {
-		t.Fatalf("CanIn: %v", err)
-	}
-	if want := []string{"tenant-a", "tenant-c"}; !reflect.DeepEqual(got, want) {
-		t.Errorf("got %v, want %v (only namespaces granting VM read should survive)", got, want)
-	}
-}
-
-// TestCanInFailureIsAnError pins fail-closed without a false answer: one
-// failed review makes the whole set unknown. Returning the others would read
-// as lost access to the failed namespace and get cached as such.
-func TestCanInFailureIsAnError(t *testing.T) {
-	kube := fake.NewSimpleClientset()
-	vmReadIn(kube, []string{"tenant-a", "tenant-b"}, []string{"tenant-b"})
-
-	c := &Client{kube: kube}
-	got, err := c.CanIn(context.Background(), "list", "kubevirt.io", "virtualmachines", []string{"tenant-a", "tenant-b"})
-	if err == nil {
-		t.Fatalf("got %v with nil error; a failed review must fail the probe", got)
-	}
-	if !apierrors.IsServiceUnavailable(err) {
-		t.Errorf("err = %v; the review's own status must stay classifiable", err)
-	}
-}
-
-// TestCanInCanceled pins the cancel path: a done context is the answer,
-// never the reviews that happened to finish first.
-func TestCanInCanceled(t *testing.T) {
-	kube := fake.NewSimpleClientset()
-	ctx, cancel := context.WithCancel(context.Background())
-	kube.PrependReactor("create", "selfsubjectaccessreviews", func(action k8stesting.Action) (bool, runtime.Object, error) {
-		ssar := action.(k8stesting.CreateAction).GetObject().(*authzv1.SelfSubjectAccessReview).DeepCopy()
-		cancel()
-		ssar.Status.Allowed = true
-		return true, ssar, nil
-	})
-
-	c := &Client{kube: kube}
-	got, err := c.CanIn(ctx, "list", "kubevirt.io", "virtualmachines", []string{"tenant-a", "tenant-b", "tenant-c"})
-	if !errors.Is(err, context.Canceled) {
-		t.Fatalf("got %v, %v; want context.Canceled", got, err)
-	}
-}
-
-// TestCanInBoundsConcurrency pins the probe fan-out: parallel, so a
-// many-namespace tenant is not a serial chain of reviews, and bounded. A real
-// client over HTTP, since the fake clientset serializes every action.
-func TestCanInBoundsConcurrency(t *testing.T) {
-	var inFlight, peak atomic.Int32
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		n := inFlight.Add(1)
-		defer inFlight.Add(-1)
-		for p := peak.Load(); n > p && !peak.CompareAndSwap(p, n); p = peak.Load() {
-		}
-		time.Sleep(5 * time.Millisecond)
-		_, _ = io.WriteString(w, `{"kind":"SelfSubjectAccessReview","apiVersion":"authorization.k8s.io/v1","status":{"allowed":true}}`)
-	}))
-	defer srv.Close()
-	kube, err := kubernetes.NewForConfig(&rest.Config{Host: srv.URL, QPS: -1})
-	if err != nil {
-		t.Fatal(err)
-	}
-	candidates := make([]string, 40)
-	for i := range candidates {
-		candidates[i] = fmt.Sprintf("tenant-%02d", i)
-	}
-
-	c := &Client{kube: kube}
-	got, err := c.CanIn(context.Background(), "list", "kubevirt.io", "virtualmachines", candidates)
-	if err != nil || len(got) != len(candidates) {
-		t.Fatalf("got %d namespaces, err %v; want all %d", len(got), err, len(candidates))
-	}
-	if p := peak.Load(); p < 2 || p > probeConcurrency {
-		t.Errorf("peak concurrent reviews = %d, want 2..%d", p, probeConcurrency)
-	}
-}
 
 // TestSetNodeMaintenanceRoundTrip drives enter/exit through the fake's real
 // strategic-merge patching: one patch must flip the annotation and cordon
@@ -248,20 +134,5 @@ func TestListNodeLabelsCarriesPodSubnets(t *testing.T) {
 	got, err := c.ListNodeLabels(context.Background())
 	if err != nil || len(got) != 1 || got[0].Labels["zone"] != "a" || got[0].PodSubnets != `{"default":["10.128.0.0/23"]}` {
 		t.Fatalf("ListNodeLabels = %+v, %v", got, err)
-	}
-}
-
-// A ClusterRole's resourceNames answers only a review that names the object.
-func TestCanGetNamespacesNamesTheObject(t *testing.T) {
-	kube := fake.NewSimpleClientset()
-	kube.PrependReactor("create", "selfsubjectaccessreviews", func(a k8stesting.Action) (bool, runtime.Object, error) {
-		ssar := a.(k8stesting.CreateAction).GetObject().(*authzv1.SelfSubjectAccessReview)
-		ra := ssar.Spec.ResourceAttributes
-		ssar.Status.Allowed = ra.Verb == "get" && ra.Group == "" && ra.Resource == "namespaces" && ra.Name == ra.Namespace && ra.Name == "mine"
-		return true, ssar, nil
-	})
-	got, err := (&Client{kube: kube}).CanGetNamespaces(context.Background(), []string{"mine", "theirs"})
-	if err != nil || !reflect.DeepEqual(got, []string{"mine"}) {
-		t.Errorf("got %v, %v", got, err)
 	}
 }

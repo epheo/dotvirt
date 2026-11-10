@@ -126,30 +126,62 @@ func readsVMsIn(nss ...string) func(*authzv1.ResourceAttributes) bool {
 	}
 }
 
-// seedVisibleAt caches ns as tok's visible set at the current levels, swept
-// at swept, so a test's reads stay off the visibility reviews, and off the
-// snapshot when the server has none.
+// seedVisibleAt caches ns as tok's view at the current levels, derived at
+// swept, each kind listable everywhere, so a test's reads stay off the
+// visibility reviews, and off the snapshot when the server has none.
 func seedVisibleAt(s *Server, tok string, ns map[string]bool, swept time.Time) {
-	lv := s.visLevels()
-	cands := &candidates{ver: lv.ns, names: map[string]bool{}}
-	if s.state != nil {
-		cands = s.candidates(lv.ns)
-	}
-	s.visible.Put(restfactory.TokenKey(tok), visibleSet{ns: ns, wideReads: allReads, cands: cands, lv: lv, swept: swept})
+	s.views.Put(restfactory.TokenKey(tok), viewMemo{ns: ns, wideReads: allReads, lv: s.visLevels(), built: swept, until: swept.Add(visibleTTL)})
 }
 
 func seedVisible(s *Server, tok string, ns map[string]bool) { seedVisibleAt(s, tok, ns, time.Now()) }
 
-// seedVisibleWithReads caches ns as tok's visible set, each listable, and
+// seedVisibleWithReads caches ns as tok's view, each listable there, and
 // nothing cluster-wide.
 func seedVisibleWithReads(s *Server, tok string, ns map[string]bool) {
 	seedVisible(s, tok, ns)
-	e, _ := s.visible.Get(restfactory.TokenKey(tok))
-	e.wideReads, e.reads = 0, map[string]readSet{}
+	m, _ := s.views.Get(restfactory.TokenKey(tok))
+	m.wideReads, m.reads = 0, map[string]readSet{}
 	for n := range ns {
-		e.reads[n] = allReads
+		m.reads[n] = allReads
 	}
-	s.visible.Put(restfactory.TokenKey(tok), e)
+	s.views.Put(restfactory.TokenKey(tok), m)
+}
+
+// ageVerdicts moves tok's cached verdicts on qs back by age, and its view to
+// when the first of them stops serving, as deriveView would have stamped it.
+func ageVerdicts(s *Server, tok string, age time.Duration, qs ...question) {
+	key := restfactory.TokenKey(tok)
+	m, held := s.views.Get(key)
+	for _, q := range qs {
+		k := verdictKey(restfactory.TokenKey(tok), q)
+		if v, at, ok := s.ssar.GetAge(k); ok {
+			s.ssar.PutAt(k, v, time.Now().Add(-at-age))
+			if served := time.Now().Add(s.maxAge(v.unsettled) - at - age); held && served.Before(m.until) {
+				m.until = served
+			}
+		}
+	}
+	if held {
+		s.views.Put(key, m)
+	}
+}
+
+// wideQuestions is what a sweep of a token seeing every namespace asks.
+func wideQuestions() []question {
+	qs := []question{refQ(verbGet, ssarNamespace, ""), refQ(verbList, ssarNamespace, "")}
+	for _, k := range readKinds {
+		qs = append(qs, refQ(verbList, k, ""))
+	}
+	return qs
+}
+
+// nsQuestions is what a sweep asks of a token in ns: the gate and each kind.
+func nsQuestions(ns string) []question {
+	qs := []question{{Verb: verbGet, Resource: ssarNamespace.resource, Namespace: ns, Name: ns}}
+	for _, k := range readKinds {
+		qs = append(qs, refQ(verbList, k, ns))
+	}
+	return qs
 }
 
 func projectNS(name string) *corev1.Namespace {
@@ -238,7 +270,7 @@ func visibleOf(t *testing.T, s *Server, tok string, c *cluster.Client) map[strin
 	return got
 }
 
-// TestVisibleForCachesPerToken pins the hot-path contract: a token's visible set
+// TestVisibleForCachesPerToken pins the hot-path contract: a token's view
 // is reviewed once and every same-level read after that is a pure cache hit -
 // a request burst must not fan out into per-request reviews.
 func TestVisibleForCachesPerToken(t *testing.T) {
@@ -356,7 +388,7 @@ func TestVisibleForSharesOneProbe(t *testing.T) {
 	}
 }
 
-// While every RBAC watch runs, a cached visible set serves for minutes; once
+// While every RBAC watch runs, a cached view serves for minutes; once
 // one fails, the same entry serves only seconds, so a revocation the watches
 // cannot report waits no longer than it did before them. A snapshot whose
 // watches never ran keeps the short TTL throughout.
@@ -420,12 +452,11 @@ func TestUnsettledReviewsServeTheShortTTL(t *testing.T) {
 	c, reviews := ssarCountingClient(func(*authzv1.ResourceAttributes) bool { return true })
 	visibleOf(t, s, "tok-alice", c)
 	key := restfactory.TokenKey("tok-alice")
-	e, ok := s.visible.Get(key)
-	if !ok || !e.sweptUnsettled {
-		t.Fatalf("a sweep right after a grant move cached %+v (ok=%v), want it unsettled", e, ok)
+	m, ok := s.views.Get(key)
+	if !ok || m.until.Sub(m.built) > unwatchedTTL+time.Second {
+		t.Fatalf("a sweep right after a grant move cached %+v (ok=%v), want it to serve the short TTL", m, ok)
 	}
-	e.swept = time.Now().Add(-time.Minute)
-	s.visible.Put(key, e)
+	ageVerdicts(s, "tok-alice", time.Minute, wideQuestions()...)
 	if visibleOf(t, s, "tok-alice", c); *reviews != 2*wideSweep {
 		t.Fatalf("a minute-old unsettled entry: %d reviews, want a second sweep", *reviews)
 	}
@@ -953,45 +984,16 @@ var wideSweep = 2 + len(readKinds)
 
 // Seeing a namespace is not seeing all it holds: each row asks its own kind.
 func TestAViewNarrowsByKind(t *testing.T) {
-	vmsOnly := callerView{set: visibleSet{reads: map[string]readSet{"a": readSetOf([]bool{true, false, false, false, false})}}}
+	vmsOnly := callerView{memo: viewMemo{reads: map[string]readSet{"a": 1}}}
 	if !vmsOnly.lists(ssarVM, "a") || vmsOnly.lists(ssarNetpol, "a") || vmsOnly.lists(ssarVM, "b") {
-		t.Errorf("a namespace reader's rights: %+v", vmsOnly.set.reads)
+		t.Errorf("a namespace reader's rights: %+v", vmsOnly.memo.reads)
 	}
 	if vmsOnly.listsBacking("no-such-kind", "a") {
 		t.Error("an unknown backing was shown")
 	}
-	wide := callerView{set: visibleSet{wideReads: allReads}}
+	wide := callerView{memo: viewMemo{wideReads: allReads}}
 	if !wide.lists(ssarNetpol, "anywhere") || !wide.listsBacking(model.KindUDN.Kind, "anywhere") {
 		t.Error("a cluster-wide reader was narrowed")
-	}
-}
-
-// A grant move in one namespace re-reads that namespace alone.
-func TestReadsAreKeptWhereNothingMoved(t *testing.T) {
-	prev := visibleSet{reads: map[string]readSet{"kept": 1, "moved": 1}}
-	next := visibleSet{ns: map[string]bool{"kept": true, "moved": true}}
-	token := newAsking(func(*authzv1.ResourceAttributes) bool { return false })
-	got, err := (&Server{}).refreshReads(context.Background(), auth.Identity{}, token.c, next, prev, map[string]bool{"moved": true})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if asked := token.take(); !slices.Equal(asked, slices.Repeat([]string{"moved"}, len(readKinds))) {
-		t.Errorf("asked %v", asked)
-	}
-	if got.reads["kept"] != 1 || got.reads["moved"] != 0 {
-		t.Errorf("reads = %v", got.reads)
-	}
-}
-
-// What a token may list everywhere is not asked again per namespace.
-func TestAskReadsSkipsWhatIsHeldEverywhere(t *testing.T) {
-	token := newAsking(func(*authzv1.ResourceAttributes) bool { return true })
-	got, err := askReads(context.Background(), token.c, []string{"a"}, allReads&^1)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if asked := token.take(); !slices.Equal(asked, []string{"a"}) || got["a"] != 1 {
-		t.Errorf("asked %v, reads %v", asked, got)
 	}
 }
 
@@ -1000,8 +1002,9 @@ func TestVMRoutesNeedVMRights(t *testing.T) {
 	fc := newFakeCluster(t)
 	fc.readsVMs = tenantReadsTeamA
 	s := fc.server(nil, Config{})
-	s.visible.Put(restfactory.TokenKey(tenantToken), visibleSet{
-		ns: map[string]bool{"team-a-dev": true}, cands: s.candidates(s.visLevels().ns), lv: s.visLevels(), swept: time.Now(),
+	now := time.Now()
+	s.views.Put(restfactory.TokenKey(tenantToken), viewMemo{
+		ns: map[string]bool{"team-a-dev": true}, lv: s.visLevels(), built: now, until: now.Add(visibleTTL),
 		reads: map[string]readSet{"team-a-dev": 0},
 	})
 	wantStatus(t, do(s, tenantToken, http.MethodGet, "/api/vms/team-a-dev/web/manifest", ""), http.StatusNotFound)
