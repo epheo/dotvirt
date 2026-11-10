@@ -19,6 +19,8 @@ import (
 	"github.com/epheo/dotvirt/internal/draft"
 	"github.com/epheo/dotvirt/internal/git"
 	"github.com/epheo/dotvirt/internal/model"
+	"github.com/epheo/dotvirt/internal/project"
+	"github.com/epheo/dotvirt/pkg/forge"
 )
 
 // draftsRig is a server over a real coordinator and its store. The tenant
@@ -173,5 +175,47 @@ func TestDraftsAnswerEveryDraftOfTheCaller(t *testing.T) {
 	}
 	if calls := g.fc.seen(); len(calls) > 0 {
 		t.Errorf("drafts read the cluster beyond its reviews: %q", calls)
+	}
+}
+
+// A PR the user opened in the forge on the head dotvirt pushed takes the
+// changes off their draft once the lane lists it; one on another head does
+// not.
+func TestDraftsAdoptThePROpenedOnThePushedHead(t *testing.T) {
+	g := newDraftsRig(t, false)
+	g.stage(t, "tenant", "team-a")
+	entries, err := g.store.List("tenant", "team-a")
+	if err != nil || len(entries) != 1 {
+		t.Fatalf("staged: %v %+v", err, entries)
+	}
+	branch := g.s.reader.ProposedBranch(auth.Identity{Username: "tenant"}, project.ProjectInfo{Name: "team-a"})
+	if err := g.store.SetProposal("tenant", "team-a", draft.Proposal{
+		Repo: forge.NormalizeRepoURL(g.repo["team-a"]), Branch: branch, Head: "pushed", Entries: entries,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	lane := func(head string) {
+		g.s.proposals.Put("team-a", []model.Proposal{{Project: "team-a", PRNumber: 9, Branch: branch, Head: head}})
+	}
+
+	// team-a's prune warning keeps it listed: the count is what moves.
+	staged := func() int {
+		for _, d := range g.drafts(t, "tenant").Drafts {
+			if d.Project == "team-a" {
+				return d.Draft.Count
+			}
+		}
+		return 0
+	}
+	lane("moved")
+	if n := staged(); n != 1 {
+		t.Fatalf("a PR on another head adopted the draft: %d staged", n)
+	}
+	lane("pushed")
+	if n := staged(); n != 0 {
+		t.Fatalf("the PR on the pushed head left %d staged", n)
+	}
+	if rec, _, _ := g.store.Proposal("tenant", "team-a"); rec.PR != 9 {
+		t.Errorf("record PR = %d, want 9", rec.PR)
 	}
 }
