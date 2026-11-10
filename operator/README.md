@@ -493,8 +493,15 @@ their own change.
 
 - dotvirt pushes the branch and answers with the forge's compare link;
 - the requester opens the PR there, as themselves: the forge refuses their own approval;
-- the PR they open on that branch is adopted: its changes leave their draft, and later proposes extend it;
+- a PR opened on the head dotvirt pushed is adopted, from the forge webhook or the lane's refresh: its changes leave the draft, and later proposes extend it;
+- one merged before dotvirt saw it open settles the draft the same way;
 - dotvirt never opens, reopens or edits a PR.
 
 Protect `dotvirt/proposed/**` in the forge so only dotvirt's account pushes there:
 otherwise anyone who may push could put content into a PR and approve it.
+
+The guarantee holds only while the requester is the PR's poster.
+Anyone who may read the repo can open a PR from another user's pushed branch.
+The requester could then approve their own change.
+dotvirt adopts that PR all the same, as it matches the branch and head.
+So require approvals from a reviewer team, or another rule the forge enforces, beyond "not the poster".
