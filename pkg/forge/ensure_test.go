@@ -246,19 +246,21 @@ func TestRepoExistsKeepsTheStatus(t *testing.T) {
 	}
 }
 
-// PrivatizeOrgRepos pages through the org and makes only its public repos
-// private.
+// PrivatizeOrgRepos pages through the org, makes only its public repos
+// private, and goes on past a repo that refuses the change.
 func TestPrivatizeOrgRepos(t *testing.T) {
 	pages := map[string]string{
-		"1": `[{"name":"a","private":false},{"name":"b","private":true}]`,
+		"1": `[{"name":"a","private":false},{"name":"b","private":true},{"name":"locked","private":false}]`,
 		"2": `[{"name":"c","private":false}]`,
 	}
 	var patched []string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/orgs/dotvirt/repos":
-			w.Header().Set("X-Total-Count", "3")
+			w.Header().Set("X-Total-Count", "4")
 			_, _ = w.Write([]byte(pages[r.URL.Query().Get("page")]))
+		case r.Method == http.MethodPatch && r.URL.Path == "/api/v1/repos/dotvirt/locked":
+			w.WriteHeader(http.StatusForbidden)
 		case r.Method == http.MethodPatch:
 			patched = append(patched, r.URL.Path)
 			_, _ = w.Write([]byte(`{}`))
@@ -270,12 +272,15 @@ func TestPrivatizeOrgRepos(t *testing.T) {
 	defer srv.Close()
 
 	c := NewFactory(srv.URL, StaticToken("tok"), false, "").For("http://forge/dotvirt/platform.git")
-	n, err := c.PrivatizeOrgRepos()
+	n, failed, err := c.PrivatizeOrgRepos()
 	if err != nil {
 		t.Fatal(err)
 	}
 	want := []string{"/api/v1/repos/dotvirt/a", "/api/v1/repos/dotvirt/c"}
 	if n != 2 || len(patched) != 2 || patched[0] != want[0] || patched[1] != want[1] {
 		t.Errorf("changed %d, patched %v, want %v", n, patched, want)
+	}
+	if len(failed) != 1 || failed["locked"] == nil {
+		t.Errorf("failed = %v, want only locked", failed)
 	}
 }

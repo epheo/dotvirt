@@ -13,6 +13,7 @@ import (
 
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/types"
@@ -451,21 +452,29 @@ func TestPlatformRepoEnsuresManagedOrg(t *testing.T) {
 	}
 }
 
-// A managed forge's org holds only dotvirt's repos: the public ones are made
-// private, once per operator process, and private ones are left alone.
+// A managed forge's org holds only dotvirt's repos: once the workload is
+// ready, the public ones are made private, once per operator process. A repo
+// that refuses is left, a failed listing is retried, and neither touches the
+// platform repo's condition.
 func TestManagedForgeReposMadePrivateOnce(t *testing.T) {
 	dv := managedForgeCR()
 	var listings int
+	listFails := true
 	var patched []string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case r.Method == http.MethodGet && (r.URL.Path == "/api/v1/orgs/dotvirt" || r.URL.Path == "/api/v1/repos/dotvirt/platform"):
-			w.WriteHeader(http.StatusOK)
 			_, _ = w.Write([]byte(`{}`))
 		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/orgs/dotvirt/repos":
 			listings++
-			w.Header().Set("X-Total-Count", "3")
-			_, _ = w.Write([]byte(`[{"name":"platform","private":false},{"name":"team-a","private":true},{"name":"team-b","private":false}]`))
+			if listFails {
+				w.WriteHeader(http.StatusBadGateway)
+				return
+			}
+			w.Header().Set("X-Total-Count", "4")
+			_, _ = w.Write([]byte(`[{"name":"platform","private":false},{"name":"team-a","private":true},{"name":"locked","private":false},{"name":"team-b","private":false}]`))
+		case r.Method == http.MethodPatch && r.URL.Path == "/api/v1/repos/dotvirt/locked":
+			w.WriteHeader(http.StatusForbidden)
 		case r.Method == http.MethodPatch:
 			body, _ := io.ReadAll(r.Body)
 			if string(body) != `{"private":true}` {
@@ -484,20 +493,30 @@ func TestManagedForgeReposMadePrivateOnce(t *testing.T) {
 	}
 	r := newReconciler(testBuilder(t).WithObjects(dv, cred).Build(), depsOK)
 	r.forgeAPIBase = func(*dotvirtv1alpha1.Dotvirt) string { return srv.URL }
-
-	for range 2 {
+	pass := func() {
+		t.Helper()
 		if _, err := r.reconcilePlatformRepo(context.Background(), dv, nil); err != nil {
 			t.Fatal(err)
 		}
+		if repo := cond(dv, dotvirtv1alpha1.ConditionForgeRepoReady); repo == nil || repo.Status != metav1.ConditionTrue {
+			t.Errorf("ForgeRepoReady = %+v, want True", repo)
+		}
 	}
+
+	pass()
+	if listings != 0 {
+		t.Errorf("listed %d times before the workload was ready, want none", listings)
+	}
+	meta.SetStatusCondition(&dv.Status.Conditions, metav1.Condition{Type: dotvirtv1alpha1.ConditionWorkloadReady, Status: metav1.ConditionTrue, Reason: "Ready"})
+	pass()
+	listFails = false
+	pass()
+	pass()
 	if want := []string{"/api/v1/repos/dotvirt/platform", "/api/v1/repos/dotvirt/team-b"}; !slices.Equal(patched, want) {
 		t.Errorf("patched %v, want %v", patched, want)
 	}
-	if listings != 1 {
-		t.Errorf("listed the org's repos %d times, want once per process", listings)
-	}
-	if repo := cond(dv, dotvirtv1alpha1.ConditionForgeRepoReady); repo == nil || repo.Status != metav1.ConditionTrue {
-		t.Errorf("ForgeRepoReady = %+v, want True", repo)
+	if listings != 2 {
+		t.Errorf("listed the org's repos %d times, want the failed listing and one more", listings)
 	}
 }
 

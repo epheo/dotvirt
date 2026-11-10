@@ -222,29 +222,45 @@ func (r *DotvirtReconciler) ensurePlatformRepo(ctx context.Context, dv *dotvirtv
 		logf.FromContext(ctx).Info("created platform repo", "repo", dv.Spec.Forge.PlatformRepo)
 	}
 	if dv.Spec.Forge.Managed {
-		return r.privatizeOnce(ctx, dv, client)
+		r.privatizeOnce(ctx, dv, client)
 	}
 	return nil
 }
 
+// privatizeKey is one managed install's forge org.
+type privatizeKey struct {
+	install types.NamespacedName
+	owner   string
+}
+
 // privatizeOnce makes every repo of a managed forge's owner org private, once
-// per operator process: the org holds only dotvirt's repos, and a public one
-// is readable by anyone who reaches the forge. Once bounds the cost to one
-// listing per start. An external forge's repos are its admins' to set.
-func (r *DotvirtReconciler) privatizeOnce(ctx context.Context, dv *dotvirtv1alpha1.Dotvirt, client *forge.Client) error {
-	key := types.NamespacedName{Namespace: dv.Namespace, Name: dv.Name}
+// per operator process and org: the org holds only dotvirt's repos, and a
+// public one is readable by anyone who reaches the forge. It waits for the
+// workload to be ready, so an operand still creating public repos is gone
+// first. It never fails the platform repo's condition: a failed listing is
+// retried on a later pass, a repo that refuses the change is logged and left.
+// An external forge's repos are its admins' to set.
+func (r *DotvirtReconciler) privatizeOnce(ctx context.Context, dv *dotvirtv1alpha1.Dotvirt, client *forge.Client) {
+	if !meta.IsStatusConditionTrue(dv.Status.Conditions, dotvirtv1alpha1.ConditionWorkloadReady) {
+		return
+	}
+	key := privatizeKey{types.NamespacedName{Namespace: dv.Namespace, Name: dv.Name}, client.Owner()}
 	if _, done := r.privatized.Load(key); done {
-		return nil
+		return
 	}
-	n, err := client.PrivatizeOrgRepos()
-	if err != nil {
-		return fmt.Errorf("make the forge's repos private: %w", err)
-	}
+	log := logf.FromContext(ctx)
+	n, failed, err := client.PrivatizeOrgRepos()
 	if n > 0 {
-		logf.FromContext(ctx).Info("made public repos private", "count", n)
+		log.Info("made public repos private", "org", key.owner, "count", n)
+	}
+	for repo, ferr := range failed {
+		log.Error(ferr, "could not make a public repo private", "org", key.owner, "repo", repo)
+	}
+	if err != nil {
+		log.Error(err, "list the forge's repos to make them private; retrying on a later pass", "org", key.owner)
+		return
 	}
 	r.privatized.Store(key, struct{}{})
-	return nil
 }
 
 // forgejoExposure exposes the managed Forgejo off-cluster so its UI + PRs are reviewable.
