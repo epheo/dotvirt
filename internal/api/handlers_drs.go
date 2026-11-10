@@ -1,6 +1,7 @@
 package api
 
 import (
+	"fmt"
 	"log"
 	"net/http"
 
@@ -80,6 +81,11 @@ func (s *Server) handleDRSEnable(w http.ResponseWriter, r *http.Request) {
 	}
 	if !s.gateServed(w, r, model.KindSub) || !s.gateServed(w, r, model.KindOpGroup) ||
 		spec.InstallPSI && !s.gateServed(w, r, model.KindMachCfg) {
+		return
+	}
+	// Rescheduling moves VMs alone: a cluster without KubeVirt has none.
+	if s.noVMs() {
+		fail(w, fmt.Errorf("%w: this cluster runs no VMs (no KubeVirt), so there is nothing to rebalance", model.ErrConflict))
 		return
 	}
 	sc, ok := s.platformScopeGated(w, r)
