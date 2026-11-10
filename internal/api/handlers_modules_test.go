@@ -50,7 +50,34 @@ func TestModulesAnswerWhatTheClusterServes(t *testing.T) {
 	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
 		t.Fatal(err)
 	}
-	if got != (model.Modules{VMs: true}) {
+	// Discovery did not answer for OLM's kinds: only a known no hides.
+	if got != (model.Modules{VMs: true, OLM: true, MachineConfig: true}) {
 		t.Errorf("modules = %+v", got)
+	}
+}
+
+// Rebalancing installs through OLM and its PSI option adds a MachineConfig:
+// the modules say which this cluster serves, so the web can say why neither
+// is offered rather than read a refused capability as a missing right.
+func TestModulesSayWhatTheClusterCanInstall(t *testing.T) {
+	for _, c := range []struct {
+		name          string
+		serves        []model.Kind
+		olm, machCfgs bool
+	}{
+		{"no OLM", []model.Kind{model.KindNS}, false, false},
+		{"OLM, no machine config", []model.Kind{model.KindNS, model.KindSub, model.KindOpGroup}, true, false},
+		{"both", []model.Kind{model.KindNS, model.KindSub, model.KindOpGroup, model.KindMachCfg}, true, true},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			fc := newFakeCluster(t)
+			fc.serveKinds(c.serves...)
+			s := fc.server(nil, Config{})
+			s.modules = knownModules(t, true)
+			got := decodeBody[model.Modules](t, do(s, adminToken, http.MethodGet, "/api/modules", ""))
+			if got.OLM != c.olm || got.MachineConfig != c.machCfgs {
+				t.Errorf("modules = %+v, want olm %v, machineConfig %v", got, c.olm, c.machCfgs)
+			}
+		})
 	}
 }

@@ -1657,6 +1657,11 @@ const novms = {
 // project network to create.
 const nonetworks = { ...base, modules: { networks: false } };
 
+// A cluster that cannot install rebalancing (MicroShift): no OLM, no
+// MachineConfig. And one with OLM but no MachineConfig, so no PSI.
+const noolm = { ...base, modules: { olm: false, machineConfig: false } };
+const nomachineconfig = { ...base, modules: { machineConfig: false } };
+
 // ── replicated storage: a placement with one of each state ─────────────────
 const GIB = 1024 ** 3;
 const copy = (node, state = 'in-sync', extra = {}) => ({
@@ -1926,6 +1931,8 @@ export const scenarios = {
 	replicatedtenant,
 	novms,
 	nonetworks,
+	noolm,
+	nomachineconfig,
 	residue,
 	sso,
 	ssoready,

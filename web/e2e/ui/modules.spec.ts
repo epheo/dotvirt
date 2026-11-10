@@ -99,3 +99,37 @@ test('without project networks New Project neither offers nor stages one', async
 	const body = (await posted).postDataJSON();
 	expect(body).toEqual({ name: 'team-c', namespace: 'team-c' });
 });
+
+test('without OLM rebalancing says the cluster cannot install it, never a missing right', async ({
+	page,
+}) => {
+	await setScenario(page, 'noolm');
+	await login(page);
+	await page.goto('/hosts?tab=configure');
+	const main = page.locator('main');
+	await expect(
+		main.getByText(
+			'This cluster has no operator catalog (OLM), so rebalancing cannot be installed',
+		),
+	).toBeVisible();
+	await expect(main.getByRole('button', { name: 'Enable Dynamic Rescheduling' })).toHaveCount(0);
+	await expect(main.getByText(/You may not/)).toHaveCount(0);
+});
+
+test('without MachineConfig rebalancing offers no PSI', async ({ page }) => {
+	await setScenario(page, 'base');
+	await login(page);
+	for (const [scenario, offered] of [
+		['base', 1],
+		['nomachineconfig', 0],
+	] as const) {
+		await setScenario(page, scenario);
+		await page.goto('/hosts?tab=configure');
+		await page.getByRole('button', { name: 'Enable Dynamic Rescheduling' }).click();
+		const dialog = page.getByRole('dialog');
+		await expect(
+			dialog.getByRole('heading', { name: 'Configure Dynamic Rescheduling' }),
+		).toBeVisible();
+		await expect(dialog.getByText('Enable PSI on worker nodes')).toHaveCount(offered);
+	}
+});
