@@ -50,7 +50,7 @@ func (s *Server) routes(mux *http.ServeMux) {
 	// routes to the tenant project owning the namespace, the same path as a
 	// project-scoped UDN; the tenant's Argo app applies it on merge (its AppProject
 	// must permit k8s.ovn.org/EgressFirewall).
-	mux.HandleFunc("POST /api/egressfirewalls", s.namespacedCreate("an egress firewall", draft.ResourceEgressFirewall, model.KindEgressFW))
+	mux.HandleFunc("POST /api/egressfirewalls", s.namespacedCreate("an egress firewall", draft.ResourceEgressFirewall, model.KindEgressFW, s.resolvesWildcards))
 	// An EgressIP (a fixed outbound IP pool) is always platform-tier, gated on
 	// the caller's authority to create EgressIPs.
 	mux.HandleFunc("POST /api/egressips", s.platformCreate(model.KindEgressIP, draft.ResourceEgressIP))

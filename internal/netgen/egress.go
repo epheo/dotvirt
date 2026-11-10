@@ -56,7 +56,7 @@ func EgressFirewallManifest(s EgressFirewallSpec) (path string, content []byte, 
 			return "", nil, fmt.Errorf("rule %d: cidr %q must be a CIDR (e.g. 0.0.0.0/0)", i+1, r.CIDR)
 		}
 		if r.DNSName != "" && !egressDNSName.MatchString(r.DNSName) {
-			return "", nil, fmt.Errorf("rule %d: dnsName %q must be a DNS name, optionally starting with *. (e.g. *.example.com)", i+1, r.DNSName)
+			return "", nil, fmt.Errorf("rule %d: dnsName %q must be a DNS name such as api.example.com, optionally starting with *.", i+1, r.DNSName)
 		}
 		to := map[string]any{}
 		if r.CIDR != "" {

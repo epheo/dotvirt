@@ -2,9 +2,11 @@ package api
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
+	"strings"
 
 	"github.com/epheo/dotvirt/internal/auth"
 	"github.com/epheo/dotvirt/internal/cluster"
@@ -62,7 +64,7 @@ func (s *Server) platformCreate(kind model.Kind, resource draft.Resource) http.H
 // it (resolveProject is the authorization point - a namespace outside the
 // caller's projects is not found), then gates like platformCreate. what names
 // the kind in the missing-namespace error, article included.
-func (s *Server) namespacedCreate(what string, resource draft.Resource, kind model.Kind) http.HandlerFunc {
+func (s *Server) namespacedCreate(what string, resource draft.Resource, kind model.Kind, checks ...func(context.Context, []byte) error) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		raw, p, ok := readBody[nsPeek](w, r, false)
 		if !ok {
@@ -76,8 +78,34 @@ func (s *Server) namespacedCreate(what string, resource draft.Resource, kind mod
 		if !ok || !s.gateForm(w, r, sc, kind, p.Namespace) {
 			return
 		}
+		for _, check := range checks {
+			if err := check(r.Context(), raw); err != nil {
+				fail(w, err)
+				return
+			}
+		}
 		s.stageCreate(w, r, sc, resource, raw)
 	}
+}
+
+// kindDNSNameResolver is served where OVN-Kubernetes runs its DNS name
+// resolver, the only one that takes a wildcard dnsName.
+var kindDNSNameResolver = model.Kind{Kind: "DNSNameResolver", Group: "network.openshift.io", Version: "v1alpha1", Plural: "dnsnameresolvers"}
+
+// resolvesWildcards refuses an egress rule to a wildcard DNS name where the
+// cluster serves no DNSNameResolver: OVN-Kubernetes would refuse the whole
+// firewall. A body that does not parse is left to the render.
+func (s *Server) resolvesWildcards(ctx context.Context, raw []byte) error {
+	var spec netgen.EgressFirewallSpec
+	if json.Unmarshal(raw, &spec) != nil {
+		return nil
+	}
+	for i, rule := range spec.Rules {
+		if strings.HasPrefix(rule.DNSName, "*.") && s.unserved(ctx, kindDNSNameResolver)[kindDNSNameResolver] {
+			return fmt.Errorf("%w: rule %d: this cluster resolves no wildcard DNS names, so OVN-Kubernetes would refuse the firewall; name each host instead of %s", model.ErrConflict, i+1, rule.DNSName)
+		}
+	}
+	return nil
 }
 
 // handleCreateNetwork stages a new network, proposed as a PR (the
