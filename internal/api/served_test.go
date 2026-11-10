@@ -1,7 +1,9 @@
 package api
 
 import (
+	"encoding/json"
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 
@@ -159,5 +161,45 @@ func TestTenantKindRuleReadsTheIndexOnly(t *testing.T) {
 	}
 	if listed := (&Server{}).tenantKindRule(); listed.Declarable("apps", "Deployment") {
 		t.Error("the listed kinds admit a Deployment")
+	}
+}
+
+// OVN-Kubernetes takes a wildcard dnsName only with its DNS name resolver,
+// which serves DNSNameResolver: elsewhere the create form refuses one, and
+// a named host stays open.
+func TestWildcardEgressNeedsTheDNSNameResolver(t *testing.T) {
+	wildcard := `{"namespace":"team-a-dev","rules":[{"action":"Allow","dnsName":"api.example.com"},{"action":"Allow","dnsName":"*.example.com"}]}`
+	named := `{"namespace":"team-a-dev","rules":[{"action":"Allow","dnsName":"api.example.com"}]}`
+	for _, resolver := range []bool{false, true} {
+		fc := newFakeCluster(t)
+		if resolver {
+			fc.serveKinds(model.KindEgressFW, kindDNSNameResolver)
+		} else {
+			fc.serveKinds(model.KindEgressFW)
+		}
+		d := &gatedDraft{planeDraft: &planeDraft{declared: map[model.ObjectRef]string{}}}
+		s := fc.server(d, Config{BaseBranch: "main"})
+		rec := do(s, adminToken, http.MethodPost, "/api/egressfirewalls", wildcard)
+		refused := rec.Code == http.StatusConflict && strings.Contains(rec.Body.String(), "rule 2: this cluster resolves no wildcard DNS names")
+		if refused == resolver || resolver && rec.Code != http.StatusOK {
+			t.Errorf("resolver=%v: a wildcard rule = %d %s", resolver, rec.Code, rec.Body.String())
+		}
+		if rec := do(s, adminToken, http.MethodPost, "/api/egressfirewalls", named); rec.Code != http.StatusOK {
+			t.Errorf("resolver=%v: a named host = %d %s", resolver, rec.Code, rec.Body.String())
+		}
+		// The manifest editor alike: an edit OVN-K refuses keeps the old rules.
+		edit := func(dns string) *httptest.ResponseRecorder {
+			manifest := "kind: EgressFirewall\nspec:\n  egress:\n  - type: Allow\n    to:\n      cidrSelector: 10.0.0.0/8\n  - type: Allow\n    to:\n      dnsName: '" + dns + "'\n"
+			body, _ := json.Marshal(model.UpdateManifestRequest{YAML: manifest})
+			return do(s, adminToken, http.MethodPut, "/api/objects/egressfirewall/team-a-dev/default", string(body))
+		}
+		rec = edit("*.example.com")
+		refused = rec.Code == http.StatusConflict && strings.Contains(rec.Body.String(), "rule 2: this cluster resolves no wildcard DNS names")
+		if refused == resolver || resolver && rec.Code != http.StatusOK {
+			t.Errorf("resolver=%v: an edit to a wildcard = %d %s", resolver, rec.Code, rec.Body.String())
+		}
+		if rec := edit("api.example.com"); rec.Code != http.StatusOK {
+			t.Errorf("resolver=%v: an edit to a named host = %d %s", resolver, rec.Code, rec.Body.String())
+		}
 	}
 }
