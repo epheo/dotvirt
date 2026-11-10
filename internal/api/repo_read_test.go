@@ -401,3 +401,58 @@ func TestRefusalWordingFollowsTheAction(t *testing.T) {
 		t.Errorf("any of a read and a change refused as %q", err)
 	}
 }
+
+// A project's template library is its repo's content: listed and deployed
+// from only by a caller who may read the repo. The shared library stays open.
+func TestTemplateLibrariesAreRepoReads(t *testing.T) {
+	fc := newFakeCluster(t)
+	fc.readsVMs = tenantReadsTeamA
+	// Authors VMs in team-a-dev but lists nothing past its view.
+	fc.ssar = func(token string, a *authzv1.ResourceAttributes) bool {
+		return token == adminToken || token == tenantToken && a.Namespace == "team-a-dev" && a.Verb != verbList
+	}
+	fc.serveKinds(model.KindNetpol, model.KindDV)
+	d := &planeDraft{kinds: []schema.GroupKind{declaresNP}, templates: map[string][]model.Template{
+		"platform": {{Name: "rhel9", Library: "platform"}},
+		"team-a":   {{Name: "web", Library: "team-a"}},
+	}}
+	s := fc.server(d, Config{PlatformRepo: platformRepo})
+	libraries := func(token string) string {
+		rec := do(s, token, http.MethodGet, "/api/templates", "")
+		wantStatus(t, rec, http.StatusOK)
+		var out []string
+		for _, tpl := range decodeBody[model.TemplateList](t, rec).Templates {
+			out = append(out, tpl.Library+"/"+tpl.Name)
+		}
+		return strings.Join(out, ",")
+	}
+	deploy := func(library string) int {
+		body := fmt.Sprintf(`{"namespace":"team-a-dev","template":"web","library":%q}`, library)
+		return do(s, tenantToken, http.MethodPost, "/api/templates/deploy", body).Code
+	}
+
+	if got := libraries(tenantToken); got != "platform/rhel9,team-a/web" {
+		t.Errorf("a caller reading the repo lists %s", got)
+	}
+	for _, lib := range []string{"", "team-a", "platform"} {
+		if code := deploy(lib); code == http.StatusForbidden {
+			t.Errorf("a caller reading the repo deploys from %q: 403", lib)
+		}
+	}
+
+	d.kinds = append(d.kinds, declaresDV)
+	if got := libraries(tenantToken); got != "platform/rhel9" {
+		t.Errorf("a caller refused the repo lists %s", got)
+	}
+	for _, lib := range []string{"", "team-a"} {
+		if code := deploy(lib); code != http.StatusForbidden {
+			t.Errorf("a caller refused the repo deploys from %q: %d", lib, code)
+		}
+	}
+	if code := deploy("platform"); code == http.StatusForbidden {
+		t.Error("a caller refused its repo is refused the shared library")
+	}
+	if got := libraries(adminToken); got != "platform/rhel9,team-a/web" {
+		t.Errorf("admin lists %s", got)
+	}
+}
