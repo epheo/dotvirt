@@ -3,6 +3,7 @@
 	import { adoptNamespaces } from '#lib/actions.js';
 	import { action } from '#lib/resource.svelte.js';
 	import { inventory } from '#lib/state/inventory.svelte.js';
+	import { vmsOff } from '#lib/state/modules.svelte.js';
 	import { ui } from '#lib/state/ui.svelte.js';
 	import Banner from './Banner.svelte';
 	import Button from './Button.svelte';
@@ -39,9 +40,12 @@
 		);
 	});
 	const untracked = $derived(untrackedVMs.length + untrackedObjects);
+	const kinds = $derived(
+		vmsOff() ? 'networks, policies, volumes' : 'VMs, networks, policies, disks',
+	);
 	// One string, so the sentence never wraps in the markup: locators match it whole.
 	const copy = $derived(
-		`in this ${namespace ? 'namespace' : 'project'} but ${untracked === 1 ? 'is' : 'are'} not described in git, so GitOps does not manage ${untracked === 1 ? 'it' : 'them'}. Adopting captures the live manifests of everything untracked here (VMs, networks, policies, disks) into one pull request; nothing changes until it merges.`,
+		`in this ${namespace ? 'namespace' : 'project'} but ${untracked === 1 ? 'is' : 'are'} not described in git, so GitOps does not manage ${untracked === 1 ? 'it' : 'them'}. Adopting captures the live manifests of everything untracked here (${kinds}) into one pull request; nothing changes until it merges.`,
 	);
 	const adoptNS = $derived.by(() => {
 		const want = new Set(scoped);

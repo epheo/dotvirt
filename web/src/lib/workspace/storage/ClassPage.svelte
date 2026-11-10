@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { storageHref, trailForScope } from '#lib/nav.js';
+	import { vmsOff } from '#lib/state/modules.svelte.js';
 	import { storage } from '#lib/state/storage.svelte.js';
 	import { FRESH_DAYS, ago, classFacts, classTag, num, size } from '#lib/storage.js';
 	import Breadcrumb from '#lib/components/Breadcrumb.svelte';
@@ -51,6 +52,10 @@
 
 	const verdict = (v: boolean | null, yes: string, no: string) =>
 		v === null ? 'Unknown' : v ? yes : no;
+	// Without KubeVirt a claim here is a volume, not a VM's disk, and the rows
+	// list VM disks only, so their card goes. An unknown state keeps VM terms.
+	const vmTerms = $derived(!vmsOff());
+	const thing = $derived(vmTerms ? 'disk' : 'volume');
 	const ROW =
 		'grid grid-cols-[minmax(0,2fr)_minmax(0,3fr)] gap-3 border-t border-line-soft py-2 first:border-t-0';
 </script>
@@ -80,20 +85,29 @@
 		{/if}
 
 		<div class="grid grid-cols-[repeat(auto-fit,minmax(min(360px,100%),1fr))] items-start gap-4">
-			<Card title="What a disk here gets" meta="Managed by the cluster platform, not dotvirt">
+			<Card title="What a {thing} here gets" meta="Managed by the cluster platform, not dotvirt">
 				<dl class="text-[13px]">
 					<div class={ROW}>
-						<dt class="text-ink-muted">Live migration</dt>
-						<dd>
-							{verdict(facts.liveMigration, 'Possible', 'Not possible: the disk stays on one host')}
-						</dd>
+						{#if vmTerms}
+							<dt class="text-ink-muted">Live migration</dt>
+							<dd>
+								{verdict(
+									facts.liveMigration,
+									'Possible',
+									'Not possible: the disk stays on one host',
+								)}
+							</dd>
+						{:else}
+							<dt class="text-ink-muted">Access</dt>
+							<dd>{verdict(facts.shared, 'Many hosts', 'One host at a time')}</dd>
+						{/if}
 					</div>
 					<div class={ROW}>
 						<dt class="text-ink-muted">Snapshots</dt>
 						<dd>{info ? info.snapshotClass || 'Not available' : 'Unknown'}</dd>
 					</div>
 					<div class={ROW}>
-						<dt class="text-ink-muted">Disk resize</dt>
+						<dt class="text-ink-muted">{vmTerms ? 'Disk resize' : 'Volume resize'}</dt>
 						<dd>{info ? (info.expandable ? 'Allowed' : 'Not allowed') : 'Unknown'}</dd>
 					</div>
 					{#if info?.profile}
@@ -134,33 +148,35 @@
 			</Card>
 
 			<div class="flex flex-col gap-4">
-				<Card
-					title="Disks"
-					meta={disks.length
-						? `${num(disks.length)} on ${num(vms)} ${vms === 1 ? 'VM' : 'VMs'}, ${size(held)}`
-						: ''}
-				>
-					{#if disks.length}
-						<ul class="flex flex-col gap-1.5 text-[13px]">
-							{#each counts as c (c.f)}
-								<li class="flex items-baseline gap-2">
-									{#if c.n === null}
-										<span class="text-ink-faint">Reading snapshots</span>
-									{:else if c.n === 0}
-										<span class="text-ink-faint">None {c.label}</span>
-									{:else}
-										<a
-											class="text-accent-ink hover:underline"
-											href={storageHref('disks', { class: name, f: c.f })}>{num(c.n)} {c.label}</a
-										>
-									{/if}
-								</li>
-							{/each}
-						</ul>
-					{:else}
-						<p class="text-[13px] text-ink-faint">No VM disk is on this class.</p>
-					{/if}
-				</Card>
+				{#if vmTerms}
+					<Card
+						title="Disks"
+						meta={disks.length
+							? `${num(disks.length)} on ${num(vms)} ${vms === 1 ? 'VM' : 'VMs'}, ${size(held)}`
+							: ''}
+					>
+						{#if disks.length}
+							<ul class="flex flex-col gap-1.5 text-[13px]">
+								{#each counts as c (c.f)}
+									<li class="flex items-baseline gap-2">
+										{#if c.n === null}
+											<span class="text-ink-faint">Reading snapshots</span>
+										{:else if c.n === 0}
+											<span class="text-ink-faint">None {c.label}</span>
+										{:else}
+											<a
+												class="text-accent-ink hover:underline"
+												href={storageHref('disks', { class: name, f: c.f })}>{num(c.n)} {c.label}</a
+											>
+										{/if}
+									</li>
+								{/each}
+							</ul>
+						{:else}
+							<p class="text-[13px] text-ink-faint">No VM disk is on this class.</p>
+						{/if}
+					</Card>
+				{/if}
 
 				<Card title="Free space" meta={facts.free}>
 					{#if segments.length > 1}
@@ -199,8 +215,8 @@
 						<!-- The per-host split names hosts, so it reaches only callers who
 						     may read nodes; the total is all anyone else gets. -->
 						<p class="text-[13px]">
-							{size(info.free)} free in total, spread across hosts. A disk here takes its space on one
-							host.
+							{size(info.free)} free in total, spread across hosts. A {thing} here takes its space on
+							one host.
 						</p>
 						{#if segments.length === 0}
 							<p class="mt-1 text-xs text-ink-faint">

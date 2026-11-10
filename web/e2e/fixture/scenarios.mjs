@@ -1677,7 +1677,8 @@ const platstager = {
 };
 // --- end platstager ---
 
-// A cluster without KubeVirt: storage and networking only.
+// A cluster without KubeVirt: storage and networking only. Its metrics carry
+// no VM series: node totals stay, VM usage, requests and top VMs are gone.
 const novms = {
 	...base,
 	inventory: {
@@ -1688,6 +1689,25 @@ const novms = {
 		})),
 	},
 	modules: { vms: false },
+	metrics: {
+		...base.metrics,
+		clusterSummary: {
+			...clusterSummary(0),
+			cpu: { used: 0, total: 48, spark: [] },
+			memory: { used: 0, total: 192e9, spark: [] },
+			vms: {},
+			topCpu: [],
+			topMemory: [],
+		},
+		hostCapacity: {
+			...hostCapacity,
+			nodes: hostCapacity.nodes.map(({ node, cpuAllocatable, memAllocatable }) => ({
+				node,
+				cpuAllocatable,
+				memAllocatable,
+			})),
+		},
+	},
 };
 
 // A cluster that serves no UserDefinedNetwork, as MicroShift: VMs, and no

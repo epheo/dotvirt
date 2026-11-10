@@ -4,6 +4,7 @@
 	import { plural } from '#lib/format.js';
 	import { hostGate } from '#lib/gates.js';
 	import { action } from '#lib/resource.svelte.js';
+	import { vmsOff } from '#lib/state/modules.svelte.js';
 	import { ui } from '#lib/state/ui.svelte.js';
 	import Button from './Button.svelte';
 	import Consequence from './Consequence.svelte';
@@ -139,6 +140,11 @@
 	</div>
 	{#if !gate.ok}
 		<p class="text-xs leading-4 text-ink-faint">{gate.why}</p>
+	{:else if armed && vmsOff()}
+		<!-- Evacuation moves VMs only: without KubeVirt nothing here moves. -->
+		<Consequence size="sm" tone="warn">
+			Cordons {node} until you exit maintenance. Workloads running here stay.
+		</Consequence>
 	{:else if armed}
 		<Consequence size="sm" tone="warn">
 			Cordons {node} and live-migrates {running.length
@@ -154,10 +160,16 @@
 			Holds until you exit it, even if something else uncordons {node}.
 		</Consequence>
 	{:else if info.unschedulable}
-		<Consequence size="sm">Takes no new VMs; the VMs running here stay.</Consequence>
+		<Consequence size="sm"
+			>{vmsOff()
+				? 'Takes no new workloads; those running here stay.'
+				: 'Takes no new VMs; the VMs running here stay.'}</Consequence
+		>
 	{:else}
 		<Consequence size="sm">
-			Maintenance moves its running VMs to other hosts. Cordon only stops new ones.
+			{vmsOff()
+				? 'Both stop new workloads. Maintenance holds until you exit it; nothing running here moves.'
+				: 'Maintenance moves its running VMs to other hosts. Cordon only stops new ones.'}
 		</Consequence>
 	{/if}
 </div>

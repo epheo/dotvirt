@@ -54,7 +54,7 @@
 	// The header and the tab counts speak for the whole platform; the project
 	// narrows what the tabs list, like any other filter.
 	const context = $derived(
-		storageContext(storage.rows, storage.classNames.length, storage.hostCount),
+		storageContext(storage.rows, storage.classNames.length, storage.hostCount, !vmsOff()),
 	);
 	const tabs = $derived(
 		available.map((t) => ({
@@ -107,30 +107,28 @@
 	}
 </script>
 
+{#snippet findDisk()}
+	<label class="relative block w-[340px] max-w-full min-w-[200px]">
+		<Search size={16} class="pointer-events-none absolute top-[9px] left-2.5 text-ink-faint" />
+		<span class="sr-only">Find a disk, VM or image</span>
+		<input
+			type="search"
+			value={query}
+			oninput={(e) => search(e.currentTarget.value)}
+			placeholder="Find a disk, VM or image"
+			class="h-[34px] w-full rounded-md border border-line-strong bg-panel pr-3 pl-[34px] text-sm text-ink placeholder:text-ink-faint"
+		/>
+	</label>
+{/snippet}
+
 <div class="min-h-0 flex-1 overflow-y-auto bg-canvas">
 	<div class="flex min-h-full flex-col gap-[18px] px-7 pt-5 pb-8">
 		<div class="flex flex-col gap-2">
 			<Breadcrumb
 				trail={[{ label: 'Storage', href: storageHref('library', { project }) }, { label }]}
 			/>
-			<PageHeader title="Storage" {context}>
-				{#snippet actions()}
-					<label class="relative block w-[340px] max-w-full min-w-[200px]">
-						<Search
-							size={16}
-							class="pointer-events-none absolute top-[9px] left-2.5 text-ink-faint"
-						/>
-						<span class="sr-only">Find a disk, VM or image</span>
-						<input
-							type="search"
-							value={query}
-							oninput={(e) => search(e.currentTarget.value)}
-							placeholder="Find a disk, VM or image"
-							class="h-[34px] w-full rounded-md border border-line-strong bg-panel pr-3 pl-[34px] text-sm text-ink placeholder:text-ink-faint"
-						/>
-					</label>
-				{/snippet}
-			</PageHeader>
+			<!-- The search finds VM disks on the Disks tab: without KubeVirt there is neither. -->
+			<PageHeader title="Storage" {context} actions={vmsOff() ? undefined : findDisk} />
 			<TabBar
 				class="mt-1"
 				{tabs}

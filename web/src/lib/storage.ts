@@ -530,12 +530,17 @@ export function libraryTiles(
 	};
 }
 
-// "3,412 disks on 3 classes, 48 hosts"
-export function storageContext(rows: DiskRow[], classes: number, hosts: number): string {
+// "3,412 disks on 3 classes, 48 hosts". Without VMs there are no VM disks to
+// count: "3 classes, 48 hosts".
+export function storageContext(
+	rows: DiskRow[],
+	classes: number,
+	hosts: number,
+	vms = true,
+): string {
 	const disks = rows.filter((r) => !r.ephemeral).length;
-	const parts = [
-		`${num(disks)} ${disks === 1 ? 'disk' : 'disks'} on ${classes} ${classes === 1 ? 'class' : 'classes'}`,
-	];
+	const cls = `${classes} ${classes === 1 ? 'class' : 'classes'}`;
+	const parts = [vms ? `${num(disks)} ${disks === 1 ? 'disk' : 'disks'} on ${cls}` : cls];
 	if (hosts) parts.push(`${num(hosts)} ${hosts === 1 ? 'host' : 'hosts'}`);
 	return parts.join(', ');
 }

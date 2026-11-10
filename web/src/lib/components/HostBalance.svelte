@@ -6,6 +6,7 @@
 	import { metricsGap } from '#lib/metrics.js';
 	import type { Resource } from '#lib/resource.svelte.js';
 	import { inventory } from '#lib/state/inventory.svelte.js';
+	import { vmsOff } from '#lib/state/modules.svelte.js';
 	import Card from './Card.svelte';
 	import MetricsGap from './MetricsGap.svelte';
 
@@ -146,15 +147,20 @@
 			)
 			.sort((a, b) => Date.parse(b.migration!.endedAt!) - Date.parse(a.migration!.endedAt!));
 	});
+	// Rescheduling moves VMs and the migration line counts them: without
+	// KubeVirt the card keeps the hosts' load alone. An unknown state keeps both.
+	const vmMoves = $derived(!vmsOff());
 </script>
 
 {#if data}
 	<Card
 		title="Host balance"
-		link={{
-			label: band ? 'Rescheduling settings' : 'Enable Dynamic Rescheduling',
-			href: '?tab=configure',
-		}}
+		link={vmMoves
+			? {
+					label: band ? 'Rescheduling settings' : 'Enable Dynamic Rescheduling',
+					href: '?tab=configure',
+				}
+			: undefined}
 		flush
 	>
 		<div class="px-card py-4">
@@ -315,7 +321,7 @@
 					>
 						band {Math.round(band.low)}-{Math.round(band.high)}%
 					</span>
-				{:else}
+				{:else if vmMoves}
 					<span class="text-ink-muted">Rescheduling is not configured: no action band.</span>
 				{/if}
 				{#if !strip}
@@ -330,7 +336,7 @@
 				{/if}
 			</div>
 
-			{#if moves.length}
+			{#if vmMoves && moves.length}
 				{@const latest = moves[0]}
 				<p class="mt-1 text-xs text-ink-muted">
 					{plural(moves.length, 'live migration')} in the last 24h. Latest:
@@ -340,7 +346,7 @@
 						latest.migration?.endedAt,
 					)}.
 				</p>
-			{:else if band}
+			{:else if vmMoves && band}
 				<p class="mt-1 text-xs text-ink-muted">No live migrations in the last 24h.</p>
 			{/if}
 
