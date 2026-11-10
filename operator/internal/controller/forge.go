@@ -221,6 +221,29 @@ func (r *DotvirtReconciler) ensurePlatformRepo(ctx context.Context, dv *dotvirtv
 	if created {
 		logf.FromContext(ctx).Info("created platform repo", "repo", dv.Spec.Forge.PlatformRepo)
 	}
+	if dv.Spec.Forge.Managed {
+		return r.privatizeOnce(ctx, dv, client)
+	}
+	return nil
+}
+
+// privatizeOnce makes every repo of a managed forge's owner org private, once
+// per operator process: the org holds only dotvirt's repos, and a public one
+// is readable by anyone who reaches the forge. Once bounds the cost to one
+// listing per start. An external forge's repos are its admins' to set.
+func (r *DotvirtReconciler) privatizeOnce(ctx context.Context, dv *dotvirtv1alpha1.Dotvirt, client *forge.Client) error {
+	key := types.NamespacedName{Namespace: dv.Namespace, Name: dv.Name}
+	if _, done := r.privatized.Load(key); done {
+		return nil
+	}
+	n, err := client.PrivatizeOrgRepos()
+	if err != nil {
+		return fmt.Errorf("make the forge's repos private: %w", err)
+	}
+	if n > 0 {
+		logf.FromContext(ctx).Info("made public repos private", "count", n)
+	}
+	r.privatized.Store(key, struct{}{})
 	return nil
 }
 

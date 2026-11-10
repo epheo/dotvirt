@@ -13,6 +13,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -164,12 +165,49 @@ func (c *Client) EnsureRepo() (created bool, err error) {
 		"name":           c.repo,
 		"auto_init":      true,
 		"default_branch": "main",
-		"private":        false,
+		// A public repo is readable by anyone who reaches the forge, past every
+		// grant it holds: one tenant's manifests would be every visitor's.
+		"private": true,
 	}
 	if err := c.do("POST", fmt.Sprintf("/api/v1/orgs/%s/repos", c.owner), payload, nil); err != nil {
 		return false, err
 	}
 	return true, nil
+}
+
+// orgRepoPage is the page an organization's repo listing asks for.
+const orgRepoPage = 50
+
+// PrivatizeOrgRepos makes every public repo of the client's owner organization
+// private and reports how many it changed. Pages run until the forge's
+// X-Total-Count is reached or a page comes back empty.
+func (c *Client) PrivatizeOrgRepos() (int, error) {
+	changed, seen := 0, 0
+	for page := 1; ; page++ {
+		var repos []struct {
+			Name    string `json:"name"`
+			Private bool   `json:"private"`
+		}
+		path := fmt.Sprintf("/api/v1/orgs/%s/repos?limit=%d&page=%d", c.owner, orgRepoPage, page)
+		header, err := c.doRead("GET", path, nil, &repos)
+		if err != nil {
+			return changed, err
+		}
+		for _, r := range repos {
+			if r.Private {
+				continue
+			}
+			if err := c.do("PATCH", fmt.Sprintf("/api/v1/repos/%s/%s", c.owner, r.Name), map[string]any{"private": true}, nil); err != nil {
+				return changed, err
+			}
+			changed++
+		}
+		seen += len(repos)
+		total, terr := strconv.Atoi(header.Get("X-Total-Count"))
+		if len(repos) == 0 || terr == nil && seen >= total {
+			return changed, nil
+		}
+	}
 }
 
 // RepoExists reports whether the client's repo is present on the forge, so a caller

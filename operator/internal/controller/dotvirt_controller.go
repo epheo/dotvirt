@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sync"
 	"time"
 
 	appsv1 "k8s.io/api/apps/v1"
@@ -63,6 +64,10 @@ type DotvirtReconciler struct {
 	// over its in-cluster Service URL, which a unit test redirects to an httptest
 	// server. nil = the real Service URL.
 	forgeAPIBase func(*dotvirtv1alpha1.Dotvirt) string
+
+	// privatized holds the managed installs whose forge repos this process
+	// already made private (privatizeOnce).
+	privatized sync.Map
 
 	pruneState
 	syncCache

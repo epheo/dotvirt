@@ -3,8 +3,10 @@ package controller
 import (
 	"context"
 	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -424,6 +426,8 @@ func TestPlatformRepoEnsuresManagedOrg(t *testing.T) {
 			}
 			repoCreated = true
 			w.WriteHeader(http.StatusCreated)
+		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/orgs/dotvirt/repos":
+			_, _ = w.Write([]byte(`[]`))
 		default:
 			t.Errorf("unexpected %s %s", r.Method, r.URL.Path)
 		}
@@ -441,6 +445,56 @@ func TestPlatformRepoEnsuresManagedOrg(t *testing.T) {
 	}
 	if !orgCreated || !repoCreated {
 		t.Errorf("org created=%v repo created=%v, want both", orgCreated, repoCreated)
+	}
+	if repo := cond(dv, dotvirtv1alpha1.ConditionForgeRepoReady); repo == nil || repo.Status != metav1.ConditionTrue {
+		t.Errorf("ForgeRepoReady = %+v, want True", repo)
+	}
+}
+
+// A managed forge's org holds only dotvirt's repos: the public ones are made
+// private, once per operator process, and private ones are left alone.
+func TestManagedForgeReposMadePrivateOnce(t *testing.T) {
+	dv := managedForgeCR()
+	var listings int
+	var patched []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && (r.URL.Path == "/api/v1/orgs/dotvirt" || r.URL.Path == "/api/v1/repos/dotvirt/platform"):
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`{}`))
+		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/orgs/dotvirt/repos":
+			listings++
+			w.Header().Set("X-Total-Count", "3")
+			_, _ = w.Write([]byte(`[{"name":"platform","private":false},{"name":"team-a","private":true},{"name":"team-b","private":false}]`))
+		case r.Method == http.MethodPatch:
+			body, _ := io.ReadAll(r.Body)
+			if string(body) != `{"private":true}` {
+				t.Errorf("PATCH %s body %s", r.URL.Path, body)
+			}
+			patched = append(patched, r.URL.Path)
+			_, _ = w.Write([]byte(`{}`))
+		default:
+			t.Errorf("unexpected %s %s", r.Method, r.URL.Path)
+		}
+	}))
+	defer srv.Close()
+	cred := &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{Name: install.ForgeSecretName(dv), Namespace: dv.Namespace},
+		Data:       map[string][]byte{"token": []byte("tok")},
+	}
+	r := newReconciler(testBuilder(t).WithObjects(dv, cred).Build(), depsOK)
+	r.forgeAPIBase = func(*dotvirtv1alpha1.Dotvirt) string { return srv.URL }
+
+	for range 2 {
+		if _, err := r.reconcilePlatformRepo(context.Background(), dv, nil); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if want := []string{"/api/v1/repos/dotvirt/platform", "/api/v1/repos/dotvirt/team-b"}; !slices.Equal(patched, want) {
+		t.Errorf("patched %v, want %v", patched, want)
+	}
+	if listings != 1 {
+		t.Errorf("listed the org's repos %d times, want once per process", listings)
 	}
 	if repo := cond(dv, dotvirtv1alpha1.ConditionForgeRepoReady); repo == nil || repo.Status != metav1.ConditionTrue {
 		t.Errorf("ForgeRepoReady = %+v, want True", repo)
@@ -467,7 +521,7 @@ func TestManagedOrgExistsBeforeOrgWebhook(t *testing.T) {
 			w.WriteHeader(http.StatusOK)
 		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/repos/dotvirt/platform":
 			w.WriteHeader(http.StatusNotFound)
-		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/orgs/dotvirt/hooks":
+		case r.Method == http.MethodGet && (r.URL.Path == "/api/v1/orgs/dotvirt/hooks" || r.URL.Path == "/api/v1/orgs/dotvirt/repos"):
 			_, _ = w.Write([]byte(`[]`))
 		case r.Method == http.MethodPost:
 			w.WriteHeader(http.StatusCreated)
