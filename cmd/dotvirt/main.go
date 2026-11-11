@@ -206,7 +206,8 @@ func run() error {
 	publishing := publish.Settings{Domain: cfg.PublishDomain, GatewayClass: cfg.PublishGatewayClass, Issuer: cfg.PublishIssuer, ProjectLabel: cfg.ProjectLabel, PortailNamespace: cfg.PublishPortailNamespace}
 	coordinator := changeset.New(draftStore, repos, forgeFactory, resyncer,
 		liveVMs{clusterSnapshot}, pruneSource, cfg.BaseBranch, cfg.ProposedBranch).WithSyncNamespace(cfg.ArgoNamespace).
-		WithTenantKinds(cfg.TenantKinds).WithUsersOpeningPRs(cfg.UsersOpenPRs).WithPublishing(publishing)
+		WithTenantKinds(cfg.TenantKinds).WithUsersOpeningPRs(cfg.UsersOpenPRs).WithPublishing(publishing).
+		WithProductName(cfg.ProductName)
 
 	metricsClient, err := metrics.New(cfg.MetricsURL, cfg.MetricsTenancyURL, cfg.MetricsCA, cfg.InsecureTLS)
 	if err != nil {

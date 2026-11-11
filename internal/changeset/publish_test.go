@@ -209,6 +209,45 @@ func TestReproposeRebuildsTheOpenPR(t *testing.T) {
 	}
 }
 
+// An install renamed while its PR is open still reads the user's message back
+// from the old footer: the rebuilt body carries it once, under the new name.
+func TestARenamedInstallKeepsItsOpenPRsMessage(t *testing.T) {
+	f, prs := newPRFixture(t)
+	f.stageLabel(t, "env", "prod")
+	if _, err := f.c.Propose(f.id, f.proj, model.ProposeRequest{Title: "edit web", Message: "Why: launch."}); err != nil {
+		t.Fatalf("first Propose: %v", err)
+	}
+	if body := prs.pr(1).Body; !strings.Contains(body, "Proposed from dotvirt by ") {
+		t.Fatalf("unbranded footer:\n%s", body)
+	}
+	f.c.WithProductName("Uniwatt Cloud")
+	view := f.stageLabel(t, "tier", "gold")
+	if !strings.Contains(view.DefaultBody, "Proposed from Uniwatt Cloud by ") {
+		t.Errorf("the draft's default body keeps the old name:\n%s", view.DefaultBody)
+	}
+	if _, err := f.c.Propose(f.id, f.proj, model.ProposeRequest{Title: view.DefaultTitle}); err != nil {
+		t.Fatalf("Propose: %v", err)
+	}
+	body := prs.pr(1).Body
+	if strings.Count(body, "Why: launch.") != 1 || strings.Contains(body, "dotvirt") || strings.Count(body, "Proposed from Uniwatt Cloud by ") != 1 {
+		t.Errorf("the rebuilt body must carry the message once under the new name only:\n%s", body)
+	}
+}
+
+// The starter templates' commit names the console as the provider calls it.
+func TestSeedCommitNamesTheProduct(t *testing.T) {
+	f, _ := newPRFixture(t)
+	f.c.WithProductName("Uniwatt Cloud")
+	f.c.seedTemplates(f.proj.Repo)
+	out, err := exec.Command("git", "-C", f.proj.Repo, "log", "-1", "--format=%s", "main").Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.TrimSpace(string(out)); got != "Uniwatt Cloud: seed starter templates" {
+		t.Errorf("seed commit = %q", got)
+	}
+}
+
 // Main moves after the PR is cut. The rebuild runs on the new main: a field
 // main changed and the draft changes back is no no-op, and the PR keeps what
 // it carried.

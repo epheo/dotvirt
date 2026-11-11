@@ -58,7 +58,7 @@ func (c *Coordinator) Revert(id auth.Identity, proj project.ProjectInfo, hash st
 	title := fmt.Sprintf("Revert %q (%s)", d.Commit.Title, ref)
 	view := model.DraftView{Items: commitItems(c.revertFiles(read, items))}
 	view.Warning, _ = c.revertState(read, d.Files)
-	body := prBody(view, fmt.Sprintf("Reverts commit %s, %q.", short, d.Commit.Title), id.Username)
+	body := prBody(view, fmt.Sprintf("Reverts commit %s, %q.", short, d.Commit.Title), id.Username, c.productName())
 
 	fc := c.forgeFor(proj.Repo)
 	branch := c.revertBranch(id.Username, proj.Name, hash)

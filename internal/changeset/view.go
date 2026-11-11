@@ -137,7 +137,7 @@ func (c *Coordinator) render(id auth.Identity, proj project.ProjectInfo, entries
 		view.Items = append(view.Items, item)
 	}
 	view.DefaultTitle = defaultTitle(view)
-	view.DefaultBody = prBody(view, "", id.Username)
+	view.DefaultBody = prBody(view, "", id.Username, c.productName())
 	return view, nil
 }
 
