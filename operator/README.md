@@ -208,10 +208,10 @@ The publish namespace holds nothing of the tenant's:
   Network, or on the cluster's own network where one of its namespaces is. Until it
   exists, the project says publishing waits on it.
 - A namespace a user requested is never one: it carries `openshift.io/requester`,
-  and that user is its admin. On OpenShift any user may request any free name by
-  default (`self-provisioner`); a hosting install removes that grant, or a user can
-  request `<project>-publish` before the platform repo's namespace syncs and leave
-  the project unable to publish.
+  and that user is its admin. On OpenShift any user may request any free name
+  (`self-provisioner`), so one may take `<project>-publish` before the platform
+  repo's namespace syncs. The project then cannot publish, and its Configure tab
+  says to delete that namespace or have its requester release the name.
 
 The Gateway reaches the project namespaces on its publish namespace's network.
 
