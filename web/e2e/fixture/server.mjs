@@ -12,6 +12,7 @@
 //   POST /__fixture/ws-refuse/{n}      destroy the next n WS handshakes pre-open
 //   POST /__fixture/login-status/{s}   next POST /api/login answers status s
 //   POST /__fixture/fail/{plane}/{n}   the next n calls of a plane answer 503 (events, logout)
+//   POST /__fixture/proxy-down/{0|1}   the upload proxy drops connections, as one the browser cannot reach or trust
 //   GET  /__fixture/scenario           current scenario name
 
 import { createReadStream, existsSync, statSync } from 'node:fs';
@@ -152,6 +153,7 @@ const state = {
 	sockets: new Set(),
 	uploads: new Map(), // "ns/name" -> DataVolume phase, or an import's phases, for the status poll
 	fail: new Map(), // plane -> reads left to fail, so a test sees the error and the retry
+	proxyDown: false, // the upload proxy drops every connection
 };
 
 // failing spends one injected failure of a plane, if any are left.
@@ -1275,6 +1277,7 @@ function handleControl(req, res, url) {
 		state.staged.clear();
 		state.fail.clear();
 		state.uploads.clear();
+		state.proxyDown = false;
 		broadcastInventory();
 		return sendJSON(res, 200, { scenario: next.name });
 	}
@@ -1287,8 +1290,18 @@ function handleControl(req, res, url) {
 		state.wsRefuse = Number(m[1]);
 		return sendJSON(res, 200, { refuse: state.wsRefuse });
 	}
-	// The upload proxy's health, which the browser asks before an upload.
-	if (path === '/__fixture/proxy/healthz' && req.method === 'GET') return sendText(res, 200, 'OK');
+	// The upload proxy's health, which the browser asks before an upload. Down,
+	// it drops the connection: the browser's fetch fails as on an untrusted
+	// certificate.
+	if (path === '/__fixture/proxy/healthz' && req.method === 'GET') {
+		if (state.proxyDown) return req.socket.destroy();
+		return sendText(res, 200, 'OK');
+	}
+	m = path.match(/^\/__fixture\/proxy-down\/([01])$/);
+	if (m && req.method === 'POST') {
+		state.proxyDown = m[1] === '1';
+		return sendJSON(res, 200, { down: state.proxyDown });
+	}
 	// The upload proxy the browser streams an image to: the bytes are dropped,
 	// the upload then reads as imported.
 	m = path.match(/^\/__fixture\/upload\/(.+)$/);

@@ -1084,14 +1084,6 @@ const uploadoff = {
 	},
 };
 
-// proxyblocked: the upload proxy is one this browser cannot reach, as one
-// whose certificate it does not trust yet.
-const proxyblocked = {
-	...base,
-	name: 'proxyblocked',
-	capabilities: { cluster: { uploadProxy: 'http://127.0.0.1:1' } },
-};
-
 // --- unfinished boot images ---
 // Two boot images a user added in batch-prod that never became ready: a
 // download the cluster cannot reach (CDI retries it, so its error says it
@@ -2152,7 +2144,6 @@ export const scenarios = {
 	noboot,
 	noupload,
 	uploadoff,
-	proxyblocked,
 	unfinished,
 	nodelete,
 	metricsoff,

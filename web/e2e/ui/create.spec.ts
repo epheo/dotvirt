@@ -221,21 +221,21 @@ test('the image type offers and allows only what the caller may do', async ({ pa
 });
 
 // The browser sends the file to the upload proxy itself: one it cannot reach,
-// or does not trust yet, is named with a link to open before anything is made.
-test('an upload proxy the browser cannot reach is named before anything is created', async ({
+// or does not trust yet, is named with a link before anything is made. Back on
+// the tab once it answers, the note goes and the upload runs.
+test('an upload proxy the browser cannot reach is named, and the upload runs once it answers', async ({
 	page,
 }) => {
-	await setScenario(page, 'proxyblocked');
+	await setScenario(page, 'base');
+	expect((await page.request.post('/__fixture/proxy-down/1')).ok()).toBeTruthy();
 	await login(page);
 	await page.goto('/storage');
 	await page.getByTitle('Create a VM, network, rule or project').click();
 	const sheet = page.getByRole('dialog');
 	const note = sheet.getByRole('status').filter({ hasText: "the cluster's upload proxy" });
 	await expect(note).toContainText('cannot reach or does not trust yet');
-	await expect(note.getByRole('link', { name: 'http://127.0.0.1:1/healthz' })).toHaveAttribute(
-		'href',
-		'http://127.0.0.1:1/healthz',
-	);
+	const link = note.getByRole('link', { name: /\/__fixture\/proxy\/healthz$/ });
+	await expect(link).toHaveAttribute('href', /^http:\/\/localhost:\d+\/__fixture\/proxy\/healthz$/);
 	await sheet.locator('input[type=file]').setInputFiles({
 		name: 'Fedora-43.qcow2',
 		mimeType: 'application/octet-stream',
@@ -247,8 +247,15 @@ test('an upload proxy the browser cannot reach is named before anything is creat
 	});
 	await sheet.getByRole('button', { name: 'Upload image' }).click();
 	await expect(sheet.getByText(/Nothing was created\./)).toBeVisible();
-	await expect(note).toBeVisible();
 	expect(created).toEqual([]);
+
+	// Certificate accepted in another tab: back here, the form asks again.
+	expect((await page.request.post('/__fixture/proxy-down/0')).ok()).toBeTruthy();
+	await page.evaluate(() => window.dispatchEvent(new Event('focus')));
+	await expect(note).toHaveCount(0);
+	await sheet.getByRole('button', { name: 'Retry upload' }).click();
+	await expect(sheet.getByText(/is a boot image in/)).toBeVisible({ timeout: 15_000 });
+	expect(created).toHaveLength(1);
 });
 
 test('Escape closes the sheet and hands focus back to New', async ({ page }) => {
