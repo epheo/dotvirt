@@ -210,6 +210,32 @@
 			signal.addEventListener('abort', abort, { once: true });
 		});
 
+	// The browser sends the file straight to the upload proxy, so it must reach
+	// and trust that host itself: accepting the console's certificate covers no
+	// other host. A probe fails at once where the upload would sit at 0%, and
+	// before anything is created.
+	const proxy = $derived(caps.cluster?.uploadProxy ?? '');
+	let proxyBlocked = $state(''); // the proxy this browser could not reach
+	async function proxyAnswers(): Promise<boolean> {
+		const base = proxy;
+		if (!base) return true;
+		let ok = true;
+		try {
+			await fetch(`${base}/healthz`, {
+				mode: 'no-cors',
+				cache: 'no-store',
+				signal: AbortSignal.any([teardown.signal, AbortSignal.timeout(10_000)]),
+			});
+		} catch {
+			ok = false;
+		}
+		proxyBlocked = ok ? '' : base;
+		return ok;
+	}
+	$effect(() => {
+		if (!downloads && !uploadOff && proxy) untrack(() => void proxyAnswers());
+	});
+
 	// Polls the DataVolume until pred holds; false when the watch ran out first.
 	async function until(pred: (phase: string) => boolean): Promise<boolean> {
 		for (let i = 0; i < 600; i++) {
@@ -250,17 +276,23 @@
 				xhr.status >= 200 && xhr.status < 300
 					? resolve()
 					: reject(new Error(`proxy ${xhr.status}: ${xhr.responseText || xhr.statusText}`));
-			xhr.onerror = () =>
+			xhr.onerror = () => {
+				proxyBlocked = proxy || new URL(url).origin;
 				reject(
 					new Error(
-						'The upload failed. The browser may not trust the upload proxy certificate: open it once to accept it.',
+						'The upload failed: this browser lost the upload proxy, or does not trust its certificate.',
 					),
 				);
+			};
 			xhr.send(file);
 		});
 	}
 
 	async function sendFile() {
+		if (!(await proxyAnswers()))
+			throw new Error(
+				'This browser cannot reach the upload proxy, or does not trust its certificate. Nothing was created.',
+			);
 		const target = await api.createUpload({
 			namespace,
 			name,
@@ -402,6 +434,13 @@
 	</div>
 {/snippet}
 
+<!-- Back from accepting the certificate in another tab: ask again. -->
+<svelte:window
+	onfocus={() => {
+		if (proxyBlocked && !running) void proxyAnswers();
+	}}
+/>
+
 <SheetBody error={leftover ? '' : error}>
 	{#snippet form()}
 		{#if phase === 'form' || phase === 'error'}
@@ -522,6 +561,22 @@
 						data-autofocus
 					/>
 				</label>
+				{#if proxyBlocked}
+					<p
+						role="status"
+						class="rounded-lg border border-warn/40 bg-warn-soft px-3.5 py-2.5 text-[13px] text-warn-ink"
+					>
+						The file goes straight to the cluster's upload proxy, which this browser cannot reach or
+						does not trust yet. Open
+						<a
+							href="{proxyBlocked}/healthz"
+							target="_blank"
+							rel="noopener noreferrer"
+							class="font-mono break-all underline">{proxyBlocked}/healthz</a
+						>
+						in a new tab and accept its certificate. Once it reads OK, come back and upload.
+					</p>
+				{/if}
 			{/if}
 
 			<div class="grid grid-cols-1 gap-4 sm:grid-cols-2">

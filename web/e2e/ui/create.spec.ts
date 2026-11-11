@@ -220,6 +220,37 @@ test('the image type offers and allows only what the caller may do', async ({ pa
 	await expect(sheet.getByRole('button', { name: 'Upload image' })).toBeDisabled();
 });
 
+// The browser sends the file to the upload proxy itself: one it cannot reach,
+// or does not trust yet, is named with a link to open before anything is made.
+test('an upload proxy the browser cannot reach is named before anything is created', async ({
+	page,
+}) => {
+	await setScenario(page, 'proxyblocked');
+	await login(page);
+	await page.goto('/storage');
+	await page.getByTitle('Create a VM, network, rule or project').click();
+	const sheet = page.getByRole('dialog');
+	const note = sheet.getByRole('status').filter({ hasText: "the cluster's upload proxy" });
+	await expect(note).toContainText('cannot reach or does not trust yet');
+	await expect(note.getByRole('link', { name: 'http://127.0.0.1:1/healthz' })).toHaveAttribute(
+		'href',
+		'http://127.0.0.1:1/healthz',
+	);
+	await sheet.locator('input[type=file]').setInputFiles({
+		name: 'Fedora-43.qcow2',
+		mimeType: 'application/octet-stream',
+		buffer: Buffer.alloc(1024),
+	});
+	const created: string[] = [];
+	page.on('request', (r) => {
+		if (r.method() === 'POST' && r.url().endsWith('/api/uploads')) created.push(r.url());
+	});
+	await sheet.getByRole('button', { name: 'Upload image' }).click();
+	await expect(sheet.getByText(/Nothing was created\./)).toBeVisible();
+	await expect(note).toBeVisible();
+	expect(created).toEqual([]);
+});
+
 test('Escape closes the sheet and hands focus back to New', async ({ page }) => {
 	const sheet = await openNew(page);
 	await page.keyboard.press('Escape');

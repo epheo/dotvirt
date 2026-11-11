@@ -1043,6 +1043,7 @@ function clusterCaps(s) {
 		drsDisable: !!s.rebalancing?.canManage,
 		oauthClient: !!n.canManage,
 		imageUpload: true,
+		uploadProxy: `http://localhost:${port}/__fixture/proxy`,
 		hosts: true,
 		...s.capabilities?.cluster,
 	};
@@ -1286,6 +1287,8 @@ function handleControl(req, res, url) {
 		state.wsRefuse = Number(m[1]);
 		return sendJSON(res, 200, { refuse: state.wsRefuse });
 	}
+	// The upload proxy's health, which the browser asks before an upload.
+	if (path === '/__fixture/proxy/healthz' && req.method === 'GET') return sendText(res, 200, 'OK');
 	// The upload proxy the browser streams an image to: the bytes are dropped,
 	// the upload then reads as imported.
 	m = path.match(/^\/__fixture\/upload\/(.+)$/);
