@@ -254,8 +254,7 @@ type DotvirtSpec struct {
 
 // BrandingSpec is a provider's dress for the console.
 type BrandingSpec struct {
-	// ProductName replaces dotvirt in the masthead, the page title and the
-	// sign-in screen.
+	// ProductName replaces dotvirt throughout the console.
 	// +kubebuilder:validation:MaxLength=40
 	// +kubebuilder:validation:Pattern=`^[^\x00-\x1f\x7f-\x9f]*$`
 	// +optional

@@ -49,7 +49,7 @@ func (e *BaseMovedError) Error() string { return e.Path + " changed on the base 
 
 // ErrBranchMoved reports a branch that no longer holds the head a rebuild
 // was leased to: someone else pushed to it, or it was deleted.
-var ErrBranchMoved = errors.New("the branch moved off the head dotvirt pushed")
+var ErrBranchMoved = errors.New("the branch moved off the head the console pushed")
 
 // ErrNoChanges reports a changeset whose every item already matches base -
 // nothing to commit because the intent is already true in git.

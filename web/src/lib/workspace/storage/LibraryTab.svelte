@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { branding } from '#lib/state/branding.svelte.js';
 	import { untrack, type Snippet } from 'svelte';
 	import {
 		ChevronRight,
@@ -263,7 +264,7 @@
 		<CountTile
 			label="Free space not reported"
 			body={tiles.free.length
-				? 'No class here reports free space, so dotvirt cannot tell how full it is.'
+				? `No class here reports free space, so ${branding.name} cannot tell how full it is.`
 				: 'No storage classes visible yet.'}
 			link={{ label: 'Open the Classes tab', href: storageHref('classes', { project: p }) }}
 		/>

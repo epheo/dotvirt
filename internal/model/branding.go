@@ -3,8 +3,7 @@ package model
 // Branding is a provider's dress for the console, read before sign-in: the
 // login screen wears it too.
 type Branding struct {
-	// ProductName replaces dotvirt in the masthead and the page title; ""
-	// keeps it.
+	// ProductName replaces dotvirt throughout the console; "" keeps it.
 	ProductName string         `json:"productName,omitempty"`
 	Links       []BrandingLink `json:"links,omitempty"`
 	// Theme: /api/branding/theme.css answers a stylesheet loaded after the

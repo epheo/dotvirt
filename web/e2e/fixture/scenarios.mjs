@@ -1672,7 +1672,7 @@ const platstager = {
 	],
 	proposalDenied: {
 		'platform#8':
-			'forbidden: pull request #8 changed outside dotvirt since you proposed it; a platform administrator can review it',
+			'forbidden: pull request #8 changed outside the console since you proposed it; a platform administrator can review it',
 	},
 };
 // --- end platstager ---

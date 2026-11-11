@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { branding } from '#lib/state/branding.svelte.js';
 	// The Permissions tab: the caller's effective capabilities per namespace, from a
 	// SelfSubjectRulesReview under their own token. Read-only - dotvirt grants
 	// nothing; RBAC is managed by the platform.
@@ -51,7 +52,7 @@
 		<p class="max-w-2xl text-xs text-ink-faint">
 			These reflect your own Kubernetes permissions. Configuration, power, and delete aren't listed:
 			they go through a pull request, where the project's repository decides who merges. Access
-			itself is granted by the platform, not dotvirt.
+			itself is granted by the platform, not {branding.name}.
 		</p>
 	</div>
 {/if}

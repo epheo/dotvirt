@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { branding } from '#lib/state/branding.svelte.js';
 	import { api, rebalanceThresholdLabel, type DRSView } from '#lib/api.js';
 	import { clusterGate } from '#lib/gates.js';
 	import { olmOff, vmsOff } from '#lib/state/modules.svelte.js';
@@ -59,7 +60,8 @@
 	const liveStatus = $derived.by(() => {
 		if (!view) return '';
 		const l = view.live;
-		if (l.stale) return 'Status unavailable: dotvirt cannot read the descheduler state right now';
+		if (l.stale)
+			return `Status unavailable: ${branding.name} cannot read the descheduler state right now`;
 		if (l.degraded) return `Operator degraded: ${l.degraded}`;
 		if (l.deployed) return l.available ? 'Operator running' : 'Operator starting';
 		if (l.apiPresent && !l.synced) return 'Reading descheduler state...';
@@ -95,7 +97,7 @@
 			{/if}
 			<Row
 				label="PSI (load signal)"
-				value={view.psiConfigured ? 'Managed by dotvirt' : 'Not managed'}
+				value={view.psiConfigured ? `Managed by ${branding.name}` : 'Not managed'}
 			/>
 			{#if pending}
 				<Row label="Pending" value={pending} />

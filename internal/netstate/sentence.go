@@ -109,7 +109,7 @@ func (p peer) phrase(red *Redaction) string {
 	case peerNodeSelector:
 		return "the cluster's hosts"
 	}
-	return "a destination dotvirt cannot read"
+	return "a destination the console cannot read"
 }
 
 // vmsPhrase names the VMs a namespace and pod selector pair picks. own is the

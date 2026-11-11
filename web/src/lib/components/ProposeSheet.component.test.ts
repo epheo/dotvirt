@@ -81,12 +81,14 @@ describe('ProposeSheet', () => {
 		setup([openPR]);
 		refuse(
 			409,
-			"conflict: pull request #41's branch was changed outside dotvirt (pushed to or deleted); nothing was pushed and the draft is kept: merge or close #41, then propose\n",
+			"conflict: pull request #41's branch was changed outside the console (pushed to or deleted); nothing was pushed and the draft is kept: merge or close #41, then propose\n",
 		);
 		await fireEvent.click(screen.getByRole('button', { name: 'Add to PR #41' }));
 		const alert = await screen.findByRole('alert');
 		expect(alert.textContent).toContain('Not proposed: this needs a decision first.');
-		expect(alert.textContent).toContain("pull request #41's branch was changed outside dotvirt");
+		expect(alert.textContent).toContain(
+			"pull request #41's branch was changed outside the console",
+		);
 		expect(alert.textContent).not.toContain('/api/');
 		expect(alert.textContent).not.toContain('conflict:');
 		expect(screen.getByRole('link', { name: 'Open PR #41' }).getAttribute('href')).toBe(

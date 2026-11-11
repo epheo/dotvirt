@@ -471,7 +471,7 @@ func (s *Server) ownProposal(w http.ResponseWriter, sc scope, n int, refused err
 	}
 	detail, err := s.reader.OwnProposal(sc.id, sc.proj, row)
 	if errors.Is(err, git.ErrForeignCommit) {
-		err = fmt.Errorf("%w: pull request #%d changed outside dotvirt since you proposed it; someone who can read the whole repo can review it", model.ErrForbidden, n)
+		err = fmt.Errorf("%w: pull request #%d changed outside the console since you proposed it; someone who can read the whole repo can review it", model.ErrForbidden, n)
 	}
 	detail.Proposal.Mine = true
 	respond(w, detail, err)

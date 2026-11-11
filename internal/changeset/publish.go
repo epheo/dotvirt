@@ -162,7 +162,7 @@ func (r *proposeRun) forgeDown(err error) error {
 func (r *proposeRun) extend(pr forge.PR, rec draft.Proposal, hasRec bool) (model.ProposeResult, error) {
 	c := r.c
 	if !hasRec || rec.PR != pr.Number && !rec.Pushed(pr.Head.Sha) {
-		return model.ProposeResult{}, fmt.Errorf("%w: pull request #%d was opened before dotvirt kept a record of what it carries, so it cannot be rebuilt; merge or close #%d, then propose", model.ErrConflict, pr.Number, pr.Number)
+		return model.ProposeResult{}, fmt.Errorf("%w: pull request #%d was opened before the console kept a record of what it carries, so it cannot be rebuilt; merge or close #%d, then propose", model.ErrConflict, pr.Number, pr.Number)
 	}
 	// A PR opened by hand on the branch dotvirt pushed is adopted.
 	rec.PR = pr.Number
@@ -557,10 +557,10 @@ func (r *proposeRun) commitFailed(err error, carried []draft.Entry, pr int) erro
 		return fmt.Errorf("%w: every staged change already matches git; the draft has been cleared", model.ErrInvalid)
 	}
 	if errors.Is(err, git.ErrBranchMoved) && pr == 0 {
-		return fmt.Errorf("%w: the branch %s was changed outside dotvirt while this was proposed; nothing was overwritten and the draft is kept, so propose again", model.ErrConflict, r.branch)
+		return fmt.Errorf("%w: the branch %s was changed outside the console while this was proposed; nothing was overwritten and the draft is kept, so propose again", model.ErrConflict, r.branch)
 	}
 	if errors.Is(err, git.ErrBranchMoved) {
-		return fmt.Errorf("%w: pull request #%d's branch was changed outside dotvirt (pushed to or deleted); nothing was pushed and the draft is kept: merge or close #%d, then propose", model.ErrConflict, pr, pr)
+		return fmt.Errorf("%w: pull request #%d's branch was changed outside the console (pushed to or deleted); nothing was pushed and the draft is kept: merge or close #%d, then propose", model.ErrConflict, pr, pr)
 	}
 	var moved *git.BaseMovedError
 	if errors.As(err, &moved) {

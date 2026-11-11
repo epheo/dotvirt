@@ -9,8 +9,7 @@
  */
 export interface Branding {
   /**
-   * ProductName replaces dotvirt in the masthead and the page title; ""
-   * keeps it.
+   * ProductName replaces dotvirt throughout the console; "" keeps it.
    */
   productName?: string;
   links?: BrandingLink[];

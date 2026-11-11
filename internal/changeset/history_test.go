@@ -522,8 +522,8 @@ func TestProposalForgeFailureNamesOnlyItsClass(t *testing.T) {
 		says   string
 	}{
 		{http.StatusNotFound, model.ErrNotFound, "the forge has no pull request #7"},
-		{http.StatusUnauthorized, model.ErrUnavailable, "pull request #7: the forge refused dotvirt (401)"},
-		{http.StatusForbidden, model.ErrUnavailable, "pull request #7: the forge refused dotvirt (403)"},
+		{http.StatusUnauthorized, model.ErrUnavailable, "pull request #7: the forge refused the console (401)"},
+		{http.StatusForbidden, model.ErrUnavailable, "pull request #7: the forge refused the console (403)"},
 		{http.StatusBadGateway, model.ErrUnavailable, "pull request #7: the forge failed (502)"},
 	} {
 		status.Store(int32(tc.status))
