@@ -21,9 +21,8 @@
 #   CLEAN=1 sudo hack/e2e-microshift.sh  # tear down container + loopback VG
 set -euo pipefail
 
-# Pinned by digest: the tag moves with each MicroShift build. epheo.42: the
-# node NIC in br-ex, OVN-K in shared gateway mode, OpenShift's topology.
-MS_IMAGE="${MS_IMAGE:-ghcr.io/epheo/microshift:5.0.0_202610291612.p0_g0f0de241_5.0.0_okd_scos.6_epheo.42@sha256:f6f872559db523dcd243129fddb090fe33bc3f294b36946c9a79cd149f19d44e}"
+# Pinned by digest: the tag moves with each MicroShift build.
+MS_IMAGE="${MS_IMAGE:-ghcr.io/epheo/microshift:5.0.0_202610291612.p0_g0f0de241_5.0.0_okd_scos.6_epheo.41@sha256:f107b08cc79106687884bbf2604a91d5ff187b202e82a48ec5cc547b17e8e7f6}"
 NAME="${NAME:-dotvirt-e2e-microshift}"
 KUBEVIRT="${KUBEVIRT:-1}"
 APP_IMAGE_TAR="${APP_IMAGE_TAR:-}"
