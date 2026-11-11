@@ -472,6 +472,104 @@ retry "tenant repo exists" 300 forge -o /dev/null "${FORGE}/api/v1/repos/dotvirt
 retry "project in inventory" 300 sh -c \
 	"curl -fsS -H 'Authorization: Bearer ${TOK}' '${BASE}/api/inventory' | grep -q '\"${PROJECT}\"'"
 
+# The supported personas (docs/personas.md), each offered what TestPersonas
+# pins for MicroShift, in both lanes. The operator binds the network admin role
+# to Group dotvirt-platform-admins; a ServiceAccount joins no Group, so it is
+# bound here.
+check_personas() {
+	log "checking the supported personas"
+	persona_token() {
+		local sa=$1 role
+		shift
+		kc -n "${PROJECT}" create serviceaccount "${sa}" --dry-run=client -o yaml | kc apply -f - >/dev/null
+		for role in "$@"; do
+			kc -n "${PROJECT}" create rolebinding "${sa}-${role}" --clusterrole="${role}" \
+				--serviceaccount="${PROJECT}:${sa}" --dry-run=client -o yaml | kc apply -f - >/dev/null
+		done
+		kc -n "${PROJECT}" create token "${sa}" --duration=1h
+	}
+	VIEWER_TOK="$(persona_token e2e-viewer view dotvirt-tenant-egress-view)"
+	AUTHOR_TOK="$(persona_token e2e-author edit dotvirt-tenant-egress-view)"
+	PROJECT_ADMIN_TOK="$(persona_token e2e-project-admin admin dotvirt-tenant-egress)"
+	NETWORK_ADMIN_TOK="$(persona_token e2e-network-admin)"
+	kc create clusterrolebinding e2e-network-admin --clusterrole=dotvirt-platform-network-admin \
+		--serviceaccount="${PROJECT}:e2e-network-admin" --dry-run=client -o yaml | kc apply -f - >/dev/null
+	offered() {
+		local got
+		got="$(curl -fsS --max-time 30 -H "Authorization: Bearer $1" "${BASE}/api/capabilities?namespace=${PROJECT}" |
+			jq -c '.namespace | {repoRead: .project.repoRead, vmCreate: .vm.create, console, networkCreate: .network.create, egressFirewallCreate: .egressFirewall.create}')" || return 1
+		echo "offered ${got}, wanted $2"
+		[ "${got}" = "$2" ]
+	}
+	# A grant offers a new object only where the cluster serves its kind: a kind
+	# nothing syncs is never offered. MicroShift serves EgressFirewalls from
+	# epheo.39 on, UserDefinedNetworks from epheo.44 on.
+	# served <resource> <var> sets <var> to the cluster's answer. Only a NotFound
+	# means not served; any other failure is asked again, as the server counts a
+	# failed read as served.
+	served() {
+		local out err answer
+		err="$(mktemp)"
+		if out="$(kc get --raw /apis/k8s.ovn.org/v1 2>"${err}")"; then
+			rm -f "${err}"
+			# A body that does not parse is asked again.
+			answer="$(jq -r --arg r "$1" '[.resources[].name] | index($r) != null' <<<"${out}")" || return 1
+			printf -v "$2" '%s' "${answer}"
+			return 0
+		fi
+		if grep -q 'NotFound' "${err}"; then
+			rm -f "${err}"
+			printf -v "$2" '%s' false
+			return 0
+		fi
+		cat "${err}"
+		rm -f "${err}"
+		return 1
+	}
+	retry "the cluster's answer on EgressFirewalls" 120 served egressfirewalls egress
+	retry "the cluster's answer on UserDefinedNetworks" 120 served userdefinednetworks udn
+	log "EgressFirewalls served: ${egress}; UserDefinedNetworks served: ${udn}"
+	# Without KubeVirt, edit and admin aggregate no VM rights.
+	vms=true
+	[ "${KUBEVIRT}" != "0" ] || vms=false
+	retry "a project viewer reads the repo and authors nothing" 180 offered "${VIEWER_TOK}" \
+		'{"repoRead":true,"vmCreate":false,"console":false,"networkCreate":false,"egressFirewallCreate":false}'
+	retry "a project author authors VMs, networks where served, and opens consoles" 180 offered "${AUTHOR_TOK}" \
+		'{"repoRead":true,"vmCreate":'"${vms}"',"console":'"${vms}"',"networkCreate":'"${udn}"',"egressFirewallCreate":false}'
+	retry "a project admin authors VMs, and networks and egress firewalls where served" 180 offered "${PROJECT_ADMIN_TOK}" \
+		'{"repoRead":true,"vmCreate":'"${vms}"',"console":'"${vms}"',"networkCreate":'"${udn}"',"egressFirewallCreate":'"${egress}"'}'
+	# View reads a project's networks wherever they are served. Created here, not
+	# through git: what is checked is the viewer's read.
+	if [ "${udn}" = true ]; then
+		kc apply -f - >/dev/null <<YAML
+apiVersion: k8s.ovn.org/v1
+kind: UserDefinedNetwork
+metadata: {name: e2e-reads, namespace: ${PROJECT}}
+spec:
+  topology: Layer2
+  layer2: {role: Secondary, subnets: [10.20.0.0/24]}
+YAML
+		reads_network() {
+			curl -fsS --max-time 30 -H "Authorization: Bearer ${VIEWER_TOK}" "${BASE}/api/networks" |
+				jq -e --arg ns "${PROJECT}" '[.networks[] | select(.namespace == $ns and .name == "e2e-reads" and .backing == "UserDefinedNetwork")] | length == 1'
+		}
+		retry "a project viewer reads the project's network" 180 reads_network
+	fi
+	platform_offered() {
+		local got
+		got="$(curl -fsS --max-time 30 -H "Authorization: Bearer ${NETWORK_ADMIN_TOK}" "${BASE}/api/capabilities" |
+			jq -c '.cluster | {platform, platformRead, hosts}')" || return 1
+		echo "offered ${got}"
+		[ "${got}" = '{"platform":true,"platformRead":false,"hosts":false}' ]
+	}
+	retry "a platform network admin stages platform changes and sees no project" 180 platform_offered
+	no_project_caps() {
+		[ "$(curl -s -o /dev/null -w '%{http_code}' --max-time 30 -H "Authorization: Bearer ${NETWORK_ADMIN_TOK}" \
+			"${BASE}/api/capabilities?namespace=${PROJECT}")" = 404 ]
+	}
+	retry "a platform network admin is not in the project" 180 no_project_caps
+}
+
 # ── 8. Without KubeVirt the loop ends here: nothing to stage, what matters is
 # that the install came up and says what this cluster has.
 if [ "${KUBEVIRT}" = "0" ]; then
@@ -501,6 +599,10 @@ if [ "${KUBEVIRT}" = "0" ]; then
 		[ "$(kc -n dotvirt get dotvirt dotvirt -o jsonpath='{.status.conditions[?(@.type=="SyncImpersonationReady")].reason}')" = "ManualStep" ]
 	}
 	retry "sync impersonation is asked for and waits on argocd-cm" 360 sync_waits_on_argocd_cm
+	# Published images may predate these rules; this tree must hold them.
+	if [ -n "${APP_IMAGE_TAR}" ]; then
+		check_personas
+	fi
 	log "no-KubeVirt install complete"
 	exit 0
 fi
@@ -595,101 +697,7 @@ YAML
 		curl -fsS --max-time 30 -H "Authorization: Bearer ${NO_GET_TOK}" "${BASE}/api/storage/classes" | jq -e 'length > 0'
 	}
 	retry "any authenticated user reads the storage classes" 180 reads_storage_classes
-
-	# The supported personas (docs/personas.md), each offered what TestPersonas
-	# pins for MicroShift. The operator binds the network admin role to Group
-	# dotvirt-platform-admins; a ServiceAccount joins no Group, so it is bound here.
-	log "checking the supported personas"
-	persona_token() {
-		local sa=$1 role
-		shift
-		kc -n "${PROJECT}" create serviceaccount "${sa}" --dry-run=client -o yaml | kc apply -f - >/dev/null
-		for role in "$@"; do
-			kc -n "${PROJECT}" create rolebinding "${sa}-${role}" --clusterrole="${role}" \
-				--serviceaccount="${PROJECT}:${sa}" --dry-run=client -o yaml | kc apply -f - >/dev/null
-		done
-		kc -n "${PROJECT}" create token "${sa}" --duration=1h
-	}
-	VIEWER_TOK="$(persona_token e2e-viewer view dotvirt-tenant-egress-view)"
-	AUTHOR_TOK="$(persona_token e2e-author edit dotvirt-tenant-egress-view)"
-	PROJECT_ADMIN_TOK="$(persona_token e2e-project-admin admin dotvirt-tenant-egress)"
-	NETWORK_ADMIN_TOK="$(persona_token e2e-network-admin)"
-	kc create clusterrolebinding e2e-network-admin --clusterrole=dotvirt-platform-network-admin \
-		--serviceaccount="${PROJECT}:e2e-network-admin" --dry-run=client -o yaml | kc apply -f - >/dev/null
-	offered() {
-		local got
-		got="$(curl -fsS --max-time 30 -H "Authorization: Bearer $1" "${BASE}/api/capabilities?namespace=${PROJECT}" |
-			jq -c '.namespace | {repoRead: .project.repoRead, vmCreate: .vm.create, console, networkCreate: .network.create, egressFirewallCreate: .egressFirewall.create}')" || return 1
-		echo "offered ${got}, wanted $2"
-		[ "${got}" = "$2" ]
-	}
-	# A grant offers a new object only where the cluster serves its kind: a kind
-	# nothing syncs is never offered. MicroShift serves EgressFirewalls from
-	# epheo.39 on, UserDefinedNetworks from epheo.44 on.
-	# served <resource> <var> sets <var> to the cluster's answer. Only a NotFound
-	# means not served; any other failure is asked again, as the server counts a
-	# failed read as served.
-	served() {
-		local out err answer
-		err="$(mktemp)"
-		if out="$(kc get --raw /apis/k8s.ovn.org/v1 2>"${err}")"; then
-			rm -f "${err}"
-			# A body that does not parse is asked again.
-			answer="$(jq -r --arg r "$1" '[.resources[].name] | index($r) != null' <<<"${out}")" || return 1
-			printf -v "$2" '%s' "${answer}"
-			return 0
-		fi
-		if grep -q 'NotFound' "${err}"; then
-			rm -f "${err}"
-			printf -v "$2" '%s' false
-			return 0
-		fi
-		cat "${err}"
-		rm -f "${err}"
-		return 1
-	}
-	retry "the cluster's answer on EgressFirewalls" 120 served egressfirewalls egress
-	retry "the cluster's answer on UserDefinedNetworks" 120 served userdefinednetworks udn
-	log "EgressFirewalls served: ${egress}; UserDefinedNetworks served: ${udn}"
-	# Without KubeVirt, edit and admin aggregate no VM rights.
-	vms=true
-	[ "${KUBEVIRT}" != "0" ] || vms=false
-	retry "a project viewer reads the repo and authors nothing" 180 offered "${VIEWER_TOK}" \
-		'{"repoRead":true,"vmCreate":false,"console":false,"networkCreate":false,"egressFirewallCreate":false}'
-	retry "a project author authors VMs, networks where served, and opens consoles" 180 offered "${AUTHOR_TOK}" \
-		'{"repoRead":true,"vmCreate":'"${vms}"',"console":'"${vms}"',"networkCreate":'"${udn}"',"egressFirewallCreate":false}'
-	retry "a project admin authors VMs, and networks and egress firewalls where served" 180 offered "${PROJECT_ADMIN_TOK}" \
-		'{"repoRead":true,"vmCreate":'"${vms}"',"console":'"${vms}"',"networkCreate":'"${udn}"',"egressFirewallCreate":'"${egress}"'}'
-	# View reads a project's networks wherever they are served. Created here, not
-	# through git: what is checked is the viewer's read.
-	if [ "${udn}" = true ]; then
-		kc apply -f - >/dev/null <<YAML
-apiVersion: k8s.ovn.org/v1
-kind: UserDefinedNetwork
-metadata: {name: e2e-reads, namespace: ${PROJECT}}
-spec:
-  topology: Layer2
-  layer2: {role: Secondary, subnets: [10.20.0.0/24]}
-YAML
-		reads_network() {
-			curl -fsS --max-time 30 -H "Authorization: Bearer ${VIEWER_TOK}" "${BASE}/api/networks" |
-				jq -e --arg ns "${PROJECT}" '[.networks[] | select(.namespace == $ns and .name == "e2e-reads" and .backing == "UserDefinedNetwork")] | length == 1'
-		}
-		retry "a project viewer reads the project's network" 180 reads_network
-	fi
-	platform_offered() {
-		local got
-		got="$(curl -fsS --max-time 30 -H "Authorization: Bearer ${NETWORK_ADMIN_TOK}" "${BASE}/api/capabilities" |
-			jq -c '.cluster | {platform, platformRead, hosts}')" || return 1
-		echo "offered ${got}"
-		[ "${got}" = '{"platform":true,"platformRead":false,"hosts":false}' ]
-	}
-	retry "a platform network admin stages platform changes and sees no project" 180 platform_offered
-	no_project_caps() {
-		[ "$(curl -s -o /dev/null -w '%{http_code}' --max-time 30 -H "Authorization: Bearer ${NETWORK_ADMIN_TOK}" \
-			"${BASE}/api/capabilities?namespace=${PROJECT}")" = 404 ]
-	}
-	retry "a platform network admin is not in the project" 180 no_project_caps
+	check_personas
 fi
 
 # ── 10. The round-trip itself ───────────────────────────────────────────────────
