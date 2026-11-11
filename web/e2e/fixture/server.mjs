@@ -596,6 +596,24 @@ async function handleAPI(req, res, url) {
 		return sendJSON(res, 200, draftFor('platform'));
 	}
 
+	// A project's publish namespace, staged in the platform draft; refused on
+	// the capability the UI gates it by.
+	m = path.match(/^\/api\/projects\/([^/]+)\/publish-namespace$/);
+	if (m && req.method === 'POST') {
+		const p = state.scenario.inventory.projects.find((x) => x.name === m[1]);
+		if (!p?.namespaces.length) return sendText(res, 404, 'project not found');
+		const caps = namespaceCaps(s, p, p.namespaces[0].namespace).project;
+		if (!caps.publishNamespaceCreate) return sendText(res, 403, 'you may not create namespaces');
+		stageInto('platform', {
+			kind: 'create',
+			resource: 'namespace',
+			namespace: caps.publishNamespace,
+			name: caps.publishNamespace,
+			changes: [],
+		});
+		return sendJSON(res, 200, draftFor('platform'));
+	}
+
 	// Publishing for a project: its Gateway, certificate and its admins' read
 	// of them in its publish namespace, and each reached namespace's route
 	// grant, staged in the platform draft; refused on the capability the UI

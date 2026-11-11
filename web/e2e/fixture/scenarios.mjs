@@ -2044,20 +2044,34 @@ const publishingwaits = {
 	name: 'publishingwaits',
 	capabilities: { ...publishing.capabilities, 'db-prod': { project: { publishingWaits: true } } },
 };
-// team-db has no publish namespace: the caller could, but it waits on one.
+// team-db has no publish namespace: it waits on one, which the caller may
+// create.
 const publishingunhoused = {
 	...publishing,
 	name: 'publishingunhoused',
 	capabilities: {
 		...publishing.capabilities,
-		'db-prod': { project: { publishingUnhoused: true } },
+		'db-prod': {
+			project: {
+				publishingUnhoused: true,
+				publishNamespaceCreate: true,
+				publishNamespace: 'team-db-publish',
+			},
+		},
 	},
+};
+// Each of team-db's namespaces has a VM Network of its own: not offered.
+const publishingapart = {
+	...publishing,
+	name: 'publishingapart',
+	capabilities: { ...publishing.capabilities, 'db-prod': { project: { publishingApart: true } } },
 };
 
 export const scenarios = {
 	publishing,
 	publishingwaits,
 	publishingunhoused,
+	publishingapart,
 	fronted,
 	frontedtenant,
 	replicated,

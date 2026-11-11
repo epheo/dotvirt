@@ -60,6 +60,11 @@ var ErrPublishingOn = fmt.Errorf("%w: publishing is already on", model.ErrInvali
 // the publishing GatewayClass does not say its Gateways are isolated.
 var ErrPrimaryNetwork = fmt.Errorf("%w: publishing on a VM Network needs a newer portail: today one project could delay the others' route changes", model.ErrInvalid)
 
+// ErrApart refuses publishing, and the publish namespace, for a project none
+// of whose namespaces shares the publish namespace's network: each has a VM
+// Network of its own, where a gateway is the project's to run.
+var ErrApart = fmt.Errorf("%w: no namespace of the project shares its publish namespace's network: each has a VM Network of its own", model.ErrInvalid)
+
 // ErrNoPublishNamespace refuses publishing for a project whose publish
 // namespace the cluster lacks. dotvirt never creates it here: a namespace
 // joins a VM Network only when created, so only the project's creator knows
@@ -175,7 +180,7 @@ func (c *Coordinator) publishPlan(commitProj, target project.ProjectInfo, pt Pub
 	case !pt.PublishNamespace:
 		return plan, entries, fmt.Errorf("%w: %s does not exist", ErrNoPublishNamespace, plan.Namespace)
 	case len(plan.Reach) == 0:
-		return plan, nil, fmt.Errorf("%w: no namespace of %s shares %s's network", model.ErrInvalid, target.Name, plan.Namespace)
+		return plan, nil, fmt.Errorf("%w (%s)", ErrApart, plan.Namespace)
 	case len(entries) == 0:
 		return plan, nil, fmt.Errorf("%w for %s", ErrPublishingOn, target.Name)
 	case plan.Primary && !pt.Isolated:

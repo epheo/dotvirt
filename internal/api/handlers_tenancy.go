@@ -224,6 +224,22 @@ func (s *Server) handlePublishing(w http.ResponseWriter, r *http.Request) {
 	respond(w, view, err)
 }
 
+// handlePublishNamespace stages a project's publish namespace into the
+// platform repo, for a project the cluster holds none for, gated on the
+// claim of that namespace should one by its name exist.
+func (s *Server) handlePublishNamespace(w http.ResponseWriter, r *http.Request) {
+	plat, ok := s.platformScopeGated(w, r)
+	if !ok {
+		return
+	}
+	target, ok := s.tenancyTarget(w, r, plat)
+	if !ok {
+		return
+	}
+	view, err := s.draft.StagePublishNamespace(plat.id, plat.proj, target, s.publishTarget(target), s.claimNamespaces(r.Context(), plat, target.Name))
+	respond(w, view, err)
+}
+
 // publishingKinds are the kinds publishing stages, each of which the cluster
 // must serve: a Certificate only with an issuer.
 func (s *Server) publishingKinds() []model.Kind {

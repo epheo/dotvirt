@@ -1,6 +1,7 @@
 package changeset
 
 import (
+	"cmp"
 	"encoding/json"
 	"fmt"
 	"slices"
@@ -202,24 +203,31 @@ func (c *Coordinator) projectEntries(commitProj project.ProjectInfo, spec Projec
 // publishNamespaceEntries stages spec's publish namespace with the project,
 // where the install publishes and the project starts on the cluster's own
 // network: a VM Network belongs to one namespace and cannot span a publish
-// namespace. One the cluster holds for this project already stays as it is.
+// namespace.
 func (c *Coordinator) publishNamespaceEntries(spec ProjectSpec, live LiveNamespaces) ([]draft.Entry, error) {
 	if !c.publishing.On() || spec.VMNetwork != nil {
 		return nil, nil
 	}
-	name := tenancy.PublishNamespace(spec.Name)
+	return c.newPublishNamespace(spec.Name, live)
+}
+
+// newPublishNamespace stages project's publish namespace. One the cluster
+// holds for project already stays as it is; a namespace by that name held
+// otherwise, a user's own project among them, is refused.
+func (c *Coordinator) newPublishNamespace(project string, live LiveNamespaces) ([]draft.Entry, error) {
+	name := tenancy.PublishNamespace(project)
 	ln, err := live.lookup(name)
 	if err != nil {
 		return nil, err
 	}
 	if ln != nil {
 		_, inProject := ln.Labels[c.publishing.ProjectLabel]
-		if tenancy.PublishProject(name, ln.Labels, inProject) == spec.Name {
+		if tenancy.PublishProject(name, ln.Labels, ln.Annotations, inProject) == project {
 			return nil, nil
 		}
-		return nil, fmt.Errorf("%w: namespace %s exists and is not %s's publish namespace", model.ErrConflict, name, spec.Name)
+		return nil, fmt.Errorf("%w: namespace %s exists and is not %s's publish namespace", model.ErrConflict, name, project)
 	}
-	path, content, err := netgen.PublishNamespaceManifest(spec.Name)
+	path, content, err := netgen.PublishNamespaceManifest(project)
 	if err != nil {
 		return nil, invalid(err)
 	}
@@ -231,6 +239,48 @@ func (c *Coordinator) publishNamespaceEntries(spec ProjectSpec, live LiveNamespa
 		SourceFile: path,
 		Manifest:   string(content),
 	}}, nil
+}
+
+// StagePublishNamespace stages target's publish namespace into commitProj, for
+// a project the cluster holds none for: one made before the install
+// published. It joins no VM Network, so it serves the project's namespaces on
+// the cluster's own network, of which the project needs one.
+func (c *Coordinator) StagePublishNamespace(id auth.Identity, commitProj, target project.ProjectInfo, pt PublishTarget, live LiveNamespaces) (model.DraftView, error) {
+	entries, err := c.publishNamespacePlan(target, pt, live)
+	if err != nil {
+		return model.DraftView{}, err
+	}
+	return c.stage(id, commitProj, entries...)
+}
+
+// PublishNamespaceNeeds is StagePublishNamespace's accesses, unstaged.
+func (c *Coordinator) PublishNamespaceNeeds(commitProj, target project.ProjectInfo, pt PublishTarget) ([]Access, error) {
+	entries, err := c.publishNamespacePlan(target, pt, nil)
+	if err != nil {
+		return nil, err
+	}
+	return c.needs(commitProj, entries)
+}
+
+func (c *Coordinator) publishNamespacePlan(target project.ProjectInfo, pt PublishTarget, live LiveNamespaces) ([]draft.Entry, error) {
+	if !c.publishing.On() {
+		return nil, fmt.Errorf("%w: publishing is not configured on this install", model.ErrUnavailable)
+	}
+	if err := tenantName(target.Name); err != nil {
+		return nil, err
+	}
+	name := tenancy.PublishNamespace(target.Name)
+	if pt.PublishNamespace {
+		return nil, fmt.Errorf("%w: %s exists", model.ErrConflict, name)
+	}
+	if !slices.ContainsFunc(target.Namespaces, func(ns string) bool { return cmp.Or(pt.Networks[ns], DefaultNetwork) == DefaultNetwork }) {
+		return nil, fmt.Errorf("%w (%s)", ErrApart, name)
+	}
+	entries, err := c.newPublishNamespace(target.Name, live)
+	if err == nil && len(entries) == 0 {
+		err = fmt.Errorf("%w: %s exists", model.ErrConflict, name)
+	}
+	return entries, err
 }
 
 // AdoptProject wires a repo to an EXISTING labeled-but-repoless project - the

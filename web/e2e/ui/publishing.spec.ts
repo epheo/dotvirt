@@ -44,12 +44,26 @@ test.describe('publishing', () => {
 		await expect(page.getByRole('button', { name: 'Turn publishing on' })).toHaveCount(0);
 	});
 
-	test('a project without a publish namespace says what it waits on', async ({ page }) => {
+	test('a project without a publish namespace says what it waits on, and creates it', async ({
+		page,
+	}) => {
 		await setScenario(page, 'publishingunhoused');
 		await login(page);
 		await page.goto('/compute/team-db?tab=configure');
-		await expect(page.getByText('team-db-publish')).toBeVisible();
-		await expect(page.getByText(/which the platform creates with the project/)).toBeVisible();
+		await expect(page.getByText(/publishing needs the namespace team-db-publish/)).toBeVisible();
+		await expect(page.getByRole('button', { name: 'Turn publishing on' })).toHaveCount(0);
+		await page.getByRole('button', { name: 'Create team-db-publish' }).click();
+		const dialog = page.getByRole('dialog');
+		await expect(dialog.getByText(/will hold team-db's Gateway/)).toBeVisible();
+		await dialog.getByRole('button', { name: 'Stage namespace' }).click();
+		await expect(page.getByText('team-db-publish staged in the platform draft.')).toBeVisible();
+	});
+
+	test('a project whose namespaces each run their own network is told so', async ({ page }) => {
+		await setScenario(page, 'publishingapart');
+		await login(page);
+		await page.goto('/compute/team-db?tab=configure');
+		await expect(page.getByText(/each namespace has a VM Network of its own/)).toBeVisible();
 		await expect(page.getByRole('button', { name: 'Turn publishing on' })).toHaveCount(0);
 	});
 

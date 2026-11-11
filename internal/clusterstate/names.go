@@ -63,7 +63,7 @@ func (n *namespaceSink) publishOf(name string, obj any) string {
 	if err != nil {
 		return ""
 	}
-	return tenancy.PublishProject(name, m.GetLabels(), n.selected(obj))
+	return tenancy.PublishProject(name, m.GetLabels(), m.GetAnnotations(), n.selected(obj))
 }
 
 // setPublished records name as its project's publish namespace, or drops it

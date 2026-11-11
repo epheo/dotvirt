@@ -70,12 +70,22 @@ const PublishSuffix = "-publish"
 // PublishNamespace names project's publish namespace.
 func PublishNamespace(project string) string { return project + PublishSuffix }
 
+// RequesterAnnotation marks a namespace OpenShift made from a user's project
+// request: that user is its admin, and no namespace the platform repo
+// declares carries it.
+const RequesterAnnotation = "openshift.io/requester"
+
 // PublishProject is the project whose publish namespace ns is, read from its
-// labels: named for that project, labeled for it, and itself in no project
-// (inProject). "" when ns is no project's.
-func PublishProject(ns string, labels map[string]string, inProject bool) string {
+// metadata: named for that project, labeled for it, in no project
+// (inProject), and not a user's own project, which a self-provisioner could
+// have made before the platform repo's namespace synced. "" when ns is no
+// project's.
+func PublishProject(ns string, labels, annotations map[string]string, inProject bool) string {
 	project := labels[PublishLabel]
 	if project == "" || inProject || ns != PublishNamespace(project) {
+		return ""
+	}
+	if _, requested := annotations[RequesterAnnotation]; requested {
 		return ""
 	}
 	return project

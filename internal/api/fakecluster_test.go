@@ -661,6 +661,11 @@ func (d *planeDraft) StagePublishing(_ auth.Identity, commit, target project.Pro
 	return stagedView, nil
 }
 
+func (d *planeDraft) StagePublishNamespace(_ auth.Identity, commit, target project.ProjectInfo, _ changeset.PublishTarget, _ changeset.LiveNamespaces) (model.DraftView, error) {
+	d.record("StagePublishNamespace "+commit.Name+","+target.Name, nil)
+	return stagedView, nil
+}
+
 func (d *planeDraft) ReleaseDeclared(_ auth.Identity, commit, target project.ProjectInfo) ([]string, []string, error) {
 	d.record("ReleaseDeclared "+commit.Name+","+target.Name, nil)
 	return d.releaseStaged, d.releaseResidue, nil
@@ -705,6 +710,9 @@ func (d *planeDraft) SyncAccessNeeds(project.ProjectInfo, project.ProjectInfo) (
 }
 func (d *planeDraft) PublishingNeeds(project.ProjectInfo, project.ProjectInfo, changeset.PublishTarget) (changeset.PublishPlan, []changeset.Access, error) {
 	return changeset.PublishPlan{}, nil, nil
+}
+func (d *planeDraft) PublishNamespaceNeeds(project.ProjectInfo, project.ProjectInfo, changeset.PublishTarget) ([]changeset.Access, error) {
+	return nil, nil
 }
 func (d *planeDraft) ReleaseNeeds(project.ProjectInfo, project.ProjectInfo) ([]changeset.Access, []string, error) {
 	return nil, d.releaseResidue, nil

@@ -84,8 +84,8 @@ func TestPublishingPlan(t *testing.T) {
 	if err != nil || plan.Namespace != "shop-publish" || !slices.Equal(plan.Reach, []string{"b", "d"}) || !plan.On || plan.Primary {
 		t.Errorf("shop: %+v %v, want on in shop-publish, reaching b and d", plan, err)
 	}
-	if _, _, err := c.PublishingNeeds(plat, project.ProjectInfo{Name: "shop", Namespaces: []string{"a"}}, on(map[string]string{"a": "udn:a/own"})); !errors.Is(err, model.ErrInvalid) || errors.Is(err, ErrNoPublishNamespace) {
-		t.Errorf("no namespace on the publish namespace's network: %v, want ErrInvalid", err)
+	if _, _, err := c.PublishingNeeds(plat, project.ProjectInfo{Name: "shop", Namespaces: []string{"a"}}, on(map[string]string{"a": "udn:a/own"})); !errors.Is(err, ErrApart) {
+		t.Errorf("no namespace on the publish namespace's network: %v, want ErrApart", err)
 	}
 	vpc := project.ProjectInfo{Name: "vpc", Namespaces: []string{"x", "y", "z"}}
 	cudn := on(map[string]string{"x": "cudn:vpc", "y": "cudn:vpc", "vpc-publish": "cudn:vpc"})
@@ -227,5 +227,39 @@ func TestRoutesGrantFollowsTheAdminGrant(t *testing.T) {
 	_, admin := grantSubjects(t, items["web-admins"], "web-admins")
 	if _, got := grantSubjects(t, items["web-routes"], "web-routes"); !slices.Equal(got, admin) {
 		t.Errorf("route grant names %+v, want the admin grant's %+v", got, admin)
+	}
+}
+
+// A project the cluster holds no publish namespace for gets one staged on
+// asking, labeled for it and never into it. Refused: one it holds, a project
+// whose every namespace has a VM Network of its own, a namespace by that name
+// held otherwise, and an install without publishing.
+func TestStagePublishNamespace(t *testing.T) {
+	c, plat := publishingCoordinator(t, nil)
+	shop := project.ProjectInfo{Name: "shop", Namespaces: []string{"web", "db"}}
+	view, err := c.StagePublishNamespace(auth.Identity{Username: "admin"}, plat, shop, PublishTarget{Networks: map[string]string{"web": "udn:web/own"}}, nil)
+	if err != nil {
+		t.Fatalf("StagePublishNamespace: %v", err)
+	}
+	items := stagedYAML(t, view)
+	if y, ok := items["shop-publish"]; len(items) != 1 || !ok || !strings.Contains(y, tenancy.PublishLabel+": shop") || strings.Contains(y, "dotvirt.io/project") {
+		t.Errorf("staged %v:\n%s", slices.Sorted(maps.Keys(items)), y)
+	}
+	if _, err := c.PublishNamespaceNeeds(plat, shop, on(nil)); !errors.Is(err, model.ErrConflict) {
+		t.Errorf("held: %v, want ErrConflict", err)
+	}
+	own := PublishTarget{Networks: map[string]string{"web": "udn:web/own", "db": "udn:db/own"}}
+	if _, err := c.PublishNamespaceNeeds(plat, shop, own); !errors.Is(err, ErrApart) {
+		t.Errorf("every namespace on its own VM Network: %v, want ErrApart", err)
+	}
+	squatted := func(string) (*netgen.LiveNamespace, error) {
+		return &netgen.LiveNamespace{Labels: map[string]string{tenancy.PublishLabel: "shop"}, Annotations: map[string]string{tenancy.RequesterAnnotation: "mallory"}}, nil
+	}
+	if _, err := c.StagePublishNamespace(auth.Identity{Username: "admin"}, plat, shop, PublishTarget{}, squatted); !errors.Is(err, model.ErrConflict) {
+		t.Errorf("a user's own project by that name: %v, want ErrConflict", err)
+	}
+	off := newTestCoordinator(t, false)
+	if _, err := off.PublishNamespaceNeeds(plat, shop, PublishTarget{}); !errors.Is(err, model.ErrUnavailable) {
+		t.Errorf("publishing off: %v, want ErrUnavailable", err)
 	}
 }

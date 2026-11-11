@@ -64,6 +64,8 @@ export const projectGate = {
 // Publishing: a project's Gateway, staged by a platform admin.
 export const publishGate = {
 	on: (n: string) => proj(n, (c) => c.project.publishing, 'turn publishing on for this project'),
+	namespace: (n: string) =>
+		proj(n, (c) => !!c.project.publishNamespaceCreate, "create this project's publish namespace"),
 };
 
 // templateGate is writing one template library: the shared one ('platform'),

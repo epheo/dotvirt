@@ -2,12 +2,14 @@ package api
 
 import (
 	"context"
+	"encoding/json"
 	"maps"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -23,6 +25,7 @@ import (
 	"github.com/epheo/dotvirt/internal/git"
 	"github.com/epheo/dotvirt/internal/model"
 	"github.com/epheo/dotvirt/internal/netgen"
+	"github.com/epheo/dotvirt/internal/netstate"
 	"github.com/epheo/dotvirt/internal/publish"
 	"github.com/epheo/dotvirt/pkg/forge"
 	"github.com/epheo/dotvirt/pkg/tenancy"
@@ -94,7 +97,7 @@ func newCoordinatorRig(t *testing.T, extra ...map[string]string) *gateRig {
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
 	repos := git.NewRepoSet(ctx, "", "", nil, false, nil, time.Hour)
-	publishing := publish.Settings{Domain: "apps.example.com", GatewayClass: "portail", Issuer: "letsencrypt", ProjectLabel: "dotvirt.io/project"}
+	publishing := publish.Settings{Domain: "apps.example.com", GatewayClass: "portail", Issuer: "letsencrypt", ProjectLabel: "dotvirt.io/project", PortailNamespace: "portail-system"}
 	c := changeset.New(store, repos, forge.NewFactory(forgeSrv.URL, forge.StaticToken("tok"), false, ""), nil, nil, nil, "main", "dotvirt/proposed").
 		WithSyncNamespace("dotvirt-sync").WithPublishing(publishing)
 	// The release strips label residue under the caller's token.
@@ -172,6 +175,9 @@ func TestCapabilitiesEqualTheCoordinatorsGate(t *testing.T) {
 		// team-a-dev's admin-grant subjects.
 		{"publishing", "team-a-dev", http.MethodPost, "/api/projects/team-a/publishing", ``,
 			pr(func(p model.ProjectCaps) bool { return p.Publishing })},
+		// orphans has no publish namespace: its Namespace alone.
+		{"publish namespace", "orphans-ns", http.MethodPost, "/api/projects/orphans/publish-namespace", ``,
+			pr(func(p model.ProjectCaps) bool { return p.PublishNamespaceCreate })},
 		// Reconfiguring: the committed KubeDescheduler is updated, the rest of
 		// the set created.
 		{"drs enable", "", http.MethodPost, "/api/drs", `{"mode":"Predictive"}`,
@@ -344,9 +350,9 @@ func TestPublishingOnFollowsGatewayReads(t *testing.T) {
 	}
 }
 
-// A project the cluster holds no publish namespace for is told so, and only
-// to a caller who could otherwise stage its publishing; the route refuses it
-// and stages nothing.
+// A project the cluster holds no publish namespace for is told so, naming it,
+// and only to a caller who could otherwise stage its publishing or the
+// namespace; the route refuses it and stages nothing.
 func TestPublishingWaitsOnThePublishNamespace(t *testing.T) {
 	g := newCoordinatorRig(t)
 	able := g.token([]grant{
@@ -356,14 +362,113 @@ func TestPublishingWaitsOnThePublishNamespace(t *testing.T) {
 		kind(verbCreate, model.KindCert, ""),
 	})
 	_, nc := g.caps(able, "orphans-ns")
-	if !nc.Project.PublishingUnhoused || nc.Project.Publishing || nc.Project.PublishNamespace != "" || len(nc.Project.PublishingReach) != 0 {
-		t.Errorf("caps %+v: want unhoused alone", nc.Project)
+	if !nc.Project.PublishingUnhoused || nc.Project.Publishing || nc.Project.PublishNamespaceCreate || nc.Project.PublishNamespace != "orphans-publish" || len(nc.Project.PublishingReach) != 0 {
+		t.Errorf("caps %+v: want unhoused in orphans-publish, nothing reached, no namespace create without the right", nc.Project)
 	}
 	if _, nc := g.caps(g.token(nil), "orphans-ns"); nc.Project.PublishingUnhoused {
 		t.Error("unhoused, told to a caller who could stage nothing")
 	}
 	if rec := do(g.s, able, http.MethodPost, "/api/projects/orphans/publishing", ""); rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "orphans-publish") {
 		t.Errorf("publishing = %d %q, want 400 naming orphans-publish", rec.Code, rec.Body.String())
+	}
+	creator := g.token([]grant{{verb: verbGet, resource: "namespaces"}, {verb: verbCreate, resource: "namespaces"}})
+	if _, nc := g.caps(creator, "orphans-ns"); !nc.Project.PublishNamespaceCreate || !nc.Project.PublishingUnhoused || nc.Project.PublishNamespace != "orphans-publish" {
+		t.Errorf("caps %+v: want the publish namespace offered to one who may create it", nc.Project)
+	}
+	rec := do(g.s, creator, http.MethodPost, "/api/projects/orphans/publish-namespace", "")
+	var view model.DraftView
+	if rec.Code != http.StatusOK || json.Unmarshal(rec.Body.Bytes(), &view) != nil || len(view.Items) != 1 || view.Items[0].Name != "orphans-publish" || !strings.Contains(view.Items[0].YAML, tenancy.PublishLabel+": orphans") {
+		t.Errorf("publish namespace = %d %q, want orphans-publish alone staged", rec.Code, rec.Body.String())
+	}
+}
+
+// onVPC is the coordinator rig with a primary CUDN, vpc, generated in each
+// of namespaces, its netstate synced.
+func onVPC(t *testing.T, namespaces ...string) *gateRig {
+	t.Helper()
+	g := newCoordinatorRig(t)
+	resources := func(gv string, names ...string) http.HandlerFunc {
+		return func(w http.ResponseWriter, _ *http.Request) {
+			list := metav1.APIResourceList{TypeMeta: metav1.TypeMeta{Kind: "APIResourceList", APIVersion: "v1"}, GroupVersion: gv}
+			for _, n := range names {
+				list.APIResources = append(list.APIResources, metav1.APIResource{Name: n, Verbs: []string{"list", "watch"}})
+			}
+			writeObj(w, list)
+		}
+	}
+	g.fc.on(http.MethodGet, "/apis/k8s.ovn.org/v1", resources("k8s.ovn.org/v1", "clusteruserdefinednetworks", "userdefinednetworks"))
+	g.fc.on(http.MethodGet, "/apis/k8s.cni.cncf.io/v1", resources("k8s.cni.cncf.io/v1", "network-attachment-definitions"))
+	g.fc.on(http.MethodGet, "/apis/k8s.ovn.org/v1/clusteruserdefinednetworks", unstructuredList("k8s.ovn.org/v1", "ClusterUserDefinedNetwork", map[string]any{
+		"apiVersion": "k8s.ovn.org/v1", "kind": "ClusterUserDefinedNetwork",
+		"metadata": map[string]any{"name": "vpc", "uid": "vpc", "resourceVersion": "1"},
+		"spec":     map[string]any{"network": map[string]any{"topology": "Layer2", "layer2": map[string]any{"role": "Primary", "subnets": []any{"10.40.0.0/16"}}}},
+	}))
+	g.fc.on(http.MethodGet, "/apis/k8s.ovn.org/v1/userdefinednetworks", unstructuredList("k8s.ovn.org/v1", "UserDefinedNetwork"))
+	var nads []map[string]any
+	for _, ns := range namespaces {
+		nads = append(nads, map[string]any{
+			"apiVersion": "k8s.cni.cncf.io/v1", "kind": "NetworkAttachmentDefinition",
+			"metadata": map[string]any{
+				"name": "vpc", "namespace": ns, "resourceVersion": "1",
+				"ownerReferences": []any{map[string]any{"apiVersion": "k8s.ovn.org/v1", "kind": "ClusterUserDefinedNetwork", "name": "vpc", "uid": "vpc"}},
+			},
+		})
+	}
+	g.fc.on(http.MethodGet, "/apis/k8s.cni.cncf.io/v1/network-attachment-definitions", unstructuredList("k8s.cni.cncf.io/v1", "NetworkAttachmentDefinition", nads...))
+	ns := netstate.New(g.fc.sa, nil)
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	ns.Run(ctx)
+	g.s.netstate = ns
+	for deadline := time.Now().Add(10 * time.Second); ns.PrimaryNetwork(namespaces[0]) != "cudn:vpc"; time.Sleep(10 * time.Millisecond) {
+		if time.Now().After(deadline) {
+			t.Fatalf("netstate never put %s on vpc", namespaces[0])
+		}
+	}
+	return g
+}
+
+// publisher may stage every file publishing on a VM Network stages.
+func publisher(g *gateRig) string {
+	rbac := "rbac.authorization.k8s.io"
+	return g.token([]grant{
+		{verb: verbGet, resource: "namespaces"},
+		{verb: verbPatch, resource: "namespaces"},
+		{verb: verbCreate, resource: "namespaces"},
+		{verb: verbCreate, group: rbac, resource: "rolebindings"},
+		{verb: verbUpdate, group: rbac, resource: "rolebindings"},
+		{verb: verbBind, group: rbac, resource: "clusterroles"},
+		{verb: verbBind, group: rbac, resource: "roles"},
+		kind(verbCreate, model.KindGateway, ""),
+		kind(verbCreate, model.KindCert, ""),
+		kind(verbCreate, model.KindGWParams, ""),
+	})
+}
+
+// A publish namespace on the project's VM Network makes a Gateway that polls
+// portail through the apiserver: the network is read for the publish
+// namespace itself, so until the class says Gateways are isolated publishing
+// waits, and it reaches only the project namespaces on that network.
+func TestPublishingOnAVMNetworkWaitsOnIsolation(t *testing.T) {
+	g := onVPC(t, "team-a-publish", "team-a-dev")
+	_, nc := g.caps(publisher(g), "team-a-dev")
+	if !nc.Project.PublishingWaits || nc.Project.Publishing || !slices.Equal(nc.Project.PublishingReach, []string{"team-a-dev"}) {
+		t.Errorf("caps %+v: want waiting on isolation, reaching team-a-dev", nc.Project)
+	}
+}
+
+// A publish namespace on no network of the project's reaches nothing:
+// publishing is not offered, and the project is told why rather than offered
+// a stage the route refuses.
+func TestPublishingApartFromEveryNamespace(t *testing.T) {
+	g := onVPC(t, "team-a-dev")
+	tok := publisher(g)
+	_, nc := g.caps(tok, "team-a-dev")
+	if !nc.Project.PublishingApart || nc.Project.Publishing || nc.Project.PublishingUnhoused || nc.Project.PublishingWaits {
+		t.Errorf("caps %+v: want apart alone", nc.Project)
+	}
+	if rec := do(g.s, tok, http.MethodPost, "/api/projects/team-a/publishing", ""); rec.Code != http.StatusBadRequest {
+		t.Errorf("publishing = %d %q, want 400", rec.Code, rec.Body.String())
 	}
 }
 

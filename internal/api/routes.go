@@ -132,6 +132,7 @@ func (s *Server) routes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/projects/{project}/release", s.handleReleaseProject)
 	mux.HandleFunc("POST /api/projects/{project}/sync-access", s.handleProjectSyncAccess)
 	mux.HandleFunc("POST /api/projects/{project}/publishing", s.handlePublishing)
+	mux.HandleFunc("POST /api/projects/{project}/publish-namespace", s.handlePublishNamespace)
 
 	if s.stream != nil {
 		mux.HandleFunc("GET /api/inventory/stream", s.streaming(s.stream.Handler))

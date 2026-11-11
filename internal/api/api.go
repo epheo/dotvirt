@@ -148,6 +148,9 @@ type Draft interface {
 	// StagePublishing stages what target's publishing lacks into the
 	// platform draft.
 	StagePublishing(id auth.Identity, commitProj, target project.ProjectInfo, pt changeset.PublishTarget) (model.DraftView, error)
+	// StagePublishNamespace stages target's publish namespace into the
+	// platform draft, for a project the cluster holds none for.
+	StagePublishNamespace(id auth.Identity, commitProj, target project.ProjectInfo, pt changeset.PublishTarget, live changeset.LiveNamespaces) (model.DraftView, error)
 	// Resync runs with dotvirt's SA (Argo operations carry no user context);
 	// the implementation weighs what the sync applies under id's own token
 	// before escalating, so no future caller can reach the SA-privileged patch
@@ -160,6 +163,7 @@ type Draft interface {
 	AdoptNeeds(commitProj, target project.ProjectInfo, owners []string) ([]changeset.Access, error)
 	SyncAccessNeeds(commitProj, target project.ProjectInfo) ([]changeset.Access, error)
 	PublishingNeeds(commitProj, target project.ProjectInfo, pt changeset.PublishTarget) (changeset.PublishPlan, []changeset.Access, error)
+	PublishNamespaceNeeds(commitProj, target project.ProjectInfo, pt changeset.PublishTarget) ([]changeset.Access, error)
 	ReleaseNeeds(commitProj, target project.ProjectInfo) (need []changeset.Access, residue []string, err error)
 	EnableDRSNeeds(proj project.ProjectInfo, spec json.RawMessage) ([]changeset.Access, error)
 	DisableDRSNeeds(proj project.ProjectInfo) ([]changeset.Access, error)

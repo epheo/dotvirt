@@ -70,7 +70,7 @@ func newGrantCluster(t *testing.T) *gateRig {
 	// takes no new or changed object, whatever the grants say.
 	g.fc.serveKinds(model.KindVM, model.KindUDN, model.KindCUDN, model.KindNAD, model.KindNNCP, model.KindNS, model.KindRB,
 		model.KindEgressFW, model.KindEgressIP, model.KindExtRoute, model.KindNetpol, model.KindANP, model.KindBANP,
-		model.KindOpGroup, model.KindSub, model.KindDesched, model.KindMachCfg, model.KindGateway, model.KindCert)
+		model.KindOpGroup, model.KindSub, model.KindDesched, model.KindMachCfg, model.KindGateway, model.KindCert, model.KindGWParams)
 	return g
 }
 

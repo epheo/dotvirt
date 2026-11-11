@@ -766,8 +766,8 @@ func TestCreateProjectRefusesVMNetworkOnExistingNamespace(t *testing.T) {
 // Where the install publishes, a project starting on the cluster's own
 // network gets its publish namespace beside its first one, labeled for it and
 // never into it. One with a VM Network gets none, one the cluster holds for
-// it already stays, and a namespace by that name held otherwise is refused
-// before the repo exists.
+// it already stays, and a namespace by that name held otherwise, a user's own
+// project among them, is refused before the repo exists.
 func TestCreateProjectStagesItsPublishNamespace(t *testing.T) {
 	createRepo := func(m, path string) (int, string, bool) {
 		if m == "POST" && strings.HasPrefix(path, "/api/v1/orgs/") && strings.HasSuffix(path, "/repos") {
@@ -793,10 +793,14 @@ func TestCreateProjectStagesItsPublishNamespace(t *testing.T) {
 	if _, ok := items["tenant-a-publish"]; err != nil || ok {
 		t.Errorf("VM Network: %v, staged %v; want no publish namespace", err, slices.Sorted(maps.Keys(items)))
 	}
-	held := func(labels map[string]string) LiveNamespaces {
+	held := func(labels map[string]string, annotations ...string) LiveNamespaces {
 		return func(name string) (*netgen.LiveNamespace, error) {
 			if name == "tenant-a-publish" {
-				return &netgen.LiveNamespace{Labels: labels}, nil
+				ln := &netgen.LiveNamespace{Labels: labels, Annotations: map[string]string{}}
+				for _, a := range annotations {
+					ln.Annotations[a] = "mallory"
+				}
+				return ln, nil
 			}
 			return nil, nil
 		}
@@ -805,10 +809,15 @@ func TestCreateProjectStagesItsPublishNamespace(t *testing.T) {
 	if _, ok := items["tenant-a-publish"]; err != nil || ok {
 		t.Errorf("held already: %v, staged %v; want it left as it is", err, slices.Sorted(maps.Keys(items)))
 	}
-	f := newProposeFixture(t)
-	f.c.WithPublishing(pubSettings)
-	if _, err := f.c.StageCreateProject(f.id, f.platform(), json.RawMessage(`{"name":"tenant-a"}`), held(map[string]string{"team": "x"}), nil); !errors.Is(err, model.ErrConflict) {
-		t.Errorf("held otherwise: %v, want ErrConflict", err)
+	for _, live := range []LiveNamespaces{
+		held(map[string]string{"team": "x"}),
+		held(map[string]string{tenancy.PublishLabel: "tenant-a"}, tenancy.RequesterAnnotation),
+	} {
+		f := newProposeFixture(t)
+		f.c.WithPublishing(pubSettings)
+		if _, err := f.c.StageCreateProject(f.id, f.platform(), json.RawMessage(`{"name":"tenant-a"}`), live, nil); !errors.Is(err, model.ErrConflict) {
+			t.Errorf("held otherwise, or a user's own project: %v, want ErrConflict", err)
+		}
 	}
 }
 

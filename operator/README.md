@@ -203,7 +203,15 @@ The publish namespace holds nothing of the tenant's:
 - It is created with the project, never when publishing is turned on: a namespace
   joins a VM Network only when created. New Project creates it for a project on the
   cluster's own network once publishing is configured; a provider's onboarding
-  creates it otherwise. Until it exists, the project says publishing waits on it.
+  creates it otherwise. A project made before the install published gets it from
+  "Create `<project>-publish`" on its Configure tab, where one of its namespaces is
+  on the cluster's own network. Until it exists, the project says publishing waits
+  on it.
+- A namespace a user requested is never one: it carries `openshift.io/requester`,
+  and that user is its admin. On OpenShift any user may request any free name by
+  default (`self-provisioner`); a hosting install removes that grant, or a user can
+  request `<project>-publish` before the platform repo's namespace syncs and leave
+  the project unable to publish.
 
 The Gateway reaches the project namespaces on its publish namespace's network. A
 namespace with a VM Network of its own is not reached; a customer who wants a

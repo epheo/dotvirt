@@ -215,12 +215,25 @@ export interface ProjectCaps {
    */
   publishingWaits?: boolean;
   /**
-   * PublishingUnhoused: the caller could stage it but for the project's
-   * publish namespace, which the cluster lacks and the platform creates.
+   * PublishingUnhoused: the caller could stage it, or its publish
+   * namespace, but for that namespace, which the cluster lacks.
    */
   publishingUnhoused?: boolean;
   /**
-   * PublishNamespace holds the project's Gateway. Set with PublishingReach.
+   * PublishingApart: publishing is not offered, as no namespace of the
+   * project shares its publish namespace's network, or could share a new
+   * one's: each with a VM Network of its own runs its own gateway.
+   */
+  publishingApart?: boolean;
+  /**
+   * PublishNamespaceCreate stages the project's publish namespace, which
+   * the cluster lacks: false where every namespace of the project has a VM
+   * Network of its own, which it cannot join.
+   */
+  publishNamespaceCreate?: boolean;
+  /**
+   * PublishNamespace holds the project's Gateway. Set with PublishingReach
+   * or PublishingUnhoused.
    */
   publishNamespace?: string;
   /**

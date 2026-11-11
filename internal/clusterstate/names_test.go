@@ -138,7 +138,8 @@ func TestGrantMovesByNamespace(t *testing.T) {
 
 // A project's publish namespace is found from the one Namespace watch, though
 // no project selects it: it goes once its label changes, it joins a project,
-// or it is deleted, and a relist rebuilds what the events built.
+// or it is deleted, a user's own project labeled like one is none, and a
+// relist rebuilds what the events built.
 func TestNamespaceSinkKeepsPublishNamespaces(t *testing.T) {
 	s, _ := sinkState(t)
 	publishNS := func(name, project string, more ...string) *corev1.Namespace {
@@ -165,6 +166,12 @@ func TestNamespaceSinkKeepsPublishNamespaces(t *testing.T) {
 	_ = s.names.Update(publishNS("shop-publish", "shop", projectKey))
 	if found("shop") != "" {
 		t.Errorf("joined a project, still a publish namespace")
+	}
+	squatted := publishNS("shop-publish", "shop")
+	squatted.Annotations = map[string]string{tenancy.RequesterAnnotation: "mallory"}
+	_ = s.names.Update(squatted)
+	if found("shop") != "" {
+		t.Errorf("a user's own project, labeled by the platform sync, taken for shop's")
 	}
 	_ = s.names.Add(publishNS("db-publish", "db"))
 	_ = s.names.Delete(publishNS("db-publish", "db"))
