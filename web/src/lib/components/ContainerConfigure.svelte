@@ -109,17 +109,30 @@
 								>{c.publishNamespace}</span
 							>, which holds the project's Gateway.</span
 						>
-						<div class="flex flex-wrap items-center gap-2">
-							<Button
-								variant="outline"
-								size="sm"
-								disabled={!create.ok}
-								title={create.why}
-								onclick={() => (ui.modal = { kind: 'publishNamespace', project: p.name })}
-								>Create {c.publishNamespace}</Button
+						{#if c.publishNameRequested}
+							<span class="text-ink-muted"
+								>A user's own project holds that name, requested before the platform's: delete it,
+								then create <span class="font-mono">{c.publishNamespace}</span> here.</span
 							>
-							<StageChip kind="pr" />
-						</div>
+						{:else if c.publishNameHeld}
+							<span class="text-ink-muted"
+								>Another namespace holds that name: delete it, then create <span class="font-mono"
+									>{c.publishNamespace}</span
+								> here.</span
+							>
+						{:else}
+							<div class="flex flex-wrap items-center gap-2">
+								<Button
+									variant="outline"
+									size="sm"
+									disabled={!create.ok}
+									title={create.why}
+									onclick={() => (ui.modal = { kind: 'publishNamespace', project: p.name })}
+									>Create {c.publishNamespace}</Button
+								>
+								<StageChip kind="pr" />
+							</div>
+						{/if}
 					{/if}
 					{#if !c?.publishingWaits && !c?.publishingUnhoused && !c?.publishingApart && (!c?.publishingOn || c.publishing)}
 						<div class="flex flex-wrap items-center gap-2">

@@ -258,6 +258,12 @@ func TestStagePublishNamespace(t *testing.T) {
 	if _, err := c.StagePublishNamespace(auth.Identity{Username: "admin"}, plat, shop, PublishTarget{}, squatted); !errors.Is(err, model.ErrConflict) {
 		t.Errorf("a user's own project by that name: %v, want ErrConflict", err)
 	}
+	if _, err := c.PublishNamespaceNeeds(plat, shop, PublishTarget{PublishNameHeld: true, PublishNameRequested: true}); !errors.Is(err, ErrPublishNameRequested) || !errors.Is(err, model.ErrConflict) {
+		t.Errorf("name held by a user's own project: %v, want ErrPublishNameRequested", err)
+	}
+	if _, err := c.PublishNamespaceNeeds(plat, shop, PublishTarget{PublishNameHeld: true}); !errors.Is(err, ErrPublishNameHeld) || errors.Is(err, ErrPublishNameRequested) {
+		t.Errorf("name held otherwise: %v, want ErrPublishNameHeld alone", err)
+	}
 	off := newTestCoordinator(t, false)
 	if _, err := off.PublishNamespaceNeeds(plat, shop, PublishTarget{}); !errors.Is(err, model.ErrUnavailable) {
 		t.Errorf("publishing off: %v, want ErrUnavailable", err)

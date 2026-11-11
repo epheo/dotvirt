@@ -2060,6 +2060,22 @@ const publishingunhoused = {
 		},
 	},
 };
+// A user's own project holds team-db-publish: it must go first.
+const publishingheld = {
+	...publishing,
+	name: 'publishingheld',
+	capabilities: {
+		...publishing.capabilities,
+		'db-prod': {
+			project: {
+				publishingUnhoused: true,
+				publishNameHeld: true,
+				publishNameRequested: true,
+				publishNamespace: 'team-db-publish',
+			},
+		},
+	},
+};
 // Each of team-db's namespaces has a VM Network of its own: not offered.
 const publishingapart = {
 	...publishing,
@@ -2071,6 +2087,7 @@ export const scenarios = {
 	publishing,
 	publishingwaits,
 	publishingunhoused,
+	publishingheld,
 	publishingapart,
 	fronted,
 	frontedtenant,

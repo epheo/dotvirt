@@ -183,3 +183,34 @@ func TestNamespaceSinkKeepsPublishNamespaces(t *testing.T) {
 		t.Errorf("after a relist: db %q, shop %q", found("db"), found("shop"))
 	}
 }
+
+// A publish namespace's name held by another namespace is told apart from a
+// free one, and a user's own project from the rest: the events and a relist
+// say the same.
+func TestNamespaceSinkTellsAHeldPublishName(t *testing.T) {
+	s, _ := sinkState(t)
+	requested := func(name string) *corev1.Namespace {
+		ns := namespace(name)
+		ns.Annotations = map[string]string{tenancy.RequesterAnnotation: "mallory"}
+		return ns
+	}
+	held := func(project string) [2]bool {
+		h, r := s.PublishNameHeld(project)
+		return [2]bool{h, r}
+	}
+	_ = s.names.Replace([]any{requested("shop-publish"), namespace("db-publish"), namespace("web")}, "1")
+	if held("shop") != [2]bool{true, true} || held("db") != [2]bool{true, false} || held("web") != [2]bool{} {
+		t.Fatalf("after the list: shop %v, db %v, web %v", held("shop"), held("db"), held("web"))
+	}
+	ours := namespace("db-publish")
+	ours.Labels[tenancy.PublishLabel] = "db"
+	_ = s.names.Update(ours)
+	_ = s.names.Delete(requested("shop-publish"))
+	if held("db") != [2]bool{} || held("shop") != [2]bool{} {
+		t.Errorf("db's own publish namespace, and shop's freed name: db %v, shop %v", held("db"), held("shop"))
+	}
+	_ = s.names.Add(requested("shop-publish"))
+	if held("shop") != [2]bool{true, true} {
+		t.Errorf("requested again: %v", held("shop"))
+	}
+}

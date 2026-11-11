@@ -32,8 +32,8 @@
 	</div>
 	<div class="flex flex-col gap-1.5">
 		<Consequence tone="info"
-			><span class="font-mono">{ns}</span> will hold {project}'s Gateway. None of {project}'s people
-			or its repo gets rights there.</Consequence
+			><span class="font-mono">{ns}</span> will hold {project}'s Gateway. {project}'s people and its
+			repo get no write there.</Consequence
 		>
 		<Consequence
 			>It joins no VM Network: the Gateway serves {project}'s namespaces on the cluster's own

@@ -251,6 +251,8 @@ func (s *Server) publishingCaps(ctx context.Context, sc scope, full project.Proj
 		out.PublishingUnhoused = allowed || out.PublishNamespaceCreate
 		if out.PublishingUnhoused {
 			out.PublishNamespace = plan.Namespace
+			out.PublishNameHeld = errors.Is(err, changeset.ErrPublishNameHeld)
+			out.PublishNameRequested = errors.Is(err, changeset.ErrPublishNameRequested)
 		}
 		return
 	}

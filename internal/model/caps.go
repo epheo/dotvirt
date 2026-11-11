@@ -156,6 +156,11 @@ type ProjectCaps struct {
 	// project shares its publish namespace's network, or could share a new
 	// one's: each with a VM Network of its own runs its own gateway.
 	PublishingApart bool `json:"publishingApart,omitempty"`
+	// PublishNameHeld: another namespace holds the publish namespace's name,
+	// PublishNameRequested a user's own project: it must go before the
+	// publish namespace is created. Set with PublishingUnhoused.
+	PublishNameHeld      bool `json:"publishNameHeld,omitempty"`
+	PublishNameRequested bool `json:"publishNameRequested,omitempty"`
 	// PublishNamespaceCreate stages the project's publish namespace, which
 	// the cluster lacks: false where every namespace of the project has a VM
 	// Network of its own, which it cannot join.

@@ -20,6 +20,9 @@ type PublishTarget struct {
 	// PublishNamespace: the cluster holds the project's publish namespace
 	// (tenancy.PublishNamespace), which the platform creates with the project.
 	PublishNamespace bool
+	// PublishNameHeld: another namespace holds that name; PublishNameRequested:
+	// a user's own project, which a self-provisioner may request.
+	PublishNameHeld, PublishNameRequested bool
 	// Networks is each namespace's primary network, the publish namespace's
 	// among them, "default" for the cluster's own: namespaces sharing one
 	// reach each other's Services.
@@ -64,6 +67,13 @@ var ErrPrimaryNetwork = fmt.Errorf("%w: publishing on a VM Network needs a newer
 // of whose namespaces shares the publish namespace's network: each has a VM
 // Network of its own, where a gateway is the project's to run.
 var ErrApart = fmt.Errorf("%w: no namespace of the project shares its publish namespace's network: each has a VM Network of its own", model.ErrInvalid)
+
+// ErrPublishNameHeld refuses creating a project's publish namespace while
+// another namespace holds its name.
+var ErrPublishNameHeld = fmt.Errorf("%w: another namespace holds the publish namespace's name: delete it, then create the publish namespace", model.ErrConflict)
+
+// ErrPublishNameRequested is ErrPublishNameHeld by a user's own project.
+var ErrPublishNameRequested = fmt.Errorf("%w (a user's own project, requested before the platform's)", ErrPublishNameHeld)
 
 // ErrNoPublishNamespace refuses publishing for a project whose publish
 // namespace the cluster lacks. dotvirt never creates it here: a namespace
