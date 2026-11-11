@@ -1,11 +1,11 @@
 package netgen
 
 import (
-	"slices"
 	"strings"
 
 	"github.com/epheo/dotvirt/pkg/tenancy"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/util/intstr"
 	"sigs.k8s.io/yaml"
 )
@@ -62,23 +62,16 @@ func NamespaceNames(sel *metav1.LabelSelector) []string {
 	return nil
 }
 
-// SelectsProjectNetwork reports whether sel picks namespaces labeled for
-// project's VM Network (tenancy.NetworkLabel), by matchLabels or an In
-// expression: a network that, beside the project's own, would take its
-// namespaces.
+// SelectsProjectNetwork reports whether sel picks a namespace labeled for
+// project's VM Network (tenancy.NetworkLabel), evaluated as OVN-K evaluates
+// it, every selector form alike: a network that, beside the project's own,
+// would take its namespaces.
 func SelectsProjectNetwork(sel *metav1.LabelSelector, project string) bool {
 	if sel == nil {
 		return false
 	}
-	if sel.MatchLabels[tenancy.NetworkLabel] == project {
-		return true
-	}
-	for _, r := range sel.MatchExpressions {
-		if r.Key == tenancy.NetworkLabel && r.Operator == metav1.LabelSelectorOpIn && slices.Contains(r.Values, project) {
-			return true
-		}
-	}
-	return false
+	s, err := metav1.LabelSelectorAsSelector(sel)
+	return err == nil && s.Matches(labels.Set{tenancy.NetworkLabel: project})
 }
 
 // DeclaredNetworkSelects reports whether content, a ClusterUserDefinedNetwork

@@ -5,6 +5,8 @@ import (
 	"strings"
 	"testing"
 
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+
 	"github.com/epheo/dotvirt/pkg/tenancy"
 )
 
@@ -184,6 +186,34 @@ func TestProjectNetwork(t *testing.T) {
 	}
 	if strings.Contains(string(pub), "dotvirt.io/project") {
 		t.Errorf("publish namespace joined the project:\n%s", pub)
+	}
+}
+
+// A network selects a project's namespaces by any selector form that picks
+// the project's network label, as OVN-K reads it.
+func TestSelectsProjectNetwork(t *testing.T) {
+	req := func(op metav1.LabelSelectorOperator, values ...string) *metav1.LabelSelector {
+		return &metav1.LabelSelector{MatchExpressions: []metav1.LabelSelectorRequirement{{Key: tenancy.NetworkLabel, Operator: op, Values: values}}}
+	}
+	for name, c := range map[string]struct {
+		sel  *metav1.LabelSelector
+		want bool
+	}{
+		"matchLabels":       {&metav1.LabelSelector{MatchLabels: map[string]string{tenancy.NetworkLabel: "shop"}}, true},
+		"matchLabels other": {&metav1.LabelSelector{MatchLabels: map[string]string{tenancy.NetworkLabel: "other"}}, false},
+		"In":                {req(metav1.LabelSelectorOpIn, "other", "shop"), true},
+		"In other":          {req(metav1.LabelSelectorOpIn, "other"), false},
+		"Exists":            {req(metav1.LabelSelectorOpExists), true},
+		"NotIn other":       {req(metav1.LabelSelectorOpNotIn, "other"), true},
+		"NotIn shop":        {req(metav1.LabelSelectorOpNotIn, "shop"), false},
+		"DoesNotExist":      {req(metav1.LabelSelectorOpDoesNotExist), false},
+		"empty":             {&metav1.LabelSelector{}, true},
+		"names":             {&metav1.LabelSelector{MatchExpressions: []metav1.LabelSelectorRequirement{{Key: NamespaceNameLabel, Operator: metav1.LabelSelectorOpIn, Values: []string{"web"}}}}, false},
+		"none":              {nil, false},
+	} {
+		if got := SelectsProjectNetwork(c.sel, "shop"); got != c.want {
+			t.Errorf("%s: %v, want %v", name, got, c.want)
+		}
 	}
 }
 
