@@ -328,11 +328,12 @@ func dotvirtVolumes(dv *dotvirtv1alpha1.Dotvirt) ([]corev1.VolumeMount, []corev1
 	}}
 	if cm := dv.Spec.Branding.ConfigMap; cm != "" {
 		// Optional: a missing ConfigMap leaves the console dotvirt's own.
+		optional := true
 		volumeMounts = append(volumeMounts, corev1.VolumeMount{Name: "branding", MountPath: brandingMountPath, ReadOnly: true})
 		volumes = append(volumes, corev1.Volume{
 			Name: "branding",
 			VolumeSource: corev1.VolumeSource{ConfigMap: &corev1.ConfigMapVolumeSource{
-				LocalObjectReference: corev1.LocalObjectReference{Name: cm}, Optional: &caOptional,
+				LocalObjectReference: corev1.LocalObjectReference{Name: cm}, Optional: &optional,
 			}},
 		})
 	}

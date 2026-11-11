@@ -33,7 +33,7 @@
 				throw new Error(
 					e instanceof Unauthorized
 						? 'That token was rejected. Check it and try again.'
-						: 'dotvirt could not verify the token: the dotvirt server or the cluster is unreachable. Try again shortly.',
+						: `${branding.name} could not verify the token: its server or the cluster is unreachable. Try again shortly.`,
 					{ cause: e },
 				);
 			}

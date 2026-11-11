@@ -96,9 +96,19 @@ func printable(s string) bool {
 // wears the branding too.
 func (s Settings) Info() model.Branding {
 	b := model.Branding{ProductName: s.ProductName, Links: s.Links}
-	_, b.Theme = s.read(ThemeFile)
-	_, _, b.Logo = s.logo()
+	b.Theme = s.present(ThemeFile)
+	b.Logo = s.present(LogoSVG) || s.present(LogoPNG)
 	return b
+}
+
+// present reports whether read would answer name, without reading it: the
+// open endpoint asks this on every page load.
+func (s Settings) present(name string) bool {
+	if s.Dir == "" {
+		return false
+	}
+	fi, err := os.Stat(filepath.Join(s.Dir, name))
+	return err == nil && fi.Mode().IsRegular() && fi.Size() <= MaxFile
 }
 
 // ServeTheme answers the stylesheet, loaded after the console's own so it
@@ -148,6 +158,8 @@ func (s Settings) read(name string) ([]byte, bool) {
 		return nil, false
 	}
 	defer f.Close()
+	// Stat after Open follows the link: kubelet mounts each ConfigMap key as
+	// a symlink into ..data/, so an Lstat check would refuse every real file.
 	fi, err := f.Stat()
 	if err != nil || !fi.Mode().IsRegular() {
 		return nil, false

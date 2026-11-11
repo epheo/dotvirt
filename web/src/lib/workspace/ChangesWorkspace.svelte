@@ -5,6 +5,7 @@
 	import { api, Unauthorized, type Proposal, type ProposeResult } from '#lib/api.js';
 	import { friendlyError, plural } from '#lib/format.js';
 	import { clusterGate, namespaceHistoryGate } from '#lib/gates.js';
+	import { branding } from '#lib/state/branding.svelte.js';
 	import { opStands } from '#lib/gitops.js';
 	import { CHANGES_TABS, changesHref, changesTab, type ChangesTab } from '#lib/nav.js';
 	import { bySize } from '#lib/rail.js';
@@ -445,7 +446,7 @@
 	const tabHref = (id: string) => `${page.url.pathname}?tab=${id}`;
 </script>
 
-<svelte:head><title>Changes - dotvirt</title></svelte:head>
+<svelte:head><title>Changes - {branding.name}</title></svelte:head>
 
 {#snippet refusedLine()}
 	{#if refused.length === 1}

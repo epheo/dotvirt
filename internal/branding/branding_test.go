@@ -125,3 +125,36 @@ func TestServeLogo(t *testing.T) {
 		t.Errorf("no logo = %d, want 404", w.Code)
 	}
 }
+
+// Kubelet mounts each ConfigMap key as a symlink into a ..data directory,
+// itself a symlink swapped on update: the files behind the links are served.
+func TestServesAMountedConfigMap(t *testing.T) {
+	d := t.TempDir()
+	stamp := filepath.Join(d, "..2026_11_11_00_00_00.000000001")
+	if err := os.Mkdir(stamp, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for name, content := range map[string]string{ThemeFile: ":root{}", LogoPNG: "png"} {
+		if err := os.WriteFile(filepath.Join(stamp, name), []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.Symlink(filepath.Base(stamp), filepath.Join(d, "..data")); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{ThemeFile, LogoPNG} {
+		if err := os.Symlink(filepath.Join("..data", name), filepath.Join(d, name)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	s := Settings{Dir: d}
+	if info := s.Info(); !info.Theme || !info.Logo {
+		t.Errorf("Info = %+v, want theme and logo", info)
+	}
+	if w := get(s.ServeTheme); w.Code != http.StatusOK || w.Body.String() != ":root{}" {
+		t.Errorf("theme behind a symlink = %d %q", w.Code, w.Body.String())
+	}
+	if w := get(s.ServeLogo); w.Code != http.StatusOK || w.Header().Get("Content-Type") != "image/png" {
+		t.Errorf("logo behind a symlink = %d %q", w.Code, w.Header().Get("Content-Type"))
+	}
+}
