@@ -211,7 +211,7 @@ The publish namespace holds nothing of the tenant's:
   and that user is its admin. On OpenShift any user may request any free name
   (`self-provisioner`), so one may take `<project>-publish` before the platform
   repo's namespace syncs. The project then cannot publish, and its Configure tab
-  says to delete that namespace, then create `<project>-publish` there.
+  says to delete that namespace, then create `<project>-publish` from that tab.
 
 The Gateway reaches the project namespaces on its publish namespace's network.
 
