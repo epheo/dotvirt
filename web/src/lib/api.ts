@@ -547,6 +547,8 @@ export const api = {
 		get<VMMetrics>(`/api/metrics/scope${scopeQS(scope, { range })}`),
 	alarms: () => get<gen.Alert[]>('/api/alarms'),
 	modules: () => get<gen.Modules>('/api/modules'),
+	// Read before sign-in: the login screen wears the provider's dress too.
+	branding: () => get<gen.Branding>('/api/branding'),
 	// Node maintenance (cluster-scoped; the user's token is the gate).
 	nodes: () => get<gen.Node[]>('/api/nodes'),
 	capacity: () => get<gen.HostCapacity>('/api/metrics/capacity'),

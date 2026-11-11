@@ -13,6 +13,12 @@ func (s *Server) routes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/healthz", func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, map[string]string{"status": "ok"})
 	})
+	// The login screen wears the branding too, so it is read before any session.
+	mux.HandleFunc("GET /api/branding", func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, s.cfg.Branding.Info())
+	})
+	mux.HandleFunc("GET /api/branding/theme.css", s.cfg.Branding.ServeTheme)
+	mux.HandleFunc("GET /api/branding/logo", s.cfg.Branding.ServeLogo)
 
 	if s.auth != nil {
 		mux.HandleFunc("POST /api/login", s.auth.Login)

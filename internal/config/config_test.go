@@ -53,6 +53,25 @@ func TestLoadChecksTheForgeWebURL(t *testing.T) {
 	}
 }
 
+// A provider's branding is checked at startup: a product name the masthead
+// carries as text, and few https masthead links.
+func TestLoadChecksTheBranding(t *testing.T) {
+	for _, args := range [][]string{
+		{"-product-name", "Uni\nwatt"},
+		{"-product-name", strings.Repeat("a", 41)},
+		{"-masthead-links", `[{"label":"a","url":"http://c.example"}]`},
+		{"-masthead-links", `not json`},
+	} {
+		if _, err := Load(append(args, "-session-secret", "s")); err == nil || !strings.Contains(err.Error(), args[0]) {
+			t.Errorf("%v: err %v, want one naming the flag", args, err)
+		}
+	}
+	c, err := Load([]string{"-product-name", "Uniwatt Cloud", "-masthead-links", `[{"label":"Account","url":"https://c.example/account"}]`, "-branding-dir", "/etc/dotvirt/branding", "-session-secret", "s"})
+	if err != nil || c.ProductName != "Uniwatt Cloud" || len(c.MastheadLinks) != 1 || c.BrandingDir != "/etc/dotvirt/branding" {
+		t.Errorf("a provider's branding: %+v, %v", c, err)
+	}
+}
+
 // What tenant repos may declare beyond the listed kinds comes from the
 // operator. A value it cannot read, or one naming a kind no tenant repo may
 // apply, fails at startup rather than disagree with the AppProjects.

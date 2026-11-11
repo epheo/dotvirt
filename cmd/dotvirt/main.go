@@ -19,6 +19,7 @@ import (
 	"github.com/epheo/dotvirt/internal/api"
 	"github.com/epheo/dotvirt/internal/argo"
 	"github.com/epheo/dotvirt/internal/auth"
+	"github.com/epheo/dotvirt/internal/branding"
 	"github.com/epheo/dotvirt/internal/changeset"
 	"github.com/epheo/dotvirt/internal/cluster"
 	"github.com/epheo/dotvirt/internal/clusterstate"
@@ -249,6 +250,7 @@ func run() error {
 			RepoAnnotation:    cfg.RepoAnnotation,
 			TenantKinds:       cfg.TenantKinds,
 			Publish:           publishing,
+			Branding:          branding.Settings{ProductName: cfg.ProductName, Links: cfg.MastheadLinks, Dir: cfg.BrandingDir},
 		},
 	})
 

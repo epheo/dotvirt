@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { branding } from '#lib/state/branding.svelte.js';
 	import { goto } from '$app/navigation';
 	import {
 		Check,
@@ -60,7 +61,11 @@
      tokens, not ink tokens. -->
 <header class="flex h-12 shrink-0 items-center gap-4 bg-bar px-4 text-white">
 	<a href="/compute" class="flex items-center gap-2 text-[17px] font-bold">
-		<span class="size-2.5 rounded-full bg-brand" aria-hidden="true"></span>dotvirt
+		{#if branding.value?.logo}
+			<img src="/api/branding/logo" alt="" class="h-6 w-auto" />
+		{:else}
+			<span class="size-2.5 rounded-full bg-brand" aria-hidden="true"></span>
+		{/if}{branding.name}
 	</a>
 
 	<GlobalSearch onpick={onSearchPick} />
@@ -68,6 +73,16 @@
 	<NewMenu />
 
 	<div class="flex-1"></div>
+
+	<!-- A provider's links back to its own app. -->
+	{#each branding.value?.links ?? [] as l, i (i)}
+		<a
+			href={l.url}
+			target="_blank"
+			rel="noopener noreferrer"
+			class="text-[13px] text-side-dim hover:text-white">{l.label}</a
+		>
+	{/each}
 
 	<!-- Issues: standing problems and firing alerts (never pending applies), one
 	     count, named in words so a clean fleet reads as a stated fact. -->

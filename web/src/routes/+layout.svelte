@@ -26,6 +26,7 @@
 	import { storage } from '#lib/state/storage.svelte.js';
 	import { clusterGate } from '#lib/gates.js';
 	import { caps } from '#lib/state/caps.svelte.js';
+	import { branding } from '#lib/state/branding.svelte.js';
 	import { modules } from '#lib/state/modules.svelte.js';
 	import { lastSection } from '#lib/state/nav.svelte.js';
 	import { session } from '#lib/state/session.svelte.js';
@@ -50,6 +51,8 @@
 	import StorageTree from '#lib/tree/StorageTree.svelte';
 
 	let { children }: { children: Snippet } = $props();
+
+	void branding.load();
 
 	// The tree follows the section the URL is in, but sticks across the
 	// section-agnostic /vm route - a VM opened from the Hosts tree keeps the
@@ -216,7 +219,10 @@
 
 <svelte:head>
 	<link rel="icon" href={favicon} />
-	<title>dotvirt</title>
+	<title>{branding.name}</title>
+	<!-- After the console's own stylesheet, so it may override its tokens;
+	     same-origin, as the content-security policy requires. -->
+	{#if branding.value?.theme}<link rel="stylesheet" href="/api/branding/theme.css" />{/if}
 </svelte:head>
 
 {#if session.checking}

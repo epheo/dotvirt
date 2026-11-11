@@ -15,6 +15,8 @@ import (
 
 	"k8s.io/apimachinery/pkg/util/validation"
 
+	"github.com/epheo/dotvirt/internal/branding"
+	"github.com/epheo/dotvirt/internal/model"
 	"github.com/epheo/dotvirt/pkg/forge"
 	"github.com/epheo/dotvirt/pkg/tenancy"
 )
@@ -68,6 +70,12 @@ type Config struct {
 	// compare pages, repositories) when it is not ForgeURL: a forge the pod
 	// reaches in-cluster, or one a provider's app fronts on the same paths.
 	ForgeWebURL string
+	// Branding dresses the console as a provider's (internal/branding): a
+	// product name, masthead links, and a mounted directory holding its
+	// stylesheet and logo.
+	ProductName   string
+	MastheadLinks []model.BrandingLink
+	BrandingDir   string
 	// ForgeTokenFile, when set, is a mounted-secret path read on EVERY forge/git
 	// call (see ForgeTokenSource) - kubelet updates it in place, so an operator
 	// re-mint/rotation takes effect with no pod restart. Takes precedence over the
@@ -172,6 +180,9 @@ func Load(args []string) (*Config, error) {
 	fs.StringVar(&c.DraftDir, "draft-dir", envOr("DOTVIRT_DRAFT_DIR", "./.dotvirt-drafts"), "root dir for persisted drafts (<dir>/<user>/<project>.json)")
 	fs.StringVar(&c.ForgeURL, "forge-url", os.Getenv("DOTVIRT_FORGE_URL"), "Forgejo base URL (empty = push-only, no PR, anonymous git)")
 	fs.StringVar(&c.ForgeWebURL, "forge-web-url", os.Getenv("DOTVIRT_FORGE_WEB_URL"), "base URL browsers open forge pages at, when not -forge-url (empty = -forge-url)")
+	fs.StringVar(&c.ProductName, "product-name", os.Getenv("DOTVIRT_PRODUCT_NAME"), "product name the console shows in place of dotvirt (empty = dotvirt)")
+	links := fs.String("masthead-links", os.Getenv("DOTVIRT_MASTHEAD_LINKS"), `masthead links back to a provider's app, JSON [{"label":..,"url":"https://.."}] (empty = none)`)
+	fs.StringVar(&c.BrandingDir, "branding-dir", os.Getenv("DOTVIRT_BRANDING_DIR"), "directory holding theme.css and logo.svg or logo.png, served same-origin (empty = none)")
 	fs.StringVar(&c.ForgeToken, "forge-token", os.Getenv("DOTVIRT_FORGE_TOKEN"), "Forgejo API token (git https + API)")
 	fs.StringVar(&c.ForgeTokenFile, "forge-token-file", os.Getenv("DOTVIRT_FORGE_TOKEN_FILE"), "path to a mounted secret holding the forge token, re-read per call (rotation-safe; overrides -forge-token)")
 	fs.BoolVar(&c.InsecureTLS, "insecure-tls", envBool("DOTVIRT_INSECURE_TLS", false), "skip TLS verification for git+forge (dev only)")
@@ -215,6 +226,12 @@ func Load(args []string) (*Config, error) {
 		return nil, fmt.Errorf("-tenant-kinds-allowed (DOTVIRT_TENANT_KINDS_ALLOWED) names kinds no tenant repo may apply: %s", tenancy.FormatGroupKinds(refused))
 	}
 	c.TenantKinds = tenancy.Policy{Allowed: allowed}
+	if err := branding.CheckName(c.ProductName); err != nil {
+		return nil, fmt.Errorf("-product-name (DOTVIRT_PRODUCT_NAME): %w", err)
+	}
+	if c.MastheadLinks, err = branding.ParseLinks(*links); err != nil {
+		return nil, fmt.Errorf("-masthead-links (DOTVIRT_MASTHEAD_LINKS): %w", err)
+	}
 	// Every forge link the UI renders starts with it: credentials would show
 	// in each, and a path appended after a query or fragment opens the base.
 	if c.ForgeWebURL != "" && !webBase(c.ForgeWebURL) {

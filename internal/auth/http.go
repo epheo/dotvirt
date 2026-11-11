@@ -156,6 +156,10 @@ func isOpenPath(path string) bool {
 	switch path {
 	case "/api/healthz", "/api/login":
 		return true
+	case "/api/branding", "/api/branding/theme.css", "/api/branding/logo":
+		// A provider's dress, which the login screen wears: nothing of a
+		// session's.
+		return true
 	case "/api/logout":
 		// Authenticated by opening the session cookie alone (see Logout).
 		return true
