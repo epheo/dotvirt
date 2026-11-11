@@ -63,6 +63,7 @@ export type AppModal =
 	| { kind: 'releaseProject'; project: string; namespaces: string[] }
 	| { kind: 'syncAccess'; project: string }
 	| { kind: 'publishing'; project: string }
+	| { kind: 'publishNamespace'; project: string }
 	| { kind: 'egressFw'; namespaces: string[]; namespace?: string; initial?: EgressFirewallCreate }
 	| { kind: 'projectRule'; namespaces: string[]; namespace?: string; initial?: NetworkPolicyCreate }
 	| { kind: 'clusterEdge'; initial?: EdgeInitial }

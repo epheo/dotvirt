@@ -2,10 +2,11 @@
 // repo for a project: its Gateway and, with an issuer, the wildcard
 // certificate the Gateway's HTTPS listener serves.
 //
-// The Gateway sits in one project namespace and serves the others on its
-// network: a primary network is reached only by a gateway joined to it. A
-// Gateway per project owns its hostnames by construction: its listeners take
-// only *.<project>.<domain>, and only routes from namespaces labeled with the
+// The Gateway sits in the project's publish namespace, where no tenant grant
+// reaches, and serves the project namespaces on that namespace's network: a
+// primary network is reached only by a gateway joined to it. A Gateway per
+// project owns its hostnames by construction: its listeners take only
+// *.<project>.<domain>, and only routes from namespaces labeled with the
 // project, a label no tenant role may change.
 package publish
 
@@ -65,10 +66,11 @@ type File struct {
 	Content []byte
 }
 
-// Manifests renders project's Gateway in ns, then its Certificate when s
-// names an issuer. proxied: ns is on a VM Network, whose pods reach portail's
-// controller only through the apiserver; the Gateway then takes parameters
-// saying so, and a RoleBinding in PortailNamespace lets its pods.
+// Manifests renders project's Gateway in its publish namespace ns, then its
+// Certificate when s names an issuer. proxied: ns is on a VM Network, whose
+// pods reach portail's controller only through the apiserver; the Gateway
+// then takes parameters saying so, and a RoleBinding in PortailNamespace lets
+// its pods.
 func Manifests(s Settings, project, ns string, proxied bool) ([]File, error) {
 	if !s.On() {
 		return nil, errors.New("publishing needs a domain and a GatewayClass")

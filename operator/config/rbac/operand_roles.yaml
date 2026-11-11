@@ -264,6 +264,26 @@ rules:
     resources: ["httproutes"]
     verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
 ---
+# Reads of a project's Gateway and Certificate in its publish namespace, which holds
+# nothing of the tenant's and no tenant grant reaches; never Secrets, as the
+# certificate's key lives there. The platform repo binds it there to the subjects of
+# the admin grants of the namespaces the Gateway reaches (publish-view), or a
+# provider's onboarding binds it to its own groups. The operator never binds it.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: dotvirt-tenant-gateway-view
+  labels:
+    app.kubernetes.io/name: dotvirt
+    app.kubernetes.io/managed-by: dotvirt-operator
+rules:
+  - apiGroups: ["gateway.networking.k8s.io"]
+    resources: ["gateways"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["cert-manager.io"]
+    resources: ["certificates"]
+    verbs: ["get", "list", "watch"]
+---
 # What the platform tier's Argo sync account needs beyond dotvirt-argocd-apply once
 # Argo syncs the platform repo as it: the Namespaces that repo declares, and `bind` on
 # the roles its project grants name, which is what lets it apply those RoleBindings
@@ -281,7 +301,7 @@ rules:
     verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
   - apiGroups: ["rbac.authorization.k8s.io"]
     resources: ["clusterroles"]
-    resourceNames: ["admin", "dotvirt-tenant-egress", "view", "edit", "dotvirt-tenant-egress-view", "dotvirt-tenant-routes"]
+    resourceNames: ["admin", "dotvirt-tenant-egress", "view", "edit", "dotvirt-tenant-egress-view", "dotvirt-tenant-routes", "dotvirt-tenant-gateway-view"]
     verbs: ["bind"]
   # A Gateway on a VM Network polls portail's controller through the apiserver:
   # its pods' account is bound to portail's Role there, which grants

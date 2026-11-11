@@ -153,10 +153,11 @@ func whitelist(kinds []tenancy.Kind) []any {
 }
 
 // TenantsAppProject is the shared tenant tier: any namespace outside platform
-// space, any repo of the forge owner. That is wide enough for one tenant's repo
-// to write into another's namespace, so it is rendered only while an
-// Application still references it, which keeps those Applications syncing
-// until the ApplicationSet moves them to their own TenantAppProject.
+// space and publish namespaces, any repo of the forge owner. That is wide
+// enough for one tenant's repo to write into another's namespace, so it is
+// rendered only while an Application still references it, which keeps those
+// Applications syncing until the ApplicationSet moves them to their own
+// TenantAppProject.
 func TenantsAppProject(dv *dotvirtv1alpha1.Dotvirt, argoNS, platformRepo, operatorNS string) *unstructured.Unstructured {
 	return argoObject("AppProject", TenantsProjectName, argoNS, dv, tenantKinds(map[string]any{
 		"description": "dotvirt tenant projects — namespaced workloads only.",
@@ -167,6 +168,8 @@ func TenantsAppProject(dv *dotvirtv1alpha1.Dotvirt, argoNS, platformRepo, operat
 			map[string]any{"server": InClusterServer, "namespace": "!kube-*"},
 			map[string]any{"server": InClusterServer, "namespace": "!" + operatorNS},
 			map[string]any{"server": InClusterServer, "namespace": "!" + argoNS},
+			// A publish namespace holds a project's Gateway, never tenant content.
+			map[string]any{"server": InClusterServer, "namespace": "!*" + tenancy.PublishSuffix},
 		},
 	}, nil))
 }

@@ -15,6 +15,7 @@
 	import ReleaseProjectModal from './ReleaseProjectModal.svelte';
 	import SyncAccessModal from './SyncAccessModal.svelte';
 	import PublishingModal from './PublishingModal.svelte';
+	import PublishNamespaceModal from './PublishNamespaceModal.svelte';
 	import DeleteObjectModal from './DeleteObjectModal.svelte';
 	import DeleteVMModal from './DeleteVMModal.svelte';
 	import EditManifestModal from './EditManifestModal.svelte';
@@ -86,6 +87,8 @@
 	<SyncAccessModal project={m.project} onclose={close} />
 {:else if m?.kind === 'publishing'}
 	<PublishingModal project={m.project} onclose={close} />
+{:else if m?.kind === 'publishNamespace'}
+	<PublishNamespaceModal project={m.project} onclose={close} />
 {:else if m?.kind === 'deleteObject'}
 	<DeleteObjectModal
 		resource={m.resource}

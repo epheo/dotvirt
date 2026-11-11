@@ -23,6 +23,9 @@ func TestTenantNameRefusesReserved(t *testing.T) {
 	if err := tenantName("team-a"); err != nil {
 		t.Fatalf("tenantName(team-a) = %v", err)
 	}
+	if err := tenantName("team-publish"); !errors.Is(err, model.ErrInvalid) {
+		t.Fatalf("tenantName(team-publish) = %v, want ErrInvalid: its first namespace would be named like a publish namespace", err)
+	}
 }
 
 // A project's grants name its sync account beside the owners, the

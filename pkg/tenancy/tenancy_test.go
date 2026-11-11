@@ -43,6 +43,32 @@ func TestReserved(t *testing.T) {
 	}
 }
 
+// A publish namespace is named for its project, labeled for it, in no
+// project, and not a user's own: a project namespace carrying the label, a
+// namespace labeled for another project, or one a user requested, is none.
+func TestPublishProject(t *testing.T) {
+	requested := map[string]string{RequesterAnnotation: "mallory"}
+	for _, c := range []struct {
+		ns          string
+		labels      map[string]string
+		annotations map[string]string
+		inProject   bool
+		want        string
+	}{
+		{"shop-publish", map[string]string{PublishLabel: "shop"}, nil, false, "shop"},
+		{"shop-publish", map[string]string{PublishLabel: "shop"}, nil, true, ""},
+		{"shop-publish", map[string]string{PublishLabel: "shop"}, requested, false, ""},
+		{"shop-publish", map[string]string{PublishLabel: "other"}, nil, false, ""},
+		{"shop-publish", nil, nil, false, ""},
+		{"web", map[string]string{PublishLabel: "web"}, nil, false, ""},
+		{"-publish", map[string]string{PublishLabel: ""}, nil, false, ""},
+	} {
+		if got := PublishProject(c.ns, c.labels, c.annotations, c.inProject); got != c.want {
+			t.Errorf("PublishProject(%q, %v, %v, %v) = %q, want %q", c.ns, c.labels, c.annotations, c.inProject, got, c.want)
+		}
+	}
+}
+
 // The destination holds still as namespaces join: a newer namespace never
 // displaces it, whatever its name, and platform space never qualifies.
 func TestDestination(t *testing.T) {

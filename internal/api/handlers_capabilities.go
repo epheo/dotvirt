@@ -228,15 +228,35 @@ func (s *Server) publishingCaps(ctx context.Context, sc scope, full project.Proj
 	if len(sc.proj.Namespaces) < len(full.Namespaces) && !s.capable(ctx, id, c, claimAction("")) {
 		return
 	}
+	if errors.Is(err, changeset.ErrApart) {
+		out.PublishingApart = true
+		return
+	}
 	waits := errors.Is(err, changeset.ErrPrimaryNetwork)
-	if waits {
+	unhoused := errors.Is(err, changeset.ErrNoPublishNamespace)
+	if waits || unhoused {
 		err = nil
 	}
 	allowed := s.needsAllowed(ctx, id, c, need, err)
-	out.Publishing = allowed && !waits
+	out.Publishing = allowed && !waits && !unhoused
 	out.PublishingWaits = allowed && waits
+	if unhoused {
+		// The route reads the namespace first, should one by that name exist.
+		need, err := s.draft.PublishNamespaceNeeds(s.platformProject(), full, s.publishTarget(full))
+		if errors.Is(err, changeset.ErrApart) {
+			out.PublishingApart = true
+			return
+		}
+		out.PublishNamespaceCreate = s.tenancyCap(ctx, id, c, readNamespace(plan.Namespace), need, err)
+		out.PublishingUnhoused = allowed || out.PublishNamespaceCreate
+		if out.PublishingUnhoused {
+			out.PublishNamespace = plan.Namespace
+		}
+		return
+	}
 	if out.PublishingOn || allowed {
 		out.PublishingReach = plan.Reach
+		out.PublishNamespace = plan.Namespace
 	}
 }
 

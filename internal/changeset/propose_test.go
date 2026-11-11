@@ -5,10 +5,12 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"maps"
 	"net/http"
 	"net/http/httptest"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -23,6 +25,7 @@ import (
 	"github.com/epheo/dotvirt/internal/netgen"
 	"github.com/epheo/dotvirt/internal/project"
 	"github.com/epheo/dotvirt/pkg/forge"
+	"github.com/epheo/dotvirt/pkg/tenancy"
 )
 
 // proposeFixture wires a Coordinator over a seeded bare repo and a forge Factory
@@ -765,6 +768,64 @@ func TestCreateProjectRefusesVMNetworkOnExistingNamespace(t *testing.T) {
 		json.RawMessage(`{"name":"tenant-a","namespace":"tenant-a","vmNetwork":{"name":"vm-net","subnet":"10.40.0.0/24"}}`), live, nil)
 	if !errors.Is(err, model.ErrConflict) {
 		t.Fatalf("want ErrConflict, got %v", err)
+	}
+}
+
+// Where the install publishes, a project starting on the cluster's own
+// network gets its publish namespace beside its first one, labeled for it and
+// never into it. One with a VM Network gets none, one the cluster holds for
+// it already stays, and a namespace by that name held otherwise, a user's own
+// project among them, is refused before the repo exists.
+func TestCreateProjectStagesItsPublishNamespace(t *testing.T) {
+	createRepo := func(m, path string) (int, string, bool) {
+		if m == "POST" && strings.HasPrefix(path, "/api/v1/orgs/") && strings.HasSuffix(path, "/repos") {
+			return http.StatusCreated, "{}", true
+		}
+		return 0, "", false
+	}
+	stage := func(spec string, live LiveNamespaces) (map[string]string, error) {
+		f := newProposeFixture(t, when("GET", "tenant-a", http.StatusNotFound, ""), createRepo)
+		f.c.WithPublishing(pubSettings)
+		view, err := f.c.StageCreateProject(f.id, f.platform(), json.RawMessage(spec), live, nil)
+		return stagedYAML(t, view), err
+	}
+	items, err := stage(`{"name":"tenant-a"}`, nil)
+	if err != nil {
+		t.Fatalf("StageCreateProject: %v", err)
+	}
+	pub, ok := items["tenant-a-publish"]
+	if !ok || !strings.Contains(pub, tenancy.PublishLabel+": tenant-a") || strings.Contains(pub, "dotvirt.io/project") {
+		t.Errorf("staged %v; publish namespace:\n%s", slices.Sorted(maps.Keys(items)), pub)
+	}
+	items, err = stage(`{"name":"tenant-a","vmNetwork":{"name":"vm-net","subnet":"10.40.0.0/24"}}`, nil)
+	if _, ok := items["tenant-a-publish"]; err != nil || ok {
+		t.Errorf("VM Network: %v, staged %v; want no publish namespace", err, slices.Sorted(maps.Keys(items)))
+	}
+	held := func(labels map[string]string, annotations ...string) LiveNamespaces {
+		return func(name string) (*netgen.LiveNamespace, error) {
+			if name == "tenant-a-publish" {
+				ln := &netgen.LiveNamespace{Labels: labels, Annotations: map[string]string{}}
+				for _, a := range annotations {
+					ln.Annotations[a] = "mallory"
+				}
+				return ln, nil
+			}
+			return nil, nil
+		}
+	}
+	items, err = stage(`{"name":"tenant-a"}`, held(map[string]string{tenancy.PublishLabel: "tenant-a"}))
+	if _, ok := items["tenant-a-publish"]; err != nil || ok {
+		t.Errorf("held already: %v, staged %v; want it left as it is", err, slices.Sorted(maps.Keys(items)))
+	}
+	for _, live := range []LiveNamespaces{
+		held(map[string]string{"team": "x"}),
+		held(map[string]string{tenancy.PublishLabel: "tenant-a"}, tenancy.RequesterAnnotation),
+	} {
+		f := newProposeFixture(t)
+		f.c.WithPublishing(pubSettings)
+		if _, err := f.c.StageCreateProject(f.id, f.platform(), json.RawMessage(`{"name":"tenant-a"}`), live, nil); !errors.Is(err, model.ErrConflict) {
+			t.Errorf("held otherwise, or a user's own project: %v, want ErrConflict", err)
+		}
 	}
 }
 

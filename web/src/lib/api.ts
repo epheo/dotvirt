@@ -601,6 +601,9 @@ export const api = {
 	// Stage what the project's publishing lacks: its Gateway and certificate,
 	// and the route grant of each namespace it reaches, in the platform repo.
 	publishing: (project: string) => post<DraftView>(`/api/projects/${enc(project)}/publishing`, {}),
+	// Stage the project's publish namespace, which the cluster lacks.
+	publishNamespace: (project: string) =>
+		post<DraftView>(`/api/projects/${enc(project)}/publish-namespace`, {}),
 
 	// The template library. Deploy renders server-side
 	// and stages the VM into the draft; save derives a template from a VM's git

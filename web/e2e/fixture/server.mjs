@@ -596,24 +596,51 @@ async function handleAPI(req, res, url) {
 		return sendJSON(res, 200, draftFor('platform'));
 	}
 
-	// Publishing for a project: its Gateway and certificate in its first
-	// namespace and each reached namespace's route grant, staged in the
-	// platform draft; refused on the capability the UI gates it by.
+	// A project's publish namespace, staged in the platform draft; refused on
+	// the capability the UI gates it by.
+	m = path.match(/^\/api\/projects\/([^/]+)\/publish-namespace$/);
+	if (m && req.method === 'POST') {
+		const p = state.scenario.inventory.projects.find((x) => x.name === m[1]);
+		if (!p?.namespaces.length) return sendText(res, 404, 'project not found');
+		const caps = namespaceCaps(s, p, p.namespaces[0].namespace).project;
+		if (!caps.publishNamespaceCreate) return sendText(res, 403, 'you may not create namespaces');
+		stageInto('platform', {
+			kind: 'create',
+			resource: 'namespace',
+			namespace: caps.publishNamespace,
+			name: caps.publishNamespace,
+			changes: [],
+		});
+		return sendJSON(res, 200, draftFor('platform'));
+	}
+
+	// Publishing for a project: its Gateway, certificate and its admins' read
+	// of them in its publish namespace, and each reached namespace's route
+	// grant, staged in the platform draft; refused on the capability the UI
+	// gates it by.
 	m = path.match(/^\/api\/projects\/([^/]+)\/publishing$/);
 	if (m && req.method === 'POST') {
 		const p = state.scenario.inventory.projects.find((x) => x.name === m[1]);
 		if (!p?.namespaces.length) return sendText(res, 404, 'project not found');
 		const first = p.namespaces[0].namespace;
 		const caps = namespaceCaps(s, p, first).project;
-		if (!caps.publishing) return sendText(res, 403, `you may not create gateways in ${first}`);
+		const home = `${p.name}-publish`;
+		if (!caps.publishing) return sendText(res, 403, `you may not create gateways in ${home}`);
 		for (const name of ['publish', 'publish-tls'])
 			stageInto('platform', {
 				kind: 'create',
 				resource: 'publishing',
-				namespace: first,
+				namespace: home,
 				name,
 				changes: [],
 			});
+		stageInto('platform', {
+			kind: 'create',
+			resource: 'rolebinding',
+			namespace: home,
+			name: 'publish-view',
+			changes: [],
+		});
 		for (const namespace of caps.publishingReach ?? [first])
 			stageInto('platform', {
 				kind: 'create',

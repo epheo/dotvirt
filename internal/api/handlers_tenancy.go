@@ -11,6 +11,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"slices"
 
 	"github.com/epheo/dotvirt/internal/changeset"
 	"github.com/epheo/dotvirt/internal/model"
@@ -223,6 +224,22 @@ func (s *Server) handlePublishing(w http.ResponseWriter, r *http.Request) {
 	respond(w, view, err)
 }
 
+// handlePublishNamespace stages a project's publish namespace into the
+// platform repo, for a project the cluster holds none for, gated on the
+// claim of that namespace should one by its name exist.
+func (s *Server) handlePublishNamespace(w http.ResponseWriter, r *http.Request) {
+	plat, ok := s.platformScopeGated(w, r)
+	if !ok {
+		return
+	}
+	target, ok := s.tenancyTarget(w, r, plat)
+	if !ok {
+		return
+	}
+	view, err := s.draft.StagePublishNamespace(plat.id, plat.proj, target, s.publishTarget(target), s.claimNamespaces(r.Context(), plat, target.Name))
+	respond(w, view, err)
+}
+
 // publishingKinds are the kinds publishing stages, each of which the cluster
 // must serve: a Certificate only with an issuer.
 func (s *Server) publishingKinds() []model.Kind {
@@ -232,14 +249,22 @@ func (s *Server) publishingKinds() []model.Kind {
 	return []model.Kind{model.KindGateway}
 }
 
-// publishTarget is the project's namespaces as the snapshots see them.
+// publishTarget is the project's namespaces, and its publish namespace, as
+// the snapshots see them.
 func (s *Server) publishTarget(p project.ProjectInfo) changeset.PublishTarget {
 	pt := changeset.PublishTarget{
 		Networks:      map[string]string{},
 		RoutesGranted: s.state != nil && s.state.AdminWritesRoutes(),
 		Isolated:      s.gateways != nil && s.gateways.GatewaysIsolated(s.cfg.Publish.GatewayClass),
 	}
-	for _, ns := range p.Namespaces {
+	namespaces := p.Namespaces
+	if s.state != nil {
+		if ns, ok := s.state.PublishNamespace(p.Name); ok {
+			pt.PublishNamespace = true
+			namespaces = append(slices.Clone(namespaces), ns)
+		}
+	}
+	for _, ns := range namespaces {
 		pt.Networks[ns] = changeset.DefaultNetwork
 		if s.netstate != nil {
 			pt.Networks[ns] = s.netstate.PrimaryNetwork(ns)

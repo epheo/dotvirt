@@ -12,12 +12,17 @@ import (
 	"github.com/epheo/dotvirt/internal/model"
 	"github.com/epheo/dotvirt/internal/project"
 	"github.com/epheo/dotvirt/internal/publish"
+	"github.com/epheo/dotvirt/pkg/tenancy"
 )
 
 // PublishTarget is what the API's snapshots say of a project's namespaces.
 type PublishTarget struct {
-	// Networks is each namespace's primary network, "default" for the
-	// cluster's own: namespaces sharing one reach each other's Services.
+	// PublishNamespace: the cluster holds the project's publish namespace
+	// (tenancy.PublishNamespace), which the platform creates with the project.
+	PublishNamespace bool
+	// Networks is each namespace's primary network, the publish namespace's
+	// among them, "default" for the cluster's own: namespaces sharing one
+	// reach each other's Services.
 	Networks map[string]string
 	// RoutesGranted: the cluster's admin role already writes HTTPRoutes, so
 	// no namespace needs a route grant of its own.
@@ -33,12 +38,11 @@ const DefaultNetwork = "default"
 
 // PublishPlan is where a project's Gateway goes and whom it serves.
 type PublishPlan struct {
-	// Namespace holds the Gateway: the one git holds it in, else the first
-	// namespace of the project's largest network.
+	// Namespace holds the Gateway: the project's publish namespace, where no
+	// tenant grant reaches.
 	Namespace string
-	// Reach is the project's namespaces on that network, Namespace among
-	// them. One with a VM Network of its own is not: no gateway joins two
-	// primary networks.
+	// Reach is the project's namespaces on that namespace's network. One with
+	// a VM Network of its own is not: no gateway joins two primary networks.
 	Reach []string
 	// On: git holds the project's Gateway.
 	On bool
@@ -56,10 +60,21 @@ var ErrPublishingOn = fmt.Errorf("%w: publishing is already on", model.ErrInvali
 // the publishing GatewayClass does not say its Gateways are isolated.
 var ErrPrimaryNetwork = fmt.Errorf("%w: publishing on a VM Network needs a newer portail: today one project could delay the others' route changes", model.ErrInvalid)
 
+// ErrApart refuses publishing, and the publish namespace, for a project none
+// of whose namespaces shares the publish namespace's network: each has a VM
+// Network of its own, where a gateway is the project's to run.
+var ErrApart = fmt.Errorf("%w: no namespace of the project shares its publish namespace's network: each has a VM Network of its own", model.ErrInvalid)
+
+// ErrNoPublishNamespace refuses publishing for a project whose publish
+// namespace the cluster lacks. dotvirt never creates it here: a namespace
+// joins a VM Network only when created, so only the project's creator knows
+// what it must be.
+var ErrNoPublishNamespace = fmt.Errorf("%w: publishing needs the project's publish namespace, which the platform creates with the project", model.ErrInvalid)
+
 // StagePublishing stages, into the platform draft, what target's publishing
-// lacks: its Gateway, its certificate when the platform names an issuer, and
-// the HTTPRoute grant of each namespace it reaches where the admin role lacks
-// one.
+// lacks: its Gateway, its certificate when the platform names an issuer, the
+// HTTPRoute grant of each namespace it reaches where the admin role lacks
+// one, and the read of its Gateway for those namespaces' admins.
 func (c *Coordinator) StagePublishing(id auth.Identity, commitProj, target project.ProjectInfo, pt PublishTarget) (model.DraftView, error) {
 	_, entries, err := c.publishPlan(commitProj, target, pt)
 	if err != nil {
@@ -69,11 +84,12 @@ func (c *Coordinator) StagePublishing(id auth.Identity, commitProj, target proje
 }
 
 // PublishingNeeds is StagePublishing's plan and accesses, unstaged. The plan
-// stands beside ErrPublishingOn; beside ErrPrimaryNetwork the accesses are
-// what it would ask, so a caller who could is told what it waits on.
+// stands beside ErrPublishingOn; beside ErrPrimaryNetwork and
+// ErrNoPublishNamespace the accesses are what it would ask, so a caller who
+// could is told what it waits on.
 func (c *Coordinator) PublishingNeeds(commitProj, target project.ProjectInfo, pt PublishTarget) (PublishPlan, []Access, error) {
 	plan, entries, err := c.publishPlan(commitProj, target, pt)
-	if err != nil && !errors.Is(err, ErrPrimaryNetwork) {
+	if err != nil && !errors.Is(err, ErrPrimaryNetwork) && !errors.Is(err, ErrNoPublishNamespace) {
 		return plan, nil, err
 	}
 	need, nerr := c.needs(commitProj, entries)
@@ -100,22 +116,18 @@ func (c *Coordinator) publishPlan(commitProj, target project.ProjectInfo, pt Pub
 	if err != nil {
 		return plan, nil, err
 	}
-	for _, ns := range target.Namespaces {
-		if _, ok, err := read.LookupOnBranch(c.baseBranch, model.KindGateway.RepoPath(ns, publish.Gateway)); err != nil {
-			return plan, nil, err
-		} else if ok && plan.On {
-			return plan, nil, fmt.Errorf("%w: project %q publishes from both %s and %s; keep one", model.ErrConflict, target.Name, plan.Namespace, ns)
-		} else if ok {
-			plan.Namespace, plan.On = ns, true
-		}
+	plan.Namespace = tenancy.PublishNamespace(target.Name)
+	_, on, err := read.LookupOnBranch(c.baseBranch, model.KindGateway.RepoPath(plan.Namespace, publish.Gateway))
+	if err != nil {
+		return plan, nil, err
 	}
+	plan.On = on
 	network := func(ns string) string { return cmp.Or(pt.Networks[ns], DefaultNetwork) }
-	if !plan.On {
-		plan.Namespace = largestNetwork(target.Namespaces, network)
-	}
-	for _, ns := range slices.Sorted(slices.Values(target.Namespaces)) {
-		if network(ns) == network(plan.Namespace) {
-			plan.Reach = append(plan.Reach, ns)
+	if pt.PublishNamespace {
+		for _, ns := range slices.Sorted(slices.Values(target.Namespaces)) {
+			if network(ns) == network(plan.Namespace) {
+				plan.Reach = append(plan.Reach, ns)
+			}
 		}
 	}
 	plan.Primary = network(plan.Namespace) != DefaultNetwork
@@ -146,11 +158,11 @@ func (c *Coordinator) publishPlan(commitProj, target project.ProjectInfo, pt Pub
 		}
 		entries = append(entries, e)
 	}
+	grants, err := c.grantSource(commitProj)
+	if err != nil {
+		return plan, nil, err
+	}
 	if !pt.RoutesGranted {
-		grants, err := c.grantSource(commitProj)
-		if err != nil {
-			return plan, nil, err
-		}
 		for _, ns := range plan.Reach {
 			routes, err := grants.routes(ns, target.Name)
 			if err != nil {
@@ -159,28 +171,20 @@ func (c *Coordinator) publishPlan(commitProj, target project.ProjectInfo, pt Pub
 			entries = append(entries, routes...)
 		}
 	}
-	if len(entries) == 0 {
-		return plan, nil, fmt.Errorf("%w for %s", ErrPublishingOn, target.Name)
+	view, err := grants.gatewayView(plan.Namespace, plan.Reach)
+	if err != nil {
+		return plan, nil, err
 	}
-	if plan.Primary && !pt.Isolated {
+	entries = append(entries, view...)
+	switch {
+	case !pt.PublishNamespace:
+		return plan, entries, fmt.Errorf("%w: %s does not exist", ErrNoPublishNamespace, plan.Namespace)
+	case len(plan.Reach) == 0:
+		return plan, nil, fmt.Errorf("%w (%s)", ErrApart, plan.Namespace)
+	case len(entries) == 0:
+		return plan, nil, fmt.Errorf("%w for %s", ErrPublishingOn, target.Name)
+	case plan.Primary && !pt.Isolated:
 		return plan, entries, ErrPrimaryNetwork
 	}
 	return plan, entries, nil
-}
-
-// largestNetwork is the first namespace, by name, of the network most of
-// namespaces share; a tie goes to the network of the first namespace.
-func largestNetwork(namespaces []string, network func(string) string) string {
-	sorted := slices.Sorted(slices.Values(namespaces))
-	count := map[string]int{}
-	for _, ns := range sorted {
-		count[network(ns)]++
-	}
-	best := sorted[0]
-	for _, ns := range sorted {
-		if count[network(ns)] > count[network(best)] {
-			best = ns
-		}
-	}
-	return best
 }

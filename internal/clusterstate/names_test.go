@@ -12,6 +12,7 @@ import (
 	"k8s.io/apimachinery/pkg/labels"
 
 	"github.com/epheo/dotvirt/internal/reflect"
+	"github.com/epheo/dotvirt/pkg/tenancy"
 )
 
 const projectKey = "dotvirt.io/project"
@@ -132,5 +133,53 @@ func TestGrantMovesByNamespace(t *testing.T) {
 	g.mu.Unlock()
 	if kept {
 		t.Error("a move older than the horizon was kept")
+	}
+}
+
+// A project's publish namespace is found from the one Namespace watch, though
+// no project selects it: it goes once its label changes, it joins a project,
+// or it is deleted, a user's own project labeled like one is none, and a
+// relist rebuilds what the events built.
+func TestNamespaceSinkKeepsPublishNamespaces(t *testing.T) {
+	s, _ := sinkState(t)
+	publishNS := func(name, project string, more ...string) *corev1.Namespace {
+		ns := namespace(name, more...)
+		ns.Labels[tenancy.PublishLabel] = project
+		return ns
+	}
+	found := func(project string) string {
+		ns, _ := s.PublishNamespace(project)
+		return ns
+	}
+	_ = s.names.Replace([]any{publishNS("shop-publish", "shop"), publishNS("web", "web"), namespace("default")}, "1")
+	if found("shop") != "shop-publish" || found("web") != "" {
+		t.Fatalf("after the list: shop %q, web %q; want shop-publish and none", found("shop"), found("web"))
+	}
+	if got := projects(s); len(got) != 0 {
+		t.Errorf("a publish namespace is in no project, yet the project store holds %v", got)
+	}
+	_ = s.names.Update(publishNS("shop-publish", "other"))
+	if found("shop") != "" {
+		t.Errorf("relabeled for another project, still shop's")
+	}
+	_ = s.names.Update(publishNS("shop-publish", "shop"))
+	_ = s.names.Update(publishNS("shop-publish", "shop", projectKey))
+	if found("shop") != "" {
+		t.Errorf("joined a project, still a publish namespace")
+	}
+	squatted := publishNS("shop-publish", "shop")
+	squatted.Annotations = map[string]string{tenancy.RequesterAnnotation: "mallory"}
+	_ = s.names.Update(squatted)
+	if found("shop") != "" {
+		t.Errorf("a user's own project, labeled by the platform sync, taken for shop's")
+	}
+	_ = s.names.Add(publishNS("db-publish", "db"))
+	_ = s.names.Delete(publishNS("db-publish", "db"))
+	if found("db") != "" {
+		t.Errorf("deleted, still found")
+	}
+	_ = s.names.Replace([]any{publishNS("db-publish", "db")}, "2")
+	if found("db") != "db-publish" || found("shop") != "" {
+		t.Errorf("after a relist: db %q, shop %q", found("db"), found("shop"))
 	}
 }

@@ -97,8 +97,31 @@
 						<span class="text-ink-muted"
 							>Not yet: a project on a VM Network waits on a portail update.</span
 						>
+					{:else if c?.publishingApart}
+						<span class="text-ink-muted"
+							>Not offered: each namespace has a VM Network of its own, where it runs its own
+							Gateway.</span
+						>
+					{:else if c?.publishingUnhoused}
+						{@const create = publishGate.namespace(projectNS(p))}
+						<span class="text-ink-muted"
+							>Not yet: publishing needs the namespace <span class="font-mono"
+								>{c.publishNamespace}</span
+							>, which holds the project's Gateway.</span
+						>
+						<div class="flex flex-wrap items-center gap-2">
+							<Button
+								variant="outline"
+								size="sm"
+								disabled={!create.ok}
+								title={create.why}
+								onclick={() => (ui.modal = { kind: 'publishNamespace', project: p.name })}
+								>Create {c.publishNamespace}</Button
+							>
+							<StageChip kind="pr" />
+						</div>
 					{/if}
-					{#if !c?.publishingWaits && (!c?.publishingOn || c.publishing)}
+					{#if !c?.publishingWaits && !c?.publishingUnhoused && !c?.publishingApart && (!c?.publishingOn || c.publishing)}
 						<div class="flex flex-wrap items-center gap-2">
 							<Button
 								variant="outline"
