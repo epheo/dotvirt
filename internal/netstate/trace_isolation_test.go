@@ -661,7 +661,7 @@ func TestAdminPoliciesMayNotBindAVMNetwork(t *testing.T) {
 	if res := s.Trace(nil, src, &dst, "", "TCP", 80); res.Verdict == "Deny" {
 		t.Errorf("an admin deny between two VMs on a VM Network decided: %v", stepKinds(t, res))
 	}
-	eff := s.Effective("tenant-a", src.NSLabels, nil, false, "")
+	eff := s.Effective("tenant-a", src.NSLabels, nil, false, true, "")
 	if len(eff.EastWest) < 2 {
 		t.Fatalf("effective chain on a VM Network: %+v, want the admin and baseline bindings", eff.EastWest)
 	}
@@ -676,7 +676,7 @@ func TestAdminPoliciesMayNotBindAVMNetwork(t *testing.T) {
 	if res := plain.Trace(nil, p1, &p2, "", "TCP", 80); res.Verdict != "Deny" {
 		t.Errorf("an admin deny on the cluster's own network: verdict = %s (%v)", res.Verdict, stepKinds(t, res))
 	}
-	for _, b := range plain.Effective("team-a", p1.NSLabels, nil, false, "").EastWest {
+	for _, b := range plain.Effective("team-a", p1.NSLabels, nil, false, true, "").EastWest {
 		if b.Policy.Kind == "admin" && b.Conditional {
 			t.Errorf("an admin policy on the cluster's own network read as conditional")
 		}
@@ -700,10 +700,67 @@ func TestEffectiveReadsAWorkloadsDefaultBinding(t *testing.T) {
 		t.Fatalf("no admin binding in %+v", eff.EastWest)
 		return model.PolicyBinding{}
 	}
-	if b := admin(s.Effective("team-a", labels, map[string]string{"app": "vm"}, true, "team-a/bridge")); !b.Conditional || !strings.Contains(b.Note, "VM Network") {
+	if b := admin(s.Effective("team-a", labels, map[string]string{"app": "vm"}, true, false, "team-a/bridge")); !b.Conditional || !strings.Contains(b.Note, "VM Network") {
 		t.Errorf("a VM on a Multus default binding: conditional %v, note %q", b.Conditional, b.Note)
 	}
-	if b := admin(s.Effective("team-a", labels, map[string]string{"app": "vm"}, true, "")); b.Conditional {
+	if b := admin(s.Effective("team-a", labels, map[string]string{"app": "vm"}, true, true, "")); b.Conditional {
 		t.Errorf("a VM on the cluster network read as conditional: %q", b.Note)
+	}
+}
+
+// A VM with no cluster network attachment - only VLAN or other secondary
+// NICs, or a localnet default binding - is filtered by no cluster or project
+// rule: every binding in its chain is conditional with that reason, and no
+// default deny is claimed for it.
+func TestEffectiveOffTheClusterNetwork(t *testing.T) {
+	s := New(nil, nil)
+	anp(t, s, "deny-all", 1, map[string]any{"action": "Deny", "to": []any{map[string]any{"namespaces": map[string]any{}}}})
+	add(t, s.banp, map[string]any{
+		"apiVersion": "policy.networking.k8s.io/v1alpha1", "kind": "BaselineAdminNetworkPolicy",
+		"metadata": map[string]any{"name": "default"},
+		"spec":     map[string]any{"subject": map[string]any{"namespaces": map[string]any{}}},
+	})
+	add(t, s.netpol, map[string]any{
+		"apiVersion": "networking.k8s.io/v1", "kind": "NetworkPolicy",
+		"metadata": map[string]any{"name": "deny", "namespace": "team-a"},
+		"spec":     map[string]any{"podSelector": map[string]any{}, "policyTypes": []any{"Ingress"}},
+	})
+	add(t, s.egressfw, map[string]any{
+		"apiVersion": "k8s.ovn.org/v1", "kind": "EgressFirewall",
+		"metadata": map[string]any{"name": "default", "namespace": "team-a"},
+		"spec":     map[string]any{"egress": []any{map[string]any{"type": "Deny", "to": map[string]any{"cidrSelector": "0.0.0.0/0"}}}},
+	})
+	add(t, s.nad, map[string]any{
+		"apiVersion": "k8s.cni.cncf.io/v1", "kind": "NetworkAttachmentDefinition",
+		"metadata": map[string]any{"name": "vlan42", "namespace": "team-a"},
+		"spec":     map[string]any{"config": `{"type":"ovn-k8s-cni-overlay","topology":"localnet","vlanID":42}`},
+	})
+	labels := map[string]string{"kubernetes.io/metadata.name": "team-a"}
+	pod := map[string]string{"app": "vm"}
+	for name, eff := range map[string]model.EffectivePolicy{
+		"VLAN only":                  s.Effective("team-a", labels, pod, true, false, ""),
+		"a localnet default binding": s.Effective("team-a", labels, pod, true, false, "team-a/vlan42"),
+	} {
+		if eff.DefaultDenyIngress || eff.DefaultDenyEgress {
+			t.Errorf("%s: default deny claimed (%v, %v)", name, eff.DefaultDenyIngress, eff.DefaultDenyEgress)
+		}
+		all := slices.Concat(eff.EastWest, eff.Gateway, eff.SNAT, eff.Routes)
+		if len(all) < 4 {
+			t.Fatalf("%s: chain %+v, want the admin, project, baseline and firewall bindings", name, all)
+		}
+		for _, b := range all {
+			if !b.Conditional || !strings.Contains(b.Note, "no cluster network attachment") {
+				t.Errorf("%s: %s %s conditional %v, note %q", name, b.Policy.Kind, b.Policy.Name, b.Conditional, b.Note)
+			}
+		}
+	}
+	on := s.Effective("team-a", labels, pod, true, true, "")
+	if !on.DefaultDenyIngress {
+		t.Error("a VM on the cluster network lost its default deny")
+	}
+	for _, b := range on.EastWest {
+		if b.Policy.Kind == "admin" && b.Conditional {
+			t.Errorf("a VM on the cluster network read admin rules as conditional: %q", b.Note)
+		}
 	}
 }
