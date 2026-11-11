@@ -684,3 +684,48 @@ func TestScopePoliciesAsksTheBackingKind(t *testing.T) {
 		t.Errorf("policies = %+v, want the NetworkPolicy alone", got)
 	}
 }
+
+// A VM with only a VLAN NIC has no cluster network attachment: its Security
+// tab reads every cluster rule as one that may not filter it.
+func TestVMPolicyOffTheClusterNetwork(t *testing.T) {
+	fc := newFakeCluster(t)
+	tmpl := &kubevirtcorev1.VirtualMachineInstanceTemplateSpec{}
+	tmpl.Spec.Networks = []kubevirtcorev1.Network{{Name: "vlan", NetworkSource: kubevirtcorev1.NetworkSource{Multus: &kubevirtcorev1.MultusNetwork{NetworkName: "team-a-dev/vlan42"}}}}
+	fc.vms = append(fc.vms, kubevirtcorev1.VirtualMachine{
+		ObjectMeta: metav1.ObjectMeta{Namespace: "team-a-dev", Name: "edge"},
+		Spec:       kubevirtcorev1.VirtualMachineSpec{Template: tmpl},
+	})
+	gv := "policy.networking.k8s.io/v1alpha1"
+	fc.on(http.MethodGet, "/apis/"+gv, func(w http.ResponseWriter, _ *http.Request) {
+		writeObj(w, metav1.APIResourceList{
+			TypeMeta: metav1.TypeMeta{Kind: "APIResourceList", APIVersion: "v1"}, GroupVersion: gv,
+			APIResources: []metav1.APIResource{{Name: "adminnetworkpolicies", Kind: "AdminNetworkPolicy", Verbs: []string{"list", "watch"}}},
+		})
+	})
+	fc.on(http.MethodGet, "/apis/"+gv+"/adminnetworkpolicies", unstructuredList(gv, "AdminNetworkPolicy", map[string]any{
+		"apiVersion": gv, "kind": "AdminNetworkPolicy",
+		"metadata": map[string]any{"name": "lockdown", "resourceVersion": "1"},
+		"spec": map[string]any{"priority": int64(10), "subject": map[string]any{"namespaces": map[string]any{}},
+			"ingress": []any{map[string]any{"action": "Deny", "from": []any{map[string]any{"namespaces": map[string]any{}}}}}},
+	}))
+	s := fc.server(nil, Config{})
+	ns := netstate.New(fc.sa, nil)
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	ns.Run(ctx)
+	s.netstate = ns
+	for deadline := time.Now().Add(10 * time.Second); len(ns.Policies()) == 0; time.Sleep(10 * time.Millisecond) {
+		if time.Now().After(deadline) {
+			t.Fatal("netstate never synced the admin policy")
+		}
+	}
+	eff := decodeBody[model.EffectivePolicy](t, do(s, adminToken, http.MethodGet, "/api/vms/team-a-dev/edge/policy", ""))
+	if len(eff.EastWest) == 0 {
+		t.Fatalf("no bindings: %+v", eff)
+	}
+	for _, b := range eff.EastWest {
+		if !b.Conditional || !strings.Contains(b.Note, "no cluster network attachment") {
+			t.Errorf("%s %s on a VLAN-only VM: conditional %v, note %q", b.Policy.Kind, b.Policy.Name, b.Conditional, b.Note)
+		}
+	}
+}

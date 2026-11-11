@@ -66,6 +66,7 @@ const (
 	reasonUnresolved    = "a destination form this trace cannot resolve"
 	reasonEqualPriority = "an admin policy at the same priority may decide first, in an order OVN-Kubernetes leaves undefined"
 	reasonPrimaryUDN    = "OVN-Kubernetes binds admin network policies to the cluster network's pods, and this workload is on a VM Network"
+	reasonNoClusterNIC  = "this VM has no cluster network attachment, and cluster and project rules filter only that network"
 )
 
 // unenforcedReason words why an ANP past the programmed range only may apply.
