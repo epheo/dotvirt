@@ -248,9 +248,21 @@ func TestTraceServiceAddressFromIsolatedNetwork(t *testing.T) {
 	if res := s.Trace(nil, a, nil, "172.30.12.7", "TCP", 8080); res.Verdict != "Conditional" {
 		t.Errorf("outbound deny on a service address: verdict = %s (%v)", res.Verdict, stepKinds(t, res))
 	}
+	// OVN-K does not bind an admin policy to a VM Network's pods: its Deny
+	// may not apply, so it decides nothing.
 	anp(t, s, "no-egress", 1, map[string]any{"action": "Deny", "to": []any{map[string]any{"networks": []any{"0.0.0.0/0"}}}})
-	if res := s.Trace(nil, a, nil, "172.30.12.7", "TCP", 8080); res.Verdict != "Deny" {
-		t.Errorf("source egress deny: verdict = %s (%v)", res.Verdict, stepKinds(t, res))
+	res = s.Trace(nil, a, nil, "172.30.12.7", "TCP", 8080)
+	if res.Verdict != "Conditional" {
+		t.Errorf("admin deny from a VM Network: verdict = %s (%v)", res.Verdict, stepKinds(t, res))
+	}
+	var named bool
+	for _, st := range res.Steps {
+		if st.Stage == "admin" && st.Conditional && strings.Contains(st.Note, "VM Network") {
+			named = true
+		}
+	}
+	if !named {
+		t.Errorf("the admin rule is not a maybe naming the VM Network: %+v", res.Steps)
 	}
 }
 
@@ -626,6 +638,47 @@ func TestTraceReadsFollowsTheCatalog(t *testing.T) {
 	} {
 		if got := c.view.reads(c.r); got != c.want {
 			t.Errorf("%s: reads = %v, want %v", name, got, c.want)
+		}
+	}
+}
+
+// OVN-K binds admin and baseline policies to the cluster network's pods: on a
+// VM Network their rules may not apply, so between two VMs there no admin or
+// baseline Deny decides, and the namespace's effective chain says why. On the
+// cluster's own network nothing changes.
+func TestAdminPoliciesMayNotBindAVMNetwork(t *testing.T) {
+	s := isolated(t, false)
+	anp(t, s, "deny-all", 1, map[string]any{"action": "Deny", "to": []any{map[string]any{"namespaces": map[string]any{}}}})
+	add(t, s.banp, map[string]any{
+		"apiVersion": "policy.networking.k8s.io/v1alpha1", "kind": "BaselineAdminNetworkPolicy",
+		"metadata": map[string]any{"name": "default"},
+		"spec": map[string]any{
+			"subject": map[string]any{"namespaces": map[string]any{}},
+			"egress":  []any{map[string]any{"action": "Deny", "to": []any{map[string]any{"namespaces": map[string]any{}}}}},
+		},
+	})
+	src, dst := wl("tenant-a", "a1", nil, nil, "10.100.0.5"), wl("tenant-a", "a2", nil, nil, "10.100.0.6")
+	if res := s.Trace(nil, src, &dst, "", "TCP", 80); res.Verdict == "Deny" {
+		t.Errorf("an admin deny between two VMs on a VM Network decided: %v", stepKinds(t, res))
+	}
+	eff := s.Effective("tenant-a", src.NSLabels, nil, false)
+	if len(eff.EastWest) < 2 {
+		t.Fatalf("effective chain on a VM Network: %+v, want the admin and baseline bindings", eff.EastWest)
+	}
+	for _, b := range eff.EastWest {
+		if (b.Policy.Kind == "admin" || b.Policy.Kind == "baseline") && (!b.Conditional || !strings.Contains(b.Note, "VM Network")) {
+			t.Errorf("%s %s on a VM Network: conditional %v, note %q", b.Policy.Kind, b.Policy.Name, b.Conditional, b.Note)
+		}
+	}
+	plain := New(nil, nil)
+	anp(t, plain, "deny-all", 1, map[string]any{"action": "Deny", "to": []any{map[string]any{"namespaces": map[string]any{}}}})
+	p1, p2 := wl("team-a", "w1", nil, nil), wl("team-a", "w2", nil, nil)
+	if res := plain.Trace(nil, p1, &p2, "", "TCP", 80); res.Verdict != "Deny" {
+		t.Errorf("an admin deny on the cluster's own network: verdict = %s (%v)", res.Verdict, stepKinds(t, res))
+	}
+	for _, b := range plain.Effective("team-a", p1.NSLabels, nil, false).EastWest {
+		if b.Policy.Kind == "admin" && b.Conditional {
+			t.Errorf("an admin policy on the cluster's own network read as conditional")
 		}
 	}
 }

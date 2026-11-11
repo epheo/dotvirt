@@ -210,9 +210,22 @@ func (s *Snapshot) directionWalk(dir string, subject TraceWorkload, peer peerTar
 	// Allow/Deny are final, and (admin tier only) Pass hands the flow down. A
 	// non-nil return is the walk's outcome; nil means evaluation continues into
 	// the tiers below (no decision, or a Pass delegation).
+	// OVN-Kubernetes selects admin and baseline policies' pods and peers by
+	// their cluster-network addresses: on a primary user-defined network its
+	// rules may not apply, so none decides there.
+	onUDN := s.onPrimaryUDN(subject)
 	adminTier := func(policies []*policy, stage string) *walkResult {
 		baseline := stage == "baseline"
 		bs := bind(policies, subject.NSLabels, subject.PodLabels, true)
+		if onUDN {
+			for _, b := range bs {
+				for _, c := range b.candidates(dir, peer, protocol, port) {
+					rv := c.r.view(dir, nil)
+					w.maybe(&c.pol.view, &rv, stage, c.r.action, reasonPrimaryUDN)
+				}
+			}
+			return nil
+		}
 		for len(bs) > 0 {
 			n := 1
 			for !baseline && n < len(bs) && bs[n].pol.view.Priority == bs[0].pol.view.Priority {
