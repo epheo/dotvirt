@@ -229,7 +229,7 @@ func (r *proposeRun) extend(pr forge.PR, rec draft.Proposal, hasRec bool) (model
 	if err != nil {
 		return model.ProposeResult{}, r.commitFailed(err, all, pr.Number)
 	}
-	out := model.ProposeResult{Branch: res.Branch, PRURL: pr.HTMLURL, PRNumber: pr.Number, Existing: true}
+	out := model.ProposeResult{Branch: res.Branch, PRURL: r.fc.PullURL(pr.Number), PRNumber: pr.Number, Existing: true}
 	rec.Head, rec.Entries, rec.Pending = res.Hash, all, nil
 	if r.fc == nil {
 		return out, r.done(rec)
@@ -438,9 +438,9 @@ func (c *Coordinator) publish(fc *forge.Client, write *git.WriteRepo, branch, me
 	case fc == nil:
 		return out, res.Hash, false, nil
 	case found && prior.State == "open":
-		out.PRURL, out.PRNumber, out.Existing = prior.HTMLURL, prior.Number, true
+		out.PRURL, out.PRNumber, out.Existing = fc.PullURL(prior.Number), prior.Number, true
 	case reopened:
-		out.PRURL, out.PRNumber, out.Existing = prior.HTMLURL, prior.Number, true
+		out.PRURL, out.PRNumber, out.Existing = fc.PullURL(prior.Number), prior.Number, true
 	default:
 		if !c.createPR(fc, &out, branch, title, body) {
 			return out, res.Hash, false, nil
@@ -464,7 +464,7 @@ func (c *Coordinator) createPR(fc *forge.Client, out *model.ProposeResult, branc
 		out.CompareURL = fc.CompareURL(branch, c.baseBranch)
 		return false
 	}
-	out.PRURL, out.PRNumber = pr.HTMLURL, pr.Number
+	out.PRURL, out.PRNumber = fc.PullURL(pr.Number), pr.Number
 	return true
 }
 

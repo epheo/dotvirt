@@ -62,6 +62,7 @@ func TestWebhookRecordsMerge(t *testing.T) {
 	feed := tasks.New(eventbus.New())
 	s := NewServer(Deps{
 		Tasks:  feed,
+		Forge:  forge.NewFactory("https://forge", forge.StaticToken("t"), false, "").WithWebURL("https://web"),
 		Reader: &fakeDraft{},
 		Draft:  &fakeDraft{},
 		Config: Config{WebhookSecret: "hooksecret", BaseBranch: "main", ProposedBranch: "dotvirt/proposed"},
@@ -86,6 +87,10 @@ func TestWebhookRecordsMerge(t *testing.T) {
 		t.Fatalf("merges = %+v", ms)
 	}
 	m := ms[0]
+	// The link is the web base's, not the forge's html_url.
+	if m.URL != "https://web/o/r/pulls/12" {
+		t.Errorf("merge link = %q, want the web base's", m.URL)
+	}
 	if m.RepoURL != "https://forge/o/r" || m.Number != 12 || m.By != "alice" || m.Title != "resize web" || m.Branch != "dotvirt/proposed/alice/team-a-1a2b3c" {
 		t.Fatalf("merge = %+v", m)
 	}

@@ -114,7 +114,9 @@ func newProposeFixture(t *testing.T, routes ...route) *proposeFixture {
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
 	repos := git.NewRepoSet(ctx, "", "", nil, true, nil, time.Hour)
-	ff := forge.NewFactory(srv.URL, forge.StaticToken("tok"), false, "")
+	// Browsers open the forge at another base than the API's: every link
+	// handed out must start there.
+	ff := forge.NewFactory(srv.URL, forge.StaticToken("tok"), false, "").WithWebURL("http://forge")
 	f.c = New(store, repos, ff, nil, nil, nil, "main", "dotvirt/proposed")
 	f.c.UseAuthorizer(allowAll{})
 	f.repos = repos
@@ -327,6 +329,12 @@ func (f *proposeFixture) draftCount(t *testing.T) int {
 	return len(entries)
 }
 
+// webPR reports whether url is pull request n's page under the fixture's web
+// base, whatever the forge's html_url says.
+func webPR(url string, n int) bool {
+	return strings.HasPrefix(url, "http://forge/") && strings.HasSuffix(url, "/pulls/"+strconv.Itoa(n))
+}
+
 // A fresh propose with no existing PR creates one; its URL is returned and the
 // draft is cleared.
 func TestProposeCreatesPR(t *testing.T) {
@@ -335,7 +343,7 @@ func TestProposeCreatesPR(t *testing.T) {
 		when("POST", "/pulls", http.StatusCreated, `{"number":1,"state":"open","html_url":"http://forge/pulls/1"}`),
 	)
 	out := f.stageAndPropose(t)
-	if out.PRURL != "http://forge/pulls/1" || out.Existing {
+	if !webPR(out.PRURL, 1) || out.Existing {
 		t.Fatalf("got %+v, want fresh PR URL", out)
 	}
 	if n := f.draftCount(t); n != 0 {
@@ -353,7 +361,7 @@ func TestProposeReopensClosedPR(t *testing.T) {
 		when("PATCH", "/pulls/4", http.StatusOK, `{"number":4,"state":"open","html_url":"http://forge/pulls/4"}`),
 	)
 	out := f.stageAndPropose(t)
-	if out.PRURL != "http://forge/pulls/4" || !out.Existing {
+	if !webPR(out.PRURL, 4) || !out.Existing {
 		t.Fatalf("got %+v, want reopened existing PR #4", out)
 	}
 	// The branch was rebuilt from the draft alone, so the reopened PR must say
@@ -558,7 +566,7 @@ func TestProposeSelfHealsSatisfiedDraft(t *testing.T) {
 func TestPublish(t *testing.T) {
 	head := proposedBranchFor("alice", "p")
 	listed := func(state string, merged bool) forge.PR {
-		pr := forge.PR{Number: 4, State: state, Merged: merged, HTMLURL: "http://forge/pulls/4"}
+		pr := forge.PR{Number: 4, State: state, Merged: merged}
 		pr.Head.Ref = head
 		return pr
 	}

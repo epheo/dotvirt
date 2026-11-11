@@ -636,6 +636,23 @@ func TestDeploymentCarriesPublishing(t *testing.T) {
 	}
 }
 
+// The forge's web base reaches dotvirt only when set: unset, links keep the
+// forge's URL.
+func TestDeploymentCarriesTheForgeWebURL(t *testing.T) {
+	dv := testDotvirt()
+	dv.Spec.Forge.Managed = true
+	web := func() (string, bool) {
+		return envValue(Deployment(dv, "argocd", nil).Spec.Template.Spec.Containers[0].Env, "DOTVIRT_FORGE_WEB_URL")
+	}
+	if v, ok := web(); ok {
+		t.Errorf("unset webURL: DOTVIRT_FORGE_WEB_URL = %q, want unset", v)
+	}
+	dv.Spec.Forge.WebURL = "https://c.example/forge"
+	if v, _ := web(); v != "https://c.example/forge" {
+		t.Errorf("webURL: DOTVIRT_FORGE_WEB_URL = %q", v)
+	}
+}
+
 // Users opening their own pull requests reaches dotvirt as one env var; the
 // default leaves it out.
 func TestDeploymentCarriesWhoOpensPullRequests(t *testing.T) {

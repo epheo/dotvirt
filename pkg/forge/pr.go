@@ -14,10 +14,9 @@ import (
 
 // PR is a pull request as returned by Forgejo (subset).
 type PR struct {
-	Number  int    `json:"number"`
-	HTMLURL string `json:"html_url"`
-	State   string `json:"state"`
-	Merged  bool   `json:"merged"`
+	Number int    `json:"number"`
+	State  string `json:"state"`
+	Merged bool   `json:"merged"`
 	// MergedAt is zero while unmerged (Forgejo sends null; time honors that).
 	MergedAt time.Time `json:"merged_at"`
 	// UpdatedAt moves with the PR's issue activity (reviews, comments, pushes)
@@ -281,9 +280,14 @@ func (c *Client) EditPR(number int, edit PREdit) (PR, error) {
 	return pr, nil
 }
 
-// PullURL is the browser URL of pull request number on this forge.
+// PullURL is the browser URL of pull request number, "" on a nil Client. Every
+// pull request link dotvirt hands out is built here, never from the forge's
+// html_url, which follows its ROOT_URL rather than the web base.
 func (c *Client) PullURL(number int) string {
-	return fmt.Sprintf("%s/%s/%s/pulls/%d", c.f.baseURL, c.owner, c.repo, number)
+	if c == nil {
+		return ""
+	}
+	return fmt.Sprintf("%s/%s/%s/pulls/%d", c.f.webURL, c.owner, c.repo, number)
 }
 
 // mergeSubject matches the subjects Forgejo writes when it merges a PR: a merge

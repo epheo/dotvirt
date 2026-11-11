@@ -43,6 +43,7 @@ import (
 	"github.com/epheo/dotvirt/internal/routes"
 	"github.com/epheo/dotvirt/internal/tasks"
 	"github.com/epheo/dotvirt/internal/ttlcache"
+	"github.com/epheo/dotvirt/pkg/forge"
 	"github.com/epheo/dotvirt/pkg/tenancy"
 )
 
@@ -248,6 +249,7 @@ type Server struct {
 	storage       *ttlcache.Cache[[]cluster.SheetClass]
 	metrics       *metrics.Client // Prometheus/Thanos for the Performance tab; nil disables it
 	tasks         *tasks.Feed     // recent-activity feed (ops + merged PRs); nil disables it
+	forge         *forge.Factory  // forge links; nil-safe
 	reader        Reader
 	draft         Draft
 	auth          *auth.Authenticator // nil leaves the API open (dev)
@@ -298,6 +300,7 @@ type Deps struct {
 	Repos          *git.RepoSet
 	Metrics        *metrics.Client // Prometheus/Thanos query client; nil disables the Performance tab
 	Tasks          *tasks.Feed     // recent-activity feed; nil disables GET /api/tasks
+	Forge          *forge.Factory  // builds the forge links the UI opens; nil links repos as written
 	Reader         Reader
 	Draft          Draft
 	Auth           *auth.Authenticator
@@ -333,6 +336,7 @@ func NewServer(d Deps) *Server {
 		storage:       ttlcache.New[[]cluster.SheetClass](storageTTL),
 		metrics:       d.Metrics,
 		tasks:         d.Tasks,
+		forge:         d.Forge,
 		reader:        d.Reader,
 		draft:         d.Draft,
 		auth:          d.Auth,

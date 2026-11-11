@@ -34,6 +34,25 @@ func TestLoadRejectsInvalidProjectLabel(t *testing.T) {
 	}
 }
 
+// Every forge link the UI renders starts with the web base, so only an
+// absolute http(s) URL is taken.
+func TestLoadChecksTheForgeWebURL(t *testing.T) {
+	for _, u := range []string{
+		"javascript:alert(1)", "/forge", "c.example/forge", "ftp://c.example", "https:///forge",
+		"https://?x", "https://@", "https://host:abc", "https://u:p@host", "https://host?x", "https://host?", "https://host#f", "https://host/a b",
+		"https://host/%zz", "https://host/a%2", "https://host/a\x7fb", "https://host/a\x01b",
+	} {
+		_, err := Load([]string{"-forge-web-url", u, "-session-secret", "s"})
+		if err == nil || !strings.Contains(err.Error(), "-forge-web-url") {
+			t.Errorf("forge-web-url %q: err %v, want one naming the flag", u, err)
+		}
+	}
+	c, err := Load([]string{"-forge-web-url", "https://c.example/forge", "-session-secret", "s"})
+	if err != nil || c.ForgeWebURL != "https://c.example/forge" {
+		t.Errorf("a https base: %+v, %v", c, err)
+	}
+}
+
 // What tenant repos may declare beyond the listed kinds comes from the
 // operator. A value it cannot read, or one naming a kind no tenant repo may
 // apply, fails at startup rather than disagree with the AppProjects.

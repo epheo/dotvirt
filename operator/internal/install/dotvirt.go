@@ -236,6 +236,9 @@ func dotvirtEnv(dv *dotvirtv1alpha1.Dotvirt, argoNS string, tenantAllowed []tena
 			env = append(env, secretEnv("DOTVIRT_FORGE_URL", forgeSecret, "url", false))
 		}
 		env = append(env, corev1.EnvVar{Name: "DOTVIRT_FORGE_TOKEN_FILE", Value: forgeTokenMountPath})
+		if dv.Spec.Forge.WebURL != "" {
+			env = append(env, corev1.EnvVar{Name: "DOTVIRT_FORGE_WEB_URL", Value: dv.Spec.Forge.WebURL})
+		}
 		if dv.Spec.Forge.PullRequests == "Users" {
 			env = append(env, corev1.EnvVar{Name: "DOTVIRT_USERS_OPEN_PRS", Value: "true"})
 		}

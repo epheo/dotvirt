@@ -2148,6 +2148,11 @@ export interface ProjectNamespace {
 export interface Project {
   name: string;
   repo?: string;
+  /**
+   * RepoPage is where a browser opens Repo: its page under the forge's web
+   * base, which may differ from the base git and the API reach it at.
+   */
+  repoPage?: string;
   namespaces: ProjectNamespace[];
   error?: string;
   /**
