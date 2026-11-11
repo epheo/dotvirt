@@ -157,7 +157,7 @@ func (s Settings) read(name string) ([]byte, bool) {
 	if err != nil {
 		return nil, false
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 	// Stat after Open follows the link: kubelet mounts each ConfigMap key as
 	// a symlink into ..data/, so an Lstat check would refuse every real file.
 	fi, err := f.Stat()
