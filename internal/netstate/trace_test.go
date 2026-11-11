@@ -735,6 +735,13 @@ func TestTraceExternalVLAN(t *testing.T) {
 		t.Fatalf("secondary-only source, a router may carry it: verdict = %s (%v)", res.Verdict, stepKinds(t, res))
 	}
 
+	raw := wl("team-a", "router", nil, nil, "192.168.1.5")
+	raw.PodNet, raw.DefaultNet = false, "team-a/bridge"
+	res = s.Trace(nil, raw, nil, "203.0.113.9", "TCP", 443)
+	if res.Verdict != "Conditional" || slices.ContainsFunc(res.Steps, func(st model.TraceStep) bool { return st.Stage == "gateway" }) {
+		t.Fatalf("a default binding no primary network generated, under a gateway deny: verdict = %s (%v)", res.Verdict, stepKinds(t, res))
+	}
+
 	bare := wl("team-a", "island", nil, nil)
 	bare.PodNet = false
 	if res := s.Trace(nil, bare, nil, "203.0.113.9", "TCP", 443); res.Verdict != "Unreachable" {
