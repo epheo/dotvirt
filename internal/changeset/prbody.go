@@ -13,14 +13,16 @@ import (
 // a second time.
 const changesHeading = "## Changes\n"
 
-// footer closes every generated PR body.
-const footer = "\n---\nProposed from dotvirt by "
+// footerLead opens the footer closing every generated PR body: "Proposed
+// from <product> by <user>.". A body is read back by it alone, so an install
+// whose product name changed still finds the user's message in its open PRs.
+const footerLead = "\n---\nProposed from "
 
 // prBody renders the PR description the forge reviewer reads: the user's own
 // message first, then the draft's semantic changes with their restart plane.
 // The review happens in the forge, so dotvirt's analysis has to travel with
 // the PR - a reviewer must not need the YAML diff to see what a change does.
-func prBody(view model.DraftView, message, username string) string {
+func prBody(view model.DraftView, message, username, product string) string {
 	if strings.Contains(message, changesHeading) {
 		return message
 	}
@@ -62,7 +64,7 @@ func prBody(view model.DraftView, message, username string) string {
 	if view.Warning != "" {
 		fmt.Fprintf(&b, "\n**Warning:** %s\n", view.Warning)
 	}
-	fmt.Fprintf(&b, "%s%s.\n", footer, username)
+	fmt.Fprintf(&b, "%s%s by %s.\n", footerLead, product, username)
 	return b.String()
 }
 
@@ -72,7 +74,7 @@ func userMessage(body string) string {
 	if i := strings.Index(body, changesHeading); i >= 0 {
 		body = body[:i]
 	}
-	if i := strings.Index(body, footer); i >= 0 {
+	if i := strings.Index(body, footerLead); i >= 0 {
 		body = body[:i]
 	}
 	return strings.TrimSpace(body)

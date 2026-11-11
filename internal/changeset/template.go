@@ -203,7 +203,7 @@ func (c *Coordinator) seedTemplates(repoURL string) {
 		log.Printf("seed templates %s: %v", repoURL, err)
 		return
 	}
-	if _, err := write.Commit(c.baseBranch, "dotvirt: seed starter templates", vmtemplate.SeedFiles()); err != nil {
+	if _, err := write.Commit(c.baseBranch, c.productName()+": seed starter templates", vmtemplate.SeedFiles()); err != nil {
 		log.Printf("seed templates %s: %v", repoURL, err)
 	}
 }

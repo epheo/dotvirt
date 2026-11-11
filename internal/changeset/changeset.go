@@ -9,6 +9,7 @@
 package changeset
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -105,6 +106,8 @@ type Coordinator struct {
 	usersOpenPRs bool
 	// publishing is the platform's publishing settings (WithPublishing).
 	publishing publish.Settings
+	// product names the console in the forge (WithProductName).
+	product string
 }
 
 // New builds a Coordinator. forge and resyncer may be nil (PR creation degrades
@@ -125,6 +128,17 @@ func (c *Coordinator) WithPublishing(s publish.Settings) *Coordinator {
 	c.publishing = s
 	return c
 }
+
+// WithProductName names the console, in place of dotvirt, in the PR titles,
+// bodies and commits it writes to the forge; "" keeps dotvirt. Set once,
+// before serving.
+func (c *Coordinator) WithProductName(name string) *Coordinator {
+	c.product = name
+	return c
+}
+
+// productName is the console's name in the forge.
+func (c *Coordinator) productName() string { return cmp.Or(c.product, "dotvirt") }
 
 // WithSyncNamespace names the ArgoCD namespace holding the per-project sync
 // accounts (tenancy.SyncAccount) every project grant includes. Set once,

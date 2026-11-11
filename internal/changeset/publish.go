@@ -190,7 +190,7 @@ func (r *proposeRun) extend(pr forge.PR, rec draft.Proposal, hasRec bool) (model
 	if message == "" {
 		message = userMessage(pr.Body)
 	}
-	body := prBody(view, message, r.id.Username)
+	body := prBody(view, message, r.id.Username, r.c.productName())
 
 	plan := git.PushPlan{Lease: rec.Head, BeforePush: func(hash string) error {
 		ahead := rec
@@ -528,13 +528,13 @@ func (r *proposeRun) done(rec draft.Proposal) error {
 func (r *proposeRun) draftText() (title, body string) {
 	title, body = r.req.Title, r.req.Message
 	if r.rendered {
-		body = prBody(r.draft, r.req.Message, r.id.Username)
+		body = prBody(r.draft, r.req.Message, r.id.Username, r.c.productName())
 		if title == "" {
 			title = r.draft.DefaultTitle
 		}
 	}
 	if title == "" {
-		title = fmt.Sprintf("dotvirt: %d change(s)", len(r.entries))
+		title = fmt.Sprintf("%s: %d change(s)", r.c.productName(), len(r.entries))
 	}
 	return title, body
 }
