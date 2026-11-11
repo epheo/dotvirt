@@ -1024,6 +1024,7 @@ function clusterCaps(s) {
 		baselineAdminNetworkPolicy: objects(c.adminNetworkPolicy),
 		namespaceCreate: !!c.namespace,
 		vmNetwork: !!c.namespace,
+		projectNetwork: !!c.namespace,
 		grantAdmin: !!c.namespace,
 		sharedLibrary: !!n.canManage,
 		drsEnable: !!s.rebalancing?.canManage,

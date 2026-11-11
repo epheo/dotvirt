@@ -829,6 +829,44 @@ func TestCreateProjectStagesItsPublishNamespace(t *testing.T) {
 	}
 }
 
+// A project's VM Network spans its namespaces: New Project stages the
+// network, its first namespace on it, and its publish namespace on it too, so
+// the Gateway reaches the project's Services. A project network on an
+// existing namespace is refused before the repo exists.
+func TestCreateProjectWithItsVMNetwork(t *testing.T) {
+	f := newProposeFixture(t, when("GET", "tenant-a", http.StatusNotFound, ""), func(m, path string) (int, string, bool) {
+		if m == "POST" && strings.HasPrefix(path, "/api/v1/orgs/") && strings.HasSuffix(path, "/repos") {
+			return http.StatusCreated, "{}", true
+		}
+		return 0, "", false
+	})
+	f.c.WithPublishing(pubSettings)
+	view, err := f.c.StageCreateProject(f.id, f.platform(), json.RawMessage(`{"name":"tenant-a","projectNetwork":{"name":"tenant-a-net","subnet":"10.40.0.0/16"}}`), nil, nil)
+	if err != nil {
+		t.Fatalf("StageCreateProject: %v", err)
+	}
+	items := stagedYAML(t, view)
+	for name, wants := range map[string][]string{
+		"tenant-a":         {tenancy.NetworkLabel + ": tenant-a", "k8s.ovn.org/primary-user-defined-network", "dotvirt.io/project: tenant-a"},
+		"tenant-a-net":     {"kind: ClusterUserDefinedNetwork", tenancy.NetworkLabel + ": tenant-a", "role: Primary"},
+		"tenant-a-publish": {tenancy.PublishLabel + ": tenant-a", tenancy.NetworkLabel + ": tenant-a", "k8s.ovn.org/primary-user-defined-network"},
+	} {
+		for _, want := range wants {
+			if !strings.Contains(items[name], want) {
+				t.Errorf("%s lacks %q:\n%s", name, want, items[name])
+			}
+		}
+	}
+	if strings.Contains(items["tenant-a"], "kind: UserDefinedNetwork") {
+		t.Errorf("the first namespace got a network of its own:\n%s", items["tenant-a"])
+	}
+	g := newProposeFixture(t)
+	live := func(string) (*netgen.LiveNamespace, error) { return &netgen.LiveNamespace{}, nil }
+	if _, err := g.c.StageCreateProject(g.id, g.platform(), json.RawMessage(`{"name":"tenant-a","projectNetwork":{"name":"n","subnet":"10.40.0.0/16"}}`), live, nil); !errors.Is(err, model.ErrConflict) {
+		t.Errorf("a project network on an existing namespace: %v, want ErrConflict", err)
+	}
+}
+
 // The preview lists what staging would, restart flags included, and stages
 // nothing; the staged edit then rides the view so an editor can extend it.
 func TestPreviewEditStagesNothing(t *testing.T) {

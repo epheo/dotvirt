@@ -116,7 +116,7 @@ func TestPublishNamespaces(t *testing.T) {
 	if _, _, err := NamespaceManifest(NamespaceSpec{Name: "edge", Project: "other", Live: live}); err == nil {
 		t.Error("a namespace labeled as a publish namespace joined a project")
 	}
-	path, content, err := PublishNamespaceManifest("shop")
+	path, content, err := PublishNamespaceManifest("shop", false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -124,8 +124,54 @@ func TestPublishNamespaces(t *testing.T) {
 	if path != "namespaces/shop-publish.yaml" || !strings.Contains(y, "name: shop-publish") || !strings.Contains(y, tenancy.PublishLabel+": shop") || strings.Contains(y, "dotvirt.io/project") {
 		t.Errorf("%s:\n%s", path, y)
 	}
-	if _, _, err := PublishNamespaceManifest(strings.Repeat("a", 60)); err == nil {
+	if _, _, err := PublishNamespaceManifest(strings.Repeat("a", 60), false); err == nil {
 		t.Error("a publish namespace name past 63 characters rendered")
+	}
+}
+
+// A project's VM Network spans the namespaces labeled for the project: one
+// joining it, and its publish namespace, carry that label and the primary
+// label from creation; a namespace never has both its own and its project's.
+func TestProjectNetwork(t *testing.T) {
+	path, content, err := ProjectNetworkManifest("shop", PrimaryNet{Name: "shop-net", Subnet: "10.40.0.0/16"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	y := string(content)
+	for _, want := range []string{"kind: ClusterUserDefinedNetwork", "name: shop-net", tenancy.NetworkLabel + ": shop", "role: Primary", "10.40.0.0/16"} {
+		if !strings.Contains(y, want) {
+			t.Errorf("%s lacks %q:\n%s", path, want, y)
+		}
+	}
+	if _, _, err := ProjectNetworkManifest("shop", PrimaryNet{Name: "shop-net"}); err == nil {
+		t.Error("a primary network without a subnet rendered")
+	}
+	_, ns, err := NamespaceManifest(NamespaceSpec{Name: "web", Project: "shop", ProjectNetwork: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{tenancy.NetworkLabel + ": shop", "k8s.ovn.org/primary-user-defined-network"} {
+		if !strings.Contains(string(ns), want) {
+			t.Errorf("joining namespace lacks %q:\n%s", want, ns)
+		}
+	}
+	if strings.Contains(string(ns), "UserDefinedNetwork") {
+		t.Errorf("a joining namespace rendered a network of its own:\n%s", ns)
+	}
+	if _, _, err := NamespaceManifest(NamespaceSpec{Name: "web", Project: "shop", ProjectNetwork: true, VMNetwork: &PrimaryNet{Name: "n", Subnet: "10.0.0.0/24"}}); err == nil {
+		t.Error("a namespace rendered with both its own VM Network and its project's")
+	}
+	_, pub, err := PublishNamespaceManifest("shop", true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{tenancy.PublishLabel + ": shop", tenancy.NetworkLabel + ": shop", "k8s.ovn.org/primary-user-defined-network"} {
+		if !strings.Contains(string(pub), want) {
+			t.Errorf("publish namespace on the project network lacks %q:\n%s", want, pub)
+		}
+	}
+	if strings.Contains(string(pub), "dotvirt.io/project") {
+		t.Errorf("publish namespace joined the project:\n%s", pub)
 	}
 }
 

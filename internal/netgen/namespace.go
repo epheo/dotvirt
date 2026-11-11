@@ -32,6 +32,9 @@ type NamespaceSpec struct {
 	Project   string      `json:"project"` // dotvirt.io/project label
 	Repo      string      `json:"repo"`    // dotvirt.io/repo annotation
 	VMNetwork *PrimaryNet `json:"vmNetwork,omitempty"`
+	// ProjectNetwork: the namespace joins its project's VM Network
+	// (ProjectNetworkManifest) instead of having one of its own.
+	ProjectNetwork bool `json:"projectNetwork,omitempty"`
 	// Live is what the namespace already carries when adoption meets an
 	// existing one, nil for a new one. Never a wire field: the capture runs
 	// under the caller's token, not from the request body.
@@ -114,9 +117,15 @@ func NamespaceManifest(s NamespaceSpec) (path string, content []byte, err error)
 		}
 	}
 	labels[projectLabel] = s.Project
-	if s.VMNetwork != nil {
-		// Required for OVN-K to treat a UDN in this namespace as primary.
+	if s.VMNetwork != nil && s.ProjectNetwork {
+		return "", nil, fmt.Errorf("namespace %q: a VM Network of its own or its project's, not both", s.Name)
+	}
+	if s.VMNetwork != nil || s.ProjectNetwork {
+		// Required for OVN-K to treat a UDN or CUDN here as primary.
 		labels[primaryNetworkLabel] = ""
+	}
+	if s.ProjectNetwork {
+		labels[tenancy.NetworkLabel] = s.Project
 	}
 	meta := map[string]any{"name": s.Name, "labels": labels}
 	if s.Repo != "" {
@@ -170,8 +179,9 @@ func NamespaceManifest(s NamespaceSpec) (path string, content []byte, err error)
 
 // PublishNamespaceManifest renders project's publish namespace, labeled for
 // it under tenancy.PublishLabel and never into the project: no tenant
-// Application or grant reaches the Gateway it holds.
-func PublishNamespaceManifest(project string) (path string, content []byte, err error) {
+// Application or grant reaches the Gateway it holds. onNetwork: it joins the
+// project's VM Network, as its Gateway must to reach the project's Services.
+func PublishNamespaceManifest(project string, onNetwork bool) (path string, content []byte, err error) {
 	if err := validate.RequireDNS1123("project", project); err != nil {
 		return "", nil, err
 	}
@@ -179,9 +189,14 @@ func PublishNamespaceManifest(project string) (path string, content []byte, err 
 	if err := validate.RequireDNS1123("publish namespace", name); err != nil {
 		return "", nil, err
 	}
+	labels := map[string]any{tenancy.PublishLabel: project}
+	if onNetwork {
+		labels[tenancy.NetworkLabel] = project
+		labels[primaryNetworkLabel] = ""
+	}
 	out, err := yaml.Marshal(map[string]any{
 		"apiVersion": model.KindNS.APIVersion(), "kind": model.KindNS.Kind,
-		"metadata": map[string]any{"name": name, "labels": map[string]any{tenancy.PublishLabel: project}},
+		"metadata": map[string]any{"name": name, "labels": labels},
 	})
 	if err != nil {
 		return "", nil, err

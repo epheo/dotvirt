@@ -1,6 +1,8 @@
 <script lang="ts">
+	import { untrack } from 'svelte';
 	import { api, type NamespaceCreate } from '#lib/api.js';
 	import { clusterGate, projectGate, projectNS } from '#lib/gates.js';
+	import { caps } from '#lib/state/caps.svelte.js';
 	import { inventory } from '#lib/state/inventory.svelte.js';
 	import { validName, NAME_HINT, validCIDR } from '#lib/validate.js';
 	import StageModal from './StageModal.svelte';
@@ -21,7 +23,10 @@
 
 	let name = $state('');
 	let project = $state('');
-	let withNetwork = $state(true);
+	// The namespace's VM Network: its project's, which it joins, one of its
+	// own, or none (the cluster's own network).
+	let mode = $state<'project' | 'own' | 'none'>('own');
+	const withNetwork = $derived(mode === 'own');
 	let netName = $state('');
 	let subnet = $state('');
 
@@ -30,11 +35,19 @@
 	});
 	let netTouched = $state(false);
 
-	const join = $derived(
-		projectGate.newNamespace(
-			projectNS(inventory.projects.find((p) => p.name === project) ?? { namespaces: [] }),
-		),
+	const first = $derived(
+		projectNS(inventory.projects.find((p) => p.name === project) ?? { namespaces: [] }),
 	);
+	const join = $derived(projectGate.newNamespace(first));
+	// A project with a VM Network of its own: new namespaces join it unless told.
+	const shared = $derived(!!caps.ns(first)?.project?.projectNetwork);
+	$effect(() => {
+		const s = shared;
+		untrack(() => {
+			if (s && mode === 'own') mode = 'project';
+			if (!s && mode === 'project') mode = 'own';
+		});
+	});
 	const net = $derived(clusterGate.vmNetwork());
 
 	const missing = $derived.by(() => {
@@ -54,12 +67,13 @@
 	const valid = $derived(missing.length === 0);
 	const summary = $derived(
 		valid
-			? `Stages namespace ${name} in ${project}${withNetwork ? ` + VM Network ${netName}` : ''}`
+			? `Stages namespace ${name} in ${project}${withNetwork ? ` + VM Network ${netName}` : mode === 'project' ? `, on ${project}'s VM Network` : ''}`
 			: '',
 	);
 
 	async function stage() {
 		const req: NamespaceCreate = { name, project };
+		if (mode === 'project') req.projectNetwork = true;
 		if (withNetwork) {
 			// A VM Network is a primary UDN, which must do IPAM - the subnet is required.
 			req.vmNetwork = { name: netName, subnet: subnet.trim() };
@@ -85,10 +99,13 @@
 		</SelectInput>
 	</FormField>
 
-	<label class="flex items-center gap-2">
-		<input type="checkbox" bind:checked={withNetwork} />
-		<span class="text-ink-soft">Add a VM Network: the namespace's primary network</span>
-	</label>
+	<FormField label="VM Network">
+		<SelectInput bind:value={mode}>
+			{#if shared}<option value="project">{project}'s VM Network</option>{/if}
+			<option value="own">A VM Network of its own</option>
+			<option value="none">None: the cluster's own network</option>
+		</SelectInput>
+	</FormField>
 
 	{#if withNetwork}
 		<VMNetworkFields base={name} bind:name={netName} bind:subnet bind:touched={netTouched} />
@@ -96,7 +113,8 @@
 
 	<p class="rounded bg-inset px-3 py-2 text-xs text-ink-muted">
 		Creates a namespace in this project (labeled so dotvirt adopts it){#if withNetwork}, with a
-			primary "VM Network" its VMs attach to by default{/if}. Applied by the project's Argo app on
-		merge.
+			primary "VM Network" its VMs attach to by default{:else if mode === 'project'}, on the
+			project's VM Network, which its VMs attach to by default{/if}. A namespace takes a VM Network
+		only when created. Applied by the project's Argo app on merge.
 	</p>
 </StageModal>

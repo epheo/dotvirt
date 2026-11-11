@@ -121,6 +121,9 @@ func (s *Server) clusterCaps(ctx context.Context, id auth.Identity, c *cluster.C
 	if !un[model.KindUDN] {
 		out.VMNetwork = s.newProjectCap(ctx, id, c, `{"name":"`+newNamespace+`","vmNetwork":{"name":"vm-network","subnet":"10.0.0.0/24"}}`)
 	}
+	if !un[model.KindCUDN] {
+		out.ProjectNetwork = s.newProjectCap(ctx, id, c, `{"name":"`+newNamespace+`","projectNetwork":{"name":"vm-network","subnet":"10.0.0.0/24"}}`)
+	}
 	owners, _ := json.Marshal([]string{id.Username})
 	out.GrantAdmin = s.newProjectCap(ctx, id, c, `{"name":"`+newNamespace+`","owners":`+string(owners)+`}`)
 	out.DRSEnable, out.DRSPSI, out.DRSDisable = s.drsCaps(ctx, id, c)
@@ -271,6 +274,7 @@ func (s *Server) projectCaps(ctx context.Context, sc scope, full project.Project
 	id, c := sc.id, sc.cluster
 	need, err := s.draft.NamespaceNeeds(platform, full, json.RawMessage(`{"name":"`+newNamespace+`"}`))
 	out.NewNamespace = s.tenancyCap(ctx, id, c, readNamespace(""), need, err)
+	out.ProjectNetwork = s.projectNetwork(full)
 	// The rest resolve their target as tenancyTarget does: a project seen
 	// only in part is refused.
 	if len(sc.proj.Namespaces) < len(full.Namespaces) && !s.capable(ctx, id, c, claimAction("")) {

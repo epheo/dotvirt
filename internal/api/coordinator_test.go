@@ -142,6 +142,7 @@ func TestCapabilitiesEqualTheCoordinatorsGate(t *testing.T) {
 		{verb: verbBind, group: rbac, resource: "clusterroles", name: tenancy.TenantRoutesRole},
 		{verb: verbBind, group: rbac, resource: "clusterroles", name: tenancy.TenantGatewayViewRole},
 		kind(verbCreate, model.KindUDN, ""),
+		kind(verbCreate, model.KindCUDN, ""),
 		kind(verbCreate, model.KindGateway, ""),
 		kind(verbCreate, model.KindCert, ""),
 		{verb: verbCreate, group: "operator.openshift.io", resource: "kubedeschedulers", ns: descheduler},
@@ -166,6 +167,8 @@ func TestCapabilitiesEqualTheCoordinatorsGate(t *testing.T) {
 			cl(func(c model.ClusterCaps) bool { return c.NamespaceCreate })},
 		{"new project with a VM Network", "", http.MethodPost, "/api/projects", `{"name":"team-c","vmNetwork":{"name":"v","subnet":"10.0.0.0/24"}}`,
 			cl(func(c model.ClusterCaps) bool { return c.VMNetwork })},
+		{"new project with its VM Network", "", http.MethodPost, "/api/projects", `{"name":"team-c","projectNetwork":{"name":"team-c-net","subnet":"10.0.0.0/24"}}`,
+			cl(func(c model.ClusterCaps) bool { return c.ProjectNetwork })},
 		{"new project with owners", "", http.MethodPost, "/api/projects", `{"name":"team-c","owners":["u"]}`,
 			cl(func(c model.ClusterCaps) bool { return c.GrantAdmin })},
 		{"new namespace", "team-a-dev", http.MethodPost, "/api/namespaces", `{"project":"team-a","name":"newns"}`,
@@ -411,22 +414,59 @@ func TestPublishNameHeldByAUsersProject(t *testing.T) {
 	}
 }
 
+// A new namespace joins its project's VM Network only where the project has
+// one: labeled for a network that does not exist, it could never run a pod.
+// The project says it has one, and a new project never takes over a live
+// network's name.
+func TestJoiningTheProjectNetwork(t *testing.T) {
+	g := onVPC(t, "team-a-dev")
+	tok := publisher(g)
+	if _, nc := g.caps(tok, "team-a-dev"); nc.Project.ProjectNetwork {
+		t.Error("team-a told it has a VM Network to join without one")
+	}
+	if rec := do(g.s, tok, http.MethodPost, "/api/namespaces", `{"project":"team-a","name":"newns","projectNetwork":true}`); rec.Code != http.StatusBadRequest {
+		t.Errorf("joining a network team-a lacks = %d %q, want 400", rec.Code, rec.Body.String())
+	}
+	if rec := do(g.s, tok, http.MethodPost, "/api/projects", `{"name":"team-z","projectNetwork":{"name":"vpc","subnet":"10.9.0.0/16"}}`); rec.Code != http.StatusConflict {
+		t.Errorf("a new project naming the live vpc network = %d %q, want 409", rec.Code, rec.Body.String())
+	}
+
+	h := coordinatorRigWith(t, func(g *gateRig) {
+		g.fc.namespaces[0].Labels[tenancy.NetworkLabel] = "team-a"
+	})
+	tok = publisher(h)
+	if _, nc := h.caps(tok, "team-a-dev"); !nc.Project.ProjectNetwork {
+		t.Error("team-a not told it has a VM Network to join")
+	}
+	rec := do(h.s, tok, http.MethodPost, "/api/namespaces", `{"project":"team-a","name":"newns","projectNetwork":true}`)
+	var view model.DraftView
+	if rec.Code != http.StatusOK || json.Unmarshal(rec.Body.Bytes(), &view) != nil {
+		t.Fatalf("joining team-a's network = %d %q", rec.Code, rec.Body.String())
+	}
+	for _, it := range view.Items {
+		if it.Name == "newns" && (!strings.Contains(it.YAML, tenancy.NetworkLabel+": team-a") || !strings.Contains(it.YAML, "k8s.ovn.org/primary-user-defined-network")) {
+			t.Errorf("newns not on team-a's network:\n%s", it.YAML)
+		}
+	}
+}
+
 // onVPC is the coordinator rig with a primary CUDN, vpc, generated in each
 // of namespaces, its netstate synced.
 func onVPC(t *testing.T, namespaces ...string) *gateRig {
 	t.Helper()
 	g := newCoordinatorRig(t)
-	resources := func(gv string, names ...string) http.HandlerFunc {
+	resources := func(gv string, kinds ...model.Kind) http.HandlerFunc {
 		return func(w http.ResponseWriter, _ *http.Request) {
 			list := metav1.APIResourceList{TypeMeta: metav1.TypeMeta{Kind: "APIResourceList", APIVersion: "v1"}, GroupVersion: gv}
-			for _, n := range names {
-				list.APIResources = append(list.APIResources, metav1.APIResource{Name: n, Verbs: []string{"list", "watch"}})
+			for _, k := range kinds {
+				list.APIResources = append(list.APIResources, metav1.APIResource{Name: k.Plural, Kind: k.Kind, Namespaced: k == model.KindUDN || k == model.KindNAD,
+					Verbs: []string{"get", "list", "watch", "create", "update", "patch", "delete"}})
 			}
 			writeObj(w, list)
 		}
 	}
-	g.fc.on(http.MethodGet, "/apis/k8s.ovn.org/v1", resources("k8s.ovn.org/v1", "clusteruserdefinednetworks", "userdefinednetworks"))
-	g.fc.on(http.MethodGet, "/apis/k8s.cni.cncf.io/v1", resources("k8s.cni.cncf.io/v1", "network-attachment-definitions"))
+	g.fc.on(http.MethodGet, "/apis/k8s.ovn.org/v1", resources("k8s.ovn.org/v1", model.KindCUDN, model.KindUDN))
+	g.fc.on(http.MethodGet, "/apis/k8s.cni.cncf.io/v1", resources("k8s.cni.cncf.io/v1", model.KindNAD))
 	g.fc.on(http.MethodGet, "/apis/k8s.ovn.org/v1/clusteruserdefinednetworks", unstructuredList("k8s.ovn.org/v1", "ClusterUserDefinedNetwork", map[string]any{
 		"apiVersion": "k8s.ovn.org/v1", "kind": "ClusterUserDefinedNetwork",
 		"metadata": map[string]any{"name": "vpc", "uid": "vpc", "resourceVersion": "1"},

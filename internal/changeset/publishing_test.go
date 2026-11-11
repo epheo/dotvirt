@@ -1,6 +1,7 @@
 package changeset
 
 import (
+	"encoding/json"
 	"errors"
 	"maps"
 	"slices"
@@ -267,5 +268,40 @@ func TestStagePublishNamespace(t *testing.T) {
 	off := newTestCoordinator(t, false)
 	if _, err := off.PublishNamespaceNeeds(plat, shop, PublishTarget{}); !errors.Is(err, model.ErrUnavailable) {
 		t.Errorf("publishing off: %v, want ErrUnavailable", err)
+	}
+}
+
+// A new project's VM Network never takes over one git declares, and a first
+// namespace has its own VM Network or its project's, never both.
+func TestProjectNetworkRefusals(t *testing.T) {
+	_, declared, err := netgen.ProjectNetworkManifest("other", netgen.PrimaryNet{Name: "shared", Subnet: "10.9.0.0/16"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	c, plat := publishingCoordinator(t, map[string][]byte{"networks/shared.yaml": declared})
+	if _, err := c.ProjectNeeds(plat, json.RawMessage(`{"name":"shop","projectNetwork":{"name":"shared","subnet":"10.40.0.0/16"}}`)); !errors.Is(err, model.ErrConflict) {
+		t.Errorf("a declared network's name: %v, want ErrConflict", err)
+	}
+	both := `{"name":"shop","vmNetwork":{"name":"a","subnet":"10.1.0.0/24"},"projectNetwork":{"name":"b","subnet":"10.2.0.0/24"}}`
+	if _, err := c.ProjectNeeds(plat, json.RawMessage(both)); !errors.Is(err, model.ErrInvalid) {
+		t.Errorf("both networks: %v, want ErrInvalid", err)
+	}
+	need, err := c.ProjectNeeds(plat, json.RawMessage(`{"name":"shop","projectNetwork":{"name":"shop-net","subnet":"10.40.0.0/16"}}`))
+	if err != nil || !slices.ContainsFunc(need, func(a Access) bool { return a.Resource == model.KindCUDN.Plural && a.Verb == "create" }) {
+		t.Errorf("project network accesses %v %v, want a ClusterUserDefinedNetwork create", need, err)
+	}
+}
+
+// A project on its own VM Network gets a publish namespace on that network,
+// though none of its namespaces is on the cluster's own.
+func TestPublishNamespaceJoinsTheProjectNetwork(t *testing.T) {
+	c, plat := publishingCoordinator(t, nil)
+	vpc := project.ProjectInfo{Name: "vpc", Namespaces: []string{"x"}}
+	view, err := c.StagePublishNamespace(auth.Identity{Username: "admin"}, plat, vpc, PublishTarget{ProjectNetwork: true, Networks: map[string]string{"x": "cudn:vpc-net"}}, nil)
+	if err != nil {
+		t.Fatalf("StagePublishNamespace: %v", err)
+	}
+	if y := stagedYAML(t, view)["vpc-publish"]; !strings.Contains(y, tenancy.NetworkLabel+": vpc") || !strings.Contains(y, "k8s.ovn.org/primary-user-defined-network") {
+		t.Errorf("publish namespace not on the project network:\n%s", y)
 	}
 }

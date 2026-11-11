@@ -95,7 +95,7 @@
 		if (splitList(owners).length && !clusterGate.grantAdmin().ok)
 			m.push(clusterGate.grantAdmin().why);
 		if (network) {
-			if (!clusterGate.vmNetwork().ok) m.push(clusterGate.vmNetwork().why);
+			if (!clusterGate.projectNetwork().ok) m.push(clusterGate.projectNetwork().why);
 			if (!netName) m.push('Name its network');
 			if (!subnet.trim()) m.push('Its network needs a subnet');
 			else if (!validCIDR(subnet.trim())) m.push('The subnet needs CIDR form, like 10.40.0.0/16');
@@ -106,7 +106,7 @@
 		const req: ProjectCreate = { name, namespace };
 		const o = splitList(owners);
 		if (o.length) req.owners = o;
-		if (network) req.vmNetwork = { name: netName, subnet: subnet.trim() };
+		if (network) req.projectNetwork = { name: netName, subnet: subnet.trim() };
 		return req;
 	});
 
@@ -184,7 +184,7 @@
 		{#if offerNetwork}
 			<label class="flex cursor-pointer items-center gap-2 text-sm text-ink">
 				<input type="checkbox" class="size-4 accent-accent" bind:checked={withNetwork} />
-				Give it a default network its {runs} start on
+				Give it a VM Network its namespaces share, which its {runs} start on
 			</label>
 			{#if withNetwork}
 				<div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
@@ -277,7 +277,7 @@
 					<Consequence tone={clash.length ? 'warn' : 'ok'}
 						>{clash.length
 							? `Its network overlaps ${clash.map((n) => n.name).join(' and ')}.`
-							: `Its ${runs} start on ${netName || 'its network'}, ${subnet || 'no range yet'}.`}</Consequence
+							: `Its ${runs} start on ${netName || 'its network'}, ${subnet || 'no range yet'}, which its namespaces share.`}</Consequence
 					>
 				{/if}
 			{/snippet}

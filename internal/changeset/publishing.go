@@ -23,6 +23,9 @@ type PublishTarget struct {
 	// PublishNameHeld: another namespace holds that name; PublishNameRequested:
 	// a user's own project, which a self-provisioner may request.
 	PublishNameHeld, PublishNameRequested bool
+	// ProjectNetwork: the project has a VM Network its namespaces join
+	// (tenancy.NetworkLabel), which a new publish namespace joins too.
+	ProjectNetwork bool
 	// Networks is each namespace's primary network, the publish namespace's
 	// among them, "default" for the cluster's own: namespaces sharing one
 	// reach each other's Services.
