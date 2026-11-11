@@ -20,17 +20,21 @@ import (
 // per-connection verdict.
 func (s *Snapshot) Effective(ns string, nsLabels, podLabels map[string]string, podScoped bool) model.EffectivePolicy {
 	eff := model.EffectivePolicy{Namespace: ns}
+	// On a VM Network OVN-K may not apply admin or baseline policies.
+	onUDN := s.PrimaryNetwork(ns) != "default"
 
 	anps := bind(s.sortedANPs(), nsLabels, podLabels, podScoped)
 	for i, b := range anps {
 		var note string
 		switch p := b.pol.view.Priority; {
+		case onUDN:
+			note = mayNot(reasonPrimaryUDN)
 		case p > netgen.MaxANPPriority:
 			note = unenforcedReason(p) + "."
 		case i > 0 && anps[i-1].pol.view.Priority == p, i+1 < len(anps) && anps[i+1].pol.view.Priority == p:
 			note = "Shared priority: " + reasonEqualPriority + "."
 		}
-		eff.EastWest = append(eff.EastWest, b.binding(note))
+		eff.EastWest = append(eff.EastWest, b.maybeIf(onUDN).binding(note))
 	}
 	// A definite selection default-denies the directions the policy declares
 	// - the fact the panel must surface, since it flips the namespace from
@@ -43,7 +47,11 @@ func (s *Snapshot) Effective(ns string, nsLabels, podLabels map[string]string, p
 		eff.EastWest = append(eff.EastWest, b.binding(""))
 	}
 	for _, b := range bind(s.baselines(), nsLabels, podLabels, podScoped) {
-		eff.EastWest = append(eff.EastWest, b.binding("Applies only where no admin or project rule decided."))
+		note := "Applies only where no admin or project rule decided."
+		if onUDN {
+			note = mayNot(reasonPrimaryUDN)
+		}
+		eff.EastWest = append(eff.EastWest, b.maybeIf(onUDN).binding(note))
 	}
 
 	// Gateway firewall: the namespace's EgressFirewall (rules are first-match).
@@ -71,6 +79,17 @@ type bound struct {
 func (b bound) binding(note string) model.PolicyBinding {
 	return model.PolicyBinding{Policy: b.pol.view, Conditional: b.m == matchCond, Note: note}
 }
+
+// maybeIf is b, only conditionally bound when may.
+func (b bound) maybeIf(may bool) bound {
+	if may {
+		b.m = matchCond
+	}
+	return b
+}
+
+// mayNot words why a binding may not apply.
+func mayNot(reason string) string { return "May not apply: " + reason + "." }
 
 // bind keeps the policies whose subject may apply to the workload, in the
 // order given - the one filter every tier and plane shares.

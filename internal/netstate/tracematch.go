@@ -65,6 +65,7 @@ const (
 	reasonDNSName       = "DNS-name rule (%s) - resolution unknown here"
 	reasonUnresolved    = "a destination form this trace cannot resolve"
 	reasonEqualPriority = "an admin policy at the same priority may decide first, in an order OVN-Kubernetes leaves undefined"
+	reasonPrimaryUDN    = "OVN-Kubernetes binds admin network policies to the cluster network's pods, and this workload is on a VM Network"
 )
 
 // unenforcedReason words why an ANP past the programmed range only may apply.

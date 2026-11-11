@@ -34,6 +34,13 @@ func (s *Snapshot) primaryOf(w TraceWorkload) (key, display string) {
 	return s.primaryDomain(w.Namespace)
 }
 
+// onPrimaryUDN reports whether w attaches a primary network other than the
+// cluster's own.
+func (s *Snapshot) onPrimaryUDN(w TraceWorkload) bool {
+	key, _ := s.primaryOf(w)
+	return key != "" && key != "default"
+}
+
 // primaryDomain resolves a namespace's primary network: a Primary-role UDN in
 // the namespace, a Primary-role CUDN, each only where OVN-K generated its NAD
 // there, else the cluster default network.
