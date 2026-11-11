@@ -6,7 +6,7 @@
 // The relative replaces in go.mod resolve pkg/forge and pkg/tenancy without the
 // workspace, which is how the images build (GOWORK=off) and why ./... at the
 // root skips the operator and the pkg modules.
-go 1.27.3
+go 1.27.4
 
 use (
 	.
