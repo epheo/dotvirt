@@ -111,8 +111,11 @@ jobs:
         working-directory: web
       - run: npm run test:ui
         working-directory: web
+      # Diagnostics only: an artifact-service outage must not fail the gate
+      # after green tests. A failed test still fails the job.
       - name: Upload view screenshots (human-reviewable)
         if: always()
+        continue-on-error: true
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: ui-screenshots
@@ -120,6 +123,7 @@ jobs:
           if-no-files-found: ignore
       - name: Upload the Playwright report on failure
         if: failure()
+        continue-on-error: true
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: playwright-report

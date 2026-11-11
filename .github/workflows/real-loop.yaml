@@ -71,8 +71,11 @@ jobs:
           mkdir -p artifacts
           cp -r "$RUNNER_TEMP/e2e" artifacts/ 2>/dev/null || true
           sudo podman logs dotvirt-e2e-microshift > artifacts/microshift-container.log 2>&1 || true
+      # Diagnostics only: an artifact-service outage must not turn a green lane
+      # red. A failed lane still fails the job.
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
+        continue-on-error: true
         with:
           name: real-loop-diagnostics
           path: artifacts/
@@ -120,8 +123,11 @@ jobs:
           mkdir -p artifacts
           cp -r "$RUNNER_TEMP/e2e" artifacts/ 2>/dev/null || true
           sudo podman logs dotvirt-e2e-microshift > artifacts/microshift-container.log 2>&1 || true
+      # Diagnostics only: an artifact-service outage must not turn a green lane
+      # red. A failed lane still fails the job.
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
+        continue-on-error: true
         with:
           name: real-loop-no-kubevirt-diagnostics
           path: artifacts/
