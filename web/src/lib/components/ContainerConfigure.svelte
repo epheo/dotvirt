@@ -116,8 +116,8 @@
 							>
 						{:else if c.publishNameHeld}
 							<span class="text-ink-muted"
-								>Another namespace holds that name: delete it, then create <span class="font-mono"
-									>{c.publishNamespace}</span
+								>Another namespace holds that name: free it, moving what it holds first, then create <span
+									class="font-mono">{c.publishNamespace}</span
 								> here.</span
 							>
 						{:else}

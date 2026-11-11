@@ -70,10 +70,10 @@ var ErrApart = fmt.Errorf("%w: no namespace of the project shares its publish na
 
 // ErrPublishNameHeld refuses creating a project's publish namespace while
 // another namespace holds its name.
-var ErrPublishNameHeld = fmt.Errorf("%w: another namespace holds the publish namespace's name: delete it, then create the publish namespace", model.ErrConflict)
+var ErrPublishNameHeld = fmt.Errorf("%w: another namespace holds the publish namespace's name: free that name, moving what it holds first, then create the publish namespace", model.ErrConflict)
 
 // ErrPublishNameRequested is ErrPublishNameHeld by a user's own project.
-var ErrPublishNameRequested = fmt.Errorf("%w (a user's own project, requested before the platform's)", ErrPublishNameHeld)
+var ErrPublishNameRequested = fmt.Errorf("%w (a user's own project, requested before the platform's: delete it)", ErrPublishNameHeld)
 
 // ErrNoPublishNamespace refuses publishing for a project whose publish
 // namespace the cluster lacks. dotvirt never creates it here: a namespace
