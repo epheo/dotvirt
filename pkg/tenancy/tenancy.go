@@ -44,11 +44,46 @@ const TenantEgressViewRole = "dotvirt-tenant-egress-view"
 // holds it.
 const TenantRoutesRole = "dotvirt-tenant-routes"
 
+// TenantGatewayViewRole reads the Gateway and Certificate in a project's
+// publish namespace, never its Secrets: the certificate's key lives there.
+// Bound there to the subjects of the project's admin grants
+// (GatewayViewBinding), or by a provider's onboarding to its own groups.
+const TenantGatewayViewRole = "dotvirt-tenant-gateway-view"
+
 // ProjectGrantRoles are the ClusterRoles a project grant in the platform repo
 // binds, the parts of the project personas: admin with TenantEgressRole,
-// view or edit with TenantEgressViewRole, and TenantRoutesRole where
-// publishing is on. The platform sync account may bind these and no other.
-var ProjectGrantRoles = []string{"admin", TenantEgressRole, "view", "edit", TenantEgressViewRole, TenantRoutesRole}
+// view or edit with TenantEgressViewRole, and TenantRoutesRole and
+// TenantGatewayViewRole where publishing is on. The platform sync account may
+// bind these and no other.
+var ProjectGrantRoles = []string{"admin", TenantEgressRole, "view", "edit", TenantEgressViewRole, TenantRoutesRole, TenantGatewayViewRole}
+
+// PublishLabel marks a project's publish namespace, its value the project.
+// That namespace holds the project's Gateway and nothing of the tenant's: it
+// never carries the project label, so no tenant Application targets it and no
+// tenant grant reaches it.
+const PublishLabel = "dotvirt.io/publish"
+
+// PublishSuffix ends every publish namespace's name and no project
+// namespace's, so a tenant namespace is never taken for one.
+const PublishSuffix = "-publish"
+
+// PublishNamespace names project's publish namespace.
+func PublishNamespace(project string) string { return project + PublishSuffix }
+
+// PublishProject is the project whose publish namespace ns is, read from its
+// labels: named for that project, labeled for it, and itself in no project
+// (inProject). "" when ns is no project's.
+func PublishProject(ns string, labels map[string]string, inProject bool) string {
+	project := labels[PublishLabel]
+	if project == "" || inProject || ns != PublishNamespace(project) {
+		return ""
+	}
+	return project
+}
+
+// GatewayViewBinding is the platform repo's RoleBinding, in a project's
+// publish namespace, granting its admin-grant subjects TenantGatewayViewRole.
+const GatewayViewBinding = "publish-view"
 
 // PathAnnotation names the folder of the repo a project lives in, beside the
 // repo annotation. It only locates content: Argo and the forge grant by repo, so

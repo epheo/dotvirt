@@ -392,6 +392,10 @@ func TestTenantAppProjectConfinesOneProject(t *testing.T) {
 		t.Errorf("sourceRepos = %v", repos)
 	}
 	shared := TenantsAppProject(dv, "argocd", "https://forge/dotvirt/platform.git", "ns")
+	sharedDests, _, _ := unstructured.NestedSlice(shared.Object, "spec", "destinations")
+	if !slices.ContainsFunc(sharedDests, func(d any) bool { return d.(map[string]any)["namespace"] == "!*-publish" }) {
+		t.Errorf("the shared tier admits publish namespaces: %v", sharedDests)
+	}
 	for _, f := range []string{"clusterResourceWhitelist", "namespaceResourceWhitelist"} {
 		if !reflect.DeepEqual(ap.Object["spec"].(map[string]any)[f], shared.Object["spec"].(map[string]any)[f]) {
 			t.Errorf("%s differs from the shared tier's", f)

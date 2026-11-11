@@ -229,14 +229,17 @@ func (s *Server) publishingCaps(ctx context.Context, sc scope, full project.Proj
 		return
 	}
 	waits := errors.Is(err, changeset.ErrPrimaryNetwork)
-	if waits {
+	unhoused := errors.Is(err, changeset.ErrNoPublishNamespace)
+	if waits || unhoused {
 		err = nil
 	}
 	allowed := s.needsAllowed(ctx, id, c, need, err)
-	out.Publishing = allowed && !waits
+	out.Publishing = allowed && !waits && !unhoused
 	out.PublishingWaits = allowed && waits
-	if out.PublishingOn || allowed {
+	out.PublishingUnhoused = allowed && unhoused
+	if (out.PublishingOn || allowed) && !unhoused {
 		out.PublishingReach = plan.Reach
+		out.PublishNamespace = plan.Namespace
 	}
 }
 

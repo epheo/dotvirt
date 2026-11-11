@@ -215,6 +215,15 @@ export interface ProjectCaps {
    */
   publishingWaits?: boolean;
   /**
+   * PublishingUnhoused: the caller could stage it but for the project's
+   * publish namespace, which the cluster lacks and the platform creates.
+   */
+  publishingUnhoused?: boolean;
+  /**
+   * PublishNamespace holds the project's Gateway. Set with PublishingReach.
+   */
+  publishNamespace?: string;
+  /**
    * PublishingOn: git holds the project's Gateway, told only to a caller
    * who may list gateways in its namespace.
    */

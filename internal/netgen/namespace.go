@@ -96,6 +96,14 @@ func NamespaceManifest(s NamespaceSpec) (path string, content []byte, err error)
 	if s.Project == "" {
 		return "", nil, fmt.Errorf("a project is required")
 	}
+	// A publish namespace holds a project's Gateway: in a project, that
+	// project's people would administer another's.
+	if strings.HasSuffix(s.Name, tenancy.PublishSuffix) {
+		return "", nil, fmt.Errorf("namespace %q: names ending in %s are kept for publish namespaces", s.Name, tenancy.PublishSuffix)
+	}
+	if s.Live != nil && s.Live.Labels[tenancy.PublishLabel] != "" {
+		return "", nil, fmt.Errorf("namespace %q is a publish namespace and joins no project", s.Name)
+	}
 	labels, annotations := map[string]any{}, map[string]any{}
 	if s.Live != nil {
 		for k, v := range s.Live.Labels {
@@ -158,6 +166,27 @@ func NamespaceManifest(s NamespaceSpec) (path string, content []byte, err error)
 		out = append(out, append([]byte("---\n"), d...)...)
 	}
 	return model.KindNS.RepoPath("", s.Name), out, nil
+}
+
+// PublishNamespaceManifest renders project's publish namespace, labeled for
+// it under tenancy.PublishLabel and never into the project: no tenant
+// Application or grant reaches the Gateway it holds.
+func PublishNamespaceManifest(project string) (path string, content []byte, err error) {
+	if err := validate.RequireDNS1123("project", project); err != nil {
+		return "", nil, err
+	}
+	name := tenancy.PublishNamespace(project)
+	if err := validate.RequireDNS1123("publish namespace", name); err != nil {
+		return "", nil, err
+	}
+	out, err := yaml.Marshal(map[string]any{
+		"apiVersion": model.KindNS.APIVersion(), "kind": model.KindNS.Kind,
+		"metadata": map[string]any{"name": name, "labels": map[string]any{tenancy.PublishLabel: project}},
+	})
+	if err != nil {
+		return "", nil, err
+	}
+	return model.KindNS.RepoPath("", name), out, nil
 }
 
 // RoleBindingSpec grants a tenant's owners admin on one of its namespaces - the
@@ -223,6 +252,13 @@ func EgressManifest(s RoleBindingSpec) (path string, content []byte, err error) 
 // RoleBindingManifest. s.Role does not apply.
 func RoutesManifest(s RoleBindingSpec) (path string, content []byte, err error) {
 	return grantManifest(s, tenancy.RoutesBinding(s.Namespace), tenancy.TenantRoutesRole)
+}
+
+// GatewayViewManifest renders the read of a project's Gateway in its publish
+// namespace s.Namespace (tenancy.TenantGatewayViewRole) for s's kept
+// subjects. s.Role does not apply.
+func GatewayViewManifest(s RoleBindingSpec) (path string, content []byte, err error) {
+	return grantManifest(s, tenancy.GatewayViewBinding, tenancy.TenantGatewayViewRole)
 }
 
 // grantManifest renders RoleBinding name binding role to s's kept subjects,

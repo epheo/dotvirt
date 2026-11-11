@@ -86,6 +86,11 @@ func (c *Coordinator) StageCreateProject(id auth.Identity, commitProj project.Pr
 	if err != nil {
 		return model.DraftView{}, err
 	}
+	publishNS, err := c.publishNamespaceEntries(spec, live)
+	if err != nil {
+		return model.DraftView{}, err
+	}
+	entries = append(entries, publishNS...)
 	// Gated before the repo exists: a refusal must not leave one behind.
 	if err := c.gate(id, commitProj, entries); err != nil {
 		return model.DraftView{}, err
@@ -130,6 +135,11 @@ func (c *Coordinator) PreviewCreateProject(id auth.Identity, commitProj project.
 	if err != nil {
 		return model.StagePreview{}, err
 	}
+	publishNS, err := c.publishNamespaceEntries(spec, live)
+	if err != nil {
+		return model.StagePreview{}, err
+	}
+	entries = append(entries, publishNS...)
 	p, err := c.previewOf(id, commitProj, entries...)
 	if err != nil {
 		return p, err
@@ -187,6 +197,40 @@ func (c *Coordinator) projectEntries(commitProj project.ProjectInfo, spec Projec
 	first := []netgen.NamespaceSpec{{Name: ns, Project: spec.Name, Repo: forge.PathRef(repoURL), VMNetwork: spec.VMNetwork, Live: ln}}
 	entries, err := c.projectAdoption(commitProj, first, spec.Owners)
 	return entries, repoURL, err
+}
+
+// publishNamespaceEntries stages spec's publish namespace with the project,
+// where the install publishes and the project starts on the cluster's own
+// network: a VM Network belongs to one namespace and cannot span a publish
+// namespace. One the cluster holds for this project already stays as it is.
+func (c *Coordinator) publishNamespaceEntries(spec ProjectSpec, live LiveNamespaces) ([]draft.Entry, error) {
+	if !c.publishing.On() || spec.VMNetwork != nil {
+		return nil, nil
+	}
+	name := tenancy.PublishNamespace(spec.Name)
+	ln, err := live.lookup(name)
+	if err != nil {
+		return nil, err
+	}
+	if ln != nil {
+		_, inProject := ln.Labels[c.publishing.ProjectLabel]
+		if tenancy.PublishProject(name, ln.Labels, inProject) == spec.Name {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("%w: namespace %s exists and is not %s's publish namespace", model.ErrConflict, name, spec.Name)
+	}
+	path, content, err := netgen.PublishNamespaceManifest(spec.Name)
+	if err != nil {
+		return nil, invalid(err)
+	}
+	return []draft.Entry{{
+		Kind:       draft.KindCreate,
+		Resource:   draft.ResourceNamespace,
+		Namespace:  name,
+		Name:       name,
+		SourceFile: path,
+		Manifest:   string(content),
+	}}, nil
 }
 
 // AdoptProject wires a repo to an EXISTING labeled-but-repoless project - the
@@ -709,6 +753,20 @@ func (g grantSource) routes(ns, proj string) ([]draft.Entry, error) {
 	return g.follow(ns, tenancy.RoutesBinding(ns), spec, netgen.RoutesManifest, true)
 }
 
+// gatewayView stages the read of a project's Gateway, in its publish
+// namespace publishNS, for the subjects of the admin grants of the
+// namespaces it reaches, sync accounts aside: their repos hold nothing
+// there. Nothing without such a grant in git: a provider binding its own
+// groups there stages none here.
+func (g grantSource) gatewayView(publishNS string, reach []string) ([]draft.Entry, error) {
+	admins, err := g.inherited(project.ProjectInfo{Namespaces: reach})
+	if err != nil || len(admins) == 0 {
+		return nil, err
+	}
+	spec := netgen.RoleBindingSpec{Namespace: publishNS, Kept: admins}
+	return g.follow(publishNS, tenancy.GatewayViewBinding, spec, netgen.GatewayViewManifest, true)
+}
+
 // entry stages RoleBinding ns/name as render renders it from the bytes git
 // declares it in (nil for none): a create at its layout path, or an edit of
 // its file pinned to those bytes; nothing when git already says the same.
@@ -747,6 +805,10 @@ func tenantName(name string) error {
 	}
 	if name == project.PlatformName {
 		return fmt.Errorf("%w: %q is reserved for the platform repo", model.ErrInvalid, name)
+	}
+	// A project's first namespace defaults to its name.
+	if strings.HasSuffix(name, tenancy.PublishSuffix) {
+		return fmt.Errorf("%w: project names ending in %s are kept for publish namespaces", model.ErrInvalid, tenancy.PublishSuffix)
 	}
 	return nil
 }

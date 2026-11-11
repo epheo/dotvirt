@@ -149,6 +149,11 @@ type ProjectCaps struct {
 	// PublishingWaits: the caller could stage it but for the project's VM
 	// Network, which waits on a newer portail.
 	PublishingWaits bool `json:"publishingWaits,omitempty"`
+	// PublishingUnhoused: the caller could stage it but for the project's
+	// publish namespace, which the cluster lacks and the platform creates.
+	PublishingUnhoused bool `json:"publishingUnhoused,omitempty"`
+	// PublishNamespace holds the project's Gateway. Set with PublishingReach.
+	PublishNamespace string `json:"publishNamespace,omitempty"`
 	// PublishingOn: git holds the project's Gateway, told only to a caller
 	// who may list gateways in its namespace.
 	PublishingOn bool `json:"publishingOn,omitempty"`

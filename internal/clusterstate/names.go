@@ -1,12 +1,15 @@
 package clusterstate
 
 import (
+	"strings"
 	"sync"
 	"time"
 
 	apimeta "k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/client-go/tools/cache"
+
+	"github.com/epheo/dotvirt/pkg/tenancy"
 )
 
 // namespaceSink is the sink of the one Namespace watch, of every namespace.
@@ -17,6 +20,9 @@ import (
 // rebuilds no frame, since what a frame shows of it arrives with its objects,
 // whose own kinds publish.
 //
+// It also keeps each project's publish namespace (tenancy.PublishProject),
+// which no project selects.
+//
 // A deleted namespace's grant levels are forgotten ForgetAfter later unless
 // it came back (forget): its bus marks would otherwise outlive it.
 type namespaceSink struct {
@@ -26,12 +32,13 @@ type namespaceSink struct {
 	synced   func()
 	now      func() time.Time
 
-	mu     sync.Mutex
-	names  map[string]struct{}
-	gen    uint64 // moves on every change of names
-	listed bool
-	gone   map[string]time.Time // deleted namespaces not forgotten yet, by deletion time
-	swept  time.Time
+	mu        sync.Mutex
+	names     map[string]struct{}
+	published map[string]string // project -> its publish namespace
+	gen       uint64            // moves on every change of names
+	listed    bool
+	gone      map[string]time.Time // deleted namespaces not forgotten yet, by deletion time
+	swept     time.Time
 }
 
 // ForgetAfter is how long a deleted namespace's grant levels are kept: longer
@@ -42,12 +49,41 @@ const ForgetAfter = 15 * time.Minute
 
 func newNamespaceSink(project labels.Selector, projects cache.Indexer, forget func(string), synced func()) *namespaceSink {
 	return &namespaceSink{project: project, projects: projects, forget: forget, synced: synced, now: time.Now,
-		names: map[string]struct{}{}, gone: map[string]time.Time{}}
+		names: map[string]struct{}{}, published: map[string]string{}, gone: map[string]time.Time{}}
 }
 
 func (n *namespaceSink) selected(obj any) bool {
 	m, err := apimeta.Accessor(obj)
 	return err == nil && n.project.Matches(labels.Set(m.GetLabels()))
+}
+
+// publishOf is the project obj is the publish namespace of, "" for none.
+func (n *namespaceSink) publishOf(name string, obj any) string {
+	m, err := apimeta.Accessor(obj)
+	if err != nil {
+		return ""
+	}
+	return tenancy.PublishProject(name, m.GetLabels(), n.selected(obj))
+}
+
+// setPublished records name as its project's publish namespace, or drops it
+// as one. Callers hold mu.
+func (n *namespaceSink) setPublished(name, project string) {
+	if project != "" {
+		n.published[project] = name
+		return
+	}
+	if p := strings.TrimSuffix(name, tenancy.PublishSuffix); n.published[p] == name {
+		delete(n.published, p)
+	}
+}
+
+// publishNamespace is project's publish namespace, if the cluster holds it.
+func (n *namespaceSink) publishNamespace(project string) (string, bool) {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	ns, ok := n.published[project]
+	return ns, ok
 }
 
 func (n *namespaceSink) Add(obj any) error    { return n.put(obj) }
@@ -64,6 +100,7 @@ func (n *namespaceSink) put(obj any) error {
 		n.gen++
 	}
 	delete(n.gone, name)
+	n.setPublished(name, n.publishOf(name, obj))
 	n.mu.Unlock()
 	if n.selected(obj) {
 		return n.projects.Update(obj)
@@ -86,6 +123,7 @@ func (n *namespaceSink) Delete(obj any) error {
 		n.gen++
 	}
 	n.gone[name] = now
+	n.setPublished(name, "")
 	due := n.sweep(now)
 	n.mu.Unlock()
 	n.forgetAll(due)
@@ -97,10 +135,14 @@ func (n *namespaceSink) Delete(obj any) error {
 
 func (n *namespaceSink) Replace(list []any, rv string) error {
 	next := make(map[string]struct{}, len(list))
+	published := map[string]string{}
 	var selected []any
 	for _, obj := range list {
 		if name, err := cache.MetaNamespaceKeyFunc(obj); err == nil {
 			next[name] = struct{}{}
+			if p := n.publishOf(name, obj); p != "" {
+				published[p] = name
+			}
 		}
 		if n.selected(obj) {
 			selected = append(selected, obj)
@@ -117,6 +159,7 @@ func (n *namespaceSink) Replace(list []any, rv string) error {
 		delete(n.gone, name)
 	}
 	n.names = next
+	n.published = published
 	n.gen++
 	first := !n.listed
 	n.listed = true
@@ -209,4 +252,14 @@ func (s *State) AllNamespaces() map[string]bool {
 	}
 	s.all, s.allGen = all, gen
 	return all
+}
+
+// PublishNamespace is project's publish namespace, when the cluster holds one
+// (tenancy.PublishProject). It is in no project, so no Namespaces read finds
+// it.
+func (s *State) PublishNamespace(project string) (string, bool) {
+	if s.names == nil {
+		return "", false
+	}
+	return s.names.publishNamespace(project)
 }

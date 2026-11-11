@@ -4,6 +4,8 @@ import (
 	"slices"
 	"strings"
 	"testing"
+
+	"github.com/epheo/dotvirt/pkg/tenancy"
 )
 
 func TestManifest(t *testing.T) {
@@ -101,6 +103,29 @@ func TestVLANValidate(t *testing.T) {
 	bad.Namespaces = nil
 	if _, _, err := Manifest(bad); err == nil {
 		t.Error("expected error without namespaces")
+	}
+}
+
+// A publish namespace never joins a project, by name or by label, and its
+// own manifest labels it for the project and never into it.
+func TestPublishNamespaces(t *testing.T) {
+	if _, _, err := NamespaceManifest(NamespaceSpec{Name: "shop-publish", Project: "other"}); err == nil {
+		t.Error("a namespace named like a publish namespace joined a project")
+	}
+	live := &LiveNamespace{Labels: map[string]string{tenancy.PublishLabel: "shop"}}
+	if _, _, err := NamespaceManifest(NamespaceSpec{Name: "edge", Project: "other", Live: live}); err == nil {
+		t.Error("a namespace labeled as a publish namespace joined a project")
+	}
+	path, content, err := PublishNamespaceManifest("shop")
+	if err != nil {
+		t.Fatal(err)
+	}
+	y := string(content)
+	if path != "namespaces/shop-publish.yaml" || !strings.Contains(y, "name: shop-publish") || !strings.Contains(y, tenancy.PublishLabel+": shop") || strings.Contains(y, "dotvirt.io/project") {
+		t.Errorf("%s:\n%s", path, y)
+	}
+	if _, _, err := PublishNamespaceManifest(strings.Repeat("a", 60)); err == nil {
+		t.Error("a publish namespace name past 63 characters rendered")
 	}
 }
 

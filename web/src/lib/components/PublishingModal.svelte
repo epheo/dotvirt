@@ -43,8 +43,10 @@
 	</div>
 	<div class="flex flex-col gap-1.5">
 		<Consequence tone="info"
-			>{project} gets one Gateway, answering <span class="font-mono">{host}</span> and only routes
-			from {project}'s namespaces.</Consequence
+			>{project} gets one Gateway{#if c?.publishNamespace}, in <span class="font-mono"
+					>{c.publishNamespace}</span
+				>{/if}, answering <span class="font-mono">{host}</span> and only routes from {project}'s
+			namespaces.</Consequence
 		>
 		{#if reach.length}
 			<Consequence tone="info">Their admins may publish VMs from {reach.join(', ')}.</Consequence>

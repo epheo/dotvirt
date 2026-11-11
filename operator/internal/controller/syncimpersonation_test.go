@@ -319,6 +319,16 @@ func TestSyncOperandRoles(t *testing.T) {
 		!slices.Equal(routes.Rules[0].APIGroups, []string{"gateway.networking.k8s.io"}) {
 		t.Errorf("%s = %+v, want HTTPRoute writes alone", tenancy.TenantRoutesRole, routes)
 	}
+	gateway := roles[tenancy.TenantGatewayViewRole]
+	if gateway == nil || len(gateway.Rules) != 2 {
+		t.Errorf("%s = %+v, want Gateway and Certificate reads", tenancy.TenantGatewayViewRole, gateway)
+	} else {
+		for _, rule := range gateway.Rules {
+			if !slices.Equal(rule.Verbs, []string{"get", "list", "watch"}) || slices.Contains(rule.Resources, "secrets") || slices.Contains(rule.Resources, "*") {
+				t.Errorf("%s grants %+v, want reads of gateways and certificates alone", tenancy.TenantGatewayViewRole, rule)
+			}
+		}
+	}
 	platformSync := roles[tenancy.PlatformSyncAccount]
 	if platformSync == nil {
 		t.Fatalf("no %s role", tenancy.PlatformSyncAccount)

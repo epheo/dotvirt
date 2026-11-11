@@ -96,8 +96,14 @@
 						<span class="text-ink-muted"
 							>Not yet: a project on a VM Network waits on a portail update.</span
 						>
+					{:else if c?.publishingUnhoused}
+						<span class="text-ink-muted"
+							>Not yet: publishing needs the namespace <span class="font-mono"
+								>{p.name}-publish</span
+							>, which the platform creates with the project.</span
+						>
 					{/if}
-					{#if !c?.publishingWaits && (!c?.publishingOn || c.publishing)}
+					{#if !c?.publishingWaits && !c?.publishingUnhoused && (!c?.publishingOn || c.publishing)}
 						<div class="flex flex-wrap items-center gap-2">
 							<Button
 								variant="outline"

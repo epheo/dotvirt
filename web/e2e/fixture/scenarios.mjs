@@ -2022,8 +2022,20 @@ const publishing = {
 		),
 	},
 	capabilities: {
-		'web-prod': { project: { publishing: true, publishingReach: ['web-prod'] } },
-		'batch-prod': { project: { publishingOn: true, publishingReach: ['batch-prod'] } },
+		'web-prod': {
+			project: {
+				publishing: true,
+				publishingReach: ['web-prod'],
+				publishNamespace: 'team-web-publish',
+			},
+		},
+		'batch-prod': {
+			project: {
+				publishingOn: true,
+				publishingReach: ['batch-prod'],
+				publishNamespace: 'team-batch-publish',
+			},
+		},
 	},
 };
 // team-db is on a VM Network: the caller could, but it waits.
@@ -2032,10 +2044,20 @@ const publishingwaits = {
 	name: 'publishingwaits',
 	capabilities: { ...publishing.capabilities, 'db-prod': { project: { publishingWaits: true } } },
 };
+// team-db has no publish namespace: the caller could, but it waits on one.
+const publishingunhoused = {
+	...publishing,
+	name: 'publishingunhoused',
+	capabilities: {
+		...publishing.capabilities,
+		'db-prod': { project: { publishingUnhoused: true } },
+	},
+};
 
 export const scenarios = {
 	publishing,
 	publishingwaits,
+	publishingunhoused,
 	fronted,
 	frontedtenant,
 	replicated,

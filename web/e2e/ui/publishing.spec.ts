@@ -1,8 +1,9 @@
 import { expect, login, setScenario, test } from './fx';
 
 // A platform admin turns publishing on per project from the Configure tab.
-// Each project says where it stands: on, offered, refused, or waiting, and
-// which namespaces its Gateway does not reach.
+// Each project says where it stands: on, offered, refused, or waiting on a
+// portail update or its publish namespace, and which namespaces its Gateway
+// does not reach.
 
 test.describe('publishing', () => {
 	test('each project says where it stands', async ({ page }) => {
@@ -25,6 +26,7 @@ test.describe('publishing', () => {
 		const dialog = page.getByRole('dialog');
 		await expect(dialog.getByText('Turn publishing on for team-web')).toBeVisible();
 		await expect(dialog.getByText('*.team-web.apps.example.com').first()).toBeVisible();
+		await expect(dialog.getByText('team-web-publish')).toBeVisible();
 		await expect(dialog.getByText(/web-edge has a VM Network of its own/)).toBeVisible();
 		await dialog.getByRole('button', { name: 'Stage publishing' }).click();
 		await expect(
@@ -39,6 +41,15 @@ test.describe('publishing', () => {
 		await expect(
 			page.getByText(/a project on a VM Network waits on a portail update/),
 		).toBeVisible();
+		await expect(page.getByRole('button', { name: 'Turn publishing on' })).toHaveCount(0);
+	});
+
+	test('a project without a publish namespace says what it waits on', async ({ page }) => {
+		await setScenario(page, 'publishingunhoused');
+		await login(page);
+		await page.goto('/compute/team-db?tab=configure');
+		await expect(page.getByText('team-db-publish')).toBeVisible();
+		await expect(page.getByText(/which the platform creates with the project/)).toBeVisible();
 		await expect(page.getByRole('button', { name: 'Turn publishing on' })).toHaveCount(0);
 	});
 

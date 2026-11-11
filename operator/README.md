@@ -176,20 +176,36 @@ forge to a Gateway someone else runs. Two things stay with whoever runs it:
 ## Publishing
 
 With `spec.publishing` a platform admin may turn publishing on for a project. The
-platform repo then gains:
+platform repo then gains, in the project's publish namespace `<project>-publish`:
 
-- one Gateway `publish` of `gatewayClassName`, in a project namespace, whose
-  listeners take only `*.<project>.<domain>` and only HTTPRoutes from namespaces
-  labeled with the project (`dotvirt.io/project`), a label no tenant role may change;
+- one Gateway `publish` of `gatewayClassName`, whose listeners take only
+  `*.<project>.<domain>` and only HTTPRoutes from namespaces labeled with the
+  project (`dotvirt.io/project`), a label no tenant role may change;
 - with `clusterIssuer`, a cert-manager Certificate for that wildcard and an HTTPS
   listener serving it;
-- `<namespace>-routes` in each namespace the Gateway reaches, binding
-  `dotvirt-tenant-routes` (HTTPRoute writes) to the subjects of that namespace's
-  admin grant and the project's sync account. It is left out where the cluster's
-  `admin` role already writes HTTPRoutes (OpenShift).
+- `publish-view`, binding `dotvirt-tenant-gateway-view` (Gateway and Certificate
+  reads, never Secrets) to the subjects of the admin grants of the namespaces the
+  Gateway reaches. Without such a grant in the platform repo none is staged: a
+  provider binds its own groups there.
 
-The Gateway reaches the project namespaces on its network: it goes in the first
-namespace of the project's largest network, and stays where git holds it. A
+And `<namespace>-routes` in each namespace the Gateway reaches, binding
+`dotvirt-tenant-routes` (HTTPRoute writes) to the subjects of that namespace's admin
+grant and the project's sync account. It is left out where the cluster's `admin`
+role already writes HTTPRoutes (OpenShift).
+
+The publish namespace holds nothing of the tenant's:
+
+- It carries `dotvirt.io/publish=<project>` and never `dotvirt.io/project`, so no
+  tenant Application targets it and no tenant grant reaches it; the shared tenant
+  AppProject refuses `*-publish` too.
+- dotvirt refuses project and namespace names ending in `-publish`, and never joins
+  a namespace labeled `dotvirt.io/publish` to a project.
+- It is created with the project, never when publishing is turned on: a namespace
+  joins a VM Network only when created. New Project creates it for a project on the
+  cluster's own network once publishing is configured; a provider's onboarding
+  creates it otherwise. Until it exists, the project says publishing waits on it.
+
+The Gateway reaches the project namespaces on its publish namespace's network. A
 namespace with a VM Network of its own is not reached; a customer who wants a
 gateway there runs their own, which is outside dotvirt for now (Gateway stays a
 platform kind: a tenant listener could claim any hostname). A namespace that joins
@@ -225,9 +241,11 @@ What stays with the platform:
   whose listeners admit its namespace. A Gateway shared across projects must keep
   `allowedRoutes` at `Same` or a selector of platform namespaces, or it serves
   tenant hostnames. That is Gateway API, but this grant turns it on.
-- cert-manager. Where tenants hold Certificate writes (cert-manager aggregates
-  them into `admin` by default), they can edit the staged Certificate and request
-  any name the issuer can prove. Keep them from tenants on clusters that publish.
+- cert-manager. The staged Certificate lives in the publish namespace, out of
+  tenants' reach. Where tenants hold Certificate writes in their own namespaces
+  (cert-manager aggregates them into `admin` by default), they can still request
+  any name a ClusterIssuer can prove. Keep them from tenants on clusters that
+  publish.
 
 ## Network policies
 

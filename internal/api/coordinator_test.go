@@ -77,6 +77,7 @@ func newCoordinatorRig(t *testing.T, extra ...map[string]string) *gateRig {
 	}))
 	t.Cleanup(forgeSrv.Close)
 	g.fc.namespaces[0].Annotations["dotvirt.io/repo"] = forgeSrv.URL + "/o/team-a.git"
+	g.fc.namespaces = append(g.fc.namespaces, corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "team-a-publish", Labels: map[string]string{tenancy.PublishLabel: "team-a"}}})
 	files := map[string]string{
 		"descheduler/kubedescheduler.yaml": "apiVersion: operator.openshift.io/v1\nkind: KubeDescheduler\nmetadata:\n  name: cluster\n  namespace: " + descheduler + "\nspec:\n  mode: Automatic\n",
 		// team-a-dev's admin grant: publishing grants route writes to its subjects.
@@ -127,6 +128,7 @@ func TestCapabilitiesEqualTheCoordinatorsGate(t *testing.T) {
 		{verb: verbBind, group: rbac, resource: "clusterroles", name: "admin"},
 		{verb: verbBind, group: rbac, resource: "clusterroles", name: tenancy.TenantEgressRole},
 		{verb: verbBind, group: rbac, resource: "clusterroles", name: tenancy.TenantRoutesRole},
+		{verb: verbBind, group: rbac, resource: "clusterroles", name: tenancy.TenantGatewayViewRole},
 		kind(verbCreate, model.KindUDN, ""),
 		kind(verbCreate, model.KindGateway, ""),
 		kind(verbCreate, model.KindCert, ""),
@@ -309,31 +311,59 @@ func TestNamespaceRightsInsideTheNamespaceCount(t *testing.T) {
 }
 
 // "On" is what Kubernetes shows the caller: only one who may list gateways in
-// a namespace whose publishing git holds is told it is on, whatever else it
-// may do there.
+// the project's publish namespace, whose publishing git holds, is told it is
+// on, whatever else they may do.
 func TestPublishingOnFollowsGatewayReads(t *testing.T) {
-	files, err := publish.Manifests(publish.Settings{Domain: "apps.example.com", GatewayClass: "portail", Issuer: "letsencrypt", ProjectLabel: "dotvirt.io/project"}, "team-a", "team-a-dev", false)
+	files, err := publish.Manifests(publish.Settings{Domain: "apps.example.com", GatewayClass: "portail", Issuer: "letsencrypt", ProjectLabel: "dotvirt.io/project"}, "team-a", "team-a-publish", false)
 	if err != nil {
 		t.Fatal(err)
 	}
+	alice := []netgen.Subject{{Kind: "User", APIGroup: "rbac.authorization.k8s.io", Name: "alice"}}
 	_, routes, err := netgen.RoutesManifest(netgen.RoleBindingSpec{
-		Namespace: "team-a-dev", Project: "team-a",
-		Kept:        []netgen.Subject{{Kind: "User", APIGroup: "rbac.authorization.k8s.io", Name: "alice"}},
+		Namespace: "team-a-dev", Project: "team-a", Kept: alice,
 		SyncAccount: netgen.ServiceAccountSubject("dotvirt-sync", "dotvirt-p-team-a"),
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	published := map[string]string{"rbac/team-a-dev/team-a-dev-routes.yaml": string(routes)}
+	viewPath, view, err := netgen.GatewayViewManifest(netgen.RoleBindingSpec{Namespace: "team-a-publish", Kept: alice})
+	if err != nil {
+		t.Fatal(err)
+	}
+	published := map[string]string{"rbac/team-a-dev/team-a-dev-routes.yaml": string(routes), viewPath: string(view)}
 	for _, f := range files {
 		published[f.Path] = string(f.Content)
 	}
 	g := newCoordinatorRig(t, published)
-	if _, nc := g.caps(g.token(nil), "team-a-dev"); nc.Project.PublishingOn {
-		t.Error("on, told to a caller who may not list gateways")
+	if _, nc := g.caps(g.token([]grant{kind(verbList, model.KindGateway, "team-a-dev")}), "team-a-dev"); nc.Project.PublishingOn {
+		t.Error("on, told to a caller who may list gateways in the project's namespace alone")
 	}
-	if _, nc := g.caps(g.token([]grant{kind(verbList, model.KindGateway, "team-a-dev")}), "team-a-dev"); !nc.Project.PublishingOn || nc.Project.Publishing {
-		t.Errorf("publishingOn %v, publishing %v: want on, nothing to stage", nc.Project.PublishingOn, nc.Project.Publishing)
+	_, nc := g.caps(g.token([]grant{kind(verbList, model.KindGateway, "team-a-publish")}), "team-a-dev")
+	if !nc.Project.PublishingOn || nc.Project.Publishing || nc.Project.PublishNamespace != "team-a-publish" {
+		t.Errorf("publishingOn %v, publishing %v, in %q: want on in team-a-publish, nothing to stage", nc.Project.PublishingOn, nc.Project.Publishing, nc.Project.PublishNamespace)
+	}
+}
+
+// A project the cluster holds no publish namespace for is told so, and only
+// to a caller who could otherwise stage its publishing; the route refuses it
+// and stages nothing.
+func TestPublishingWaitsOnThePublishNamespace(t *testing.T) {
+	g := newCoordinatorRig(t)
+	able := g.token([]grant{
+		{verb: verbGet, resource: "namespaces"},
+		{verb: verbPatch, resource: "namespaces"},
+		kind(verbCreate, model.KindGateway, ""),
+		kind(verbCreate, model.KindCert, ""),
+	})
+	_, nc := g.caps(able, "orphans-ns")
+	if !nc.Project.PublishingUnhoused || nc.Project.Publishing || nc.Project.PublishNamespace != "" || len(nc.Project.PublishingReach) != 0 {
+		t.Errorf("caps %+v: want unhoused alone", nc.Project)
+	}
+	if _, nc := g.caps(g.token(nil), "orphans-ns"); nc.Project.PublishingUnhoused {
+		t.Error("unhoused, told to a caller who could stage nothing")
+	}
+	if rec := do(g.s, able, http.MethodPost, "/api/projects/orphans/publishing", ""); rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "orphans-publish") {
+		t.Errorf("publishing = %d %q, want 400 naming orphans-publish", rec.Code, rec.Body.String())
 	}
 }
 
