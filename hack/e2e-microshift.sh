@@ -22,7 +22,7 @@
 set -euo pipefail
 
 # Pinned by digest: the tag moves with each MicroShift build.
-MS_IMAGE="${MS_IMAGE:-ghcr.io/epheo/microshift:5.0.0_202610291612.p0_g0f0de241_5.0.0_okd_scos.6_epheo.41@sha256:f107b08cc79106687884bbf2604a91d5ff187b202e82a48ec5cc547b17e8e7f6}"
+MS_IMAGE="${MS_IMAGE:-ghcr.io/epheo/microshift:5.0.0_202610291612.p0_g0f0de241_5.0.0_okd_scos.6_epheo.43@sha256:c49091a48658c39f9c449ab20f04590e1024921cdde7aee7843d860078433f15}"
 NAME="${NAME:-dotvirt-e2e-microshift}"
 KUBEVIRT="${KUBEVIRT:-1}"
 APP_IMAGE_TAR="${APP_IMAGE_TAR:-}"
