@@ -391,7 +391,7 @@ func objectQuestion(raw []byte) (question, error) {
 	}
 	k, ok := managedKind(body.Kind)
 	if !ok {
-		return question{}, fmt.Errorf("%w: %s is not a kind dotvirt manages", model.ErrInvalid, body.Kind)
+		return question{}, fmt.Errorf("%w: %s is not a kind the console manages", model.ErrInvalid, body.Kind)
 	}
 	ns := body.Metadata.Namespace
 	if k.ClusterScoped {
@@ -683,7 +683,7 @@ func (s *Server) exists(ctx context.Context, a changeset.Access, version string)
 	found, err := sa.Exists(ctx, a.Group, version, a.Resource, a.Namespace, a.Name)
 	if apierrors.IsForbidden(err) {
 		a.Verb = verbCreate
-		return false, fmt.Errorf("%w: you may not %s, and dotvirt may not read whether it exists to weigh the change as its update",
+		return false, fmt.Errorf("%w: you may not %s, and the console may not read whether it exists to weigh the change as its update",
 			model.ErrForbidden, a)
 	}
 	return found, err

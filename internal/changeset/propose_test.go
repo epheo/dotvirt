@@ -965,7 +965,7 @@ func TestProposeForgeFailureNamesOnlyItsClass(t *testing.T) {
 		says   string
 	}{
 		{http.StatusNotFound, model.ErrNotFound, "the forge has no repo for project p; nothing was pushed and the draft is kept"},
-		{http.StatusForbidden, model.ErrUnavailable, "repo for project p: the forge refused dotvirt (403)"},
+		{http.StatusForbidden, model.ErrUnavailable, "repo for project p: the forge refused the console (403)"},
 		{http.StatusServiceUnavailable, model.ErrUnavailable, "repo for project p: the forge failed (503); try again in a moment"},
 	} {
 		f := newProposeFixture(t, when("GET", "/pulls", tc.status, leakyForgeBody))
@@ -1012,7 +1012,7 @@ func TestTenantRepoForgeFailureNamesOnlyItsClass(t *testing.T) {
 		{"create, token refused", func(f *proposeFixture) error {
 			_, err := f.c.StageCreateProject(f.id, f.platform(), spec, nil, nil)
 			return err
-		}, model.ErrUnavailable, "organization for project repos: the forge refused dotvirt (403)",
+		}, model.ErrUnavailable, "organization for project repos: the forge refused the console (403)",
 			[]route{when("GET", "team-a", http.StatusNotFound, ""), createAnswers(http.StatusForbidden)}},
 		{"create, no organization", func(f *proposeFixture) error {
 			_, err := f.c.StageCreateProject(f.id, f.platform(), spec, nil, nil)

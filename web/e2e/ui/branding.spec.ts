@@ -1,7 +1,7 @@
 import { expect, login, setScenario, test } from './fx';
 
-// A provider's dress: its name in the masthead, the title and the sign-in
-// screen, its stylesheet after the console's own, its links back to its app.
+// A provider's dress: its name throughout the console, sign-in included, its
+// stylesheet after the console's own, its links back to its app.
 
 test("the console wears a provider's branding, sign-in included", async ({ page }) => {
 	await setScenario(page, 'branded');
@@ -25,6 +25,8 @@ test("the console wears a provider's branding, sign-in included", async ({ page 
 			),
 		)
 		.toBe('1');
+	await page.goto('/storage?tab=classes');
+	await expect(page.getByText('Managed by the cluster platform, not Uniwatt Cloud')).toBeVisible();
 });
 
 test('unbranded, the console is dotvirt', async ({ page }) => {

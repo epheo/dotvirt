@@ -623,11 +623,11 @@ func argoObjects(path string, content []byte) ([]object, error) {
 	}
 	heads, docs := manifest.Headers(content)
 	if docs != len(objs) || len(heads) != len(objs) {
-		return nil, fmt.Errorf("splits into documents differently for Argo and for dotvirt")
+		return nil, fmt.Errorf("splits into documents differently for Argo and for the console")
 	}
 	for i, h := range heads {
 		if h != objs[i].written {
-			return nil, fmt.Errorf("names %s %s differently for Argo and for dotvirt", h.Kind, h.Name)
+			return nil, fmt.Errorf("names %s %s differently for Argo and for the console", h.Kind, h.Name)
 		}
 	}
 	return objs, nil
@@ -661,7 +661,7 @@ func objectOf(path string, body map[string]any) (object, error) {
 	}
 	k, ok := managedKind(group, kind)
 	if !ok {
-		return object{}, fmt.Errorf("declares %s %s (%s), which dotvirt does not manage", kind, name, apiVersion)
+		return object{}, fmt.Errorf("declares %s %s (%s), which the console does not manage", kind, name, apiVersion)
 	}
 	o := object{written: model.ObjectRef{Kind: kind, Namespace: namespace, Name: name}, kind: k, body: body}
 	if annotations, _ := meta["annotations"].(map[string]any); annotations != nil {

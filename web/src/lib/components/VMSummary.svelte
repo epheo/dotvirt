@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { branding } from '#lib/state/branding.svelte.js';
 	import { ChevronDown, ChevronRight } from '@lucide/svelte';
 	import {
 		api,
@@ -240,7 +241,7 @@
 			Not in git — this VM exists only in the cluster
 		</div>
 		<p class="mt-1 text-xs text-warn-ink">
-			A VM created by Clone or outside dotvirt has no manifest in git yet, so settings edits and
+			A VM created by Clone or outside {branding.name} has no manifest in git yet, so settings edits and
 			ArgoCD sync do not apply. Adopting stages its live manifest into
 			<strong>Changes</strong>, to propose as a PR.
 		</p>

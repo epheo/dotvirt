@@ -1214,7 +1214,7 @@ async function handleStorage(req, res, url) {
 			return sendText(
 				res,
 				409,
-				`conflict: ${name} is not a boot image dotvirt added (it points at another disk); nothing was removed`,
+				`conflict: ${name} is not a boot image the console added (it points at another disk); nothing was removed`,
 			);
 		if (img.ready)
 			return sendText(

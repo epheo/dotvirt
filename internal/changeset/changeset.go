@@ -182,12 +182,12 @@ func forgeFailed(what string, err error) error {
 	case se.Status == http.StatusNotFound:
 		return fmt.Errorf("%w: the forge has no %s", model.ErrNotFound, what)
 	case se.Status == http.StatusUnauthorized, se.Status == http.StatusForbidden:
-		return fmt.Errorf("%w: %s: the forge refused dotvirt (%d); an administrator must check dotvirt's forge token", model.ErrUnavailable, what, se.Status)
+		return fmt.Errorf("%w: %s: the forge refused the console (%d); an administrator must check the console's forge token", model.ErrUnavailable, what, se.Status)
 	case se.Status >= http.StatusInternalServerError, se.Status == http.StatusTooManyRequests:
 		return fmt.Errorf("%w: %s: the forge failed (%d); try again in a moment", model.ErrUnavailable, what, se.Status)
 	}
 	// Any other refusal is dotvirt asking wrong: an internal error.
-	return fmt.Errorf("%s: the forge rejected dotvirt's request (%d)", what, se.Status)
+	return fmt.Errorf("%s: the forge rejected the console's request (%d)", what, se.Status)
 }
 
 // gitFailed turns a failed read of commit hash from the project's mirror into

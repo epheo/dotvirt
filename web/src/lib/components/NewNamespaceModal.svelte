@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { branding } from '#lib/state/branding.svelte.js';
 	import { untrack } from 'svelte';
 	import { api, type NamespaceCreate } from '#lib/api.js';
 	import { clusterGate, projectGate, projectNS } from '#lib/gates.js';
@@ -112,8 +113,8 @@
 	{/if}
 
 	<p class="rounded bg-inset px-3 py-2 text-xs text-ink-muted">
-		Creates a namespace in this project (labeled so dotvirt adopts it){#if withNetwork}, with a
-			primary "VM Network" its VMs attach to by default{:else if mode === 'project'}, on the
+		Creates a namespace in this project (labeled so {branding.name} adopts it){#if withNetwork},
+			with a primary "VM Network" its VMs attach to by default{:else if mode === 'project'}, on the
 			project's VM Network, which its VMs attach to by default{/if}. A namespace takes a VM Network
 		only when created. Applied by the project's Argo app on merge.
 	</p>

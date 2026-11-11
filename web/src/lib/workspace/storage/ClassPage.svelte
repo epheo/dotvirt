@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { branding } from '#lib/state/branding.svelte.js';
 	import { storageHref, trailForScope } from '#lib/nav.js';
 	import { vmsOff } from '#lib/state/modules.svelte.js';
 	import { storage } from '#lib/state/storage.svelte.js';
@@ -85,7 +86,10 @@
 		{/if}
 
 		<div class="grid grid-cols-[repeat(auto-fit,minmax(min(360px,100%),1fr))] items-start gap-4">
-			<Card title="What a {thing} here gets" meta="Managed by the cluster platform, not dotvirt">
+			<Card
+				title="What a {thing} here gets"
+				meta="Managed by the cluster platform, not {branding.name}"
+			>
 				<dl class="text-[13px]">
 					<div class={ROW}>
 						{#if vmTerms}
