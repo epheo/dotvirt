@@ -41,6 +41,16 @@ func (s *Snapshot) onPrimaryUDN(w TraceWorkload) bool {
 	return key != "" && key != "default"
 }
 
+// clusterNIC reports whether w's primary NIC is one the cluster controls
+// filter: the pod network, or a Multus default binding to a NAD a realized
+// Primary-role UDN or CUDN generated. Any other default binding - localnet, a
+// raw CNI, a secondary network, a NAD not read - has no port NetworkPolicy,
+// admin or baseline policy, or the egress planes see; MultiNetworkPolicy, not
+// read here, is what filters a secondary network.
+func (s *Snapshot) clusterNIC(w TraceWorkload) bool {
+	return w.PodNet || (w.DefaultNet != "" && s.netView().nads[w.DefaultNet].primary)
+}
+
 // primaryDomain resolves a namespace's primary network: a Primary-role UDN in
 // the namespace, a Primary-role CUDN, each only where OVN-K generated its NAD
 // there, else the cluster default network.

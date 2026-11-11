@@ -1,6 +1,7 @@
 package netstate
 
 import (
+	"slices"
 	"strings"
 	"testing"
 
@@ -454,13 +455,15 @@ func TestTracePassConvergence(t *testing.T) {
 	}
 }
 
-// A default multus binding substitutes the NAD's network for the pod network:
-// it never rides the namespace primary, and two such bindings meet only on
-// the same network identity.
+// A Multus default binding is a cluster NIC only to a NAD a Primary-role
+// network generated: two such bindings on one network walk the policies like
+// pods on it. Any other default binding is off the cluster network, so no
+// policy walk runs and nothing is certain: a shared one is the layer-2
+// bypass, and one side off the cluster network reaches the other's exposed
+// services through the fabric.
 func TestTraceDefaultMultusSegment(t *testing.T) {
-	s := New(nil, nil)
-	s.routeAds.Store(routeAdsAbsent)
-	secondaryCUDN(t, s, "shared-vlan", "x")
+	s := isolated(t, false)
+	secondaryCUDN(t, s, "shared-vlan", "y")
 	for _, ns := range []string{"team-a", "team-b"} {
 		add(t, s.nad, map[string]any{
 			"apiVersion": "k8s.cni.cncf.io/v1", "kind": "NetworkAttachmentDefinition",
@@ -468,26 +471,75 @@ func TestTraceDefaultMultusSegment(t *testing.T) {
 				"name": "shared-vlan", "namespace": ns,
 				"ownerReferences": []any{map[string]any{
 					"apiVersion": "k8s.ovn.org/v1", "kind": "ClusterUserDefinedNetwork",
-					"name": "shared-vlan", "uid": "x",
+					"name": "shared-vlan", "uid": "y",
 				}},
 			},
 		})
 	}
-
-	onDefault := wl("team-a", "web", nil, nil)
-	onDefault.PodNet = false
-	onDefault.DefaultNet = "team-a/vlan-x"
-	onPod := wl("team-b", "db", nil, nil)
-	if res := s.Trace(nil, onDefault, &onPod, "", "TCP", 5432); res.Verdict != "Unreachable" {
-		t.Fatalf("substituted default vs cluster default: verdict = %s (%v)", res.Verdict, stepKinds(t, res))
+	add(t, s.nad, map[string]any{
+		"apiVersion": "k8s.cni.cncf.io/v1", "kind": "NetworkAttachmentDefinition",
+		"metadata": map[string]any{"name": "vlan42", "namespace": "team-a"},
+		"spec":     map[string]any{"config": `{"type":"ovn-k8s-cni-overlay","topology":"localnet","vlanID":42}`},
+	})
+	add(t, s.netpol, map[string]any{
+		"apiVersion": "networking.k8s.io/v1", "kind": "NetworkPolicy",
+		"metadata": map[string]any{"name": "deny", "namespace": "team-a"},
+		"spec":     map[string]any{"podSelector": map[string]any{}, "policyTypes": []any{"Ingress"}},
+	})
+	bound := func(ns, name, ref string) TraceWorkload {
+		w := wl(ns, name, nil, nil)
+		w.PodNet, w.DefaultNet = false, ref
+		return w
+	}
+	maybe := func(name string, src, dst TraceWorkload, bypass string) {
+		t.Helper()
+		res := s.Trace(nil, src, &dst, "", "TCP", 5432)
+		if res.Verdict != "Conditional" {
+			t.Errorf("%s: verdict = %s (%v)", name, res.Verdict, stepKinds(t, res))
+		}
+		var named bool
+		for _, st := range res.Steps {
+			if st.Decisive || st.Stage != "connectivity" && st.Stage != "segment" {
+				t.Errorf("%s: a policy step or a certain one, %+v", name, st)
+			}
+			named = named || st.Action == "Bypass" && st.Conditional && strings.Contains(st.Note, bypass)
+		}
+		if !named {
+			t.Errorf("%s: no conditional bypass naming %s in %v", name, bypass, stepKinds(t, res))
+		}
 	}
 
-	a := wl("team-a", "web", nil, nil)
-	a.PodNet, a.DefaultNet = false, "team-a/shared-vlan"
-	b := wl("team-b", "db", nil, nil)
-	b.PodNet, b.DefaultNet = false, "team-b/shared-vlan"
+	maybe("a localnet default binding on each side, a deny-all beside",
+		bound("team-a", "web", "team-a/vlan42"), bound("team-a", "db", "team-a/vlan42"), "team-a/vlan42")
+	web, db := bound("team-a", "web", "team-a/vlan42"), bound("team-a", "db", "team-a/vlan42")
+	if !slices.ContainsFunc(s.Trace(nil, web, &db, "", "TCP", 5432).Steps, func(st model.TraceStep) bool {
+		return st.Stage == "segment" && st.Action == "Bypass"
+	}) {
+		t.Error("one localnet default binding on each side: no shared segment")
+	}
+	maybe("a secondary network's default binding on each side",
+		bound("team-a", "web", "team-a/shared-vlan"), bound("team-b", "db", "team-b/shared-vlan"), "shared-vlan")
+	primaryUDN(t, s, "team-a", "side-udn", map[string]any{"topology": "Layer2", "layer2": map[string]any{"role": "Secondary"}})
+	maybe("a secondary UDN's default binding against the cluster network",
+		bound("team-a", "web", "team-a/side-udn"), wl("team-b", "db", nil, nil), "side-udn")
+	add(t, s.nad, ownedNAD("tenant-a", "alias", "UserDefinedNetwork", "net-a", "tenant-a/net-a", ""))
+	maybe("a NAD its primary UDN owns under another name, against that UDN",
+		bound("tenant-a", "a1", "tenant-a/alias"), wl("tenant-a", "a2", nil, nil), "net-a")
+	maybe("an unread NAD's default binding against the cluster network",
+		bound("team-a", "web", "team-a/vlan-x"), wl("team-b", "db", nil, nil), "team-a/vlan-x")
+	maybe("the cluster network against a localnet default binding",
+		wl("team-b", "db", nil, nil), bound("team-a", "web", "team-a/vlan42"), "team-a/vlan42")
+	maybe("a localnet default binding against a VM Network",
+		bound("team-a", "web", "team-a/vlan42"), wl("tenant-a", "a1", nil, nil), "team-a/vlan42")
+
+	a, b := bound("tenant-c", "web", "tenant-c/shared"), wl("tenant-d", "db", nil, nil)
 	if res := s.Trace(nil, a, &b, "", "TCP", 5432); res.Verdict != "Allow" {
-		t.Fatalf("same CUDN network as default: verdict = %s (%v)", res.Verdict, stepKinds(t, res))
+		t.Errorf("a primary network's default binding beside a pod on it: verdict = %s (%v)", res.Verdict, stepKinds(t, res))
+	}
+	none := wl("team-a", "web", nil, nil)
+	none.PodNet = false
+	if res := s.Trace(nil, none, &b, "", "TCP", 5432); res.Verdict != "Unreachable" {
+		t.Errorf("a VM with no NIC: verdict = %s (%v)", res.Verdict, stepKinds(t, res))
 	}
 }
 
@@ -687,6 +739,13 @@ func TestTraceExternalVLAN(t *testing.T) {
 	internal.PodNet, internal.Nets = false, []string{"team-a/db-net"}
 	if res := s.Trace(nil, internal, nil, "203.0.113.9", "TCP", 443); res.Verdict != "Conditional" {
 		t.Fatalf("secondary-only source, a router may carry it: verdict = %s (%v)", res.Verdict, stepKinds(t, res))
+	}
+
+	raw := wl("team-a", "router", nil, nil, "192.168.1.5")
+	raw.PodNet, raw.DefaultNet = false, "team-a/bridge"
+	res = s.Trace(nil, raw, nil, "203.0.113.9", "TCP", 443)
+	if res.Verdict != "Conditional" || slices.ContainsFunc(res.Steps, func(st model.TraceStep) bool { return st.Stage == "gateway" }) {
+		t.Fatalf("a default binding no primary network generated, under a gateway deny: verdict = %s (%v)", res.Verdict, stepKinds(t, res))
 	}
 
 	bare := wl("team-a", "island", nil, nil)

@@ -94,6 +94,12 @@ jobs:
   # human pass.
   ui:
     runs-on: ubuntu-latest
+    # The browsers and their system libraries come in the image, at the Playwright
+    # version web/package-lock.json holds (validate checks the pair): no apt or
+    # browser download per run. --ipc=host: Chromium outgrows the default /dev/shm.
+    container:
+      image: mcr.microsoft.com/playwright:v1.65.0-noble@sha256:6e3fb709361521eb27161606e6da6d2674e5e89fa16516cb37d6fdd91372273d
+      options: --ipc=host
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
@@ -102,8 +108,6 @@ jobs:
           cache: npm
           cache-dependency-path: web/package-lock.json
       - run: npm ci
-        working-directory: web
-      - run: npx playwright install --with-deps chromium
         working-directory: web
       - run: npm run test:ui
         working-directory: web
@@ -146,6 +150,11 @@ jobs:
         run: |
           grep -q "^FROM quay.io/operator-framework/opm:$OPM_VERSION@sha256:" operator/catalog.Dockerfile \
             || { echo "::error::operator/catalog.Dockerfile must pin opm:$OPM_VERSION (hack/versions.env) by digest"; exit 1; }
+      - name: The ui job's Playwright image matches web/package-lock.json
+        run: |
+          v="$(jq -r '.packages["node_modules/playwright-core"].version' web/package-lock.json)"
+          grep -q "image: mcr.microsoft.com/playwright:v$v-noble@sha256:" .github/workflows/ci.yaml \
+            || { echo "::error::the ui job must run mcr.microsoft.com/playwright:v$v-noble, pinned by digest (web/package-lock.json holds $v)"; exit 1; }
       - name: Scorecard config pins SCORECARD_TEST_IMAGE
         # bundle-test preloads exactly that image; any other ref would be pulled mid-test.
         run: |
