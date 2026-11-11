@@ -204,6 +204,50 @@ func (s *Server) handleProjectSyncAccess(w http.ResponseWriter, r *http.Request)
 	respond(w, view, err)
 }
 
+// handlePublishing stages what a project's publishing lacks: its Gateway,
+// its certificate and the HTTPRoute grant of each namespace it reaches land in
+// the platform repo, each weighed by the coordinator as the caller.
+func (s *Server) handlePublishing(w http.ResponseWriter, r *http.Request) {
+	if !s.gateServed(w, r, s.publishingKinds()...) {
+		return
+	}
+	plat, ok := s.platformScopeGated(w, r)
+	if !ok {
+		return
+	}
+	target, ok := s.tenancyTarget(w, r, plat)
+	if !ok {
+		return
+	}
+	view, err := s.draft.StagePublishing(plat.id, plat.proj, target, s.publishTarget(target))
+	respond(w, view, err)
+}
+
+// publishingKinds are the kinds publishing stages, each of which the cluster
+// must serve: a Certificate only with an issuer.
+func (s *Server) publishingKinds() []model.Kind {
+	if s.cfg.Publish.Issuer != "" {
+		return []model.Kind{model.KindGateway, model.KindCert}
+	}
+	return []model.Kind{model.KindGateway}
+}
+
+// publishTarget is the project's namespaces as the snapshots see them.
+func (s *Server) publishTarget(p project.ProjectInfo) changeset.PublishTarget {
+	pt := changeset.PublishTarget{
+		Networks:      map[string]string{},
+		RoutesGranted: s.state != nil && s.state.AdminWritesRoutes(),
+		Isolated:      s.gateways != nil && s.gateways.GatewaysIsolated(s.cfg.Publish.GatewayClass),
+	}
+	for _, ns := range p.Namespaces {
+		pt.Networks[ns] = changeset.DefaultNetwork
+		if s.netstate != nil {
+			pt.Networks[ns] = s.netstate.PrimaryNetwork(ns)
+		}
+	}
+	return pt
+}
+
 // handleReleaseProject dissolves a repoless project back into a plain
 // namespace (or an adoptable tenant): declared tenancy is staged as a
 // platform-repo rewrite (the PR is the release), label residue is stripped

@@ -131,6 +131,10 @@ type State struct {
 
 	grants grantMoves // when the RBAC sinks last published RBACChanged, by namespace
 
+	// adminRoutes is whether ClusterRole admin, as aggregated, writes
+	// HTTPRoutes: the one fact read off an RBAC object (AdminWritesRoutes).
+	adminRoutes atomic.Bool
+
 	allMu  sync.Mutex
 	all    map[string]bool // AllNamespaces, built at allGen
 	allGen [2]uint64       // names.gen and nssGen when all was built
@@ -210,7 +214,7 @@ func New(sa *cluster.Client, projectLabel string, bus *eventbus.Bus) *State {
 		gvrClusterRoles:        sa.ClusterRoleListWatch(),
 		gvrGroups:              sa.DynamicListWatch(gvrGroups),
 	}
-	s.signals = signalWatches(func(gvr schema.GroupVersionResource) *cache.ListWatch { return sources[gvr] }, rbac, refs, s.clusterBindings)
+	s.signals = signalWatches(func(gvr schema.GroupVersionResource) *cache.ListWatch { return sources[gvr] }, rbac, refs, s.clusterBindings, &s.adminRoutes)
 	return s
 }
 
@@ -243,7 +247,8 @@ type signalWatch struct {
 
 // signalWatches wires the gated RBAC watches; refs is shared with the
 // RoleBinding sink, so a role signals while any relevant binding binds it.
-func signalWatches(lw func(schema.GroupVersionResource) *cache.ListWatch, onChange func(string), refs *roleRefs, clusterBindings *bindingIndex) []*signalWatch {
+// adminRoutes follows ClusterRole admin (adminRoutesDigest).
+func signalWatches(lw func(schema.GroupVersionResource) *cache.ListWatch, onChange func(string), refs *roleRefs, clusterBindings *bindingIndex, adminRoutes *atomic.Bool) []*signalWatch {
 	watch := func(gvr schema.GroupVersionResource, expected any, binds *roleRefs, digest func(any) (grant, bool)) *signalWatch {
 		sink := newRBACSignal(onChange, binds, digest)
 		return &signalWatch{gvr: gvr, expected: expected, lw: lw(gvr), sink: sink, store: sink}
@@ -253,10 +258,15 @@ func signalWatches(lw func(schema.GroupVersionResource) *cache.ListWatch, onChan
 	return []*signalWatch{
 		watch(gvrRoles, &rbacv1.Role{}, nil, roleDigest(refs)),
 		crbs,
-		watch(gvrClusterRoles, &rbacv1.ClusterRole{}, nil, clusterRoleDigest(refs)),
+		watch(gvrClusterRoles, &rbacv1.ClusterRole{}, nil, adminRoutesDigest(clusterRoleDigest(refs), adminRoutes)),
 		watch(gvrGroups, &unstructured.Unstructured{}, nil, groupDigest),
 	}
 }
+
+// AdminWritesRoutes reports whether the cluster's admin role, as
+// aggregated, writes HTTPRoutes (OpenShift's does). False until the
+// ClusterRole watch has seen it.
+func (s *State) AdminWritesRoutes() bool { return s.adminRoutes.Load() }
 
 func (s *State) inProject(ns string) bool {
 	_, ok, _ := s.nss.GetByKey(ns)

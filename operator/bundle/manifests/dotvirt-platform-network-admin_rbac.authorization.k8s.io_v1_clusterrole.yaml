@@ -56,3 +56,21 @@ rules:
   - virtualmachinetemplates
   verbs:
   - create
+- apiGroups:
+  - gateway.networking.k8s.io
+  resources:
+  - gateways
+  verbs:
+  - create
+- apiGroups:
+  - cert-manager.io
+  resources:
+  - certificates
+  verbs:
+  - create
+- apiGroups:
+  - portail.epheo.eu
+  resources:
+  - gatewayparameters
+  verbs:
+  - create

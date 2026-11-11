@@ -202,6 +202,29 @@ export interface ProjectCaps {
    * RoleBindings; false once it holds them, or with no sync namespace.
    */
   syncAccess: boolean;
+  /**
+   * Publishing stages what the project's publishing lacks: its Gateway and
+   * certificate, or a reached namespace's HTTPRoute grant. False when
+   * nothing is missing, on an install without publishing, and while its
+   * network waits (PublishingWaits).
+   */
+  publishing: boolean;
+  /**
+   * PublishingWaits: the caller could stage it but for the project's VM
+   * Network, which waits on a newer portail.
+   */
+  publishingWaits?: boolean;
+  /**
+   * PublishingOn: git holds the project's Gateway, told only to a caller
+   * who may list gateways in its namespace.
+   */
+  publishingOn?: boolean;
+  /**
+   * PublishingReach is the namespaces its Gateway serves, those on its
+   * namespace's network; one with a VM Network of its own is not among
+   * them. Set with PublishingOn or an allowed stage.
+   */
+  publishingReach?: string[];
 }
 
 //////////
@@ -947,6 +970,12 @@ export interface Modules {
    * repo's alone.
    */
   extraTenantKinds: boolean;
+  /**
+   * PublishDomain: a platform admin may turn publishing on for a project
+   * namespace, which then answers *.<namespace>.<PublishDomain>. "" while
+   * the install or the cluster offers no publishing.
+   */
+  publishDomain?: string;
 }
 
 //////////

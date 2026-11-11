@@ -1,7 +1,9 @@
 <script lang="ts">
 	import type { Project } from '#lib/api.js';
 	import { plural } from '#lib/format.js';
-	import { projectGate, projectNS } from '#lib/gates.js';
+	import { projectGate, projectNS, publishGate } from '#lib/gates.js';
+	import { caps } from '#lib/state/caps.svelte.js';
+	import { modules } from '#lib/state/modules.svelte.js';
 	import { ui } from '#lib/state/ui.svelte.js';
 	import Button from './Button.svelte';
 	import Consequence from './Consequence.svelte';
@@ -22,6 +24,8 @@
 		projects: Project[];
 		cluster?: boolean;
 	} = $props();
+
+	const domain = $derived(modules.value?.publishDomain ?? '');
 </script>
 
 <div class="grid items-start gap-4 lg:grid-cols-2">
@@ -74,6 +78,46 @@
 					<Consequence size="sm"
 						>ArgoCD syncs {p.name} as its own account once the platform PR merges.</Consequence
 					>
+				</div>
+			{/if}
+			{#if domain && p.namespaces.length}
+				{@const c = caps.ns(projectNS(p))?.project}
+				{@const gate = publishGate.on(projectNS(p))}
+				{@const reach = c?.publishingReach ?? []}
+				{@const apart = p.namespaces
+					.map((n) => n.namespace)
+					.filter((n) => reach.length && !reach.includes(n))}
+				<div class="flex flex-col gap-1.5 border-t border-line-soft px-card py-3 text-[13px]">
+					<span class="text-xs font-semibold text-ink-soft">Publishing</span>
+					{#if c?.publishingOn}
+						<span class="text-ink-soft"
+							>On, at <span class="font-mono">*.{p.name}.{domain}</span></span
+						>
+					{:else if c?.publishingWaits}
+						<span class="text-ink-muted"
+							>Not yet: a project on a VM Network waits on a portail update.</span
+						>
+					{/if}
+					{#if !c?.publishingWaits && (!c?.publishingOn || c.publishing)}
+						<div class="flex flex-wrap items-center gap-2">
+							<Button
+								variant="outline"
+								size="sm"
+								disabled={!gate.ok}
+								title={gate.why}
+								onclick={() => (ui.modal = { kind: 'publishing', project: p.name })}
+								>{c?.publishingOn ? 'Update publishing' : 'Turn publishing on'}</Button
+							>
+							<StageChip kind="pr" />
+						</div>
+					{/if}
+					{#if apart.length}
+						<span class="text-ink-muted"
+							>Not reached: {apart.join(', ')}, on a VM Network of {apart.length === 1
+								? 'its'
+								: 'their'} own.</span
+						>
+					{/if}
 				</div>
 			{/if}
 			<!-- Quota-aware capacity: the project's ResourceQuotas. -->

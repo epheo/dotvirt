@@ -37,11 +37,18 @@ const TenantEgressRole = "dotvirt-tenant-egress"
 // repo declares one.
 const TenantEgressViewRole = "dotvirt-tenant-egress-view"
 
+// TenantRoutesRole is the ClusterRole granting HTTPRoute writes where the
+// admin role lacks them (Gateway API ships no tenant role), bound in a
+// namespace a project's Gateway reaches to the same subjects as its admin
+// grant (RoutesBinding). Never aggregated: only a namespace publishing reaches
+// holds it.
+const TenantRoutesRole = "dotvirt-tenant-routes"
+
 // ProjectGrantRoles are the ClusterRoles a project grant in the platform repo
 // binds, the parts of the project personas: admin with TenantEgressRole,
-// view or edit with TenantEgressViewRole. The platform sync account may bind
-// these and no other.
-var ProjectGrantRoles = []string{"admin", TenantEgressRole, "view", "edit", TenantEgressViewRole}
+// view or edit with TenantEgressViewRole, and TenantRoutesRole where
+// publishing is on. The platform sync account may bind these and no other.
+var ProjectGrantRoles = []string{"admin", TenantEgressRole, "view", "edit", TenantEgressViewRole, TenantRoutesRole}
 
 // PathAnnotation names the folder of the repo a project lives in, beside the
 // repo annotation. It only locates content: Argo and the forge grant by repo, so
@@ -82,6 +89,10 @@ func AdminBinding(ns string) string { return ns + "-admins" }
 // namespace's admin-grant subjects, owners and sync account alike,
 // TenantEgressRole: the project's people and its repo hold the same rights.
 func EgressBinding(ns string) string { return ns + "-egress" }
+
+// RoutesBinding is the platform repo's RoleBinding granting the admin-grant
+// subjects of a namespace its project's Gateway reaches TenantRoutesRole.
+func RoutesBinding(ns string) string { return ns + "-routes" }
 
 // Reserved reports whether ns is platform space no tenant Application may
 // target: the openshift-* and kube-* system namespaces, and platform, the

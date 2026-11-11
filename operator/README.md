@@ -173,6 +173,62 @@ forge to a Gateway someone else runs. Two things stay with whoever runs it:
   private CA fails x509 at ArgoCD: use a publicly trusted certificate, or keep
   `spec.forge.url` on the in-cluster Service.
 
+## Publishing
+
+With `spec.publishing` a platform admin may turn publishing on for a project. The
+platform repo then gains:
+
+- one Gateway `publish` of `gatewayClassName`, in a project namespace, whose
+  listeners take only `*.<project>.<domain>` and only HTTPRoutes from namespaces
+  labeled with the project (`dotvirt.io/project`), a label no tenant role may change;
+- with `clusterIssuer`, a cert-manager Certificate for that wildcard and an HTTPS
+  listener serving it;
+- `<namespace>-routes` in each namespace the Gateway reaches, binding
+  `dotvirt-tenant-routes` (HTTPRoute writes) to the subjects of that namespace's
+  admin grant and the project's sync account. It is left out where the cluster's
+  `admin` role already writes HTTPRoutes (OpenShift).
+
+The Gateway reaches the project namespaces on its network: it goes in the first
+namespace of the project's largest network, and stays where git holds it. A
+namespace with a VM Network of its own is not reached; a customer who wants a
+gateway there runs their own, which is outside dotvirt for now (Gateway stays a
+platform kind: a tenant listener could claim any hostname). A namespace that joins
+the project later gets its grant from "Update publishing" on the project card.
+
+Settings:
+
+- `domain`: the zone each project gets a subdomain of.
+- `gatewayClassName`: the class of each project's Gateway.
+- `clusterIssuer` (optional): a ClusterIssuer able to issue each project's
+  wildcard, so DNS-01. Without it the Gateways serve HTTP only.
+- `portailNamespace` (optional, default `portail-system`): where portail's
+  controller and its proxy Role live.
+
+Publishing is off until `domain` and `gatewayClassName` are both set.
+
+What stays with the platform:
+
+- DNS and addresses. Point `*.<domain>` at your edge, which routes each project's
+  hostnames to its Gateway; a project with its own address gets its DNS pointed
+  straight at it. Giving a project's Gateway an address is a platform-repo change a
+  platform admin stages, never the tenant's. dotvirt writes no DNS records.
+- The Gateway's Service is the GatewayClass's default; whether a LoadBalancer
+  Service is reachable on a VM Network is not verified yet.
+- A project on a VM Network is offered publishing once the publishing
+  GatewayClass carries `portail.epheo.eu/GatewaysIsolated=True` (portail with
+  per-Gateway poll caps and local token verification): until then one project could
+  delay the others' route changes. Its Gateway reaches portail's controller only
+  through the apiserver, so dotvirt stages its GatewayParameters and binds portail's
+  `portail-controller-proxy` Role, in `portailNamespace`, to its pods' account. That
+  Role comes with portail's `deploy/components/apiserver-proxy`.
+- Shared Gateways. HTTPRoute write lets a namespace attach routes to any Gateway
+  whose listeners admit its namespace. A Gateway shared across projects must keep
+  `allowedRoutes` at `Same` or a selector of platform namespaces, or it serves
+  tenant hostnames. That is Gateway API, but this grant turns it on.
+- cert-manager. Where tenants hold Certificate writes (cert-manager aggregates
+  them into `admin` by default), they can edit the staged Certificate and request
+  any name the issuer can prove. Keep them from tenants on clusters that publish.
+
 ## Network policies
 
 On OpenShift the dotvirt and managed Forgejo pods get an ingress NetworkPolicy

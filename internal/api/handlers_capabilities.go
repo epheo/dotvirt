@@ -207,8 +207,37 @@ func (s *Server) namespaceCaps(ctx context.Context, sc scope, ns string) model.N
 	out.Project.TemplateEdit, _ = s.projectAuthor(ctx, sc.id, sc.cluster, sc.proj.Namespaces)
 	if full, ok := s.projectByName(sc.proj.Name); ok && s.cfg.PlatformRepo != "" {
 		s.projectCaps(ctx, sc, full, &out.Project)
+		s.publishingCaps(ctx, sc, full, &out.Project)
 	}
 	return out
+}
+
+// publishingCaps answers the publishing route over project full as
+// handlePublishing weighs it: every kind served, the whole project in view or
+// any namespace claimable, and the gate's accesses allowed. PublishingOn is
+// what Kubernetes shows the caller: the project's Gateway, told only to one
+// who may list gateways in its namespace. A project on a VM Network is
+// weighed as if publishing reached it, so the UI can say what it waits on.
+func (s *Server) publishingCaps(ctx context.Context, sc scope, full project.ProjectInfo, out *model.ProjectCaps) {
+	if !s.cfg.Publish.On() || len(s.unserved(ctx, s.publishingKinds()...)) > 0 {
+		return
+	}
+	id, c := sc.id, sc.cluster
+	plan, need, err := s.draft.PublishingNeeds(s.platformProject(), full, s.publishTarget(full))
+	out.PublishingOn = plan.On && s.capable(ctx, id, c, kindAction(verbList, model.KindGateway, plan.Namespace))
+	if len(sc.proj.Namespaces) < len(full.Namespaces) && !s.capable(ctx, id, c, claimAction("")) {
+		return
+	}
+	waits := errors.Is(err, changeset.ErrPrimaryNetwork)
+	if waits {
+		err = nil
+	}
+	allowed := s.needsAllowed(ctx, id, c, need, err)
+	out.Publishing = allowed && !waits
+	out.PublishingWaits = allowed && waits
+	if out.PublishingOn || allowed {
+		out.PublishingReach = plan.Reach
+	}
 }
 
 // projectCaps answers the tenancy routes over project full: joining a new
@@ -275,5 +304,8 @@ func (s *Server) handleModules(w http.ResponseWriter, r *http.Request) {
 	m.OLM = !un[model.KindSub] && !un[model.KindOpGroup]
 	m.MachineConfig = !un[model.KindMachCfg]
 	m.ExtraTenantKinds = len(s.cfg.TenantKinds.Allowed) > 0
+	if s.cfg.Publish.On() && len(s.unserved(r.Context(), s.publishingKinds()...)) == 0 {
+		m.PublishDomain = s.cfg.Publish.Domain
+	}
 	writeJSON(w, m)
 }

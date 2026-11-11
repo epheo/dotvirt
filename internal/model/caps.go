@@ -141,4 +141,19 @@ type ProjectCaps struct {
 	// SyncAccess grants the project's Argo sync account in its namespaces'
 	// RoleBindings; false once it holds them, or with no sync namespace.
 	SyncAccess bool `json:"syncAccess"`
+	// Publishing stages what the project's publishing lacks: its Gateway and
+	// certificate, or a reached namespace's HTTPRoute grant. False when
+	// nothing is missing, on an install without publishing, and while its
+	// network waits (PublishingWaits).
+	Publishing bool `json:"publishing"`
+	// PublishingWaits: the caller could stage it but for the project's VM
+	// Network, which waits on a newer portail.
+	PublishingWaits bool `json:"publishingWaits,omitempty"`
+	// PublishingOn: git holds the project's Gateway, told only to a caller
+	// who may list gateways in its namespace.
+	PublishingOn bool `json:"publishingOn,omitempty"`
+	// PublishingReach is the namespaces its Gateway serves, those on its
+	// namespace's network; one with a VM Network of its own is not among
+	// them. Set with PublishingOn or an allowed stage.
+	PublishingReach []string `json:"publishingReach,omitempty"`
 }

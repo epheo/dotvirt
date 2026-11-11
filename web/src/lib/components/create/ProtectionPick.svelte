@@ -74,7 +74,11 @@
 			return r?.copies === 1 && p.bytes > 0 ? [{ tier: r.tier, bytes: p.bytes }] : [];
 		});
 		const others = ones.filter((p) => p.tier === tier).map((p) => p.bytes);
-		const tiers = [...new Set(ones.map((p) => p.tier).filter((t) => t !== tier))];
+		const tiers = [...new Set(ones.map((p) => p.tier).filter((t) => t !== tier))].map((t) => ({
+			tier: t,
+			disks: ones.filter((p) => p.tier === t).map((p) => p.bytes),
+			hosts: rooms?.find((r) => r.tier === t)?.hosts ?? [],
+		}));
 		const volumes = replication.overview?.volumes;
 		return { others, tiers, host: vm && volumes ? pinnedHost(vm, volumes) : undefined };
 	});

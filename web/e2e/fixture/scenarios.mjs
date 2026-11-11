@@ -2002,7 +2002,40 @@ const frontedtenant = {
 	],
 };
 
+// --- publishing ---
+// The install publishes under apps.example.com. team-web may be turned on and
+// its web-edge namespace, on a VM Network of its own, is not reached; this
+// caller may not for team-db; team-batch is on in git.
+const publishing = {
+	...base,
+	name: 'publishing',
+	modules: { routes: true, publishDomain: 'apps.example.com' },
+	inventory: {
+		...base.inventory,
+		projects: base.inventory.projects.map((p) =>
+			p.name === 'team-web'
+				? {
+						...p,
+						namespaces: [...p.namespaces, { namespace: 'web-edge', canAuthor: true, vms: [] }],
+					}
+				: p,
+		),
+	},
+	capabilities: {
+		'web-prod': { project: { publishing: true, publishingReach: ['web-prod'] } },
+		'batch-prod': { project: { publishingOn: true, publishingReach: ['batch-prod'] } },
+	},
+};
+// team-db is on a VM Network: the caller could, but it waits.
+const publishingwaits = {
+	...publishing,
+	name: 'publishingwaits',
+	capabilities: { ...publishing.capabilities, 'db-prod': { project: { publishingWaits: true } } },
+};
+
 export const scenarios = {
+	publishing,
+	publishingwaits,
 	fronted,
 	frontedtenant,
 	replicated,

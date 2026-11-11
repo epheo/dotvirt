@@ -596,6 +596,35 @@ async function handleAPI(req, res, url) {
 		return sendJSON(res, 200, draftFor('platform'));
 	}
 
+	// Publishing for a project: its Gateway and certificate in its first
+	// namespace and each reached namespace's route grant, staged in the
+	// platform draft; refused on the capability the UI gates it by.
+	m = path.match(/^\/api\/projects\/([^/]+)\/publishing$/);
+	if (m && req.method === 'POST') {
+		const p = state.scenario.inventory.projects.find((x) => x.name === m[1]);
+		if (!p?.namespaces.length) return sendText(res, 404, 'project not found');
+		const first = p.namespaces[0].namespace;
+		const caps = namespaceCaps(s, p, first).project;
+		if (!caps.publishing) return sendText(res, 403, `you may not create gateways in ${first}`);
+		for (const name of ['publish', 'publish-tls'])
+			stageInto('platform', {
+				kind: 'create',
+				resource: 'publishing',
+				namespace: first,
+				name,
+				changes: [],
+			});
+		for (const namespace of caps.publishingReach ?? [first])
+			stageInto('platform', {
+				kind: 'create',
+				resource: 'rolebinding',
+				namespace,
+				name: `${namespace}-routes`,
+				changes: [],
+			});
+		return sendJSON(res, 200, draftFor('platform'));
+	}
+
 	m = path.match(/^\/api\/projects\/([^/]+)\/(history(\/|$)|revert$|proposals\/(\d+)$)/);
 	if (m && m[1] === 'platform' && !m[4] && !clusterCaps(s).platformRead)
 		return sendText(res, 403, 'forbidden: not authorized to read the platform repo');
@@ -918,6 +947,7 @@ function namespaceCaps(s, project, ns) {
 			grantAdmin: author,
 			release: !project.repo,
 			syncAccess: author && !!project.repo,
+			publishing: false,
 			...override?.project,
 		},
 	};

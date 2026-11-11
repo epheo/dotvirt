@@ -207,9 +207,14 @@ func TestReleaseDeclaredRevokesSyncAccount(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	_, routes, err := netgen.RoutesManifest(netgen.RoleBindingSpec{Namespace: "alpha", Kept: []netgen.Subject{user("carol")}, SyncAccount: ptr(syncSA("legacy"))})
+	if err != nil {
+		t.Fatal(err)
+	}
 	bare, _ := seedWork(t, map[string][]byte{
 		"rbac/alpha.yaml":              grantYAML("alpha", "admin", user("carol"), syncSA("legacy")),
 		"rbac/alpha/alpha-egress.yaml": egress,
+		"rbac/alpha/alpha-routes.yaml": routes,
 		"rbac/beta.yaml":               grantYAML("beta", "admin", user("dan")),
 		"namespaces/alpha.yaml":        []byte(declaredNS),
 	})
@@ -235,5 +240,8 @@ func TestReleaseDeclaredRevokesSyncAccount(t *testing.T) {
 	}
 	if e := got["alpha-egress"]; e.Kind != draft.KindDelete || e.SourceFile != "rbac/alpha/alpha-egress.yaml" {
 		t.Errorf("alpha egress = %s %s, want its file removed", e.Kind, e.SourceFile)
+	}
+	if _, subjects := grantSubjects(t, got["alpha-routes"].Manifest, "alpha-routes"); !slices.Equal(subjects, []netgen.Subject{user("carol")}) {
+		t.Errorf("alpha routes grant after release = %+v, want carol alone", subjects)
 	}
 }

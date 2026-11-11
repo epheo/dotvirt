@@ -216,6 +216,27 @@ type AuthSpec struct {
 	OpenShiftSSO bool `json:"openShiftSSO,omitempty"`
 }
 
+// PublishingSpec lets a platform admin turn publishing on for a project: one
+// Gateway in a project namespace, whose listeners take only routes from the
+// project's namespaces, on *.<project>.<domain>. The platform names the
+// domain, so no project can ask for another's hostnames. Domain or
+// GatewayClassName empty leaves publishing off.
+type PublishingSpec struct {
+	// Domain is the DNS zone each publishing project gets a subdomain of.
+	// The platform points each *.<project>.<domain> at that project's
+	// Gateway address; dotvirt writes no DNS.
+	// +kubebuilder:validation:Pattern=`^([a-z0-9]([-a-z0-9]*[a-z0-9])?\.)*[a-z0-9]([-a-z0-9]*[a-z0-9])?$`
+	Domain string `json:"domain,omitempty"`
+	// GatewayClassName is the GatewayClass of each project's Gateway.
+	GatewayClassName string `json:"gatewayClassName,omitempty"`
+	// ClusterIssuer is a cert-manager ClusterIssuer able to issue each
+	// project's wildcard (DNS-01). Empty: the Gateways serve HTTP only.
+	ClusterIssuer string `json:"clusterIssuer,omitempty"`
+	// PortailNamespace holds portail's controller and its proxy Role, which a
+	// Gateway on a VM Network is bound to. Default portail-system.
+	PortailNamespace string `json:"portailNamespace,omitempty"`
+}
+
 // DotvirtSpec is the desired dotvirt install.
 type DotvirtSpec struct {
 	// Image is the dotvirt app image to deploy.
@@ -225,6 +246,8 @@ type DotvirtSpec struct {
 	Ingress IngressSpec `json:"ingress,omitempty"`
 	Metrics MetricsSpec `json:"metrics,omitempty"`
 	Auth    AuthSpec    `json:"auth,omitempty"`
+	// Publishing is off until Domain and GatewayClassName are set.
+	Publishing PublishingSpec `json:"publishing,omitempty"`
 }
 
 // DotvirtStatus is the observed install state.

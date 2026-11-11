@@ -21,6 +21,7 @@ import (
 	"github.com/epheo/dotvirt/internal/git"
 	"github.com/epheo/dotvirt/internal/model"
 	"github.com/epheo/dotvirt/internal/project"
+	"github.com/epheo/dotvirt/internal/publish"
 	"github.com/epheo/dotvirt/internal/vmtemplate"
 	"github.com/epheo/dotvirt/pkg/forge"
 	"github.com/epheo/dotvirt/pkg/tenancy"
@@ -102,6 +103,8 @@ type Coordinator struct {
 	tenantKinds tenancy.Policy
 	// usersOpenPRs: dotvirt writes no pull request (WithUsersOpeningPRs).
 	usersOpenPRs bool
+	// publishing is the platform's publishing settings (WithPublishing).
+	publishing publish.Settings
 }
 
 // New builds a Coordinator. forge and resyncer may be nil (PR creation degrades
@@ -114,6 +117,13 @@ func New(store *draft.Store, repos *git.RepoSet, ff *forge.Factory, rs Resyncer,
 		renderer: vmtemplate.EngineRenderer{},
 		prune:    prune,
 	}
+}
+
+// WithPublishing sets the platform's publishing settings; the zero value
+// leaves publishing off. Set once, before serving.
+func (c *Coordinator) WithPublishing(s publish.Settings) *Coordinator {
+	c.publishing = s
+	return c
 }
 
 // WithSyncNamespace names the ArgoCD namespace holding the per-project sync

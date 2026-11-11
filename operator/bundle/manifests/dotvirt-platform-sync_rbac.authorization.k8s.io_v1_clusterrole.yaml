@@ -27,7 +27,16 @@ rules:
   - view
   - edit
   - dotvirt-tenant-egress-view
+  - dotvirt-tenant-routes
   resources:
   - clusterroles
+  verbs:
+  - bind
+- apiGroups:
+  - rbac.authorization.k8s.io
+  resourceNames:
+  - portail-controller-proxy
+  resources:
+  - roles
   verbs:
   - bind

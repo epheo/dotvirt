@@ -74,6 +74,8 @@ func (k Kind) RepoPath(namespace, name string) string {
 			return "rbac/" + namespace + ".yaml"
 		}
 		return "rbac/" + namespace + "/" + name + ".yaml"
+	case KindGateway.Kind, KindCert.Kind, KindGWParams.Kind:
+		return "publishing/" + namespace + "/" + name + ".yaml"
 	case KindNS.Kind:
 		return "namespaces/" + name + ".yaml"
 	case KindCUDN.Kind:
@@ -165,6 +167,9 @@ var (
 	KindDesched  = kindOf("KubeDescheduler")
 	KindMachCfg  = kindOf("MachineConfig")
 	KindTemplate = kindOf("VirtualMachineTemplate")
+	KindGateway  = kindOf("Gateway")
+	KindCert     = kindOf("Certificate")
+	KindGWParams = kindOf("GatewayParameters")
 )
 
 // KindDV is a VM's disk, declared beside it in a tenant repo. It has no row:
@@ -208,6 +213,9 @@ var resources = []Resource{
 	// kernel-arg MachineConfig. Its Namespace document is the namespace resource.
 	{Name: "drs", Kinds: []Kind{KindOpGroup, KindSub, KindDesched, KindMachCfg}, CreateLabel: "Configure rebalancing", EditLabel: "Edit rebalancing", Noun: "rebalancing"},
 	{Name: "template", Kinds: []Kind{KindTemplate}, CreateLabel: "Save as template", EditLabel: "Edit template", Noun: "a template"},
+	// A namespace's Gateway and its certificate; the route grant beside them
+	// is the rolebinding resource.
+	{Name: "publishing", Kinds: []Kind{KindGateway, KindCert, KindGWParams}, CreateLabel: "Turn publishing on", EditLabel: "Edit publishing", Noun: "publishing"},
 }
 
 // ResourceNoun names a draft resource in a message: the persisted name is

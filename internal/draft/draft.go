@@ -52,6 +52,7 @@ const (
 	ResourceBaselineAdminNetworkPolicy Resource = "baselineadminnetworkpolicy" // the baseline cluster rule (BANP)
 	ResourceDRS                        Resource = "drs"                        // the cluster DRS (descheduler) install/config file set
 	ResourceTemplate                   Resource = "template"                   // a VM template saved into a library's templates/ dir
+	ResourcePublishing                 Resource = "publishing"                 // a namespace's Gateway and its certificate
 )
 
 // Atomic reports whether entries of this resource form one logical change that

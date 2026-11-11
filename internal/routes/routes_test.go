@@ -336,3 +336,36 @@ func TestAKindIsWatchedAtTheVersionServedAndStopsWithTheModule(t *testing.T) {
 		t.Fatal("a stopped module reads as synced")
 	}
 }
+
+// Only portail's condition, True for the class's current generation, says a
+// class's Gateways are isolated.
+func TestDecodeIsolated(t *testing.T) {
+	class := func(conds ...map[string]any) *unstructured.Unstructured {
+		list := make([]any, len(conds))
+		for i, c := range conds {
+			list[i] = c
+		}
+		return &unstructured.Unstructured{Object: map[string]any{
+			"metadata": map[string]any{"name": "portail", "generation": int64(3)},
+			"status":   map[string]any{"conditions": list},
+		}}
+	}
+	cond := func(kind, status string, gen int64) map[string]any {
+		return map[string]any{"type": kind, "status": status, "observedGeneration": gen}
+	}
+	for name, c := range map[string]struct {
+		u    *unstructured.Unstructured
+		want bool
+	}{
+		"true":       {class(cond("Accepted", "True", 3), cond(Isolated, "True", 3)), true},
+		"stale":      {class(cond(Isolated, "True", 2)), false},
+		"no gen":     {class(map[string]any{"type": Isolated, "status": "True"}), false},
+		"false":      {class(cond(Isolated, "False", 3)), false},
+		"absent":     {class(cond("Accepted", "True", 3)), false},
+		"other kind": {class(cond("GatewaysIsolated", "True", 3)), false},
+	} {
+		if got, keep := decodeIsolated(c.u); got != c.want || !keep {
+			t.Errorf("%s: %v %v, want %v", name, got, keep, c.want)
+		}
+	}
+}

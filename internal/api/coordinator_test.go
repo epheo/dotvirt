@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"maps"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -21,6 +22,8 @@ import (
 	"github.com/epheo/dotvirt/internal/draft"
 	"github.com/epheo/dotvirt/internal/git"
 	"github.com/epheo/dotvirt/internal/model"
+	"github.com/epheo/dotvirt/internal/netgen"
+	"github.com/epheo/dotvirt/internal/publish"
 	"github.com/epheo/dotvirt/pkg/forge"
 	"github.com/epheo/dotvirt/pkg/tenancy"
 )
@@ -60,7 +63,9 @@ func seedPlatformRepo(t *testing.T, files map[string]string) string {
 // coordinator, the server its authorizer, the platform repo seeded with a
 // committed DRS configuration, and project grants made to a sync account.
 // The forge has no repo and creates any asked for: team-a's is one it lost.
-func newCoordinatorRig(t *testing.T) *gateRig {
+// newCoordinatorRig is the coordinator over a platform repo holding the
+// DRS configuration, team-a-dev's admin grant, and extra.
+func newCoordinatorRig(t *testing.T, extra ...map[string]string) *gateRig {
 	g := newGrantCluster(t)
 	forgeSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodPost {
@@ -72,9 +77,15 @@ func newCoordinatorRig(t *testing.T) *gateRig {
 	}))
 	t.Cleanup(forgeSrv.Close)
 	g.fc.namespaces[0].Annotations["dotvirt.io/repo"] = forgeSrv.URL + "/o/team-a.git"
-	platform := seedPlatformRepo(t, map[string]string{
+	files := map[string]string{
 		"descheduler/kubedescheduler.yaml": "apiVersion: operator.openshift.io/v1\nkind: KubeDescheduler\nmetadata:\n  name: cluster\n  namespace: " + descheduler + "\nspec:\n  mode: Automatic\n",
-	})
+		// team-a-dev's admin grant: publishing grants route writes to its subjects.
+		"rbac/team-a-dev.yaml": "apiVersion: rbac.authorization.k8s.io/v1\nkind: RoleBinding\nmetadata:\n  name: team-a-dev-admins\n  namespace: team-a-dev\nroleRef:\n  apiGroup: rbac.authorization.k8s.io\n  kind: ClusterRole\n  name: admin\nsubjects:\n- apiGroup: rbac.authorization.k8s.io\n  kind: User\n  name: alice\n",
+	}
+	for _, e := range extra {
+		maps.Copy(files, e)
+	}
+	platform := seedPlatformRepo(t, files)
 	store, err := draft.Open(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
@@ -82,8 +93,9 @@ func newCoordinatorRig(t *testing.T) *gateRig {
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
 	repos := git.NewRepoSet(ctx, "", "", nil, false, nil, time.Hour)
+	publishing := publish.Settings{Domain: "apps.example.com", GatewayClass: "portail", Issuer: "letsencrypt", ProjectLabel: "dotvirt.io/project"}
 	c := changeset.New(store, repos, forge.NewFactory(forgeSrv.URL, forge.StaticToken("tok"), false, ""), nil, nil, nil, "main", "dotvirt/proposed").
-		WithSyncNamespace("dotvirt-sync")
+		WithSyncNamespace("dotvirt-sync").WithPublishing(publishing)
 	// The release strips label residue under the caller's token.
 	g.fc.on(http.MethodPatch, "/api/v1/namespaces/orphans-ns", func(w http.ResponseWriter, r *http.Request) {
 		if !g.fc.ssar(bearer(r), &authzv1.ResourceAttributes{Verb: verbPatch, Resource: "namespaces", Namespace: "orphans-ns", Name: "orphans-ns"}) {
@@ -92,7 +104,7 @@ func newCoordinatorRig(t *testing.T) *gateRig {
 		}
 		writeObj(w, map[string]any{"apiVersion": "v1", "kind": "Namespace", "metadata": map[string]any{"name": "orphans-ns"}})
 	})
-	g.s = g.fc.server(c, Config{PlatformRepo: platform, BaseBranch: "main"})
+	g.s = g.fc.server(c, Config{PlatformRepo: platform, BaseBranch: "main", Publish: publishing})
 	c.UseAuthorizer(g.s)
 	return g
 }
@@ -114,7 +126,10 @@ func TestCapabilitiesEqualTheCoordinatorsGate(t *testing.T) {
 		{verb: verbUpdate, group: rbac, resource: "rolebindings"},
 		{verb: verbBind, group: rbac, resource: "clusterroles", name: "admin"},
 		{verb: verbBind, group: rbac, resource: "clusterroles", name: tenancy.TenantEgressRole},
+		{verb: verbBind, group: rbac, resource: "clusterroles", name: tenancy.TenantRoutesRole},
 		kind(verbCreate, model.KindUDN, ""),
+		kind(verbCreate, model.KindGateway, ""),
+		kind(verbCreate, model.KindCert, ""),
 		{verb: verbCreate, group: "operator.openshift.io", resource: "kubedeschedulers", ns: descheduler},
 		{verb: verbUpdate, group: "operator.openshift.io", resource: "kubedeschedulers", ns: descheduler},
 		{verb: verbDelete, group: "operator.openshift.io", resource: "kubedeschedulers", ns: descheduler},
@@ -151,6 +166,10 @@ func TestCapabilitiesEqualTheCoordinatorsGate(t *testing.T) {
 			pr(func(p model.ProjectCaps) bool { return p.Adopt })},
 		{"sync access", "team-a-dev", http.MethodPost, "/api/projects/team-a/sync-access", ``,
 			pr(func(p model.ProjectCaps) bool { return p.SyncAccess })},
+		// The project's Gateway, its certificate and the route grant to
+		// team-a-dev's admin-grant subjects.
+		{"publishing", "team-a-dev", http.MethodPost, "/api/projects/team-a/publishing", ``,
+			pr(func(p model.ProjectCaps) bool { return p.Publishing })},
 		// Reconfiguring: the committed KubeDescheduler is updated, the rest of
 		// the set created.
 		{"drs enable", "", http.MethodPost, "/api/drs", `{"mode":"Predictive"}`,
@@ -289,6 +308,35 @@ func TestNamespaceRightsInsideTheNamespaceCount(t *testing.T) {
 	}
 }
 
+// "On" is what Kubernetes shows the caller: only one who may list gateways in
+// a namespace whose publishing git holds is told it is on, whatever else it
+// may do there.
+func TestPublishingOnFollowsGatewayReads(t *testing.T) {
+	files, err := publish.Manifests(publish.Settings{Domain: "apps.example.com", GatewayClass: "portail", Issuer: "letsencrypt", ProjectLabel: "dotvirt.io/project"}, "team-a", "team-a-dev", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, routes, err := netgen.RoutesManifest(netgen.RoleBindingSpec{
+		Namespace: "team-a-dev", Project: "team-a",
+		Kept:        []netgen.Subject{{Kind: "User", APIGroup: "rbac.authorization.k8s.io", Name: "alice"}},
+		SyncAccount: netgen.ServiceAccountSubject("dotvirt-sync", "dotvirt-p-team-a"),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	published := map[string]string{"rbac/team-a-dev/team-a-dev-routes.yaml": string(routes)}
+	for _, f := range files {
+		published[f.Path] = string(f.Content)
+	}
+	g := newCoordinatorRig(t, published)
+	if _, nc := g.caps(g.token(nil), "team-a-dev"); nc.Project.PublishingOn {
+		t.Error("on, told to a caller who may not list gateways")
+	}
+	if _, nc := g.caps(g.token([]grant{kind(verbList, model.KindGateway, "team-a-dev")}), "team-a-dev"); !nc.Project.PublishingOn || nc.Project.Publishing {
+		t.Errorf("publishingOn %v, publishing %v: want on, nothing to stage", nc.Project.PublishingOn, nc.Project.Publishing)
+	}
+}
+
 // Granting a project's sync account lands RoleBindings alone: rights on
 // those in its namespaces, and none on any Namespace, grant it, and the
 // capability agrees.
@@ -300,6 +348,7 @@ func TestSyncAccessNeedsOnlyItsGrants(t *testing.T) {
 	}
 	tok := g.token([]grant{
 		in(verbCreate, "rolebindings", ""),
+		in(verbUpdate, "rolebindings", ""),
 		in(verbBind, "clusterroles", "admin"),
 		in(verbBind, "clusterroles", tenancy.TenantEgressRole),
 	})

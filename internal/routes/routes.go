@@ -32,6 +32,7 @@ const group = "gateway.networking.k8s.io"
 // The kinds outside the route tables.
 var (
 	GVRGateway   = schema.GroupVersionResource{Group: group, Version: "v1", Resource: "gateways"}
+	GVRClass     = schema.GroupVersionResource{Group: group, Version: "v1", Resource: "gatewayclasses"}
 	GVRRateLimit = schema.GroupVersionResource{Group: "portail.epheo.eu", Version: "v1alpha1", Resource: "ratelimitpolicies"}
 )
 
@@ -83,6 +84,9 @@ type Snapshot struct {
 	mu       sync.RWMutex
 	gateways *reflect.Table[model.GatewayInfo]
 	limits   *reflect.Table[rateLimit]
+	// isolated is, by GatewayClass, whether its controller says one Gateway
+	// can never delay another's configuration (Isolated).
+	isolated *reflect.Table[bool]
 	routes   []*reflect.Table[model.Route]
 	// gens counts each namespace's moves per route kind, so a tenant's
 	// watermark moves with the routes it may read; total counts every move.
@@ -103,6 +107,8 @@ func New(src Source, bus *eventbus.Bus, served func() bool) *Snapshot {
 		Touch: func(string, *model.GatewayInfo, *model.GatewayInfo) { s.total++ }}
 	s.limits = &reflect.Table[rateLimit]{Lock: &s.mu, Decode: decodeRateLimit, Key: reflect.NamespacedKey, Publish: s.publish,
 		Touch: func(string, *rateLimit, *rateLimit) { s.total++ }}
+	s.isolated = &reflect.Table[bool]{Lock: &s.mu, Decode: decodeIsolated, Publish: s.publish,
+		Touch: func(string, *bool, *bool) { s.total++ }}
 	for _, k := range RouteKinds {
 		s.routes = append(s.routes, &reflect.Table[model.Route]{
 			Lock: &s.mu, Key: reflect.NamespacedKey, Publish: s.publish,
@@ -117,7 +123,7 @@ func New(src Source, bus *eventbus.Bus, served func() bool) *Snapshot {
 			},
 		})
 	}
-	s.healthy = make([]atomic.Bool, 2+len(RouteKinds))
+	s.healthy = make([]atomic.Bool, 3+len(RouteKinds))
 	for i := range s.healthy {
 		s.healthy[i].Store(true)
 	}
@@ -134,7 +140,7 @@ func (s *Snapshot) ready(ctx context.Context) bool {
 	if !s.served() {
 		return false
 	}
-	want := []schema.GroupVersionResource{GVRGateway, GVRRateLimit}
+	want := []schema.GroupVersionResource{GVRGateway, GVRRateLimit, GVRClass}
 	for _, k := range RouteKinds {
 		want = append(want, schema.GroupVersionResource{Group: group, Resource: k.Resource})
 	}
@@ -156,8 +162,9 @@ func (s *Snapshot) start(ctx context.Context) {
 	s.publish()
 	reflect.RunWhenServed(ctx, s.src.HasAPIResource, GVRGateway, s.src.DynamicListWatch(GVRGateway), s.gateways, &s.healthy[0], s.flipped)
 	reflect.RunWhenServed(ctx, s.src.HasAPIResource, GVRRateLimit, s.src.DynamicListWatch(GVRRateLimit), s.limits, &s.healthy[1], s.flipped)
+	reflect.RunWhenServed(ctx, s.src.HasAPIResource, GVRClass, s.src.DynamicListWatch(GVRClass), s.isolated, &s.healthy[2], s.flipped)
 	for i, k := range RouteKinds {
-		go s.watchRoute(ctx, k, s.routes[i], &s.healthy[2+i])
+		go s.watchRoute(ctx, k, s.routes[i], &s.healthy[3+i])
 	}
 }
 
@@ -186,6 +193,7 @@ func (s *Snapshot) clear() {
 	s.started.Store(false)
 	s.gateways.Clear()
 	s.limits.Clear()
+	s.isolated.Clear()
 	for _, t := range s.routes {
 		t.Clear()
 	}
@@ -335,10 +343,11 @@ func decode[T any](u *unstructured.Unstructured) T {
 }
 
 type conditionDoc struct {
-	Type    string `json:"type"`
-	Status  string `json:"status"`
-	Reason  string `json:"reason"`
-	Message string `json:"message"`
+	Type               string `json:"type"`
+	Status             string `json:"status"`
+	Reason             string `json:"reason"`
+	Message            string `json:"message"`
+	ObservedGeneration int64  `json:"observedGeneration"`
 }
 
 // verdict folds conditions into whether every wanted one holds, and the first
@@ -381,6 +390,32 @@ type gatewayDoc struct {
 			Conditions     []conditionDoc `json:"conditions"`
 		} `json:"listeners"`
 	} `json:"status"`
+}
+
+// Isolated is portail's GatewayClass condition saying one Gateway can never
+// delay another's configuration: each holds a bounded share of the
+// controller, and tokens are verified before any shared budget is spent.
+const Isolated = "portail.epheo.eu/GatewaysIsolated"
+
+// GatewaysIsolated reports whether GatewayClass class says Isolated is True
+// for its current generation; false while it is unknown. A True left from an
+// older generation is a controller that stopped reconciling the class, or one
+// that no longer writes the condition.
+func (s *Snapshot) GatewaysIsolated(class string) bool {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.isolated.Rows[class]
+}
+
+func decodeIsolated(u *unstructured.Unstructured) (bool, bool) {
+	doc := decode[struct {
+		Status struct {
+			Conditions []conditionDoc `json:"conditions"`
+		} `json:"status"`
+	}](u)
+	return slices.ContainsFunc(doc.Status.Conditions, func(c conditionDoc) bool {
+		return c.Type == Isolated && c.Status == "True" && c.ObservedGeneration == u.GetGeneration()
+	}), true
 }
 
 func decodeGateway(u *unstructured.Unstructured) (model.GatewayInfo, bool) {

@@ -314,6 +314,11 @@ func TestSyncOperandRoles(t *testing.T) {
 		!slices.Equal(view.Rules[0].Verbs, []string{"get", "list", "watch"}) {
 		t.Errorf("%s = %+v, want EgressFirewall reads alone", tenancy.TenantEgressViewRole, view)
 	}
+	routes := roles[tenancy.TenantRoutesRole]
+	if routes == nil || len(routes.Rules) != 1 || !slices.Equal(routes.Rules[0].Resources, []string{"httproutes"}) ||
+		!slices.Equal(routes.Rules[0].APIGroups, []string{"gateway.networking.k8s.io"}) {
+		t.Errorf("%s = %+v, want HTTPRoute writes alone", tenancy.TenantRoutesRole, routes)
+	}
 	platformSync := roles[tenancy.PlatformSyncAccount]
 	if platformSync == nil {
 		t.Fatalf("no %s role", tenancy.PlatformSyncAccount)
@@ -323,7 +328,7 @@ func TestSyncOperandRoles(t *testing.T) {
 		if slices.Contains(rule.Verbs, "escalate") || slices.Contains(rule.Resources, "*") {
 			t.Errorf("%s grants %+v", tenancy.PlatformSyncAccount, rule)
 		}
-		if slices.Contains(rule.Verbs, "bind") {
+		if slices.Contains(rule.Verbs, "bind") && slices.Contains(rule.Resources, "clusterroles") {
 			bind = append(bind, rule.ResourceNames...)
 		}
 	}

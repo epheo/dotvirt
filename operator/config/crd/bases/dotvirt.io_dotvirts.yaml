@@ -273,6 +273,32 @@ spec:
                       cluster Thanos querier service).
                     type: string
                 type: object
+              publishing:
+                description: Publishing is off until Domain and GatewayClassName are
+                  set.
+                properties:
+                  clusterIssuer:
+                    description: |-
+                      ClusterIssuer is a cert-manager ClusterIssuer able to issue each
+                      project's wildcard (DNS-01). Empty: the Gateways serve HTTP only.
+                    type: string
+                  domain:
+                    description: |-
+                      Domain is the DNS zone each publishing project gets a subdomain of.
+                      The platform points each *.<project>.<domain> at that project's
+                      Gateway address; dotvirt writes no DNS.
+                    pattern: ^([a-z0-9]([-a-z0-9]*[a-z0-9])?\.)*[a-z0-9]([-a-z0-9]*[a-z0-9])?$
+                    type: string
+                  gatewayClassName:
+                    description: GatewayClassName is the GatewayClass of each project's
+                      Gateway.
+                    type: string
+                  portailNamespace:
+                    description: |-
+                      PortailNamespace holds portail's controller and its proxy Role, which a
+                      Gateway on a VM Network is bound to. Default portail-system.
+                    type: string
+                type: object
             type: object
           status:
             description: DotvirtStatus is the observed install state.

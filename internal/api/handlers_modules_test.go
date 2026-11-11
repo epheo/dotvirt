@@ -11,6 +11,7 @@ import (
 
 	"github.com/epheo/dotvirt/internal/model"
 	"github.com/epheo/dotvirt/internal/modules"
+	"github.com/epheo/dotvirt/internal/publish"
 )
 
 type servesVMsOnly struct{}
@@ -77,6 +78,34 @@ func TestModulesSayWhatTheClusterCanInstall(t *testing.T) {
 			got := decodeBody[model.Modules](t, do(s, adminToken, http.MethodGet, "/api/modules", ""))
 			if got.OLM != c.olm || got.MachineConfig != c.machCfgs {
 				t.Errorf("modules = %+v, want olm %v, machineConfig %v", got, c.olm, c.machCfgs)
+			}
+		})
+	}
+}
+
+// Publishing is offered under its domain only where the install names one and
+// the cluster serves what it stages: a Certificate too when there is an issuer.
+func TestModulesSayThePublishDomain(t *testing.T) {
+	on := publish.Settings{Domain: "apps.example.com", GatewayClass: "portail", Issuer: "letsencrypt"}
+	for _, c := range []struct {
+		name     string
+		settings publish.Settings
+		serves   []model.Kind
+		want     string
+	}{
+		{"off", publish.Settings{}, []model.Kind{model.KindGateway, model.KindCert}, ""},
+		{"no Gateway API", on, []model.Kind{model.KindCert}, ""},
+		{"no cert-manager", on, []model.Kind{model.KindGateway}, ""},
+		{"on", on, []model.Kind{model.KindGateway, model.KindCert}, "apps.example.com"},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			fc := newFakeCluster(t)
+			fc.serveKinds(c.serves...)
+			s := fc.server(nil, Config{Publish: c.settings})
+			s.modules = knownModules(t, true)
+			got := decodeBody[model.Modules](t, do(s, adminToken, http.MethodGet, "/api/modules", ""))
+			if got.PublishDomain != c.want {
+				t.Errorf("publishDomain = %q, want %q", got.PublishDomain, c.want)
 			}
 		})
 	}
