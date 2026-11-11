@@ -270,8 +270,13 @@ func (c *Coordinator) publishNamespacePlan(target project.ProjectInfo, pt Publis
 		return nil, err
 	}
 	name := tenancy.PublishNamespace(target.Name)
-	if pt.PublishNamespace {
+	switch {
+	case pt.PublishNamespace:
 		return nil, fmt.Errorf("%w: %s exists", model.ErrConflict, name)
+	case pt.PublishNameRequested:
+		return nil, fmt.Errorf("%w: %s", ErrPublishNameRequested, name)
+	case pt.PublishNameHeld:
+		return nil, fmt.Errorf("%w: %s", ErrPublishNameHeld, name)
 	}
 	if !slices.ContainsFunc(target.Namespaces, func(ns string) bool { return cmp.Or(pt.Networks[ns], DefaultNetwork) == DefaultNetwork }) {
 		return nil, fmt.Errorf("%w (%s)", ErrApart, name)

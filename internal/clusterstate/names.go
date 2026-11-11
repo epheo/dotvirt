@@ -35,6 +35,7 @@ type namespaceSink struct {
 	mu        sync.Mutex
 	names     map[string]struct{}
 	published map[string]string // project -> its publish namespace
+	requested map[string]bool   // names ending like a publish namespace's that a user requested
 	gen       uint64            // moves on every change of names
 	listed    bool
 	gone      map[string]time.Time // deleted namespaces not forgotten yet, by deletion time
@@ -49,7 +50,7 @@ const ForgetAfter = 15 * time.Minute
 
 func newNamespaceSink(project labels.Selector, projects cache.Indexer, forget func(string), synced func()) *namespaceSink {
 	return &namespaceSink{project: project, projects: projects, forget: forget, synced: synced, now: time.Now,
-		names: map[string]struct{}{}, published: map[string]string{}, gone: map[string]time.Time{}}
+		names: map[string]struct{}{}, published: map[string]string{}, requested: map[string]bool{}, gone: map[string]time.Time{}}
 }
 
 func (n *namespaceSink) selected(obj any) bool {
@@ -78,6 +79,28 @@ func (n *namespaceSink) setPublished(name, project string) {
 	}
 }
 
+// requestedName reports whether obj, named name, is a user's own project
+// holding a publish namespace's name.
+func requestedName(name string, obj any) bool {
+	m, err := apimeta.Accessor(obj)
+	if err != nil || !strings.HasSuffix(name, tenancy.PublishSuffix) {
+		return false
+	}
+	_, ok := m.GetAnnotations()[tenancy.RequesterAnnotation]
+	return ok
+}
+
+// publishNameHeld reports whether a namespace other than project's publish
+// namespace holds its name, and whether a user requested that one.
+func (n *namespaceSink) publishNameHeld(project string) (held, requested bool) {
+	name := tenancy.PublishNamespace(project)
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	_, exists := n.names[name]
+	held = exists && n.published[project] != name
+	return held, held && n.requested[name]
+}
+
 // publishNamespace is project's publish namespace, if the cluster holds it.
 func (n *namespaceSink) publishNamespace(project string) (string, bool) {
 	n.mu.Lock()
@@ -101,6 +124,11 @@ func (n *namespaceSink) put(obj any) error {
 	}
 	delete(n.gone, name)
 	n.setPublished(name, n.publishOf(name, obj))
+	if requestedName(name, obj) {
+		n.requested[name] = true
+	} else {
+		delete(n.requested, name)
+	}
 	n.mu.Unlock()
 	if n.selected(obj) {
 		return n.projects.Update(obj)
@@ -124,6 +152,7 @@ func (n *namespaceSink) Delete(obj any) error {
 	}
 	n.gone[name] = now
 	n.setPublished(name, "")
+	delete(n.requested, name)
 	due := n.sweep(now)
 	n.mu.Unlock()
 	n.forgetAll(due)
@@ -136,12 +165,16 @@ func (n *namespaceSink) Delete(obj any) error {
 func (n *namespaceSink) Replace(list []any, rv string) error {
 	next := make(map[string]struct{}, len(list))
 	published := map[string]string{}
+	requested := map[string]bool{}
 	var selected []any
 	for _, obj := range list {
 		if name, err := cache.MetaNamespaceKeyFunc(obj); err == nil {
 			next[name] = struct{}{}
 			if p := n.publishOf(name, obj); p != "" {
 				published[p] = name
+			}
+			if requestedName(name, obj) {
+				requested[name] = true
 			}
 		}
 		if n.selected(obj) {
@@ -160,6 +193,7 @@ func (n *namespaceSink) Replace(list []any, rv string) error {
 	}
 	n.names = next
 	n.published = published
+	n.requested = requested
 	n.gen++
 	first := !n.listed
 	n.listed = true
@@ -262,4 +296,14 @@ func (s *State) PublishNamespace(project string) (string, bool) {
 		return "", false
 	}
 	return s.names.publishNamespace(project)
+}
+
+// PublishNameHeld reports whether a namespace other than project's publish
+// namespace holds its name, and whether a user requested that one: either
+// way the publish namespace cannot be created until it goes.
+func (s *State) PublishNameHeld(project string) (held, requested bool) {
+	if s.names == nil {
+		return false, false
+	}
+	return s.names.publishNameHeld(project)
 }

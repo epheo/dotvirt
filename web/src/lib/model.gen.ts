@@ -226,6 +226,13 @@ export interface ProjectCaps {
    */
   publishingApart?: boolean;
   /**
+   * PublishNameHeld: another namespace holds the publish namespace's name,
+   * PublishNameRequested a user's own project: it must go before the
+   * publish namespace is created. Set with PublishingUnhoused.
+   */
+  publishNameHeld?: boolean;
+  publishNameRequested?: boolean;
+  /**
    * PublishNamespaceCreate stages the project's publish namespace, which
    * the cluster lacks: false where every namespace of the project has a VM
    * Network of its own, which it cannot join.

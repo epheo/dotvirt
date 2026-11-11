@@ -263,6 +263,7 @@ func (s *Server) publishTarget(p project.ProjectInfo) changeset.PublishTarget {
 			pt.PublishNamespace = true
 			namespaces = append(slices.Clone(namespaces), ns)
 		}
+		pt.PublishNameHeld, pt.PublishNameRequested = s.state.PublishNameHeld(p.Name)
 	}
 	for _, ns := range namespaces {
 		pt.Networks[ns] = changeset.DefaultNetwork

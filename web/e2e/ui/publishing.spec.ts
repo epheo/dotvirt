@@ -59,6 +59,16 @@ test.describe('publishing', () => {
 		await expect(page.getByText('team-db-publish staged in the platform draft.')).toBeVisible();
 	});
 
+	test('a publish namespace name a user holds says what to do, and offers no create', async ({
+		page,
+	}) => {
+		await setScenario(page, 'publishingheld');
+		await login(page);
+		await page.goto('/compute/team-db?tab=configure');
+		await expect(page.getByText(/A user's own project holds that name/)).toBeVisible();
+		await expect(page.getByRole('button', { name: 'Create team-db-publish' })).toHaveCount(0);
+	});
+
 	test('a project whose namespaces each run their own network is told so', async ({ page }) => {
 		await setScenario(page, 'publishingapart');
 		await login(page);

@@ -69,6 +69,12 @@ func seedPlatformRepo(t *testing.T, files map[string]string) string {
 // newCoordinatorRig is the coordinator over a platform repo holding the
 // DRS configuration, team-a-dev's admin grant, and extra.
 func newCoordinatorRig(t *testing.T, extra ...map[string]string) *gateRig {
+	return coordinatorRigWith(t, nil, extra...)
+}
+
+// coordinatorRigWith is newCoordinatorRig with setup run on the cluster
+// before the server starts.
+func coordinatorRigWith(t *testing.T, setup func(*gateRig), extra ...map[string]string) *gateRig {
 	g := newGrantCluster(t)
 	forgeSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodPost {
@@ -81,6 +87,9 @@ func newCoordinatorRig(t *testing.T, extra ...map[string]string) *gateRig {
 	t.Cleanup(forgeSrv.Close)
 	g.fc.namespaces[0].Annotations["dotvirt.io/repo"] = forgeSrv.URL + "/o/team-a.git"
 	g.fc.namespaces = append(g.fc.namespaces, corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "team-a-publish", Labels: map[string]string{tenancy.PublishLabel: "team-a"}}})
+	if setup != nil {
+		setup(g)
+	}
 	files := map[string]string{
 		"descheduler/kubedescheduler.yaml": "apiVersion: operator.openshift.io/v1\nkind: KubeDescheduler\nmetadata:\n  name: cluster\n  namespace: " + descheduler + "\nspec:\n  mode: Automatic\n",
 		// team-a-dev's admin grant: publishing grants route writes to its subjects.
@@ -379,6 +388,26 @@ func TestPublishingWaitsOnThePublishNamespace(t *testing.T) {
 	var view model.DraftView
 	if rec.Code != http.StatusOK || json.Unmarshal(rec.Body.Bytes(), &view) != nil || len(view.Items) != 1 || view.Items[0].Name != "orphans-publish" || !strings.Contains(view.Items[0].YAML, tenancy.PublishLabel+": orphans") {
 		t.Errorf("publish namespace = %d %q, want orphans-publish alone staged", rec.Code, rec.Body.String())
+	}
+}
+
+// A publish namespace's name held by a user's own project is told as such to
+// one who could create the namespace, and the action is refused: the name
+// must go first.
+func TestPublishNameHeldByAUsersProject(t *testing.T) {
+	g := coordinatorRigWith(t, func(g *gateRig) {
+		g.fc.namespaces = append(g.fc.namespaces, corev1.Namespace{ObjectMeta: metav1.ObjectMeta{
+			Name: "orphans-publish", Annotations: map[string]string{tenancy.RequesterAnnotation: "mallory"},
+		}})
+	})
+	creator := g.token([]grant{{verb: verbGet, resource: "namespaces"}, {verb: verbCreate, resource: "namespaces"},
+		kind(verbCreate, model.KindGateway, ""), kind(verbCreate, model.KindCert, "")})
+	_, nc := g.caps(creator, "orphans-ns")
+	if !nc.Project.PublishingUnhoused || !nc.Project.PublishNameHeld || !nc.Project.PublishNameRequested || nc.Project.PublishNamespaceCreate {
+		t.Errorf("caps %+v: want unhoused, the name held by a user's own project, no create", nc.Project)
+	}
+	if rec := do(g.s, creator, http.MethodPost, "/api/projects/orphans/publish-namespace", ""); rec.Code != http.StatusConflict {
+		t.Errorf("publish namespace = %d %q, want 409", rec.Code, rec.Body.String())
 	}
 }
 
