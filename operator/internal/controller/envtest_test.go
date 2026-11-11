@@ -310,6 +310,50 @@ func TestEnvtest(t *testing.T) {
 		}
 	})
 
+	t.Run("admission refuses branding the app refuses", func(t *testing.T) {
+		// The app's own checks (internal/branding) refuse each of these at
+		// startup: admission refusing them first keeps dotvirt from a
+		// crashloop.
+		link := func(label, url string) []dotvirtv1alpha1.BrandingLink {
+			return []dotvirtv1alpha1.BrandingLink{{Label: label, URL: url}}
+		}
+		six := make([]dotvirtv1alpha1.BrandingLink, 6)
+		for i := range six {
+			six[i] = dotvirtv1alpha1.BrandingLink{Label: "a", URL: "https://c.example"}
+		}
+		for name, b := range map[string]dotvirtv1alpha1.BrandingSpec{
+			"long name":           {ProductName: strings.Repeat("a", 41)},
+			"name newline":        {ProductName: "Uni\nwatt"},
+			"name C1":             {ProductName: "Uni\u0085watt"},
+			"six links":           {Links: six},
+			"empty label":         {Links: link("", "https://c.example")},
+			"long label":          {Links: link(strings.Repeat("a", 33), "https://c.example")},
+			"label control":       {Links: link("a\x7fb", "https://c.example")},
+			"http":                {Links: link("a", "http://c.example")},
+			"javascript":          {Links: link("a", "javascript:alert(1)")},
+			"credentials":         {Links: link("a", "https://u:p@c.example")},
+			"no host":             {Links: link("a", "https:///account")},
+			"space":               {Links: link("a", "https://c.example/a b")},
+			"bad escape":          {Links: link("a", "https://c.example/%zz")},
+			"control in url":      {Links: link("a", "https://c.example/a\x01b")},
+			"configmap uppercase": {ConfigMap: "Theme"},
+		} {
+			dv := testCR()
+			dv.Spec.Branding = b
+			if err := admin.Create(ctx, dv, client.DryRunAll); !apierrors.IsInvalid(err) {
+				t.Errorf("%s: got %v, want Invalid", name, err)
+			}
+		}
+		dv := testCR()
+		dv.Spec.Branding = dotvirtv1alpha1.BrandingSpec{
+			ProductName: "Uniwatt Cloud", ConfigMap: "uniwatt-theme",
+			Links: link("Billing", "https://c.example/billing?tab=open#due"),
+		}
+		if err := admin.Create(ctx, dv, client.DryRunAll); client.IgnoreAlreadyExists(err) != nil {
+			t.Errorf("a provider's branding: %v", err)
+		}
+	})
+
 	t.Run("admission refuses allowed tenant kinds without sync impersonation", func(t *testing.T) {
 		off, on := false, true
 		deploy := []dotvirtv1alpha1.GroupKind{{Group: "apps", Kind: "Deployment"}}

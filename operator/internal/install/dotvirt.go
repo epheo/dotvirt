@@ -1,6 +1,7 @@
 package install
 
 import (
+	"encoding/json"
 	"fmt"
 	"net"
 	"net/url"
@@ -166,6 +167,7 @@ func svcURL(name, namespace string, port int32) string {
 // holds the per-project sync accounts the app's project grants name.
 func dotvirtEnv(dv *dotvirtv1alpha1.Dotvirt, argoNS string, tenantAllowed []tenancy.GroupKind) []corev1.EnvVar {
 	env := []corev1.EnvVar{{Name: "DOTVIRT_ARGO_NAMESPACE", Value: argoNS}}
+	env = append(env, brandingEnv(dv.Spec.Branding)...)
 	// What tenant repos may apply beyond the listed kinds, as the AppProjects
 	// say it (TenantAllowed).
 	if len(tenantAllowed) > 0 {
@@ -281,6 +283,25 @@ func dotvirtArgs(dv *dotvirtv1alpha1.Dotvirt) []string {
 	return args
 }
 
+// brandingMountPath holds the branding ConfigMap's files.
+const brandingMountPath = "/etc/dotvirt/branding"
+
+// brandingEnv passes spec.branding to the app; none unset.
+func brandingEnv(b dotvirtv1alpha1.BrandingSpec) []corev1.EnvVar {
+	var env []corev1.EnvVar
+	if b.ProductName != "" {
+		env = append(env, corev1.EnvVar{Name: "DOTVIRT_PRODUCT_NAME", Value: b.ProductName})
+	}
+	if len(b.Links) > 0 {
+		links, _ := json.Marshal(b.Links)
+		env = append(env, corev1.EnvVar{Name: "DOTVIRT_MASTHEAD_LINKS", Value: string(links)})
+	}
+	if b.ConfigMap != "" {
+		env = append(env, corev1.EnvVar{Name: "DOTVIRT_BRANDING_DIR", Value: brandingMountPath})
+	}
+	return env
+}
+
 // dotvirtVolumes: the drafts PVC, the trust anchors, and (forge-configured) the
 // mounted forge token. Trust-anchor mounts are always rendered and OPTIONAL:
 // absent ConfigMaps (vanilla, or copy/injection lag) must never block the pod.
@@ -305,6 +326,17 @@ func dotvirtVolumes(dv *dotvirtv1alpha1.Dotvirt) ([]corev1.VolumeMount, []corev1
 			LocalObjectReference: corev1.LocalObjectReference{Name: ServiceCAConfigMap}, Optional: &caOptional,
 		}},
 	}}
+	if cm := dv.Spec.Branding.ConfigMap; cm != "" {
+		// Optional: a missing ConfigMap leaves the console dotvirt's own.
+		optional := true
+		volumeMounts = append(volumeMounts, corev1.VolumeMount{Name: "branding", MountPath: brandingMountPath, ReadOnly: true})
+		volumes = append(volumes, corev1.Volume{
+			Name: "branding",
+			VolumeSource: corev1.VolumeSource{ConfigMap: &corev1.ConfigMapVolumeSource{
+				LocalObjectReference: corev1.LocalObjectReference{Name: cm}, Optional: &optional,
+			}},
+		})
+	}
 	if ForgeConfigured(dv) {
 		volumeMounts = append(volumeMounts, corev1.VolumeMount{Name: "forge-token", MountPath: "/var/run/dotvirt/forge", ReadOnly: true})
 		volumes = append(volumes, corev1.Volume{

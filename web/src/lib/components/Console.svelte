@@ -1,6 +1,7 @@
 <script lang="ts">
 	import type RFB from '@novnc/novnc';
 	import { api, Unauthorized, type VM } from '#lib/api.js';
+	import { branding } from '#lib/state/branding.svelte.js';
 	import StatusDot from './StatusDot.svelte';
 
 	let { vm }: { vm: VM } = $props();
@@ -58,7 +59,7 @@
 				rfb.addEventListener('connect', () => (status = 'connected'));
 				rfb.addEventListener('disconnect', (e: Event) => {
 					status = 'disconnected';
-					if (ended) detail = 'Your dotvirt session ended';
+					if (ended) detail = `Your ${branding.name} session ended`;
 					else detail = (e as CustomEvent).detail?.clean ? 'Session ended' : 'Connection lost';
 				});
 				rfb.addEventListener('securityfailure', (e: Event) => {

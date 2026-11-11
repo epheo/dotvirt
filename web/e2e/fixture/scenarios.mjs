@@ -2083,6 +2083,24 @@ const projectnetwork = {
 	name: 'projectnetwork',
 	capabilities: { 'web-prod': { project: { newNamespace: true, projectNetwork: true } } },
 };
+// A provider's dress: its name, logo, stylesheet and links back to its app.
+const branded = {
+	...base,
+	name: 'branded',
+	branding: {
+		info: {
+			productName: 'Uniwatt Cloud',
+			theme: true,
+			logo: true,
+			links: [
+				{ label: 'Account', url: 'https://c.example/account' },
+				{ label: 'Billing', url: 'https://c.example/billing' },
+			],
+		},
+		theme: ':root { --branded-marker: 1; }',
+		logo: '<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24"/>',
+	},
+};
 // Each of team-db's namespaces has a VM Network of its own: not offered.
 const publishingapart = {
 	...publishing,
@@ -2097,6 +2115,7 @@ export const scenarios = {
 	publishingheld,
 	publishingapart,
 	projectnetwork,
+	branded,
 	fronted,
 	frontedtenant,
 	replicated,

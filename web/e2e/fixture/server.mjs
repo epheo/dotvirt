@@ -384,6 +384,17 @@ async function handleAPI(req, res, url) {
 
 	if (path === '/api/healthz') return sendJSON(res, 200, { status: 'ok' });
 
+	// A provider's branding, read before sign-in.
+	if (path === '/api/branding') return sendJSON(res, 200, s.branding?.info ?? {});
+	if (path === '/api/branding/theme.css' && s.branding?.theme) {
+		res.writeHead(200, { 'Content-Type': 'text/css; charset=utf-8' });
+		return res.end(s.branding.theme);
+	}
+	if (path === '/api/branding/logo' && s.branding?.logo) {
+		res.writeHead(200, { 'Content-Type': 'image/svg+xml' });
+		return res.end(s.branding.logo);
+	}
+
 	if (path === '/api/login' && req.method === 'POST') {
 		if (state.loginStatus) {
 			const st = state.loginStatus;

@@ -340,6 +340,15 @@ func TestMiddlewareInjectsIdentity(t *testing.T) {
 	if rec.Code == http.StatusUnauthorized {
 		t.Error("health endpoint should bypass auth")
 	}
+	// The branding the login screen wears is read before any session; a path
+	// beneath it that serves nothing is not open.
+	for path, open := range map[string]bool{"/api/branding": true, "/api/branding/theme.css": true, "/api/branding/logo": true, "/api/branding/other": false} {
+		rec = httptest.NewRecorder()
+		h.ServeHTTP(rec, httptest.NewRequest("GET", path, nil))
+		if (rec.Code != http.StatusUnauthorized) != open {
+			t.Errorf("%s without a session: %d, want open %v", path, rec.Code, open)
+		}
+	}
 
 	// Rejected token -> 401 (definitive).
 	req = httptest.NewRequest("GET", "/api/inventory", nil)

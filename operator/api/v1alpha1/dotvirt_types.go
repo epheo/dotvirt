@@ -248,6 +248,44 @@ type DotvirtSpec struct {
 	Auth    AuthSpec    `json:"auth,omitempty"`
 	// Publishing is off until Domain and GatewayClassName are set.
 	Publishing PublishingSpec `json:"publishing,omitempty"`
+	// Branding dresses the console as a provider's; unset, it is dotvirt's own.
+	Branding BrandingSpec `json:"branding,omitempty"`
+}
+
+// BrandingSpec is a provider's dress for the console.
+type BrandingSpec struct {
+	// ProductName replaces dotvirt in the masthead, the page title and the
+	// sign-in screen.
+	// +kubebuilder:validation:MaxLength=40
+	// +kubebuilder:validation:Pattern=`^[^\x00-\x1f\x7f-\x9f]*$`
+	// +optional
+	ProductName string `json:"productName,omitempty"`
+	// ConfigMap names a ConfigMap in dotvirt's namespace holding theme.css,
+	// loaded after the console's own stylesheet so it may override its
+	// tokens, and logo.svg or logo.png. dotvirt serves them itself, each up to
+	// 256 KiB: the console never loads a remote URL. An edit shows on the next
+	// page load.
+	// +kubebuilder:validation:MaxLength=253
+	// +kubebuilder:validation:Pattern=`^[a-z0-9]([-a-z0-9.]*[a-z0-9])?$`
+	// +optional
+	ConfigMap string `json:"configMap,omitempty"`
+	// Links lead back to the provider's own app from the masthead.
+	// +kubebuilder:validation:MaxItems=5
+	// +listType=atomic
+	// +optional
+	Links []BrandingLink `json:"links,omitempty"`
+}
+
+// BrandingLink is one masthead link.
+type BrandingLink struct {
+	// Label is the link's text.
+	// +kubebuilder:validation:MinLength=1
+	// +kubebuilder:validation:MaxLength=32
+	// +kubebuilder:validation:Pattern=`^[^\x00-\x1f\x7f-\x9f]*$`
+	Label string `json:"label"`
+	// URL is an https URL with a host and no credentials.
+	// +kubebuilder:validation:Pattern=`^https://[A-Za-z0-9]([-A-Za-z0-9.]*[A-Za-z0-9])?(:[0-9]{1,5})?([/?#]([^%@\s\x00-\x1f\x7f]|%[0-9A-Fa-f]{2})*)?$`
+	URL string `json:"url"`
 }
 
 // DotvirtStatus is the observed install state.

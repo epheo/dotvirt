@@ -636,6 +636,41 @@ func TestDeploymentCarriesPublishing(t *testing.T) {
 	}
 }
 
+// A provider's branding reaches dotvirt only when set; its ConfigMap mounts
+// optional, so a missing one leaves the console dotvirt's own.
+func TestDeploymentCarriesTheBranding(t *testing.T) {
+	dv := testDotvirt()
+	pod := func() corev1.PodSpec { return Deployment(dv, "argocd", nil).Spec.Template.Spec }
+	for _, name := range []string{"DOTVIRT_PRODUCT_NAME", "DOTVIRT_MASTHEAD_LINKS", "DOTVIRT_BRANDING_DIR"} {
+		if v, ok := envValue(pod().Containers[0].Env, name); ok {
+			t.Errorf("unset branding: %s = %q", name, v)
+		}
+	}
+	dv.Spec.Branding = dotvirtv1alpha1.BrandingSpec{
+		ProductName: "Uniwatt Cloud", ConfigMap: "uniwatt-theme",
+		Links: []dotvirtv1alpha1.BrandingLink{{Label: "Account", URL: "https://c.example/account"}},
+	}
+	env := pod().Containers[0].Env
+	if v, _ := envValue(env, "DOTVIRT_PRODUCT_NAME"); v != "Uniwatt Cloud" {
+		t.Errorf("product name = %q", v)
+	}
+	if v, _ := envValue(env, "DOTVIRT_MASTHEAD_LINKS"); v != `[{"label":"Account","url":"https://c.example/account"}]` {
+		t.Errorf("links = %q", v)
+	}
+	if v, _ := envValue(env, "DOTVIRT_BRANDING_DIR"); v != brandingMountPath {
+		t.Errorf("branding dir = %q", v)
+	}
+	var mounted bool
+	for _, vol := range pod().Volumes {
+		if cm := vol.ConfigMap; vol.Name == "branding" && cm != nil && cm.Name == "uniwatt-theme" && cm.Optional != nil && *cm.Optional {
+			mounted = true
+		}
+	}
+	if !mounted {
+		t.Error("the branding ConfigMap is not mounted optional")
+	}
+}
+
 // The forge's web base reaches dotvirt only when set: unset, links keep the
 // forge's URL.
 func TestDeploymentCarriesTheForgeWebURL(t *testing.T) {

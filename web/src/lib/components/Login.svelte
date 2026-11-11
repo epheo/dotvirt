@@ -2,6 +2,7 @@
 	import { page } from '$app/state';
 	import { api, Unauthorized, type User } from '#lib/api.js';
 	import { action } from '#lib/resource.svelte.js';
+	import { branding } from '#lib/state/branding.svelte.js';
 	import { authMethods } from '#lib/state/session.svelte.js';
 	import Button from './Button.svelte';
 
@@ -32,7 +33,7 @@
 				throw new Error(
 					e instanceof Unauthorized
 						? 'That token was rejected. Check it and try again.'
-						: 'dotvirt could not verify the token: the dotvirt server or the cluster is unreachable. Try again shortly.',
+						: `${branding.name} could not verify the token: its server or the cluster is unreachable. Try again shortly.`,
 					{ cause: e },
 				);
 			}
@@ -45,9 +46,12 @@
 		onsubmit={submit}
 		class="w-full max-w-md rounded-lg border border-line bg-panel p-6 shadow-sm"
 	>
-		<h1 class="mb-1 text-xl font-semibold text-ink">Sign in to dotvirt</h1>
+		{#if branding.value?.logo}
+			<img src="/api/branding/logo" alt="" class="mb-3 h-8 w-auto" />
+		{/if}
+		<h1 class="mb-1 text-xl font-semibold text-ink">Sign in to {branding.name}</h1>
 		<p class="mb-4 text-sm text-ink-muted">
-			dotvirt acts as you — you see only the projects your cluster permissions allow.
+			{branding.name} acts as you — you see only the projects your cluster permissions allow.
 		</p>
 
 		{#if ssoError}

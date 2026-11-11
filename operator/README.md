@@ -588,6 +588,21 @@ Set `spec.forge.webURL` when browsers must open the forge elsewhere:
 dotvirt's API and git calls still go to `spec.forge.url`.
 Unset, links start with `spec.forge.url`.
 
+## Branding
+
+`spec.branding` dresses the console as a provider's; unset, it is dotvirt's own.
+
+- `productName`: shown in place of dotvirt in the masthead, the page titles, the sign-in screen and the session messages. Help text elsewhere still names dotvirt. At most 40 characters, no control characters.
+- `links`: up to 5 masthead links back to your own app (account, billing). Each a text `label` of at most 32 characters and an `https` `url` with a host and no credentials. They open in a new tab.
+- `configMap`: a ConfigMap in dotvirt's namespace holding:
+  - `theme.css`, loaded after the console's own stylesheet, so it may override its tokens (`--color-accent`, surfaces, ink, `--font-sans`);
+  - `logo.svg` or `logo.png`, shown beside the product name.
+
+dotvirt serves these files itself, each up to 256 KiB, from the same origin: the console's content-security policy stays as it is, so a stylesheet that loads a remote font or image is refused. Embed fonts as `data:` URLs instead.
+An SVG logo opened on its own runs sandboxed, with nothing to load.
+The ConfigMap is mounted optional: missing, the console keeps dotvirt's look. An edit shows on the next page load.
+The sign-in screen reads the branding before any session, so it holds nothing private.
+
 ## Who opens pull requests
 
 By default dotvirt opens each proposal's pull request with its forge account.
