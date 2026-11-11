@@ -684,9 +684,9 @@ func TestAdminPoliciesMayNotBindAVMNetwork(t *testing.T) {
 }
 
 // A VM's Multus default binding decides its chain: to a NAD a Primary-role
-// network generated, it is on that VM Network, admin rules conditional; to a
-// NAD nothing read generated, it is off the cluster network. The namespace's
-// own chain stays certain.
+// network generated, it is on that VM Network, admin rules conditional; to
+// any other NAD, one a primary UDN owns under another name among them, it is
+// off the cluster network. The namespace's own chain stays certain.
 func TestEffectiveReadsAWorkloadsDefaultBinding(t *testing.T) {
 	s := New(nil, nil)
 	anp(t, s, "deny-all", 1, map[string]any{"action": "Deny", "to": []any{map[string]any{"namespaces": map[string]any{}}}})
@@ -705,8 +705,11 @@ func TestEffectiveReadsAWorkloadsDefaultBinding(t *testing.T) {
 	if b := admin(s.Effective("team-a", labels, pod, true, false, "team-a/net-a")); !b.Conditional || !strings.Contains(b.Note, "VM Network") {
 		t.Errorf("a VM bound to its VM Network: conditional %v, note %q", b.Conditional, b.Note)
 	}
-	if b := admin(s.Effective("team-a", labels, pod, true, false, "team-a/bridge")); !b.Conditional || !strings.Contains(b.Note, "no cluster network attachment") {
-		t.Errorf("a VM bound to an unread NAD: conditional %v, note %q", b.Conditional, b.Note)
+	add(t, s.nad, ownedNAD("team-a", "alias", "UserDefinedNetwork", "net-a", "team-a/net-a", ""))
+	for _, ref := range []string{"team-a/bridge", "team-a/alias"} {
+		if b := admin(s.Effective("team-a", labels, pod, true, false, ref)); !b.Conditional || !strings.Contains(b.Note, "no cluster network attachment") {
+			t.Errorf("a VM bound to %s, which OVN-K did not generate for a primary network: conditional %v, note %q", ref, b.Conditional, b.Note)
+		}
 	}
 	b := admin(s.Effective("team-b", map[string]string{"kubernetes.io/metadata.name": "team-b"}, pod, true, true, ""))
 	if b.Conditional {
@@ -754,9 +757,11 @@ func TestEffectiveOffTheClusterNetwork(t *testing.T) {
 			"ownerReferences": []any{map[string]any{"apiVersion": "k8s.ovn.org/v1", "kind": "ClusterUserDefinedNetwork", "name": "side", "uid": "s"}},
 		},
 	})
+	primaryUDN(t, s, "team-a", "side-udn", map[string]any{"topology": "Layer2", "layer2": map[string]any{"role": "Secondary"}})
 	labels := map[string]string{"kubernetes.io/metadata.name": "team-a"}
 	pod := map[string]string{"app": "vm"}
 	for name, eff := range map[string]model.EffectivePolicy{
+		"a secondary UDN's default binding":     s.Effective("team-a", labels, pod, true, false, "team-a/side-udn"),
 		"VLAN only":                             s.Effective("team-a", labels, pod, true, false, ""),
 		"a localnet default binding":            s.Effective("team-a", labels, pod, true, false, "team-a/vlan42"),
 		"a raw NAD's default binding":           s.Effective("team-a", labels, pod, true, false, "team-a/bridge"),

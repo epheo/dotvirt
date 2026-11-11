@@ -519,6 +519,12 @@ func TestTraceDefaultMultusSegment(t *testing.T) {
 	}
 	maybe("a secondary network's default binding on each side",
 		bound("team-a", "web", "team-a/shared-vlan"), bound("team-b", "db", "team-b/shared-vlan"), "shared-vlan")
+	primaryUDN(t, s, "team-a", "side-udn", map[string]any{"topology": "Layer2", "layer2": map[string]any{"role": "Secondary"}})
+	maybe("a secondary UDN's default binding against the cluster network",
+		bound("team-a", "web", "team-a/side-udn"), wl("team-b", "db", nil, nil), "side-udn")
+	add(t, s.nad, ownedNAD("tenant-a", "alias", "UserDefinedNetwork", "net-a", "tenant-a/net-a", ""))
+	maybe("a NAD its primary UDN owns under another name, against that UDN",
+		bound("tenant-a", "a1", "tenant-a/alias"), wl("tenant-a", "a2", nil, nil), "net-a")
 	maybe("an unread NAD's default binding against the cluster network",
 		bound("team-a", "web", "team-a/vlan-x"), wl("team-b", "db", nil, nil), "team-a/vlan-x")
 	maybe("the cluster network against a localnet default binding",
