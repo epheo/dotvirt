@@ -180,7 +180,7 @@ func Load(args []string) (*Config, error) {
 	fs.StringVar(&c.DraftDir, "draft-dir", envOr("DOTVIRT_DRAFT_DIR", "./.dotvirt-drafts"), "root dir for persisted drafts (<dir>/<user>/<project>.json)")
 	fs.StringVar(&c.ForgeURL, "forge-url", os.Getenv("DOTVIRT_FORGE_URL"), "Forgejo base URL (empty = push-only, no PR, anonymous git)")
 	fs.StringVar(&c.ForgeWebURL, "forge-web-url", os.Getenv("DOTVIRT_FORGE_WEB_URL"), "base URL browsers open forge pages at, when not -forge-url (empty = -forge-url)")
-	fs.StringVar(&c.ProductName, "product-name", os.Getenv("DOTVIRT_PRODUCT_NAME"), "product name the console shows in place of dotvirt (empty = dotvirt)")
+	fs.StringVar(&c.ProductName, "product-name", os.Getenv("DOTVIRT_PRODUCT_NAME"), "product name shown in place of dotvirt, in the console and the forge (empty = dotvirt)")
 	links := fs.String("masthead-links", os.Getenv("DOTVIRT_MASTHEAD_LINKS"), `masthead links back to a provider's app, JSON [{"label":..,"url":"https://.."}] (empty = none)`)
 	fs.StringVar(&c.BrandingDir, "branding-dir", os.Getenv("DOTVIRT_BRANDING_DIR"), "directory holding theme.css and logo.svg or logo.png, served same-origin (empty = none)")
 	fs.StringVar(&c.ForgeToken, "forge-token", os.Getenv("DOTVIRT_FORGE_TOKEN"), "Forgejo API token (git https + API)")
