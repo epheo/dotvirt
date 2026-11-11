@@ -282,6 +282,14 @@ func TestProjectNetworkRefusals(t *testing.T) {
 	if _, err := c.ProjectNeeds(plat, json.RawMessage(`{"name":"shop","projectNetwork":{"name":"shared","subnet":"10.40.0.0/16"}}`)); !errors.Is(err, model.ErrConflict) {
 		t.Errorf("a declared network's name: %v, want ErrConflict", err)
 	}
+	_, earlier, err := netgen.ProjectNetworkManifest("shop", netgen.PrimaryNet{Name: "shop-old", Subnet: "10.8.0.0/16"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	e, eplat := publishingCoordinator(t, map[string][]byte{"networks/shop-old.yaml": earlier})
+	if _, err := e.ProjectNeeds(eplat, json.RawMessage(`{"name":"shop","projectNetwork":{"name":"shop-net","subnet":"10.40.0.0/16"}}`)); !errors.Is(err, model.ErrConflict) {
+		t.Errorf("git already declares a network for shop's namespaces: %v, want ErrConflict", err)
+	}
 	both := `{"name":"shop","vmNetwork":{"name":"a","subnet":"10.1.0.0/24"},"projectNetwork":{"name":"b","subnet":"10.2.0.0/24"}}`
 	if _, err := c.ProjectNeeds(plat, json.RawMessage(both)); !errors.Is(err, model.ErrInvalid) {
 		t.Errorf("both networks: %v, want ErrInvalid", err)
@@ -293,7 +301,8 @@ func TestProjectNetworkRefusals(t *testing.T) {
 }
 
 // A project on its own VM Network gets a publish namespace on that network,
-// though none of its namespaces is on the cluster's own.
+// though none of its namespaces is on the cluster's own; never while
+// namespaces outside the project share that network.
 func TestPublishNamespaceJoinsTheProjectNetwork(t *testing.T) {
 	c, plat := publishingCoordinator(t, nil)
 	vpc := project.ProjectInfo{Name: "vpc", Namespaces: []string{"x"}}
@@ -303,5 +312,9 @@ func TestPublishNamespaceJoinsTheProjectNetwork(t *testing.T) {
 	}
 	if y := stagedYAML(t, view)["vpc-publish"]; !strings.Contains(y, tenancy.NetworkLabel+": vpc") || !strings.Contains(y, "k8s.ovn.org/primary-user-defined-network") {
 		t.Errorf("publish namespace not on the project network:\n%s", y)
+	}
+	shared := PublishTarget{ProjectNetwork: true, NetworkResidue: true}
+	if _, err := c.PublishNamespaceNeeds(plat, vpc, shared); !errors.Is(err, model.ErrConflict) {
+		t.Errorf("namespaces outside vpc on its network: %v, want ErrConflict", err)
 	}
 }

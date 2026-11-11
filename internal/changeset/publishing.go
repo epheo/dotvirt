@@ -25,7 +25,9 @@ type PublishTarget struct {
 	PublishNameHeld, PublishNameRequested bool
 	// ProjectNetwork: the project has a VM Network its namespaces join
 	// (tenancy.NetworkLabel), which a new publish namespace joins too.
-	ProjectNetwork bool
+	// NetworkResidue: namespaces outside the project, a release's, are on
+	// that network too.
+	ProjectNetwork, NetworkResidue bool
 	// Networks is each namespace's primary network, the publish namespace's
 	// among them, "default" for the cluster's own: namespaces sharing one
 	// reach each other's Services.

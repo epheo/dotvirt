@@ -221,7 +221,10 @@ its first namespace, its publish namespace, and each namespace that joins it fro
 Namespace, all labeled at creation, since OVN takes a primary network only then. Only
 the platform writes namespace labels, so no tenant moves a namespace between
 networks. dotvirt reads a namespace's network from the cluster, never from that
-label, and the label key is the selector a provider's own onboarding may use too.
+label alone, and the label key is the selector a provider's own onboarding may use
+too. A released namespace keeps its label, so its VMs keep their network: it never
+joins another project, and a new project by the released one's name cannot make a
+VM Network while such namespaces, or a network selecting them, remain.
 
 A namespace with a VM Network of its own is not reached; a customer who wants a
 gateway there runs their own, which is outside dotvirt for now (Gateway stays a

@@ -50,6 +50,15 @@ type LiveNamespace struct {
 	Annotations map[string]string
 }
 
+// networkOf is the project whose VM Network l's namespace is on, by its
+// label; "" for none or no namespace.
+func (l *LiveNamespace) networkOf() string {
+	if l == nil {
+		return ""
+	}
+	return l.Labels[tenancy.NetworkLabel]
+}
+
 // PrimaryNet is the namespace's default "VM Network" - a primary Layer2 UDN. It's
 // always Layer2 on purpose: a flat L2 network follows a VM across nodes on live
 // migration (the VM keeps its IP), whereas Layer3's per-node subnets don't suit
@@ -106,6 +115,11 @@ func NamespaceManifest(s NamespaceSpec) (path string, content []byte, err error)
 	}
 	if s.Live != nil && s.Live.Labels[tenancy.PublishLabel] != "" {
 		return "", nil, fmt.Errorf("namespace %q is a publish namespace and joins no project", s.Name)
+	}
+	// Its labels are kept beneath the tenancy keys, so another project's
+	// network label would leave it on that project's VM Network.
+	if net := s.Live.networkOf(); net != "" && net != s.Project {
+		return "", nil, fmt.Errorf("namespace %q is on project %s's VM Network, and a namespace's network is fixed at creation", s.Name, net)
 	}
 	labels, annotations := map[string]any{}, map[string]any{}
 	if s.Live != nil {

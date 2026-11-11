@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"net/http"
 	"slices"
+	"strings"
 
 	"github.com/epheo/dotvirt/internal/changeset"
 	"github.com/epheo/dotvirt/internal/model"
@@ -162,6 +163,12 @@ func (s *Server) handleCreateProject(w http.ResponseWriter, r *http.Request) {
 			fail(w, fmt.Errorf("%w: a network named %s exists", model.ErrConflict, p.ProjectNetwork.Name))
 			return
 		}
+		// A released project leaves its network and namespaces labeled for
+		// its name: a new one by that name would share them.
+		if left := s.networkResidue(p.Name, nil); len(left) > 0 {
+			fail(w, fmt.Errorf("%w: an earlier project named %s left %s on its VM Network: remove them first", model.ErrConflict, p.Name, strings.Join(left, ", ")))
+			return
+		}
 	}
 	plat, ok := s.platformScopeGated(w, r)
 	if !ok {
@@ -280,6 +287,7 @@ func (s *Server) publishTarget(p project.ProjectInfo) changeset.PublishTarget {
 		Isolated:      s.gateways != nil && s.gateways.GatewaysIsolated(s.cfg.Publish.GatewayClass),
 	}
 	pt.ProjectNetwork = s.projectNetwork(p)
+	pt.NetworkResidue = len(s.networkResidue(p.Name, p.Namespaces)) > 0
 	namespaces := p.Namespaces
 	if s.state != nil {
 		if ns, ok := s.state.PublishNamespace(p.Name); ok {
@@ -341,12 +349,33 @@ func (s *Server) handleReleaseProject(w http.ResponseWriter, r *http.Request) {
 
 // projectNetwork reports whether p has a VM Network its new namespaces may
 // join: one of its namespaces carries tenancy.NetworkLabel for it, which only
-// the platform writes, and only when it creates the namespace on it.
+// the platform writes, and only when it creates the namespace on it, and the
+// cluster has that namespace on a cluster-wide network.
 func (s *Server) projectNetwork(p project.ProjectInfo) bool {
-	if s.state == nil {
+	if s.state == nil || s.netstate == nil {
 		return false
 	}
 	return slices.ContainsFunc(p.Namespaces, func(ns string) bool {
-		return s.state.NamespaceLabels(ns)[tenancy.NetworkLabel] == p.Name
+		return s.state.NamespaceLabels(ns)[tenancy.NetworkLabel] == p.Name && strings.HasPrefix(s.netstate.PrimaryNetwork(ns), "cudn:")
 	})
+}
+
+// networkResidue is what a project by name left on its VM Network outside
+// own and its publish namespace: namespaces still labeled for it, and live
+// networks selecting them when none of own is.
+func (s *Server) networkResidue(name string, own []string) []string {
+	var left []string
+	if s.state != nil {
+		for _, ns := range s.state.NetworkMembers(name) {
+			if !slices.Contains(own, ns) && ns != tenancy.PublishNamespace(name) {
+				left = append(left, "namespace "+ns)
+			}
+		}
+	}
+	if s.netstate != nil && len(own) == 0 {
+		for _, n := range s.netstate.NetworksSelecting(name) {
+			left = append(left, "network "+n)
+		}
+	}
+	return left
 }

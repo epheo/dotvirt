@@ -215,7 +215,39 @@ func (c *Coordinator) projectEntries(commitProj project.ProjectInfo, spec Projec
 	if network.Kind == draft.KindEdit {
 		return nil, "", fmt.Errorf("%w: the platform repo declares a network named %s", model.ErrConflict, spec.ProjectNetwork.Name)
 	}
+	if other, err := c.declaredNetworkFor(commitProj, spec.Name); err != nil {
+		return nil, "", err
+	} else if other != "" {
+		return nil, "", fmt.Errorf("%w: the platform repo's network %s already spans namespaces labeled for %s, an earlier project's: remove it first", model.ErrConflict, other, spec.Name)
+	}
 	return append(entries, network), repoURL, nil
+}
+
+// declaredNetworkFor names a ClusterUserDefinedNetwork commitProj declares
+// that selects project's VM Network namespaces, "" for none: a second one
+// would put the new project's namespaces on two primary networks.
+func (c *Coordinator) declaredNetworkFor(commitProj project.ProjectInfo, project string) (string, error) {
+	read, err := c.read(commitProj)
+	if err != nil {
+		return "", err
+	}
+	idx, err := indexDeclared(read, c.baseBranch)
+	if err != nil {
+		return "", err
+	}
+	for ref, path := range idx.Files {
+		if ref.Kind != model.KindCUDN.Kind {
+			continue
+		}
+		content, err := read.FileOnBranch(c.baseBranch, path)
+		if err != nil {
+			return "", err
+		}
+		if netgen.DeclaredNetworkSelects(content, project) {
+			return ref.Name, nil
+		}
+	}
+	return "", nil
 }
 
 // publishNamespaceEntries stages spec's publish namespace with the project,
@@ -296,6 +328,8 @@ func (c *Coordinator) publishNamespacePlan(target project.ProjectInfo, pt Publis
 		return nil, fmt.Errorf("%w: %s", ErrPublishNameRequested, name)
 	case pt.PublishNameHeld:
 		return nil, fmt.Errorf("%w: %s", ErrPublishNameHeld, name)
+	case pt.ProjectNetwork && pt.NetworkResidue:
+		return nil, fmt.Errorf("%w: namespaces outside %s are on its VM Network, which %s would join: remove them from it first", model.ErrConflict, target.Name, name)
 	}
 	if !pt.ProjectNetwork && !slices.ContainsFunc(target.Namespaces, func(ns string) bool { return cmp.Or(pt.Networks[ns], DefaultNetwork) == DefaultNetwork }) {
 		return nil, fmt.Errorf("%w (%s)", ErrApart, name)

@@ -431,9 +431,14 @@ func TestJoiningTheProjectNetwork(t *testing.T) {
 		t.Errorf("a new project naming the live vpc network = %d %q, want 409", rec.Code, rec.Body.String())
 	}
 
-	h := coordinatorRigWith(t, func(g *gateRig) {
-		g.fc.namespaces[0].Labels[tenancy.NetworkLabel] = "team-a"
-	})
+	labeled := func(g *gateRig) { g.fc.namespaces[0].Labels[tenancy.NetworkLabel] = "team-a" }
+	// The label alone, the cluster holding team-a-dev on no network of
+	// team-a's: nothing to join.
+	bare := onVPCWith(t, labeled, "team-a-publish")
+	if _, nc := bare.caps(publisher(bare), "team-a-dev"); nc.Project.ProjectNetwork {
+		t.Error("team-a told it has a VM Network the cluster does not hold")
+	}
+	h := onVPCWith(t, labeled, "team-a-dev")
 	tok = publisher(h)
 	if _, nc := h.caps(tok, "team-a-dev"); !nc.Project.ProjectNetwork {
 		t.Error("team-a not told it has a VM Network to join")
@@ -450,11 +455,37 @@ func TestJoiningTheProjectNetwork(t *testing.T) {
 	}
 }
 
-// onVPC is the coordinator rig with a primary CUDN, vpc, generated in each
-// of namespaces, its netstate synced.
+// A new project never inherits what a released one by its name left on its
+// VM Network: a namespace still labeled for it, or a live network selecting
+// such namespaces.
+func TestNewProjectNetworkRefusesResidue(t *testing.T) {
+	g := coordinatorRigWith(t, func(g *gateRig) {
+		g.fc.namespaces = append(g.fc.namespaces, corev1.Namespace{ObjectMeta: metav1.ObjectMeta{
+			Name: "old", Labels: map[string]string{tenancy.NetworkLabel: "team-z"},
+		}})
+	})
+	rec := do(g.s, publisher(g), http.MethodPost, "/api/projects", `{"name":"team-z","projectNetwork":{"name":"team-z-net","subnet":"10.9.0.0/16"}}`)
+	if rec.Code != http.StatusConflict || !strings.Contains(rec.Body.String(), "namespace old") {
+		t.Errorf("a namespace left labeled for team-z = %d %q, want 409 naming it", rec.Code, rec.Body.String())
+	}
+	v := onVPC(t, "team-a-dev")
+	rec = do(v.s, publisher(v), http.MethodPost, "/api/projects", `{"name":"team-a","projectNetwork":{"name":"team-a-net2","subnet":"10.9.0.0/16"}}`)
+	if rec.Code != http.StatusConflict || !strings.Contains(rec.Body.String(), "network vpc") {
+		t.Errorf("a live network selecting team-a's namespaces = %d %q, want 409 naming it", rec.Code, rec.Body.String())
+	}
+}
+
+// onVPC is the coordinator rig with team-a's primary CUDN, vpc, generated in
+// each of namespaces, its netstate synced.
 func onVPC(t *testing.T, namespaces ...string) *gateRig {
 	t.Helper()
-	g := newCoordinatorRig(t)
+	return onVPCWith(t, nil, namespaces...)
+}
+
+// onVPCWith is onVPC with setup run on the cluster before the server starts.
+func onVPCWith(t *testing.T, setup func(*gateRig), namespaces ...string) *gateRig {
+	t.Helper()
+	g := coordinatorRigWith(t, setup)
 	resources := func(gv string, kinds ...model.Kind) http.HandlerFunc {
 		return func(w http.ResponseWriter, _ *http.Request) {
 			list := metav1.APIResourceList{TypeMeta: metav1.TypeMeta{Kind: "APIResourceList", APIVersion: "v1"}, GroupVersion: gv}
@@ -470,7 +501,10 @@ func onVPC(t *testing.T, namespaces ...string) *gateRig {
 	g.fc.on(http.MethodGet, "/apis/k8s.ovn.org/v1/clusteruserdefinednetworks", unstructuredList("k8s.ovn.org/v1", "ClusterUserDefinedNetwork", map[string]any{
 		"apiVersion": "k8s.ovn.org/v1", "kind": "ClusterUserDefinedNetwork",
 		"metadata": map[string]any{"name": "vpc", "uid": "vpc", "resourceVersion": "1"},
-		"spec":     map[string]any{"network": map[string]any{"topology": "Layer2", "layer2": map[string]any{"role": "Primary", "subnets": []any{"10.40.0.0/16"}}}},
+		"spec": map[string]any{
+			"namespaceSelector": map[string]any{"matchLabels": map[string]any{tenancy.NetworkLabel: "team-a"}},
+			"network":           map[string]any{"topology": "Layer2", "layer2": map[string]any{"role": "Primary", "subnets": []any{"10.40.0.0/16"}}},
+		},
 	}))
 	g.fc.on(http.MethodGet, "/apis/k8s.ovn.org/v1/userdefinednetworks", unstructuredList("k8s.ovn.org/v1", "UserDefinedNetwork"))
 	var nads []map[string]any

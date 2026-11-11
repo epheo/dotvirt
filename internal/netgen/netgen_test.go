@@ -161,6 +161,18 @@ func TestProjectNetwork(t *testing.T) {
 	if _, _, err := NamespaceManifest(NamespaceSpec{Name: "web", Project: "shop", ProjectNetwork: true, VMNetwork: &PrimaryNet{Name: "n", Subnet: "10.0.0.0/24"}}); err == nil {
 		t.Error("a namespace rendered with both its own VM Network and its project's")
 	}
+	other := &LiveNamespace{Labels: map[string]string{tenancy.NetworkLabel: "other", "k8s.ovn.org/primary-user-defined-network": ""}}
+	if _, _, err := NamespaceManifest(NamespaceSpec{Name: "old", Project: "shop", Live: other}); err == nil {
+		t.Error("a namespace on another project's VM Network joined shop")
+	}
+	own := &LiveNamespace{Labels: map[string]string{tenancy.NetworkLabel: "shop", "k8s.ovn.org/primary-user-defined-network": ""}}
+	if _, _, err := NamespaceManifest(NamespaceSpec{Name: "old", Project: "shop", Live: own}); err != nil {
+		t.Errorf("a namespace on shop's own VM Network rejoining shop: %v", err)
+	}
+	_, cudn, _ := ProjectNetworkManifest("shop", PrimaryNet{Name: "shop-net", Subnet: "10.40.0.0/16"})
+	if !DeclaredNetworkSelects(cudn, "shop") || DeclaredNetworkSelects(cudn, "other") {
+		t.Error("a project network's selector misread")
+	}
 	_, pub, err := PublishNamespaceManifest("shop", true)
 	if err != nil {
 		t.Fatal(err)

@@ -1,6 +1,7 @@
 package clusterstate
 
 import (
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -36,6 +37,7 @@ type namespaceSink struct {
 	names     map[string]struct{}
 	published map[string]string // project -> its publish namespace
 	requested map[string]bool   // names ending like a publish namespace's that a user requested
+	networked map[string]string // namespace -> the project whose VM Network its label names
 	gen       uint64            // moves on every change of names
 	listed    bool
 	gone      map[string]time.Time // deleted namespaces not forgotten yet, by deletion time
@@ -50,7 +52,7 @@ const ForgetAfter = 15 * time.Minute
 
 func newNamespaceSink(project labels.Selector, projects cache.Indexer, forget func(string), synced func()) *namespaceSink {
 	return &namespaceSink{project: project, projects: projects, forget: forget, synced: synced, now: time.Now,
-		names: map[string]struct{}{}, published: map[string]string{}, requested: map[string]bool{}, gone: map[string]time.Time{}}
+		names: map[string]struct{}{}, published: map[string]string{}, requested: map[string]bool{}, networked: map[string]string{}, gone: map[string]time.Time{}}
 }
 
 func (n *namespaceSink) selected(obj any) bool {
@@ -88,6 +90,30 @@ func requestedName(name string, obj any) bool {
 	}
 	_, ok := m.GetAnnotations()[tenancy.RequesterAnnotation]
 	return ok
+}
+
+// networkOf is the project whose VM Network obj's label names, "" for none.
+func networkOf(obj any) string {
+	m, err := apimeta.Accessor(obj)
+	if err != nil {
+		return ""
+	}
+	return m.GetLabels()[tenancy.NetworkLabel]
+}
+
+// networkMembers are the namespaces labeled for project's VM Network,
+// sorted, a released project's among them.
+func (n *namespaceSink) networkMembers(project string) []string {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	var out []string
+	for ns, net := range n.networked {
+		if net == project {
+			out = append(out, ns)
+		}
+	}
+	slices.Sort(out)
+	return out
 }
 
 // publishNameHeld reports whether a namespace other than project's publish
@@ -129,6 +155,11 @@ func (n *namespaceSink) put(obj any) error {
 	} else {
 		delete(n.requested, name)
 	}
+	if net := networkOf(obj); net != "" {
+		n.networked[name] = net
+	} else {
+		delete(n.networked, name)
+	}
 	n.mu.Unlock()
 	if n.selected(obj) {
 		return n.projects.Update(obj)
@@ -153,6 +184,7 @@ func (n *namespaceSink) Delete(obj any) error {
 	n.gone[name] = now
 	n.setPublished(name, "")
 	delete(n.requested, name)
+	delete(n.networked, name)
 	due := n.sweep(now)
 	n.mu.Unlock()
 	n.forgetAll(due)
@@ -166,6 +198,7 @@ func (n *namespaceSink) Replace(list []any, rv string) error {
 	next := make(map[string]struct{}, len(list))
 	published := map[string]string{}
 	requested := map[string]bool{}
+	networked := map[string]string{}
 	var selected []any
 	for _, obj := range list {
 		if name, err := cache.MetaNamespaceKeyFunc(obj); err == nil {
@@ -175,6 +208,9 @@ func (n *namespaceSink) Replace(list []any, rv string) error {
 			}
 			if requestedName(name, obj) {
 				requested[name] = true
+			}
+			if net := networkOf(obj); net != "" {
+				networked[name] = net
 			}
 		}
 		if n.selected(obj) {
@@ -194,6 +230,7 @@ func (n *namespaceSink) Replace(list []any, rv string) error {
 	n.names = next
 	n.published = published
 	n.requested = requested
+	n.networked = networked
 	n.gen++
 	first := !n.listed
 	n.listed = true
@@ -306,4 +343,13 @@ func (s *State) PublishNameHeld(project string) (held, requested bool) {
 		return false, false
 	}
 	return s.names.publishNameHeld(project)
+}
+
+// NetworkMembers are the namespaces labeled for project's VM Network,
+// sorted: its own, its publish namespace, and any a release left there.
+func (s *State) NetworkMembers(project string) []string {
+	if s.names == nil {
+		return nil
+	}
+	return s.names.networkMembers(project)
 }
