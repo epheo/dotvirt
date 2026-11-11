@@ -164,9 +164,9 @@ func personaServer(t *testing.T, platform string) *Server {
 	}
 	fc := newFakeCluster(t)
 	fc.ssar = func(token string, a *authzv1.ResourceAttributes) bool { return allows(byToken[token], a) }
-	served := []model.Kind{model.KindNetpol, model.KindDV, model.KindNAD}
+	served := []model.Kind{model.KindNetpol, model.KindDV, model.KindNAD, model.KindEgressFW}
 	if platform == "openshift" {
-		served = append(served, model.KindUDN, model.KindEgressFW)
+		served = append(served, model.KindUDN)
 	}
 	fc.serveKinds(served...)
 	fc.on(http.MethodGet, "/apis/storage.k8s.io/v1/storageclasses", unstructuredList("storage.k8s.io/v1", "StorageClass",
@@ -241,11 +241,11 @@ func TestPersonas(t *testing.T) {
 		"microshift": {pViewerToken: project, pAuthorToken: author, pProjectAdminToken: admin,
 			pNetworkAdminToken: network, pClusterAdminToken: all, pSignedInToken: signedIn},
 	}
-	// MicroShift serves no UserDefinedNetworks and no EgressFirewalls: whatever
-	// RBAC allows, nobody is offered a new one there.
+	// The captured MicroShift serves no UserDefinedNetworks: whatever RBAC
+	// allows, nobody is offered a new one there.
 	for _, token := range []string{pAuthorToken, pProjectAdminToken, pClusterAdminToken} {
 		fp := want["microshift"][token]
-		fp.NetworkCreate, fp.EgressFWCreate = false, false
+		fp.NetworkCreate = false
 		want["microshift"][token] = fp
 	}
 	for platform, personas := range want {

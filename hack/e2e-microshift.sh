@@ -619,42 +619,64 @@ YAML
 	offered() {
 		local got
 		got="$(curl -fsS --max-time 30 -H "Authorization: Bearer $1" "${BASE}/api/capabilities?namespace=${PROJECT}" |
-			jq -c '.namespace | {repoRead: .project.repoRead, vmCreate: .vm.create, console, egressFirewallCreate: .egressFirewall.create}')" || return 1
+			jq -c '.namespace | {repoRead: .project.repoRead, vmCreate: .vm.create, console, networkCreate: .network.create, egressFirewallCreate: .egressFirewall.create}')" || return 1
 		echo "offered ${got}, wanted $2"
 		[ "${got}" = "$2" ]
 	}
-	# Without KubeVirt, edit and admin aggregate no VM rights.
-	vms=true
-	[ "${KUBEVIRT}" != "0" ] || vms=false
-	retry "a project viewer reads the repo and authors nothing" 180 offered "${VIEWER_TOK}" \
-		'{"repoRead":true,"vmCreate":false,"console":false,"egressFirewallCreate":false}'
-	retry "a project author authors VMs and opens consoles" 180 offered "${AUTHOR_TOK}" \
-		'{"repoRead":true,"vmCreate":'"${vms}"',"console":'"${vms}"',"egressFirewallCreate":false}'
-	# The admin's grant on EgressFirewalls offers a new one only where the
-	# cluster serves them (epheo.39 on): a kind nothing syncs is never offered.
-	# Only a NotFound means not served; any other failure is asked again, as
-	# the server counts a failed read as served.
-	egress_served() {
-		local out err
+	# A grant offers a new object only where the cluster serves its kind: a kind
+	# nothing syncs is never offered. MicroShift serves EgressFirewalls from
+	# epheo.39 on, UserDefinedNetworks from epheo.44 on.
+	# served <resource> <var> sets <var> to the cluster's answer. Only a NotFound
+	# means not served; any other failure is asked again, as the server counts a
+	# failed read as served.
+	served() {
+		local out err answer
 		err="$(mktemp)"
 		if out="$(kc get --raw /apis/k8s.ovn.org/v1 2>"${err}")"; then
 			rm -f "${err}"
 			# A body that does not parse is asked again.
-			egress="$(jq -r '[.resources[].name] | index("egressfirewalls") != null' <<<"${out}")" || return 1
+			answer="$(jq -r --arg r "$1" '[.resources[].name] | index($r) != null' <<<"${out}")" || return 1
+			printf -v "$2" '%s' "${answer}"
 			return 0
 		fi
 		if grep -q 'NotFound' "${err}"; then
 			rm -f "${err}"
-			egress=false
+			printf -v "$2" '%s' false
 			return 0
 		fi
 		cat "${err}"
 		rm -f "${err}"
 		return 1
 	}
-	retry "the cluster's answer on EgressFirewalls" 120 egress_served
-	retry "a project admin authors VMs and is offered an egress firewall only where served" 180 offered "${PROJECT_ADMIN_TOK}" \
-		'{"repoRead":true,"vmCreate":'"${vms}"',"console":'"${vms}"',"egressFirewallCreate":'"${egress}"'}'
+	retry "the cluster's answer on EgressFirewalls" 120 served egressfirewalls egress
+	retry "the cluster's answer on UserDefinedNetworks" 120 served userdefinednetworks udn
+	log "EgressFirewalls served: ${egress}; UserDefinedNetworks served: ${udn}"
+	# Without KubeVirt, edit and admin aggregate no VM rights.
+	vms=true
+	[ "${KUBEVIRT}" != "0" ] || vms=false
+	retry "a project viewer reads the repo and authors nothing" 180 offered "${VIEWER_TOK}" \
+		'{"repoRead":true,"vmCreate":false,"console":false,"networkCreate":false,"egressFirewallCreate":false}'
+	retry "a project author authors VMs, networks where served, and opens consoles" 180 offered "${AUTHOR_TOK}" \
+		'{"repoRead":true,"vmCreate":'"${vms}"',"console":'"${vms}"',"networkCreate":'"${udn}"',"egressFirewallCreate":false}'
+	retry "a project admin authors VMs, and networks and egress firewalls where served" 180 offered "${PROJECT_ADMIN_TOK}" \
+		'{"repoRead":true,"vmCreate":'"${vms}"',"console":'"${vms}"',"networkCreate":'"${udn}"',"egressFirewallCreate":'"${egress}"'}'
+	# View reads a project's networks wherever they are served. Created here, not
+	# through git: what is checked is the viewer's read.
+	if [ "${udn}" = true ]; then
+		kc apply -f - >/dev/null <<YAML
+apiVersion: k8s.ovn.org/v1
+kind: UserDefinedNetwork
+metadata: {name: e2e-reads, namespace: ${PROJECT}}
+spec:
+  topology: Layer2
+  layer2: {role: Secondary, subnets: [10.20.0.0/24]}
+YAML
+		reads_network() {
+			curl -fsS --max-time 30 -H "Authorization: Bearer ${VIEWER_TOK}" "${BASE}/api/networks" |
+				jq -e --arg ns "${PROJECT}" '[.networks[] | select(.namespace == $ns and .name == "e2e-reads" and .backing == "UserDefinedNetwork")] | length == 1'
+		}
+		retry "a project viewer reads the project's network" 180 reads_network
+	fi
 	platform_offered() {
 		local got
 		got="$(curl -fsS --max-time 30 -H "Authorization: Bearer ${NETWORK_ADMIN_TOK}" "${BASE}/api/capabilities" |
