@@ -168,7 +168,7 @@ var networkMoves = []move{
 // tenant where the api redacts.
 func policyViews(t testing.TB, s *Snapshot, all []NamespaceLabels) map[string]string {
 	t.Helper()
-	eff := s.Effective(scaleNS(4), scaleNSLabels(4), map[string]string{"app": "web"}, true, "")
+	eff := s.Effective(scaleNS(4), scaleNSLabels(4), map[string]string{"app": "web"}, true, true, "")
 	s.redactEffective(&eff, scaleTenant(all))
 	nss := make([]string, 0, scaleCUDNSpan)
 	for k := range scaleCUDNSpan {
@@ -259,7 +259,7 @@ func TestRedactGonePolicyKeepsSharedRows(t *testing.T) {
 	s := scaleSnapshot(t)
 	all := scaleUniverse()
 	eff := func() model.EffectivePolicy {
-		return s.Effective(scaleNS(4), scaleNSLabels(4), map[string]string{"app": "web"}, true, "")
+		return s.Effective(scaleNS(4), scaleNSLabels(4), map[string]string{"app": "web"}, true, true, "")
 	}
 	mine, theirs := eff(), eff()
 	before := asJSON(t, theirs)
@@ -366,7 +366,7 @@ func TestMemoConcurrentReaders(t *testing.T) {
 				for i := range pols {
 					pols[i].Sync, pols[i].SourceFile = "Synced", "policies.yaml"
 				}
-				eff := s.Effective(scaleNS(4), scaleNSLabels(4), map[string]string{"app": "web"}, true, "")
+				eff := s.Effective(scaleNS(4), scaleNSLabels(4), map[string]string{"app": "web"}, true, true, "")
 				for _, bs := range [][]model.PolicyBinding{eff.EastWest, eff.Gateway, eff.SNAT, eff.Routes} {
 					for i := range bs {
 						bs[i].Policy.Sync = "OutOfSync"
