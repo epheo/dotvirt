@@ -25,13 +25,9 @@ func (s *Snapshot) Effective(ns string, nsLabels, podLabels map[string]string, p
 	// Without a cluster network attachment no cluster or project rule filters
 	// the workload; on a VM Network OVN-K may not apply admin or baseline
 	// policies.
-	var offCluster, onUDN bool
-	switch {
-	case !podNet && (defaultNet == "" || s.isLocalnet(defaultNet)):
-		offCluster = true
-	default:
-		onUDN = s.onPrimaryUDN(TraceWorkload{Namespace: ns, PodNet: podNet, DefaultNet: defaultNet})
-	}
+	w := TraceWorkload{Namespace: ns, PodNet: podNet, DefaultNet: defaultNet}
+	offCluster := !s.clusterNIC(w)
+	onUDN := !offCluster && s.onPrimaryUDN(w)
 	off := mayNot(reasonNoClusterNIC)
 
 	anps := bind(s.sortedANPs(), nsLabels, podLabels, podScoped)
