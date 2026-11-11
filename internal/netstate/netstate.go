@@ -19,17 +19,22 @@ import (
 	"context"
 	"maps"
 	"net/netip"
+	"slices"
 	"sync"
 	"sync/atomic"
 	"time"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/client-go/tools/cache"
 
 	"github.com/epheo/dotvirt/internal/cluster"
 	"github.com/epheo/dotvirt/internal/eventbus"
 	"github.com/epheo/dotvirt/internal/model"
+	"github.com/epheo/dotvirt/internal/netgen"
 	"github.com/epheo/dotvirt/internal/reflect"
 )
 
@@ -163,6 +168,28 @@ func (s *Snapshot) listable(ctx context.Context) func(schema.GroupVersionResourc
 		ok, err := s.sa.Can(ctx, "list", gvr.Group, gvr.Resource, "")
 		return err == nil && ok
 	}
+}
+
+// NetworksSelecting names the live ClusterUserDefinedNetworks whose
+// selector picks project's VM Network namespaces (netgen.SelectsProjectNetwork).
+func (s *Snapshot) NetworksSelecting(project string) []string {
+	var out []string
+	for _, obj := range s.cudn.List() {
+		u, ok := obj.(*unstructured.Unstructured)
+		if !ok {
+			continue
+		}
+		raw, found, _ := unstructured.NestedMap(u.Object, "spec", "namespaceSelector")
+		if !found {
+			continue
+		}
+		var sel metav1.LabelSelector
+		if runtime.DefaultUnstructuredConverter.FromUnstructured(raw, &sel) == nil && netgen.SelectsProjectNetwork(&sel, project) {
+			out = append(out, u.GetName())
+		}
+	}
+	slices.Sort(out)
+	return out
 }
 
 // Holds reports whether a store holds the object of resource (group, plural)

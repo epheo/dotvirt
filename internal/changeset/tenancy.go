@@ -42,8 +42,8 @@ func (l LiveNamespaces) lookup(name string) (*netgen.LiveNamespace, error) {
 // primaryNetworkOnExisting refuses a VM Network on a namespace that already
 // exists: OVN allows the primary-network label only at creation, so the sync
 // could never apply it.
-func primaryNetworkOnExisting(ns string, live *netgen.LiveNamespace, net *netgen.PrimaryNet) error {
-	if live != nil && net != nil {
+func primaryNetworkOnExisting(ns string, live *netgen.LiveNamespace, net *netgen.PrimaryNet, joins bool) error {
+	if live != nil && (net != nil || joins) {
 		return fmt.Errorf("%w: namespace %q already exists; a VM Network can only be added when a namespace is created", model.ErrConflict, ns)
 	}
 	return nil
@@ -56,7 +56,10 @@ type ProjectSpec struct {
 	Name      string             `json:"name"`      // project name -> repo name + dotvirt.io/project
 	Namespace string             `json:"namespace"` // first namespace; defaults to Name
 	Owners    []string           `json:"owners,omitempty"`
-	VMNetwork *netgen.PrimaryNet `json:"vmNetwork,omitempty"`
+	VMNetwork *netgen.PrimaryNet `json:"vmNetwork,omitempty"` // the first namespace's own
+	// ProjectNetwork is the project's VM Network, spanning its namespaces and
+	// its publish namespace (netgen.ProjectNetworkManifest).
+	ProjectNetwork *netgen.PrimaryNet `json:"projectNetwork,omitempty"`
 }
 
 // StageCreateProject bootstraps a new tenant. The repo is created imperatively (a
@@ -80,7 +83,7 @@ func (c *Coordinator) StageCreateProject(id auth.Identity, commitProj project.Pr
 	if err != nil {
 		return model.DraftView{}, err
 	}
-	if err := primaryNetworkOnExisting(ns, ln, spec.VMNetwork); err != nil {
+	if err := primaryNetworkOnExisting(ns, ln, spec.VMNetwork, spec.ProjectNetwork != nil); err != nil {
 		return model.DraftView{}, err
 	}
 	entries, repoURL, err := c.projectEntries(commitProj, spec, ns, ln)
@@ -129,7 +132,7 @@ func (c *Coordinator) PreviewCreateProject(id auth.Identity, commitProj project.
 	if err != nil {
 		return model.StagePreview{}, err
 	}
-	if err := primaryNetworkOnExisting(ns, ln, spec.VMNetwork); err != nil {
+	if err := primaryNetworkOnExisting(ns, ln, spec.VMNetwork, spec.ProjectNetwork != nil); err != nil {
 		return model.StagePreview{}, err
 	}
 	entries, repoURL, err := c.projectEntries(commitProj, spec, ns, ln)
@@ -195,26 +198,73 @@ func (c *Coordinator) projectEntries(commitProj project.ProjectInfo, spec Projec
 	if err != nil {
 		return nil, "", err
 	}
-	first := []netgen.NamespaceSpec{{Name: ns, Project: spec.Name, Repo: forge.PathRef(repoURL), VMNetwork: spec.VMNetwork, Live: ln}}
+	first := []netgen.NamespaceSpec{{Name: ns, Project: spec.Name, Repo: forge.PathRef(repoURL), VMNetwork: spec.VMNetwork, ProjectNetwork: spec.ProjectNetwork != nil, Live: ln}}
 	entries, err := c.projectAdoption(commitProj, first, spec.Owners)
-	return entries, repoURL, err
+	if err != nil || spec.ProjectNetwork == nil {
+		return entries, repoURL, err
+	}
+	network, err := c.renderedEntry(commitProj, func() (draft.Entry, error) {
+		path, content, err := netgen.ProjectNetworkManifest(spec.Name, *spec.ProjectNetwork)
+		return draft.Entry{Resource: draft.ResourceNetwork, Name: spec.ProjectNetwork.Name, SourceFile: path, Manifest: string(content)}, err
+	})
+	if err != nil {
+		return nil, "", err
+	}
+	// Rewriting a network git declares would move its namespaces onto this
+	// project's.
+	if network.Kind == draft.KindEdit {
+		return nil, "", fmt.Errorf("%w: the platform repo declares a network named %s", model.ErrConflict, spec.ProjectNetwork.Name)
+	}
+	if other, err := c.declaredNetworkFor(commitProj, spec.Name); err != nil {
+		return nil, "", err
+	} else if other != "" {
+		return nil, "", fmt.Errorf("%w: the platform repo's network %s already spans namespaces labeled for %s, an earlier project's: remove it first", model.ErrConflict, other, spec.Name)
+	}
+	return append(entries, network), repoURL, nil
+}
+
+// declaredNetworkFor names a ClusterUserDefinedNetwork commitProj declares
+// that selects project's VM Network namespaces, "" for none: a second one
+// would put the new project's namespaces on two primary networks.
+func (c *Coordinator) declaredNetworkFor(commitProj project.ProjectInfo, project string) (string, error) {
+	read, err := c.read(commitProj)
+	if err != nil {
+		return "", err
+	}
+	idx, err := indexDeclared(read, c.baseBranch)
+	if err != nil {
+		return "", err
+	}
+	for ref, path := range idx.Files {
+		if ref.Kind != model.KindCUDN.Kind {
+			continue
+		}
+		content, err := read.FileOnBranch(c.baseBranch, path)
+		if err != nil {
+			return "", err
+		}
+		if netgen.DeclaredNetworkSelects(content, project) {
+			return ref.Name, nil
+		}
+	}
+	return "", nil
 }
 
 // publishNamespaceEntries stages spec's publish namespace with the project,
-// where the install publishes and the project starts on the cluster's own
-// network: a VM Network belongs to one namespace and cannot span a publish
-// namespace.
+// where the install publishes, on the project's VM Network when it has one.
+// A first namespace with a VM Network of its own gets none: that network
+// cannot span a publish namespace.
 func (c *Coordinator) publishNamespaceEntries(spec ProjectSpec, live LiveNamespaces) ([]draft.Entry, error) {
 	if !c.publishing.On() || spec.VMNetwork != nil {
 		return nil, nil
 	}
-	return c.newPublishNamespace(spec.Name, live)
+	return c.newPublishNamespace(spec.Name, spec.ProjectNetwork != nil, live)
 }
 
 // newPublishNamespace stages project's publish namespace. One the cluster
 // holds for project already stays as it is; a namespace by that name held
 // otherwise, a user's own project among them, is refused.
-func (c *Coordinator) newPublishNamespace(project string, live LiveNamespaces) ([]draft.Entry, error) {
+func (c *Coordinator) newPublishNamespace(project string, onNetwork bool, live LiveNamespaces) ([]draft.Entry, error) {
 	name := tenancy.PublishNamespace(project)
 	ln, err := live.lookup(name)
 	if err != nil {
@@ -227,7 +277,7 @@ func (c *Coordinator) newPublishNamespace(project string, live LiveNamespaces) (
 		}
 		return nil, fmt.Errorf("%w: namespace %s exists and is not %s's publish namespace", model.ErrConflict, name, project)
 	}
-	path, content, err := netgen.PublishNamespaceManifest(project)
+	path, content, err := netgen.PublishNamespaceManifest(project, onNetwork)
 	if err != nil {
 		return nil, invalid(err)
 	}
@@ -243,8 +293,9 @@ func (c *Coordinator) newPublishNamespace(project string, live LiveNamespaces) (
 
 // StagePublishNamespace stages target's publish namespace into commitProj, for
 // a project the cluster holds none for: one made before the install
-// published. It joins no VM Network, so it serves the project's namespaces on
-// the cluster's own network, of which the project needs one.
+// published. It joins the project's VM Network where the project has one,
+// else the cluster's own network, which one of the project's namespaces must
+// then be on.
 func (c *Coordinator) StagePublishNamespace(id auth.Identity, commitProj, target project.ProjectInfo, pt PublishTarget, live LiveNamespaces) (model.DraftView, error) {
 	entries, err := c.publishNamespacePlan(target, pt, live)
 	if err != nil {
@@ -277,11 +328,13 @@ func (c *Coordinator) publishNamespacePlan(target project.ProjectInfo, pt Publis
 		return nil, fmt.Errorf("%w: %s", ErrPublishNameRequested, name)
 	case pt.PublishNameHeld:
 		return nil, fmt.Errorf("%w: %s", ErrPublishNameHeld, name)
+	case pt.ProjectNetwork && pt.NetworkResidue:
+		return nil, fmt.Errorf("%w: namespaces outside %s are on its VM Network, which %s would join: remove them from it first", model.ErrConflict, target.Name, name)
 	}
-	if !slices.ContainsFunc(target.Namespaces, func(ns string) bool { return cmp.Or(pt.Networks[ns], DefaultNetwork) == DefaultNetwork }) {
+	if !pt.ProjectNetwork && !slices.ContainsFunc(target.Namespaces, func(ns string) bool { return cmp.Or(pt.Networks[ns], DefaultNetwork) == DefaultNetwork }) {
 		return nil, fmt.Errorf("%w (%s)", ErrApart, name)
 	}
-	entries, err := c.newPublishNamespace(target.Name, live)
+	entries, err := c.newPublishNamespace(target.Name, pt.ProjectNetwork, live)
 	if err == nil && len(entries) == 0 {
 		err = fmt.Errorf("%w: %s exists", model.ErrConflict, name)
 	}

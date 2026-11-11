@@ -12,11 +12,13 @@ import (
 	"fmt"
 	"net/http"
 	"slices"
+	"strings"
 
 	"github.com/epheo/dotvirt/internal/changeset"
 	"github.com/epheo/dotvirt/internal/model"
 	"github.com/epheo/dotvirt/internal/netgen"
 	"github.com/epheo/dotvirt/internal/project"
+	"github.com/epheo/dotvirt/pkg/tenancy"
 )
 
 // claimNamespaces binds the namespace capture to the caller's token and gates
@@ -88,8 +90,9 @@ func (s *Server) tenancyTarget(w http.ResponseWriter, r *http.Request, sc scope)
 // once the capture knows whether it exists.
 func (s *Server) handleCreateNamespace(w http.ResponseWriter, r *http.Request) {
 	raw, p, ok := readBody[struct {
-		Project   string    `json:"project"`
-		VMNetwork *struct{} `json:"vmNetwork"`
+		Project        string    `json:"project"`
+		VMNetwork      *struct{} `json:"vmNetwork"`
+		ProjectNetwork bool      `json:"projectNetwork"`
 	}](w, r, false)
 	if !ok {
 		return
@@ -104,6 +107,12 @@ func (s *Server) handleCreateNamespace(w http.ResponseWriter, r *http.Request) {
 	// The tenant project it joins: annotation source + authz (the caller must see it).
 	join, ok := s.resolveProject(w, r, byName(p.Project))
 	if !ok {
+		return
+	}
+	// A namespace takes a primary network only when created: labeled for a
+	// network its project lacks, it could never run a pod.
+	if p.ProjectNetwork && !s.projectNetwork(join.proj) {
+		fail(w, invalid(fmt.Errorf("project %s has no VM Network to join", join.proj.Name)))
 		return
 	}
 	plat, ok := s.platformScopeGated(w, r)
@@ -128,8 +137,11 @@ func (s *Server) handleCreateNamespace(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleCreateProject(w http.ResponseWriter, r *http.Request) {
 	// Peek the name for an early 400; the Coordinator re-decodes the full spec.
 	raw, p, ok := readBody[struct {
-		Name      string    `json:"name"`
-		VMNetwork *struct{} `json:"vmNetwork"`
+		Name           string    `json:"name"`
+		VMNetwork      *struct{} `json:"vmNetwork"`
+		ProjectNetwork *struct {
+			Name string `json:"name"`
+		} `json:"projectNetwork"`
 	}](w, r, false)
 	if !ok {
 		return
@@ -140,6 +152,23 @@ func (s *Server) handleCreateProject(w http.ResponseWriter, r *http.Request) {
 	}
 	if p.VMNetwork != nil && !s.gateServed(w, r, model.KindUDN) {
 		return
+	}
+	if p.ProjectNetwork != nil {
+		if !s.gateServed(w, r, model.KindCUDN) {
+			return
+		}
+		// Argo would take over a live network by that name, moving its
+		// namespaces onto this project's.
+		if s.netstate != nil && s.netstate.Holds(model.KindCUDN.Group, model.KindCUDN.Plural, "", p.ProjectNetwork.Name) {
+			fail(w, fmt.Errorf("%w: a network named %s exists", model.ErrConflict, p.ProjectNetwork.Name))
+			return
+		}
+		// A released project leaves its network and namespaces labeled for
+		// its name: a new one by that name would share them.
+		if left := s.networkResidue(p.Name, nil); len(left) > 0 {
+			fail(w, fmt.Errorf("%w: an earlier project named %s left %s on its VM Network: remove them first", model.ErrConflict, p.Name, strings.Join(left, ", ")))
+			return
+		}
 	}
 	plat, ok := s.platformScopeGated(w, r)
 	if !ok {
@@ -257,6 +286,8 @@ func (s *Server) publishTarget(p project.ProjectInfo) changeset.PublishTarget {
 		RoutesGranted: s.state != nil && s.state.AdminWritesRoutes(),
 		Isolated:      s.gateways != nil && s.gateways.GatewaysIsolated(s.cfg.Publish.GatewayClass),
 	}
+	pt.ProjectNetwork = s.projectNetwork(p)
+	pt.NetworkResidue = len(s.networkResidue(p.Name, p.Namespaces)) > 0
 	namespaces := p.Namespaces
 	if s.state != nil {
 		if ns, ok := s.state.PublishNamespace(p.Name); ok {
@@ -314,4 +345,37 @@ func (s *Server) handleReleaseProject(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	respond(w, res, nil)
+}
+
+// projectNetwork reports whether p has a VM Network its new namespaces may
+// join: one of its namespaces carries tenancy.NetworkLabel for it, which only
+// the platform writes, and only when it creates the namespace on it, and the
+// cluster has that namespace on a cluster-wide network.
+func (s *Server) projectNetwork(p project.ProjectInfo) bool {
+	if s.state == nil || s.netstate == nil {
+		return false
+	}
+	return slices.ContainsFunc(p.Namespaces, func(ns string) bool {
+		return s.state.NamespaceLabels(ns)[tenancy.NetworkLabel] == p.Name && strings.HasPrefix(s.netstate.PrimaryNetwork(ns), "cudn:")
+	})
+}
+
+// networkResidue is what a project by name left on its VM Network outside
+// own and its publish namespace: namespaces still labeled for it, and live
+// networks selecting them when none of own is.
+func (s *Server) networkResidue(name string, own []string) []string {
+	var left []string
+	if s.state != nil {
+		for _, ns := range s.state.NetworkMembers(name) {
+			if !slices.Contains(own, ns) && ns != tenancy.PublishNamespace(name) {
+				left = append(left, "namespace "+ns)
+			}
+		}
+	}
+	if s.netstate != nil && len(own) == 0 {
+		for _, n := range s.netstate.NetworksSelecting(name) {
+			left = append(left, "network "+n)
+		}
+	}
+	return left
 }

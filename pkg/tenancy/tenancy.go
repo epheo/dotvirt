@@ -63,6 +63,11 @@ var ProjectGrantRoles = []string{"admin", TenantEgressRole, "view", "edit", Tena
 // tenant grant reaches it.
 const PublishLabel = "dotvirt.io/publish"
 
+// NetworkLabel marks the namespaces a project's VM Network spans, its value
+// the project: the network's selector. Only the platform writes namespace
+// labels, and a namespace joins a VM Network only when created.
+const NetworkLabel = "dotvirt.io/network"
+
 // PublishSuffix ends every publish namespace's name and no project
 // namespace's, so a tenant namespace is never taken for one.
 const PublishSuffix = "-publish"

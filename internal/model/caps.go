@@ -54,6 +54,9 @@ type ClusterCaps struct {
 	// no UserDefinedNetwork; GrantAdmin names its owners.
 	NamespaceCreate bool `json:"namespaceCreate"`
 	VMNetwork       bool `json:"vmNetwork"`
+	// ProjectNetwork gives a new project a VM Network its namespaces share,
+	// false on a cluster that serves no ClusterUserDefinedNetwork.
+	ProjectNetwork bool `json:"projectNetwork"`
 	GrantAdmin      bool `json:"grantAdmin"`
 	// SharedLibrary writes the shared template library.
 	SharedLibrary bool `json:"sharedLibrary"`
@@ -131,6 +134,8 @@ type ProjectCaps struct {
 	// NewNamespace joins a new namespace to the project (with a VM Network,
 	// ClusterCaps.VMNetwork too).
 	NewNamespace bool `json:"newNamespace"`
+	// ProjectNetwork: the project has a VM Network a new namespace may join.
+	ProjectNetwork bool `json:"projectNetwork,omitempty"`
 	// Adopt attaches a repo to the project: a repoless one's, or Recover repo
 	// on one whose forge lost or re-homed it (the route refuses a healthy
 	// repo). GrantAdmin names owners while doing so. Release dissolves a

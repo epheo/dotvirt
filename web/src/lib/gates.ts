@@ -165,6 +165,7 @@ export const clusterGate = {
 	platformRead: () => cluster((c) => c.platformRead, "read the platform's changes"),
 	namespaceCreate: () => cluster((c) => c.namespaceCreate, 'create projects or namespaces'),
 	vmNetwork: () => cluster((c) => c.vmNetwork, 'give a namespace a VM network'),
+	projectNetwork: () => cluster((c) => c.projectNetwork, 'give a project a VM Network'),
 	grantAdmin: () => cluster((c) => c.grantAdmin, 'grant project access'),
 	sharedLibrary: () => cluster((c) => c.sharedLibrary, 'change the shared template library'),
 	rebalanceOn: () => cluster((c) => c.drsEnable, 'turn on rebalancing'),

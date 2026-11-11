@@ -214,3 +214,23 @@ func TestNamespaceSinkTellsAHeldPublishName(t *testing.T) {
 		t.Errorf("requested again: %v", held("shop"))
 	}
 }
+
+// The namespaces labeled for a project's VM Network are known from the one
+// watch, a released one, in no project, among them.
+func TestNamespaceSinkKnowsNetworkMembers(t *testing.T) {
+	s, _ := sinkState(t)
+	on := func(name, net string, more ...string) *corev1.Namespace {
+		ns := namespace(name, more...)
+		ns.Labels[tenancy.NetworkLabel] = net
+		return ns
+	}
+	_ = s.names.Replace([]any{on("web", "shop", projectKey), on("old", "shop"), on("db", "other", projectKey), namespace("plain")}, "1")
+	if got := s.NetworkMembers("shop"); !slices.Equal(got, []string{"old", "web"}) {
+		t.Errorf("after the list: %v", got)
+	}
+	_ = s.names.Delete(on("old", "shop"))
+	_ = s.names.Update(namespace("web", projectKey))
+	if got := s.NetworkMembers("shop"); len(got) != 0 {
+		t.Errorf("after a delete and a relabel: %v", got)
+	}
+}

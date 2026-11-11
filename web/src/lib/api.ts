@@ -195,12 +195,14 @@ export interface NamespaceCreate {
 	name: string;
 	project: string; // the project the namespace joins (its repo)
 	vmNetwork?: { name: string; subnet?: string }; // optional primary (Layer2) UDN; subnet required server-side (primary = IPAM)
+	projectNetwork?: boolean; // joins its project's VM Network instead
 }
 export interface ProjectCreate {
 	name: string; // project name -> tenant repo + dotvirt.io/project label
 	namespace?: string; // first namespace; defaults to name
 	owners?: string[]; // usernames granted namespace-admin on the first namespace
 	vmNetwork?: { name: string; subnet?: string }; // optional primary (Layer2) UDN on that namespace
+	projectNetwork?: { name: string; subnet: string }; // the project's VM Network, spanning its namespaces
 }
 
 export interface RebalanceRequest {

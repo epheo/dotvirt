@@ -2076,6 +2076,13 @@ const publishingheld = {
 		},
 	},
 };
+// team-web has a VM Network its namespaces share: a new namespace joins it
+// unless told otherwise.
+const projectnetwork = {
+	...base,
+	name: 'projectnetwork',
+	capabilities: { 'web-prod': { project: { newNamespace: true, projectNetwork: true } } },
+};
 // Each of team-db's namespaces has a VM Network of its own: not offered.
 const publishingapart = {
 	...publishing,
@@ -2089,6 +2096,7 @@ export const scenarios = {
 	publishingunhoused,
 	publishingheld,
 	publishingapart,
+	projectnetwork,
 	fronted,
 	frontedtenant,
 	replicated,

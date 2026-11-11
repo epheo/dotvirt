@@ -271,8 +271,8 @@ test('without VMs the network and project forms speak of workloads', async ({ pa
 		await expect(
 			sheet.getByRole('checkbox', {
 				name: vms
-					? 'Give it a default network its VMs start on'
-					: 'Give it a default network its workloads start on',
+					? 'Give it a VM Network its namespaces share, which its VMs start on'
+					: 'Give it a VM Network its namespaces share, which its workloads start on',
 			}),
 		).toBeVisible();
 		await expect(

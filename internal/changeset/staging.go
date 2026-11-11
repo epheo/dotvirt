@@ -422,7 +422,7 @@ func (c *Coordinator) StageCreateNamespace(id auth.Identity, commitProj, joinPro
 	if err != nil {
 		return model.DraftView{}, err
 	}
-	if err := primaryNetworkOnExisting(spec.Name, ln, spec.VMNetwork); err != nil {
+	if err := primaryNetworkOnExisting(spec.Name, ln, spec.VMNetwork, spec.ProjectNetwork); err != nil {
 		return model.DraftView{}, err
 	}
 	spec.Live = ln
@@ -445,7 +445,7 @@ func (c *Coordinator) PreviewCreateNamespace(id auth.Identity, commitProj, joinP
 	if err != nil {
 		return model.StagePreview{}, err
 	}
-	if err := primaryNetworkOnExisting(spec.Name, ln, spec.VMNetwork); err != nil {
+	if err := primaryNetworkOnExisting(spec.Name, ln, spec.VMNetwork, spec.ProjectNetwork); err != nil {
 		return model.StagePreview{}, err
 	}
 	spec.Live = ln

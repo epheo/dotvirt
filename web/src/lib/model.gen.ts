@@ -75,6 +75,11 @@ export interface ClusterCaps {
    */
   namespaceCreate: boolean;
   vmNetwork: boolean;
+  /**
+   * ProjectNetwork gives a new project a VM Network its namespaces share,
+   * false on a cluster that serves no ClusterUserDefinedNetwork.
+   */
+  projectNetwork: boolean;
   grantAdmin: boolean;
   /**
    * SharedLibrary writes the shared template library.
@@ -188,6 +193,10 @@ export interface ProjectCaps {
    * ClusterCaps.VMNetwork too).
    */
   newNamespace: boolean;
+  /**
+   * ProjectNetwork: the project has a VM Network a new namespace may join.
+   */
+  projectNetwork?: boolean;
   /**
    * Adopt attaches a repo to the project: a repoless one's, or Recover repo
    * on one whose forge lost or re-homed it (the route refuses a healthy

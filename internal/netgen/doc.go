@@ -3,8 +3,11 @@ package netgen
 import (
 	"strings"
 
+	"github.com/epheo/dotvirt/pkg/tenancy"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/util/intstr"
+	"sigs.k8s.io/yaml"
 )
 
 // The document shapes both planes read. Decode turns a manifest this package
@@ -57,6 +60,28 @@ func NamespaceNames(sel *metav1.LabelSelector) []string {
 		return out
 	}
 	return nil
+}
+
+// SelectsProjectNetwork reports whether sel picks a namespace labeled for
+// project's VM Network (tenancy.NetworkLabel), evaluated as OVN-K evaluates
+// it, every selector form alike: a network that, beside the project's own,
+// would take its namespaces.
+func SelectsProjectNetwork(sel *metav1.LabelSelector, project string) bool {
+	if sel == nil {
+		return false
+	}
+	s, err := metav1.LabelSelectorAsSelector(sel)
+	return err == nil && s.Matches(labels.Set{tenancy.NetworkLabel: project})
+}
+
+// DeclaredNetworkSelects reports whether content, a ClusterUserDefinedNetwork
+// manifest, selects project's VM Network namespaces.
+func DeclaredNetworkSelects(content []byte, project string) bool {
+	var doc NetworkDoc
+	if err := yaml.Unmarshal(content, &doc); err != nil || doc.Kind != "ClusterUserDefinedNetwork" {
+		return false
+	}
+	return SelectsProjectNetwork(&doc.Spec.NamespaceSelector, project)
 }
 
 type Meta struct {

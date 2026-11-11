@@ -7,6 +7,7 @@ import (
 
 	"github.com/epheo/dotvirt/internal/model"
 	"github.com/epheo/dotvirt/internal/validate"
+	"github.com/epheo/dotvirt/pkg/tenancy"
 )
 
 // Scope of a network create. Project/shared are the read plane's
@@ -101,6 +102,36 @@ func sharedCUDN(s Spec) (string, []byte, error) {
 		return "", nil, err
 	}
 	return model.KindCUDN.RepoPath("", s.Name), out, nil
+}
+
+// ProjectNetworkManifest renders project's VM Network: a primary Layer2
+// cluster-scoped network spanning the namespaces labeled for the project
+// (tenancy.NetworkLabel), its publish namespace among them, so its Gateway
+// reaches the project's Services. A primary network must do IPAM, so the
+// subnet is required.
+func ProjectNetworkManifest(project string, net PrimaryNet) (path string, content []byte, err error) {
+	if err := validate.RequireDNS1123("project", project); err != nil {
+		return "", nil, err
+	}
+	if err := validate.RequireDNS1123("VM Network name", net.Name); err != nil {
+		return "", nil, err
+	}
+	if !validCIDR(net.Subnet) {
+		return "", nil, fmt.Errorf("the VM Network needs a subnet CIDR (a primary network must do IPAM)")
+	}
+	out, err := yaml.Marshal(map[string]any{
+		"apiVersion": model.KindCUDN.APIVersion(),
+		"kind":       model.KindCUDN.Kind,
+		"metadata":   map[string]any{"name": net.Name},
+		"spec": map[string]any{
+			"namespaceSelector": map[string]any{"matchLabels": map[string]any{tenancy.NetworkLabel: project}},
+			"network":           map[string]any{"topology": "Layer2", "layer2": map[string]any{"role": "Primary", "subnets": []any{net.Subnet}}},
+		},
+	})
+	if err != nil {
+		return "", nil, err
+	}
+	return model.KindCUDN.RepoPath("", net.Name), out, nil
 }
 
 // vlanCUDN is a VLAN-backed (localnet, secondary) cluster-scoped network: it
