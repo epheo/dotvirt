@@ -410,31 +410,39 @@ func planeStep(b bound, stage, action, note string) model.TraceStep {
 // policy runs. A shared secondary network is an unfiltered layer-2 bypass;
 // without a shared primary it is the only path, so the answer is Conditional,
 // never a certain Unreachable, as it is where route advertisement may join
-// the two primaries. decided is "" when the policy walk decides.
+// the two primaries. A side off the cluster network runs no policy walk: its
+// NICs reach the fabric, and through it whatever the other side exposes, so
+// the answer is Conditional unless a side has no NIC at all. decided is ""
+// when the policy walk decides.
 func (s *Snapshot) connectivity(src, dst TraceWorkload) (decided string, steps []model.TraceStep) {
+	srcOn, dstOn := s.clusterNIC(src), s.clusterNIC(dst)
 	srcKey, srcName := s.primaryOf(src)
 	dstKey, dstName := s.primaryOf(dst)
-	reachable := srcKey != "" && srcKey == dstKey
-	shared := s.sharedNetworks(src.Nets, dst.Nets)
-	joinable := !reachable && srcKey != "" && dstKey != "" && s.mayJoin()
+	reachable := srcOn && dstOn && srcKey == dstKey
+	shared := s.sharedNetworks(s.offClusterNICs(src), s.offClusterNICs(dst))
+	joinable := !reachable && srcOn && dstOn && s.mayJoin()
 	if !reachable {
-		decided = "Unreachable"
-		if len(shared) > 0 || joinable {
-			decided = "Conditional"
-		}
+		decided = "Conditional"
 	}
 	switch {
 	case reachable:
 		steps = append(steps, model.TraceStep{Stage: "connectivity", Action: "Reachable",
 			Note: "Both workloads attach " + srcName + "."})
-	case srcKey == "" || dstKey == "":
-		who := src.Name
-		if srcKey != "" {
-			who = dst.Name
+	case !srcOn || !dstOn:
+		for _, w := range []TraceWorkload{src, dst} {
+			if s.clusterNIC(w) {
+				continue
+			}
+			if len(s.offClusterNICs(w)) == 0 {
+				return "Unreachable", []model.TraceStep{{Stage: "connectivity", Action: "Unreachable", Decisive: true,
+					Note: w.Name + " has no network attachment."}}
+			}
+			steps = append(steps, s.offClusterStep(w))
 		}
-		steps = append(steps, model.TraceStep{Stage: "connectivity", Action: "Unreachable", Decisive: len(shared) == 0,
-			Note: who + " has no primary network attachment."})
 	default:
+		if len(shared) == 0 && !joinable {
+			decided = "Unreachable"
+		}
 		steps = append(steps, model.TraceStep{Stage: "connectivity", Action: "Unreachable",
 			Decisive: len(shared) == 0 && !joinable, Conditional: joinable,
 			Note: fmt.Sprintf("Isolated primary networks: %s is on %s, %s on %s.", src.Name, srcName, dst.Name, dstName) + joinNote(joinable)})
@@ -444,6 +452,26 @@ func (s *Snapshot) connectivity(src, dst TraceWorkload) (decided string, steps [
 			Note: "Both attach network " + name + " - an unfiltered layer-2 path; workload policy does not apply on secondary networks."})
 	}
 	return decided, steps
+}
+
+// offClusterNICs is w's NICs no cluster control filters: its secondary ones,
+// and its default binding when that is not a cluster NIC.
+func (s *Snapshot) offClusterNICs(w TraceWorkload) []string {
+	if w.DefaultNet != "" && !s.clusterNIC(w) {
+		return append([]string{w.DefaultNet}, w.Nets...)
+	}
+	return w.Nets
+}
+
+// offClusterStep names the network a workload off the cluster network sits
+// on: the flow can only ride a path the trace does not read.
+func (s *Snapshot) offClusterStep(w TraceWorkload) model.TraceStep {
+	note := w.Name + " has no cluster network attachment: only its secondary networks, which no cluster or project rule filters, can carry the flow. The networks behind them decide."
+	if w.DefaultNet != "" {
+		_, name := s.networkIdentity(w.DefaultNet)
+		note = w.Name + "'s primary NIC is on network " + name + ", off the cluster network: no cluster or project rule filters it, and the network behind it decides whether the flow arrives."
+	}
+	return model.TraceStep{Stage: "connectivity", Action: "Bypass", Conditional: true, Note: note}
 }
 
 // egressPath frames a flow to a bare address. decided is the verdict when no
@@ -461,15 +489,11 @@ type egressPath struct {
 }
 
 // externalConnectivity frames the egress path. The cluster controls filter
-// only the primary NIC (the pod network, or a default multus binding that is
-// not localnet); a VLAN NIC reaches the fabric around all of them. With no
-// primary NIC no cluster control sees the flow.
+// only a cluster NIC (clusterNIC); a VLAN NIC reaches the fabric around all of
+// them. Without a cluster NIC no cluster control sees the flow.
 func (s *Snapshot) externalConnectivity(src TraceWorkload, dstIP string, view *TraceView) egressPath {
-	cluster := src.PodNet || (src.DefaultNet != "" && !s.isLocalnet(src.DefaultNet))
-	refs := src.Nets
-	if src.DefaultNet != "" && !cluster {
-		refs = append([]string{src.DefaultNet}, src.Nets...)
-	}
+	cluster := s.clusterNIC(src)
+	refs := s.offClusterNICs(src)
 	var bypasses []model.TraceStep
 	for _, ref := range refs {
 		if s.isLocalnet(ref) {
@@ -491,7 +515,7 @@ func (s *Snapshot) externalConnectivity(src TraceWorkload, dstIP string, view *T
 		// on the network, may still carry the flow.
 		p.decided = "Conditional"
 		p.steps = append(p.steps, model.TraceStep{Stage: "connectivity", Action: "Bypass", Conditional: true,
-			Note: src.Name + " has no primary network: traffic to " + dstIP + " can leave only through a secondary network, which no cluster control filters. The network behind it decides."})
+			Note: src.Name + " has no cluster network attachment: traffic to " + dstIP + " can leave only through a network no cluster control filters. The network behind it decides."})
 	default:
 		p.decided = "Unreachable"
 		p.steps = append(p.steps, model.TraceStep{Stage: "connectivity", Action: "Unreachable", Decisive: true,

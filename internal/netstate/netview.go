@@ -33,6 +33,9 @@ type netID struct{ key, display string }
 type nadView struct {
 	id       netID
 	localnet bool
+	// primary: a Primary-role UDN or CUDN generated it, so a pod bound to it
+	// has an OVN port on that network, which the cluster controls filter.
+	primary  bool
 	prefixes []netip.Prefix // its address range; nil when unknown
 }
 
@@ -76,10 +79,12 @@ func (s *Snapshot) decodeNetworks() *netView {
 			cudnNS[name] = append(cudnNS[name], ns)
 			cudnNADs = append(cudnNADs, [2]string{ns, name})
 			n.id, n.prefixes = netID{"cudn:" + name, name}, parsePrefixes(cudnCfg[name].Subnets())
+			n.primary = strings.EqualFold(cudnCfg[name].Role(), "Primary")
 		case "UserDefinedNetwork":
 			n.id, n.prefixes = netID{"udn:" + ref, name}, parsePrefixes(udnCfg[ns+"/"+name].Subnets())
 			if name == u.GetName() {
 				v.realized[ref] = true
+				n.primary = strings.EqualFold(udnCfg[ref].Role(), "Primary")
 			}
 		default:
 			if !isSystemNamespace(ns) {

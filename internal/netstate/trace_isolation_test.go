@@ -683,13 +683,14 @@ func TestAdminPoliciesMayNotBindAVMNetwork(t *testing.T) {
 	}
 }
 
-// A VM whose default network is a Multus binding is off the cluster network
-// whatever its namespace: its effective chain reads admin rules as the trace
-// does, conditional, while the namespace's own chain stays certain.
+// A VM's Multus default binding decides its chain: to a NAD a Primary-role
+// network generated, it is on that VM Network, admin rules conditional; to
+// any other NAD, one a primary UDN owns under another name among them, it is
+// off the cluster network. The namespace's own chain stays certain.
 func TestEffectiveReadsAWorkloadsDefaultBinding(t *testing.T) {
 	s := New(nil, nil)
 	anp(t, s, "deny-all", 1, map[string]any{"action": "Deny", "to": []any{map[string]any{"namespaces": map[string]any{}}}})
-	labels := map[string]string{"kubernetes.io/metadata.name": "team-a"}
+	primaryUDN(t, s, "team-a", "net-a", map[string]any{"topology": "Layer2", "layer2": map[string]any{"role": "Primary"}})
 	admin := func(eff model.EffectivePolicy) model.PolicyBinding {
 		t.Helper()
 		for _, b := range eff.EastWest {
@@ -700,16 +701,24 @@ func TestEffectiveReadsAWorkloadsDefaultBinding(t *testing.T) {
 		t.Fatalf("no admin binding in %+v", eff.EastWest)
 		return model.PolicyBinding{}
 	}
-	if b := admin(s.Effective("team-a", labels, map[string]string{"app": "vm"}, true, false, "team-a/bridge")); !b.Conditional || !strings.Contains(b.Note, "VM Network") {
-		t.Errorf("a VM on a Multus default binding: conditional %v, note %q", b.Conditional, b.Note)
+	labels, pod := map[string]string{"kubernetes.io/metadata.name": "team-a"}, map[string]string{"app": "vm"}
+	if b := admin(s.Effective("team-a", labels, pod, true, false, "team-a/net-a")); !b.Conditional || !strings.Contains(b.Note, "VM Network") {
+		t.Errorf("a VM bound to its VM Network: conditional %v, note %q", b.Conditional, b.Note)
 	}
-	if b := admin(s.Effective("team-a", labels, map[string]string{"app": "vm"}, true, true, "")); b.Conditional {
+	add(t, s.nad, ownedNAD("team-a", "alias", "UserDefinedNetwork", "net-a", "team-a/net-a", ""))
+	for _, ref := range []string{"team-a/bridge", "team-a/alias"} {
+		if b := admin(s.Effective("team-a", labels, pod, true, false, ref)); !b.Conditional || !strings.Contains(b.Note, "no cluster network attachment") {
+			t.Errorf("a VM bound to %s, which OVN-K did not generate for a primary network: conditional %v, note %q", ref, b.Conditional, b.Note)
+		}
+	}
+	b := admin(s.Effective("team-b", map[string]string{"kubernetes.io/metadata.name": "team-b"}, pod, true, true, ""))
+	if b.Conditional {
 		t.Errorf("a VM on the cluster network read as conditional: %q", b.Note)
 	}
 }
 
 // A VM with no cluster network attachment - only VLAN or other secondary
-// NICs, or a localnet default binding - is filtered by no cluster or project
+// NICs, or a default binding no Primary-role network generated - is filtered by no cluster or project
 // rule: every binding in its chain is conditional with that reason, and no
 // default deny is claimed for it.
 func TestEffectiveOffTheClusterNetwork(t *testing.T) {
@@ -735,11 +744,29 @@ func TestEffectiveOffTheClusterNetwork(t *testing.T) {
 		"metadata": map[string]any{"name": "vlan42", "namespace": "team-a"},
 		"spec":     map[string]any{"config": `{"type":"ovn-k8s-cni-overlay","topology":"localnet","vlanID":42}`},
 	})
+	add(t, s.nad, map[string]any{
+		"apiVersion": "k8s.cni.cncf.io/v1", "kind": "NetworkAttachmentDefinition",
+		"metadata": map[string]any{"name": "bridge", "namespace": "team-a"},
+		"spec":     map[string]any{"config": `{"cniVersion":"0.3.1","type":"bridge","bridge":"br1"}`},
+	})
+	secondaryCUDN(t, s, "side", "s")
+	add(t, s.nad, map[string]any{
+		"apiVersion": "k8s.cni.cncf.io/v1", "kind": "NetworkAttachmentDefinition",
+		"metadata": map[string]any{
+			"name": "side", "namespace": "team-a",
+			"ownerReferences": []any{map[string]any{"apiVersion": "k8s.ovn.org/v1", "kind": "ClusterUserDefinedNetwork", "name": "side", "uid": "s"}},
+		},
+	})
+	primaryUDN(t, s, "team-a", "side-udn", map[string]any{"topology": "Layer2", "layer2": map[string]any{"role": "Secondary"}})
 	labels := map[string]string{"kubernetes.io/metadata.name": "team-a"}
 	pod := map[string]string{"app": "vm"}
 	for name, eff := range map[string]model.EffectivePolicy{
-		"VLAN only":                  s.Effective("team-a", labels, pod, true, false, ""),
-		"a localnet default binding": s.Effective("team-a", labels, pod, true, false, "team-a/vlan42"),
+		"a secondary UDN's default binding":     s.Effective("team-a", labels, pod, true, false, "team-a/side-udn"),
+		"VLAN only":                             s.Effective("team-a", labels, pod, true, false, ""),
+		"a localnet default binding":            s.Effective("team-a", labels, pod, true, false, "team-a/vlan42"),
+		"a raw NAD's default binding":           s.Effective("team-a", labels, pod, true, false, "team-a/bridge"),
+		"a secondary network's default binding": s.Effective("team-a", labels, pod, true, false, "team-a/side"),
+		"an unread NAD's default binding":       s.Effective("team-a", labels, pod, true, false, "team-a/gone"),
 	} {
 		if eff.DefaultDenyIngress || eff.DefaultDenyEgress {
 			t.Errorf("%s: default deny claimed (%v, %v)", name, eff.DefaultDenyIngress, eff.DefaultDenyEgress)
