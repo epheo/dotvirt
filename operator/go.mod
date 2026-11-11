@@ -1,6 +1,6 @@
 module github.com/epheo/dotvirt/operator
 
-go 1.27.3
+go 1.27.4
 
 require (
 	github.com/epheo/dotvirt/pkg/forge v0.0.0
