@@ -134,6 +134,12 @@ export interface ClusterCaps {
    * fields DataVolumeCreate and BootImageCreate read false.
    */
   imageUpload: boolean;
+  /**
+   * UploadProxy is that proxy's base URL. The browser sends the image there
+   * itself, so it must trust that host's certificate: accepting the
+   * console's covers no other host.
+   */
+  uploadProxy?: string;
 }
 /**
  * NamespaceCaps are the actions in one namespace and on its project.

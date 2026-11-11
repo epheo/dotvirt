@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"strings"
 
 	"github.com/epheo/dotvirt/internal/auth"
 	"github.com/epheo/dotvirt/internal/changeset"
@@ -90,7 +91,7 @@ func (s *Server) tenancyCap(ctx context.Context, id auth.Identity, c *cluster.Cl
 // platform repo, SSO's an OAuth flow: without one they stay false, as their
 // routes then answer 503. Platform is the union of the platform-tier fields.
 func (s *Server) clusterCaps(ctx context.Context, id auth.Identity, c *cluster.Client) model.ClusterCaps {
-	out := model.ClusterCaps{ImageUpload: s.cfg.UploadProxyURL != ""}
+	out := model.ClusterCaps{ImageUpload: s.cfg.UploadProxyURL != "", UploadProxy: strings.TrimRight(s.cfg.UploadProxyURL, "/")}
 	fields := []capField{{&out.Hosts, ask(verbList, ssarNodes, "")}}
 	var un map[model.Kind]bool
 	if s.replication != nil && s.replication.Started() {

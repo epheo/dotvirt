@@ -73,6 +73,10 @@ type ClusterCaps struct {
 	// upload is refused whatever the caller's rights, and the namespace
 	// fields DataVolumeCreate and BootImageCreate read false.
 	ImageUpload bool `json:"imageUpload"`
+	// UploadProxy is that proxy's base URL. The browser sends the image there
+	// itself, so it must trust that host's certificate: accepting the
+	// console's covers no other host.
+	UploadProxy string `json:"uploadProxy,omitempty"`
 }
 
 // NamespaceCaps are the actions in one namespace and on its project.
