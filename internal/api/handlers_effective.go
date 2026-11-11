@@ -29,7 +29,7 @@ func (s *Server) handleVMPolicy(w http.ResponseWriter, r *http.Request) {
 		fail(w, fmt.Errorf("%w: vm %s/%s", model.ErrNotFound, ns, name))
 		return
 	}
-	eff := s.effectivePolicy(ns, wl.Labels, true)
+	eff := s.effectivePolicy(ns, wl.Labels, true, wl.DefaultNet)
 	eff.VM, eff.Labels, eff.LabelsLive = name, wl.Labels, wl.Live
 	s.redactEffective(r.Context(), sc, &eff)
 	writeJSON(w, eff)
@@ -42,7 +42,7 @@ func (s *Server) handleNamespacePolicy(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	eff := s.effectivePolicy(ns, nil, false)
+	eff := s.effectivePolicy(ns, nil, false, "")
 	s.redactEffective(r.Context(), sc, &eff)
 	writeJSON(w, eff)
 }
@@ -229,11 +229,11 @@ func (s *Server) redactEffective(ctx context.Context, sc scope, eff *model.Effec
 	}
 }
 
-func (s *Server) effectivePolicy(ns string, podLabels map[string]string, podScoped bool) model.EffectivePolicy {
+func (s *Server) effectivePolicy(ns string, podLabels map[string]string, podScoped bool, defaultNet string) model.EffectivePolicy {
 	if s.netstate == nil {
 		return model.EffectivePolicy{Namespace: ns}
 	}
-	eff := s.netstate.Effective(ns, s.state.NamespaceLabels(ns), podLabels, podScoped)
+	eff := s.netstate.Effective(ns, s.state.NamespaceLabels(ns), podLabels, podScoped, defaultNet)
 	for _, bs := range [][]model.PolicyBinding{eff.EastWest, eff.Gateway, eff.SNAT, eff.Routes} {
 		for i := range bs {
 			s.policyDrift(&bs[i].Policy)

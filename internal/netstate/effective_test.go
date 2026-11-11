@@ -75,7 +75,7 @@ func TestEffectiveEastWestOrder(t *testing.T) {
 	})
 
 	nsLabels := map[string]string{"kubernetes.io/metadata.name": "team-a", "env": "prod"}
-	eff := s.Effective("team-a", nsLabels, map[string]string{"app": "web"}, true)
+	eff := s.Effective("team-a", nsLabels, map[string]string{"app": "web"}, true, "")
 
 	var names []string
 	for _, b := range eff.EastWest {
@@ -116,7 +116,7 @@ func TestEffectiveNetpolTypeDefaulting(t *testing.T) {
 			"egress":      []any{map[string]any{"to": []any{}}},
 		},
 	})
-	eff := s.Effective("team-a", nil, nil, true)
+	eff := s.Effective("team-a", nil, nil, true, "")
 	if !eff.DefaultDenyIngress || !eff.DefaultDenyEgress {
 		t.Errorf("egress rules without policyTypes: want both directions denied, got ingress=%v egress=%v",
 			eff.DefaultDenyIngress, eff.DefaultDenyEgress)
@@ -145,7 +145,7 @@ func TestEffectiveNamespaceScopeConditional(t *testing.T) {
 		},
 	})
 
-	eff := s.Effective("team-a", nil, nil, false)
+	eff := s.Effective("team-a", nil, nil, false, "")
 	if len(eff.EastWest) != 2 {
 		t.Fatalf("want both netpols bound, got %+v", eff.EastWest)
 	}
@@ -183,17 +183,17 @@ func TestEffectiveANPPodSubject(t *testing.T) {
 		},
 	})
 	nsLabels := map[string]string{"env": "prod"}
-	if eff := s.Effective("team-a", nsLabels, map[string]string{"app": "web"}, true); len(eff.EastWest) != 1 {
+	if eff := s.Effective("team-a", nsLabels, map[string]string{"app": "web"}, true, ""); len(eff.EastWest) != 1 {
 		t.Errorf("web pod in prod namespace: want the ANP bound, got %+v", eff.EastWest)
 	}
-	if eff := s.Effective("team-a", nsLabels, map[string]string{"app": "db"}, true); len(eff.EastWest) != 0 {
+	if eff := s.Effective("team-a", nsLabels, map[string]string{"app": "db"}, true, ""); len(eff.EastWest) != 0 {
 		t.Errorf("db pod: want no binding, got %+v", eff.EastWest)
 	}
-	if eff := s.Effective("team-b", map[string]string{"env": "dev"}, map[string]string{"app": "web"}, true); len(eff.EastWest) != 0 {
+	if eff := s.Effective("team-b", map[string]string{"env": "dev"}, map[string]string{"app": "web"}, true, ""); len(eff.EastWest) != 0 {
 		t.Errorf("dev namespace: want no binding, got %+v", eff.EastWest)
 	}
 	// Namespace scope: the namespace side matches, the pod side can't resolve.
-	if eff := s.Effective("team-a", nsLabels, nil, false); len(eff.EastWest) != 1 || !eff.EastWest[0].Conditional {
+	if eff := s.Effective("team-a", nsLabels, nil, false, ""); len(eff.EastWest) != 1 || !eff.EastWest[0].Conditional {
 		t.Errorf("namespace scope: want one conditional binding, got %+v", eff.EastWest)
 	}
 }
@@ -230,7 +230,7 @@ func TestEffectiveEgressPlanes(t *testing.T) {
 
 	nsLabels := map[string]string{"kubernetes.io/metadata.name": "team-a"}
 
-	eff := s.Effective("team-a", nsLabels, map[string]string{"tier": "backend"}, true)
+	eff := s.Effective("team-a", nsLabels, map[string]string{"tier": "backend"}, true, "")
 	if len(eff.Gateway) != 1 || len(eff.SNAT) != 1 || len(eff.Routes) != 0 {
 		t.Fatalf("backend pod: gateway=%d snat=%d routes=%d", len(eff.Gateway), len(eff.SNAT), len(eff.Routes))
 	}
@@ -238,15 +238,15 @@ func TestEffectiveEgressPlanes(t *testing.T) {
 		t.Errorf("pod labels match the EgressIP podSelector: must be definite")
 	}
 
-	if eff := s.Effective("team-a", nsLabels, map[string]string{"tier": "frontend"}, true); len(eff.SNAT) != 0 {
+	if eff := s.Effective("team-a", nsLabels, map[string]string{"tier": "frontend"}, true, ""); len(eff.SNAT) != 0 {
 		t.Errorf("frontend pod: EgressIP podSelector must exclude it, got %+v", eff.SNAT)
 	}
 
-	if eff := s.Effective("team-a", nsLabels, nil, false); len(eff.SNAT) != 1 || !eff.SNAT[0].Conditional {
+	if eff := s.Effective("team-a", nsLabels, nil, false, ""); len(eff.SNAT) != 1 || !eff.SNAT[0].Conditional {
 		t.Errorf("namespace scope: EgressIP with podSelector must bind conditionally, got %+v", eff.SNAT)
 	}
 
-	if eff := s.Effective("team-b", map[string]string{"kubernetes.io/metadata.name": "team-b"}, nil, false); len(eff.Gateway)+len(eff.SNAT)+len(eff.Routes) != 0 {
+	if eff := s.Effective("team-b", map[string]string{"kubernetes.io/metadata.name": "team-b"}, nil, false, ""); len(eff.Gateway)+len(eff.SNAT)+len(eff.Routes) != 0 {
 		t.Errorf("team-b: nothing binds, got %+v", eff)
 	}
 }
@@ -263,7 +263,7 @@ func TestEffectiveEgressPlanesOrdered(t *testing.T) {
 		})
 	}
 	for range 50 {
-		eff := s.Effective("team-a", nil, nil, true)
+		eff := s.Effective("team-a", nil, nil, true, "")
 		var got []string
 		for _, b := range eff.SNAT {
 			got = append(got, b.Policy.Name)
@@ -286,7 +286,7 @@ func TestEffectiveANPPriorityNotes(t *testing.T) {
 		})
 	}
 	notes := map[string]string{}
-	for _, b := range s.Effective("team-a", nil, nil, true).EastWest {
+	for _, b := range s.Effective("team-a", nil, nil, true, "").EastWest {
 		notes[b.Policy.Name] = b.Note
 	}
 	for _, name := range []string{"a-shared", "b-shared"} {
@@ -506,7 +506,7 @@ func TestDecodedSelectorsMatchLibrary(t *testing.T) {
 		t.Errorf("verdicts covered: %v, want yes, no and conditional", seen)
 	}
 
-	eff := s.Effective("team-b", map[string]string{"env": "prod"}, map[string]string{"app": "web"}, true)
+	eff := s.Effective("team-b", map[string]string{"env": "prod"}, map[string]string{"app": "web"}, true, "")
 	got := map[string]bool{}
 	for _, b := range eff.EastWest {
 		got[b.Policy.Name] = b.Conditional
