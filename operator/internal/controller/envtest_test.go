@@ -293,6 +293,7 @@ func TestEnvtest(t *testing.T) {
 		for _, u := range []string{
 			"javascript:alert(1)", "/forge", "c.example/forge", "ftp://c.example", "https:///forge",
 			"https://?x", "https://@", "https://host:abc", "https://u:p@host", "https://host?x", "https://host?", "https://host#f", "https://host/a b",
+			"https://host/%zz", "https://host/a%2", "https://host/a\x7fb", "https://host/a\x01b",
 		} {
 			dv := testCR()
 			dv.Spec.Forge.WebURL = u
@@ -300,7 +301,7 @@ func TestEnvtest(t *testing.T) {
 				t.Errorf("webURL %q: got %v, want Invalid", u, err)
 			}
 		}
-		for _, u := range []string{"https://c.example", "https://c.example/forge/", "http://forge.dotvirt.svc:3000"} {
+		for _, u := range []string{"https://c.example", "https://c.example/forge/", "https://c.example/a%2Fb", "http://forge.dotvirt.svc:3000"} {
 			dv := testCR()
 			dv.Spec.Forge.WebURL = u
 			if err := admin.Create(ctx, dv, client.DryRunAll); client.IgnoreAlreadyExists(err) != nil {

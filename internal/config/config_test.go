@@ -40,6 +40,7 @@ func TestLoadChecksTheForgeWebURL(t *testing.T) {
 	for _, u := range []string{
 		"javascript:alert(1)", "/forge", "c.example/forge", "ftp://c.example", "https:///forge",
 		"https://?x", "https://@", "https://host:abc", "https://u:p@host", "https://host?x", "https://host?", "https://host#f", "https://host/a b",
+		"https://host/%zz", "https://host/a%2", "https://host/a\x7fb", "https://host/a\x01b",
 	} {
 		_, err := Load([]string{"-forge-web-url", u, "-session-secret", "s"})
 		if err == nil || !strings.Contains(err.Error(), "-forge-web-url") {
