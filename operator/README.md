@@ -592,7 +592,7 @@ Unset, links start with `spec.forge.url`.
 
 `spec.branding` dresses the console as a provider's; unset, it is dotvirt's own.
 
-- `productName`: shown in place of dotvirt in the masthead, the page titles, the sign-in screen and the session messages. Help text elsewhere still names dotvirt. At most 40 characters, no control characters.
+- `productName`: shown in place of dotvirt throughout the console. Messages the server writes say "the console". At most 40 characters, no control characters.
 - `links`: up to 5 masthead links back to your own app (account, billing). Each a text `label` of at most 32 characters and an `https` `url` with a host and no credentials. They open in a new tab.
 - `configMap`: a ConfigMap in dotvirt's namespace holding:
   - `theme.css`, loaded after the console's own stylesheet, so it may override its tokens (`--color-accent`, surfaces, ink, `--font-sans`);

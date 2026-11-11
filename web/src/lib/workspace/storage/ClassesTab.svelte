@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { branding } from '#lib/state/branding.svelte.js';
 	import { type StorageClassInfo } from '#lib/api.js';
 	import { hrefForScope } from '#lib/nav.js';
 	import { inventory } from '#lib/state/inventory.svelte.js';
@@ -85,7 +86,7 @@
 	</Note>
 {/if}
 
-<Card title="Storage classes" meta="Managed by the cluster platform, not dotvirt" flush>
+<Card title="Storage classes" meta="Managed by the cluster platform, not {branding.name}" flush>
 	<div class="overflow-x-auto">
 		<table class="w-full border-collapse text-[13px] tabular-nums">
 			<thead>

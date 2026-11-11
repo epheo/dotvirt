@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { branding } from '#lib/state/branding.svelte.js';
 	import { untrack } from 'svelte';
 	import { page } from '$app/state';
 	import { CircleDot, X } from '@lucide/svelte';
@@ -301,7 +302,7 @@
 				</div>
 			{:else if open.catalog && !open.catalog.ready}
 				<p class="border-b border-line-soft px-card py-3.5 text-xs leading-4 text-ink-faint">
-					Added outside dotvirt, so it is not deleted here.
+					Added outside {branding.name}, so it is not deleted here.
 				</p>
 			{/if}
 			<dl class="grid grid-cols-[auto_1fr] gap-x-4 gap-y-2 px-card py-3.5 text-[13px]">

@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { branding } from '#lib/state/branding.svelte.js';
 	import { api, type ReleaseResult } from '#lib/api.js';
 	import { action } from '#lib/resource.svelte.js';
 	import { ui } from '#lib/state/ui.svelte.js';
@@ -49,7 +50,7 @@
 >
 	<p>
 		<strong>{project}</strong> has the project label but no backing repo. Releasing removes
-		dotvirt's claim on {namespaces.length === 1
+		{branding.name}'s claim on {namespaces.length === 1
 			? 'its namespace'
 			: `its ${namespaces.length} namespaces`}
 		({namespaces.join(', ')}):

@@ -18,8 +18,8 @@ describe('plural', () => {
 
 describe('serverReason', () => {
 	it('drops the kind and keeps the sentence', () => {
-		expect(serverReason('forbidden: pull request #8 changed outside dotvirt\n')).toBe(
-			'pull request #8 changed outside dotvirt',
+		expect(serverReason('forbidden: pull request #8 changed outside the console\n')).toBe(
+			'pull request #8 changed outside the console',
 		);
 		expect(serverReason('conflict: the branch moved')).toBe('the branch moved');
 		expect(serverReason('the forge is down')).toBe('the forge is down');

@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { branding } from '#lib/state/branding.svelte.js';
 	import type { VM } from '#lib/api.js';
 	import { plural } from '#lib/format.js';
 	import { clusterObjectGate } from '#lib/gates.js';
@@ -30,7 +31,7 @@
 				<Row label="VMs placed here" value={vms.length.toLocaleString('en-US')} />
 			</dl>
 			<p class="border-t border-line-soft px-card py-2.5 text-xs text-ink-muted">
-				Host configuration is managed by the cluster platform, not dotvirt.
+				Host configuration is managed by the cluster platform, not {branding.name}.
 			</p>
 		</Card>
 

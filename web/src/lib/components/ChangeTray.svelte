@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { branding } from '#lib/state/branding.svelte.js';
 	import { untrack } from 'svelte';
 	import { page } from '$app/state';
 	import {
@@ -418,10 +419,10 @@
 							<div class="flex items-center gap-3 px-3 py-2">
 								<p class="min-w-0 flex-1 text-ink-soft">
 									{!unfollowable(lane.project)
-										? 'GitOps status is not available, so dotvirt cannot follow it to the cluster.'
+										? `GitOps status is not available, so ${branding.name} cannot follow it to the cluster.`
 										: lane.project === PLATFORM_PROJECT
-											? "You cannot read the platform's history, so dotvirt cannot follow it to the cluster."
-											: `You cannot read all of ${lane.project}, so dotvirt cannot follow it to the cluster.`}
+											? `You cannot read the platform's history, so ${branding.name} cannot follow it to the cluster.`
+											: `You cannot read all of ${lane.project}, so ${branding.name} cannot follow it to the cluster.`}
 								</p>
 								<button class="text-ink-soft hover:underline" onclick={() => tray.dismiss(lane.key)}
 									>Dismiss</button

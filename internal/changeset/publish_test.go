@@ -811,7 +811,7 @@ func TestProposeIgnoresARecordForAnotherBranch(t *testing.T) {
 		t.Fatal(err)
 	}
 	f.stageLabel(t, "tier", "gold")
-	if _, err := f.c.Propose(f.id, f.proj, model.ProposeRequest{}); !errors.Is(err, model.ErrConflict) || !strings.Contains(err.Error(), "before dotvirt kept a record") {
+	if _, err := f.c.Propose(f.id, f.proj, model.ProposeRequest{}); !errors.Is(err, model.ErrConflict) || !strings.Contains(err.Error(), "before the console kept a record") {
 		t.Fatalf("want the unrecorded-PR refusal, got %v", err)
 	}
 }

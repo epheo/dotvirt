@@ -264,7 +264,7 @@ func (r *Repo) BranchDiff(base, head string) ([]FileChange, error) {
 
 // ErrForeignCommit: a branch carries, past its fork from base, a commit
 // dotvirt did not write for the author asked about (BranchDiffBy).
-var ErrForeignCommit = errors.New("the branch carries a commit dotvirt did not write for its author")
+var ErrForeignCommit = errors.New("the branch carries a commit the console did not write for its author")
 
 // byCommitsMax bounds the walk of BranchDiffBy: dotvirt writes one commit per
 // branch build, so a longer run is someone else's.

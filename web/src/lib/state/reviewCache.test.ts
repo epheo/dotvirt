@@ -75,11 +75,11 @@ describe('reviewCache proposals', () => {
 
 	it('a 403 is the answer, not a failure to retry', async () => {
 		inventory.apply(lane('aaa'));
-		api.api.proposal.mockRejectedValueOnce(new api.HttpError('changed outside dotvirt', 403));
+		api.api.proposal.mockRejectedValueOnce(new api.HttpError('changed outside the console', 403));
 		reviewCache.loadProposal('p', 4);
 		await settle();
 		expect(reviewCache.proposal('p', 4)).toMatchObject({
-			error: 'changed outside dotvirt',
+			error: 'changed outside the console',
 			denied: true,
 		});
 

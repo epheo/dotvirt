@@ -225,10 +225,10 @@ test('a platform stager without platform read reviews their own platform PRs', a
 	await expect(main.getByText('dc-vlan-120').first()).toBeVisible();
 	await expect(main.getByText('yours')).toBeVisible();
 
-	// Changed outside dotvirt: the server's answer is the review, with nothing to retry.
+	// Changed outside the console: the server's answer is the review, with nothing to retry.
 	await main.getByRole('button', { name: /PR #8/ }).click();
 	await expect(
-		main.getByText('Pull request #8 changed outside dotvirt since you proposed it.'),
+		main.getByText('Pull request #8 changed outside the console since you proposed it.'),
 	).toBeVisible();
 	await expect(main.getByText('A platform administrator can review it.')).toBeVisible();
 	await expect(main.getByRole('button', { name: 'Retry' })).toHaveCount(0);

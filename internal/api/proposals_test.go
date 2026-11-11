@@ -550,7 +550,7 @@ func TestProposalRouteNeverEchoesTheForge(t *testing.T) {
 		says        string
 	}{
 		{http.StatusNotFound, http.StatusNotFound, "the forge has no pull request #7"},
-		{http.StatusForbidden, http.StatusServiceUnavailable, "the forge refused dotvirt (403)"},
+		{http.StatusForbidden, http.StatusServiceUnavailable, "the forge refused the console (403)"},
 		{http.StatusInternalServerError, http.StatusServiceUnavailable, "the forge failed (500)"},
 	} {
 		status.Store(int32(tc.forge))
@@ -732,7 +732,7 @@ func TestPlatformReviewOpensToItsOwnerAlone(t *testing.T) {
 
 	rec = get(alice, "4")
 	if body := rec.Body.String(); rec.Code != http.StatusForbidden ||
-		!strings.Contains(body, "changed outside dotvirt since you proposed it; someone who can read the whole repo can review it") || strings.Contains(body, "items") {
+		!strings.Contains(body, "changed outside the console since you proposed it; someone who can read the whole repo can review it") || strings.Contains(body, "items") {
 		t.Errorf("own PR someone pushed to = %d %q, want the guided refusal without items", rec.Code, body)
 	}
 

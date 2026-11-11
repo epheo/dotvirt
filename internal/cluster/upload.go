@@ -243,7 +243,7 @@ func (c *Client) DeleteBootImage(ctx context.Context, namespace, name string) (n
 		return "", err
 	}
 	if why := notOwnShape(ds); why != "" {
-		return "", fmt.Errorf("%w: %s is not a boot image dotvirt added (%s); nothing was removed", model.ErrConflict, name, why)
+		return "", fmt.Errorf("%w: %s is not a boot image the console added (%s); nothing was removed", model.ErrConflict, name, why)
 	}
 	if dataSourceReady(ds) {
 		return "", fmt.Errorf("%w: %s is ready, and only an unfinished boot image is deleted here; nothing was removed", model.ErrConflict, name)
@@ -256,7 +256,7 @@ func (c *Client) DeleteBootImage(ctx context.Context, namespace, name string) (n
 		return "", fmt.Errorf("nothing was removed: %w", err)
 	default:
 		if why := notOwnDisk(dv); why != "" {
-			return "", fmt.Errorf("%w: %s is not a boot image dotvirt added (%s); nothing was removed", model.ErrConflict, name, why)
+			return "", fmt.Errorf("%w: %s is not a boot image the console added (%s); nothing was removed", model.ErrConflict, name, why)
 		}
 	}
 
