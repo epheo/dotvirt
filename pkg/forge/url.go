@@ -87,7 +87,7 @@ func OwnerPrefixURL(repoURL string) string {
 // CompareURL is the browser URL to manually open a PR for head->base, used when
 // the forge API isn't configured.
 func (c *Client) CompareURL(head, base string) string {
-	return fmt.Sprintf("%s/%s/%s/compare/%s...%s", c.f.baseURL, c.owner, c.repo, base, head)
+	return fmt.Sprintf("%s/%s/%s/compare/%s...%s", c.f.webURL, c.owner, c.repo, base, head)
 }
 
 // urlPath returns the path component of a URL, or raw unchanged if it has none -

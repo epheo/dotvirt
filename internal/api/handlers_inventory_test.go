@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -15,6 +16,7 @@ import (
 
 	"github.com/epheo/dotvirt/internal/argo"
 	"github.com/epheo/dotvirt/internal/auth"
+	"github.com/epheo/dotvirt/internal/git"
 	"github.com/epheo/dotvirt/internal/model"
 	"github.com/epheo/dotvirt/pkg/forge"
 )
@@ -179,5 +181,33 @@ func TestPlatformRollupNamesWhatTheCallerMayList(t *testing.T) {
 	}
 	if body := frame(platform); !strings.Contains(body, "acme-lockdown") {
 		t.Errorf("a caller listing cluster rules must still read the row: %s", body)
+	}
+}
+
+// The frame hands each project's repo out as its page under the forge's web
+// base, while repo stays the clone URL git and Argo use.
+func TestInventoryLinksTheRepoUnderTheWebBase(t *testing.T) {
+	// A URL with no host is this forge's: its last two path segments name it.
+	path := seedPlatformRepo(t, map[string]string{"team-a-dev/README.md": "x"})
+	repo := "file://" + path
+	want := "https://web/" + filepath.Base(filepath.Dir(path)) + "/" + strings.TrimSuffix(filepath.Base(path), ".git")
+	fc := newFakeCluster(t)
+	fc.namespaces[0].Annotations["dotvirt.io/repo"] = repo
+	fc.readsVMs = tenantReadsTeamA
+	s := fc.server(nil, Config{BaseBranch: "main"})
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	s.repos = git.NewRepoSet(ctx, "", "", nil, false, nil, time.Hour)
+	s.forge = forge.NewFactory("https://forge", forge.StaticToken("t"), false, "").WithWebURL("https://web")
+	inv, err := s.InventoryForIdentity(context.Background(), auth.Identity{Token: tenantToken, Username: "u"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	i := slices.IndexFunc(inv.Projects, func(p model.Project) bool { return p.Name == "team-a" })
+	if i < 0 {
+		t.Fatalf("team-a missing: %+v", inv.Projects)
+	}
+	if p := inv.Projects[i]; p.RepoPage != want || p.Repo != repo {
+		t.Errorf("repo %q, page %q: want the clone URL and its page under the web base", p.Repo, p.RepoPage)
 	}
 }

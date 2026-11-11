@@ -211,7 +211,8 @@
 				>
 				<MenuItem
 					onclick={() => {
-						if (ctx.kind === 'container' && ctx.repo) window.open(ctx.repo, '_blank');
+						if (ctx.kind === 'container' && ctx.repo)
+							window.open(ctx.repoPage || ctx.repo, '_blank', 'noopener');
 						ui.ctx = null;
 					}}
 					disabled={!ctx.repo}>Open repository ↗</MenuItem

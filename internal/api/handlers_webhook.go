@@ -73,7 +73,7 @@ func (s *Server) handleForgeWebhook(w http.ResponseWriter, r *http.Request) {
 			s.tasks.RecordMerge(tasks.Merge{
 				RepoURL: repo,
 				Number:  pr.Number,
-				URL:     pr.HTMLURL,
+				URL:     s.forge.PullPage(event.Repository.CloneURL, pr.Number),
 				Title:   pr.Title,
 				By:      tasks.MergeAuthor(pr.HeadBranch(), s.cfg.ProposedBranch, pr.User.Login),
 				Branch:  pr.HeadBranch(),

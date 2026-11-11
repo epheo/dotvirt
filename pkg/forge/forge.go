@@ -54,6 +54,7 @@ func FileToken(path string) TokenSource {
 // forge endpoint + token are shared. Returns nil if the forge isn't configured.
 type Factory struct {
 	baseURL string
+	webURL  string // where browsers open its pages; baseURL unless WithWebURL
 	tokenFn TokenSource
 	http    *http.Client
 }
@@ -69,11 +70,39 @@ func NewFactory(baseURL string, tokenFn TokenSource, insecure bool, caFile strin
 	if baseURL == "" || tokenFn == nil {
 		return nil
 	}
+	base := strings.TrimRight(baseURL, "/")
 	return &Factory{
-		baseURL: strings.TrimRight(baseURL, "/"),
+		baseURL: base,
+		webURL:  base,
 		tokenFn: tokenFn,
 		http:    httpClient(insecure, caFile),
 	}
+}
+
+// WithWebURL sets the base browsers open the forge's pages at - pull requests,
+// compare pages, repositories - when it is not the API's: a forge the API
+// reaches in-cluster, or one a provider's app fronts on the same paths. Empty
+// keeps the API's base.
+func (f *Factory) WithWebURL(webURL string) *Factory {
+	if u := strings.TrimRight(strings.TrimSpace(webURL), "/"); f != nil && u != "" {
+		f.webURL = u
+	}
+	return f
+}
+
+// RepoPage is the browser URL of the repo at repoURL: its page under the web
+// base when this forge serves it, else repoURL as written.
+func (f *Factory) RepoPage(repoURL string) string {
+	if c := f.For(repoURL); c != nil && f.SameForge(repoURL) {
+		return fmt.Sprintf("%s/%s/%s", f.webURL, c.owner, c.repo)
+	}
+	return repoURL
+}
+
+// PullPage is the browser URL of pull request number of the repo at repoURL,
+// "" without a forge.
+func (f *Factory) PullPage(repoURL string, number int) string {
+	return f.For(repoURL).PullURL(number)
 }
 
 // For returns a Client targeting the repo identified by repoURL (e.g.

@@ -58,6 +58,8 @@ type Inputs struct {
 	// ScopeSync narrows a project's GitOps rollup to what the caller may read;
 	// nil leaves it whole.
 	ScopeSync func(project.ProjectInfo, model.ProjectSync) *model.ProjectSync
+	// RepoPage is the browser URL of a project's repo; nil leaves it unset.
+	RepoPage func(repoURL string) string
 }
 
 // Build produces the inventory. A project whose repo can't be read (or that has
@@ -89,6 +91,9 @@ func logRepoErr(project string, err error) {
 
 func buildProject(in Inputs, p project.ProjectInfo) model.Project {
 	out := model.Project{Name: p.Name, Repo: p.Repo, Error: p.Error, Namespaces: []model.ProjectNamespace{}}
+	if in.RepoPage != nil && p.Repo != "" {
+		out.RepoPage = in.RepoPage(p.Repo)
+	}
 	// The GitOps rollup is keyed by the Application's repo, independent of whether
 	// dotvirt can read the repo - so it's attached even when the repo read below fails
 	// (that's exactly when a "sync unhealthy" badge matters most).
