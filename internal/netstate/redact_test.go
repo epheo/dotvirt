@@ -259,7 +259,7 @@ func TestRedactOwnScopeEverySurface(t *testing.T) {
 	for _, p := range s.Policies() {
 		redact("policy "+p.Name, &p, nil)
 	}
-	eff := s.Effective("tenant-a", nsLabels("tenant-a"), map[string]string{"app": "web"}, true)
+	eff := s.Effective("tenant-a", nsLabels("tenant-a"), map[string]string{"app": "web"}, true, "")
 	for _, list := range [][]model.PolicyBinding{eff.EastWest, eff.SNAT} {
 		for i := range list {
 			redact("effective "+list[i].Policy.Name, &list[i].Policy, nil)

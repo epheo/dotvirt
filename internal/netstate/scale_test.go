@@ -397,7 +397,7 @@ func BenchmarkEffective(b *testing.B) {
 	pod := map[string]string{"app": "web"}
 	b.ReportAllocs()
 	for b.Loop() {
-		eff := s.Effective(scaleNS(4), scaleNSLabels(4), pod, true)
+		eff := s.Effective(scaleNS(4), scaleNSLabels(4), pod, true, "")
 		s.redactEffective(&eff, scaleTenant(all))
 	}
 }

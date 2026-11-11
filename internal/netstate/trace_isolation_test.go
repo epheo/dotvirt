@@ -661,7 +661,7 @@ func TestAdminPoliciesMayNotBindAVMNetwork(t *testing.T) {
 	if res := s.Trace(nil, src, &dst, "", "TCP", 80); res.Verdict == "Deny" {
 		t.Errorf("an admin deny between two VMs on a VM Network decided: %v", stepKinds(t, res))
 	}
-	eff := s.Effective("tenant-a", src.NSLabels, nil, false)
+	eff := s.Effective("tenant-a", src.NSLabels, nil, false, "")
 	if len(eff.EastWest) < 2 {
 		t.Fatalf("effective chain on a VM Network: %+v, want the admin and baseline bindings", eff.EastWest)
 	}
@@ -676,9 +676,34 @@ func TestAdminPoliciesMayNotBindAVMNetwork(t *testing.T) {
 	if res := plain.Trace(nil, p1, &p2, "", "TCP", 80); res.Verdict != "Deny" {
 		t.Errorf("an admin deny on the cluster's own network: verdict = %s (%v)", res.Verdict, stepKinds(t, res))
 	}
-	for _, b := range plain.Effective("team-a", p1.NSLabels, nil, false).EastWest {
+	for _, b := range plain.Effective("team-a", p1.NSLabels, nil, false, "").EastWest {
 		if b.Policy.Kind == "admin" && b.Conditional {
 			t.Errorf("an admin policy on the cluster's own network read as conditional")
 		}
+	}
+}
+
+// A VM whose default network is a Multus binding is off the cluster network
+// whatever its namespace: its effective chain reads admin rules as the trace
+// does, conditional, while the namespace's own chain stays certain.
+func TestEffectiveReadsAWorkloadsDefaultBinding(t *testing.T) {
+	s := New(nil, nil)
+	anp(t, s, "deny-all", 1, map[string]any{"action": "Deny", "to": []any{map[string]any{"namespaces": map[string]any{}}}})
+	labels := map[string]string{"kubernetes.io/metadata.name": "team-a"}
+	admin := func(eff model.EffectivePolicy) model.PolicyBinding {
+		t.Helper()
+		for _, b := range eff.EastWest {
+			if b.Policy.Kind == "admin" {
+				return b
+			}
+		}
+		t.Fatalf("no admin binding in %+v", eff.EastWest)
+		return model.PolicyBinding{}
+	}
+	if b := admin(s.Effective("team-a", labels, map[string]string{"app": "vm"}, true, "team-a/bridge")); !b.Conditional || !strings.Contains(b.Note, "VM Network") {
+		t.Errorf("a VM on a Multus default binding: conditional %v, note %q", b.Conditional, b.Note)
+	}
+	if b := admin(s.Effective("team-a", labels, map[string]string{"app": "vm"}, true, "")); b.Conditional {
+		t.Errorf("a VM on the cluster network read as conditional: %q", b.Note)
 	}
 }

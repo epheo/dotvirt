@@ -26,7 +26,7 @@ func (s *Snapshot) NetworkRules(namespaces []string, nsLabels func(string) map[s
 	out := model.NetworkRules{Namespaces: namespaces, Applies: []model.PolicyBinding{}, Reaches: []model.PeerRule{}}
 	bound := map[string]int{} // policy identity -> index in Applies
 	for _, ns := range namespaces {
-		eff := s.Effective(ns, nsLabels(ns), nil, false)
+		eff := s.Effective(ns, nsLabels(ns), nil, false, "")
 		for _, list := range [][]model.PolicyBinding{eff.EastWest, eff.Gateway, eff.SNAT, eff.Routes} {
 			for _, b := range list {
 				k := policyKey(b.Policy)

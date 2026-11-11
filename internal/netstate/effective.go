@@ -17,11 +17,13 @@ import (
 // being dropped - a maybe-applying firewall rule is never hidden.
 //
 // Control-plane binding only: which policies apply and in what order, not a
-// per-connection verdict.
-func (s *Snapshot) Effective(ns string, nsLabels, podLabels map[string]string, podScoped bool) model.EffectivePolicy {
+// per-connection verdict. defaultNet is the workload's Multus default binding
+// ("namespace/name"), "" for none or a namespace-level query: the workload's
+// primary network is read as the trace reads it.
+func (s *Snapshot) Effective(ns string, nsLabels, podLabels map[string]string, podScoped bool, defaultNet string) model.EffectivePolicy {
 	eff := model.EffectivePolicy{Namespace: ns}
 	// On a VM Network OVN-K may not apply admin or baseline policies.
-	onUDN := s.PrimaryNetwork(ns) != "default"
+	onUDN := s.onPrimaryUDN(TraceWorkload{Namespace: ns, PodNet: defaultNet == "", DefaultNet: defaultNet})
 
 	anps := bind(s.sortedANPs(), nsLabels, podLabels, podScoped)
 	for i, b := range anps {
