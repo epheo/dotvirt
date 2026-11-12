@@ -490,18 +490,21 @@ On OpenShift the operator reads the router CA from
 This is why the operator's role holds `get` on ConfigMaps (the CA lives in another
 namespace) beside the `create`/`patch` every server-side apply needs.
 
-## OpenShift SSO (optional)
+## OpenShift SSO
 
-dotvirt can offer "Sign in with OpenShift" beside the always-present token login:
+dotvirt offers "Sign in with OpenShift" beside the always-present token login:
 the OAuth access token the cluster hands back is a normal bearer token, so it rides
 the same TokenReview + per-request pass-through path as a pasted one.
 
-Set `spec.auth.openShiftSSO: true`:
+It is on by default wherever the cluster runs the OpenShift OAuth server and
+`spec.auth.oidc` is unset. MicroShift, and an OpenShift that signs in through an
+external OIDC issuer, serve no OAuthClients, so it stays off there. Set
+`spec.auth.openShiftSSO: false` to keep it off:
 
 ```yaml
 spec:
   auth:
-    openShiftSSO: true
+    openShiftSSO: false
 ```
 
 The operator generates the client credential and, once the console host is assigned,
@@ -509,12 +512,21 @@ publishes a ready-to-apply command in `status.ssoOAuthClient`: one `oc apply` th
 registers the cluster-scoped `OAuthClient` with the right redirect URI. Registering that
 cluster-scoped object stays a cluster-admin act the operator deliberately leaves to you
 (it holds no `oauthclients` grant); the client secret is read from the generated Secret
-at apply time, so it never lands in status:
+at apply time, so it never lands in status.
+
+The simplest way: sign in to the console once with a token (`oc whoami -t`) as a
+cluster admin and click "Finish SSO setup"; it registers the client with your own
+rights. Or run the command yourself:
 
 ```console
 $ oc -n <install ns> get dotvirt dotvirt -o jsonpath='{.status.ssoOAuthClient}'
 # copy-paste and run the printed `oc apply` command
 ```
+
+Upgrading from 0.2.0 or earlier: an install that never set `spec.auth.openShiftSSO`
+turns SSO on. Until a cluster admin finishes setup, the console shows them the banner,
+and everyone can still sign in with a token. Set `spec.auth.openShiftSSO: false` before
+upgrading to keep it off.
 
 The server-side code exchange calls the cluster's oauth Route, which the router CA
 signs; the Deployment points `DOTVIRT_OAUTH_CA` at the mounted ingress-CA copy, so

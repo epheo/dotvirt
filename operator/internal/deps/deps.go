@@ -40,6 +40,10 @@ var Required = []Dependency{
 type Result struct {
 	MissingHard []string
 	MissingSoft []string
+	// OpenShiftOAuth says the cluster serves oauth.openshift.io OAuthClients:
+	// OpenShift's own OAuth server runs, which MicroShift and an OpenShift
+	// signing in through an external OIDC issuer lack.
+	OpenShiftOAuth bool
 }
 
 // Probe reports which dependencies' CRDs the cluster currently serves. A partial
@@ -68,7 +72,7 @@ func Probe(cfg *rest.Config) (Result, error) {
 		}
 	}
 
-	var res Result
+	res := Result{OpenShiftOAuth: served["oauth.openshift.io/oauthclients"]}
 	for _, d := range Required {
 		ok := served[d.Group+"/"+d.Resource]
 		switch {
