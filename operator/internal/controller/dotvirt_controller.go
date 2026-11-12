@@ -327,6 +327,8 @@ type reconcileCtx struct {
 	// read the same answer.
 	tenantAllowed   []tenancy.GroupKind
 	tenantKindsRead bool
+	// impersonation is impersonating's answer for this pass, nil until asked.
+	impersonation *bool
 }
 
 func (r *DotvirtReconciler) newReconcileCtx(ctx context.Context, dv *dotvirtv1alpha1.Dotvirt) *reconcileCtx {

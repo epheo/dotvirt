@@ -413,6 +413,115 @@ func TestSyncImpersonationFlipAndRollback(t *testing.T) {
 	}
 }
 
+// applyHolders are the subjects dotvirt-argocd-apply binds, nil when the
+// binding is gone.
+func applyHolders(t *testing.T, c client.Client) []string {
+	t.Helper()
+	var b rbacv1.ClusterRoleBinding
+	if !exists(t, c, &b, "", "dotvirt-argocd-apply") {
+		return nil
+	}
+	var names []string
+	for _, s := range b.Subjects {
+		names = append(names, s.Name)
+	}
+	return names
+}
+
+// The shared controller loses dotvirt's apply role only once a pass has seen
+// impersonation on, gets it back when Argo stops impersonating, keeps reading
+// what dotvirt's repos declare throughout, and is bound again before the
+// setting leaves on the way off. The platform account holds the role all along.
+func TestControllerLosesTheApplyRoleOnceImpersonationIsOn(t *testing.T) {
+	forgeDown := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusServiceUnavailable)
+	}))
+	defer forgeDown.Close()
+	dv, creds := byoForgeCR(forgeDown.URL)
+	optIn(dv, false)
+	var n atomic.Int64
+	var order []string
+	f := reviews(granted(map[string][]string{"dotvirt-p-team-a": {"a"}}), &n)
+	f.Patch = func(ctx context.Context, cl client.WithWatch, obj client.Object, patch client.Patch, opts ...client.PatchOption) error {
+		switch {
+		case obj.GetName() == "dotvirt-argocd-apply":
+			order = append(order, "binding")
+		case obj.GetName() == "argocd" && obj.GetObjectKind().GroupVersionKind() == install.ArgoCDGVK:
+			order = append(order, "instance")
+		}
+		return cl.Patch(ctx, obj, patch, opts...)
+	}
+	c := testBuilder(t).WithObjects(dv, creds, argoCDInstance(nil), projectNS("a", "team-a", "dotvirt/team-a.git")).
+		WithInterceptorFuncs(f).WithReturnManagedFields().Build()
+	r := newReconciler(c, depsOK)
+	both := []string{controllerSA, tenancy.PlatformSyncAccount}
+	platformOnly := []string{tenancy.PlatformSyncAccount}
+	reads := func() {
+		t.Helper()
+		var b rbacv1.ClusterRoleBinding
+		if !exists(t, c, &b, "", "dotvirt-argocd-read") || len(b.Subjects) != 1 || b.Subjects[0].Name != controllerSA || b.RoleRef.Name != "dotvirt-argocd-read" {
+			t.Errorf("dotvirt-argocd-read binding = %+v, want the controller", b)
+		}
+	}
+
+	reconcileOnce(t, r, dv)
+	if got := applyHolders(t, c); !slices.Equal(got, both) {
+		t.Fatalf("set, not yet carried: apply holders = %v, want %v", got, both)
+	}
+	// The argocd-operator copies the key into argocd-cm: on, said by this pass.
+	cm := argoCM(true)
+	if err := c.Create(context.Background(), cm); err != nil {
+		t.Fatal(err)
+	}
+	reconcileOnce(t, r, getCR(t, c, dv))
+	if got := syncCond(t, c, dv); got.Status != metav1.ConditionTrue {
+		t.Fatalf("condition = %+v, want on", got)
+	}
+	if got := applyHolders(t, c); !slices.Equal(got, both) {
+		t.Errorf("first pass to see it on: apply holders = %v, want %v", got, both)
+	}
+	reconcileOnce(t, r, getCR(t, c, dv))
+	if got := applyHolders(t, c); !slices.Equal(got, platformOnly) {
+		t.Errorf("on and seen: apply holders = %v, want %v", got, platformOnly)
+	}
+	reads()
+
+	// Argo stops impersonating while the spec still asks: the controller
+	// applies again, so it holds the role again.
+	cm.Data = nil
+	if err := c.Update(context.Background(), cm); err != nil {
+		t.Fatal(err)
+	}
+	reconcileOnce(t, r, getCR(t, c, dv))
+	if got := applyHolders(t, c); !slices.Equal(got, both) {
+		t.Errorf("argocd-cm lost the setting: apply holders = %v, want %v", got, both)
+	}
+	cm.Data = map[string]string{install.SyncImpersonationKey: "true"}
+	if err := c.Update(context.Background(), cm); err != nil {
+		t.Fatal(err)
+	}
+	reconcileOnce(t, r, getCR(t, c, dv))
+	reconcileOnce(t, r, getCR(t, c, dv))
+	if got := applyHolders(t, c); !slices.Equal(got, platformOnly) {
+		t.Fatalf("on and seen again: apply holders = %v, want %v", got, platformOnly)
+	}
+
+	order = nil
+	stored := setSpec(t, c, dv, func(d *dotvirtv1alpha1.Dotvirt) { d.Spec.ArgoCD.SyncImpersonation.Enabled = new(false) })
+	reconcileOnce(t, r, stored)
+	if got := applyHolders(t, c); !slices.Equal(got, both) {
+		t.Errorf("asked off: apply holders = %v, want %v", got, both)
+	}
+	if extra := extraConfig(t, c); extra[install.SyncImpersonationKey] != nil {
+		t.Errorf("asked off, extraConfig = %v", extra)
+	}
+	first, last := slices.Index(order, "binding"), slices.Index(order, "instance")
+	if first < 0 || last < 0 || first > last {
+		t.Errorf("write order %v: the controller must hold the apply role before the setting is removed", order)
+	}
+	reads()
+}
+
 // Held back: a missing grant, a grant reaching past a project's namespaces,
 // another team's Application with no account mapped, Applications still in
 // the shared tier, a controller that cannot impersonate. Each is said, the

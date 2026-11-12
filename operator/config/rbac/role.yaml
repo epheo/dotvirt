@@ -222,6 +222,7 @@ rules:
   resourceNames:
   - dotvirt
   - dotvirt-argocd-apply
+  - dotvirt-argocd-read
   - dotvirt-platform-network-admin
   - dotvirt-platform-sync
   - dotvirt-storage-catalog
@@ -234,6 +235,7 @@ rules:
   resourceNames:
   - dotvirt
   - dotvirt-argocd-apply
+  - dotvirt-argocd-read
   - dotvirt-platform-network-admin
   - dotvirt-platform-sync
   - dotvirt-storage-catalog

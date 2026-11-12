@@ -10,6 +10,7 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -82,6 +83,9 @@ type tenantTier struct {
 	// shared tier, which names no sync account.
 	accounts    map[string][]string
 	sharedInUse bool
+	// controllerApplies says the shared Argo controller still applies
+	// dotvirt's tiers (controllerApplies).
+	controllerApplies bool
 }
 
 // tenantAppProjects renders one AppProject per project from the live namespace
@@ -113,6 +117,7 @@ func (r *DotvirtReconciler) tenantAppProjects(ctx context.Context, dv *dotvirtv1
 		}
 	}
 	allowed := r.tenantKinds(ctx, dv, rc, held.Items)
+	t.controllerApplies = r.controllerApplies(ctx, dv, rc, held.Items)
 	want, refused := install.NamedTenantKinds(dv)
 	if len(refused) > 0 {
 		t.degraded = append(t.degraded, "spec.argocd.tenantKindsAllowed names kinds no tenant repo may apply, left out: "+tenancy.FormatGroupKinds(refused))
@@ -277,8 +282,35 @@ func (r *DotvirtReconciler) tenantKinds(ctx context.Context, dv *dotvirtv1alpha1
 		}
 		held = list.Items
 	}
-	rc.tenantAllowed = install.TenantAllowed(dv, r.impersonating(ctx, dv, rc.argoNS, held))
+	rc.tenantAllowed = install.TenantAllowed(dv, r.impersonatingOnce(ctx, dv, rc, held))
 	return rc.tenantAllowed
+}
+
+// impersonatingOnce is impersonating, asked once per pass.
+func (r *DotvirtReconciler) impersonatingOnce(ctx context.Context, dv *dotvirtv1alpha1.Dotvirt, rc *reconcileCtx, held []unstructured.Unstructured) bool {
+	if rc.impersonation == nil {
+		rc.impersonation = new(r.impersonating(ctx, dv, rc.argoNS, held))
+	}
+	return *rc.impersonation
+}
+
+// controllerApplies reports whether the shared Argo controller still applies
+// dotvirt's tiers, so needs dotvirt-argocd-apply. It stops only once the
+// spec asks for impersonation, Argo is impersonating, and an earlier pass
+// already saw argocd-cm carry the setting (SyncImpersonationReady Enabled, or
+// Degraded naming what is missing), so Argo read it before the role goes. A
+// pass asked off keeps the controller bound: the Argo phase runs before the
+// sync phase removes the setting, so the role is back before Argo applies as
+// the controller again.
+func (r *DotvirtReconciler) controllerApplies(ctx context.Context, dv *dotvirtv1alpha1.Dotvirt, rc *reconcileCtx, held []unstructured.Unstructured) bool {
+	if !dv.Spec.ArgoCD.SyncImpersonation.On() {
+		return true
+	}
+	seen := meta.FindStatusCondition(dv.Status.Conditions, dotvirtv1alpha1.ConditionSyncImpersonationReady)
+	if seen == nil || (seen.Reason != "Enabled" && seen.Reason != "Degraded") {
+		return true
+	}
+	return !r.impersonatingOnce(ctx, dv, rc, held)
 }
 
 // impersonating reports whether the instance syncs dotvirt's Applications as
