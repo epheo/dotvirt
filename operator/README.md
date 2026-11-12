@@ -96,6 +96,11 @@ owns one status condition; a phase that fails or waits records why there, so
    out of the ApplicationSet, since Argo would place its Application under that
    AppProject's permissions; a labeled namespace in platform space; or an error the
    ApplicationSet itself reports.
+   A generator failure the dotvirt pod's restart explains is not `Degraded`:
+   `ArgoReady` is `Unknown` (`WaitingForDotvirt`) while the pod is down, then
+   `Unknown` (`Refreshing`) while the operator asks Argo to run the generator again
+   instead of waiting for its three-minute retry. A failure still there a minute
+   after the operator asked is `Degraded`.
    Each AppProject names the ServiceAccount its Applications sync as once sync
    impersonation is on (below): `<argoNS>/dotvirt-p-<project>` for a tenant,
    `<argoNS>/dotvirt-platform-sync` for the platform tier. Names only: Argo
@@ -661,8 +666,11 @@ their own change.
 - one merged before dotvirt saw it open settles the draft the same way;
 - dotvirt never opens, reopens or edits a PR.
 
-Protect `dotvirt/proposed/**` in the forge so only dotvirt's account pushes there:
-otherwise anyone who may push could put content into a PR and approve it.
+Leave `dotvirt/proposed/**` unprotected in the forge.
+dotvirt rebuilds a proposal's branch on every propose and force-pushes it.
+Forgejo refuses force pushes and deletions on any protected branch, for everyone.
+dotvirt never overwrites a branch someone else moved: it pushes with a lease on the head it last pushed.
+Anyone who may push can still add commits to a proposal's branch; the PR shows them.
 
 The guarantee holds only while the requester is the PR's poster.
 Anyone who may read the repo can open a PR from another user's pushed branch.

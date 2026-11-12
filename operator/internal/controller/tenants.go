@@ -218,21 +218,6 @@ func (r *DotvirtReconciler) platformNamespaces(dv *dotvirtv1alpha1.Dotvirt, argo
 	return slices.Compact(out)
 }
 
-// applicationSetError is the ApplicationSet's own ErrorOccurred message, ""
-// when it reports none: a template the plugin's parameters cannot fill, or an
-// Application it refused, freezes the tenant Applications where they are.
-func applicationSetError(appset *unstructured.Unstructured) string {
-	conds, _, _ := unstructured.NestedSlice(appset.Object, "status", "conditions")
-	for _, c := range conds {
-		m, ok := c.(map[string]any)
-		if ok && m["type"] == "ErrorOccurred" && m["status"] == "True" {
-			msg, _ := m["message"].(string)
-			return fmt.Sprintf("ApplicationSet %s: %s", appset.GetName(), msg)
-		}
-	}
-	return ""
-}
-
 // appForgeBase is the forge URL the app resolves relative repo refs against,
 // the DOTVIRT_FORGE_URL dotvirtEnv hands it: a managed forge's resolved URL, a
 // BYO forge's from its credentials secret, none without a forge.
@@ -254,14 +239,23 @@ func (r *DotvirtReconciler) appForgeBase(ctx context.Context, dv *dotvirtv1alpha
 }
 
 // setArgoReady records the tier's state: Degraded while a project is not
-// served as labeled, Ready otherwise, the notes said either way.
-func (r *DotvirtReconciler) setArgoReady(dv *dotvirtv1alpha1.Dotvirt, t tenantTier) {
-	msg := strings.Join(append(append([]string{"argo resources applied"}, t.degraded...), t.notes...), "; ")
-	if len(t.degraded) > 0 {
-		r.setCondition(dv, dotvirtv1alpha1.ConditionArgoReady, metav1.ConditionFalse, "Degraded", msg)
-		return
+// served as labeled, Unknown while the ApplicationSet waits on the dotvirt
+// pod, Ready otherwise, the notes said either way.
+func (r *DotvirtReconciler) setArgoReady(dv *dotvirtv1alpha1.Dotvirt, t tenantTier, a appsetState) {
+	degraded := t.degraded
+	if a.degraded != "" {
+		degraded = append(degraded, a.degraded)
 	}
-	r.setCondition(dv, dotvirtv1alpha1.ConditionArgoReady, metav1.ConditionTrue, "Ready", msg)
+	msg := strings.Join(append(append([]string{"argo resources applied"}, degraded...), t.notes...), "; ")
+	switch {
+	case len(degraded) > 0:
+		r.setCondition(dv, dotvirtv1alpha1.ConditionArgoReady, metav1.ConditionFalse, "Degraded", msg)
+	case a.waiting != "":
+		r.setCondition(dv, dotvirtv1alpha1.ConditionArgoReady, metav1.ConditionUnknown, a.waiting,
+			strings.Join(append([]string{"argo resources applied", a.msg}, t.notes...), "; "))
+	default:
+		r.setCondition(dv, dotvirtv1alpha1.ConditionArgoReady, metav1.ConditionTrue, "Ready", msg)
+	}
 }
 
 // tenantKinds is install.TenantAllowed for this pass, decided once, so the

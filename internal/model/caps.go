@@ -57,7 +57,7 @@ type ClusterCaps struct {
 	// ProjectNetwork gives a new project a VM Network its namespaces share,
 	// false on a cluster that serves no ClusterUserDefinedNetwork.
 	ProjectNetwork bool `json:"projectNetwork"`
-	GrantAdmin      bool `json:"grantAdmin"`
+	GrantAdmin     bool `json:"grantAdmin"`
 	// SharedLibrary writes the shared template library.
 	SharedLibrary bool `json:"sharedLibrary"`
 	// DRSEnable stages the rebalancing file set, DRSPSI with the PSI MachineConfig;
@@ -67,6 +67,9 @@ type ClusterCaps struct {
 	DRSDisable bool `json:"drsDisable"`
 	// OAuthClient registers the SSO OAuthClient (finish SSO).
 	OAuthClient bool `json:"oauthClient"`
+	// ForgeAdmin reads a managed forge's admin password: the caller may get
+	// its Secret. False without a managed forge.
+	ForgeAdmin bool `json:"forgeAdmin"`
 	// Hosts is listing the cluster's nodes, the read behind the Hosts section.
 	Hosts bool `json:"hosts"`
 	// ImageUpload is this dotvirt knowing an upload proxy: without one every
@@ -184,4 +187,10 @@ type ProjectCaps struct {
 	// namespace's network; one with a VM Network of its own is not among
 	// them. Set with PublishingOn or an allowed stage.
 	PublishingReach []string `json:"publishingReach,omitempty"`
+}
+
+// ForgeAdminCredential is a managed forge's admin sign-in.
+type ForgeAdminCredential struct {
+	Username string `json:"username"`
+	Password string `json:"password"`
 }

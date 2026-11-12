@@ -239,6 +239,9 @@ func (r *DotvirtReconciler) provision(ctx context.Context, key types.NamespacedN
 	if argoSettling || meta.IsStatusConditionFalse(dv.Status.Conditions, dotvirtv1alpha1.ConditionForgeRepoReady) {
 		wait = min(wait, settleRetry)
 	}
+	if argo != nil && argo.Reason == reasonRefreshing {
+		wait = min(wait, refreshRetry)
+	}
 	return ctrl.Result{RequeueAfter: wait}, nil
 }
 

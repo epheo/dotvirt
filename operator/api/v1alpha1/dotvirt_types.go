@@ -97,8 +97,9 @@ type ForgeSpec struct {
 	// Dotvirt (the default) opens it with its forge account; Users leaves it
 	// to the requester, who opens it in the forge as themselves from the
 	// branch dotvirt pushed and the link it returns, so the forge's review
-	// rules see them as its poster. Protect dotvirt/proposed/** so only
-	// dotvirt's account pushes there.
+	// rules see them as its poster. Leave dotvirt/proposed/** unprotected:
+	// dotvirt force-pushes each proposal's branch, which a protected branch
+	// refuses on Forgejo. Require approvals from a reviewer team instead.
 	// +kubebuilder:validation:Enum=Dotvirt;Users
 	// +optional
 	PullRequests string `json:"pullRequests,omitempty"`

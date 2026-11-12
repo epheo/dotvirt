@@ -31,6 +31,7 @@ import (
 	"github.com/epheo/dotvirt/internal/changeset"
 	"github.com/epheo/dotvirt/internal/cluster"
 	"github.com/epheo/dotvirt/internal/clusterstate"
+	"github.com/epheo/dotvirt/internal/config"
 	"github.com/epheo/dotvirt/internal/draft"
 	"github.com/epheo/dotvirt/internal/drs"
 	"github.com/epheo/dotvirt/internal/eventbus"
@@ -189,19 +190,20 @@ type VNCHandler interface {
 
 // Config carries the non-collaborator settings the handlers need.
 type Config struct {
-	BaseBranch        string            // repo branch the inventory reads + drafts target
-	ProposedBranch    string            // proposal-branch prefix; attributes merged PRs to their proposing user
-	AllowOrigin       string            // CORS origin for the SvelteKit frontend; empty disables CORS
-	AppSetPluginToken string            // bearer for the ArgoCD ApplicationSet plugin endpoint; empty disables it
-	StaticDir         string            // built SPA dir to serve at the same origin; empty = dev (SPA on Vite)
-	WebhookSecret     string            // HMAC secret for the Forgejo webhook endpoint; empty disables it
-	UploadProxyURL    string            // cdi-uploadproxy base for image uploads; empty disables it
-	PlatformRepo      string            // platform-tier repo for cluster-scoped + tenancy manifests; empty disables those creates
-	ProjectLabel      string            // namespace label naming the project (release strips it)
-	RepoAnnotation    string            // namespace annotation holding the repo URL (release strips it)
-	TenantKinds       tenancy.Policy    // what a tenant repo may declare, as the tenant AppProjects carry it
-	Publish           publish.Settings  // the platform's publishing settings; zero: publishing off
-	Branding          branding.Settings // a provider's dress for the console; zero: dotvirt's own
+	BaseBranch        string               // repo branch the inventory reads + drafts target
+	ProposedBranch    string               // proposal-branch prefix; attributes merged PRs to their proposing user
+	AllowOrigin       string               // CORS origin for the SvelteKit frontend; empty disables CORS
+	AppSetPluginToken string               // bearer for the ArgoCD ApplicationSet plugin endpoint; empty disables it
+	StaticDir         string               // built SPA dir to serve at the same origin; empty = dev (SPA on Vite)
+	WebhookSecret     string               // HMAC secret for the Forgejo webhook endpoint; empty disables it
+	UploadProxyURL    string               // cdi-uploadproxy base for image uploads; empty disables it
+	PlatformRepo      string               // platform-tier repo for cluster-scoped + tenancy manifests; empty disables those creates
+	ProjectLabel      string               // namespace label naming the project (release strips it)
+	RepoAnnotation    string               // namespace annotation holding the repo URL (release strips it)
+	TenantKinds       tenancy.Policy       // what a tenant repo may declare, as the tenant AppProjects carry it
+	Publish           publish.Settings     // the platform's publishing settings; zero: publishing off
+	Branding          branding.Settings    // a provider's dress for the console; zero: dotvirt's own
+	ForgeAdmin        config.ForgeAdminRef // a managed forge's admin credential, read as the caller; zero: none
 }
 
 // visibleTTL bounds a token's cached verdicts, and the view derived from them,
