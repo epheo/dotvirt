@@ -553,3 +553,81 @@ func TestDeleteGrantCoversEveryRenderedName(t *testing.T) {
 		}
 	}
 }
+
+// The operator patches its exposures and network policies by name only: an
+// unscoped patch would let it rewrite any route or policy in the cluster. Every
+// one it renders must be named in the grant, or its apply is refused.
+func TestPatchGrantNamesEveryRenderedExposure(t *testing.T) {
+	scoped := map[string]bool{
+		"route.openshift.io/routes":            true,
+		"gateway.networking.k8s.io/httproutes": true,
+		"networking.k8s.io/ingresses":          true,
+		"networking.k8s.io/networkpolicies":    true,
+	}
+	granted := map[string]bool{}
+	for _, role := range readClusterRoles(t, filepath.Join("..", "..", "config", "rbac", "role.yaml")) {
+		for _, rule := range role.Rules {
+			if !slices.Contains(rule.Verbs, "patch") && !slices.Contains(rule.Verbs, "update") {
+				continue
+			}
+			for _, g := range rule.APIGroups {
+				for _, res := range rule.Resources {
+					if !scoped[g+"/"+res] {
+						continue
+					}
+					if len(rule.ResourceNames) == 0 {
+						t.Errorf("patch on %s/%s is not scoped by name", g, res)
+					}
+					for _, name := range rule.ResourceNames {
+						granted[g+"/"+res+"/"+name] = true
+					}
+				}
+			}
+		}
+	}
+	withIngress := managedForgeCR()
+	withIngress.Spec.Ingress.Host = "dotvirt.example"
+	withGateway := managedForgeCR()
+	withGateway.Spec.Ingress = dotvirtv1alpha1.IngressSpec{Host: "dotvirt.example", Gateway: &dotvirtv1alpha1.GatewayRef{Name: "edge"}}
+	seen := map[string]bool{}
+	for _, pass := range []struct {
+		name     string
+		dv       *dotvirtv1alpha1.Dotvirt
+		platform platform.Platform
+	}{
+		{"Routes", managedForgeCR(), platform.OpenShift},
+		{"Ingresses", withIngress, platform.Kubernetes},
+		{"HTTPRoutes", withGateway, platform.Kubernetes},
+	} {
+		var applied []objKey
+		c := testBuilder(t).WithObjects(pass.dv).WithInterceptorFuncs(interceptor.Funcs{
+			Patch: func(ctx context.Context, cl client.WithWatch, obj client.Object, patch client.Patch, opts ...client.PatchOption) error {
+				gvk, err := apiutil.GVKForObject(obj, cl.Scheme())
+				if err != nil {
+					return err
+				}
+				applied = append(applied, objKey{gvk.GroupKind(), obj.GetNamespace(), obj.GetName()})
+				return cl.Patch(ctx, obj, patch, opts...)
+			},
+		}).Build()
+		r := newReconciler(c, depsOK)
+		r.Platform, r.DryRun = pass.platform, true
+		reconcileOnce(t, r, pass.dv)
+		for _, k := range applied {
+			resource, _ := apimeta.UnsafeGuessKindToResource(k.gk.WithVersion(""))
+			gr := k.gk.Group + "/" + resource.Resource
+			if !scoped[gr] {
+				continue
+			}
+			seen[gr] = true
+			if !granted[gr+"/"+k.name] {
+				t.Errorf("%s: %s %s/%s is rendered, but the patch grant does not name it", pass.name, k.gk.Kind, k.namespace, k.name)
+			}
+		}
+	}
+	for gr := range scoped {
+		if !seen[gr] {
+			t.Errorf("no pass renders %s, so its grant goes unchecked", gr)
+		}
+	}
+}

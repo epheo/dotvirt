@@ -180,7 +180,6 @@ rules:
   verbs:
   - create
   - list
-  - patch
 - apiGroups:
   - gateway.networking.k8s.io
   resourceNames:
@@ -190,6 +189,7 @@ rules:
   - httproutes
   verbs:
   - delete
+  - patch
 - apiGroups:
   - networking.k8s.io
   resources:
@@ -198,7 +198,6 @@ rules:
   verbs:
   - create
   - list
-  - patch
 - apiGroups:
   - networking.k8s.io
   resourceNames:
@@ -209,6 +208,7 @@ rules:
   - networkpolicies
   verbs:
   - delete
+  - patch
 - apiGroups:
   - rbac.authorization.k8s.io
   resources:
@@ -255,7 +255,6 @@ rules:
   - create
   - get
   - list
-  - patch
   - watch
 - apiGroups:
   - route.openshift.io
@@ -266,6 +265,7 @@ rules:
   - routes
   verbs:
   - delete
+  - patch
 - apiGroups:
   - route.openshift.io
   resources:
