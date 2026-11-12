@@ -96,6 +96,11 @@ owns one status condition; a phase that fails or waits records why there, so
    out of the ApplicationSet, since Argo would place its Application under that
    AppProject's permissions; a labeled namespace in platform space; or an error the
    ApplicationSet itself reports.
+   A generator failure the dotvirt pod's restart explains is not `Degraded`:
+   `ArgoReady` is `Unknown` (`WaitingForDotvirt`) while the pod is down, then
+   `Unknown` (`Refreshing`) while the operator asks Argo to run the generator again
+   instead of waiting for its three-minute retry. A failure still there a minute
+   after the operator asked is `Degraded`.
    Each AppProject names the ServiceAccount its Applications sync as once sync
    impersonation is on (below): `<argoNS>/dotvirt-p-<project>` for a tenant,
    `<argoNS>/dotvirt-platform-sync` for the platform tier. Names only: Argo
