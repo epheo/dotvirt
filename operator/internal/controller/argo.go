@@ -8,6 +8,7 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -93,11 +94,14 @@ func (r *DotvirtReconciler) reconcileArgo(ctx context.Context, dv *dotvirtv1alph
 		r.dryRunSkip(dv, dotvirtv1alpha1.ConditionArgoReady, "appset-token mirror and forge TLS trust")
 		return nil, nil
 	}
-	// The apply answered with the live object, status included.
-	if msg := applicationSetError(appset); msg != "" {
-		tenants.degraded = append(tenants.degraded, msg)
+	// The apply answered with the live object, status and annotations included.
+	state := judgeAppSet(appset, meta.FindStatusCondition(dv.Status.Conditions, dotvirtv1alpha1.ConditionWorkloadReady), r.clock())
+	if state.refresh {
+		if err := r.refreshAppSet(ctx, appset); err != nil {
+			return nil, fmt.Errorf("ask the ApplicationSet to run again: %w", err)
+		}
 	}
-	r.setArgoReady(dv, tenants)
+	r.setArgoReady(dv, tenants, state)
 	return nil, nil
 }
 
