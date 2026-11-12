@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"sort"
+	"strings"
 	"time"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -129,6 +130,12 @@ func (c *Client) DeleteSnapshot(ctx context.Context, namespace, snapName string)
 
 // RestoreSnapshot rolls the VM back to a snapshot via a VirtualMachineRestore. The
 // VM must be stopped - the snapshot controller rejects a running target.
+//
+// InPlace keeps the VM's disk names. KubeVirt's default renames them, so a VM
+// git declares drifts, and ArgoCD's self-heal points it back at the old names:
+// KubeVirt then re-creates those disks from their sources and the restore is
+// lost. Strict field validation makes a KubeVirt without the policy refuse the
+// restore rather than drop the field and rename.
 func (c *Client) RestoreSnapshot(ctx context.Context, namespace, vmName, snapName string) error {
 	dyn, err := c.dynamic()
 	if err != nil {
@@ -141,8 +148,12 @@ func (c *Client) RestoreSnapshot(ctx context.Context, namespace, vmName, snapNam
 		"spec": map[string]any{
 			"target":                     map[string]any{"apiGroup": "kubevirt.io", "kind": "VirtualMachine", "name": vmName},
 			"virtualMachineSnapshotName": snapName,
+			"volumeRestorePolicy":        "InPlace",
 		},
 	}}
-	_, err = dyn.Resource(gvrRestores).Namespace(namespace).Create(ctx, obj, metav1.CreateOptions{})
+	_, err = dyn.Resource(gvrRestores).Namespace(namespace).Create(ctx, obj, metav1.CreateOptions{FieldValidation: metav1.FieldValidationStrict})
+	if apierrors.IsBadRequest(err) && strings.Contains(err.Error(), `unknown field "spec.volumeRestorePolicy"`) {
+		return fmt.Errorf("%w: this cluster's KubeVirt cannot restore disks in place, and a restore under new disk names would be undone by git", model.ErrUnavailable)
+	}
 	return err
 }
