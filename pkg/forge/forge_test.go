@@ -64,6 +64,29 @@ func TestOwnerPrefixURL(t *testing.T) {
 	}
 }
 
+// A forge whose ROOT_URL is the web base names its repos there in webhook
+// payloads; they must key as the repos dotvirt clones from the API's base.
+func TestRepoKeyReadsTheWebBaseAsTheAPIs(t *testing.T) {
+	f := NewFactory("http://forge.ns.svc:3000/", StaticToken("t"), false, "").WithWebURL("https://Forge.example/")
+	cases := map[string]string{
+		"https://forge.example/o/r.git": "http://forge.ns.svc:3000/o/r",
+		"https://forge.example/o/r":     "http://forge.ns.svc:3000/o/r",
+		"http://forge.ns.svc:3000/o/r/": "http://forge.ns.svc:3000/o/r",
+		"https://forge.example.org/o/r": "https://forge.example.org/o/r",
+		"https://other.example/o/r.git": "https://other.example/o/r",
+		"":                              "",
+	}
+	for in, want := range cases {
+		if got := f.RepoKey(in); got != want {
+			t.Errorf("RepoKey(%q) = %q, want %q", in, got, want)
+		}
+	}
+	var none *Factory
+	if got := none.RepoKey("https://forge.example/o/r.git"); got != "https://forge.example/o/r" {
+		t.Errorf("nil factory: RepoKey = %q", got)
+	}
+}
+
 // testClient points a Client at an httptest server with the standard owner/repo.
 func testClient(srvURL string) *Client {
 	return NewFactory(srvURL, StaticToken("tok"), false, "").For(srvURL + "/dotvirt/team-a.git")

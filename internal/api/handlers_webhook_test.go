@@ -8,6 +8,8 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+
+	"github.com/epheo/dotvirt/pkg/forge"
 )
 
 func webhookServer(secret string) *Server {
@@ -83,5 +85,25 @@ func TestWebhookNudgesProposalsOnPREventsOnly(t *testing.T) {
 	s.propMu.Unlock()
 	if !dirty {
 		t.Fatalf("the nudge must name the PR's repo, dirty = %v", s.propDirty)
+	}
+}
+
+// Forgejo names its repos at ROOT_URL, the forge's web base when one is set,
+// while dotvirt keys them by the URL it clones from: a delivery must reach that
+// repo's lane all the same.
+func TestWebhookReadsTheWebBaseAsTheForges(t *testing.T) {
+	s := NewServer(Deps{
+		Forge:  forge.NewFactory("http://forge.ns.svc:3000", forge.StaticToken("t"), false, "").WithWebURL("https://forge.example"),
+		Reader: &fakeDraft{},
+		Draft:  &fakeDraft{},
+		Config: Config{WebhookSecret: "hooksecret"},
+	})
+	pr := []byte(`{"action":"closed","pull_request":{"number":3},"repository":{"clone_url":"https://forge.example/o/r.git","html_url":"https://forge.example/o/r"}}`)
+	deliver(t, s, pr, sign(pr, "hooksecret"))
+	s.propMu.Lock()
+	_, dirty := s.propDirty["http://forge.ns.svc:3000/o/r"]
+	s.propMu.Unlock()
+	if !dirty {
+		t.Fatalf("the nudge must name the repo by its clone URL, dirty = %v", s.propDirty)
 	}
 }

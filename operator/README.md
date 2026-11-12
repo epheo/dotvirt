@@ -587,6 +587,7 @@ Set `spec.forge.webURL` when browsers must open the forge elsewhere:
 
 dotvirt's API and git calls still go to `spec.forge.url`.
 Unset, links start with `spec.forge.url`.
+A managed forge also takes `webURL` as its `ROOT_URL`, so its own pages and clone links name it.
 
 ## Branding
 

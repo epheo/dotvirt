@@ -249,7 +249,8 @@ spec:
                       pages and repositories. Empty: the forge's URL. Set it when that URL is
                       in-cluster, or when an app of yours fronts the forge on the same paths
                       (<owner>/<repo>, .../pulls/<n>, .../compare/<base>...<head>); dotvirt's
-                      own API and git calls still go to the forge's URL.
+                      own API and git calls still go to the forge's URL. A managed forge also
+                      takes it as its ROOT_URL, so its own pages and clone links name it.
                     pattern: ^https?://[A-Za-z0-9]([-A-Za-z0-9.]*[A-Za-z0-9])?(:[0-9]{1,5})?(/([^?#@%\s\x00-\x1f\x7f]|%[0-9A-Fa-f]{2})*)?$
                     type: string
                 type: object
