@@ -7,7 +7,6 @@ import (
 
 	"github.com/epheo/dotvirt/internal/auth"
 	"github.com/epheo/dotvirt/internal/eventbus"
-	"github.com/epheo/dotvirt/internal/restfactory"
 )
 
 // streaming counts a token's open inventory streams while each is served (the
@@ -21,7 +20,7 @@ func (s *Server) streaming(next http.HandlerFunc) http.HandlerFunc {
 			next(w, r)
 			return
 		}
-		key := restfactory.TokenKey(id.Token)
+		key := id.Key()
 		s.streamMu.Lock()
 		s.streams[key]++
 		s.streamMu.Unlock()

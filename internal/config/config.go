@@ -145,6 +145,17 @@ type Config struct {
 	OAuthClientSecret string
 	OAuthCA           string
 
+	// OIDC sign-in (optional): the client dotvirt is registered as at an issuer
+	// the apiserver trusts. Setting the issuer enables it (it also needs
+	// PublicURL for the redirect URI) in place of OpenShift SSO; token paste
+	// always remains. OIDCScopes are asked beside openid.
+	OIDCIssuer       string
+	OIDCClientID     string
+	OIDCClientSecret string
+	OIDCScopes       []string
+	OIDCName         string
+	OIDCCA           string
+
 	ArgoEnabled bool // enable ArgoCD drift reads + re-sync
 	// ArgoNamespace holds the per-project sync ServiceAccounts Argo impersonates
 	// (tenancy.SyncAccount); the project grants dotvirt stages name them. Empty
@@ -203,6 +214,13 @@ func Load(args []string) (*Config, error) {
 	fs.StringVar(&c.OAuthClientID, "oauth-client-id", os.Getenv("DOTVIRT_OAUTH_CLIENT_ID"), "OpenShift OAuthClient name enabling SSO login (empty disables; needs -public-url)")
 	fs.StringVar(&c.OAuthClientSecret, "oauth-client-secret", os.Getenv("DOTVIRT_OAUTH_CLIENT_SECRET"), "secret of the OpenShift OAuthClient")
 	fs.StringVar(&c.OAuthCA, "oauth-ca", os.Getenv("DOTVIRT_OAUTH_CA"), "PEM CA bundle path to trust for the oauth token endpoint (e.g. the ingress CA)")
+	fs.StringVar(&c.OIDCIssuer, "oidc-issuer", os.Getenv("DOTVIRT_OIDC_ISSUER"), "OIDC issuer URL enabling sign-in with it, in place of OpenShift SSO (empty disables; needs -public-url)")
+	fs.StringVar(&c.OIDCClientID, "oidc-client-id", os.Getenv("DOTVIRT_OIDC_CLIENT_ID"), "client ID dotvirt is registered as at the OIDC issuer; the apiserver must accept it as an audience")
+	fs.StringVar(&c.OIDCClientSecret, "oidc-client-secret", os.Getenv("DOTVIRT_OIDC_CLIENT_SECRET"), "client secret at the OIDC issuer (empty: a public client)")
+	var oidcScopes string
+	fs.StringVar(&oidcScopes, "oidc-scopes", os.Getenv("DOTVIRT_OIDC_SCOPES"), "scopes asked beside openid, space-separated (those the apiserver's claim mappings read)")
+	fs.StringVar(&c.OIDCName, "oidc-name", envOr("DOTVIRT_OIDC_NAME", "single sign-on"), `what the sign-in button names the issuer: "Sign in with <name>"`)
+	fs.StringVar(&c.OIDCCA, "oidc-ca", os.Getenv("DOTVIRT_OIDC_CA"), "PEM CA bundle path to trust for the OIDC issuer (empty: the system pool)")
 
 	// Default on: ArgoCD is the normal deployment shape. The off switch stays for
 	// dev/BYO runs without Argo, whose Application reflector would error-loop.
@@ -215,6 +233,7 @@ func Load(args []string) (*Config, error) {
 	if err := fs.Parse(args); err != nil {
 		return nil, err
 	}
+	c.OIDCScopes = strings.Fields(strings.ReplaceAll(oidcScopes, ",", " "))
 	// A value read wrong would stage what the AppProjects refuse, or refuse
 	// what they admit: both fail here.
 	named, err := tenancy.ParseGroupKinds(tenantAllowed)

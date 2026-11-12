@@ -241,7 +241,7 @@ type Server struct {
 	bus           *eventbus.Bus         // change-version source for the version-stamped auth caches
 	resolver      *project.Resolver
 	repos         *git.RepoSet
-	views         *ttlcache.Cache[viewMemo]         // per-token view, derived from ssar
+	views         *ttlcache.Cache[viewMemo]         // per-identity view (auth.Identity.Key), derived from ssar
 	cands         atomic.Pointer[candidates]        // project namespaces and projects at the last namespace version
 	ssar          *ttlcache.Cache[ssarVerdict]      // per-(token, question) SSAR verdict, RBAC-version-stamped
 	kinds         atomic.Pointer[kindIndex]         // discovery's answer for the repos' kinds
@@ -256,6 +256,7 @@ type Server struct {
 	draft         Draft
 	auth          *auth.Authenticator // nil leaves the API open (dev)
 	oauth         *auth.OAuth         // nil hides the OpenShift SSO login path
+	oidc          *auth.OIDC          // nil hides the OIDC sign-in path
 	stream        StreamHandler
 	vnc           VNCHandler
 	cfg           Config
@@ -307,6 +308,7 @@ type Deps struct {
 	Draft          Draft
 	Auth           *auth.Authenticator
 	OAuth          *auth.OAuth // OpenShift SSO flow; nil hides it
+	OIDC           *auth.OIDC  // OIDC sign-in flow; nil hides it, and it excludes OAuth
 	Config         Config
 }
 
@@ -343,6 +345,7 @@ func NewServer(d Deps) *Server {
 		draft:         d.Draft,
 		auth:          d.Auth,
 		oauth:         d.OAuth,
+		oidc:          d.OIDC,
 		cfg:           d.Config,
 
 		revokeTimeout: revokeTimeout,
@@ -571,7 +574,7 @@ var errSessionRejected = fmt.Errorf("%w: session expired", auth.ErrRejected)
 // error can name other tenants' namespaces.
 func (s *Server) reviewFailed(ctx context.Context, id auth.Identity, err error) error {
 	if apierrors.IsUnauthorized(err) && s.auth != nil {
-		if errors.Is(s.auth.Recheck(ctx, id.Token), auth.ErrRejected) {
+		if errors.Is(s.auth.Recheck(ctx, id), auth.ErrRejected) {
 			log.Printf("api: %s: session rejected: %v", id.Username, err)
 			s.bus.Publish(eventbus.SessionEnded)
 			return errSessionRejected

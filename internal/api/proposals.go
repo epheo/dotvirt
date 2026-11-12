@@ -9,7 +9,6 @@ import (
 	"github.com/epheo/dotvirt/internal/eventbus"
 	"github.com/epheo/dotvirt/internal/model"
 	"github.com/epheo/dotvirt/internal/project"
-	"github.com/epheo/dotvirt/internal/restfactory"
 	"github.com/epheo/dotvirt/internal/tasks"
 	"github.com/epheo/dotvirt/pkg/forge"
 )
@@ -147,7 +146,7 @@ func (s *Server) ownRow(id auth.Identity, proj project.ProjectInfo, n int) (mode
 // forward so the lane survives the blip. Otherwise its absence is a verdict,
 // and a demoted reader stops seeing others' platform PRs.
 func (s *Server) trackProposals(id auth.Identity, projects []project.ProjectInfo, keepPlatform bool) ([]project.ProjectInfo, bool) {
-	key := restfactory.TokenKey(id.Token)
+	key := id.Key()
 	s.propMu.Lock()
 	defer s.propMu.Unlock()
 	reads := hasProject(projects, platformProjectName)
@@ -165,7 +164,7 @@ func (s *Server) trackProposals(id auth.Identity, projects []project.ProjectInfo
 // token that hasn't built an inventory yet (or whose platform tier discovery never
 // lists) wouldn't be - so without this the new PR would wait for a later build.
 func (s *Server) trackProposalsProject(id auth.Identity, proj project.ProjectInfo) {
-	key := restfactory.TokenKey(id.Token)
+	key := id.Key()
 	s.propMu.Lock()
 	defer s.propMu.Unlock()
 	t, ok := s.propTargets[key]

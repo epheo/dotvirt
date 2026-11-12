@@ -524,7 +524,7 @@ func TestRejectedTokenEndsSessions(t *testing.T) {
 		t.Fatalf("live token: err %v, live %v", err, a.SessionLive(key, now))
 	}
 	delete(valid, "good")
-	if err := a.Recheck(context.Background(), "good"); !errors.Is(err, ErrRejected) {
+	if err := a.Recheck(context.Background(), Identity{Token: "good"}); !errors.Is(err, ErrRejected) {
 		t.Fatalf("recheck: %v, want a rejection", err)
 	}
 	if a.SessionLive(key, now) || a.SessionLive(key, time.Time{}) {
@@ -555,7 +555,7 @@ func TestRevalidateRejectsEndedSession(t *testing.T) {
 	reviews := *rig.reviews
 	ctx := context.Background()
 	for name, issued := range map[string]time.Time{"signed-out": ended, "expired": now.Add(-sessionMaxAge)} {
-		if err := rig.a.Revalidate(ctx, Identity{Token: "good", Issued: issued}); !errors.Is(err, ErrSessionEnded) || !errors.Is(err, ErrRejected) {
+		if _, err := rig.a.Revalidate(ctx, Identity{Token: "good", Issued: issued}); !errors.Is(err, ErrSessionEnded) || !errors.Is(err, ErrRejected) {
 			t.Errorf("%s session re-checked: %v, want ErrSessionEnded", name, err)
 		}
 	}
@@ -563,7 +563,7 @@ func TestRevalidateRejectsEndedSession(t *testing.T) {
 		t.Errorf("an ended session's re-check spent %d TokenReviews", *rig.reviews-reviews)
 	}
 	for name, issued := range map[string]time.Time{"newer": newer, "bearer": {}} {
-		if err := rig.a.Revalidate(ctx, Identity{Token: "good", Issued: issued}); err != nil {
+		if _, err := rig.a.Revalidate(ctx, Identity{Token: "good", Issued: issued}); err != nil {
 			t.Errorf("%s re-checked: %v, want nil", name, err)
 		}
 	}

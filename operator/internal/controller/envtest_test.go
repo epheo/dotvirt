@@ -310,6 +310,27 @@ func TestEnvtest(t *testing.T) {
 		}
 	})
 
+	t.Run("admission takes one sign-in flow", func(t *testing.T) {
+		oidc := &dotvirtv1alpha1.OIDCSpec{IssuerURL: "https://idm.example/oauth2/openid/dotvirt", ClientID: "dotvirt"}
+		dv := testCR()
+		dv.Spec.Auth = dotvirtv1alpha1.AuthSpec{OpenShiftSSO: true, OIDC: oidc}
+		if err := admin.Create(ctx, dv, client.DryRunAll); !apierrors.IsInvalid(err) {
+			t.Errorf("openShiftSSO with oidc: got %v, want Invalid", err)
+		}
+		for _, u := range []string{"http://idm.example", "idm.example", "https://idm.example/a b", "https://idm.example?x"} {
+			dv := testCR()
+			dv.Spec.Auth.OIDC = &dotvirtv1alpha1.OIDCSpec{IssuerURL: u, ClientID: "dotvirt"}
+			if err := admin.Create(ctx, dv, client.DryRunAll); !apierrors.IsInvalid(err) {
+				t.Errorf("issuer %q: got %v, want Invalid", u, err)
+			}
+		}
+		dv = testCR()
+		dv.Spec.Auth.OIDC = oidc
+		if err := admin.Create(ctx, dv, client.DryRunAll); client.IgnoreAlreadyExists(err) != nil {
+			t.Errorf("oidc alone: %v", err)
+		}
+	})
+
 	t.Run("admission refuses branding the app refuses", func(t *testing.T) {
 		// The app's own checks (internal/branding) refuse each of these at
 		// startup: admission refusing them first keeps dotvirt from a

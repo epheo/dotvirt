@@ -105,6 +105,14 @@ export interface User {
 	groups: string[];
 }
 
+// The sign-in paths besides a pasted token. oidc names the issuer its button
+// signs in with; sso is OpenShift's, and the two never come together.
+export interface AuthMethods {
+	sso: boolean;
+	ssoPending: boolean;
+	oidc?: string;
+}
+
 export interface CreateVMRequest {
 	name: string;
 	namespace: string;
@@ -421,7 +429,7 @@ export const api = {
 		get<gen.EffectivePolicy>(`/api/namespaces/${enc(namespace)}/policy`),
 	trace: (req: gen.TraceRequest) => post<gen.TraceResult>('/api/networking/trace', req),
 	// Which sign-in paths exist (shown on the login screen before any session).
-	authMethods: () => get<{ sso: boolean; ssoPending: boolean }>('/api/auth/methods'),
+	authMethods: () => get<AuthMethods>('/api/auth/methods'),
 	// Applies the OAuthClient under the CALLER's token; RBAC is the gate.
 	finishSSO: () => req<void>('/api/auth/oauthclient', { method: 'POST' }),
 

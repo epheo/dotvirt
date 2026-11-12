@@ -197,13 +197,13 @@ func TestRecheck(t *testing.T) {
 		}
 	}
 	delete(valid, "good")
-	if err := a.Recheck(context.Background(), "good"); !errors.Is(err, ErrRejected) || *calls != 3 {
+	if err := a.Recheck(context.Background(), Identity{Token: "good"}); !errors.Is(err, ErrRejected) || *calls != 3 {
 		t.Fatalf("dead token: err = %v, reviews = %d; want a fresh rejecting review", err, *calls)
 	}
-	if err := a.Recheck(context.Background(), "good"); !errors.Is(err, ErrRejected) || *calls != 3 {
+	if err := a.Recheck(context.Background(), Identity{Token: "good"}); !errors.Is(err, ErrRejected) || *calls != 3 {
 		t.Fatalf("cached rejection: err = %v, reviews = %d; want no further review", err, *calls)
 	}
-	if err := a.Recheck(context.Background(), "fine"); err != nil || *calls != 4 {
+	if err := a.Recheck(context.Background(), Identity{Token: "fine"}); err != nil || *calls != 4 {
 		t.Fatalf("live token: err = %v, reviews = %d; want a fresh accepting review", err, *calls)
 	}
 }
@@ -249,7 +249,7 @@ func TestRevalidateOutsideTheBudget(t *testing.T) {
 	var wg sync.WaitGroup
 	for range 8 {
 		wg.Go(func() {
-			if err := a.Revalidate(context.Background(), Identity{Token: "good"}); err != nil {
+			if _, err := a.Revalidate(context.Background(), Identity{Token: "good"}); err != nil {
 				t.Errorf("Revalidate: %v", err)
 			}
 		})
@@ -263,7 +263,7 @@ func TestRevalidateOutsideTheBudget(t *testing.T) {
 	if _, err := a.Validate(context.Background(), "unknown"); !errors.Is(err, ErrThrottled) {
 		t.Errorf("an unknown token past the budget: %v, want ErrThrottled", err)
 	}
-	if err := a.Revalidate(context.Background(), Identity{Token: "bad"}); !errors.Is(err, ErrRejected) {
+	if _, err := a.Revalidate(context.Background(), Identity{Token: "bad"}); !errors.Is(err, ErrRejected) {
 		t.Errorf("a dead token re-checked: %v, want ErrRejected", err)
 	}
 }

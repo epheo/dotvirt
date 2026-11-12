@@ -207,7 +207,9 @@ type MetricsSpec struct {
 	URL string `json:"url,omitempty"`
 }
 
-// AuthSpec enables OpenShift SSO beside the always-present token login.
+// AuthSpec adds a sign-in flow beside the always-present token login: OpenShift
+// SSO or OIDC.
+// +kubebuilder:validation:XValidation:rule="!(has(self.openShiftSSO) && self.openShiftSSO && has(self.oidc))",message="openShiftSSO and oidc are exclusive: pick one sign-in flow"
 type AuthSpec struct {
 	// OpenShiftSSO adds a "Sign in with OpenShift" button beside the token login. The
 	// operator generates the client credential and, once the console host is assigned,
@@ -215,6 +217,44 @@ type AuthSpec struct {
 	// status.ssoOAuthClient. Registering that cluster-scoped OAuthClient stays a
 	// cluster-admin act the operator deliberately doesn't perform. OpenShift only.
 	OpenShiftSSO bool `json:"openShiftSSO,omitempty"`
+	// OIDC adds a "Sign in with <displayName>" button for an OpenID Connect
+	// issuer the apiserver trusts. The issuer's ID token is the user's bearer,
+	// so the apiserver's AuthenticationConfiguration must accept this client ID
+	// as an audience of that issuer. Register https://<console host>/api/auth/callback
+	// as the client's redirect URI.
+	// +optional
+	OIDC *OIDCSpec `json:"oidc,omitempty"`
+}
+
+// OIDCSpec is the client dotvirt is registered as at an OpenID Connect issuer.
+type OIDCSpec struct {
+	// IssuerURL is the issuer exactly as its tokens name it (their iss claim).
+	// +kubebuilder:validation:Pattern=`^https://[^\s?#]+$`
+	IssuerURL string `json:"issuerURL"`
+	// ClientID is the client's ID at the issuer.
+	// +kubebuilder:validation:MinLength=1
+	ClientID string `json:"clientID"`
+	// ClientSecret is the key of a Secret in dotvirt's namespace holding the
+	// client secret. Unset: a public client, which PKCE alone protects. The
+	// console reads it when it starts: restart it after a rotation.
+	// +optional
+	ClientSecret *SecretKeyRef `json:"clientSecret,omitempty"`
+	// Scopes are asked beside openid: those whose claims the apiserver maps
+	// to a username and groups.
+	// +optional
+	Scopes []string `json:"scopes,omitempty"`
+	// DisplayName names the issuer on the sign-in button. Unset: "single sign-on".
+	// +kubebuilder:validation:MaxLength=40
+	// +optional
+	DisplayName string `json:"displayName,omitempty"`
+}
+
+// SecretKeyRef is one key of a Secret in dotvirt's namespace.
+type SecretKeyRef struct {
+	// +kubebuilder:validation:MinLength=1
+	Name string `json:"name"`
+	// +kubebuilder:validation:MinLength=1
+	Key string `json:"key"`
 }
 
 // PublishingSpec lets a platform admin turn publishing on for a project: one

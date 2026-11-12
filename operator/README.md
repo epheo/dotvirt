@@ -520,6 +520,36 @@ The server-side code exchange calls the cluster's oauth Route, which the router 
 signs; the Deployment points `DOTVIRT_OAUTH_CA` at the mounted ingress-CA copy, so
 no extra trust configuration is needed.
 
+## OIDC sign-in (optional)
+
+dotvirt can offer "Sign in with <name>" for any OpenID Connect issuer the apiserver trusts, in place of OpenShift SSO.
+The issuer's ID token is the user's bearer token, so it rides the same TokenReview and per-request pass-through path as a pasted one.
+
+The apiserver must accept dotvirt's client ID as an audience of that issuer (its `AuthenticationConfiguration`, or `--oidc-client-id`).
+Register `https://<console host>/api/auth/callback` as the client's redirect URI.
+
+```yaml
+spec:
+  auth:
+    oidc:
+      issuerURL: https://idm.example.com/oauth2/openid/dotvirt
+      clientID: dotvirt
+      clientSecret: {name: dotvirt-oidc, key: secret}
+      scopes: [profile, groups]
+      displayName: Example ID
+```
+
+- `issuerURL`: exactly as the tokens' `iss` claim names it; dotvirt refuses an issuer whose discovery document names another.
+- `clientSecret`: a Secret key in dotvirt's namespace; unset for a public client, which PKCE alone protects. The console reads it when it starts: restart it after a rotation.
+- `scopes`: asked beside `openid`; those whose claims the apiserver maps to a username and groups.
+
+Sign-in uses PKCE (S256) and a nonce.
+The session's tokens stay in dotvirt's memory; the cookie holds a random handle.
+dotvirt renews the ID token with the refresh token once three quarters of its life has passed, once per session however many requests arrive.
+An issuer that refuses the refresh ends the session.
+Logout revokes the refresh token at the issuer, when it publishes a `revocation_endpoint`.
+A restart of dotvirt signs every OIDC session out: the next sign-in is one redirect through the issuer.
+
 ## Packaging
 
 - **`make run`**: run the controller against the current kubecontext (prepend

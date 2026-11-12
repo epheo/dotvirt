@@ -51,9 +51,9 @@ const (
 const buildWorkers = 8
 
 // SessionLive reports whether the session a connection opened under may still
-// authenticate (auth.Authenticator.SessionLive). tokenKey is
-// restfactory.TokenKey of the connection's token; issued is its Identity's.
-type SessionLive func(tokenKey string, issued time.Time) bool
+// authenticate (auth.Authenticator.SessionLive). key and issued are its
+// Identity's Key and Issued.
+type SessionLive func(key string, issued time.Time) bool
 
 // Levels is the change level frames are reconciled against.
 type Levels interface {

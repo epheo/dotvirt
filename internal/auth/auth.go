@@ -11,6 +11,7 @@ import (
 	"crypto/cipher"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	authnv1 "k8s.io/api/authentication/v1"
@@ -32,8 +33,22 @@ type Identity struct {
 	// Issued is when the session cookie carrying Token was issued; zero when
 	// the token came in a bearer header.
 	Issued time.Time
-	// SSO marks a session whose token dotvirt's own OAuth client minted.
+	// SSO marks a session a sign-in flow started.
 	SSO bool
+	// Session keys an OIDC session, whose Token is renewed under it; empty
+	// for a session that is its token.
+	Session string
+	// refresh is set only on the Identity Logout returns, for OIDC.Revoke.
+	refresh string
+}
+
+// Key is what caches about id are keyed by: its OIDC session, which outlives
+// each renewed token, else its token's hash.
+func (id Identity) Key() string {
+	if id.Session != "" {
+		return id.Session
+	}
+	return restfactory.TokenKey(id.Token)
 }
 
 type ctxKey struct{}
@@ -57,6 +72,7 @@ type Authenticator struct {
 	saKube   kubernetes.Interface
 	sealer   cipher.AEAD // seals the session cookie (newSealer)
 	sessions *sessions
+	oidc     *oidcSessions
 
 	cache   *ttlcache.Cache[cachedIdentity] // keyed by sha256(token)
 	reviews *rate.Limiter                   // TokenReview budget for uncached tokens (reviewRate)
@@ -78,6 +94,7 @@ func New(saKube kubernetes.Interface, secret []byte) *Authenticator {
 		saKube:   saKube,
 		sealer:   newSealer(secret),
 		sessions: newSessions(),
+		oidc:     newOIDCSessions(),
 		cache:    ttlcache.New[cachedIdentity](authCacheTTL),
 		reviews:  rate.NewLimiter(reviewRate, reviewBurst),
 	}
@@ -85,10 +102,13 @@ func New(saKube kubernetes.Interface, secret []byte) *Authenticator {
 
 // SessionLive reports whether the session issued at issued may still
 // authenticate: its token not rejected by the last TokenReview, the session
-// not signed out, and not past SessionExpiry. tokenKey is
-// restfactory.TokenKey of its token. A zero issued (a bearer header) has no
-// session to end, only a token to reject.
-func (a *Authenticator) SessionLive(tokenKey string, issued time.Time) bool {
+// not signed out, and not past SessionExpiry. key is its Identity's Key. A
+// zero issued (a bearer header) has no session to end, only a token to reject.
+func (a *Authenticator) SessionLive(key string, issued time.Time) bool {
+	if strings.HasPrefix(key, oidcKeyPrefix) {
+		return a.oidc.live(key)
+	}
+	tokenKey := key
 	if c, ok := a.cache.Get(tokenKey); ok && c.err {
 		return false
 	}
@@ -120,17 +140,39 @@ var ErrRejected = errors.New("token rejected")
 // its token: other sessions of the token stand.
 var ErrSessionEnded = fmt.Errorf("%w: session ended", ErrRejected)
 
-// Recheck re-runs the TokenReview for a token the apiserver refused after the
-// cache vouched for it, and caches the new verdict; a cached rejection answers
-// at once. It returns Validate's error: ErrRejected only when the token is dead.
-func (a *Authenticator) Recheck(ctx context.Context, token string) error {
+// Recheck re-runs the TokenReview for id's token after the apiserver refused
+// it where the cache vouched for it, and caches the new verdict; a cached
+// rejection answers at once. An OIDC session's current token is the one
+// checked. It returns Validate's error: ErrRejected only when the token, or
+// the session, is dead.
+func (a *Authenticator) Recheck(ctx context.Context, id Identity) error {
+	token := id.Token
+	if id.Session != "" {
+		t, err := a.oidc.current(ctx, id.Session)
+		if err != nil {
+			return err
+		}
+		token = t
+	}
 	key := restfactory.TokenKey(token)
 	if c, ok := a.cache.Get(key); ok && c.err {
+		a.endRejected(id.Session)
 		return ErrRejected
 	}
 	a.cache.Delete(key)
 	_, err := a.Validate(ctx, token)
+	if errors.Is(err, ErrRejected) {
+		a.endRejected(id.Session)
+	}
 	return err
+}
+
+// endRejected ends the OIDC session under key, if any, whose token the
+// cluster rejected: no renewal makes it valid again.
+func (a *Authenticator) endRejected(key string) {
+	if key != "" {
+		a.oidc.end(key)
+	}
 }
 
 // Validate checks token via TokenReview and returns the attributed Identity.
@@ -140,20 +182,36 @@ func (a *Authenticator) Validate(ctx context.Context, token string) (Identity, e
 	return a.validate(ctx, token, restfactory.TokenKey(token), true)
 }
 
-// Revalidate re-checks a session an open stream already presented: an ended
-// session (signed out, past its lifetime) is rejected outright, else the cached
-// verdict when there is one, else a review outside the budget unknown tokens
-// spend, so streams re-checking cannot starve sign-ins and a re-check is never
-// refused into a pass. Its load is bounded by the open sessions: one review per
-// token per authCacheTTL. A transient failure is returned as such, never as a
-// rejection.
-func (a *Authenticator) Revalidate(ctx context.Context, id Identity) error {
+// Revalidate re-checks a session an open stream already presented and returns
+// its Identity as of now: an OIDC session's carries its current token. An
+// ended session (signed out, past its lifetime) is rejected outright, else the
+// cached verdict when there is one, else a review outside the budget unknown
+// tokens spend, so streams re-checking cannot starve sign-ins and a re-check
+// is never refused into a pass. Its load is bounded by the open sessions: one
+// review per token per authCacheTTL. A transient failure is returned as such,
+// never as a rejection.
+func (a *Authenticator) Revalidate(ctx context.Context, id Identity) (Identity, error) {
+	if id.Session != "" {
+		token, err := a.oidc.current(ctx, id.Session)
+		if err != nil {
+			return id, err
+		}
+		cur, err := a.validate(ctx, token, restfactory.TokenKey(token), false)
+		if err != nil {
+			if errors.Is(err, ErrRejected) {
+				a.endRejected(id.Session)
+			}
+			return id, err
+		}
+		cur.Issued, cur.SSO, cur.Session = id.Issued, id.SSO, id.Session
+		return cur, nil
+	}
 	key := restfactory.TokenKey(id.Token)
 	if !a.sessions.live(key, id.Issued) {
-		return ErrSessionEnded
+		return id, ErrSessionEnded
 	}
 	_, err := a.validate(ctx, id.Token, key, false)
-	return err
+	return id, err
 }
 
 // validate is Validate for a token whose key the caller already holds, with the

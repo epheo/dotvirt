@@ -216,6 +216,7 @@ func dotvirtEnv(dv *dotvirtv1alpha1.Dotvirt, argoNS string, tenantAllowed []tena
 			secretEnv("DOTVIRT_OAUTH_CLIENT_SECRET", OAuthSecretName, "clientSecret", true),
 		)
 	}
+	env = append(env, oidcEnv(dv.Spec.Auth.OIDC)...)
 
 	env = append(env,
 		secretEnv("DOTVIRT_SESSION_SECRET", SessionSecretName, "secret", false),
@@ -257,6 +258,29 @@ func dotvirtEnv(dv *dotvirtv1alpha1.Dotvirt, argoNS string, tenantAllowed []tena
 	if strings.HasPrefix(dv.Spec.Metrics.URL, "https://") && strings.Contains(dv.Spec.Metrics.URL, ".svc") {
 		// In-cluster metrics serve the service-CA-signed cert.
 		env = append(env, corev1.EnvVar{Name: "DOTVIRT_METRICS_CA", Value: serviceCAMountPath + "/" + ServiceCAKey})
+	}
+	return env
+}
+
+// oidcEnv passes spec.auth.oidc to the app; none when unset. A named client
+// secret is required: a missing Secret fails the pod's start, where an empty
+// value would read as a public client and fail every sign-in.
+func oidcEnv(o *dotvirtv1alpha1.OIDCSpec) []corev1.EnvVar {
+	if o == nil {
+		return nil
+	}
+	env := []corev1.EnvVar{
+		{Name: "DOTVIRT_OIDC_ISSUER", Value: o.IssuerURL},
+		{Name: "DOTVIRT_OIDC_CLIENT_ID", Value: o.ClientID},
+	}
+	if o.ClientSecret != nil {
+		env = append(env, secretEnv("DOTVIRT_OIDC_CLIENT_SECRET", o.ClientSecret.Name, o.ClientSecret.Key, false))
+	}
+	if len(o.Scopes) > 0 {
+		env = append(env, corev1.EnvVar{Name: "DOTVIRT_OIDC_SCOPES", Value: strings.Join(o.Scopes, " ")})
+	}
+	if o.DisplayName != "" {
+		env = append(env, corev1.EnvVar{Name: "DOTVIRT_OIDC_NAME", Value: o.DisplayName})
 	}
 	return env
 }

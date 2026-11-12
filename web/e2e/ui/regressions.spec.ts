@@ -152,6 +152,18 @@ test('#146: SSO pending guides instead of offering a failing button', async ({ p
 	await expect(page.getByRole('link', { name: 'Sign in with OpenShift' })).toBeVisible();
 });
 
+test('an OIDC issuer is offered by its name, the token path beside it', async ({ page }) => {
+	await setScenario(page, 'oidc');
+	await page.goto('/');
+	const signIn = page.getByRole('link', { name: 'Sign in with Kanidm' });
+	await expect(signIn).toHaveAttribute('href', '/api/auth/oidc');
+	await expect(page.getByRole('link', { name: 'Sign in with OpenShift' })).toHaveCount(0);
+	await expect(page.locator('textarea')).toBeVisible();
+
+	await page.goto('/?sso_error=1');
+	await expect(page.getByText(/Sign-in with Kanidm failed/)).toBeVisible();
+});
+
 test('bulk selection stages a power change per VM', async ({ page }) => {
 	await setScenario(page, 'base');
 	await login(page);

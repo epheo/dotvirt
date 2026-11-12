@@ -22,7 +22,6 @@ import (
 	"github.com/epheo/dotvirt/internal/cluster"
 	"github.com/epheo/dotvirt/internal/drs"
 	"github.com/epheo/dotvirt/internal/model"
-	"github.com/epheo/dotvirt/internal/restfactory"
 )
 
 // The access family. Every route gate, every capability field and the
@@ -620,7 +619,7 @@ func (s *Server) dryRun(ctx context.Context, id auth.Identity, c *cluster.Client
 	if a.Group == ssarNamespace.group && a.Resource == ssarNamespace.resource && a.Name != "" {
 		ver.obj = s.grantVersion(a.Name)
 	}
-	k := strings.Join([]string{restfactory.TokenKey(id.Token), "dry-run", a.Verb, a.Group, a.Resource, a.Namespace, a.Name, hex.EncodeToString(sum[:])}, "\x00")
+	k := strings.Join([]string{id.Key(), "dry-run", a.Verb, a.Group, a.Resource, a.Namespace, a.Name, hex.EncodeToString(sum[:])}, "\x00")
 	if e, age, ok := s.ssar.GetAge(k); ok && e.ver == ver && age < s.maxAge(e.unsettled) {
 		return e.ok, nil
 	}

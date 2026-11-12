@@ -13,7 +13,6 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 
 	"github.com/epheo/dotvirt/internal/auth"
-	"github.com/epheo/dotvirt/internal/restfactory"
 )
 
 // VNCDialer opens a VNC stream to a VMI as a net.Conn carrying the RFB protocol.
@@ -167,7 +166,7 @@ func (p *VNCProxy) Handler(w http.ResponseWriter, r *http.Request) {
 	}
 	defer func() { _ = ws.Close() }()
 	ws.SetReadLimit(vncReadLimit)
-	defer p.track(&console{key: restfactory.TokenKey(id.Token), issued: id.Issued, ws: ws})()
+	defer p.track(&console{key: id.Key(), issued: id.Issued, ws: ws})()
 	if exp := auth.SessionExpiry(id.Issued); !exp.IsZero() {
 		lifetime := time.AfterFunc(time.Until(exp), func() { endConsole(ws) })
 		defer lifetime.Stop()
