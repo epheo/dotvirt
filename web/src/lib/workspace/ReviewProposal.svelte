@@ -6,6 +6,7 @@
 	import { reviewCache } from '#lib/state/reviewCache.svelte.js';
 	import Button from '#lib/components/Button.svelte';
 	import ErrorNote from '#lib/components/ErrorNote.svelte';
+	import ForgeAdminCopy from '#lib/components/ForgeAdminCopy.svelte';
 	import GitOpsStepper from '#lib/components/GitOpsStepper.svelte';
 	import Skeleton from '#lib/components/Skeleton.svelte';
 	import StatusPill from '#lib/components/StatusPill.svelte';
@@ -75,6 +76,7 @@
 			<Button href={p.prURL} target="_blank" rel="noopener">
 				Open PR to approve and merge <ExternalLink size={14} />
 			</Button>
+			<ForgeAdminCopy class="text-xs" />
 		</div>
 		<p class="text-xs leading-4 text-ink-faint">
 			Approval and merge happen in the forge; once merged, ArgoCD applies the change and the result

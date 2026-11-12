@@ -432,6 +432,10 @@ export const api = {
 	authMethods: () => get<AuthMethods>('/api/auth/methods'),
 	// Applies the OAuthClient under the CALLER's token; RBAC is the gate.
 	finishSSO: () => req<void>('/api/auth/oauthclient', { method: 'POST' }),
+	// A managed forge's admin sign-in, read under the CALLER's token on their
+	// click only: the answer goes to the clipboard and is kept nowhere.
+	forgeAdminPassword: () =>
+		req<gen.ForgeAdminCredential>('/api/forge/admin-password', { method: 'POST' }),
 
 	// Commit history, one commit's review, and its revert (a forward commit
 	// opened as a PR).

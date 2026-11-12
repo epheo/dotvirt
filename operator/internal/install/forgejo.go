@@ -26,7 +26,8 @@ const (
 	// it carries dotvirt's standard hardened securityContext like the operand does.
 	forgejoImage       = "codeberg.org/forgejo/forgejo:11-rootless@sha256:5135f11de848bea6d59c0a96688e90c361380ba102bdc08dbd5aa52cca2b179b"
 	forgejoSAName      = "dotvirt-forgejo"
-	ForgejoAdminSecret = "dotvirt-forgejo-admin" // generated admin password (key "password")
+	ForgejoAdminSecret = "dotvirt-forgejo-admin" // generated admin password, under ForgejoAdminKey
+	ForgejoAdminKey    = "password"
 	forgejoPVCName     = "dotvirt-forgejo-data"
 	ForgejoServiceName = "dotvirt-forgejo"
 	ForgejoBotUser     = "dotvirt-bot" // the service user the operator mints a token for
@@ -157,7 +158,7 @@ func ForgejoDeployment(dv *dotvirtv1alpha1.Dotvirt, setFSGroup bool, argoWebhook
 	caMount := corev1.VolumeMount{Name: "ingress-ca", MountPath: forgejoCADir, ReadOnly: true}
 	adminPW := corev1.EnvVar{Name: "ADMIN_PW", ValueFrom: &corev1.EnvVarSource{
 		SecretKeyRef: &corev1.SecretKeySelector{
-			LocalObjectReference: corev1.LocalObjectReference{Name: ForgejoAdminSecret}, Key: "password",
+			LocalObjectReference: corev1.LocalObjectReference{Name: ForgejoAdminSecret}, Key: ForgejoAdminKey,
 		},
 	}}
 	// environment-to-ini renders app.ini from the FORGEJO__* env (the rootless image's

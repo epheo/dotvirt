@@ -110,6 +110,11 @@ func (s *Server) clusterCaps(ctx context.Context, id auth.Identity, c *cluster.C
 	if s.gateways != nil && s.gateways.Started() {
 		fields = append(fields, capField{&out.Gateways, gatewaysRead})
 	}
+	if a := s.cfg.ForgeAdmin; a.Name != "" {
+		q := refQ(verbGet, ssarSecrets, a.Namespace)
+		q.Name = a.Name
+		fields = append(fields, capField{&out.ForgeAdmin, action{q}})
+	}
 	s.fill(ctx, id, c, fields)
 	if s.oauth != nil {
 		clientID, _, _ := s.oauth.DesiredClient()
