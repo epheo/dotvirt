@@ -12,6 +12,7 @@ package deps
 import (
 	"strings"
 
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/discovery"
 	"k8s.io/client-go/rest"
 )
@@ -40,6 +41,10 @@ var Required = []Dependency{
 type Result struct {
 	MissingHard []string
 	MissingSoft []string
+	// OpenShiftOAuth says the cluster has the oauth.openshift.io API, serving
+	// or failing discovery: OpenShift's own OAuth server runs, which MicroShift
+	// and an OpenShift signing in through an external OIDC issuer lack.
+	OpenShiftOAuth bool
 }
 
 // Probe reports which dependencies' CRDs the cluster currently serves. A partial
@@ -54,7 +59,11 @@ func Probe(cfg *rest.Config) (Result, error) {
 	if err != nil && !discovery.IsGroupDiscoveryFailedError(err) {
 		return Result{}, err
 	}
+	return classify(lists, err), nil
+}
 
+// classify reads a discovery answer: lists, and err when some groups failed.
+func classify(lists []*metav1.APIResourceList, err error) Result {
 	served := map[string]bool{} // "group/resource"
 	for _, l := range lists {
 		group := l.GroupVersion // "group/version", or just "version" for the core group
@@ -68,7 +77,7 @@ func Probe(cfg *rest.Config) (Result, error) {
 		}
 	}
 
-	var res Result
+	res := Result{OpenShiftOAuth: served["oauth.openshift.io/oauthclients"] || failed(err, "oauth.openshift.io")}
 	for _, d := range Required {
 		ok := served[d.Group+"/"+d.Resource]
 		switch {
@@ -79,7 +88,21 @@ func Probe(cfg *rest.Config) (Result, error) {
 			res.MissingSoft = append(res.MissingSoft, d.Label+" ("+d.Enables+")")
 		}
 	}
-	return res, nil
+	return res
+}
+
+// failed reports whether group's discovery failed: its aggregated APIService
+// is registered but its apiserver did not answer (an OpenShift upgrade or a
+// control-plane reboot). The API is installed all the same, so a feature keyed
+// on it must not flip off for the blip.
+func failed(err error, group string) bool {
+	groups, _ := discovery.GroupDiscoveryFailedErrorGroups(err)
+	for gv := range groups {
+		if gv.Group == group {
+			return true
+		}
+	}
+	return false
 }
 
 // Summary is a one-line status suitable for a condition message.

@@ -217,7 +217,7 @@ func dotvirtEnv(dv *dotvirtv1alpha1.Dotvirt, argoNS string, tenantAllowed []tena
 	// applies the OAuthClient (a cluster-admin act it deliberately doesn't perform; no
 	// oauthclients grant), reported in status.ssoOAuthClient. optional=true: enabling SSO
 	// before the OAuthClient is applied must not wedge the pod.
-	if dv.Spec.Auth.OpenShiftSSO {
+	if dv.Spec.Auth.SSOEnabled() {
 		env = append(env,
 			corev1.EnvVar{Name: "DOTVIRT_OAUTH_CLIENT_ID", Value: OAuthClientName(dv.Namespace)},
 			secretEnv("DOTVIRT_OAUTH_CLIENT_SECRET", OAuthSecretName, "clientSecret", true),
@@ -258,7 +258,7 @@ func dotvirtEnv(dv *dotvirtv1alpha1.Dotvirt, argoNS string, tenantAllowed []tena
 			env = append(env, corev1.EnvVar{Name: "DOTVIRT_FORGE_CA", Value: ingressCAMountPath + "/" + IngressCAKey})
 		}
 	}
-	if dv.Spec.Auth.OpenShiftSSO {
+	if dv.Spec.Auth.SSOEnabled() {
 		// The oauth token endpoint is router-served: same ingress CA.
 		env = append(env, corev1.EnvVar{Name: "DOTVIRT_OAUTH_CA", Value: ingressCAMountPath + "/" + IngressCAKey})
 	}

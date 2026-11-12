@@ -116,7 +116,7 @@ func TestDeploymentSSOEnvGatedOnFlag(t *testing.T) {
 		t.Error("SSO off: DOTVIRT_OAUTH_CLIENT_ID must be unset")
 	}
 	sso := testDotvirt()
-	sso.Spec.Auth.OpenShiftSSO = true
+	sso.Spec.Auth.OpenShiftSSO = new(true)
 	env := Deployment(sso, "argocd", nil).Spec.Template.Spec.Containers[0].Env
 	// The OAuthClient is cluster-scoped, so its name must be per-install: a shared one
 	// lets a second install overwrite the first's redirect URI and secret.
@@ -342,7 +342,7 @@ func TestForgejoRollsOnAdminSecretChange(t *testing.T) {
 func TestDeploymentVerifiedTLSByDefault(t *testing.T) {
 	dv := testDotvirt()
 	dv.Spec.Forge.Managed = true
-	dv.Spec.Auth.OpenShiftSSO = true
+	dv.Spec.Auth.OpenShiftSSO = new(true)
 	dv.Spec.Metrics.URL = "https://thanos-querier.openshift-monitoring.svc.cluster.local:9091"
 	d := Deployment(dv, "argocd", nil)
 	c := d.Spec.Template.Spec.Containers[0]

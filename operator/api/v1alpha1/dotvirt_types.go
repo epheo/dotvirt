@@ -212,12 +212,16 @@ type MetricsSpec struct {
 // SSO or OIDC.
 // +kubebuilder:validation:XValidation:rule="!(has(self.openShiftSSO) && self.openShiftSSO && has(self.oidc))",message="openShiftSSO and oidc are exclusive: pick one sign-in flow"
 type AuthSpec struct {
-	// OpenShiftSSO adds a "Sign in with OpenShift" button beside the token login. The
-	// operator generates the client credential and, once the console host is assigned,
-	// reports the exact OAuthClient to apply (redirect URI filled in) in
-	// status.ssoOAuthClient. Registering that cluster-scoped OAuthClient stays a
-	// cluster-admin act the operator deliberately doesn't perform. OpenShift only.
-	OpenShiftSSO bool `json:"openShiftSSO,omitempty"`
+	// OpenShiftSSO adds a "Sign in with OpenShift" button beside the token login.
+	// Unset turns it on wherever the cluster runs OpenShift's OAuth server and no
+	// oidc flow is set; false keeps it off. The operator generates the client
+	// credential and, once the console host is assigned, reports the exact
+	// OAuthClient to apply (redirect URI filled in) in status.ssoOAuthClient; a
+	// cluster admin signed in to the console can register it from there instead.
+	// Registering that cluster-scoped OAuthClient stays a cluster-admin act the
+	// operator deliberately doesn't perform. OpenShift only.
+	// +optional
+	OpenShiftSSO *bool `json:"openShiftSSO,omitempty"`
 	// OIDC adds a "Sign in with <displayName>" button for an OpenID Connect
 	// issuer the apiserver trusts. The issuer's ID token is the user's bearer,
 	// so the apiserver's AuthenticationConfiguration must accept this client ID
@@ -226,6 +230,10 @@ type AuthSpec struct {
 	// +optional
 	OIDC *OIDCSpec `json:"oidc,omitempty"`
 }
+
+// SSOEnabled is openShiftSSO once the operator resolved it for the cluster:
+// before that, an unset field reads as off.
+func (a AuthSpec) SSOEnabled() bool { return a.OpenShiftSSO != nil && *a.OpenShiftSSO }
 
 // OIDCSpec is the client dotvirt is registered as at an OpenID Connect issuer.
 type OIDCSpec struct {

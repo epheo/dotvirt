@@ -26,7 +26,7 @@ func (r *DotvirtReconciler) reconcileSecrets(ctx context.Context, dv *dotvirtv1a
 		{install.WebhookSecretName, "secret"},
 		{install.ArgoWebhookSecretName, "secret"},
 	}
-	if dv.Spec.Auth.OpenShiftSSO {
+	if dv.Spec.Auth.SSOEnabled() {
 		// The generated OAuth client secret: the app reads it, and the admin copies it into
 		// the OAuthClient via the status.ssoOAuthClient command (so it never lands in status).
 		secrets = append(secrets, struct{ name, key string }{install.OAuthSecretName, "clientSecret"})
