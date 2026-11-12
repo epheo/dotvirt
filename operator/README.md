@@ -682,4 +682,5 @@ Protect the base branch's `.argocd-source.yaml` files too.
 Argo CD's repo-server merges `.argocd-source.yaml` and `.argocd-source-<app>.yaml`, found at an Application's path, into the Application's source settings.
 Such a file can change which files sync and how, the source type included, whatever the repo's layout says; no Argo CD setting turns this off.
 dotvirt refuses to stage or revert one in, and lists one already in a project's repo as an issue; removing one stays open.
-A push from outside the console is the forge's to refuse: on Forgejo, add the protected file patterns `.argocd-source*.yaml;**/.argocd-source*.yaml` to the base branch's rule, so a pull request changing one, removal included, cannot merge.
+A push from outside the console is the forge's to refuse: on Forgejo, add the protected file patterns `.argocd-source*.yaml;**/.argocd-source*.yaml` to the base branch's rule and turn on "Apply the rule to administrators".
+A pull request changing one, removal included, then cannot merge; only a forge instance administrator can still merge past it.
