@@ -69,8 +69,10 @@ type Authorizer interface {
 	// namespace, for a kind the table does not know; reading nothing new.
 	ClusterScoped(group, kind string) bool
 	// ProjectNamespace reports whether namespace belongs to a project,
-	// from the API's snapshot; reading nothing new.
-	ProjectNamespace(namespace string) bool
+	// from the API's snapshot; reading nothing new. known is false until the
+	// snapshot has listed the project namespaces: before that every namespace
+	// would read as no project's.
+	ProjectNamespace(namespace string) (project, known bool)
 }
 
 // UseAuthorizer attaches the caller's RBAC to every stage, propose, restore
@@ -426,7 +428,15 @@ func ownNetworks(rule KindRule, o object) error {
 		m, _ := n["multus"].(map[string]any)
 		ref, _ := m["networkName"].(string)
 		ns, name, ok := strings.Cut(ref, "/")
-		if ok && ns != o.ref.Namespace && rule.ProjectNamespace(ns) {
+		if !ok || ns == o.ref.Namespace {
+			continue
+		}
+		project, known := rule.ProjectNamespace(ns)
+		if !known {
+			return fmt.Errorf("%w: the cluster's project namespaces are still loading, so %s's network %s in %s cannot be checked yet; try again in a moment",
+				model.ErrUnavailable, o.ref.Name, name, ns)
+		}
+		if project {
 			return fmt.Errorf("%w: %s attaches to network %s of namespace %s, which a VM in %s cannot join; use %s's network %s, or one in a shared namespace",
 				model.ErrConflict, o.ref.Name, name, ns, o.ref.Namespace, o.ref.Namespace, name)
 		}
