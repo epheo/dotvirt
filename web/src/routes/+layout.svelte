@@ -221,8 +221,11 @@
 	<link rel="icon" href={favicon} />
 	<title>{branding.name}</title>
 	<!-- After the console's own stylesheet, so it may override its tokens;
-	     same-origin, as the content-security policy requires. -->
-	{#if branding.value?.theme}<link rel="stylesheet" href="/api/branding/theme.css" />{/if}
+	     same-origin, as the content-security policy requires. A served shell
+	     carries it already. -->
+	{#if branding.value?.theme && !branding.fromShell}
+		<link rel="stylesheet" href="/api/branding/theme.css" />
+	{/if}
 </svelte:head>
 
 {#if session.checking}

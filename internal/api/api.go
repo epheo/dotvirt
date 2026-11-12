@@ -16,6 +16,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -392,20 +393,23 @@ func (s *Server) Handler() http.Handler {
 		return apiHandler
 	}
 	var csp string
-	if b, err := os.ReadFile(filepath.Join(s.cfg.StaticDir, "index.html")); err == nil {
-		csp = buildCSP(b, s.cfg.UploadProxyURL)
+	index, err := os.ReadFile(filepath.Join(s.cfg.StaticDir, "index.html"))
+	if err == nil {
+		csp = buildCSP(index, s.cfg.UploadProxyURL)
 	} else {
 		log.Printf("api: no CSP: reading index.html: %v", err)
 	}
-	return withSecurityHeaders(csp, spaRouter(s.cfg.StaticDir, apiHandler))
+	return withSecurityHeaders(csp, spaRouter(s.cfg.StaticDir, index, s.cfg.Branding, apiHandler))
 }
 
 // spaRouter serves /api/* via the API handler and every other path from the static
-// SPA build dir - a real file when one exists, else index.html so client-side
-// routes resolve. Static assets bypass auth (the SPA authenticates via /api/login).
-func spaRouter(dir string, apiHandler http.Handler) http.Handler {
+// SPA build dir - a real file when one exists, else the shell, index dressed in
+// the branding, so client-side routes resolve. Static assets bypass auth (the SPA
+// authenticates via /api/login). A nil index, unread at startup, is served from
+// the dir as it is.
+func spaRouter(dir string, index []byte, brand branding.Settings, apiHandler http.Handler) http.Handler {
 	fileServer := http.FileServer(http.Dir(dir))
-	index := filepath.Join(dir, "index.html")
+	indexPath := filepath.Join(dir, "index.html")
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if strings.HasPrefix(r.URL.Path, "/api/") {
 			apiHandler.ServeHTTP(w, r)
@@ -416,7 +420,19 @@ func spaRouter(dir string, apiHandler http.Handler) http.Handler {
 			fileServer.ServeHTTP(w, r)
 			return
 		}
-		http.ServeFile(w, r, index)
+		if index == nil {
+			http.ServeFile(w, r, indexPath)
+			return
+		}
+		// ServeFile's own guard, kept for the shell: a dot-dot path names nothing.
+		if slices.Contains(strings.Split(r.URL.Path, "/"), "..") {
+			http.Error(w, "invalid URL path", http.StatusBadRequest)
+			return
+		}
+		h := w.Header()
+		h.Set("Content-Type", "text/html; charset=utf-8")
+		h.Set("Cache-Control", "no-cache")
+		_, _ = w.Write(brand.Shell(index))
 	})
 }
 

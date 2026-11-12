@@ -1,6 +1,7 @@
 package branding
 
 import (
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -156,5 +157,51 @@ func TestServesAMountedConfigMap(t *testing.T) {
 	}
 	if w := get(s.ServeLogo); w.Code != http.StatusOK || w.Header().Get("Content-Type") != "image/png" {
 		t.Errorf("logo behind a symlink = %d %q", w.Code, w.Header().Get("Content-Type"))
+	}
+}
+
+// The shell carries the branding for the first paint: the title, the
+// stylesheet after the console's own, and Info as a block no value can close.
+func TestShell(t *testing.T) {
+	index := []byte(`<html><head><link href="/app.css" rel="stylesheet"></head><body></body></html>`)
+	block := func(shell string) model.Branding {
+		t.Helper()
+		open := `<script type="application/json" id="` + ShellID + `">`
+		_, rest, ok := strings.Cut(shell, open)
+		raw, _, closed := strings.Cut(rest, "</script>")
+		var b model.Branding
+		if !ok || !closed || json.Unmarshal([]byte(raw), &b) != nil {
+			t.Fatalf("no readable branding block in %q", shell)
+		}
+		return b
+	}
+
+	plain := string(Settings{}.Shell(index))
+	if b := block(plain); !strings.Contains(plain, "<title>dotvirt</title>") || strings.Contains(plain, "theme.css") || b.ProductName != "" || b.Theme || b.Logo || len(b.Links) != 0 {
+		t.Errorf("unbranded shell = %q", plain)
+	}
+
+	s := Settings{
+		ProductName: "Volt & Co",
+		Links:       []model.BrandingLink{{Label: "</script><script>alert(1)</script>", URL: "https://c.example/a"}},
+		Dir:         dir(t, map[string]string{ThemeFile: ":root{}", LogoSVG: "<svg/>"}),
+	}
+	shell := string(s.Shell(index))
+	if !strings.Contains(shell, "<title>Volt &amp; Co</title>") {
+		t.Errorf("title not escaped: %q", shell)
+	}
+	theme := strings.Index(shell, `<link rel="stylesheet" href="/api/branding/theme.css">`)
+	if own := strings.Index(shell, `href="/app.css"`); theme < 0 || theme < own || theme > strings.Index(shell, "</head>") {
+		t.Errorf("the stylesheet must follow the console's own, in the head: %q", shell)
+	}
+	if strings.Count(shell, "<script") != 1 {
+		t.Errorf("a value opened a script: %q", shell)
+	}
+	if got := block(shell); got.ProductName != "Volt & Co" || !got.Theme || !got.Logo || len(got.Links) != 1 || got.Links[0].Label != s.Links[0].Label {
+		t.Errorf("block = %+v", got)
+	}
+
+	if got := (Settings{ProductName: "x"}).Shell([]byte("no head")); string(got) != "no head" {
+		t.Errorf("an index with no </head> = %q", got)
 	}
 }

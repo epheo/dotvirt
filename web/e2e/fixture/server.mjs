@@ -15,7 +15,7 @@
 //   POST /__fixture/proxy-down/{0|1}   the upload proxy drops connections, as one the browser cannot reach or trust
 //   GET  /__fixture/scenario           current scenario name
 
-import { createReadStream, existsSync, statSync } from 'node:fs';
+import { createReadStream, existsSync, readFileSync, statSync } from 'node:fs';
 import { createServer } from 'node:http';
 import { dirname, extname, join, normalize } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -1332,10 +1332,25 @@ function handleControl(req, res, url) {
 
 function serveStatic(req, res, url) {
 	const clean = normalize(url.pathname).replace(/^(\.\.[/\\])+/, '');
-	let file = join(buildDir, clean);
-	if (!existsSync(file) || statSync(file).isDirectory()) file = join(buildDir, 'index.html');
+	const file = join(buildDir, clean);
+	if (!existsSync(file) || statSync(file).isDirectory()) return serveShell(res);
 	res.writeHead(200, { 'Content-Type': MIME[extname(file)] ?? 'application/octet-stream' });
 	createReadStream(file).pipe(res);
+}
+
+// The shell dressed as dotvirt's server dresses it (branding.Settings.Shell):
+// the title, the stylesheet after the console's own, and the branding block.
+function serveShell(res) {
+	const info = state.scenario.branding?.info ?? {};
+	const esc = (v) => v.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+	const block = JSON.stringify(info).replace(/</g, '\\u003c').replace(/>/g, '\\u003e');
+	const head =
+		`<title>${esc(info.productName || 'dotvirt')}</title>` +
+		(info.theme ? '<link rel="stylesheet" href="/api/branding/theme.css">' : '') +
+		`<script type="application/json" id="dotvirt-branding">${block}</script>`;
+	const index = readFileSync(join(buildDir, 'index.html'), 'utf8');
+	res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-cache' });
+	res.end(index.replace('</head>', head + '</head>'));
 }
 
 const server = createServer((req, res) => {
