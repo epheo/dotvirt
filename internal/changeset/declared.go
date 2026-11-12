@@ -113,6 +113,9 @@ type Placement struct {
 	Named      map[string][]model.ObjectRef
 	Namespaces []string
 	Declared   []GroupRef
+	// SourceOverrides are the files Argo CD reads as an Application's source
+	// settings (git.ArgoSourceOverride).
+	SourceOverrides []string
 }
 
 // Undeclarable are the objects a tenant repo declares that rule refuses: its
@@ -171,6 +174,9 @@ func indexDeclared(read *git.Repo, branch string) (declaredIndex, error) {
 		err := read.WalkYAML(branch,
 			func(path string) bool { return !git.InTemplatesDir(path) },
 			func(path string, content []byte) error {
+				if git.ArgoSourceOverride(path) {
+					idx.Placement.SourceOverrides = append(idx.Placement.SourceOverrides, path)
+				}
 				for _, k := range manifest.Kinds(content) {
 					kinds[k] = true
 				}

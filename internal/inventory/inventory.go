@@ -8,6 +8,7 @@ package inventory
 import (
 	"fmt"
 	"log"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -171,8 +172,9 @@ func buildProject(in Inputs, p project.ProjectInfo) model.Project {
 	return out
 }
 
-// placementIssues fills the project's Unnamespaced, OutOfProject and
-// PlatformKinds from the base branch, limited to what the caller may see.
+// placementIssues fills the project's Unnamespaced, OutOfProject,
+// PlatformKinds and SourceOverrides from the base branch, limited to what the
+// caller may see.
 func placementIssues(out *model.Project, in Inputs, read *git.Repo) error {
 	pl, err := changeset.PlacementOnBranch(read, in.Branch)
 	if err != nil {
@@ -181,6 +183,7 @@ func placementIssues(out *model.Project, in Inputs, read *git.Repo) error {
 	shown := func(ns string) bool {
 		return in.Visible == nil || in.Visible[ns] || in.Owners[ns] == ""
 	}
+	out.SourceOverrides = slices.Clone(pl.SourceOverrides)
 	for _, ref := range pl.Implied {
 		if shown(ref.Namespace) {
 			out.Unnamespaced = append(out.Unnamespaced, ref)

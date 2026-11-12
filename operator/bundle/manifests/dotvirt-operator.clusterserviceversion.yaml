@@ -389,7 +389,6 @@ spec:
               verbs:
                 - create
                 - list
-                - patch
             - apiGroups:
                 - gateway.networking.k8s.io
               resourceNames:
@@ -399,6 +398,7 @@ spec:
                 - httproutes
               verbs:
                 - delete
+                - patch
             - apiGroups:
                 - networking.k8s.io
               resources:
@@ -407,7 +407,6 @@ spec:
               verbs:
                 - create
                 - list
-                - patch
             - apiGroups:
                 - networking.k8s.io
               resourceNames:
@@ -418,6 +417,7 @@ spec:
                 - networkpolicies
               verbs:
                 - delete
+                - patch
             - apiGroups:
                 - rbac.authorization.k8s.io
               resources:
@@ -466,7 +466,6 @@ spec:
                 - create
                 - get
                 - list
-                - patch
                 - watch
             - apiGroups:
                 - route.openshift.io
@@ -477,6 +476,7 @@ spec:
                 - routes
               verbs:
                 - delete
+                - patch
             - apiGroups:
                 - route.openshift.io
               resources:
