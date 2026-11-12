@@ -316,6 +316,11 @@ applies nothing of dotvirt's, and the operator drops it from that binding. It ke
 `dotvirt-argocd-read`, the same kinds with read verbs only: Argo diffs and
 health-checks with its own account. Turning impersonation off binds the controller
 again in the same pass, before the setting leaves `argocd-cm`.
+That read covers MachineConfigs, which the platform tier declares for rebalancing's
+PSI kernel argument. Rendered MachineConfigs carry the cluster pull secret, and list
+and watch cannot be scoped by name, so on an ArgoCD whose controller does not
+already read every kind, this role is what lets it read them. OpenShift GitOps'
+controller already reads every kind.
 While impersonation is off, give dotvirt its own ArgoCD instance where other teams'
 Applications must not hold these rights.
 
