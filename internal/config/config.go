@@ -70,6 +70,10 @@ type Config struct {
 	// compare pages, repositories) when it is not ForgeURL: a forge the pod
 	// reaches in-cluster, or one a provider's app fronts on the same paths.
 	ForgeWebURL string
+	// ForgeAdmin locates a managed forge's bootstrap admin credential. The
+	// console reads it under the caller's own token, on request: dotvirt's
+	// account never holds it.
+	ForgeAdmin ForgeAdminRef
 	// Branding dresses the console as a provider's (internal/branding): a
 	// product name, masthead links, and a mounted directory holding its
 	// stylesheet and logo.
@@ -191,6 +195,9 @@ func Load(args []string) (*Config, error) {
 	fs.StringVar(&c.DraftDir, "draft-dir", envOr("DOTVIRT_DRAFT_DIR", "./.dotvirt-drafts"), "root dir for persisted drafts (<dir>/<user>/<project>.json)")
 	fs.StringVar(&c.ForgeURL, "forge-url", os.Getenv("DOTVIRT_FORGE_URL"), "Forgejo base URL (empty = push-only, no PR, anonymous git)")
 	fs.StringVar(&c.ForgeWebURL, "forge-web-url", os.Getenv("DOTVIRT_FORGE_WEB_URL"), "base URL browsers open forge pages at, when not -forge-url (empty = -forge-url)")
+	adminSecret := fs.String("forge-admin-secret", os.Getenv("DOTVIRT_FORGE_ADMIN_SECRET"), "namespace/name of a managed forge's admin credential Secret, read under the caller's token (empty = none)")
+	fs.StringVar(&c.ForgeAdmin.Key, "forge-admin-key", envOr("DOTVIRT_FORGE_ADMIN_KEY", "password"), "key of the admin password in -forge-admin-secret")
+	fs.StringVar(&c.ForgeAdmin.User, "forge-admin-user", os.Getenv("DOTVIRT_FORGE_ADMIN_USER"), "the forge admin's user name")
 	fs.StringVar(&c.ProductName, "product-name", os.Getenv("DOTVIRT_PRODUCT_NAME"), "product name shown in place of dotvirt, in the console and the forge (empty = dotvirt)")
 	links := fs.String("masthead-links", os.Getenv("DOTVIRT_MASTHEAD_LINKS"), `masthead links back to a provider's app, JSON [{"label":..,"url":"https://.."}] (empty = none)`)
 	fs.StringVar(&c.BrandingDir, "branding-dir", os.Getenv("DOTVIRT_BRANDING_DIR"), "directory holding theme.css and logo.svg or logo.png, served same-origin (empty = none)")
@@ -256,6 +263,13 @@ func Load(args []string) (*Config, error) {
 	if c.ForgeWebURL != "" && !webBase(c.ForgeWebURL) {
 		return nil, fmt.Errorf("-forge-web-url (DOTVIRT_FORGE_WEB_URL) %q is not an http(s) base URL: a host, no credentials, query or fragment", c.ForgeWebURL)
 	}
+	if *adminSecret != "" {
+		ns, name, ok := strings.Cut(*adminSecret, "/")
+		if !ok || len(validation.IsDNS1123Label(ns)) > 0 || len(validation.IsDNS1123Subdomain(name)) > 0 || c.ForgeAdmin.Key == "" {
+			return nil, fmt.Errorf("-forge-admin-secret (DOTVIRT_FORGE_ADMIN_SECRET) %q is not namespace/name, or -forge-admin-key is empty", *adminSecret)
+		}
+		c.ForgeAdmin.Namespace, c.ForgeAdmin.Name = ns, name
+	}
 	// The snapshot selects project namespaces by this key: a malformed one
 	// would select none and look like an empty cluster, so it fails here.
 	if errs := validation.IsQualifiedName(c.ProjectLabel); len(errs) > 0 {
@@ -313,6 +327,12 @@ func envBool(key string, def bool) bool {
 	default:
 		return def
 	}
+}
+
+// ForgeAdminRef is the Secret, and its key, holding a managed forge's admin
+// password, and that admin's user name; Name "" is none.
+type ForgeAdminRef struct {
+	Namespace, Name, Key, User string
 }
 
 // webBase reports whether raw is an absolute http(s) URL with a host and

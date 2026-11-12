@@ -125,6 +125,11 @@ export interface ClusterCaps {
    */
   oauthClient: boolean;
   /**
+   * ForgeAdmin reads a managed forge's admin password: the caller may get
+   * its Secret. False without a managed forge.
+   */
+  forgeAdmin: boolean;
+  /**
    * Hosts is listing the cluster's nodes, the read behind the Hosts section.
    */
   hosts: boolean;
@@ -297,6 +302,13 @@ export interface ProjectCaps {
    * them. Set with PublishingOn or an allowed stage.
    */
   publishingReach?: string[];
+}
+/**
+ * ForgeAdminCredential is a managed forge's admin sign-in.
+ */
+export interface ForgeAdminCredential {
+  username: string;
+  password: string;
 }
 
 //////////
