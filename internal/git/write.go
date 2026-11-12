@@ -1,6 +1,8 @@
 package git
 
 import (
+	"bytes"
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -125,14 +127,19 @@ func (w *WriteRepo) pushBranch(repo *git.Repository, branch string, lease plumbi
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), writeTimeout)
 	defer cancel()
+	var remote bytes.Buffer
 	opts := &git.PushOptions{
 		Auth:     w.auth(),
 		RefSpecs: []config.RefSpec{config.RefSpec(fmt.Sprintf("+refs/heads/%s:refs/heads/%s", branch, branch))},
+		Progress: &remote,
 	}
 	if !lease.IsZero() {
 		opts.ForceWithLease = &git.ForceWithLease{RefName: plumbing.NewBranchReferenceName(branch), Hash: lease}
 	}
 	err := repo.PushContext(ctx, opts)
+	if err != nil && hookDeclined(err, branch) {
+		return &BranchRefusedError{Branch: branch, Reason: lastRemoteLine(remote.String())}
+	}
 	if err != nil && !lease.IsZero() && leaseRefused(err, branch) {
 		return fmt.Errorf("push %s: %w", branch, ErrBranchMoved)
 	}
@@ -211,6 +218,43 @@ func ensureDir(wt *git.Worktree, path string) error {
 		}
 	}
 	return nil
+}
+
+// BranchRefusedError is a push the forge's own rules declined. On Forgejo a
+// protected branch refuses every force push and deletion, for everyone, and
+// a proposal's branch is rebuilt and force-pushed on each propose.
+type BranchRefusedError struct {
+	Branch string
+	// Reason is the forge's last word on the push, "" when it said nothing.
+	Reason string
+}
+
+func (e *BranchRefusedError) Error() string {
+	why := cmp.Or(e.Reason, "its pre-receive hook declined")
+	return fmt.Sprintf("the forge refused the push to %s (%s): the console rebuilds a proposal's branch and force-pushes it, which a protected branch refuses; leave the proposal branches unprotected in the forge", e.Branch, why)
+}
+
+func (e *BranchRefusedError) Unwrap() error { return model.ErrConflict }
+
+// hookDeclined reports a push of branch the server's pre-receive hook
+// refused: git's report-status reason, which go-git returns as a command
+// error.
+func hookDeclined(err error, branch string) bool {
+	ref := plumbing.NewBranchReferenceName(branch).String()
+	return strings.Contains(err.Error(), "command error on "+ref+": pre-receive hook declined")
+}
+
+// lastRemoteLine is the last line the server wrote to the pusher, where a
+// hook's refusal lands, without git's progress counters or a "remote:" tag.
+func lastRemoteLine(out string) string {
+	lines := strings.FieldsFunc(out, func(r rune) bool { return r == '\n' || r == '\r' })
+	for i := len(lines) - 1; i >= 0; i-- {
+		line := strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(lines[i]), "remote:"))
+		if line != "" && !strings.HasSuffix(line, "done.") && !strings.Contains(line, "%") {
+			return line
+		}
+	}
+	return ""
 }
 
 // leaseRefused reports a push of branch refused because the branch moved

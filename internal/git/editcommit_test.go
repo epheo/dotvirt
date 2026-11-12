@@ -9,6 +9,8 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+
+	"github.com/epheo/dotvirt/internal/model"
 )
 
 // seedRepo creates a bare repo with one VM manifest on main, returning the bare
@@ -284,6 +286,39 @@ func TestLeaseRefused(t *testing.T) {
 	} {
 		if got := leaseRefused(errors.New(msg), "p"); got != want {
 			t.Errorf("%q: got %v, want %v", msg, got, want)
+		}
+	}
+}
+
+// A push the forge's hook declined is a refusal that names the protection,
+// never a moved branch, whatever the lease.
+func TestHookDeclinedIsABranchRefusal(t *testing.T) {
+	declined := errors.New("command error on refs/heads/p: pre-receive hook declined")
+	if !hookDeclined(declined, "p") || hookDeclined(declined, "q") {
+		t.Error("hookDeclined must match the pushed ref's decline only")
+	}
+	if hookDeclined(errors.New("command error on refs/heads/p: failed to update ref"), "p") {
+		t.Error("a refused lease is not a hook decline")
+	}
+	err := error(&BranchRefusedError{Branch: "p", Reason: "branch p is protected from force push"})
+	if !errors.Is(err, model.ErrConflict) || errors.Is(err, ErrBranchMoved) {
+		t.Errorf("err = %v: want a conflict, not a moved branch", err)
+	}
+	if !strings.Contains(err.Error(), "(branch p is protected from force push)") || !strings.Contains(err.Error(), "leave the proposal branches unprotected") {
+		t.Errorf("err = %q", err)
+	}
+}
+
+// The forge's refusal is the last line it wrote, past git's counters.
+func TestLastRemoteLine(t *testing.T) {
+	for out, want := range map[string]string{
+		"": "",
+		"Counting objects: 100% (3/3), done.\r\n":                                                         "",
+		"Resolving deltas: 100% (1/1), done.\nremote: Forgejo: branch p is protected from force push\n\n": "Forgejo: branch p is protected from force push",
+		"branch p is protected from force push\n":                                                         "branch p is protected from force push",
+	} {
+		if got := lastRemoteLine(out); got != want {
+			t.Errorf("%q: got %q, want %q", out, got, want)
 		}
 	}
 }
