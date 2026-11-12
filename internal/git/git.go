@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"io"
 	"maps"
+	"path"
 	"slices"
 	"sort"
 	"strings"
@@ -361,6 +362,15 @@ func isYAML(name string) bool {
 // template's embedded VM is not inventory); TemplatesOnBranch reads only it.
 func InTemplatesDir(name string) bool {
 	return strings.HasPrefix(name, model.TemplatesDir+"/")
+}
+
+// ArgoSourceOverride reports a file Argo CD's repo-server merges into an
+// Application's source settings when it sits at the Application's path
+// (.argocd-source.yaml, .argocd-source-<app>.yaml): it can change which files
+// sync, and how, whatever the repo's layout says.
+func ArgoSourceOverride(name string) bool {
+	base := path.Base(name)
+	return base == ".argocd-source.yaml" || strings.HasPrefix(base, ".argocd-source-") && strings.HasSuffix(base, ".yaml")
 }
 
 // TemplatesOnBranch returns every .yaml file under templates/ on branch - the

@@ -677,3 +677,9 @@ Anyone who may read the repo can open a PR from another user's pushed branch.
 The requester could then approve their own change.
 dotvirt adopts that PR all the same, as it matches the branch and head.
 So require approvals from a reviewer team, or another rule the forge enforces, beyond "not the poster".
+
+Protect the base branch's `.argocd-source.yaml` files too.
+Argo CD's repo-server merges `.argocd-source.yaml` and `.argocd-source-<app>.yaml`, found at an Application's path, into the Application's source settings.
+Such a file can change which files sync and how, the source type included, whatever the repo's layout says; no Argo CD setting turns this off.
+dotvirt refuses to stage or revert one in, and lists one already in a project's repo as an issue; removing one stays open.
+A push from outside the console is the forge's to refuse: on Forgejo, add the protected file patterns `.argocd-source*.yaml;**/.argocd-source*.yaml` to the base branch's rule, so a pull request changing one, removal included, cannot merge.

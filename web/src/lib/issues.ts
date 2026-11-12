@@ -280,7 +280,8 @@ const EDITABLE: Record<string, string> = {
 // Objects a project's repo declares where its Application cannot keep them:
 // without a namespace (Argo applies them to the project's default namespace
 // instead), in a namespace outside the project, or of a kind only the
-// platform repo may hold (both refuse the project's whole sync).
+// platform repo may hold (both refuse the project's whole sync); and files
+// Argo reads as the project's source settings, which change what syncs.
 function placementIssues(inv: Inventory, p: Project, extraTenantKinds = false): Issue[] {
 	const at = (o: GitObject) => (o.namespace ? `${o.namespace}/${o.name}` : o.name);
 	const view = (o: GitObject) =>
@@ -329,6 +330,18 @@ function placementIssues(inv: Inventory, p: Project, extraTenantKinds = false): 
 					? { label: 'Open the network', href: view(o) }
 					: open(view(o)),
 		});
+	for (const path of p.sourceOverrides ?? []) {
+		const href = changesHref(p.name);
+		out.push({
+			severity: 'danger',
+			scope: path,
+			label: 'Argo source settings in git',
+			detail: `Argo CD reads ${path} as ${p.name}'s source settings, so what syncs is not what the repo's layout says: remove it in git.`,
+			href,
+			project: p.name,
+			action: { label: "Open the project's changes", href },
+		});
+	}
 	return out;
 }
 

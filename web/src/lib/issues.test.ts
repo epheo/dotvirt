@@ -363,6 +363,29 @@ describe('objects a project repo cannot keep', () => {
 		expect(deriveIssues(inv).map((i) => i.label)).toEqual(['Role only the platform repo may hold']);
 	});
 
+	it('names a file Argo reads as source settings, to remove in git', () => {
+		const inv: Inventory = {
+			projects: [
+				{
+					name: 'team-web',
+					namespaces: [{ namespace: 'web-prod', vms: [] }],
+					sourceOverrides: ['.argocd-source.yaml'],
+				},
+			],
+		};
+		expect(
+			deriveIssues(inv).map((i) => [i.scope, i.label, i.severity, i.project, i.action.label]),
+		).toEqual([
+			[
+				'.argocd-source.yaml',
+				'Argo source settings in git',
+				'danger',
+				'team-web',
+				"Open the project's changes",
+			],
+		]);
+	});
+
 	it('names each by object, with its next action', () => {
 		const inv: Inventory = {
 			projects: [

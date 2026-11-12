@@ -629,6 +629,30 @@ func TestGateKeepsAVMOnItsOwnNamespacesNetworks(t *testing.T) {
 	}
 }
 
+// A file Argo CD reads as the Application's source settings is never written,
+// at the repo's root or below it; removing one stays open.
+func TestGateRefusesArgoSourceSettings(t *testing.T) {
+	settings := []byte("directory:\n  recurse: true\n")
+	bare := seedBareFiles(t, map[string][]byte{"README.md": []byte("seed\n"), ".argocd-source.yaml": settings})
+	c := newTestCoordinator(t, false)
+	c.UseAuthorizer(&rbac{})
+	id := auth.Identity{Username: "alice"}
+	proj := project.ProjectInfo{Name: "p", Repo: bare, Namespaces: []string{"alpha"}}
+	gate := func(e draft.Entry) error { return c.gate(id, proj, []draft.Entry{e}) }
+	for name, e := range map[string]draft.Entry{
+		"create at the root": {Kind: draft.KindCreate, SourceFile: ".argocd-source-dotvirt-p.yaml", Manifest: "directory:\n  include: '*.yml'\n"},
+		"create below":       {Kind: draft.KindCreate, SourceFile: "alpha/.argocd-source.yaml", Manifest: "kustomize: {}\n"},
+		"edit":               {Kind: draft.KindEdit, SourceFile: ".argocd-source.yaml", Manifest: "directory:\n  exclude: '*'\n", BaseBlob: git.BlobID(settings)},
+	} {
+		if err := gate(e); !errors.Is(err, model.ErrInvalid) || !strings.Contains(err.Error(), "source settings") {
+			t.Errorf("%s: err = %v, want the source-settings refusal", name, err)
+		}
+	}
+	if err := gate(draft.Entry{Kind: draft.KindDelete, SourceFile: ".argocd-source.yaml", BaseBlob: git.BlobID(settings)}); err != nil {
+		t.Errorf("removing it: %v", err)
+	}
+}
+
 // unlisted is an authorizer whose snapshot has not listed the project
 // namespaces yet.
 type unlisted struct{ *rbac }
