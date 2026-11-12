@@ -5,6 +5,11 @@ import { expect, login, setScenario, test } from './fx';
 
 test("the console wears a provider's branding, sign-in included", async ({ page }) => {
 	await setScenario(page, 'branded');
+	// The served shell carries the branding: the console asks no endpoint for it.
+	const asked: string[] = [];
+	page.on('request', (r) => {
+		if (new URL(r.url()).pathname === '/api/branding') asked.push(r.url());
+	});
 	await page.goto('/');
 	await expect(page.getByRole('heading', { name: 'Sign in to Uniwatt Cloud' })).toBeVisible();
 	await login(page);
@@ -27,6 +32,7 @@ test("the console wears a provider's branding, sign-in included", async ({ page 
 		.toBe('1');
 	await page.goto('/storage?tab=classes');
 	await expect(page.getByText('Managed by the cluster platform, not Uniwatt Cloud')).toBeVisible();
+	expect(asked).toEqual([]);
 });
 
 test('unbranded, the console is dotvirt', async ({ page }) => {

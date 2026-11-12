@@ -6,11 +6,13 @@ package branding
 
 import (
 	"bytes"
+	"cmp"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"html"
 	"io"
 	"net/http"
 	"net/url"
@@ -101,8 +103,38 @@ func (s Settings) Info() model.Branding {
 	return b
 }
 
-// present reports whether read would answer name, without reading it: the
-// open endpoint asks this on every page load.
+// ShellID is the id of the branding block Shell writes, which the console
+// reads at init in place of GET /api/branding.
+const ShellID = "dotvirt-branding"
+
+// Shell is the console's index.html dressed for its first paint: the product
+// name as its title, the stylesheet after the console's own, and Info as a
+// JSON block. None of them is a script the browser runs, so the
+// content-security policy derived from the plain index still holds. Called per
+// page load, like Info: a ConfigMap change shows on the next one. An index
+// with no </head> is returned as it is.
+func (s Settings) Shell(index []byte) []byte {
+	at := bytes.Index(index, []byte("</head>"))
+	if at < 0 {
+		return index
+	}
+	info := s.Info()
+	var b bytes.Buffer
+	fmt.Fprintf(&b, "<title>%s</title>", html.EscapeString(cmp.Or(info.ProductName, "dotvirt")))
+	if info.Theme {
+		b.WriteString(`<link rel="stylesheet" href="/api/branding/theme.css">`)
+	}
+	// Marshal escapes <, > and &, so no value can close the block.
+	raw, _ := json.Marshal(info)
+	fmt.Fprintf(&b, `<script type="application/json" id="%s">%s</script>`, ShellID, raw)
+	out := make([]byte, 0, len(index)+b.Len())
+	out = append(out, index[:at]...)
+	out = append(out, b.Bytes()...)
+	return append(out, index[at:]...)
+}
+
+// present reports whether read would answer name, without reading it: each
+// page load asks this.
 func (s Settings) present(name string) bool {
 	if s.Dir == "" {
 		return false

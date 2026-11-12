@@ -6,6 +6,8 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"github.com/epheo/dotvirt/internal/branding"
 )
 
 const testIndex = `<!doctype html>
@@ -101,5 +103,14 @@ func TestWithBodyLimit(t *testing.T) {
 	h.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/api/login", strings.NewReader(`{"token":"t"}`)))
 	if rec.Code != http.StatusOK {
 		t.Fatalf("small body: status = %d, want 200", rec.Code)
+	}
+}
+
+// The branding the shell carries runs no script: the policy derived from the
+// plain index holds for the branded shell.
+func TestBrandedShellKeepsTheCSP(t *testing.T) {
+	shell := branding.Settings{ProductName: "Uniwatt Cloud"}.Shell([]byte(testIndex))
+	if got, want := buildCSP(shell, ""), buildCSP([]byte(testIndex), ""); got != want {
+		t.Errorf("branded shell CSP = %q, want the plain one %q", got, want)
 	}
 }

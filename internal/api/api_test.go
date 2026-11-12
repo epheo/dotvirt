@@ -13,6 +13,7 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 
+	"github.com/epheo/dotvirt/internal/branding"
 	"github.com/epheo/dotvirt/internal/model"
 )
 
@@ -144,10 +145,12 @@ func TestUnavailableNamesOnlyTheSubsystem(t *testing.T) {
 }
 
 // spaRouter: /api/* reaches the API handler, a real static file is served
-// as-is, and any other path falls back to index.html so client routes resolve.
+// as-is, and any other path falls back to the shell, index dressed in the
+// branding, so client routes resolve.
 func TestSPARouter(t *testing.T) {
 	dir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(dir, "index.html"), []byte("the-index"), 0o600); err != nil {
+	index := []byte("<html><head>the-index</head></html>")
+	if err := os.WriteFile(filepath.Join(dir, "index.html"), index, 0o600); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(dir, "app.js"), []byte("the-asset"), 0o600); err != nil {
@@ -156,7 +159,7 @@ func TestSPARouter(t *testing.T) {
 	api := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusTeapot)
 	})
-	h := spaRouter(dir, api)
+	h := spaRouter(dir, index, branding.Settings{ProductName: "Uniwatt Cloud"}, api)
 
 	get := func(path string) *httptest.ResponseRecorder {
 		rec := httptest.NewRecorder()
@@ -170,8 +173,10 @@ func TestSPARouter(t *testing.T) {
 	if rec := get("/app.js"); !strings.Contains(rec.Body.String(), "the-asset") {
 		t.Errorf("static file not served: %q", rec.Body.String())
 	}
-	if rec := get("/vm/prod/web-1"); !strings.Contains(rec.Body.String(), "the-index") {
-		t.Errorf("client route did not fall back to index: %q", rec.Body.String())
+	rec := get("/vm/prod/web-1")
+	if body := rec.Body.String(); !strings.Contains(body, "the-index") || !strings.Contains(body, "<title>Uniwatt Cloud</title>") ||
+		rec.Header().Get("Content-Type") != "text/html; charset=utf-8" || rec.Header().Get("Cache-Control") != "no-cache" {
+		t.Errorf("client route did not fall back to the branded shell: %q %v", body, rec.Header())
 	}
 	// Traversal must not escape the static dir: the join is cleaned and
 	// ServeFile's own dot-dot guard refuses the raw path outright.
