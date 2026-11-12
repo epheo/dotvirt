@@ -480,6 +480,10 @@ func (s *State) WaitForSync(ctx context.Context) error {
 	return nil
 }
 
+// NamespacesListed reports whether the project-namespace store holds a real
+// LIST: before it, a namespace missing from it is unknown, not no project's.
+func (s *State) NamespacesListed() bool { return s.nssReady.Done() }
+
 // VMSnapshotReady reports whether a real LIST of VMs has landed, and the
 // namespace store synced: only then is a VM missing from the snapshot known
 // absent. Authorization weighs a create on that answer and drift and adoption
