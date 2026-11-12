@@ -649,8 +649,11 @@ their own change.
 - one merged before dotvirt saw it open settles the draft the same way;
 - dotvirt never opens, reopens or edits a PR.
 
-Protect `dotvirt/proposed/**` in the forge so only dotvirt's account pushes there:
-otherwise anyone who may push could put content into a PR and approve it.
+Leave `dotvirt/proposed/**` unprotected in the forge.
+dotvirt rebuilds a proposal's branch on every propose and force-pushes it.
+Forgejo refuses force pushes and deletions on any protected branch, for everyone.
+dotvirt never overwrites a branch someone else moved: it pushes with a lease on the head it last pushed.
+Anyone who may push can still add commits to a proposal's branch; the PR shows them.
 
 The guarantee holds only while the requester is the PR's poster.
 Anyone who may read the repo can open a PR from another user's pushed branch.

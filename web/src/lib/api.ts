@@ -13,6 +13,7 @@
 // rides cross-origin in dev (Vite proxy) and same-origin in production.
 
 import type * as gen from './model.gen';
+import { serverReason } from '#lib/format.js';
 
 export type * from './model.gen';
 export type { Event as VMEvent, Node as NodeTarget } from './model.gen';
@@ -277,11 +278,12 @@ export class HttpError extends Error {
 	}
 }
 
-// What a failed answer says to people: the server's own message, or the
-// status when it sent none (or a proxy's HTML error page).
+// What a failed answer says to people: the server's own sentence without its
+// kind ("temporarily unavailable: ..."), or the status when it sent none (or a
+// proxy's HTML error page).
 async function failure(path: string, res: Response): Promise<HttpError> {
 	const html = (res.headers.get('Content-Type') ?? '').includes('text/html');
-	const text = html ? '' : (await res.text()).trim();
+	const text = html ? '' : serverReason(await res.text());
 	return new HttpError(text || `${res.status} ${res.statusText}`.trim(), res.status, path);
 }
 
