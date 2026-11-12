@@ -315,8 +315,10 @@ func TestReconcileMinimalCRToReady(t *testing.T) {
 	if err := c.List(context.Background(), &crbs, client.MatchingLabels{"dotvirt.io/instance": dv.Name}); err != nil {
 		t.Fatal(err)
 	}
-	if len(crbs.Items) != 4 {
-		t.Errorf("instance-labeled ClusterRoleBindings = %d, want 4", len(crbs.Items))
+	// dotvirt, dotvirt-argocd-apply, dotvirt-argocd-read, the platform network
+	// admins, and the storage catalog off OpenShift.
+	if len(crbs.Items) != 5 {
+		t.Errorf("instance-labeled ClusterRoleBindings = %d, want 5", len(crbs.Items))
 	}
 }
 

@@ -770,3 +770,37 @@ func TestDeploymentCarriesWhoOpensPullRequests(t *testing.T) {
 		t.Errorf("pullRequests Users: DOTVIRT_USERS_OPEN_PRS = %q, want true", v)
 	}
 }
+
+// The shared controller holds dotvirt's apply role only while it applies the
+// tiers; the platform account holds it whenever there is a platform tier, and
+// with neither there is no binding at all.
+func TestArgocdApplyBindingSubjects(t *testing.T) {
+	dv := testDotvirt()
+	for _, c := range []struct {
+		platform, controller bool
+		want                 []string
+	}{
+		{true, true, []string{"ctl", tenancy.PlatformSyncAccount}},
+		{true, false, []string{tenancy.PlatformSyncAccount}},
+		{false, true, []string{"ctl"}},
+		{false, false, nil},
+	} {
+		b := ArgocdApplyClusterRoleBinding(dv, "argocd", "ctl", c.platform, c.controller)
+		var got []string
+		if b != nil {
+			for _, s := range b.Subjects {
+				got = append(got, s.Name)
+				if s.Namespace != "argocd" {
+					t.Errorf("subject %s in %q, want argocd", s.Name, s.Namespace)
+				}
+			}
+		}
+		if !slices.Equal(got, c.want) || (b == nil) != (c.want == nil) {
+			t.Errorf("platform %v controller %v: subjects %v (binding %v), want %v", c.platform, c.controller, got, b != nil, c.want)
+		}
+	}
+	r := ArgocdReadClusterRoleBinding(dv, "argocd", "ctl")
+	if r.RoleRef.Name != "dotvirt-argocd-read" || len(r.Subjects) != 1 || r.Subjects[0].Name != "ctl" {
+		t.Errorf("read binding = %+v, want the controller on dotvirt-argocd-read", r)
+	}
+}

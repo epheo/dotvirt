@@ -41,7 +41,7 @@ package controller
 // +kubebuilder:rbac:groups=rbac.authorization.k8s.io,resources=clusterrolebindings,verbs=list;create;patch
 // clusterroles `bind`: the operator's ONLY rbac-authoring right - bind these named
 // static roles into the bindings above. No escalate, no role create/update/delete.
-// +kubebuilder:rbac:groups=rbac.authorization.k8s.io,resources=clusterroles,resourceNames=dotvirt;dotvirt-argocd-apply;dotvirt-platform-network-admin;dotvirt-platform-sync;dotvirt-storage-catalog,verbs=bind
+// +kubebuilder:rbac:groups=rbac.authorization.k8s.io,resources=clusterroles,resourceNames=dotvirt;dotvirt-argocd-apply;dotvirt-argocd-read;dotvirt-platform-network-admin;dotvirt-platform-sync;dotvirt-storage-catalog,verbs=bind
 // Sync impersonation: SubjectAccessReviews ask what each sync account may do before
 // the operator turns it on, the RoleBindings the platform Application manages say
 // which roles the platform account must bind (read point-wise, never listed or
@@ -66,7 +66,7 @@ package controller
 // +kubebuilder:rbac:groups=gateway.networking.k8s.io,resources=httproutes,resourceNames=dotvirt;dotvirt-forgejo,verbs=patch;delete
 // +kubebuilder:rbac:groups="",resources=secrets,resourceNames=dotvirt-appset-plugin;dotvirt-repo-creds,verbs=delete
 // +kubebuilder:rbac:groups="",resources=configmaps,resourceNames=dotvirt-appset-plugin,verbs=delete
-// +kubebuilder:rbac:groups=rbac.authorization.k8s.io,resources=clusterrolebindings,resourceNames=dotvirt;dotvirt-argocd-apply;dotvirt-platform-network-admin;dotvirt-platform-sync;dotvirt-storage-catalog,verbs=delete
+// +kubebuilder:rbac:groups=rbac.authorization.k8s.io,resources=clusterrolebindings,resourceNames=dotvirt;dotvirt-argocd-apply;dotvirt-argocd-read;dotvirt-platform-network-admin;dotvirt-platform-sync;dotvirt-storage-catalog,verbs=delete
 // +kubebuilder:rbac:groups=argoproj.io,resources=appprojects,verbs=delete
 // +kubebuilder:rbac:groups=argoproj.io,resources=applications,resourceNames=dotvirt-platform,verbs=delete
 // +kubebuilder:rbac:groups=argoproj.io,resources=applicationsets,resourceNames=dotvirt-projects,verbs=delete

@@ -301,22 +301,28 @@ replica would split drafts and race pushes. The Deployment therefore uses the
 
 ## The ArgoCD controller's rights
 
-The `dotvirt-argocd-apply` binding grants the shared ArgoCD application
-controller ServiceAccount apply rights on everything dotvirt's PRs emit, including
-`MachineConfig`, `Subscription`/`OperatorGroup` and `KubeDescheduler` (the DRS
-platform objects) and RoleBindings. It is cluster-wide: every Application that
-controller reconciles gains them, not only dotvirt's. The tenant AppProjects
-keep each tenant repo to namespaced workloads in its own namespaces;
-Applications in other AppProjects on a shared ArgoCD are bounded only by their
-own AppProject.
-Give dotvirt its own ArgoCD instance where other teams' Applications must not
-hold these rights.
+Until sync impersonation is in effect, the `dotvirt-argocd-apply` binding grants the
+shared ArgoCD application controller ServiceAccount apply rights on everything
+dotvirt's PRs emit, including `MachineConfig`, `Subscription`/`OperatorGroup` and
+`KubeDescheduler` (the DRS platform objects) and RoleBindings. It is cluster-wide:
+every Application that controller reconciles gains them, not only dotvirt's. The
+tenant AppProjects keep each tenant repo to namespaced workloads in its own
+namespaces; Applications in other AppProjects on a shared ArgoCD are bounded only by
+their own AppProject.
+
+Once impersonation is in effect (Argo reads the setting, dotvirt's AppProjects keep
+their accounts, and a pass has reported `SyncImpersonationReady` on), the controller
+applies nothing of dotvirt's, and the operator drops it from that binding. It keeps
+`dotvirt-argocd-read`, the same kinds with read verbs only: Argo diffs and
+health-checks with its own account. Turning impersonation off binds the controller
+again in the same pass, before the setting leaves `argocd-cm`.
+While impersonation is off, give dotvirt its own ArgoCD instance where other teams'
+Applications must not hold these rights.
 
 The binding also names the platform tier's sync account, which applies the platform
 repo once sync impersonation is on. Its own `dotvirt-platform-sync` binding adds the
 Namespaces that repo declares and `bind` on `admin` and `dotvirt-tenant-egress`, the
-roles project grants name. The controller stays a subject while impersonation is
-optional, since it applies every tier while it is off.
+roles project grants name.
 
 ## Sync impersonation
 

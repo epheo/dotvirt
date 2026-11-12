@@ -38,16 +38,34 @@ func DotvirtClusterRoleBinding(dv *dotvirtv1alpha1.Dotvirt) *rbacv1.ClusterRoleB
 
 // ArgocdApplyClusterRoleBinding binds the "dotvirt-argocd-apply" role to the
 // platform tier's sync account, which Argo applies the platform repo as once
-// sync impersonation is on, and to the shared Argo controller SA, which
-// applies every tier while it is off. The AppProjects (not the role) scope
-// which app may use cluster-scoped kinds. platform=false (no platform tier)
-// leaves the sync account out.
-func ArgocdApplyClusterRoleBinding(dv *dotvirtv1alpha1.Dotvirt, argoNS, argoSA string, platform bool) *rbacv1.ClusterRoleBinding {
-	subjects := []rbacv1.Subject{{Kind: "ServiceAccount", Name: argoSA, Namespace: argoNS}}
+// sync impersonation is on, and, while controller holds, to the shared Argo
+// controller SA, which applies every tier until impersonation is in effect.
+// Past that the controller applies nothing of dotvirt's, and holding the role
+// would only widen what every other Application on the instance may write.
+// The AppProjects (not the role) scope which app may use cluster-scoped kinds.
+// platform=false (no platform tier) leaves the sync account out; nil when
+// nobody is left to bind, so prune removes the binding.
+func ArgocdApplyClusterRoleBinding(dv *dotvirtv1alpha1.Dotvirt, argoNS, argoSA string, platform, controller bool) *rbacv1.ClusterRoleBinding {
+	var subjects []rbacv1.Subject
+	if controller {
+		subjects = append(subjects, rbacv1.Subject{Kind: "ServiceAccount", Name: argoSA, Namespace: argoNS})
+	}
 	if platform {
 		subjects = append(subjects, rbacv1.Subject{Kind: "ServiceAccount", Name: tenancy.PlatformSyncAccount, Namespace: argoNS})
 	}
+	if len(subjects) == 0 {
+		return nil
+	}
 	return crb("dotvirt-argocd-apply", "dotvirt-argocd-apply", dv, subjects)
+}
+
+// ArgocdReadClusterRoleBinding binds the "dotvirt-argocd-read" role to the
+// shared Argo controller SA: it diffs and health-checks every tier with its
+// own account, impersonation or not.
+func ArgocdReadClusterRoleBinding(dv *dotvirtv1alpha1.Dotvirt, argoNS, argoSA string) *rbacv1.ClusterRoleBinding {
+	return crb("dotvirt-argocd-read", "dotvirt-argocd-read", dv, []rbacv1.Subject{
+		{Kind: "ServiceAccount", Name: argoSA, Namespace: argoNS},
+	})
 }
 
 // PlatformSyncClusterRoleBinding binds the "dotvirt-platform-sync" role to the

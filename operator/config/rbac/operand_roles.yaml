@@ -111,9 +111,10 @@ rules:
     resourceNames: ["cluster"]
     verbs: ["get"]
 ---
-# The apply rights for the kinds dotvirt's PR flow emits, granted to the SHARED Argo
-# application-controller SA (the binding targets it). The AppProjects — not this role —
-# scope which app may use the cluster-scoped kinds.
+# The apply rights for the kinds dotvirt's PR flow emits, granted to the platform tier's
+# sync account and, until sync impersonation is in effect, to the SHARED Argo
+# application-controller SA, which then applies every tier. The AppProjects — not this
+# role — scope which app may use the cluster-scoped kinds.
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
@@ -171,6 +172,61 @@ rules:
   - apiGroups: ["portail.epheo.eu"]
     resources: ["gatewayparameters"]
     verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+---
+# What the shared Argo controller keeps of dotvirt-argocd-apply once sync impersonation
+# is in effect: Argo diffs and health-checks with its own account and only applies as
+# the tiers' accounts, so it still reads every kind dotvirt's repos declare. The same
+# resources as dotvirt-argocd-apply, read verbs only.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: dotvirt-argocd-read
+  labels:
+    app.kubernetes.io/name: dotvirt
+    app.kubernetes.io/managed-by: dotvirt-operator
+rules:
+  - apiGroups: ["kubevirt.io"]
+    resources: ["virtualmachines"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["cdi.kubevirt.io"]
+    resources: ["datavolumes"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["k8s.ovn.org"]
+    resources: ["userdefinednetworks", "clusteruserdefinednetworks", "egressfirewalls", "egressips", "adminpolicybasedexternalroutes"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["networking.k8s.io"]
+    resources: ["networkpolicies"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["policy.networking.k8s.io"]
+    resources: ["adminnetworkpolicies", "baselineadminnetworkpolicies"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["k8s.cni.cncf.io"]
+    resources: ["network-attachment-definitions"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["nmstate.io"]
+    resources: ["nodenetworkconfigurationpolicies"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["rbac.authorization.k8s.io"]
+    resources: ["rolebindings"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["operators.coreos.com"]
+    resources: ["subscriptions", "operatorgroups"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["operator.openshift.io"]
+    resources: ["kubedeschedulers"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["machineconfiguration.openshift.io"]
+    resources: ["machineconfigs"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["gateway.networking.k8s.io"]
+    resources: ["gateways"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["cert-manager.io"]
+    resources: ["certificates"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["portail.epheo.eu"]
+    resources: ["gatewayparameters"]
+    verbs: ["get", "list", "watch"]
 ---
 # The authoring SIGNAL the UI's SSAR-gate reads (create cudn/nncp/namespaces), and list,
 # so a delegate is shown what they author. The user never creates these: Argo applies

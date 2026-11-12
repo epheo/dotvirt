@@ -3,6 +3,7 @@ package install
 import (
 	"errors"
 	"io"
+	"maps"
 	"os"
 	"slices"
 	"testing"
@@ -48,6 +49,30 @@ func TestApplyRolesCoverEveryDeclarableKind(t *testing.T) {
 			t.Errorf("%s/%s: tenant kind without create in dotvirt-argocd-apply", k.Group, k.Resource)
 		case k.Platform && !grants(apply, k) && !grants(sync, k):
 			t.Errorf("%s/%s: platform kind no apply role grants", k.Group, k.Resource)
+		}
+	}
+	// Once impersonation is in effect the controller keeps only dotvirt-argocd-read:
+	// it still diffs and health-checks every kind the apply role writes, and writes
+	// none of them.
+	read := roles["dotvirt-argocd-read"]
+	type gr struct{ group, resource string }
+	resources := func(rules []rbacv1.PolicyRule) map[gr]bool {
+		out := map[gr]bool{}
+		for _, r := range rules {
+			for _, g := range r.APIGroups {
+				for _, res := range r.Resources {
+					out[gr{g, res}] = true
+				}
+			}
+		}
+		return out
+	}
+	if got, want := resources(read), resources(apply); !maps.Equal(got, want) {
+		t.Errorf("dotvirt-argocd-read covers %v, want dotvirt-argocd-apply's %v", got, want)
+	}
+	for _, r := range read {
+		if !slices.Equal(r.Verbs, []string{"get", "list", "watch"}) {
+			t.Errorf("dotvirt-argocd-read grants %v on %v %v, want read verbs only", r.Verbs, r.APIGroups, r.Resources)
 		}
 	}
 	// CDI authorizes a clone as the DataVolume's creator. The shared controller
