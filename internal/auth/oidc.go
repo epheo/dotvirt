@@ -275,15 +275,23 @@ func tokensFrom(tok *oauth2.Token) (oidcTokens, error) {
 	if err != nil {
 		return oidcTokens{}, err
 	}
-	return oidcTokens{id: id, refresh: tok.RefreshToken, expiry: time.Unix(claims.Exp, 0)}, nil
+	return oidcTokens{id: id, refresh: tok.RefreshToken, expiry: time.Unix(claims.Exp, 0), subject: claims.subject()}, nil
 }
 
 // idClaims are the ID token claims dotvirt reads. Unverified: the apiserver
 // checks the signature, issuer and audience on every call. dotvirt reads only
-// when to renew, and the nonce the token endpoint, reached over TLS, echoes.
+// when to renew, the nonce the token endpoint, reached over TLS, echoes, and
+// whose tokens a session holds.
 type idClaims struct {
+	Iss   string `json:"iss"`
+	Sub   string `json:"sub"`
 	Exp   int64  `json:"exp"`
 	Nonce string `json:"nonce"`
+}
+
+// subject names who the token is for: its iss and sub (OIDC Core 12.2).
+func (c idClaims) subject() string {
+	return c.Iss + "\x00" + c.Sub
 }
 
 func readClaims(token string) (idClaims, error) {

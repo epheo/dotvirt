@@ -35,6 +35,9 @@ type oidcTokens struct {
 	id      string // the bearer presented to the apiserver
 	refresh string // empty: the issuer gave none, so the session ends with id
 	expiry  time.Time
+	// subject is the ID token's iss and sub. A renewal must keep it: what is
+	// cached under the session key holds for that subject alone.
+	subject string
 }
 
 type oidcSession struct {
@@ -187,6 +190,10 @@ func (s *oidcSessions) current(ctx context.Context, key string) (string, error) 
 			return t.id, nil
 		}
 		return "", fmt.Errorf("renew the session's token: %w", err)
+	case next.subject != t.subject:
+		log.Printf("auth: OIDC session ended: its renewal named another subject")
+		s.drop(key, sess)
+		return "", ErrSessionEnded
 	}
 	sess.tokens, sess.renewAt, sess.retryAt = next, renewAt(time.Now(), next.expiry), time.Time{}
 	return next.id, nil

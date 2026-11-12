@@ -546,7 +546,8 @@ spec:
 Sign-in uses PKCE (S256) and a nonce.
 The session's tokens stay in dotvirt's memory; the cookie holds a random handle.
 dotvirt renews the ID token with the refresh token once three quarters of its life has passed, once per session however many requests arrive.
-An issuer that refuses the refresh ends the session.
+An issuer that refuses the refresh ends the session, and so does a renewal naming another subject (`iss` and `sub`).
+The issuer must send a new ID token on refresh, as Kanidm and Keycloak do; one that does not signs users out once per ID token life.
 Logout revokes the refresh token at the issuer, when it publishes a `revocation_endpoint`.
 A restart of dotvirt signs every OIDC session out: the next sign-in is one redirect through the issuer.
 

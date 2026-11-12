@@ -32,7 +32,11 @@ type fakeIssuer struct {
 	challenge string          // the last authorize redirect's PKCE challenge
 	nonce     string          // and its nonce
 	live      map[string]bool // refresh tokens not spent yet
-	minted    map[string]bool // ID tokens, which the fake TokenReview accepts
+	minted    map[string]int  // ID tokens by their n, which the fake TokenReview accepts
+	rejectAt  int             // non-zero: the TokenReview rejects tokens minted from this n on
+	sub       string          // the subject tokens name from now on
+	hold      chan struct{}   // non-nil: a refresh waits on it, after telling held
+	held      chan struct{}
 	revoked   []string
 	n         int
 	ttl       time.Duration
@@ -45,7 +49,7 @@ type fakeIssuer struct {
 
 func newFakeIssuer(t *testing.T) *fakeIssuer {
 	t.Helper()
-	f := &fakeIssuer{t: t, live: map[string]bool{}, minted: map[string]bool{}, ttl: 15 * time.Minute}
+	f := &fakeIssuer{t: t, live: map[string]bool{}, minted: map[string]int{}, ttl: 15 * time.Minute, sub: "alice"}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /oauth2/openid/dotvirt/.well-known/openid-configuration", func(w http.ResponseWriter, r *http.Request) {
 		base := f.srv.URL + "/oauth2/openid/dotvirt"
@@ -92,6 +96,13 @@ func (f *fakeIssuer) token(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	f.mu.Lock()
+	hold, held := f.hold, f.held
+	f.mu.Unlock()
+	if hold != nil && r.PostFormValue("grant_type") == "refresh_token" {
+		held <- struct{}{}
+		<-hold
+	}
+	f.mu.Lock()
 	defer f.mu.Unlock()
 	var nonce string
 	switch r.PostFormValue("grant_type") {
@@ -120,10 +131,10 @@ func (f *fakeIssuer) token(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	f.n++
-	claims, _ := json.Marshal(map[string]any{"sub": "alice", "exp": time.Now().Add(f.ttl).Unix(), "nonce": nonce, "n": f.n})
+	claims, _ := json.Marshal(map[string]any{"iss": f.issuerURL(), "sub": f.sub, "exp": time.Now().Add(f.ttl).Unix(), "nonce": nonce, "n": f.n})
 	id := "e30." + base64.RawURLEncoding.EncodeToString(claims) + ".sig"
 	rt := fmt.Sprintf("r%d", f.n)
-	f.minted[id], f.live[rt] = true, true
+	f.minted[id], f.live[rt] = f.n, true
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(map[string]any{
 		"access_token": fmt.Sprintf("a%d", f.n), "token_type": "Bearer", "expires_in": int(f.ttl.Seconds()),
@@ -134,7 +145,15 @@ func (f *fakeIssuer) token(w http.ResponseWriter, r *http.Request) {
 func (f *fakeIssuer) mintedToken(token string) bool {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	return f.minted[token]
+	return f.minted[token] != 0
+}
+
+// accepted is the fake TokenReview's verdict on token.
+func (f *fakeIssuer) accepted(token string) bool {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	n := f.minted[token]
+	return n != 0 && (f.rejectAt == 0 || n < f.rejectAt)
 }
 
 // oidcRig is the flow over a fake issuer, the middleware over one route that
@@ -156,7 +175,7 @@ func newOIDCRig(t *testing.T) *oidcRig {
 		tr := action.(k8stesting.CreateAction).GetObject().(*authnv1.TokenReview)
 		out := tr.DeepCopy()
 		out.Status = authnv1.TokenReviewStatus{Authenticated: false, Error: "bad token"}
-		if f.mintedToken(tr.Spec.Token) {
+		if f.accepted(tr.Spec.Token) {
 			out.Status = authnv1.TokenReviewStatus{Authenticated: true, User: authnv1.UserInfo{Username: "uw:alice"}}
 		}
 		return true, out, nil
@@ -240,15 +259,29 @@ func (rig *oidcRig) last() Identity {
 	return rig.seen[len(rig.seen)-1]
 }
 
-// dueNow makes the one session's renewal due.
+// dueNow makes the one session's renewal due, past any failed one's pause.
 func (rig *oidcRig) dueNow() {
 	rig.a.oidc.mu.Lock()
 	defer rig.a.oidc.mu.Unlock()
 	for _, s := range rig.a.oidc.m {
 		s.mu.Lock()
-		s.renewAt = time.Now().Add(-time.Second)
+		s.renewAt, s.retryAt = time.Now().Add(-time.Second), time.Time{}
 		s.mu.Unlock()
 	}
+}
+
+// sessionKey is the one session's key.
+func (rig *oidcRig) sessionKey(t *testing.T) string {
+	t.Helper()
+	rig.a.oidc.mu.Lock()
+	defer rig.a.oidc.mu.Unlock()
+	if len(rig.a.oidc.m) != 1 {
+		t.Fatalf("sessions = %d, want 1", len(rig.a.oidc.m))
+	}
+	for k := range rig.a.oidc.m {
+		return k
+	}
+	return ""
 }
 
 // The cookie carries a handle, never a token; the bearer the middleware
@@ -429,6 +462,137 @@ func TestOIDCCallbackChecksTheRoundTrip(t *testing.T) {
 	}
 	if len(rig.a.oidc.m) != 0 {
 		t.Fatalf("sessions = %d", len(rig.a.oidc.m))
+	}
+}
+
+// The state is the login-CSRF guard: a callback carrying another state, or
+// none of the cookie that seals it, starts no session, though its code and
+// verifier would exchange.
+func TestOIDCCallbackChecksTheState(t *testing.T) {
+	rig := newOIDCRig(t)
+	rec := httptest.NewRecorder()
+	rig.o.LoginRedirect(rec, httptest.NewRequest(http.MethodGet, "/api/auth/oidc", nil))
+	q := must(url.Parse(rec.Header().Get("Location"))).Query()
+	rig.f.mu.Lock()
+	rig.f.challenge, rig.f.nonce = q.Get("code_challenge"), q.Get("nonce")
+	rig.f.mu.Unlock()
+	if rig.callback(t, rec.Result().Cookies(), randomToken()) != nil {
+		t.Fatal("a callback with another state started a session")
+	}
+	if rig.callback(t, nil, q.Get("state")) != nil {
+		t.Fatal("a callback without the state cookie started a session")
+	}
+	if rig.callback(t, rec.Result().Cookies(), q.Get("state")) == nil {
+		t.Fatal("the round-trip's own state must sign in")
+	}
+}
+
+// A renewal must name the session's subject (OIDC Core 12.2): what is cached
+// under the session key holds for that subject alone.
+func TestOIDCRenewalKeepsTheSubject(t *testing.T) {
+	rig := newOIDCRig(t)
+	c := rig.signIn(t)
+	key := rig.sessionKey(t)
+	rig.f.mu.Lock()
+	rig.f.sub = "mallory"
+	rig.f.mu.Unlock()
+	rig.dueNow()
+	if rec := rig.send(http.MethodGet, "/api/inventory", c); rec.Code != http.StatusUnauthorized || !clears(rec) {
+		t.Fatalf("a renewal naming another subject = %d", rec.Code)
+	}
+	if rig.a.SessionLive(key, time.Now()) {
+		t.Fatal("the session outlived a change of subject")
+	}
+}
+
+// A session past its lifetime is over for its streams too, which reach the
+// store through SessionLive, not through the cookie's issue time.
+func TestOIDCSessionLifetime(t *testing.T) {
+	s := newOIDCSessions()
+	s.renew = func(context.Context, string) (oidcTokens, error) {
+		t.Fatal("an expired session renewed")
+		return oidcTokens{}, nil
+	}
+	old := s.start(oidcTokens{id: "x", refresh: "r", expiry: time.Now().Add(time.Hour)}, time.Now().Add(-sessionMaxAge-time.Second))
+	key := oidcSessionKey(old)
+	if s.live(key) {
+		t.Fatal("a session past its lifetime reads live")
+	}
+	if _, err := s.current(context.Background(), key); !errors.Is(err, ErrSessionEnded) {
+		t.Fatalf("current = %v, want ErrSessionEnded", err)
+	}
+}
+
+// A renewal is due once three quarters of the token's life has passed, before
+// it expires; not before.
+func TestOIDCRenewsAtThreeQuarters(t *testing.T) {
+	s := newOIDCSessions()
+	var renewed int
+	s.renew = func(context.Context, string) (oidcTokens, error) {
+		renewed++
+		return oidcTokens{id: "next", refresh: "r2", expiry: time.Now().Add(40 * time.Second)}, nil
+	}
+	now := time.Now()
+	early := oidcSessionKey(s.start(oidcTokens{id: "early", refresh: "r", expiry: now.Add(11 * time.Second)}, now.Add(-29*time.Second)))
+	if got, _ := s.current(context.Background(), early); got != "early" || renewed != 0 {
+		t.Fatalf("before three quarters: %q, renewals %d", got, renewed)
+	}
+	due := oidcSessionKey(s.start(oidcTokens{id: "due", refresh: "r", expiry: now.Add(9 * time.Second)}, now.Add(-31*time.Second)))
+	if got, _ := s.current(context.Background(), due); got != "next" || renewed != 1 {
+		t.Fatalf("past three quarters: %q, renewals %d", got, renewed)
+	}
+}
+
+// A renewal outlives the request that started it: the issuer has spent the
+// old refresh token, so the session must hold the new one, or its next
+// renewal presents the spent one and the issuer revokes the grant.
+func TestOIDCRenewalOutlivesItsRequest(t *testing.T) {
+	rig := newOIDCRig(t)
+	rig.signIn(t)
+	key := rig.sessionKey(t)
+	rig.f.mu.Lock()
+	rig.f.hold, rig.f.held = make(chan struct{}), make(chan struct{})
+	hold, held := rig.f.hold, rig.f.held
+	rig.f.mu.Unlock()
+	rig.dueNow()
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() {
+		_, _ = rig.a.oidc.current(ctx, key)
+		close(done)
+	}()
+	<-held
+	cancel()
+	rig.f.mu.Lock()
+	rig.f.hold = nil
+	rig.f.mu.Unlock()
+	close(hold)
+	<-done
+
+	rig.dueNow()
+	if _, err := rig.a.oidc.current(context.Background(), key); err != nil {
+		t.Fatalf("the renewal after an abandoned one = %v", err)
+	}
+	if n := rig.f.refreshes.Load(); n != 2 {
+		t.Fatalf("refresh grants = %d, want 2", n)
+	}
+}
+
+// A renewed token the cluster rejects ends its session: no later renewal
+// makes it valid again.
+func TestOIDCRejectedTokenEndsTheSession(t *testing.T) {
+	rig := newOIDCRig(t)
+	c := rig.signIn(t)
+	key := rig.sessionKey(t)
+	rig.f.mu.Lock()
+	rig.f.rejectAt = rig.f.n + 1
+	rig.f.mu.Unlock()
+	rig.dueNow()
+	if rec := rig.send(http.MethodGet, "/api/inventory", c); rec.Code != http.StatusUnauthorized || !clears(rec) {
+		t.Fatalf("a rejected renewed token = %d", rec.Code)
+	}
+	if rig.a.SessionLive(key, time.Now()) {
+		t.Fatal("the session outlived its rejected token")
 	}
 }
 
