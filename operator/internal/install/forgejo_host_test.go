@@ -28,3 +28,26 @@ func TestForgejoHostStripsPort(t *testing.T) {
 		}
 	}
 }
+
+// Forgejo's ROOT_URL is where browsers open it: webURL when set, so the pages
+// served at that host carry no wrong-ROOT_URL banner and clone links name it.
+func TestForgejoRootURLFollowsTheWebURL(t *testing.T) {
+	dv := &dotvirtv1alpha1.Dotvirt{
+		ObjectMeta: metav1.ObjectMeta{Name: "dotvirt", Namespace: "dotvirt"},
+		Spec: dotvirtv1alpha1.DotvirtSpec{Forge: dotvirtv1alpha1.ForgeSpec{
+			Managed: true,
+			URL:     "http://dotvirt-forgejo.dotvirt.svc.cluster.local:3000",
+		}},
+	}
+	root := func() string {
+		v, _ := envValue(ForgejoDeployment(dv, false, "", "h").Spec.Template.Spec.Containers[0].Env, "FORGEJO__server__ROOT_URL")
+		return v
+	}
+	if got := root(); got != "http://dotvirt-forgejo.dotvirt.svc.cluster.local:3000/" {
+		t.Errorf("no webURL: ROOT_URL = %q, want the forge's URL", got)
+	}
+	dv.Spec.Forge.WebURL = "https://forge.apps.example.com/"
+	if got := root(); got != "https://forge.apps.example.com/" {
+		t.Errorf("webURL set: ROOT_URL = %q, want the webURL", got)
+	}
+}

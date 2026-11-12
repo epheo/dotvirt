@@ -54,9 +54,11 @@ func (s *Server) handleForgeWebhook(w http.ResponseWriter, r *http.Request) {
 		} `json:"repository"`
 	}
 	_ = json.Unmarshal(body, &event)
-	// Every spelling of a repo normalizes to the open-repo cache's key (an
-	// unknown repo is simply not being watched yet).
-	repo := cmp.Or(forge.NormalizeRepoURL(event.Repository.CloneURL), forge.NormalizeRepoURL(event.Repository.HTMLURL))
+	// Every spelling of a repo, at whatever host the forge names it, normalizes
+	// to the open-repo cache's key (an unknown repo is simply not being watched
+	// yet).
+	clone, html := s.forge.RepoKey(event.Repository.CloneURL), s.forge.RepoKey(event.Repository.HTMLURL)
+	repo := cmp.Or(clone, html)
 	if repo != "" {
 		s.repos.Poke(repo)
 	}
@@ -91,7 +93,6 @@ func (s *Server) handleForgeWebhook(w http.ResponseWriter, r *http.Request) {
 	// detached, bounded context - the handler returns 204 now; best-effort, since
 	// Argo's own webhook + poll remain as backstops. Only when Argo is wired.
 	if s.drift != nil {
-		clone, html := event.Repository.CloneURL, event.Repository.HTMLURL
 		go func() {
 			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 			defer cancel()

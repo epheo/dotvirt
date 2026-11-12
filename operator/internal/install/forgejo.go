@@ -43,11 +43,15 @@ func ForgejoServiceURL(dv *dotvirtv1alpha1.Dotvirt) string {
 	return svcURL(ForgejoServiceName, dv.Namespace, ForgejoHTTPPort)
 }
 
-// forgejoExternalURL is the browser/clone-facing base URL: the effective spec.forge.url
-// (the operator fills a derived one from the router-assigned Route before rendering),
-// else the in-cluster Service URL, the fallback only a dry-run or a still-unresolved
-// host hits, since a real render resolves the URL first.
+// forgejoExternalURL is the browser/clone-facing base URL: spec.forge.webURL, else the
+// effective spec.forge.url (the operator fills a derived one from the router-assigned
+// Route before rendering), else the in-cluster Service URL, the fallback only a dry-run
+// or a still-unresolved host hits, since a real render resolves the URL first.
+// Forgejo answers on any host, so dotvirt and ArgoCD still reach it at spec.forge.url.
 func forgejoExternalURL(dv *dotvirtv1alpha1.Dotvirt) string {
+	if dv.Spec.Forge.WebURL != "" {
+		return strings.TrimRight(dv.Spec.Forge.WebURL, "/")
+	}
 	if dv.Spec.Forge.URL != "" {
 		return strings.TrimRight(dv.Spec.Forge.URL, "/")
 	}

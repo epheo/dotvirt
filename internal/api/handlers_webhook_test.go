@@ -2,12 +2,22 @@ package api
 
 import (
 	"bytes"
+	"context"
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/hex"
+	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
+	"time"
+
+	"github.com/epheo/dotvirt/internal/argo"
+	"github.com/epheo/dotvirt/pkg/forge"
 )
 
 func webhookServer(secret string) *Server {
@@ -83,5 +93,61 @@ func TestWebhookNudgesProposalsOnPREventsOnly(t *testing.T) {
 	s.propMu.Unlock()
 	if !dirty {
 		t.Fatalf("the nudge must name the PR's repo, dirty = %v", s.propDirty)
+	}
+}
+
+// Forgejo names its repos at ROOT_URL, the forge's web base when one is set,
+// while dotvirt keys them, and Argo sources them, by the URL it clones from: a
+// delivery must reach that repo's lane and hard-refresh its Application all
+// the same.
+func TestWebhookReadsTheWebBaseAsTheForges(t *testing.T) {
+	fc := newFakeCluster(t)
+	app := map[string]any{
+		"apiVersion": "argoproj.io/v1alpha1", "kind": "Application",
+		"metadata": map[string]any{"name": "team-a", "namespace": "argocd"},
+		"spec":     map[string]any{"source": map[string]any{"repoURL": "http://forge.ns.svc:3000/o/r.git"}},
+	}
+	fc.on(http.MethodGet, "/apis/argoproj.io/v1alpha1/applications", unstructuredList("argoproj.io/v1alpha1", "Application", app))
+	refreshed := make(chan string, 1)
+	fc.on(http.MethodPatch, "/apis/argoproj.io/v1alpha1/namespaces/argocd/applications/team-a", func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		refreshed <- string(body)
+		writeObj(w, app)
+	})
+	s := fc.server(&planeDraft{}, Config{WebhookSecret: "hooksecret"})
+	s.forge = forge.NewFactory("http://forge.ns.svc:3000", forge.StaticToken("t"), false, "").WithWebURL("https://forge.example")
+	kubeconfig := filepath.Join(t.TempDir(), "kubeconfig")
+	kc := fmt.Sprintf("apiVersion: v1\nkind: Config\nclusters:\n- name: t\n  cluster: {server: %s, insecure-skip-tls-verify: true}\ncontexts:\n- name: t\n  context: {cluster: t, user: t}\ncurrent-context: t\nusers:\n- name: t\n  user: {token: sa-token}\n", fc.srv.URL)
+	if err := os.WriteFile(kubeconfig, []byte(kc), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	ac, err := argo.NewSAClient(kubeconfig)
+	if err != nil {
+		t.Fatal(err)
+	}
+	snap := argo.NewSnapshot(ac, nil)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	t.Cleanup(cancel)
+	snap.Run(ctx)
+	if err := snap.WaitForSync(ctx); err != nil {
+		t.Fatal(err)
+	}
+	s.drift = snap
+
+	pr := []byte(`{"action":"closed","pull_request":{"number":3},"repository":{"clone_url":"https://forge.example/o/r.git","html_url":"https://forge.example/o/r"}}`)
+	deliver(t, s, pr, sign(pr, "hooksecret"))
+	s.propMu.Lock()
+	_, dirty := s.propDirty["http://forge.ns.svc:3000/o/r"]
+	s.propMu.Unlock()
+	if !dirty {
+		t.Errorf("the nudge must name the repo by its clone URL, dirty = %v", s.propDirty)
+	}
+	select {
+	case body := <-refreshed:
+		if !strings.Contains(body, `"argocd.argoproj.io/refresh":"hard"`) {
+			t.Errorf("refresh patch = %s", body)
+		}
+	case <-ctx.Done():
+		t.Fatal("the Application sourcing the repo was never hard-refreshed")
 	}
 }
