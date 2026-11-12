@@ -99,18 +99,17 @@ func (f *Factory) RepoPage(repoURL string) string {
 	return repoURL
 }
 
-// RepoKey is repoURL's NormalizeRepoURL key, a repo under the web base read as the
-// same repo under the API's: a forge whose ROOT_URL is the web base names its repos
-// there in webhook payloads, while dotvirt keys them by the URL it clones.
+// RepoKey is the NormalizeRepoURL key of this forge's repo that repoURL names,
+// at whatever host it is written: a forge names its repos at its ROOT_URL in
+// webhook payloads, the web base or a public host, while dotvirt keys them by
+// the URL it clones from. Only for a URL known to be this forge's, as a signed
+// delivery's is. One that names no owner/repo keys as written.
 func (f *Factory) RepoKey(repoURL string) string {
-	key := NormalizeRepoURL(repoURL)
-	if f == nil || f.webURL == f.baseURL {
-		return key
+	c := f.For(repoURL)
+	if c == nil {
+		return NormalizeRepoURL(repoURL)
 	}
-	if rest, ok := strings.CutPrefix(key, NormalizeRepoURL(f.webURL)+"/"); ok {
-		return NormalizeRepoURL(f.baseURL) + "/" + rest
-	}
-	return key
+	return NormalizeRepoURL(f.baseURL + "/" + c.owner + "/" + c.repo)
 }
 
 // PullPage is the browser URL of pull request number of the repo at repoURL,

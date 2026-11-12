@@ -54,7 +54,7 @@ func (s *Server) handleForgeWebhook(w http.ResponseWriter, r *http.Request) {
 		} `json:"repository"`
 	}
 	_ = json.Unmarshal(body, &event)
-	// Every spelling of a repo, at the forge's web base or its API's, normalizes
+	// Every spelling of a repo, at whatever host the forge names it, normalizes
 	// to the open-repo cache's key (an unknown repo is simply not being watched
 	// yet).
 	clone, html := s.forge.RepoKey(event.Repository.CloneURL), s.forge.RepoKey(event.Repository.HTMLURL)
