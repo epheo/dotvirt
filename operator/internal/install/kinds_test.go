@@ -44,14 +44,18 @@ func TestApplyRolesCoverEveryDeclarableKind(t *testing.T) {
 	}
 	for _, k := range tenancy.Kinds {
 		switch {
-		// Known gap, not a design: only sync impersonation, off by default,
-		// gives Argo this create, through the project's admin grant. Without it
-		// a DataVolume a tenant repo declares alone fails to sync.
-		case k.Kind == "DataVolume":
 		case k.Tenant && !grants(apply, k):
 			t.Errorf("%s/%s: tenant kind without create in dotvirt-argocd-apply", k.Group, k.Resource)
 		case k.Platform && !grants(apply, k) && !grants(sync, k):
 			t.Errorf("%s/%s: platform kind no apply role grants", k.Group, k.Resource)
+		}
+	}
+	// CDI authorizes a clone as the DataVolume's creator. The shared controller
+	// holding datavolumes/source would let any tenant repo clone a disk out of
+	// any namespace, so a clone is authorized only as a project's own account.
+	for _, r := range apply {
+		if slices.Contains(r.APIGroups, "cdi.kubevirt.io") && (slices.Contains(r.Resources, "datavolumes/source") || slices.Contains(r.Resources, "*")) {
+			t.Errorf("dotvirt-argocd-apply grants %v on cdi.kubevirt.io: the shared controller could clone any namespace's disks", r.Resources)
 		}
 	}
 }
