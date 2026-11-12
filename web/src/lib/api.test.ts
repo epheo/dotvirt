@@ -116,6 +116,21 @@ describe('HttpError', () => {
 		}
 	});
 
+	it('drops the kind the server prefixes its sentence with', async () => {
+		answer(
+			new Response('temporarily unavailable: image upload is not configured on this cluster\n', {
+				status: 503,
+			}),
+		);
+		try {
+			const e = await caught(api.tasks());
+			expect(e!.message).toBe('image upload is not configured on this cluster');
+			expect(e!.status).toBe(503);
+		} finally {
+			vi.unstubAllGlobals();
+		}
+	});
+
 	it('takes a 2xx without a body as a yes', async () => {
 		answer(new Response(null, { status: 200, headers: { 'Content-Length': '0' } }));
 		try {
