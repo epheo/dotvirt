@@ -25,7 +25,7 @@ type allowAll struct{}
 
 func (allowAll) Authorize(auth.Identity, []Access) error { return nil }
 func (allowAll) ClusterScoped(string, string) bool       { return false }
-func (allowAll) ProjectNamespace(string) bool            { return false }
+func (allowAll) ProjectNamespace(string) (bool, bool)    { return false, true }
 
 // rbac grants every access deny does not, recording what it was asked.
 type rbac struct {
@@ -37,8 +37,8 @@ type rbac struct {
 func (*rbac) ClusterScoped(string, string) bool { return false }
 
 // ProjectNamespace reads the test projects' namespaces: alpha, beta, gamma.
-func (*rbac) ProjectNamespace(ns string) bool {
-	return slices.Contains([]string{"alpha", "beta", "gamma"}, ns)
+func (*rbac) ProjectNamespace(ns string) (bool, bool) {
+	return slices.Contains([]string{"alpha", "beta", "gamma"}, ns), true
 }
 
 func (r *rbac) Authorize(_ auth.Identity, need []Access) error {
@@ -613,4 +613,24 @@ func TestGateKeepsAVMOnItsOwnNamespacesNetworks(t *testing.T) {
 			t.Errorf("%s: %v", ok, err)
 		}
 	}
+
+	// Before the project namespaces are listed, every namespace reads as no
+	// project's: a network in another namespace waits rather than passes.
+	c.UseAuthorizer(unlisted{&rbac{}})
+	for _, ref := range []string{"beta/vm-net", "openshift-cnv/shared"} {
+		if err := stage(ref); !errors.Is(err, model.ErrUnavailable) {
+			t.Errorf("%s before the namespaces are listed: err = %v, want ErrUnavailable", ref, err)
+		}
+	}
+	for _, ok := range []string{"alpha/vm-net", "vm-net"} {
+		if err := stage(ok); err != nil {
+			t.Errorf("%s before the namespaces are listed: %v", ok, err)
+		}
+	}
 }
+
+// unlisted is an authorizer whose snapshot has not listed the project
+// namespaces yet.
+type unlisted struct{ *rbac }
+
+func (unlisted) ProjectNamespace(string) (bool, bool) { return false, false }
