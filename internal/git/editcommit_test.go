@@ -309,6 +309,58 @@ func TestHookDeclinedIsABranchRefusal(t *testing.T) {
 	}
 }
 
+// The forge's pre-receive hook declining a proposal's push, with a lease or
+// without, comes back as the refusal with the forge's own words.
+func TestProposeChangesetHookDeclined(t *testing.T) {
+	bare := seedMultiRepo(t)
+	w := OpenWrite(bare, "", nil, true)
+	by := Author{Name: "u", Email: "u@x"}
+	drop := []ChangesetItem{{Path: "tenant-a/db.yaml", Delete: true}}
+	first, err := w.CommitChangeset("main", "p", "drop db", drop, by)
+	if err != nil {
+		t.Fatal(err)
+	}
+	hook := filepath.Join(bare, "hooks", "pre-receive")
+	if err := os.MkdirAll(filepath.Dir(hook), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(hook, []byte("#!/bin/sh\necho 'Forgejo: branch p is protected from force push' >&2\nexit 1\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for name, plan := range map[string]PushPlan{"lease": {Lease: first.Hash}, "rebuild": {}} {
+		_, err := w.ProposeChangeset("main", "p", "again", drop, by, plan)
+		var refused *BranchRefusedError
+		if !errors.As(err, &refused) || errors.Is(err, ErrBranchMoved) {
+			t.Fatalf("%s: err = %v, want a BranchRefusedError", name, err)
+		}
+		if refused.Reason != "Forgejo: branch p is protected from force push" {
+			t.Errorf("%s: reason = %q", name, refused.Reason)
+		}
+	}
+	if head := revParse(t, bare, "p"); head != first.Hash {
+		t.Fatalf("the declined push must leave p at %s, got %s", first.Hash, head)
+	}
+}
+
+// Only a protection is answered with unprotecting: a quota or a push
+// permission declines the same way and is named as the forge said it.
+func TestBranchRefusedAdvice(t *testing.T) {
+	for reason, advised := range map[string]bool{
+		"":                                      true,
+		"branch p is protected from force push": true,
+		"Quota exceeded":                        false,
+		"User 'bot' is not allowed to push to repository 'o/r'.": false,
+	} {
+		msg := (&BranchRefusedError{Branch: "p", Reason: reason}).Error()
+		if got := strings.Contains(msg, "leave the proposal branches unprotected"); got != advised {
+			t.Errorf("%q: advice %v, want %v (%s)", reason, got, advised, msg)
+		}
+		if reason != "" && !strings.Contains(msg, "("+reason+")") {
+			t.Errorf("%q: the forge's reason is missing from %q", reason, msg)
+		}
+	}
+}
+
 // The forge's refusal is the last line it wrote, past git's counters.
 func TestLastRemoteLine(t *testing.T) {
 	for out, want := range map[string]string{

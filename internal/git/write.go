@@ -230,8 +230,13 @@ type BranchRefusedError struct {
 }
 
 func (e *BranchRefusedError) Error() string {
-	why := cmp.Or(e.Reason, "its pre-receive hook declined")
-	return fmt.Sprintf("the forge refused the push to %s (%s): the console rebuilds a proposal's branch and force-pushes it, which a protected branch refuses; leave the proposal branches unprotected in the forge", e.Branch, why)
+	msg := fmt.Sprintf("the forge refused the push to %s (%s)", e.Branch, cmp.Or(e.Reason, "its pre-receive hook declined"))
+	// A quota, a push permission or a signing rule declines the same way; only
+	// a protection is fixed by unprotecting.
+	if e.Reason == "" || strings.Contains(e.Reason, "protected") {
+		msg += ": the console rebuilds a proposal's branch and force-pushes it, which a protected branch refuses; leave the proposal branches unprotected in the forge"
+	}
+	return msg
 }
 
 func (e *BranchRefusedError) Unwrap() error { return model.ErrConflict }
