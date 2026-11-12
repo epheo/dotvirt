@@ -135,9 +135,9 @@ func (p Placement) Undeclarable(rule KindRule) []model.ObjectRef {
 type KindRule struct {
 	Policy        tenancy.Policy
 	ClusterScoped func(group, kind string) bool
-	// ProjectNamespace reports whether a namespace is a project's; nil knows
-	// none.
-	ProjectNamespace func(namespace string) bool
+	// ProjectNamespace reports whether a namespace is a project's, and whether
+	// that is known yet; nil knows none.
+	ProjectNamespace func(namespace string) (project, known bool)
 }
 
 // Declarable reports whether a tenant repo may declare group/kind: a listed

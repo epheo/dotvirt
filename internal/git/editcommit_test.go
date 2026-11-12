@@ -9,6 +9,8 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+
+	"github.com/epheo/dotvirt/internal/model"
 )
 
 // seedRepo creates a bare repo with one VM manifest on main, returning the bare
@@ -284,6 +286,91 @@ func TestLeaseRefused(t *testing.T) {
 	} {
 		if got := leaseRefused(errors.New(msg), "p"); got != want {
 			t.Errorf("%q: got %v, want %v", msg, got, want)
+		}
+	}
+}
+
+// A push the forge's hook declined is a refusal that names the protection,
+// never a moved branch, whatever the lease.
+func TestHookDeclinedIsABranchRefusal(t *testing.T) {
+	declined := errors.New("command error on refs/heads/p: pre-receive hook declined")
+	if !hookDeclined(declined, "p") || hookDeclined(declined, "q") {
+		t.Error("hookDeclined must match the pushed ref's decline only")
+	}
+	if hookDeclined(errors.New("command error on refs/heads/p: failed to update ref"), "p") {
+		t.Error("a refused lease is not a hook decline")
+	}
+	err := error(&BranchRefusedError{Branch: "p", Reason: "branch p is protected from force push"})
+	if !errors.Is(err, model.ErrConflict) || errors.Is(err, ErrBranchMoved) {
+		t.Errorf("err = %v: want a conflict, not a moved branch", err)
+	}
+	if !strings.Contains(err.Error(), "(branch p is protected from force push)") || !strings.Contains(err.Error(), "leave the proposal branches unprotected") {
+		t.Errorf("err = %q", err)
+	}
+}
+
+// The forge's pre-receive hook declining a proposal's push, with a lease or
+// without, comes back as the refusal with the forge's own words.
+func TestProposeChangesetHookDeclined(t *testing.T) {
+	bare := seedMultiRepo(t)
+	w := OpenWrite(bare, "", nil, true)
+	by := Author{Name: "u", Email: "u@x"}
+	drop := []ChangesetItem{{Path: "tenant-a/db.yaml", Delete: true}}
+	first, err := w.CommitChangeset("main", "p", "drop db", drop, by)
+	if err != nil {
+		t.Fatal(err)
+	}
+	hook := filepath.Join(bare, "hooks", "pre-receive")
+	if err := os.MkdirAll(filepath.Dir(hook), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(hook, []byte("#!/bin/sh\necho 'Forgejo: branch p is protected from force push' >&2\nexit 1\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for name, plan := range map[string]PushPlan{"lease": {Lease: first.Hash}, "rebuild": {}} {
+		_, err := w.ProposeChangeset("main", "p", "again", drop, by, plan)
+		var refused *BranchRefusedError
+		if !errors.As(err, &refused) || errors.Is(err, ErrBranchMoved) {
+			t.Fatalf("%s: err = %v, want a BranchRefusedError", name, err)
+		}
+		if refused.Reason != "Forgejo: branch p is protected from force push" {
+			t.Errorf("%s: reason = %q", name, refused.Reason)
+		}
+	}
+	if head := revParse(t, bare, "p"); head != first.Hash {
+		t.Fatalf("the declined push must leave p at %s, got %s", first.Hash, head)
+	}
+}
+
+// Only a protection is answered with unprotecting: a quota or a push
+// permission declines the same way and is named as the forge said it.
+func TestBranchRefusedAdvice(t *testing.T) {
+	for reason, advised := range map[string]bool{
+		"":                                      true,
+		"branch p is protected from force push": true,
+		"Quota exceeded":                        false,
+		"User 'bot' is not allowed to push to repository 'o/r'.": false,
+	} {
+		msg := (&BranchRefusedError{Branch: "p", Reason: reason}).Error()
+		if got := strings.Contains(msg, "leave the proposal branches unprotected"); got != advised {
+			t.Errorf("%q: advice %v, want %v (%s)", reason, got, advised, msg)
+		}
+		if reason != "" && !strings.Contains(msg, "("+reason+")") {
+			t.Errorf("%q: the forge's reason is missing from %q", reason, msg)
+		}
+	}
+}
+
+// The forge's refusal is the last line it wrote, past git's counters.
+func TestLastRemoteLine(t *testing.T) {
+	for out, want := range map[string]string{
+		"": "",
+		"Counting objects: 100% (3/3), done.\r\n":                                                         "",
+		"Resolving deltas: 100% (1/1), done.\nremote: Forgejo: branch p is protected from force push\n\n": "Forgejo: branch p is protected from force push",
+		"branch p is protected from force push\n":                                                         "branch p is protected from force push",
+	} {
+		if got := lastRemoteLine(out); got != want {
+			t.Errorf("%q: got %q, want %q", out, got, want)
 		}
 	}
 }

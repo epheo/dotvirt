@@ -125,6 +125,11 @@ rules:
   - apiGroups: ["kubevirt.io"]
     resources: ["virtualmachines"]
     verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  # Never datavolumes/source: CDI authorizes a clone as its creator, so this
+  # shared account would let any tenant repo clone a disk out of any namespace.
+  - apiGroups: ["cdi.kubevirt.io"]
+    resources: ["datavolumes"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
   - apiGroups: ["k8s.ovn.org"]
     resources: ["userdefinednetworks", "clusteruserdefinednetworks", "egressfirewalls", "egressips", "adminpolicybasedexternalroutes"]
     verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]

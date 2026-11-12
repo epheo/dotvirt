@@ -24,6 +24,7 @@
 	import { itemLine, trayLanes, type TrayLane } from '#lib/tray.js';
 	import Button from './Button.svelte';
 	import DiscardDraft from './DiscardDraft.svelte';
+	import ForgeAdminCopy from './ForgeAdminCopy.svelte';
 
 	// The one place a change of this user's is followed from staged to live:
 	// it replaces the header Propose button, the Changes dot and the pending
@@ -309,6 +310,7 @@
 								{/if}
 								<p class="text-ink-soft">
 									Next: someone with merge rights approves and merges it in the forge.
+									<ForgeAdminCopy />
 								</p>
 							</div>
 							<footer class="flex items-center gap-3 border-t border-line-soft px-3 py-2">

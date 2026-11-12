@@ -187,6 +187,13 @@ func dotvirtEnv(dv *dotvirtv1alpha1.Dotvirt, argoNS string, tenantAllowed []tena
 	// URL either.
 	if dv.Spec.Forge.Managed {
 		env = append(env, corev1.EnvVar{Name: "DOTVIRT_WEBHOOK_URL", Value: ServiceURL(dv)})
+		// Where the admin password lives, never the password: the console
+		// reads it under the caller's own token.
+		env = append(env,
+			corev1.EnvVar{Name: "DOTVIRT_FORGE_ADMIN_SECRET", Value: dv.Namespace + "/" + ForgejoAdminSecret},
+			corev1.EnvVar{Name: "DOTVIRT_FORGE_ADMIN_KEY", Value: ForgejoAdminKey},
+			corev1.EnvVar{Name: "DOTVIRT_FORGE_ADMIN_USER", Value: ForgejoBotUser},
+		)
 	}
 	if p := dv.Spec.Publishing; p.Domain != "" && p.GatewayClassName != "" {
 		env = append(env,

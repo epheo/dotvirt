@@ -113,8 +113,11 @@ func (s *Server) ClusterScoped(group, kind string) bool {
 
 // ProjectNamespace reports whether namespace belongs to a project: the
 // snapshot watches project namespaces alone. It reads nothing new.
-func (s *Server) ProjectNamespace(namespace string) bool {
-	return s.state != nil && s.state.Holds(model.KindNS.Group, model.KindNS.Plural, "", namespace)
+func (s *Server) ProjectNamespace(namespace string) (project, known bool) {
+	if s.state == nil || !s.state.NamespacesListed() {
+		return false, false
+	}
+	return s.state.Holds(model.KindNS.Group, model.KindNS.Plural, "", namespace), true
 }
 
 // tenantKindRule is what a tenant repo may declare on this install, with the

@@ -155,3 +155,39 @@ test('a merge in a project the caller cannot read all of is not followed past gi
 	).toBeVisible();
 	expect(reads).toEqual([]);
 });
+
+test('a caller who may read the forge admin Secret copies its password from the PR lane, read only on the click', async ({
+	page,
+	context,
+}) => {
+	await context.grantPermissions(['clipboard-read', 'clipboard-write']);
+	await setScenario(page, 'forgeadmin');
+	const reads: string[] = [];
+	page.on('request', (r) => {
+		if (r.url().includes('/api/forge/admin-password')) reads.push(r.method());
+	});
+	await login(page);
+	const tray = trayOf(page);
+	await tray.getByRole('button', { name: 'Show' }).click();
+	const copy = tray.getByRole('button', { name: 'Copy the forge admin password' });
+	await expect(copy).toBeVisible();
+	expect(reads).toEqual([]);
+	await copy.click();
+	await expect(
+		page.getByText('Forge admin password copied. Sign in to the forge as dotvirt-bot.'),
+	).toBeVisible();
+	expect(reads).toEqual(['POST']);
+	expect(await page.evaluate(() => navigator.clipboard.readText())).toBe('fixture-forge-admin-pw');
+	await expect(page.getByText('fixture-forge-admin-pw')).toHaveCount(0);
+});
+
+test('a caller who may not read the forge admin Secret is not offered its password', async ({
+	page,
+}) => {
+	await setScenario(page, 'base');
+	await login(page);
+	const tray = trayOf(page);
+	await tray.getByRole('button', { name: 'Show' }).click();
+	await expect(tray.getByRole('button', { name: 'Copy link for a reviewer' })).toBeVisible();
+	await expect(page.getByRole('button', { name: 'Copy the forge admin password' })).toHaveCount(0);
+});

@@ -172,6 +172,7 @@ export const clusterGate = {
 	rebalancePSI: () => cluster((c) => c.drsPSI, 'turn on host pressure readings'),
 	rebalanceOff: () => cluster((c) => c.drsDisable, 'turn off rebalancing'),
 	oauthClient: () => cluster((c) => c.oauthClient, 'finish single sign-on'),
+	forgeAdmin: () => cluster((c) => c.forgeAdmin, "read the forge's admin password"),
 };
 
 // A host's maintenance verbs: the host's own read carries the server's answer

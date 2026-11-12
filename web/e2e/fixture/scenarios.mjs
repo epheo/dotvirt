@@ -1408,6 +1408,12 @@ const oidc = {
 	name: 'oidc',
 	authMethods: { sso: false, ssoPending: false, oidc: 'Kanidm' },
 };
+// A managed forge whose admin Secret the caller may read.
+const forgeadmin = {
+	...base,
+	name: 'forgeadmin',
+	capabilities: { ...base.capabilities, cluster: { forgeAdmin: true } },
+};
 
 // ── residue: a labeled project with no repo (an old install's leftover) ────────
 // The "no repo configured" dead-end Release resolves: the project label stands
@@ -2136,6 +2142,7 @@ export const scenarios = {
 	sso,
 	ssoready,
 	oidc,
+	forgeadmin,
 	base,
 	empty,
 	degraded,
