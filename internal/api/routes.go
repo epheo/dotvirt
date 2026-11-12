@@ -27,11 +27,19 @@ func (s *Server) routes(mux *http.ServeMux) {
 		// The login screen asks which sign-in paths exist before any session.
 		// ssoPending says SSO is configured but its OAuthClient isn't registered yet,
 		// so the screen can say "finish setup" instead of offering a button that fails.
+		// oidc names the issuer the OIDC button signs in with.
 		mux.HandleFunc("GET /api/auth/methods", func(w http.ResponseWriter, r *http.Request) {
-			pending := s.oauth != nil && !s.oauth.ClientRegistered(r.Context())
-			writeJSON(w, map[string]bool{"sso": s.oauth != nil, "ssoPending": pending})
+			m := authMethods{SSO: s.oauth != nil}
+			m.SSOPending = s.oauth != nil && !s.oauth.ClientRegistered(r.Context())
+			if s.oidc != nil {
+				m.OIDC = s.oidc.Name()
+			}
+			writeJSON(w, m)
 		})
-		if s.oauth != nil {
+		if s.oidc != nil {
+			mux.HandleFunc("GET /api/auth/oidc", s.oidc.LoginRedirect)
+			mux.HandleFunc("GET /api/auth/callback", s.oidc.Callback)
+		} else if s.oauth != nil {
 			mux.HandleFunc("GET /api/auth/openshift", s.oauth.LoginRedirect)
 			mux.HandleFunc("GET /api/auth/callback", s.oauth.Callback)
 			mux.HandleFunc("POST /api/auth/oauthclient", s.handleFinishSSO)
@@ -180,4 +188,11 @@ func (s *Server) routes(mux *http.ServeMux) {
 	mux.HandleFunc("DELETE /api/vms/{namespace}/{name}/snapshots/{snapshot}", s.handleDeleteSnapshot)
 	mux.HandleFunc("GET /api/vms/{namespace}/{name}/clones", s.handleClones)
 	mux.HandleFunc("POST /api/vms/{namespace}/{name}/clone", s.handleCreateClone)
+}
+
+// authMethods is what GET /api/auth/methods answers.
+type authMethods struct {
+	SSO        bool   `json:"sso"`
+	SSOPending bool   `json:"ssoPending"`
+	OIDC       string `json:"oidc,omitempty"`
 }

@@ -31,10 +31,10 @@ func fakeOAuthAt(t *testing.T, a *Authenticator, h http.HandlerFunc) *OAuth {
 		},
 		auth:   a,
 		client: ts.Client(),
-		meta: &oauthMeta{
+		disc: discovery[oauthMeta]{val: &oauthMeta{
 			AuthorizationEndpoint: ts.URL + "/oauth/authorize",
 			TokenEndpoint:         ts.URL + "/oauth/token",
-		},
+		}},
 	}
 }
 

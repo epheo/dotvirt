@@ -20,7 +20,6 @@ import (
 	"github.com/epheo/dotvirt/internal/model"
 	"github.com/epheo/dotvirt/internal/project"
 	"github.com/epheo/dotvirt/internal/replication"
-	"github.com/epheo/dotvirt/internal/restfactory"
 	"github.com/epheo/dotvirt/internal/routes"
 	"github.com/epheo/dotvirt/internal/ttlcache"
 )
@@ -293,7 +292,7 @@ func (s *Server) visibleFor(ctx context.Context, id auth.Identity, c *cluster.Cl
 // in the view fails the request, as a gate would; a failed one asked for
 // another kind hides what it covers.
 func (s *Server) viewFor(ctx context.Context, id auth.Identity, c *cluster.Client) (callerView, error) {
-	key := restfactory.TokenKey(id.Token)
+	key := id.Key()
 	lv := s.visLevels()
 	m, ok := s.views.Get(key)
 	if now := time.Now(); !ok || m.lv != lv || !now.Before(m.until) || now.Sub(m.built) >= s.authTTL() {
@@ -328,7 +327,7 @@ func (s *Server) askEach(ctx context.Context, id auth.Identity, c *cluster.Clien
 		until = time.Now().Add(s.authTTL())
 		sem   = make(chan struct{}, authConcurrency)
 	)
-	tk := restfactory.TokenKey(id.Token)
+	tk := id.Key()
 	for i, q := range qs {
 		if ok, served, held := s.cached(tk, q); held {
 			mu.Lock()
@@ -534,7 +533,7 @@ func (s *Server) can(ctx context.Context, id auth.Identity, c *cluster.Client, q
 
 // canUntil is can with when its verdict stops serving.
 func (s *Server) canUntil(ctx context.Context, id auth.Identity, c *cluster.Client, q question) (bool, time.Time, error) {
-	tk := restfactory.TokenKey(id.Token)
+	tk := id.Key()
 	if ok, until, held := s.cached(tk, q); held {
 		return ok, until, nil
 	}
@@ -568,8 +567,8 @@ func (s *Server) cached(tk string, q question) (ok bool, until time.Time, held b
 	return e.ok, time.Now().Add(s.maxAge(e.unsettled) - age), true
 }
 
-// verdictKey is where can caches q's verdict for the token keyed tk
-// (restfactory.TokenKey, computed once per batch: it hashes the token).
+// verdictKey is where can caches q's verdict for the identity keyed tk
+// (auth.Identity.Key, computed once per batch: it hashes the token).
 func verdictKey(tk string, q question) string {
 	return strings.Join([]string{tk, q.Verb, q.Group, q.Resource, q.Subresource, q.Namespace, q.Name}, "\x00")
 }

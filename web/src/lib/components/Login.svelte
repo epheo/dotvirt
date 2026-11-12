@@ -10,12 +10,15 @@
 
 	let token = $state('');
 	const op = action();
-	// SSO is offered once the backend confirms it; the token form always stays.
-	// ssoPending: say "not finished" instead of offering a failing button.
+	// A sign-in flow is offered once the backend confirms it; the token form
+	// always stays. ssoPending: say "not finished" instead of offering a
+	// failing button.
 	const auth = authMethods();
 	const sso = $derived(auth.data?.sso ?? false);
 	const ssoPending = $derived(auth.data?.ssoPending ?? false);
-	// The OAuth callback bounces here with ?sso_error=1 on any failure (the
+	const oidc = $derived(auth.data?.oidc ?? '');
+	const flow = $derived(sso || !!oidc);
+	// The sign-in callback bounces here with ?sso_error=1 on any failure (the
 	// detail is server-logged, never shown - it can carry endpoint internals).
 	const ssoError = $derived(page.url.searchParams.get('sso_error') !== null);
 
@@ -58,17 +61,21 @@
 			<p
 				class="mb-3 rounded border border-danger-soft bg-danger-soft/60 px-3 py-2 text-sm text-danger-ink"
 			>
-				OpenShift sign-in failed. Try again, or paste a token below.
+				{oidc ? `Sign-in with ${oidc}` : 'OpenShift sign-in'} failed. Try again, or paste a token below.
 			</p>
 		{/if}
 
-		{#if sso && ssoPending}
+		{#if oidc}
+			<Button class="mb-4 w-full" href="/api/auth/oidc">Sign in with {oidc}</Button>
+		{:else if sso && ssoPending}
 			<p class="mb-4 rounded bg-warn-soft/60 px-3 py-2 text-sm text-warn-ink">
 				OpenShift SSO is enabled but not ready: its OAuthClient is missing or holds an outdated
 				secret. A cluster admin can sign in with a token below and fix it in one click.
 			</p>
 		{:else if sso}
 			<Button class="mb-4 w-full" href="/api/auth/openshift">Sign in with OpenShift</Button>
+		{/if}
+		{#if oidc || (sso && !ssoPending)}
 			<div class="mb-3 flex items-center gap-2 text-xs text-ink-faint">
 				<span class="h-px flex-1 bg-line"></span>
 				or paste a token
@@ -92,7 +99,7 @@
 		<button
 			type="submit"
 			disabled={op.busy || !token.trim()}
-			class="mt-3 w-full rounded {sso
+			class="mt-3 w-full rounded {flow
 				? 'border border-line bg-inset text-ink-soft hover:bg-inset-strong'
 				: 'bg-accent text-white hover:bg-accent-hover'} px-4 py-2 text-sm font-medium disabled:opacity-40"
 		>

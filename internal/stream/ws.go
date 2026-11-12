@@ -8,7 +8,6 @@ import (
 	"github.com/gorilla/websocket"
 
 	"github.com/epheo/dotvirt/internal/auth"
-	"github.com/epheo/dotvirt/internal/restfactory"
 )
 
 const (
@@ -61,9 +60,10 @@ func (h *Hub) Handler(w http.ResponseWriter, r *http.Request) {
 		return // Upgrade already wrote an error response
 	}
 
-	// Group connections by the token's hash (same key the API caches use), so two
-	// tabs of one user share a build - and the raw bearer never becomes a map key.
-	c := newConn(id, restfactory.TokenKey(id.Token))
+	// Group connections by the identity's key (the one the API caches use), so
+	// two tabs of one session share a build - and the raw bearer never becomes
+	// a map key.
+	c := newConn(id, id.Key())
 	h.add(c)
 	defer h.remove(c)
 

@@ -36,7 +36,8 @@ func (s *Server) InventoryForIdentity(ctx context.Context, id auth.Identity) (mo
 	// re-check withholds the frame without ending the session. A signed-out or
 	// expired session fails it too, and a rejection closes the token's consoles.
 	if s.auth != nil {
-		if err := s.auth.Revalidate(ctx, id); errors.Is(err, auth.ErrRejected) {
+		cur, err := s.auth.Revalidate(ctx, id)
+		if errors.Is(err, auth.ErrRejected) {
 			s.bus.Publish(eventbus.SessionEnded)
 			if errors.Is(err, auth.ErrSessionEnded) {
 				return model.Inventory{}, err // this session's end, not its token's
@@ -45,6 +46,8 @@ func (s *Server) InventoryForIdentity(ctx context.Context, id auth.Identity) (mo
 		} else if err != nil {
 			return model.Inventory{}, unavailable(err)
 		}
+		// An OIDC session's token is renewed under it: build with the current one.
+		id = cur
 	}
 	userCluster, err := s.clusterF.For(id.Token)
 	if err != nil {

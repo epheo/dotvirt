@@ -18,11 +18,11 @@ import (
 const revokeTimeout = 10 * time.Second
 
 // handleLogout ends the caller's session, answers, and closes the session's
-// streams and consoles. An SSO session's token is then deleted cluster-wide,
-// under that token itself: dotvirt's OAuth client minted it for this session
-// alone. A failed delete is logged; the session has ended either way. Only a
-// session this call ended is revoked, so a replayed cookie costs no apiserver
-// call.
+// streams and consoles. What a sign-in flow minted for the session alone is
+// then revoked: an OIDC session's refresh token at its issuer, an OpenShift
+// SSO token cluster-wide, under that token itself. A failed revocation is
+// logged; the session has ended either way. Only a session this call ended is
+// revoked, so a replayed cookie costs no outbound call.
 func (s *Server) handleLogout(w http.ResponseWriter, r *http.Request) {
 	id, ended := s.auth.Logout(w, r)
 	if !ended {
@@ -30,13 +30,20 @@ func (s *Server) handleLogout(w http.ResponseWriter, r *http.Request) {
 	}
 	s.bus.Publish(eventbus.SessionEnded)
 	name, ok := auth.OAuthTokenName(id.Token)
-	if !id.SSO || !ok || s.clusterF == nil {
+	oidc := id.Session != "" && s.oidc != nil
+	if !oidc && (!id.SSO || !ok || s.clusterF == nil) {
 		return
 	}
-	_ = http.NewResponseController(w).Flush() // the UI need not wait on the delete
+	_ = http.NewResponseController(w).Flush() // the UI need not wait on the revocation
 	// Detached: a client hanging up after its logout must not keep the token alive.
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), s.revokeTimeout)
 	defer cancel()
+	if oidc {
+		if err := s.oidc.Revoke(ctx, id); err != nil {
+			log.Printf("api: logout: OIDC refresh token not revoked: %v", err)
+		}
+		return
+	}
 	c, err := s.clusterF.For(id.Token)
 	if err == nil {
 		err = c.DeleteOwnOAuthToken(ctx, name)

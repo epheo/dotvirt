@@ -9,6 +9,7 @@ package auth
 
 import (
 	"context"
+	"crypto/cipher"
 	"crypto/hmac"
 	"crypto/rand"
 	"crypto/sha256"
@@ -52,34 +53,16 @@ type OAuth struct {
 	saKube kubernetes.Interface // discovery rides dotvirt's SA (an unauthenticated cluster metadata read)
 	auth   *Authenticator
 	client *http.Client // token exchange; carries the CA the oauth Route is signed with
+	disc   discovery[oauthMeta]
 
-	// mu guards the caches below and is never held across network I/O: the
-	// routes that probe are reachable before authentication.
-	mu sync.Mutex
-	// Discovery cache: endpoints stick once found; a failure is answered from
-	// metaErr until probeTTL passes. metaDone is open while a discovery runs.
-	meta     *oauthMeta
-	metaErr  error
-	metaAt   time.Time
-	metaDone chan struct{}
-	// Probe cache for ClientRegistered: a definitive yes sticks, any other
-	// outcome re-probes after probeTTL.
+	// mu guards the probe cache for ClientRegistered: a definitive yes sticks,
+	// any other outcome re-probes after probeTTL. Never held across network
+	// I/O: the login screen asks before authentication.
+	mu            sync.Mutex
 	registered    bool
 	probedPending bool
 	probedAt      time.Time
 }
-
-// probeTTL is how long a probe outcome other than success answers for the
-// next caller. A probe is claimed under mu before it starts, so callers
-// within the window never fan out into outbound requests.
-const probeTTL = 10 * time.Second
-
-// probeTimeout bounds every outbound call the flow makes.
-const probeTimeout = 15 * time.Second
-
-// errDiscoveryPending answers a caller that will not wait while another runs
-// the first discovery.
-var errDiscoveryPending = errors.New("oauth discovery: in progress")
 
 type oauthMeta struct {
 	AuthorizationEndpoint string `json:"authorization_endpoint"`
@@ -88,70 +71,36 @@ type oauthMeta struct {
 
 // NewOAuth builds the flow. It never probes the cluster here - see discover.
 func NewOAuth(cfg OAuthConfig, saKube kubernetes.Interface, auth *Authenticator) (*OAuth, error) {
+	return &OAuth{
+		cfg:    cfg,
+		saKube: saKube,
+		auth:   auth,
+		client: tlsClient("oauth", cfg.CAFile, cfg.InsecureTLS),
+	}, nil
+}
+
+// tlsClient is a sign-in flow's client for the endpoints the browser is not
+// sent to: caFile trusts a signer outside the system pool (empty: the system
+// pool), insecure is the dev opt-out.
+func tlsClient(name, caFile string, insecure bool) *http.Client {
 	transport := http.DefaultTransport
-	if cfg.CAFile != "" || cfg.InsecureTLS {
-		tlsCfg := &tls.Config{InsecureSkipVerify: cfg.InsecureTLS} //nolint:gosec // explicit dev opt-in
-		if cfg.CAFile != "" {
-			if pool := forge.RootCAs("oauth", cfg.CAFile); pool != nil {
+	if caFile != "" || insecure {
+		tlsCfg := &tls.Config{InsecureSkipVerify: insecure} //nolint:gosec // explicit dev opt-in
+		if caFile != "" {
+			if pool := forge.RootCAs(name, caFile); pool != nil {
 				tlsCfg.RootCAs = pool
 			}
 		}
 		transport = &http.Transport{TLSClientConfig: tlsCfg}
 	}
-	return &OAuth{
-		cfg:    cfg,
-		saKube: saKube,
-		auth:   auth,
-		client: &http.Client{Transport: transport, Timeout: probeTimeout},
-	}, nil
+	return &http.Client{Transport: transport, Timeout: probeTimeout}
 }
 
 // discover returns the OAuth endpoints from the API server's well-known
-// document: fetched once, then cached for good; a failure answers callers for
-// probeTTL. One discovery runs at a time: a caller arriving meanwhile waits for
-// its outcome when wait is set (a login needs the endpoints; the fetch is
-// bounded by probeTimeout), else gets errDiscoveryPending. Reached through the
-// SA client so TLS + auth to the API server need no extra wiring.
+// document (see discovery), reached through the SA client so TLS + auth to the
+// API server need no extra wiring.
 func (o *OAuth) discover(ctx context.Context, wait bool) (*oauthMeta, error) {
-	o.mu.Lock()
-	switch {
-	case o.meta != nil:
-		m := o.meta
-		o.mu.Unlock()
-		return m, nil
-	case o.metaDone != nil:
-		done := o.metaDone
-		o.mu.Unlock()
-		if !wait {
-			return nil, errDiscoveryPending
-		}
-		select {
-		case <-done:
-		case <-ctx.Done():
-			return nil, ctx.Err()
-		}
-		o.mu.Lock()
-		defer o.mu.Unlock()
-		return o.meta, o.metaErr
-	case time.Since(o.metaAt) < probeTTL:
-		err := o.metaErr
-		o.mu.Unlock()
-		return nil, err
-	}
-	done := make(chan struct{})
-	o.metaDone = done
-	o.mu.Unlock()
-
-	// Detached from the caller: a client hanging up must not stamp a failure.
-	fctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), probeTimeout)
-	defer cancel()
-	m, err := o.fetchMeta(fctx)
-
-	o.mu.Lock()
-	o.meta, o.metaErr, o.metaAt, o.metaDone = m, err, time.Now(), nil
-	o.mu.Unlock()
-	close(done)
-	return m, err
+	return o.disc.get(ctx, wait, o.fetchMeta)
 }
 
 func (o *OAuth) fetchMeta(ctx context.Context) (*oauthMeta, error) {
@@ -193,22 +142,8 @@ func (o *OAuth) LoginRedirect(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "OpenShift SSO unavailable: "+err.Error(), http.StatusServiceUnavailable)
 		return
 	}
-	b := make([]byte, 24)
-	if _, err := rand.Read(b); err != nil {
-		http.Error(w, "internal error", http.StatusInternalServerError)
-		return
-	}
-	state := base64.RawURLEncoding.EncodeToString(b)
-	http.SetCookie(w, &http.Cookie{
-		Name:     stateCookie,
-		Value:    stateValue(state, o.auth.sealer),
-		Path:     "/api/auth",
-		HttpOnly: true,
-		Secure:   isTLS(r),
-		// Lax: the cookie must ride the top-level redirect back from the OAuth server.
-		SameSite: http.SameSiteLaxMode,
-		MaxAge:   300,
-	})
+	state := randomToken()
+	setStateCookie(w, r, state, o.auth.sealer)
 	http.Redirect(w, r, o.oauth2Config(m).AuthCodeURL(state), http.StatusFound)
 }
 
@@ -265,7 +200,7 @@ func (o *OAuth) Callback(w http.ResponseWriter, r *http.Request) {
 	}
 	log.Printf("oauth: %s signed in via OpenShift SSO", id.Username)
 	clearStateCookie(w, r)
-	setCookie(w, r, tok.AccessToken, true, o.auth.sealer)
+	setCookie(w, r, session{token: tok.AccessToken, issued: time.Now(), sso: true}, o.auth.sealer)
 	http.Redirect(w, r, "/", http.StatusFound)
 }
 
@@ -284,6 +219,27 @@ func OAuthTokenName(token string) (string, bool) {
 	}
 	sum := sha256.Sum256([]byte(secret))
 	return oauthTokenPrefix + base64.RawURLEncoding.EncodeToString(sum[:]), true
+}
+
+// randomToken is 24 random bytes, base64url: a state or nonce.
+func randomToken() string {
+	b := make([]byte, 24)
+	_, _ = rand.Read(b) // never fails
+	return base64.RawURLEncoding.EncodeToString(b)
+}
+
+// setStateCookie seals value, a sign-in round-trip's secrets, for the callback.
+func setStateCookie(w http.ResponseWriter, r *http.Request, value string, sealer cipher.AEAD) {
+	http.SetCookie(w, &http.Cookie{
+		Name:     stateCookie,
+		Value:    stateValue(value, sealer),
+		Path:     "/api/auth",
+		HttpOnly: true,
+		Secure:   isTLS(r),
+		// Lax: the cookie must ride the top-level redirect back from the issuer.
+		SameSite: http.SameSiteLaxMode,
+		MaxAge:   300,
+	})
 }
 
 func clearStateCookie(w http.ResponseWriter, r *http.Request) {

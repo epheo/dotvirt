@@ -688,6 +688,42 @@ func TestDeploymentCarriesTheForgeWebURL(t *testing.T) {
 	}
 }
 
+// spec.auth.oidc reaches the app as its env; a named client secret is read
+// from its Secret, required, so a missing one fails the start instead of
+// reading as a public client.
+func TestDeploymentCarriesOIDC(t *testing.T) {
+	dv := testDotvirt()
+	env := func() []corev1.EnvVar { return Deployment(dv, "argocd", nil).Spec.Template.Spec.Containers[0].Env }
+	if v, ok := envValue(env(), "DOTVIRT_OIDC_ISSUER"); ok {
+		t.Errorf("unset oidc: DOTVIRT_OIDC_ISSUER = %q", v)
+	}
+	dv.Spec.Auth.OIDC = &dotvirtv1alpha1.OIDCSpec{
+		IssuerURL: "https://idm.example/oauth2/openid/dotvirt", ClientID: "dotvirt",
+		ClientSecret: &dotvirtv1alpha1.SecretKeyRef{Name: "dotvirt-oidc", Key: "secret"},
+		Scopes:       []string{"openid", "profile", "groups_name"},
+		DisplayName:  "Kanidm",
+	}
+	for name, want := range map[string]string{
+		"DOTVIRT_OIDC_ISSUER":    "https://idm.example/oauth2/openid/dotvirt",
+		"DOTVIRT_OIDC_CLIENT_ID": "dotvirt",
+		"DOTVIRT_OIDC_SCOPES":    "openid profile groups_name",
+		"DOTVIRT_OIDC_NAME":      "Kanidm",
+	} {
+		if v, _ := envValue(env(), name); v != want {
+			t.Errorf("%s = %q, want %q", name, v, want)
+		}
+	}
+	var ref *corev1.SecretKeySelector
+	for _, e := range env() {
+		if e.Name == "DOTVIRT_OIDC_CLIENT_SECRET" && e.ValueFrom != nil {
+			ref = e.ValueFrom.SecretKeyRef
+		}
+	}
+	if ref == nil || ref.Name != "dotvirt-oidc" || ref.Key != "secret" || ref.Optional == nil || *ref.Optional {
+		t.Errorf("client secret ref = %+v, want dotvirt-oidc/secret, required", ref)
+	}
+}
+
 // Users opening their own pull requests reaches dotvirt as one env var; the
 // default leaves it out.
 func TestDeploymentCarriesWhoOpensPullRequests(t *testing.T) {

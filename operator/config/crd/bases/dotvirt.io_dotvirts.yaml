@@ -139,9 +139,59 @@ spec:
                     == 0 || !has(self.syncImpersonation) || !has(self.syncImpersonation.enabled)
                     || self.syncImpersonation.enabled'
               auth:
-                description: AuthSpec enables OpenShift SSO beside the always-present
-                  token login.
+                description: |-
+                  AuthSpec adds a sign-in flow beside the always-present token login: OpenShift
+                  SSO or OIDC.
                 properties:
+                  oidc:
+                    description: |-
+                      OIDC adds a "Sign in with <displayName>" button for an OpenID Connect
+                      issuer the apiserver trusts. The issuer's ID token is the user's bearer,
+                      so the apiserver's AuthenticationConfiguration must accept this client ID
+                      as an audience of that issuer. Register https://<console host>/api/auth/callback
+                      as the client's redirect URI.
+                    properties:
+                      clientID:
+                        description: ClientID is the client's ID at the issuer.
+                        minLength: 1
+                        type: string
+                      clientSecret:
+                        description: |-
+                          ClientSecret is the key of a Secret in dotvirt's namespace holding the
+                          client secret. Unset: a public client, which PKCE alone protects. The
+                          console reads it when it starts: restart it after a rotation.
+                        properties:
+                          key:
+                            minLength: 1
+                            type: string
+                          name:
+                            minLength: 1
+                            type: string
+                        required:
+                        - key
+                        - name
+                        type: object
+                      displayName:
+                        description: 'DisplayName names the issuer on the sign-in
+                          button. Unset: "single sign-on".'
+                        maxLength: 40
+                        type: string
+                      issuerURL:
+                        description: IssuerURL is the issuer exactly as its tokens
+                          name it (their iss claim).
+                        pattern: ^https://[^\s?#]+$
+                        type: string
+                      scopes:
+                        description: |-
+                          Scopes are asked beside openid: those whose claims the apiserver maps
+                          to a username and groups.
+                        items:
+                          type: string
+                        type: array
+                    required:
+                    - clientID
+                    - issuerURL
+                    type: object
                   openShiftSSO:
                     description: |-
                       OpenShiftSSO adds a "Sign in with OpenShift" button beside the token login. The
@@ -151,6 +201,10 @@ spec:
                       cluster-admin act the operator deliberately doesn't perform. OpenShift only.
                     type: boolean
                 type: object
+                x-kubernetes-validations:
+                - message: 'openShiftSSO and oidc are exclusive: pick one sign-in
+                    flow'
+                  rule: '!(has(self.openShiftSSO) && self.openShiftSSO && has(self.oidc))'
               branding:
                 description: Branding dresses the console as a provider's; unset,
                   it is dotvirt's own.

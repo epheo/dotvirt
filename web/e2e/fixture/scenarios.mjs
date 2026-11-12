@@ -1403,6 +1403,11 @@ function largeScenario() {
 // offering a button that fails; ready offers the SSO path beside the token.
 const sso = { ...base, name: 'sso', authMethods: { sso: true, ssoPending: true } };
 const ssoready = { ...base, name: 'ssoready', authMethods: { sso: true, ssoPending: false } };
+const oidc = {
+	...base,
+	name: 'oidc',
+	authMethods: { sso: false, ssoPending: false, oidc: 'Kanidm' },
+};
 
 // ── residue: a labeled project with no repo (an old install's leftover) ────────
 // The "no repo configured" dead-end Release resolves: the project label stands
@@ -2130,6 +2135,7 @@ export const scenarios = {
 	residue,
 	sso,
 	ssoready,
+	oidc,
 	base,
 	empty,
 	degraded,

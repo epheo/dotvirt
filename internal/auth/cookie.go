@@ -34,15 +34,21 @@ const (
 // flags byte.
 const sealedHeader = 9
 
-const flagSSO byte = 1
+const (
+	flagSSO  byte = 1
+	flagOIDC byte = 2
+)
 
 // session is what the session cookie seals.
 type session struct {
+	// token is the bearer token, or an OIDC session's handle.
 	token  string
 	issued time.Time
-	// sso marks a token dotvirt's own OAuth client minted, which logout deletes
-	// cluster-wide. Never a pasted token: it may be the user's CLI session.
+	// sso marks a session a sign-in flow started, never a pasted token, which
+	// may be the user's CLI session: logout revokes what the flow minted.
 	sso bool
+	// oidc marks an OIDC session, whose tokens the server holds (oidcSessions).
+	oidc bool
 }
 
 // A legacy cookie has no issue time. It reads as issued at the Unix epoch, so
@@ -82,6 +88,9 @@ func cookieValue(s session, sealer cipher.AEAD) string {
 	if s.sso {
 		flags |= flagSSO
 	}
+	if s.oidc {
+		flags |= flagOIDC
+	}
 	return seal(append(append(plain, flags), s.token...), sessionPurpose, sealer)
 }
 
@@ -98,6 +107,7 @@ func parseCookieValue(value string, sealer cipher.AEAD) (session, bool) {
 		token:  string(raw[sealedHeader:]),
 		issued: time.Unix(0, int64(binary.BigEndian.Uint64(raw))),
 		sso:    raw[8]&flagSSO != 0,
+		oidc:   raw[8]&flagOIDC != 0,
 	}, true
 }
 
@@ -132,15 +142,14 @@ func open(value, prefix, purpose string, sealer cipher.AEAD) ([]byte, bool) {
 	return raw, true
 }
 
-// setCookie writes the sealed session cookie, issued now; sso says dotvirt's
-// OAuth client minted token. httpOnly (no JS access), SameSite Lax (sent on
-// top-level navigations + same-site requests), Secure when the request arrived
-// over TLS. No Max-Age: sessionMaxAge is enforced server-side, and the cookie
-// stays a browser-session one.
-func setCookie(w http.ResponseWriter, r *http.Request, token string, sso bool, sealer cipher.AEAD) {
+// setCookie writes the sealed session cookie. httpOnly (no JS access), SameSite
+// Lax (sent on top-level navigations + same-site requests), Secure when the
+// request arrived over TLS. No Max-Age: sessionMaxAge is enforced server-side,
+// and the cookie stays a browser-session one.
+func setCookie(w http.ResponseWriter, r *http.Request, s session, sealer cipher.AEAD) {
 	http.SetCookie(w, &http.Cookie{
 		Name:     cookieName,
-		Value:    cookieValue(session{token: token, issued: time.Now(), sso: sso}, sealer),
+		Value:    cookieValue(s, sealer),
 		Path:     "/",
 		HttpOnly: true,
 		Secure:   isTLS(r),

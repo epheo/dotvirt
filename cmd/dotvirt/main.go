@@ -178,10 +178,34 @@ func run() error {
 	}
 	authenticator := auth.New(saKube, []byte(cfg.SessionSecret))
 
-	// OpenShift SSO (optional): only token acquisition changes - the access token
-	// rides the same TokenReview + cookie + pass-through path as a pasted one.
+	// OIDC sign-in or OpenShift SSO (optional, one of them): only token
+	// acquisition changes - the token rides the same TokenReview + pass-through
+	// path as a pasted one.
+	var oidcFlow *auth.OIDC
+	if cfg.OIDCIssuer != "" {
+		switch {
+		case cfg.PublicURL == "":
+			log.Printf("oidc: -oidc-issuer set but -public-url empty; OIDC sign-in disabled")
+		case cfg.OIDCClientID == "":
+			log.Printf("oidc: -oidc-issuer set but -oidc-client-id empty; OIDC sign-in disabled")
+		default:
+			if cfg.OAuthClientID != "" {
+				log.Printf("oidc: OIDC sign-in replaces OpenShift SSO; -oauth-client-id ignored")
+			}
+			oidcFlow = auth.NewOIDC(auth.OIDCConfig{
+				Issuer:       cfg.OIDCIssuer,
+				ClientID:     cfg.OIDCClientID,
+				ClientSecret: cfg.OIDCClientSecret,
+				RedirectURL:  strings.TrimRight(cfg.PublicURL, "/") + "/api/auth/callback",
+				Scopes:       cfg.OIDCScopes,
+				Name:         cfg.OIDCName,
+				CAFile:       cfg.OIDCCA,
+				InsecureTLS:  cfg.InsecureTLS,
+			}, authenticator)
+		}
+	}
 	var oauthFlow *auth.OAuth
-	if cfg.OAuthClientID != "" {
+	if cfg.OAuthClientID != "" && oidcFlow == nil {
 		if cfg.PublicURL == "" {
 			log.Printf("oauth: -oauth-client-id set but -public-url empty; OpenShift SSO disabled")
 		} else {
@@ -238,6 +262,7 @@ func run() error {
 		Draft:          coordinator,
 		Auth:           authenticator,
 		OAuth:          oauthFlow,
+		OIDC:           oidcFlow,
 		Config: api.Config{
 			BaseBranch:        cfg.BaseBranch,
 			ProposedBranch:    cfg.ProposedBranch,

@@ -1,4 +1,4 @@
-import { api, HttpError, retryDelay, Unauthorized, type User } from '#lib/api.js';
+import { api, HttpError, retryDelay, Unauthorized, type AuthMethods, type User } from '#lib/api.js';
 import { friendlyError } from '#lib/format.js';
 import { resource, type Resource } from '#lib/resource.svelte.js';
 
@@ -75,7 +75,7 @@ export const session = new Session();
 // Which sign-in paths exist, read fresh per mount: the login screen offers
 // SSO once the backend confirms it, the admin banner offers to finish an SSO
 // whose OAuthClient is still unregistered. Call during component init.
-export function authMethods(): Resource<{ sso: boolean; ssoPending: boolean }> {
+export function authMethods(): Resource<AuthMethods> {
 	return resource(
 		() => '',
 		() => api.authMethods(),
