@@ -10,6 +10,8 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
+	"github.com/epheo/dotvirt/internal/clusterstate"
+	"github.com/epheo/dotvirt/internal/eventbus"
 	"github.com/epheo/dotvirt/internal/model"
 	"github.com/epheo/dotvirt/pkg/tenancy"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -222,6 +224,15 @@ func TestProjectNamespaceReadsTheSnapshot(t *testing.T) {
 	if !read("team-a-dev") || read("openshift-cnv") || read("nowhere") {
 		t.Errorf("team-a-dev %v, openshift-cnv %v, nowhere %v; want only team-a-dev",
 			read("team-a-dev"), read("openshift-cnv"), read("nowhere"))
+	}
+
+	// A snapshot whose namespace store has not listed yet knows no namespace:
+	// every one would read as no project's.
+	unlisted := &Server{state: clusterstate.New(fc.sa, "dotvirt.io/project", eventbus.New())}
+	for _, ns := range []string{"team-a-dev", "nowhere"} {
+		if project, known := unlisted.ProjectNamespace(ns); project || known {
+			t.Errorf("%s before the list: project %v, known %v; want neither", ns, project, known)
+		}
 	}
 }
 
