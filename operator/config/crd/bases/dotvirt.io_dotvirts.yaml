@@ -194,11 +194,14 @@ spec:
                     type: object
                   openShiftSSO:
                     description: |-
-                      OpenShiftSSO adds a "Sign in with OpenShift" button beside the token login. The
-                      operator generates the client credential and, once the console host is assigned,
-                      reports the exact OAuthClient to apply (redirect URI filled in) in
-                      status.ssoOAuthClient. Registering that cluster-scoped OAuthClient stays a
-                      cluster-admin act the operator deliberately doesn't perform. OpenShift only.
+                      OpenShiftSSO adds a "Sign in with OpenShift" button beside the token login.
+                      Unset turns it on wherever the cluster runs OpenShift's OAuth server and no
+                      oidc flow is set; false keeps it off. The operator generates the client
+                      credential and, once the console host is assigned, reports the exact
+                      OAuthClient to apply (redirect URI filled in) in status.ssoOAuthClient; a
+                      cluster admin signed in to the console can register it from there instead.
+                      Registering that cluster-scoped OAuthClient stays a cluster-admin act the
+                      operator deliberately doesn't perform. OpenShift only.
                     type: boolean
                 type: object
                 x-kubernetes-validations:
@@ -285,8 +288,9 @@ spec:
                       Dotvirt (the default) opens it with its forge account; Users leaves it
                       to the requester, who opens it in the forge as themselves from the
                       branch dotvirt pushed and the link it returns, so the forge's review
-                      rules see them as its poster. Protect dotvirt/proposed/** so only
-                      dotvirt's account pushes there.
+                      rules see them as its poster. Leave dotvirt/proposed/** unprotected:
+                      dotvirt force-pushes each proposal's branch, which a protected branch
+                      refuses on Forgejo. Require approvals from a reviewer team instead.
                     enum:
                     - Dotvirt
                     - Users

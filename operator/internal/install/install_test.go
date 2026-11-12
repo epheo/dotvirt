@@ -30,6 +30,33 @@ func envValue(env []corev1.EnvVar, name string) (string, bool) {
 	return "", false
 }
 
+// A managed forge tells the app where its admin password lives, never the
+// password: the console reads it under the caller's own token.
+func TestManagedForgeNamesItsAdminSecret(t *testing.T) {
+	managed := testDotvirt()
+	managed.Spec.Forge.Managed = true
+	env := Deployment(managed, "argocd", nil).Spec.Template.Spec.Containers[0].Env
+	for name, want := range map[string]string{
+		"DOTVIRT_FORGE_ADMIN_SECRET": managed.Namespace + "/" + ForgejoAdminSecret,
+		"DOTVIRT_FORGE_ADMIN_KEY":    ForgejoAdminKey,
+		"DOTVIRT_FORGE_ADMIN_USER":   ForgejoBotUser,
+	} {
+		if got, ok := envValue(env, name); !ok || got != want {
+			t.Errorf("%s = (%q, ok=%v), want %q", name, got, ok, want)
+		}
+	}
+	for _, e := range env {
+		if e.ValueFrom != nil && e.ValueFrom.SecretKeyRef != nil && e.ValueFrom.SecretKeyRef.Name == ForgejoAdminSecret {
+			t.Errorf("%s mounts the admin password into the app", e.Name)
+		}
+	}
+
+	byo := testDotvirt()
+	if got, ok := envValue(Deployment(byo, "argocd", nil).Spec.Template.Spec.Containers[0].Env, "DOTVIRT_FORGE_ADMIN_SECRET"); ok {
+		t.Errorf("BYO forge: DOTVIRT_FORGE_ADMIN_SECRET must be unset, got %q", got)
+	}
+}
+
 // DOTVIRT_WEBHOOK_URL points the forge at dotvirt's in-cluster Service ONLY for a managed
 // (in-cluster) Forgejo, which can't hairpin to the external Route. A bring-your-own forge
 // is typically off-cluster and can't reach that Service URL, so the var is left unset and
@@ -89,7 +116,7 @@ func TestDeploymentSSOEnvGatedOnFlag(t *testing.T) {
 		t.Error("SSO off: DOTVIRT_OAUTH_CLIENT_ID must be unset")
 	}
 	sso := testDotvirt()
-	sso.Spec.Auth.OpenShiftSSO = true
+	sso.Spec.Auth.OpenShiftSSO = new(true)
 	env := Deployment(sso, "argocd", nil).Spec.Template.Spec.Containers[0].Env
 	// The OAuthClient is cluster-scoped, so its name must be per-install: a shared one
 	// lets a second install overwrite the first's redirect URI and secret.
@@ -315,7 +342,7 @@ func TestForgejoRollsOnAdminSecretChange(t *testing.T) {
 func TestDeploymentVerifiedTLSByDefault(t *testing.T) {
 	dv := testDotvirt()
 	dv.Spec.Forge.Managed = true
-	dv.Spec.Auth.OpenShiftSSO = true
+	dv.Spec.Auth.OpenShiftSSO = new(true)
 	dv.Spec.Metrics.URL = "https://thanos-querier.openshift-monitoring.svc.cluster.local:9091"
 	d := Deployment(dv, "argocd", nil)
 	c := d.Spec.Template.Spec.Containers[0]

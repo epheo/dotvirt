@@ -49,14 +49,13 @@ func (r *DotvirtReconciler) reconcileWorkload(ctx context.Context, dv *dotvirtv1
 	if dv.Spec.Ingress.Host != "" {
 		dv.Status.ConsoleURL = "https://" + dv.Spec.Ingress.Host
 	}
-	if dv.Spec.Auth.OpenShiftSSO {
+	if dv.Spec.Auth.SSOEnabled() {
 		if dv.Spec.Ingress.Host != "" {
 			dv.Status.SSOOAuthClient = ssoApplyCommand(dv.Namespace, dv.Spec.Ingress.Host)
 		}
 	} else {
-		// Derived status: toggling SSO off (or the vanilla gate zeroing it in-memory)
-		// must retire the stale apply command, not leave it inviting a needless
-		// OAuthClient forever.
+		// Derived status: SSO turned or resolved off must retire the stale apply
+		// command, not leave it inviting a needless OAuthClient forever.
 		dv.Status.SSOOAuthClient = ""
 	}
 	if err := r.applyOwned(ctx, dv, install.Deployment(dv, rc.argoNS, r.tenantKinds(ctx, dv, rc, nil))); err != nil {

@@ -84,8 +84,9 @@ spec:
       - description: Prometheus/Thanos query API backing the Performance tab.
         displayName: Metrics
         path: metrics
-      - description: Add "Sign in with OpenShift" beside the token login. The operator
-          publishes the OAuthClient to apply in status.ssoOAuthClient.
+      - description: Sign in with OpenShift beside the token login. Unset turns it
+          on where the OpenShift OAuth server runs and no OIDC flow is set; false
+          keeps it off. A cluster admin finishes setup once from the console.
         displayName: OpenShift SSO
         path: auth.openShiftSSO
         x-descriptors:
@@ -129,9 +130,9 @@ spec:
     1. Install the operator. The console then offers to create a `Dotvirt`
        resource; the defaults work as-is on OpenShift.
     2. Wait for the `Available` condition, then open `status.consoleURL`.
-    3. Sign in with a Kubernetes token (`oc whoami -t`), or set
-       `auth.openShiftSSO: true` and click "Finish SSO setup" once as a
-       cluster admin.
+    3. On OpenShift, sign in once with a Kubernetes token (`oc whoami -t`) as
+       a cluster admin and click "Finish SSO setup"; everyone then signs in
+       with OpenShift. A token always works too.
 
     Every TLS hop is verified out of the box: the operator wires the cluster's
     ingress and service CAs through the whole stack.
@@ -163,7 +164,8 @@ spec:
     - `forge.managed: true` runs an evaluation Forgejo; for production point
       `forge.url` and `forge.credentialsSecret` at your own Forgejo/Gitea
     - `ingress.host` pins the console hostname (required on vanilla Kubernetes)
-    - `auth.openShiftSSO` adds "Sign in with OpenShift"
+    - `auth.openShiftSSO: false` drops "Sign in with OpenShift" (on by default
+      where OpenShift's OAuth server runs)
     - `metrics.url` points the Performance tab at a Prometheus/Thanos API
 
     Status reports the rest: `consoleURL`, `forgeURL`, `forgeAdminHint` (the

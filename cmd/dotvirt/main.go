@@ -271,6 +271,7 @@ func run() error {
 			StaticDir:         cfg.StaticDir,
 			WebhookSecret:     cfg.WebhookSecret,
 			UploadProxyURL:    uploadProxyURL(ctx, cfg.UploadProxyURL, saCluster),
+			ForgeAdmin:        cfg.ForgeAdmin,
 			PlatformRepo:      cfg.PlatformRepo,
 			ProjectLabel:      cfg.ProjectLabel,
 			RepoAnnotation:    cfg.RepoAnnotation,

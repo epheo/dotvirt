@@ -47,6 +47,9 @@ func (s *Server) routes(mux *http.ServeMux) {
 	}
 
 	mux.HandleFunc("GET /api/inventory", s.handleInventory)
+	if s.cfg.ForgeAdmin.Name != "" {
+		mux.HandleFunc("POST /api/forge/admin-password", s.handleForgeAdminPassword)
+	}
 	mux.HandleFunc("GET /api/tasks", s.handleTasks)
 	mux.HandleFunc("GET /api/options", s.handleOptions)
 	mux.HandleFunc("GET /api/storage/classes", s.handleStorageClasses)

@@ -610,6 +610,9 @@ var ssarNodes = ssarRef{resource: "nodes"}
 // ssarClaims is reading a namespace's PersistentVolumeClaims.
 var ssarClaims = ssarRef{resource: "persistentvolumeclaims"}
 
+// ssarSecrets is reading a Secret: the managed forge's admin credential.
+var ssarSecrets = ssarRef{resource: "secrets"}
+
 // replicationRead is everything GET /api/storage/replication shows. Those
 // kinds are cluster-scoped and the snapshot behind it is the SA's, so each is
 // asked of the caller.

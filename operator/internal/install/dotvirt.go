@@ -187,6 +187,13 @@ func dotvirtEnv(dv *dotvirtv1alpha1.Dotvirt, argoNS string, tenantAllowed []tena
 	// URL either.
 	if dv.Spec.Forge.Managed {
 		env = append(env, corev1.EnvVar{Name: "DOTVIRT_WEBHOOK_URL", Value: ServiceURL(dv)})
+		// Where the admin password lives, never the password: the console
+		// reads it under the caller's own token.
+		env = append(env,
+			corev1.EnvVar{Name: "DOTVIRT_FORGE_ADMIN_SECRET", Value: dv.Namespace + "/" + ForgejoAdminSecret},
+			corev1.EnvVar{Name: "DOTVIRT_FORGE_ADMIN_KEY", Value: ForgejoAdminKey},
+			corev1.EnvVar{Name: "DOTVIRT_FORGE_ADMIN_USER", Value: ForgejoBotUser},
+		)
 	}
 	if p := dv.Spec.Publishing; p.Domain != "" && p.GatewayClassName != "" {
 		env = append(env,
@@ -210,7 +217,7 @@ func dotvirtEnv(dv *dotvirtv1alpha1.Dotvirt, argoNS string, tenantAllowed []tena
 	// applies the OAuthClient (a cluster-admin act it deliberately doesn't perform; no
 	// oauthclients grant), reported in status.ssoOAuthClient. optional=true: enabling SSO
 	// before the OAuthClient is applied must not wedge the pod.
-	if dv.Spec.Auth.OpenShiftSSO {
+	if dv.Spec.Auth.SSOEnabled() {
 		env = append(env,
 			corev1.EnvVar{Name: "DOTVIRT_OAUTH_CLIENT_ID", Value: OAuthClientName(dv.Namespace)},
 			secretEnv("DOTVIRT_OAUTH_CLIENT_SECRET", OAuthSecretName, "clientSecret", true),
@@ -251,7 +258,7 @@ func dotvirtEnv(dv *dotvirtv1alpha1.Dotvirt, argoNS string, tenantAllowed []tena
 			env = append(env, corev1.EnvVar{Name: "DOTVIRT_FORGE_CA", Value: ingressCAMountPath + "/" + IngressCAKey})
 		}
 	}
-	if dv.Spec.Auth.OpenShiftSSO {
+	if dv.Spec.Auth.SSOEnabled() {
 		// The oauth token endpoint is router-served: same ingress CA.
 		env = append(env, corev1.EnvVar{Name: "DOTVIRT_OAUTH_CA", Value: ingressCAMountPath + "/" + IngressCAKey})
 	}

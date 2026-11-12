@@ -174,6 +174,9 @@ const MIME = {
 	'.woff2': 'font/woff2',
 };
 
+// The managed forge's admin password the forgeadmin scenario may read.
+const FORGE_ADMIN_PASSWORD = 'fixture-forge-admin-pw';
+
 function sendJSON(res, status, body) {
 	const data = JSON.stringify(body);
 	res.writeHead(status, { 'Content-Type': 'application/json' });
@@ -427,6 +430,13 @@ async function handleAPI(req, res, url) {
 	const createCtx = { state, sendJSON, sendText, readBody, projectOf, stageInto, draftFor };
 	if (await handleCreate(req, res, url, createCtx)) return;
 
+	// Mirrors the Go route: the read is the caller's, its answer never cached.
+	if (path === '/api/forge/admin-password' && req.method === 'POST') {
+		if (!clusterCaps(s).forgeAdmin)
+			return sendText(res, 403, "forbidden: you may not read the forge's admin password");
+		res.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' });
+		return res.end(JSON.stringify({ username: 'dotvirt-bot', password: FORGE_ADMIN_PASSWORD }));
+	}
 	if (path === '/api/inventory') return sendJSON(res, 200, s.inventory);
 	if (path === '/api/options') return sendJSON(res, 200, s.options);
 	if (path === '/api/storage/classes') return sendJSON(res, 200, s.storageClasses ?? []);
@@ -1044,6 +1054,7 @@ function clusterCaps(s) {
 		drsPSI: !!s.rebalancing?.canPSI,
 		drsDisable: !!s.rebalancing?.canManage,
 		oauthClient: !!n.canManage,
+		forgeAdmin: false,
 		imageUpload: true,
 		uploadProxy: `http://localhost:${port}/__fixture/proxy`,
 		hosts: true,

@@ -313,9 +313,15 @@ func TestEnvtest(t *testing.T) {
 	t.Run("admission takes one sign-in flow", func(t *testing.T) {
 		oidc := &dotvirtv1alpha1.OIDCSpec{IssuerURL: "https://idm.example/oauth2/openid/dotvirt", ClientID: "dotvirt"}
 		dv := testCR()
-		dv.Spec.Auth = dotvirtv1alpha1.AuthSpec{OpenShiftSSO: true, OIDC: oidc}
+		dv.Spec.Auth = dotvirtv1alpha1.AuthSpec{OpenShiftSSO: new(true), OIDC: oidc}
 		if err := admin.Create(ctx, dv, client.DryRunAll); !apierrors.IsInvalid(err) {
 			t.Errorf("openShiftSSO with oidc: got %v, want Invalid", err)
+		}
+		// Unset resolves off beside oidc, so only an explicit true conflicts.
+		dv = testCR()
+		dv.Spec.Auth = dotvirtv1alpha1.AuthSpec{OpenShiftSSO: new(false), OIDC: oidc}
+		if err := admin.Create(ctx, dv, client.DryRunAll); client.IgnoreAlreadyExists(err) != nil {
+			t.Errorf("openShiftSSO false with oidc: %v", err)
 		}
 		for _, u := range []string{"http://idm.example", "idm.example", "https://idm.example/a b", "https://idm.example?x"} {
 			dv := testCR()
@@ -328,6 +334,33 @@ func TestEnvtest(t *testing.T) {
 		dv.Spec.Auth.OIDC = oidc
 		if err := admin.Create(ctx, dv, client.DryRunAll); client.IgnoreAlreadyExists(err) != nil {
 			t.Errorf("oidc alone: %v", err)
+		}
+	})
+
+	t.Run("an oidc install that never named openShiftSSO upgrades as it is", func(t *testing.T) {
+		// Stored as an earlier operator wrote it: oidc set, openShiftSSO absent.
+		// Every later write must pass admission, and the operator never writes
+		// the resolved value back. A second install halts before the finalizer,
+		// so the operator reads it and the subtest can delete it freely.
+		mustCreate(t, admin, &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "sso-upgrade"}})
+		dv := testCR()
+		dv.Namespace = "sso-upgrade"
+		dv.Spec.Auth.OIDC = &dotvirtv1alpha1.OIDCSpec{IssuerURL: "https://idm.example/oauth2/openid/dotvirt", ClientID: "dotvirt"}
+		mustCreate(t, admin, dv)
+		t.Cleanup(func() { _ = admin.Delete(context.Background(), dv) })
+		got := &dotvirtv1alpha1.Dotvirt{}
+		eventually(t, "the operator read the install", func() bool {
+			return admin.Get(ctx, client.ObjectKeyFromObject(dv), got) == nil && len(got.Status.Conditions) > 0
+		})
+		if got.Spec.Auth.OpenShiftSSO != nil {
+			t.Errorf("stored openShiftSSO = %v, want absent", *got.Spec.Auth.OpenShiftSSO)
+		}
+		// A merge patch carries no resourceVersion: the operator's own status
+		// writes cannot make it conflict.
+		base := got.DeepCopy()
+		got.Spec.Auth.OIDC.DisplayName = "Company login"
+		if err := admin.Patch(ctx, got, client.MergeFrom(base)); err != nil {
+			t.Errorf("updating the oidc install: %v", err)
 		}
 	})
 

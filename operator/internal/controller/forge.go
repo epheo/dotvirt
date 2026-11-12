@@ -172,9 +172,9 @@ func applyEffectiveForgeSpec(dv *dotvirtv1alpha1.Dotvirt, forgeURL string) {
 }
 
 func forgeAdminHint(ns string) string {
-	return fmt.Sprintf("Forgejo admin user %q; reveal the password: "+
-		"oc extract secret/%s -n %s --keys=password --to=-",
-		install.ForgejoBotUser, install.ForgejoAdminSecret, ns)
+	return fmt.Sprintf("Forgejo admin user %q; copy the password from the console's change tray, or: "+
+		"oc extract secret/%s -n %s --keys=%s --to=-",
+		install.ForgejoBotUser, install.ForgejoAdminSecret, ns, install.ForgejoAdminKey)
 }
 
 // reconcilePlatformRepo ensures the platform repo exists - the imperative
@@ -294,7 +294,7 @@ func (r *DotvirtReconciler) forgejoExposure(dv *dotvirtv1alpha1.Dotvirt) client.
 // orphaned (no ownerRef) so the git data survives uninstall.
 func (r *DotvirtReconciler) applyForgejoBase(ctx context.Context, dv *dotvirtv1alpha1.Dotvirt, rc *reconcileCtx) error {
 	if !r.DryRun {
-		if err := r.ensureSecret(ctx, dv, install.ForgejoAdminSecret, "password"); err != nil {
+		if err := r.ensureSecret(ctx, dv, install.ForgejoAdminSecret, install.ForgejoAdminKey); err != nil {
 			return err
 		}
 	}
@@ -355,7 +355,7 @@ func (r *DotvirtReconciler) adminSecretHash(ctx context.Context, dv *dotvirtv1al
 	if err != nil {
 		return "", fmt.Errorf("read the forge admin secret: %w", err)
 	}
-	sum := sha256.Sum256(s.Data["password"])
+	sum := sha256.Sum256(s.Data[install.ForgejoAdminKey])
 	return hex.EncodeToString(sum[:8]), nil
 }
 
@@ -418,7 +418,7 @@ func (r *DotvirtReconciler) bootstrapForgejo(ctx context.Context, dv *dotvirtv1a
 	// re-mints every reconcile forever. write:organization/write:repository cover the org
 	// + repo webhook and PR operations.
 	token, err := forge.NewFactory(apiBase, forge.StaticToken("unused"), false, "").
-		MintToken(install.ForgejoBotUser, string(admin.Data["password"]), "dotvirt-operator", []string{"read:user", "write:organization", "write:repository"})
+		MintToken(install.ForgejoBotUser, string(admin.Data[install.ForgejoAdminKey]), "dotvirt-operator", []string{"read:user", "write:organization", "write:repository"})
 	if err != nil {
 		return false, err
 	}

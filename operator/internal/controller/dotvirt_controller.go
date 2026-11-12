@@ -156,9 +156,8 @@ func (r *DotvirtReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 			// status patch and turn it into an optimistic lock.
 			base = dv.DeepCopy()
 		}
-		// Only after the finalizer add, the reconcile's one spec write: the effective
-		// spec must never reach the stored CR.
-		r.normalizeSpec(&dv)
+		// Only after the finalizer add, the reconcile's one spec write: the
+		// effective spec the phases fill in must never reach the stored CR.
 		res, err = r.provision(ctx, req.NamespacedName, &dv)
 	}
 	if werr := r.writeStatus(ctx, &dv, base); werr != nil {
@@ -240,6 +239,9 @@ func (r *DotvirtReconciler) provision(ctx context.Context, key types.NamespacedN
 	if argoSettling || meta.IsStatusConditionFalse(dv.Status.Conditions, dotvirtv1alpha1.ConditionForgeRepoReady) {
 		wait = min(wait, settleRetry)
 	}
+	if argo != nil && argo.Reason == reasonRefreshing {
+		wait = min(wait, refreshRetry)
+	}
 	return ctrl.Result{RequeueAfter: wait}, nil
 }
 
@@ -286,19 +288,22 @@ func precedes(a, b *dotvirtv1alpha1.Dotvirt) bool {
 	return a.Namespace+"/"+a.Name < b.Namespace+"/"+b.Name
 }
 
-// normalizeSpec derives the EFFECTIVE in-memory spec the whole pipeline consumes.
-// Never persisted: it runs after the finalizer add and everything later writes
-// only /status, so these mutations stay in-process (a regression test pins the
-// stored spec). The forge and exposure phases fill their resolved hosts into the
-// spec the same way.
-func (r *DotvirtReconciler) normalizeSpec(dv *dotvirtv1alpha1.Dotvirt) {
-	// SSO is OpenShift-only: the app's oauth flow runs against the cluster oauth server.
-	if dv.Spec.Auth.OpenShiftSSO && r.Platform != platform.OpenShift {
-		dv.Spec.Auth.OpenShiftSSO = false
+// resolveSSO fills openShiftSSO into the EFFECTIVE in-memory spec the later
+// phases read. Never persisted: it runs after the finalizer add and everything
+// later writes only /status (a regression test pins the stored spec); the forge
+// and exposure phases fill their resolved hosts in the same way. Unset follows
+// the cluster: on where OpenShift's OAuth server runs and no oidc flow is set.
+// Off OpenShift even an explicit true is off: the app's flow needs that server.
+func (r *DotvirtReconciler) resolveSSO(dv *dotvirtv1alpha1.Dotvirt, oauthServed bool) {
+	a := &dv.Spec.Auth
+	on := oauthServed && a.OIDC == nil
+	if a.OpenShiftSSO != nil {
+		on = *a.OpenShiftSSO
 	}
+	a.OpenShiftSSO = new(on && r.Platform == platform.OpenShift)
 }
 
-// reconcileCtx is what one pass derives once, after normalizeSpec, for every
+// reconcileCtx is what one pass derives once, before the phases, for every
 // phase to read instead of re-resolving: the ArgoCD target and external URL (a
 // Route GET) and the default ingress CA (a ConfigMap GET).
 type reconcileCtx struct {
@@ -356,6 +361,7 @@ func (r *DotvirtReconciler) reconcileDependencies(ctx context.Context, dv *dotvi
 		return r.waitPhase(dv, dotvirtv1alpha1.ConditionDependenciesReady, "MissingPrerequisite",
 			depRes.Summary(), dotvirtv1alpha1.PhaseBlockedOnDependencies, time.Minute), nil
 	}
+	r.resolveSSO(dv, depRes.OpenShiftOAuth)
 	r.setCondition(dv, dotvirtv1alpha1.ConditionDependenciesReady, metav1.ConditionTrue, "Satisfied", depRes.Summary())
 	return nil, nil
 }
