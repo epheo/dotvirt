@@ -212,9 +212,16 @@ func TestProjectNamespaceReadsTheSnapshot(t *testing.T) {
 	fc := newFakeCluster(t)
 	fc.namespaces = append(fc.namespaces, corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "openshift-cnv"}})
 	s := fc.server(nil, Config{BaseBranch: "main"})
-	if !s.ProjectNamespace("team-a-dev") || s.ProjectNamespace("openshift-cnv") || s.ProjectNamespace("nowhere") {
+	read := func(ns string) bool {
+		project, known := s.ProjectNamespace(ns)
+		if !known {
+			t.Errorf("%s: unknown after the snapshot synced", ns)
+		}
+		return project
+	}
+	if !read("team-a-dev") || read("openshift-cnv") || read("nowhere") {
 		t.Errorf("team-a-dev %v, openshift-cnv %v, nowhere %v; want only team-a-dev",
-			s.ProjectNamespace("team-a-dev"), s.ProjectNamespace("openshift-cnv"), s.ProjectNamespace("nowhere"))
+			read("team-a-dev"), read("openshift-cnv"), read("nowhere"))
 	}
 }
 
