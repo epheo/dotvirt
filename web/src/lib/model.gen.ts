@@ -2244,6 +2244,12 @@ export interface Project {
    * issue to fix in git.
    */
   platformKinds?: ObjectRef[];
+  /**
+   * SourceOverrides are files Argo CD reads as the project's source settings
+   * when they sit at its path: they change which files sync, and how, so what
+   * syncs is not what the repo's layout says. Each is an issue to fix in git.
+   */
+  sourceOverrides?: string[];
 }
 /**
  * AdoptableNamespace is a namespace holding VMs but no dotvirt.io/project label -

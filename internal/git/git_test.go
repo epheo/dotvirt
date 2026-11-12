@@ -183,3 +183,22 @@ func TestRefreshDropsUnreachableObjects(t *testing.T) {
 		t.Errorf("main lost content: %v", err)
 	}
 }
+
+// Argo CD reads exactly these two names at an Application's path.
+func TestArgoSourceOverride(t *testing.T) {
+	for name, want := range map[string]bool{
+		".argocd-source.yaml":               true,
+		".argocd-source-dotvirt-p-web.yaml": true,
+		"tenant/.argocd-source.yaml":        true,
+		"a/b/.argocd-source-x.yaml":         true,
+		"argocd-source.yaml":                false,
+		".argocd-source.yml":                false,
+		"alpha/web.yaml":                    false,
+		".argocd-source-x.yaml/web.yaml":    false,
+		"alpha/.argocd-source.yaml.bak":     false,
+	} {
+		if got := ArgoSourceOverride(name); got != want {
+			t.Errorf("%s: got %v, want %v", name, got, want)
+		}
+	}
+}

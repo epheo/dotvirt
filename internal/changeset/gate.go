@@ -313,6 +313,14 @@ type fileChange struct {
 // is the identity the write claims; a revert claims none and may restore any
 // managed object.
 func fileAccess(rule KindRule, proj project.ProjectInfo, idx declaredIndex, ch fileChange, want func(after []object) error) ([]Access, error) {
+	if git.ArgoSourceOverride(ch.path) {
+		// Removing one gives the repo's layout back its say; it declares no
+		// object, so the removal makes no access of its own.
+		if ch.remove {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("%w: %s is a file Argo CD reads as the Application's source settings, not a manifest: it would change which files sync, and how; the console never writes one", model.ErrInvalid, ch.path)
+	}
 	var before, after []object
 	if ch.before != nil {
 		var err error

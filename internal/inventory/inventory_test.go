@@ -140,6 +140,27 @@ func TestBuildFiltersAndEnriches(t *testing.T) {
 	}
 }
 
+// A file Argo CD reads as the project's source settings rides the project as
+// an issue, wherever the repo holds it.
+func TestBuildSurfacesArgoSourceSettings(t *testing.T) {
+	bare := seedRepoFiles(t, map[string]string{
+		"a-dev/web.yaml":                vmYAML("web", "a-dev"),
+		".argocd-source.yaml":           "directory:\n  recurse: true\n",
+		"a-dev/.argocd-source-app.yaml": "kustomize: {}\n",
+	})
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	repos := git.NewRepoSet(ctx, "", "", nil, false, nil, time.Hour)
+	got := Build(Inputs{
+		Branch: "main", Repos: repos,
+		Projects: []project.ProjectInfo{{Name: "team-a", Repo: bare, Namespaces: []string{"a-dev"}}},
+	}).Projects[0]
+	slices.Sort(got.SourceOverrides)
+	if want := []string{".argocd-source.yaml", "a-dev/.argocd-source-app.yaml"}; !slices.Equal(got.SourceOverrides, want) {
+		t.Errorf("source overrides = %v, want %v", got.SourceOverrides, want)
+	}
+}
+
 // Documents Argo will not apply as dotvirt reads them ride the project as
 // issues: one without metadata.namespace, one naming a namespace outside the
 // project, one of a platform-tier kind. A caller sees only those whose
