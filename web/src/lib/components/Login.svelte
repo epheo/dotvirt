@@ -101,7 +101,7 @@
 			disabled={op.busy || !token.trim()}
 			class="mt-3 w-full rounded {flow
 				? 'border border-line bg-inset text-ink-soft hover:bg-inset-strong'
-				: 'bg-accent text-accent-on hover:bg-accent-hover'} px-4 py-2 text-sm font-medium disabled:opacity-40"
+				: 'bg-accent text-accent-on hover:bg-accent-deep'} px-4 py-2 text-sm font-medium disabled:opacity-40"
 		>
 			{op.busy ? 'Signing in…' : 'Sign in with token'}
 		</button>
