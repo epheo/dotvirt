@@ -38,6 +38,8 @@
 	--color-accent-ink: #0066cc;
 	/* filled-button hover: darker, so white ink gains contrast in both themes */
 	--color-accent-deep: #004d99;
+	/* ink on an accent fill: a theme whose accent is light sets a dark one */
+	--color-accent-on: #fff;
 
 	/* selection — the one pair every panel uses: current target vs hover */
 	--color-select: #e7f1fa;

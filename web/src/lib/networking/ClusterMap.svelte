@@ -274,7 +274,7 @@
 		{/if}
 		{#if hostHere}
 			<span
-				class="mt-auto flex items-center gap-1.5 rounded bg-accent px-1.5 py-0.5 text-xs leading-4 text-white"
+				class="mt-auto flex items-center gap-1.5 rounded bg-accent px-1.5 py-0.5 text-xs leading-4 text-accent-on"
 			>
 				<span class="font-mono">{way!.host}</span><span class="ml-auto">{hit!.vm.name} here</span>
 			</span>
@@ -487,7 +487,7 @@
 
 {#snippet hitChip()}
 	<span
-		class="mt-1 flex items-center gap-1.5 rounded bg-accent px-1.5 py-0.5 text-xs leading-4 text-white"
+		class="mt-1 flex items-center gap-1.5 rounded bg-accent px-1.5 py-0.5 text-xs leading-4 text-accent-on"
 	>
 		<Search size={12} /><span class="font-mono">{hit!.vm.name}</span><span
 			>in {hit!.vm.namespace}</span

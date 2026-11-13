@@ -174,7 +174,7 @@
 							{#each way.steps as s, i (i)}
 								<li class="flex items-start gap-2">
 									<span
-										class="mt-px size-[18px] shrink-0 rounded-full bg-accent text-center text-[11px] leading-[18px] font-bold text-white"
+										class="mt-px size-[18px] shrink-0 rounded-full bg-accent text-center text-[11px] leading-[18px] font-bold text-accent-on"
 										>{i + 1}</span
 									>
 									<span>{s.text}</span>

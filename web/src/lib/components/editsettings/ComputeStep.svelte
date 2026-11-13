@@ -60,7 +60,7 @@
 			type="button"
 			onclick={() => setMode('instancetype')}
 			class="px-3 py-1 text-xs {form.mode === 'instancetype'
-				? 'bg-accent text-white'
+				? 'bg-accent text-accent-on'
 				: 'bg-panel text-ink-soft hover:bg-inset'}"
 		>
 			Instance type
@@ -69,7 +69,7 @@
 			type="button"
 			onclick={() => setMode('custom')}
 			class="border-l border-line-strong px-3 py-1 text-xs {form.mode === 'custom'
-				? 'bg-accent text-white'
+				? 'bg-accent text-accent-on'
 				: 'bg-panel text-ink-soft hover:bg-inset'}"
 		>
 			Custom CPU/Memory
