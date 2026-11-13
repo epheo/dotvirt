@@ -109,10 +109,10 @@
 				<div class="flex items-center justify-between gap-3 border-b border-line px-3 py-2.5">
 					<span class="flex items-center gap-1.5 text-sm font-semibold text-ink"
 						>Issues{#if issues.length}<span
-								class="rounded-full px-1.5 text-[11px] leading-4 font-semibold text-white {worstTone ===
+								class="rounded-full px-1.5 text-[11px] leading-4 font-semibold {worstTone ===
 								'danger'
-									? 'bg-danger'
-									: 'bg-warn-ink'}">{issues.length}</span
+									? 'bg-danger text-danger-on'
+									: 'bg-warn text-warn-on'}">{issues.length}</span
 							>{/if}</span
 					>
 					<span class="text-ink-faint">GitOps state and cluster alerts, one list</span>
