@@ -82,7 +82,7 @@
 		if (i === current) return { cls: 'bg-accent text-white', text: String(i + 1) };
 		if (step.valid === false)
 			return { cls: 'bg-warn-soft text-warn-ink ring-1 ring-warn/50', text: String(i + 1) };
-		if (step.valid === true) return { cls: 'bg-ok text-white', text: '', done: true };
+		if (step.valid === true) return { cls: 'bg-ok text-ok-on', text: '', done: true };
 		return { cls: 'bg-line text-ink-muted', text: String(i + 1) };
 	}
 </script>

@@ -56,6 +56,10 @@
 	--color-ok: #3e8635;
 	--color-warn: #f0ab00;
 	--color-danger: #c9190b;
+	/* ink on a status fill, each at 4.5:1 or more; amber takes dark ink */
+	--color-ok-on: #fff;
+	--color-warn-on: #151515;
+	--color-danger-on: #fff;
 	--color-ok-soft: #f3faf2;
 	--color-warn-soft: #fdf7e7;
 	--color-danger-soft: #faeae8;
@@ -189,6 +193,9 @@
 	--color-ok: #6ec664;
 	--color-warn: #f0ab00;
 	--color-danger: #f4695f;
+	/* the brighter fills take dark ink */
+	--color-ok-on: #151515;
+	--color-danger-on: #151515;
 	--color-ok-soft: #1c3a17;
 	--color-warn-soft: #3d2f05;
 	--color-danger-soft: #45120c;
