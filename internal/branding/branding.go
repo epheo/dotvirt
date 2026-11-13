@@ -121,6 +121,10 @@ func (s Settings) Shell(index []byte) []byte {
 	info := s.Info()
 	var b bytes.Buffer
 	fmt.Fprintf(&b, "<title>%s</title>", html.EscapeString(cmp.Or(info.ProductName, "dotvirt")))
+	if info.Logo {
+		// Declared after the bundled icon, so the browser takes this one.
+		b.WriteString(`<link rel="icon" href="/api/branding/logo">`)
+	}
 	if info.Theme {
 		b.WriteString(`<link rel="stylesheet" href="/api/branding/theme.css">`)
 	}

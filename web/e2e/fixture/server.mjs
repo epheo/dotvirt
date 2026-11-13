@@ -1350,13 +1350,15 @@ function serveStatic(req, res, url) {
 }
 
 // The shell dressed as dotvirt's server dresses it (branding.Settings.Shell):
-// the title, the stylesheet after the console's own, and the branding block.
+// the title, the logo as the icon, the stylesheet after the console's own,
+// and the branding block.
 function serveShell(res) {
 	const info = state.scenario.branding?.info ?? {};
 	const esc = (v) => v.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 	const block = JSON.stringify(info).replace(/</g, '\\u003c').replace(/>/g, '\\u003e');
 	const head =
 		`<title>${esc(info.productName || 'dotvirt')}</title>` +
+		(info.logo ? '<link rel="icon" href="/api/branding/logo">' : '') +
 		(info.theme ? '<link rel="stylesheet" href="/api/branding/theme.css">' : '') +
 		`<script type="application/json" id="dotvirt-branding">${block}</script>`;
 	const index = readFileSync(join(buildDir, 'index.html'), 'utf8');
