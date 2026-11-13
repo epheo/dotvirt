@@ -193,8 +193,10 @@
 	--color-ok: #6ec664;
 	--color-warn: #f0ab00;
 	--color-danger: #f4695f;
-	/* the brighter fills take dark ink */
+	/* the brighter fills take dark ink; each fill and its ink are declared
+	   together, so a theme's dark values stay a pair */
 	--color-ok-on: #151515;
+	--color-warn-on: #151515;
 	--color-danger-on: #151515;
 	--color-ok-soft: #1c3a17;
 	--color-warn-soft: #3d2f05;
