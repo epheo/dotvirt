@@ -17,11 +17,10 @@ test("the console wears a provider's branding, sign-in included", async ({ page 
 	const header = page.locator('header').first();
 	await expect(header.getByRole('link', { name: 'Uniwatt Cloud' })).toBeVisible();
 	await expect(page).toHaveTitle('Uniwatt Cloud');
-	// The browser takes the last icon declared: the provider's logo.
-	await expect(page.locator('link[rel="icon"]').last()).toHaveAttribute(
-		'href',
-		/\/api\/branding\/logo$/,
-	);
+	// Every icon is the provider's logo: browsers do not simply take the last
+	// one declared, so no other may sit beside it.
+	await expect(page.locator('link[rel="icon"]')).not.toHaveCount(0);
+	await expect(page.locator('link[rel="icon"]:not([href$="/api/branding/logo"])')).toHaveCount(0);
 	const account = header.getByRole('link', { name: 'Account' });
 	await expect(account).toHaveAttribute('href', 'https://c.example/account');
 	await expect(account).toHaveAttribute('rel', 'noopener noreferrer');
