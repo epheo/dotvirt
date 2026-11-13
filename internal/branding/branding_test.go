@@ -194,6 +194,12 @@ func TestShell(t *testing.T) {
 	if own := strings.Index(shell, `href="/app.css"`); theme < 0 || theme < own || theme > strings.Index(shell, "</head>") {
 		t.Errorf("the stylesheet must follow the console's own, in the head: %q", shell)
 	}
+	if icon := strings.Index(shell, `<link rel="icon" href="/api/branding/logo">`); icon < 0 || icon > strings.Index(shell, "</head>") {
+		t.Errorf("the logo must be the icon: %q", shell)
+	}
+	if strings.Contains(plain, `rel="icon"`) {
+		t.Errorf("an unbranded shell names an icon: %q", plain)
+	}
 	if strings.Count(shell, "<script") != 1 {
 		t.Errorf("a value opened a script: %q", shell)
 	}

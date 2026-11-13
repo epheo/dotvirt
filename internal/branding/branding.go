@@ -108,8 +108,8 @@ func (s Settings) Info() model.Branding {
 const ShellID = "dotvirt-branding"
 
 // Shell is the console's index.html dressed for its first paint: the product
-// name as its title, the stylesheet after the console's own, and Info as a
-// JSON block. None of them is a script the browser runs, so the
+// name as its title, the logo as its icon, the stylesheet after the console's
+// own, and Info as a JSON block. None of them is a script the browser runs, so the
 // content-security policy derived from the plain index still holds. Called per
 // page load, like Info: a ConfigMap change shows on the next one. An index
 // with no </head> is returned as it is.
@@ -121,6 +121,11 @@ func (s Settings) Shell(index []byte) []byte {
 	info := s.Info()
 	var b bytes.Buffer
 	fmt.Fprintf(&b, "<title>%s</title>", html.EscapeString(cmp.Or(info.ProductName, "dotvirt")))
+	if info.Logo {
+		// The index carries no icon of its own: until the layout mounts and
+		// names the logo too, this is the page's only one.
+		b.WriteString(`<link rel="icon" href="/api/branding/logo">`)
+	}
 	if info.Theme {
 		b.WriteString(`<link rel="stylesheet" href="/api/branding/theme.css">`)
 	}
