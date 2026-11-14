@@ -460,12 +460,12 @@
 				{#if worst.kind === 'staged'}
 					{@const project = worst.project}
 					<button
-						class="inline-flex h-5 items-center rounded-full bg-accent px-2.5 font-bold text-white"
+						class="inline-flex h-5 items-center rounded-full bg-accent px-2.5 font-bold text-accent-on"
 						onclick={() => (ui.modal = { kind: 'propose', project })}>Review</button
 					>
 				{:else}
 					<button
-						class="inline-flex h-5 items-center rounded-full bg-accent px-2.5 font-bold text-white"
+						class="inline-flex h-5 items-center rounded-full bg-accent px-2.5 font-bold text-accent-on"
 						onclick={unfold}>Show</button
 					>
 				{/if}

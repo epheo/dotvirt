@@ -29,7 +29,7 @@
 
 	const SHAPE = {
 		primary:
-			'border border-accent bg-accent font-medium text-white hover:border-accent-deep hover:bg-accent-deep disabled:border-line-soft disabled:bg-inset disabled:text-ink-faint',
+			'border border-accent bg-accent font-medium text-accent-on hover:border-accent-deep hover:bg-accent-deep disabled:border-line-soft disabled:bg-inset disabled:text-ink-faint',
 		outline:
 			'border border-accent bg-panel font-medium text-accent-ink hover:bg-select-soft disabled:opacity-50',
 		secondary:

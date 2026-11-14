@@ -36,8 +36,11 @@
 	--color-accent: #0066cc;
 	--color-accent-hover: #1e7ce0;
 	--color-accent-ink: #0066cc;
-	/* filled-button hover: darker, so white ink gains contrast in both themes */
+	/* filled-button hover: darker, so the default ink gains contrast in both themes */
 	--color-accent-deep: #004d99;
+	/* ink on the accent fills (accent, accent-hover, accent-deep): a theme
+	   whose accent is light sets a dark one */
+	--color-accent-on: #fff;
 
 	/* selection — the one pair every panel uses: current target vs hover */
 	--color-select: #e7f1fa;
@@ -172,11 +175,14 @@
 	--color-ink-muted: #b8bbbe;
 	--color-ink-faint: #999da1;
 
-	/* accent: the button fill keeps PF blue (white ink at 5.6:1); links go to
-	   the light PF blue so they clear 8:1 on the panels */
+	/* accent: the button fill keeps PF blue (its ink at 5.6:1); links go to
+	   the light PF blue so they clear 8:1 on the panels. The fill and its ink
+	   are declared together, so a theme's dark values stay a pair. */
 	--color-accent: #0066cc;
 	--color-accent-hover: #1e7ce0;
 	--color-accent-ink: #73bcf7;
+	--color-accent-deep: #004d99;
+	--color-accent-on: #fff;
 
 	/* selection */
 	--color-select: #123a5e;

@@ -79,7 +79,7 @@
 	// Rail badge: current = blue number / invalid = amber number / satisfied
 	// required step = green check / optional step = slate number.
 	function railBadge(step: WizardStep, i: number): { cls: string; text: string; done?: boolean } {
-		if (i === current) return { cls: 'bg-accent text-white', text: String(i + 1) };
+		if (i === current) return { cls: 'bg-accent text-accent-on', text: String(i + 1) };
 		if (step.valid === false)
 			return { cls: 'bg-warn-soft text-warn-ink ring-1 ring-warn/50', text: String(i + 1) };
 		if (step.valid === true) return { cls: 'bg-ok text-white', text: '', done: true };
