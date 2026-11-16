@@ -125,16 +125,18 @@ func (o *OIDC) oauth2Config(m *oidcMeta) *oauth2.Config {
 
 // LoginRedirect (GET /api/auth/oidc) sends the browser to the issuer with a
 // fresh state, PKCE challenge and nonce, their secrets sealed in the state
-// cookie.
+// cookie with the ?return= page the callback lands on (SafeReturn). An
+// unreachable issuer lands on the sign-in screen's failure button, not a bare
+// error page: the screen redirects here on its own.
 func (o *OIDC) LoginRedirect(w http.ResponseWriter, r *http.Request) {
 	m, err := o.discover(r.Context())
 	if err != nil {
-		log.Printf("oidc: %v", err)
-		http.Error(w, "single sign-on is unavailable, try again shortly", http.StatusServiceUnavailable)
+		log.Printf("oidc: sign-in start: %v", err)
+		http.Redirect(w, r, "/?sso_error=1", http.StatusFound)
 		return
 	}
 	state, nonce, verifier := randomToken(), randomToken(), oauth2.GenerateVerifier()
-	setStateCookie(w, r, strings.Join([]string{state, verifier, nonce}, "."), o.auth.sealer)
+	setStateCookie(w, r, state, withReturn(strings.Join([]string{state, verifier, nonce}, "."), r.URL.Query().Get("return")), o.auth.sealer)
 	http.Redirect(w, r, o.oauth2Config(m).AuthCodeURL(state,
 		oauth2.S256ChallengeOption(verifier), oauth2.SetAuthURLParam("nonce", nonce)), http.StatusFound)
 }
@@ -144,20 +146,23 @@ func (o *OIDC) LoginRedirect(w http.ResponseWriter, r *http.Request) {
 // starts a session holding them. Failures land back on the login screen with
 // the generic sso_error flag; the detail is only logged.
 func (o *OIDC) Callback(w http.ResponseWriter, r *http.Request) {
+	state := r.URL.Query().Get("state")
+	c, err := r.Cookie(stateCookieName(state))
 	failLogin := func(why string, err error) {
 		log.Printf("oidc callback: %s: %v", why, err)
-		clearStateCookie(w, r)
+		if c != nil {
+			clearStateCookie(w, r, c.Name)
+		}
 		http.Redirect(w, r, "/?sso_error=1", http.StatusFound)
 	}
-	c, err := r.Cookie(stateCookie)
-	if err != nil {
+	if state == "" || err != nil {
 		failLogin("state cookie missing", err)
 		return
 	}
 	sealed, ok := parseStateValue(c.Value, o.auth.sealer)
+	sealed, ret := splitReturn(sealed)
 	parts := strings.Split(sealed, ".")
-	state := r.URL.Query().Get("state")
-	if !ok || len(parts) != 3 || state == "" || !hmac.Equal([]byte(state), []byte(parts[0])) {
+	if !ok || len(parts) != 3 || !hmac.Equal([]byte(state), []byte(parts[0])) {
 		failLogin("state mismatch", nil)
 		return
 	}
@@ -198,9 +203,9 @@ func (o *OIDC) Callback(w http.ResponseWriter, r *http.Request) {
 	log.Printf("oidc: %s signed in", id.Username)
 	now := time.Now()
 	handle := o.auth.oidc.start(t, now)
-	clearStateCookie(w, r)
+	clearStateCookie(w, r, c.Name)
 	setCookie(w, r, session{token: handle, issued: now, sso: true, oidc: true}, o.auth.sealer)
-	http.Redirect(w, r, "/", http.StatusFound)
+	http.Redirect(w, r, ret, http.StatusFound)
 }
 
 // renew trades refresh for the session's next tokens. A refusal of the grant
