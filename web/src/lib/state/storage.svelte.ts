@@ -5,11 +5,12 @@ import {
 	type Claim,
 	type Node,
 	type Snapshot,
+	type StorageClass,
 	type StorageClassInfo,
 } from '#lib/api.js';
 import { friendlyError } from '#lib/format.js';
 import { resource } from '#lib/resource.svelte.js';
-import { diskRows, imageUsage, uploadAbility, type UploadAbility } from '#lib/storage.js';
+import { diskRows, imageUsage, repick, uploadAbility, type UploadAbility } from '#lib/storage.js';
 import { caps } from './caps.svelte';
 import { templates } from './templates.svelte';
 import { inventory } from './inventory.svelte';
@@ -178,3 +179,20 @@ export const namespaceClasses = (namespace: () => string) =>
 		() => CLASSES_IN + namespace(),
 		(key) => api.storageClasses(key.slice(CLASSES_IN.length) || undefined),
 	);
+
+// Keeps a form's class picks off the classes its namespace forbids, whether
+// or not a picker is on screen: '' (the cluster default) moves to the first
+// allowed class when the default is forbidden, and a pick held over from
+// another namespace moves off. Call during component setup.
+export function keepClassesAllowed(
+	classes: () => (StorageClass | StorageClassInfo)[],
+	picks: () => [string, (name: string) => void][],
+) {
+	$effect(() => {
+		const list = classes();
+		for (const [value, set] of picks()) {
+			const next = repick(list, value);
+			if (next !== null) untrack(() => set(next));
+		}
+	});
+}

@@ -92,7 +92,7 @@
 					<td class="py-1.5">
 						<StorageClassSelect
 							options={classOptions}
-							pin={false}
+							emptyIsDefault={false}
 							value={targets[d.name] ?? ''}
 							onchange={(e) => (targets = { ...targets, [d.name]: e.currentTarget.value })}
 							emptyLabel="— keep —"

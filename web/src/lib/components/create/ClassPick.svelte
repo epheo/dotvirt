@@ -1,9 +1,8 @@
 <script lang="ts">
-	import { untrack } from 'svelte';
 	import type { StorageClass, StorageClassInfo } from '#lib/api.js';
 	import { liveMigrates } from '#lib/create.js';
 	import { classPromise } from '#lib/replication.js';
-	import { noClassAllowed, offeredClasses, repick } from '#lib/storage.js';
+	import { noClassAllowed, offeredClasses } from '#lib/storage.js';
 	import { bytes } from '#lib/format.js';
 	import { inventory } from '#lib/state/inventory.svelte.js';
 	import { LABEL } from './sheet.svelte.js';
@@ -11,29 +10,21 @@
 	// A storage class picker that says what each class means for a VM: shared
 	// (it can live-migrate) or pinned to one host, and the free space when the
 	// driver reports it. value '' is the cluster default. Classes the
-	// namespace's quotas forbid are not offered; pin moves the pick off one
-	// (and off the default when that is forbidden) - false where the caller
-	// holds the full list and pins itself.
+	// namespace's quotas forbid are not offered (the form keeps its pick off
+	// them: keepClassesAllowed).
 	let {
 		label,
 		value,
 		onpick,
 		classes,
-		pin = true,
 	}: {
 		label: string;
 		value: string;
 		onpick: (name: string) => void;
 		classes: (StorageClassInfo | StorageClass)[];
-		pin?: boolean;
 	} = $props();
 
 	const shown = $derived(offeredClasses(classes));
-	$effect(() => {
-		if (!pin) return;
-		const next = repick(classes, value);
-		if (next !== null) untrack(() => onpick(next));
-	});
 
 	const id = $props.id();
 	const facts = (c: StorageClassInfo | StorageClass) =>

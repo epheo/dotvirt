@@ -3,7 +3,7 @@
 	import { freeName } from '#lib/devices.js';
 	import { diskError, diskErrors, type DiskRow, type EditForm } from '#lib/editform.js';
 	import { quantityBytes } from '#lib/format.js';
-	import { namespaceClasses } from '#lib/state/storage.svelte.js';
+	import { keepClassesAllowed, namespaceClasses } from '#lib/state/storage.svelte.js';
 	import { protectionCards } from '#lib/state/replication.svelte.js';
 	import ProtectionPick from '../create/ProtectionPick.svelte';
 	import RowListEditor from '../RowListEditor.svelte';
@@ -24,6 +24,14 @@
 	const classes = $derived(classesRes.data ?? []);
 	const cards = $derived(protectionCards(classes));
 	const added = $derived(form.disks.filter((d) => d.isNew && !d.removed));
+	keepClassesAllowed(
+		() => (classes.length ? classes : (options?.storageClasses ?? [])),
+		() =>
+			added.map((d): [string, (c: string) => void] => [
+				d.storageClass ?? '',
+				(c) => (d.storageClass = c),
+			]),
+	);
 	const sizes = $derived(
 		added.map((d) => ({ storageClass: d.storageClass ?? '', bytes: quantityBytes(d.size ?? '') })),
 	);

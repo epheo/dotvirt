@@ -8,7 +8,7 @@
 	import { action } from '#lib/resource.svelte.js';
 	import { caps } from '#lib/state/caps.svelte.js';
 	import { inventory } from '#lib/state/inventory.svelte.js';
-	import { namespaceClasses } from '#lib/state/storage.svelte.js';
+	import { keepClassesAllowed, namespaceClasses } from '#lib/state/storage.svelte.js';
 	import { ui, type ImageDownload } from '#lib/state/ui.svelte.js';
 	import { imageDeleteConsequence, suggestImageName } from '#lib/storage.js';
 	import { NAME_HINT, validName } from '#lib/validate.js';
@@ -118,6 +118,10 @@
 	const classesRes = namespaceClasses(() => namespace);
 	const classRows = $derived(
 		classesRes.data?.length ? classesRes.data : (inventory.options?.storageClasses ?? []),
+	);
+	keepClassesAllowed(
+		() => classRows,
+		() => [[storageClass, (c) => (storageClass = c)]],
 	);
 	const info = $derived(
 		classesRes.data?.find((c) => c.name === (storageClass || inventory.defaultStorageClass)),

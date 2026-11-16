@@ -2119,7 +2119,11 @@ const publishingapart = {
 	capabilities: { ...publishing.capabilities, 'db-prod': { project: { publishingApart: true } } },
 };
 
+// web-prod's quotas forbid fast-ssd, the cluster default; db-prod's do not.
+const classquota = { ...base, name: 'classquota', classQuotas: { 'web-prod': ['fast-ssd'] } };
+
 export const scenarios = {
+	classquota,
 	publishing,
 	publishingwaits,
 	publishingunhoused,

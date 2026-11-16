@@ -31,7 +31,7 @@
 	import { memoryRoom } from '#lib/state/hosts.svelte.js';
 	import { vmGate } from '#lib/gates.js';
 	import { inventory } from '#lib/state/inventory.svelte.js';
-	import { namespaceClasses } from '#lib/state/storage.svelte.js';
+	import { keepClassesAllowed, namespaceClasses } from '#lib/state/storage.svelte.js';
 	import { persisted } from '#lib/state/persisted.svelte.js';
 	import { ui } from '#lib/state/ui.svelte.js';
 	import { NAME_HINT, validName } from '#lib/validate.js';
@@ -231,6 +231,16 @@
 	const classes = $derived(classesRes.data ?? []);
 	// Facts when the class list loaded, else the bare names the options carry.
 	const classRows = $derived(classes.length ? classes : (options?.storageClasses ?? []));
+	keepClassesAllowed(
+		() => classRows,
+		() => [
+			[storageClass, (c) => (storageClass = c)],
+			...disks.rows.map((d): [string, (c: string) => void] => [
+				d.storageClass,
+				(c) => (d.storageClass = c),
+			]),
+		],
+	);
 	const classOf = (c: string) =>
 		classes.find((x) => x.name === (c || inventory.defaultStorageClass));
 	const rootClass = $derived(classOf(storageClass));
