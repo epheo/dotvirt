@@ -654,10 +654,10 @@ A managed forge also takes `webURL` as its `ROOT_URL`, so its own pages and clon
 dotvirt queries with each caller's own token, never its ServiceAccount's.
 
 - A caller allowed `get` on `prometheuses/api` (`monitoring.coreos.com`) named `k8s` in `openshift-monitoring` queries `url` across every namespace.
-  That endpoint must check the token itself: unauthenticated, it shows every signed-in user every namespace's series.
+  Through dotvirt no one else reaches it, but the endpoint must still check the token itself: unauthenticated, anyone with network reach to it reads every namespace's series.
 - Every other caller queries `tenancyURL`, once per namespace, with a `namespace=<ns>` parameter and a `{namespace="<ns>"}` matcher.
   That endpoint must allow only a caller who may `get` `pods.metrics.k8s.io` in that namespace, and force the query to it (kube-rbac-proxy plus prom-label-proxy, as OpenShift's Thanos querier does on 9092).
-  dotvirt relies on it to keep tenants apart.
+  That check is what keeps tenants apart.
 
 On OpenShift, `url: https://thanos-querier.openshift-monitoring.svc.cluster.local:9091` is enough: the tenancy port and the service CA are derived.
 Elsewhere, set both endpoints and the CA that signs them:
@@ -671,7 +671,9 @@ spec:
 ```
 
 - `tenancyURL` unset, outside OpenShift: callers without the cluster-wide right get no metrics.
-- `ca`: a ConfigMap key in dotvirt's namespace, trusted for both endpoints.
+  It must differ from `url`.
+- `ca`: a ConfigMap key in dotvirt's namespace, trusted for both endpoints; it needs an https `url` or `tenancyURL`.
+  Unset, an https `.svc` `url` trusts OpenShift's service CA, any other the system pool; with `spec.forge.insecureTLS`, that other skips verification.
   It is mounted optional: missing, metrics TLS fails verification and the console stays up.
   The console reads it when it starts: restart it after a rotation.
 

@@ -318,7 +318,8 @@ func dotvirtArgs(dv *dotvirtv1alpha1.Dotvirt) []string {
 	}
 	if dv.Spec.Forge.InsecureTLS {
 		// A self-signed forge Route: skip TLS verification for forge API calls +
-		// git clones. Metrics stays verified (its own CA env).
+		// git clones. Metrics too, unless DOTVIRT_METRICS_CA names a CA (an https
+		// .svc URL, or spec.metrics.ca): the app's metrics client lets a CA win.
 		args = append(args, "-insecure-tls")
 	}
 	return args
