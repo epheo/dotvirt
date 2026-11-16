@@ -5,6 +5,7 @@ import {
 	applyFilters,
 	classFacts,
 	classTag,
+	defaultClassForbidden,
 	diskRows,
 	diskShared,
 	filtersFromQuery,
@@ -811,6 +812,12 @@ describe('classes a namespace forbids', () => {
 		expect(repick([fast, no(lab)], 'lab')).toBe('');
 		expect(repick([no(fast), no(lab), slow], 'lab')).toBe('slow');
 		expect(repick([fast, slow], 'slow')).toBeNull();
+	});
+
+	it('knows when the namespace forbids the default class', () => {
+		expect(defaultClassForbidden([no(fast), slow])).toBe(true);
+		expect(defaultClassForbidden([no(fast), no(slow)])).toBe(true);
+		expect(defaultClassForbidden([fast, no(slow)])).toBe(false);
 	});
 
 	it('says when the namespace allows no class', () => {

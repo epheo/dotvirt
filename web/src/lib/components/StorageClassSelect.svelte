@@ -1,7 +1,7 @@
 <script lang="ts">
 	import type { HTMLSelectAttributes } from 'svelte/elements';
 	import type { StorageClass, StorageClassInfo } from '#lib/api.js';
-	import { noClassAllowed, offeredClasses, pinnedClass } from '#lib/storage.js';
+	import { defaultClassForbidden, noClassAllowed, offeredClasses } from '#lib/storage.js';
 	import SelectInput from './SelectInput.svelte';
 
 	// The one storage-class picker. The empty option means "no explicit class"
@@ -27,7 +27,7 @@
 	} & Omit<HTMLSelectAttributes, 'value' | 'class' | 'size'> = $props();
 
 	const shown = $derived(offeredClasses(options));
-	const defaultForbidden = $derived(emptyIsDefault && !!pinnedClass(options));
+	const defaultForbidden = $derived(emptyIsDefault && defaultClassForbidden(options));
 </script>
 
 <SelectInput bind:value class={cls} {...rest}>

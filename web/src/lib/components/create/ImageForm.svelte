@@ -10,7 +10,7 @@
 	import { inventory } from '#lib/state/inventory.svelte.js';
 	import { keepClassesAllowed, namespaceClasses } from '#lib/state/storage.svelte.js';
 	import { ui, type ImageDownload } from '#lib/state/ui.svelte.js';
-	import { imageDeleteConsequence, suggestImageName } from '#lib/storage.js';
+	import { imageDeleteConsequence, noClassAllowed, suggestImageName } from '#lib/storage.js';
 	import { NAME_HINT, validName } from '#lib/validate.js';
 	import Button from '../Button.svelte';
 	import Consequence from '../Consequence.svelte';
@@ -165,6 +165,7 @@
 		else if (!validName(name)) m.push('The name needs lowercase letters, digits and -');
 		if (!namespace) m.push('Pick a project and namespace');
 		if (!sizeOK) m.push('The size needs a unit, like 10Gi');
+		if (noClassAllowed(classRows)) m.push(`No storage class may be used in ${namespace}`);
 		if (asBoot && bootTaken) m.push(`${name} is already a boot image in ${namespace}`);
 		return m;
 	});

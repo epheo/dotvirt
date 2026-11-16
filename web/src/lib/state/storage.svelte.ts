@@ -178,6 +178,8 @@ export const namespaceClasses = (namespace: () => string) =>
 	resource<StorageClassInfo[]>(
 		() => CLASSES_IN + namespace(),
 		(key) => api.storageClasses(key.slice(CLASSES_IN.length) || undefined),
+		// Blank on a switch: one namespace's marks never stand for another's.
+		{ reset: true },
 	);
 
 // Keeps a form's class picks off the classes its namespace forbids, whether

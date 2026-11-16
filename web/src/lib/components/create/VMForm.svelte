@@ -32,6 +32,7 @@
 	import { vmGate } from '#lib/gates.js';
 	import { inventory } from '#lib/state/inventory.svelte.js';
 	import { keepClassesAllowed, namespaceClasses } from '#lib/state/storage.svelte.js';
+	import { noClassAllowed, offeredClasses } from '#lib/storage.js';
 	import { persisted } from '#lib/state/persisted.svelte.js';
 	import { ui } from '#lib/state/ui.svelte.js';
 	import { NAME_HINT, validName } from '#lib/validate.js';
@@ -260,7 +261,7 @@
 			return info && !liveMigrates(info);
 		}),
 	);
-	const keep = $derived(pinned ? sharedClass(classes) : undefined);
+	const keep = $derived(pinned ? sharedClass(offeredClasses(classes)) : undefined);
 	function keepMigration() {
 		if (!keep) return;
 		storageClass = keep.name;
@@ -415,6 +416,7 @@
 		if (!preference) m.push('Pick an OS tuning');
 		else if (short) m.push(short);
 		if (!sizeOK(diskSize)) m.push('The disk size needs a unit, like 30Gi');
+		if (noClassAllowed(classRows)) m.push(`No storage class may be used in ${namespace}`);
 		if (!hasNetwork) m.push('Keep at least one network');
 		for (const e of disks.rows.map((_, i) => diskError(i))) if (e) m.push(e);
 		return m;

@@ -981,12 +981,14 @@ const forbidden = (c: StorageClass | StorageClassInfo) => 'forbidden' in c && !!
 export const offeredClasses = <T extends StorageClass | StorageClassInfo>(classes: T[]): T[] =>
 	classes.filter((c) => !forbidden(c));
 
+// True when the namespace forbids the cluster's default class.
+export const defaultClassForbidden = (classes: (StorageClass | StorageClassInfo)[]): boolean =>
+	classes.some((c) => c.default && forbidden(c));
+
 // What a picker holds instead of '' (the cluster default) where the namespace
 // forbids the default class: the first class it allows, '' when none.
-export function pinnedClass(classes: (StorageClass | StorageClassInfo)[]): string {
-	const def = classes.find((c) => c.default);
-	return def && forbidden(def) ? (offeredClasses(classes)[0]?.name ?? '') : '';
-}
+export const pinnedClass = (classes: (StorageClass | StorageClassInfo)[]): string =>
+	defaultClassForbidden(classes) ? (offeredClasses(classes)[0]?.name ?? '') : '';
 
 // The pick a picker should move to: from a class the namespace forbids (one
 // held over from another namespace), or from '' when the default is
