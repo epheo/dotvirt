@@ -143,3 +143,28 @@ func TestClassReplicationReadsOnlyR_DRBD(t *testing.T) {
 		t.Fatalf("absent replicas should read as r-drbd's default of one: %+v", got)
 	}
 }
+
+// A class is usable when CDI fills a DataVolume's modes on it: from its own
+// provisioner table (Recognized), or from claim settings an admin put on the
+// profile for a driver CDI does not know.
+func TestStorageProfileRecognizesAdminClaimSettings(t *testing.T) {
+	profile := func(status map[string]any) *unstructured.Unstructured {
+		return &unstructured.Unstructured{Object: map[string]any{"status": status}}
+	}
+	sets := []any{map[string]any{"accessModes": []any{"ReadWriteOnce"}, "volumeMode": "Block"}}
+	unknown := []any{map[string]any{"type": "Recognized", "status": "False"}}
+	known := []any{map[string]any{"type": "Recognized", "status": "True"}}
+	for name, c := range map[string]struct {
+		status map[string]any
+		want   bool
+	}{
+		"in CDI's table":                    {map[string]any{"conditions": known, "claimPropertySets": sets}, true},
+		"unknown driver, admin claim sets":  {map[string]any{"conditions": unknown, "claimPropertySets": sets}, true},
+		"unknown driver, no claim settings": {map[string]any{"conditions": unknown}, false},
+		"no status yet":                     {map[string]any{}, false},
+	} {
+		if got := storageProfile(profile(c.status)).Recognized; got != c.want {
+			t.Errorf("%s: recognized = %v, want %v", name, got, c.want)
+		}
+	}
+}

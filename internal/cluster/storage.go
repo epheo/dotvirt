@@ -137,6 +137,10 @@ func storageProfile(p *unstructured.Unstructured) *model.StorageProfile {
 			}
 		}
 	}
+	// CDI's Recognized condition covers only its built-in provisioner table; a
+	// driver it does not know is just as usable once an admin's claim settings
+	// reach status.
+	sp.Recognized = len(sets) > 0
 	conds, _, _ := unstructured.NestedSlice(p.Object, "status", "conditions")
 	for _, raw := range conds {
 		cond, _ := raw.(map[string]any)
