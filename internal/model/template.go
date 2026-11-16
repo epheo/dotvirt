@@ -35,8 +35,20 @@ type TemplateParameter struct {
 }
 
 // TemplateList is the content-library listing across the caller's libraries.
+// Seeds reports the starter library's pull request, or why it could not be
+// opened, per library that has one pending.
 type TemplateList struct {
-	Templates []Template `json:"templates"`
+	Templates []Template     `json:"templates"`
+	Seeds     []TemplateSeed `json:"seeds,omitempty"`
+}
+
+// TemplateSeed is the starter template library proposed to a project's repo:
+// its open pull request, or the forge's refusal when it could not be opened.
+type TemplateSeed struct {
+	Library  string `json:"library"`
+	PRNumber int    `json:"prNumber,omitempty"`
+	PRURL    string `json:"prURL,omitempty"`
+	Error    string `json:"error,omitempty"`
 }
 
 // DeployTemplateRequest renders a library template and stages the resulting VM

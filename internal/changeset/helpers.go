@@ -9,6 +9,7 @@ import (
 
 	"github.com/epheo/dotvirt/internal/draft"
 	"github.com/epheo/dotvirt/internal/model"
+	"github.com/epheo/dotvirt/internal/tasks"
 )
 
 // authorEmail derives a stable noreply commit email from a k8s username, which is
@@ -46,6 +47,23 @@ func refSegment(s string) string {
 	out = strings.Trim(out, "-.")
 	if out == "" {
 		out = "x"
+	}
+	return out
+}
+
+// userSegment is refSegment for the user, the first segment of a proposal
+// branch, kept out of the segments that name no user: a leading '_' is
+// reserved (tasks.SeedSegment) and RevertSegment heads revert branches, which
+// review services read as "a revert by the next segment". A username starting
+// with '_' or equal to "revert" therefore proposes on a branch that differs
+// from its plain refSegment form.
+func userSegment(user string) string {
+	out := strings.TrimLeft(refSegment(user), "_-.")
+	if out == "" {
+		out = "x"
+	}
+	if out == tasks.RevertSegment {
+		out = "u-" + out
 	}
 	return out
 }

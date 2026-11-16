@@ -108,6 +108,11 @@ type Coordinator struct {
 	publishing publish.Settings
 	// product names the console in the forge (WithProductName).
 	product string
+
+	// seeds is what this process knows of each repo's starter-library offer
+	// (seed.go), keyed by normalized repo URL.
+	seedMu sync.Mutex
+	seeds  map[string]*seedState
 }
 
 // New builds a Coordinator. forge and resyncer may be nil (PR creation degrades
