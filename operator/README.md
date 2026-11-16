@@ -852,6 +852,20 @@ their own change.
 - one merged before dotvirt saw it open settles the draft the same way;
 - dotvirt never opens, reopens or edits a PR.
 
+`spec.forge.pullRequests: Delegated` acts with the requester's own forge account.
+It suits a forge whose users sign in through the same identity provider as the console.
+This build sets up the connection only: dotvirt still pushes and opens pull requests with its own account until the write path ships.
+
+- Register dotvirt at the forge as an OAuth2 application: a confidential client, with the redirect URI `https://<console host>/api/forge/callback`.
+- Put its client secret in a Secret in dotvirt's namespace, and set `spec.forge.userAuth`: `clientID`, `clientSecret` (that Secret and key), and `authorizeURL`, the forge's `/login/oauth/authorize` as users' browsers reach it.
+- `tokenURL` defaults to the forge's URL plus `/login/oauth/access_token`; set it when dotvirt reaches the token endpoint at another address.
+- The kubelet reads the client secret for the console's pod: the operator never does, so the Secret needs no grant. Restart the console after a rotation.
+- Users must be able to sign in to the forge at `authorizeURL`; the rest of the forge may stay private.
+- The first sign-in of each console session sends the user to that page once. The forge asks for consent the first time only, then answers at once. Leaving the page unanswered leaves the console usable; the next sign-in, or the user menu's "Connect git account", asks again.
+- The token rides the console session only: kept in memory, never written to disk, dropped at sign-out, at session expiry, and by the user menu's "Disconnect git account". A restart drops every connection; the next connect is the forge's silent answer.
+- Disconnecting forgets the token; the grant itself stays at the forge until the user, the forge's admin, or deleting the forge account revokes it.
+- dotvirt asks the scopes `write:repository read:user`, fixed for good: the forge refuses a grant asked with other scopes than it holds.
+
 Leave `dotvirt/proposed/**` unprotected in the forge.
 dotvirt rebuilds a proposal's branch on every propose and force-pushes it.
 Forgejo refuses force pushes and deletions on any protected branch, for everyone.

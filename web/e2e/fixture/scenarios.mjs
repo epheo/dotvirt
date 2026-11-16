@@ -1411,6 +1411,12 @@ const oidc = {
 // A provider round trip that never leaves a session behind: the sign-in screen
 // must stop redirecting instead of bouncing forever.
 const oidcsessionless = { ...oidc, name: 'oidcsessionless', sessionless: true };
+
+// Pull requests through each user's own forge account (pullRequests:
+// Delegated). consent: the forge, the user already signed in there, grants at
+// once; abandon: the user leaves its authorize page without answering.
+const delegated = { ...base, name: 'delegated', forgeDelegated: { mode: 'consent' } };
+const delegatedabandon = { ...base, name: 'delegatedabandon', forgeDelegated: { mode: 'abandon' } };
 // A managed forge whose admin Secret the caller may read.
 const forgeadmin = {
 	...base,
@@ -2174,6 +2180,8 @@ export const scenarios = {
 	residue,
 	sso,
 	oidcsessionless,
+	delegated,
+	delegatedabandon,
 	ssoready,
 	oidc,
 	forgeadmin,

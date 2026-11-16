@@ -114,6 +114,16 @@ export interface AuthMethods {
 	oidc?: string;
 }
 
+// The session's own forge account, for pull requests opened as the user.
+// asked: a connect already started this session, so the console starts no
+// other on its own.
+export interface ForgeSession {
+	delegated: boolean;
+	connected: boolean;
+	login?: string;
+	asked: boolean;
+}
+
 export interface CreateVMRequest {
 	name: string;
 	namespace: string;
@@ -434,6 +444,8 @@ export const api = {
 	trace: (req: gen.TraceRequest) => post<gen.TraceResult>('/api/networking/trace', req),
 	// Which sign-in paths exist (shown on the login screen before any session).
 	authMethods: () => get<AuthMethods>('/api/auth/methods'),
+	forgeSession: () => get<ForgeSession>('/api/forge/session'),
+	forgeDisconnect: () => post<void>('/api/forge/disconnect', {}),
 	// Applies the OAuthClient under the CALLER's token; RBAC is the gate.
 	finishSSO: () => req<void>('/api/auth/oauthclient', { method: 'POST' }),
 	// A managed forge's admin sign-in, read under the CALLER's token on their
