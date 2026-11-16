@@ -398,6 +398,77 @@ func TestDeploymentMetricsTenancyURL(t *testing.T) {
 	}
 }
 
+// A tenancy URL the CR names wins over the derived one, and serves a querier
+// with no known tenancy port; without url there is no metrics at all.
+func TestDeploymentMetricsExplicitTenancyURL(t *testing.T) {
+	for _, tc := range []struct{ url, tenancy, want string }{
+		{"https://prom-wide.monitoring.svc:8443", "https://prom-tenancy.monitoring.svc:8443", "https://prom-tenancy.monitoring.svc:8443"},
+		{"https://thanos-querier.openshift-monitoring.svc:9091", "https://own-proxy.monitoring.svc:9443", "https://own-proxy.monitoring.svc:9443"},
+		{"", "https://prom-tenancy.monitoring.svc:8443", ""},
+	} {
+		dv := testDotvirt()
+		dv.Spec.Metrics.URL, dv.Spec.Metrics.TenancyURL = tc.url, tc.tenancy
+		got, ok := envValue(Deployment(dv, "argocd", nil).Spec.Template.Spec.Containers[0].Env, "DOTVIRT_METRICS_TENANCY_URL")
+		if got != tc.want || ok != (tc.want != "") {
+			t.Errorf("url %q tenancy %q: tenancy URL = %q (set %t), want %q", tc.url, tc.tenancy, got, ok, tc.want)
+		}
+	}
+}
+
+// The metrics CA the CR names is the one both metrics endpoints trust, in
+// place of the service CA; unset, OpenShift's in-cluster default stands.
+func TestDeploymentMetricsCA(t *testing.T) {
+	ref := &dotvirtv1alpha1.ConfigMapKeyRef{Name: "metrics-ca", Key: "bundle.pem"}
+	for _, tc := range []struct {
+		name   string
+		url    string
+		ca     *dotvirtv1alpha1.ConfigMapKeyRef
+		want   string
+		volume bool
+	}{
+		{"named CA", "https://prom.monitoring.svc:8443", ref, "/var/run/dotvirt/tls-metrics/ca.crt", true},
+		{"named CA beats the service CA", "https://thanos-querier.openshift-monitoring.svc:9091", ref, "/var/run/dotvirt/tls-metrics/ca.crt", true},
+		{"in-cluster default", "https://thanos-querier.openshift-monitoring.svc:9091", nil, "/var/run/dotvirt/tls-service/service-ca.crt", false},
+		{"external, system pool", "https://prom.example.com", nil, "", false},
+		{"no url", "", ref, "", false},
+	} {
+		dv := testDotvirt()
+		dv.Spec.Metrics.URL, dv.Spec.Metrics.CA = tc.url, tc.ca
+		d := Deployment(dv, "argocd", nil)
+		c := d.Spec.Template.Spec.Containers[0]
+		if got, ok := envValue(c.Env, "DOTVIRT_METRICS_CA"); got != tc.want || ok != (tc.want != "") {
+			t.Errorf("%s: DOTVIRT_METRICS_CA = %q (set %t), want %q", tc.name, got, ok, tc.want)
+		}
+		if hasVolume(d, "metrics-ca") != tc.volume {
+			t.Errorf("%s: metrics-ca volume present = %t, want %t", tc.name, !tc.volume, tc.volume)
+		}
+		if !tc.volume {
+			continue
+		}
+		for _, v := range d.Spec.Template.Spec.Volumes {
+			if v.Name != "metrics-ca" {
+				continue
+			}
+			cm := v.ConfigMap
+			if cm == nil || cm.Name != "metrics-ca" || len(cm.Items) != 1 || cm.Items[0].Key != "bundle.pem" || cm.Items[0].Path != "ca.crt" {
+				t.Errorf("%s: metrics-ca volume = %+v, want key bundle.pem of ConfigMap metrics-ca as ca.crt", tc.name, cm)
+			}
+			if cm != nil && (cm.Optional == nil || !*cm.Optional) {
+				t.Errorf("%s: metrics-ca must be optional: a missing CA must not keep the console down", tc.name)
+			}
+		}
+		mounted := false
+		for _, m := range c.VolumeMounts {
+			if m.Name == "metrics-ca" {
+				mounted = m.MountPath == "/var/run/dotvirt/tls-metrics" && m.ReadOnly
+			}
+		}
+		if !mounted {
+			t.Errorf("%s: metrics-ca not mounted read-only at /var/run/dotvirt/tls-metrics", tc.name)
+		}
+	}
+}
+
 // Webhook TLS stays verified; the global SKIP_TLS_VERIFY (which also unverified
 // tenant webhooks) must never come back.
 func TestForgejoVerifiesWebhookTLS(t *testing.T) {

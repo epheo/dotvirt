@@ -204,10 +204,45 @@ type GatewayRef struct {
 
 // MetricsSpec points the Performance tab at a Prometheus/Thanos query API; empty
 // disables it.
+// +kubebuilder:validation:XValidation:rule="!has(self.tenancyURL) || has(self.url)",message="tenancyURL needs url"
+// +kubebuilder:validation:XValidation:rule="!has(self.ca) || has(self.url)",message="ca needs url"
 type MetricsSpec struct {
 	// URL is a Prometheus-compatible query API base URL (for OpenShift, the
-	// cluster Thanos querier service).
+	// cluster Thanos querier service). dotvirt queries it with the caller's own
+	// token, and only for a caller allowed get on prometheuses/api
+	// (monitoring.coreos.com) named k8s in openshift-monitoring: it must check
+	// that token itself, or every signed-in user reads every namespace's series.
+	// +kubebuilder:validation:Pattern=`^https?://[A-Za-z0-9]([-A-Za-z0-9.]*[A-Za-z0-9])?(:[0-9]{1,5})?(/([^?#@%\s\x00-\x1f\x7f]|%[0-9A-Fa-f]{2})*)?$`
+	// +optional
 	URL string `json:"url,omitempty"`
+	// TenancyURL is the per-namespace query API for every other caller: dotvirt
+	// sends one query per namespace with the caller's token, a namespace=<ns>
+	// parameter and a {namespace="<ns>"} matcher. It must allow only a caller
+	// who may get pods.metrics.k8s.io in that namespace and force the query to
+	// it (as kube-rbac-proxy and prom-label-proxy do): dotvirt relies on it to.
+	// Unset: derived for OpenShift's Thanos querier (port 9092 beside 9091);
+	// other endpoints get none, and those callers no metrics.
+	// +kubebuilder:validation:Pattern=`^https?://[A-Za-z0-9]([-A-Za-z0-9.]*[A-Za-z0-9])?(:[0-9]{1,5})?(/([^?#@%\s\x00-\x1f\x7f]|%[0-9A-Fa-f]{2})*)?$`
+	// +optional
+	TenancyURL string `json:"tenancyURL,omitempty"`
+	// CA is the key of a ConfigMap in dotvirt's namespace holding the PEM bundle
+	// that signs both endpoints' serving certs. Unset: an https in-cluster
+	// (.svc) URL trusts OpenShift's service CA, any other the system pool. A
+	// missing ConfigMap or key leaves the system pool, so a private CA fails
+	// verification. The console reads it when it starts: restart it after a
+	// rotation.
+	// +optional
+	CA *ConfigMapKeyRef `json:"ca,omitempty"`
+}
+
+// ConfigMapKeyRef is one key of a ConfigMap in dotvirt's namespace.
+type ConfigMapKeyRef struct {
+	// +kubebuilder:validation:MaxLength=253
+	// +kubebuilder:validation:Pattern=`^[a-z0-9]([-a-z0-9.]*[a-z0-9])?$`
+	Name string `json:"name"`
+	// +kubebuilder:validation:MaxLength=253
+	// +kubebuilder:validation:Pattern=`^[-._a-zA-Z0-9]+$`
+	Key string `json:"key"`
 }
 
 // AuthSpec adds a sign-in flow beside the always-present token login: OpenShift

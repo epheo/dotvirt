@@ -648,6 +648,35 @@ dotvirt's API and git calls still go to `spec.forge.url`.
 Unset, links start with `spec.forge.url`.
 A managed forge also takes `webURL` as its `ROOT_URL`, so its own pages and clone links name it.
 
+## Metrics
+
+`spec.metrics.url` turns on the Performance tab, host load and alarms.
+dotvirt queries with each caller's own token, never its ServiceAccount's.
+
+- A caller allowed `get` on `prometheuses/api` (`monitoring.coreos.com`) named `k8s` in `openshift-monitoring` queries `url` across every namespace.
+  That endpoint must check the token itself: unauthenticated, it shows every signed-in user every namespace's series.
+- Every other caller queries `tenancyURL`, once per namespace, with a `namespace=<ns>` parameter and a `{namespace="<ns>"}` matcher.
+  That endpoint must allow only a caller who may `get` `pods.metrics.k8s.io` in that namespace, and force the query to it (kube-rbac-proxy plus prom-label-proxy, as OpenShift's Thanos querier does on 9092).
+  dotvirt relies on it to keep tenants apart.
+
+On OpenShift, `url: https://thanos-querier.openshift-monitoring.svc.cluster.local:9091` is enough: the tenancy port and the service CA are derived.
+Elsewhere, set both endpoints and the CA that signs them:
+
+```yaml
+spec:
+  metrics:
+    url: https://prometheus-wide.monitoring.svc:8443
+    tenancyURL: https://prometheus-tenancy.monitoring.svc:8443
+    ca: {name: metrics-ca, key: ca.crt}
+```
+
+- `tenancyURL` unset, outside OpenShift: callers without the cluster-wide right get no metrics.
+- `ca`: a ConfigMap key in dotvirt's namespace, trusted for both endpoints.
+  It is mounted optional: missing, metrics TLS fails verification and the console stays up.
+  The console reads it when it starts: restart it after a rotation.
+
+The series read: KubeVirt's `kubevirt_vmi_*` (labels `namespace`, `name`, `node`), kube-state-metrics' `kube_node*`, node-exporter's `node_cpu_seconds_total` and `node_memory_*` with `instance` set to the node name, and firing `ALERTS` carrying `namespace`.
+
 ## Branding
 
 `spec.branding` dresses the console as a provider's; unset, it is dotvirt's own.

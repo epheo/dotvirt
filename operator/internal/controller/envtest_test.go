@@ -312,6 +312,38 @@ func TestEnvtest(t *testing.T) {
 		}
 	})
 
+	t.Run("admission takes metrics endpoints the console can query", func(t *testing.T) {
+		ca := &dotvirtv1alpha1.ConfigMapKeyRef{Name: "metrics-ca", Key: "ca.crt"}
+		const wide = "https://prom-wide.monitoring.svc:8443"
+		for name, m := range map[string]dotvirtv1alpha1.MetricsSpec{
+			"tenancyURL without url": {TenancyURL: "https://prom-tenancy.monitoring.svc:8443"},
+			"ca without url":         {CA: ca},
+			"url not http":           {URL: "ftp://prom.monitoring.svc"},
+			"url with a query":       {URL: wide + "?x=1"},
+			"url with credentials":   {URL: "https://u:p@prom.monitoring.svc"},
+			"tenancyURL not http":    {URL: wide, TenancyURL: "prom-tenancy.monitoring.svc:8443"},
+			"ca with a bad key":      {URL: wide, CA: &dotvirtv1alpha1.ConfigMapKeyRef{Name: "metrics-ca", Key: "a/b"}},
+			"ca with a bad name":     {URL: wide, CA: &dotvirtv1alpha1.ConfigMapKeyRef{Name: "Metrics_CA", Key: "ca.crt"}},
+		} {
+			dv := testCR()
+			dv.Spec.Metrics = m
+			if err := admin.Create(ctx, dv, client.DryRunAll); !apierrors.IsInvalid(err) {
+				t.Errorf("%s: got %v, want Invalid", name, err)
+			}
+		}
+		for name, m := range map[string]dotvirtv1alpha1.MetricsSpec{
+			"OpenShift's querier alone": {URL: "https://thanos-querier.openshift-monitoring.svc.cluster.local:9091"},
+			"both endpoints and a CA":   {URL: wide, TenancyURL: "https://prom-tenancy.monitoring.svc:8443/", CA: ca},
+			"plain http in-cluster":     {URL: "http://prometheus-operated.monitoring.svc:9090", TenancyURL: "http://prom-label-proxy.monitoring.svc:8080"},
+		} {
+			dv := testCR()
+			dv.Spec.Metrics = m
+			if err := admin.Create(ctx, dv, client.DryRunAll); client.IgnoreAlreadyExists(err) != nil {
+				t.Errorf("%s: %v", name, err)
+			}
+		}
+	})
+
 	t.Run("admission takes one sign-in flow", func(t *testing.T) {
 		oidc := &dotvirtv1alpha1.OIDCSpec{IssuerURL: "https://idm.example/oauth2/openid/dotvirt", ClientID: "dotvirt"}
 		dv := testCR()
