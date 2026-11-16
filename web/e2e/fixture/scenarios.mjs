@@ -1408,6 +1408,9 @@ const oidc = {
 	name: 'oidc',
 	authMethods: { sso: false, ssoPending: false, oidc: 'Kanidm' },
 };
+// A provider round trip that never leaves a session behind: the sign-in screen
+// must stop redirecting instead of bouncing forever.
+const oidcsessionless = { ...oidc, name: 'oidcsessionless', sessionless: true };
 // A managed forge whose admin Secret the caller may read.
 const forgeadmin = {
 	...base,
@@ -2170,6 +2173,7 @@ export const scenarios = {
 	nomachineconfig,
 	residue,
 	sso,
+	oidcsessionless,
 	ssoready,
 	oidc,
 	forgeadmin,

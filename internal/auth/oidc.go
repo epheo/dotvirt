@@ -125,7 +125,7 @@ func (o *OIDC) oauth2Config(m *oidcMeta) *oauth2.Config {
 
 // LoginRedirect (GET /api/auth/oidc) sends the browser to the issuer with a
 // fresh state, PKCE challenge and nonce, their secrets sealed in the state
-// cookie.
+// cookie with the ?return= page the callback lands on (SafeReturn).
 func (o *OIDC) LoginRedirect(w http.ResponseWriter, r *http.Request) {
 	m, err := o.discover(r.Context())
 	if err != nil {
@@ -134,7 +134,7 @@ func (o *OIDC) LoginRedirect(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	state, nonce, verifier := randomToken(), randomToken(), oauth2.GenerateVerifier()
-	setStateCookie(w, r, strings.Join([]string{state, verifier, nonce}, "."), o.auth.sealer)
+	setStateCookie(w, r, withReturn(strings.Join([]string{state, verifier, nonce}, "."), r.URL.Query().Get("return")), o.auth.sealer)
 	http.Redirect(w, r, o.oauth2Config(m).AuthCodeURL(state,
 		oauth2.S256ChallengeOption(verifier), oauth2.SetAuthURLParam("nonce", nonce)), http.StatusFound)
 }
@@ -155,6 +155,7 @@ func (o *OIDC) Callback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	sealed, ok := parseStateValue(c.Value, o.auth.sealer)
+	sealed, ret := splitReturn(sealed)
 	parts := strings.Split(sealed, ".")
 	state := r.URL.Query().Get("state")
 	if !ok || len(parts) != 3 || state == "" || !hmac.Equal([]byte(state), []byte(parts[0])) {
@@ -200,7 +201,7 @@ func (o *OIDC) Callback(w http.ResponseWriter, r *http.Request) {
 	handle := o.auth.oidc.start(t, now)
 	clearStateCookie(w, r)
 	setCookie(w, r, session{token: handle, issued: now, sso: true, oidc: true}, o.auth.sealer)
-	http.Redirect(w, r, "/", http.StatusFound)
+	http.Redirect(w, r, ret, http.StatusFound)
 }
 
 // renew trades refresh for the session's next tokens. A refusal of the grant

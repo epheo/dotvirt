@@ -14,6 +14,7 @@
 //   POST /__fixture/fail/{plane}/{n}   the next n calls of a plane answer 503 (events, logout)
 //   POST /__fixture/proxy-down/{0|1}   the upload proxy drops connections, as one the browser cannot reach or trust
 //   GET  /__fixture/scenario           current scenario name
+//   GET  /__fixture/provider-starts    sign-in provider starts since the scenario switch
 
 import { createReadStream, existsSync, readFileSync, statSync } from 'node:fs';
 import { createServer } from 'node:http';
@@ -406,6 +407,23 @@ async function handleAPI(req, res, url) {
 		if (!named || !s.branding?.icons?.[name]) return sendText(res, 404, 'not found');
 		res.writeHead(200, { 'Content-Type': 'image/svg+xml' });
 		return res.end(s.branding.icons[name]);
+	}
+
+	// A provider whose user is already signed in there: the start URL comes
+	// straight back to the callback, which lands on ?return= with a session, as
+	// the Go callback does (SafeReturn, simplified). sessionless: a provider
+	// round trip whose session the browser never keeps.
+	if (
+		(path === '/api/auth/oidc' && s.authMethods?.oidc) ||
+		(path === '/api/auth/openshift' && s.authMethods?.sso && !s.authMethods?.ssoPending)
+	) {
+		state.providerStarts = (state.providerStarts ?? 0) + 1;
+		const ret = url.searchParams.get('return') ?? '/';
+		const to = ret.startsWith('/') && !ret.startsWith('//') && !ret.startsWith('/api') ? ret : '/';
+		const headers = { Location: to };
+		if (!s.sessionless) headers['Set-Cookie'] = `${COOKIE}; Path=/; HttpOnly`;
+		res.writeHead(302, headers);
+		return res.end();
 	}
 
 	if (path === '/api/login' && req.method === 'POST') {
@@ -1296,6 +1314,9 @@ function handleControl(req, res, url) {
 	if (path === '/__fixture/scenario' && req.method === 'GET') {
 		return sendJSON(res, 200, { scenario: state.scenario.name });
 	}
+	if (path === '/__fixture/provider-starts' && req.method === 'GET') {
+		return sendJSON(res, 200, { starts: state.providerStarts ?? 0 });
+	}
 	let m = path.match(/^\/__fixture\/scenario\/([a-z]+)$/);
 	if (m && req.method === 'POST') {
 		const next = scenarios[m[1]];
@@ -1307,6 +1328,7 @@ function handleControl(req, res, url) {
 		state.fail.clear();
 		state.uploads.clear();
 		state.proxyDown = false;
+		state.providerStarts = 0;
 		broadcastInventory();
 		return sendJSON(res, 200, { scenario: next.name });
 	}

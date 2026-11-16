@@ -135,7 +135,8 @@ func (o *OAuth) oauth2Config(m *oauthMeta) *oauth2.Config {
 const stateCookie = "dotvirt_oauth_state"
 
 // LoginRedirect (GET /api/auth/openshift) sends the browser to the cluster's
-// authorize endpoint with a fresh signed state.
+// authorize endpoint with a fresh signed state. ?return= names the page the
+// callback lands on, sealed with the state (SafeReturn).
 func (o *OAuth) LoginRedirect(w http.ResponseWriter, r *http.Request) {
 	m, err := o.discover(r.Context(), true)
 	if err != nil {
@@ -143,7 +144,7 @@ func (o *OAuth) LoginRedirect(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	state := randomToken()
-	setStateCookie(w, r, state, o.auth.sealer)
+	setStateCookie(w, r, withReturn(state, r.URL.Query().Get("return")), o.auth.sealer)
 	http.Redirect(w, r, o.oauth2Config(m).AuthCodeURL(state), http.StatusFound)
 }
 
@@ -162,7 +163,8 @@ func (o *OAuth) Callback(w http.ResponseWriter, r *http.Request) {
 		failLogin("state cookie missing", err)
 		return
 	}
-	want, ok := parseStateValue(c.Value, o.auth.sealer)
+	sealed, ok := parseStateValue(c.Value, o.auth.sealer)
+	want, ret := splitReturn(sealed)
 	state := r.URL.Query().Get("state")
 	if !ok || state == "" || !hmac.Equal([]byte(state), []byte(want)) {
 		failLogin("state mismatch", nil)
@@ -201,7 +203,7 @@ func (o *OAuth) Callback(w http.ResponseWriter, r *http.Request) {
 	log.Printf("oauth: %s signed in via OpenShift SSO", id.Username)
 	clearStateCookie(w, r)
 	setCookie(w, r, session{token: tok.AccessToken, issued: time.Now(), sso: true}, o.auth.sealer)
-	http.Redirect(w, r, "/", http.StatusFound)
+	http.Redirect(w, r, ret, http.StatusFound)
 }
 
 // oauthTokenPrefix starts every OpenShift OAuth access token and the name of

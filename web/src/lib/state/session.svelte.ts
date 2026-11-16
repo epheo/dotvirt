@@ -1,3 +1,4 @@
+import { goto } from '$app/navigation';
 import { api, HttpError, retryDelay, Unauthorized, type AuthMethods, type User } from '#lib/api.js';
 import { friendlyError } from '#lib/format.js';
 import { resource, type Resource } from '#lib/resource.svelte.js';
@@ -53,20 +54,27 @@ class Session {
 
 	// Only the server's yes signs out here. A 401 means it already ended the
 	// session (the api layer's sink signs out too); any other failure, network
-	// included, keeps the session and says so.
+	// included, keeps the session and says so. A sign-out lands on ?signed_out:
+	// the sign-in screen would otherwise redirect to the provider, whose own
+	// live session signs the user straight back in.
 	async logout() {
 		if (this.signingOut) return;
 		this.signingOut = true;
 		this.logoutError = '';
 		try {
 			await api.logout();
-			this.user = null;
+			this.signedOut();
 		} catch (e) {
-			if (e instanceof Unauthorized) this.user = null;
+			if (e instanceof Unauthorized) this.signedOut();
 			else this.logoutError = 'Sign-out did not complete. Your session is still active.';
 		} finally {
 			this.signingOut = false;
 		}
+	}
+
+	private signedOut() {
+		this.user = null;
+		void goto('/?signed_out');
 	}
 }
 

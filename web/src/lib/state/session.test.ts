@@ -14,6 +14,7 @@ const api = vi.hoisted(() => {
 });
 vi.mock('#lib/api.js', () => api);
 
+import { navigations } from '../../test/app-navigation';
 import { session } from './session.svelte';
 
 describe('session.check', () => {
@@ -78,22 +79,27 @@ describe('session.logout', () => {
 		answer();
 		await retry;
 		expect(session.user).toBeNull();
+		expect(navigations.at(-1)).toBe('/?signed_out');
 		expect(session.logoutError).toBe('');
 	});
 
 	it('keeps the session when the request never reached the server', async () => {
 		signedIn();
+		navigations.length = 0;
 		api.api.logout.mockRejectedValueOnce(new TypeError('Failed to fetch'));
 		await session.logout();
+		expect(navigations).toEqual([]);
 		expect(session.user?.username).toBe('ada');
 		expect(session.logoutError).not.toBe('');
 	});
 
 	it('reads a 401 as already signed out', async () => {
 		signedIn();
+		navigations.length = 0;
 		api.api.logout.mockRejectedValueOnce(new api.Unauthorized());
 		await session.logout();
 		expect(session.user).toBeNull();
+		expect(navigations).toEqual(['/?signed_out']);
 		expect(session.logoutError).toBe('');
 	});
 });
