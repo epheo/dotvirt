@@ -4,9 +4,12 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
+	"slices"
 	"sync"
 	"testing"
 
+	appsv1 "k8s.io/api/apps/v1"
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	"github.com/epheo/dotvirt/internal/config"
@@ -14,50 +17,81 @@ import (
 	"github.com/epheo/dotvirt/pkg/adminobjects"
 )
 
-var installRef = config.InstallRef{Namespace: "dotvirt", Name: "x"}
+var (
+	installRef = config.InstallRef{Namespace: "dotvirt", Name: "x"}
+	adminPins  = adminobjects.Params{
+		Operator: "system:serviceaccount:dotvirt-operator:dotvirt-operator-controller", Namespace: "dotvirt",
+		ArgoNamespace: "argocd", ArgoController: "argocd-application-controller",
+	}
+	// What an admin chose: the install's spec.image and the operator
+	// Deployment's env, read as the caller.
+	adminChosen = adminobjects.Params{
+		SpecImage:    "registry.example/team/dotvirt:custom",
+		DotvirtImage: "quay.io/epheo/dotvirt@sha256:aaaa", ForgejoImage: "codeberg.org/forgejo/forgejo:12-rootless",
+	}
+)
 
-// adminObjectsServer serves an install whose status lists the operator guard
-// and one object no install may ask for. The install and the guard answer
-// admin-token alone; applies are recorded with their bearer.
-func adminObjectsServer(t *testing.T) (*Server, *fakeCluster, func() map[string]string) {
+const (
+	installPath  = "/apis/dotvirt.io/v1alpha1/namespaces/dotvirt/dotvirts/x"
+	operatorPath = "/apis/apps/v1/namespaces/dotvirt-operator/deployments/dotvirt-operator-controller"
+)
+
+// adminObjectsServer serves an install whose status an operator tampered
+// with (a deny-everything policy under the guard's name, and a binding no
+// install may ask for), the operator's Deployment, and the guard's objects;
+// all answer admin-token alone. Applies are recorded with bearer and body.
+func adminObjectsServer(t *testing.T) (*Server, *fakeCluster, func() map[string]applied) {
 	t.Helper()
 	fc := newFakeCluster(t)
-	guard := adminobjects.Guard(adminobjects.GuardParams{
-		Operator: "system:serviceaccount:dotvirt-operator:dotvirt-operator-controller", Namespace: "dotvirt", ArgoNamespace: "argocd",
-	})
-	var entries []any
-	for _, o := range guard {
-		entries = append(entries, map[string]any{"purpose": o.Purpose, "state": "NotInstalled", "object": o.Object.Object})
-	}
-	entries = append(entries, map[string]any{"purpose": "rogue", "state": "NotInstalled", "object": map[string]any{
-		"apiVersion": "rbac.authorization.k8s.io/v1", "kind": "ClusterRoleBinding", "metadata": map[string]any{"name": "rogue"},
-		"roleRef":  map[string]any{"apiGroup": "rbac.authorization.k8s.io", "kind": "ClusterRole", "name": "cluster-admin"},
-		"subjects": []any{map[string]any{"kind": "User", "name": "mallory"}},
-	}})
-	fc.on(http.MethodGet, "/apis/dotvirt.io/v1alpha1/namespaces/dotvirt/dotvirts/x", func(w http.ResponseWriter, r *http.Request) {
+	adminOnly := func(w http.ResponseWriter, r *http.Request) bool {
 		if bearer(r) != adminToken {
 			writeStatus(w, http.StatusForbidden, metav1.StatusReasonForbidden)
+			return false
+		}
+		return true
+	}
+	fc.on(http.MethodGet, installPath, func(w http.ResponseWriter, r *http.Request) {
+		if !adminOnly(w, r) {
 			return
 		}
 		writeObj(w, map[string]any{
 			"apiVersion": "dotvirt.io/v1alpha1", "kind": "Dotvirt", "metadata": map[string]any{"name": "x", "namespace": "dotvirt"},
-			"status": map[string]any{"adminObjects": entries},
+			"spec": map[string]any{"image": adminChosen.SpecImage},
+			"status": map[string]any{"adminObjects": []any{
+				map[string]any{"purpose": "tampered", "state": "NotInstalled", "kind": "ValidatingAdmissionPolicy", "name": adminobjects.GuardSecretsName,
+					"object": map[string]any{"apiVersion": "admissionregistration.k8s.io/v1", "kind": "ValidatingAdmissionPolicy",
+						"metadata": map[string]any{"name": adminobjects.GuardSecretsName},
+						"spec":     map[string]any{"validations": []any{map[string]any{"expression": "false"}}}}},
+				map[string]any{"purpose": "rogue", "state": "NotInstalled", "object": map[string]any{
+					"apiVersion": "rbac.authorization.k8s.io/v1", "kind": "ClusterRoleBinding", "metadata": map[string]any{"name": "rogue"},
+					"roleRef": map[string]any{"apiGroup": "rbac.authorization.k8s.io", "kind": "ClusterRole", "name": "cluster-admin"}}},
+			}},
 		})
+	})
+	fc.on(http.MethodGet, operatorPath, func(w http.ResponseWriter, r *http.Request) {
+		if !adminOnly(w, r) {
+			return
+		}
+		d := appsv1.Deployment{TypeMeta: metav1.TypeMeta{Kind: "Deployment", APIVersion: "apps/v1"},
+			ObjectMeta: metav1.ObjectMeta{Name: adminobjects.OperatorDeployment, Namespace: "dotvirt-operator"}}
+		d.Spec.Template.Spec.Containers = []corev1.Container{{Name: "manager", Env: []corev1.EnvVar{
+			{Name: "RELATED_IMAGE_DOTVIRT", Value: adminChosen.DotvirtImage},
+			{Name: "RELATED_IMAGE_FORGEJO", Value: adminChosen.ForgejoImage},
+		}}}
+		writeObj(w, d)
 	})
 	var mu sync.Mutex
 	stored := map[string]map[string]any{}
-	applied := map[string]string{}
-	for _, o := range guard {
-		ref, _ := adminobjects.Allow(adminobjects.Allowed("dotvirt"), o.Object)
+	seen := map[string]applied{}
+	for _, ref := range adminobjects.Allowed("dotvirt") {
 		path := "/apis/" + ref.Group + "/" + ref.Version + "/" + ref.Resource + "/" + ref.Name
 		fc.on(http.MethodGet, path, func(w http.ResponseWriter, r *http.Request) {
+			if !adminOnly(w, r) {
+				return
+			}
 			mu.Lock()
 			obj := stored[path]
 			mu.Unlock()
-			if bearer(r) != adminToken {
-				writeStatus(w, http.StatusForbidden, metav1.StatusReasonForbidden)
-				return
-			}
 			if obj == nil {
 				writeStatus(w, http.StatusNotFound, metav1.StatusReasonNotFound)
 				return
@@ -71,41 +105,45 @@ func adminObjectsServer(t *testing.T) (*Server, *fakeCluster, func() map[string]
 				t.Errorf("apply body: %v", err)
 			}
 			mu.Lock()
-			applied[ref.Kind+"/"+ref.Name] = bearer(r)
-			if bearer(r) == adminToken {
-				stored[path] = obj
-			}
+			seen[ref.Kind+"/"+ref.Name] = applied{bearer(r), obj}
 			mu.Unlock()
-			if bearer(r) != adminToken {
-				writeStatus(w, http.StatusForbidden, metav1.StatusReasonForbidden)
+			if !adminOnly(w, r) {
 				return
 			}
+			mu.Lock()
+			stored[path] = obj
+			mu.Unlock()
 			writeObj(w, obj)
 		})
 	}
 	fc.on(http.MethodPatch, "/apis/rbac.authorization.k8s.io/v1/clusterrolebindings/rogue", func(w http.ResponseWriter, r *http.Request) {
 		mu.Lock()
-		applied["ClusterRoleBinding/rogue"] = bearer(r)
+		seen["ClusterRoleBinding/rogue"] = applied{bearer: bearer(r)}
 		mu.Unlock()
 		writeObj(w, map[string]any{})
 	})
-	s := fc.server(nil, Config{Install: installRef})
-	return s, fc, func() map[string]string {
+	s := fc.server(nil, Config{Install: installRef, AdminPins: adminPins})
+	return s, fc, func() map[string]applied {
 		mu.Lock()
 		defer mu.Unlock()
-		out := map[string]string{}
-		for k, v := range applied {
+		out := map[string]applied{}
+		for k, v := range seen {
 			out[k] = v
 		}
 		return out
 	}
 }
 
-// Installing the install's admin objects runs under the caller's token,
-// behind the review the console asks before offering it, and applies only
-// what an install may ask for.
-func TestAdminObjectsInstallAsTheCaller(t *testing.T) {
-	s, fc, applied := adminObjectsServer(t)
+type applied struct {
+	bearer string
+	body   map[string]any
+}
+
+// The console installs its own render of the admin objects, from its pins and
+// the images an admin chose, under the caller's token, behind the review it
+// asks before offering it. What the operator wrote in status changes nothing.
+func TestAdminObjectsInstallTheConsolesRender(t *testing.T) {
+	s, fc, seen := adminObjectsServer(t)
 	caps := func(token string) bool {
 		c := decodeBody[model.Capabilities](t, do(s, token, http.MethodGet, "/api/capabilities", "")).Cluster
 		return c != nil && c.AdminObjects
@@ -113,47 +151,57 @@ func TestAdminObjectsInstallAsTheCaller(t *testing.T) {
 	if !caps(adminToken) || caps(tenantToken) {
 		t.Errorf("adminObjects: admin %v, tenant %v; want true, false", caps(adminToken), caps(tenantToken))
 	}
-	if fc.called(http.MethodGet, "/apis/dotvirt.io/v1alpha1/namespaces/dotvirt/dotvirts/x") {
-		t.Error("the capability read the install; it must ask reviews only")
+	if fc.called(http.MethodGet, installPath) || fc.called(http.MethodGet, operatorPath) {
+		t.Error("the capability read the cluster; it must ask reviews only")
 	}
 
 	for _, method := range []string{http.MethodGet, http.MethodPost} {
 		wantStatus(t, do(s, tenantToken, method, "/api/admin-objects", ""), http.StatusForbidden)
 	}
-	if got := applied(); len(got) != 0 || fc.called(http.MethodGet, "/apis/dotvirt.io/v1alpha1/namespaces/dotvirt/dotvirts/x") {
+	if got := seen(); len(got) != 0 || fc.called(http.MethodGet, installPath) {
 		t.Fatalf("a refused caller reached the cluster: applied %v", got)
 	}
+
+	want := adminPins
+	want.SpecImage, want.DotvirtImage, want.ForgejoImage = adminChosen.SpecImage, adminChosen.DotvirtImage, adminChosen.ForgejoImage
+	rendered := adminobjects.Render(want)
 
 	rec := do(s, adminToken, http.MethodGet, "/api/admin-objects", "")
 	wantStatus(t, rec, http.StatusOK)
 	listed := decodeBody[model.AdminObjects](t, rec)
-	if len(listed.Objects) != 4 {
-		t.Fatalf("listed %d objects, want the guard's four and not the rogue one: %+v", len(listed.Objects), listed.Objects)
+	if listed.Operator != want.Operator || listed.Namespace != "dotvirt" || listed.ArgoNamespace != "argocd" || listed.ArgoController != want.ArgoController ||
+		!slices.Equal(listed.Images, []string{want.SpecImage, want.DotvirtImage, want.ForgejoImage}) {
+		t.Errorf("pins = %+v", listed)
+	}
+	if len(listed.Objects) != len(rendered) {
+		t.Fatalf("listed %d objects, want the render's %d", len(listed.Objects), len(rendered))
 	}
 	for _, o := range listed.Objects {
-		if o.State != string(adminobjects.NotInstalled) || o.Purpose == "" || o.Object["kind"] != o.Kind {
+		if o.State != string(adminobjects.NotInstalled) || o.Purpose == "" || o.Detail == "" {
 			t.Errorf("before install: %+v", o)
 		}
 	}
 
 	rec = do(s, adminToken, http.MethodPost, "/api/admin-objects", "")
 	wantStatus(t, rec, http.StatusOK)
-	installed := decodeBody[model.AdminObjects](t, rec)
-	for _, o := range installed.Objects {
+	for _, o := range decodeBody[model.AdminObjects](t, rec).Objects {
 		if o.State != string(adminobjects.Installed) {
 			t.Errorf("after install: %s %s is %s (%s)", o.Kind, o.Name, o.State, o.Detail)
 		}
 	}
-	got := applied()
+	got := seen()
 	if _, ok := got["ClusterRoleBinding/rogue"]; ok {
-		t.Error("the console applied an object no install may ask for")
+		t.Error("the console applied an object from status")
 	}
-	if len(got) != 4 {
-		t.Errorf("applied %v, want the guard's four", got)
+	if len(got) != len(rendered) {
+		t.Errorf("applied %d objects, want the render's %d", len(got), len(rendered))
 	}
-	for what, b := range got {
-		if b != adminToken {
-			t.Errorf("%s applied with %q, want the caller's token", what, b)
+	for _, o := range rendered {
+		a := got[o.Object.GetKind()+"/"+o.Object.GetName()]
+		x, _ := json.Marshal(a.body)
+		y, _ := json.Marshal(o.Object.Object)
+		if a.bearer != adminToken || string(x) != string(y) {
+			t.Errorf("%s %s applied by %q as\n%s\nwant the render\n%s", o.Object.GetKind(), o.Object.GetName(), a.bearer, x, y)
 		}
 	}
 }

@@ -1416,8 +1416,9 @@ const forgeadmin = {
 };
 
 // ── adminobjects: what the install asks a cluster admin to install ─────────────
-// The operator guard, not installed yet. Only a caller holding the capability
-// is offered it; the install flips each object to Installed.
+// The operator guard as the console renders it, pinned and not installed yet,
+// one policy edited by another admin. Only a caller holding the capability is
+// offered it; the install flips each object to Installed.
 const guardObject = (kind, name) => ({
 	apiVersion: 'admissionregistration.k8s.io/v1',
 	kind,
@@ -1427,30 +1428,50 @@ const adminobjects = {
 	...base,
 	name: 'adminobjects',
 	capabilities: { ...base.capabilities, cluster: { adminObjects: true } },
-	adminObjects: [
-		['ValidatingAdmissionPolicy', 'dotvirt-operator-secrets', "Bounds the operator's Secrets"],
-		[
-			'ValidatingAdmissionPolicy',
-			'dotvirt-operator-deployments',
-			"Bounds the operator's Deployments",
-		],
-		[
-			'ValidatingAdmissionPolicyBinding',
-			'dotvirt-operator-secrets',
-			'Enforces dotvirt-operator-secrets',
-		],
-		[
-			'ValidatingAdmissionPolicyBinding',
-			'dotvirt-operator-deployments',
-			'Enforces dotvirt-operator-deployments',
-		],
-	].map(([kind, name, purpose]) => ({
-		purpose,
-		kind,
-		name,
-		state: 'NotInstalled',
-		object: guardObject(kind, name),
-	})),
+	adminObjects: {
+		operator: 'system:serviceaccount:dotvirt-operator:dotvirt-operator-controller',
+		namespace: 'dotvirt',
+		argoNamespace: 'openshift-gitops',
+		argoController: 'openshift-gitops-argocd-application-controller',
+		images: ['registry.example/team/dotvirt:custom'],
+		objects: [
+			[
+				'ValidatingAdmissionPolicy',
+				'dotvirt-operator-secrets',
+				"Bounds the operator's Secrets",
+				'NotInstalled',
+				'',
+			],
+			[
+				'ValidatingAdmissionPolicy',
+				'dotvirt-operator-deployments',
+				"Bounds the operator's Deployments",
+				'Outdated',
+				'ValidatingAdmissionPolicy dotvirt-operator-deployments lacks the rule "the operator mounts no host path"',
+			],
+			[
+				'ValidatingAdmissionPolicy',
+				'dotvirt-operator-bindings',
+				"Bounds the operator's RBAC bindings",
+				'NotInstalled',
+				'',
+			],
+			[
+				'ValidatingAdmissionPolicyBinding',
+				'dotvirt-operator-secrets',
+				'Enforces dotvirt-operator-secrets',
+				'Installed',
+				'',
+			],
+		].map(([kind, name, purpose, state, detail]) => ({
+			purpose,
+			kind,
+			name,
+			state,
+			detail,
+			object: guardObject(kind, name),
+		})),
+	},
 };
 // The same install, seen by a caller who may not install it.
 const adminobjectsdenied = {

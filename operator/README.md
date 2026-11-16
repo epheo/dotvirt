@@ -57,25 +57,31 @@ owns one status condition; a phase that fails or waits records why there, so
 1. **Dependencies** (`DependenciesReady`): probes for ArgoCD, a hard prerequisite
    it never installs (it waits and reports if it is absent), and for KubeVirt,
    OVN-K, NMState and CDI (soft: noted, the install proceeds).
-2. **Operator guard** (`OperatorGuard`): renders two ValidatingAdmissionPolicies and
-   their bindings (`dotvirt-operator-secrets`, `dotvirt-operator-deployments`) that
-   bound the operator's own account, pinned to its exact username, the install
-   namespace and the ArgoCD namespace:
-   - Secrets only in those two namespaces, never of type
-     `kubernetes.io/service-account-token` nor carrying
-     `kubernetes.io/service-account.name`;
-   - Deployments only in the install namespace, as `dotvirt` or `dotvirt-forgejo`,
-     with no host network, PID or IPC, no host path, no privileged container and
-     none allowed to escalate.
+2. **Operator guard** (`OperatorGuard`): renders three ValidatingAdmissionPolicies and
+   their bindings that bound the operator's own account, pinned to its exact username
+   (one SelfSubjectReview at startup), the install namespace, the ArgoCD namespace and
+   its controller's ServiceAccount:
+   - `dotvirt-operator-secrets`: Secrets only in those two namespaces, never of type
+     `kubernetes.io/service-account-token` nor carrying `kubernetes.io/service-account.name`;
+   - `dotvirt-operator-deployments`: Deployments only in the install namespace, as
+     `dotvirt` or `dotvirt-forgejo`, with images from `quay.io/epheo/dotvirt` or
+     `codeberg.org/forgejo/forgejo` (any tag or digest) or exactly the image an admin
+     chose (`spec.image`, the operator Deployment's `RELATED_IMAGE_*`); no host network,
+     PID or IPC, no host path, no pod or container as root or seccomp `Unconfined`, every
+     container with `allowPrivilegeEscalation: false`, all capabilities dropped and none
+     added, none privileged;
+   - `dotvirt-operator-bindings`: only the ClusterRoleBindings and RoleBinding the
+     operator renders, each to the ClusterRole of its own name and to its rendered
+     subjects only.
 
-   The operator never installs them: it lists them in `status.adminObjects` (see
-   [Admin objects](#admin-objects)) and reads them back by name to report
-   `NotInstalled`, `Outdated` (rendered for other namespaces or another version, or
-   changed since) or `Installed`. The apiserver evaluates them in-process, only for
-   Secret and Deployment writes, with the username check first. Best-effort: never
-   a halt, never `Available`. Once installed, a change of either namespace makes
-   them `Outdated` and refuses the operator's writes there until an admin installs
-   the new render.
+   The operator never installs them: it reads them back by name and reports each in
+   `status.adminObjects` as `NotInstalled`, `Outdated` (rendered for other pins or
+   another version, or changed since) or `Installed`; see [Admin objects](#admin-objects).
+   The apiserver evaluates them in-process, only for those kinds' writes, with the
+   username check first. Best-effort: never a halt, never `Available`. A new release
+   in the same repositories passes as it is; an admin changing `spec.image`, the
+   operator's `RELATED_IMAGE_*` or either namespace makes them `Outdated`, and until
+   re-installed they refuse the operator's writes that need the change.
 3. **Forge** (`ForgeReady`): converges the trust anchors (below) first, then, with
    `spec.forge.managed`, stands up the eval-grade Forgejo (single pod, SQLite, a PVC
    that survives uninstall), resolves its external URL (an explicit `spec.forge.url`,
@@ -192,36 +198,36 @@ forge bootstrap, the workload rollout, both webhooks, the platform repo) record 
 ## Admin objects
 
 Some objects an install needs are ones its operator must not be able to create,
-because the operator could then grant itself anything. The operator renders them
-and lists each in `status.adminObjects` with its purpose and state.
-`status.adminManifest` is all of them as one List; a cluster admin without the
-console saves it to a file and applies it:
+because the operator could then grant itself anything. The console renders them
+itself and a cluster admin installs them; the operator only reports them.
 
-```sh
-kubectl -n <install ns> get dotvirt <name> -o jsonpath='{.status.adminManifest}' > admin-objects.json
-kubectl apply --server-side --field-manager=dotvirt -f admin-objects.json
-```
+A cluster admin signed in to the console sees a banner listing what is missing or
+differs (and what differs), the pins the render uses, one **Install** button, and the
+same render to download. Install applies the render under the admin's own token:
+- the console renders from its own configuration (the operator's username, its
+  namespaces, the ArgoCD controller) and from reads under the admin's token (the
+  Dotvirt resource's `spec.image`, the operator Deployment's `RELATED_IMAGE_*`), never
+  from anything the operator writes, `status` included;
+- it is offered only when reviews say that token may read those, and read, create and
+  patch every object an install may ask for (`pkg/adminobjects` allowlist);
+- it takes back any field someone changed since (a forced server-side apply): it
+  exists to restore the render, which is why the banner says what differs first.
 
-kubectl reports a conflict on any field someone else changed since; review it, and
-add `--force-conflicts` to take the field back.
+Without the console, use the release's `install/guard.yaml`: fill its placeholders
+(its header says how; the `OperatorGuard` condition names this install's values) and
+apply it with `kubectl apply --server-side --field-manager=dotvirt`. kubectl reports a
+conflict on any field someone else changed; review it, and add `--force-conflicts` to
+take the field back.
 
-A cluster admin signed in to the console sees a banner listing what is missing,
-one **Install** button, and the same manifest to download. Install applies the
-list under the admin's own token:
-- it is offered only when a review says that token may read the install, and
-  create and patch every object an install may ask for;
-- it applies only the kinds and names in the console's allowlist
-  (`pkg/adminobjects`), whatever the status lists;
-- it takes back any field someone changed since (a forced server-side apply):
-  it exists to restore the render, an `Outdated` object included.
+That template is also the path after moving the install to another namespace or
+reinstalling it elsewhere: the installed guard then refuses the operator's first
+Secret write in the new namespace, before the console is deployed there, so no
+console comes up to offer Install until the guard is re-applied for the new pins.
 
-dotvirt's own ServiceAccount and the operator hold no right to these objects.
-
-The operator does not watch them: their state in status follows on its next pass
-(within 10 minutes), the console's banner at once. After an upgrade that renders
-them differently they read `Outdated`, and the banner offers the install again.
-The objects stay after uninstall (nothing that ran can delete them); they match
-only the operator's account, and an admin may delete them.
+The operator does not watch these objects: their state in status follows on its next
+pass (within 10 minutes), the console's banner at once. They stay after uninstall
+(nothing that ran can delete them); they match only the operator's username, and an
+admin may delete them.
 
 ## Serving through a Gateway
 

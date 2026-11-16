@@ -46,6 +46,7 @@ import (
 	"github.com/epheo/dotvirt/internal/routes"
 	"github.com/epheo/dotvirt/internal/tasks"
 	"github.com/epheo/dotvirt/internal/ttlcache"
+	"github.com/epheo/dotvirt/pkg/adminobjects"
 	"github.com/epheo/dotvirt/pkg/forge"
 	"github.com/epheo/dotvirt/pkg/tenancy"
 )
@@ -204,7 +205,8 @@ type Config struct {
 	Publish           publish.Settings     // the platform's publishing settings; zero: publishing off
 	Branding          branding.Settings    // a provider's dress for the console; zero: dotvirt's own
 	ForgeAdmin        config.ForgeAdminRef // a managed forge's admin credential, read as the caller; zero: none
-	Install           config.InstallRef    // the Dotvirt resource whose admin objects a cluster admin installs; zero: none
+	Install           config.InstallRef    // the Dotvirt resource the console renders admin objects for; zero: none
+	AdminPins         adminobjects.Params  // the operator guard's pins from this console's own config; images are read per request
 }
 
 // visibleTTL bounds a token's cached verdicts, and the view derived from them,

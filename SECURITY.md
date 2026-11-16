@@ -22,14 +22,32 @@ app (git and the forge API, including creating project repos) and ArgoCD's
 repo-creds. Reports that concern the operator's privileges, the forge credential,
 the user-token pass-through, or the GitOps PR-merge gate are especially welcome.
 
-The operator's own account is bounded by two ValidatingAdmissionPolicies a
-cluster admin installs from the console (`dotvirt-operator-secrets`,
-`dotvirt-operator-deployments`): no ServiceAccount token Secret, no Secret
-outside the install and ArgoCD namespaces, and Deployments only in the install
-namespace, as dotvirt's own accounts, off the host. The operator renders them
-but holds no right to create, change or delete them, so it cannot loosen them.
-They stay after an uninstall, match only the operator's account, and an admin
-may delete them.
+### The operator guard
+
+The operator needs wide rights to install (Secrets and Deployments, cluster-wide
+bindings, Argo objects). A cluster admin can install, from the console, admission
+policies that refuse the operator's own account some of what those rights allow. The
+console renders them itself; the operator holds no right to create, change or delete
+them. Until an admin installs them, nothing below is enforced.
+
+What the guard closes:
+- minting a ServiceAccount token through a Secret, and writing Secrets outside the
+  install and ArgoCD namespaces;
+- running a Deployment outside the install namespace, as another account, on the
+  host, as root, privileged or with added capabilities;
+- running its own code in the console, where signed-in admins' tokens arrive: images
+  must come from the official repositories or be the exact image an admin chose;
+- binding any operand role to itself or another subject: bindings carry only their
+  rendered names, roles and subjects.
+
+What stays open:
+- reads: the operator still reads Secrets and other objects cluster-wide;
+- Argo objects: AppProjects, Applications, the ArgoCD resource, `argocd-cm`,
+  `argocd-rbac-cm` and `argocd-secret` reach Argo's own rights;
+- an older official release: any tag or digest in the official repositories passes,
+  rollbacks included;
+- configuration through the console's environment, such as pointing sign-in at
+  another issuer.
 
 ## Supported versions
 

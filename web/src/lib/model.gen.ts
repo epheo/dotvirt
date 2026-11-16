@@ -324,9 +324,20 @@ export interface ForgeAdminCredential {
 }
 /**
  * AdminObjects is GET and POST /api/admin-objects: the objects the install
- * needs but its operator may not create, which a cluster admin installs.
+ * needs but its operator may not create, which a cluster admin installs. The
+ * console renders them from its own configuration and from reads under the
+ * caller's token, and shows the pins it rendered them with.
  */
 export interface AdminObjects {
+  /**
+   * Operator, Namespace, ArgoNamespace and ArgoController are the guard's
+   * pins; Images the images an admin chose beside the official repositories.
+   */
+  operator: string;
+  namespace: string;
+  argoNamespace: string;
+  argoController: string;
+  images: string[];
   objects: AdminObject[];
 }
 /**
@@ -338,13 +349,13 @@ export interface AdminObject {
   name: string;
   namespace?: string;
   /**
-   * State is NotInstalled, Outdated or Installed; Detail says how a copy
-   * differs.
+   * State is NotInstalled, Outdated or Installed; Detail says what differs,
+   * so installing over another admin's change is a choice.
    */
   state: string;
   detail?: string;
   /**
-   * Object is the object as rendered, which an install applies.
+   * Object is the console's render, which an install applies.
    */
   object: { [key: string]: any};
 }

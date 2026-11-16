@@ -200,9 +200,18 @@ type ForgeAdminCredential struct {
 }
 
 // AdminObjects is GET and POST /api/admin-objects: the objects the install
-// needs but its operator may not create, which a cluster admin installs.
+// needs but its operator may not create, which a cluster admin installs. The
+// console renders them from its own configuration and from reads under the
+// caller's token, and shows the pins it rendered them with.
 type AdminObjects struct {
-	Objects []AdminObject `json:"objects"`
+	// Operator, Namespace, ArgoNamespace and ArgoController are the guard's
+	// pins; Images the images an admin chose beside the official repositories.
+	Operator       string        `json:"operator"`
+	Namespace      string        `json:"namespace"`
+	ArgoNamespace  string        `json:"argoNamespace"`
+	ArgoController string        `json:"argoController"`
+	Images         []string      `json:"images"`
+	Objects        []AdminObject `json:"objects"`
 }
 
 // AdminObject is one of them, as read under the caller's token.
@@ -211,10 +220,10 @@ type AdminObject struct {
 	Kind      string `json:"kind"`
 	Name      string `json:"name"`
 	Namespace string `json:"namespace,omitempty"`
-	// State is NotInstalled, Outdated or Installed; Detail says how a copy
-	// differs.
+	// State is NotInstalled, Outdated or Installed; Detail says what differs,
+	// so installing over another admin's change is a choice.
 	State  string `json:"state"`
 	Detail string `json:"detail,omitempty"`
-	// Object is the object as rendered, which an install applies.
+	// Object is the console's render, which an install applies.
 	Object map[string]any `json:"object"`
 }

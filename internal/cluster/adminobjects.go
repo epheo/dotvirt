@@ -14,30 +14,39 @@ import (
 
 var dotvirtsGVR = schema.GroupVersionResource{Group: "dotvirt.io", Version: "v1alpha1", Resource: "dotvirts"}
 
-// InstallAdminObjects reads, under THIS client's identity, the objects the
-// install namespace/name asks a cluster admin to apply (its
-// status.adminObjects), as the operator rendered them. They are unchecked:
-// the caller weighs each against adminobjects.Allowed.
-func (c *Client) InstallAdminObjects(ctx context.Context, namespace, name string) ([]adminobjects.Object, error) {
+// InstallImage reads, under THIS client's identity, the image an admin chose
+// in the install namespace/name (its spec.image), "" when none.
+func (c *Client) InstallImage(ctx context.Context, namespace, name string) (string, error) {
 	u, err := c.dyn.Resource(dotvirtsGVR).Namespace(namespace).Get(ctx, name, metav1.GetOptions{})
 	if err != nil {
-		return nil, err
+		return "", err
 	}
-	entries, _, err := unstructured.NestedSlice(u.Object, "status", "adminObjects")
+	image, _, err := unstructured.NestedString(u.Object, "spec", "image")
 	if err != nil {
-		return nil, fmt.Errorf("status.adminObjects: %w", err)
+		return "", fmt.Errorf("spec.image: %w", err)
 	}
-	var out []adminobjects.Object
-	for _, e := range entries {
-		m, _ := e.(map[string]any)
-		obj, _ := m["object"].(map[string]any)
-		purpose, _ := m["purpose"].(string)
-		if obj == nil {
-			continue
+	return image, nil
+}
+
+// OperatorImages reads, under THIS client's identity, the operand images an
+// admin chose on the operator's own Deployment namespace/name: its
+// RELATED_IMAGE_DOTVIRT and RELATED_IMAGE_FORGEJO, "" when unset.
+func (c *Client) OperatorImages(ctx context.Context, namespace, name string) (dotvirt, forgejo string, err error) {
+	d, err := c.kube.AppsV1().Deployments(namespace).Get(ctx, name, metav1.GetOptions{})
+	if err != nil {
+		return "", "", err
+	}
+	for _, ctr := range d.Spec.Template.Spec.Containers {
+		for _, e := range ctr.Env {
+			switch e.Name {
+			case "RELATED_IMAGE_DOTVIRT":
+				dotvirt = e.Value
+			case "RELATED_IMAGE_FORGEJO":
+				forgejo = e.Value
+			}
 		}
-		out = append(out, adminobjects.Object{Purpose: purpose, Object: &unstructured.Unstructured{Object: obj}})
 	}
-	return out, nil
+	return dotvirt, forgejo, nil
 }
 
 // AdminObject reads ref under THIS client's identity: nil when absent.

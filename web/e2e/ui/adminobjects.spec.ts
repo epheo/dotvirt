@@ -14,12 +14,15 @@ test('a cluster admin installs what the install asks for, and the banner clears'
 	await login(page);
 	const list = page.getByTestId('admin-objects');
 	await expect(list).toBeVisible();
+	// Each pending object, and what differs where another admin changed one.
 	await expect(list.getByRole('listitem')).toHaveText([
-		"Bounds the operator's Secrets",
-		"Bounds the operator's Deployments",
-		'Enforces dotvirt-operator-secrets',
-		'Enforces dotvirt-operator-deployments',
+		"Bounds the operator's Secrets (missing)",
+		'Bounds the operator\'s Deployments (differs: ValidatingAdmissionPolicy dotvirt-operator-deployments lacks the rule "the operator mounts no host path")',
+		"Bounds the operator's RBAC bindings (missing)",
 	]);
+	await expect(page.getByTestId('admin-pins')).toHaveText(
+		'Pinned to system:serviceaccount:dotvirt-operator:dotvirt-operator-controller, namespace dotvirt, ArgoCD openshift-gitops (openshift-gitops-argocd-application-controller), images registry.example/team/dotvirt:custom.',
+	);
 	// The manifest an admin applies with kubectl instead: the listed objects, as one List.
 	const [file] = await Promise.all([
 		page.waitForEvent('download'),
@@ -33,8 +36,8 @@ test('a cluster admin installs what the install asks for, and the banner clears'
 	expect(manifest.items.map((o: { metadata: { name: string } }) => o.metadata.name)).toEqual([
 		'dotvirt-operator-secrets',
 		'dotvirt-operator-deployments',
+		'dotvirt-operator-bindings',
 		'dotvirt-operator-secrets',
-		'dotvirt-operator-deployments',
 	]);
 	await expect(
 		page.getByText(

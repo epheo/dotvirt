@@ -454,8 +454,12 @@ async function handleAPI(req, res, url) {
 				'forbidden: installing what the install needs takes a cluster admin',
 			);
 		if (req.method === 'POST')
-			s.adminObjects = (s.adminObjects ?? []).map((o) => ({ ...o, state: 'Installed' }));
-		return sendJSON(res, 200, { objects: s.adminObjects ?? [] });
+			s.adminObjects.objects = s.adminObjects.objects.map((o) => ({
+				...o,
+				state: 'Installed',
+				detail: '',
+			}));
+		return sendJSON(res, 200, s.adminObjects);
 	}
 	if (path === '/api/inventory') return sendJSON(res, 200, s.inventory);
 	if (path === '/api/options') return sendJSON(res, 200, s.options);

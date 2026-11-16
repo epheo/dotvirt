@@ -17,6 +17,7 @@ import (
 
 	"github.com/epheo/dotvirt/internal/branding"
 	"github.com/epheo/dotvirt/internal/model"
+	"github.com/epheo/dotvirt/pkg/adminobjects"
 	"github.com/epheo/dotvirt/pkg/forge"
 	"github.com/epheo/dotvirt/pkg/tenancy"
 )
@@ -170,9 +171,15 @@ type Config struct {
 	// allows.
 	ArgoNamespace string
 
-	// Install is the Dotvirt resource this console belongs to: its status lists
-	// the objects a cluster admin installs from the console. Name "" is none.
+	// Install is the Dotvirt resource this console belongs to, read under a
+	// cluster admin's token for the admin objects the console renders. Name ""
+	// is none.
 	Install InstallRef
+	// OperatorUsername and ArgoController pin the operator guard the console
+	// renders for a cluster admin to install, beside Install's namespace and
+	// ArgoNamespace: the operator's username and the ArgoCD application
+	// controller's ServiceAccount. Empty offers no guard.
+	OperatorUsername, ArgoController string
 
 	// TenantKinds is what a tenant repo may declare beyond the listed kinds, as
 	// the operator put it on the tenant AppProjects. The AppProjects enforce
@@ -242,6 +249,8 @@ func Load(args []string) (*Config, error) {
 	fs.BoolVar(&c.ArgoEnabled, "argo", envBool("DOTVIRT_ARGO", true), "enable ArgoCD drift reads (set -argo=false on clusters without ArgoCD)")
 	fs.StringVar(&c.Install.Namespace, "install-namespace", os.Getenv("DOTVIRT_INSTALL_NAMESPACE"), "namespace of the Dotvirt resource this console belongs to, whose status lists the objects a cluster admin installs from the console (empty: none)")
 	fs.StringVar(&c.Install.Name, "install-name", os.Getenv("DOTVIRT_INSTALL_NAME"), "name of that Dotvirt resource")
+	fs.StringVar(&c.OperatorUsername, "operator-username", os.Getenv("DOTVIRT_OPERATOR_USERNAME"), "the operator's username, system:serviceaccount:<namespace>:<name>, which the operator guard pins (empty: no guard offered)")
+	fs.StringVar(&c.ArgoController, "argo-controller", os.Getenv("DOTVIRT_ARGO_CONTROLLER"), "the ArgoCD application controller's ServiceAccount in -argo-namespace, which the operator guard admits in the bindings it pins")
 	fs.StringVar(&c.ArgoNamespace, "argo-namespace", os.Getenv("DOTVIRT_ARGO_NAMESPACE"), "ArgoCD namespace holding the per-project sync ServiceAccounts the project grants name, and the only one whose Applications dotvirt patches (empty: owner grants only, patches wherever RBAC allows)")
 
 	var tenantAllowed string
@@ -283,6 +292,9 @@ func Load(args []string) (*Config, error) {
 	if (c.Install.Namespace == "") != (c.Install.Name == "") ||
 		(c.Install.Name != "" && (len(validation.IsDNS1123Label(c.Install.Namespace)) > 0 || len(validation.IsDNS1123Subdomain(c.Install.Name)) > 0)) {
 		return nil, fmt.Errorf("-install-namespace %q and -install-name %q name no Dotvirt resource: set both, or neither", c.Install.Namespace, c.Install.Name)
+	}
+	if c.OperatorUsername != "" && !adminobjects.ValidUsername(c.OperatorUsername) {
+		return nil, fmt.Errorf("-operator-username (DOTVIRT_OPERATOR_USERNAME) %q is not system:serviceaccount:<namespace>:<name>", c.OperatorUsername)
 	}
 	// The snapshot selects project namespaces by this key: a malformed one
 	// would select none and look like an empty cluster, so it fails here.
