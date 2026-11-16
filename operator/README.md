@@ -850,7 +850,14 @@ their own change.
 - the requester opens the PR there, as themselves: the forge refuses their own approval;
 - a PR opened on the head dotvirt pushed is adopted, from the forge webhook or the lane's refresh: its changes leave the draft, and later proposes extend it;
 - one merged before dotvirt saw it open settles the draft the same way;
-- dotvirt never opens, reopens or edits a PR.
+- dotvirt never opens, reopens or edits a PR, except the starter-template offer below.
+
+The first segment under `dotvirt/proposed/` is the requester (`dotvirt/proposed/<user>/<project>-<hash>`), apart from two reserved segments that name no user:
+- `revert/<user>/<project>-...`: a revert, by the next segment;
+- `_seed/starter-templates`: the starter-template offer.
+
+No user segment starts with `_` or equals `revert`: such a name is changed (a leading `_` dropped, `revert` written `u-revert`).
+A user whose name changes that way proposes on a new branch after the upgrade; a PR still open on the old branch is no longer updated by the console, so close it and propose again.
 
 Leave `dotvirt/proposed/**` unprotected in the forge.
 dotvirt rebuilds a proposal's branch on every propose and force-pushes it.
@@ -870,3 +877,18 @@ Such a file can change which files sync and how, the source type included, whate
 dotvirt refuses to stage or revert one in, and lists one already in a project's repo as an issue; removing one stays open.
 A push from outside the console is the forge's to refuse: on Forgejo, add the protected file patterns `.argocd-source*.yaml;**/.argocd-source*.yaml` to the base branch's rule and turn on "Apply the rule to administrators".
 A pull request changing one, removal included, then cannot merge; only a forge instance administrator can still merge past it.
+
+## Starter templates
+
+A project repo with no template library is offered one, once: two example VirtualMachineTemplates under `templates/`.
+The offer is always a pull request opened by dotvirt's forge account, in every `pullRequests` mode: no user asked for it, and a base branch that refuses direct pushes still takes it.
+
+- Branch: `dotvirt/proposed/_seed/starter-templates`, into the base branch.
+- Marker: the PR also adds `templates/.dotvirt-seeded`. Merged, it keeps the library from being offered again, even after its examples are deleted.
+- When: a repo dotvirt creates is offered right away. Any other repo is offered when its pull request lane is next read, if its base branch holds neither the marker nor a template.
+- Once: a pull request from the seed branch in any state, open, merged or closed, means the offer was made. Closing it unmerged declines it for good.
+- To skip it: commit `templates/.dotvirt-seeded` (any content) to the base branch, or close the offer's pull request.
+- A refused push or pull request is shown with the library, on the Templates tab, and retried at most once an hour.
+
+Nothing in `templates/` is applied to the cluster, the marker included.
+Protect the base branch as you like: the offer only needs `dotvirt/proposed/**` writable, as every proposal does.
