@@ -123,8 +123,7 @@
 		{:else if l.icon}
 			<a
 				href={l.url}
-				target="_blank"
-				rel="noopener noreferrer"
+				rel="noreferrer"
 				aria-label={l.label}
 				data-tip
 				onfocus={() => (tipsOff = false)}
@@ -142,11 +141,8 @@
 				>
 			</a>
 		{:else}
-			<a
-				href={l.url}
-				target="_blank"
-				rel="noopener noreferrer"
-				class="text-[13px] text-side-dim hover:text-white">{l.label}</a
+			<a href={l.url} rel="noreferrer" class="text-[13px] text-side-dim hover:text-white"
+				>{l.label}</a
 			>
 		{/if}
 	{/each}

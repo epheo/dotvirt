@@ -23,12 +23,16 @@ test("the console wears a provider's branding, sign-in included", async ({ page 
 	await expect(page.locator('link[rel="icon"]:not([href$="/api/branding/logo"])')).toHaveCount(0);
 	const account = header.getByRole('link', { name: 'Account' });
 	await expect(account).toHaveAttribute('href', 'https://c.example/account');
-	await expect(account).toHaveAttribute('rel', 'noopener noreferrer');
+	// Same tab, and the console path is not sent as Referer to the provider's app.
+	await expect(account).not.toHaveAttribute('target');
+	await expect(account).toHaveAttribute('rel', 'noreferrer');
 	await expect(account).toHaveText('Account');
 	// A link with an icon shows the icon alone, named by its label, which
 	// keyboard focus shows as a tooltip.
 	const billing = header.getByRole('link', { name: 'Billing' });
 	await expect(billing).toHaveAttribute('href', 'https://c.example/billing');
+	await expect(billing).not.toHaveAttribute('target');
+	await expect(billing).toHaveAttribute('rel', 'noreferrer');
 	await expect(billing.locator('img')).toHaveAttribute('src', '/api/branding/icon/billing.svg');
 	await expect(billing.locator('img')).toHaveJSProperty('naturalWidth', 22);
 	const tip = billing.getByText('Billing');
