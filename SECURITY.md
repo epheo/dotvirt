@@ -22,12 +22,14 @@ app (git and the forge API, including creating project repos) and ArgoCD's
 repo-creds. Reports that concern the operator's privileges, the forge credential,
 the user-token pass-through, or the GitOps PR-merge gate are especially welcome.
 
-The operator bounds its own account with a ValidatingAdmissionPolicy,
-`dotvirt-operator-no-token-secrets`: it refuses that account any ServiceAccount
-token Secret, the shortest path from the operator's Secret rights to another
-account's. The operator may create the policy but never change or delete it, so
-it stays after an uninstall; it matches only an account of the operator's name,
-and an admin may delete it and its binding.
+The operator's own account is bounded by two ValidatingAdmissionPolicies a
+cluster admin installs from the console (`dotvirt-operator-secrets`,
+`dotvirt-operator-deployments`): no ServiceAccount token Secret, no Secret
+outside the install and ArgoCD namespaces, and Deployments only in the install
+namespace, as dotvirt's own accounts, off the host. The operator renders them
+but holds no right to create, change or delete them, so it cannot loosen them.
+They stay after an uninstall, match only the operator's account, and an admin
+may delete them.
 
 ## Supported versions
 

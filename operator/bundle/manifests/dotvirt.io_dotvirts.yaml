@@ -477,6 +477,40 @@ spec:
           status:
             description: DotvirtStatus is the observed install state.
             properties:
+              adminApply:
+                description: |-
+                  AdminApply is a ready-to-run command applying every AdminObjects entry,
+                  for a cluster admin without the console.
+                type: string
+              adminObjects:
+                description: |-
+                  AdminObjects are objects the install needs but the operator may not
+                  create, each with its purpose and state: a cluster admin installs them
+                  from the console (one Install action, under the admin's own token), or
+                  with AdminApply.
+                items:
+                  description: |-
+                    AdminObject is one object the install needs but the operator may not
+                    create.
+                  properties:
+                    object:
+                      description: Object is the object as rendered.
+                      type: object
+                      x-kubernetes-preserve-unknown-fields: true
+                    purpose:
+                      description: Purpose says what the object is for.
+                      type: string
+                    state:
+                      description: |-
+                        State is NotInstalled, Outdated (rendered for other parameters or by
+                        another version, or changed after it was installed) or Installed.
+                      type: string
+                  required:
+                  - object
+                  - purpose
+                  - state
+                  type: object
+                type: array
               conditions:
                 description: Conditions follow the standard k8s conventions (see the
                   Condition* consts).

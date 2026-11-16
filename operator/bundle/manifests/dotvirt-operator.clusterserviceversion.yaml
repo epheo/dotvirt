@@ -124,6 +124,10 @@ spec:
             path: ssoOAuthClient
             x-descriptors:
               - urn:alm:descriptor:com.tectonic.ui:text
+          - displayName: Admin objects (a cluster admin installs them)
+            path: adminApply
+            x-descriptors:
+              - urn:alm:descriptor:com.tectonic.ui:text
           - displayName: Forge Admin (reveal bootstrap password)
             path: forgeAdminHint
             x-descriptors:
@@ -187,8 +191,10 @@ spec:
 
     Status reports the rest: `consoleURL`, `forgeURL`, `forgeAdminHint` (the
     command that reveals the managed forge's admin password), `ssoOAuthClient`,
-    and one condition per install step, so `kubectl describe dotvirt` explains
-    a stuck install.
+    `adminObjects` (what a cluster admin installs from the console, such as
+    the admission policies bounding the operator's own account, with
+    `adminApply` to run instead), and one condition per install step, so
+    `kubectl describe dotvirt` explains a stuck install.
 
     ### Prerequisites
 
@@ -293,15 +299,9 @@ spec:
                 - delete
             - apiGroups:
                 - admissionregistration.k8s.io
-              resources:
-                - validatingadmissionpolicies
-                - validatingadmissionpolicybindings
-              verbs:
-                - create
-            - apiGroups:
-                - admissionregistration.k8s.io
               resourceNames:
-                - dotvirt-operator-no-token-secrets
+                - dotvirt-operator-deployments
+                - dotvirt-operator-secrets
               resources:
                 - validatingadmissionpolicies
                 - validatingadmissionpolicybindings
@@ -533,10 +533,6 @@ spec:
                       - --leader-elect
                       - --health-probe-bind-address=:8081
                     env:
-                      - name: OPERATOR_SERVICE_ACCOUNT
-                        valueFrom:
-                          fieldRef:
-                            fieldPath: spec.serviceAccountName
                       - name: RELATED_IMAGE_DOTVIRT
                         value: quay.io/epheo/dotvirt@sha256:3226b44e8c1a2060f3f672d82d4e1b5cdc7b8e4b54cb6c4ab3a6c0301743c032
                       - name: RELATED_IMAGE_FORGEJO

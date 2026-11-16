@@ -57,18 +57,25 @@ owns one status condition; a phase that fails or waits records why there, so
 1. **Dependencies** (`DependenciesReady`): probes for ArgoCD, a hard prerequisite
    it never installs (it waits and reports if it is absent), and for KubeVirt,
    OVN-K, NMState and CDI (soft: noted, the install proceeds).
-2. **Operator guard** (`OperatorGuard`): creates, once, a ValidatingAdmissionPolicy and
-   its binding (`dotvirt-operator-no-token-secrets`) refusing the operator's own
-   ServiceAccount any Secret of type `kubernetes.io/service-account-token` or carrying
-   `kubernetes.io/service-account.name`. The operator writes neither; the Secret
-   rights its install needs would otherwise let a compromised operator mint and read
-   any account's token. It holds create and get on the two, never patch or delete,
-   so it cannot loosen them: a changed policy is reported `False` (`Modified`) with
-   what to do, never rewritten. The apiserver evaluates the policy in-process, and
-   only for Secret writes, where a username check runs first. Best-effort: never a
-   halt, never `Available`. They stay after uninstall (the operator cannot delete
-   them); they match only an account of the operator's name, so they are harmless,
-   and an admin may delete both.
+2. **Operator guard** (`OperatorGuard`): renders two ValidatingAdmissionPolicies and
+   their bindings (`dotvirt-operator-secrets`, `dotvirt-operator-deployments`) that
+   bound the operator's own account, pinned to its exact username, the install
+   namespace and the ArgoCD namespace:
+   - Secrets only in those two namespaces, never of type
+     `kubernetes.io/service-account-token` nor carrying
+     `kubernetes.io/service-account.name`;
+   - Deployments only in the install namespace, as `dotvirt` or `dotvirt-forgejo`,
+     with no host network, PID or IPC, no host path, no privileged container and
+     none allowed to escalate.
+
+   The operator never installs them: it lists them in `status.adminObjects` (see
+   [Admin objects](#admin-objects)) and reads them back by name to report
+   `NotInstalled`, `Outdated` (rendered for other namespaces or another version, or
+   changed since) or `Installed`. The apiserver evaluates them in-process, only for
+   Secret and Deployment writes, with the username check first. Best-effort: never
+   a halt, never `Available`. Once installed, a change of either namespace makes
+   them `Outdated` and refuses the operator's writes there until an admin installs
+   the new render.
 3. **Forge** (`ForgeReady`): converges the trust anchors (below) first, then, with
    `spec.forge.managed`, stands up the eval-grade Forgejo (single pod, SQLite, a PVC
    that survives uninstall), resolves its external URL (an explicit `spec.forge.url`,
@@ -181,6 +188,26 @@ server validates schema, admission, and RBAC, and nothing is persisted, a spec c
 against a real cluster. Phases whose work dry-run cannot model (the secrets, the
 forge bootstrap, the workload rollout, both webhooks, the platform repo) record a
 `DryRun` condition instead, and so does `Available`: nothing serves.
+
+## Admin objects
+
+Some objects an install needs are ones its operator must not be able to create,
+because the operator could then grant itself anything. The operator renders them
+and lists each in `status.adminObjects` with its purpose and state; `status.adminApply`
+is one command applying them all.
+
+A cluster admin signed in to the console sees a banner listing what is missing,
+and one **Install** button. The console applies the list under the admin's own
+token: it is offered only when a review says that token may read the install and
+create and patch every object an install may ask for, and the console applies
+only the kinds and names in its allowlist (`pkg/adminobjects`), whatever the
+status lists. dotvirt's own ServiceAccount and the operator hold no right to them.
+
+The operator does not watch them: their state in status follows on its next pass
+(within 10 minutes), the console's banner at once. After an upgrade that renders
+them differently they read `Outdated`, and the banner offers the install again.
+The objects stay after uninstall (nothing that ran can delete them); they match
+only the operator's account, and an admin may delete them.
 
 ## Serving through a Gateway
 
