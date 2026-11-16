@@ -87,6 +87,10 @@ Through OLM, set the override on the Subscription:
 - Deleting a Dotvirt outside the install namespace only drops the operator's
   finalizer: nothing is pruned on its say. To uninstall an install that lives
   outside it, name its namespace first, then delete it.
+- The operator guard pins the install namespace, so it refuses a move: remove the
+  guard, move the install, then install the guard again from the console there (or
+  the template, which resolves the namespace in this same order). A console the
+  install moved away from refuses to install it.
 - Why step 3 is safe: only cluster admins and this operator may write
   ClusterRoleBinding `dotvirt`, and the operator wrote it for the install it acted
   on. Its limit: an operator before this rule acted on the oldest Dotvirt anywhere,
