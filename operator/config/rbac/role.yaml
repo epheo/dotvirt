@@ -82,6 +82,22 @@ rules:
   verbs:
   - delete
 - apiGroups:
+  - admissionregistration.k8s.io
+  resources:
+  - validatingadmissionpolicies
+  - validatingadmissionpolicybindings
+  verbs:
+  - create
+- apiGroups:
+  - admissionregistration.k8s.io
+  resourceNames:
+  - dotvirt-operator-no-token-secrets
+  resources:
+  - validatingadmissionpolicies
+  - validatingadmissionpolicybindings
+  verbs:
+  - get
+- apiGroups:
   - apps
   resources:
   - deployments

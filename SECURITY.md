@@ -22,6 +22,13 @@ app (git and the forge API, including creating project repos) and ArgoCD's
 repo-creds. Reports that concern the operator's privileges, the forge credential,
 the user-token pass-through, or the GitOps PR-merge gate are especially welcome.
 
+The operator bounds its own account with a ValidatingAdmissionPolicy,
+`dotvirt-operator-no-token-secrets`: it refuses that account any ServiceAccount
+token Secret, the shortest path from the operator's Secret rights to another
+account's. The operator may create the policy but never change or delete it, so
+it stays after an uninstall; it matches only an account of the operator's name,
+and an admin may delete it and its binding.
+
 ## Supported versions
 
 Only the latest released version is supported. dotvirt is pre-1.0 (`v1alpha1`); fixes

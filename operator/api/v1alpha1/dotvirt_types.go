@@ -36,6 +36,12 @@ const (
 	// that the controller's own rights let a tenant DataVolume clone from any
 	// namespace (CloneAnywhere). It never gates Available.
 	ConditionSyncImpersonationReady = "SyncImpersonationReady"
+	// ConditionOperatorGuard is True while the admission policy refusing the
+	// operator's own ServiceAccount any token Secret is in place as rendered;
+	// False when it cannot be created or was changed (the operator never
+	// rewrites it); Unknown when the cluster lacks the API or the operator does
+	// not know its account. It never gates Available.
+	ConditionOperatorGuard = "OperatorGuard"
 	// ConditionAvailable is the roll-up: the full install is reconciled and serving.
 	ConditionAvailable = "Available"
 )

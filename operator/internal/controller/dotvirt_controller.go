@@ -58,6 +58,9 @@ type DotvirtReconciler struct {
 	APIReader client.Reader
 	// OperatorNamespace is admitted by the NetworkPolicies; "" when unknown.
 	OperatorNamespace string
+	// OperatorServiceAccount is the account the operator runs as, refused
+	// token Secrets by the operator guard; "" when unknown.
+	OperatorServiceAccount string
 
 	// probe is a test seam (not config): deps.Probe needs a live discovery
 	// endpoint, so tests stub it. nil = the real probe.
@@ -181,6 +184,8 @@ func (r *DotvirtReconciler) provision(ctx context.Context, key types.NamespacedN
 	// below.
 	for _, phase := range []reconcilePhase{
 		{dotvirtv1alpha1.ConditionDependenciesReady, r.reconcileDependencies, ""},
+		// Before the phases that write Secrets: the guard bounds them.
+		{dotvirtv1alpha1.ConditionOperatorGuard, r.reconcileOperatorGuard, "operator guard"},
 		{dotvirtv1alpha1.ConditionForgeReady, r.reconcileForge, ""},
 		{dotvirtv1alpha1.ConditionSecretsReady, r.reconcileSecrets, "secret generation"},
 		{dotvirtv1alpha1.ConditionWorkloadReady, r.reconcileWorkload, ""},

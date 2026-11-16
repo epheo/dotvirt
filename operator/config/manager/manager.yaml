@@ -33,6 +33,10 @@ spec:
           # ImageDigestMirrorSet) redirects by digest. DOTVIRT is re-pinned each release;
           # FORGEJO is static (bumped only when the upstream :11-rootless tag moves).
           env:
+            # The account the operator guard refuses token Secrets.
+            - name: OPERATOR_SERVICE_ACCOUNT
+              valueFrom:
+                fieldRef: {fieldPath: spec.serviceAccountName}
             - name: RELATED_IMAGE_DOTVIRT
               value: quay.io/epheo/dotvirt@sha256:3226b44e8c1a2060f3f672d82d4e1b5cdc7b8e4b54cb6c4ab3a6c0301743c032
             - name: RELATED_IMAGE_FORGEJO

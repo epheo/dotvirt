@@ -15,6 +15,7 @@ import (
 	"testing"
 	"time"
 
+	admissionregistrationv1 "k8s.io/api/admissionregistration/v1"
 	appsv1 "k8s.io/api/apps/v1"
 	authzv1 "k8s.io/api/authorization/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -27,6 +28,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	utilyaml "k8s.io/apimachinery/pkg/util/yaml"
+	admissionregistrationv1ac "k8s.io/client-go/applyconfigurations/admissionregistration/v1"
 	rbacv1ac "k8s.io/client-go/applyconfigurations/rbac/v1"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
@@ -153,6 +155,16 @@ func TestEnvtest(t *testing.T) {
 			// Proved by this row alone: the operator also holds the role's one rule,
 			// so the escalation check would admit its binding without bind.
 			{authzv1.ResourceAttributes{Verb: "bind", Group: "rbac.authorization.k8s.io", Resource: "clusterroles", Name: install.SyncRequestName}, true},
+			// The operator guard: created and read, never loosened or removed.
+			{authzv1.ResourceAttributes{Verb: "create", Group: "admissionregistration.k8s.io", Resource: "validatingadmissionpolicies"}, true},
+			{authzv1.ResourceAttributes{Verb: "get", Group: "admissionregistration.k8s.io", Resource: "validatingadmissionpolicies", Name: install.OperatorGuardName}, true},
+			{authzv1.ResourceAttributes{Verb: "get", Group: "admissionregistration.k8s.io", Resource: "validatingadmissionpolicies", Name: "other"}, false},
+			{authzv1.ResourceAttributes{Verb: "list", Group: "admissionregistration.k8s.io", Resource: "validatingadmissionpolicies"}, false},
+			{authzv1.ResourceAttributes{Verb: "patch", Group: "admissionregistration.k8s.io", Resource: "validatingadmissionpolicies", Name: install.OperatorGuardName}, false},
+			{authzv1.ResourceAttributes{Verb: "update", Group: "admissionregistration.k8s.io", Resource: "validatingadmissionpolicies", Name: install.OperatorGuardName}, false},
+			{authzv1.ResourceAttributes{Verb: "delete", Group: "admissionregistration.k8s.io", Resource: "validatingadmissionpolicies", Name: install.OperatorGuardName}, false},
+			{authzv1.ResourceAttributes{Verb: "patch", Group: "admissionregistration.k8s.io", Resource: "validatingadmissionpolicybindings", Name: install.OperatorGuardName}, false},
+			{authzv1.ResourceAttributes{Verb: "delete", Group: "admissionregistration.k8s.io", Resource: "validatingadmissionpolicybindings", Name: install.OperatorGuardName}, false},
 		} {
 			res, err := kube.AuthorizationV1().SelfSubjectAccessReviews().Create(ctx,
 				&authzv1.SelfSubjectAccessReview{Spec: authzv1.SelfSubjectAccessReviewSpec{ResourceAttributes: &c.attrs}}, metav1.CreateOptions{})
@@ -265,6 +277,83 @@ func TestEnvtest(t *testing.T) {
 		}
 		if err := admin.Get(ctx, types.NamespacedName{Namespace: "argocd", Name: "dotvirt-p-team-a"}, argoObj("AppProject", "", "", nil)); err != nil {
 			t.Errorf("tenant AppProject: %v", err)
+		}
+	})
+
+	t.Run("the operator's account is refused token Secrets", func(t *testing.T) {
+		eventually(t, "the guard and its binding", func() bool {
+			return admin.Get(ctx, client.ObjectKey{Name: install.OperatorGuardName}, &admissionregistrationv1.ValidatingAdmissionPolicy{}) == nil &&
+				admin.Get(ctx, client.ObjectKey{Name: install.OperatorGuardName}, &admissionregistrationv1.ValidatingAdmissionPolicyBinding{}) == nil
+		})
+		got := &dotvirtv1alpha1.Dotvirt{}
+		if err := admin.Get(ctx, types.NamespacedName{Namespace: "dotvirt", Name: "x"}, got); err != nil {
+			t.Fatal(err)
+		}
+		if c := apimeta.FindStatusCondition(got.Status.Conditions, dotvirtv1alpha1.ConditionOperatorGuard); c == nil || c.Status != metav1.ConditionTrue {
+			t.Errorf("OperatorGuard = %+v, want True", c)
+		}
+
+		op := kubernetes.NewForConfigOrDie(opCfg)
+		token := func(name string) *corev1.Secret {
+			return &corev1.Secret{
+				ObjectMeta: metav1.ObjectMeta{Name: name, Annotations: map[string]string{corev1.ServiceAccountNameKey: "default"}},
+				Type:       corev1.SecretTypeServiceAccountToken,
+			}
+		}
+		annotated := func(name string) *corev1.Secret {
+			return &corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: name, Annotations: map[string]string{corev1.ServiceAccountNameKey: "default"}}}
+		}
+		refused := func(err error) bool {
+			return apierrors.IsForbidden(err) && strings.Contains(err.Error(), install.OperatorGuardName)
+		}
+		// The apiserver enforces a new policy once its informer has it: until
+		// then a probe lands, so remove it and ask again.
+		eventually(t, "the guard enforced", func() bool {
+			_, err := op.CoreV1().Secrets("dotvirt").Create(ctx, token("guard-token"), metav1.CreateOptions{})
+			if err == nil {
+				_ = admin.Delete(ctx, &corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: "guard-token", Namespace: "dotvirt"}})
+			}
+			return refused(err)
+		})
+		if _, err := op.CoreV1().Secrets("dotvirt").Create(ctx, annotated("guard-annotated"), metav1.CreateOptions{}); !refused(err) {
+			t.Errorf("operator's annotated Opaque Secret: err=%v, want the guard's Forbidden", err)
+		}
+		plain := &corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: "guard-plain", Namespace: "dotvirt"}, StringData: map[string]string{"k": "v"}}
+		if _, err := op.CoreV1().Secrets("dotvirt").Create(ctx, plain, metav1.CreateOptions{}); err != nil {
+			t.Errorf("operator's plain Secret: %v", err)
+		}
+		_ = admin.Delete(ctx, plain)
+
+		// Another ServiceAccount, holding the same Secret right, is not the guard's.
+		builder := "system:serviceaccount:team-a:builder"
+		mustCreate(t, admin, &rbacv1.Role{
+			ObjectMeta: metav1.ObjectMeta{Name: "secret-writer", Namespace: "team-a"},
+			Rules:      []rbacv1.PolicyRule{{APIGroups: []string{""}, Resources: []string{"secrets"}, Verbs: []string{"create"}}},
+		})
+		mustCreate(t, admin, &rbacv1.RoleBinding{
+			ObjectMeta: metav1.ObjectMeta{Name: "secret-writer", Namespace: "team-a"},
+			RoleRef:    rbacv1.RoleRef{APIGroup: rbacv1.GroupName, Kind: "Role", Name: "secret-writer"},
+			Subjects:   []rbacv1.Subject{{Kind: rbacv1.UserKind, Name: builder}},
+		})
+		other, err := env.AddUser(envtest.User{Name: builder}, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := kubernetes.NewForConfigOrDie(other.Config()).CoreV1().Secrets("team-a").Create(ctx, token("builder-token"), metav1.CreateOptions{}); err != nil {
+			t.Errorf("another ServiceAccount's token Secret: %v", err)
+		}
+		if _, err := kubernetes.NewForConfigOrDie(adminCfg).CoreV1().Secrets("team-a").Create(ctx, token("admin-token"), metav1.CreateOptions{}); err != nil {
+			t.Errorf("an admin's token Secret: %v", err)
+		}
+
+		// Create-only: the operator can neither re-apply nor remove its guard.
+		apply := admissionregistrationv1ac.ValidatingAdmissionPolicy(install.OperatorGuardName).
+			WithSpec(admissionregistrationv1ac.ValidatingAdmissionPolicySpec().WithValidations())
+		if _, err := op.AdmissionregistrationV1().ValidatingAdmissionPolicies().Apply(ctx, apply, metav1.ApplyOptions{FieldManager: operatorFieldManager, Force: true}); !apierrors.IsForbidden(err) {
+			t.Errorf("operator re-applying the guard: err=%v, want Forbidden", err)
+		}
+		if err := op.AdmissionregistrationV1().ValidatingAdmissionPolicyBindings().Delete(ctx, install.OperatorGuardName, metav1.DeleteOptions{}); !apierrors.IsForbidden(err) {
+			t.Errorf("operator deleting the guard's binding: err=%v, want Forbidden", err)
 		}
 	})
 
@@ -1055,7 +1144,9 @@ func runManager(t *testing.T, cfg *rest.Config, scheme *runtime.Scheme) (*atomic
 		Config:    mgr.GetConfig(),
 		Platform:  platform.Kubernetes,
 		APIReader: mgr.GetAPIReader(),
-		syncCache: syncCache{syncRecheck: time.Second, syncTTL: time.Second},
+		// The account operatorUser names.
+		OperatorServiceAccount: "dotvirt-operator",
+		syncCache:              syncCache{syncRecheck: time.Second, syncTTL: time.Second},
 		probe: func(c *rest.Config) (deps.Result, error) {
 			passes.Add(1)
 			return depsOK(c)

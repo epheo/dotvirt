@@ -57,7 +57,19 @@ owns one status condition; a phase that fails or waits records why there, so
 1. **Dependencies** (`DependenciesReady`): probes for ArgoCD, a hard prerequisite
    it never installs (it waits and reports if it is absent), and for KubeVirt,
    OVN-K, NMState and CDI (soft: noted, the install proceeds).
-2. **Forge** (`ForgeReady`): converges the trust anchors (below) first, then, with
+2. **Operator guard** (`OperatorGuard`): creates, once, a ValidatingAdmissionPolicy and
+   its binding (`dotvirt-operator-no-token-secrets`) refusing the operator's own
+   ServiceAccount any Secret of type `kubernetes.io/service-account-token` or carrying
+   `kubernetes.io/service-account.name`. The operator writes neither; the Secret
+   rights its install needs would otherwise let a compromised operator mint and read
+   any account's token. It holds create and get on the two, never patch or delete,
+   so it cannot loosen them: a changed policy is reported `False` (`Modified`) with
+   what to do, never rewritten. The apiserver evaluates the policy in-process, and
+   only for Secret writes, where a username check runs first. Best-effort: never a
+   halt, never `Available`. They stay after uninstall (the operator cannot delete
+   them); they match only an account of the operator's name, so they are harmless,
+   and an admin may delete both.
+3. **Forge** (`ForgeReady`): converges the trust anchors (below) first, then, with
    `spec.forge.managed`, stands up the eval-grade Forgejo (single pod, SQLite, a PVC
    that survives uninstall), resolves its external URL (an explicit `spec.forge.url`,
    or the host the router assigns to a hostless Route) and mints its scoped bot
@@ -65,14 +77,14 @@ owns one status condition; a phase that fails or waits records why there, so
    `spec.forge.credentialsSecret` exists, `CredentialsSecretMissing` naming it when
    not (the dotvirt pod cannot start without it). No forge at all records
    `NotConfigured` (push-only).
-3. **Secrets** (`SecretsReady`): generates the session key, the ApplicationSet-plugin
+4. **Secrets** (`SecretsReady`): generates the session key, the ApplicationSet-plugin
    token, the webhook secrets and, with SSO, the OAuth client secret. Create-once:
    they survive restarts and are never regenerated.
-4. **Workload** (`WorkloadReady`): the ServiceAccount, drafts PVC, Service, Route,
+5. **Workload** (`WorkloadReady`): the ServiceAccount, drafts PVC, Service, Route,
    Ingress or HTTPRoute, NetworkPolicy (below) and the Deployment, owner-referenced to the CR for
    automatic cleanup. `True` only once the dotvirt pod is ready; `Progressing` until
    then, without holding back the later phases. Single replica, see below.
-5. **GitOps wiring** (`ArgoReady`): mirrors the plugin token into the ArgoCD
+6. **GitOps wiring** (`ArgoReady`): mirrors the plugin token into the ArgoCD
    namespace and trusts the managed forge's Route there (below), then applies the
    bindings of the static operand ClusterRoles (shipped in
    `config/rbac/operand_roles.yaml`; the operator only `bind`s them, never authors
@@ -109,23 +121,23 @@ owns one status condition; a phase that fails or waits records why there, so
    impersonation is on (below): `<argoNS>/dotvirt-p-<project>` for a tenant,
    `<argoNS>/dotvirt-platform-sync` for the platform tier. Names only: Argo
    impersonates by username and RBAC binds by name, so no object is created.
-6. **Sync impersonation** (`SyncImpersonationReady`): on unless opted out, see
+7. **Sync impersonation** (`SyncImpersonationReady`): on unless opted out, see
    [Sync impersonation](#sync-impersonation). Best-effort: never a halt,
    never `Available`.
-7. **Platform repo** (`ForgeRepoReady`): ensures the platform git repo exists
+8. **Platform repo** (`ForgeRepoReady`): ensures the platform git repo exists
    (`forge.EnsureRepo`, the imperative step a declarative installer can't do) and,
    for a managed forge, its owner org. Best-effort: a failure is recorded and the
    pass goes on. The condition is absent when no platform repo is configured.
-8. **Argo webhook** (`ArgoWebhook`): registers one org-level forge-to-ArgoCD webhook
+9. **Argo webhook** (`ArgoWebhook`): registers one org-level forge-to-ArgoCD webhook
    for instant sync; `Unknown` when no ArgoCD URL resolves (Argo falls back to its
    poll).
-9. **dotvirt webhook** (`DotvirtWebhook`): the forge-to-dotvirt hook is registered by
+10. **dotvirt webhook** (`DotvirtWebhook`): the forge-to-dotvirt hook is registered by
    the app itself; the operator only observes it.
 
 `Available` is `True` only after a completed pass with the dotvirt pod ready. A
 phase that fails or blocks sets it `False` with that phase's reason; the
-best-effort phases (sync impersonation, platform repo, both webhooks) never do,
-since the operand serves without them.
+best-effort phases (operator guard, sync impersonation, platform repo, both
+webhooks) never do, since the operand serves without them.
 `status.phase` is `Provisioning`, `BlockedOnDependencies` or `Ready`.
 
 A completed pass requeues after 10 minutes, so drift on the kinds the operator does

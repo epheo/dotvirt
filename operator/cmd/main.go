@@ -99,8 +99,9 @@ func main() {
 		ClusterVersioned: clusterVersioned,
 		DryRun:           dryRun,
 
-		APIReader:         mgr.GetAPIReader(),
-		OperatorNamespace: operatorNamespace(),
+		APIReader:              mgr.GetAPIReader(),
+		OperatorNamespace:      operatorNamespace(),
+		OperatorServiceAccount: os.Getenv("OPERATOR_SERVICE_ACCOUNT"),
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "Dotvirt")
 		os.Exit(1)
