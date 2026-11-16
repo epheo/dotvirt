@@ -56,8 +56,9 @@ func TestUngrantedCredentialWaitsOnlyWhatNeedsIt(t *testing.T) {
 	c := testBuilder(t).WithObjects(dv, creds, repoCreds).WithInterceptorFuncs(refuseSecret(creds.Name, &refused)).Build()
 	r := newReconciler(c, depsOK)
 
-	if res := reconcileOnce(t, r, dv); res.RequeueAfter != credentialRetry {
-		t.Errorf("requeue = %v, want %v: no watch sees the grant land", res.RequeueAfter, credentialRetry)
+	// A grant can stay pending for days: the wait comes back at the drift cadence.
+	if res := reconcileOnce(t, r, dv); res.RequeueAfter != driftResync {
+		t.Errorf("requeue = %v, want %v", res.RequeueAfter, driftResync)
 	}
 	got := getCR(t, c, dv)
 	granted := cond(got, dotvirtv1alpha1.ConditionForgeCredentialGranted)

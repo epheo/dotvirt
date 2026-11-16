@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"time"
 
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -24,10 +23,6 @@ var errCredentialNotGranted = errors.New("the forge credential is not granted to
 
 // reasonCredentialNotGranted is the reason of every condition waiting on the grant.
 const reasonCredentialNotGranted = "CredentialNotGranted"
-
-// credentialRetry is how soon a pass waiting on the grant comes back: neither
-// Roles nor RoleBindings are watched.
-const credentialRetry = time.Minute
 
 // forgeSecret reads the forge credential; a refusal is errCredentialNotGranted.
 func (r *DotvirtReconciler) forgeSecret(ctx context.Context, dv *dotvirtv1alpha1.Dotvirt) (*corev1.Secret, error) {
@@ -79,5 +74,7 @@ func (r *DotvirtReconciler) waitForCredential(dv *dotvirtv1alpha1.Dotvirt) *ctrl
 	if dv.Status.Phase == "" {
 		dv.Status.Phase = dotvirtv1alpha1.PhaseProvisioning
 	}
-	return &ctrl.Result{RequeueAfter: credentialRetry}
+	// The drift cadence, not sooner: a grant can stay pending for days, and
+	// neither Roles nor RoleBindings are watched.
+	return &ctrl.Result{RequeueAfter: driftResync}
 }
