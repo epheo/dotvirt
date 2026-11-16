@@ -183,6 +183,7 @@ spec:
     - `auth.openShiftSSO: false` drops "Sign in with OpenShift" (on by default
       where OpenShift's OAuth server runs)
     - `metrics.url` points the Performance tab at a Prometheus/Thanos API
+      (`metrics.tenancyURL` and `metrics.ca` for one outside OpenShift monitoring)
 
     Status reports the rest: `consoleURL`, `forgeURL`, `forgeAdminHint` (the
     command that reveals the managed forge's admin password), `ssoOAuthClient`,
