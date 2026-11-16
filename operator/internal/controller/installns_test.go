@@ -334,55 +334,60 @@ func TestAdoptionTrustsOnlyTheInstallSubject(t *testing.T) {
 }
 
 // Finalizing an adopted install takes ClusterRoleBinding dotvirt last: a delete
-// failing midway leaves the binding, so the retry still finds the install and
-// finishes instead of reading it as ignored and dropping the finalizer.
+// failing midway, in the Argo namespace or among the other bindings, leaves it,
+// so the retry still finds the install and finishes instead of reading it as
+// ignored and dropping the finalizer.
 func TestAdoptedFinalizeRetryFinishesTheCleanup(t *testing.T) {
-	now := metav1.Now()
-	dv := testCR()
-	dv.Finalizers = []string{dotvirtFinalizer}
-	dv.DeletionTimestamp = &now
-	mine := install.Labels(dv)
-	crb := dotvirtBinding(dv.Namespace)
-	crb.Labels = mine
-	failOnce := true
-	c := testBuilder(t).WithObjects(
-		dv, crb,
-		&rbacv1.ClusterRoleBinding{ObjectMeta: metav1.ObjectMeta{Name: "dotvirt-argocd-apply", Labels: mine}},
-		&corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: install.AppsetSecretName, Namespace: "argocd", Labels: mine}},
-	).WithInterceptorFuncs(interceptor.Funcs{
-		Delete: func(ctx context.Context, cl client.WithWatch, obj client.Object, opts ...client.DeleteOption) error {
-			if obj.GetName() == "dotvirt-argocd-apply" && failOnce {
-				failOnce = false
-				return errors.New("transient")
+	for _, failing := range []string{install.AppsetSecretName, "dotvirt-argocd-apply"} {
+		t.Run(failing, func(t *testing.T) {
+			now := metav1.Now()
+			dv := testCR()
+			dv.Finalizers = []string{dotvirtFinalizer}
+			dv.DeletionTimestamp = &now
+			mine := install.Labels(dv)
+			crb := dotvirtBinding(dv.Namespace)
+			crb.Labels = mine
+			failOnce := true
+			c := testBuilder(t).WithObjects(
+				dv, crb,
+				&rbacv1.ClusterRoleBinding{ObjectMeta: metav1.ObjectMeta{Name: "dotvirt-argocd-apply", Labels: mine}},
+				&corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: install.AppsetSecretName, Namespace: "argocd", Labels: mine}},
+			).WithInterceptorFuncs(interceptor.Funcs{
+				Delete: func(ctx context.Context, cl client.WithWatch, obj client.Object, opts ...client.DeleteOption) error {
+					if obj.GetName() == failing && failOnce {
+						failOnce = false
+						return errors.New("transient")
+					}
+					return cl.Delete(ctx, obj, opts...)
+				},
+			}).Build()
+			r := adoptingReconciler(c)
+			req := ctrl.Request{NamespacedName: client.ObjectKeyFromObject(dv)}
+			if _, err := r.Reconcile(context.Background(), req); err == nil {
+				t.Fatal("first pass: want the transient error")
 			}
-			return cl.Delete(ctx, obj, opts...)
-		},
-	}).Build()
-	r := adoptingReconciler(c)
-	req := ctrl.Request{NamespacedName: client.ObjectKeyFromObject(dv)}
-	if _, err := r.Reconcile(context.Background(), req); err == nil {
-		t.Fatal("first pass: want the transient error")
-	}
-	if !exists(t, c, &rbacv1.ClusterRoleBinding{}, "", install.AppName) {
-		t.Fatal("ClusterRoleBinding dotvirt went before the rest")
-	}
-	if _, err := r.Reconcile(context.Background(), req); err != nil {
-		t.Fatalf("second pass: %v", err)
-	}
-	if exists(t, c, &dotvirtv1alpha1.Dotvirt{}, dv.Namespace, dv.Name) {
-		t.Error("the CR is still there")
-	}
-	for _, o := range []struct {
-		obj      client.Object
-		ns, name string
-	}{
-		{&rbacv1.ClusterRoleBinding{}, "", "dotvirt-argocd-apply"},
-		{&rbacv1.ClusterRoleBinding{}, "", install.AppName},
-		{&corev1.Secret{}, "argocd", install.AppsetSecretName},
-	} {
-		if exists(t, c, o.obj, o.ns, o.name) {
-			t.Errorf("%s/%s left behind", o.ns, o.name)
-		}
+			if !exists(t, c, &rbacv1.ClusterRoleBinding{}, "", install.AppName) {
+				t.Fatal("ClusterRoleBinding dotvirt went before the rest")
+			}
+			if _, err := r.Reconcile(context.Background(), req); err != nil {
+				t.Fatalf("second pass: %v", err)
+			}
+			if exists(t, c, &dotvirtv1alpha1.Dotvirt{}, dv.Namespace, dv.Name) {
+				t.Error("the CR is still there")
+			}
+			for _, o := range []struct {
+				obj      client.Object
+				ns, name string
+			}{
+				{&rbacv1.ClusterRoleBinding{}, "", "dotvirt-argocd-apply"},
+				{&rbacv1.ClusterRoleBinding{}, "", install.AppName},
+				{&corev1.Secret{}, "argocd", install.AppsetSecretName},
+			} {
+				if exists(t, c, o.obj, o.ns, o.name) {
+					t.Errorf("%s/%s left behind", o.ns, o.name)
+				}
+			}
+		})
 	}
 }
 
@@ -415,7 +420,7 @@ func TestAdoptionRefusesDisagreeingSubjects(t *testing.T) {
 	dv := testCR()
 	crb := dotvirtBinding("team-a")
 	crb.Subjects = append(crb.Subjects, rbacv1.Subject{Kind: rbacv1.ServiceAccountKind, Name: install.AppName, Namespace: dv.Namespace})
-	c := testBuilder(t).WithObjects(dv, crb).Build()
+	c := testBuilder(t).WithObjects(dv, tenantCR(), crb).Build()
 	ns, adopted, err := adoptingReconciler(c).installNamespace(context.Background())
 	if err != nil || ns != "" || adopted {
 		t.Errorf("installNamespace = (%q, %v, %v), want none", ns, adopted, err)
