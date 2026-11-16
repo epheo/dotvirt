@@ -856,8 +856,12 @@ The first segment under `dotvirt/proposed/` is the requester (`dotvirt/proposed/
 - `revert/<user>/<project>-...`: a revert, by the next segment;
 - `_seed/starter-templates`: the starter-template offer.
 
-No user segment starts with `_` or equals `revert`: such a name is changed (a leading `_` dropped, `revert` written `u-revert`).
-A user whose name changes that way proposes on a new branch after the upgrade; a PR still open on the old branch is no longer updated by the console, so close it and propose again.
+Review services match these segments exactly and case-sensitively: `revert` is a revert, `Revert` a user.
+No user segment starts with `_` or equals `revert`. A segment that would, or that starts with `u-`, gains a leading `u-` (`_bob` is `u-_bob`, `revert` is `u-revert`, `u-bob` is `u-u-bob`, `bob` stays `bob`). The escape is one-to-one: strip one leading `u-` to read the name back.
+The segment is a readable form, not an identity: names are made ref-safe first, so `uw:alice` and `uw-alice` share a segment, and their branches stay distinct by the hash. Credit a change to the requester dotvirt records where it records one, not to the segment alone.
+
+After the upgrade, a user whose ref-safe name starts with `_` or `u-`, or equals `revert`, proposes on a new branch.
+A pull request still open on the old branch is no longer updated by the console: merge it as it is, or close it and stage those changes again.
 
 Leave `dotvirt/proposed/**` unprotected in the forge.
 dotvirt rebuilds a proposal's branch on every propose and force-pushes it.
@@ -885,10 +889,12 @@ The offer is always a pull request opened by dotvirt's forge account, in every `
 
 - Branch: `dotvirt/proposed/_seed/starter-templates`, into the base branch.
 - Marker: the PR also adds `templates/.dotvirt-seeded`. Merged, it keeps the library from being offered again, even after its examples are deleted.
-- When: a repo dotvirt creates is offered right away. Any other repo is offered when its pull request lane is next read, if its base branch holds neither the marker nor a template.
-- Once: a pull request from the seed branch in any state, open, merged or closed, means the offer was made. Closing it unmerged declines it for good.
+- Content: the branch is rebuilt from the base branch with exactly the two examples and the marker, whatever was on it before. If it moves between that push and the pull request, dotvirt closes the pull request rather than show content it did not write.
+- When: a repo dotvirt creates is offered right away. Any other repo is offered when its pull request lane is next read, if its base branch holds neither the marker nor a template. Offers run one at a time.
+- Once: a pull request from the seed branch in any state, open, merged or closed, its branch since deleted included, means the offer was made. Closing it unmerged declines it for good.
+- Folder projects (`dotvirt.io/path`) are never offered: the library the Templates tab lists is the repo root's, which no single folder project owns.
 - To skip it: commit `templates/.dotvirt-seeded` (any content) to the base branch, or close the offer's pull request.
-- A refused push or pull request is shown with the library, on the Templates tab, and retried at most once an hour.
+- A failed offer is shown on the Templates tab, by its kind only (a hook's refusal keeps the hook's words), and retried at most once an hour; the detail is in the console's log.
 
 Nothing in `templates/` is applied to the cluster, the marker included.
 Protect the base branch as you like: the offer only needs `dotvirt/proposed/**` writable, as every proposal does.

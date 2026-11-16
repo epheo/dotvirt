@@ -198,7 +198,8 @@
 					{#if seed.error}
 						<StatusPill tone="warn" label="Not offered" />
 						<span class="min-w-0 text-ink-muted"
-							>Starter templates for {libraryLabel(seed.library)} could not be proposed: {seed.error}</span
+							>Starter templates for {libraryLabel(seed.library)} could not be proposed: {seed.error}.
+							The console tries again within the hour.</span
 						>
 					{:else}
 						<StageChip kind="pr" />

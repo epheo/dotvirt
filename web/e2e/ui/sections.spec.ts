@@ -114,7 +114,11 @@ test('templates: a pending starter-library offer shows its PR or why it failed',
 		'href',
 		'https://forge.example/dotvirt/team-web/pulls/7',
 	);
-	await expect(seeds.getByText(/team-db could not be proposed: the forge refused/)).toBeVisible();
+	const refused = seeds.filter({ hasText: 'team-db' });
+	await expect(refused).toContainText(
+		"could not be proposed: the forge refused the console's account (403).",
+	);
+	await expect(refused).toContainText('The console tries again within the hour.');
 
 	// A project shows only its own offer.
 	await page.goto('/compute/team-web?tab=templates');

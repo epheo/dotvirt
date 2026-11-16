@@ -54,19 +54,21 @@ func refSegment(s string) string {
 // userSegment is refSegment for the user, the first segment of a proposal
 // branch, kept out of the segments that name no user: a leading '_' is
 // reserved (tasks.SeedSegment) and RevertSegment heads revert branches, which
-// review services read as "a revert by the next segment". A username starting
-// with '_' or equal to "revert" therefore proposes on a branch that differs
-// from its plain refSegment form.
+// review services read as "a revert by the next segment". The escape is one
+// prefix, applied one-to-one on top of refSegment: a segment starting with
+// '_' or the escape itself, or equal to "revert", gains a leading "u-", so an
+// escaped segment always starts with "u-", an unescaped one never does, and
+// stripping one "u-" decodes it.
 func userSegment(user string) string {
-	out := strings.TrimLeft(refSegment(user), "_-.")
-	if out == "" {
-		out = "x"
-	}
-	if out == tasks.RevertSegment {
-		out = "u-" + out
+	out := refSegment(user)
+	if strings.HasPrefix(out, "_") || strings.HasPrefix(out, userEscape) || out == tasks.RevertSegment {
+		out = userEscape + out
 	}
 	return out
 }
+
+// userEscape is the prefix userSegment escapes a reserved-looking segment with.
+const userEscape = "u-"
 
 // shortHash is a stable 10-hex-char fingerprint of the exact (user, project),
 // appended to the working branch so distinct identities get distinct branches

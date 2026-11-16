@@ -1647,7 +1647,7 @@ const seedoffer = {
 			},
 			{
 				library: 'team-db',
-				error: 'the forge refused the push to main (direct pushes are closed)',
+				error: "the forge refused the console's account (403)",
 			},
 		],
 	},

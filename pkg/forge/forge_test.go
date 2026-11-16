@@ -232,6 +232,42 @@ func TestFindPR(t *testing.T) {
 	}
 }
 
+// EverOpened counts a PR from head in any state, one whose branch was deleted
+// included, and never a fork's.
+func TestEverOpened(t *testing.T) {
+	const head = "dotvirt/proposed/_seed/starter-templates"
+	fork := listedPR(3, "closed", head, "main", false)
+	fork.Head.RepoID, fork.Base.RepoID = 2, 1
+	declined := listedPR(8, "closed", "refs/pull/8/head", "main", false)
+	declined.Head.Label = head
+	cases := []struct {
+		name string
+		prs  []PR
+		want bool
+	}{
+		{"none", nil, false},
+		{"open", []PR{listedPR(4, "open", head, "main", false)}, true},
+		{"closed unmerged", []PR{listedPR(4, "closed", head, "main", false)}, true},
+		{"closed, branch deleted", []PR{declined}, true},
+		{"closed, among other closed PRs", []PR{
+			listedPR(1, "closed", "a", "main", false), listedPR(2, "closed", "b", "main", false),
+			listedPR(5, "closed", "c", "main", false), listedPR(6, "closed", "d", "main", false),
+			listedPR(7, "closed", "e", "main", false), listedPR(9, "closed", head, "main", false),
+		}, true},
+		{"a fork's", []PR{fork}, false},
+		{"another base", []PR{listedPR(4, "closed", head, "release", false)}, false},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			srv, _ := pullsServer(t, 2, c.prs...)
+			got, err := testClient(srv.URL).EverOpened(head, "main")
+			if err != nil || got != c.want {
+				t.Fatalf("EverOpened = %v, %v; want %v", got, err, c.want)
+			}
+		})
+	}
+}
+
 // The forge's pair lookup ends the search when it answers with the open PR;
 // any other answer falls back to the list, which finds the open one.
 func TestFindPRPairLookup(t *testing.T) {
