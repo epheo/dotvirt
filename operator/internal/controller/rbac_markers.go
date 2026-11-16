@@ -5,8 +5,8 @@ package controller
 // create+patch (never update); only the kinds it watches (dotvirts, secrets,
 // deployments, routes, namespaces) get watch; prune's label-selected sweep is list on
 // each rendered kind plus delete BY NAME (below). The operator does NOT author ClusterRoles - it only
-// `bind`s the static operand roles - so it needs no `escalate` and no
-// ClusterRole/RoleBinding writes.
+// `bind`s the static operand roles - so it needs no `escalate` and no ClusterRole
+// writes.
 // +kubebuilder:rbac:groups=dotvirt.io,resources=dotvirts,verbs=get;list;watch;update
 // +kubebuilder:rbac:groups=dotvirt.io,resources=dotvirts/status,verbs=get;update;patch
 // dotvirts/finalizers: unused on default clusters (AddFinalizer writes the main
@@ -39,9 +39,17 @@ package controller
 // clusterrolebindings: the operator creates the bindings that wire the static operand roles
 // to the dotvirt SA / Argo controller / platform-admins / every authenticated user.
 // +kubebuilder:rbac:groups=rbac.authorization.k8s.io,resources=clusterrolebindings,verbs=list;create;patch
-// clusterroles `bind`: the operator's ONLY rbac-authoring right - bind these named
-// static roles into the bindings above. No escalate, no role create/update/delete.
-// +kubebuilder:rbac:groups=rbac.authorization.k8s.io,resources=clusterroles,resourceNames=dotvirt;dotvirt-argocd-apply;dotvirt-argocd-read;dotvirt-platform-network-admin;dotvirt-platform-sync;dotvirt-storage-catalog,verbs=bind
+// rolebindings: the one RoleBinding, dotvirt-sync-request in the Argo namespace, which
+// keeps dotvirt's Application patch off every other namespace. All three verbs are
+// scoped by name: install.Apply creates through server-side apply, which the apiserver
+// authorizes as create WITH the object's name (a POST create could not be scoped).
+// Never listed: prune reads it by name.
+// +kubebuilder:rbac:groups=rbac.authorization.k8s.io,resources=rolebindings,resourceNames=dotvirt-sync-request,verbs=create;patch;delete
+// clusterroles `bind`: the operator's ONLY rbac-authoring right - it permits binding
+// these named static roles even where the operator does not hold their rules (RBAC's
+// escalation check refuses a binding otherwise). No escalate, no role
+// create/update/delete.
+// +kubebuilder:rbac:groups=rbac.authorization.k8s.io,resources=clusterroles,resourceNames=dotvirt;dotvirt-argocd-apply;dotvirt-argocd-read;dotvirt-platform-network-admin;dotvirt-platform-sync;dotvirt-storage-catalog;dotvirt-sync-request,verbs=bind
 // Sync impersonation: SubjectAccessReviews ask what each sync account may do before
 // the operator turns it on, the RoleBindings the platform Application manages say
 // which roles the platform account must bind (read point-wise, never listed or

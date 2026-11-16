@@ -27,6 +27,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	utilyaml "k8s.io/apimachinery/pkg/util/yaml"
+	rbacv1ac "k8s.io/client-go/applyconfigurations/rbac/v1"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -136,10 +137,22 @@ func TestEnvtest(t *testing.T) {
 			{authzv1.ResourceAttributes{Verb: "bind", Group: "rbac.authorization.k8s.io", Resource: "clusterroles", Name: tenancy.TenantEgressRole}, false},
 			{authzv1.ResourceAttributes{Verb: "delete", Group: "rbac.authorization.k8s.io", Resource: "clusterrolebindings", Name: tenancy.PlatformSyncAccount}, true},
 			{authzv1.ResourceAttributes{Verb: "delete", Resource: "serviceaccounts", Namespace: "argocd", Name: "dotvirt-p-team-a"}, false},
-			// The platform RoleBindings are read one by one, never listed or watched.
+			// RoleBindings are read one by one, never listed or watched. The one the
+			// install writes is created (server-side apply authorizes create with the
+			// name), patched and deleted by name, and no other.
 			{authzv1.ResourceAttributes{Verb: "get", Group: "rbac.authorization.k8s.io", Resource: "rolebindings", Namespace: "team-a", Name: "team-a-admins"}, true},
 			{authzv1.ResourceAttributes{Verb: "list", Group: "rbac.authorization.k8s.io", Resource: "rolebindings"}, false},
+			{authzv1.ResourceAttributes{Verb: "watch", Group: "rbac.authorization.k8s.io", Resource: "rolebindings"}, false},
+			{authzv1.ResourceAttributes{Verb: "create", Group: "rbac.authorization.k8s.io", Resource: "rolebindings", Namespace: "argocd", Name: install.SyncRequestName}, true},
 			{authzv1.ResourceAttributes{Verb: "create", Group: "rbac.authorization.k8s.io", Resource: "rolebindings", Namespace: "team-a"}, false},
+			{authzv1.ResourceAttributes{Verb: "create", Group: "rbac.authorization.k8s.io", Resource: "rolebindings", Namespace: "team-a", Name: "team-a-admins"}, false},
+			{authzv1.ResourceAttributes{Verb: "patch", Group: "rbac.authorization.k8s.io", Resource: "rolebindings", Namespace: "argocd", Name: install.SyncRequestName}, true},
+			{authzv1.ResourceAttributes{Verb: "patch", Group: "rbac.authorization.k8s.io", Resource: "rolebindings", Namespace: "team-a", Name: "team-a-admins"}, false},
+			{authzv1.ResourceAttributes{Verb: "delete", Group: "rbac.authorization.k8s.io", Resource: "rolebindings", Namespace: "argocd", Name: install.SyncRequestName}, true},
+			{authzv1.ResourceAttributes{Verb: "delete", Group: "rbac.authorization.k8s.io", Resource: "rolebindings", Namespace: "team-a", Name: "team-a-admins"}, false},
+			// Proved by this row alone: the operator also holds the role's one rule,
+			// so the escalation check would admit its binding without bind.
+			{authzv1.ResourceAttributes{Verb: "bind", Group: "rbac.authorization.k8s.io", Resource: "clusterroles", Name: install.SyncRequestName}, true},
 		} {
 			res, err := kube.AuthorizationV1().SelfSubjectAccessReviews().Create(ctx,
 				&authzv1.SelfSubjectAccessReview{Spec: authzv1.SelfSubjectAccessReviewSpec{ResourceAttributes: &c.attrs}}, metav1.CreateOptions{})
@@ -159,6 +172,19 @@ func TestEnvtest(t *testing.T) {
 		}
 		if _, err := kube.RbacV1().ClusterRoleBindings().Create(ctx, crb, metav1.CreateOptions{}); !apierrors.IsForbidden(err) {
 			t.Errorf("binding cluster-admin: err=%v, want Forbidden", err)
+		}
+		// Under the one name it may create, as the operator creates it (server-side
+		// apply, authorized with that name), a RoleBinding to another role is still
+		// refused: RBAC's escalation check stops it, not the name. A POST create
+		// would carry no name and stop at authorization instead. cluster-admin, not
+		// admin: envtest runs no aggregation controller, so its admin role is empty
+		// and anyone may bind it.
+		rb := rbacv1ac.RoleBinding(install.SyncRequestName, "team-a").
+			WithRoleRef(rbacv1ac.RoleRef().WithAPIGroup(rbacv1.GroupName).WithKind("ClusterRole").WithName("cluster-admin")).
+			WithSubjects(rbacv1ac.Subject().WithKind(rbacv1.UserKind).WithName(operatorUser))
+		_, err := kube.RbacV1().RoleBindings("team-a").Apply(ctx, rb, metav1.ApplyOptions{FieldManager: "dotvirt-operator"})
+		if !apierrors.IsForbidden(err) || !strings.Contains(err.Error(), "attempting to grant RBAC permissions not currently held") {
+			t.Errorf("binding cluster-admin in team-a: err=%v, want the escalation check's Forbidden", err)
 		}
 	})
 
@@ -203,6 +229,35 @@ func TestEnvtest(t *testing.T) {
 		// network admins, and the storage catalog off OpenShift.
 		if len(crbs.Items) != 5 {
 			t.Errorf("instance ClusterRoleBindings = %d, want 5", len(crbs.Items))
+		}
+		// dotvirt's ServiceAccount reads Applications everywhere and patches
+		// them only in the ArgoCD namespace.
+		eventually(t, "sync-request RoleBinding", func() bool {
+			return admin.Get(ctx, types.NamespacedName{Namespace: "argocd", Name: install.SyncRequestName}, &rbacv1.RoleBinding{}) == nil
+		})
+		adminKube := kubernetes.NewForConfigOrDie(adminCfg)
+		sa := "system:serviceaccount:" + dv.Namespace + ":" + install.AppName
+		for _, c := range []struct {
+			verb, ns string
+			want     bool
+		}{
+			{"patch", "argocd", true},
+			{"patch", "team-a", false},
+			{"patch", "", false},
+			{"update", "argocd", false},
+			{"list", "", true},
+		} {
+			res, err := adminKube.AuthorizationV1().SubjectAccessReviews().Create(ctx, &authzv1.SubjectAccessReview{Spec: authzv1.SubjectAccessReviewSpec{
+				User:               sa,
+				Groups:             []string{"system:serviceaccounts", "system:serviceaccounts:" + dv.Namespace},
+				ResourceAttributes: &authzv1.ResourceAttributes{Verb: c.verb, Group: "argoproj.io", Resource: "applications", Namespace: c.ns},
+			}}, metav1.CreateOptions{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if res.Status.Allowed != c.want {
+				t.Errorf("dotvirt %s applications in %q: allowed=%v, want %v", c.verb, c.ns, res.Status.Allowed, c.want)
+			}
 		}
 		appset := install.ApplicationSet(got, "argocd", nil, nil)
 		if err := admin.Get(ctx, client.ObjectKeyFromObject(appset), argoObj("ApplicationSet", "", "", nil)); err != nil {
@@ -897,6 +952,7 @@ func TestEnvtest(t *testing.T) {
 		left := map[string]bool{}
 		for _, list := range []client.ObjectList{
 			&rbacv1.ClusterRoleBindingList{},
+			&rbacv1.RoleBindingList{},
 			&corev1.SecretList{},
 			&corev1.ConfigMapList{},
 			&appsv1.DeploymentList{},

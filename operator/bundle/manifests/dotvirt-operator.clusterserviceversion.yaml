@@ -449,6 +449,7 @@ spec:
                 - dotvirt-platform-network-admin
                 - dotvirt-platform-sync
                 - dotvirt-storage-catalog
+                - dotvirt-sync-request
               resources:
                 - clusterroles
               verbs:
@@ -459,6 +460,16 @@ spec:
                 - rolebindings
               verbs:
                 - get
+            - apiGroups:
+                - rbac.authorization.k8s.io
+              resourceNames:
+                - dotvirt-sync-request
+              resources:
+                - rolebindings
+              verbs:
+                - create
+                - delete
+                - patch
             - apiGroups:
                 - route.openshift.io
               resources:
