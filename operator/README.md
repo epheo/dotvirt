@@ -48,6 +48,33 @@ make run          # run against the current kubecontext
 make docker-build # image (built from the repo root context)
 ```
 
+## Install namespace
+
+The operator acts on one Dotvirt only: the one in its install namespace.
+
+- By default that is the operator's own namespace (`dotvirt-operator` from the
+  bundled manifests and OperatorHub's suggestion).
+- A cluster admin can name another namespace with `OPERATOR_INSTALL_NAMESPACE` on
+  the operator's Deployment (or its `-install-namespace` flag). Through OLM, set it
+  on the Subscription:
+
+  ```yaml
+  spec:
+    config:
+      env:
+        - name: OPERATOR_INSTALL_NAMESPACE
+          value: dotvirt
+  ```
+
+- A Dotvirt in any other namespace gets no finalizer, render or binding. Its
+  `Available` condition reads `WrongNamespace` and says where the install lives.
+- Why: OLM adds create rights on Dotvirts to every namespace's `admin` and `edit`
+  roles. Acting on a Dotvirt in a tenant's namespace would bind the install's
+  cluster-wide roles to accounts the tenant controls.
+- Deleting a Dotvirt outside the install namespace only drops the operator's
+  finalizer: nothing is pruned on its say. To uninstall an install that lives
+  outside it, name its namespace first, then delete it.
+
 ## What it provisions
 
 From one `Dotvirt` resource the controller runs the phases below in order. Each
@@ -645,6 +672,12 @@ A restart of dotvirt signs every OIDC session out: the next sign-in is one redir
 
 ## Upgrading
 
+- The operator acts only on the Dotvirt in its install namespace (see Install
+  namespace). An install whose Dotvirt lives elsewhere, `dotvirt` from the earlier
+  sample for instance, stops being reconciled after the upgrade: nothing is deleted
+  and its workloads keep running, while its `Available` condition reads
+  `WrongNamespace`. Set `OPERATOR_INSTALL_NAMESPACE` to that namespace, through the
+  Subscription's `spec.config.env` under OLM, and it resumes.
 - The CSV supports only the `AllNamespaces` install mode: one install per cluster,
   watched cluster-wide.
   - An OperatorGroup with `targetNamespaces` (OwnNamespace or SingleNamespace) fails

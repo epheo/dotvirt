@@ -1152,6 +1152,45 @@ func TestEnvtest(t *testing.T) {
 			t.Errorf("left after deletion: %v, want only the legacy binding and the other install's AppProject", left)
 		}
 	})
+
+	// The install is gone, so a namespace admin's Dotvirt is now the oldest in
+	// the cluster. The suite's install namespace is dotvirt, not the operator's
+	// own, which is the admin override at work; team-a is outside it.
+	t.Run("a Dotvirt outside the install namespace gets nothing even when oldest", func(t *testing.T) {
+		dv := &dotvirtv1alpha1.Dotvirt{ObjectMeta: metav1.ObjectMeta{
+			Name: "x", Namespace: "team-a", Finalizers: []string{dotvirtFinalizer},
+		}}
+		mustCreate(t, admin, dv)
+		eventually(t, "WrongNamespace status", func() bool {
+			var got dotvirtv1alpha1.Dotvirt
+			if admin.Get(ctx, client.ObjectKeyFromObject(dv), &got) != nil {
+				return false
+			}
+			c := apimeta.FindStatusCondition(got.Status.Conditions, dotvirtv1alpha1.ConditionAvailable)
+			return c != nil && c.Reason == "WrongNamespace"
+		})
+		var crbs rbacv1.ClusterRoleBindingList
+		if err := admin.List(ctx, &crbs); err != nil {
+			t.Fatal(err)
+		}
+		for _, b := range crbs.Items {
+			for _, s := range b.Subjects {
+				if s.Namespace == "team-a" {
+					t.Errorf("ClusterRoleBinding %s binds %s in team-a", b.Name, s.Name)
+				}
+			}
+		}
+		if err := admin.Get(ctx, types.NamespacedName{Namespace: "team-a", Name: install.AppName}, &appsv1.Deployment{}); !apierrors.IsNotFound(err) {
+			t.Errorf("console Deployment in team-a: err=%v, want NotFound", err)
+		}
+		// The finalizer its creator set is dropped on deletion, with no prune.
+		if err := admin.Delete(ctx, dv); err != nil {
+			t.Fatal(err)
+		}
+		eventually(t, "ignored Dotvirt gone", func() bool {
+			return apierrors.IsNotFound(admin.Get(ctx, client.ObjectKeyFromObject(dv), &dotvirtv1alpha1.Dotvirt{}))
+		})
+	})
 }
 
 // runManager starts the controller as cmd/main.go wires it, under cfg, and
@@ -1226,7 +1265,10 @@ func runManager(t *testing.T, cfg *rest.Config, scheme *runtime.Scheme) (*atomic
 		Config:    mgr.GetConfig(),
 		Platform:  platform.Kubernetes,
 		APIReader: mgr.GetAPIReader(),
-		syncCache: syncCache{syncRecheck: time.Second, syncTTL: time.Second},
+		// The suite's installs all live in dotvirt; the tenant subtest proves
+		// a Dotvirt elsewhere gets nothing.
+		InstallNamespace: "dotvirt",
+		syncCache:        syncCache{syncRecheck: time.Second, syncTTL: time.Second},
 		probe: func(c *rest.Config) (deps.Result, error) {
 			passes.Add(1)
 			return depsOK(c)

@@ -59,6 +59,13 @@ type DotvirtReconciler struct {
 	APIReader client.Reader
 	// OperatorNamespace is admitted by the NetworkPolicies; "" when unknown.
 	OperatorNamespace string
+	// InstallNamespace is the one namespace whose Dotvirt the operator acts on:
+	// its own, or the one a cluster admin names on its Deployment. A Dotvirt
+	// elsewhere only gets a status saying so, because the admin and edit roles
+	// let any namespace admin create one, and acting on it would bind the
+	// install's cluster-wide roles to accounts in that tenant's namespace.
+	// "" acts on none.
+	InstallNamespace string
 
 	// probe is a test seam (not config): deps.Probe needs a live discovery
 	// endpoint, so tests stub it. nil = the real probe.
@@ -115,6 +122,9 @@ func (r *DotvirtReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 	var dv dotvirtv1alpha1.Dotvirt
 	if err := r.reader().Get(ctx, req.NamespacedName, &dv); err != nil {
 		return ctrl.Result{}, client.IgnoreNotFound(err)
+	}
+	if dv.Namespace != r.InstallNamespace || r.InstallNamespace == "" {
+		return ctrl.Result{}, r.ignore(ctx, &dv)
 	}
 	log.Info("reconciling dotvirt install", "platform", r.Platform)
 
@@ -268,12 +278,13 @@ func (r *DotvirtReconciler) syncWait(dv *dotvirtv1alpha1.Dotvirt) time.Duration 
 	}
 }
 
-// olderInstall returns the Dotvirt CR that precedes dv, if any: by creation time,
-// then namespace/name, so every reconciler picks the same winner. A CR already
-// being deleted no longer counts, which is what unblocks its successor.
+// olderInstall returns the Dotvirt CR in the install namespace that precedes dv,
+// if any: by creation time, then name, so every reconciler picks the same
+// winner. A CR already being deleted no longer counts, which is what unblocks
+// its successor.
 func (r *DotvirtReconciler) olderInstall(ctx context.Context, dv *dotvirtv1alpha1.Dotvirt) (*dotvirtv1alpha1.Dotvirt, bool, error) {
 	var list dotvirtv1alpha1.DotvirtList
-	if err := r.List(ctx, &list); err != nil {
+	if err := r.List(ctx, &list, client.InNamespace(r.InstallNamespace)); err != nil {
 		return nil, false, err
 	}
 	for i := range list.Items {
@@ -630,10 +641,14 @@ func (r *DotvirtReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return b.Complete(r)
 }
 
-// installs enqueues every install: a project namespace is an input to each.
+// installs enqueues every Dotvirt in the install namespace: a project namespace
+// is an input to each.
 func (r *DotvirtReconciler) installs(ctx context.Context, _ client.Object) []reconcile.Request {
+	if r.InstallNamespace == "" {
+		return nil
+	}
 	var list dotvirtv1alpha1.DotvirtList
-	if err := r.List(ctx, &list); err != nil {
+	if err := r.List(ctx, &list, client.InNamespace(r.InstallNamespace)); err != nil {
 		logf.FromContext(ctx).Error(err, "list installs for a project namespace event")
 		return nil
 	}
@@ -677,4 +692,36 @@ func tenancyChanged(e event.UpdateEvent) bool {
 // derived field the pass cleared goes out as a null, so it still converges.
 func (r *DotvirtReconciler) writeStatus(ctx context.Context, dv, base *dotvirtv1alpha1.Dotvirt) error {
 	return r.Status().Patch(ctx, dv, client.MergeFrom(base))
+}
+
+// InstallNamespaceEnv names the operator Deployment's env that sets
+// InstallNamespace when it is not the operator's own namespace.
+const InstallNamespaceEnv = "OPERATOR_INSTALL_NAMESPACE"
+
+// ignore handles a Dotvirt outside the install namespace: no finalizer, render,
+// binding or prune, only a status saying where the install lives. Its deletion
+// drops the operator's finalizer, should it carry one, WITHOUT finalize: prune
+// matches objects by instance labels, so cleaning up on this CR's say could take
+// the real install's objects. An install moved out of the install namespace
+// keeps its objects until a cluster admin names its namespace again.
+func (r *DotvirtReconciler) ignore(ctx context.Context, dv *dotvirtv1alpha1.Dotvirt) error {
+	if !dv.DeletionTimestamp.IsZero() {
+		if !r.DryRun && controllerutil.RemoveFinalizer(dv, dotvirtFinalizer) {
+			return r.Update(ctx, dv)
+		}
+		return nil
+	}
+	msg := fmt.Sprintf("the operator could not tell its install namespace; set %s on its Deployment", InstallNamespaceEnv)
+	if r.InstallNamespace != "" {
+		msg = fmt.Sprintf("the operator acts only on the Dotvirt in namespace %s, so this one is ignored. "+
+			"Create the install there, or a cluster admin names %s with %s on the operator's Deployment "+
+			"(through OLM: the Subscription's spec.config.env)", r.InstallNamespace, dv.Namespace, InstallNamespaceEnv)
+	}
+	if c := meta.FindStatusCondition(dv.Status.Conditions, dotvirtv1alpha1.ConditionAvailable); c != nil &&
+		c.Status == metav1.ConditionFalse && c.Reason == "WrongNamespace" && c.Message == msg && c.ObservedGeneration == dv.Generation {
+		return nil
+	}
+	base := dv.DeepCopy()
+	r.setCondition(dv, dotvirtv1alpha1.ConditionAvailable, metav1.ConditionFalse, "WrongNamespace", msg)
+	return r.writeStatus(ctx, dv, base)
 }
