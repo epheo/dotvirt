@@ -32,9 +32,12 @@ const templateHeader = `# The dotvirt operator guard: admission policies boundin
 #   relimg() { kubectl -n "${OP%/*}" get deploy ` + OperatorDeployment + ` \
 #     -o jsonpath="{.spec.template.spec.containers[0].env[?(@.name==\"$1\")].value}"; }
 #   export RELATED_IMAGE_DOTVIRT="$(relimg RELATED_IMAGE_DOTVIRT)" RELATED_IMAGE_FORGEJO="$(relimg RELATED_IMAGE_FORGEJO)"
-#   # The install (one per cluster), as an admin wrote it:
-#   export INSTALL_NAMESPACE="$(kubectl get dotvirt -A -o jsonpath='{.items[0].metadata.namespace}')"
-#   spec() { kubectl get dotvirt -A -o jsonpath="{.items[0].spec.$1}"; }
+#   # The install's namespace is the console's: tenants may create Dotvirts in
+#   # their own namespaces, so take the one ClusterRoleBinding dotvirt grants the
+#   # console's ServiceAccount in, and the one Dotvirt there, as the console does:
+#   export INSTALL_NAMESPACE="$(kubectl get clusterrolebinding dotvirt \
+#     -o jsonpath='{.subjects[?(@.kind=="ServiceAccount")].namespace}')"
+#   spec() { kubectl -n "$INSTALL_NAMESPACE" get dotvirt -o jsonpath="{.items[0].spec.$1}"; }
 #   export SPEC_IMAGE="$(spec image)"
 #   export FORGE_INSECURE_TLS="$( [ "$(spec forge.insecureTLS)" = true ] && echo true || echo false )"
 #   # Where users' metrics queries go: spec.metrics.url; its tenancyURL, else for
