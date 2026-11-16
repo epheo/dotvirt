@@ -71,17 +71,62 @@ func repoPrefix(platformRepo string) string {
 // this key is set: under any other key every delivery is accepted unsigned.
 const ArgoWebhookKey = "webhook.gogs.secret"
 
-// ArgoWebhookSecret is a PARTIAL argocd-secret carrying ONLY ArgoWebhookKey -
-// server-side-applied so the operator owns just that key and coexists with the
-// gitops-operator-managed keys. Deliberately NOT instance-labeled: the operator
-// owns the key, not the Secret, so the finalizer must never delete
-// argocd-secret. (The key is left behind on uninstall - a harmless orphan.)
+// LegacyArgoWebhookKey is the key operators before 0.2.3 wrote the secret
+// under. Argo never reads it.
+const LegacyArgoWebhookKey = "webhook.gitea.secret"
+
+// ArgoSecretName is Argo's settings Secret, of which the operator holds one key.
+const ArgoSecretName = "argocd-secret"
+
+// ArgoWebhookSecret is a PARTIAL argocd-secret carrying ONLY ArgoWebhookKey, or
+// nothing when value is "", which applied releases the key. Server-side-applied
+// unforced (ApplyShared) so the operator owns just that key, coexists with the
+// gitops-operator-managed keys, and never takes a key another manager set.
+// Data, not StringData: a stringData write is recorded under f:stringData, so
+// SSA would neither see another manager's data key nor release its own.
+// Deliberately NOT instance-labeled: the operator owns the key, not the Secret,
+// so prune must never delete argocd-secret; the finalizer releases the key.
 func ArgoWebhookSecret(argoNS, value string) *corev1.Secret {
-	return &corev1.Secret{
+	s := &corev1.Secret{
 		TypeMeta:   metav1.TypeMeta{APIVersion: "v1", Kind: "Secret"},
-		ObjectMeta: metav1.ObjectMeta{Name: "argocd-secret", Namespace: argoNS},
-		StringData: map[string]string{ArgoWebhookKey: value},
+		ObjectMeta: metav1.ObjectMeta{Name: ArgoSecretName, Namespace: argoNS},
 	}
+	if value != "" {
+		s.Data = map[string][]byte{ArgoWebhookKey: []byte(value)}
+	}
+	return s
+}
+
+// HoldsArgoWebhookKey reports whether the operator's apply holds
+// ArgoWebhookKey in argocd-secret s: only then is removing it the operator's
+// call.
+func HoldsArgoWebhookKey(s *corev1.Secret) bool {
+	for _, mf := range s.GetManagedFields() {
+		if mf.Manager != fieldManager || mf.Operation != metav1.ManagedFieldsOperationApply || mf.FieldsV1 == nil {
+			continue
+		}
+		var fields map[string]any
+		if json.Unmarshal(mf.FieldsV1.Raw, &fields) != nil {
+			continue
+		}
+		data, _ := fields["f:data"].(map[string]any)
+		if _, ok := data["f:"+ArgoWebhookKey]; ok {
+			return true
+		}
+	}
+	return false
+}
+
+// DeclaresWebhookSecrets reports whether the ArgoCD resource inst sets
+// spec.webhookSecrets. The argocd-operator then owns every webhook key of
+// argocd-secret: it writes the ones declared there, deletes the others, and
+// reverts any other write.
+func DeclaresWebhookSecrets(inst *unstructured.Unstructured) bool {
+	if inst == nil {
+		return false
+	}
+	v, found, _ := unstructured.NestedFieldNoCopy(inst.Object, "spec", "webhookSecrets")
+	return found && v != nil
 }
 
 // RepoCredsSecret is an Argo repo-credentials TEMPLATE (type repo-creds) covering

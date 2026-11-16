@@ -146,6 +146,11 @@ func (r *DotvirtReconciler) finalize(ctx context.Context, dv *dotvirtv1alpha1.Do
 			return err
 		}
 	}
+	// argocd-secret is Argo's: prune never takes it, so the key comes out here.
+	argoNS, _ := r.argoTarget(dv)
+	if err := r.releaseArgoWebhookKey(ctx, dv, argoNS); err != nil {
+		return err
+	}
 	if err := r.prune(ctx, dv, renderSet{}); err != nil {
 		return err
 	}

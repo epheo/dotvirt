@@ -2,6 +2,7 @@ package controller
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
 	"net/http"
@@ -16,6 +17,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/types"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	dotvirtv1alpha1 "github.com/epheo/dotvirt/operator/api/v1alpha1"
 	"github.com/epheo/dotvirt/operator/internal/install"
@@ -578,5 +580,92 @@ func TestManagedOrgExistsBeforeOrgWebhook(t *testing.T) {
 	}
 	if repo := cond(got, dotvirtv1alpha1.ConditionForgeRepoReady); repo == nil || repo.Status != metav1.ConditionTrue {
 		t.Errorf("ForgeRepoReady = %+v, want True", repo)
+	}
+}
+
+// An ArgoCD resource setting spec.webhookSecrets has the argocd-operator own
+// argocd-secret's webhook keys: it would delete or rewrite the operator's key,
+// so the operator writes none and registers no hook that would then verify
+// nothing. Without that field, or without an ArgoCD resource at all, the hook
+// is registered for pushes, the only event Argo parses.
+func TestArgoWebhookStepsAsideWhenArgoCDOwnsTheKeys(t *testing.T) {
+	declared := argoCDInstance(nil)
+	declared.Object["spec"].(map[string]any)["webhookSecrets"] = map[string]any{
+		"gogs": map[string]any{"webhookSecretRef": map[string]any{"name": "forge-hook", "key": "secret"}},
+	}
+	for _, tc := range []struct {
+		name   string
+		inst   client.Object
+		status metav1.ConditionStatus
+		reason string
+		events []string
+	}{
+		{"no ArgoCD resource", nil, metav1.ConditionTrue, "Registered", []string{"push"}},
+		{"ArgoCD without webhookSecrets", argoCDInstance(nil), metav1.ConditionTrue, "Registered", []string{"push"}},
+		{"ArgoCD with webhookSecrets", declared, metav1.ConditionUnknown, "ManagedByArgoCD", nil},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var events []string
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				switch {
+				case r.URL.Path == "/api/v1/user":
+					w.WriteHeader(http.StatusOK)
+				case r.Method == http.MethodGet && r.URL.Path == "/api/v1/orgs/dotvirt/hooks":
+					_, _ = w.Write([]byte(`[]`))
+				case r.Method == http.MethodPost && r.URL.Path == "/api/v1/orgs/dotvirt/hooks":
+					var body struct {
+						Events []string `json:"events"`
+					}
+					_ = json.NewDecoder(r.Body).Decode(&body)
+					events = body.Events
+					w.WriteHeader(http.StatusCreated)
+					_, _ = w.Write([]byte(`{"id":1}`))
+				default:
+					t.Errorf("unexpected %s %s", r.Method, r.URL.Path)
+				}
+			}))
+			defer srv.Close()
+			dv := managedForgeCR()
+			dv.Spec.ArgoCD.ServerURL = "https://argocd.example"
+			objs := []client.Object{dv,
+				&corev1.Secret{
+					ObjectMeta: metav1.ObjectMeta{Name: install.ForgeSecretName(dv), Namespace: dv.Namespace},
+					Data: map[string][]byte{
+						"url": []byte(dv.Spec.Forge.URL), "username": []byte(install.ForgejoBotUser), "token": []byte("tok"),
+					},
+				},
+				&corev1.Secret{
+					ObjectMeta: metav1.ObjectMeta{Name: install.ArgoWebhookSecretName, Namespace: dv.Namespace},
+					Data:       map[string][]byte{"secret": []byte("hmac")},
+				},
+			}
+			if tc.inst != nil {
+				objs = append(objs, tc.inst)
+			}
+			c := testBuilder(t).WithObjects(objs...).WithReturnManagedFields().Build()
+			r := newReconciler(c, depsOK)
+			r.forgeAPIBase = func(*dotvirtv1alpha1.Dotvirt) string { return srv.URL }
+
+			if _, err := r.reconcileArgoWebhook(context.Background(), dv, phaseCtx(r, dv)); err != nil {
+				t.Fatal(err)
+			}
+			if got := cond(dv, dotvirtv1alpha1.ConditionArgoWebhook); got == nil || got.Status != tc.status || got.Reason != tc.reason {
+				t.Errorf("ArgoWebhook = %+v, want %s/%s", got, tc.status, tc.reason)
+			}
+			if !slices.Equal(events, tc.events) {
+				t.Errorf("hook events = %v, want %v", events, tc.events)
+			}
+			var argoSecret corev1.Secret
+			written := exists(t, c, &argoSecret, "argocd", install.ArgoSecretName)
+			if tc.events == nil {
+				if written {
+					t.Errorf("argocd-secret written: %v", argoSecret.Data)
+				}
+				return
+			}
+			if !written || string(argoSecret.Data[install.ArgoWebhookKey]) != "hmac" || !install.HoldsArgoWebhookKey(&argoSecret) {
+				t.Errorf("argocd-secret = %v, want %s applied by the operator", argoSecret.Data, install.ArgoWebhookKey)
+			}
+		})
 	}
 }

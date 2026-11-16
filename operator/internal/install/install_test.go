@@ -825,7 +825,7 @@ func TestArgocdApplyBindingSubjects(t *testing.T) {
 // Gogs key; any other key leaves every delivery accepted unsigned.
 func TestArgoWebhookSecretUsesTheKeyArgoVerifies(t *testing.T) {
 	s := ArgoWebhookSecret("argocd", "s3cret")
-	if s.Name != "argocd-secret" || len(s.StringData) != 1 || s.StringData["webhook.gogs.secret"] != "s3cret" {
-		t.Errorf("argocd-secret patch = %v, want only webhook.gogs.secret", s.StringData)
+	if s.Name != "argocd-secret" || len(s.Data) != 1 || s.StringData != nil || string(s.Data["webhook.gogs.secret"]) != "s3cret" {
+		t.Errorf("argocd-secret patch = %v, want only webhook.gogs.secret", s.Data)
 	}
 }

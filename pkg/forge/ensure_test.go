@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"testing"
 )
 
@@ -68,6 +69,40 @@ func TestEnsureOrgWebhookRegistersOnce(t *testing.T) {
 	}
 	if !posted {
 		t.Error("expected the org hook to be created")
+	}
+}
+
+// Argo CD parses pushes only and answers any other event 400, so its hook
+// subscribes to nothing else.
+func TestEnsureOrgPushWebhookSubscribesToPushOnly(t *testing.T) {
+	resetHookCache()
+	var events []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/orgs/dotvirt/hooks":
+			_, _ = w.Write([]byte(`[]`))
+		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/orgs/dotvirt/hooks":
+			var body struct {
+				Events []string `json:"events"`
+			}
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				t.Fatalf("decode POST body: %v", err)
+			}
+			events = body.Events
+			w.WriteHeader(http.StatusCreated)
+		default:
+			t.Errorf("unexpected %s %s", r.Method, r.URL.Path)
+			w.WriteHeader(http.StatusInternalServerError)
+		}
+	}))
+	defer srv.Close()
+
+	c := NewFactory(srv.URL, StaticToken("tok"), false, "").For("http://forge/dotvirt/platform.git")
+	if err := c.EnsureOrgPushWebhook("https://argo/api/webhook", "s3cr3t"); err != nil {
+		t.Fatalf("EnsureOrgPushWebhook: %v", err)
+	}
+	if !slices.Equal(events, []string{"push"}) {
+		t.Errorf("events = %v, want [push]", events)
 	}
 }
 
