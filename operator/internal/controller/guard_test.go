@@ -15,6 +15,7 @@ import (
 
 	dotvirtv1alpha1 "github.com/epheo/dotvirt/operator/api/v1alpha1"
 	"github.com/epheo/dotvirt/operator/internal/install"
+	"github.com/epheo/dotvirt/operator/internal/platform"
 	"github.com/epheo/dotvirt/pkg/adminobjects"
 	"github.com/epheo/dotvirt/pkg/tenancy"
 )
@@ -120,7 +121,7 @@ func TestOperatorGuardFollowsTheAdminImage(t *testing.T) {
 		"spec": map[string]any{"domain": "apps.example"},
 	}}
 	c := fake.NewClientBuilder().WithScheme(testScheme(t)).WithObjects(domain).Build()
-	r := &DotvirtReconciler{Client: c, OperatorUsername: guardOperator}
+	r := &DotvirtReconciler{Client: c, OperatorUsername: guardOperator, Platform: platform.OpenShift}
 	dv := &dotvirtv1alpha1.Dotvirt{ObjectMeta: metav1.ObjectMeta{Name: "x", Namespace: "dotvirt"}}
 	dv.Spec.Image = "registry.example/team/dotvirt:custom"
 	p := r.guardParams(t.Context(), dv, guardRC)

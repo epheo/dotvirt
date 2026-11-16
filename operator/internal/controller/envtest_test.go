@@ -744,8 +744,11 @@ func TestEnvtest(t *testing.T) {
 		for name, o := range map[string]client.Object{
 			"the console's Service": svc(nil),
 			"the console's Route":   route(install.AppName, "", nil),
-			"the forge's Service":   install.ForgejoService(dv),
-			"the forge's Route":     route(install.ForgejoServiceName, "", nil),
+			// The host the router gives a hostless Route, while the guard
+			// knows none (no cluster ingress domain here).
+			"the console's Route with the router's host": route(install.AppName, "dotvirt-dotvirt.apps.example", nil),
+			"the forge's Service":                        install.ForgejoService(dv),
+			"the forge's Route":                          route(install.ForgejoServiceName, "", nil),
 		} {
 			if err := dryApply(o); err != nil {
 				t.Errorf("%s as rendered: %v", name, err)
@@ -767,7 +770,6 @@ func TestEnvtest(t *testing.T) {
 			"the console's Route passed through": route(install.AppName, "", func(spec map[string]any) {
 				spec["tls"] = map[string]any{"termination": "passthrough"}
 			}),
-			"the console's Route on another host": route(install.AppName, "evil.example", nil),
 			"the console's Route annotated": func() client.Object {
 				r := route(install.AppName, "", nil)
 				r.SetAnnotations(map[string]string{"haproxy.router.openshift.io/rewrite-target": "/evil"})
@@ -920,7 +922,8 @@ func TestEnvtest(t *testing.T) {
 				r.Object["spec"].(map[string]any)["rules"] = []any{map[string]any{"backendRefs": []any{map[string]any{"name": install.ForgejoServiceName, "port": int64(3000)}}}}
 				return r
 			}(),
-			"the forge's Route on a wildcard": route(install.ForgejoServiceName, "x.example", func(spec map[string]any) { spec["wildcardPolicy"] = "Subdomain" }),
+			"the forge's Route on a wildcard":     route(install.ForgejoServiceName, "x.example", func(spec map[string]any) { spec["wildcardPolicy"] = "Subdomain" }),
+			"the console's Route on another host": route(install.AppName, "evil.example", nil),
 			"the console's Ingress to the forge": ingress(install.AppName, func(i *networkingv1.Ingress) {
 				i.Spec.Rules[0].HTTP.Paths[0].Backend.Service.Name = install.ForgejoServiceName
 			}),

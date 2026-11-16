@@ -478,8 +478,8 @@ spec:
       == "Service" && object.spec.to.name == "dotvirt" && (!has(object.spec.alternateBackends)
       || size(object.spec.alternateBackends) == 0) && has(object.spec.port) && string(object.spec.port.targetPort)
       == "http" && has(object.spec.tls) && object.spec.tls.termination == "edge" &&
-      !has(object.spec.tls.destinationCACertificate) && (!has(object.spec.host) ||
-      object.spec.host == "" || object.spec.host == "${CONSOLE_HOST}"))'
+      !has(object.spec.tls.destinationCACertificate) && ("${CONSOLE_HOST}" == "" ||
+      !has(object.spec.host) || object.spec.host == "" || object.spec.host == "${CONSOLE_HOST}"))'
     message: the operator routes the console's host only to the console's Service,
       edge-terminated (dotvirt operator guard)
     reason: Forbidden

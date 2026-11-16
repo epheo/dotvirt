@@ -271,7 +271,9 @@ func frontDoor(p Params) []admissionregistrationv1.Validation {
 			`(!has(object.spec.alternateBackends) || size(object.spec.alternateBackends) == 0) && `+
 			`has(object.spec.port) && string(object.spec.port.targetPort) == "http" && `+
 			`has(object.spec.tls) && object.spec.tls.termination == "edge" && !has(object.spec.tls.destinationCACertificate) && `+
-			`(!has(object.spec.host) || object.spec.host == "" || object.spec.host == `+host+`))`,
+			// An unknown host (no cluster ingress domain to read, as on
+			// MicroShift) leaves the router's own host to the hostless Route.
+			`(`+host+` == "" || !has(object.spec.host) || object.spec.host == "" || object.spec.host == `+host+`))`,
 			"the operator routes the console's host only to the console's Service, edge-terminated"),
 		deny(`!(`+kind("ingresses")+` && `+console+`) || (`+sameAnnotations+` && `+
 			`(!has(object.spec.defaultBackend) || (has(object.spec.defaultBackend.service) && object.spec.defaultBackend.service.name == `+quote(ConsoleDeployment)+`)) && `+

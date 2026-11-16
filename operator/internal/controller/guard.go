@@ -14,6 +14,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	dotvirtv1alpha1 "github.com/epheo/dotvirt/operator/api/v1alpha1"
+	"github.com/epheo/dotvirt/operator/internal/platform"
 	"github.com/epheo/dotvirt/pkg/adminobjects"
 )
 
@@ -75,7 +76,7 @@ func (r *DotvirtReconciler) operatorGuard(ctx context.Context, dv *dotvirtv1alph
 // (config.openshift.io Ingress cluster), when the console's host is the
 // router's; "" without spec.ingress.host where nothing serves it.
 func (r *DotvirtReconciler) appsDomain(ctx context.Context, dv *dotvirtv1alpha1.Dotvirt) string {
-	if dv.Spec.Ingress.Host != "" {
+	if dv.Spec.Ingress.Host != "" || r.Platform != platform.OpenShift {
 		return ""
 	}
 	u := &unstructured.Unstructured{}
