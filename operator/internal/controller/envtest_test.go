@@ -143,6 +143,11 @@ func TestEnvtest(t *testing.T) {
 			// name), patched and deleted by name, and no other.
 			{authzv1.ResourceAttributes{Verb: "get", Group: "rbac.authorization.k8s.io", Resource: "rolebindings", Namespace: "team-a", Name: "team-a-admins"}, true},
 			{authzv1.ResourceAttributes{Verb: "list", Group: "rbac.authorization.k8s.io", Resource: "rolebindings"}, false},
+			// The forge credential's grant is watched by name, never written.
+			{authzv1.ResourceAttributes{Verb: "list", Group: "rbac.authorization.k8s.io", Resource: "rolebindings", Name: install.ForgeCredentialGrantName}, true},
+			{authzv1.ResourceAttributes{Verb: "watch", Group: "rbac.authorization.k8s.io", Resource: "rolebindings", Name: install.ForgeCredentialGrantName}, true},
+			{authzv1.ResourceAttributes{Verb: "create", Group: "rbac.authorization.k8s.io", Resource: "rolebindings", Namespace: "dotvirt", Name: install.ForgeCredentialGrantName}, false},
+			{authzv1.ResourceAttributes{Verb: "create", Group: "rbac.authorization.k8s.io", Resource: "roles", Namespace: "dotvirt", Name: install.ForgeCredentialGrantName}, false},
 			{authzv1.ResourceAttributes{Verb: "watch", Group: "rbac.authorization.k8s.io", Resource: "rolebindings"}, false},
 			{authzv1.ResourceAttributes{Verb: "create", Group: "rbac.authorization.k8s.io", Resource: "rolebindings", Namespace: "argocd", Name: install.SyncRequestName}, true},
 			{authzv1.ResourceAttributes{Verb: "create", Group: "rbac.authorization.k8s.io", Resource: "rolebindings", Namespace: "team-a"}, false},
@@ -671,7 +676,7 @@ func TestEnvtest(t *testing.T) {
 			if admin.Get(ctx, client.ObjectKeyFromObject(dv), got) != nil {
 				return ""
 			}
-			return got.Status.ArgoNamespace
+			return strings.Join(got.Status.ArgoNamespaces, ",")
 		}
 		eventually(t, "argocd recorded", func() bool { return recorded() == "argocd" && written("argocd") == 5 })
 		moveTo("argocd-moved")
@@ -738,11 +743,16 @@ func TestEnvtest(t *testing.T) {
 		}{{"cred-byo", false}, {"cred-managed", true}} {
 			mustCreate(t, admin, &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: c.ns}})
 			// Not the install the deletion subtest takes down: its labels differ.
-			dv := &dotvirtv1alpha1.Dotvirt{ObjectMeta: metav1.ObjectMeta{Name: "cred", Namespace: c.ns}}
+			// The owner never exists, and envtest runs no garbage collector.
+			dv := &dotvirtv1alpha1.Dotvirt{ObjectMeta: metav1.ObjectMeta{Name: "cred", Namespace: c.ns, UID: "0f7c1d2e-cred"}}
 			dv.Spec.Forge.CredentialsSecret, dv.Spec.Forge.Managed = "byo-creds", c.managed
 			role, binding := install.ForgeCredentialGrant(dv, "dotvirt-operator")
 			mustCreate(t, admin, role)
+			// The binding landing (and, below, going) is a pass at once, not
+			// one on the drift timer.
+			before := passes.Load()
 			mustCreate(t, admin, binding)
+			soon(t, "a pass after the grant lands", func() bool { return passes.Load() > before })
 			for _, r := range []struct {
 				verb, ns, name string
 				want           bool
@@ -764,6 +774,11 @@ func TestEnvtest(t *testing.T) {
 				}
 			}
 		}
+		before := passes.Load()
+		if err := admin.Delete(ctx, &rbacv1.RoleBinding{ObjectMeta: metav1.ObjectMeta{Name: install.ForgeCredentialGrantName, Namespace: "cred-byo"}}); err != nil {
+			t.Fatal(err)
+		}
+		soon(t, "a pass after the grant is revoked", func() bool { return passes.Load() > before })
 	})
 
 	t.Run("a project's sync account holds its project's rights only", func(t *testing.T) {
@@ -1161,7 +1176,7 @@ func runManager(t *testing.T, cfg *rest.Config, scheme *runtime.Scheme) (*atomic
 		Metrics:                metricsserver.Options{BindAddress: "0"},
 		HealthProbeBindAddress: "0",
 		Cache:                  cache.Options{ByObject: CacheByObject(platform.Kubernetes)},
-		Client:                 client.Options{Cache: &client.CacheOptions{DisableFor: []client.Object{&corev1.ConfigMap{}, &corev1.Secret{}}}},
+		Client:                 client.Options{Cache: &client.CacheOptions{DisableFor: []client.Object{&corev1.ConfigMap{}, &corev1.Secret{}, &rbacv1.RoleBinding{}}}},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -1284,6 +1299,18 @@ func settle(t *testing.T, c client.Client, objs ...client.Object) {
 		}
 		return time.Since(stableSince) > 1500*time.Millisecond
 	})
+}
+
+// soon is eventually for what a watch delivers: seconds, well inside any timer.
+func soon(t *testing.T, what string, cond func() bool) {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for !cond() {
+		if time.Now().After(deadline) {
+			t.Fatalf("not within 5s: %s", what)
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
 }
 
 func eventually(t *testing.T, what string, cond func() bool) {

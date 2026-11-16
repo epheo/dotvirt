@@ -108,7 +108,7 @@ func TestPruneDeletesOnlyUnrenderedInstanceObjects(t *testing.T) {
 	sameNameElsewhere := map[string]string{install.InstanceLabel: dv.Name, install.InstanceNamespaceLabel: "elsewhere"}
 	// spec.argocd.namespace moved from here: status remembers it.
 	oldArgo := "argo-old"
-	dv.Status.ArgoNamespace = oldArgo
+	dv.Status.ArgoNamespaces = []string{oldArgo}
 	role := readOperatorRole(t)
 
 	c := testBuilder(t).WithObjects(
@@ -150,8 +150,8 @@ func TestPruneDeletesOnlyUnrenderedInstanceObjects(t *testing.T) {
 	}).Build()
 	r := newReconciler(c, depsOK)
 	reconcileOnce(t, r, dv)
-	if got := getCR(t, c, dv).Status.ArgoNamespace; got != "argocd" {
-		t.Errorf("status.argoNamespace = %q after the sweep, want argocd", got)
+	if got := getCR(t, c, dv).Status.ArgoNamespaces; len(got) != 1 || got[0] != "argocd" {
+		t.Errorf("status.argoNamespaces = %v after the sweep, want [argocd]", got)
 	}
 
 	type ref struct {

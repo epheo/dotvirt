@@ -36,12 +36,13 @@ const (
 	// that the controller's own rights let a tenant DataVolume clone from any
 	// namespace (CloneAnywhere). It never gates Available.
 	ConditionSyncImpersonationReady = "SyncImpersonationReady"
-	// ConditionForgeCredentialGranted says whether the operator may use the Secret
-	// spec.forge.credentialsSecret names, set only for a name its own role does
-	// not cover. False (NotGranted) until a cluster admin installs the Role and
-	// RoleBinding dotvirt-forge-credential in the install namespace; meanwhile
-	// the phases needing the credential wait and the rest of the install runs.
-	ConditionForgeCredentialGranted = "ForgeCredentialGranted"
+	// ConditionForgeCredentialReady says whether the operator may use the Secret
+	// spec.forge.credentialsSecret names, set for any name but dotvirt-forge.
+	// False NotGranted until a cluster admin installs the Role and RoleBinding
+	// dotvirt-forge-credential in the install namespace (the message carries the
+	// commands); False NameTaken for a Secret the operator generates for itself.
+	// Meanwhile the phases needing the credential wait and the rest runs.
+	ConditionForgeCredentialReady = "ForgeCredentialReady"
 	// ConditionAvailable is the roll-up: the full install is reconciled and serving.
 	ConditionAvailable = "Available"
 )
@@ -97,7 +98,8 @@ type ForgeSpec struct {
 	// webhooks needs an org owner, and without one dotvirt and ArgoCD fall back to
 	// polling. Any name but dotvirt-forge needs a cluster admin's grant: the
 	// operator reads only the Secrets its own role names, and reports the Role and
-	// RoleBinding to install (ForgeCredentialGranted).
+	// RoleBinding to install (ForgeCredentialReady). A name the operator gives one
+	// of its own Secrets (dotvirt-session, ...) is refused there too.
 	CredentialsSecret string `json:"credentialsSecret,omitempty"`
 	// InsecureTLS skips TLS verification when calling the forge API (a self-signed forge
 	// Route, e.g. the bundled Forgejo). DEV/EVAL ONLY; never enable against a forge with
@@ -422,10 +424,10 @@ type DotvirtStatus struct {
 	// install is deleted, so no Application is left needing an account dotvirt
 	// no longer maps.
 	SyncImpersonationInstance string `json:"syncImpersonationInstance,omitempty"`
-	// ArgoNamespace is the ArgoCD namespace the install last wrote, recorded once
-	// a prune there completes: when spec.argocd.namespace moves, prune reads the
-	// objects left in this one by name and deletes them, then records the new one.
-	ArgoNamespace string `json:"argoNamespace,omitempty"`
+	// ArgoNamespaces are the ArgoCD namespaces the install wrote that no
+	// completed prune has swept since: a pass adds the one it writes, and a
+	// completed prune, having swept the others by name, leaves the current one.
+	ArgoNamespaces []string `json:"argoNamespaces,omitempty"`
 	// ForgeAdminHint is the command that reveals the managed Forgejo bootstrap admin
 	// password (user dotvirt-bot); the value stays in the Secret, never in status.
 	// Set only for a managed forge.

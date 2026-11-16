@@ -2,9 +2,9 @@ package controller
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"net/url"
+	"slices"
 	"strings"
 
 	corev1 "k8s.io/api/core/v1"
@@ -33,6 +33,20 @@ import (
 func (r *DotvirtReconciler) reconcileArgo(ctx context.Context, dv *dotvirtv1alpha1.Dotvirt, rc *reconcileCtx) (*ctrl.Result, error) {
 	argoNS, argoSA := rc.argoNS, rc.argoSA
 	platformRepo := dv.Spec.Forge.PlatformRepo
+	// Before any write: a bring-your-own forge's base, which tenant repo refs
+	// resolve against, is its credential's url.
+	forgeBase, err := r.appForgeBase(ctx, dv)
+	if credentialWaits(err) {
+		return r.waitForCredential(dv), nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	if !r.DryRun && !slices.Contains(dv.Status.ArgoNamespaces, argoNS) {
+		// Recorded before the first write there, so a move that no prune
+		// completed after still has this namespace swept.
+		dv.Status.ArgoNamespaces = append(dv.Status.ArgoNamespaces, argoNS)
+	}
 	// The plugin generator reads the appset token from the ArgoCD namespace, so
 	// mirror the generated one there. Dry-run skips both this and the TLS trust
 	// merge: the mirror copies a Secret the (skipped) secrets phase never
@@ -47,10 +61,7 @@ func (r *DotvirtReconciler) reconcileArgo(ctx context.Context, dv *dotvirtv1alph
 		}
 	}
 	platformNS := r.platformNamespaces(dv, argoNS)
-	tenants, err := r.tenantAppProjects(ctx, dv, rc, platformNS)
-	if errors.Is(err, errCredentialNotGranted) {
-		return r.waitForCredential(dv), nil
-	}
+	tenants, err := r.tenantAppProjects(ctx, dv, rc, platformNS, forgeBase)
 	if err != nil {
 		return nil, err
 	}
@@ -93,8 +104,10 @@ func (r *DotvirtReconciler) reconcileArgo(ctx context.Context, dv *dotvirtv1alph
 	// platform repos, including private ones. Best-effort - nil if the forge URL or
 	// secret is absent.
 	creds, err := r.repoCreds(ctx, dv, argoNS)
-	if errors.Is(err, errCredentialNotGranted) {
-		return r.waitForCredential(dv), nil
+	if credentialWaits(err) {
+		// Only a managed forge gets here, whose tier needs the credential for the
+		// repo credentials alone: the copy Argo already has stays.
+		err = r.keepRepoCreds(ctx, dv, argoNS)
 	}
 	if err != nil {
 		return nil, err
@@ -186,8 +199,8 @@ func (r *DotvirtReconciler) mirrorAppsetToken(ctx context.Context, dv *dotvirtv1
 // Real-only (the caller skips it in dry-run) - it mutates the forge + argocd-secret.
 func (r *DotvirtReconciler) argoWebhook(ctx context.Context, dv *dotvirtv1alpha1.Dotvirt, rc *reconcileCtx) (metav1.ConditionStatus, string, string) {
 	failed := func(err error) (metav1.ConditionStatus, string, string) {
-		if errors.Is(err, errCredentialNotGranted) {
-			return metav1.ConditionUnknown, reasonCredentialNotGranted, "waiting for " + dotvirtv1alpha1.ConditionForgeCredentialGranted
+		if credentialWaits(err) {
+			return metav1.ConditionUnknown, reasonCredentialWait, credentialWaitMessage
 		}
 		return metav1.ConditionFalse, "Error", err.Error()
 	}
@@ -302,6 +315,22 @@ func (r *DotvirtReconciler) dropLegacyArgoWebhookKey(ctx context.Context, s *cor
 	delete(s.Data, install.LegacyArgoWebhookKey)
 	if err := r.Patch(ctx, s, client.MergeFromWithOptions(base, client.MergeFromWithOptimisticLock{})); err != nil {
 		return fmt.Errorf("remove %s from %s/%s: %w", install.LegacyArgoWebhookKey, s.Namespace, install.ArgoSecretName, err)
+	}
+	return nil
+}
+
+// keepRepoCreds keeps this install's repo credentials in argoNS as they are,
+// unread from the forge credential: recorded as rendered, so prune leaves them.
+func (r *DotvirtReconciler) keepRepoCreds(ctx context.Context, dv *dotvirtv1alpha1.Dotvirt, argoNS string) error {
+	s, err := r.secret(ctx, argoNS, install.RepoCredsName)
+	if apierrors.IsNotFound(err) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if install.OwnedBy(s.GetLabels(), dv) {
+		r.recordRender(ctx, s)
 	}
 	return nil
 }

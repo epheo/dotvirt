@@ -281,7 +281,8 @@ spec:
                       webhooks needs an org owner, and without one dotvirt and ArgoCD fall back to
                       polling. Any name but dotvirt-forge needs a cluster admin's grant: the
                       operator reads only the Secrets its own role names, and reports the Role and
-                      RoleBinding to install (ForgeCredentialGranted).
+                      RoleBinding to install (ForgeCredentialReady). A name the operator gives one
+                      of its own Secrets (dotvirt-session, ...) is refused there too.
                     type: string
                   insecureTLS:
                     description: |-
@@ -479,12 +480,14 @@ spec:
           status:
             description: DotvirtStatus is the observed install state.
             properties:
-              argoNamespace:
+              argoNamespaces:
                 description: |-
-                  ArgoNamespace is the ArgoCD namespace the install last wrote, recorded once
-                  a prune there completes: when spec.argocd.namespace moves, prune reads the
-                  objects left in this one by name and deletes them, then records the new one.
-                type: string
+                  ArgoNamespaces are the ArgoCD namespaces the install wrote that no
+                  completed prune has swept since: a pass adds the one it writes, and a
+                  completed prune, having swept the others by name, leaves the current one.
+                items:
+                  type: string
+                type: array
               conditions:
                 description: Conditions follow the standard k8s conventions (see the
                   Condition* consts).

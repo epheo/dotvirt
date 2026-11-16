@@ -2,8 +2,14 @@ package controller
 
 import (
 	"context"
+	"errors"
+	"fmt"
+	"io"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	utilyaml "k8s.io/apimachinery/pkg/util/yaml"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -82,6 +88,9 @@ func (role operatorRole) allows(verb, group, resource, name string, unscoped fun
 func TestUnscopedRulesAreTheReasonedOnes(t *testing.T) {
 	got := map[string][]string{}
 	for _, rule := range readOperatorRole(t) {
+		if len(rule.NonResourceURLs) > 0 {
+			t.Errorf("non-resource URLs %v granted %v: the operator calls none", rule.NonResourceURLs, rule.Verbs)
+		}
 		if len(rule.ResourceNames) > 0 {
 			continue
 		}
@@ -268,5 +277,58 @@ func TestOperatorSecretNamesAreTheRolesSecrets(t *testing.T) {
 	want := slices.Sorted(slices.Values(install.OperatorSecretNames))
 	if !slices.Equal(named, want) {
 		t.Errorf("role's Secret names %v, install.OperatorSecretNames %v", named, want)
+	}
+}
+
+// The forge credential's grant binds the operator's ServiceAccount by name: it
+// must be the account the operator runs as, in its manifests and its CSV.
+func TestOperatorServiceAccountIsTheDeployedOne(t *testing.T) {
+	read := func(path string) []map[string]any {
+		t.Helper()
+		f, err := os.Open(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer func() { _ = f.Close() }()
+		dec := utilyaml.NewYAMLOrJSONDecoder(f, 4096)
+		var out []map[string]any
+		for {
+			doc := map[string]any{}
+			if err := dec.Decode(&doc); errors.Is(err, io.EOF) {
+				return out
+			} else if err != nil {
+				t.Fatalf("%s: %v", path, err)
+			}
+			out = append(out, doc)
+		}
+	}
+	names := map[string]string{}
+	sa := read(filepath.Join("..", "..", "config", "rbac", "service_account.yaml"))[0]
+	names["config/rbac/service_account.yaml"], _, _ = unstructured.NestedString(sa, "metadata", "name")
+	manager := read(filepath.Join("..", "..", "config", "manager", "manager.yaml"))
+	for _, doc := range manager {
+		if doc["kind"] == "Deployment" {
+			names["config/manager Deployment"], _, _ = unstructured.NestedString(doc, "spec", "template", "spec", "serviceAccountName")
+		}
+	}
+	csv := read(filepath.Join("..", "..", "bundle", "manifests", "dotvirt-operator.clusterserviceversion.yaml"))[0]
+	spec, _, _ := unstructured.NestedMap(csv, "spec", "install", "spec")
+	for _, key := range []string{"clusterPermissions", "permissions"} {
+		list, _, _ := unstructured.NestedSlice(spec, key)
+		for i, p := range list {
+			names[fmt.Sprintf("CSV %s[%d]", key, i)], _, _ = unstructured.NestedString(p.(map[string]any), "serviceAccountName")
+		}
+	}
+	deployments, _, _ := unstructured.NestedSlice(spec, "deployments")
+	for i, d := range deployments {
+		names[fmt.Sprintf("CSV deployments[%d]", i)], _, _ = unstructured.NestedString(d.(map[string]any), "spec", "template", "spec", "serviceAccountName")
+	}
+	if len(names) < 4 {
+		t.Fatalf("found %v, want the manifests' and CSV's account names", names)
+	}
+	for where, name := range names {
+		if name != install.OperatorServiceAccount {
+			t.Errorf("%s runs as %q, install.OperatorServiceAccount is %q", where, name, install.OperatorServiceAccount)
+		}
 	}
 }

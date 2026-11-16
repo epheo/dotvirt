@@ -184,11 +184,11 @@ func (r *DotvirtReconciler) syncInstances(dv *dotvirtv1alpha1.Dotvirt) []string 
 // these kinds.
 func (r *DotvirtReconciler) prune(ctx context.Context, dv *dotvirtv1alpha1.Dotvirt, rendered renderSet) error {
 	// This pass's namespaces, the current ArgoCD namespace, which finalize must
-	// sweep though it renders nothing there, and the one status records, which
+	// sweep though it renders nothing there, and the ones status records, which
 	// the objects of a moved spec.argocd.namespace are left in.
 	written := renderedNamespaces(dv, rendered)
 	argoNS, _ := r.argoTarget(dv)
-	for _, ns := range []string{argoNS, dv.Status.ArgoNamespace} {
+	for _, ns := range append([]string{argoNS}, dv.Status.ArgoNamespaces...) {
 		if ns != "" && ns != dv.Namespace {
 			written[ns] = true
 		}

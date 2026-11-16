@@ -9,6 +9,7 @@ import (
 
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
+	rbacv1 "k8s.io/api/rbac/v1"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -228,7 +229,8 @@ func (r *DotvirtReconciler) provision(ctx context.Context, key types.NamespacedN
 			return ctrl.Result{}, fmt.Errorf("prune: %w", err)
 		}
 		r.markPruned(key, digest)
-		dv.Status.ArgoNamespace = rc.argoNS
+		// Every other recorded namespace was just swept by name.
+		dv.Status.ArgoNamespaces = []string{rc.argoNS}
 	}
 	// The watches cover the CR, Deployments, Routes and project namespaces;
 	// the drift timer heals the rest. No watch reports the platform
@@ -565,6 +567,9 @@ func CacheByObject(plat platform.Platform) map[client.Object]cache.ByObject {
 		// The watch on Argo's settings selects argocd-cm by name, the only
 		// ConfigMap the RBAC lets the operator watch; reads stay direct.
 		&corev1.ConfigMap{}: {Field: fields.OneTermEqualSelector("metadata.name", argoSettings)},
+		// The forge credential's grant, by name, the only RoleBinding the RBAC
+		// lets the operator watch; RoleBinding reads stay direct.
+		&rbacv1.RoleBinding{}: {Field: fields.OneTermEqualSelector("metadata.name", install.ForgeCredentialGrantName)},
 	}
 	// Registering the Route kind on vanilla Kubernetes fails the cache's REST lookup.
 	if plat == platform.OpenShift {
@@ -600,7 +605,10 @@ func (r *DotvirtReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		// pass re-renders their AppProjects at once, not on the next drift
 		// requeue.
 		Watches(&corev1.ConfigMap{}, handler.EnqueueRequestsFromMapFunc(r.installs),
-			builder.WithPredicates(predicate.Funcs{UpdateFunc: impersonationChanged, GenericFunc: func(event.GenericEvent) bool { return false }}))
+			builder.WithPredicates(predicate.Funcs{UpdateFunc: impersonationChanged, GenericFunc: func(event.GenericEvent) bool { return false }})).
+		// A cluster admin granting or revoking the forge credential: the phases
+		// waiting on it go on at once, not on the drift timer.
+		Watches(&rbacv1.RoleBinding{}, handler.EnqueueRequestsFromMapFunc(r.installs))
 	// Routes exist only where the route API does, so gate the watch on the same
 	// platform detection that gates rendering them; on vanilla Kubernetes the
 	// informer could never sync. Unstructured because the module carries no

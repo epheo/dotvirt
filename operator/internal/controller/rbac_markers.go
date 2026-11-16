@@ -82,6 +82,10 @@ package controller
 // rolebindings: the one RoleBinding, dotvirt-sync-request in the Argo namespace, which
 // keeps dotvirt's Application patch off every other namespace.
 // +kubebuilder:rbac:groups=rbac.authorization.k8s.io,resources=rolebindings,resourceNames=dotvirt-sync-request,verbs=create;patch;delete
+// rolebindings list/watch on dotvirt-forge-credential alone (the cache selects it
+// by name): a cluster admin granting or revoking the forge credential triggers a
+// pass. The operator never writes it.
+// +kubebuilder:rbac:groups=rbac.authorization.k8s.io,resources=rolebindings,resourceNames=dotvirt-forge-credential,verbs=list;watch
 // clusterroles `bind`: the operator's ONLY rbac-authoring right - it permits binding
 // these named static roles even where the operator does not hold their rules (RBAC's
 // escalation check refuses a binding otherwise). No escalate, no role

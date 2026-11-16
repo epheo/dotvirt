@@ -16,6 +16,7 @@ import (
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 
 	corev1 "k8s.io/api/core/v1"
+	rbacv1 "k8s.io/api/rbac/v1"
 	"sigs.k8s.io/controller-runtime/pkg/cache"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
@@ -78,11 +79,12 @@ func main() {
 		LeaderElection:         enableLeaderElection,
 		LeaderElectionID:       "dotvirt-operator.dotvirt.io",
 		Cache:                  cache.Options{ByObject: controller.CacheByObject(plat)},
-		// ConfigMaps and Secrets are read point-wise, never watched: the cached
+		// ConfigMaps, Secrets and RoleBindings are read point-wise: the cached
 		// client would spin a CLUSTER-WIDE informer on first Get, exceeding the
 		// RBAC (get by name, no list or watch) and blocking that Get forever,
-		// wedging reconcile and deletion alike.
-		Client: client.Options{Cache: &client.CacheOptions{DisableFor: []client.Object{&corev1.ConfigMap{}, &corev1.Secret{}}}},
+		// wedging reconcile and deletion alike. The ones watched by name
+		// (argocd-cm, the credential grant) feed events only.
+		Client: client.Options{Cache: &client.CacheOptions{DisableFor: []client.Object{&corev1.ConfigMap{}, &corev1.Secret{}, &rbacv1.RoleBinding{}}}},
 	})
 	if err != nil {
 		setupLog.Error(err, "unable to start manager")

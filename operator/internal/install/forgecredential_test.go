@@ -2,6 +2,7 @@ package install
 
 import (
 	"slices"
+	"strings"
 	"testing"
 
 	rbacv1 "k8s.io/api/rbac/v1"
@@ -22,7 +23,7 @@ func TestForgeCredentialGrant(t *testing.T) {
 		{"bring your own", false, []string{"get"}},
 		{"managed", true, []string{"get", "create", "patch"}},
 	} {
-		dv := &dotvirtv1alpha1.Dotvirt{ObjectMeta: metav1.ObjectMeta{Name: "x", Namespace: "dotvirt"}}
+		dv := &dotvirtv1alpha1.Dotvirt{ObjectMeta: metav1.ObjectMeta{Name: "x", Namespace: "dotvirt", UID: "uid-x"}}
 		dv.Spec.Forge.CredentialsSecret, dv.Spec.Forge.Managed = "byo-creds", c.managed
 		role, binding := ForgeCredentialGrant(dv, "dotvirt-operator")
 		if role == nil || binding == nil {
@@ -38,6 +39,14 @@ func TestForgeCredentialGrant(t *testing.T) {
 				slices.Equal(a.ResourceNames, b.ResourceNames) && slices.Equal(a.Verbs, b.Verbs)
 		}) {
 			t.Errorf("%s: rules = %+v, want %+v", c.name, role.Rules, want)
+		}
+		// Owned by the CR without blockOwnerDeletion: the garbage collector takes
+		// the grant with the install, and whoever installs it needs no finalizers right.
+		for _, owners := range [][]metav1.OwnerReference{role.OwnerReferences, binding.OwnerReferences} {
+			if len(owners) != 1 || owners[0].Kind != "Dotvirt" || owners[0].Name != "x" || owners[0].UID != "uid-x" ||
+				owners[0].BlockOwnerDeletion != nil || owners[0].Controller != nil {
+				t.Errorf("%s: owners = %+v, want the CR alone, not blocking its deletion", c.name, owners)
+			}
 		}
 		wantRef := rbacv1.RoleRef{APIGroup: rbacv1.GroupName, Kind: "Role", Name: ForgeCredentialGrantName}
 		wantSubjects := []rbacv1.Subject{{Kind: "ServiceAccount", Name: OperatorServiceAccount, Namespace: "dotvirt-operator"}}
@@ -62,5 +71,22 @@ func TestForgeCredentialGrantOnlyWhenNeeded(t *testing.T) {
 		if role, binding := ForgeCredentialGrant(dv, c.operatorNS); role != nil || binding != nil {
 			t.Errorf("credentialsSecret %q, operator namespace %q: a grant was rendered", c.secret, c.operatorNS)
 		}
+	}
+}
+
+// The commands an admin runs by hand grant what ForgeCredentialGrant renders.
+func TestForgeCredentialCommands(t *testing.T) {
+	dv := &dotvirtv1alpha1.Dotvirt{ObjectMeta: metav1.ObjectMeta{Name: "x", Namespace: "dotvirt"}}
+	dv.Spec.Forge.CredentialsSecret = "byo-creds"
+	want := []string{
+		"kubectl -n dotvirt create role dotvirt-forge-credential --verb=get --resource=secrets --resource-name=byo-creds",
+		"kubectl -n dotvirt create rolebinding dotvirt-forge-credential --role=dotvirt-forge-credential --serviceaccount=dotvirt-operator:dotvirt-operator-controller",
+	}
+	if got := ForgeCredentialCommands(dv, "dotvirt-operator"); !slices.Equal(got, want) {
+		t.Errorf("bring your own: %q, want %q", got, want)
+	}
+	dv.Spec.Forge.Managed = true
+	if got := ForgeCredentialCommands(dv, ""); !strings.Contains(got[0], "--verb=get,create,patch") || !strings.Contains(got[1], "<operator-namespace>:") {
+		t.Errorf("managed, operator namespace unknown: %q", got)
 	}
 }

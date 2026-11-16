@@ -95,16 +95,12 @@ type tenantTier struct {
 // the ApplicationSet moves its Applications off it, and a vanished project's,
 // admitting nothing, until its Application is removed. Unreferenced, they
 // leave the render and prune deletes them.
-func (r *DotvirtReconciler) tenantAppProjects(ctx context.Context, dv *dotvirtv1alpha1.Dotvirt, rc *reconcileCtx, platformNS []string) (tenantTier, error) {
+func (r *DotvirtReconciler) tenantAppProjects(ctx context.Context, dv *dotvirtv1alpha1.Dotvirt, rc *reconcileCtx, platformNS []string, forgeBase string) (tenantTier, error) {
 	argoNS := rc.argoNS
 	t := tenantTier{accounts: map[string][]string{}}
 	var nsList corev1.NamespaceList
 	if err := r.List(ctx, &nsList, client.HasLabels{install.ProjectLabel}); err != nil {
 		return t, fmt.Errorf("list project namespaces: %w", err)
-	}
-	forgeBase, err := r.appForgeBase(ctx, dv)
-	if err != nil {
-		return t, err
 	}
 	held := unstructuredList(install.ArgoGVK("AppProject"))().(*unstructured.UnstructuredList)
 	if err := r.reader().List(ctx, held, client.InNamespace(argoNS)); err != nil {

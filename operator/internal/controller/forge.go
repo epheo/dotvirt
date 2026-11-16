@@ -38,8 +38,8 @@ func (r *DotvirtReconciler) reconcileForge(ctx context.Context, dv *dotvirtv1alp
 	// install needs it (the app's OAuth exchange verifies against the same copy),
 	// so it precedes the managed check.
 	r.ensureTrustAnchors(ctx, dv, rc)
-	if !install.ForgeCredentialNeedsGrant(dv) {
-		meta.RemoveStatusCondition(&dv.Status.Conditions, dotvirtv1alpha1.ConditionForgeCredentialGranted)
+	if !credentialChecked(dv) {
+		meta.RemoveStatusCondition(&dv.Status.Conditions, dotvirtv1alpha1.ConditionForgeCredentialReady)
 	}
 	if !dv.Spec.Forge.Managed {
 		// Derived status, so a switch off managed retires the stale bootstrap hint too.
@@ -71,12 +71,11 @@ func (r *DotvirtReconciler) reconcileForge(ctx context.Context, dv *dotvirtv1alp
 	}
 	ready, err := r.bootstrapForgejo(ctx, dv)
 	if ready || err != nil {
-		r.recordCredentialGrant(dv, err)
+		r.recordCredential(dv, err)
 	}
-	if errors.Is(err, errCredentialNotGranted) {
-		// The forge serves; only what needs its credential waits (waitForCredential).
-		r.setCondition(dv, dotvirtv1alpha1.ConditionForgeReady, metav1.ConditionFalse, reasonCredentialNotGranted,
-			"waiting for "+dotvirtv1alpha1.ConditionForgeCredentialGranted)
+	if credentialWaits(err) {
+		// The forge serves; only what needs its credential waits.
+		r.setCondition(dv, dotvirtv1alpha1.ConditionForgeReady, metav1.ConditionFalse, reasonCredentialWait, credentialWaitMessage)
 		return nil, nil
 	}
 	if errors.Is(err, forge.ErrUnauthorized) {
@@ -115,10 +114,9 @@ func (r *DotvirtReconciler) observeForge(ctx context.Context, dv *dotvirtv1alpha
 			"no forge configured; propose pushes a branch but opens no pull request")
 	default:
 		_, err := r.forgeSecret(ctx, dv)
-		r.recordCredentialGrant(dv, err)
-		if errors.Is(err, errCredentialNotGranted) {
-			r.setCondition(dv, dotvirtv1alpha1.ConditionForgeReady, metav1.ConditionFalse, reasonCredentialNotGranted,
-				"waiting for "+dotvirtv1alpha1.ConditionForgeCredentialGranted)
+		r.recordCredential(dv, err)
+		if credentialWaits(err) {
+			r.setCondition(dv, dotvirtv1alpha1.ConditionForgeReady, metav1.ConditionFalse, reasonCredentialWait, credentialWaitMessage)
 		} else if apierrors.IsNotFound(err) {
 			r.setCondition(dv, dotvirtv1alpha1.ConditionForgeReady, metav1.ConditionFalse, "CredentialsSecretMissing",
 				fmt.Sprintf("spec.forge.credentialsSecret names %s/%s, which does not exist; the dotvirt pod cannot start without it", dv.Namespace, name))
@@ -208,9 +206,8 @@ func (r *DotvirtReconciler) reconcilePlatformRepo(ctx context.Context, dv *dotvi
 		meta.RemoveStatusCondition(&dv.Status.Conditions, dotvirtv1alpha1.ConditionForgeRepoReady)
 		return nil, nil
 	}
-	if err := r.ensurePlatformRepo(ctx, dv); errors.Is(err, errCredentialNotGranted) {
-		r.setCondition(dv, dotvirtv1alpha1.ConditionForgeRepoReady, metav1.ConditionUnknown, reasonCredentialNotGranted,
-			"waiting for "+dotvirtv1alpha1.ConditionForgeCredentialGranted)
+	if err := r.ensurePlatformRepo(ctx, dv); credentialWaits(err) {
+		r.setCondition(dv, dotvirtv1alpha1.ConditionForgeRepoReady, metav1.ConditionUnknown, reasonCredentialWait, credentialWaitMessage)
 		return nil, nil
 	} else if err != nil {
 		r.setCondition(dv, dotvirtv1alpha1.ConditionForgeRepoReady, metav1.ConditionFalse, "Error", err.Error())

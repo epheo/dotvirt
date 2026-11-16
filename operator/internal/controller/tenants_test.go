@@ -12,6 +12,7 @@ import (
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
+	rbacv1 "k8s.io/api/rbac/v1"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -139,7 +140,11 @@ func TestTenantAppProjectResolvesAgainstBYOForge(t *testing.T) {
 	dv.Spec.Forge.URL = "https://spec.example"
 	c := testBuilder(t).WithObjects(dv, creds, projectNS("a", "team-a", "dotvirt/team-a.git")).Build()
 	r := newReconciler(c, depsOK)
-	tier, err := r.tenantAppProjects(context.Background(), dv, &reconcileCtx{argoNS: "argocd"}, nil)
+	base, err := r.appForgeBase(context.Background(), dv)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tier, err := r.tenantAppProjects(context.Background(), dv, &reconcileCtx{argoNS: "argocd"}, nil, base)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -283,6 +288,12 @@ func TestCacheByObjectScope(t *testing.T) {
 				}
 				continue
 			}
+			if _, rb := obj.(*rbacv1.RoleBinding); rb {
+				if !opts.Field.Matches(fields.Set{"metadata.name": install.ForgeCredentialGrantName}) || opts.Field.Matches(fields.Set{"metadata.name": "other"}) {
+					t.Errorf("%s: RoleBinding selector %q does not select the credential grant alone", plat, opts.Field)
+				}
+				continue
+			}
 			key := install.InstanceLabel
 			if _, ns := obj.(*corev1.Namespace); ns {
 				key = install.ProjectLabel
@@ -400,7 +411,11 @@ func TestTenantKindsFollowTheImpersonationSetting(t *testing.T) {
 			}
 			c2 := testBuilder(t).WithObjects(objs...).Build()
 			r := newReconciler(c2, depsOK)
-			tier, err := r.tenantAppProjects(context.Background(), dv, &reconcileCtx{argoNS: "argocd"}, nil)
+			base, err := r.appForgeBase(context.Background(), dv)
+			if err != nil {
+				t.Fatal(err)
+			}
+			tier, err := r.tenantAppProjects(context.Background(), dv, &reconcileCtx{argoNS: "argocd"}, nil, base)
 			if err != nil {
 				t.Fatal(err)
 			}
