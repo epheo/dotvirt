@@ -143,22 +143,26 @@ ArgoCD namespace, a managed forge switched off. A tenant AppProject whose projec
 is gone, and the shared `dotvirt-tenants` AppProject of earlier versions, are kept
 while an Application still references them (the former admitting nothing), then
 pruned.
-Secrets, ConfigMaps and the `dotvirt-sync-request` RoleBinding are swept only in
-the namespaces the install writes (the ArgoCD namespace, and a former one still
-holding its argoproj objects), so a labelled copy an admin made elsewhere survives.
-The RoleBinding is read by name there: the operator may not list RoleBindings.
+Prune reads each name the install renders, never a list: the operator may not
+list Secrets, ConfigMaps, bindings or the operand's kinds. Tenant AppProjects,
+named after their projects, are the one kind listed, and only in the ArgoCD
+namespaces the install wrote. The ArgoCD-namespace objects are swept only there:
+the current namespace and the one `status.argoNamespace` records, the last one a
+prune completed in, so a labelled copy an admin made elsewhere survives.
 Never pruned: anything without the labels, and Secrets, PersistentVolumeClaims and
 the CA ConfigMaps in the install namespace (generated keys, the minted forge token
 and the forge's git data are state, not render). A pass that halts prunes nothing.
 Deleting the CR runs the same prune with nothing rendered, after taking sync
 impersonation off the ArgoCD instance if the operator set it there (below).
 
-The operator's delete grant names each object it renders (`rbac_markers.go`), so it
-cannot delete any other Secret, binding or Application in the cluster. AppProjects
-are the exception: tenant ones are named after their projects, so the grant covers
-any AppProject and prune's label check is what keeps it to this install's. An object
-only an older version rendered under another name is refused, logged and left for
-an admin to delete; it never blocks prune or deletion.
+The operator's own RBAC names each object it writes and reads (`rbac_markers.go`),
+so it cannot touch any other Secret, ConfigMap, binding or Application in the
+cluster; a rule without names says why beside it. AppProjects are the exception:
+tenant ones are named after their projects, so the grant covers any AppProject and
+prune's label check is what keeps it to this install's. An object only an older
+version rendered under another name is never read, and left for an admin to delete.
+`spec.forge.credentialsSecret`, an admin-chosen name, still needs get, create and
+patch on Secrets without names.
 
 The labels are `dotvirt.io/instance` (the CR name) and
 `dotvirt.io/instance-namespace` (its namespace). Objects from versions that set only
