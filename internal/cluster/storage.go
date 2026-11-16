@@ -137,13 +137,11 @@ func storageProfile(p *unstructured.Unstructured) *model.StorageProfile {
 			}
 		}
 	}
-	conds, _, _ := unstructured.NestedSlice(p.Object, "status", "conditions")
-	for _, raw := range conds {
-		cond, _ := raw.(map[string]any)
-		if cond["type"] == "Recognized" && cond["status"] == "True" {
-			sp.Recognized = true
-		}
-	}
+	// CDI's own test before it fills a DataVolume's modes: the first claim set's
+	// access modes, whether they come from its provisioner table, the profile's
+	// spec or existing PVs. Its Recognized condition covers the table alone,
+	// and CDI before v1.65 sets none.
+	sp.Recognized = len(sp.AccessModes) > 0
 	return sp
 }
 

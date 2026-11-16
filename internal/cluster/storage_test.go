@@ -174,3 +174,28 @@ func TestForbiddenClasses(t *testing.T) {
 		t.Errorf("forbidden = %v, want lab and replicated", got)
 	}
 }
+
+// A class is usable when CDI fills a DataVolume's modes on it: its profile's
+// status carries claim settings, whatever their source; CDI's Recognized
+// condition alone does not decide.
+func TestStorageProfileRecognizesAdminClaimSettings(t *testing.T) {
+	profile := func(status map[string]any) *unstructured.Unstructured {
+		return &unstructured.Unstructured{Object: map[string]any{"status": status}}
+	}
+	sets := []any{map[string]any{"accessModes": []any{"ReadWriteOnce"}, "volumeMode": "Block"}}
+	unknown := []any{map[string]any{"type": "Recognized", "status": "False"}}
+	known := []any{map[string]any{"type": "Recognized", "status": "True"}}
+	for name, c := range map[string]struct {
+		status map[string]any
+		want   bool
+	}{
+		"in CDI's table":                    {map[string]any{"conditions": known, "claimPropertySets": sets}, true},
+		"unknown driver, admin claim sets":  {map[string]any{"conditions": unknown, "claimPropertySets": sets}, true},
+		"unknown driver, no claim settings": {map[string]any{"conditions": unknown}, false},
+		"no status yet":                     {map[string]any{}, false},
+	} {
+		if got := storageProfile(profile(c.status)).Recognized; got != c.want {
+			t.Errorf("%s: recognized = %v, want %v", name, got, c.want)
+		}
+	}
+}
