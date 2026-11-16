@@ -268,13 +268,6 @@ func argoAppSpec(project, repoURL, path, namespace string) map[string]any {
 		"syncPolicy": map[string]any{
 			"automated":   map[string]any{"prune": true, "selfHeal": true},
 			"syncOptions": []any{"CreateNamespace=false"},
-			// Automated sync never re-attempts a failed sync of the same commit: a
-			// webhook briefly down or a CRD still establishing would otherwise
-			// leave the tier failed until the next commit.
-			"retry": map[string]any{
-				"limit":   int64(5),
-				"backoff": map[string]any{"duration": "5s", "factor": int64(2), "maxDuration": "3m"},
-			},
 		},
 	}
 }
