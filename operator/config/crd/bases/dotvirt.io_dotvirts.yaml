@@ -558,6 +558,12 @@ spec:
                 description: ObservedGeneration is the .metadata.generation last reconciled.
                 format: int64
                 type: integer
+              operatorGuard:
+                description: |-
+                  OperatorGuard is a ready-to-run command that installs the admission
+                  policies bounding the operator's own account, for a cluster admin
+                  without the console. The operator holds no right to install them.
+                type: string
               phase:
                 description: |-
                   Phase is a short human-facing summary: Provisioning, BlockedOnDependencies or

@@ -406,6 +406,21 @@ func dotvirtVolumes(dv *dotvirtv1alpha1.Dotvirt) ([]corev1.VolumeMount, []corev1
 	return volumeMounts, volumes
 }
 
+// WithOperatorGuard tells the console the pins of the operator guard it
+// offers cluster admins to install (pkg/guard): the operator's username and
+// the install namespace, beside DOTVIRT_ARGO_NAMESPACE. Unknown username:
+// nothing, and the console offers no guard.
+func WithOperatorGuard(dep *appsv1.Deployment, operator string) *appsv1.Deployment {
+	if operator == "" {
+		return dep
+	}
+	c := &dep.Spec.Template.Spec.Containers[0]
+	c.Env = append(c.Env,
+		corev1.EnvVar{Name: "DOTVIRT_OPERATOR_USERNAME", Value: operator},
+		corev1.EnvVar{Name: "DOTVIRT_INSTALL_NAMESPACE", Value: dep.Namespace})
+	return dep
+}
+
 // Deployment runs the dotvirt binary (which also serves the SPA), with the forge
 // token mounted so a re-mint reaches the app without a restart.
 // tenantAllowed is TenantAllowed's answer for this pass.

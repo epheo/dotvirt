@@ -22,6 +22,7 @@ import (
 	dotvirtv1alpha1 "github.com/epheo/dotvirt/operator/api/v1alpha1"
 	"github.com/epheo/dotvirt/operator/internal/controller"
 	"github.com/epheo/dotvirt/operator/internal/platform"
+	"github.com/epheo/dotvirt/pkg/guard"
 )
 
 var scheme = runtime.NewScheme()
@@ -33,6 +34,20 @@ func operatorNamespace() string {
 		return ""
 	}
 	return strings.TrimSpace(string(b))
+}
+
+// operatorUsername is the username the manager pod authenticates as, "" out
+// of cluster.
+func operatorUsername() string {
+	b, err := os.ReadFile("/var/run/secrets/kubernetes.io/serviceaccount/token")
+	if err != nil {
+		return ""
+	}
+	u, err := guard.UsernameFromToken(string(b))
+	if err != nil {
+		return ""
+	}
+	return u
 }
 
 func init() {
@@ -101,7 +116,7 @@ func main() {
 
 		APIReader:              mgr.GetAPIReader(),
 		OperatorNamespace:      operatorNamespace(),
-		OperatorServiceAccount: os.Getenv("OPERATOR_SERVICE_ACCOUNT"),
+		OperatorUsername:       operatorUsername(),
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "Dotvirt")
 		os.Exit(1)

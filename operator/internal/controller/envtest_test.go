@@ -15,7 +15,6 @@ import (
 	"testing"
 	"time"
 
-	admissionregistrationv1 "k8s.io/api/admissionregistration/v1"
 	appsv1 "k8s.io/api/apps/v1"
 	authzv1 "k8s.io/api/authorization/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -42,6 +41,7 @@ import (
 	"github.com/epheo/dotvirt/operator/internal/deps"
 	"github.com/epheo/dotvirt/operator/internal/install"
 	"github.com/epheo/dotvirt/operator/internal/platform"
+	"github.com/epheo/dotvirt/pkg/guard"
 	"github.com/epheo/dotvirt/pkg/tenancy"
 )
 
@@ -155,16 +155,19 @@ func TestEnvtest(t *testing.T) {
 			// Proved by this row alone: the operator also holds the role's one rule,
 			// so the escalation check would admit its binding without bind.
 			{authzv1.ResourceAttributes{Verb: "bind", Group: "rbac.authorization.k8s.io", Resource: "clusterroles", Name: install.SyncRequestName}, true},
-			// The operator guard: created and read, never loosened or removed.
-			{authzv1.ResourceAttributes{Verb: "create", Group: "admissionregistration.k8s.io", Resource: "validatingadmissionpolicies"}, true},
-			{authzv1.ResourceAttributes{Verb: "get", Group: "admissionregistration.k8s.io", Resource: "validatingadmissionpolicies", Name: install.OperatorGuardName}, true},
+			// The operator guard: read by name to report it, never written.
+			{authzv1.ResourceAttributes{Verb: "get", Group: "admissionregistration.k8s.io", Resource: "validatingadmissionpolicies", Name: guard.SecretsName}, true},
+			{authzv1.ResourceAttributes{Verb: "get", Group: "admissionregistration.k8s.io", Resource: "validatingadmissionpolicybindings", Name: guard.DeploymentsName}, true},
 			{authzv1.ResourceAttributes{Verb: "get", Group: "admissionregistration.k8s.io", Resource: "validatingadmissionpolicies", Name: "other"}, false},
 			{authzv1.ResourceAttributes{Verb: "list", Group: "admissionregistration.k8s.io", Resource: "validatingadmissionpolicies"}, false},
-			{authzv1.ResourceAttributes{Verb: "patch", Group: "admissionregistration.k8s.io", Resource: "validatingadmissionpolicies", Name: install.OperatorGuardName}, false},
-			{authzv1.ResourceAttributes{Verb: "update", Group: "admissionregistration.k8s.io", Resource: "validatingadmissionpolicies", Name: install.OperatorGuardName}, false},
-			{authzv1.ResourceAttributes{Verb: "delete", Group: "admissionregistration.k8s.io", Resource: "validatingadmissionpolicies", Name: install.OperatorGuardName}, false},
-			{authzv1.ResourceAttributes{Verb: "patch", Group: "admissionregistration.k8s.io", Resource: "validatingadmissionpolicybindings", Name: install.OperatorGuardName}, false},
-			{authzv1.ResourceAttributes{Verb: "delete", Group: "admissionregistration.k8s.io", Resource: "validatingadmissionpolicybindings", Name: install.OperatorGuardName}, false},
+			{authzv1.ResourceAttributes{Verb: "create", Group: "admissionregistration.k8s.io", Resource: "validatingadmissionpolicies"}, false},
+			{authzv1.ResourceAttributes{Verb: "create", Group: "admissionregistration.k8s.io", Resource: "validatingadmissionpolicybindings"}, false},
+			{authzv1.ResourceAttributes{Verb: "patch", Group: "admissionregistration.k8s.io", Resource: "validatingadmissionpolicies", Name: guard.SecretsName}, false},
+			{authzv1.ResourceAttributes{Verb: "patch", Group: "admissionregistration.k8s.io", Resource: "validatingadmissionpolicybindings", Name: guard.SecretsName}, false},
+			{authzv1.ResourceAttributes{Verb: "update", Group: "admissionregistration.k8s.io", Resource: "validatingadmissionpolicies", Name: guard.SecretsName}, false},
+			{authzv1.ResourceAttributes{Verb: "update", Group: "admissionregistration.k8s.io", Resource: "validatingadmissionpolicybindings", Name: guard.SecretsName}, false},
+			{authzv1.ResourceAttributes{Verb: "delete", Group: "admissionregistration.k8s.io", Resource: "validatingadmissionpolicies", Name: guard.SecretsName}, false},
+			{authzv1.ResourceAttributes{Verb: "delete", Group: "admissionregistration.k8s.io", Resource: "validatingadmissionpolicybindings", Name: guard.SecretsName}, false},
 		} {
 			res, err := kube.AuthorizationV1().SelfSubjectAccessReviews().Create(ctx,
 				&authzv1.SelfSubjectAccessReview{Spec: authzv1.SelfSubjectAccessReviewSpec{ResourceAttributes: &c.attrs}}, metav1.CreateOptions{})
@@ -227,8 +230,9 @@ func TestEnvtest(t *testing.T) {
 			t.Fatal(err)
 		}
 		for _, c := range got.Status.Conditions {
-			// No forge in this install: ForgeReady says so, and nothing else may fail.
-			if c.Status == metav1.ConditionFalse && c.Type != dotvirtv1alpha1.ConditionForgeReady {
+			// No forge in this install: ForgeReady says so; no admin installed the
+			// operator guard yet: OperatorGuard says so. Nothing else may fail.
+			if c.Status == metav1.ConditionFalse && c.Type != dotvirtv1alpha1.ConditionForgeReady && c.Type != dotvirtv1alpha1.ConditionOperatorGuard {
 				t.Errorf("condition %s False: %s", c.Type, c.Message)
 			}
 		}
@@ -280,81 +284,170 @@ func TestEnvtest(t *testing.T) {
 		}
 	})
 
-	t.Run("the operator's account is refused token Secrets", func(t *testing.T) {
-		eventually(t, "the guard and its binding", func() bool {
-			return admin.Get(ctx, client.ObjectKey{Name: install.OperatorGuardName}, &admissionregistrationv1.ValidatingAdmissionPolicy{}) == nil &&
-				admin.Get(ctx, client.ObjectKey{Name: install.OperatorGuardName}, &admissionregistrationv1.ValidatingAdmissionPolicyBinding{}) == nil
-		})
-		got := &dotvirtv1alpha1.Dotvirt{}
-		if err := admin.Get(ctx, types.NamespacedName{Namespace: "dotvirt", Name: "x"}, got); err != nil {
+	t.Run("the operator guard bounds the operator once an admin installs it", func(t *testing.T) {
+		key := types.NamespacedName{Namespace: "dotvirt", Name: "x"}
+		guardCond := func(want string) bool {
+			got := &dotvirtv1alpha1.Dotvirt{}
+			if admin.Get(ctx, key, got) != nil {
+				return false
+			}
+			c := apimeta.FindStatusCondition(got.Status.Conditions, dotvirtv1alpha1.ConditionOperatorGuard)
+			return c != nil && c.Reason == want && got.Status.OperatorGuard != ""
+		}
+		eventually(t, "OperatorGuard NotInstalled", func() bool { return guardCond(string(guard.NotInstalled)) })
+
+		// The console's install, as a cluster admin: the render, server-side applied.
+		set := guard.Render(guard.Params{Operator: operatorUser, Namespace: "dotvirt", ArgoNamespace: "argocd"})
+		objs, err := set.Unstructured()
+		if err != nil {
 			t.Fatal(err)
 		}
-		if c := apimeta.FindStatusCondition(got.Status.Conditions, dotvirtv1alpha1.ConditionOperatorGuard); c == nil || c.Status != metav1.ConditionTrue {
-			t.Errorf("OperatorGuard = %+v, want True", c)
-		}
-
-		op := kubernetes.NewForConfigOrDie(opCfg)
-		token := func(name string) *corev1.Secret {
-			return &corev1.Secret{
-				ObjectMeta: metav1.ObjectMeta{Name: name, Annotations: map[string]string{corev1.ServiceAccountNameKey: "default"}},
-				Type:       corev1.SecretTypeServiceAccountToken,
+		for _, o := range objs {
+			if err := admin.Patch(ctx, o, client.Apply, client.FieldOwner("dotvirt"), client.ForceOwnership); err != nil {
+				t.Fatalf("install %s: %v", o.GetName(), err)
 			}
 		}
-		annotated := func(name string) *corev1.Secret {
-			return &corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: name, Annotations: map[string]string{corev1.ServiceAccountNameKey: "default"}}}
+		// Installing the guard changes nothing the operator watches, so a spec
+		// edit runs the next pass, as the drift timer would.
+		patchCR := func() {
+			got := &dotvirtv1alpha1.Dotvirt{}
+			if err := admin.Get(ctx, key, got); err != nil {
+				t.Fatal(err)
+			}
+			mp := client.MergeFrom(got.DeepCopy())
+			got.Spec.Branding.ProductName = fmt.Sprint("Guarded ", time.Now().UnixNano())
+			if err := admin.Patch(ctx, got, mp); err != nil {
+				t.Fatal(err)
+			}
 		}
+		patchCR()
+		eventually(t, "OperatorGuard Installed", func() bool { return guardCond(string(guard.Installed)) })
+
+		op := kubernetes.NewForConfigOrDie(opCfg)
 		refused := func(err error) bool {
-			return apierrors.IsForbidden(err) && strings.Contains(err.Error(), install.OperatorGuardName)
+			return apierrors.IsForbidden(err) && strings.Contains(err.Error(), "dotvirt operator guard")
+		}
+		token := &corev1.Secret{
+			ObjectMeta: metav1.ObjectMeta{Name: "guard-token", Annotations: map[string]string{corev1.ServiceAccountNameKey: "default"}},
+			Type:       corev1.SecretTypeServiceAccountToken,
 		}
 		// The apiserver enforces a new policy once its informer has it: until
 		// then a probe lands, so remove it and ask again.
 		eventually(t, "the guard enforced", func() bool {
-			_, err := op.CoreV1().Secrets("dotvirt").Create(ctx, token("guard-token"), metav1.CreateOptions{})
+			_, err := op.CoreV1().Secrets("dotvirt").Create(ctx, token, metav1.CreateOptions{})
 			if err == nil {
 				_ = admin.Delete(ctx, &corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: "guard-token", Namespace: "dotvirt"}})
 			}
 			return refused(err)
 		})
-		if _, err := op.CoreV1().Secrets("dotvirt").Create(ctx, annotated("guard-annotated"), metav1.CreateOptions{}); !refused(err) {
-			t.Errorf("operator's annotated Opaque Secret: err=%v, want the guard's Forbidden", err)
+		plain := func(name string) *corev1.Secret {
+			return &corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: name}, StringData: map[string]string{"k": "v"}}
 		}
-		plain := &corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: "guard-plain", Namespace: "dotvirt"}, StringData: map[string]string{"k": "v"}}
-		if _, err := op.CoreV1().Secrets("dotvirt").Create(ctx, plain, metav1.CreateOptions{}); err != nil {
-			t.Errorf("operator's plain Secret: %v", err)
+		annotated := plain("guard-annotated")
+		annotated.Annotations = map[string]string{corev1.ServiceAccountNameKey: "default"}
+		if _, err := op.CoreV1().Secrets("dotvirt").Create(ctx, annotated, metav1.CreateOptions{}); !refused(err) {
+			t.Errorf("operator's annotated Secret: err=%v, want the guard's Forbidden", err)
 		}
-		_ = admin.Delete(ctx, plain)
-
-		// Another ServiceAccount, holding the same Secret right, is not the guard's.
-		builder := "system:serviceaccount:team-a:builder"
-		mustCreate(t, admin, &rbacv1.Role{
-			ObjectMeta: metav1.ObjectMeta{Name: "secret-writer", Namespace: "team-a"},
-			Rules:      []rbacv1.PolicyRule{{APIGroups: []string{""}, Resources: []string{"secrets"}, Verbs: []string{"create"}}},
-		})
-		mustCreate(t, admin, &rbacv1.RoleBinding{
-			ObjectMeta: metav1.ObjectMeta{Name: "secret-writer", Namespace: "team-a"},
-			RoleRef:    rbacv1.RoleRef{APIGroup: rbacv1.GroupName, Kind: "Role", Name: "secret-writer"},
-			Subjects:   []rbacv1.Subject{{Kind: rbacv1.UserKind, Name: builder}},
-		})
-		other, err := env.AddUser(envtest.User{Name: builder}, nil)
+		if _, err := op.CoreV1().Secrets("team-a").Create(ctx, plain("guard-elsewhere"), metav1.CreateOptions{}); !refused(err) {
+			t.Errorf("operator's Secret outside its namespaces: err=%v, want the guard's Forbidden", err)
+		}
+		for _, ns := range []string{"dotvirt", "argocd"} {
+			if _, err := op.CoreV1().Secrets(ns).Create(ctx, plain("guard-plain"), metav1.CreateOptions{}); err != nil {
+				t.Errorf("operator's plain Secret in %s: %v", ns, err)
+			}
+			_ = admin.Delete(ctx, &corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: "guard-plain", Namespace: ns}})
+		}
+		// Another ServiceAccount is not the guard's.
+		other, err := env.AddUser(envtest.User{Name: "system:serviceaccount:team-a:builder", Groups: []string{"system:masters"}}, nil)
 		if err != nil {
 			t.Fatal(err)
 		}
-		if _, err := kubernetes.NewForConfigOrDie(other.Config()).CoreV1().Secrets("team-a").Create(ctx, token("builder-token"), metav1.CreateOptions{}); err != nil {
+		if _, err := kubernetes.NewForConfigOrDie(other.Config()).CoreV1().Secrets("team-a").Create(ctx, token, metav1.CreateOptions{}); err != nil {
 			t.Errorf("another ServiceAccount's token Secret: %v", err)
 		}
-		if _, err := kubernetes.NewForConfigOrDie(adminCfg).CoreV1().Secrets("team-a").Create(ctx, token("admin-token"), metav1.CreateOptions{}); err != nil {
-			t.Errorf("an admin's token Secret: %v", err)
+
+		// Deployments: the rendered ones pass (dry run, as the operator applies
+		// them); elsewhere, as another account, or reaching the host, refused.
+		dv := &dotvirtv1alpha1.Dotvirt{}
+		if err := admin.Get(ctx, key, dv); err != nil {
+			t.Fatal(err)
+		}
+		dryApply := func(d *appsv1.Deployment) error {
+			m, err := runtime.DefaultUnstructuredConverter.ToUnstructured(d)
+			if err != nil {
+				t.Fatal(err)
+			}
+			u := &unstructured.Unstructured{Object: m}
+			u.SetAPIVersion("apps/v1")
+			u.SetKind("Deployment")
+			opClient, err := client.New(opCfg, client.Options{Scheme: scheme})
+			if err != nil {
+				t.Fatal(err)
+			}
+			return opClient.Patch(ctx, u, client.Apply, client.FieldOwner(operatorFieldManager), client.ForceOwnership, client.DryRunAll)
+		}
+		rendered := []*appsv1.Deployment{
+			install.WithOperatorGuard(install.Deployment(dv, "argocd", nil), operatorUser),
+			install.ForgejoDeployment(dv, false, "", ""),
+		}
+		for _, d := range rendered {
+			if err := dryApply(d); err != nil {
+				t.Errorf("rendered Deployment %s: %v", d.Name, err)
+			}
+		}
+		for name, edit := range map[string]func(*appsv1.Deployment){
+			"in another namespace": func(d *appsv1.Deployment) { d.Namespace = "team-a" },
+			"as another account":   func(d *appsv1.Deployment) { d.Spec.Template.Spec.ServiceAccountName = "default" },
+			"mounting a host path": func(d *appsv1.Deployment) {
+				d.Spec.Template.Spec.Volumes = append(d.Spec.Template.Spec.Volumes,
+					corev1.Volume{Name: "host", VolumeSource: corev1.VolumeSource{HostPath: &corev1.HostPathVolumeSource{Path: "/"}}})
+			},
+			"in the host network": func(d *appsv1.Deployment) { d.Spec.Template.Spec.HostNetwork = true },
+			"privileged": func(d *appsv1.Deployment) {
+				sc := d.Spec.Template.Spec.Containers[0].SecurityContext
+				sc.Privileged, sc.AllowPrivilegeEscalation = new(true), nil
+			},
+		} {
+			d := install.Deployment(dv, "argocd", nil)
+			edit(d)
+			if err := dryApply(d); !refused(err) {
+				t.Errorf("operator's Deployment %s: err=%v, want the guard's Forbidden", name, err)
+			}
 		}
 
-		// Create-only: the operator can neither re-apply nor remove its guard.
-		apply := admissionregistrationv1ac.ValidatingAdmissionPolicy(install.OperatorGuardName).
+		// The operator can neither re-apply nor remove its guard.
+		apply := admissionregistrationv1ac.ValidatingAdmissionPolicy(guard.SecretsName).
 			WithSpec(admissionregistrationv1ac.ValidatingAdmissionPolicySpec().WithValidations())
 		if _, err := op.AdmissionregistrationV1().ValidatingAdmissionPolicies().Apply(ctx, apply, metav1.ApplyOptions{FieldManager: operatorFieldManager, Force: true}); !apierrors.IsForbidden(err) {
 			t.Errorf("operator re-applying the guard: err=%v, want Forbidden", err)
 		}
-		if err := op.AdmissionregistrationV1().ValidatingAdmissionPolicyBindings().Delete(ctx, install.OperatorGuardName, metav1.DeleteOptions{}); !apierrors.IsForbidden(err) {
+		if err := op.AdmissionregistrationV1().ValidatingAdmissionPolicyBindings().Delete(ctx, guard.DeploymentsName, metav1.DeleteOptions{}); !apierrors.IsForbidden(err) {
 			t.Errorf("operator deleting the guard's binding: err=%v, want Forbidden", err)
 		}
+		// With the guard in place, a pass still reconciles the install.
+		patchCR()
+		eventually(t, "a pass under the guard", func() bool {
+			got := &dotvirtv1alpha1.Dotvirt{}
+			if admin.Get(ctx, key, got) != nil {
+				return false
+			}
+			w := apimeta.FindStatusCondition(got.Status.Conditions, dotvirtv1alpha1.ConditionWorkloadReady)
+			return got.Status.ObservedGeneration == got.Generation && w != nil && w.Status == metav1.ConditionTrue
+		})
+
+		// Later subtests write as the operator into other ArgoCD namespaces,
+		// which this guard rightly refuses: an admin removes it, as uninstall
+		// leaves them to.
+		for _, o := range objs {
+			if err := admin.Delete(ctx, o); err != nil {
+				t.Fatal(err)
+			}
+		}
+		eventually(t, "the guard lifted", func() bool {
+			_, err := op.CoreV1().Secrets("team-a").Create(ctx, plain("guard-lifted"), metav1.CreateOptions{})
+			_ = admin.Delete(ctx, &corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: "guard-lifted", Namespace: "team-a"}})
+			return err == nil
+		})
 	})
 
 	t.Run("a labeled namespace confines its project", func(t *testing.T) {
@@ -1139,14 +1232,13 @@ func runManager(t *testing.T, cfg *rest.Config, scheme *runtime.Scheme) (*atomic
 	passes := &atomic.Int64{}
 	ops := &opLog{}
 	r := &DotvirtReconciler{
-		Client:    loggingClient{mgr.GetClient(), ops},
-		Scheme:    mgr.GetScheme(),
-		Config:    mgr.GetConfig(),
-		Platform:  platform.Kubernetes,
-		APIReader: mgr.GetAPIReader(),
-		// The account operatorUser names.
-		OperatorServiceAccount: "dotvirt-operator",
-		syncCache:              syncCache{syncRecheck: time.Second, syncTTL: time.Second},
+		Client:           loggingClient{mgr.GetClient(), ops},
+		Scheme:           mgr.GetScheme(),
+		Config:           mgr.GetConfig(),
+		Platform:         platform.Kubernetes,
+		APIReader:        mgr.GetAPIReader(),
+		OperatorUsername: operatorUser,
+		syncCache:        syncCache{syncRecheck: time.Second, syncTTL: time.Second},
 		probe: func(c *rest.Config) (deps.Result, error) {
 			passes.Add(1)
 			return depsOK(c)

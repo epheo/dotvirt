@@ -57,12 +57,9 @@ package controller
 // its two conventional names only).
 // +kubebuilder:rbac:groups=authorization.k8s.io,resources=subjectaccessreviews,verbs=create
 // +kubebuilder:rbac:groups=rbac.authorization.k8s.io,resources=rolebindings,verbs=get
-// The operator guard (guard.go): create and get, never patch, update or delete, so
-// the operator cannot loosen the policy that bounds it. Create is a POST, which
-// RBAC cannot scope by name; a server-side apply could be scoped but needs patch.
-// A policy only ever refuses, so the unscoped create grants no access.
-// +kubebuilder:rbac:groups=admissionregistration.k8s.io,resources=validatingadmissionpolicies;validatingadmissionpolicybindings,verbs=create
-// +kubebuilder:rbac:groups=admissionregistration.k8s.io,resources=validatingadmissionpolicies;validatingadmissionpolicybindings,resourceNames=dotvirt-operator-no-token-secrets,verbs=get
+// The operator guard (guard.go) is read by name to report it, never written: a
+// cluster admin installs it, so the operator cannot loosen what bounds it.
+// +kubebuilder:rbac:groups=admissionregistration.k8s.io,resources=validatingadmissionpolicies;validatingadmissionpolicybindings,resourceNames=dotvirt-operator-secrets;dotvirt-operator-deployments,verbs=get
 // +kubebuilder:rbac:groups=argoproj.io,resources=argocds,resourceNames=openshift-gitops;argocd,verbs=get;patch
 //
 // delete, scoped to the fixed names the install renders (prune and the finalizer

@@ -36,11 +36,12 @@ const (
 	// that the controller's own rights let a tenant DataVolume clone from any
 	// namespace (CloneAnywhere). It never gates Available.
 	ConditionSyncImpersonationReady = "SyncImpersonationReady"
-	// ConditionOperatorGuard is True while the admission policy refusing the
-	// operator's own ServiceAccount any token Secret is in place as rendered;
-	// False when it cannot be created or was changed (the operator never
-	// rewrites it); Unknown when the cluster lacks the API or the operator does
-	// not know its account. It never gates Available.
+	// ConditionOperatorGuard is True while the admission policies bounding the
+	// operator's own account (status.operatorGuard) are installed as rendered;
+	// False while they are missing (NotInstalled), rendered for other
+	// namespaces or another version (Outdated), or edited (Modified): a cluster
+	// admin installs them from the console, the operator never does; Unknown
+	// when it cannot tell. It never gates Available.
 	ConditionOperatorGuard = "OperatorGuard"
 	// ConditionAvailable is the roll-up: the full install is reconciled and serving.
 	ConditionAvailable = "Available"
@@ -414,6 +415,10 @@ type DotvirtStatus struct {
 	// OAuthClient SSO needs, with the redirect URI filled from the assigned console host.
 	// Set only while auth.openShiftSSO is on; run it once to finish SSO.
 	SSOOAuthClient string `json:"ssoOAuthClient,omitempty"`
+	// OperatorGuard is a ready-to-run command that installs the admission
+	// policies bounding the operator's own account, for a cluster admin
+	// without the console. The operator holds no right to install them.
+	OperatorGuard string `json:"operatorGuard,omitempty"`
 	// SyncImpersonationInstance is the ArgoCD resource, as namespace/name, the
 	// operator set application.sync.impersonation.enabled on: it removes the
 	// setting there when spec.argocd moves to another instance and before the
