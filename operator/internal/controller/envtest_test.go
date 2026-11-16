@@ -1889,6 +1889,112 @@ func TestEnvtest(t *testing.T) {
 			t.Errorf("left after deletion: %v, want only the legacy binding and the other install's AppProject", left)
 		}
 	})
+
+	// The install is gone, so a namespace admin's Dotvirt is now the oldest in
+	// the cluster. The suite's install namespace is dotvirt, not the operator's
+	// own, which is the admin override at work; team-a is outside it.
+	// The install-namespace subtests run under the guard a cluster admin
+	// installs for the suite's install, in force before they start.
+	guarded := func(t *testing.T) {
+		t.Helper()
+		p := adminobjects.Params{Operator: operatorUser, Namespace: "dotvirt", ArgoNamespace: "argocd", ArgoController: "argocd-application-controller"}
+		objs := adminobjects.Render(p)
+		for _, o := range objs {
+			if err := admin.Apply(ctx, client.ApplyConfigurationFromUnstructured(o.Object.DeepCopy()), client.FieldOwner("dotvirt"), client.ForceOwnership); err != nil {
+				t.Fatalf("install %s: %v", o.Object.GetName(), err)
+			}
+		}
+		opClient, err := client.New(opCfg, client.Options{Scheme: scheme})
+		if err != nil {
+			t.Fatal(err)
+		}
+		// A Secret the operator's role allows by name anywhere, which the
+		// guard refuses outside the install and ArgoCD namespaces.
+		probe := func() error {
+			m, _ := runtime.DefaultUnstructuredConverter.ToUnstructured(&corev1.Secret{
+				TypeMeta:   metav1.TypeMeta{APIVersion: "v1", Kind: "Secret"},
+				ObjectMeta: metav1.ObjectMeta{Name: install.OAuthSecretName, Namespace: "team-a"},
+			})
+			return opClient.Apply(context.Background(), client.ApplyConfigurationFromUnstructured(&unstructured.Unstructured{Object: m}),
+				client.FieldOwner(operatorFieldManager), client.ForceOwnership, client.DryRunAll)
+		}
+		eventually(t, "the guard in force", func() bool {
+			err := probe()
+			return apierrors.IsForbidden(err) && strings.Contains(err.Error(), "dotvirt operator guard")
+		})
+		t.Cleanup(func() {
+			for _, o := range objs {
+				_ = admin.Delete(context.Background(), o.Object)
+			}
+			eventually(t, "the guard lifted", func() bool { return probe() == nil })
+		})
+	}
+
+	t.Run("a Dotvirt outside the install namespace gets nothing even when oldest", func(t *testing.T) {
+		guarded(t)
+		dv := &dotvirtv1alpha1.Dotvirt{ObjectMeta: metav1.ObjectMeta{
+			Name: "x", Namespace: "team-a", Finalizers: []string{dotvirtFinalizer},
+		}}
+		mustCreate(t, admin, dv)
+		eventually(t, "WrongNamespace status", func() bool {
+			var got dotvirtv1alpha1.Dotvirt
+			if admin.Get(ctx, client.ObjectKeyFromObject(dv), &got) != nil {
+				return false
+			}
+			c := apimeta.FindStatusCondition(got.Status.Conditions, dotvirtv1alpha1.ConditionAvailable)
+			return c != nil && c.Reason == "WrongNamespace"
+		})
+		var crbs rbacv1.ClusterRoleBindingList
+		if err := admin.List(ctx, &crbs); err != nil {
+			t.Fatal(err)
+		}
+		for _, b := range crbs.Items {
+			for _, s := range b.Subjects {
+				if s.Namespace == "team-a" {
+					t.Errorf("ClusterRoleBinding %s binds %s in team-a", b.Name, s.Name)
+				}
+			}
+		}
+		if err := admin.Get(ctx, types.NamespacedName{Namespace: "team-a", Name: install.AppName}, &appsv1.Deployment{}); !apierrors.IsNotFound(err) {
+			t.Errorf("console Deployment in team-a: err=%v, want NotFound", err)
+		}
+		// The finalizer its creator set is dropped on deletion, with no prune.
+		if err := admin.Delete(ctx, dv); err != nil {
+			t.Fatal(err)
+		}
+		eventually(t, "ignored Dotvirt gone", func() bool {
+			return apierrors.IsNotFound(admin.Get(ctx, client.ObjectKeyFromObject(dv), &dotvirtv1alpha1.Dotvirt{}))
+		})
+	})
+
+	// An upgrade with no override and no Dotvirt in the operator's namespace
+	// adopts the install ClusterRoleBinding dotvirt names, read as the operator.
+	t.Run("the operator adopts the install its binding names", func(t *testing.T) {
+		guarded(t)
+		// Outside the suite's install namespace, so its manager leaves it be.
+		mustCreate(t, admin, &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "adopted"}})
+		dv := &dotvirtv1alpha1.Dotvirt{ObjectMeta: metav1.ObjectMeta{Name: "x", Namespace: "adopted"}}
+		mustCreate(t, admin, dv)
+		defer func() { _ = admin.Delete(ctx, dv) }()
+		// The binding comes after the Dotvirt it was made for.
+		time.Sleep(1100 * time.Millisecond)
+		crb := &rbacv1.ClusterRoleBinding{
+			ObjectMeta: metav1.ObjectMeta{Name: install.AppName},
+			RoleRef:    rbacv1.RoleRef{APIGroup: rbacv1.GroupName, Kind: "ClusterRole", Name: install.AppName},
+			Subjects:   []rbacv1.Subject{{Kind: rbacv1.ServiceAccountKind, Name: install.AppName, Namespace: "adopted"}},
+		}
+		mustCreate(t, admin, crb)
+		defer func() { _ = admin.Delete(ctx, crb) }()
+		op, err := client.New(opCfg, client.Options{Scheme: scheme})
+		if err != nil {
+			t.Fatal(err)
+		}
+		r := &DotvirtReconciler{Client: op, APIReader: op, OperatorNamespace: "dotvirt-operator"}
+		ns, adopted, err := r.installNamespace(ctx)
+		if err != nil || ns != "adopted" || !adopted {
+			t.Errorf("installNamespace = (%q, %v, %v), want (adopted, true, nil)", ns, adopted, err)
+		}
+	})
 }
 
 // runManager starts the controller as cmd/main.go wires it, under cfg, and
@@ -1964,6 +2070,9 @@ func runManager(t *testing.T, cfg *rest.Config, scheme *runtime.Scheme) (*atomic
 		Platform:         platform.Kubernetes,
 		APIReader:        mgr.GetAPIReader(),
 		OperatorUsername: operatorUser,
+		// The suite's installs all live in dotvirt; the tenant subtest proves
+		// a Dotvirt elsewhere gets nothing.
+		InstallNamespace: "dotvirt",
 		syncCache:        syncCache{syncRecheck: time.Second, syncTTL: time.Second},
 		probe: func(c *rest.Config) (deps.Result, error) {
 			passes.Add(1)

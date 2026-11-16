@@ -48,6 +48,67 @@ make run          # run against the current kubecontext
 make docker-build # image (built from the repo root context)
 ```
 
+## Install namespace
+
+The operator acts on one Dotvirt only: the one in its install namespace, resolved
+on every pass in this order.
+
+1. The namespace a cluster admin names with `OPERATOR_INSTALL_NAMESPACE` on the
+   operator's Deployment (or its `-install-namespace` flag).
+2. The operator's own namespace (`dotvirt-operator` from the bundled manifests and
+   OperatorHub's suggestion), once it holds a Dotvirt.
+3. The namespace ClusterRoleBinding `dotvirt` binds the ServiceAccount `dotvirt` in:
+   the install an earlier operator provisioned. This keeps an install created
+   elsewhere (in `dotvirt`, as the earlier sample did) working across the upgrade.
+   Its `InstallNamespaceAdopted` condition names the namespace and suggests the
+   override. Only a Dotvirt there created before the binding is adopted, and the
+   binding must name one namespace. Deleting the binding by hand drops an adopted
+   install to `WrongNamespace` (nothing is deleted): set the override to keep it.
+
+Through OLM, set the override on the Subscription:
+
+  ```yaml
+  spec:
+    config:
+      env:
+        - name: OPERATOR_INSTALL_NAMESPACE
+          value: dotvirt
+  ```
+
+- A Dotvirt in any other namespace gets no finalizer, render or binding. Its
+  `Available` condition reads `WrongNamespace` and says where the install lives.
+- Why: OLM adds create rights on Dotvirts to every namespace's `admin` and `edit`
+  roles. Acting on a Dotvirt in a tenant's namespace would bind the install's
+  cluster-wide roles to accounts the tenant controls.
+- The override, and the operator's own namespace, must name a namespace only
+  cluster admins control. Where users may create projects (OpenShift
+  self-provisioning), a user could create a namespace of that name first and own
+  the install. Create the namespace before naming it.
+- Deleting a Dotvirt outside the install namespace only drops the operator's
+  finalizer: nothing is pruned on its say. To uninstall an install that lives
+  outside it, name its namespace first, then delete it.
+- Why step 3 is safe: only cluster admins and this operator may write
+  ClusterRoleBinding `dotvirt`, and the operator wrote it for the install it acted
+  on. Its limit: an operator before this rule acted on the oldest Dotvirt anywhere,
+  so a tenant's could have been that install. After upgrading, check the namespace
+  the binding names:
+
+  ```sh
+  kubectl get clusterrolebinding dotvirt -o jsonpath='{.subjects[?(@.name=="dotvirt")].namespace}'
+  ```
+
+  It must be the namespace you installed dotvirt in. If it names a tenant's
+  namespace, in this order:
+
+  1. Create the install in the operator's namespace, or name yours with the
+     override. The tenant's Dotvirt is then ignored.
+  2. Delete the tenant's Dotvirt. Ignored, it prunes nothing; deleted while still
+     adopted, it would run its own cleanup.
+  3. Delete what its install left: objects labelled
+     `dotvirt.io/instance-namespace=<tenant namespace>` in the Argo namespace
+     (AppProjects, the ApplicationSet, Secrets), and any binding still naming the
+     tenant's accounts.
+
 ## What it provisions
 
 From one `Dotvirt` resource the controller runs the phases below in order. Each
@@ -769,6 +830,12 @@ Each sign-in keeps its own state cookie, so tabs signing in at once do not undo 
 
 ## Upgrading
 
+- The operator acts only on the Dotvirt in its install namespace (see Install
+  namespace). An existing install keeps working: one in the operator's namespace
+  as before, one elsewhere (`dotvirt`, from the earlier sample) adopted from the
+  ClusterRoleBinding the earlier operator provisioned for it. Its
+  `InstallNamespaceAdopted` condition suggests setting `OPERATOR_INSTALL_NAMESPACE`
+  explicitly; check the namespace it names, as Install namespace says.
 - The CSV supports only the `AllNamespaces` install mode: one install per cluster,
   watched cluster-wide.
   - An OperatorGroup with `targetNamespaces` (OwnNamespace or SingleNamespace) fails

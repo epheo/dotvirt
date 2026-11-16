@@ -11,6 +11,7 @@ import (
 	appsv1 "k8s.io/api/apps/v1"
 	authzv1 "k8s.io/api/authorization/v1"
 	corev1 "k8s.io/api/core/v1"
+	rbacv1 "k8s.io/api/rbac/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes/scheme"
 
@@ -36,9 +37,26 @@ var (
 )
 
 const (
-	installPath  = "/apis/dotvirt.io/v1alpha1/namespaces/dotvirt/dotvirts"
-	operatorPath = "/apis/apps/v1/deployments"
+	installPath         = "/apis/dotvirt.io/v1alpha1/namespaces/dotvirt/dotvirts"
+	operatorPath        = "/apis/apps/v1/deployments"
+	operatorInstallPath = "/apis/dotvirt.io/v1alpha1/namespaces/dotvirt-operator/dotvirts"
+	consoleBindingPath  = "/apis/rbac.authorization.k8s.io/v1/clusterrolebindings/dotvirt"
 )
+
+// consoleBinding is ClusterRoleBinding dotvirt as the operator writes it for
+// the install in namespace.
+func consoleBinding(namespace string) rbacv1.ClusterRoleBinding {
+	return rbacv1.ClusterRoleBinding{
+		TypeMeta:   metav1.TypeMeta{Kind: "ClusterRoleBinding", APIVersion: "rbac.authorization.k8s.io/v1"},
+		ObjectMeta: metav1.ObjectMeta{Name: "dotvirt", CreationTimestamp: metav1.Now()},
+		RoleRef:    rbacv1.RoleRef{APIGroup: "rbac.authorization.k8s.io", Kind: "ClusterRole", Name: "dotvirt"},
+		Subjects:   []rbacv1.Subject{{Kind: "ServiceAccount", Name: "dotvirt", Namespace: namespace}},
+	}
+}
+
+func dotvirtList(items ...any) map[string]any {
+	return map[string]any{"apiVersion": "dotvirt.io/v1alpha1", "kind": "DotvirtList", "metadata": map[string]any{}, "items": append([]any{}, items...)}
+}
 
 // adminObjectsServer serves an install whose status an operator tampered
 // with (a deny-everything policy under the guard's name, and a binding no
@@ -91,6 +109,16 @@ func adminObjectsServer(t *testing.T) (*Server, *fakeCluster, func() map[string]
 			{Name: "RELATED_IMAGE_DOTVIRT", Value: "registry.example/evil:1"},
 		}}}
 		writeObj(w, appsv1.DeploymentList{TypeMeta: metav1.TypeMeta{Kind: "DeploymentList", APIVersion: "apps/v1"}, Items: []appsv1.Deployment{decoy, d}})
+	})
+	fc.on(http.MethodGet, operatorInstallPath, func(w http.ResponseWriter, r *http.Request) {
+		if adminOnly(w, r) {
+			writeObj(w, dotvirtList())
+		}
+	})
+	fc.on(http.MethodGet, consoleBindingPath, func(w http.ResponseWriter, r *http.Request) {
+		if adminOnly(w, r) {
+			writeObj(w, consoleBinding("dotvirt"))
+		}
 	})
 	fc.on(http.MethodPost, "/apis/authorization.k8s.io/v1/subjectaccessreviews", func(w http.ResponseWriter, r *http.Request) {
 		if !adminOnly(w, r) {
@@ -235,4 +263,51 @@ func TestAdminObjectsInstallTheConsolesRender(t *testing.T) {
 			t.Errorf("%s %s applied by %q as\n%s\nwant the render\n%s", o.Object.GetKind(), o.Object.GetName(), a.bearer, x, y)
 		}
 	}
+}
+
+// The guard pins the install the operator acts on, as it resolves it: a
+// console that install moved away from refuses to pin its own namespace.
+func TestAdminObjectsPinOnlyTheOperatorsInstall(t *testing.T) {
+	operator := func(env ...corev1.EnvVar) http.HandlerFunc {
+		return func(w http.ResponseWriter, r *http.Request) {
+			d := appsv1.Deployment{ObjectMeta: metav1.ObjectMeta{Name: adminobjects.OperatorDeployment, Namespace: "dotvirt-operator"}}
+			d.Spec.Template.Spec.ServiceAccountName = "dotvirt-operator-controller"
+			d.Spec.Template.Spec.Containers = []corev1.Container{{Name: "manager", Env: env}}
+			writeObj(w, appsv1.DeploymentList{TypeMeta: metav1.TypeMeta{Kind: "DeploymentList", APIVersion: "apps/v1"}, Items: []appsv1.Deployment{d}})
+		}
+	}
+	for name, steer := range map[string]func(*fakeCluster){
+		"an admin names another namespace on the operator": func(fc *fakeCluster) {
+			fc.on(http.MethodGet, operatorPath, operator(corev1.EnvVar{Name: adminobjects.InstallNamespaceEnv, Value: "elsewhere"}))
+		},
+		"a Dotvirt in the operator's own namespace": func(fc *fakeCluster) {
+			fc.on(http.MethodGet, operatorInstallPath, func(w http.ResponseWriter, r *http.Request) {
+				writeObj(w, dotvirtList(map[string]any{"apiVersion": "dotvirt.io/v1alpha1", "kind": "Dotvirt",
+					"metadata": map[string]any{"name": "x", "namespace": "dotvirt-operator"}}))
+			})
+		},
+		"the console's binding in another namespace": func(fc *fakeCluster) {
+			fc.on(http.MethodGet, consoleBindingPath, func(w http.ResponseWriter, r *http.Request) {
+				writeObj(w, consoleBinding("elsewhere"))
+			})
+			fc.on(http.MethodGet, "/apis/dotvirt.io/v1alpha1/namespaces/elsewhere/dotvirts", func(w http.ResponseWriter, r *http.Request) {
+				writeObj(w, dotvirtList(map[string]any{"apiVersion": "dotvirt.io/v1alpha1", "kind": "Dotvirt",
+					"metadata": map[string]any{"name": "x", "namespace": "elsewhere"}}))
+			})
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			s, fc, seen := adminObjectsServer(t)
+			steer(fc)
+			for _, method := range []string{http.MethodGet, http.MethodPost} {
+				wantStatus(t, do(s, adminToken, method, "/api/admin-objects", ""), http.StatusConflict)
+			}
+			if got := seen(); len(got) != 0 {
+				t.Errorf("applied %v", got)
+			}
+		})
+	}
+	s, fc, _ := adminObjectsServer(t)
+	fc.on(http.MethodGet, operatorPath, operator(corev1.EnvVar{Name: adminobjects.InstallNamespaceEnv, Value: "dotvirt"}))
+	wantStatus(t, do(s, adminToken, http.MethodGet, "/api/admin-objects", ""), http.StatusOK)
 }

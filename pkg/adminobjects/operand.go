@@ -13,15 +13,22 @@ import (
 // managed forge run as; ConsoleDeployment and ForgeDeployment their
 // Deployments.
 const (
-	ConsoleAccount = "dotvirt"
-	// ConsoleSelectorKey and ConsoleSelectorValue select the console's pods
-	// for its Service.
+	ConsoleAccount    = "dotvirt"
+	ForgeAccount      = "dotvirt-forgejo"
+	ConsoleDeployment = "dotvirt"
+	ForgeDeployment   = "dotvirt-forgejo"
+)
+
+// ConsoleSelectorKey and ConsoleSelectorValue select the console's pods for
+// its Service.
+const (
 	ConsoleSelectorKey   = "app"
 	ConsoleSelectorValue = "dotvirt"
-	ForgeAccount         = "dotvirt-forgejo"
-	ConsoleDeployment    = "dotvirt"
-	ForgeDeployment      = "dotvirt-forgejo"
 )
+
+// InstallNamespaceEnv is the operator Deployment's env by which a cluster
+// admin names the install's namespace.
+const InstallNamespaceEnv = "OPERATOR_INSTALL_NAMESPACE"
 
 // ArgoTarget is the ArgoCD namespace and controller ServiceAccount an install
 // writes into: the spec's, else the defaults. The operator and the console

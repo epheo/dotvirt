@@ -1,4 +1,5 @@
-# A sample Dotvirt install: apply it into the namespace dotvirt runs in and the
+# A sample Dotvirt install: apply it into the operator's install namespace (its own
+# namespace unless a cluster admin set OPERATOR_INSTALL_NAMESPACE) and the
 # operator provisions the rest. On OpenShift nothing here needs a hostname; with
 # forge.managed and no forge.url the operator hosts Forgejo and assigns its host
 # (reported in status.forgeURL), and ingress.type: auto assigns the console host too
@@ -8,7 +9,7 @@ apiVersion: dotvirt.io/v1alpha1
 kind: Dotvirt
 metadata:
   name: dotvirt
-  namespace: dotvirt
+  namespace: dotvirt-operator
 spec:
   # No image pin: the operator deploys its built-in (digest-pinned) DefaultImage,
   # so an OLM operator upgrade rolls the app. Set spec.image only to override.

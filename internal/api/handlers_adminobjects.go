@@ -28,8 +28,9 @@ func (s *Server) adminObjectsOffered() bool {
 func (s *Server) adminObjectsAction() action {
 	ns := s.cfg.OwnNamespace
 	act := action{
-		{Verb: verbList, Group: "dotvirt.io", Resource: "dotvirts", Namespace: ns},
+		{Verb: verbList, Group: "dotvirt.io", Resource: "dotvirts"},
 		{Verb: verbList, Group: "apps", Resource: "deployments", Name: adminobjects.OperatorDeployment},
+		{Verb: verbGet, Group: "rbac.authorization.k8s.io", Resource: "clusterrolebindings", Name: adminobjects.ConsoleAccount},
 		{Verb: verbCreate, Group: "authorization.k8s.io", Resource: "subjectaccessreviews"},
 		{Verb: verbGet, Group: "config.openshift.io", Resource: "ingresses", Name: "cluster"},
 	}
@@ -84,6 +85,15 @@ func (s *Server) adminParams(ctx context.Context, c *cluster.Client) (adminobjec
 	op, err := c.OperatorDeployment(ctx, adminobjects.OperatorDeployment, ns)
 	if err != nil {
 		return adminobjects.Params{}, unavailable(fmt.Errorf("find the operator: %w", err))
+	}
+	// A console the install moved away from would pin the namespace the
+	// operator left, which refuses the install it acts on.
+	switch acts, err := c.OperatorInstall(ctx, op); {
+	case err != nil:
+		return adminobjects.Params{}, unavailable(fmt.Errorf("resolve the operator's install: %w", err))
+	case acts != ns:
+		return adminobjects.Params{}, fmt.Errorf("%w: the operator acts on the install in namespace %q, not on this console's (%s); install the guard from the console there",
+			model.ErrConflict, acts, ns)
 	}
 	openShift, err := c.ServesRoutes()
 	if err != nil {

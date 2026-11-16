@@ -5,24 +5,29 @@
 # placeholders and apply it. Run the lines below as a script: it stops when it
 # cannot tell which operator to pin.
 #
-#   # The install's namespace is the console's: tenants may create Dotvirts in
-#   # their own namespaces, so take the one ClusterRoleBinding dotvirt grants the
-#   # console's ServiceAccount in, and the one Dotvirt there, as the console does.
-#   # After moving the install, the binding names the old namespace until the
-#   # operator reconciles it: use the new namespace then.
-#   export INSTALL_NAMESPACE="$(kubectl get clusterrolebinding dotvirt \
-#     -o jsonpath='{.subjects[?(@.kind=="ServiceAccount")].namespace}')"
 #   # The operator's Deployment: among those named dotvirt-operator-controller (a
-#   # tenant may name one so), the one whose account may patch Dotvirt status there:
+#   # tenant may name one so), the one whose account may patch Dotvirt status in
+#   # every namespace:
 #   OP="$(kubectl get deploy -A --field-selector metadata.name=dotvirt-operator-controller \
 #     -o jsonpath='{range .items[*]}{.metadata.namespace}/{.spec.template.spec.serviceAccountName}{"\n"}{end}' |
 #     while IFS=/ read -r ns sa; do kubectl auth can-i patch dotvirts.dotvirt.io --subresource=status \
-#       -n "$INSTALL_NAMESPACE" --as="system:serviceaccount:$ns:${sa:-default}" >/dev/null && echo "$ns/${sa:-default}"; done)"
+#       --all-namespaces --as="system:serviceaccount:$ns:${sa:-default}" >/dev/null && echo "$ns/${sa:-default}"; done)"
 #   [ "$(printf '%s\n' "$OP" | grep -c /)" = 1 ] || { echo "want exactly one operator, found: $OP" >&2; exit 1; }
 #   export OPERATOR_USERNAME="system:serviceaccount:${OP%/*}:${OP#*/}"
-#   relimg() { kubectl -n "${OP%/*}" get deploy dotvirt-operator-controller \
+#   openv() { kubectl -n "${OP%/*}" get deploy dotvirt-operator-controller \
 #     -o jsonpath="{.spec.template.spec.containers[0].env[?(@.name==\"$1\")].value}"; }
-#   export RELATED_IMAGE_DOTVIRT="$(relimg RELATED_IMAGE_DOTVIRT)" RELATED_IMAGE_FORGEJO="$(relimg RELATED_IMAGE_FORGEJO)"
+#   export RELATED_IMAGE_DOTVIRT="$(openv RELATED_IMAGE_DOTVIRT)" RELATED_IMAGE_FORGEJO="$(openv RELATED_IMAGE_FORGEJO)"
+#   # The install's namespace, as the operator resolves it: the one an admin names
+#   # on its Deployment, else its own while a Dotvirt is there, else the one
+#   # ClusterRoleBinding dotvirt grants the console's ServiceAccount in. Never a
+#   # Dotvirt's own: tenants may create them in their namespaces.
+#   INSTALL_NAMESPACE="$(openv OPERATOR_INSTALL_NAMESPACE)"
+#   if [ -z "$INSTALL_NAMESPACE" ] && [ -n "$(kubectl -n "${OP%/*}" get dotvirt -o name)" ]; then
+#     INSTALL_NAMESPACE="${OP%/*}"; fi
+#   [ -n "$INSTALL_NAMESPACE" ] || INSTALL_NAMESPACE="$(kubectl get clusterrolebinding dotvirt \
+#     -o jsonpath='{.subjects[?(@.kind=="ServiceAccount")].namespace}')"
+#   case "$INSTALL_NAMESPACE" in ""|*" "*) echo "want one install namespace, found: '$INSTALL_NAMESPACE'" >&2; exit 1;; esac
+#   export INSTALL_NAMESPACE
 #   spec() { kubectl -n "$INSTALL_NAMESPACE" get dotvirt -o jsonpath="{.items[0].spec.$1}"; }
 #   export SPEC_IMAGE="$(spec image)"
 #   export FORGE_INSECURE_TLS="$( [ "$(spec forge.insecureTLS)" = true ] && echo true || echo false )"

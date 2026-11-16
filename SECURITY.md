@@ -22,6 +22,15 @@ app (git and the forge API, including creating project repos) and ArgoCD's
 repo-creds. Reports that concern the operator's privileges, the forge credential,
 the user-token pass-through, or the GitOps PR-merge gate are especially welcome.
 
+The operator acts only on the Dotvirt in its install namespace: one a cluster admin
+names on its Deployment, else its own namespace, else the install it already
+provisioned (from ClusterRoleBinding `dotvirt`, which only cluster admins and the
+operator may write). OLM lets every namespace admin create a Dotvirt in their
+namespace; earlier versions acted on the oldest Dotvirt anywhere, so a tenant's
+could become the install while none existed and receive its cluster-wide
+bindings. After upgrading, check that ClusterRoleBinding `dotvirt` names the
+namespace you installed in (operator README, Install namespace).
+
 ### The operator guard
 
 The operator needs wide rights to install: Secrets and Deployments by name, the

@@ -9,7 +9,7 @@ metadata:
           "kind": "Dotvirt",
           "metadata": {
             "name": "dotvirt",
-            "namespace": "dotvirt"
+            "namespace": "dotvirt-operator"
           },
           "spec": {
             "forge": {

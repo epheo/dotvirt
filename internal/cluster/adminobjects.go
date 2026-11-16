@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	authzv1 "k8s.io/api/authorization/v1"
+	rbacv1 "k8s.io/api/rbac/v1"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -55,6 +56,8 @@ func (c *Client) InstallIn(ctx context.Context, namespace string) (InstallSpec, 
 type OperatorInfo struct {
 	Namespace, ServiceAccount  string
 	DotvirtImage, ForgejoImage string
+	// InstallNamespace is the install's namespace an admin names there, if any.
+	InstallNamespace string
 }
 
 // OperatorDeployment finds, under THIS client's identity, the operator of the
@@ -93,6 +96,8 @@ func (c *Client) OperatorDeployment(ctx context.Context, name, installNS string)
 					info.DotvirtImage = e.Value
 				case "RELATED_IMAGE_FORGEJO":
 					info.ForgejoImage = e.Value
+				case adminobjects.InstallNamespaceEnv:
+					info.InstallNamespace = e.Value
 				}
 			}
 		}
@@ -160,4 +165,56 @@ func (c *Client) SSOClient(ctx context.Context, namespace string) (id, redirect 
 		}
 	}
 	return adminobjects.SSOClientName(namespace), adminobjects.SSORedirect(spec.IngressHost, namespace, domain), nil
+}
+
+// OperatorInstall is the namespace whose Dotvirt the operator op acts on, as
+// the operator resolves it, read as THIS client: the one an admin names on its
+// Deployment, else its own while a Dotvirt is there, else the one
+// ClusterRoleBinding dotvirt grants the console's ServiceAccount in, while a
+// Dotvirt there predates the binding; "" for none.
+func (c *Client) OperatorInstall(ctx context.Context, op OperatorInfo) (string, error) {
+	if op.InstallNamespace != "" {
+		return op.InstallNamespace, nil
+	}
+	own, err := c.dyn.Resource(dotvirtsGVR).Namespace(op.Namespace).List(ctx, metav1.ListOptions{Limit: 1})
+	if err != nil {
+		return "", err
+	}
+	if len(own.Items) > 0 {
+		return op.Namespace, nil
+	}
+	crb, err := c.kube.RbacV1().ClusterRoleBindings().Get(ctx, adminobjects.ConsoleAccount, metav1.GetOptions{})
+	if apierrors.IsNotFound(err) {
+		return "", nil
+	}
+	if err != nil {
+		return "", err
+	}
+	if crb.RoleRef.Kind != "ClusterRole" || crb.RoleRef.Name != adminobjects.ConsoleAccount {
+		return "", nil
+	}
+	bound := ""
+	for _, s := range crb.Subjects {
+		if s.Kind != rbacv1.ServiceAccountKind || s.Name != adminobjects.ConsoleAccount {
+			continue
+		}
+		if s.Namespace == "" || (bound != "" && s.Namespace != bound) {
+			return "", nil
+		}
+		bound = s.Namespace
+	}
+	if bound == "" {
+		return "", nil
+	}
+	there, err := c.dyn.Resource(dotvirtsGVR).Namespace(bound).List(ctx, metav1.ListOptions{})
+	if err != nil {
+		return "", err
+	}
+	for _, d := range there.Items {
+		created := d.GetCreationTimestamp()
+		if !crb.CreationTimestamp.Before(&created) {
+			return bound, nil
+		}
+	}
+	return "", nil
 }

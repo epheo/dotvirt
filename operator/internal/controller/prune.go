@@ -115,14 +115,24 @@ func pruneScopes() []pruneScope {
 		{list: typedList(&networkingv1.IngressList{}), where: installNS, names: operand},
 		{list: unstructuredList(install.RouteGVK), where: installNS, names: operand},
 		{list: unstructuredList(install.HTTPRouteGVK), where: installNS, names: operand},
-		{list: typedList(&rbacv1.ClusterRoleBindingList{}), where: cluster, names: install.ClusterRoleBindingNames},
 		{list: unstructuredList(install.ArgoGVK("AppProject")), where: writtenNS},
 		{list: unstructuredList(install.ArgoGVK("Application")), where: writtenNS, names: []string{install.PlatformApplicationName}},
 		{list: unstructuredList(install.ArgoGVK("ApplicationSet")), where: writtenNS, names: []string{install.ApplicationSetName}},
 		{list: typedList(&corev1.SecretList{}), where: writtenNS, names: []string{install.AppsetSecretName, install.RepoCredsName}},
 		{list: typedList(&corev1.ConfigMapList{}), where: writtenNS, names: []string{install.AppsetConfigMapName}},
 		{list: typedList(&rbacv1.RoleBindingList{}), where: writtenNS, names: []string{install.SyncRequestName}},
+		// Last, and ClusterRoleBinding dotvirt last of all: an install outside the
+		// operator's namespace is found through it (installNamespace), so a
+		// finalize that fails after taking it would read as no install on the
+		// retry, drop the finalizer and leave the rest behind.
+		{list: typedList(&rbacv1.ClusterRoleBindingList{}), where: cluster, names: bindingsDotvirtLast()},
 	}
+}
+
+// bindingsDotvirtLast is install.ClusterRoleBindingNames with dotvirt last.
+func bindingsDotvirtLast() []string {
+	names := slices.DeleteFunc(slices.Clone(install.ClusterRoleBindingNames), func(n string) bool { return n == install.AppName })
+	return append(names, install.AppName)
 }
 
 // renderedNamespaces are the namespaces other than the install's that the pass
