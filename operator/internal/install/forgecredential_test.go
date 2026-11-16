@@ -85,6 +85,11 @@ func TestForgeCredentialCommands(t *testing.T) {
 	if got := ForgeCredentialCommands(dv, "dotvirt-operator"); !slices.Equal(got, want) {
 		t.Errorf("bring your own: %q, want %q", got, want)
 	}
+	// A half grant is replaced too: the delete tolerates the one that is absent.
+	if got := ForgeCredentialReplaceCommands(dv, "dotvirt-operator"); len(got) != 3 ||
+		got[0] != "kubectl -n dotvirt delete role,rolebinding dotvirt-forge-credential --ignore-not-found" || !slices.Equal(got[1:], want) {
+		t.Errorf("replace: %q", got)
+	}
 	dv.Spec.Forge.Managed = true
 	if got := ForgeCredentialCommands(dv, ""); !strings.Contains(got[0], "--verb=get,create,patch") || !strings.Contains(got[1], "<operator-namespace>:") {
 		t.Errorf("managed, operator namespace unknown: %q", got)

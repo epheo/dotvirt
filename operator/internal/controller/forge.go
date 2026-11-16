@@ -207,6 +207,10 @@ func (r *DotvirtReconciler) reconcilePlatformRepo(ctx context.Context, dv *dotvi
 		meta.RemoveStatusCondition(&dv.Status.Conditions, dotvirtv1alpha1.ConditionForgeRepoReady)
 		return nil, nil
 	}
+	if credentialRefused(dv) {
+		r.setCondition(dv, dotvirtv1alpha1.ConditionForgeRepoReady, metav1.ConditionUnknown, reasonCredentialWait, credentialWaitMessage)
+		return nil, nil
+	}
 	if err := r.ensurePlatformRepo(ctx, dv); credentialWaits(err) {
 		r.setCondition(dv, dotvirtv1alpha1.ConditionForgeRepoReady, metav1.ConditionUnknown, reasonCredentialWait, credentialWaitMessage)
 		return nil, nil

@@ -100,7 +100,8 @@ func ForgeCredentialCommands(dv *dotvirtv1alpha1.Dotvirt, operatorNS string) []s
 // ForgeCredentialReplaceCommands replace a Role and RoleBinding that do not
 // grant what the credential needs: delete both, then ForgeCredentialCommands.
 func ForgeCredentialReplaceCommands(dv *dotvirtv1alpha1.Dotvirt, operatorNS string) []string {
-	return append([]string{fmt.Sprintf("kubectl -n %s delete role,rolebinding %s", dv.Namespace, ForgeCredentialGrantName)},
+	// --ignore-not-found: a half grant (one of the two) is a grant to replace too.
+	return append([]string{fmt.Sprintf("kubectl -n %s delete role,rolebinding %s --ignore-not-found", dv.Namespace, ForgeCredentialGrantName)},
 		ForgeCredentialCommands(dv, operatorNS)...)
 }
 

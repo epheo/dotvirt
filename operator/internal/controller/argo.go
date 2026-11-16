@@ -240,6 +240,9 @@ func (r *DotvirtReconciler) argoWebhook(ctx context.Context, dv *dotvirtv1alpha1
 		return failed(err)
 	}
 	// One org webhook covers every repo, using the forge credential to register it.
+	if credentialRefused(dv) {
+		return metav1.ConditionUnknown, reasonCredentialWait, credentialWaitMessage
+	}
 	fc, err := r.forgeClient(ctx, dv)
 	if err != nil {
 		return failed(err)

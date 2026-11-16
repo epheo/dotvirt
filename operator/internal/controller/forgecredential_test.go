@@ -50,13 +50,18 @@ func refuseSecret(name string, refused *bool) interceptor.Funcs {
 // answerReviews answers the operator's SelfSubjectAccessReviews with allowed,
 // recording what each asked in asked.
 func answerReviews(allowed bool, asked *[]authorizationv1.ResourceAttributes) func(context.Context, client.WithWatch, client.Object, ...client.CreateOption) error {
+	return answerReviewsBy(func(authorizationv1.ResourceAttributes) bool { return allowed }, asked)
+}
+
+// answerReviewsBy answers each SelfSubjectAccessReview with allow's verdict.
+func answerReviewsBy(allow func(authorizationv1.ResourceAttributes) bool, asked *[]authorizationv1.ResourceAttributes) func(context.Context, client.WithWatch, client.Object, ...client.CreateOption) error {
 	return func(ctx context.Context, cl client.WithWatch, obj client.Object, opts ...client.CreateOption) error {
 		review, ok := obj.(*authorizationv1.SelfSubjectAccessReview)
 		if !ok {
 			return cl.Create(ctx, obj, opts...)
 		}
 		*asked = append(*asked, *review.Spec.ResourceAttributes)
-		review.Status.Allowed = allowed
+		review.Status.Allowed = allow(*review.Spec.ResourceAttributes)
 		return nil
 	}
 }
@@ -380,14 +385,24 @@ func TestWrongGrantRechecksBrieflyThenSaysReplace(t *testing.T) {
 }
 
 // A managed forge never mints a token it may not store in an admin-named
-// credential: it asks first, and mints only once the answer is yes.
+// credential: it asks first (create and patch while the Secret is absent: a
+// server-side apply needs both), and mints only once every answer is yes.
 func TestManagedForgeMintsOnlyWhatItMayStore(t *testing.T) {
-	for _, allowed := range []bool{false, true} {
+	for _, c := range []struct {
+		name    string
+		allow   func(authorizationv1.ResourceAttributes) bool
+		allowed bool
+	}{
+		{"nothing granted", func(authorizationv1.ResourceAttributes) bool { return false }, false},
+		{"create without patch", func(a authorizationv1.ResourceAttributes) bool { return a.Verb != "patch" }, false},
+		{"create and patch", func(authorizationv1.ResourceAttributes) bool { return true }, true},
+	} {
+		allowed := c.allowed
 		dv := managedForgeCR()
 		dv.Spec.Forge.CredentialsSecret = "custom-forge"
 		srv, objs, mints := countingForgejo(t, dv)
 		var asked []authorizationv1.ResourceAttributes
-		c := testBuilder(t).WithObjects(append(objs, dv)...).WithInterceptorFuncs(interceptor.Funcs{Create: answerReviews(allowed, &asked)}).Build()
+		c := testBuilder(t).WithObjects(append(objs, dv)...).WithInterceptorFuncs(interceptor.Funcs{Create: answerReviewsBy(c.allow, &asked)}).Build()
 		r := newReconciler(c, depsOK)
 		r.forgeAPIBase = func(*dotvirtv1alpha1.Dotvirt) string { return srv.URL }
 		for range 3 {
@@ -402,12 +417,57 @@ func TestManagedForgeMintsOnlyWhatItMayStore(t *testing.T) {
 		if got := mints.Load(); got != want {
 			t.Errorf("allowed=%v: %d tokens minted over three passes, want %d", allowed, got, want)
 		}
-		if len(asked) == 0 || asked[0] != (authorizationv1.ResourceAttributes{Namespace: dv.Namespace, Verb: "create", Resource: "secrets", Name: "custom-forge"}) {
-			t.Errorf("allowed=%v: asked %+v, want create on the absent credential", allowed, asked)
+		ask := func(verb string) authorizationv1.ResourceAttributes {
+			return authorizationv1.ResourceAttributes{Namespace: dv.Namespace, Verb: verb, Resource: "secrets", Name: "custom-forge"}
+		}
+		if len(asked) == 0 || asked[0] != ask("create") || (allowed && (len(asked) < 2 || asked[1] != ask("patch"))) {
+			t.Errorf("allowed=%v: asked %+v, want create then patch on the absent credential", allowed, asked)
 		}
 		ready := cond(dv, dotvirtv1alpha1.ConditionForgeCredentialReady)
 		if allowed != (ready != nil && ready.Status == metav1.ConditionTrue) {
 			t.Errorf("allowed=%v: ForgeCredentialReady = %+v", allowed, ready)
+		}
+	}
+}
+
+// A managed forge whose grant reads but does not write, past the lag window:
+// the forge-dependent phases wait without reading the credential, nothing is
+// minted, and the pass keeps the drift cadence (no settle retry from them).
+func TestManagedGetOnlyGrantSettlesAtTheDriftCadence(t *testing.T) {
+	dv := managedForgeCR()
+	dv.Spec.Forge.CredentialsSecret = "custom-forge"
+	// An Argo URL, so the Argo webhook would register if it could; sync
+	// impersonation off, whose own recheck is not what this is about.
+	dv.Spec.ArgoCD.ServerURL = "https://argocd.example"
+	dv.Spec.ArgoCD.SyncImpersonation.Enabled = new(false)
+	srv, objs, mints := countingForgejo(t, dv)
+	now := time.Now().Truncate(time.Second)
+	role, binding := install.ForgeCredentialGrant(dv, "dotvirt-operator")
+	role.Rules[0].Verbs = []string{"get"}
+	role.CreationTimestamp, binding.CreationTimestamp = metav1.NewTime(now.Add(-time.Minute)), metav1.NewTime(now.Add(-time.Minute))
+	var asked []authorizationv1.ResourceAttributes
+	c := testBuilder(t).WithObjects(append(objs, dv, role, binding)...).WithInterceptorFuncs(interceptor.Funcs{
+		Create: answerReviewsBy(func(a authorizationv1.ResourceAttributes) bool { return a.Verb == "get" }, &asked),
+	}).Build()
+	r := newReconciler(c, depsOK)
+	r.forgeAPIBase = func(*dotvirtv1alpha1.Dotvirt) string { return srv.URL }
+	r.now = func() time.Time { return now }
+
+	reconcileOnce(t, r, dv)
+	markOperandReady(t, c, dv)
+	now = now.Add(driftResync + grantLagWindow)
+	for range 2 {
+		if res := reconcileOnce(t, r, dv); res.RequeueAfter != driftResync {
+			t.Errorf("past the window: requeue = %v, want %v", res.RequeueAfter, driftResync)
+		}
+	}
+	if n := mints.Load(); n != 0 {
+		t.Errorf("%d tokens minted it could not store", n)
+	}
+	got := getCR(t, c, dv)
+	for _, ct := range []string{dotvirtv1alpha1.ConditionForgeRepoReady, dotvirtv1alpha1.ConditionArgoWebhook, dotvirtv1alpha1.ConditionDotvirtWebhook} {
+		if c := cond(got, ct); c == nil || c.Status != metav1.ConditionUnknown || c.Reason != reasonCredentialWait {
+			t.Errorf("%s = %+v, want Unknown/%s", ct, c, reasonCredentialWait)
 		}
 	}
 }

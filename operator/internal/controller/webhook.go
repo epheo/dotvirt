@@ -19,6 +19,10 @@ import (
 // needs the argocd-secret write the app must never hold.) Never halts; the git
 // poll backstops.
 func (r *DotvirtReconciler) reconcileDotvirtWebhook(ctx context.Context, dv *dotvirtv1alpha1.Dotvirt, _ *reconcileCtx) (*ctrl.Result, error) {
+	if credentialRefused(dv) {
+		r.setCondition(dv, dotvirtv1alpha1.ConditionDotvirtWebhook, metav1.ConditionUnknown, reasonCredentialWait, credentialWaitMessage)
+		return nil, nil
+	}
 	if registered, err := r.observeDotvirtWebhook(ctx, dv); credentialWaits(err) {
 		r.setCondition(dv, dotvirtv1alpha1.ConditionDotvirtWebhook, metav1.ConditionUnknown, reasonCredentialWait, credentialWaitMessage)
 	} else if err != nil {

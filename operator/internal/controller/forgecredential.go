@@ -107,26 +107,29 @@ func latestChange(obj client.Object, after time.Time) time.Time {
 }
 
 // mayStoreCredential asks, for an admin-named credential, whether the operator
-// may write it (create while absent, patch once present) before a token is
-// minted: one minted but never stored is a dangling forge token every pass.
+// may write it before a token is minted: one minted but never stored is a
+// dangling forge token every pass. The write is a server-side apply, which
+// needs patch always and create too while the Secret is absent.
 func (r *DotvirtReconciler) mayStoreCredential(ctx context.Context, dv *dotvirtv1alpha1.Dotvirt, present bool) error {
 	if !install.ForgeCredentialNeedsGrant(dv) {
 		return nil
 	}
-	verb := "create"
-	if present {
-		verb = "patch"
+	verbs := []string{"patch"}
+	if !present {
+		verbs = []string{"create", "patch"}
 	}
-	review := &authorizationv1.SelfSubjectAccessReview{Spec: authorizationv1.SelfSubjectAccessReviewSpec{
-		ResourceAttributes: &authorizationv1.ResourceAttributes{
-			Namespace: dv.Namespace, Verb: verb, Resource: "secrets", Name: dv.Spec.Forge.CredentialsSecret,
-		},
-	}}
-	if err := r.Create(ctx, review); err != nil {
-		return fmt.Errorf("ask whether the operator may %s Secret %s/%s: %w", verb, dv.Namespace, dv.Spec.Forge.CredentialsSecret, err)
-	}
-	if !review.Status.Allowed {
-		return errCredentialNotGranted
+	for _, verb := range verbs {
+		review := &authorizationv1.SelfSubjectAccessReview{Spec: authorizationv1.SelfSubjectAccessReviewSpec{
+			ResourceAttributes: &authorizationv1.ResourceAttributes{
+				Namespace: dv.Namespace, Verb: verb, Resource: "secrets", Name: dv.Spec.Forge.CredentialsSecret,
+			},
+		}}
+		if err := r.Create(ctx, review); err != nil {
+			return fmt.Errorf("ask whether the operator may %s Secret %s/%s: %w", verb, dv.Namespace, dv.Spec.Forge.CredentialsSecret, err)
+		}
+		if !review.Status.Allowed {
+			return errCredentialNotGranted
+		}
 	}
 	return nil
 }
@@ -142,6 +145,13 @@ func (r *DotvirtReconciler) forgeSecret(ctx context.Context, dv *dotvirtv1alpha1
 		return nil, errCredentialNotGranted
 	}
 	return s, err
+}
+
+// credentialRefused reports whether this pass found the credential unusable
+// (ForgeCredentialReady False, any reason): the phases after the forge's then
+// wait on it without reading it.
+func credentialRefused(dv *dotvirtv1alpha1.Dotvirt) bool {
+	return meta.IsStatusConditionFalse(dv.Status.Conditions, dotvirtv1alpha1.ConditionForgeCredentialReady)
 }
 
 // credentialChecked reports whether ForgeCredentialReady applies: any

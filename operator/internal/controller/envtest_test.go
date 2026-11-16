@@ -789,6 +789,33 @@ func TestEnvtest(t *testing.T) {
 			t.Fatal(err)
 		}
 		soon(t, "a pass after the grant is revoked", func() bool { return passes.Load() > before })
+
+		// A half grant (the Role alone) is what GrantIncomplete reports: its
+		// replace commands, run as a cluster admin would, end with the grant.
+		mustCreate(t, admin, &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "cred-half"}})
+		dv := &dotvirtv1alpha1.Dotvirt{ObjectMeta: metav1.ObjectMeta{Name: "cred", Namespace: "cred-half", UID: "0f7c1d2e-cred"}}
+		dv.Spec.Forge.CredentialsSecret = "byo-creds"
+		role, _ := install.ForgeCredentialGrant(dv, "dotvirt-operator")
+		mustCreate(t, admin, role)
+		clusterAdmin, err := env.AddUser(envtest.User{Name: "grant-admin", Groups: []string{"system:masters"}}, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		kubectl, err := clusterAdmin.Kubectl()
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, cmd := range install.ForgeCredentialReplaceCommands(dv, "dotvirt-operator") {
+			stdout, stderr, err := kubectl.Run(strings.Fields(cmd)[1:]...)
+			if err != nil {
+				out, _ := io.ReadAll(stdout)
+				msg, _ := io.ReadAll(stderr)
+				t.Fatalf("%s: %v: %s %s", cmd, err, out, msg)
+			}
+		}
+		if !review(account, groups, authzv1.ResourceAttributes{Verb: "get", Resource: "secrets", Namespace: "cred-half", Name: "byo-creds"}) {
+			t.Error("the replace commands left the operator without the grant")
+		}
 	})
 
 	t.Run("a project's sync account holds its project's rights only", func(t *testing.T) {
