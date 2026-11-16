@@ -38,7 +38,6 @@ import (
 	"github.com/epheo/dotvirt/internal/routes"
 	"github.com/epheo/dotvirt/internal/stream"
 	"github.com/epheo/dotvirt/internal/tasks"
-	"github.com/epheo/dotvirt/pkg/adminobjects"
 	"github.com/epheo/dotvirt/pkg/forge"
 )
 
@@ -274,16 +273,12 @@ func run() error {
 			UploadProxyURL:    uploadProxyURL(ctx, cfg.UploadProxyURL, saCluster),
 			ForgeAdmin:        cfg.ForgeAdmin,
 			Install:           cfg.Install,
-			AdminPins: adminobjects.Params{
-				Operator: cfg.OperatorUsername, Namespace: cfg.Install.Namespace,
-				ArgoNamespace: cfg.ArgoNamespace, ArgoController: cfg.ArgoController,
-			},
-			PlatformRepo:   cfg.PlatformRepo,
-			ProjectLabel:   cfg.ProjectLabel,
-			RepoAnnotation: cfg.RepoAnnotation,
-			TenantKinds:    cfg.TenantKinds,
-			Publish:        publishing,
-			Branding:       branding.Settings{ProductName: cfg.ProductName, Links: cfg.MastheadLinks, Dir: cfg.BrandingDir},
+			PlatformRepo:      cfg.PlatformRepo,
+			ProjectLabel:      cfg.ProjectLabel,
+			RepoAnnotation:    cfg.RepoAnnotation,
+			TenantKinds:       cfg.TenantKinds,
+			Publish:           publishing,
+			Branding:          branding.Settings{ProductName: cfg.ProductName, Links: cfg.MastheadLinks, Dir: cfg.BrandingDir},
 		},
 	})
 

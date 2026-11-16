@@ -57,31 +57,41 @@ owns one status condition; a phase that fails or waits records why there, so
 1. **Dependencies** (`DependenciesReady`): probes for ArgoCD, a hard prerequisite
    it never installs (it waits and reports if it is absent), and for KubeVirt,
    OVN-K, NMState and CDI (soft: noted, the install proceeds).
-2. **Operator guard** (`OperatorGuard`): renders three ValidatingAdmissionPolicies and
+2. **Operator guard** (`OperatorGuard`): renders four ValidatingAdmissionPolicies and
    their bindings that bound the operator's own account, pinned to its exact username
-   (one SelfSubjectReview at startup), the install namespace, the ArgoCD namespace and
-   its controller's ServiceAccount:
+   (one SelfSubjectReview at startup), the install namespace, and the ArgoCD namespace
+   and controller (`spec.argocd`, else the defaults):
    - `dotvirt-operator-secrets`: Secrets only in those two namespaces, never of type
      `kubernetes.io/service-account-token` nor carrying `kubernetes.io/service-account.name`;
-   - `dotvirt-operator-deployments`: Deployments only in the install namespace, as
-     `dotvirt` or `dotvirt-forgejo`, with images from `quay.io/epheo/dotvirt` or
-     `codeberg.org/forgejo/forgejo` (any tag or digest) or exactly the image an admin
-     chose (`spec.image`, the operator Deployment's `RELATED_IMAGE_*`); no host network,
-     PID or IPC, no host path, no pod or container as root or seccomp `Unconfined`, every
-     container with `allowPrivilegeEscalation: false`, all capabilities dropped and none
-     added, none privileged;
+   - `dotvirt-operator-deployments`: only the console (`dotvirt`, as `dotvirt`) and the
+     forge (`dotvirt-forgejo`, as `dotvirt-forgejo`), in the install namespace. The
+     console's images come from `quay.io/epheo/dotvirt` and the forge's from
+     `codeberg.org/forgejo/forgejo` (any tag or digest), or exactly the image an admin
+     chose (`spec.image`, the operator Deployment's `RELATED_IMAGE_*`). Their command and
+     arguments are the ones rendered (`-insecure-tls` only with `spec.forge.insecureTLS`).
+     The console keeps its own token mounted where client-go reads it, with no
+     `KUBECONFIG`, `KUBERNETES_SERVICE_*` or `envFrom`. Nothing is mounted at, above or
+     inside the token directory. Every container runs non-root with a RuntimeDefault or
+     Localhost seccomp profile, `allowPrivilegeEscalation: false`, all capabilities
+     dropped and none added, unprivileged, off the host network, PID and IPC, with no
+     host path;
    - `dotvirt-operator-bindings`: only the ClusterRoleBindings and RoleBinding the
      operator renders, each to the ClusterRole of its own name and to its rendered
-     subjects only.
+     subjects only;
+   - `dotvirt-operator-install`: the operator's updates to its Dotvirt resource keep
+     spec, labels, annotations and owners as they are. It adds and removes its finalizer
+     by a patch of the finalizers alone, so once the guard is in, the spec is the
+     admin's.
 
    The operator never installs them: it reads them back by name and reports each in
    `status.adminObjects` as `NotInstalled`, `Outdated` (rendered for other pins or
    another version, or changed since) or `Installed`; see [Admin objects](#admin-objects).
    The apiserver evaluates them in-process, only for those kinds' writes, with the
    username check first. Best-effort: never a halt, never `Available`. A new release
-   in the same repositories passes as it is; an admin changing `spec.image`, the
-   operator's `RELATED_IMAGE_*` or either namespace makes them `Outdated`, and until
-   re-installed they refuse the operator's writes that need the change.
+   in the same repositories passes as it is; an admin changing `spec.image`,
+   `spec.argocd`, `spec.forge.insecureTLS`, the operator's `RELATED_IMAGE_*` or the
+   namespace makes them `Outdated`, and until re-installed they refuse the operator's
+   writes that need the change.
 3. **Forge** (`ForgeReady`): converges the trust anchors (below) first, then, with
    `spec.forge.managed`, stands up the eval-grade Forgejo (single pod, SQLite, a PVC
    that survives uninstall), resolves its external URL (an explicit `spec.forge.url`,
@@ -251,18 +261,21 @@ itself and a cluster admin installs them; the operator only reports them.
 A cluster admin signed in to the console sees a banner listing what is missing or
 differs (and what differs), the pins the render uses, one **Install** button, and the
 same render to download. Install applies the render under the admin's own token:
-- the console renders from its own configuration (the operator's username, its
-  namespaces, the ArgoCD controller) and from reads under the admin's token (the
-  Dotvirt resource's `spec.image`, the operator Deployment's `RELATED_IMAGE_*`), never
-  from anything the operator writes, `status` included;
+- the console reads every pin under the admin's token, never from anything the
+  operator writes (its status, or the console's own environment): the Dotvirt
+  resource's spec (`spec.argocd`, `spec.image`, `spec.forge.insecureTLS`), the one
+  Deployment named `dotvirt-operator-controller` in the cluster (the operator's
+  account and its `RELATED_IMAGE_*`; the operator may create no Deployment of that
+  name), and whether routes are served (the ArgoCD defaults);
 - it is offered only when reviews say that token may read those, and read, create and
   patch every object an install may ask for (`pkg/adminobjects` allowlist);
 - it takes back any field someone changed since (a forced server-side apply): it
   exists to restore the render, which is why the banner says what differs first.
 
-Without the console, use the release's `install/guard.yaml`: fill its placeholders
-(its header says how; the `OperatorGuard` condition names this install's values) and
-apply it with `kubectl apply --server-side --field-manager=dotvirt`. kubectl reports a
+Without the console, use the release's `install/guard.yaml`: derive each value from
+the cluster as its header shows (never copy one from the operator's status or
+conditions, which the operator writes), fill its placeholders and apply it with
+`kubectl apply --server-side --field-manager=dotvirt`. kubectl reports a
 conflict on any field someone else changed; review it, and add `--force-conflicts` to
 take the field back.
 

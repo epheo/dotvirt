@@ -13,21 +13,21 @@ import (
 	"github.com/epheo/dotvirt/pkg/adminobjects"
 )
 
-// adminObjectsOffered is whether this console renders admin objects: it knows
-// its install and every pin of the guard.
+// adminObjectsOffered is whether this console renders admin objects: it
+// belongs to an install. Every pin comes from reads under the caller's token.
 func (s *Server) adminObjectsOffered() bool {
-	return s.cfg.Install.Name != "" && s.cfg.AdminPins.Valid()
+	return s.cfg.Install.Name != ""
 }
 
 // adminObjectsAction is what installing the admin objects takes: reading the
-// install and the operator's Deployment (the images an admin chose), then
-// reading, creating and patching every object an install may ask for. Asked
-// of the allowlist, so the capability reads nothing.
+// install (the pins an admin chose) and finding the operator's Deployment (its
+// account, its images), then reading, creating and patching every object an
+// install may ask for. Asked of the allowlist, so the capability reads nothing.
 func (s *Server) adminObjectsAction() action {
-	in, pins := s.cfg.Install, s.cfg.AdminPins
+	in := s.cfg.Install
 	act := action{
 		{Verb: verbGet, Group: "dotvirt.io", Resource: "dotvirts", Namespace: in.Namespace, Name: in.Name},
-		{Verb: verbGet, Group: "apps", Resource: "deployments", Namespace: pins.OperatorNamespace(), Name: adminobjects.OperatorDeployment},
+		{Verb: verbList, Group: "apps", Resource: "deployments", Name: adminobjects.OperatorDeployment},
 	}
 	for _, r := range adminobjects.Allowed(in.Namespace) {
 		act = append(act,
@@ -65,17 +65,33 @@ func (s *Server) serveAdminObjects(w http.ResponseWriter, r *http.Request, insta
 	writeJSON(w, out)
 }
 
-// adminParams completes the console's pins with the images an admin chose,
-// read as the caller: the install's spec.image and the operator Deployment's
-// RELATED_IMAGE_* env, which OLM or GitOps writes and the operator cannot.
+// adminParams are the guard's pins, every one read as the caller, none from
+// anything the operator writes: the install's spec (its ArgoCD target, its
+// image, its TLS choice; the operator may only patch its finalizers once the
+// guard is in), and the operator's Deployment (its account and images; OLM or
+// GitOps writes it).
 func (s *Server) adminParams(ctx context.Context, c *cluster.Client) (adminobjects.Params, error) {
-	p, in := s.cfg.AdminPins, s.cfg.Install
-	var err error
-	if p.SpecImage, err = c.InstallImage(ctx, in.Namespace, in.Name); err != nil {
-		return p, unavailable(fmt.Errorf("read the install %s/%s: %w", in.Namespace, in.Name, err))
+	in := s.cfg.Install
+	spec, err := c.InstallSpec(ctx, in.Namespace, in.Name)
+	if err != nil {
+		return adminobjects.Params{}, unavailable(fmt.Errorf("read the install %s/%s: %w", in.Namespace, in.Name, err))
 	}
-	if p.DotvirtImage, p.ForgejoImage, err = c.OperatorImages(ctx, p.OperatorNamespace(), adminobjects.OperatorDeployment); err != nil {
-		return p, unavailable(fmt.Errorf("read the operator Deployment %s/%s: %w", p.OperatorNamespace(), adminobjects.OperatorDeployment, err))
+	op, err := c.OperatorDeployment(ctx, adminobjects.OperatorDeployment)
+	if err != nil {
+		return adminobjects.Params{}, unavailable(fmt.Errorf("find the operator: %w", err))
+	}
+	openShift, err := c.ServesRoutes()
+	if err != nil {
+		return adminobjects.Params{}, unavailable(fmt.Errorf("discover the platform: %w", err))
+	}
+	p := adminobjects.Params{
+		Operator:  "system:serviceaccount:" + op.Namespace + ":" + op.ServiceAccount,
+		Namespace: in.Namespace, SpecImage: spec.Image, DotvirtImage: op.DotvirtImage, ForgejoImage: op.ForgejoImage,
+		InsecureTLS: spec.InsecureTLS,
+	}
+	p.ArgoNamespace, p.ArgoController = adminobjects.ArgoTarget(spec.ArgoNamespace, spec.ArgoController, openShift)
+	if !p.Valid() {
+		return adminobjects.Params{}, unavailable(fmt.Errorf("the install's pins are not well formed: %+v", p))
 	}
 	return p, nil
 }

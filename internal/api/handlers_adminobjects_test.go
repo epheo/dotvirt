@@ -19,13 +19,12 @@ import (
 
 var (
 	installRef = config.InstallRef{Namespace: "dotvirt", Name: "x"}
-	adminPins  = adminobjects.Params{
+	// The pins the console must render from its reads: the operator's
+	// Deployment's account, the install's spec, the default ArgoCD target off
+	// OpenShift, and the images an admin chose.
+	adminWant = adminobjects.Params{
 		Operator: "system:serviceaccount:dotvirt-operator:dotvirt-operator-controller", Namespace: "dotvirt",
 		ArgoNamespace: "argocd", ArgoController: "argocd-application-controller",
-	}
-	// What an admin chose: the install's spec.image and the operator
-	// Deployment's env, read as the caller.
-	adminChosen = adminobjects.Params{
 		SpecImage:    "registry.example/team/dotvirt:custom",
 		DotvirtImage: "quay.io/epheo/dotvirt@sha256:aaaa", ForgejoImage: "codeberg.org/forgejo/forgejo:12-rootless",
 	}
@@ -33,7 +32,7 @@ var (
 
 const (
 	installPath  = "/apis/dotvirt.io/v1alpha1/namespaces/dotvirt/dotvirts/x"
-	operatorPath = "/apis/apps/v1/namespaces/dotvirt-operator/deployments/dotvirt-operator-controller"
+	operatorPath = "/apis/apps/v1/deployments"
 )
 
 // adminObjectsServer serves an install whose status an operator tampered
@@ -56,7 +55,7 @@ func adminObjectsServer(t *testing.T) (*Server, *fakeCluster, func() map[string]
 		}
 		writeObj(w, map[string]any{
 			"apiVersion": "dotvirt.io/v1alpha1", "kind": "Dotvirt", "metadata": map[string]any{"name": "x", "namespace": "dotvirt"},
-			"spec": map[string]any{"image": adminChosen.SpecImage},
+			"spec": map[string]any{"image": adminWant.SpecImage},
 			"status": map[string]any{"adminObjects": []any{
 				map[string]any{"purpose": "tampered", "state": "NotInstalled", "kind": "ValidatingAdmissionPolicy", "name": adminobjects.GuardSecretsName,
 					"object": map[string]any{"apiVersion": "admissionregistration.k8s.io/v1", "kind": "ValidatingAdmissionPolicy",
@@ -72,13 +71,16 @@ func adminObjectsServer(t *testing.T) (*Server, *fakeCluster, func() map[string]
 		if !adminOnly(w, r) {
 			return
 		}
-		d := appsv1.Deployment{TypeMeta: metav1.TypeMeta{Kind: "Deployment", APIVersion: "apps/v1"},
-			ObjectMeta: metav1.ObjectMeta{Name: adminobjects.OperatorDeployment, Namespace: "dotvirt-operator"}}
+		if r.URL.Query().Get("fieldSelector") != "metadata.name="+adminobjects.OperatorDeployment {
+			t.Errorf("operator Deployment listed with %q", r.URL.RawQuery)
+		}
+		d := appsv1.Deployment{ObjectMeta: metav1.ObjectMeta{Name: adminobjects.OperatorDeployment, Namespace: "dotvirt-operator"}}
+		d.Spec.Template.Spec.ServiceAccountName = "dotvirt-operator-controller"
 		d.Spec.Template.Spec.Containers = []corev1.Container{{Name: "manager", Env: []corev1.EnvVar{
-			{Name: "RELATED_IMAGE_DOTVIRT", Value: adminChosen.DotvirtImage},
-			{Name: "RELATED_IMAGE_FORGEJO", Value: adminChosen.ForgejoImage},
+			{Name: "RELATED_IMAGE_DOTVIRT", Value: adminWant.DotvirtImage},
+			{Name: "RELATED_IMAGE_FORGEJO", Value: adminWant.ForgejoImage},
 		}}}
-		writeObj(w, d)
+		writeObj(w, appsv1.DeploymentList{TypeMeta: metav1.TypeMeta{Kind: "DeploymentList", APIVersion: "apps/v1"}, Items: []appsv1.Deployment{d}})
 	})
 	var mu sync.Mutex
 	stored := map[string]map[string]any{}
@@ -122,7 +124,7 @@ func adminObjectsServer(t *testing.T) (*Server, *fakeCluster, func() map[string]
 		mu.Unlock()
 		writeObj(w, map[string]any{})
 	})
-	s := fc.server(nil, Config{Install: installRef, AdminPins: adminPins})
+	s := fc.server(nil, Config{Install: installRef})
 	return s, fc, func() map[string]applied {
 		mu.Lock()
 		defer mu.Unlock()
@@ -139,10 +141,14 @@ type applied struct {
 	body   map[string]any
 }
 
-// The console installs its own render of the admin objects, from its pins and
-// the images an admin chose, under the caller's token, behind the review it
-// asks before offering it. What the operator wrote in status changes nothing.
+// The console installs its own render of the admin objects, every pin read
+// under the caller's token (the install's spec, the operator's Deployment),
+// behind the review it asks before offering it. What the operator wrote,
+// status or env, changes nothing.
 func TestAdminObjectsInstallTheConsolesRender(t *testing.T) {
+	// Env the operator writes on the console's Deployment, steered at another
+	// account: the render must not follow it.
+	t.Setenv("DOTVIRT_OPERATOR_USERNAME", "system:serviceaccount:dotvirt-operator:default")
 	s, fc, seen := adminObjectsServer(t)
 	caps := func(token string) bool {
 		c := decodeBody[model.Capabilities](t, do(s, token, http.MethodGet, "/api/capabilities", "")).Cluster
@@ -162,8 +168,7 @@ func TestAdminObjectsInstallTheConsolesRender(t *testing.T) {
 		t.Fatalf("a refused caller reached the cluster: applied %v", got)
 	}
 
-	want := adminPins
-	want.SpecImage, want.DotvirtImage, want.ForgejoImage = adminChosen.SpecImage, adminChosen.DotvirtImage, adminChosen.ForgejoImage
+	want := adminWant
 	rendered := adminobjects.Render(want)
 
 	rec := do(s, adminToken, http.MethodGet, "/api/admin-objects", "")
