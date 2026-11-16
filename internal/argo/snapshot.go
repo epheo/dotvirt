@@ -398,6 +398,9 @@ type AppRef struct {
 	Namespace      string
 	Name           string
 	TargetRevision string
+	// Operating: an operation is requested or still running. A resync merged
+	// into it would rewrite the running operation's fields, so none is sent.
+	Operating bool
 }
 
 // projectAppLabel marks the Applications dotvirt's ApplicationSet generates,
@@ -460,6 +463,14 @@ func (s *Snapshot) Resync(ctx context.Context, username, namespace, name string)
 	if !s.writable(ref.Namespace) {
 		return model.ResyncResult{}, fmt.Errorf("%w: Application %s/%s manages %s, but dotvirt may request syncs only in the ArgoCD namespace %s",
 			model.ErrUnavailable, ref.Namespace, ref.Name, name, s.writeNS)
+	}
+	// Read from the snapshot, so an operation starting after it is not seen.
+	// That window is accepted: no precondition can close it without adding a
+	// field to a patch installs pin in admission, and Argo's own resourceVersion
+	// churn would refuse most honest resyncs.
+	if ref.Operating {
+		return model.ResyncResult{}, fmt.Errorf("%w: a sync of %s is already running; try again when it finishes",
+			model.ErrConflict, ref.Name)
 	}
 	revision := ref.TargetRevision
 	if revision == "" {
@@ -571,10 +582,20 @@ func resyncable(app *unstructured.Unstructured, namespace, name string) bool {
 	return app.GetLabels()[projectAppLabel] != "" && appManagesVM(app.Object, namespace, name)
 }
 
-// appRefOf reads the AppRef (name/namespace/sync revision) from an Application.
+// appRefOf reads the AppRef (name/namespace/sync revision/operation in flight) from an Application.
 func appRefOf(app *unstructured.Unstructured) AppRef {
 	rev, _, _ := unstructured.NestedString(app.Object, "spec", "source", "targetRevision")
-	return AppRef{Namespace: app.GetNamespace(), Name: app.GetName(), TargetRevision: rev}
+	return AppRef{Namespace: app.GetNamespace(), Name: app.GetName(), TargetRevision: rev, Operating: operating(app)}
+}
+
+// operating reports an operation requested on app (spec-level operation set)
+// or still in progress (status.operationState Running or Terminating).
+func operating(app *unstructured.Unstructured) bool {
+	if op, ok := app.Object["operation"]; ok && op != nil {
+		return true
+	}
+	phase, _, _ := unstructured.NestedString(app.Object, "status", "operationState", "phase")
+	return phase == "Running" || phase == "Terminating"
 }
 
 // appManagesVM reports whether app's status.resources[] includes the VirtualMachine

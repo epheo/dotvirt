@@ -531,3 +531,103 @@ func TestResyncPrefersTheArgoNamespace(t *testing.T) {
 		}
 	}
 }
+
+// installs pin the resync operation's exact shape in admission; any change to
+// it must be deliberate.
+func TestResyncPatchShapeIsPinned(t *testing.T) {
+	got, err := resyncPatch(`al"ice`, "main", "prod", "vm-a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := `{"operation":{"initiatedBy":{"username":"al\"ice"},"sync":{"revision":"main","resources":[{"group":"kubevirt.io","kind":"VirtualMachine","namespace":"prod","name":"vm-a"}]},"info":[{"name":"reason","value":"dotvirt re-sync from git"}]}}`
+	if string(got) != want {
+		t.Errorf("resync patch =\n%s\nwant\n%s", got, want)
+	}
+}
+
+// A resync merged into an operation already requested or running would
+// rewrite it, so the caller is told to wait and nothing is patched; a finished
+// operation does not block.
+func TestResyncWaitsForTheRunningOperation(t *testing.T) {
+	withOp := func(a *unstructured.Unstructured) {
+		a.Object["operation"] = map[string]any{"sync": map[string]any{"revision": "main"}}
+	}
+	withPhase := func(phase string) func(*unstructured.Unstructured) {
+		return func(a *unstructured.Unstructured) {
+			_ = unstructured.SetNestedField(a.Object, phase, "status", "operationState", "phase")
+		}
+	}
+	cases := []struct {
+		name  string
+		shape func(*unstructured.Unstructured)
+		busy  bool
+	}{
+		{"operation requested", withOp, true},
+		{"operation running", withPhase("Running"), true},
+		{"operation terminating", withPhase("Terminating"), true},
+		{"last operation succeeded", withPhase("Succeeded"), false},
+		{"last operation failed", withPhase("Failed"), false},
+	}
+	for _, tc := range cases {
+		for _, synced := range []bool{true, false} {
+			a := dotvirtApp("argocd", "team-a", "https://forge/team-a.git",
+				[]any{vmResource("prod", "vm-a", "Synced", "Healthy")})
+			tc.shape(a)
+			dyn := dynamicfake.NewSimpleDynamicClientWithCustomListKinds(runtime.NewScheme(),
+				map[schema.GroupVersionResource]string{applicationsGVR: "ApplicationList"}, a.DeepCopy())
+			patched := false
+			dyn.PrependReactor("patch", "applications", func(k8stesting.Action) (bool, runtime.Object, error) {
+				patched = true
+				return false, nil, nil
+			})
+			s := NewSnapshot(&Client{dyn: dyn}, nil)
+			if synced {
+				_ = s.apps.Add(a)
+				s.synced.Mark()
+			}
+			_, err := s.Resync(context.Background(), "alice", "prod", "vm-a")
+			if tc.busy {
+				if !errors.Is(err, model.ErrConflict) || !strings.Contains(err.Error(), "already running") {
+					t.Errorf("%s, synced=%v: err = %v, want a conflict saying a sync is already running", tc.name, synced, err)
+				}
+				if patched {
+					t.Errorf("%s, synced=%v: patched an Application whose operation is in flight", tc.name, synced)
+				}
+				continue
+			}
+			if err != nil {
+				t.Errorf("%s, synced=%v: err = %v, want the resync to proceed", tc.name, synced, err)
+			}
+			if !patched {
+				t.Errorf("%s, synced=%v: no patch sent", tc.name, synced)
+			}
+		}
+	}
+}
+
+// The snapshot decides: an operation it has not seen yet does not block (the
+// accepted window), and one it still shows blocks until the watch catches up.
+func TestResyncReadsInFlightFromTheSnapshot(t *testing.T) {
+	live := dotvirtApp("argocd", "team-a", "https://forge/team-a.git",
+		[]any{vmResource("prod", "vm-a", "Synced", "Healthy")})
+	live.Object["operation"] = map[string]any{"sync": map[string]any{"revision": "main"}}
+	seen := dotvirtApp("argocd", "team-a", "https://forge/team-a.git",
+		[]any{vmResource("prod", "vm-a", "Synced", "Healthy")})
+	dyn := dynamicfake.NewSimpleDynamicClient(runtime.NewScheme(), live)
+	gets := 0
+	dyn.PrependReactor("*", "applications", func(a k8stesting.Action) (bool, runtime.Object, error) {
+		if a.GetVerb() == "get" || a.GetVerb() == "list" {
+			gets++
+		}
+		return false, nil, nil
+	})
+	s := NewSnapshot(&Client{dyn: dyn}, nil)
+	_ = s.apps.Add(seen)
+	s.synced.Mark()
+	if _, err := s.Resync(context.Background(), "alice", "prod", "vm-a"); err != nil {
+		t.Errorf("snapshot shows no operation: err = %v, want the resync to proceed", err)
+	}
+	if gets != 0 {
+		t.Errorf("a synced resync read the cluster %d times, want none", gets)
+	}
+}
