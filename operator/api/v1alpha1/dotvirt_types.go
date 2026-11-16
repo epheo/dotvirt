@@ -204,10 +204,49 @@ type GatewayRef struct {
 
 // MetricsSpec points the Performance tab at a Prometheus/Thanos query API; empty
 // disables it.
+// +kubebuilder:validation:XValidation:rule="!has(self.tenancyURL) || (has(self.url) && size(self.url) > 0)",message="tenancyURL needs url"
+// +kubebuilder:validation:XValidation:rule="!has(self.tenancyURL) || !has(self.url) || (self.tenancyURL != self.url && self.tenancyURL != self.url + '/' && self.tenancyURL + '/' != self.url)",message="tenancyURL must differ from url: one endpoint cannot be both the cluster-wide and the per-namespace one"
+// +kubebuilder:validation:XValidation:rule="!has(self.ca) || (has(self.url) && size(self.url) > 0)",message="ca needs url"
+// +kubebuilder:validation:XValidation:rule="!has(self.ca) || (has(self.url) && self.url.lowerAscii().startsWith('https://')) || (has(self.tenancyURL) && self.tenancyURL.lowerAscii().startsWith('https://'))",message="ca needs an https url or tenancyURL: plain http never uses it"
 type MetricsSpec struct {
 	// URL is a Prometheus-compatible query API base URL (for OpenShift, the
-	// cluster Thanos querier service).
+	// cluster Thanos querier service). dotvirt sends it only the queries of a
+	// caller allowed get on prometheuses/api (monitoring.coreos.com) named k8s
+	// in openshift-monitoring, with that caller's own token. It must check the
+	// token itself: anyone with network reach to an unauthenticated endpoint
+	// reads every namespace's series.
 	URL string `json:"url,omitempty"`
+	// TenancyURL is the per-namespace query API for every other caller: dotvirt
+	// sends one query per namespace with the caller's token, a namespace=<ns>
+	// parameter and a {namespace="<ns>"} matcher. The endpoint must allow only
+	// a caller who may get pods.metrics.k8s.io in that namespace, and force the
+	// query to it (as kube-rbac-proxy and prom-label-proxy do): dotvirt keeps
+	// tenants apart only through that check. Unset: derived for OpenShift's
+	// Thanos querier (port 9092 beside 9091); other endpoints get none, and
+	// those callers no metrics.
+	// +kubebuilder:validation:MaxLength=2048
+	// +kubebuilder:validation:Pattern=`^https?://([A-Za-z0-9]([-A-Za-z0-9.]*[A-Za-z0-9])?|\[[0-9A-Fa-f:.]+\])(:[0-9]{1,5})?(/([^?#@%\s\x00-\x1f\x7f]|%[0-9A-Fa-f]{2})*)?$`
+	// +optional
+	TenancyURL string `json:"tenancyURL,omitempty"`
+	// CA is the key of a ConfigMap in dotvirt's namespace holding the PEM bundle
+	// that signs both endpoints' serving certs. Unset: an https in-cluster
+	// (.svc) url trusts OpenShift's service CA; any other uses the system pool,
+	// or skips verification when forge.insecureTLS is set. A missing ConfigMap
+	// or key leaves the system pool, so a private CA fails verification. The
+	// console reads it when it starts: restart it after a rotation.
+	// +optional
+	CA *ConfigMapKeyRef `json:"ca,omitempty"`
+}
+
+// ConfigMapKeyRef is one key of a ConfigMap in dotvirt's namespace.
+type ConfigMapKeyRef struct {
+	// +kubebuilder:validation:MaxLength=253
+	// +kubebuilder:validation:Pattern=`^[a-z0-9]([-a-z0-9.]*[a-z0-9])?$`
+	Name string `json:"name"`
+	// Key is a ConfigMap key: not ".", and not starting with "..".
+	// +kubebuilder:validation:MaxLength=253
+	// +kubebuilder:validation:Pattern=`^\.?[-_a-zA-Z0-9][-._a-zA-Z0-9]*$`
+	Key string `json:"key"`
 }
 
 // AuthSpec adds a sign-in flow beside the always-present token login: OpenShift

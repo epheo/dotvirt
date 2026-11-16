@@ -313,6 +313,61 @@ func TestEnvtest(t *testing.T) {
 		}
 	})
 
+	t.Run("admission takes metrics endpoints the console can query", func(t *testing.T) {
+		ca := &dotvirtv1alpha1.ConfigMapKeyRef{Name: "metrics-ca", Key: "ca.crt"}
+		const wide, tenancy = "https://prom-wide.monitoring.svc:8443", "https://prom-tenancy.monitoring.svc:8443"
+		for name, m := range map[string]dotvirtv1alpha1.MetricsSpec{
+			"tenancyURL without url":         {TenancyURL: tenancy},
+			"ca without url":                 {CA: ca},
+			"tenancyURL not http":            {URL: wide, TenancyURL: "prom-tenancy.monitoring.svc:8443"},
+			"tenancyURL with a query":        {URL: wide, TenancyURL: tenancy + "?x=1"},
+			"tenancyURL with an empty query": {URL: wide, TenancyURL: tenancy + "/?"},
+			"tenancyURL with a fragment":     {URL: wide, TenancyURL: tenancy + "#f"},
+			"tenancyURL with credentials":    {URL: wide, TenancyURL: "https://u:p@prom-tenancy.monitoring.svc:8443"},
+			"tenancyURL equal to url":        {URL: wide, TenancyURL: wide},
+			"tenancyURL equal to url plus /": {URL: wide, TenancyURL: wide + "/"},
+			"url equal to tenancyURL plus /": {URL: wide + "/", TenancyURL: wide},
+			"ca with only http endpoints":    {URL: "http://prom.monitoring.svc:9090", TenancyURL: "http://proxy.monitoring.svc:8080", CA: ca},
+			"ca with a slash in its key":     {URL: wide, CA: &dotvirtv1alpha1.ConfigMapKeyRef{Name: "metrics-ca", Key: "a/b"}},
+			"ca key .":                       {URL: wide, CA: &dotvirtv1alpha1.ConfigMapKeyRef{Name: "metrics-ca", Key: "."}},
+			"ca key ..":                      {URL: wide, CA: &dotvirtv1alpha1.ConfigMapKeyRef{Name: "metrics-ca", Key: ".."}},
+			"ca key starting with ..":        {URL: wide, CA: &dotvirtv1alpha1.ConfigMapKeyRef{Name: "metrics-ca", Key: "..ca"}},
+			"ca with a bad ConfigMap name":   {URL: wide, CA: &dotvirtv1alpha1.ConfigMapKeyRef{Name: "Metrics_CA", Key: "ca.crt"}},
+		} {
+			dv := testCR()
+			dv.Spec.Metrics = m
+			if err := admin.Create(ctx, dv, client.DryRunAll); !apierrors.IsInvalid(err) {
+				t.Errorf("%s: got %v, want Invalid", name, err)
+			}
+		}
+		// Unstructured: the typed client drops an empty url before it is sent.
+		emptyURL := &unstructured.Unstructured{Object: map[string]any{
+			"apiVersion": "dotvirt.io/v1alpha1", "kind": "Dotvirt",
+			"metadata": map[string]any{"name": "empty-metrics-url", "namespace": "dotvirt"},
+			"spec":     map[string]any{"metrics": map[string]any{"url": "", "tenancyURL": tenancy}},
+		}}
+		if err := admin.Create(ctx, emptyURL, client.DryRunAll); !apierrors.IsInvalid(err) {
+			t.Errorf("tenancyURL with an empty url: got %v, want Invalid", err)
+		}
+		for name, m := range map[string]dotvirtv1alpha1.MetricsSpec{
+			"OpenShift's querier alone":       {URL: "https://thanos-querier.openshift-monitoring.svc.cluster.local:9091"},
+			"both endpoints and a CA":         {URL: wide, TenancyURL: tenancy + "/", CA: ca},
+			"plain http in-cluster":           {URL: "http://prometheus-operated.monitoring.svc:9090", TenancyURL: "http://prom-label-proxy.monitoring.svc:8080"},
+			"ca for an https tenancyURL only": {URL: "http://prom.monitoring.svc:9090", TenancyURL: tenancy, CA: ca},
+			"bracketed IPv6 tenancyURL":       {URL: "https://[fd00::10]:9091", TenancyURL: "https://[fd00::10]:9092"},
+			"ca key starting with one dot":    {URL: wide, CA: &dotvirtv1alpha1.ConfigMapKeyRef{Name: "metrics-ca", Key: ".ca.crt"}},
+			// url shipped without validation, so any stored value still admits.
+			"url with an uppercase scheme": {URL: "HTTPS://thanos-querier.openshift-monitoring.svc:9091"},
+			"url with a trailing-dot FQDN": {URL: "https://prom.monitoring.svc.cluster.local.:9091"},
+		} {
+			dv := testCR()
+			dv.Spec.Metrics = m
+			if err := admin.Create(ctx, dv, client.DryRunAll); client.IgnoreAlreadyExists(err) != nil {
+				t.Errorf("%s: %v", name, err)
+			}
+		}
+	})
+
 	t.Run("admission takes one sign-in flow", func(t *testing.T) {
 		oidc := &dotvirtv1alpha1.OIDCSpec{IssuerURL: "https://idm.example/oauth2/openid/dotvirt", ClientID: "dotvirt"}
 		dv := testCR()
