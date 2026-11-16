@@ -650,9 +650,10 @@ func TestEnvtest(t *testing.T) {
 		})
 		evil := install.ArgocdApplyClusterRoleBinding(dv, "argocd", "argocd-application-controller", true, true)
 		evil.Name, evil.RoleRef.Name, evil.Subjects = "dotvirt-evil", "dotvirt-evil", nil
+		// Until RBAC sees the grant, only it answers; then the guard does.
 		eventually(t, "the probe grant", func() bool {
 			err := dryApply(evil)
-			return err != nil && !strings.Contains(err.Error(), "cannot patch resource") && !strings.Contains(err.Error(), "cannot create resource")
+			return err == nil || (!strings.Contains(err.Error(), "cannot patch resource") && !strings.Contains(err.Error(), "cannot create resource"))
 		})
 		if err := dryApply(evil); !refused(err) {
 			t.Errorf("operator's binding under an unrendered name: err=%v, want the guard's Forbidden", err)
