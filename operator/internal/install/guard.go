@@ -53,6 +53,9 @@ func OperatorGuardPolicy(account string) *admissionregistrationv1.ValidatingAdmi
 				Expression: `request.userInfo.username.startsWith("system:serviceaccount:") && ` +
 					`request.userInfo.username.endsWith(":` + account + `")`,
 			}},
+			// Kubernetes already requires the annotation on a token-type Secret, so
+			// the annotation rule refuses both today; the type rule holds if that
+			// requirement ever goes.
 			Validations: []admissionregistrationv1.Validation{
 				{
 					Expression: `!has(object.type) || object.type != "` + string(corev1.SecretTypeServiceAccountToken) + `"`,
