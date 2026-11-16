@@ -110,6 +110,9 @@ func (s *Server) clusterCaps(ctx context.Context, id auth.Identity, c *cluster.C
 	if s.gateways != nil && s.gateways.Started() {
 		fields = append(fields, capField{&out.Gateways, gatewaysRead})
 	}
+	if s.cfg.Install.Name != "" {
+		fields = append(fields, capField{&out.AdminObjects, s.adminObjectsAction()})
+	}
 	if a := s.cfg.ForgeAdmin; a.Name != "" {
 		q := refQ(verbGet, ssarSecrets, a.Namespace)
 		q.Name = a.Name

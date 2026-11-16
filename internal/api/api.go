@@ -204,6 +204,7 @@ type Config struct {
 	Publish           publish.Settings     // the platform's publishing settings; zero: publishing off
 	Branding          branding.Settings    // a provider's dress for the console; zero: dotvirt's own
 	ForgeAdmin        config.ForgeAdminRef // a managed forge's admin credential, read as the caller; zero: none
+	Install           config.InstallRef    // the Dotvirt resource whose admin objects a cluster admin installs; zero: none
 }
 
 // visibleTTL bounds a token's cached verdicts, and the view derived from them,

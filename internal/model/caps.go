@@ -67,6 +67,10 @@ type ClusterCaps struct {
 	DRSDisable bool `json:"drsDisable"`
 	// OAuthClient registers the SSO OAuthClient (finish SSO).
 	OAuthClient bool `json:"oauthClient"`
+	// AdminObjects installs the objects the install asks a cluster admin for
+	// (GET and POST /api/admin-objects): it reads the install, and may create
+	// and patch every object the install may ask for. False without an install.
+	AdminObjects bool `json:"adminObjects"`
 	// ForgeAdmin reads a managed forge's admin password: the caller may get
 	// its Secret. False without a managed forge.
 	ForgeAdmin bool `json:"forgeAdmin"`
@@ -193,4 +197,24 @@ type ProjectCaps struct {
 type ForgeAdminCredential struct {
 	Username string `json:"username"`
 	Password string `json:"password"`
+}
+
+// AdminObjects is GET and POST /api/admin-objects: the objects the install
+// needs but its operator may not create, which a cluster admin installs.
+type AdminObjects struct {
+	Objects []AdminObject `json:"objects"`
+}
+
+// AdminObject is one of them, as read under the caller's token.
+type AdminObject struct {
+	Purpose   string `json:"purpose"`
+	Kind      string `json:"kind"`
+	Name      string `json:"name"`
+	Namespace string `json:"namespace,omitempty"`
+	// State is NotInstalled, Outdated or Installed; Detail says how a copy
+	// differs.
+	State  string `json:"state"`
+	Detail string `json:"detail,omitempty"`
+	// Object is the object as rendered, which an install applies.
+	Object map[string]any `json:"object"`
 }

@@ -131,6 +131,12 @@ export interface ClusterCaps {
    */
   oauthClient: boolean;
   /**
+   * AdminObjects installs the objects the install asks a cluster admin for
+   * (GET and POST /api/admin-objects): it reads the install, and may create
+   * and patch every object the install may ask for. False without an install.
+   */
+  adminObjects: boolean;
+  /**
    * ForgeAdmin reads a managed forge's admin password: the caller may get
    * its Secret. False without a managed forge.
    */
@@ -315,6 +321,32 @@ export interface ProjectCaps {
 export interface ForgeAdminCredential {
   username: string;
   password: string;
+}
+/**
+ * AdminObjects is GET and POST /api/admin-objects: the objects the install
+ * needs but its operator may not create, which a cluster admin installs.
+ */
+export interface AdminObjects {
+  objects: AdminObject[];
+}
+/**
+ * AdminObject is one of them, as read under the caller's token.
+ */
+export interface AdminObject {
+  purpose: string;
+  kind: string;
+  name: string;
+  namespace?: string;
+  /**
+   * State is NotInstalled, Outdated or Installed; Detail says how a copy
+   * differs.
+   */
+  state: string;
+  detail?: string;
+  /**
+   * Object is the object as rendered, which an install applies.
+   */
+  object: { [key: string]: any};
 }
 
 //////////
