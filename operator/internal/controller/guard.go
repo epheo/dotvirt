@@ -2,28 +2,30 @@ package controller
 
 import (
 	"context"
+	"encoding/json"
+	"slices"
 
-	admissionregistrationv1 "k8s.io/api/admissionregistration/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	dotvirtv1alpha1 "github.com/epheo/dotvirt/operator/api/v1alpha1"
-	"github.com/epheo/dotvirt/pkg/guard"
+	"github.com/epheo/dotvirt/pkg/adminobjects"
 )
 
-// guardNextAction is what a cluster admin does about a guard not in place.
-const guardNextAction = "a cluster admin installs it from the console (Install operator guard), or runs the command in status.operatorGuard"
+// adminNextAction is what a cluster admin does about an admin object not in
+// place.
+const adminNextAction = "a cluster admin installs it from the console (Install), or runs the command in status.adminApply"
 
 // reconcileOperatorGuard reports whether the admission policies bounding the
-// operator's own account are installed as rendered for this install: its
-// Secrets only in the install and ArgoCD namespaces and never a token, its
-// Deployments only in the install namespace, as dotvirt's own accounts, off
-// the host. The operator reads them and never writes them: an operator that
-// could install its guard could loosen it. Best-effort: never a halt, never
-// Available.
+// operator's own account are installed as rendered for this install, and
+// lists them in status for a cluster admin to install. The operator reads
+// them and never writes them: an operator that could install its guard could
+// loosen it. Best-effort: never a halt, never Available.
 func (r *DotvirtReconciler) reconcileOperatorGuard(ctx context.Context, dv *dotvirtv1alpha1.Dotvirt, rc *reconcileCtx) (*ctrl.Result, error) {
 	status, reason, msg := r.operatorGuard(ctx, dv, rc.argoNS)
 	r.setCondition(dv, dotvirtv1alpha1.ConditionOperatorGuard, status, reason, msg)
@@ -31,44 +33,86 @@ func (r *DotvirtReconciler) reconcileOperatorGuard(ctx context.Context, dv *dotv
 }
 
 func (r *DotvirtReconciler) operatorGuard(ctx context.Context, dv *dotvirtv1alpha1.Dotvirt, argoNS string) (metav1.ConditionStatus, string, string) {
-	p := guard.Params{Operator: r.OperatorUsername, Namespace: dv.Namespace, ArgoNamespace: argoNS}
+	isGuard := func(o *unstructured.Unstructured) bool {
+		return o.GroupVersionKind().Group == "admissionregistration.k8s.io" && slices.Contains(adminobjects.GuardNames, o.GetName())
+	}
+	p := adminobjects.GuardParams{Operator: r.OperatorUsername, Namespace: dv.Namespace, ArgoNamespace: argoNS}
 	if !p.Valid() {
-		dv.Status.OperatorGuard = ""
+		publishAdminObjects(dv, isGuard, nil, nil)
 		return metav1.ConditionUnknown, "AccountUnknown",
 			"the operator does not know the account it runs as (no mounted ServiceAccount token, as when it runs outside its pod), so no guard can pin it"
 	}
-	want := guard.Render(p)
-	cmd, err := want.ApplyCommand()
-	if err != nil {
-		return metav1.ConditionUnknown, "RenderFailed", err.Error()
+	want := adminobjects.Guard(p)
+	states, details, err := r.adminObjectStates(ctx, want)
+	switch {
+	case meta.IsNoMatchError(err):
+		publishAdminObjects(dv, isGuard, nil, nil)
+		return metav1.ConditionUnknown, "Unsupported",
+			"the cluster does not serve admissionregistration.k8s.io/v1 ValidatingAdmissionPolicy (Kubernetes 1.30+), so no guard can bound the operator"
+	case err != nil:
+		return metav1.ConditionUnknown, "Unreadable", "could not read the operator guard: " + err.Error()
 	}
-	dv.Status.OperatorGuard = cmd
-	policies := map[string]*admissionregistrationv1.ValidatingAdmissionPolicy{}
-	bindings := map[string]*admissionregistrationv1.ValidatingAdmissionPolicyBinding{}
-	for _, name := range guard.Names {
-		pol, bind := &admissionregistrationv1.ValidatingAdmissionPolicy{}, &admissionregistrationv1.ValidatingAdmissionPolicyBinding{}
-		for _, o := range []client.Object{pol, bind} {
-			err := r.reader().Get(ctx, client.ObjectKey{Name: name}, o)
-			switch {
-			case meta.IsNoMatchError(err):
-				return metav1.ConditionUnknown, "Unsupported",
-					"the cluster does not serve admissionregistration.k8s.io/v1 ValidatingAdmissionPolicy (Kubernetes 1.30+), so no guard can bound the operator"
-			case apierrors.IsNotFound(err):
-				continue
-			case err != nil:
-				return metav1.ConditionUnknown, "Unreadable", "could not read the operator guard: " + err.Error()
-			}
-			if o == client.Object(pol) {
-				policies[name] = pol
-			} else {
-				bindings[name] = bind
-			}
+	publishAdminObjects(dv, isGuard, want, states)
+	for _, s := range []adminobjects.State{adminobjects.NotInstalled, adminobjects.Outdated} {
+		if i := slices.Index(states, s); i >= 0 {
+			return metav1.ConditionFalse, string(s), details[i] + "; " + adminNextAction
 		}
 	}
-	switch state, detail := guard.Compare(want, policies, bindings); state {
-	case guard.Installed:
-		return metav1.ConditionTrue, string(state), "the admission policies bounding " + p.Operator + " are installed as rendered"
-	default:
-		return metav1.ConditionFalse, string(state), detail + "; " + guardNextAction
+	return metav1.ConditionTrue, string(adminobjects.Installed), "the admission policies bounding " + p.Operator + " are installed as rendered"
+}
+
+// adminObjectStates reads each rendered admin object back, by name, and
+// weighs it against its render.
+func (r *DotvirtReconciler) adminObjectStates(ctx context.Context, want []adminobjects.Object) ([]adminobjects.State, []string, error) {
+	states, details := make([]adminobjects.State, len(want)), make([]string, len(want))
+	for i, w := range want {
+		live := &unstructured.Unstructured{}
+		live.SetGroupVersionKind(w.Object.GroupVersionKind())
+		err := r.reader().Get(ctx, client.ObjectKeyFromObject(w.Object), live)
+		if apierrors.IsNotFound(err) {
+			live, err = nil, nil
+		}
+		if err != nil {
+			return nil, nil, err
+		}
+		states[i], details[i] = adminobjects.Compare(w.Object, live)
+	}
+	return states, details, nil
+}
+
+// publishAdminObjects replaces the status entries owned matches with want,
+// each at its state, and the apply command with one for every entry. A phase
+// that renders admin objects publishes its own, so phases never drop each
+// other's.
+func publishAdminObjects(dv *dotvirtv1alpha1.Dotvirt, owned func(*unstructured.Unstructured) bool, want []adminobjects.Object, states []adminobjects.State) {
+	var kept []dotvirtv1alpha1.AdminObject
+	for _, e := range dv.Status.AdminObjects {
+		var o unstructured.Unstructured
+		if json.Unmarshal(e.Object.Raw, &o.Object) == nil && !owned(&o) {
+			kept = append(kept, e)
+		}
+	}
+	for i, w := range want {
+		raw, err := json.Marshal(w.Object.Object)
+		if err != nil {
+			continue
+		}
+		kept = append(kept, dotvirtv1alpha1.AdminObject{Purpose: w.Purpose, State: string(states[i]), Object: runtime.RawExtension{Raw: raw}})
+	}
+	dv.Status.AdminObjects = kept
+	dv.Status.AdminApply = ""
+	var all []adminobjects.Object
+	for _, e := range kept {
+		o := &unstructured.Unstructured{}
+		if err := json.Unmarshal(e.Object.Raw, &o.Object); err != nil {
+			continue
+		}
+		all = append(all, adminobjects.Object{Purpose: e.Purpose, Object: o})
+	}
+	if len(all) > 0 {
+		cmd, err := adminobjects.ApplyCommand(all)
+		if err == nil {
+			dv.Status.AdminApply = cmd
+		}
 	}
 }

@@ -41,7 +41,7 @@ import (
 	"github.com/epheo/dotvirt/operator/internal/deps"
 	"github.com/epheo/dotvirt/operator/internal/install"
 	"github.com/epheo/dotvirt/operator/internal/platform"
-	"github.com/epheo/dotvirt/pkg/guard"
+	"github.com/epheo/dotvirt/pkg/adminobjects"
 	"github.com/epheo/dotvirt/pkg/tenancy"
 )
 
@@ -156,18 +156,18 @@ func TestEnvtest(t *testing.T) {
 			// so the escalation check would admit its binding without bind.
 			{authzv1.ResourceAttributes{Verb: "bind", Group: "rbac.authorization.k8s.io", Resource: "clusterroles", Name: install.SyncRequestName}, true},
 			// The operator guard: read by name to report it, never written.
-			{authzv1.ResourceAttributes{Verb: "get", Group: "admissionregistration.k8s.io", Resource: "validatingadmissionpolicies", Name: guard.SecretsName}, true},
-			{authzv1.ResourceAttributes{Verb: "get", Group: "admissionregistration.k8s.io", Resource: "validatingadmissionpolicybindings", Name: guard.DeploymentsName}, true},
+			{authzv1.ResourceAttributes{Verb: "get", Group: "admissionregistration.k8s.io", Resource: "validatingadmissionpolicies", Name: adminobjects.GuardSecretsName}, true},
+			{authzv1.ResourceAttributes{Verb: "get", Group: "admissionregistration.k8s.io", Resource: "validatingadmissionpolicybindings", Name: adminobjects.GuardDeploymentsName}, true},
 			{authzv1.ResourceAttributes{Verb: "get", Group: "admissionregistration.k8s.io", Resource: "validatingadmissionpolicies", Name: "other"}, false},
 			{authzv1.ResourceAttributes{Verb: "list", Group: "admissionregistration.k8s.io", Resource: "validatingadmissionpolicies"}, false},
 			{authzv1.ResourceAttributes{Verb: "create", Group: "admissionregistration.k8s.io", Resource: "validatingadmissionpolicies"}, false},
 			{authzv1.ResourceAttributes{Verb: "create", Group: "admissionregistration.k8s.io", Resource: "validatingadmissionpolicybindings"}, false},
-			{authzv1.ResourceAttributes{Verb: "patch", Group: "admissionregistration.k8s.io", Resource: "validatingadmissionpolicies", Name: guard.SecretsName}, false},
-			{authzv1.ResourceAttributes{Verb: "patch", Group: "admissionregistration.k8s.io", Resource: "validatingadmissionpolicybindings", Name: guard.SecretsName}, false},
-			{authzv1.ResourceAttributes{Verb: "update", Group: "admissionregistration.k8s.io", Resource: "validatingadmissionpolicies", Name: guard.SecretsName}, false},
-			{authzv1.ResourceAttributes{Verb: "update", Group: "admissionregistration.k8s.io", Resource: "validatingadmissionpolicybindings", Name: guard.SecretsName}, false},
-			{authzv1.ResourceAttributes{Verb: "delete", Group: "admissionregistration.k8s.io", Resource: "validatingadmissionpolicies", Name: guard.SecretsName}, false},
-			{authzv1.ResourceAttributes{Verb: "delete", Group: "admissionregistration.k8s.io", Resource: "validatingadmissionpolicybindings", Name: guard.SecretsName}, false},
+			{authzv1.ResourceAttributes{Verb: "patch", Group: "admissionregistration.k8s.io", Resource: "validatingadmissionpolicies", Name: adminobjects.GuardSecretsName}, false},
+			{authzv1.ResourceAttributes{Verb: "patch", Group: "admissionregistration.k8s.io", Resource: "validatingadmissionpolicybindings", Name: adminobjects.GuardSecretsName}, false},
+			{authzv1.ResourceAttributes{Verb: "update", Group: "admissionregistration.k8s.io", Resource: "validatingadmissionpolicies", Name: adminobjects.GuardSecretsName}, false},
+			{authzv1.ResourceAttributes{Verb: "update", Group: "admissionregistration.k8s.io", Resource: "validatingadmissionpolicybindings", Name: adminobjects.GuardSecretsName}, false},
+			{authzv1.ResourceAttributes{Verb: "delete", Group: "admissionregistration.k8s.io", Resource: "validatingadmissionpolicies", Name: adminobjects.GuardSecretsName}, false},
+			{authzv1.ResourceAttributes{Verb: "delete", Group: "admissionregistration.k8s.io", Resource: "validatingadmissionpolicybindings", Name: adminobjects.GuardSecretsName}, false},
 		} {
 			res, err := kube.AuthorizationV1().SelfSubjectAccessReviews().Create(ctx,
 				&authzv1.SelfSubjectAccessReview{Spec: authzv1.SelfSubjectAccessReviewSpec{ResourceAttributes: &c.attrs}}, metav1.CreateOptions{})
@@ -292,20 +292,29 @@ func TestEnvtest(t *testing.T) {
 				return false
 			}
 			c := apimeta.FindStatusCondition(got.Status.Conditions, dotvirtv1alpha1.ConditionOperatorGuard)
-			return c != nil && c.Reason == want && got.Status.OperatorGuard != ""
+			return c != nil && c.Reason == want && len(got.Status.AdminObjects) == 4 && got.Status.AdminApply != ""
 		}
-		eventually(t, "OperatorGuard NotInstalled", func() bool { return guardCond(string(guard.NotInstalled)) })
+		eventually(t, "OperatorGuard NotInstalled", func() bool { return guardCond(string(adminobjects.NotInstalled)) })
 
-		// The console's install, as a cluster admin: the render, server-side applied.
-		set := guard.Render(guard.Params{Operator: operatorUser, Namespace: "dotvirt", ArgoNamespace: "argocd"})
-		objs, err := set.Unstructured()
-		if err != nil {
+		// The console's install, as a cluster admin: what status lists, server-side
+		// applied once the allowlist admits it.
+		got := &dotvirtv1alpha1.Dotvirt{}
+		if err := admin.Get(ctx, key, got); err != nil {
 			t.Fatal(err)
 		}
-		for _, o := range objs {
+		var objs []*unstructured.Unstructured
+		for _, e := range got.Status.AdminObjects {
+			o := &unstructured.Unstructured{}
+			if err := o.UnmarshalJSON(e.Object.Raw); err != nil {
+				t.Fatal(err)
+			}
+			if _, ok := adminobjects.Allow(adminobjects.Allowed("dotvirt"), o); !ok {
+				t.Fatalf("status lists %s %s, which the console would refuse", o.GetKind(), o.GetName())
+			}
 			if err := admin.Patch(ctx, o, client.Apply, client.FieldOwner("dotvirt"), client.ForceOwnership); err != nil {
 				t.Fatalf("install %s: %v", o.GetName(), err)
 			}
+			objs = append(objs, o)
 		}
 		// Installing the guard changes nothing the operator watches, so a spec
 		// edit runs the next pass, as the drift timer would.
@@ -321,7 +330,7 @@ func TestEnvtest(t *testing.T) {
 			}
 		}
 		patchCR()
-		eventually(t, "OperatorGuard Installed", func() bool { return guardCond(string(guard.Installed)) })
+		eventually(t, "OperatorGuard Installed", func() bool { return guardCond(string(adminobjects.Installed)) })
 
 		op := kubernetes.NewForConfigOrDie(opCfg)
 		refused := func(err error) bool {
@@ -387,7 +396,7 @@ func TestEnvtest(t *testing.T) {
 			return opClient.Patch(ctx, u, client.Apply, client.FieldOwner(operatorFieldManager), client.ForceOwnership, client.DryRunAll)
 		}
 		rendered := []*appsv1.Deployment{
-			install.WithOperatorGuard(install.Deployment(dv, "argocd", nil), operatorUser),
+			install.Deployment(dv, "argocd", nil),
 			install.ForgejoDeployment(dv, false, "", ""),
 		}
 		for _, d := range rendered {
@@ -416,12 +425,12 @@ func TestEnvtest(t *testing.T) {
 		}
 
 		// The operator can neither re-apply nor remove its guard.
-		apply := admissionregistrationv1ac.ValidatingAdmissionPolicy(guard.SecretsName).
+		apply := admissionregistrationv1ac.ValidatingAdmissionPolicy(adminobjects.GuardSecretsName).
 			WithSpec(admissionregistrationv1ac.ValidatingAdmissionPolicySpec().WithValidations())
 		if _, err := op.AdmissionregistrationV1().ValidatingAdmissionPolicies().Apply(ctx, apply, metav1.ApplyOptions{FieldManager: operatorFieldManager, Force: true}); !apierrors.IsForbidden(err) {
 			t.Errorf("operator re-applying the guard: err=%v, want Forbidden", err)
 		}
-		if err := op.AdmissionregistrationV1().ValidatingAdmissionPolicyBindings().Delete(ctx, guard.DeploymentsName, metav1.DeleteOptions{}); !apierrors.IsForbidden(err) {
+		if err := op.AdmissionregistrationV1().ValidatingAdmissionPolicyBindings().Delete(ctx, adminobjects.GuardDeploymentsName, metav1.DeleteOptions{}); !apierrors.IsForbidden(err) {
 			t.Errorf("operator deleting the guard's binding: err=%v, want Forbidden", err)
 		}
 		// With the guard in place, a pass still reconciles the install.

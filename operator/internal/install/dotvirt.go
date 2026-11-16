@@ -168,7 +168,13 @@ func svcURL(name, namespace string, port int32) string {
 // platform-repo + metrics config and the secret-backed credentials. argoNS
 // holds the per-project sync accounts the app's project grants name.
 func dotvirtEnv(dv *dotvirtv1alpha1.Dotvirt, argoNS string, tenantAllowed []tenancy.GroupKind) []corev1.EnvVar {
-	env := []corev1.EnvVar{{Name: "DOTVIRT_ARGO_NAMESPACE", Value: argoNS}}
+	env := []corev1.EnvVar{
+		{Name: "DOTVIRT_ARGO_NAMESPACE", Value: argoNS},
+		// The console reads status.adminObjects from the install, under a
+		// cluster admin's token, to offer installing them.
+		{Name: "DOTVIRT_INSTALL_NAMESPACE", Value: dv.Namespace},
+		{Name: "DOTVIRT_INSTALL_NAME", Value: dv.Name},
+	}
 	env = append(env, brandingEnv(dv.Spec.Branding)...)
 	// What tenant repos may apply beyond the listed kinds, as the AppProjects
 	// say it (TenantAllowed).
@@ -404,21 +410,6 @@ func dotvirtVolumes(dv *dotvirtv1alpha1.Dotvirt) ([]corev1.VolumeMount, []corev1
 		})
 	}
 	return volumeMounts, volumes
-}
-
-// WithOperatorGuard tells the console the pins of the operator guard it
-// offers cluster admins to install (pkg/guard): the operator's username and
-// the install namespace, beside DOTVIRT_ARGO_NAMESPACE. Unknown username:
-// nothing, and the console offers no guard.
-func WithOperatorGuard(dep *appsv1.Deployment, operator string) *appsv1.Deployment {
-	if operator == "" {
-		return dep
-	}
-	c := &dep.Spec.Template.Spec.Containers[0]
-	c.Env = append(c.Env,
-		corev1.EnvVar{Name: "DOTVIRT_OPERATOR_USERNAME", Value: operator},
-		corev1.EnvVar{Name: "DOTVIRT_INSTALL_NAMESPACE", Value: dep.Namespace})
-	return dep
 }
 
 // Deployment runs the dotvirt binary (which also serves the SPA), with the forge

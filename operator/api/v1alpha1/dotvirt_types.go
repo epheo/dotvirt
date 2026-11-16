@@ -1,6 +1,9 @@
 package v1alpha1
 
-import metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+import (
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
+)
 
 // Condition types the controller sets on a Dotvirt's status. Available is the
 // roll-up other tooling watches; the rest explain a not-yet-ready install.
@@ -37,9 +40,9 @@ const (
 	// namespace (CloneAnywhere). It never gates Available.
 	ConditionSyncImpersonationReady = "SyncImpersonationReady"
 	// ConditionOperatorGuard is True while the admission policies bounding the
-	// operator's own account (status.operatorGuard) are installed as rendered;
-	// False while they are missing (NotInstalled), rendered for other
-	// namespaces or another version (Outdated), or edited (Modified): a cluster
+	// operator's own account (status.adminObjects) are installed as rendered;
+	// False while they are missing (NotInstalled), or rendered for other
+	// namespaces or another version or changed since (Outdated): a cluster
 	// admin installs them from the console, the operator never does; Unknown
 	// when it cannot tell. It never gates Available.
 	ConditionOperatorGuard = "OperatorGuard"
@@ -394,6 +397,21 @@ type BrandingLink struct {
 	Icon string `json:"icon,omitempty"`
 }
 
+// AdminObject is one object the install needs but the operator may not
+// create.
+type AdminObject struct {
+	// Purpose says what the object is for.
+	Purpose string `json:"purpose"`
+	// State is NotInstalled, Outdated (rendered for other parameters or by
+	// another version, or changed after it was installed) or Installed.
+	State string `json:"state"`
+	// Object is the object as rendered.
+	// +kubebuilder:pruning:PreserveUnknownFields
+	// +kubebuilder:validation:Schemaless
+	// +kubebuilder:validation:Type=object
+	Object runtime.RawExtension `json:"object"`
+}
+
 // DotvirtStatus is the observed install state.
 type DotvirtStatus struct {
 	// ObservedGeneration is the .metadata.generation last reconciled.
@@ -415,10 +433,15 @@ type DotvirtStatus struct {
 	// OAuthClient SSO needs, with the redirect URI filled from the assigned console host.
 	// Set only while auth.openShiftSSO is on; run it once to finish SSO.
 	SSOOAuthClient string `json:"ssoOAuthClient,omitempty"`
-	// OperatorGuard is a ready-to-run command that installs the admission
-	// policies bounding the operator's own account, for a cluster admin
-	// without the console. The operator holds no right to install them.
-	OperatorGuard string `json:"operatorGuard,omitempty"`
+	// AdminObjects are objects the install needs but the operator may not
+	// create, each with its purpose and state: a cluster admin installs them
+	// from the console (one Install action, under the admin's own token), or
+	// with AdminApply.
+	// +optional
+	AdminObjects []AdminObject `json:"adminObjects,omitempty"`
+	// AdminApply is a ready-to-run command applying every AdminObjects entry,
+	// for a cluster admin without the console.
+	AdminApply string `json:"adminApply,omitempty"`
 	// SyncImpersonationInstance is the ArgoCD resource, as namespace/name, the
 	// operator set application.sync.impersonation.enabled on: it removes the
 	// setting there when spec.argocd moves to another instance and before the

@@ -22,7 +22,7 @@ import (
 	dotvirtv1alpha1 "github.com/epheo/dotvirt/operator/api/v1alpha1"
 	"github.com/epheo/dotvirt/operator/internal/controller"
 	"github.com/epheo/dotvirt/operator/internal/platform"
-	"github.com/epheo/dotvirt/pkg/guard"
+	"github.com/epheo/dotvirt/pkg/adminobjects"
 )
 
 var scheme = runtime.NewScheme()
@@ -43,7 +43,7 @@ func operatorUsername() string {
 	if err != nil {
 		return ""
 	}
-	u, err := guard.UsernameFromToken(string(b))
+	u, err := adminobjects.UsernameFromToken(string(b))
 	if err != nil {
 		return ""
 	}
