@@ -61,10 +61,9 @@ const (
 	IngressGateway IngressType = "gateway"
 )
 
-// ForgeSpec points dotvirt at its git forge and the platform-tier repo. The forge
-// credential here is the INSTALL-TIME admin token the operator uses to create the
-// platform repo, distinct from (and more privileged than) dotvirt's runtime
-// clone/push token, preserving the install-provisioner vs runtime-owns-nothing split.
+// ForgeSpec points dotvirt at its git forge and the platform-tier repo. One forge
+// credential serves the operator (platform repo, webhooks), the app (git over
+// HTTPS and the forge API) and ArgoCD's repo-creds.
 type ForgeSpec struct {
 	// URL is the forge base URL. Leave empty with managed on OpenShift: the operator
 	// exposes Forgejo on a router-assigned host and reports it in status.forgeURL. Set it
@@ -85,9 +84,11 @@ type ForgeSpec struct {
 	PlatformRepo string `json:"platformRepo,omitempty"`
 	// Managed deploys a self-hosted Forgejo for evaluation; false = bring your own.
 	Managed bool `json:"managed,omitempty"`
-	// CredentialsSecret names a Secret holding the forge-admin credential (keys: url,
+	// CredentialsSecret names a Secret holding the forge credential (keys: url,
 	// username, token). For a managed forge the operator WRITES this secret; point it at
-	// an existing secret only for a bring-your-own forge.
+	// an existing secret only for a bring-your-own forge. Its account needs write on
+	// the platform and project repos; registering the org webhooks needs an org owner,
+	// and without one dotvirt and ArgoCD fall back to polling.
 	CredentialsSecret string `json:"credentialsSecret,omitempty"`
 	// InsecureTLS skips TLS verification when calling the forge API (a self-signed forge
 	// Route, e.g. the bundled Forgejo). DEV/EVAL ONLY; never enable against a forge with
