@@ -61,7 +61,9 @@ on every pass in this order.
    the install an earlier operator provisioned. This keeps an install created
    elsewhere (in `dotvirt`, as the earlier sample did) working across the upgrade.
    Its `InstallNamespaceAdopted` condition names the namespace and suggests the
-   override.
+   override. Only a Dotvirt there created before the binding is adopted, and the
+   binding must name one namespace. Deleting the binding by hand drops an adopted
+   install to `WrongNamespace` (nothing is deleted): set the override to keep it.
 
 Through OLM, set the override on the Subscription:
 
@@ -78,6 +80,10 @@ Through OLM, set the override on the Subscription:
 - Why: OLM adds create rights on Dotvirts to every namespace's `admin` and `edit`
   roles. Acting on a Dotvirt in a tenant's namespace would bind the install's
   cluster-wide roles to accounts the tenant controls.
+- The override, and the operator's own namespace, must name a namespace only
+  cluster admins control. Where users may create projects (OpenShift
+  self-provisioning), a user could create a namespace of that name first and own
+  the install. Create the namespace before naming it.
 - Deleting a Dotvirt outside the install namespace only drops the operator's
   finalizer: nothing is pruned on its say. To uninstall an install that lives
   outside it, name its namespace first, then delete it.
@@ -88,13 +94,20 @@ Through OLM, set the override on the Subscription:
   the binding names:
 
   ```sh
-  kubectl get clusterrolebinding dotvirt -o jsonpath='{.subjects[0].namespace}'
+  kubectl get clusterrolebinding dotvirt -o jsonpath='{.subjects[?(@.name=="dotvirt")].namespace}'
   ```
 
   It must be the namespace you installed dotvirt in. If it names a tenant's
-  namespace, delete that Dotvirt (nothing is pruned on its say), remove its
-  bindings, and create the install in the operator's namespace or name yours with
-  the override.
+  namespace, in this order:
+
+  1. Create the install in the operator's namespace, or name yours with the
+     override. The tenant's Dotvirt is then ignored.
+  2. Delete the tenant's Dotvirt. Ignored, it prunes nothing; deleted while still
+     adopted, it would run its own cleanup.
+  3. Delete what its install left: objects labelled
+     `dotvirt.io/instance-namespace=<tenant namespace>` in the Argo namespace
+     (AppProjects, the ApplicationSet, Secrets), and any binding still naming the
+     tenant's accounts.
 
 ## What it provisions
 

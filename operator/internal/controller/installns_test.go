@@ -2,11 +2,13 @@ package controller
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 	"time"
 
 	appsv1 "k8s.io/api/apps/v1"
+	corev1 "k8s.io/api/core/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -73,6 +75,21 @@ func TestIgnoredDotvirtStatusIsWrittenOnce(t *testing.T) {
 	}
 	if writes != 1 {
 		t.Errorf("status writes = %d over 3 passes, want 1", writes)
+	}
+	// A spec change moves the generation: the status follows it once.
+	got := getCR(t, c, dv)
+	got.Generation++
+	if err := c.Update(context.Background(), got); err != nil {
+		t.Fatal(err)
+	}
+	for range 2 {
+		reconcileOnce(t, r, dv)
+	}
+	if writes != 2 {
+		t.Errorf("status writes = %d after a generation bump, want 2", writes)
+	}
+	if co := cond(getCR(t, c, dv), dotvirtv1alpha1.ConditionAvailable); co == nil || co.ObservedGeneration != got.Generation {
+		t.Errorf("Available = %+v, want observedGeneration %d", co, got.Generation)
 	}
 }
 
@@ -173,10 +190,10 @@ func adoptingReconciler(c client.Client) *DotvirtReconciler {
 }
 
 // dotvirtBinding is ClusterRoleBinding dotvirt as an earlier operator left it
-// for the install in ns.
+// for the install in ns: created now, after that install's Dotvirt.
 func dotvirtBinding(ns string) *rbacv1.ClusterRoleBinding {
 	return &rbacv1.ClusterRoleBinding{
-		ObjectMeta: metav1.ObjectMeta{Name: install.AppName},
+		ObjectMeta: metav1.ObjectMeta{Name: install.AppName, CreationTimestamp: metav1.Now()},
 		RoleRef:    rbacv1.RoleRef{APIGroup: rbacv1.GroupName, Kind: "ClusterRole", Name: install.AppName},
 		Subjects:   []rbacv1.Subject{{Kind: rbacv1.ServiceAccountKind, Name: install.AppName, Namespace: ns}},
 	}
@@ -313,5 +330,153 @@ func TestAdoptionTrustsOnlyTheInstallSubject(t *testing.T) {
 				t.Errorf("Available = %+v, want False/WrongNamespace", co)
 			}
 		})
+	}
+}
+
+// Finalizing an adopted install takes ClusterRoleBinding dotvirt last: a delete
+// failing midway leaves the binding, so the retry still finds the install and
+// finishes instead of reading it as ignored and dropping the finalizer.
+func TestAdoptedFinalizeRetryFinishesTheCleanup(t *testing.T) {
+	now := metav1.Now()
+	dv := testCR()
+	dv.Finalizers = []string{dotvirtFinalizer}
+	dv.DeletionTimestamp = &now
+	mine := install.Labels(dv)
+	crb := dotvirtBinding(dv.Namespace)
+	crb.Labels = mine
+	failOnce := true
+	c := testBuilder(t).WithObjects(
+		dv, crb,
+		&rbacv1.ClusterRoleBinding{ObjectMeta: metav1.ObjectMeta{Name: "dotvirt-argocd-apply", Labels: mine}},
+		&corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: install.AppsetSecretName, Namespace: "argocd", Labels: mine}},
+	).WithInterceptorFuncs(interceptor.Funcs{
+		Delete: func(ctx context.Context, cl client.WithWatch, obj client.Object, opts ...client.DeleteOption) error {
+			if obj.GetName() == "dotvirt-argocd-apply" && failOnce {
+				failOnce = false
+				return errors.New("transient")
+			}
+			return cl.Delete(ctx, obj, opts...)
+		},
+	}).Build()
+	r := adoptingReconciler(c)
+	req := ctrl.Request{NamespacedName: client.ObjectKeyFromObject(dv)}
+	if _, err := r.Reconcile(context.Background(), req); err == nil {
+		t.Fatal("first pass: want the transient error")
+	}
+	if !exists(t, c, &rbacv1.ClusterRoleBinding{}, "", install.AppName) {
+		t.Fatal("ClusterRoleBinding dotvirt went before the rest")
+	}
+	if _, err := r.Reconcile(context.Background(), req); err != nil {
+		t.Fatalf("second pass: %v", err)
+	}
+	if exists(t, c, &dotvirtv1alpha1.Dotvirt{}, dv.Namespace, dv.Name) {
+		t.Error("the CR is still there")
+	}
+	for _, o := range []struct {
+		obj      client.Object
+		ns, name string
+	}{
+		{&rbacv1.ClusterRoleBinding{}, "", "dotvirt-argocd-apply"},
+		{&rbacv1.ClusterRoleBinding{}, "", install.AppName},
+		{&corev1.Secret{}, "argocd", install.AppsetSecretName},
+	} {
+		if exists(t, c, o.obj, o.ns, o.name) {
+			t.Errorf("%s/%s left behind", o.ns, o.name)
+		}
+	}
+}
+
+// A binding that outlived its install, its namespace since taken by someone
+// who created a Dotvirt there, is not adopted: that Dotvirt is newer than it.
+func TestBindingOlderThanTheDotvirtIsNotAdopted(t *testing.T) {
+	crb := dotvirtBinding("dotvirt")
+	crb.CreationTimestamp = metav1.NewTime(time.Now().Add(-48 * time.Hour))
+	dv := testCR()
+	dv.CreationTimestamp = metav1.Now()
+	dv.Spec.ArgoCD.Namespace = "dotvirt"
+	dv.Spec.ArgoCD.ControllerServiceAccount = "tenant-sa"
+	c := testBuilder(t).WithObjects(dv, crb).Build()
+
+	reconcileOnce(t, adoptingReconciler(c), dv)
+	got := getCR(t, c, dv)
+	if co := cond(got, dotvirtv1alpha1.ConditionAvailable); co == nil || co.Reason != "WrongNamespace" {
+		t.Errorf("Available = %+v, want False/WrongNamespace", co)
+	}
+	if controllerutil.ContainsFinalizer(got, dotvirtFinalizer) {
+		t.Error("the newer Dotvirt was taken as the install")
+	}
+	if exists(t, c, &rbacv1.ClusterRoleBinding{}, "", "dotvirt-argocd-apply") {
+		t.Error("ClusterRoleBinding dotvirt-argocd-apply was rendered for it")
+	}
+}
+
+// Several dotvirt subjects that disagree on the namespace name no install.
+func TestAdoptionRefusesDisagreeingSubjects(t *testing.T) {
+	dv := testCR()
+	crb := dotvirtBinding("team-a")
+	crb.Subjects = append(crb.Subjects, rbacv1.Subject{Kind: rbacv1.ServiceAccountKind, Name: install.AppName, Namespace: dv.Namespace})
+	c := testBuilder(t).WithObjects(dv, crb).Build()
+	ns, adopted, err := adoptingReconciler(c).installNamespace(context.Background())
+	if err != nil || ns != "" || adopted {
+		t.Errorf("installNamespace = (%q, %v, %v), want none", ns, adopted, err)
+	}
+}
+
+// The adoption condition survives the pass that adds the finalizer.
+func TestAdoptionIsRecordedOnTheFirstPass(t *testing.T) {
+	dv := testCR() // no finalizer yet
+	c := testBuilder(t).WithObjects(dv, dotvirtBinding(dv.Namespace)).Build()
+	reconcileOnce(t, adoptingReconciler(c), dv)
+	if co := cond(getCR(t, c, dv), dotvirtv1alpha1.ConditionInstallNamespaceAdopted); co == nil || co.Status != metav1.ConditionTrue {
+		t.Errorf("InstallNamespaceAdopted = %+v after the finalizer-adding pass, want True", co)
+	}
+}
+
+// A Dotvirt that was the install and is now ignored loses what its status said
+// of that install, and keeps what prune remembers.
+func TestIgnoredDotvirtDropsItsPastInstallStatus(t *testing.T) {
+	dv := tenantCR()
+	dv.Status = dotvirtv1alpha1.DotvirtStatus{
+		Phase:          dotvirtv1alpha1.PhaseReady,
+		ConsoleURL:     "https://dotvirt.example",
+		ForgeURL:       "https://forge.example",
+		ArgoNamespaces: []string{"argocd"},
+		Conditions: []metav1.Condition{
+			{Type: dotvirtv1alpha1.ConditionWorkloadReady, Status: metav1.ConditionTrue, Reason: "Ready", LastTransitionTime: metav1.Now()},
+			{Type: dotvirtv1alpha1.ConditionAvailable, Status: metav1.ConditionTrue, Reason: "Ready", LastTransitionTime: metav1.Now()},
+		},
+	}
+	c := testBuilder(t).WithObjects(dv).WithStatusSubresource(dv).Build()
+	reconcileOnce(t, newReconciler(c, depsOK), dv)
+	got := getCR(t, c, dv)
+	if got.Status.Phase != "" || got.Status.ConsoleURL != "" || got.Status.ForgeURL != "" {
+		t.Errorf("status kept the past install: phase %q, console %q, forge %q", got.Status.Phase, got.Status.ConsoleURL, got.Status.ForgeURL)
+	}
+	if len(got.Status.Conditions) != 1 || got.Status.Conditions[0].Reason != "WrongNamespace" {
+		t.Errorf("conditions = %+v, want only Available False/WrongNamespace", got.Status.Conditions)
+	}
+	if len(got.Status.ArgoNamespaces) != 1 {
+		t.Errorf("argoNamespaces = %v: prune's memory was dropped", got.Status.ArgoNamespaces)
+	}
+}
+
+// Once an install appears, the ignored Dotvirts say where it lives.
+func TestIgnoredDotvirtsAreRestatedWhenTheInstallAppears(t *testing.T) {
+	tenant := tenantCR()
+	c := testBuilder(t).WithObjects(tenant).Build()
+	r := adoptingReconciler(c)
+	reconcileOnce(t, r, tenant)
+	if co := cond(getCR(t, c, tenant), dotvirtv1alpha1.ConditionAvailable); co == nil || !strings.Contains(co.Message, "no install exists yet") {
+		t.Fatalf("Available = %+v, want the no-install message", co)
+	}
+	own := testCR()
+	own.Namespace = "dotvirt-operator"
+	if err := c.Create(context.Background(), own); err != nil {
+		t.Fatal(err)
+	}
+	reconcileOnce(t, r, own)
+	if co := cond(getCR(t, c, tenant), dotvirtv1alpha1.ConditionAvailable); co == nil ||
+		!strings.Contains(co.Message, "only on the Dotvirt in namespace dotvirt-operator") {
+		t.Errorf("tenant Available = %+v, want it to name dotvirt-operator", co)
 	}
 }

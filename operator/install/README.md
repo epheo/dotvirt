@@ -12,8 +12,7 @@ kubectl apply -f operator/install/operatorgroup.yaml
 kubectl apply -f operator/install/catalogsource.yaml
 kubectl apply -f operator/install/subscription.yaml
 kubectl -n dotvirt-operator get csv -w        # wait for Succeeded
-kubectl create namespace dotvirt
-kubectl apply -f operator/config/samples/dotvirt_v1alpha1_dotvirt.yaml   # fix the example.com hosts first
+kubectl apply -f operator/config/samples/dotvirt_v1alpha1_dotvirt.yaml   # into dotvirt-operator; fix the example.com hosts first
 ```
 
 Upgrade: each release repins `catalogsource.yaml`; re-apply it and OLM rolls the rest.

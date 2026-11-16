@@ -11,6 +11,7 @@ import (
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
+	"k8s.io/apimachinery/pkg/api/equality"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -66,6 +67,9 @@ type DotvirtReconciler struct {
 	// resolved remembers the last namespace installNamespace resolved, so event
 	// mappings fan out without a read of their own.
 	resolved atomic.Value
+	// moved is set when the resolution changes, so the next pass rewrites the
+	// status of every ignored Dotvirt, whose message names the install.
+	moved atomic.Bool
 
 	// probe is a test seam (not config): deps.Probe needs a live discovery
 	// endpoint, so tests stub it. nil = the real probe.
@@ -127,6 +131,9 @@ func (r *DotvirtReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 	if err != nil {
 		return ctrl.Result{}, err
 	}
+	if r.moved.Swap(false) {
+		r.restateIgnored(ctx, installNS)
+	}
 	if dv.Namespace != installNS || installNS == "" {
 		return ctrl.Result{}, r.ignore(ctx, &dv, installNS)
 	}
@@ -146,7 +153,6 @@ func (r *DotvirtReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 	}
 	base := dv.DeepCopy()
 	var res ctrl.Result
-	r.markAdopted(&dv, adopted)
 	// One install per cluster: the ClusterRoleBindings it provisions carry fixed
 	// cluster-scoped names, so two CRs would rewrite each other's subjects on every
 	// reconcile and each finalizer would delete the other's bindings. The oldest CR
@@ -160,6 +166,7 @@ func (r *DotvirtReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 			other.Namespace, other.Name)
 		res = *r.waitPhase(&dv, dotvirtv1alpha1.ConditionAvailable, "Conflict", msg,
 			dotvirtv1alpha1.PhaseProvisioning, time.Minute)
+		r.markAdopted(&dv, adopted)
 	} else {
 		// Ensure the finalizer is present before provisioning anything cluster-scoped.
 		// Skipped under -dry-run so a validation run mutates nothing (and the CR stays
@@ -172,6 +179,9 @@ func (r *DotvirtReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 			// status patch and turn it into an optimistic lock.
 			base = dv.DeepCopy()
 		}
+		// After the finalizer add, whose Update reads the status back from the
+		// server.
+		r.markAdopted(&dv, adopted)
 		// Only after the finalizer add, the reconcile's one spec write: the
 		// effective spec the phases fill in must never reach the stored CR.
 		res, err = r.provision(ctx, req.NamespacedName, &dv)
@@ -726,8 +736,11 @@ const InstallNamespaceEnv = "OPERATOR_INSTALL_NAMESPACE"
 // no install: every Dotvirt is ignored.
 func (r *DotvirtReconciler) installNamespace(ctx context.Context) (ns string, adopted bool, err error) {
 	defer func() {
-		if err == nil {
-			r.resolved.Store(ns)
+		if err != nil {
+			return
+		}
+		if prev, known := r.resolved.Swap(ns).(string); known && prev != ns {
+			r.moved.Store(true)
 		}
 	}()
 	if r.InstallNamespace != "" {
@@ -749,9 +762,31 @@ func (r *DotvirtReconciler) installNamespace(ctx context.Context) (ns string, ad
 	if crb.RoleRef.Kind != "ClusterRole" || crb.RoleRef.Name != install.AppName {
 		return "", false, nil
 	}
+	bound := ""
 	for _, s := range crb.Subjects {
-		if s.Kind == rbacv1.ServiceAccountKind && s.Name == install.AppName && s.Namespace != "" {
-			return s.Namespace, true, nil
+		if s.Kind != rbacv1.ServiceAccountKind || s.Name != install.AppName {
+			continue
+		}
+		if s.Namespace == "" || (bound != "" && s.Namespace != bound) {
+			return "", false, nil
+		}
+		bound = s.Namespace
+	}
+	if bound == "" {
+		return "", false, nil
+	}
+	// The operator applies the binding after the Dotvirt it acts on exists. A
+	// Dotvirt there only newer than the binding was created after it: the
+	// binding outlived its install (the operator removed first, the finalizer
+	// stripped by hand) and the namespace has since changed hands, which
+	// self-provisioning lets any user do.
+	var there dotvirtv1alpha1.DotvirtList
+	if err := r.List(ctx, &there, client.InNamespace(bound)); err != nil {
+		return "", false, err
+	}
+	for i := range there.Items {
+		if !crb.CreationTimestamp.Before(&there.Items[i].CreationTimestamp) {
+			return bound, true, nil
 		}
 	}
 	return "", false, nil
@@ -770,12 +805,34 @@ func (r *DotvirtReconciler) markAdopted(dv *dotvirtv1alpha1.Dotvirt, adopted boo
 			"spec.config.env)", InstallNamespaceEnv, dv.Namespace))
 }
 
+// restateIgnored rewrites the status of every Dotvirt outside installNS after
+// the install namespace changed: each names where the install lives. One write
+// per ignored Dotvirt per change; a failure waits for that Dotvirt's next event.
+func (r *DotvirtReconciler) restateIgnored(ctx context.Context, installNS string) {
+	var all dotvirtv1alpha1.DotvirtList
+	if err := r.List(ctx, &all); err != nil {
+		logf.FromContext(ctx).Error(err, "list Dotvirts to restate the ignored ones")
+		return
+	}
+	for i := range all.Items {
+		dv := &all.Items[i]
+		if dv.Namespace == installNS || !dv.DeletionTimestamp.IsZero() {
+			continue
+		}
+		if err := r.ignore(ctx, dv, installNS); err != nil {
+			logf.FromContext(ctx).Error(err, "restate an ignored Dotvirt", "namespace", dv.Namespace, "name", dv.Name)
+		}
+	}
+}
+
 // ignore handles a Dotvirt outside the install namespace: no finalizer, render,
-// binding or prune, only a status saying where the install lives. Its deletion
-// drops the operator's finalizer, should it carry one, WITHOUT finalize: prune
-// matches objects by instance labels, so cleaning up on this CR's say could take
-// the real install's objects. An install outside the install namespace keeps its
-// objects until a cluster admin names its namespace.
+// binding or prune, only a status saying where the install lives. What the
+// status said of a past install (phase, URLs, other conditions) goes; what
+// prune remembers (argoNamespaces, syncImpersonationInstance) stays, for when a
+// cluster admin names its namespace again. Its deletion drops the operator's
+// finalizer, should it carry one, WITHOUT finalize: prune matches objects by
+// instance labels, so cleaning up on this CR's say could take the real
+// install's objects.
 func (r *DotvirtReconciler) ignore(ctx context.Context, dv *dotvirtv1alpha1.Dotvirt, installNS string) error {
 	if !dv.DeletionTimestamp.IsZero() {
 		if !r.DryRun && controllerutil.RemoveFinalizer(dv, dotvirtFinalizer) {
@@ -795,11 +852,22 @@ func (r *DotvirtReconciler) ignore(ctx context.Context, dv *dotvirtv1alpha1.Dotv
 			"in %s, or a cluster admin names %s with %s on the operator's Deployment (through OLM: the Subscription's "+
 			"spec.config.env)", own, own, dv.Namespace, InstallNamespaceEnv)
 	}
-	if c := meta.FindStatusCondition(dv.Status.Conditions, dotvirtv1alpha1.ConditionAvailable); c != nil &&
-		c.Status == metav1.ConditionFalse && c.Reason == "WrongNamespace" && c.Message == msg && c.ObservedGeneration == dv.Generation {
+	want := dotvirtv1alpha1.DotvirtStatus{
+		ObservedGeneration:        dv.Status.ObservedGeneration,
+		SyncImpersonationInstance: dv.Status.SyncImpersonationInstance,
+		ArgoNamespaces:            dv.Status.ArgoNamespaces,
+	}
+	if c := meta.FindStatusCondition(dv.Status.Conditions, dotvirtv1alpha1.ConditionAvailable); c != nil {
+		want.Conditions = []metav1.Condition{*c}
+	}
+	meta.SetStatusCondition(&want.Conditions, metav1.Condition{
+		Type: dotvirtv1alpha1.ConditionAvailable, Status: metav1.ConditionFalse,
+		Reason: "WrongNamespace", Message: msg, ObservedGeneration: dv.Generation,
+	})
+	if equality.Semantic.DeepEqual(dv.Status, want) {
 		return nil
 	}
 	base := dv.DeepCopy()
-	r.setCondition(dv, dotvirtv1alpha1.ConditionAvailable, metav1.ConditionFalse, "WrongNamespace", msg)
+	dv.Status = want
 	return r.writeStatus(ctx, dv, base)
 }

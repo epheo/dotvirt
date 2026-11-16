@@ -1195,10 +1195,17 @@ func TestEnvtest(t *testing.T) {
 	// An upgrade with no override and no Dotvirt in the operator's namespace
 	// adopts the install ClusterRoleBinding dotvirt names, read as the operator.
 	t.Run("the operator adopts the install its binding names", func(t *testing.T) {
+		// Outside the suite's install namespace, so its manager leaves it be.
+		mustCreate(t, admin, &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "adopted"}})
+		dv := &dotvirtv1alpha1.Dotvirt{ObjectMeta: metav1.ObjectMeta{Name: "x", Namespace: "adopted"}}
+		mustCreate(t, admin, dv)
+		defer func() { _ = admin.Delete(ctx, dv) }()
+		// The binding comes after the Dotvirt it was made for.
+		time.Sleep(1100 * time.Millisecond)
 		crb := &rbacv1.ClusterRoleBinding{
 			ObjectMeta: metav1.ObjectMeta{Name: install.AppName},
 			RoleRef:    rbacv1.RoleRef{APIGroup: rbacv1.GroupName, Kind: "ClusterRole", Name: install.AppName},
-			Subjects:   []rbacv1.Subject{{Kind: rbacv1.ServiceAccountKind, Name: install.AppName, Namespace: "dotvirt"}},
+			Subjects:   []rbacv1.Subject{{Kind: rbacv1.ServiceAccountKind, Name: install.AppName, Namespace: "adopted"}},
 		}
 		mustCreate(t, admin, crb)
 		defer func() { _ = admin.Delete(ctx, crb) }()
@@ -1208,8 +1215,8 @@ func TestEnvtest(t *testing.T) {
 		}
 		r := &DotvirtReconciler{Client: op, APIReader: op, OperatorNamespace: "dotvirt-operator"}
 		ns, adopted, err := r.installNamespace(ctx)
-		if err != nil || ns != "dotvirt" || !adopted {
-			t.Errorf("installNamespace = (%q, %v, %v), want (dotvirt, true, nil)", ns, adopted, err)
+		if err != nil || ns != "adopted" || !adopted {
+			t.Errorf("installNamespace = (%q, %v, %v), want (adopted, true, nil)", ns, adopted, err)
 		}
 	})
 }
