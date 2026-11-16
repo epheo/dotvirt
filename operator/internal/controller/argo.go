@@ -243,9 +243,15 @@ func (r *DotvirtReconciler) argoWebhook(ctx context.Context, dv *dotvirtv1alpha1
 	if credentialRefused(dv) {
 		return metav1.ConditionUnknown, reasonCredentialWait, credentialWaitMessage
 	}
-	fc, err := r.forgeClient(ctx, dv)
+	fc, credKey, err := r.forgeAccess(ctx, dv)
 	if err != nil {
 		return failed(err)
+	}
+	// A refusal repeats on every pass, so it is held until the forge, the
+	// credential, the ArgoCD URL or the secret changes.
+	key := credKey + "|" + hookURL + "|" + fingerprint(value)
+	if ref, held := r.heldRefusal(dv, hookArgo, key); held {
+		return metav1.ConditionUnknown, ref.reason, ref.msg
 	}
 	// Registering the hook is best-effort, like the app's own webhook sweep
 	// (cmd/dotvirt logs and moves on): a transient forge hiccup here must not read as a
@@ -253,9 +259,16 @@ func (r *DotvirtReconciler) argoWebhook(ctx context.Context, dv *dotvirtv1alpha1
 	// and report unconfigured so the next reconcile retries. The secret/credential steps
 	// above stay hard errors - those are operator-internal, not forge-transient.
 	if err := fc.EnsureOrgPushWebhook(hookURL, value); err != nil {
+		if status := forge.RefusedStatus(err); status != 0 {
+			msg := refusedHookMessage(dv, fc.Owner(), status, hookURL, "push only", install.ArgoWebhookSecretName,
+				fmt.Sprintf(" (the operator sets the same value in %s/%s key %s)", rc.argoNS, install.ArgoSecretName, install.ArgoWebhookKey),
+				"Argo falls back to its poll meanwhile.")
+			return metav1.ConditionUnknown, reasonRegistrationRefused, r.holdRefusal(dv, hookArgo, key, reasonRegistrationRefused, msg).msg
+		}
 		logf.FromContext(ctx).Info("argo webhook registration deferred; ArgoCD poll backstops", "error", err.Error())
 		return notRegistered()
 	}
+	r.dropRefusal(dv, hookArgo)
 	return metav1.ConditionTrue, "Registered", "org webhook -> ArgoCD"
 }
 

@@ -2,7 +2,6 @@ package controller
 
 import (
 	"context"
-	"strings"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -23,41 +22,12 @@ func (r *DotvirtReconciler) reconcileDotvirtWebhook(ctx context.Context, dv *dot
 		r.setCondition(dv, dotvirtv1alpha1.ConditionDotvirtWebhook, metav1.ConditionUnknown, reasonCredentialWait, credentialWaitMessage)
 		return nil, nil
 	}
-	if registered, err := r.observeDotvirtWebhook(ctx, dv); credentialWaits(err) {
-		r.setCondition(dv, dotvirtv1alpha1.ConditionDotvirtWebhook, metav1.ConditionUnknown, reasonCredentialWait, credentialWaitMessage)
-	} else if err != nil {
-		r.setCondition(dv, dotvirtv1alpha1.ConditionDotvirtWebhook, metav1.ConditionUnknown, "Unobservable",
-			"could not read the forge's webhooks ("+err.Error()+"); updates still flow via the app's git poll")
-	} else if registered {
-		r.setCondition(dv, dotvirtv1alpha1.ConditionDotvirtWebhook, metav1.ConditionTrue, "Registered", "org webhook -> dotvirt (registered by the app)")
-	} else {
-		r.setCondition(dv, dotvirtv1alpha1.ConditionDotvirtWebhook, metav1.ConditionUnknown, "NotRegistered",
-			"the app registers this webhook within about a minute of starting; until then (or if its pod is down) updates arrive via the git poll instead of instantly")
+	status, reason, msg := r.dotvirtWebhookState(ctx, dv)
+	if status == metav1.ConditionUnknown && reason == "Unobservable" {
+		logf.FromContext(ctx).Info("dotvirt webhook unobservable; git poll backstops", "message", msg)
 	}
+	r.setCondition(dv, dotvirtv1alpha1.ConditionDotvirtWebhook, status, reason, msg)
 	return nil, nil
-}
-
-// observeDotvirtWebhook: read-only. false/no-error when there is nothing to
-// observe yet; err only when the forge cannot be asked, surfaced as
-// Unobservable, never an install failure.
-func (r *DotvirtReconciler) observeDotvirtWebhook(ctx context.Context, dv *dotvirtv1alpha1.Dotvirt) (bool, error) {
-	if dv.Spec.Forge.URL == "" || dv.Spec.Forge.PlatformRepo == "" {
-		return false, nil
-	}
-	target := r.dotvirtWebhookTarget(dv)
-	if target == "" {
-		return false, nil
-	}
-	client, err := r.forgeClient(ctx, dv)
-	if err != nil {
-		return false, err
-	}
-	registered, err := client.HasOrgWebhook(strings.TrimRight(target, "/") + "/api/webhooks/forge")
-	if err != nil {
-		logf.FromContext(ctx).Info("dotvirt webhook unobservable; git poll backstops", "error", err.Error())
-		return false, err
-	}
-	return registered, nil
 }
 
 // dotvirtWebhookTarget resolves the base URL the forge delivers dotvirt webhooks to: a
