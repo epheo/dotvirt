@@ -206,13 +206,20 @@ func run() error {
 	}
 	var oauthFlow *auth.OAuth
 	if cfg.OAuthClientID != "" && oidcFlow == nil {
-		if cfg.PublicURL == "" {
-			log.Printf("oauth: -oauth-client-id set but -public-url empty; OpenShift SSO disabled")
+		// The client and its redirect as the install declares them, the same
+		// ones Finish SSO registers; the env the operator writes only when
+		// they cannot be read (the console's role reads them).
+		clientID, redirect, derr := api.SSOClientConfig(ctx, saCluster, ownNamespace(), cfg.OAuthClientID, cfg.PublicURL)
+		if derr != nil {
+			log.Printf("oauth: derive the SSO client from the install: %v; falling back to -oauth-client-id and -public-url", derr)
+		}
+		if redirect == "" {
+			log.Printf("oauth: -oauth-client-id set but no redirect known (no install readable, -public-url empty); OpenShift SSO disabled")
 		} else {
 			oauthFlow, err = auth.NewOAuth(auth.OAuthConfig{
-				ClientID:     cfg.OAuthClientID,
+				ClientID:     clientID,
 				ClientSecret: cfg.OAuthClientSecret,
-				RedirectURL:  strings.TrimRight(cfg.PublicURL, "/") + "/api/auth/callback",
+				RedirectURL:  redirect,
 				CAFile:       cfg.OAuthCA,
 				InsecureTLS:  cfg.InsecureTLS,
 			}, saKube, authenticator)

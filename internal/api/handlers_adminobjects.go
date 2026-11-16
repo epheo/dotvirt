@@ -6,6 +6,7 @@ import (
 	"net/http"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/meta"
 
 	"github.com/epheo/dotvirt/internal/auth"
 	"github.com/epheo/dotvirt/internal/cluster"
@@ -30,6 +31,7 @@ func (s *Server) adminObjectsAction() action {
 		{Verb: verbList, Group: "dotvirt.io", Resource: "dotvirts", Namespace: ns},
 		{Verb: verbList, Group: "apps", Resource: "deployments", Name: adminobjects.OperatorDeployment},
 		{Verb: verbCreate, Group: "authorization.k8s.io", Resource: "subjectaccessreviews"},
+		{Verb: verbGet, Group: "config.openshift.io", Resource: "ingresses", Name: "cluster"},
 	}
 	for _, r := range adminobjects.Allowed(ns) {
 		act = append(act,
@@ -94,6 +96,16 @@ func (s *Server) adminParams(ctx context.Context, c *cluster.Client) (adminobjec
 		Metrics:     adminobjects.MetricsFor(spec.MetricsURL, spec.MetricsTenancyURL, spec.MetricsCA),
 	}
 	p.ArgoNamespace, p.ArgoController = adminobjects.ArgoTarget(spec.ArgoNamespace, spec.ArgoController, openShift)
+	domain := ""
+	if spec.IngressHost == "" {
+		switch d, err := c.AppsDomain(ctx); {
+		case err == nil:
+			domain = d
+		case !apierrors.IsNotFound(err) && !meta.IsNoMatchError(err):
+			return adminobjects.Params{}, unavailable(fmt.Errorf("read the cluster's ingress domain: %w", err))
+		}
+	}
+	p.ConsoleHost = adminobjects.ConsoleHost(spec.IngressHost, ns, domain)
 	if !p.Valid() {
 		return adminobjects.Params{}, unavailable(fmt.Errorf("the install's pins are not well formed: %+v", p))
 	}

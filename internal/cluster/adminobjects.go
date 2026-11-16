@@ -143,3 +143,21 @@ func (c *Client) AppsDomain(ctx context.Context) (string, error) {
 	}
 	return domain, nil
 }
+
+// SSOClient is the OpenShift OAuthClient the console in namespace registers
+// and signs users in with, as THIS client reads it: named for the namespace,
+// redirecting to the install's spec.ingress.host, else the router's host for
+// the console's Route. Never the env the operator writes.
+func (c *Client) SSOClient(ctx context.Context, namespace string) (id, redirect string, err error) {
+	spec, err := c.InstallIn(ctx, namespace)
+	if err != nil {
+		return "", "", fmt.Errorf("the install: %w", err)
+	}
+	domain := ""
+	if spec.IngressHost == "" {
+		if domain, err = c.AppsDomain(ctx); err != nil {
+			return "", "", fmt.Errorf("the cluster's ingress domain: %w", err)
+		}
+	}
+	return adminobjects.SSOClientName(namespace), adminobjects.SSORedirect(spec.IngressHost, namespace, domain), nil
+}

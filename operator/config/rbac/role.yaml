@@ -106,6 +106,7 @@ rules:
   resourceNames:
   - dotvirt-operator-bindings
   - dotvirt-operator-deployments
+  - dotvirt-operator-frontdoor
   - dotvirt-operator-install
   - dotvirt-operator-secrets
   resources:
@@ -186,6 +187,14 @@ rules:
   - subjectaccessreviews
   verbs:
   - create
+- apiGroups:
+  - config.openshift.io
+  resourceNames:
+  - cluster
+  resources:
+  - ingresses
+  verbs:
+  - get
 - apiGroups:
   - dotvirt.io
   resources:

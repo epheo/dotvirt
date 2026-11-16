@@ -9,6 +9,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
@@ -31,9 +32,10 @@ func (r *DotvirtReconciler) reconcileOperatorGuard(ctx context.Context, dv *dotv
 // guardParams are the guard's pins for this install, as the console takes
 // them: the images from the CR and from the operator's own environment, which
 // its Deployment sets.
-func (r *DotvirtReconciler) guardParams(dv *dotvirtv1alpha1.Dotvirt, rc *reconcileCtx) adminobjects.Params {
+func (r *DotvirtReconciler) guardParams(ctx context.Context, dv *dotvirtv1alpha1.Dotvirt, rc *reconcileCtx) adminobjects.Params {
 	return adminobjects.Params{
-		Operator: r.OperatorUsername, Namespace: dv.Namespace, ArgoNamespace: rc.argoNS, ArgoController: rc.argoSA,
+		ConsoleHost: adminobjects.ConsoleHost(dv.Spec.Ingress.Host, dv.Namespace, r.appsDomain(ctx, dv)),
+		Operator:    r.OperatorUsername, Namespace: dv.Namespace, ArgoNamespace: rc.argoNS, ArgoController: rc.argoSA,
 		SpecImage: dv.Spec.Image, DotvirtImage: os.Getenv("RELATED_IMAGE_DOTVIRT"), ForgejoImage: os.Getenv("RELATED_IMAGE_FORGEJO"),
 		InsecureTLS: dv.Spec.Forge.InsecureTLS,
 		Metrics:     adminobjects.MetricsFor(dv.Spec.Metrics.URL, dv.Spec.Metrics.TenancyURL, dv.Spec.Metrics.CA != nil),
@@ -44,7 +46,7 @@ func (r *DotvirtReconciler) operatorGuard(ctx context.Context, dv *dotvirtv1alph
 	isGuard := func(e dotvirtv1alpha1.AdminObject) bool {
 		return (e.Kind == "ValidatingAdmissionPolicy" || e.Kind == "ValidatingAdmissionPolicyBinding") && slices.Contains(adminobjects.GuardNames, e.Name)
 	}
-	p := r.guardParams(dv, rc)
+	p := r.guardParams(ctx, dv, rc)
 	if !p.Valid() {
 		publishAdminObjects(dv, isGuard, nil, nil)
 		return metav1.ConditionUnknown, "AccountUnknown",
@@ -67,6 +69,22 @@ func (r *DotvirtReconciler) operatorGuard(ctx context.Context, dv *dotvirtv1alph
 		}
 	}
 	return metav1.ConditionTrue, string(adminobjects.Installed), "the admission policies bounding " + p.Operator + " are installed as rendered"
+}
+
+// appsDomain is the cluster's ingress domain, read as the console reads it
+// (config.openshift.io Ingress cluster), when the console's host is the
+// router's; "" without spec.ingress.host where nothing serves it.
+func (r *DotvirtReconciler) appsDomain(ctx context.Context, dv *dotvirtv1alpha1.Dotvirt) string {
+	if dv.Spec.Ingress.Host != "" {
+		return ""
+	}
+	u := &unstructured.Unstructured{}
+	u.SetGroupVersionKind(schema.GroupVersionKind{Group: "config.openshift.io", Version: "v1", Kind: "Ingress"})
+	if err := r.reader().Get(ctx, client.ObjectKey{Name: "cluster"}, u); err != nil {
+		return ""
+	}
+	domain, _, _ := unstructured.NestedString(u.Object, "spec", "domain")
+	return domain
 }
 
 // guardNextAction is what a cluster admin does about a guard not in place.

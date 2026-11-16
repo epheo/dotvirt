@@ -115,12 +115,22 @@ func TestOperatorGuardStates(t *testing.T) {
 // Outdated until the guard is installed for it.
 func TestOperatorGuardFollowsTheAdminImage(t *testing.T) {
 	t.Setenv("RELATED_IMAGE_DOTVIRT", "quay.io/epheo/dotvirt@sha256:"+strings.Repeat("a", 64))
-	r := &DotvirtReconciler{OperatorUsername: guardOperator}
+	domain := &unstructured.Unstructured{Object: map[string]any{
+		"apiVersion": "config.openshift.io/v1", "kind": "Ingress", "metadata": map[string]any{"name": "cluster"},
+		"spec": map[string]any{"domain": "apps.example"},
+	}}
+	c := fake.NewClientBuilder().WithScheme(testScheme(t)).WithObjects(domain).Build()
+	r := &DotvirtReconciler{Client: c, OperatorUsername: guardOperator}
 	dv := &dotvirtv1alpha1.Dotvirt{ObjectMeta: metav1.ObjectMeta{Name: "x", Namespace: "dotvirt"}}
 	dv.Spec.Image = "registry.example/team/dotvirt:custom"
-	p := r.guardParams(dv, guardRC)
-	if p.SpecImage != dv.Spec.Image || p.DotvirtImage != "quay.io/epheo/dotvirt@sha256:"+strings.Repeat("a", 64) || p.ForgejoImage != "" {
+	p := r.guardParams(t.Context(), dv, guardRC)
+	if p.SpecImage != dv.Spec.Image || p.DotvirtImage != "quay.io/epheo/dotvirt@sha256:"+strings.Repeat("a", 64) || p.ForgejoImage != "" ||
+		p.ConsoleHost != "dotvirt-dotvirt.apps.example" {
 		t.Errorf("params = %+v", p)
+	}
+	dv.Spec.Ingress.Host = "console.example"
+	if p := r.guardParams(t.Context(), dv, guardRC); p.ConsoleHost != "console.example" {
+		t.Errorf("an admin's host: %q", p.ConsoleHost)
 	}
 }
 

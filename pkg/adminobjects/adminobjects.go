@@ -55,6 +55,9 @@ type Params struct {
 	InsecureTLS bool
 	// Metrics is the admin's spec.metrics as rendered (MetricsFor).
 	Metrics Metrics
+	// ConsoleHost is the host the console is reached by (ConsoleHost), ""
+	// when nothing exposes it.
+	ConsoleHost string
 }
 
 // Valid reports whether every pin is known and well formed: a render missing

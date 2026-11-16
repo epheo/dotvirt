@@ -19,6 +19,7 @@ import (
 	appsv1 "k8s.io/api/apps/v1"
 	authzv1 "k8s.io/api/authorization/v1"
 	corev1 "k8s.io/api/core/v1"
+	networkingv1 "k8s.io/api/networking/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
 	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -27,6 +28,7 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/apimachinery/pkg/util/intstr"
 	utilyaml "k8s.io/apimachinery/pkg/util/yaml"
 	admissionregistrationv1ac "k8s.io/client-go/applyconfigurations/admissionregistration/v1"
 	rbacv1ac "k8s.io/client-go/applyconfigurations/rbac/v1"
@@ -64,7 +66,7 @@ func TestEnvtest(t *testing.T) {
 	}
 	env := &envtest.Environment{
 		CRDDirectoryPaths:     []string{filepath.Join("..", "..", "config", "crd", "bases")},
-		CRDs:                  argoStubCRDs(),
+		CRDs:                  append(argoStubCRDs(), exposureStubCRDs()...),
 		ErrorIfCRDPathMissing: true,
 	}
 	adminCfg, err := env.Start()
@@ -572,6 +574,30 @@ func TestEnvtest(t *testing.T) {
 				c := &d.Spec.Template.Spec.Containers[0]
 				c.Env = append(c.Env, corev1.EnvVar{Name: "DOTVIRT_UI_ORIGIN", Value: "https://evil.example"})
 			}},
+			"the console with an exec probe": {app, func(d *appsv1.Deployment) {
+				d.Spec.Template.Spec.Containers[0].LivenessProbe = &corev1.Probe{ProbeHandler: corev1.ProbeHandler{
+					Exec: &corev1.ExecAction{Command: []string{"/dotvirt", "-addr=:9090", "-kubeconfig=/evil"}}}}
+			}},
+			"the console with an exec startup probe": {app, func(d *appsv1.Deployment) {
+				d.Spec.Template.Spec.Containers[0].StartupProbe = &corev1.Probe{ProbeHandler: corev1.ProbeHandler{
+					Exec: &corev1.ExecAction{Command: []string{"/dotvirt", "-addr=:9090"}}}}
+			}},
+			"the console with a postStart exec": {app, func(d *appsv1.Deployment) {
+				d.Spec.Template.Spec.Containers[0].Lifecycle = &corev1.Lifecycle{PostStart: &corev1.LifecycleHandler{
+					Exec: &corev1.ExecAction{Command: []string{"/dotvirt", "-addr=:9090"}}}}
+			}},
+			"the console with a preStop exec": {app, func(d *appsv1.Deployment) {
+				d.Spec.Template.Spec.Containers[0].Lifecycle = &corev1.Lifecycle{PreStop: &corev1.LifecycleHandler{
+					Exec: &corev1.ExecAction{Command: []string{"/dotvirt", "-addr=:9090"}}}}
+			}},
+			"the console sharing its process namespace": {app, func(d *appsv1.Deployment) {
+				d.Spec.Template.Spec.ShareProcessNamespace = new(true)
+			}},
+			"the forge's pods labeled as the console's": {forge, func(d *appsv1.Deployment) {
+				// New maps: the render shares its selector map.
+				d.Spec.Selector = &metav1.LabelSelector{MatchLabels: map[string]string{"app": "dotvirt"}}
+				d.Spec.Template.Labels = map[string]string{"app": "dotvirt"}
+			}},
 			"the console resolving a host elsewhere": {app, func(d *appsv1.Deployment) {
 				d.Spec.Template.Spec.HostAliases = []corev1.HostAlias{{IP: "10.0.0.66", Hostnames: []string{"thanos-querier.openshift-monitoring.svc"}}}
 			}},
@@ -699,6 +725,60 @@ func TestEnvtest(t *testing.T) {
 			}
 		}
 
+		// The console's front door: its Service and exposure as rendered pass;
+		// re-pointed at anything else, refused.
+		svc := func(edit func(*corev1.Service)) *corev1.Service {
+			s := install.Service(dv)
+			if edit != nil {
+				edit(s)
+			}
+			return s
+		}
+		route := func(name, host string, edit func(map[string]any)) *unstructured.Unstructured {
+			r := install.Route(dv, name, host)
+			if edit != nil {
+				edit(r.Object["spec"].(map[string]any))
+			}
+			return r
+		}
+		for name, o := range map[string]client.Object{
+			"the console's Service": svc(nil),
+			"the console's Route":   route(install.AppName, "", nil),
+			"the forge's Service":   install.ForgejoService(dv),
+			"the forge's Route":     route(install.ForgejoServiceName, "", nil),
+		} {
+			if err := dryApply(o); err != nil {
+				t.Errorf("%s as rendered: %v", name, err)
+			}
+		}
+		for name, o := range map[string]client.Object{
+			"the console's Service selecting the forge": svc(func(s *corev1.Service) { s.Spec.Selector = map[string]string{"app": "dotvirt-forgejo"} }),
+			"the console's Service on another port": svc(func(s *corev1.Service) {
+				s.Spec.Ports[0].TargetPort = intstr.FromInt32(3000)
+			}),
+			"the console's Service exposed on nodes":        svc(func(s *corev1.Service) { s.Spec.Type = corev1.ServiceTypeNodePort }),
+			"the console's Service publishing unready pods": svc(func(s *corev1.Service) { s.Spec.PublishNotReadyAddresses = true }),
+			"the console's Route to the forge": route(install.AppName, "", func(spec map[string]any) {
+				spec["to"] = map[string]any{"kind": "Service", "name": install.ForgejoServiceName}
+			}),
+			"the console's Route splitting to the forge": route(install.AppName, "", func(spec map[string]any) {
+				spec["alternateBackends"] = []any{map[string]any{"kind": "Service", "name": install.ForgejoServiceName, "weight": int64(50)}}
+			}),
+			"the console's Route passed through": route(install.AppName, "", func(spec map[string]any) {
+				spec["tls"] = map[string]any{"termination": "passthrough"}
+			}),
+			"the console's Route on another host": route(install.AppName, "evil.example", nil),
+			"the console's Route annotated": func() client.Object {
+				r := route(install.AppName, "", nil)
+				r.SetAnnotations(map[string]string{"haproxy.router.openshift.io/rewrite-target": "/evil"})
+				return r
+			}(),
+		} {
+			if err := dryApply(o); !refused(err) {
+				t.Errorf("operator's %s: err=%v, want the guard's Forbidden", name, err)
+			}
+		}
+
 		// An unrendered name: the operator's role names its bindings, so grant
 		// it this one too, leaving the guard's name rule the only gate.
 		// The binding grants nothing and names no subject: only its name is wrong.
@@ -785,6 +865,28 @@ func TestEnvtest(t *testing.T) {
 		chosen.SpecImage = custom.Spec.Template.Spec.Containers[0].Image
 		// Where an admin sends metrics queries: as the operator renders it.
 		chosen.Metrics = adminobjects.MetricsFor("https://thanos-querier.openshift-monitoring.svc:9091", "", false)
+		// The console's host, which nothing else may claim.
+		chosen.ConsoleHost = "console.example"
+		ingress := func(name string, edit func(*networkingv1.Ingress)) *networkingv1.Ingress {
+			port := install.HTTPPort
+			if name == install.ForgejoServiceName {
+				port = 3000
+			}
+			i := install.Ingress(dv, name, port, chosen.ConsoleHost)
+			if edit != nil {
+				edit(i)
+			}
+			return i
+		}
+		httpRoute := func(name string, edit func(map[string]any)) *unstructured.Unstructured {
+			hd := dv.DeepCopy()
+			hd.Spec.Ingress.Gateway = &dotvirtv1alpha1.GatewayRef{Name: "public", Namespace: "gateways"}
+			r := install.HTTPRoute(hd, name, install.HTTPPort, chosen.ConsoleHost)
+			if edit != nil {
+				edit(r.Object["spec"].(map[string]any))
+			}
+			return r
+		}
 		metrics := app()
 		mc := &metrics.Spec.Template.Spec.Containers[0]
 		mc.Env = append(mc.Env,
@@ -800,6 +902,45 @@ func TestEnvtest(t *testing.T) {
 		}
 		if err := dryApply(elsewhere); !refused(err) {
 			t.Errorf("metrics queries beside the admin's choice: err=%v, want the guard's Forbidden", err)
+		}
+		for name, o := range map[string]client.Object{
+			"the console's Route on its host":     route(install.AppName, chosen.ConsoleHost, nil),
+			"the console's Ingress on its host":   ingress(install.AppName, nil),
+			"the console's HTTPRoute on its host": httpRoute(install.AppName, nil),
+		} {
+			if err := dryApply(o); err != nil {
+				t.Errorf("%s: %v", name, err)
+			}
+		}
+		for name, o := range map[string]client.Object{
+			"the forge's Route claiming the console's host":   route(install.ForgejoServiceName, chosen.ConsoleHost, nil),
+			"the forge's Ingress claiming the console's host": ingress(install.ForgejoServiceName, nil),
+			"the forge's HTTPRoute claiming the console's host": func() client.Object {
+				r := httpRoute(install.ForgejoServiceName, nil)
+				r.Object["spec"].(map[string]any)["rules"] = []any{map[string]any{"backendRefs": []any{map[string]any{"name": install.ForgejoServiceName, "port": int64(3000)}}}}
+				return r
+			}(),
+			"the forge's Route on a wildcard": route(install.ForgejoServiceName, "x.example", func(spec map[string]any) { spec["wildcardPolicy"] = "Subdomain" }),
+			"the console's Ingress to the forge": ingress(install.AppName, func(i *networkingv1.Ingress) {
+				i.Spec.Rules[0].HTTP.Paths[0].Backend.Service.Name = install.ForgejoServiceName
+			}),
+			"the console's Ingress on another host": ingress(install.AppName, func(i *networkingv1.Ingress) { i.Spec.Rules[0].Host = "evil.example" }),
+			"the console's Ingress mirrored": ingress(install.AppName, func(i *networkingv1.Ingress) {
+				i.Annotations = map[string]string{"nginx.ingress.kubernetes.io/mirror-target": "https://evil.example$request_uri"}
+			}),
+			"the console's HTTPRoute to the forge": httpRoute(install.AppName, func(spec map[string]any) {
+				spec["rules"] = []any{map[string]any{"backendRefs": []any{map[string]any{"name": install.ForgejoServiceName, "port": int64(3000)}}}}
+			}),
+			"the console's HTTPRoute mirrored": httpRoute(install.AppName, func(spec map[string]any) {
+				spec["rules"] = []any{map[string]any{
+					"filters":     []any{map[string]any{"type": "RequestMirror", "requestMirror": map[string]any{"backendRef": map[string]any{"name": install.ForgejoServiceName, "port": int64(3000)}}}},
+					"backendRefs": []any{map[string]any{"name": install.AppName, "port": int64(install.HTTPPort)}},
+				}}
+			}),
+		} {
+			if err := dryApply(o); !refused(err) {
+				t.Errorf("operator's %s: err=%v, want the guard's Forbidden", name, err)
+			}
 		}
 		installGuard(pins)
 
@@ -841,6 +982,7 @@ func TestEnvtest(t *testing.T) {
 			"${OPERATOR_USERNAME}": operatorUser, "${INSTALL_NAMESPACE}": "dotvirt", "${ARGO_NAMESPACE}": "argocd",
 			"${ARGO_CONTROLLER}": "argocd-application-controller", "${SPEC_IMAGE}": "", "${FORGE_INSECURE_TLS}": "false",
 			"${RELATED_IMAGE_DOTVIRT}": "", "${RELATED_IMAGE_FORGEJO}": "", "${METRICS_URL}": "", "${METRICS_TENANCY_URL}": "", "${METRICS_CA}": "",
+			"${CONSOLE_HOST}": "",
 		} {
 			filled = strings.ReplaceAll(filled, k, v)
 		}
@@ -1863,6 +2005,38 @@ func argoStubCRDs() []*apiextensionsv1.CustomResourceDefinition {
 				Scope: apiextensionsv1.NamespaceScoped,
 				Versions: []apiextensionsv1.CustomResourceDefinitionVersion{{
 					Name: gvk.version, Served: true, Storage: true,
+					Schema: &apiextensionsv1.CustomResourceValidation{OpenAPIV3Schema: &apiextensionsv1.JSONSchemaProps{
+						Type: "object", XPreserveUnknownFields: &preserve,
+					}},
+				}},
+			},
+		})
+	}
+	return out
+}
+
+// exposureStubCRDs serve the Route and HTTPRoute kinds the console may be
+// exposed by, schemaless, so the front-door rules have something to judge.
+func exposureStubCRDs() []*apiextensionsv1.CustomResourceDefinition {
+	preserve := true
+	var out []*apiextensionsv1.CustomResourceDefinition
+	for _, k := range []struct{ group, kind, plural string }{
+		{"route.openshift.io", "Route", "routes"},
+		{"gateway.networking.k8s.io", "HTTPRoute", "httproutes"},
+	} {
+		meta := metav1.ObjectMeta{Name: k.plural + "." + k.group}
+		if strings.HasSuffix(k.group, ".k8s.io") {
+			// The apiserver asks this of any CRD in a Kubernetes-owned group.
+			meta.Annotations = map[string]string{"api-approved.kubernetes.io": "unapproved, test stub"}
+		}
+		out = append(out, &apiextensionsv1.CustomResourceDefinition{
+			ObjectMeta: meta,
+			Spec: apiextensionsv1.CustomResourceDefinitionSpec{
+				Group: k.group,
+				Names: apiextensionsv1.CustomResourceDefinitionNames{Kind: k.kind, ListKind: k.kind + "List", Plural: k.plural, Singular: strings.ToLower(k.kind)},
+				Scope: apiextensionsv1.NamespaceScoped,
+				Versions: []apiextensionsv1.CustomResourceDefinitionVersion{{
+					Name: "v1", Served: true, Storage: true,
 					Schema: &apiextensionsv1.CustomResourceValidation{OpenAPIV3Schema: &apiextensionsv1.JSONSchemaProps{
 						Type: "object", XPreserveUnknownFields: &preserve,
 					}},

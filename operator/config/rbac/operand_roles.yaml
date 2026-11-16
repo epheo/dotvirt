@@ -24,6 +24,16 @@ rules:
   - apiGroups: [""]
     resources: ["namespaces"]
     verbs: ["get", "list", "watch"]
+  # The OpenShift SSO client the console signs users in with: named for its
+  # namespace, redirecting to its install's host, else the router's host on
+  # the cluster's ingress domain; never the env the operator writes.
+  - apiGroups: ["dotvirt.io"]
+    resources: ["dotvirts"]
+    verbs: ["get", "list"]
+  - apiGroups: ["config.openshift.io"]
+    resources: ["ingresses"]
+    resourceNames: ["cluster"]
+    verbs: ["get"]
   # Whether routes are on (a GatewayClass exists), and whether the publishing
   # class says its Gateways are isolated.
   - apiGroups: ["gateway.networking.k8s.io"]

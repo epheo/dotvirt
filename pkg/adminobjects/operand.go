@@ -13,10 +13,14 @@ import (
 // managed forge run as; ConsoleDeployment and ForgeDeployment their
 // Deployments.
 const (
-	ConsoleAccount    = "dotvirt"
-	ForgeAccount      = "dotvirt-forgejo"
-	ConsoleDeployment = "dotvirt"
-	ForgeDeployment   = "dotvirt-forgejo"
+	ConsoleAccount = "dotvirt"
+	// ConsoleSelectorKey and ConsoleSelectorValue select the console's pods
+	// for its Service.
+	ConsoleSelectorKey   = "app"
+	ConsoleSelectorValue = "dotvirt"
+	ForgeAccount         = "dotvirt-forgejo"
+	ConsoleDeployment    = "dotvirt"
+	ForgeDeployment      = "dotvirt-forgejo"
 )
 
 // ArgoTarget is the ArgoCD namespace and controller ServiceAccount an install
@@ -108,9 +112,18 @@ func SSOClientName(namespace string) string { return "dotvirt-" + namespace }
 // choosing would receive every login code, and the operator holds the
 // client secret.
 func SSORedirect(specHost, namespace, appsDomain string) string {
-	host := specHost
-	if host == "" {
-		host = ConsoleDeployment + "-" + namespace + "." + appsDomain
+	return "https://" + ConsoleHost(specHost, namespace, appsDomain) + "/api/auth/callback"
+}
+
+// ConsoleHost is the console's host: spec.ingress.host, else the host
+// OpenShift's router gives the hostless Route named dotvirt in namespace on
+// appsDomain, else "" (no router, no host: nothing is exposed).
+func ConsoleHost(specHost, namespace, appsDomain string) string {
+	switch {
+	case specHost != "":
+		return specHost
+	case appsDomain != "":
+		return ConsoleDeployment + "-" + namespace + "." + appsDomain
 	}
-	return "https://" + host + "/api/auth/callback"
+	return ""
 }

@@ -59,6 +59,8 @@ func TestGuardShape(t *testing.T) {
 		GuardDeploymentsName: {{"apps", "deployments"}},
 		GuardBindingsName:    {{"rbac.authorization.k8s.io", "clusterrolebindings"}, {"rbac.authorization.k8s.io", "rolebindings"}},
 		GuardInstallName:     {{"dotvirt.io", "dotvirts"}},
+		GuardFrontDoorName: {{"", "services"}, {"route.openshift.io", "routes"}, {"networking.k8s.io", "ingresses"},
+			{"gateway.networking.k8s.io", "httproutes"}},
 	}
 	for i, name := range GuardNames {
 		p := policyOf(t, objs[i])
@@ -175,10 +177,10 @@ func TestCompareSaysWhatDiffers(t *testing.T) {
 			return o
 		}, 1, Outdated, "lacks the rule"},
 		"a warn-only binding": {func() *unstructured.Unstructured {
-			o := want[4].Object.DeepCopy()
+			o := want[len(GuardNames)].Object.DeepCopy()
 			_ = unstructured.SetNestedStringSlice(o.Object, []string{"Warn"}, "spec", "validationActions")
 			return o
-		}, 4, Outdated, "does not only deny"},
+		}, len(GuardNames), Outdated, "does not only deny"},
 	} {
 		got, detail := Compare(want[c.which].Object, c.live())
 		if got != c.state || !strings.Contains(detail, c.detail) {
@@ -222,6 +224,7 @@ func TestReleaseTemplate(t *testing.T) {
 		"${OPERATOR_USERNAME}": params.Operator, "${INSTALL_NAMESPACE}": params.Namespace, "${ARGO_NAMESPACE}": params.ArgoNamespace,
 		"${ARGO_CONTROLLER}": params.ArgoController, "${SPEC_IMAGE}": params.SpecImage, "${RELATED_IMAGE_DOTVIRT}": "", "${RELATED_IMAGE_FORGEJO}": "",
 		"${FORGE_INSECURE_TLS}": "false", "${METRICS_URL}": "", "${METRICS_TENANCY_URL}": "", "${METRICS_CA}": "",
+		"${CONSOLE_HOST}": params.ConsoleHost,
 	} {
 		filled = strings.ReplaceAll(filled, k, v)
 	}

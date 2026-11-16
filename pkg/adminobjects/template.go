@@ -15,6 +15,7 @@ var TemplateParams = Params{
 	SpecImage:      "${SPEC_IMAGE}",
 	DotvirtImage:   "${RELATED_IMAGE_DOTVIRT}",
 	ForgejoImage:   "${RELATED_IMAGE_FORGEJO}",
+	ConsoleHost:    "${CONSOLE_HOST}",
 }
 
 // templateHeader says how to fill and apply the template, each value derived
@@ -23,7 +24,8 @@ const templateHeader = `# The dotvirt operator guard: admission policies boundin
 # account. A cluster admin installs it from the console (Install). Without the
 # console, derive each value from the cluster yourself (never copy one from the
 # operator's status or conditions, which the operator writes), fill the
-# placeholders and apply it.
+# placeholders and apply it. Run the lines below as a script: it stops when it
+# cannot tell which operator to pin.
 #
 #   # The install's namespace is the console's: tenants may create Dotvirts in
 #   # their own namespaces, so take the one ClusterRoleBinding dotvirt grants the
@@ -38,7 +40,7 @@ const templateHeader = `# The dotvirt operator guard: admission policies boundin
 #     -o jsonpath='{range .items[*]}{.metadata.namespace}/{.spec.template.spec.serviceAccountName}{"\n"}{end}' |
 #     while IFS=/ read -r ns sa; do kubectl auth can-i patch dotvirts.dotvirt.io --subresource=status \
 #       -n "$INSTALL_NAMESPACE" --as="system:serviceaccount:$ns:${sa:-default}" >/dev/null && echo "$ns/${sa:-default}"; done)"
-#   [ "$(printf '%s\n' "$OP" | grep -c /)" = 1 ] || echo "want exactly one operator, found: $OP"
+#   [ "$(printf '%s\n' "$OP" | grep -c /)" = 1 ] || { echo "want exactly one operator, found: $OP" >&2; exit 1; }
 #   export OPERATOR_USERNAME="system:serviceaccount:${OP%/*}:${OP#*/}"
 #   relimg() { kubectl -n "${OP%/*}" get deploy ` + OperatorDeployment + ` \
 #     -o jsonpath="{.spec.template.spec.containers[0].env[?(@.name==\"$1\")].value}"; }
@@ -60,6 +62,12 @@ const templateHeader = `# The dotvirt operator guard: admission policies boundin
 #   [ -n "$ARGO_CONTROLLER" ] || ARGO_CONTROLLER="$( [ "$ARGO_NAMESPACE" = openshift-gitops ] \
 #     && echo openshift-gitops-argocd-application-controller || echo argocd-application-controller)"
 #   export ARGO_NAMESPACE ARGO_CONTROLLER
+#   # The console's host: spec.ingress.host, else the router's host for the
+#   # console's Route (OpenShift), else empty:
+#   CONSOLE_HOST="$(spec ingress.host)"
+#   [ -n "$CONSOLE_HOST" ] || CONSOLE_HOST="$(kubectl get ingresses.config.openshift.io cluster \
+#     -o jsonpath='{.spec.domain}' 2>/dev/null | sed "s|^.|dotvirt-$INSTALL_NAMESPACE.&|")"
+#   export CONSOLE_HOST
 #
 #   envsubst < guard.yaml | ` + ApplyCommand + ` -
 #
@@ -69,7 +77,7 @@ const templateHeader = `# The dotvirt operator guard: admission policies boundin
 #     -e "s|\${SPEC_IMAGE}|$SPEC_IMAGE|g" -e "s|\${FORGE_INSECURE_TLS}|$FORGE_INSECURE_TLS|g" \
 #     -e "s|\${RELATED_IMAGE_DOTVIRT}|$RELATED_IMAGE_DOTVIRT|g" -e "s|\${RELATED_IMAGE_FORGEJO}|$RELATED_IMAGE_FORGEJO|g" \
 #     -e "s|\${METRICS_URL}|$METRICS_URL|g" -e "s|\${METRICS_TENANCY_URL}|$METRICS_TENANCY_URL|g" \
-#     -e "s|\${METRICS_CA}|$METRICS_CA|g" guard.yaml | ` + ApplyCommand + ` -
+#     -e "s|\${METRICS_CA}|$METRICS_CA|g" -e "s|\${CONSOLE_HOST}|$CONSOLE_HOST|g" guard.yaml | ` + ApplyCommand + ` -
 #
 # Every object carries the label app.kubernetes.io/part-of=dotvirt-operator-guard.
 #

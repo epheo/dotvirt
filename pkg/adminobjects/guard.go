@@ -23,10 +23,11 @@ const (
 	GuardDeploymentsName = "dotvirt-operator-deployments"
 	GuardBindingsName    = "dotvirt-operator-bindings"
 	GuardInstallName     = "dotvirt-operator-install"
+	GuardFrontDoorName   = "dotvirt-operator-frontdoor"
 )
 
 // GuardNames are the guard's policy and binding names, in render order.
-var GuardNames = []string{GuardSecretsName, GuardDeploymentsName, GuardBindingsName, GuardInstallName}
+var GuardNames = []string{GuardSecretsName, GuardDeploymentsName, GuardBindingsName, GuardInstallName, GuardFrontDoorName}
 
 // OperandAccounts are the ServiceAccounts the operator's Deployments run as:
 // the console's and the managed forge's.
@@ -88,9 +89,18 @@ func guard(p Params, insecure string, metrics Metrics) []Object {
 			// The console runs its image's own entrypoint and nothing before it.
 			// Its arguments stay free, so a release may add flags; the ones that
 			// send users' tokens elsewhere are pinned below.
-			deny(`object.metadata.name != `+quote(ConsoleDeployment)+` || (`+pod+`.containers.all(c, !has(c.command)) && `+
-				`(!has(`+pod+`.initContainers) || size(`+pod+`.initContainers) == 0))`,
-				"the operator runs the console with its image's own entrypoint and no init container"),
+			// No other process beside it either: an exec probe or hook could run
+			// the console's binary again with any settings, and a shared process
+			// namespace would let a sibling read its memory.
+			deny(`object.metadata.name != `+quote(ConsoleDeployment)+` || (`+pod+`.containers.all(c, !has(c.command) && `+noExec+`) && `+
+				`(!has(`+pod+`.initContainers) || size(`+pod+`.initContainers) == 0) && `+
+				`!(has(`+pod+`.shareProcessNamespace) && `+pod+`.shareProcessNamespace))`,
+				"the operator runs the console with its image's own entrypoint, no exec hook or probe, no init container, no shared process namespace"),
+			// The console's Service selects its pods by this label: a forge pod
+			// carrying it would answer on the console's host.
+			deny(`object.metadata.name != `+quote(ForgeDeployment)+` || !has(object.spec.template.metadata.labels) || `+
+				`!(`+quote(ConsoleSelectorKey)+` in object.spec.template.metadata.labels && object.spec.template.metadata.labels[`+quote(ConsoleSelectorKey)+`] == `+quote(ConsoleSelectorValue)+`)`,
+				"the operator gives the forge's pods none of the console's labels"),
 			deny(`object.metadata.name != `+quote(ConsoleDeployment)+` || `+pod+`.containers.all(c, `+consoleSettings(metrics, insecure)+`)`,
 				"the operator sets none of the console's settings that send users' tokens or the console's pages elsewhere, but as an admin chose them"),
 			// The console's apiserver endpoint and credentials are the in-cluster
@@ -148,12 +158,20 @@ func guard(p Params, insecure string, metrics Metrics) []Object {
 			deny(unchanged("object.metadata.annotations", "oldObject.metadata.annotations"), "the operator may change only its install's finalizers, never its annotations"),
 			deny(unchanged("object.metadata.ownerReferences", "oldObject.metadata.ownerReferences"), "the operator may change only its install's finalizers, never its owners"),
 		}),
+		// The console's front door: the Service and the exposure the console's
+		// host reaches it by, so its login codes reach the console and nothing
+		// else. The forge holds no user token; its exposures may only not claim
+		// the console's host.
+		policy(GuardFrontDoorName, append(append(append(rules("", "services"), rules("route.openshift.io", "routes")...),
+			rules("networking.k8s.io", "ingresses")...), rules("gateway.networking.k8s.io", "httproutes")...), operator,
+			frontDoor(p)),
 	}
 	purpose := map[string]string{
 		GuardSecretsName:     "Bounds the operator's Secrets: none outside " + p.Namespace + " and " + p.ArgoNamespace + ", never a ServiceAccount token",
 		GuardDeploymentsName: "Bounds the operator's Deployments: the console and the forge only, in " + p.Namespace + ", with their own accounts, images, commands and token, unprivileged and off the host",
 		GuardBindingsName:    "Bounds the operator's RBAC bindings: only the ones it renders, to their own roles and rendered subjects",
 		GuardInstallName:     "Bounds the operator's writes to its install: its finalizers only, never the spec an admin wrote",
+		GuardFrontDoorName:   "Bounds the console's front door: its Service and exposure lead to the console on the host an admin chose",
 	}
 	var out []Object
 	for _, pol := range policies {
@@ -220,6 +238,57 @@ func consoleSettings(m Metrics, insecure string) string {
 		never("static-dir", "DOTVIRT_STATIC_DIR"),
 		`(!has(c.env) || c.env.all(e, !(e.name in ` + list(trustEnv...) + `)))`,
 	}, " && ")
+}
+
+// noExec is container c starting no process of its own: no exec lifecycle
+// hook and no exec probe.
+const noExec = `(!has(c.lifecycle) || ((!has(c.lifecycle.postStart) || !has(c.lifecycle.postStart.exec)) && ` +
+	`(!has(c.lifecycle.preStop) || !has(c.lifecycle.preStop.exec)))) && ` +
+	`!(has(c.livenessProbe) && has(c.livenessProbe.exec)) && !(has(c.readinessProbe) && has(c.readinessProbe.exec)) && ` +
+	`!(has(c.startupProbe) && has(c.startupProbe.exec))`
+
+// frontDoor are the front-door rules: the console's Service, Route, Ingress
+// and HTTPRoute (each named dotvirt in the install namespace) as rendered,
+// and no other exposure on the console's host.
+func frontDoor(p Params) []admissionregistrationv1.Validation {
+	kind := func(resource string) string { return `request.resource.resource == ` + quote(resource) }
+	console := `(object.metadata.name == ` + quote(ConsoleDeployment) + ` && request.namespace == ` + quote(p.Namespace) + `)`
+	host := quote(p.ConsoleHost)
+	// Annotations steer some controllers (an ingress controller's mirror or
+	// snippet): the console's exposures keep whatever they have, and the
+	// operator adds none.
+	sameAnnotations := `(request.operation == "CREATE" ? !has(object.metadata.annotations) : ` +
+		unchanged("object.metadata.annotations", "oldObject.metadata.annotations") + `)`
+	return []admissionregistrationv1.Validation{
+		deny(`!(`+kind("services")+` && `+console+`) || (`+
+			`has(object.spec.selector) && object.spec.selector == {`+quote(ConsoleSelectorKey)+`: `+quote(ConsoleSelectorValue)+`} && `+
+			`(!has(object.spec.type) || object.spec.type == "ClusterIP") && !has(object.spec.externalName) && `+
+			`!(has(object.spec.publishNotReadyAddresses) && object.spec.publishNotReadyAddresses) && `+
+			`object.spec.ports.all(port, has(port.targetPort) && string(port.targetPort) in ["8080", "http"]))`,
+			"the operator points the console's Service only at the console's pods and port"),
+		deny(`!(`+kind("routes")+` && `+console+`) || (`+sameAnnotations+` && `+
+			`object.spec.to.kind == "Service" && object.spec.to.name == `+quote(ConsoleDeployment)+` && `+
+			`(!has(object.spec.alternateBackends) || size(object.spec.alternateBackends) == 0) && `+
+			`has(object.spec.port) && string(object.spec.port.targetPort) == "http" && `+
+			`has(object.spec.tls) && object.spec.tls.termination == "edge" && !has(object.spec.tls.destinationCACertificate) && `+
+			`(!has(object.spec.host) || object.spec.host == "" || object.spec.host == `+host+`))`,
+			"the operator routes the console's host only to the console's Service, edge-terminated"),
+		deny(`!(`+kind("ingresses")+` && `+console+`) || (`+sameAnnotations+` && `+
+			`(!has(object.spec.defaultBackend) || (has(object.spec.defaultBackend.service) && object.spec.defaultBackend.service.name == `+quote(ConsoleDeployment)+`)) && `+
+			`object.spec.rules.all(r, has(r.host) && r.host == `+host+` && has(r.http) && r.http.paths.all(path, `+
+			`has(path.backend.service) && path.backend.service.name == `+quote(ConsoleDeployment)+` && path.backend.service.port.number == 8080)))`,
+			"the operator sends the console's Ingress only to the console's Service, on the console's host"),
+		deny(`!(`+kind("httproutes")+` && `+console+`) || (`+sameAnnotations+` && `+
+			`object.spec.hostnames == [`+host+`] && object.spec.rules.all(r, !has(r.filters) && r.backendRefs.all(b, `+
+			`!has(b.filters) && (!has(b.kind) || b.kind == "Service") && (!has(b.group) || b.group == "") && `+
+			`(!has(b.namespace) || b.namespace == `+quote(p.Namespace)+`) && b.name == `+quote(ConsoleDeployment)+` && b.port == 8080)))`,
+			"the operator sends the console's HTTPRoute only to the console's Service, on the console's host, unfiltered"),
+		deny(``+console+` || `+host+` == "" || (`+
+			`(!(`+kind("routes")+`) || ((!has(object.spec.host) || object.spec.host != `+host+`) && (!has(object.spec.wildcardPolicy) || object.spec.wildcardPolicy == "None"))) && `+
+			`(!(`+kind("ingresses")+`) || !has(object.spec.rules) || object.spec.rules.all(r, !has(r.host) || r.host != `+host+`)) && `+
+			`(!(`+kind("httproutes")+`) || !has(object.spec.hostnames) || !(`+host+` in object.spec.hostnames)))`,
+			"the operator exposes nothing else on the console's host"),
+	}
 }
 
 // trustEnv are the env Go's HTTP clients take a proxy or a trust store from.

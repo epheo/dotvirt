@@ -36,7 +36,12 @@ What the guard closes:
   install and ArgoCD namespaces;
 - running anything but the console and the forge, each as its own account and from its
   own repository (or the image an admin chose), on the host, as root, privileged or with
-  added capabilities, or the console with another entrypoint or an init container;
+  added capabilities, or the console with another entrypoint, an init container, an exec
+  probe or hook, or a shared process namespace (the operator holds no right on pods, so
+  it cannot exec into one or add an ephemeral container either);
+- leading the console's host anywhere but the console: its Service selects only the
+  console's pods and port, its Route, Ingress or HTTPRoute leads only there, on the
+  console's host, and no other exposure may claim that host;
 - sending the tokens signed-in users give the console anywhere an admin did not choose:
   no kubeconfig, apiserver address, `envFrom`, proxy or trust store of the operator's
   choosing; nothing mounted over the console's ServiceAccount token and cluster CA; no
@@ -54,8 +59,8 @@ OAuth server through the cluster's DNS, with no proxy, host alias or resolver of
 operator's choosing, so presenting a certificate for them takes a network position the
 operator does not have.
 
-The OpenShift SSO client the console registers (Finish SSO) is named and redirected
-from what the admin's token reads, never from the console's environment.
+The OpenShift SSO client the console registers (Finish SSO), and signs users in with,
+is named and redirected from the install, never from the console's environment.
 
 What stays open:
 - the console's other configuration the operator writes as flags or `DOTVIRT_*` env,

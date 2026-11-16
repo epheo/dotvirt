@@ -57,7 +57,7 @@ owns one status condition; a phase that fails or waits records why there, so
 1. **Dependencies** (`DependenciesReady`): probes for ArgoCD, a hard prerequisite
    it never installs (it waits and reports if it is absent), and for KubeVirt,
    OVN-K, NMState and CDI (soft: noted, the install proceeds).
-2. **Operator guard** (`OperatorGuard`): renders four ValidatingAdmissionPolicies and
+2. **Operator guard** (`OperatorGuard`): renders five ValidatingAdmissionPolicies and
    their bindings that bound the operator's own account, pinned to its exact username
    (one SelfSubjectReview at startup), the install namespace, and the ArgoCD namespace
    and controller (`spec.argocd`, else the defaults):
@@ -68,7 +68,8 @@ owns one status condition; a phase that fails or waits records why there, so
      console's images come from `quay.io/epheo/dotvirt` and the forge's from
      `codeberg.org/forgejo/forgejo` (any tag or digest), or exactly the image an admin
      chose (`spec.image`, the operator Deployment's `RELATED_IMAGE_*`). The console runs
-     its image's entrypoint with no init container. Its arguments stay free, so a release
+     its image's entrypoint with no init container, no exec probe or hook, and no shared
+     process namespace; the forge's pods never carry the console's `app` label. Its arguments stay free, so a release
      may add flags, except the settings that send users' tokens or its pages elsewhere,
      by flag or env: the metrics endpoints and CA only as rendered from `spec.metrics`,
      TLS verification off only with `spec.forge.insecureTLS`, and never a kubeconfig or
@@ -84,7 +85,14 @@ owns one status condition; a phase that fails or waits records why there, so
    - `dotvirt-operator-install`: the operator's updates to its Dotvirt resource keep
      spec, labels, annotations and owners as they are. It adds and removes its finalizer
      by a patch of the finalizers alone, so once the guard is in, the spec is the
-     admin's.
+     admin's;
+   - `dotvirt-operator-frontdoor`: the console's Service selects only the console's pods
+     on its port (ClusterIP, no external name, no unready pods), and its Route, Ingress
+     or HTTPRoute leads only to that Service, on the console's host (`spec.ingress.host`,
+     else the router's host on the cluster's ingress domain), edge-terminated, with no
+     filter and no annotation the operator adds. No other exposure the operator writes
+     may claim the console's host or a wildcard. The forge's own exposures are otherwise
+     free: it holds no user token.
 
    The operator never installs them: it reads them back by name and reports each in
    `status.adminObjects` as `NotInstalled`, `Outdated` (rendered for other pins or
@@ -668,7 +676,8 @@ at apply time, so it never lands in status.
 
 A cluster admin signed in to the console can register it instead (Finish SSO). The
 console names the client `dotvirt-<namespace>` after its own namespace and takes its
-redirect from what the admin's token reads: `spec.ingress.host`, else the host
+redirect, for registering and for signing users in alike, from the install (its own
+account reads it to sign users in, the admin's token to register): `spec.ingress.host`, else the host
 OpenShift's router gives the console's hostless Route (`dotvirt-<namespace>.<cluster
 ingress domain>`). It never takes either from the public URL the operator writes into
 its environment: a redirect of the operator's choosing would receive every login code,

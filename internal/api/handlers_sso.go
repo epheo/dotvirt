@@ -2,9 +2,11 @@ package api
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
 	"net/http"
+	"strings"
 	"time"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -13,7 +15,6 @@ import (
 	"github.com/epheo/dotvirt/internal/cluster"
 	"github.com/epheo/dotvirt/internal/eventbus"
 	"github.com/epheo/dotvirt/internal/model"
-	"github.com/epheo/dotvirt/pkg/adminobjects"
 )
 
 // revokeTimeout bounds the SSO token delete a logout runs.
@@ -97,21 +98,31 @@ func (s *Server) ssoClient(ctx context.Context, c *cluster.Client) (id, redirect
 	if ns == "" {
 		return "", "", fmt.Errorf("%w: the console does not know its namespace (not running in a pod)", model.ErrUnavailable)
 	}
-	readErr := func(what string, err error) error {
-		if apierrors.IsForbidden(err) {
-			return fmt.Errorf("%w: your token may not read %s; a cluster admin has to finish SSO", model.ErrForbidden, what)
-		}
-		return unavailable(fmt.Errorf("read %s: %w", what, err))
+	id, redirect, err = c.SSOClient(ctx, ns)
+	if apierrors.IsForbidden(err) {
+		return "", "", fmt.Errorf("%w: your token may not read %v; a cluster admin has to finish SSO", model.ErrForbidden, err)
 	}
-	spec, err := c.InstallIn(ctx, ns)
 	if err != nil {
-		return "", "", readErr("the install", err)
+		return "", "", unavailable(err)
 	}
-	domain := ""
-	if spec.IngressHost == "" {
-		if domain, err = c.AppsDomain(ctx); err != nil {
-			return "", "", readErr("the cluster's ingress domain", err)
+	return id, redirect, nil
+}
+
+// SSOClientConfig is the OpenShift OAuthClient and redirect the console signs
+// users in with: the ones Finish SSO registers, read with its own account
+// (sa) in its namespace. The env the operator writes (envID, envPublicURL)
+// serves only when they cannot be read, and err says why.
+func SSOClientConfig(ctx context.Context, sa *cluster.Client, namespace, envID, envPublicURL string) (id, redirect string, err error) {
+	if namespace != "" {
+		if id, redirect, err = sa.SSOClient(ctx, namespace); err == nil {
+			return id, redirect, nil
 		}
+	} else {
+		err = errors.New("the console does not know its namespace")
 	}
-	return adminobjects.SSOClientName(ns), adminobjects.SSORedirect(spec.IngressHost, ns, domain), nil
+	redirect = ""
+	if envPublicURL != "" {
+		redirect = strings.TrimRight(envPublicURL, "/") + "/api/auth/callback"
+	}
+	return envID, redirect, err
 }

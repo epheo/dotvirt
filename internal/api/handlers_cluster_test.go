@@ -814,6 +814,28 @@ func TestFinishSSO(t *testing.T) {
 	}
 }
 
+// Sign-in uses the client and redirect Finish SSO registers, read with the
+// console's own account; the env the operator writes only when they cannot be
+// read.
+func TestSSOClientConfig(t *testing.T) {
+	fc := newFakeCluster(t)
+	fc.on(http.MethodGet, "/apis/dotvirt.io/v1alpha1/namespaces/dotvirt/dotvirts", func(w http.ResponseWriter, r *http.Request) {
+		writeObj(w, map[string]any{"apiVersion": "dotvirt.io/v1alpha1", "kind": "DotvirtList", "metadata": map[string]any{}, "items": []any{map[string]any{
+			"apiVersion": "dotvirt.io/v1alpha1", "kind": "Dotvirt", "metadata": map[string]any{"name": "x", "namespace": "dotvirt"},
+			"spec": map[string]any{"ingress": map[string]any{"host": "dotvirt.example"}},
+		}}})
+	})
+	fc.server(nil, Config{})
+	id, redirect, err := SSOClientConfig(t.Context(), fc.sa, "dotvirt", "console", "https://evil.example")
+	if err != nil || id != "dotvirt-dotvirt" || redirect != "https://dotvirt.example/api/auth/callback" {
+		t.Errorf("derived = %q %q %v; want the install's, never the env's", id, redirect, err)
+	}
+	id, redirect, err = SSOClientConfig(t.Context(), fc.sa, "elsewhere", "console", "https://env.example/")
+	if err == nil || id != "console" || redirect != "https://env.example/api/auth/callback" {
+		t.Errorf("unreadable install = %q %q %v; want the env's, and why", id, redirect, err)
+	}
+}
+
 // The cluster-wide snapshot listing reads every managed namespace under the
 // caller's token, carries the source VM and captured volumes, and skips a
 // repoless project's namespace like the events lane.
