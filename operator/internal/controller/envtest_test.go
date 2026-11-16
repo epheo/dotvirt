@@ -311,7 +311,7 @@ func TestEnvtest(t *testing.T) {
 			if _, ok := adminobjects.Allow(adminobjects.Allowed("dotvirt"), o); !ok {
 				t.Fatalf("status lists %s %s, which the console would refuse", o.GetKind(), o.GetName())
 			}
-			if err := admin.Patch(ctx, o, client.Apply, client.FieldOwner("dotvirt"), client.ForceOwnership); err != nil {
+			if err := admin.Apply(ctx, client.ApplyConfigurationFromUnstructured(o), client.FieldOwner("dotvirt"), client.ForceOwnership); err != nil {
 				t.Fatalf("install %s: %v", o.GetName(), err)
 			}
 			objs = append(objs, o)
@@ -393,7 +393,7 @@ func TestEnvtest(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			return opClient.Patch(ctx, u, client.Apply, client.FieldOwner(operatorFieldManager), client.ForceOwnership, client.DryRunAll)
+			return opClient.Apply(ctx, client.ApplyConfigurationFromUnstructured(u), client.FieldOwner(operatorFieldManager), client.ForceOwnership, client.DryRunAll)
 		}
 		rendered := []*appsv1.Deployment{
 			install.Deployment(dv, "argocd", nil),
