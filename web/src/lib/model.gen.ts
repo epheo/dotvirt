@@ -1738,6 +1738,11 @@ export interface StorageClassInfo {
    */
   free?: number /* int64 */;
   segments?: CapacitySegment[];
+  /**
+   * Forbidden is set on a list asked for one namespace: a ResourceQuota
+   * there allows no claim on the class, so a disk on it would be refused.
+   */
+  forbidden?: boolean;
 }
 /**
  * StorageProfile is what a DataVolume gets on the class when its template

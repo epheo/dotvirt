@@ -2119,7 +2119,27 @@ const publishingapart = {
 	capabilities: { ...publishing.capabilities, 'db-prod': { project: { publishingApart: true } } },
 };
 
+// web-prod's quotas forbid fast-ssd, the cluster default; db-prod's forbid
+// bulk-hdd, the shared class; batch-prod's forbid every class.
+const classquota = {
+	...base,
+	name: 'classquota',
+	classQuotas: {
+		'web-prod': ['fast-ssd'],
+		'db-prod': ['bulk-hdd'],
+		'batch-prod': ['fast-ssd', 'bulk-hdd'],
+	},
+};
+// On r-drbd, web-prod's quotas forbid the nvme two-copy class.
+const replicatedquota = {
+	...replicated,
+	name: 'replicatedquota',
+	classQuotas: { 'web-prod': ['r-drbd-replicated'] },
+};
+
 export const scenarios = {
+	classquota,
+	replicatedquota,
 	publishing,
 	publishingwaits,
 	publishingunhoused,

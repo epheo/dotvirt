@@ -56,6 +56,84 @@ test('a VM stages the request the backend renders, then shows its password once'
 	await expect(sheet).toBeHidden();
 });
 
+// A namespace's ResourceQuota of zero on a class keeps it out of the form:
+// web-prod forbids fast-ssd, the cluster default, so the pick moves to the
+// first class it allows and the request names it.
+test("a namespace's quotas keep a forbidden storage class out of the form", async ({ page }) => {
+	await setScenario(page, 'classquota');
+	await login(page);
+	await page.goto('/compute/team-web/web-prod');
+	await page.getByTitle('Create a VM, network, rule or project').click();
+	const sheet = page.getByRole('dialog');
+	await expect(sheet.getByRole('heading', { name: 'New VM' })).toBeVisible();
+	// Pinned before the disk editor is ever opened: the form, not the picker, holds it.
+	await expect(sheet.getByText(/30 GiB on bulk-hdd/)).toBeVisible();
+	await sheet.getByRole('button', { name: 'Change disk' }).click();
+	await expect(sheet.getByRole('radio', { name: /bulk-hdd/ })).toBeChecked();
+	await expect(sheet.getByRole('radio', { name: /fast-ssd/ })).toHaveCount(0);
+
+	const posted = page.waitForRequest(
+		(r) =>
+			r.method() === 'POST' &&
+			new URL(r.url()).pathname === '/api/vms' &&
+			!r.url().includes('dryRun'),
+	);
+	await sheet.getByRole('button', { name: 'Stage VM' }).click();
+	expect((await posted).postDataJSON()).toMatchObject({
+		namespace: 'web-prod',
+		storageClass: 'bulk-hdd',
+	});
+});
+
+test("the image form offers only the classes the namespace's quotas allow", async ({ page }) => {
+	await setScenario(page, 'classquota');
+	await login(page);
+	await page.goto('/compute/team-web/web-prod');
+	await page.getByTitle('Create a VM, network, rule or project').click();
+	const sheet = page.getByRole('dialog');
+	await sheet.getByRole('radio', { name: 'Image', exact: true }).click();
+	await expect(sheet.getByRole('heading', { name: 'New image' })).toBeVisible();
+	await expect(sheet.getByRole('radio', { name: /bulk-hdd/ })).toBeChecked();
+	await expect(sheet.getByRole('radio', { name: /fast-ssd/ })).toHaveCount(0);
+});
+
+test('live migration is not offered through a class the namespace forbids', async ({ page }) => {
+	await setScenario(page, 'classquota');
+	await login(page);
+	await page.goto('/compute/team-db/db-prod');
+	await page.getByTitle('Create a VM, network, rule or project').click();
+	const sheet = page.getByRole('dialog');
+	await expect(sheet.getByText(/cannot live-migrate/)).toBeVisible();
+	await expect(sheet.getByRole('button', { name: /to keep it$/ })).toHaveCount(0);
+});
+
+test('where no class is allowed, neither a VM nor an image can be staged', async ({ page }) => {
+	await setScenario(page, 'classquota');
+	await login(page);
+	await page.goto('/compute/team-batch/batch-prod');
+	await page.getByTitle('Create a VM, network, rule or project').click();
+	const sheet = page.getByRole('dialog');
+	await expect(sheet.getByRole('heading', { name: 'New VM' })).toBeVisible();
+	await expect(sheet.getByText('No storage class may be used in batch-prod')).toBeVisible();
+	await expect(sheet.getByRole('button', { name: 'Stage VM' })).toBeDisabled();
+
+	await sheet.getByRole('radio', { name: 'Image', exact: true }).click();
+	await sheet.locator('input[type=file]').setInputFiles({
+		name: 'scratch.qcow2',
+		mimeType: 'application/octet-stream',
+		buffer: Buffer.alloc(1024),
+	});
+	await expect(sheet.getByText('No storage class may be used in batch-prod')).toBeVisible();
+	await expect(sheet.getByRole('button', { name: 'Upload image' })).toBeDisabled();
+});
+
+test('without a quota on it, the default class is offered and picked', async ({ page }) => {
+	const sheet = await openNew(page);
+	await sheet.getByRole('button', { name: 'Change disk' }).click();
+	await expect(sheet.getByRole('radio', { name: /fast-ssd/ })).toBeChecked();
+	await expect(sheet.getByRole('radio', { name: /bulk-hdd/ })).not.toBeChecked();
+});
+
 test('Show YAML renders through the dry run and stages nothing', async ({ page }) => {
 	const sheet = await openNew(page);
 	const dry = page.waitForRequest((r) => r.url().includes('/api/vms?dryRun=true'));

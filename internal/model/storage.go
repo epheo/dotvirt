@@ -30,6 +30,10 @@ type StorageClassInfo struct {
 	// nothing rather than zero.
 	Free     *int64            `json:"free,omitempty"`
 	Segments []CapacitySegment `json:"segments,omitempty"`
+
+	// Forbidden is set on a list asked for one namespace: a ResourceQuota
+	// there allows no claim on the class, so a disk on it would be refused.
+	Forbidden bool `json:"forbidden,omitempty"`
 }
 
 // StorageProfile is what a DataVolume gets on the class when its template

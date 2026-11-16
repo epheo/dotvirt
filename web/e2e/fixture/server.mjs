@@ -439,7 +439,17 @@ async function handleAPI(req, res, url) {
 	}
 	if (path === '/api/inventory') return sendJSON(res, 200, s.inventory);
 	if (path === '/api/options') return sendJSON(res, 200, s.options);
-	if (path === '/api/storage/classes') return sendJSON(res, 200, s.storageClasses ?? []);
+	if (path === '/api/storage/classes') {
+		// Asked for a namespace, the classes its quotas forbid come back marked.
+		const ns = url.searchParams.get('namespace');
+		const shut = new Set((ns && s.classQuotas?.[ns]) || []);
+		const classes = s.storageClasses ?? [];
+		return sendJSON(
+			res,
+			200,
+			classes.map((c) => (shut.has(c.name) ? { ...c, forbidden: true } : c)),
+		);
+	}
 	if (req.method === 'POST') {
 		const repair = await handleRepair(req, res, path, url, s);
 		if (repair) return;

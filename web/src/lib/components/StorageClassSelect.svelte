@@ -1,32 +1,43 @@
 <script lang="ts">
 	import type { HTMLSelectAttributes } from 'svelte/elements';
-	import type { StorageClass } from '#lib/api.js';
+	import type { StorageClass, StorageClassInfo } from '#lib/api.js';
+	import { defaultClassForbidden, noClassAllowed, offeredClasses } from '#lib/storage.js';
 	import SelectInput from './SelectInput.svelte';
 
 	// The one storage-class picker. The empty option means "no explicit class"
 	// and each site names that meaning (cluster default vs keep); exclude hides
-	// a disk's current class so a migration cannot target itself.
+	// a disk's current class so a migration cannot target itself. Classes the
+	// namespace's quotas forbid are not offered, nor the cluster default where
+	// the empty option means it (emptyIsDefault) and the default is forbidden.
 	let {
 		options,
 		value = $bindable(),
 		emptyLabel = 'cluster default',
 		exclude = '',
+		emptyIsDefault = true,
 		class: cls = '',
 		...rest
 	}: {
-		options: StorageClass[];
+		options: (StorageClass | StorageClassInfo)[];
 		value?: string;
 		emptyLabel?: string;
 		exclude?: string;
+		emptyIsDefault?: boolean;
 		class?: string;
 	} & Omit<HTMLSelectAttributes, 'value' | 'class' | 'size'> = $props();
+
+	const shown = $derived(offeredClasses(options));
+	const defaultForbidden = $derived(emptyIsDefault && defaultClassForbidden(options));
 </script>
 
 <SelectInput bind:value class={cls} {...rest}>
-	<option value="">{emptyLabel}</option>
-	{#each options as sc (sc.name)}
+	{#if !defaultForbidden}<option value="">{emptyLabel}</option>{/if}
+	{#each shown as sc (sc.name)}
 		{#if sc.name !== exclude}
 			<option value={sc.name}>{sc.name}{sc.default ? ' (default)' : ''}</option>
 		{/if}
 	{/each}
 </SelectInput>
+{#if noClassAllowed(options)}
+	<span class="text-xs text-warn-ink">No storage class may be used in this namespace.</span>
+{/if}
