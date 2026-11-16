@@ -560,7 +560,7 @@ namespace) beside the `create`/`patch` every server-side apply needs.
 
 ## OpenShift SSO
 
-dotvirt offers "Sign in with OpenShift" beside the always-present token login:
+dotvirt offers "Sign in with OpenShift" (see [Sign-in screen](#sign-in-screen)):
 the OAuth access token the cluster hands back is a normal bearer token, so it rides
 the same TokenReview + per-request pass-through path as a pasted one.
 
@@ -630,6 +630,28 @@ An issuer that refuses the refresh ends the session, and so does a renewal namin
 The issuer must send a new ID token on refresh, as Kanidm and Keycloak do; one that does not signs users out once per ID token life.
 Logout revokes the refresh token at the issuer, when it publishes a `revocation_endpoint`.
 A restart of dotvirt signs every OIDC session out: the next sign-in is one redirect through the issuer.
+
+## Sign-in screen
+
+With a sign-in flow ready (OIDC, or OpenShift SSO with its OAuthClient registered), the sign-in screen goes straight to it.
+A user already signed in at the provider comes back signed in, with no click, to the page they opened.
+
+| The screen | What it shows |
+|---|---|
+| A flow is ready | Nothing: it redirects to the provider |
+| `?sso_error` (the last sign-in failed) | One "Sign in with ..." button and the failure |
+| `?signed_out`, or a sign-out just ended the session on this page | One button: a redirect would sign the user straight back in through the provider's own session |
+| A redirect already ran in this tab within a minute | One button: the provider round trip left no session, so it is not retried in a loop |
+| The tab cannot record its redirects (browser storage blocked) | One button, every time: nothing else would stop such a loop |
+| No flow ready (none configured, or OpenShift SSO not finished) | The token form, as the only way in |
+| `?token` | The token form, whatever is configured |
+
+`https://<console host>/?token` is the break-glass for admins: a pasted token (`oc whoami -t`, or `kubectl create token`) signs in when the provider is down.
+The screen links to it nowhere.
+
+A sign-in returns only to a page of the console itself: dotvirt refuses another origin, any `/api/` path (decoded, as the router reads it), and a return whose part before the `?` (fragment included) cleaning would change.
+A provider that cannot be reached when a sign-in starts lands on the failure button, with the detail in dotvirt's log.
+Each sign-in keeps its own state cookie, so tabs signing in at once do not undo each other.
 
 ## Packaging
 

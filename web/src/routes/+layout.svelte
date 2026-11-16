@@ -241,7 +241,7 @@
 		{/if}
 	</div>
 {:else if !session.user}
-	<Login onlogin={(u) => (session.user = u)} />
+	<Login onlogin={(u) => session.signIn(u)} />
 {:else}
 	<div class="flex h-screen flex-col">
 		<AppHeader />

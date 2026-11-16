@@ -90,7 +90,7 @@ func stateFromRedirect(t *testing.T, o *OAuth) (state string, cookie *http.Cooki
 		t.Errorf("scope = %q, want user:full (the token must act as the user)", got)
 	}
 	for _, c := range rec.Result().Cookies() {
-		if c.Name == stateCookie {
+		if c.Name == stateCookieName(loc.Query().Get("state")) {
 			cookie = c
 		}
 	}
