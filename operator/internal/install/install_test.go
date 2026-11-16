@@ -820,3 +820,12 @@ func TestArgocdApplyBindingSubjects(t *testing.T) {
 		t.Errorf("read binding = %+v, want the controller on dotvirt-argocd-read", r)
 	}
 }
+
+// Forgejo deliveries carry Gogs headers, so Argo verifies them against its
+// Gogs key; any other key leaves every delivery accepted unsigned.
+func TestArgoWebhookSecretUsesTheKeyArgoVerifies(t *testing.T) {
+	s := ArgoWebhookSecret("argocd", "s3cret")
+	if s.Name != "argocd-secret" || len(s.StringData) != 1 || s.StringData["webhook.gogs.secret"] != "s3cret" {
+		t.Errorf("argocd-secret patch = %v, want only webhook.gogs.secret", s.StringData)
+	}
+}

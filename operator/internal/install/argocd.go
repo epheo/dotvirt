@@ -65,16 +65,22 @@ func repoPrefix(platformRepo string) string {
 	return "*"
 }
 
-// ArgoWebhookSecret is a PARTIAL argocd-secret carrying ONLY the Gitea webhook
-// secret key - server-side-applied so the operator owns just that key and coexists
-// with the gitops-operator-managed keys. Deliberately NOT instance-labeled: the
-// operator owns the key, not the Secret, so the finalizer must never delete
+// ArgoWebhookKey is the argocd-secret key Argo verifies a Forgejo delivery
+// against. Forgejo sends Gogs headers (X-Gogs-Event, X-Gogs-Signature), Argo
+// routes those to its Gogs parser, and that parser checks the HMAC only when
+// this key is set: under any other key every delivery is accepted unsigned.
+const ArgoWebhookKey = "webhook.gogs.secret"
+
+// ArgoWebhookSecret is a PARTIAL argocd-secret carrying ONLY ArgoWebhookKey -
+// server-side-applied so the operator owns just that key and coexists with the
+// gitops-operator-managed keys. Deliberately NOT instance-labeled: the operator
+// owns the key, not the Secret, so the finalizer must never delete
 // argocd-secret. (The key is left behind on uninstall - a harmless orphan.)
 func ArgoWebhookSecret(argoNS, value string) *corev1.Secret {
 	return &corev1.Secret{
 		TypeMeta:   metav1.TypeMeta{APIVersion: "v1", Kind: "Secret"},
 		ObjectMeta: metav1.ObjectMeta{Name: "argocd-secret", Namespace: argoNS},
-		StringData: map[string]string{"webhook.gitea.secret": value},
+		StringData: map[string]string{ArgoWebhookKey: value},
 	}
 }
 
