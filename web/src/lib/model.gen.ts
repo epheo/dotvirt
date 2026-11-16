@@ -26,6 +26,12 @@ export interface Branding {
 export interface BrandingLink {
   label: string;
   url: string;
+  /**
+   * Icon is a file name in the branding directory, served at
+   * /api/branding/icon/<icon>; with one the link shows icon-only, its label
+   * the accessible name. Info leaves it out when the file is not there.
+   */
+  icon?: string;
 }
 
 //////////

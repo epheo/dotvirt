@@ -393,6 +393,11 @@ func TestEnvtest(t *testing.T) {
 			"bad escape":          {Links: link("a", "https://c.example/%zz")},
 			"control in url":      {Links: link("a", "https://c.example/a\x01b")},
 			"configmap uppercase": {ConfigMap: "Theme"},
+			"icon path":           {ConfigMap: "t", Links: []dotvirtv1alpha1.BrandingLink{{Label: "a", URL: "https://c.example", Icon: "../theme.css"}}},
+			"icon url":            {ConfigMap: "t", Links: []dotvirtv1alpha1.BrandingLink{{Label: "a", URL: "https://c.example", Icon: "https://c.example/a.svg"}}},
+			"icon type":           {ConfigMap: "t", Links: []dotvirtv1alpha1.BrandingLink{{Label: "a", URL: "https://c.example", Icon: "a.gif"}}},
+			"icon long":           {ConfigMap: "t", Links: []dotvirtv1alpha1.BrandingLink{{Label: "a", URL: "https://c.example", Icon: strings.Repeat("a", 61) + ".svg"}}},
+			"icon no configmap":   {Links: []dotvirtv1alpha1.BrandingLink{{Label: "a", URL: "https://c.example", Icon: "a.svg"}}},
 		} {
 			dv := testCR()
 			dv.Spec.Branding = b
@@ -403,10 +408,17 @@ func TestEnvtest(t *testing.T) {
 		dv := testCR()
 		dv.Spec.Branding = dotvirtv1alpha1.BrandingSpec{
 			ProductName: "Uniwatt Cloud", ConfigMap: "uniwatt-theme",
-			Links: link("Billing", "https://c.example/billing?tab=open#due"),
+			Links: append(link("Billing", "https://c.example/billing?tab=open#due"),
+				dotvirtv1alpha1.BrandingLink{Label: "Projects", URL: "https://c.example/", Icon: "projects.svg"}),
 		}
 		if err := admin.Create(ctx, dv, client.DryRunAll); client.IgnoreAlreadyExists(err) != nil {
 			t.Errorf("a provider's branding: %v", err)
+		}
+		// Text links need no ConfigMap: CRs from before link icons stay valid.
+		text := testCR()
+		text.Spec.Branding = dotvirtv1alpha1.BrandingSpec{Links: link("Billing", "https://c.example/billing")}
+		if err := admin.Create(ctx, text, client.DryRunAll); client.IgnoreAlreadyExists(err) != nil {
+			t.Errorf("text links without a ConfigMap: %v", err)
 		}
 	})
 
