@@ -170,8 +170,8 @@ func svcURL(name, namespace string, port int32) string {
 func dotvirtEnv(dv *dotvirtv1alpha1.Dotvirt, argoNS string, tenantAllowed []tenancy.GroupKind) []corev1.EnvVar {
 	env := []corev1.EnvVar{
 		{Name: "DOTVIRT_ARGO_NAMESPACE", Value: argoNS},
-		// The console reads status.adminObjects from the install, under a
-		// cluster admin's token, to offer installing them.
+		// The console reads the install under a cluster admin's token for the
+		// admin objects it renders.
 		{Name: "DOTVIRT_INSTALL_NAMESPACE", Value: dv.Namespace},
 		{Name: "DOTVIRT_INSTALL_NAME", Value: dv.Name},
 	}
@@ -410,6 +410,21 @@ func dotvirtVolumes(dv *dotvirtv1alpha1.Dotvirt) ([]corev1.VolumeMount, []corev1
 		})
 	}
 	return volumeMounts, volumes
+}
+
+// WithGuardPins tells the console the pins it renders the operator guard
+// with, beside DOTVIRT_ARGO_NAMESPACE and DOTVIRT_INSTALL_NAMESPACE: the
+// operator's username and the ArgoCD controller's ServiceAccount. An unknown
+// username adds nothing, and the console offers no guard.
+func WithGuardPins(dep *appsv1.Deployment, operator, argoController string) *appsv1.Deployment {
+	if operator == "" {
+		return dep
+	}
+	c := &dep.Spec.Template.Spec.Containers[0]
+	c.Env = append(c.Env,
+		corev1.EnvVar{Name: "DOTVIRT_OPERATOR_USERNAME", Value: operator},
+		corev1.EnvVar{Name: "DOTVIRT_ARGO_CONTROLLER", Value: argoController})
+	return dep
 }
 
 // Deployment runs the dotvirt binary (which also serves the SPA), with the forge

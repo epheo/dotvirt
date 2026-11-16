@@ -1,9 +1,6 @@
 package v1alpha1
 
-import (
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/runtime"
-)
+import metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 // Condition types the controller sets on a Dotvirt's status. Available is the
 // roll-up other tooling watches; the rest explain a not-yet-ready install.
@@ -398,18 +395,18 @@ type BrandingLink struct {
 }
 
 // AdminObject is one object the install needs but the operator may not
-// create.
+// create, as the operator sees it. A report only: the console renders what it
+// installs itself, never from this.
 type AdminObject struct {
 	// Purpose says what the object is for.
 	Purpose string `json:"purpose"`
+	Kind    string `json:"kind"`
+	Name    string `json:"name"`
+	// +optional
+	Namespace string `json:"namespace,omitempty"`
 	// State is NotInstalled, Outdated (rendered for other parameters or by
 	// another version, or changed after it was installed) or Installed.
 	State string `json:"state"`
-	// Object is the object as rendered.
-	// +kubebuilder:pruning:PreserveUnknownFields
-	// +kubebuilder:validation:Schemaless
-	// +kubebuilder:validation:Type=object
-	Object runtime.RawExtension `json:"object"`
 }
 
 // DotvirtStatus is the observed install state.
@@ -436,13 +433,9 @@ type DotvirtStatus struct {
 	// AdminObjects are objects the install needs but the operator may not
 	// create, each with its purpose and state: a cluster admin installs them
 	// from the console (one Install action, under the admin's own token), or
-	// by applying AdminManifest.
+	// from the release's install/guard.yaml.
 	// +optional
 	AdminObjects []AdminObject `json:"adminObjects,omitempty"`
-	// AdminManifest is every AdminObjects entry as one List, for a cluster
-	// admin without the console to save to a file and apply with
-	// `kubectl apply --server-side --field-manager=dotvirt -f <file>`.
-	AdminManifest string `json:"adminManifest,omitempty"`
 	// SyncImpersonationInstance is the ArgoCD resource, as namespace/name, the
 	// operator set application.sync.impersonation.enabled on: it removes the
 	// setting there when spec.argocd moves to another instance and before the

@@ -59,7 +59,7 @@ package controller
 // +kubebuilder:rbac:groups=rbac.authorization.k8s.io,resources=rolebindings,verbs=get
 // The operator guard (guard.go) is read by name to report it, never written: a
 // cluster admin installs it, so the operator cannot loosen what bounds it.
-// +kubebuilder:rbac:groups=admissionregistration.k8s.io,resources=validatingadmissionpolicies;validatingadmissionpolicybindings,resourceNames=dotvirt-operator-secrets;dotvirt-operator-deployments,verbs=get
+// +kubebuilder:rbac:groups=admissionregistration.k8s.io,resources=validatingadmissionpolicies;validatingadmissionpolicybindings,resourceNames=dotvirt-operator-secrets;dotvirt-operator-deployments;dotvirt-operator-bindings,verbs=get
 // +kubebuilder:rbac:groups=argoproj.io,resources=argocds,resourceNames=openshift-gitops;argocd,verbs=get;patch
 //
 // delete, scoped to the fixed names the install renders (prune and the finalizer

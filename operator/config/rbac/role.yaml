@@ -84,6 +84,7 @@ rules:
 - apiGroups:
   - admissionregistration.k8s.io
   resourceNames:
+  - dotvirt-operator-bindings
   - dotvirt-operator-deployments
   - dotvirt-operator-secrets
   resources:

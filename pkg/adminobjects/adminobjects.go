@@ -1,26 +1,19 @@
 // Package adminobjects is what an install needs but its operator may not
-// create: objects the operator renders and reports in its status, and a
-// cluster admin installs from the console, under the admin's own token. The
-// operator only reads them back to report whether they are in place.
-//
-// Allowed is the whole list of what an operator may ask for. The console
-// applies nothing else, whatever a status lists: an operator that could have
-// any object applied by an admin could have itself granted anything.
+// create. Each object is rendered from typed Params, which the console takes
+// from its own configuration and from reads under the cluster admin's token,
+// never from anything the operator writes: an operator that could choose what
+// an admin applies could have itself granted anything. The operator renders
+// the same objects only to report whether they are in place.
 package adminobjects
 
 import (
-	"crypto/sha256"
-	"encoding/hex"
-	"encoding/json"
+	"fmt"
+	"strings"
 
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/apimachinery/pkg/util/validation"
 )
-
-// RenderAnnotation carries a digest of the render an object came from, so a
-// reader tells a copy rendered for other parameters or another version from
-// the current one.
-const RenderAnnotation = "dotvirt.io/render"
 
 // State is how a live object compares with its render.
 type State string
@@ -39,6 +32,56 @@ type Object struct {
 	Object  *unstructured.Unstructured
 }
 
+// OperatorDeployment is the operator's own Deployment, in the operator's
+// namespace: OLM or GitOps writes it, the operator cannot.
+const OperatorDeployment = "dotvirt-operator-controller"
+
+// Params is everything the admin objects are rendered from.
+type Params struct {
+	// Operator is the operator's exact username,
+	// system:serviceaccount:<namespace>:<name>.
+	Operator string
+	// Namespace is the install's (the Dotvirt resource's) namespace.
+	Namespace string
+	// ArgoNamespace and ArgoController are the ArgoCD namespace the install
+	// writes into and its application controller's ServiceAccount.
+	ArgoNamespace, ArgoController string
+	// The images an admin chose beside the official repositories, "" when
+	// unset: the Dotvirt resource's spec.image, and the operator Deployment's
+	// RELATED_IMAGE_DOTVIRT and RELATED_IMAGE_FORGEJO.
+	SpecImage, DotvirtImage, ForgejoImage string
+}
+
+// Valid reports whether every pin is known and well formed: a render missing
+// one would pin nothing.
+func (p Params) Valid() bool {
+	return ValidUsername(p.Operator) && len(validation.IsDNS1123Label(p.Namespace)) == 0 &&
+		len(validation.IsDNS1123Label(p.ArgoNamespace)) == 0 && len(validation.IsDNS1123Subdomain(p.ArgoController)) == 0
+}
+
+// OperatorNamespace is the namespace of p.Operator's ServiceAccount.
+func (p Params) OperatorNamespace() string {
+	parts := strings.Split(p.Operator, ":")
+	if len(parts) != 4 {
+		return ""
+	}
+	return parts[2]
+}
+
+// ValidUsername reports whether u is exactly
+// system:serviceaccount:<namespace>:<name>.
+func ValidUsername(u string) bool {
+	parts := strings.Split(u, ":")
+	return len(parts) == 4 && parts[0] == "system" && parts[1] == "serviceaccount" &&
+		len(validation.IsDNS1123Label(parts[2])) == 0 && len(validation.IsDNS1123Subdomain(parts[3])) == 0
+}
+
+// Render is every admin object an install asks for, rendered from p. Append
+// here to ask for more, and to Allowed and diff.
+func Render(p Params) []Object {
+	return Guard(p)
+}
+
 // Ref names one object an install may ask an admin to apply.
 type Ref struct {
 	Group, Version, Kind, Resource string
@@ -52,7 +95,7 @@ func (r Ref) GVR() schema.GroupVersionResource {
 }
 
 // Allowed is every object an install in installNS may ask a cluster admin to
-// apply. Append to it to ask for more, with a comparer in same.
+// apply: the console applies nothing else.
 func Allowed(installNS string) []Ref {
 	var out []Ref
 	for _, name := range GuardNames {
@@ -78,42 +121,29 @@ func Allow(allowed []Ref, o *unstructured.Unstructured) (Ref, bool) {
 	return Ref{}, false
 }
 
-// same compares what decides an object's effect, per kind, ignoring apiserver
-// defaults. A kind without one is compared by its render digest alone.
-var same = map[schema.GroupKind]func(want, live *unstructured.Unstructured) bool{
-	{Group: "admissionregistration.k8s.io", Kind: "ValidatingAdmissionPolicy"}:        samePolicy,
-	{Group: "admissionregistration.k8s.io", Kind: "ValidatingAdmissionPolicyBinding"}: sameBinding,
+// diff names how a live object differs from its render in what decides its
+// effect, ignoring apiserver defaults; "" when it does not. Every kind in
+// Allowed has one.
+var diff = map[schema.GroupKind]func(want, live *unstructured.Unstructured) string{
+	{Group: "admissionregistration.k8s.io", Kind: "ValidatingAdmissionPolicy"}:        diffPolicy,
+	{Group: "admissionregistration.k8s.io", Kind: "ValidatingAdmissionPolicyBinding"}: diffBinding,
 }
 
-// Compare weighs live, nil when absent, against want. detail says how they
-// differ.
+// Compare weighs live, nil when absent, against want. detail says what
+// differs, so an install over it is a choice.
 func Compare(want, live *unstructured.Unstructured) (state State, detail string) {
 	what := want.GetKind() + " " + want.GetName()
 	if live == nil {
 		return NotInstalled, what + " is missing"
 	}
-	if live.GetAnnotations()[RenderAnnotation] != want.GetAnnotations()[RenderAnnotation] {
-		return Outdated, what + " was rendered for another install or version"
+	d, ok := diff[want.GroupVersionKind().GroupKind()]
+	if !ok {
+		return Outdated, fmt.Sprintf("%s: no comparer for its kind", what)
 	}
-	if eq := same[want.GroupVersionKind().GroupKind()]; eq != nil && !eq(want, live) {
-		return Outdated, what + " was changed after it was installed"
+	if why := d(want, live); why != "" {
+		return Outdated, what + " " + why
 	}
 	return Installed, ""
-}
-
-// stamp sets RenderAnnotation to a digest of o's content.
-func stamp(o *unstructured.Unstructured) {
-	c := o.DeepCopy()
-	unstructured.RemoveNestedField(c.Object, "metadata")
-	unstructured.RemoveNestedField(c.Object, "status")
-	b, _ := json.Marshal([]any{o.GetNamespace(), o.GetName(), c.Object})
-	sum := sha256.Sum256(b)
-	a := o.GetAnnotations()
-	if a == nil {
-		a = map[string]string{}
-	}
-	a[RenderAnnotation] = hex.EncodeToString(sum[:8])
-	o.SetAnnotations(a)
 }
 
 // ApplyCommand applies a manifest an admin saved to a file. It takes no data:
@@ -121,13 +151,3 @@ func stamp(o *unstructured.Unstructured) {
 // --force-conflicts, kubectl names any field someone else changed instead of
 // taking it back; the admin decides.
 const ApplyCommand = "kubectl apply --server-side --field-manager=dotvirt -f"
-
-// Manifest is objs as one List, for an admin without the console to save and
-// apply with ApplyCommand.
-func Manifest(objs []Object) ([]byte, error) {
-	items := make([]any, len(objs))
-	for i, o := range objs {
-		items[i] = o.Object.Object
-	}
-	return json.MarshalIndent(map[string]any{"apiVersion": "v1", "kind": "List", "items": items}, "", "  ")
-}

@@ -2,7 +2,6 @@ package controller
 
 import (
 	"context"
-	"encoding/json"
 	"slices"
 	"strings"
 	"testing"
@@ -10,7 +9,6 @@ import (
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
-	"k8s.io/apimachinery/pkg/runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
@@ -18,9 +16,12 @@ import (
 	dotvirtv1alpha1 "github.com/epheo/dotvirt/operator/api/v1alpha1"
 	"github.com/epheo/dotvirt/operator/internal/install"
 	"github.com/epheo/dotvirt/pkg/adminobjects"
+	"github.com/epheo/dotvirt/pkg/tenancy"
 )
 
 const guardOperator = "system:serviceaccount:dotvirt-operator:dotvirt-operator-controller"
+
+var guardRC = &reconcileCtx{argoNS: "argocd", argoSA: "argocd-application-controller"}
 
 // guardPass runs the guard phase once over objs, after an earlier pass left
 // prior in status, failing the test on any write: the operator never writes
@@ -48,7 +49,7 @@ func guardPass(t *testing.T, operator string, prior []dotvirtv1alpha1.AdminObjec
 	r := &DotvirtReconciler{Client: c, Scheme: c.Scheme(), OperatorUsername: operator}
 	dv := &dotvirtv1alpha1.Dotvirt{ObjectMeta: metav1.ObjectMeta{Name: "x", Namespace: "dotvirt"}}
 	dv.Status.AdminObjects = prior
-	if res, err := r.reconcileOperatorGuard(t.Context(), dv, &reconcileCtx{argoNS: "argocd"}); res != nil || err != nil {
+	if res, err := r.reconcileOperatorGuard(t.Context(), dv, guardRC); res != nil || err != nil {
 		t.Fatalf("the guard phase never halts: %v %v", res, err)
 	}
 	cond := meta.FindStatusCondition(dv.Status.Conditions, dotvirtv1alpha1.ConditionOperatorGuard)
@@ -67,11 +68,12 @@ func live(objs []adminobjects.Object) []client.Object {
 	return out
 }
 
+var guardHere = adminobjects.Params{Operator: guardOperator, Namespace: "dotvirt", ArgoNamespace: "argocd", ArgoController: "argocd-application-controller"}
+
 func TestOperatorGuardStates(t *testing.T) {
-	here := adminobjects.GuardParams{Operator: guardOperator, Namespace: "dotvirt", ArgoNamespace: "argocd"}
-	elsewhere := here
+	elsewhere := guardHere
 	elsewhere.ArgoNamespace = "openshift-gitops"
-	edited := adminobjects.Guard(here)
+	edited := adminobjects.Render(guardHere)
 	v, _, _ := unstructured.NestedSlice(edited[1].Object.Object, "spec", "validations")
 	_ = unstructured.SetNestedSlice(edited[1].Object.Object, v[:1], "spec", "validations")
 	for name, c := range map[string]struct {
@@ -80,8 +82,8 @@ func TestOperatorGuardStates(t *testing.T) {
 		state  adminobjects.State
 	}{
 		"none installed":                {nil, metav1.ConditionFalse, adminobjects.NotInstalled},
-		"installed as rendered":         {live(adminobjects.Guard(here)), metav1.ConditionTrue, adminobjects.Installed},
-		"rendered for another ArgoCD":   {live(adminobjects.Guard(elsewhere)), metav1.ConditionFalse, adminobjects.Outdated},
+		"installed as rendered":         {live(adminobjects.Render(guardHere)), metav1.ConditionTrue, adminobjects.Installed},
+		"rendered for another ArgoCD":   {live(adminobjects.Render(elsewhere)), metav1.ConditionFalse, adminobjects.Outdated},
 		"a Deployment rule edited away": {live(edited), metav1.ConditionFalse, adminobjects.Outdated},
 	} {
 		t.Run(name, func(t *testing.T) {
@@ -89,47 +91,46 @@ func TestOperatorGuardStates(t *testing.T) {
 			if cond.Status != c.status || cond.Reason != string(c.state) {
 				t.Errorf("%s %s: %s", cond.Status, cond.Reason, cond.Message)
 			}
-			if c.status != metav1.ConditionTrue && !strings.Contains(cond.Message, "a cluster admin installs it from the console") {
-				t.Errorf("message %q gives no next action", cond.Message)
+			if c.status != metav1.ConditionTrue && (!strings.Contains(cond.Message, "a cluster admin installs it from the console") ||
+				!strings.Contains(cond.Message, "install/guard.yaml with OPERATOR_USERNAME="+guardOperator+" INSTALL_NAMESPACE=dotvirt ARGO_NAMESPACE=argocd")) {
+				t.Errorf("message %q gives no next action with this install's values", cond.Message)
 			}
-			want := adminobjects.Guard(here)
-			if m, _ := adminobjects.Manifest(want); len(dv.Status.AdminObjects) != len(want) || dv.Status.AdminManifest != string(m) {
-				t.Fatalf("status lists %d admin objects (manifest %q), want %d and their manifest", len(dv.Status.AdminObjects), dv.Status.AdminManifest, len(want))
+			want := adminobjects.Render(guardHere)
+			if len(dv.Status.AdminObjects) != len(want) {
+				t.Fatalf("status lists %d admin objects, want %d", len(dv.Status.AdminObjects), len(want))
 			}
 			for i, e := range dv.Status.AdminObjects {
-				var got map[string]any
-				if err := json.Unmarshal(e.Object.Raw, &got); err != nil {
-					t.Fatal(err)
+				if e.Purpose == "" || e.Kind != want[i].Object.GetKind() || e.Name != want[i].Object.GetName() {
+					t.Errorf("entry %d = %+v, want %s %s", i, e, want[i].Object.GetKind(), want[i].Object.GetName())
 				}
-				if e.Purpose == "" || !equalJSON(t, got, want[i].Object.Object) {
-					t.Errorf("entry %d is not the render: %q %v", i, e.Purpose, got["metadata"])
+				if c.state == adminobjects.Installed && e.State != string(adminobjects.Installed) {
+					t.Errorf("entry %d is %s", i, e.State)
 				}
-			}
-			if c.state == adminobjects.Installed && slices.ContainsFunc(dv.Status.AdminObjects, func(e dotvirtv1alpha1.AdminObject) bool {
-				return e.State != string(adminobjects.Installed)
-			}) {
-				t.Errorf("an entry is not Installed: %+v", dv.Status.AdminObjects)
 			}
 		})
 	}
 }
 
-func equalJSON(t *testing.T, a, b map[string]any) bool {
-	t.Helper()
-	x, _ := json.Marshal(a)
-	y, _ := json.Marshal(b)
-	return string(x) == string(y)
+// The guard's pins follow what an admin chose: an image set in spec reads
+// Outdated until the guard is installed for it.
+func TestOperatorGuardFollowsTheAdminImage(t *testing.T) {
+	t.Setenv("RELATED_IMAGE_DOTVIRT", "quay.io/epheo/dotvirt@sha256:"+strings.Repeat("a", 64))
+	r := &DotvirtReconciler{OperatorUsername: guardOperator}
+	dv := &dotvirtv1alpha1.Dotvirt{ObjectMeta: metav1.ObjectMeta{Name: "x", Namespace: "dotvirt"}}
+	dv.Spec.Image = "registry.example/team/dotvirt:custom"
+	p := r.guardParams(dv, guardRC)
+	if p.SpecImage != dv.Spec.Image || p.DotvirtImage != "quay.io/epheo/dotvirt@sha256:"+strings.Repeat("a", 64) || p.ForgejoImage != "" {
+		t.Errorf("params = %+v", p)
+	}
 }
 
 // The guard's entries replace its own, never another phase's.
 func TestOperatorGuardKeepsOtherAdminObjects(t *testing.T) {
-	other := dotvirtv1alpha1.AdminObject{Purpose: "another phase's", State: "NotInstalled",
-		Object: runtime.RawExtension{Raw: []byte(`{"apiVersion":"rbac.authorization.k8s.io/v1","kind":"Role","metadata":{"name":"r","namespace":"dotvirt"}}`)}}
-	stale := dotvirtv1alpha1.AdminObject{Purpose: "old", State: "Installed",
-		Object: runtime.RawExtension{Raw: []byte(`{"apiVersion":"admissionregistration.k8s.io/v1","kind":"ValidatingAdmissionPolicy","metadata":{"name":"` + adminobjects.GuardSecretsName + `"}}`)}}
+	other := dotvirtv1alpha1.AdminObject{Purpose: "another phase's", Kind: "Role", Name: "r", Namespace: "dotvirt", State: "NotInstalled"}
+	stale := dotvirtv1alpha1.AdminObject{Purpose: "old", Kind: "ValidatingAdmissionPolicy", Name: adminobjects.GuardSecretsName, State: "Installed"}
 	_, dv := guardPass(t, guardOperator, []dotvirtv1alpha1.AdminObject{other, stale})
-	if len(dv.Status.AdminObjects) != 5 || dv.Status.AdminObjects[0].Purpose != "another phase's" {
-		t.Errorf("entries = %+v, want the other phase's kept and the guard's four replaced", dv.Status.AdminObjects)
+	if len(dv.Status.AdminObjects) != 7 || dv.Status.AdminObjects[0].Purpose != "another phase's" {
+		t.Errorf("entries = %+v, want the other phase's kept and the guard's six", dv.Status.AdminObjects)
 	}
 	_, dv = guardPass(t, "", []dotvirtv1alpha1.AdminObject{other, stale})
 	if len(dv.Status.AdminObjects) != 1 {
@@ -139,13 +140,14 @@ func TestOperatorGuardKeepsOtherAdminObjects(t *testing.T) {
 
 func TestOperatorGuardNeedsItsAccount(t *testing.T) {
 	cond, dv := guardPass(t, "", nil)
-	if cond.Status != metav1.ConditionUnknown || cond.Reason != "AccountUnknown" || len(dv.Status.AdminObjects) != 0 || dv.Status.AdminManifest != "" {
+	if cond.Status != metav1.ConditionUnknown || cond.Reason != "AccountUnknown" || len(dv.Status.AdminObjects) != 0 {
 		t.Errorf("%s %s, status %+v", cond.Status, cond.Reason, dv.Status.AdminObjects)
 	}
 }
 
-// The guard admits dotvirt's own accounts by name; they must stay the ones
-// its Deployments run as, and the console must learn where the install is.
+// What the guard admits by name must stay what the operator renders: its
+// Deployments' accounts, the platform sync account, and every pin the
+// console needs.
 func TestOperatorGuardMatchesTheOperand(t *testing.T) {
 	dv := &dotvirtv1alpha1.Dotvirt{ObjectMeta: metav1.ObjectMeta{Name: "x", Namespace: "dotvirt"}}
 	for _, sa := range []string{
@@ -156,11 +158,19 @@ func TestOperatorGuardMatchesTheOperand(t *testing.T) {
 			t.Errorf("Deployment account %q is not one the guard admits (%v)", sa, adminobjects.OperandAccounts)
 		}
 	}
+	if adminobjects.PlatformSyncAccount != tenancy.PlatformSyncAccount {
+		t.Errorf("guard names %s, tenancy %s", adminobjects.PlatformSyncAccount, tenancy.PlatformSyncAccount)
+	}
 	env := map[string]string{}
-	for _, e := range install.Deployment(dv, "argocd", nil).Spec.Template.Spec.Containers[0].Env {
+	for _, e := range install.WithGuardPins(install.Deployment(dv, "argocd", nil), guardOperator, "argocd-application-controller").Spec.Template.Spec.Containers[0].Env {
 		env[e.Name] = e.Value
 	}
-	if env["DOTVIRT_INSTALL_NAMESPACE"] != "dotvirt" || env["DOTVIRT_INSTALL_NAME"] != "x" {
-		t.Errorf("the console cannot find its install: %v", env)
+	for k, v := range map[string]string{
+		"DOTVIRT_OPERATOR_USERNAME": guardOperator, "DOTVIRT_ARGO_CONTROLLER": "argocd-application-controller",
+		"DOTVIRT_ARGO_NAMESPACE": "argocd", "DOTVIRT_INSTALL_NAMESPACE": "dotvirt", "DOTVIRT_INSTALL_NAME": "x",
+	} {
+		if env[k] != v {
+			t.Errorf("console env %s = %q, want %q", k, env[k], v)
+		}
 	}
 }

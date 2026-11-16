@@ -477,27 +477,24 @@ spec:
           status:
             description: DotvirtStatus is the observed install state.
             properties:
-              adminManifest:
-                description: |-
-                  AdminManifest is every AdminObjects entry as one List, for a cluster
-                  admin without the console to save to a file and apply with
-                  `kubectl apply --server-side --field-manager=dotvirt -f <file>`.
-                type: string
               adminObjects:
                 description: |-
                   AdminObjects are objects the install needs but the operator may not
                   create, each with its purpose and state: a cluster admin installs them
                   from the console (one Install action, under the admin's own token), or
-                  by applying AdminManifest.
+                  from the release's install/guard.yaml.
                 items:
                   description: |-
                     AdminObject is one object the install needs but the operator may not
-                    create.
+                    create, as the operator sees it. A report only: the console renders what it
+                    installs itself, never from this.
                   properties:
-                    object:
-                      description: Object is the object as rendered.
-                      type: object
-                      x-kubernetes-preserve-unknown-fields: true
+                    kind:
+                      type: string
+                    name:
+                      type: string
+                    namespace:
+                      type: string
                     purpose:
                       description: Purpose says what the object is for.
                       type: string
@@ -507,7 +504,8 @@ spec:
                         another version, or changed after it was installed) or Installed.
                       type: string
                   required:
-                  - object
+                  - kind
+                  - name
                   - purpose
                   - state
                   type: object

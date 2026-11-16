@@ -58,7 +58,8 @@ func (r *DotvirtReconciler) reconcileWorkload(ctx context.Context, dv *dotvirtv1
 		// command, not leave it inviting a needless OAuthClient forever.
 		dv.Status.SSOOAuthClient = ""
 	}
-	if err := r.applyOwned(ctx, dv, install.Deployment(dv, rc.argoNS, r.tenantKinds(ctx, dv, rc, nil))); err != nil {
+	dep := install.WithGuardPins(install.Deployment(dv, rc.argoNS, r.tenantKinds(ctx, dv, rc, nil)), r.OperatorUsername, rc.argoSA)
+	if err := r.applyOwned(ctx, dv, dep); err != nil {
 		return nil, applyFailed(err)
 	}
 	if r.DryRun {

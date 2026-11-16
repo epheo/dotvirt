@@ -1,0 +1,250 @@
+# The dotvirt operator guard: admission policies bounding the operator's own
+# account. A cluster admin installs it from the console (Install). Without the
+# console, fill the placeholders and apply it; the operator's OperatorGuard
+# condition names each value for its install, and an unset image stays "".
+#
+#   export OPERATOR_USERNAME=system:serviceaccount:<operator namespace>:dotvirt-operator-controller
+#   export INSTALL_NAMESPACE=<the Dotvirt resource's namespace>
+#   export ARGO_NAMESPACE=<the ArgoCD namespace> ARGO_CONTROLLER=<its application controller ServiceAccount>
+#   export SPEC_IMAGE="$(kubectl -n "$INSTALL_NAMESPACE" get dotvirt <name> -o jsonpath='{.spec.image}')"
+#   export RELATED_IMAGE_DOTVIRT="$(kubectl -n <operator namespace> get deploy dotvirt-operator-controller \
+#     -o jsonpath='{.spec.template.spec.containers[0].env[?(@.name=="RELATED_IMAGE_DOTVIRT")].value}')"
+#   export RELATED_IMAGE_FORGEJO="$(kubectl -n <operator namespace> get deploy dotvirt-operator-controller \
+#     -o jsonpath='{.spec.template.spec.containers[0].env[?(@.name=="RELATED_IMAGE_FORGEJO")].value}')"
+#   envsubst < guard.yaml | kubectl apply --server-side --field-manager=dotvirt -f -
+#
+# Generated from pkg/adminobjects (go test ./pkg/adminobjects -run TestReleaseTemplate -update).
+---
+# Bounds the operator's Secrets: none outside ${INSTALL_NAMESPACE} and ${ARGO_NAMESPACE}, never a ServiceAccount token
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  labels:
+    app.kubernetes.io/name: dotvirt
+    app.kubernetes.io/part-of: dotvirt-operator-guard
+  name: dotvirt-operator-secrets
+spec:
+  failurePolicy: Fail
+  matchConditions:
+  - expression: request.userInfo.username == "${OPERATOR_USERNAME}"
+    name: operator
+  matchConstraints:
+    resourceRules:
+    - apiGroups:
+      - ""
+      apiVersions:
+      - v1
+      operations:
+      - CREATE
+      - UPDATE
+      resources:
+      - secrets
+  validations:
+  - expression: '!has(object.type) || object.type != "kubernetes.io/service-account-token"'
+    message: the operator never writes ServiceAccount token Secrets (dotvirt operator
+      guard)
+    reason: Forbidden
+  - expression: '!has(object.metadata.annotations) || !("kubernetes.io/service-account.name"
+      in object.metadata.annotations)'
+    message: the operator never asks for a ServiceAccount token (dotvirt operator
+      guard)
+    reason: Forbidden
+  - expression: request.namespace in ["${INSTALL_NAMESPACE}", "${ARGO_NAMESPACE}"]
+    message: the operator writes Secrets only in ${INSTALL_NAMESPACE} and ${ARGO_NAMESPACE}
+      (dotvirt operator guard)
+    reason: Forbidden
+---
+# Bounds the operator's Deployments: only in ${INSTALL_NAMESPACE}, as dotvirt's own accounts, official or admin-chosen images, unprivileged and off the host
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  labels:
+    app.kubernetes.io/name: dotvirt
+    app.kubernetes.io/part-of: dotvirt-operator-guard
+  name: dotvirt-operator-deployments
+spec:
+  failurePolicy: Fail
+  matchConditions:
+  - expression: request.userInfo.username == "${OPERATOR_USERNAME}"
+    name: operator
+  matchConstraints:
+    resourceRules:
+    - apiGroups:
+      - apps
+      apiVersions:
+      - v1
+      operations:
+      - CREATE
+      - UPDATE
+      resources:
+      - deployments
+  validations:
+  - expression: request.namespace == "${INSTALL_NAMESPACE}"
+    message: the operator runs Deployments only in ${INSTALL_NAMESPACE} (dotvirt operator
+      guard)
+    reason: Forbidden
+  - expression: has(object.spec.template.spec.serviceAccountName) && object.spec.template.spec.serviceAccountName
+      in ["dotvirt", "dotvirt-forgejo"]
+    message: the operator runs Deployments only as dotvirt or dotvirt-forgejo (dotvirt
+      operator guard)
+    reason: Forbidden
+  - expression: object.spec.template.spec.containers.all(c, (c.image.startsWith("quay.io/epheo/dotvirt@sha256:")
+      || c.image.startsWith("quay.io/epheo/dotvirt:") || c.image.startsWith("codeberg.org/forgejo/forgejo@sha256:")
+      || c.image.startsWith("codeberg.org/forgejo/forgejo:") || c.image in ["${SPEC_IMAGE}",
+      "${RELATED_IMAGE_DOTVIRT}", "${RELATED_IMAGE_FORGEJO}"])) && (!has(object.spec.template.spec.initContainers)
+      || object.spec.template.spec.initContainers.all(c, (c.image.startsWith("quay.io/epheo/dotvirt@sha256:")
+      || c.image.startsWith("quay.io/epheo/dotvirt:") || c.image.startsWith("codeberg.org/forgejo/forgejo@sha256:")
+      || c.image.startsWith("codeberg.org/forgejo/forgejo:") || c.image in ["${SPEC_IMAGE}",
+      "${RELATED_IMAGE_DOTVIRT}", "${RELATED_IMAGE_FORGEJO}"])))
+    message: the operator runs only images from quay.io/epheo/dotvirt or codeberg.org/forgejo/forgejo,
+      or the image an admin chose (dotvirt operator guard)
+    reason: Forbidden
+  - expression: '!(has(object.spec.template.spec.hostNetwork) && object.spec.template.spec.hostNetwork)
+      && !(has(object.spec.template.spec.hostPID) && object.spec.template.spec.hostPID)
+      && !(has(object.spec.template.spec.hostIPC) && object.spec.template.spec.hostIPC)'
+    message: the operator runs no Deployment in the host network, PID or IPC namespace
+      (dotvirt operator guard)
+    reason: Forbidden
+  - expression: '!has(object.spec.template.spec.volumes) || object.spec.template.spec.volumes.all(v,
+      !has(v.hostPath))'
+    message: the operator mounts no host path (dotvirt operator guard)
+    reason: Forbidden
+  - expression: '!(has(object.spec.template.spec.securityContext) && has(object.spec.template.spec.securityContext.runAsUser)
+      && object.spec.template.spec.securityContext.runAsUser == 0) && !(has(object.spec.template.spec.securityContext)
+      && has(object.spec.template.spec.securityContext.seccompProfile) && object.spec.template.spec.securityContext.seccompProfile.type
+      == "Unconfined")'
+    message: the operator runs no pod as root nor unconfined by seccomp (dotvirt operator
+      guard)
+    reason: Forbidden
+  - expression: object.spec.template.spec.containers.all(c, !(has(c.securityContext)
+      && has(c.securityContext.privileged) && c.securityContext.privileged)) && (!has(object.spec.template.spec.initContainers)
+      || object.spec.template.spec.initContainers.all(c, !(has(c.securityContext)
+      && has(c.securityContext.privileged) && c.securityContext.privileged)))
+    message: the operator runs no privileged container (dotvirt operator guard)
+    reason: Forbidden
+  - expression: object.spec.template.spec.containers.all(c, has(c.securityContext)
+      && has(c.securityContext.allowPrivilegeEscalation) && c.securityContext.allowPrivilegeEscalation
+      == false) && (!has(object.spec.template.spec.initContainers) || object.spec.template.spec.initContainers.all(c,
+      has(c.securityContext) && has(c.securityContext.allowPrivilegeEscalation) &&
+      c.securityContext.allowPrivilegeEscalation == false))
+    message: the operator runs every container with allowPrivilegeEscalation false
+      (dotvirt operator guard)
+    reason: Forbidden
+  - expression: object.spec.template.spec.containers.all(c, has(c.securityContext)
+      && has(c.securityContext.capabilities) && has(c.securityContext.capabilities.drop)
+      && "ALL" in c.securityContext.capabilities.drop && !(has(c.securityContext.capabilities.add)
+      && size(c.securityContext.capabilities.add) > 0)) && (!has(object.spec.template.spec.initContainers)
+      || object.spec.template.spec.initContainers.all(c, has(c.securityContext) &&
+      has(c.securityContext.capabilities) && has(c.securityContext.capabilities.drop)
+      && "ALL" in c.securityContext.capabilities.drop && !(has(c.securityContext.capabilities.add)
+      && size(c.securityContext.capabilities.add) > 0)))
+    message: the operator runs every container with all capabilities dropped and none
+      added (dotvirt operator guard)
+    reason: Forbidden
+  - expression: object.spec.template.spec.containers.all(c, !(has(c.securityContext)
+      && has(c.securityContext.runAsUser) && c.securityContext.runAsUser == 0) &&
+      !(has(c.securityContext) && has(c.securityContext.seccompProfile) && c.securityContext.seccompProfile.type
+      == "Unconfined")) && (!has(object.spec.template.spec.initContainers) || object.spec.template.spec.initContainers.all(c,
+      !(has(c.securityContext) && has(c.securityContext.runAsUser) && c.securityContext.runAsUser
+      == 0) && !(has(c.securityContext) && has(c.securityContext.seccompProfile) &&
+      c.securityContext.seccompProfile.type == "Unconfined")))
+    message: the operator runs no container as root nor unconfined by seccomp (dotvirt
+      operator guard)
+    reason: Forbidden
+---
+# Bounds the operator's RBAC bindings: only the ones it renders, to their own roles and rendered subjects
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  labels:
+    app.kubernetes.io/name: dotvirt
+    app.kubernetes.io/part-of: dotvirt-operator-guard
+  name: dotvirt-operator-bindings
+spec:
+  failurePolicy: Fail
+  matchConditions:
+  - expression: request.userInfo.username == "${OPERATOR_USERNAME}"
+    name: operator
+  matchConstraints:
+    resourceRules:
+    - apiGroups:
+      - rbac.authorization.k8s.io
+      apiVersions:
+      - v1
+      operations:
+      - CREATE
+      - UPDATE
+      resources:
+      - clusterrolebindings
+    - apiGroups:
+      - rbac.authorization.k8s.io
+      apiVersions:
+      - v1
+      operations:
+      - CREATE
+      - UPDATE
+      resources:
+      - rolebindings
+  validations:
+  - expression: 'request.resource.resource == "clusterrolebindings" ? object.metadata.name
+      in ["dotvirt", "dotvirt-argocd-apply", "dotvirt-argocd-read", "dotvirt-platform-network-admin",
+      "dotvirt-platform-sync", "dotvirt-storage-catalog"] : (object.metadata.name
+      in ["dotvirt-sync-request"] && request.namespace == "${ARGO_NAMESPACE}")'
+    message: the operator writes only the bindings it renders, by name (dotvirt operator
+      guard)
+    reason: Forbidden
+  - expression: object.roleRef.apiGroup == "rbac.authorization.k8s.io" && object.roleRef.kind
+      == "ClusterRole" && object.roleRef.name == object.metadata.name
+    message: the operator binds each binding to the ClusterRole of its own name (dotvirt
+      operator guard)
+    reason: Forbidden
+  - expression: '!has(object.subjects) || object.subjects.all(s, (s.kind + "/" + (has(s.namespace)
+      ? s.namespace : "") + "/" + s.name) in {"dotvirt": ["ServiceAccount/${INSTALL_NAMESPACE}/dotvirt"],
+      "dotvirt-argocd-apply": ["ServiceAccount/${ARGO_NAMESPACE}/${ARGO_CONTROLLER}",
+      "ServiceAccount/${ARGO_NAMESPACE}/dotvirt-platform-sync"], "dotvirt-argocd-read":
+      ["ServiceAccount/${ARGO_NAMESPACE}/${ARGO_CONTROLLER}"], "dotvirt-platform-network-admin":
+      ["Group//dotvirt-platform-admins"], "dotvirt-platform-sync": ["ServiceAccount/${ARGO_NAMESPACE}/dotvirt-platform-sync"],
+      "dotvirt-storage-catalog": ["Group//system:authenticated"], "dotvirt-sync-request":
+      ["ServiceAccount/${INSTALL_NAMESPACE}/dotvirt"]}[object.metadata.name])'
+    message: the operator binds each binding to its rendered subjects only (dotvirt
+      operator guard)
+    reason: Forbidden
+---
+# Enforces dotvirt-operator-secrets
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  labels:
+    app.kubernetes.io/name: dotvirt
+    app.kubernetes.io/part-of: dotvirt-operator-guard
+  name: dotvirt-operator-secrets
+spec:
+  policyName: dotvirt-operator-secrets
+  validationActions:
+  - Deny
+---
+# Enforces dotvirt-operator-deployments
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  labels:
+    app.kubernetes.io/name: dotvirt
+    app.kubernetes.io/part-of: dotvirt-operator-guard
+  name: dotvirt-operator-deployments
+spec:
+  policyName: dotvirt-operator-deployments
+  validationActions:
+  - Deny
+---
+# Enforces dotvirt-operator-bindings
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  labels:
+    app.kubernetes.io/name: dotvirt
+    app.kubernetes.io/part-of: dotvirt-operator-guard
+  name: dotvirt-operator-bindings
+spec:
+  policyName: dotvirt-operator-bindings
+  validationActions:
+  - Deny

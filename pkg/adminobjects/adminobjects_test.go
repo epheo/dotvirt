@@ -1,8 +1,10 @@
 package adminobjects
 
 import (
-	"encoding/base64"
+	"bytes"
 	"encoding/json"
+	"flag"
+	"os"
 	"slices"
 	"strings"
 	"testing"
@@ -10,9 +12,16 @@ import (
 	admissionregistrationv1 "k8s.io/api/admissionregistration/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
+	"sigs.k8s.io/yaml"
 )
 
-var params = GuardParams{Operator: "system:serviceaccount:dotvirt-operator:dotvirt-operator-controller", Namespace: "dotvirt", ArgoNamespace: "openshift-gitops"}
+var params = Params{
+	Operator:       "system:serviceaccount:dotvirt-operator:dotvirt-operator-controller",
+	Namespace:      "dotvirt",
+	ArgoNamespace:  "openshift-gitops",
+	ArgoController: "openshift-gitops-argocd-application-controller",
+	SpecImage:      "registry.example/team/dotvirt:custom",
+}
 
 func policyOf(t *testing.T, o Object) admissionregistrationv1.ValidatingAdmissionPolicy {
 	t.Helper()
@@ -34,63 +43,82 @@ func exprs(p admissionregistrationv1.ValidatingAdmissionPolicy) []string {
 func holds(t *testing.T, where string, got []string, needle string) {
 	t.Helper()
 	if !slices.ContainsFunc(got, func(e string) bool { return strings.Contains(e, needle) }) {
-		t.Errorf("%s: no rule holds %s; got %q", where, needle, got)
+		t.Errorf("%s: no rule holds %s", where, needle)
 	}
 }
 
-// The guard pins the operator's exact username and the install's
-// namespaces, and matches only the two kinds it bounds, created or updated.
-func TestGuardPinsTheOperatorAndItsNamespaces(t *testing.T) {
-	objs := Guard(params)
-	if len(objs) != 4 {
-		t.Fatalf("guard = %d objects, want two policies and two bindings", len(objs))
+// The render's shape: what each policy matches, the exact username first, and
+// a rule for every pin. What the rules admit and refuse is the envtest's.
+func TestGuardShape(t *testing.T) {
+	objs := Render(params)
+	if len(objs) != 6 {
+		t.Fatalf("render = %d objects, want three policies and three bindings", len(objs))
 	}
-	for i, want := range []struct{ name, group, resource string }{{GuardSecretsName, "", "secrets"}, {GuardDeploymentsName, "apps", "deployments"}} {
+	match := map[string][][2]string{
+		GuardSecretsName:     {{"", "secrets"}},
+		GuardDeploymentsName: {{"apps", "deployments"}},
+		GuardBindingsName:    {{"rbac.authorization.k8s.io", "clusterrolebindings"}, {"rbac.authorization.k8s.io", "rolebindings"}},
+	}
+	for i, name := range GuardNames {
 		p := policyOf(t, objs[i])
-		if p.Name != want.name || *p.Spec.FailurePolicy != admissionregistrationv1.Fail || objs[i].Purpose == "" {
+		if p.Name != name || *p.Spec.FailurePolicy != admissionregistrationv1.Fail || objs[i].Purpose == "" {
 			t.Errorf("policy %d = %s %q", i, p.Name, objs[i].Purpose)
 		}
-		rules := p.Spec.MatchConstraints.ResourceRules
-		if len(rules) != 1 || !slices.Equal(rules[0].APIGroups, []string{want.group}) || !slices.Equal(rules[0].Resources, []string{want.resource}) ||
-			!slices.Equal(rules[0].Operations, []admissionregistrationv1.OperationType{admissionregistrationv1.Create, admissionregistrationv1.Update}) {
-			t.Errorf("%s match = %+v", p.Name, rules)
+		var got [][2]string
+		for _, r := range p.Spec.MatchConstraints.ResourceRules {
+			if !slices.Equal(r.Operations, []admissionregistrationv1.OperationType{admissionregistrationv1.Create, admissionregistrationv1.Update}) {
+				t.Errorf("%s operations = %v", name, r.Operations)
+			}
+			got = append(got, [2]string{r.APIGroups[0], r.Resources[0]})
+		}
+		if !slices.Equal(got, match[name]) {
+			t.Errorf("%s matches %v, want %v", name, got, match[name])
 		}
 		if len(p.Spec.MatchConditions) != 1 || p.Spec.MatchConditions[0].Expression != `request.userInfo.username == "`+params.Operator+`"` {
-			t.Errorf("%s condition = %+v, want the exact username", p.Name, p.Spec.MatchConditions)
-		}
-		var b admissionregistrationv1.ValidatingAdmissionPolicyBinding
-		if err := runtime.DefaultUnstructuredConverter.FromUnstructured(objs[2+i].Object.Object, &b); err != nil {
-			t.Fatal(err)
-		}
-		if b.Name != want.name || b.Spec.PolicyName != want.name || b.Spec.MatchResources != nil ||
-			!slices.Equal(b.Spec.ValidationActions, []admissionregistrationv1.ValidationAction{admissionregistrationv1.Deny}) {
-			t.Errorf("binding %s = %+v", b.Name, b.Spec)
+			t.Errorf("%s condition = %+v, want the exact username", name, p.Spec.MatchConditions)
 		}
 	}
-	sec, dep := exprs(policyOf(t, objs[0])), exprs(policyOf(t, objs[1]))
-	holds(t, "secrets", sec, `object.type != "kubernetes.io/service-account-token"`)
-	holds(t, "secrets", sec, `"kubernetes.io/service-account.name" in object.metadata.annotations`)
+	sec, dep, bind := exprs(policyOf(t, objs[0])), exprs(policyOf(t, objs[1])), exprs(policyOf(t, objs[2]))
 	holds(t, "secrets", sec, `request.namespace in ["dotvirt", "openshift-gitops"]`)
 	holds(t, "deployments", dep, `request.namespace == "dotvirt"`)
-	holds(t, "deployments", dep, `serviceAccountName in ["dotvirt", "dotvirt-forgejo"]`)
-	for _, f := range []string{"hostNetwork", "hostPID", "hostIPC", "!has(v.hostPath)", "containers.all(c, " + unprivileged, "initContainers.all(c, " + unprivileged} {
-		holds(t, "deployments", dep, f)
-	}
-	for _, f := range []string{"c.securityContext.privileged", "c.securityContext.allowPrivilegeEscalation"} {
-		if !strings.Contains(unprivileged, f) {
-			t.Errorf("container rule misses %s", f)
-		}
-	}
+	holds(t, "deployments", dep, `c.image.startsWith("quay.io/epheo/dotvirt@sha256:")`)
+	holds(t, "deployments", dep, `c.image in ["registry.example/team/dotvirt:custom", "", ""]`)
+	holds(t, "bindings", bind, `"ServiceAccount/openshift-gitops/openshift-gitops-argocd-application-controller"`)
+	holds(t, "bindings", bind, `request.namespace == "openshift-gitops"`)
 	for _, o := range objs {
 		if _, ok := Allow(Allowed(params.Namespace), o.Object); !ok {
 			t.Errorf("%s %s is rendered but not allowed", o.Object.GetKind(), o.Object.GetName())
+		}
+		if _, ok := diff[o.Object.GroupVersionKind().GroupKind()]; !ok {
+			t.Errorf("%s has no comparer", o.Object.GetKind())
+		}
+	}
+}
+
+func TestParamsValid(t *testing.T) {
+	if !params.Valid() || params.OperatorNamespace() != "dotvirt-operator" {
+		t.Fatalf("%+v: valid %v, operator namespace %q", params, params.Valid(), params.OperatorNamespace())
+	}
+	for name, edit := range map[string]func(*Params){
+		"a user, not an account":  func(p *Params) { p.Operator = "alice" },
+		"an extra colon":          func(p *Params) { p.Operator = "system:serviceaccount:a:b:c" },
+		"a bad namespace":         func(p *Params) { p.Operator = "system:serviceaccount:A_B:op" },
+		"no install namespace":    func(p *Params) { p.Namespace = "" },
+		"a quote in a namespace":  func(p *Params) { p.ArgoNamespace = `argo"cd` },
+		"no controller":           func(p *Params) { p.ArgoController = "" },
+		"a quote in a controller": func(p *Params) { p.ArgoController = `a"b` },
+	} {
+		p := params
+		edit(&p)
+		if p.Valid() {
+			t.Errorf("%s: valid", name)
 		}
 	}
 }
 
 func TestAllowRefusesAnythingElse(t *testing.T) {
 	allowed := Allowed("dotvirt")
-	ok := Guard(params)[0].Object
+	ok := Render(params)[0].Object
 	for name, edit := range map[string]func(*unstructured.Unstructured){
 		"another name":    func(o *unstructured.Unstructured) { o.SetName("cluster-admin") },
 		"another kind":    func(o *unstructured.Unstructured) { o.SetKind("ClusterRoleBinding") },
@@ -104,82 +132,95 @@ func TestAllowRefusesAnythingElse(t *testing.T) {
 			t.Errorf("%s: allowed", name)
 		}
 	}
-	if _, allowed := Allow(allowed, ok); !allowed {
-		t.Error("the guard's own policy is refused")
-	}
 }
 
-func TestManifestIsOneList(t *testing.T) {
-	b, err := Manifest(Guard(params))
-	if err != nil {
-		t.Fatal(err)
-	}
-	var list struct {
-		APIVersion string
-		Kind       string
-		Items      []map[string]any
-	}
-	if err := json.Unmarshal(b, &list); err != nil {
-		t.Fatal(err)
-	}
-	if list.APIVersion != "v1" || list.Kind != "List" || len(list.Items) != 4 {
-		t.Fatalf("manifest = %s %s with %d items", list.APIVersion, list.Kind, len(list.Items))
-	}
-	for i, name := range []string{GuardSecretsName, GuardDeploymentsName, GuardSecretsName, GuardDeploymentsName} {
-		if md, _ := list.Items[i]["metadata"].(map[string]any); md["name"] != name {
-			t.Errorf("item %d = %v, want %s", i, md, name)
-		}
-	}
-	if strings.Contains(ApplyCommand, "force") || !strings.HasSuffix(ApplyCommand, "-f") {
-		t.Errorf("ApplyCommand = %q: a fixed command ending in -f, never forcing", ApplyCommand)
-	}
-}
-
-func TestCompare(t *testing.T) {
-	want := Guard(params)
+func TestCompareSaysWhatDiffers(t *testing.T) {
+	want := Render(params)
 	moved := params
 	moved.ArgoNamespace = "argocd"
+	other := params
+	other.Operator = "system:serviceaccount:x:y"
 	for name, c := range map[string]struct {
-		live  func() *unstructured.Unstructured
-		which int
-		state State
+		live   func() *unstructured.Unstructured
+		which  int
+		state  State
+		detail string
 	}{
-		"as rendered":     {func() *unstructured.Unstructured { return want[0].Object.DeepCopy() }, 0, Installed},
-		"missing":         {func() *unstructured.Unstructured { return nil }, 3, NotInstalled},
-		"another install": {func() *unstructured.Unstructured { return Guard(moved)[0].Object }, 0, Outdated},
-		"a validation dropped": {func() *unstructured.Unstructured {
+		"as rendered":            {func() *unstructured.Unstructured { return want[0].Object.DeepCopy() }, 0, Installed, ""},
+		"missing":                {func() *unstructured.Unstructured { return nil }, 3, NotInstalled, "is missing"},
+		"for another ArgoCD":     {func() *unstructured.Unstructured { return Render(moved)[0].Object }, 0, Outdated, "lacks the rule"},
+		"for another account":    {func() *unstructured.Unstructured { return Render(other)[1].Object }, 1, Outdated, "applies to another account"},
+		"an extra deny-all rule": {func() *unstructured.Unstructured { return withValidations(want[1].Object, "false") }, 1, Outdated, "holds rules the render does not"},
+		"a rule dropped": {func() *unstructured.Unstructured {
 			o := want[1].Object.DeepCopy()
 			v, _, _ := unstructured.NestedSlice(o.Object, "spec", "validations")
 			_ = unstructured.SetNestedSlice(o.Object, v[1:], "spec", "validations")
 			return o
-		}, 1, Outdated},
-		"the condition widened": {func() *unstructured.Unstructured {
-			o := want[0].Object.DeepCopy()
-			_ = unstructured.SetNestedSlice(o.Object, []any{map[string]any{"name": "operator", "expression": "true"}}, "spec", "matchConditions")
-			return o
-		}, 0, Outdated},
+		}, 1, Outdated, "lacks the rule"},
 		"a warn-only binding": {func() *unstructured.Unstructured {
-			o := want[2].Object.DeepCopy()
+			o := want[3].Object.DeepCopy()
 			_ = unstructured.SetNestedStringSlice(o.Object, []string{"Warn"}, "spec", "validationActions")
 			return o
-		}, 2, Outdated},
+		}, 3, Outdated, "does not only deny"},
 	} {
-		if got, detail := Compare(want[c.which].Object, c.live()); got != c.state {
-			t.Errorf("%s: %s (%s), want %s", name, got, detail, c.state)
+		got, detail := Compare(want[c.which].Object, c.live())
+		if got != c.state || !strings.Contains(detail, c.detail) {
+			t.Errorf("%s: %s (%s), want %s with %q", name, got, detail, c.state, c.detail)
 		}
 	}
 }
 
-func TestUsernameFromToken(t *testing.T) {
-	enc := func(payload string) string {
-		return "h." + base64.RawURLEncoding.EncodeToString([]byte(payload)) + ".s"
+func withValidations(o *unstructured.Unstructured, extra string) *unstructured.Unstructured {
+	o = o.DeepCopy()
+	v, _, _ := unstructured.NestedSlice(o.Object, "spec", "validations")
+	v = append(v, map[string]any{"expression": extra})
+	_ = unstructured.SetNestedSlice(o.Object, v, "spec", "validations")
+	return o
+}
+
+var update = flag.Bool("update", false, "rewrite the release template")
+
+// The release template is the render with placeholders; filled for an
+// install, it is what the console installs.
+func TestReleaseTemplate(t *testing.T) {
+	const path = "../../operator/install/guard.yaml"
+	got, err := Template()
+	if err != nil {
+		t.Fatal(err)
 	}
-	if got, err := UsernameFromToken(enc(`{"sub":"system:serviceaccount:ops:op"}`) + "\n"); err != nil || got != "system:serviceaccount:ops:op" {
-		t.Errorf("got %q %v", got, err)
+	if *update {
+		if err := os.WriteFile(path, got, 0o644); err != nil {
+			t.Fatal(err)
+		}
 	}
-	for _, bad := range []string{"", "a.b", enc(`{"sub":"alice"}`), enc(`{"sub":"system:serviceaccount:ops"}`), enc(`not json`)} {
-		if got, err := UsernameFromToken(bad); err == nil {
-			t.Errorf("%q: got %q, want an error", bad, got)
+	committed, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(committed, got) {
+		t.Fatalf("%s is stale: go test ./pkg/adminobjects -run TestReleaseTemplate -update", path)
+	}
+	filled := string(committed)
+	for k, v := range map[string]string{
+		"${OPERATOR_USERNAME}": params.Operator, "${INSTALL_NAMESPACE}": params.Namespace, "${ARGO_NAMESPACE}": params.ArgoNamespace,
+		"${ARGO_CONTROLLER}": params.ArgoController, "${SPEC_IMAGE}": params.SpecImage, "${RELATED_IMAGE_DOTVIRT}": "", "${RELATED_IMAGE_FORGEJO}": "",
+	} {
+		filled = strings.ReplaceAll(filled, k, v)
+	}
+	docs := strings.Split(filled, "\n---\n")[1:]
+	want := Render(params)
+	if len(docs) != len(want) {
+		t.Fatalf("template holds %d objects, want %d", len(docs), len(want))
+	}
+	for i, doc := range docs {
+		var got map[string]any
+		if err := yaml.Unmarshal([]byte(doc), &got); err != nil {
+			t.Fatal(err)
+		}
+		a, _ := json.Marshal(got)
+		b, _ := json.Marshal(want[i].Object.Object)
+		if string(a) != string(b) {
+			t.Errorf("filled template object %d differs from the render:\n%s\n%s", i, a, b)
 		}
 	}
 }

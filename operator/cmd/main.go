@@ -3,13 +3,19 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"os"
 	"strings"
+	"time"
 
+	authenticationv1 "k8s.io/api/authentication/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
+	"k8s.io/client-go/kubernetes"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
+	"k8s.io/client-go/rest"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
@@ -36,18 +42,21 @@ func operatorNamespace() string {
 	return strings.TrimSpace(string(b))
 }
 
-// operatorUsername is the username the manager pod authenticates as, "" out
-// of cluster.
-func operatorUsername() string {
-	b, err := os.ReadFile("/var/run/secrets/kubernetes.io/serviceaccount/token")
+// operatorUsername is the username the manager authenticates as, asked of
+// the apiserver once (every authenticated user may: system:basic-user); ""
+// when the answer is not a ServiceAccount's.
+func operatorUsername(cfg *rest.Config) string {
+	kube, err := kubernetes.NewForConfig(cfg)
 	if err != nil {
 		return ""
 	}
-	u, err := adminobjects.UsernameFromToken(string(b))
-	if err != nil {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	review, err := kube.AuthenticationV1().SelfSubjectReviews().Create(ctx, &authenticationv1.SelfSubjectReview{}, metav1.CreateOptions{})
+	if err != nil || !adminobjects.ValidUsername(review.Status.UserInfo.Username) {
 		return ""
 	}
-	return u
+	return review.Status.UserInfo.Username
 }
 
 func init() {
@@ -116,7 +125,7 @@ func main() {
 
 		APIReader:         mgr.GetAPIReader(),
 		OperatorNamespace: operatorNamespace(),
-		OperatorUsername:  operatorUsername(),
+		OperatorUsername:  operatorUsername(cfg),
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "Dotvirt")
 		os.Exit(1)
