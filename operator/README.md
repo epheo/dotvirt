@@ -66,12 +66,33 @@ owns one status condition; a phase that fails or waits records why there, so
    not (the dotvirt pod cannot start without it). No forge at all records
    `NotConfigured` (push-only).
    A credential under any name but `dotvirt-forge` is a cluster admin's to grant:
-   the operator's own role names only its own Secrets. Until the Role and RoleBinding
-   `dotvirt-forge-credential` are installed in the install namespace (get on that
-   Secret, plus create and patch for a managed forge, bound to the operator's
-   ServiceAccount), `ForgeCredentialGranted` is False (`NotGranted`). Meanwhile the
-   ArgoCD tier, the platform repo and both webhooks wait (`CredentialNotGranted`),
-   applying and pruning nothing, and the rest of the install runs.
+   the operator's own role names only its own Secrets. `ForgeCredentialReady` is
+   False (`NotGranted`) until the Role and RoleBinding `dotvirt-forge-credential`
+   are in the install namespace; its message carries the commands, with the real
+   names:
+
+   ```sh
+   kubectl -n <install-ns> create role dotvirt-forge-credential --verb=get --resource=secrets --resource-name=<credential>
+   kubectl -n <install-ns> create rolebinding dotvirt-forge-credential --role=dotvirt-forge-credential --serviceaccount=<operator-ns>:dotvirt-operator-controller
+   ```
+
+   A managed forge, which writes its minted token there, needs
+   `--verb=get,create,patch`. Created by hand, the grant outlives the install:
+   delete both with the CR. The operator watches that RoleBinding by name, so a
+   grant (or its removal) takes effect at once. Until then, conditions wait with
+   `WaitingForCredential` and the rest of the install runs:
+   - a bring-your-own forge: the ArgoCD tier waits before writing anything, since
+     tenant repo refs resolve against the credential's url (the app's forge URL).
+     New projects, and namespaces added to a project, do not sync, sync
+     impersonation does not change, and the platform repo and both webhooks wait;
+     what Argo already syncs keeps syncing.
+   - a managed forge: no token is minted, and the platform repo and both webhooks
+     wait. The ArgoCD tier goes on (its base is `spec.forge.url`), keeping the repo
+     credentials Argo already has.
+
+   A credential named like one of the operator's own Secrets (`dotvirt-session`,
+   ...) is refused (`NameTaken`): a managed forge's token would replace that
+   Secret's keys. Name another Secret.
 3. **Secrets** (`SecretsReady`): generates the session key, the ApplicationSet-plugin
    token, the webhook secrets and, with SSO, the OAuth client secret. Create-once:
    they survive restarts and are never regenerated.
@@ -150,23 +171,28 @@ ArgoCD namespace, a managed forge switched off. A tenant AppProject whose projec
 is gone, and the shared `dotvirt-tenants` AppProject of earlier versions, are kept
 while an Application still references them (the former admitting nothing), then
 pruned.
-Prune reads each name the install renders, never a list: the operator may not
-list Secrets, ConfigMaps, bindings or the operand's kinds. Tenant AppProjects,
-named after their projects, are the one kind listed, and only in the ArgoCD
-namespaces the install wrote. The ArgoCD-namespace objects are swept only there:
-the current namespace and the one `status.argoNamespace` records, the last one a
-prune completed in, so a labelled copy an admin made elsewhere survives.
+Prune reads each name the install renders instead of listing: the operator may
+not list Secrets, ConfigMaps or bindings beyond the two it watches by name
+(argocd-cm and the forge credential's grant). Tenant AppProjects, named after
+their projects, are the one kind prune lists, and only in the ArgoCD namespaces
+the install wrote. The ArgoCD-namespace objects are swept only there: the current
+namespace and the ones `status.argoNamespaces` records (each one a pass wrote
+since the last completed prune), so a labelled copy an admin made elsewhere
+survives.
 Never pruned: anything without the labels, and Secrets, PersistentVolumeClaims and
 the CA ConfigMaps in the install namespace (generated keys, the minted forge token
 and the forge's git data are state, not render). A pass that halts prunes nothing.
 Deleting the CR runs the same prune with nothing rendered, after taking sync
 impersonation off the ArgoCD instance if the operator set it there (below).
 
-The operator's own RBAC names each object it writes and reads (`rbac_markers.go`),
-so it cannot touch any other Secret, ConfigMap, binding or Application in the
-cluster; a rule without names says why beside it. AppProjects are the exception:
-tenant ones are named after their projects, so the grant covers any AppProject and
-prune's label check is what keeps it to this install's. An object only an older
+The operator's own RBAC names each object it writes (`rbac_markers.go`), so it
+cannot write any other Secret, ConfigMap, binding or Application in the cluster,
+nor read any other Secret or ConfigMap. A rule without names says why beside it:
+the reads that stay wider are any RoleBinding by name (the ones the platform
+repo manages), every Application listed (sync impersonation), and Deployments
+and Routes listed and watched (the cache, by label). AppProjects are the one
+write exception: tenant ones are named after their projects, so the grant covers
+any AppProject and prune's label check is what keeps it to this install's. An object only an older
 version rendered under another name is never read, and left for an admin to delete.
 A forge credential under an admin-chosen name is reached only through the
 `dotvirt-forge-credential` grant a cluster admin installs (Forge, above).
