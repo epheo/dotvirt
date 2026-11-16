@@ -144,9 +144,9 @@ func TestClassReplicationReadsOnlyR_DRBD(t *testing.T) {
 	}
 }
 
-// A class is usable when CDI fills a DataVolume's modes on it: from its own
-// provisioner table (Recognized), or from claim settings an admin put on the
-// profile for a driver CDI does not know.
+// A class is usable when CDI fills a DataVolume's modes on it: its profile's
+// status carries claim settings, whatever their source; CDI's Recognized
+// condition alone does not decide.
 func TestStorageProfileRecognizesAdminClaimSettings(t *testing.T) {
 	profile := func(status map[string]any) *unstructured.Unstructured {
 		return &unstructured.Unstructured{Object: map[string]any{"status": status}}

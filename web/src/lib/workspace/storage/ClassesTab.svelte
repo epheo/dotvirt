@@ -40,8 +40,8 @@
 	);
 
 	// A class disks reference but the cluster lacks leaves their DataVolumes
-	// pending forever; an unrecognized CDI profile means DataVolumes need
-	// explicit claim settings the create flow does not write.
+	// pending forever; a CDI profile without claim settings means DataVolumes
+	// need access and volume modes the create flow does not write.
 	function stateOf(
 		info: StorageClassInfo | undefined,
 		used: boolean,
@@ -59,7 +59,7 @@
 				tone: 'warn',
 				label: 'No claim settings',
 				title:
-					'CDI has no access or volume modes for this class (an unknown provisioner, and none set on its StorageProfile): DataVolumes need them explicit',
+					'CDI has no default access and volume modes for this class: disks created here are not provisioned until the platform sets them on its StorageProfile',
 			};
 		return null;
 	}
