@@ -306,6 +306,27 @@ func TestArgoSourcesExcludeTemplateLibrary(t *testing.T) {
 	}
 }
 
+// Every dotvirt Application (the platform app and the tenant template share
+// argoAppSpec) tracks main by its full ref, and retries a failed sync.
+func TestArgoAppsTrackMainExactlyAndRetry(t *testing.T) {
+	dv := testDotvirt()
+	for name, spec := range map[string]map[string]any{
+		"platform": PlatformApplication(dv, "argocd", "https://forge/x/platform.git").Object["spec"].(map[string]any),
+		"tenant":   ApplicationSet(dv, "argocd", nil, nil).Object["spec"].(map[string]any)["template"].(map[string]any)["spec"].(map[string]any),
+	} {
+		obj := map[string]any{"spec": spec}
+		if rev, _, _ := unstructured.NestedString(obj, "spec", "source", "targetRevision"); rev != "refs/heads/main" {
+			t.Errorf("%s: targetRevision = %q, want refs/heads/main", name, rev)
+		}
+		if limit, _, _ := unstructured.NestedInt64(obj, "spec", "syncPolicy", "retry", "limit"); limit < 1 {
+			t.Errorf("%s: no sync retry", name)
+		}
+		if d, _, _ := unstructured.NestedString(obj, "spec", "syncPolicy", "retry", "backoff", "maxDuration"); d == "" {
+			t.Errorf("%s: retry backoff has no bound", name)
+		}
+	}
+}
+
 // repo-creds templates ignore `insecure`; emitting it reads as a fix while doing
 // nothing. Trust is real instead (argocd-tls-certs-cm).
 func TestRepoCredsNeverEmitsIgnoredInsecure(t *testing.T) {

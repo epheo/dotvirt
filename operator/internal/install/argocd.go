@@ -29,8 +29,10 @@ const (
 	projectPlatform    = PlatformApplicationName
 
 	// appTargetRevision is the branch every dotvirt Application syncs, spelled once so
-	// the tenant template and the platform app cannot drift apart.
-	appTargetRevision = "main"
+	// the tenant template and the platform app cannot drift apart. The full ref:
+	// Argo matches a short name against every ref's short name, so a tag or other
+	// ref named main would be synced without passing main's review.
+	appTargetRevision = "refs/heads/main"
 
 	// InClusterServer is the cluster every dotvirt Application deploys to.
 	InClusterServer = "https://kubernetes.default.svc"
@@ -266,6 +268,13 @@ func argoAppSpec(project, repoURL, path, namespace string) map[string]any {
 		"syncPolicy": map[string]any{
 			"automated":   map[string]any{"prune": true, "selfHeal": true},
 			"syncOptions": []any{"CreateNamespace=false"},
+			// Automated sync never re-attempts a failed sync of the same commit: a
+			// webhook briefly down or a CRD still establishing would otherwise
+			// leave the tier failed until the next commit.
+			"retry": map[string]any{
+				"limit":   int64(5),
+				"backoff": map[string]any{"duration": "5s", "factor": int64(2), "maxDuration": "3m"},
+			},
 		},
 	}
 }
