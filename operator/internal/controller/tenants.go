@@ -233,7 +233,7 @@ func (r *DotvirtReconciler) appForgeBase(ctx context.Context, dv *dotvirtv1alpha
 	if !install.ForgeConfigured(dv) {
 		return "", nil
 	}
-	s, err := r.secret(ctx, dv.Namespace, install.ForgeSecretName(dv))
+	s, err := r.forgeSecret(ctx, dv)
 	if apierrors.IsNotFound(err) {
 		return "", nil
 	}

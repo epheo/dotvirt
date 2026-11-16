@@ -2,6 +2,7 @@ package controller
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/url"
 	"strings"
@@ -47,6 +48,9 @@ func (r *DotvirtReconciler) reconcileArgo(ctx context.Context, dv *dotvirtv1alph
 	}
 	platformNS := r.platformNamespaces(dv, argoNS)
 	tenants, err := r.tenantAppProjects(ctx, dv, rc, platformNS)
+	if errors.Is(err, errCredentialNotGranted) {
+		return r.waitForCredential(dv), nil
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -89,6 +93,9 @@ func (r *DotvirtReconciler) reconcileArgo(ctx context.Context, dv *dotvirtv1alph
 	// platform repos, including private ones. Best-effort - nil if the forge URL or
 	// secret is absent.
 	creds, err := r.repoCreds(ctx, dv, argoNS)
+	if errors.Is(err, errCredentialNotGranted) {
+		return r.waitForCredential(dv), nil
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -179,6 +186,9 @@ func (r *DotvirtReconciler) mirrorAppsetToken(ctx context.Context, dv *dotvirtv1
 // Real-only (the caller skips it in dry-run) - it mutates the forge + argocd-secret.
 func (r *DotvirtReconciler) argoWebhook(ctx context.Context, dv *dotvirtv1alpha1.Dotvirt, rc *reconcileCtx) (metav1.ConditionStatus, string, string) {
 	failed := func(err error) (metav1.ConditionStatus, string, string) {
+		if errors.Is(err, errCredentialNotGranted) {
+			return metav1.ConditionUnknown, reasonCredentialNotGranted, "waiting for " + dotvirtv1alpha1.ConditionForgeCredentialGranted
+		}
 		return metav1.ConditionFalse, "Error", err.Error()
 	}
 	notRegistered := func() (metav1.ConditionStatus, string, string) {
@@ -304,7 +314,7 @@ func (r *DotvirtReconciler) repoCreds(ctx context.Context, dv *dotvirtv1alpha1.D
 	if dv.Spec.Forge.URL == "" {
 		return nil, nil
 	}
-	s, err := r.secret(ctx, dv.Namespace, install.ForgeSecretName(dv))
+	s, err := r.forgeSecret(ctx, dv)
 	if apierrors.IsNotFound(err) {
 		return nil, nil
 	}

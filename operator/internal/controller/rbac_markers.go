@@ -40,13 +40,11 @@ package controller
 //
 // Secrets: the generated keys and the forge credential in the install namespace,
 // the ApplicationSet plugin token and repo credentials in the ArgoCD namespace, and
-// the webhook key in argocd-secret. Never listed or watched: a Secret informer would
-// need list and watch on every Secret in the cluster.
+// the webhook key in argocd-secret (install.OperatorSecretNames). Never listed or
+// watched: a Secret informer would need list and watch on every Secret in the
+// cluster. A forge credential under another name is granted by a cluster admin,
+// in the install namespace only (install.ForgeCredentialGrant).
 // +kubebuilder:rbac:groups="",resources=secrets,resourceNames=dotvirt-session;dotvirt-appset-plugin;dotvirt-webhook;dotvirt-argo-webhook;dotvirt-oauth;dotvirt-forgejo-admin;dotvirt-forge;dotvirt-repo-creds;argocd-secret,verbs=get;create;patch
-// secrets get/create/patch without names: ONLY spec.forge.credentialsSecret, an
-// admin-chosen name (read for a bring-your-own forge, written for a managed one).
-// Pending an owner decision; without it the named rule above covers every other Secret.
-// +kubebuilder:rbac:groups="",resources=secrets,verbs=get;create;patch
 // +kubebuilder:rbac:groups="",resources=secrets,resourceNames=dotvirt-appset-plugin;dotvirt-repo-creds,verbs=delete
 //
 // ConfigMaps, all by name: the default ingress CA (openshift-config-managed) and its

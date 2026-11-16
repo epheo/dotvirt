@@ -35,7 +35,6 @@ var unscopedRules = map[string][]string{
 	"apps/deployments":                          {"get", "list", "watch"},
 	"route.openshift.io/routes":                 {"get", "list", "watch"},
 	"route.openshift.io/routes/custom-host":     {"create", "update"},
-	"/secrets":                                  {"create", "get", "patch"},
 	"/namespaces":                               {"list", "watch"},
 	"argoproj.io/applications":                  {"list"},
 	"argoproj.io/appprojects":                   {"create", "delete", "list", "patch"},
@@ -160,8 +159,8 @@ func recordCalls(calls *[]operatorCall) interceptor.Funcs {
 
 // Every write and read the reconciler makes is granted by name: server-side
 // apply is authorized as create with the object's name, so a name missing from
-// the grant is an apply the apiserver refuses. The unscoped Secret rule counts
-// only for spec.forge.credentialsSecret, the one admin-chosen name.
+// the grant is an apply the apiserver refuses. An admin-named forge credential
+// counts only through the Role a cluster admin installs for it.
 func TestApplyGrantNamesEveryRenderedObject(t *testing.T) {
 	role := readOperatorRole(t)
 	forgeDown := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
@@ -214,7 +213,7 @@ func TestApplyGrantNamesEveryRenderedObject(t *testing.T) {
 			// What ran up to a phase that fails is what is checked.
 			_, _ = r.Reconcile(context.Background(), ctrl.Request{NamespacedName: client.ObjectKeyFromObject(pass.dv)})
 		}
-		credentials := install.ForgeSecretName(pass.dv)
+		grant, _ := install.ForgeCredentialGrant(pass.dv, "dotvirt-operator")
 		for _, call := range calls {
 			if call.group == "dotvirt.io" {
 				continue
@@ -222,11 +221,11 @@ func TestApplyGrantNamesEveryRenderedObject(t *testing.T) {
 			gr := call.group + "/" + call.resource
 			seen[gr+"/"+call.name] = true
 			unscoped := func(rule string) bool {
-				if rule == "/secrets" {
-					return call.name == credentials && credentials != "dotvirt-forge"
-				}
 				_, ok := unscopedRules[rule]
 				return ok
+			}
+			if grant != nil && call.namespace == grant.Namespace && operatorRole(grant.Rules).allows(call.verb, call.group, call.resource, call.name, unscoped) {
+				continue
 			}
 			if !role.allows(call.verb, call.group, call.resource, call.name, unscoped) {
 				t.Errorf("%s: %s %s %s/%s is not granted by name", pass.name, call.verb, gr, call.namespace, call.name)
@@ -252,5 +251,22 @@ func TestApplyGrantNamesEveryRenderedObject(t *testing.T) {
 		if !seen[want] {
 			t.Errorf("no pass touches %s, so its grant goes unchecked", want)
 		}
+	}
+}
+
+// The Secrets the operator's role names are the ones install treats as needing
+// no grant: a name only one side knows is a credential the operator either
+// cannot read or asks an admin to grant for nothing.
+func TestOperatorSecretNamesAreTheRolesSecrets(t *testing.T) {
+	var named []string
+	for _, rule := range readOperatorRole(t) {
+		if slices.Contains(rule.Resources, "secrets") && slices.Contains(rule.Verbs, "get") {
+			named = append(named, rule.ResourceNames...)
+		}
+	}
+	slices.Sort(named)
+	want := slices.Sorted(slices.Values(install.OperatorSecretNames))
+	if !slices.Equal(named, want) {
+		t.Errorf("role's Secret names %v, install.OperatorSecretNames %v", named, want)
 	}
 }

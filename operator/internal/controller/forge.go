@@ -38,6 +38,9 @@ func (r *DotvirtReconciler) reconcileForge(ctx context.Context, dv *dotvirtv1alp
 	// install needs it (the app's OAuth exchange verifies against the same copy),
 	// so it precedes the managed check.
 	r.ensureTrustAnchors(ctx, dv, rc)
+	if !install.ForgeCredentialNeedsGrant(dv) {
+		meta.RemoveStatusCondition(&dv.Status.Conditions, dotvirtv1alpha1.ConditionForgeCredentialGranted)
+	}
 	if !dv.Spec.Forge.Managed {
 		// Derived status, so a switch off managed retires the stale bootstrap hint too.
 		dv.Status.ForgeURL = dv.Spec.Forge.URL
@@ -67,6 +70,15 @@ func (r *DotvirtReconciler) reconcileForge(ctx context.Context, dv *dotvirtv1alp
 		return nil, nil
 	}
 	ready, err := r.bootstrapForgejo(ctx, dv)
+	if ready || err != nil {
+		r.recordCredentialGrant(dv, err)
+	}
+	if errors.Is(err, errCredentialNotGranted) {
+		// The forge serves; only what needs its credential waits (waitForCredential).
+		r.setCondition(dv, dotvirtv1alpha1.ConditionForgeReady, metav1.ConditionFalse, reasonCredentialNotGranted,
+			"waiting for "+dotvirtv1alpha1.ConditionForgeCredentialGranted)
+		return nil, nil
+	}
 	if errors.Is(err, forge.ErrUnauthorized) {
 		// Forgejo rejected the operator's admin credential. The bootstrap initContainer
 		// reconciles the DB password to the admin secret on every start, so this should
@@ -102,7 +114,12 @@ func (r *DotvirtReconciler) observeForge(ctx context.Context, dv *dotvirtv1alpha
 		r.setCondition(dv, dotvirtv1alpha1.ConditionForgeReady, metav1.ConditionFalse, "NotConfigured",
 			"no forge configured; propose pushes a branch but opens no pull request")
 	default:
-		if _, err := r.secret(ctx, dv.Namespace, name); apierrors.IsNotFound(err) {
+		_, err := r.forgeSecret(ctx, dv)
+		r.recordCredentialGrant(dv, err)
+		if errors.Is(err, errCredentialNotGranted) {
+			r.setCondition(dv, dotvirtv1alpha1.ConditionForgeReady, metav1.ConditionFalse, reasonCredentialNotGranted,
+				"waiting for "+dotvirtv1alpha1.ConditionForgeCredentialGranted)
+		} else if apierrors.IsNotFound(err) {
 			r.setCondition(dv, dotvirtv1alpha1.ConditionForgeReady, metav1.ConditionFalse, "CredentialsSecretMissing",
 				fmt.Sprintf("spec.forge.credentialsSecret names %s/%s, which does not exist; the dotvirt pod cannot start without it", dv.Namespace, name))
 		} else if err != nil {
@@ -191,7 +208,11 @@ func (r *DotvirtReconciler) reconcilePlatformRepo(ctx context.Context, dv *dotvi
 		meta.RemoveStatusCondition(&dv.Status.Conditions, dotvirtv1alpha1.ConditionForgeRepoReady)
 		return nil, nil
 	}
-	if err := r.ensurePlatformRepo(ctx, dv); err != nil {
+	if err := r.ensurePlatformRepo(ctx, dv); errors.Is(err, errCredentialNotGranted) {
+		r.setCondition(dv, dotvirtv1alpha1.ConditionForgeRepoReady, metav1.ConditionUnknown, reasonCredentialNotGranted,
+			"waiting for "+dotvirtv1alpha1.ConditionForgeCredentialGranted)
+		return nil, nil
+	} else if err != nil {
 		r.setCondition(dv, dotvirtv1alpha1.ConditionForgeRepoReady, metav1.ConditionFalse, "Error", err.Error())
 		return nil, nil
 	}
@@ -376,7 +397,7 @@ func (r *DotvirtReconciler) bootstrapForgejo(ctx context.Context, dv *dotvirtv1a
 	// rotation (Argo + the app then fail auth). Validate it; only short-circuit when
 	// it's genuinely valid, else fall through to re-mint. A forge blip surfaces as
 	// err (requeue) rather than a needless re-mint.
-	if existing, err := r.secret(ctx, dv.Namespace, credName); err == nil {
+	if existing, err := r.forgeSecret(ctx, dv); err == nil {
 		r.recordRender(ctx, existing)
 		valid, err := forge.NewFactory(apiBase, forge.StaticToken("unused"), false, "").
 			ValidateToken(string(existing.Data["token"]))
@@ -439,5 +460,10 @@ func (r *DotvirtReconciler) writeForgeSecret(ctx context.Context, dv *dotvirtv1a
 		// lingers, and the value is readable without the API server's StringData merge.
 		Data: map[string][]byte{"url": []byte(url), "username": []byte(username), "token": []byte(token)},
 	}
-	return r.applyOwned(ctx, dv, s)
+	if err := r.applyOwned(ctx, dv, s); apierrors.IsForbidden(err) {
+		return errCredentialNotGranted
+	} else if err != nil {
+		return err
+	}
+	return nil
 }

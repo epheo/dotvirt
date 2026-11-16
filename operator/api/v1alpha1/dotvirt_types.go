@@ -36,6 +36,12 @@ const (
 	// that the controller's own rights let a tenant DataVolume clone from any
 	// namespace (CloneAnywhere). It never gates Available.
 	ConditionSyncImpersonationReady = "SyncImpersonationReady"
+	// ConditionForgeCredentialGranted says whether the operator may use the Secret
+	// spec.forge.credentialsSecret names, set only for a name its own role does
+	// not cover. False (NotGranted) until a cluster admin installs the Role and
+	// RoleBinding dotvirt-forge-credential in the install namespace; meanwhile
+	// the phases needing the credential wait and the rest of the install runs.
+	ConditionForgeCredentialGranted = "ForgeCredentialGranted"
 	// ConditionAvailable is the roll-up: the full install is reconciled and serving.
 	ConditionAvailable = "Available"
 )
@@ -89,7 +95,9 @@ type ForgeSpec struct {
 	// an existing secret only for a bring-your-own forge. Its account creates the
 	// platform and project repos in their org and writes to them; registering the org
 	// webhooks needs an org owner, and without one dotvirt and ArgoCD fall back to
-	// polling.
+	// polling. Any name but dotvirt-forge needs a cluster admin's grant: the
+	// operator reads only the Secrets its own role names, and reports the Role and
+	// RoleBinding to install (ForgeCredentialGranted).
 	CredentialsSecret string `json:"credentialsSecret,omitempty"`
 	// InsecureTLS skips TLS verification when calling the forge API (a self-signed forge
 	// Route, e.g. the bundled Forgejo). DEV/EVAL ONLY; never enable against a forge with

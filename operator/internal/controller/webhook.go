@@ -2,6 +2,7 @@ package controller
 
 import (
 	"context"
+	"errors"
 	"strings"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -19,7 +20,10 @@ import (
 // needs the argocd-secret write the app must never hold.) Never halts; the git
 // poll backstops.
 func (r *DotvirtReconciler) reconcileDotvirtWebhook(ctx context.Context, dv *dotvirtv1alpha1.Dotvirt, _ *reconcileCtx) (*ctrl.Result, error) {
-	if registered, err := r.observeDotvirtWebhook(ctx, dv); err != nil {
+	if registered, err := r.observeDotvirtWebhook(ctx, dv); errors.Is(err, errCredentialNotGranted) {
+		r.setCondition(dv, dotvirtv1alpha1.ConditionDotvirtWebhook, metav1.ConditionUnknown, reasonCredentialNotGranted,
+			"waiting for "+dotvirtv1alpha1.ConditionForgeCredentialGranted)
+	} else if err != nil {
 		r.setCondition(dv, dotvirtv1alpha1.ConditionDotvirtWebhook, metav1.ConditionUnknown, "Unobservable",
 			"could not read the forge's webhooks ("+err.Error()+"); updates still flow via the app's git poll")
 	} else if registered {

@@ -414,7 +414,7 @@ func (r *DotvirtReconciler) dryRunSkip(dv *dotvirtv1alpha1.Dotvirt, condType, wh
 // builds the app's shared forge client (pkg/forge) scoped to the platform repo.
 func (r *DotvirtReconciler) forgeClient(ctx context.Context, dv *dotvirtv1alpha1.Dotvirt) (*forge.Client, error) {
 	name := install.ForgeSecretName(dv)
-	s, err := r.secret(ctx, dv.Namespace, name)
+	s, err := r.forgeSecret(ctx, dv)
 	if err != nil {
 		return nil, fmt.Errorf("read forge credentials %q: %w", name, err)
 	}

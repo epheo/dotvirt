@@ -55,11 +55,6 @@ const operatorFieldManager = "dotvirt-operator"
 // semantics and the least-privilege RBAC the fake client cannot check. It
 // needs the envtest binaries (`make -C operator test-envtest`); plain
 // `go test` skips it so the unit suite stays hermetic.
-// credentialsSecretUnscoped: spec.forge.credentialsSecret, an admin-chosen
-// name, keeps the operator's get, create and patch on Secrets unscoped until it
-// is granted another way; the rows probing a foreign Secret flip with it.
-const credentialsSecretUnscoped = true
-
 func TestEnvtest(t *testing.T) {
 	if os.Getenv("KUBEBUILDER_ASSETS") == "" {
 		t.Skip("KUBEBUILDER_ASSETS unset; run `make -C operator test-envtest`")
@@ -164,8 +159,9 @@ func TestEnvtest(t *testing.T) {
 			{authzv1.ResourceAttributes{Verb: "watch", Resource: "secrets"}, false},
 			{authzv1.ResourceAttributes{Verb: "get", Resource: "secrets", Namespace: "argocd", Name: install.ArgoSecretName}, true},
 			{authzv1.ResourceAttributes{Verb: "patch", Resource: "secrets", Namespace: "dotvirt", Name: install.SessionSecretName}, true},
-			{authzv1.ResourceAttributes{Verb: "get", Resource: "secrets", Namespace: "kube-system", Name: "some-token"}, credentialsSecretUnscoped},
-			{authzv1.ResourceAttributes{Verb: "create", Resource: "secrets", Namespace: "kube-system", Name: "some-token"}, credentialsSecretUnscoped},
+			{authzv1.ResourceAttributes{Verb: "get", Resource: "secrets", Namespace: "kube-system", Name: "some-token"}, false},
+			{authzv1.ResourceAttributes{Verb: "create", Resource: "secrets", Namespace: "kube-system", Name: "some-token"}, false},
+			{authzv1.ResourceAttributes{Verb: "get", Resource: "secrets", Namespace: "dotvirt", Name: "byo-creds"}, false},
 			// ConfigMaps, all by name: argocd-cm listed and watched by name for the
 			// cache, Argo's RBAC settings never touched.
 			{authzv1.ResourceAttributes{Verb: "list", Resource: "configmaps"}, false},
@@ -730,6 +726,44 @@ func TestEnvtest(t *testing.T) {
 		}
 		return res.Status.Allowed
 	}
+
+	t.Run("an admin's credential grant reaches that one Secret only", func(t *testing.T) {
+		// The operator's ServiceAccount holds nothing else here (the suite binds
+		// its role to a user), so each review sees the grant alone.
+		account := "system:serviceaccount:dotvirt-operator:" + install.OperatorServiceAccount
+		groups := []string{"system:serviceaccounts", "system:serviceaccounts:dotvirt-operator"}
+		for _, c := range []struct {
+			ns      string
+			managed bool
+		}{{"cred-byo", false}, {"cred-managed", true}} {
+			mustCreate(t, admin, &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: c.ns}})
+			dv := &dotvirtv1alpha1.Dotvirt{ObjectMeta: metav1.ObjectMeta{Name: "x", Namespace: c.ns}}
+			dv.Spec.Forge.CredentialsSecret, dv.Spec.Forge.Managed = "byo-creds", c.managed
+			role, binding := install.ForgeCredentialGrant(dv, "dotvirt-operator")
+			mustCreate(t, admin, role)
+			mustCreate(t, admin, binding)
+			for _, r := range []struct {
+				verb, ns, name string
+				want           bool
+			}{
+				{"get", c.ns, "byo-creds", true},
+				{"create", c.ns, "byo-creds", c.managed},
+				{"patch", c.ns, "byo-creds", c.managed},
+				{"update", c.ns, "byo-creds", false},
+				{"delete", c.ns, "byo-creds", false},
+				{"get", c.ns, install.SessionSecretName, false},
+				{"create", c.ns, "other", false},
+				{"list", c.ns, "", false},
+				{"watch", c.ns, "", false},
+				{"get", "dotvirt", "byo-creds", false},
+				{"get", "kube-system", "byo-creds", false},
+			} {
+				if got := review(account, groups, authzv1.ResourceAttributes{Verb: r.verb, Resource: "secrets", Namespace: r.ns, Name: r.name}); got != r.want {
+					t.Errorf("%s: %s secrets %s/%s: allowed=%v, want %v", c.ns, r.verb, r.ns, r.name, got, r.want)
+				}
+			}
+		}
+	})
 
 	t.Run("a project's sync account holds its project's rights only", func(t *testing.T) {
 		mustCreate(t, admin, projectNS("team-c", "team-c", "https://forge.example/dotvirt/team-c.git"))
