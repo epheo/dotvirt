@@ -91,16 +91,20 @@ func guard(p Params, insecure string, metrics Metrics) []Object {
 			deny(`object.metadata.name != `+quote(ConsoleDeployment)+` || (`+pod+`.containers.all(c, !has(c.command)) && `+
 				`(!has(`+pod+`.initContainers) || size(`+pod+`.initContainers) == 0))`,
 				"the operator runs the console with its image's own entrypoint and no init container"),
-			deny(`object.metadata.name != `+quote(ConsoleDeployment)+` || `+pod+`.containers.all(c, `+consoleSettings(p, metrics, insecure)+`)`,
+			deny(`object.metadata.name != `+quote(ConsoleDeployment)+` || `+pod+`.containers.all(c, `+consoleSettings(metrics, insecure)+`)`,
 				"the operator sets none of the console's settings that send users' tokens or the console's pages elsewhere, but as an admin chose them"),
 			// The console's apiserver endpoint and credentials are the in-cluster
 			// ones: no kubeconfig, no service address of its own, its token and CA
-			// mounted where client-go reads them. Proxy env stays allowed (cluster
-			// proxies inject it): the apiserver's TLS is verified against that CA.
+			// mounted where client-go reads it. And no name resolves elsewhere than
+			// the cluster's DNS says: the CAs it trusts for metrics and OAuth come
+			// from ConfigMaps the operator writes, so a host alias or resolver of
+			// the operator's choosing would let such a CA intercept users' tokens.
 			deny(`object.metadata.name != `+quote(ConsoleDeployment)+` || (`+
 				`!(has(`+pod+`.automountServiceAccountToken) && !`+pod+`.automountServiceAccountToken) && `+
+				`(!has(`+pod+`.hostAliases) || size(`+pod+`.hostAliases) == 0) && !has(`+pod+`.dnsConfig) && `+
+				`(!has(`+pod+`.dnsPolicy) || `+pod+`.dnsPolicy == "ClusterFirst") && `+
 				pod+`.containers.all(c, !has(c.envFrom) && (!has(c.env) || c.env.all(e, e.name != "KUBECONFIG" && !e.name.startsWith("KUBERNETES_SERVICE_")))))`,
-				"the operator runs the console with its own ServiceAccount token, and no kubeconfig or apiserver address of its own"),
+				"the operator runs the console with its own ServiceAccount token, the cluster's DNS, and no kubeconfig or apiserver address of its own"),
 			deny(eachContainer(`!has(c.volumeMounts) || c.volumeMounts.all(m, `+mountClear+`)`),
 				"the operator mounts nothing at, above or inside the ServiceAccount token directory"),
 			deny(`!(has(`+pod+`.hostNetwork) && `+pod+`.hostNetwork) && !(has(`+pod+`.hostPID) && `+pod+`.hostPID) && !(has(`+pod+`.hostIPC) && `+pod+`.hostIPC)`,
@@ -173,34 +177,55 @@ func guard(p Params, insecure string, metrics Metrics) []Object {
 // (-name, --name, with =value; the bare form is never rendered) or by env:
 //   - the metrics endpoints and their CA, where each user's queries go with
 //     the user's token: only as rendered from the admin's spec.metrics;
+//   - the OpenShift OAuth CA: absent, or the router CA the operator mounts;
+//   - the cross-origin allowance: never (same-origin is rendered; an origin
+//     there would be trusted with every user's session);
 //   - TLS verification off: only with the admin's spec.forge.insecureTLS;
 //   - a kubeconfig, or a directory of pages to serve: never (the image sets
-//     its own pages; served from elsewhere they would run as every user).
+//     its own pages; served from elsewhere they would run as every user);
+//   - proxies and the system trust store: never. The operator renders none;
+//     a cluster that needs a proxy would pin it to the cluster's Proxy object.
 //
 // The rest stays free, so a release may add settings. Among them, kept free
-// for a reason: the public URL and the OAuth and OIDC client settings, since
-// the provider sends codes only to the redirect URI an admin registered; and
-// the OIDC issuer, which can only phish (SECURITY.md keeps it open).
-func consoleSettings(p Params, m Metrics, insecure string) string {
+// for a reason: the public URL and the OIDC client settings, since the
+// provider sends codes only to the redirect URI an admin registered (the
+// OpenShift SSO client the console registers itself is derived from admin
+// data, not from these); and the OIDC issuer, which can only phish
+// (SECURITY.md keeps it open).
+func consoleSettings(m Metrics, insecure string) string {
 	forms := func(flag string) string {
-		return `(a == "-` + flag + `" || a == "--` + flag + `" || a.startsWith("-` + flag + `=") || a.startsWith("--` + flag + `="))`
+		return `(a == ` + quote("-"+flag) + ` || a == ` + quote("--"+flag) +
+			` || a.startsWith(` + quote("-"+flag+"=") + `) || a.startsWith(` + quote("--"+flag+"=") + `))`
 	}
 	never := func(flag, env string) string {
-		return `(!has(c.args) || c.args.all(a, !` + forms(flag) + `)) && (!has(c.env) || c.env.all(e, e.name != "` + env + `"))`
+		return `(!has(c.args) || c.args.all(a, !` + forms(flag) + `)) && (!has(c.env) || c.env.all(e, e.name != ` + quote(env) + `))`
 	}
-	pinned := func(flag, env, value string) string {
-		v := quote(value)
-		return `(!has(c.args) || c.args.all(a, !` + forms(flag) + ` || (` + v + ` != "" && (a == "-` + flag + `=" + ` + v + ` || a == "--` + flag + `=" + ` + v + `)))) && ` +
-			`(!has(c.env) || c.env.all(e, e.name != "` + env + `" || (` + v + ` != "" && !has(e.valueFrom) && has(e.value) && e.value == ` + v + `)))`
+	// pinned admits flag and env only at one of values, each matched whole.
+	pinned := func(flag, env string, values ...string) string {
+		var args []string
+		for _, v := range values {
+			args = append(args, "-"+flag+"="+v, "--"+flag+"="+v)
+		}
+		return `(!has(c.args) || c.args.all(a, !` + forms(flag) + ` || a in ` + list(args...) + `)) && ` +
+			`(!has(c.env) || c.env.all(e, e.name != ` + quote(env) + ` || (!has(e.valueFrom) && (has(e.value) ? e.value : "") in ` + list(values...) + `)))`
 	}
 	return strings.Join([]string{
 		pinned("metrics-url", "DOTVIRT_METRICS_URL", m.URL),
 		pinned("metrics-tenancy-url", "DOTVIRT_METRICS_TENANCY_URL", m.TenancyURL),
 		pinned("metrics-ca", "DOTVIRT_METRICS_CA", m.CA),
+		pinned("oauth-ca", "DOTVIRT_OAUTH_CA", "", IngressCAPath),
+		pinned("ui-origin", "DOTVIRT_UI_ORIGIN", ""),
 		`(` + insecure + ` || (` + never("insecure-tls", "DOTVIRT_INSECURE_TLS") + `))`,
 		never("kubeconfig", "KUBECONFIG"),
 		never("static-dir", "DOTVIRT_STATIC_DIR"),
+		`(!has(c.env) || c.env.all(e, !(e.name in ` + list(trustEnv...) + `)))`,
 	}, " && ")
+}
+
+// trustEnv are the env Go's HTTP clients take a proxy or a trust store from.
+var trustEnv = []string{
+	"HTTPS_PROXY", "https_proxy", "HTTP_PROXY", "http_proxy", "NO_PROXY", "no_proxy", "ALL_PROXY", "all_proxy",
+	"SSL_CERT_FILE", "SSL_CERT_DIR",
 }
 
 // pod is the Deployment's pod spec in CEL.

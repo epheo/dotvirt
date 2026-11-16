@@ -4,18 +4,24 @@
 # operator's status or conditions, which the operator writes), fill the
 # placeholders and apply it.
 #
-#   # The operator's Deployment (OLM or GitOps writes it, the operator cannot):
+#   # The install's namespace is the console's: tenants may create Dotvirts in
+#   # their own namespaces, so take the one ClusterRoleBinding dotvirt grants the
+#   # console's ServiceAccount in, and the one Dotvirt there, as the console does.
+#   # After moving the install, the binding names the old namespace until the
+#   # operator reconciles it: use the new namespace then.
+#   export INSTALL_NAMESPACE="$(kubectl get clusterrolebinding dotvirt \
+#     -o jsonpath='{.subjects[?(@.kind=="ServiceAccount")].namespace}')"
+#   # The operator's Deployment: among those named dotvirt-operator-controller (a
+#   # tenant may name one so), the one whose account may patch Dotvirt status there:
 #   OP="$(kubectl get deploy -A --field-selector metadata.name=dotvirt-operator-controller \
-#     -o jsonpath='{.items[0].metadata.namespace}/{.items[0].spec.template.spec.serviceAccountName}')"
+#     -o jsonpath='{range .items[*]}{.metadata.namespace}/{.spec.template.spec.serviceAccountName}{"\n"}{end}' |
+#     while IFS=/ read -r ns sa; do kubectl auth can-i patch dotvirts.dotvirt.io --subresource=status \
+#       -n "$INSTALL_NAMESPACE" --as="system:serviceaccount:$ns:${sa:-default}" >/dev/null && echo "$ns/${sa:-default}"; done)"
+#   [ "$(printf '%s\n' "$OP" | grep -c /)" = 1 ] || echo "want exactly one operator, found: $OP"
 #   export OPERATOR_USERNAME="system:serviceaccount:${OP%/*}:${OP#*/}"
 #   relimg() { kubectl -n "${OP%/*}" get deploy dotvirt-operator-controller \
 #     -o jsonpath="{.spec.template.spec.containers[0].env[?(@.name==\"$1\")].value}"; }
 #   export RELATED_IMAGE_DOTVIRT="$(relimg RELATED_IMAGE_DOTVIRT)" RELATED_IMAGE_FORGEJO="$(relimg RELATED_IMAGE_FORGEJO)"
-#   # The install's namespace is the console's: tenants may create Dotvirts in
-#   # their own namespaces, so take the one ClusterRoleBinding dotvirt grants the
-#   # console's ServiceAccount in, and the one Dotvirt there, as the console does:
-#   export INSTALL_NAMESPACE="$(kubectl get clusterrolebinding dotvirt \
-#     -o jsonpath='{.subjects[?(@.kind=="ServiceAccount")].namespace}')"
 #   spec() { kubectl -n "$INSTALL_NAMESPACE" get dotvirt -o jsonpath="{.items[0].spec.$1}"; }
 #   export SPEC_IMAGE="$(spec image)"
 #   export FORGE_INSECURE_TLS="$( [ "$(spec forge.insecureTLS)" = true ] && echo true || echo false )"
@@ -142,41 +148,53 @@ spec:
     message: the operator runs the console with its image's own entrypoint and no
       init container (dotvirt operator guard)
     reason: Forbidden
-  - expression: object.metadata.name != "dotvirt" || object.spec.template.spec.containers.all(c,
+  - expression: 'object.metadata.name != "dotvirt" || object.spec.template.spec.containers.all(c,
       (!has(c.args) || c.args.all(a, !(a == "-metrics-url" || a == "--metrics-url"
-      || a.startsWith("-metrics-url=") || a.startsWith("--metrics-url=")) || ("${METRICS_URL}"
-      != "" && (a == "-metrics-url=" + "${METRICS_URL}" || a == "--metrics-url=" +
-      "${METRICS_URL}")))) && (!has(c.env) || c.env.all(e, e.name != "DOTVIRT_METRICS_URL"
-      || ("${METRICS_URL}" != "" && !has(e.valueFrom) && has(e.value) && e.value ==
-      "${METRICS_URL}"))) && (!has(c.args) || c.args.all(a, !(a == "-metrics-tenancy-url"
-      || a == "--metrics-tenancy-url" || a.startsWith("-metrics-tenancy-url=") ||
-      a.startsWith("--metrics-tenancy-url=")) || ("${METRICS_TENANCY_URL}" != "" &&
-      (a == "-metrics-tenancy-url=" + "${METRICS_TENANCY_URL}" || a == "--metrics-tenancy-url="
-      + "${METRICS_TENANCY_URL}")))) && (!has(c.env) || c.env.all(e, e.name != "DOTVIRT_METRICS_TENANCY_URL"
-      || ("${METRICS_TENANCY_URL}" != "" && !has(e.valueFrom) && has(e.value) && e.value
-      == "${METRICS_TENANCY_URL}"))) && (!has(c.args) || c.args.all(a, !(a == "-metrics-ca"
-      || a == "--metrics-ca" || a.startsWith("-metrics-ca=") || a.startsWith("--metrics-ca="))
-      || ("${METRICS_CA}" != "" && (a == "-metrics-ca=" + "${METRICS_CA}" || a ==
-      "--metrics-ca=" + "${METRICS_CA}")))) && (!has(c.env) || c.env.all(e, e.name
-      != "DOTVIRT_METRICS_CA" || ("${METRICS_CA}" != "" && !has(e.valueFrom) && has(e.value)
-      && e.value == "${METRICS_CA}"))) && (${FORGE_INSECURE_TLS} || ((!has(c.args)
-      || c.args.all(a, !(a == "-insecure-tls" || a == "--insecure-tls" || a.startsWith("-insecure-tls=")
-      || a.startsWith("--insecure-tls=")))) && (!has(c.env) || c.env.all(e, e.name
-      != "DOTVIRT_INSECURE_TLS")))) && (!has(c.args) || c.args.all(a, !(a == "-kubeconfig"
-      || a == "--kubeconfig" || a.startsWith("-kubeconfig=") || a.startsWith("--kubeconfig="))))
-      && (!has(c.env) || c.env.all(e, e.name != "KUBECONFIG")) && (!has(c.args) ||
-      c.args.all(a, !(a == "-static-dir" || a == "--static-dir" || a.startsWith("-static-dir=")
-      || a.startsWith("--static-dir=")))) && (!has(c.env) || c.env.all(e, e.name !=
-      "DOTVIRT_STATIC_DIR")))
+      || a.startsWith("-metrics-url=") || a.startsWith("--metrics-url=")) || a in
+      ["-metrics-url=${METRICS_URL}", "--metrics-url=${METRICS_URL}"])) && (!has(c.env)
+      || c.env.all(e, e.name != "DOTVIRT_METRICS_URL" || (!has(e.valueFrom) && (has(e.value)
+      ? e.value : "") in ["${METRICS_URL}"]))) && (!has(c.args) || c.args.all(a, !(a
+      == "-metrics-tenancy-url" || a == "--metrics-tenancy-url" || a.startsWith("-metrics-tenancy-url=")
+      || a.startsWith("--metrics-tenancy-url=")) || a in ["-metrics-tenancy-url=${METRICS_TENANCY_URL}",
+      "--metrics-tenancy-url=${METRICS_TENANCY_URL}"])) && (!has(c.env) || c.env.all(e,
+      e.name != "DOTVIRT_METRICS_TENANCY_URL" || (!has(e.valueFrom) && (has(e.value)
+      ? e.value : "") in ["${METRICS_TENANCY_URL}"]))) && (!has(c.args) || c.args.all(a,
+      !(a == "-metrics-ca" || a == "--metrics-ca" || a.startsWith("-metrics-ca=")
+      || a.startsWith("--metrics-ca=")) || a in ["-metrics-ca=${METRICS_CA}", "--metrics-ca=${METRICS_CA}"]))
+      && (!has(c.env) || c.env.all(e, e.name != "DOTVIRT_METRICS_CA" || (!has(e.valueFrom)
+      && (has(e.value) ? e.value : "") in ["${METRICS_CA}"]))) && (!has(c.args) ||
+      c.args.all(a, !(a == "-oauth-ca" || a == "--oauth-ca" || a.startsWith("-oauth-ca=")
+      || a.startsWith("--oauth-ca=")) || a in ["-oauth-ca=", "--oauth-ca=", "-oauth-ca=/var/run/dotvirt/tls-ingress/ca-bundle.crt",
+      "--oauth-ca=/var/run/dotvirt/tls-ingress/ca-bundle.crt"])) && (!has(c.env) ||
+      c.env.all(e, e.name != "DOTVIRT_OAUTH_CA" || (!has(e.valueFrom) && (has(e.value)
+      ? e.value : "") in ["", "/var/run/dotvirt/tls-ingress/ca-bundle.crt"]))) &&
+      (!has(c.args) || c.args.all(a, !(a == "-ui-origin" || a == "--ui-origin" ||
+      a.startsWith("-ui-origin=") || a.startsWith("--ui-origin=")) || a in ["-ui-origin=",
+      "--ui-origin="])) && (!has(c.env) || c.env.all(e, e.name != "DOTVIRT_UI_ORIGIN"
+      || (!has(e.valueFrom) && (has(e.value) ? e.value : "") in [""]))) && (${FORGE_INSECURE_TLS}
+      || ((!has(c.args) || c.args.all(a, !(a == "-insecure-tls" || a == "--insecure-tls"
+      || a.startsWith("-insecure-tls=") || a.startsWith("--insecure-tls=")))) && (!has(c.env)
+      || c.env.all(e, e.name != "DOTVIRT_INSECURE_TLS")))) && (!has(c.args) || c.args.all(a,
+      !(a == "-kubeconfig" || a == "--kubeconfig" || a.startsWith("-kubeconfig=")
+      || a.startsWith("--kubeconfig=")))) && (!has(c.env) || c.env.all(e, e.name !=
+      "KUBECONFIG")) && (!has(c.args) || c.args.all(a, !(a == "-static-dir" || a ==
+      "--static-dir" || a.startsWith("-static-dir=") || a.startsWith("--static-dir="))))
+      && (!has(c.env) || c.env.all(e, e.name != "DOTVIRT_STATIC_DIR")) && (!has(c.env)
+      || c.env.all(e, !(e.name in ["HTTPS_PROXY", "https_proxy", "HTTP_PROXY", "http_proxy",
+      "NO_PROXY", "no_proxy", "ALL_PROXY", "all_proxy", "SSL_CERT_FILE", "SSL_CERT_DIR"]))))'
     message: the operator sets none of the console's settings that send users' tokens
       or the console's pages elsewhere, but as an admin chose them (dotvirt operator
       guard)
     reason: Forbidden
   - expression: object.metadata.name != "dotvirt" || (!(has(object.spec.template.spec.automountServiceAccountToken)
-      && !object.spec.template.spec.automountServiceAccountToken) && object.spec.template.spec.containers.all(c,
-      !has(c.envFrom) && (!has(c.env) || c.env.all(e, e.name != "KUBECONFIG" && !e.name.startsWith("KUBERNETES_SERVICE_")))))
-    message: the operator runs the console with its own ServiceAccount token, and
-      no kubeconfig or apiserver address of its own (dotvirt operator guard)
+      && !object.spec.template.spec.automountServiceAccountToken) && (!has(object.spec.template.spec.hostAliases)
+      || size(object.spec.template.spec.hostAliases) == 0) && !has(object.spec.template.spec.dnsConfig)
+      && (!has(object.spec.template.spec.dnsPolicy) || object.spec.template.spec.dnsPolicy
+      == "ClusterFirst") && object.spec.template.spec.containers.all(c, !has(c.envFrom)
+      && (!has(c.env) || c.env.all(e, e.name != "KUBECONFIG" && !e.name.startsWith("KUBERNETES_SERVICE_")))))
+    message: the operator runs the console with its own ServiceAccount token, the
+      cluster's DNS, and no kubeconfig or apiserver address of its own (dotvirt operator
+      guard)
     reason: Forbidden
   - expression: '(object.spec.template.spec.containers.all(c, !has(c.volumeMounts)
       || c.volumeMounts.all(m, !"/var/run/secrets/kubernetes.io/serviceaccount/".startsWith(m.mountPath.endsWith("/")

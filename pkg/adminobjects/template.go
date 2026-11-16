@@ -25,18 +25,24 @@ const templateHeader = `# The dotvirt operator guard: admission policies boundin
 # operator's status or conditions, which the operator writes), fill the
 # placeholders and apply it.
 #
-#   # The operator's Deployment (OLM or GitOps writes it, the operator cannot):
+#   # The install's namespace is the console's: tenants may create Dotvirts in
+#   # their own namespaces, so take the one ClusterRoleBinding dotvirt grants the
+#   # console's ServiceAccount in, and the one Dotvirt there, as the console does.
+#   # After moving the install, the binding names the old namespace until the
+#   # operator reconciles it: use the new namespace then.
+#   export INSTALL_NAMESPACE="$(kubectl get clusterrolebinding dotvirt \
+#     -o jsonpath='{.subjects[?(@.kind=="ServiceAccount")].namespace}')"
+#   # The operator's Deployment: among those named ` + OperatorDeployment + ` (a
+#   # tenant may name one so), the one whose account may patch Dotvirt status there:
 #   OP="$(kubectl get deploy -A --field-selector metadata.name=` + OperatorDeployment + ` \
-#     -o jsonpath='{.items[0].metadata.namespace}/{.items[0].spec.template.spec.serviceAccountName}')"
+#     -o jsonpath='{range .items[*]}{.metadata.namespace}/{.spec.template.spec.serviceAccountName}{"\n"}{end}' |
+#     while IFS=/ read -r ns sa; do kubectl auth can-i patch dotvirts.dotvirt.io --subresource=status \
+#       -n "$INSTALL_NAMESPACE" --as="system:serviceaccount:$ns:${sa:-default}" >/dev/null && echo "$ns/${sa:-default}"; done)"
+#   [ "$(printf '%s\n' "$OP" | grep -c /)" = 1 ] || echo "want exactly one operator, found: $OP"
 #   export OPERATOR_USERNAME="system:serviceaccount:${OP%/*}:${OP#*/}"
 #   relimg() { kubectl -n "${OP%/*}" get deploy ` + OperatorDeployment + ` \
 #     -o jsonpath="{.spec.template.spec.containers[0].env[?(@.name==\"$1\")].value}"; }
 #   export RELATED_IMAGE_DOTVIRT="$(relimg RELATED_IMAGE_DOTVIRT)" RELATED_IMAGE_FORGEJO="$(relimg RELATED_IMAGE_FORGEJO)"
-#   # The install's namespace is the console's: tenants may create Dotvirts in
-#   # their own namespaces, so take the one ClusterRoleBinding dotvirt grants the
-#   # console's ServiceAccount in, and the one Dotvirt there, as the console does:
-#   export INSTALL_NAMESPACE="$(kubectl get clusterrolebinding dotvirt \
-#     -o jsonpath='{.subjects[?(@.kind=="ServiceAccount")].namespace}')"
 #   spec() { kubectl -n "$INSTALL_NAMESPACE" get dotvirt -o jsonpath="{.items[0].spec.$1}"; }
 #   export SPEC_IMAGE="$(spec image)"
 #   export FORGE_INSECURE_TLS="$( [ "$(spec forge.insecureTLS)" = true ] && echo true || echo false )"

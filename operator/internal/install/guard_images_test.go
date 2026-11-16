@@ -30,6 +30,7 @@ func TestRenderMatchesTheGuardsPins(t *testing.T) {
 		"forge account":      {forgejoSAName, adminobjects.ForgeAccount},
 		"metrics CA":         {metricsCAMountPath + "/" + metricsCAFile, adminobjects.MetricsCAPath},
 		"service CA":         {serviceCAMountPath + "/" + ServiceCAKey, adminobjects.ServiceCAPath},
+		"router CA":          {ingressCAMountPath + "/" + IngressCAKey, adminobjects.IngressCAPath},
 	} {
 		if c[0] != c[1] {
 			t.Errorf("%s: install %q, guard %q", name, c[0], c[1])

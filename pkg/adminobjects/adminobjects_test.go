@@ -90,6 +90,10 @@ func TestGuardShape(t *testing.T) {
 	holds(t, "deployments", dep, `c.image in ["registry.example/team/dotvirt:custom", ""]`)
 	holds(t, "deployments", dep, `a.startsWith("-metrics-url=")`)
 	holds(t, "deployments", dep, `e.name != "KUBECONFIG"`)
+	holds(t, "deployments", dep, `"HTTPS_PROXY", "https_proxy"`)
+	holds(t, "deployments", dep, `hostAliases`)
+	holds(t, "deployments", dep, `a in ["-ui-origin=", "--ui-origin="]`)
+	holds(t, "deployments", dep, `"-oauth-ca=`+IngressCAPath+`"`)
 	holds(t, "install", inst, `object.spec == oldObject.spec`)
 	holds(t, "bindings", bind, `"ServiceAccount/openshift-gitops/openshift-gitops-argocd-application-controller"`)
 	holds(t, "bindings", bind, `request.namespace == "openshift-gitops"`)
@@ -254,6 +258,18 @@ func TestArgoTargetDefaults(t *testing.T) {
 		if ns, sa := ArgoTarget(c.ns, c.sa, c.openShift); ns != c.wantNS || sa != c.wantSA {
 			t.Errorf("ArgoTarget(%q, %q, %v) = %s, %s; want %s, %s", c.ns, c.sa, c.openShift, ns, sa, c.wantNS, c.wantSA)
 		}
+	}
+}
+
+func TestSSORedirect(t *testing.T) {
+	if got := SSORedirect("", "dotvirt", "apps.example"); got != "https://dotvirt-dotvirt.apps.example/api/auth/callback" {
+		t.Errorf("router host: %s", got)
+	}
+	if got := SSORedirect("console.example", "dotvirt", "apps.example"); got != "https://console.example/api/auth/callback" {
+		t.Errorf("spec host: %s", got)
+	}
+	if SSOClientName("dotvirt") != "dotvirt-dotvirt" {
+		t.Errorf("client name %s", SSOClientName("dotvirt"))
 	}
 }
 

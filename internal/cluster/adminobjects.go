@@ -24,6 +24,7 @@ type InstallSpec struct {
 	InsecureTLS                          bool
 	MetricsURL, MetricsTenancyURL        string
 	MetricsCA                            bool
+	IngressHost                          string
 }
 
 // InstallIn reads, under THIS client's identity, the one install in
@@ -45,6 +46,7 @@ func (c *Client) InstallIn(ctx context.Context, namespace string) (InstallSpec, 
 	out.MetricsURL, _, _ = unstructured.NestedString(o, "spec", "metrics", "url")
 	out.MetricsTenancyURL, _, _ = unstructured.NestedString(o, "spec", "metrics", "tenancyURL")
 	_, out.MetricsCA, _ = unstructured.NestedMap(o, "spec", "metrics", "ca")
+	out.IngressHost, _, _ = unstructured.NestedString(o, "spec", "ingress", "host")
 	return out, nil
 }
 
@@ -124,4 +126,20 @@ func (c *Client) AdminObject(ctx context.Context, ref adminobjects.Ref) (*unstru
 func (c *Client) ApplyAdminObject(ctx context.Context, ref adminobjects.Ref, obj *unstructured.Unstructured) error {
 	_, err := c.dyn.Resource(ref.GVR()).Namespace(ref.Namespace).Apply(ctx, ref.Name, obj, metav1.ApplyOptions{FieldManager: "dotvirt", Force: true})
 	return err
+}
+
+// AppsDomain reads, under THIS client's identity, the cluster's ingress domain
+// (config.openshift.io Ingress cluster): where the router names a hostless
+// Route.
+func (c *Client) AppsDomain(ctx context.Context) (string, error) {
+	gvr := schema.GroupVersionResource{Group: "config.openshift.io", Version: "v1", Resource: "ingresses"}
+	u, err := c.dyn.Resource(gvr).Get(ctx, "cluster", metav1.GetOptions{})
+	if err != nil {
+		return "", err
+	}
+	domain, _, _ := unstructured.NestedString(u.Object, "spec", "domain")
+	if domain == "" {
+		return "", fmt.Errorf("the cluster's Ingress names no domain")
+	}
+	return domain, nil
 }

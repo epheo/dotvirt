@@ -38,19 +38,32 @@ What the guard closes:
   own repository (or the image an admin chose), on the host, as root, privileged or with
   added capabilities, or the console with another entrypoint or an init container;
 - sending the tokens signed-in users give the console anywhere an admin did not choose:
-  no kubeconfig, apiserver address or `envFrom` of the operator's choosing, nothing
-  mounted over the console's ServiceAccount token and cluster CA, the metrics endpoints
-  and CA only as the admin set them, TLS verification off only as the admin set it, and
-  no pages served from elsewhere;
+  no kubeconfig, apiserver address, `envFrom`, proxy or trust store of the operator's
+  choosing; nothing mounted over the console's ServiceAccount token and cluster CA; no
+  host alias or resolver beside the cluster's DNS; the metrics endpoints and CA only as
+  the admin set them; the OAuth CA only the router CA; TLS verification off only as the
+  admin set it; no cross-origin allowance; no pages served from elsewhere;
 - binding any operand role to itself or another subject;
 - rewriting its own install's spec, where an admin chose the images, the ArgoCD target,
   the metrics endpoints and the forge credential.
+
+The CAs the console trusts come from ConfigMaps the operator writes (the router and
+service CAs, and the admin's metrics CA it mounts). A CA of the operator's choosing
+there intercepts nothing alone: the console reaches the pinned metrics host and the
+OAuth server through the cluster's DNS, with no proxy, host alias or resolver of the
+operator's choosing, so presenting a certificate for them takes a network position the
+operator does not have.
+
+The OpenShift SSO client the console registers (Finish SSO) is named and redirected
+from what the admin's token reads, never from the console's environment.
 
 What stays open:
 - the console's other configuration the operator writes as flags or `DOTVIRT_*` env,
   among them the OIDC issuer, which allows phishing an admin's credentials at a page of
   the operator's choosing, and the image upload proxy, which receives the upload tokens
   the console mints for each upload;
+- the `oc apply` command in `status.ssoOAuthClient`, which the operator writes: review
+  its redirect before running it, or use Finish SSO;
 - an older official release: any tag or digest in the official repositories passes,
   rollbacks included;
 - reads: the operator lists Deployments, Routes, Namespaces and Argo Applications and

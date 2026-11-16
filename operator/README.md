@@ -290,7 +290,14 @@ Secret write in the new namespace, before the console is deployed there, so no
 console comes up to offer Install until the guard is re-applied for the new pins.
 
 The operator does not watch these objects: their state in status follows on its next
-pass (within 10 minutes), the console's banner at once. They stay after uninstall
+pass (within 10 minutes), the console's banner at once.
+
+A release must keep its operand inside the previous release's guard, or every upgrade
+stops at the first refused write until an admin re-installs, while the old console
+still reads `Installed`. envtest checks this against
+`internal/controller/testdata/guard-previous.yaml`, the previous release's
+`install/guard.yaml`: refresh it from the released asset at each release. A release
+whose operand fails it ships with a re-install note. They stay after uninstall
 (nothing that ran can delete them); they match only the operator's username, and an
 admin may delete them.
 
@@ -658,6 +665,15 @@ registers the cluster-scoped `OAuthClient` with the right redirect URI. Register
 cluster-scoped object stays a cluster-admin act the operator deliberately leaves to you
 (it holds no `oauthclients` grant); the client secret is read from the generated Secret
 at apply time, so it never lands in status.
+
+A cluster admin signed in to the console can register it instead (Finish SSO). The
+console names the client `dotvirt-<namespace>` after its own namespace and takes its
+redirect from what the admin's token reads: `spec.ingress.host`, else the host
+OpenShift's router gives the console's hostless Route (`dotvirt-<namespace>.<cluster
+ingress domain>`). It never takes either from the public URL the operator writes into
+its environment: a redirect of the operator's choosing would receive every login code,
+and the operator holds the client secret. Review `status.ssoOAuthClient` the same way
+before running it: its redirect comes from the operator.
 
 The simplest way: sign in to the console once with a token (`oc whoami -t`) as a
 cluster admin and click "Finish SSO setup"; it registers the client with your own

@@ -38,8 +38,7 @@ const (
 	ArgoWebhookSecretName = "dotvirt-argo-webhook"
 	defaultForgeSecret    = "dotvirt-forge"
 	// OAuthSecretName holds the operator-generated OAuth client secret (key clientSecret).
-	OAuthSecretName   = "dotvirt-oauth"
-	oauthClientPrefix = "dotvirt"
+	OAuthSecretName = "dotvirt-oauth"
 
 	// IngressCAConfigMap: in-namespace copy of the default ingress CA, mounted so
 	// the app and the managed Forgejo VERIFY router-served TLS.
@@ -62,7 +61,7 @@ const (
 // have a second install overwrite the first's redirect URI and secret, breaking its SSO
 // with nothing to say why.
 func OAuthClientName(namespace string) string {
-	return oauthClientPrefix + "-" + namespace
+	return adminobjects.SSOClientName(namespace)
 }
 
 // ForgeSecretName is the forge-credential Secret for this install: the spec override,

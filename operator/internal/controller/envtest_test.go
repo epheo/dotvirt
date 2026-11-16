@@ -479,9 +479,13 @@ func TestEnvtest(t *testing.T) {
 		newFlag.Spec.Template.Spec.Containers[0].Args = append(newFlag.Spec.Template.Spec.Containers[0].Args, "-new-setting=1", "--git-poll-interval=10m")
 		newBootstrap := forge()
 		newBootstrap.Spec.Template.Spec.InitContainers[0].Command = []string{"sh", "-c", "forgejo migrate"}
+		routerCA := app()
+		rc := &routerCA.Spec.Template.Spec.Containers[0]
+		rc.Env = append(rc.Env, corev1.EnvVar{Name: "DOTVIRT_OAUTH_CA", Value: adminobjects.IngressCAPath})
 		for name, d := range map[string]*appsv1.Deployment{
 			"the console as rendered": app(), "the forge as rendered": forge(),
-			"a new release by digest": newDigest, "a new forge release by tag": newTag,
+			"the console trusting the router CA for SSO": routerCA,
+			"a new release by digest":                    newDigest, "a new forge release by tag": newTag,
 			"a release with a new console flag": newFlag, "a release with a new forge bootstrap": newBootstrap,
 		} {
 			if err := dryApply(d); err != nil {
@@ -541,6 +545,39 @@ func TestEnvtest(t *testing.T) {
 			}},
 			"the console serving other pages": {app, func(d *appsv1.Deployment) {
 				d.Spec.Template.Spec.Containers[0].Args = append(d.Spec.Template.Spec.Containers[0].Args, "-static-dir=/evil")
+			}},
+			"the console through a proxy": {app, func(d *appsv1.Deployment) {
+				c := &d.Spec.Template.Spec.Containers[0]
+				c.Env = append(c.Env, corev1.EnvVar{Name: "HTTPS_PROXY", Value: "http://evil.example:3128"})
+			}},
+			"the console through a proxy, lowercase": {app, func(d *appsv1.Deployment) {
+				c := &d.Spec.Template.Spec.Containers[0]
+				c.Env = append(c.Env, corev1.EnvVar{Name: "https_proxy", Value: "http://evil.example:3128"})
+			}},
+			"the console trusting another store": {app, func(d *appsv1.Deployment) {
+				c := &d.Spec.Template.Spec.Containers[0]
+				c.Env = append(c.Env, corev1.EnvVar{Name: "SSL_CERT_FILE", Value: "/evil/ca.crt"})
+			}},
+			"the console trusting another OAuth CA": {app, func(d *appsv1.Deployment) {
+				c := &d.Spec.Template.Spec.Containers[0]
+				c.Env = append(c.Env, corev1.EnvVar{Name: "DOTVIRT_OAUTH_CA", Value: "/evil/ca.crt"})
+			}},
+			"the console trusting another OAuth CA by flag": {app, func(d *appsv1.Deployment) {
+				d.Spec.Template.Spec.Containers[0].Args = append(d.Spec.Template.Spec.Containers[0].Args, "-oauth-ca=/evil/ca.crt")
+			}},
+			"the console trusting another origin": {app, func(d *appsv1.Deployment) {
+				d.Spec.Template.Spec.Containers[0].Args = append(d.Spec.Template.Spec.Containers[0].Args, "-ui-origin=https://evil.example")
+			}},
+			"the console trusting another origin by env": {app, func(d *appsv1.Deployment) {
+				c := &d.Spec.Template.Spec.Containers[0]
+				c.Env = append(c.Env, corev1.EnvVar{Name: "DOTVIRT_UI_ORIGIN", Value: "https://evil.example"})
+			}},
+			"the console resolving a host elsewhere": {app, func(d *appsv1.Deployment) {
+				d.Spec.Template.Spec.HostAliases = []corev1.HostAlias{{IP: "10.0.0.66", Hostnames: []string{"thanos-querier.openshift-monitoring.svc"}}}
+			}},
+			"the console with a resolver of its own": {app, func(d *appsv1.Deployment) {
+				d.Spec.Template.Spec.DNSPolicy = corev1.DNSNone
+				d.Spec.Template.Spec.DNSConfig = &corev1.PodDNSConfig{Nameservers: []string{"10.0.0.66"}}
 			}},
 			"the console serving other pages by env": {app, func(d *appsv1.Deployment) {
 				c := &d.Spec.Template.Spec.Containers[0]
@@ -787,6 +824,86 @@ func TestEnvtest(t *testing.T) {
 			return got.Status.ObservedGeneration == got.Generation && w != nil && w.Status == metav1.ConditionTrue
 		})
 
+	})
+
+	// A release whose operand the previous release's guard refuses breaks every
+	// upgrade until an admin re-installs the guard, while the old console reads
+	// Installed. The baseline is the previous release's install/guard.yaml,
+	// refreshed from the released asset at each release; a release that cannot
+	// pass it ships with a re-install note.
+	t.Run("the operand passes the previous release's guard", func(t *testing.T) {
+		raw, err := os.ReadFile(filepath.Join("testdata", "guard-previous.yaml"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		filled := string(raw)
+		for k, v := range map[string]string{
+			"${OPERATOR_USERNAME}": operatorUser, "${INSTALL_NAMESPACE}": "dotvirt", "${ARGO_NAMESPACE}": "argocd",
+			"${ARGO_CONTROLLER}": "argocd-application-controller", "${SPEC_IMAGE}": "", "${FORGE_INSECURE_TLS}": "false",
+			"${RELATED_IMAGE_DOTVIRT}": "", "${RELATED_IMAGE_FORGEJO}": "", "${METRICS_URL}": "", "${METRICS_TENANCY_URL}": "", "${METRICS_CA}": "",
+		} {
+			filled = strings.ReplaceAll(filled, k, v)
+		}
+		var objs []*unstructured.Unstructured
+		for _, doc := range strings.Split(filled, "\n---\n")[1:] {
+			o := &unstructured.Unstructured{}
+			if err := utilyaml.NewYAMLOrJSONDecoder(strings.NewReader(doc), 4096).Decode(&o.Object); err != nil {
+				t.Fatal(err)
+			}
+			if err := admin.Apply(ctx, client.ApplyConfigurationFromUnstructured(o.DeepCopy()), client.FieldOwner("dotvirt"), client.ForceOwnership); err != nil {
+				t.Fatalf("install the previous guard's %s: %v", o.GetName(), err)
+			}
+			objs = append(objs, o)
+		}
+		opClient, err := client.New(opCfg, client.Options{Scheme: scheme})
+		if err != nil {
+			t.Fatal(err)
+		}
+		dryApply := func(o client.Object) error {
+			m, err := runtime.DefaultUnstructuredConverter.ToUnstructured(o)
+			if err != nil {
+				t.Fatal(err)
+			}
+			return opClient.Apply(ctx, client.ApplyConfigurationFromUnstructured(&unstructured.Unstructured{Object: m}),
+				client.FieldOwner(operatorFieldManager), client.ForceOwnership, client.DryRunAll)
+		}
+		t.Cleanup(func() {
+			for _, o := range objs {
+				_ = admin.Delete(context.Background(), o)
+			}
+			probe := &corev1.Secret{TypeMeta: metav1.TypeMeta{APIVersion: "v1", Kind: "Secret"},
+				ObjectMeta: metav1.ObjectMeta{Name: install.OAuthSecretName, Namespace: "team-a"}}
+			eventually(t, "the previous guard lifted", func() bool { return dryApply(probe) == nil })
+		})
+		token := &corev1.Secret{
+			TypeMeta: metav1.TypeMeta{APIVersion: "v1", Kind: "Secret"},
+			ObjectMeta: metav1.ObjectMeta{Name: install.OAuthSecretName, Namespace: "dotvirt",
+				Annotations: map[string]string{corev1.ServiceAccountNameKey: "default"}},
+			Type: corev1.SecretTypeServiceAccountToken,
+		}
+		eventually(t, "the previous guard enforced", func() bool {
+			err := dryApply(token)
+			return apierrors.IsForbidden(err) && strings.Contains(err.Error(), "dotvirt operator guard")
+		})
+		dv := &dotvirtv1alpha1.Dotvirt{}
+		if err := admin.Get(ctx, types.NamespacedName{Namespace: "dotvirt", Name: "x"}, dv); err != nil {
+			t.Fatal(err)
+		}
+		for _, o := range []client.Object{
+			install.Deployment(dv, "argocd", nil),
+			install.ForgejoDeployment(dv, false, "", ""),
+			install.DotvirtClusterRoleBinding(dv),
+			install.ArgocdApplyClusterRoleBinding(dv, "argocd", "argocd-application-controller", true, true),
+			install.ArgocdReadClusterRoleBinding(dv, "argocd", "argocd-application-controller"),
+			install.PlatformSyncClusterRoleBinding(dv, "argocd"),
+			install.PlatformNetworkAdminBinding(dv),
+			install.StorageCatalogBinding(dv),
+			install.SyncRequestRoleBinding(dv, "argocd"),
+		} {
+			if err := dryApply(o); err != nil {
+				t.Errorf("the previous guard refuses this release's %s %s: %v", o.GetObjectKind().GroupVersionKind().Kind, o.GetName(), err)
+			}
+		}
 	})
 
 	t.Run("a labeled namespace confines its project", func(t *testing.T) {

@@ -50,6 +50,10 @@ const (
 	ServiceCAPath = "/var/run/dotvirt/tls-service/service-ca.crt"
 )
 
+// IngressCAPath is the router CA the console trusts for OpenShift's OAuth
+// server, mounted when SSO is on.
+const IngressCAPath = "/var/run/dotvirt/tls-ingress/ca-bundle.crt"
+
 // Metrics is the console's metrics configuration as rendered from an
 // admin's spec.metrics: where every user's query goes with the user's token,
 // and the CA it trusts there; "" when unset. The guard pins these, so only an
@@ -90,4 +94,23 @@ func thanosTenancy(raw string) string {
 	}
 	u.Host = net.JoinHostPort(u.Hostname(), "9092")
 	return u.String()
+}
+
+// SSOClientName is the OpenShift OAuthClient an install in namespace
+// registers as: cluster-scoped, so the name carries the namespace.
+func SSOClientName(namespace string) string { return "dotvirt-" + namespace }
+
+// SSORedirect is where OpenShift's OAuth server sends an install's login
+// codes: its console host, spec.ingress.host or else the host OpenShift's
+// router gives the hostless Route named dotvirt in namespace on appsDomain.
+// The console registers it from these admin-read values, never from the
+// public URL the operator writes into its env: a redirect of the operator's
+// choosing would receive every login code, and the operator holds the
+// client secret.
+func SSORedirect(specHost, namespace, appsDomain string) string {
+	host := specHost
+	if host == "" {
+		host = ConsoleDeployment + "-" + namespace + "." + appsDomain
+	}
+	return "https://" + host + "/api/auth/callback"
 }

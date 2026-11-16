@@ -14,6 +14,7 @@ import (
 	"github.com/epheo/dotvirt/internal/cluster"
 	"github.com/epheo/dotvirt/internal/model"
 	"github.com/epheo/dotvirt/internal/project"
+	"github.com/epheo/dotvirt/pkg/adminobjects"
 )
 
 // handleCapabilities answers GET /api/capabilities (see model.Capabilities):
@@ -120,8 +121,7 @@ func (s *Server) clusterCaps(ctx context.Context, id auth.Identity, c *cluster.C
 	}
 	s.fill(ctx, id, c, fields)
 	if s.oauth != nil {
-		clientID, _, _ := s.oauth.DesiredClient()
-		out.OAuthClient = s.oauthClientCap(ctx, id, c, clientID)
+		out.OAuthClient = s.cfg.OwnNamespace != "" && s.oauthClientCap(ctx, id, c, adminobjects.SSOClientName(s.cfg.OwnNamespace))
 	}
 	if s.cfg.PlatformRepo == "" {
 		return out
