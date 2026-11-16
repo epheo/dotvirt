@@ -134,7 +134,7 @@ func (r *DotvirtReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 		return ctrl.Result{}, err
 	}
 	if r.moved.Swap(false) {
-		r.restateIgnored(ctx, installNS, req.NamespacedName)
+		r.restateIgnored(ctx, installNS)
 		r.wakeInstall(ctx, installNS, req.NamespacedName)
 	}
 	var dv dotvirtv1alpha1.Dotvirt
@@ -819,8 +819,9 @@ func (r *DotvirtReconciler) markAdopted(dv *dotvirtv1alpha1.Dotvirt, adopted boo
 // restateIgnored rewrites the status of every Dotvirt outside installNS after
 // the install namespace changed: each names where the install lives. One write
 // per ignored Dotvirt per change; a failure waits for that Dotvirt's next event.
-// self, the Dotvirt of the pass that noticed, is left to that pass.
-func (r *DotvirtReconciler) restateIgnored(ctx context.Context, installNS string, self types.NamespacedName) {
+// The pass that noticed reads its own Dotvirt after this, so it writes nothing
+// twice.
+func (r *DotvirtReconciler) restateIgnored(ctx context.Context, installNS string) {
 	var all dotvirtv1alpha1.DotvirtList
 	if err := r.List(ctx, &all); err != nil {
 		logf.FromContext(ctx).Error(err, "list Dotvirts to restate the ignored ones")
@@ -828,7 +829,7 @@ func (r *DotvirtReconciler) restateIgnored(ctx context.Context, installNS string
 	}
 	for i := range all.Items {
 		dv := &all.Items[i]
-		if dv.Namespace == installNS || !dv.DeletionTimestamp.IsZero() || client.ObjectKeyFromObject(dv) == self {
+		if dv.Namespace == installNS || !dv.DeletionTimestamp.IsZero() {
 			continue
 		}
 		if err := r.ignore(ctx, dv, installNS); err != nil {
