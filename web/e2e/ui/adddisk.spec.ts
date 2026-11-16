@@ -154,3 +154,48 @@ test("a disk added to a VM with a one-copy disk is judged on that disk's host", 
 		),
 	).toHaveCount(2);
 });
+
+// A namespace's zero quota on a class keeps it out of Add disk: the select
+// drops it and its "cluster default" stand-in, and the disk stages on the
+// first class the namespace allows.
+test("Add disk offers only the classes the VM's namespace allows", async ({ page }) => {
+	await setScenario(page, 'classquota');
+	await login(page);
+	await openVM(page, 'web-1');
+	await page.getByRole('button', { name: /Edit Settings/ }).click();
+	const dialog = page.getByRole('dialog');
+	await dialog.getByRole('button', { name: /Storage/ }).click();
+	await dialog.getByRole('button', { name: '+ Add hard disk' }).click();
+	const select = dialog.getByRole('combobox');
+	await expect(select).toHaveValue('bulk-hdd');
+	await expect(select.locator('option')).toHaveText(['bulk-hdd']);
+
+	const posted = page.waitForRequest(
+		(r) => r.method() === 'POST' && new URL(r.url()).pathname.endsWith('/edit'),
+	);
+	await stageChange(page);
+	expect((await posted).postDataJSON().addDisks).toEqual([
+		expect.objectContaining({ storageClass: 'bulk-hdd' }),
+	]);
+});
+
+test("on r-drbd, Add disk's cards leave out a class the namespace forbids", async ({ page }) => {
+	await setScenario(page, 'replicatedquota');
+	await login(page);
+	await openVM(page, 'web-1');
+	await page.getByRole('button', { name: /Edit Settings/ }).click();
+	const dialog = page.getByRole('dialog');
+	await dialog.getByRole('button', { name: /Storage/ }).click();
+	await dialog.getByRole('button', { name: '+ Add hard disk' }).click();
+	await dialog.getByRole('radio', { name: /^Two copies/ }).check();
+	await expect(dialog.getByText('Class bulk-replicated, tier hdd.')).toBeVisible();
+	await expect(dialog.getByRole('radio', { name: /^r-drbd-replicated/ })).toHaveCount(0);
+
+	const posted = page.waitForRequest(
+		(r) => r.method() === 'POST' && new URL(r.url()).pathname.endsWith('/edit'),
+	);
+	await stageChange(page);
+	expect((await posted).postDataJSON().addDisks).toEqual([
+		expect.objectContaining({ storageClass: 'bulk-replicated' }),
+	]);
+});
