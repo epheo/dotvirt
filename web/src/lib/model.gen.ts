@@ -631,12 +631,14 @@ export interface Proposal {
   title?: string;
   /**
    * Branch is the head branch; By the proposing user, from the branch name
-   * (else the forge poster); Revert marks an undo PR. Mine is set per reader:
-   * the lane is project-wide, ownership is the caller's.
+   * (else the forge poster); Revert marks an undo PR, Seed the starter
+   * template library, which no user proposed. Mine is set per reader: the
+   * lane is project-wide, ownership is the caller's.
    */
   branch?: string;
   by?: string;
   revert?: boolean;
+  seed?: boolean;
   mine?: boolean;
   /**
    * Head is the head branch's commit as dotvirt's mirror holds it: the
@@ -1989,9 +1991,22 @@ export interface TemplateParameter {
 }
 /**
  * TemplateList is the content-library listing across the caller's libraries.
+ * Seeds reports the starter library's pull request, or why it could not be
+ * opened, per library that has one pending.
  */
 export interface TemplateList {
   templates: Template[];
+  seeds?: TemplateSeed[];
+}
+/**
+ * TemplateSeed is the starter template library proposed to a project's repo:
+ * its open pull request, or the forge's refusal when it could not be opened.
+ */
+export interface TemplateSeed {
+  library: string;
+  prNumber?: number /* int */;
+  prURL?: string;
+  error?: string;
 }
 /**
  * DeployTemplateRequest renders a library template and stages the resulting VM

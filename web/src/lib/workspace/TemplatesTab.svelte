@@ -2,7 +2,7 @@
 	import { goto } from '$app/navigation';
 	import { page } from '$app/state';
 	import type { Template } from '#lib/api.js';
-	import { libraryLabel, templateKey, templatesFor } from '#lib/templates.js';
+	import { libraryLabel, seedsFor, templateKey, templatesFor } from '#lib/templates.js';
 	import { plural } from '#lib/format.js';
 	import { projectNS } from '#lib/gates.js';
 	import { DEFAULT_PAGE_SIZE, pageFor, pageSlice } from '#lib/paging.js';
@@ -31,6 +31,7 @@
 	});
 
 	const rows = $derived(templates.list && templatesFor(templates.list, project));
+	const seeds = $derived(seedsFor(templates.seeds, project));
 	const invalid = $derived(rows?.filter((t) => t.error).length ?? 0);
 	// A VM stages into a namespace the caller authors in; the sheet then asks
 	// vmGate.create of the one picked.
@@ -189,6 +190,30 @@
 					</tbody>
 				</table>
 			</div>
+			{#each seeds as seed (seed.library)}
+				<div
+					class="flex items-start gap-2 border-t border-line-soft px-card py-3 text-xs leading-5"
+					data-testid="template-seed"
+				>
+					{#if seed.error}
+						<StatusPill tone="warn" label="Not offered" />
+						<span class="min-w-0 text-ink-muted"
+							>Starter templates for {libraryLabel(seed.library)} could not be proposed: {seed.error}</span
+						>
+					{:else}
+						<StageChip kind="pr" />
+						<span class="min-w-0 text-ink-muted"
+							>Starter templates for {libraryLabel(seed.library)} are proposed in
+							<a
+								class="text-accent-ink hover:underline"
+								href={seed.prURL}
+								target="_blank"
+								rel="noopener noreferrer">pull request #{seed.prNumber}</a
+							>. Merge it to add them, or close it to decline.</span
+						>
+					{/if}
+				</div>
+			{/each}
 			<Pager
 				class="border-t border-line px-card py-3"
 				total={s.total}

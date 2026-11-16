@@ -1632,6 +1632,27 @@ const pushedbranch = {
 	},
 };
 
+// --- seedoffer: the starter library offered to a project's repo ---
+// team-web's offer is an open pull request; team-db's was refused by its forge.
+const seedoffer = {
+	...base,
+	name: 'seedoffer',
+	templates: {
+		...base.templates,
+		seeds: [
+			{
+				library: 'team-web',
+				prNumber: 7,
+				prURL: 'https://forge.example/dotvirt/team-web/pulls/7',
+			},
+			{
+				library: 'team-db',
+				error: 'the forge refused the push to main (direct pushes are closed)',
+			},
+		],
+	},
+};
+
 // --- platstager: stages to the platform, cannot read it ---
 // The server lists only the caller's own platform PRs, serves the review of
 // the ones that still match what dotvirt proposed, refuses the platform's
@@ -2203,4 +2224,5 @@ export const scenarios = {
 	kindrepo,
 	forkpr,
 	pushedbranch,
+	seedoffer,
 };

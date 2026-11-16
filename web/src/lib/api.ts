@@ -628,7 +628,7 @@ export const api = {
 	// The template library. Deploy renders server-side
 	// and stages the VM into the draft; save derives a template from a VM's git
 	// manifest ("Clone to Template") - both land as PR-gated changes.
-	templates: () => get<{ templates: gen.Template[] }>('/api/templates'),
+	templates: () => get<gen.TemplateList>('/api/templates'),
 	deployTemplate: (req: gen.DeployTemplateRequest) => post<DraftView>(createRoutes.template, req),
 	saveTemplate: (req: gen.SaveTemplateRequest) => post<DraftView>('/api/templates', req),
 	updateTemplate: (req: gen.UpdateTemplateRequest) => put<DraftView>('/api/templates', req),
