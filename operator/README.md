@@ -649,7 +649,7 @@ A user already signed in at the provider comes back signed in, with no click, to
 `https://<console host>/?token` is the break-glass for admins: a pasted token (`oc whoami -t`, or `kubectl create token`) signs in when the provider is down.
 The screen links to it nowhere.
 
-A sign-in returns only to a page of the console itself: dotvirt refuses another origin, any `/api/` path (decoded, as the router reads it), and a path that cleaning would change.
+A sign-in returns only to a page of the console itself: dotvirt refuses another origin, any `/api/` path (decoded, as the router reads it), and a return whose part before the `?` (fragment included) cleaning would change.
 A provider that cannot be reached when a sign-in starts lands on the failure button, with the detail in dotvirt's log.
 Each sign-in keeps its own state cookie, so tabs signing in at once do not undo each other.
 

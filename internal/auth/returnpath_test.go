@@ -40,6 +40,10 @@ func TestSafeReturnKeepsOnlySameOriginPages(t *testing.T) {
 		"/x%5Cy":                "/",
 		"/x%0Ay":                "/",
 		"/x/./y":                "/",
+		"/x#/../api/auth/oidc":  "/",
+		"/a/b#/../../api/me":    "/",
+		"/changes#top":          "/changes#top",
+		"/x?y=/../api":          "/x?y=/../api",
 		"/" + string(make([]byte, maxReturnPath)): "/",
 	} {
 		if got := SafeReturn(in); got != want {
