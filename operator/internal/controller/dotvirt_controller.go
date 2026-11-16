@@ -31,6 +31,7 @@ import (
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
+	"sigs.k8s.io/controller-runtime/pkg/source"
 
 	dotvirtv1alpha1 "github.com/epheo/dotvirt/operator/api/v1alpha1"
 	"github.com/epheo/dotvirt/operator/internal/deps"
@@ -68,8 +69,11 @@ type DotvirtReconciler struct {
 	// mappings fan out without a read of their own.
 	resolved atomic.Value
 	// moved is set when the resolution changes, so the next pass rewrites the
-	// status of every ignored Dotvirt, whose message names the install.
+	// status of every ignored Dotvirt, whose message names the install, and
+	// wakes the Dotvirts of the new install namespace through wake: no event of
+	// their own says they became the install.
 	moved atomic.Bool
+	wake  chan event.GenericEvent
 
 	// probe is a test seam (not config): deps.Probe needs a live discovery
 	// endpoint, so tests stub it. nil = the real probe.
@@ -123,16 +127,19 @@ func (r *DotvirtReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 	// lag the previous pass's own write. Diffed against that stale base, a field
 	// flipping back (Ready after a Provisioning the cache never saw) would drop
 	// out of the patch and stay wrong on the server.
-	var dv dotvirtv1alpha1.Dotvirt
-	if err := r.reader().Get(ctx, req.NamespacedName, &dv); err != nil {
-		return ctrl.Result{}, client.IgnoreNotFound(err)
-	}
+	// Resolved first: the pass for a Dotvirt just deleted is often the only
+	// one to see the install namespace move.
 	installNS, adopted, err := r.installNamespace(ctx)
 	if err != nil {
 		return ctrl.Result{}, err
 	}
 	if r.moved.Swap(false) {
-		r.restateIgnored(ctx, installNS)
+		r.restateIgnored(ctx, installNS, req.NamespacedName)
+		r.wakeInstall(ctx, installNS, req.NamespacedName)
+	}
+	var dv dotvirtv1alpha1.Dotvirt
+	if err := r.reader().Get(ctx, req.NamespacedName, &dv); err != nil {
+		return ctrl.Result{}, client.IgnoreNotFound(err)
 	}
 	if dv.Namespace != installNS || installNS == "" {
 		return ctrl.Result{}, r.ignore(ctx, &dv, installNS)
@@ -623,6 +630,9 @@ func (r *DotvirtReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	// an object holding finalizers), never on the pass's own status write: an
 	// error message carrying an ephemeral port would otherwise re-run the pass
 	// back to back against a struggling forge.
+	if r.wake == nil {
+		r.wake = make(chan event.GenericEvent, 16)
+	}
 	b := ctrl.NewControllerManagedBy(mgr).
 		For(&dotvirtv1alpha1.Dotvirt{}, builder.WithPredicates(predicate.GenerationChangedPredicate{})).
 		Named("dotvirt").
@@ -642,7 +652,8 @@ func (r *DotvirtReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		// and RoleBinding in either order: the phases waiting on it go on at
 		// once, not on the drift timer.
 		Watches(&rbacv1.RoleBinding{}, handler.EnqueueRequestsFromMapFunc(r.installs)).
-		Watches(&rbacv1.Role{}, handler.EnqueueRequestsFromMapFunc(r.installs))
+		Watches(&rbacv1.Role{}, handler.EnqueueRequestsFromMapFunc(r.installs)).
+		WatchesRawSource(source.Channel(r.wake, &handler.EnqueueRequestForObject{}))
 	// Routes exist only where the route API does, so gate the watch on the same
 	// platform detection that gates rendering them; on vanilla Kubernetes the
 	// informer could never sync. Unstructured because the module carries no
@@ -808,7 +819,8 @@ func (r *DotvirtReconciler) markAdopted(dv *dotvirtv1alpha1.Dotvirt, adopted boo
 // restateIgnored rewrites the status of every Dotvirt outside installNS after
 // the install namespace changed: each names where the install lives. One write
 // per ignored Dotvirt per change; a failure waits for that Dotvirt's next event.
-func (r *DotvirtReconciler) restateIgnored(ctx context.Context, installNS string) {
+// self, the Dotvirt of the pass that noticed, is left to that pass.
+func (r *DotvirtReconciler) restateIgnored(ctx context.Context, installNS string, self types.NamespacedName) {
 	var all dotvirtv1alpha1.DotvirtList
 	if err := r.List(ctx, &all); err != nil {
 		logf.FromContext(ctx).Error(err, "list Dotvirts to restate the ignored ones")
@@ -816,11 +828,35 @@ func (r *DotvirtReconciler) restateIgnored(ctx context.Context, installNS string
 	}
 	for i := range all.Items {
 		dv := &all.Items[i]
-		if dv.Namespace == installNS || !dv.DeletionTimestamp.IsZero() {
+		if dv.Namespace == installNS || !dv.DeletionTimestamp.IsZero() || client.ObjectKeyFromObject(dv) == self {
 			continue
 		}
 		if err := r.ignore(ctx, dv, installNS); err != nil {
 			logf.FromContext(ctx).Error(err, "restate an ignored Dotvirt", "namespace", dv.Namespace, "name", dv.Name)
+		}
+	}
+}
+
+// wakeInstall queues the Dotvirts of a new install namespace, but self: the
+// pass that ignored them cancelled their requeue, and nothing else says they
+// became the install.
+func (r *DotvirtReconciler) wakeInstall(ctx context.Context, installNS string, self types.NamespacedName) {
+	if r.wake == nil || installNS == "" {
+		return
+	}
+	var list dotvirtv1alpha1.DotvirtList
+	if err := r.List(ctx, &list, client.InNamespace(installNS)); err != nil {
+		logf.FromContext(ctx).Error(err, "list the new install namespace's Dotvirts")
+		return
+	}
+	for i := range list.Items {
+		if client.ObjectKeyFromObject(&list.Items[i]) == self {
+			continue
+		}
+		select {
+		case r.wake <- event.GenericEvent{Object: &list.Items[i]}:
+		case <-ctx.Done():
+			return
 		}
 	}
 }

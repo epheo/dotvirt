@@ -15,6 +15,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
+	"sigs.k8s.io/controller-runtime/pkg/event"
 
 	dotvirtv1alpha1 "github.com/epheo/dotvirt/operator/api/v1alpha1"
 	"github.com/epheo/dotvirt/operator/internal/install"
@@ -483,5 +484,65 @@ func TestIgnoredDotvirtsAreRestatedWhenTheInstallAppears(t *testing.T) {
 	if co := cond(getCR(t, c, tenant), dotvirtv1alpha1.ConditionAvailable); co == nil ||
 		!strings.Contains(co.Message, "only on the Dotvirt in namespace dotvirt-operator") {
 		t.Errorf("tenant Available = %+v, want it to name dotvirt-operator", co)
+	}
+}
+
+// When the install namespace moves, the Dotvirts of the new one are woken: the
+// pass that ignored them cancelled their requeue. Here the Dotvirt in the
+// operator's namespace goes while an adoptable install waits in dotvirt.
+func TestAMovedInstallNamespaceWakesItsDotvirts(t *testing.T) {
+	own := testCR()
+	own.Namespace = "dotvirt-operator"
+	adoptee := testCR()
+	c := testBuilder(t).WithObjects(own, adoptee, dotvirtBinding(adoptee.Namespace)).Build()
+	r := adoptingReconciler(c)
+	r.wake = make(chan event.GenericEvent, 4)
+
+	reconcileOnce(t, r, adoptee)
+	if co := cond(getCR(t, c, adoptee), dotvirtv1alpha1.ConditionAvailable); co == nil || co.Reason != "WrongNamespace" {
+		t.Fatalf("with a Dotvirt in the operator's namespace, Available = %+v, want WrongNamespace", co)
+	}
+	if err := c.Delete(context.Background(), own); err != nil {
+		t.Fatal(err)
+	}
+	reconcileOnce(t, r, own) // the deleted Dotvirt's pass sees the move
+	select {
+	case ev := <-r.wake:
+		if client.ObjectKeyFromObject(ev.Object) != client.ObjectKeyFromObject(adoptee) {
+			t.Errorf("woke %v, want %v", client.ObjectKeyFromObject(ev.Object), client.ObjectKeyFromObject(adoptee))
+		}
+	default:
+		t.Fatal("the new install namespace's Dotvirt was not woken")
+	}
+	reconcileOnce(t, r, adoptee)
+	if co := cond(getCR(t, c, adoptee), dotvirtv1alpha1.ConditionAvailable); co != nil && co.Reason == "WrongNamespace" {
+		t.Errorf("after the wake, Available = %+v: the adopted install was not reconciled", co)
+	}
+}
+
+// The pass that notices the move writes its own Dotvirt's status once, not
+// once from the restate and again from its own ignore.
+func TestTheNoticingPassWritesItsDotvirtOnce(t *testing.T) {
+	tenant := tenantCR()
+	writes := 0
+	c := testBuilder(t).WithObjects(tenant).WithInterceptorFuncs(interceptor.Funcs{
+		SubResourcePatch: func(ctx context.Context, c client.Client, sub string, o client.Object, p client.Patch, opts ...client.SubResourcePatchOption) error {
+			if o.GetNamespace() == tenant.Namespace {
+				writes++
+			}
+			return c.SubResource(sub).Patch(ctx, o, p, opts...)
+		},
+	}).Build()
+	r := adoptingReconciler(c)
+	reconcileOnce(t, r, tenant)
+	own := testCR()
+	own.Namespace = "dotvirt-operator"
+	if err := c.Create(context.Background(), own); err != nil {
+		t.Fatal(err)
+	}
+	writes = 0
+	reconcileOnce(t, r, tenant)
+	if writes != 1 {
+		t.Errorf("tenant status writes in the noticing pass = %d, want 1", writes)
 	}
 }
