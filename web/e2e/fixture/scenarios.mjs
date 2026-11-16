@@ -1415,6 +1415,50 @@ const forgeadmin = {
 	capabilities: { ...base.capabilities, cluster: { forgeAdmin: true } },
 };
 
+// ── adminobjects: what the install asks a cluster admin to install ─────────────
+// The operator guard, not installed yet. Only a caller holding the capability
+// is offered it; the install flips each object to Installed.
+const guardObject = (kind, name) => ({
+	apiVersion: 'admissionregistration.k8s.io/v1',
+	kind,
+	metadata: { name },
+});
+const adminobjects = {
+	...base,
+	name: 'adminobjects',
+	capabilities: { ...base.capabilities, cluster: { adminObjects: true } },
+	adminObjects: [
+		['ValidatingAdmissionPolicy', 'dotvirt-operator-secrets', "Bounds the operator's Secrets"],
+		[
+			'ValidatingAdmissionPolicy',
+			'dotvirt-operator-deployments',
+			"Bounds the operator's Deployments",
+		],
+		[
+			'ValidatingAdmissionPolicyBinding',
+			'dotvirt-operator-secrets',
+			'Enforces dotvirt-operator-secrets',
+		],
+		[
+			'ValidatingAdmissionPolicyBinding',
+			'dotvirt-operator-deployments',
+			'Enforces dotvirt-operator-deployments',
+		],
+	].map(([kind, name, purpose]) => ({
+		purpose,
+		kind,
+		name,
+		state: 'NotInstalled',
+		object: guardObject(kind, name),
+	})),
+};
+// The same install, seen by a caller who may not install it.
+const adminobjectsdenied = {
+	...adminobjects,
+	name: 'adminobjectsdenied',
+	capabilities: base.capabilities,
+};
+
 // ── residue: a labeled project with no repo (an old install's leftover) ────────
 // The "no repo configured" dead-end Release resolves: the project label stands
 // on namespaces nothing in git describes.
@@ -2173,6 +2217,8 @@ export const scenarios = {
 	ssoready,
 	oidc,
 	forgeadmin,
+	adminobjects,
+	adminobjectsdenied,
 	base,
 	empty,
 	degraded,

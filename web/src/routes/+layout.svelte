@@ -39,6 +39,7 @@
 	import AppModals from '#lib/components/AppModals.svelte';
 	import Banner from '#lib/components/Banner.svelte';
 	import Login from '#lib/components/Login.svelte';
+	import AdminObjectsBanner from '#lib/components/AdminObjectsBanner.svelte';
 	import SSOBanner from '#lib/components/SSOBanner.svelte';
 	import SectionSwitcher from '#lib/components/SectionSwitcher.svelte';
 	import Skeleton from '#lib/components/Skeleton.svelte';
@@ -285,6 +286,7 @@
 		{/if}
 
 		<SSOBanner />
+		<AdminObjectsBanner />
 
 		{#if inventory.inventory?.warnings?.length}
 			<Banner tone="warn" size="md" class="items-start">
