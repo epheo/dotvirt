@@ -737,7 +737,8 @@ func TestEnvtest(t *testing.T) {
 			managed bool
 		}{{"cred-byo", false}, {"cred-managed", true}} {
 			mustCreate(t, admin, &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: c.ns}})
-			dv := &dotvirtv1alpha1.Dotvirt{ObjectMeta: metav1.ObjectMeta{Name: "x", Namespace: c.ns}}
+			// Not the install the deletion subtest takes down: its labels differ.
+			dv := &dotvirtv1alpha1.Dotvirt{ObjectMeta: metav1.ObjectMeta{Name: "cred", Namespace: c.ns}}
 			dv.Spec.Forge.CredentialsSecret, dv.Spec.Forge.Managed = "byo-creds", c.managed
 			role, binding := install.ForgeCredentialGrant(dv, "dotvirt-operator")
 			mustCreate(t, admin, role)
