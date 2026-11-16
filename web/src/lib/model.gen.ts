@@ -1754,8 +1754,8 @@ export interface StorageProfile {
   cloneStrategy?: string; // snapshot | copy | csi-clone
   /**
    * Recognized is true when CDI fills a DataVolume's access and volume modes on
-   * this class: from its own provisioner table, or from claim settings an admin
-   * put on the StorageProfile.
+   * this class: its StorageProfile's status carries claim settings, from CDI's
+   * provisioner table, the profile's spec or existing PVs.
    */
   recognized: boolean;
 }
