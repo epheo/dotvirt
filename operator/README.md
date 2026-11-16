@@ -84,17 +84,19 @@ owns one status condition; a phase that fails or waits records why there, so
    (the apiserver's RBAC caches catching up); past that it is wrong (a verb, the
    Secret's name or the account), and `ForgeCredentialReady` says `GrantIncomplete`
    with the commands to replace it: `kubectl -n <install-ns> delete
-   role,rolebinding dotvirt-forge-credential`, then the two above. Until the
-   grant works, conditions wait with `WaitingForCredential` and the rest of the
-   install runs:
+   role,rolebinding dotvirt-forge-credential --ignore-not-found` (a half grant
+   included), then the two above. Until the grant works, conditions wait with
+   `WaitingForCredential`, the steps needing the credential do not read it, and
+   the rest of the install runs:
    - a bring-your-own forge: the ArgoCD tier waits before writing anything, since
      tenant repo refs resolve against the credential's url (the app's forge URL).
      New projects, and namespaces added to a project, do not sync, sync
      impersonation does not change, and the platform repo and both webhooks wait;
      what Argo already syncs keeps syncing.
    - a managed forge: no token is minted or replaced (before minting into an
-     admin-named credential the operator asks whether it may store it, so it never
-     mints a token it would lose), and the platform repo and both webhooks wait. The ArgoCD tier goes on (its base is `spec.forge.url`),
+     admin-named credential the operator asks whether it may store it, patch and,
+     while it is absent, create, so it never mints a token it would lose), and the
+     platform repo and both webhooks wait. The ArgoCD tier goes on (its base is `spec.forge.url`),
      keeping the repo credentials Argo already has; after a move to another ArgoCD
      namespace it has none there, so private repos do not clone until the grant.
 
