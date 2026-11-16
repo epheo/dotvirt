@@ -201,7 +201,8 @@ func isOpenPath(path string) bool {
 		// handler); the endpoint 404s when no webhook secret is configured.
 		return true
 	}
-	return false
+	// A masthead link's icon: part of the provider's dress, like the logo.
+	return strings.HasPrefix(path, "/api/branding/icon/")
 }
 
 // tokenFromRequest pulls the bearer token from the session cookie, falling back
