@@ -10,6 +10,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	dotvirtv1alpha1 "github.com/epheo/dotvirt/operator/api/v1alpha1"
+	"github.com/epheo/dotvirt/pkg/adminobjects"
 )
 
 // Managed (eval) Forgejo: deployed in the dotvirt namespace, single-replica, eval-grade.
@@ -171,13 +172,8 @@ func ForgejoDeployment(dv *dotvirtv1alpha1.Dotvirt, setFSGroup bool, argoWebhook
 	// admin secret (a CR delete/recreate over the retained data PVC, or a manual secret
 	// delete) can never leave the operator's basic-auth mint stuck on a stale password.
 	// The initContainer has local DB access, so it needs no prior password to reset it.
-	bootstrap := `set -e
-mkdir -p "$(dirname "$GITEA_APP_INI")"
-environment-to-ini
-forgejo migrate
-forgejo admin user create --admin --username ` + ForgejoBotUser +
-		` --password "$ADMIN_PW" --email ` + ForgejoBotUser + `@dotvirt.local --must-change-password=false ` +
-		`|| forgejo admin user change-password --username ` + ForgejoBotUser + ` --password "$ADMIN_PW" --must-change-password=false`
+	// The guard pins this command (pkg/adminobjects).
+	bootstrap := adminobjects.ForgejoBootstrap()
 
 	caOptional := true
 	noAutomount := false
@@ -204,7 +200,7 @@ forgejo admin user create --admin --username ` + ForgejoBotUser +
 					InitContainers: []corev1.Container{{
 						Name:            "bootstrap",
 						Image:           forgejoImg,
-						Command:         []string{"sh", "-c", bootstrap},
+						Command:         bootstrap,
 						Env:             append(forgejoEnv(dv, argoWebhookHost), adminPW),
 						VolumeMounts:    []corev1.VolumeMount{dataMount, etcMount, caMount},
 						Resources:       forgejoResources(),

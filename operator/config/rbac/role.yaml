@@ -106,6 +106,7 @@ rules:
   resourceNames:
   - dotvirt-operator-bindings
   - dotvirt-operator-deployments
+  - dotvirt-operator-install
   - dotvirt-operator-secrets
   resources:
   - validatingadmissionpolicies
@@ -192,7 +193,7 @@ rules:
   verbs:
   - get
   - list
-  - update
+  - patch
   - watch
 - apiGroups:
   - dotvirt.io

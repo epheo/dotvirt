@@ -1,23 +1,39 @@
 # The dotvirt operator guard: admission policies bounding the operator's own
 # account. A cluster admin installs it from the console (Install). Without the
-# console, fill the placeholders and apply it; the operator's OperatorGuard
-# condition names each value for its install, and an unset image stays "".
+# console, derive each value from the cluster yourself (never copy one from the
+# operator's status or conditions, which the operator writes), fill the
+# placeholders and apply it.
 #
-#   export OPERATOR_USERNAME=system:serviceaccount:<operator namespace>:dotvirt-operator-controller
-#   export INSTALL_NAMESPACE=<the Dotvirt resource's namespace>
-#   export ARGO_NAMESPACE=<the ArgoCD namespace> ARGO_CONTROLLER=<its application controller ServiceAccount>
-#   export SPEC_IMAGE="$(kubectl -n "$INSTALL_NAMESPACE" get dotvirt <name> -o jsonpath='{.spec.image}')"
-#   export RELATED_IMAGE_DOTVIRT="$(kubectl -n <operator namespace> get deploy dotvirt-operator-controller \
-#     -o jsonpath='{.spec.template.spec.containers[0].env[?(@.name=="RELATED_IMAGE_DOTVIRT")].value}')"
-#   export RELATED_IMAGE_FORGEJO="$(kubectl -n <operator namespace> get deploy dotvirt-operator-controller \
-#     -o jsonpath='{.spec.template.spec.containers[0].env[?(@.name=="RELATED_IMAGE_FORGEJO")].value}')"
+#   # The operator's Deployment (OLM or GitOps writes it, the operator cannot):
+#   OP="$(kubectl get deploy -A --field-selector metadata.name=dotvirt-operator-controller \
+#     -o jsonpath='{.items[0].metadata.namespace}/{.items[0].spec.template.spec.serviceAccountName}')"
+#   export OPERATOR_USERNAME="system:serviceaccount:${OP%/*}:${OP#*/}"
+#   relimg() { kubectl -n "${OP%/*}" get deploy dotvirt-operator-controller \
+#     -o jsonpath="{.spec.template.spec.containers[0].env[?(@.name==\"$1\")].value}"; }
+#   export RELATED_IMAGE_DOTVIRT="$(relimg RELATED_IMAGE_DOTVIRT)" RELATED_IMAGE_FORGEJO="$(relimg RELATED_IMAGE_FORGEJO)"
+#   # The install (one per cluster), as an admin wrote it:
+#   export INSTALL_NAMESPACE="$(kubectl get dotvirt -A -o jsonpath='{.items[0].metadata.namespace}')"
+#   spec() { kubectl get dotvirt -A -o jsonpath="{.items[0].spec.$1}"; }
+#   export SPEC_IMAGE="$(spec image)"
+#   export FORGE_INSECURE_TLS="$( [ "$(spec forge.insecureTLS)" = true ] && echo true || echo false )"
+#   # spec.argocd, else the defaults: openshift-gitops where routes are served
+#   # (OpenShift, MicroShift), argocd elsewhere, and that instance's controller:
+#   ARGO_NAMESPACE="$(spec argocd.namespace)"
+#   [ -n "$ARGO_NAMESPACE" ] || ARGO_NAMESPACE="$(kubectl api-resources --api-group=route.openshift.io -o name \
+#     | grep -q . && echo openshift-gitops || echo argocd)"
+#   ARGO_CONTROLLER="$(spec argocd.controllerServiceAccount)"
+#   [ -n "$ARGO_CONTROLLER" ] || ARGO_CONTROLLER="$( [ "$ARGO_NAMESPACE" = openshift-gitops ] \
+#     && echo openshift-gitops-argocd-application-controller || echo argocd-application-controller)"
+#   export ARGO_NAMESPACE ARGO_CONTROLLER
+#
 #   envsubst < guard.yaml | kubectl apply --server-side --field-manager=dotvirt -f -
 #
 # Without envsubst, sed with the named placeholders does the same:
 #   sed -e "s|\${OPERATOR_USERNAME}|$OPERATOR_USERNAME|g" -e "s|\${INSTALL_NAMESPACE}|$INSTALL_NAMESPACE|g" \
 #     -e "s|\${ARGO_NAMESPACE}|$ARGO_NAMESPACE|g" -e "s|\${ARGO_CONTROLLER}|$ARGO_CONTROLLER|g" \
-#     -e "s|\${SPEC_IMAGE}|$SPEC_IMAGE|g" -e "s|\${RELATED_IMAGE_DOTVIRT}|$RELATED_IMAGE_DOTVIRT|g" \
-#     -e "s|\${RELATED_IMAGE_FORGEJO}|$RELATED_IMAGE_FORGEJO|g" guard.yaml | kubectl apply --server-side --field-manager=dotvirt -f -
+#     -e "s|\${SPEC_IMAGE}|$SPEC_IMAGE|g" -e "s|\${FORGE_INSECURE_TLS}|$FORGE_INSECURE_TLS|g" \
+#     -e "s|\${RELATED_IMAGE_DOTVIRT}|$RELATED_IMAGE_DOTVIRT|g" -e "s|\${RELATED_IMAGE_FORGEJO}|$RELATED_IMAGE_FORGEJO|g" \
+#     guard.yaml | kubectl apply --server-side --field-manager=dotvirt -f -
 #
 # Every object carries the label app.kubernetes.io/part-of=dotvirt-operator-guard.
 #
@@ -62,7 +78,7 @@ spec:
       (dotvirt operator guard)
     reason: Forbidden
 ---
-# Bounds the operator's Deployments: only in ${INSTALL_NAMESPACE}, as dotvirt's own accounts, official or admin-chosen images, unprivileged and off the host
+# Bounds the operator's Deployments: the console and the forge only, in ${INSTALL_NAMESPACE}, with their own accounts, images, commands and token, unprivileged and off the host
 apiVersion: admissionregistration.k8s.io/v1
 kind: ValidatingAdmissionPolicy
 metadata:
@@ -91,21 +107,66 @@ spec:
     message: the operator runs Deployments only in ${INSTALL_NAMESPACE} (dotvirt operator
       guard)
     reason: Forbidden
-  - expression: has(object.spec.template.spec.serviceAccountName) && object.spec.template.spec.serviceAccountName
-      in ["dotvirt", "dotvirt-forgejo"]
-    message: the operator runs Deployments only as dotvirt or dotvirt-forgejo (dotvirt
+  - expression: 'object.metadata.name == "dotvirt" ? object.spec.template.spec.serviceAccountName
+      == "dotvirt" : (object.metadata.name == "dotvirt-forgejo" && object.spec.template.spec.serviceAccountName
+      == "dotvirt-forgejo")'
+    message: the operator runs only the console as dotvirt and the forge as dotvirt-forgejo
+      (dotvirt operator guard)
+    reason: Forbidden
+  - expression: 'object.metadata.name == "dotvirt" ? (object.spec.template.spec.containers.all(c,
+      (c.image.startsWith("quay.io/epheo/dotvirt@sha256:") || c.image.startsWith("quay.io/epheo/dotvirt:")
+      || c.image in ["${SPEC_IMAGE}", "${RELATED_IMAGE_DOTVIRT}"])) && (!has(object.spec.template.spec.initContainers)
+      || object.spec.template.spec.initContainers.all(c, (c.image.startsWith("quay.io/epheo/dotvirt@sha256:")
+      || c.image.startsWith("quay.io/epheo/dotvirt:") || c.image in ["${SPEC_IMAGE}",
+      "${RELATED_IMAGE_DOTVIRT}"])))) : (object.spec.template.spec.containers.all(c,
+      (c.image.startsWith("codeberg.org/forgejo/forgejo@sha256:") || c.image.startsWith("codeberg.org/forgejo/forgejo:")
+      || c.image in ["${RELATED_IMAGE_FORGEJO}"])) && (!has(object.spec.template.spec.initContainers)
+      || object.spec.template.spec.initContainers.all(c, (c.image.startsWith("codeberg.org/forgejo/forgejo@sha256:")
+      || c.image.startsWith("codeberg.org/forgejo/forgejo:") || c.image in ["${RELATED_IMAGE_FORGEJO}"]))))'
+    message: the operator runs the console only from quay.io/epheo/dotvirt and the
+      forge only from codeberg.org/forgejo/forgejo, or the image an admin chose (dotvirt
       operator guard)
     reason: Forbidden
-  - expression: object.spec.template.spec.containers.all(c, (c.image.startsWith("quay.io/epheo/dotvirt@sha256:")
-      || c.image.startsWith("quay.io/epheo/dotvirt:") || c.image.startsWith("codeberg.org/forgejo/forgejo@sha256:")
-      || c.image.startsWith("codeberg.org/forgejo/forgejo:") || c.image in ["${SPEC_IMAGE}",
-      "${RELATED_IMAGE_DOTVIRT}", "${RELATED_IMAGE_FORGEJO}"])) && (!has(object.spec.template.spec.initContainers)
-      || object.spec.template.spec.initContainers.all(c, (c.image.startsWith("quay.io/epheo/dotvirt@sha256:")
-      || c.image.startsWith("quay.io/epheo/dotvirt:") || c.image.startsWith("codeberg.org/forgejo/forgejo@sha256:")
-      || c.image.startsWith("codeberg.org/forgejo/forgejo:") || c.image in ["${SPEC_IMAGE}",
-      "${RELATED_IMAGE_DOTVIRT}", "${RELATED_IMAGE_FORGEJO}"])))
-    message: the operator runs only images from quay.io/epheo/dotvirt or codeberg.org/forgejo/forgejo,
-      or the image an admin chose (dotvirt operator guard)
+  - expression: 'object.metadata.name == "dotvirt" ? (object.spec.template.spec.containers.all(c,
+      !has(c.command) && has(c.args) && (c.args == ["-addr=:8080", "-ui-origin=",
+      "-argo=true", "-draft-dir=/var/lib/dotvirt/drafts", "-git-poll-interval=5m",
+      "-project-label=dotvirt.io/project", "-repo-annotation=dotvirt.io/repo"] ||
+      (${FORGE_INSECURE_TLS} && c.args == ["-addr=:8080", "-ui-origin=", "-argo=true",
+      "-draft-dir=/var/lib/dotvirt/drafts", "-git-poll-interval=5m", "-project-label=dotvirt.io/project",
+      "-repo-annotation=dotvirt.io/repo", "-insecure-tls"]))) && (!has(object.spec.template.spec.initContainers)
+      || size(object.spec.template.spec.initContainers) == 0)) : (object.spec.template.spec.containers.all(c,
+      !has(c.command) && !has(c.args)) && (!has(object.spec.template.spec.initContainers)
+      || object.spec.template.spec.initContainers.all(c, has(c.command) && c.command
+      == ["sh", "-c", "set -e\nmkdir -p \"$(dirname \"$GITEA_APP_INI\")\"\nenvironment-to-ini\nforgejo
+      migrate\nforgejo admin user create --admin --username dotvirt-bot --password
+      \"$ADMIN_PW\" --email dotvirt-bot@dotvirt.local --must-change-password=false
+      || forgejo admin user change-password --username dotvirt-bot --password \"$ADMIN_PW\"
+      --must-change-password=false"] && !has(c.args))))'
+    message: the operator runs its Deployments only with the commands and arguments
+      it renders (dotvirt operator guard)
+    reason: Forbidden
+  - expression: object.metadata.name != "dotvirt" || (!(has(object.spec.template.spec.automountServiceAccountToken)
+      && !object.spec.template.spec.automountServiceAccountToken) && object.spec.template.spec.containers.all(c,
+      !has(c.envFrom) && (!has(c.env) || c.env.all(e, e.name != "KUBECONFIG" && !e.name.startsWith("KUBERNETES_SERVICE_")))))
+    message: the operator runs the console with its own ServiceAccount token, and
+      no kubeconfig or apiserver address of its own (dotvirt operator guard)
+    reason: Forbidden
+  - expression: '(object.spec.template.spec.containers.all(c, !has(c.volumeMounts)
+      || c.volumeMounts.all(m, !"/var/run/secrets/kubernetes.io/serviceaccount/".startsWith(m.mountPath.endsWith("/")
+      ? m.mountPath : m.mountPath + "/") && !m.mountPath.startsWith("/var/run/secrets/kubernetes.io/serviceaccount/")
+      && !"/run/secrets/kubernetes.io/serviceaccount/".startsWith(m.mountPath.endsWith("/")
+      ? m.mountPath : m.mountPath + "/") && !m.mountPath.startsWith("/run/secrets/kubernetes.io/serviceaccount/")
+      && !m.mountPath.contains("//") && !m.mountPath.contains("/./") && !m.mountPath.contains("/../")
+      && !m.mountPath.endsWith("/.") && !m.mountPath.endsWith("/.."))) && (!has(object.spec.template.spec.initContainers)
+      || object.spec.template.spec.initContainers.all(c, !has(c.volumeMounts) || c.volumeMounts.all(m,
+      !"/var/run/secrets/kubernetes.io/serviceaccount/".startsWith(m.mountPath.endsWith("/")
+      ? m.mountPath : m.mountPath + "/") && !m.mountPath.startsWith("/var/run/secrets/kubernetes.io/serviceaccount/")
+      && !"/run/secrets/kubernetes.io/serviceaccount/".startsWith(m.mountPath.endsWith("/")
+      ? m.mountPath : m.mountPath + "/") && !m.mountPath.startsWith("/run/secrets/kubernetes.io/serviceaccount/")
+      && !m.mountPath.contains("//") && !m.mountPath.contains("/./") && !m.mountPath.contains("/../")
+      && !m.mountPath.endsWith("/.") && !m.mountPath.endsWith("/..")))))'
+    message: the operator mounts nothing at, above or inside the ServiceAccount token
+      directory (dotvirt operator guard)
     reason: Forbidden
   - expression: '!(has(object.spec.template.spec.hostNetwork) && object.spec.template.spec.hostNetwork)
       && !(has(object.spec.template.spec.hostPID) && object.spec.template.spec.hostPID)
@@ -118,46 +179,62 @@ spec:
     message: the operator mounts no host path (dotvirt operator guard)
     reason: Forbidden
   - expression: '!(has(object.spec.template.spec.securityContext) && has(object.spec.template.spec.securityContext.runAsUser)
-      && object.spec.template.spec.securityContext.runAsUser == 0) && !(has(object.spec.template.spec.securityContext)
-      && has(object.spec.template.spec.securityContext.seccompProfile) && object.spec.template.spec.securityContext.seccompProfile.type
-      == "Unconfined")'
-    message: the operator runs no pod as root nor unconfined by seccomp (dotvirt operator
-      guard)
+      && object.spec.template.spec.securityContext.runAsUser == 0)'
+    message: the operator runs no pod as root (dotvirt operator guard)
     reason: Forbidden
-  - expression: object.spec.template.spec.containers.all(c, !(has(c.securityContext)
+  - expression: (object.spec.template.spec.containers.all(c, !(has(c.securityContext)
       && has(c.securityContext.privileged) && c.securityContext.privileged)) && (!has(object.spec.template.spec.initContainers)
       || object.spec.template.spec.initContainers.all(c, !(has(c.securityContext)
-      && has(c.securityContext.privileged) && c.securityContext.privileged)))
+      && has(c.securityContext.privileged) && c.securityContext.privileged))))
     message: the operator runs no privileged container (dotvirt operator guard)
     reason: Forbidden
-  - expression: object.spec.template.spec.containers.all(c, has(c.securityContext)
+  - expression: (object.spec.template.spec.containers.all(c, has(c.securityContext)
       && has(c.securityContext.allowPrivilegeEscalation) && c.securityContext.allowPrivilegeEscalation
       == false) && (!has(object.spec.template.spec.initContainers) || object.spec.template.spec.initContainers.all(c,
       has(c.securityContext) && has(c.securityContext.allowPrivilegeEscalation) &&
-      c.securityContext.allowPrivilegeEscalation == false))
+      c.securityContext.allowPrivilegeEscalation == false)))
     message: the operator runs every container with allowPrivilegeEscalation false
       (dotvirt operator guard)
     reason: Forbidden
-  - expression: object.spec.template.spec.containers.all(c, has(c.securityContext)
+  - expression: (object.spec.template.spec.containers.all(c, has(c.securityContext)
       && has(c.securityContext.capabilities) && has(c.securityContext.capabilities.drop)
       && "ALL" in c.securityContext.capabilities.drop && !(has(c.securityContext.capabilities.add)
       && size(c.securityContext.capabilities.add) > 0)) && (!has(object.spec.template.spec.initContainers)
       || object.spec.template.spec.initContainers.all(c, has(c.securityContext) &&
       has(c.securityContext.capabilities) && has(c.securityContext.capabilities.drop)
       && "ALL" in c.securityContext.capabilities.drop && !(has(c.securityContext.capabilities.add)
-      && size(c.securityContext.capabilities.add) > 0)))
+      && size(c.securityContext.capabilities.add) > 0))))
     message: the operator runs every container with all capabilities dropped and none
       added (dotvirt operator guard)
     reason: Forbidden
-  - expression: object.spec.template.spec.containers.all(c, !(has(c.securityContext)
-      && has(c.securityContext.runAsUser) && c.securityContext.runAsUser == 0) &&
-      !(has(c.securityContext) && has(c.securityContext.seccompProfile) && c.securityContext.seccompProfile.type
-      == "Unconfined")) && (!has(object.spec.template.spec.initContainers) || object.spec.template.spec.initContainers.all(c,
+  - expression: (object.spec.template.spec.containers.all(c, !(has(c.securityContext)
+      && has(c.securityContext.runAsUser) && c.securityContext.runAsUser == 0)) &&
+      (!has(object.spec.template.spec.initContainers) || object.spec.template.spec.initContainers.all(c,
       !(has(c.securityContext) && has(c.securityContext.runAsUser) && c.securityContext.runAsUser
-      == 0) && !(has(c.securityContext) && has(c.securityContext.seccompProfile) &&
-      c.securityContext.seccompProfile.type == "Unconfined")))
-    message: the operator runs no container as root nor unconfined by seccomp (dotvirt
-      operator guard)
+      == 0))))
+    message: the operator runs no container as root (dotvirt operator guard)
+    reason: Forbidden
+  - expression: '(object.spec.template.spec.containers.all(c, (has(c.securityContext)
+      && has(c.securityContext.runAsNonRoot)) ? c.securityContext.runAsNonRoot : (has(object.spec.template.spec.securityContext)
+      && has(object.spec.template.spec.securityContext.runAsNonRoot) && object.spec.template.spec.securityContext.runAsNonRoot))
+      && (!has(object.spec.template.spec.initContainers) || object.spec.template.spec.initContainers.all(c,
+      (has(c.securityContext) && has(c.securityContext.runAsNonRoot)) ? c.securityContext.runAsNonRoot
+      : (has(object.spec.template.spec.securityContext) && has(object.spec.template.spec.securityContext.runAsNonRoot)
+      && object.spec.template.spec.securityContext.runAsNonRoot))))'
+    message: the operator runs every container as non-root (dotvirt operator guard)
+    reason: Forbidden
+  - expression: '(object.spec.template.spec.containers.all(c, (has(c.securityContext)
+      && has(c.securityContext.seccompProfile)) ? c.securityContext.seccompProfile.type
+      in ["RuntimeDefault", "Localhost"] : (has(object.spec.template.spec.securityContext)
+      && has(object.spec.template.spec.securityContext.seccompProfile) && object.spec.template.spec.securityContext.seccompProfile.type
+      in ["RuntimeDefault", "Localhost"])) && (!has(object.spec.template.spec.initContainers)
+      || object.spec.template.spec.initContainers.all(c, (has(c.securityContext) &&
+      has(c.securityContext.seccompProfile)) ? c.securityContext.seccompProfile.type
+      in ["RuntimeDefault", "Localhost"] : (has(object.spec.template.spec.securityContext)
+      && has(object.spec.template.spec.securityContext.seccompProfile) && object.spec.template.spec.securityContext.seccompProfile.type
+      in ["RuntimeDefault", "Localhost"]))))'
+    message: the operator runs every container with a RuntimeDefault or Localhost
+      seccomp profile (dotvirt operator guard)
     reason: Forbidden
 ---
 # Bounds the operator's RBAC bindings: only the ones it renders, to their own roles and rendered subjects
@@ -218,6 +295,52 @@ spec:
       operator guard)
     reason: Forbidden
 ---
+# Bounds the operator's writes to its install: its finalizers only, never the spec an admin wrote
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  labels:
+    app.kubernetes.io/name: dotvirt
+    app.kubernetes.io/part-of: dotvirt-operator-guard
+  name: dotvirt-operator-install
+spec:
+  failurePolicy: Fail
+  matchConditions:
+  - expression: request.userInfo.username == "${OPERATOR_USERNAME}"
+    name: operator
+  matchConstraints:
+    resourceRules:
+    - apiGroups:
+      - dotvirt.io
+      apiVersions:
+      - v1alpha1
+      operations:
+      - UPDATE
+      resources:
+      - dotvirts
+  validations:
+  - expression: has(object.spec) == has(oldObject.spec) && (!has(object.spec) || object.spec
+      == oldObject.spec)
+    message: the operator may change only its install's finalizers, never its spec
+      (dotvirt operator guard)
+    reason: Forbidden
+  - expression: has(object.metadata.labels) == has(oldObject.metadata.labels) && (!has(object.metadata.labels)
+      || object.metadata.labels == oldObject.metadata.labels)
+    message: the operator may change only its install's finalizers, never its labels
+      (dotvirt operator guard)
+    reason: Forbidden
+  - expression: has(object.metadata.annotations) == has(oldObject.metadata.annotations)
+      && (!has(object.metadata.annotations) || object.metadata.annotations == oldObject.metadata.annotations)
+    message: the operator may change only its install's finalizers, never its annotations
+      (dotvirt operator guard)
+    reason: Forbidden
+  - expression: has(object.metadata.ownerReferences) == has(oldObject.metadata.ownerReferences)
+      && (!has(object.metadata.ownerReferences) || object.metadata.ownerReferences
+      == oldObject.metadata.ownerReferences)
+    message: the operator may change only its install's finalizers, never its owners
+      (dotvirt operator guard)
+    reason: Forbidden
+---
 # Enforces dotvirt-operator-secrets
 apiVersion: admissionregistration.k8s.io/v1
 kind: ValidatingAdmissionPolicyBinding
@@ -254,5 +377,18 @@ metadata:
   name: dotvirt-operator-bindings
 spec:
   policyName: dotvirt-operator-bindings
+  validationActions:
+  - Deny
+---
+# Enforces dotvirt-operator-install
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  labels:
+    app.kubernetes.io/name: dotvirt
+    app.kubernetes.io/part-of: dotvirt-operator-guard
+  name: dotvirt-operator-install
+spec:
+  policyName: dotvirt-operator-install
   validationActions:
   - Deny

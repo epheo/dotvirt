@@ -17,28 +17,44 @@ var TemplateParams = Params{
 	ForgejoImage:   "${RELATED_IMAGE_FORGEJO}",
 }
 
-// templateHeader says how to fill and apply the template; the OperatorGuard
-// condition names this install's values.
+// templateHeader says how to fill and apply the template, each value derived
+// from the cluster: never from the operator's status, which it writes.
 const templateHeader = `# The dotvirt operator guard: admission policies bounding the operator's own
 # account. A cluster admin installs it from the console (Install). Without the
-# console, fill the placeholders and apply it; the operator's OperatorGuard
-# condition names each value for its install, and an unset image stays "".
+# console, derive each value from the cluster yourself (never copy one from the
+# operator's status or conditions, which the operator writes), fill the
+# placeholders and apply it.
 #
-#   export OPERATOR_USERNAME=system:serviceaccount:<operator namespace>:` + OperatorDeployment + `
-#   export INSTALL_NAMESPACE=<the Dotvirt resource's namespace>
-#   export ARGO_NAMESPACE=<the ArgoCD namespace> ARGO_CONTROLLER=<its application controller ServiceAccount>
-#   export SPEC_IMAGE="$(kubectl -n "$INSTALL_NAMESPACE" get dotvirt <name> -o jsonpath='{.spec.image}')"
-#   export RELATED_IMAGE_DOTVIRT="$(kubectl -n <operator namespace> get deploy ` + OperatorDeployment + ` \
-#     -o jsonpath='{.spec.template.spec.containers[0].env[?(@.name=="RELATED_IMAGE_DOTVIRT")].value}')"
-#   export RELATED_IMAGE_FORGEJO="$(kubectl -n <operator namespace> get deploy ` + OperatorDeployment + ` \
-#     -o jsonpath='{.spec.template.spec.containers[0].env[?(@.name=="RELATED_IMAGE_FORGEJO")].value}')"
+#   # The operator's Deployment (OLM or GitOps writes it, the operator cannot):
+#   OP="$(kubectl get deploy -A --field-selector metadata.name=` + OperatorDeployment + ` \
+#     -o jsonpath='{.items[0].metadata.namespace}/{.items[0].spec.template.spec.serviceAccountName}')"
+#   export OPERATOR_USERNAME="system:serviceaccount:${OP%/*}:${OP#*/}"
+#   relimg() { kubectl -n "${OP%/*}" get deploy ` + OperatorDeployment + ` \
+#     -o jsonpath="{.spec.template.spec.containers[0].env[?(@.name==\"$1\")].value}"; }
+#   export RELATED_IMAGE_DOTVIRT="$(relimg RELATED_IMAGE_DOTVIRT)" RELATED_IMAGE_FORGEJO="$(relimg RELATED_IMAGE_FORGEJO)"
+#   # The install (one per cluster), as an admin wrote it:
+#   export INSTALL_NAMESPACE="$(kubectl get dotvirt -A -o jsonpath='{.items[0].metadata.namespace}')"
+#   spec() { kubectl get dotvirt -A -o jsonpath="{.items[0].spec.$1}"; }
+#   export SPEC_IMAGE="$(spec image)"
+#   export FORGE_INSECURE_TLS="$( [ "$(spec forge.insecureTLS)" = true ] && echo true || echo false )"
+#   # spec.argocd, else the defaults: openshift-gitops where routes are served
+#   # (OpenShift, MicroShift), argocd elsewhere, and that instance's controller:
+#   ARGO_NAMESPACE="$(spec argocd.namespace)"
+#   [ -n "$ARGO_NAMESPACE" ] || ARGO_NAMESPACE="$(kubectl api-resources --api-group=route.openshift.io -o name \
+#     | grep -q . && echo openshift-gitops || echo argocd)"
+#   ARGO_CONTROLLER="$(spec argocd.controllerServiceAccount)"
+#   [ -n "$ARGO_CONTROLLER" ] || ARGO_CONTROLLER="$( [ "$ARGO_NAMESPACE" = openshift-gitops ] \
+#     && echo openshift-gitops-argocd-application-controller || echo argocd-application-controller)"
+#   export ARGO_NAMESPACE ARGO_CONTROLLER
+#
 #   envsubst < guard.yaml | ` + ApplyCommand + ` -
 #
 # Without envsubst, sed with the named placeholders does the same:
 #   sed -e "s|\${OPERATOR_USERNAME}|$OPERATOR_USERNAME|g" -e "s|\${INSTALL_NAMESPACE}|$INSTALL_NAMESPACE|g" \
 #     -e "s|\${ARGO_NAMESPACE}|$ARGO_NAMESPACE|g" -e "s|\${ARGO_CONTROLLER}|$ARGO_CONTROLLER|g" \
-#     -e "s|\${SPEC_IMAGE}|$SPEC_IMAGE|g" -e "s|\${RELATED_IMAGE_DOTVIRT}|$RELATED_IMAGE_DOTVIRT|g" \
-#     -e "s|\${RELATED_IMAGE_FORGEJO}|$RELATED_IMAGE_FORGEJO|g" guard.yaml | ` + ApplyCommand + ` -
+#     -e "s|\${SPEC_IMAGE}|$SPEC_IMAGE|g" -e "s|\${FORGE_INSECURE_TLS}|$FORGE_INSECURE_TLS|g" \
+#     -e "s|\${RELATED_IMAGE_DOTVIRT}|$RELATED_IMAGE_DOTVIRT|g" -e "s|\${RELATED_IMAGE_FORGEJO}|$RELATED_IMAGE_FORGEJO|g" \
+#     guard.yaml | ` + ApplyCommand + ` -
 #
 # Every object carries the label app.kubernetes.io/part-of=dotvirt-operator-guard.
 #
@@ -50,7 +66,7 @@ const templateHeader = `# The dotvirt operator guard: admission policies boundin
 func Template() ([]byte, error) {
 	var b bytes.Buffer
 	b.WriteString(templateHeader)
-	for _, o := range Guard(TemplateParams) {
+	for _, o := range guard(TemplateParams, "${FORGE_INSECURE_TLS}") {
 		y, err := yaml.Marshal(o.Object.Object)
 		if err != nil {
 			return nil, err

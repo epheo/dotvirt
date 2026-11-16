@@ -92,8 +92,8 @@ func TestOperatorGuardStates(t *testing.T) {
 				t.Errorf("%s %s: %s", cond.Status, cond.Reason, cond.Message)
 			}
 			if c.status != metav1.ConditionTrue && (!strings.Contains(cond.Message, "a cluster admin installs it from the console") ||
-				!strings.Contains(cond.Message, "install/guard.yaml with OPERATOR_USERNAME="+guardOperator+" INSTALL_NAMESPACE=dotvirt ARGO_NAMESPACE=argocd")) {
-				t.Errorf("message %q gives no next action with this install's values", cond.Message)
+				!strings.Contains(cond.Message, "install/guard.yaml") || strings.Contains(cond.Message, guardOperator)) {
+				t.Errorf("message %q: want the next action, and no value an admin would copy from the operator", cond.Message)
 			}
 			want := adminobjects.Render(guardHere)
 			if len(dv.Status.AdminObjects) != len(want) {
@@ -129,8 +129,8 @@ func TestOperatorGuardKeepsOtherAdminObjects(t *testing.T) {
 	other := dotvirtv1alpha1.AdminObject{Purpose: "another phase's", Kind: "Role", Name: "r", Namespace: "dotvirt", State: "NotInstalled"}
 	stale := dotvirtv1alpha1.AdminObject{Purpose: "old", Kind: "ValidatingAdmissionPolicy", Name: adminobjects.GuardSecretsName, State: "Installed"}
 	_, dv := guardPass(t, guardOperator, []dotvirtv1alpha1.AdminObject{other, stale})
-	if len(dv.Status.AdminObjects) != 7 || dv.Status.AdminObjects[0].Purpose != "another phase's" {
-		t.Errorf("entries = %+v, want the other phase's kept and the guard's six", dv.Status.AdminObjects)
+	if len(dv.Status.AdminObjects) != 1+2*len(adminobjects.GuardNames) || dv.Status.AdminObjects[0].Purpose != "another phase's" {
+		t.Errorf("entries = %+v, want the other phase's kept and the guard's own", dv.Status.AdminObjects)
 	}
 	_, dv = guardPass(t, "", []dotvirtv1alpha1.AdminObject{other, stale})
 	if len(dv.Status.AdminObjects) != 1 {
@@ -162,15 +162,13 @@ func TestOperatorGuardMatchesTheOperand(t *testing.T) {
 		t.Errorf("guard names %s, tenancy %s", adminobjects.PlatformSyncAccount, tenancy.PlatformSyncAccount)
 	}
 	env := map[string]string{}
-	for _, e := range install.WithGuardPins(install.Deployment(dv, "argocd", nil), guardOperator, "argocd-application-controller").Spec.Template.Spec.Containers[0].Env {
+	for _, e := range install.Deployment(dv, "argocd", nil).Spec.Template.Spec.Containers[0].Env {
 		env[e.Name] = e.Value
 	}
-	for k, v := range map[string]string{
-		"DOTVIRT_OPERATOR_USERNAME": guardOperator, "DOTVIRT_ARGO_CONTROLLER": "argocd-application-controller",
-		"DOTVIRT_ARGO_NAMESPACE": "argocd", "DOTVIRT_INSTALL_NAMESPACE": "dotvirt", "DOTVIRT_INSTALL_NAME": "x",
-	} {
-		if env[k] != v {
-			t.Errorf("console env %s = %q, want %q", k, env[k], v)
-		}
+	// Where the install is, for the console to read it under an admin's token;
+	// no pin rides the env, which the operator writes.
+	if env["DOTVIRT_INSTALL_NAMESPACE"] != "dotvirt" || env["DOTVIRT_INSTALL_NAME"] != "x" ||
+		env["DOTVIRT_OPERATOR_USERNAME"] != "" || env["DOTVIRT_ARGO_CONTROLLER"] != "" {
+		t.Errorf("console env = %v", env)
 	}
 }

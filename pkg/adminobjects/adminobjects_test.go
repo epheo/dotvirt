@@ -51,13 +51,14 @@ func holds(t *testing.T, where string, got []string, needle string) {
 // a rule for every pin. What the rules admit and refuse is the envtest's.
 func TestGuardShape(t *testing.T) {
 	objs := Render(params)
-	if len(objs) != 6 {
-		t.Fatalf("render = %d objects, want three policies and three bindings", len(objs))
+	if len(objs) != 2*len(GuardNames) {
+		t.Fatalf("render = %d objects, want a policy and a binding per guard name", len(objs))
 	}
 	match := map[string][][2]string{
 		GuardSecretsName:     {{"", "secrets"}},
 		GuardDeploymentsName: {{"apps", "deployments"}},
 		GuardBindingsName:    {{"rbac.authorization.k8s.io", "clusterrolebindings"}, {"rbac.authorization.k8s.io", "rolebindings"}},
+		GuardInstallName:     {{"dotvirt.io", "dotvirts"}},
 	}
 	for i, name := range GuardNames {
 		p := policyOf(t, objs[i])
@@ -66,7 +67,11 @@ func TestGuardShape(t *testing.T) {
 		}
 		var got [][2]string
 		for _, r := range p.Spec.MatchConstraints.ResourceRules {
-			if !slices.Equal(r.Operations, []admissionregistrationv1.OperationType{admissionregistrationv1.Create, admissionregistrationv1.Update}) {
+			ops := []admissionregistrationv1.OperationType{admissionregistrationv1.Create, admissionregistrationv1.Update}
+			if name == GuardInstallName {
+				ops = ops[1:] // the operator never creates its install
+			}
+			if !slices.Equal(r.Operations, ops) {
 				t.Errorf("%s operations = %v", name, r.Operations)
 			}
 			got = append(got, [2]string{r.APIGroups[0], r.Resources[0]})
@@ -78,11 +83,14 @@ func TestGuardShape(t *testing.T) {
 			t.Errorf("%s condition = %+v, want the exact username", name, p.Spec.MatchConditions)
 		}
 	}
-	sec, dep, bind := exprs(policyOf(t, objs[0])), exprs(policyOf(t, objs[1])), exprs(policyOf(t, objs[2]))
+	sec, dep, bind, inst := exprs(policyOf(t, objs[0])), exprs(policyOf(t, objs[1])), exprs(policyOf(t, objs[2])), exprs(policyOf(t, objs[3]))
 	holds(t, "secrets", sec, `request.namespace in ["dotvirt", "openshift-gitops"]`)
 	holds(t, "deployments", dep, `request.namespace == "dotvirt"`)
 	holds(t, "deployments", dep, `c.image.startsWith("quay.io/epheo/dotvirt@sha256:")`)
-	holds(t, "deployments", dep, `c.image in ["registry.example/team/dotvirt:custom", "", ""]`)
+	holds(t, "deployments", dep, `c.image in ["registry.example/team/dotvirt:custom", ""]`)
+	holds(t, "deployments", dep, `c.args == `+list(ConsoleArgs(false)...))
+	holds(t, "deployments", dep, `c.command == `+list(ForgejoBootstrap()...))
+	holds(t, "install", inst, `object.spec == oldObject.spec`)
 	holds(t, "bindings", bind, `"ServiceAccount/openshift-gitops/openshift-gitops-argocd-application-controller"`)
 	holds(t, "bindings", bind, `request.namespace == "openshift-gitops"`)
 	for _, o := range objs {
@@ -146,10 +154,15 @@ func TestCompareSaysWhatDiffers(t *testing.T) {
 		state  State
 		detail string
 	}{
-		"as rendered":            {func() *unstructured.Unstructured { return want[0].Object.DeepCopy() }, 0, Installed, ""},
-		"missing":                {func() *unstructured.Unstructured { return nil }, 3, NotInstalled, "is missing"},
-		"for another ArgoCD":     {func() *unstructured.Unstructured { return Render(moved)[0].Object }, 0, Outdated, "lacks the rule"},
-		"for another account":    {func() *unstructured.Unstructured { return Render(other)[1].Object }, 1, Outdated, "applies to another account"},
+		"as rendered":         {func() *unstructured.Unstructured { return want[0].Object.DeepCopy() }, 0, Installed, ""},
+		"missing":             {func() *unstructured.Unstructured { return nil }, 5, NotInstalled, "is missing"},
+		"for another ArgoCD":  {func() *unstructured.Unstructured { return Render(moved)[0].Object }, 0, Outdated, "lacks the rule"},
+		"for another account": {func() *unstructured.Unstructured { return Render(other)[1].Object }, 1, Outdated, "applies to another account"},
+		"the install rule off": {func() *unstructured.Unstructured {
+			o := want[3].Object.DeepCopy()
+			_ = unstructured.SetNestedSlice(o.Object, nil, "spec", "validations")
+			return o
+		}, 3, Outdated, "lacks the rule"},
 		"an extra deny-all rule": {func() *unstructured.Unstructured { return withValidations(want[1].Object, "false") }, 1, Outdated, "holds rules the render does not"},
 		"a rule dropped": {func() *unstructured.Unstructured {
 			o := want[1].Object.DeepCopy()
@@ -158,10 +171,10 @@ func TestCompareSaysWhatDiffers(t *testing.T) {
 			return o
 		}, 1, Outdated, "lacks the rule"},
 		"a warn-only binding": {func() *unstructured.Unstructured {
-			o := want[3].Object.DeepCopy()
+			o := want[4].Object.DeepCopy()
 			_ = unstructured.SetNestedStringSlice(o.Object, []string{"Warn"}, "spec", "validationActions")
 			return o
-		}, 3, Outdated, "does not only deny"},
+		}, 4, Outdated, "does not only deny"},
 	} {
 		got, detail := Compare(want[c.which].Object, c.live())
 		if got != c.state || !strings.Contains(detail, c.detail) {
@@ -204,6 +217,7 @@ func TestReleaseTemplate(t *testing.T) {
 	for k, v := range map[string]string{
 		"${OPERATOR_USERNAME}": params.Operator, "${INSTALL_NAMESPACE}": params.Namespace, "${ARGO_NAMESPACE}": params.ArgoNamespace,
 		"${ARGO_CONTROLLER}": params.ArgoController, "${SPEC_IMAGE}": params.SpecImage, "${RELATED_IMAGE_DOTVIRT}": "", "${RELATED_IMAGE_FORGEJO}": "",
+		"${FORGE_INSECURE_TLS}": "false",
 	} {
 		filled = strings.ReplaceAll(filled, k, v)
 	}
@@ -222,5 +236,26 @@ func TestReleaseTemplate(t *testing.T) {
 		if string(a) != string(b) {
 			t.Errorf("filled template object %d differs from the render:\n%s\n%s", i, a, b)
 		}
+	}
+}
+
+func TestArgoTargetDefaults(t *testing.T) {
+	for _, c := range []struct {
+		ns, sa    string
+		openShift bool
+		wantNS    string
+		wantSA    string
+	}{
+		{"", "", true, "openshift-gitops", "openshift-gitops-argocd-application-controller"},
+		{"", "", false, "argocd", "argocd-application-controller"},
+		{"gitops", "", true, "gitops", "argocd-application-controller"},
+		{"openshift-gitops", "custom", false, "openshift-gitops", "custom"},
+	} {
+		if ns, sa := ArgoTarget(c.ns, c.sa, c.openShift); ns != c.wantNS || sa != c.wantSA {
+			t.Errorf("ArgoTarget(%q, %q, %v) = %s, %s; want %s, %s", c.ns, c.sa, c.openShift, ns, sa, c.wantNS, c.wantSA)
+		}
+	}
+	if got := ConsoleArgs(true); got[len(got)-1] != "-insecure-tls" || slices.Contains(ConsoleArgs(false), "-insecure-tls") {
+		t.Errorf("console args: %v / %v", ConsoleArgs(false), got)
 	}
 }

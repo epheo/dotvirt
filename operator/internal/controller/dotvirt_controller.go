@@ -34,6 +34,7 @@ import (
 	"github.com/epheo/dotvirt/operator/internal/deps"
 	"github.com/epheo/dotvirt/operator/internal/install"
 	"github.com/epheo/dotvirt/operator/internal/platform"
+	"github.com/epheo/dotvirt/pkg/adminobjects"
 	"github.com/epheo/dotvirt/pkg/forge"
 	"github.com/epheo/dotvirt/pkg/tenancy"
 )
@@ -153,8 +154,9 @@ func (r *DotvirtReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 		// Ensure the finalizer is present before provisioning anything cluster-scoped.
 		// Skipped under -dry-run so a validation run mutates nothing (and the CR stays
 		// freely deletable, since the finalizer would otherwise gate its removal).
+		lock := client.MergeFromWithOptions(dv.DeepCopy(), client.MergeFromWithOptimisticLock{})
 		if !r.DryRun && controllerutil.AddFinalizer(&dv, dotvirtFinalizer) {
-			if err := r.Update(ctx, &dv); err != nil {
+			if err := r.Patch(ctx, &dv, lock); err != nil {
 				return ctrl.Result{}, err
 			}
 			// The Update moved resourceVersion; a stale base would put it in the
@@ -489,24 +491,7 @@ const openShiftGitOpsNS = "openshift-gitops"
 // spec, defaulting to the platform's conventional install (OpenShift GitOps vs
 // community Argo CD).
 func (r *DotvirtReconciler) argoTarget(dv *dotvirtv1alpha1.Dotvirt) (ns, sa string) {
-	ns, sa = dv.Spec.ArgoCD.Namespace, dv.Spec.ArgoCD.ControllerServiceAccount
-	if ns == "" {
-		if r.Platform == platform.OpenShift {
-			ns = openShiftGitOpsNS
-		} else {
-			ns = "argocd"
-		}
-	}
-	if sa == "" {
-		// By the namespace, not the platform: MicroShift reads as OpenShift and
-		// runs community Argo CD.
-		if ns == openShiftGitOpsNS {
-			sa = "openshift-gitops-argocd-application-controller"
-		} else {
-			sa = "argocd-application-controller"
-		}
-	}
-	return ns, sa
+	return adminobjects.ArgoTarget(dv.Spec.ArgoCD.Namespace, dv.Spec.ArgoCD.ControllerServiceAccount, r.Platform == platform.OpenShift)
 }
 
 func (r *DotvirtReconciler) setCondition(dv *dotvirtv1alpha1.Dotvirt, condType string, status metav1.ConditionStatus, reason, msg string) {

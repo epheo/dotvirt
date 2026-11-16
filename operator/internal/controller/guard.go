@@ -2,7 +2,6 @@ package controller
 
 import (
 	"context"
-	"fmt"
 	"os"
 	"slices"
 
@@ -36,6 +35,7 @@ func (r *DotvirtReconciler) guardParams(dv *dotvirtv1alpha1.Dotvirt, rc *reconci
 	return adminobjects.Params{
 		Operator: r.OperatorUsername, Namespace: dv.Namespace, ArgoNamespace: rc.argoNS, ArgoController: rc.argoSA,
 		SpecImage: dv.Spec.Image, DotvirtImage: os.Getenv("RELATED_IMAGE_DOTVIRT"), ForgejoImage: os.Getenv("RELATED_IMAGE_FORGEJO"),
+		InsecureTLS: dv.Spec.Forge.InsecureTLS,
 	}
 }
 
@@ -62,19 +62,16 @@ func (r *DotvirtReconciler) operatorGuard(ctx context.Context, dv *dotvirtv1alph
 	publishAdminObjects(dv, isGuard, want, states)
 	for _, s := range []adminobjects.State{adminobjects.NotInstalled, adminobjects.Outdated} {
 		if i := slices.Index(states, s); i >= 0 {
-			return metav1.ConditionFalse, string(s), details[i] + "; " + guardNextAction(p)
+			return metav1.ConditionFalse, string(s), details[i] + "; " + guardNextAction
 		}
 	}
 	return metav1.ConditionTrue, string(adminobjects.Installed), "the admission policies bounding " + p.Operator + " are installed as rendered"
 }
 
-// guardNextAction is what a cluster admin does about a guard not in place,
-// with this install's values for the release template.
-func guardNextAction(p adminobjects.Params) string {
-	return fmt.Sprintf("a cluster admin installs it from the console (Install), or fills the release's install/guard.yaml with "+
-		"OPERATOR_USERNAME=%s INSTALL_NAMESPACE=%s ARGO_NAMESPACE=%s ARGO_CONTROLLER=%s SPEC_IMAGE=%q RELATED_IMAGE_DOTVIRT=%q RELATED_IMAGE_FORGEJO=%q and applies it",
-		p.Operator, p.Namespace, p.ArgoNamespace, p.ArgoController, p.SpecImage, p.DotvirtImage, p.ForgejoImage)
-}
+// guardNextAction is what a cluster admin does about a guard not in place.
+// It names no value: the operator writes this message, so an admin derives
+// each pin from the cluster, as the template's header shows.
+const guardNextAction = "a cluster admin installs it from the console (Install), or fills the release's install/guard.yaml with values derived as its header shows, and applies it"
 
 // adminObjectStates reads each rendered admin object back, by name, and
 // weighs it against its render.

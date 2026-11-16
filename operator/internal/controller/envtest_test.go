@@ -35,6 +35,7 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/cache"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/envtest"
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 
@@ -173,6 +174,10 @@ func TestEnvtest(t *testing.T) {
 			{authzv1.ResourceAttributes{Verb: "get", Group: "admissionregistration.k8s.io", Resource: "validatingadmissionpolicies", Name: adminobjects.GuardSecretsName}, true},
 			{authzv1.ResourceAttributes{Verb: "get", Group: "admissionregistration.k8s.io", Resource: "validatingadmissionpolicybindings", Name: adminobjects.GuardDeploymentsName}, true},
 			{authzv1.ResourceAttributes{Verb: "get", Group: "admissionregistration.k8s.io", Resource: "validatingadmissionpolicies", Name: adminobjects.GuardBindingsName}, true},
+			{authzv1.ResourceAttributes{Verb: "get", Group: "admissionregistration.k8s.io", Resource: "validatingadmissionpolicies", Name: adminobjects.GuardInstallName}, true},
+			// Its install: the finalizer by patch, never a whole-object update.
+			{authzv1.ResourceAttributes{Verb: "patch", Group: "dotvirt.io", Resource: "dotvirts", Namespace: "dotvirt", Name: "x"}, true},
+			{authzv1.ResourceAttributes{Verb: "update", Group: "dotvirt.io", Resource: "dotvirts", Namespace: "dotvirt", Name: "x"}, false},
 			{authzv1.ResourceAttributes{Verb: "get", Group: "admissionregistration.k8s.io", Resource: "validatingadmissionpolicies", Name: "other"}, false},
 			{authzv1.ResourceAttributes{Verb: "list", Group: "admissionregistration.k8s.io", Resource: "validatingadmissionpolicies"}, false},
 			{authzv1.ResourceAttributes{Verb: "create", Group: "admissionregistration.k8s.io", Resource: "validatingadmissionpolicies"}, false},
@@ -336,7 +341,7 @@ func TestEnvtest(t *testing.T) {
 				return false
 			}
 			c := apimeta.FindStatusCondition(got.Status.Conditions, dotvirtv1alpha1.ConditionOperatorGuard)
-			return c != nil && c.Reason == want && len(got.Status.AdminObjects) == 6
+			return c != nil && c.Reason == want && len(got.Status.AdminObjects) == 2*len(adminobjects.GuardNames)
 		}
 		eventually(t, "OperatorGuard NotInstalled", func() bool { return guardCond(string(adminobjects.NotInstalled)) })
 
@@ -498,6 +503,58 @@ func TestEnvtest(t *testing.T) {
 				s := d.Spec.Template.Spec.InitContainers[0].SecurityContext
 				s.Privileged, s.AllowPrivilegeEscalation = new(true), nil
 			}},
+			"the console from the forge's repository": {app, func(d *appsv1.Deployment) {
+				d.Spec.Template.Spec.Containers[0].Image = "codeberg.org/forgejo/forgejo:11-rootless"
+			}},
+			"the forge from the console's repository": {forge, func(d *appsv1.Deployment) {
+				d.Spec.Template.Spec.Containers[0].Image = "quay.io/epheo/dotvirt:latest"
+			}},
+			"the console with a command": {app, func(d *appsv1.Deployment) {
+				d.Spec.Template.Spec.Containers[0].Command = []string{"sh", "-c", "env"}
+			}},
+			"the console with other arguments": {app, func(d *appsv1.Deployment) {
+				d.Spec.Template.Spec.Containers[0].Args = append(d.Spec.Template.Spec.Containers[0].Args, "-insecure-tls")
+			}},
+			"the console with an init container": {app, func(d *appsv1.Deployment) {
+				c := d.Spec.Template.Spec.Containers[0]
+				c.Name, c.LivenessProbe, c.ReadinessProbe, c.Ports = "init", nil, nil, nil
+				d.Spec.Template.Spec.InitContainers = []corev1.Container{c}
+			}},
+			"the forge with arguments": {forge, func(d *appsv1.Deployment) {
+				d.Spec.Template.Spec.Containers[0].Args = []string{"web"}
+			}},
+			"the forge bootstrap rewritten": {forge, func(d *appsv1.Deployment) {
+				d.Spec.Template.Spec.InitContainers[0].Command = []string{"sh", "-c", "true"}
+			}},
+			"the console with a kubeconfig": {app, func(d *appsv1.Deployment) {
+				c := &d.Spec.Template.Spec.Containers[0]
+				c.Env = append(c.Env, corev1.EnvVar{Name: "KUBECONFIG", Value: "/evil/kubeconfig"})
+			}},
+			"the console with an apiserver address": {app, func(d *appsv1.Deployment) {
+				c := &d.Spec.Template.Spec.Containers[0]
+				c.Env = append(c.Env, corev1.EnvVar{Name: "KUBERNETES_SERVICE_HOST", Value: "10.0.0.66"})
+			}},
+			"the console with env from a ConfigMap": {app, func(d *appsv1.Deployment) {
+				d.Spec.Template.Spec.Containers[0].EnvFrom = []corev1.EnvFromSource{{ConfigMapRef: &corev1.ConfigMapEnvSource{
+					LocalObjectReference: corev1.LocalObjectReference{Name: "dotvirt-oauth"}}}}
+			}},
+			"the console without its token": {app, func(d *appsv1.Deployment) {
+				d.Spec.Template.Spec.AutomountServiceAccountToken = new(false)
+			}},
+			"a mount over the token directory": {app, func(d *appsv1.Deployment) {
+				c := &d.Spec.Template.Spec.Containers[0]
+				c.VolumeMounts = append(c.VolumeMounts, corev1.VolumeMount{Name: "drafts", MountPath: "/var/run/secrets/kubernetes.io/serviceaccount"})
+			}},
+			"a mount above the token directory": {app, func(d *appsv1.Deployment) {
+				c := &d.Spec.Template.Spec.Containers[0]
+				c.VolumeMounts = append(c.VolumeMounts, corev1.VolumeMount{Name: "drafts", MountPath: "/run"})
+			}},
+			"a mount inside the token directory": {forge, func(d *appsv1.Deployment) {
+				c := &d.Spec.Template.Spec.Containers[0]
+				c.VolumeMounts = append(c.VolumeMounts, corev1.VolumeMount{Name: "etc", MountPath: "/var/run/secrets/kubernetes.io/serviceaccount/ca.crt"})
+			}},
+			"a container allowed root": {app, func(d *appsv1.Deployment) { sc(d).RunAsNonRoot = new(false) }},
+			"a pod without seccomp":    {app, func(d *appsv1.Deployment) { d.Spec.Template.Spec.SecurityContext.SeccompProfile = nil }},
 			"mounting a host path": {app, func(d *appsv1.Deployment) {
 				d.Spec.Template.Spec.Volumes = append(d.Spec.Template.Spec.Volumes,
 					corev1.Volume{Name: "host", VolumeSource: corev1.VolumeSource{HostPath: &corev1.HostPathVolumeSource{Path: "/"}}})
@@ -575,13 +632,80 @@ func TestEnvtest(t *testing.T) {
 			}
 		}
 
-		// An unrendered name: the operator's role names its bindings, so RBAC
-		// refuses it before the guard's name rule would.
+		// An unrendered name: the operator's role names its bindings, so grant
+		// it this one too, leaving the guard's name rule the only gate.
+		// The binding grants nothing and names no subject: only its name is wrong.
+		mustCreate(t, admin, &rbacv1.ClusterRole{ObjectMeta: metav1.ObjectMeta{Name: "dotvirt-evil"}})
+		mustCreate(t, admin, &rbacv1.ClusterRole{
+			ObjectMeta: metav1.ObjectMeta{Name: "guard-probe-evil"},
+			Rules: []rbacv1.PolicyRule{
+				{APIGroups: []string{rbacv1.GroupName}, Resources: []string{"clusterrolebindings"}, ResourceNames: []string{"dotvirt-evil"}, Verbs: []string{"create", "patch"}},
+				{APIGroups: []string{rbacv1.GroupName}, Resources: []string{"clusterroles"}, ResourceNames: []string{"dotvirt-evil"}, Verbs: []string{"bind"}},
+			},
+		})
+		mustCreate(t, admin, &rbacv1.ClusterRoleBinding{
+			ObjectMeta: metav1.ObjectMeta{Name: "guard-probe-evil"},
+			RoleRef:    rbacv1.RoleRef{APIGroup: rbacv1.GroupName, Kind: "ClusterRole", Name: "guard-probe-evil"},
+			Subjects:   []rbacv1.Subject{{Kind: rbacv1.UserKind, Name: operatorUser}},
+		})
 		evil := install.ArgocdApplyClusterRoleBinding(dv, "argocd", "argocd-application-controller", true, true)
-		evil.Name = "dotvirt-evil"
-		if err := dryApply(evil); !apierrors.IsForbidden(err) {
-			t.Errorf("operator's binding under an unrendered name: err=%v, want Forbidden", err)
+		evil.Name, evil.RoleRef.Name, evil.Subjects = "dotvirt-evil", "dotvirt-evil", nil
+		eventually(t, "the probe grant", func() bool {
+			err := dryApply(evil)
+			return err != nil && !strings.Contains(err.Error(), "cannot patch resource") && !strings.Contains(err.Error(), "cannot create resource")
+		})
+		if err := dryApply(evil); !refused(err) {
+			t.Errorf("operator's binding under an unrendered name: err=%v, want the guard's Forbidden", err)
 		}
+		_ = admin.Delete(ctx, &rbacv1.ClusterRoleBinding{ObjectMeta: metav1.ObjectMeta{Name: "guard-probe-evil"}})
+		_ = admin.Delete(ctx, &rbacv1.ClusterRole{ObjectMeta: metav1.ObjectMeta{Name: "guard-probe-evil"}})
+		_ = admin.Delete(ctx, &rbacv1.ClusterRole{ObjectMeta: metav1.ObjectMeta{Name: "dotvirt-evil"}})
+
+		// Its install: the finalizers go on and off by the operator's own
+		// patch; the spec, labels and owners an admin wrote stay theirs.
+		// Status is another resource and passes.
+		opPatch := func(edit func(*dotvirtv1alpha1.Dotvirt)) error {
+			got := &dotvirtv1alpha1.Dotvirt{}
+			if err := opClient.Get(ctx, key, got); err != nil {
+				t.Fatal(err)
+			}
+			lock := client.MergeFromWithOptions(got.DeepCopy(), client.MergeFromWithOptimisticLock{})
+			edit(got)
+			return opClient.Patch(ctx, got, lock)
+		}
+		for name, edit := range map[string]func(*dotvirtv1alpha1.Dotvirt){
+			"spec.image": func(d *dotvirtv1alpha1.Dotvirt) { d.Spec.Image = "registry.example/evil/dotvirt:1" },
+			"spec.forge.credentialsSecret": func(d *dotvirtv1alpha1.Dotvirt) {
+				d.Spec.Forge.CredentialsSecret = "kube-admin-token"
+			},
+			"a label":       func(d *dotvirtv1alpha1.Dotvirt) { d.Labels = map[string]string{"evil": "1"} },
+			"an annotation": func(d *dotvirtv1alpha1.Dotvirt) { d.Annotations = map[string]string{"evil": "1"} },
+		} {
+			if err := opPatch(edit); !refused(err) {
+				t.Errorf("operator changing its install's %s: err=%v, want the guard's Forbidden", name, err)
+			}
+		}
+		statusPatch := func() error {
+			got := &dotvirtv1alpha1.Dotvirt{}
+			if err := opClient.Get(ctx, key, got); err != nil {
+				t.Fatal(err)
+			}
+			base := got.DeepCopy()
+			got.Status.ConsoleURL = "https://probe.example"
+			return opClient.Status().Patch(ctx, got, client.MergeFrom(base))
+		}
+		if err := statusPatch(); err != nil {
+			t.Errorf("operator's status write: %v", err)
+		}
+		// Off by the operator's patch, and back on by its own pass under the guard.
+		if err := opPatch(func(d *dotvirtv1alpha1.Dotvirt) { controllerutil.RemoveFinalizer(d, dotvirtFinalizer) }); err != nil {
+			t.Errorf("operator removing its finalizer: %v", err)
+		}
+		patchCR()
+		eventually(t, "the finalizer back by the operator's pass", func() bool {
+			got := &dotvirtv1alpha1.Dotvirt{}
+			return admin.Get(ctx, key, got) == nil && controllerutil.ContainsFinalizer(got, dotvirtFinalizer)
+		})
 
 		// An image an admin chose passes once the guard is installed for it.
 		custom := app()

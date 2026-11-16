@@ -14,6 +14,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	dotvirtv1alpha1 "github.com/epheo/dotvirt/operator/api/v1alpha1"
+	"github.com/epheo/dotvirt/pkg/adminobjects"
 	"github.com/epheo/dotvirt/pkg/tenancy"
 )
 
@@ -308,27 +309,10 @@ func oidcEnv(o *dotvirtv1alpha1.OIDCSpec) []corev1.EnvVar {
 	return env
 }
 
+// dotvirtArgs are the console's arguments, which the operator guard pins
+// (pkg/adminobjects).
 func dotvirtArgs(dv *dotvirtv1alpha1.Dotvirt) []string {
-	args := []string{
-		fmt.Sprintf("-addr=:%d", HTTPPort),
-		"-ui-origin=", // same-origin: the binary serves the SPA
-		"-argo=true",
-		"-draft-dir=/var/lib/dotvirt/drafts",
-		// Webhooks (self-registered above) are the primary trigger for inventory
-		// updates; the git poll is only the missed-event backstop, so keep it slow
-		// to spare the forge - the managed Forgejo is a single SQLite-backed pod.
-		"-git-poll-interval=5m",
-		// The keys the tenant AppProjects are derived from (TenantAppProject).
-		"-project-label=" + ProjectLabel,
-		"-repo-annotation=" + RepoAnnotation,
-	}
-	if dv.Spec.Forge.InsecureTLS {
-		// A self-signed forge Route: skip TLS verification for forge API calls +
-		// git clones. Metrics too, unless DOTVIRT_METRICS_CA names a CA (an https
-		// .svc URL, or spec.metrics.ca): the app's metrics client lets a CA win.
-		args = append(args, "-insecure-tls")
-	}
-	return args
+	return adminobjects.ConsoleArgs(dv.Spec.Forge.InsecureTLS)
 }
 
 // brandingMountPath holds the branding ConfigMap's files.
@@ -410,21 +394,6 @@ func dotvirtVolumes(dv *dotvirtv1alpha1.Dotvirt) ([]corev1.VolumeMount, []corev1
 		})
 	}
 	return volumeMounts, volumes
-}
-
-// WithGuardPins tells the console the pins it renders the operator guard
-// with, beside DOTVIRT_ARGO_NAMESPACE and DOTVIRT_INSTALL_NAMESPACE: the
-// operator's username and the ArgoCD controller's ServiceAccount. An unknown
-// username adds nothing, and the console offers no guard.
-func WithGuardPins(dep *appsv1.Deployment, operator, argoController string) *appsv1.Deployment {
-	if operator == "" {
-		return dep
-	}
-	c := &dep.Spec.Template.Spec.Containers[0]
-	c.Env = append(c.Env,
-		corev1.EnvVar{Name: "DOTVIRT_OPERATOR_USERNAME", Value: operator},
-		corev1.EnvVar{Name: "DOTVIRT_ARGO_CONTROLLER", Value: argoController})
-	return dep
 }
 
 // Deployment runs the dotvirt binary (which also serves the SPA), with the forge
