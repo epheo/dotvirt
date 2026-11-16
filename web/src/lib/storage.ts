@@ -12,6 +12,7 @@ import type {
 	OSImage,
 	Project,
 	Snapshot,
+	StorageClass,
 	StorageClassInfo,
 	Template,
 	UploadStatus,
@@ -973,3 +974,29 @@ export function imageDeleteConsequence(
 	const [wait, disks] = vms === 1 ? ['waits', 'its disk stays'] : ['wait', 'their disks stay'];
 	return `${what} ${plural(vms, 'VM')} in git ${wait} on it; ${disks} pending until a boot image named ${name} is ready.`;
 }
+
+const forbidden = (c: StorageClass | StorageClassInfo) => 'forbidden' in c && !!c.forbidden;
+
+// The classes a disk picker offers: a namespace's quotas may shut some out.
+export const offeredClasses = <T extends StorageClass | StorageClassInfo>(classes: T[]): T[] =>
+	classes.filter((c) => !forbidden(c));
+
+// What a picker holds instead of '' (the cluster default) where the namespace
+// forbids the default class: the first class it allows, '' when none.
+export function pinnedClass(classes: (StorageClass | StorageClassInfo)[]): string {
+	const def = classes.find((c) => c.default);
+	return def && forbidden(def) ? (offeredClasses(classes)[0]?.name ?? '') : '';
+}
+
+// The pick a picker should move to: from a class the namespace forbids (one
+// held over from another namespace), or from '' when the default is
+// forbidden; null when the pick stands.
+export function repick(classes: (StorageClass | StorageClassInfo)[], value: string): string | null {
+	if (value === '') return pinnedClass(classes) || null;
+	const held = classes.find((c) => c.name === value);
+	return held && forbidden(held) ? pinnedClass(classes) : null;
+}
+
+// True when the namespace allows none of the classes.
+export const noClassAllowed = (classes: (StorageClass | StorageClassInfo)[]): boolean =>
+	classes.length > 0 && offeredClasses(classes).length === 0;

@@ -16,13 +16,15 @@ import {
 	libraryTiles,
 	moveConsequences,
 	moveNote,
+	noClassAllowed,
+	offeredClasses,
+	pinnedClass,
 	planBulkMove,
 	planBulkSnapshot,
-	settleEach,
-	uploadAbility,
-	suggestImageName,
 	projectsBySize,
 	repeatedNames,
+	repick,
+	settleEach,
 	sortRows,
 	sourceKey,
 	sourceOf,
@@ -30,9 +32,11 @@ import {
 	sourceText,
 	staleShare,
 	storageContext,
+	suggestImageName,
 	suggestTarget,
 	topImages,
 	type DiskRow,
+	uploadAbility,
 } from '#lib/storage.js';
 
 const NOW = Date.parse('2026-11-07T12:00:00Z');
@@ -782,5 +786,36 @@ describe('an unfinished boot image', () => {
 		expect(imageDeleteConsequence('noble', 1200)).toBe(
 			'Removes noble and its disk. 1,200 VMs in git wait on it; their disks stay pending until a boot image named noble is ready.',
 		);
+	});
+});
+
+describe('classes a namespace forbids', () => {
+	const fast = { name: 'fast', default: true };
+	const slow = { name: 'slow' };
+	const lab = { name: 'lab' };
+	const no = <T extends object>(c: T) => ({ ...c, forbidden: true });
+
+	it('offers only the classes the quotas allow', () => {
+		expect(offeredClasses([fast, no(lab), slow]).map((c) => c.name)).toEqual(['fast', 'slow']);
+	});
+
+	it('pins the first allowed class when the default is forbidden', () => {
+		expect(pinnedClass([no(fast), lab, slow])).toBe('lab');
+		expect(pinnedClass([fast, no(lab)])).toBe('');
+		expect(pinnedClass([no(fast), no(lab)])).toBe('');
+	});
+
+	it('moves a pick off a forbidden class, and off the forbidden default', () => {
+		expect(repick([no(fast), slow], '')).toBe('slow');
+		expect(repick([fast, slow], '')).toBeNull();
+		expect(repick([fast, no(lab)], 'lab')).toBe('');
+		expect(repick([no(fast), no(lab), slow], 'lab')).toBe('slow');
+		expect(repick([fast, slow], 'slow')).toBeNull();
+	});
+
+	it('says when the namespace allows no class', () => {
+		expect(noClassAllowed([no(fast), no(lab)])).toBe(true);
+		expect(noClassAllowed([no(fast), slow])).toBe(false);
+		expect(noClassAllowed([])).toBe(false);
 	});
 });

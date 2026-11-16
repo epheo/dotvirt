@@ -11,6 +11,7 @@
 		type CellKind,
 		type ProtectionClass,
 	} from '#lib/replication.js';
+	import { offeredClasses, repick } from '#lib/storage.js';
 	import { inventory } from '#lib/state/inventory.svelte.js';
 	import { protectionCards, replication } from '#lib/state/replication.svelte.js';
 	import CopyGlyph from '#lib/workspace/storage/CopyGlyph.svelte';
@@ -41,9 +42,16 @@
 	} = $props();
 
 	const id = $props.id();
-	const cards = $derived(protectionCards(classes));
-	const infos = $derived(classes.filter((c): c is StorageClassInfo => 'provisioner' in c));
-	const others = $derived(classes.filter((c) => !('replication' in c) || !c.replication));
+	// Only the classes the namespace's quotas allow are offered, and the pick
+	// moves off one it forbids; the inner pickers leave pinning to this one.
+	const usable = $derived(offeredClasses(classes));
+	$effect(() => {
+		const next = repick(classes, value);
+		if (next !== null) untrack(() => onpick(next));
+	});
+	const cards = $derived(protectionCards(usable));
+	const infos = $derived(usable.filter((c): c is StorageClassInfo => 'provisioner' in c));
+	const others = $derived(usable.filter((c) => !('replication' in c) || !c.replication));
 
 	// Room is placement data: only a caller who may read it gets numbers.
 	const gate = $derived(clusterGate.replication());
@@ -90,7 +98,7 @@
 </script>
 
 {#if !cards}
-	<ClassPick label="{disk} class" {value} {onpick} {classes} />
+	<ClassPick label="{disk} class" {value} {onpick} {classes} pin={false} />
 {:else}
 	<fieldset class="flex min-w-0 flex-col gap-2">
 		<legend class="mb-1.5 {LABEL}">{disk}: how much should it survive?</legend>
@@ -185,7 +193,7 @@
 		{/if}
 
 		{#if others.length}
-			<ClassPick label="Other classes" {value} {onpick} classes={others} />
+			<ClassPick label="Other classes" {value} {onpick} classes={others} pin={false} />
 		{/if}
 	</fieldset>
 {/if}

@@ -8,6 +8,7 @@ import {
 	type StorageClassInfo,
 } from '#lib/api.js';
 import { friendlyError } from '#lib/format.js';
+import { resource } from '#lib/resource.svelte.js';
 import { diskRows, imageUsage, uploadAbility, type UploadAbility } from '#lib/storage.js';
 import { caps } from './caps.svelte';
 import { templates } from './templates.svelte';
@@ -166,3 +167,14 @@ class StorageStore {
 }
 
 export const storage = new StorageStore();
+
+const CLASSES_IN = 'storage-classes:';
+
+// The class sheet as one namespace sees it, the classes its ResourceQuotas
+// forbid marked: what a disk form offers there. Read when a form opens or
+// its namespace changes.
+export const namespaceClasses = (namespace: () => string) =>
+	resource<StorageClassInfo[]>(
+		() => CLASSES_IN + namespace(),
+		(key) => api.storageClasses(key.slice(CLASSES_IN.length) || undefined),
+	);

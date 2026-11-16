@@ -1,10 +1,9 @@
 <script lang="ts">
-	import { api, type Options, type StorageClassInfo, type VM } from '#lib/api.js';
+	import type { Options, VM } from '#lib/api.js';
 	import { freeName } from '#lib/devices.js';
 	import { diskError, diskErrors, type DiskRow, type EditForm } from '#lib/editform.js';
 	import { quantityBytes } from '#lib/format.js';
-	import { resource } from '#lib/resource.svelte.js';
-	import { modules } from '#lib/state/modules.svelte.js';
+	import { namespaceClasses } from '#lib/state/storage.svelte.js';
 	import { protectionCards } from '#lib/state/replication.svelte.js';
 	import ProtectionPick from '../create/ProtectionPick.svelte';
 	import RowListEditor from '../RowListEditor.svelte';
@@ -19,11 +18,9 @@
 
 	const errors = $derived(diskErrors(form));
 
-	// The class facts the protection cards need, read only where r-drbd serves.
-	const classesRes = resource<StorageClassInfo[] | null>(
-		() => (modules.value?.replicatedStorage ? 'storage-classes' : ''),
-		(k) => (k ? api.storageClasses() : Promise.resolve(null)),
-	);
+	// The classes as the VM's namespace sees them: the protection cards' facts,
+	// and which classes its quotas forbid.
+	const classesRes = namespaceClasses(() => vm.namespace);
 	const classes = $derived(classesRes.data ?? []);
 	const cards = $derived(protectionCards(classes));
 	const added = $derived(form.disks.filter((d) => d.isNew && !d.removed));
@@ -63,7 +60,7 @@
 		<TextInput bind:value={disk.size} size="sm" width="w-16" aria-label="New disk size" />
 		{#if !cards}
 			<StorageClassSelect
-				options={options?.storageClasses ?? []}
+				options={classes.length ? classes : (options?.storageClasses ?? [])}
 				bind:value={disk.storageClass}
 				class="min-w-0 flex-1 py-1! text-xs"
 			/>

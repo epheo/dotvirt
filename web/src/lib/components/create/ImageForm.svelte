@@ -1,13 +1,14 @@
 <script lang="ts">
 	import { untrack } from 'svelte';
 	import { Check, Upload } from '@lucide/svelte';
-	import { api, Unauthorized, type StorageClassInfo } from '#lib/api.js';
+	import { api, Unauthorized } from '#lib/api.js';
 	import { liveMigrates } from '#lib/create.js';
 	import { friendlyError, plural } from '#lib/format.js';
 	import { imageGate } from '#lib/gates.js';
-	import { action, resource } from '#lib/resource.svelte.js';
+	import { action } from '#lib/resource.svelte.js';
 	import { caps } from '#lib/state/caps.svelte.js';
 	import { inventory } from '#lib/state/inventory.svelte.js';
+	import { namespaceClasses } from '#lib/state/storage.svelte.js';
 	import { ui, type ImageDownload } from '#lib/state/ui.svelte.js';
 	import { imageDeleteConsequence, suggestImageName } from '#lib/storage.js';
 	import { NAME_HINT, validName } from '#lib/validate.js';
@@ -114,7 +115,7 @@
 	let storageClass = $state('');
 	let dragging = $state(false);
 
-	const classesRes = resource<StorageClassInfo[]>(() => 'storage-classes', api.storageClasses);
+	const classesRes = namespaceClasses(() => namespace);
 	const classRows = $derived(
 		classesRes.data?.length ? classesRes.data : (inventory.options?.storageClasses ?? []),
 	);

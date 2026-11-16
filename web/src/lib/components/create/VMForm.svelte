@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { untrack } from 'svelte';
 	import { Check, CircleCheck, Copy, TriangleAlert, X } from '@lucide/svelte';
-	import { api, type CreateVMRequest, type Network, type StorageClassInfo } from '#lib/api.js';
+	import { api, type CreateVMRequest, type Network } from '#lib/api.js';
 	import {
 		defaultUser,
 		generatePassword,
@@ -24,13 +24,14 @@
 	import { bytes, plural, quantity, quantityBytes } from '#lib/format.js';
 	import { placement } from '#lib/headroom.js';
 	import { attachRef, attachableNetworks } from '#lib/networks.js';
-	import { action, resource } from '#lib/resource.svelte.js';
+	import { action } from '#lib/resource.svelte.js';
 	import { rowList, type RowList } from '#lib/rowlist.svelte.js';
 	import { diskNameError, freeName, RESERVED_DISKS } from '#lib/devices.js';
 	import { drafts } from '#lib/state/drafts.svelte.js';
 	import { memoryRoom } from '#lib/state/hosts.svelte.js';
 	import { vmGate } from '#lib/gates.js';
 	import { inventory } from '#lib/state/inventory.svelte.js';
+	import { namespaceClasses } from '#lib/state/storage.svelte.js';
 	import { persisted } from '#lib/state/persisted.svelte.js';
 	import { ui } from '#lib/state/ui.svelte.js';
 	import { NAME_HINT, validName } from '#lib/validate.js';
@@ -226,7 +227,7 @@
 			...RESERVED_DISKS,
 			...disks.rows.filter((_, j) => j !== i).map((d) => d.name),
 		]);
-	const classesRes = resource<StorageClassInfo[]>(() => 'storage-classes', api.storageClasses);
+	const classesRes = namespaceClasses(() => namespace);
 	const classes = $derived(classesRes.data ?? []);
 	// Facts when the class list loaded, else the bare names the options carry.
 	const classRows = $derived(classes.length ? classes : (options?.storageClasses ?? []));

@@ -2,6 +2,7 @@
 	import { toastStageResult } from '#lib/actions.js';
 	import { api, type VM } from '#lib/api.js';
 	import { inventory } from '#lib/state/inventory.svelte.js';
+	import { namespaceClasses } from '#lib/state/storage.svelte.js';
 	import { TBODY, TH, TH_LAST, THEAD, THEAD_TR } from '#lib/table.js';
 	import ErrorNote from './ErrorNote.svelte';
 	import StageModal from './StageModal.svelte';
@@ -26,6 +27,11 @@
 	// Only DataVolume-backed disks are migratable (the manifest owns their
 	// provisioning); container/cloud-init/empty disks are listed nowhere here.
 	const disks = $derived((vm.disks ?? []).filter((d) => d.type === 'dataVolume'));
+	// The target classes as the VM's namespace sees them: its quotas may forbid some.
+	const classesRes = namespaceClasses(() => vm.namespace);
+	const classOptions = $derived(
+		classesRes.data?.length ? classesRes.data : (inventory.options?.storageClasses ?? []),
+	);
 
 	let targets = $state<Record<string, string>>({}); // disk name -> target class ('' = keep)
 
@@ -85,7 +91,8 @@
 					</td>
 					<td class="py-1.5">
 						<StorageClassSelect
-							options={inventory.options?.storageClasses ?? []}
+							options={classOptions}
+							pin={false}
 							value={targets[d.name] ?? ''}
 							onchange={(e) => (targets = { ...targets, [d.name]: e.currentTarget.value })}
 							emptyLabel="— keep —"
