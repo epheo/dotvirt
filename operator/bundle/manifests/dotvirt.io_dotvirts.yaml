@@ -477,6 +477,12 @@ spec:
           status:
             description: DotvirtStatus is the observed install state.
             properties:
+              argoNamespace:
+                description: |-
+                  ArgoNamespace is the ArgoCD namespace the install last wrote, recorded once
+                  a prune there completes: when spec.argocd.namespace moves, prune reads the
+                  objects left in this one by name and deletes them, then records the new one.
+                type: string
               conditions:
                 description: Conditions follow the standard k8s conventions (see the
                   Condition* consts).
