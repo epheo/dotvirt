@@ -691,13 +691,13 @@ func TestDeploymentCarriesTheBranding(t *testing.T) {
 	}
 	dv.Spec.Branding = dotvirtv1alpha1.BrandingSpec{
 		ProductName: "Uniwatt Cloud", ConfigMap: "uniwatt-theme",
-		Links: []dotvirtv1alpha1.BrandingLink{{Label: "Account", URL: "https://c.example/account"}},
+		Links: []dotvirtv1alpha1.BrandingLink{{Label: "Account", URL: "https://c.example/account", Icon: "account.svg"}},
 	}
 	env := pod().Containers[0].Env
 	if v, _ := envValue(env, "DOTVIRT_PRODUCT_NAME"); v != "Uniwatt Cloud" {
 		t.Errorf("product name = %q", v)
 	}
-	if v, _ := envValue(env, "DOTVIRT_MASTHEAD_LINKS"); v != `[{"label":"Account","url":"https://c.example/account"}]` {
+	if v, _ := envValue(env, "DOTVIRT_MASTHEAD_LINKS"); v != `[{"label":"Account","url":"https://c.example/account","icon":"account.svg"}]` {
 		t.Errorf("links = %q", v)
 	}
 	if v, _ := envValue(env, "DOTVIRT_BRANDING_DIR"); v != brandingMountPath {

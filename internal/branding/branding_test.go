@@ -29,8 +29,11 @@ func TestCheckName(t *testing.T) {
 }
 
 // Masthead links are few, labeled in plain text, and https with no
-// credentials.
+// credentials; an icon is a plain .svg or .png file name.
 func TestParseLinks(t *testing.T) {
+	if links, err := ParseLinks(`[{"label":"Projects","url":"https://h/","icon":"projects-1.svg"}]`); err != nil || links[0].Icon != "projects-1.svg" {
+		t.Errorf("icon link = %+v, %v", links, err)
+	}
 	links, err := ParseLinks(`[{"label":"Account","url":"https://c.unw.fr/account"},{"label":"Billing","url":"https://c.unw.fr/billing?tab=open#due"}]`)
 	if err != nil || len(links) != 2 || links[0] != (model.BrandingLink{Label: "Account", URL: "https://c.unw.fr/account"}) {
 		t.Fatalf("ParseLinks = %+v, %v", links, err)
@@ -50,6 +53,12 @@ func TestParseLinks(t *testing.T) {
 		`[{"label":"a\nb","url":"https://h"}]`,
 		`[{"label":"a","url":"https://h","target":"_self"}]`,
 		`{"label":"a","url":"https://h"}`,
+		`[{"label":"a","url":"https://h","icon":"../theme.css"}]`,
+		`[{"label":"a","url":"https://h","icon":"icons/a.svg"}]`,
+		`[{"label":"a","url":"https://h","icon":"https://h/a.svg"}]`,
+		`[{"label":"a","url":"https://h","icon":"a.css"}]`,
+		`[{"label":"a","url":"https://h","icon":".a.svg"}]`,
+		`[{"label":"a","url":"https://h","icon":"` + strings.Repeat("a", 61) + `.svg"}]`,
 	} {
 		if _, err := ParseLinks(bad); err == nil {
 			t.Errorf("ParseLinks(%s) accepted", bad)
@@ -183,8 +192,8 @@ func TestShell(t *testing.T) {
 
 	s := Settings{
 		ProductName: "Volt & Co",
-		Links:       []model.BrandingLink{{Label: "</script><script>alert(1)</script>", URL: "https://c.example/a"}},
-		Dir:         dir(t, map[string]string{ThemeFile: ":root{}", LogoSVG: "<svg/>"}),
+		Links:       []model.BrandingLink{{Label: "</script><script>alert(1)</script>", URL: "https://c.example/a", Icon: "a.svg"}},
+		Dir:         dir(t, map[string]string{ThemeFile: ":root{}", LogoSVG: "<svg/>", "a.svg": "<svg/>"}),
 	}
 	shell := string(s.Shell(index))
 	if !strings.Contains(shell, "<title>Volt &amp; Co</title>") {
@@ -203,11 +212,72 @@ func TestShell(t *testing.T) {
 	if strings.Count(shell, "<script") != 1 {
 		t.Errorf("a value opened a script: %q", shell)
 	}
-	if got := block(shell); got.ProductName != "Volt & Co" || !got.Theme || !got.Logo || len(got.Links) != 1 || got.Links[0].Label != s.Links[0].Label {
+	if got := block(shell); got.ProductName != "Volt & Co" || !got.Theme || !got.Logo || len(got.Links) != 1 || got.Links[0].Label != s.Links[0].Label || got.Links[0].Icon != "a.svg" {
 		t.Errorf("block = %+v", got)
 	}
 
 	if got := (Settings{ProductName: "x"}).Shell([]byte("no head")); string(got) != "no head" {
 		t.Errorf("an index with no </head> = %q", got)
+	}
+}
+
+// A link icon is served like the logo, and only when a link names it: no other
+// file of the directory is reachable through the route. A missing icon leaves
+// the link as text.
+func TestServeIcon(t *testing.T) {
+	d := dir(t, map[string]string{"projects.svg": "<svg/>", "reviews.png": "png", "spare.svg": "<svg/>", ThemeFile: ":root{}", "big.svg": strings.Repeat("a", MaxFile+1)})
+	s := Settings{Dir: d, Links: []model.BrandingLink{
+		{Label: "Projects", URL: "https://h/", Icon: "projects.svg"},
+		{Label: "Reviews", URL: "https://h/r", Icon: "reviews.png"},
+		{Label: "Gone", URL: "https://h/g", Icon: "gone.svg"},
+		{Label: "Big", URL: "https://h/b", Icon: "big.svg"},
+		{Label: "Text", URL: "https://h/t"},
+	}}
+	icon := func(name string) *httptest.ResponseRecorder {
+		r := httptest.NewRequest(http.MethodGet, "/", nil)
+		r.SetPathValue("name", name)
+		w := httptest.NewRecorder()
+		s.ServeIcon(w, r)
+		return w
+	}
+	if w := icon("projects.svg"); w.Code != http.StatusOK || w.Header().Get("Content-Type") != "image/svg+xml" || !strings.Contains(w.Header().Get("Content-Security-Policy"), "sandbox") {
+		t.Errorf("svg icon = %d %q csp %q", w.Code, w.Header().Get("Content-Type"), w.Header().Get("Content-Security-Policy"))
+	}
+	if w := icon("reviews.png"); w.Code != http.StatusOK || w.Header().Get("Content-Type") != "image/png" {
+		t.Errorf("png icon = %d %q", w.Code, w.Header().Get("Content-Type"))
+	}
+	for _, name := range []string{"spare.svg", ThemeFile, "gone.svg", "big.svg", "../projects.svg", ""} {
+		if w := icon(name); w.Code != http.StatusNotFound {
+			t.Errorf("%q = %d, want 404", name, w.Code)
+		}
+	}
+	got := map[string]string{}
+	for _, l := range s.Info().Links {
+		got[l.Label] = l.Icon
+	}
+	if got["Projects"] != "projects.svg" || got["Reviews"] != "reviews.png" || got["Gone"] != "" || got["Big"] != "" || got["Text"] != "" {
+		t.Errorf("Info icons = %v, want only the files present", got)
+	}
+	if s.Links[2].Icon != "gone.svg" {
+		t.Error("Info changed the settings' own links")
+	}
+}
+
+// A name only ever reaches ServeIcon through ParseLinks, which refuses a path;
+// should one bypass it, the route still serves no file it does not name plainly.
+func TestServeIconRefusesABadNameEvenWhenReferenced(t *testing.T) {
+	d := dir(t, map[string]string{ThemeFile: ":root{}", "a.css": "x"})
+	s := Settings{Dir: d, Links: []model.BrandingLink{
+		{Label: "a", URL: "https://h/", Icon: ThemeFile},
+		{Label: "b", URL: "https://h/b", Icon: "a.css"},
+	}}
+	for _, name := range []string{ThemeFile, "a.css"} {
+		r := httptest.NewRequest(http.MethodGet, "/", nil)
+		r.SetPathValue("name", name)
+		w := httptest.NewRecorder()
+		s.ServeIcon(w, r)
+		if w.Code != http.StatusNotFound {
+			t.Errorf("%q = %d, want 404", name, w.Code)
+		}
 	}
 }
