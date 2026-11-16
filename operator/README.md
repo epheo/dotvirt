@@ -65,6 +65,13 @@ owns one status condition; a phase that fails or waits records why there, so
    `spec.forge.credentialsSecret` exists, `CredentialsSecretMissing` naming it when
    not (the dotvirt pod cannot start without it). No forge at all records
    `NotConfigured` (push-only).
+   A credential under any name but `dotvirt-forge` is a cluster admin's to grant:
+   the operator's own role names only its own Secrets. Until the Role and RoleBinding
+   `dotvirt-forge-credential` are installed in the install namespace (get on that
+   Secret, plus create and patch for a managed forge, bound to the operator's
+   ServiceAccount), `ForgeCredentialGranted` is False (`NotGranted`). Meanwhile the
+   ArgoCD tier, the platform repo and both webhooks wait (`CredentialNotGranted`),
+   applying and pruning nothing, and the rest of the install runs.
 3. **Secrets** (`SecretsReady`): generates the session key, the ApplicationSet-plugin
    token, the webhook secrets and, with SSO, the OAuth client secret. Create-once:
    they survive restarts and are never regenerated.
@@ -161,8 +168,8 @@ cluster; a rule without names says why beside it. AppProjects are the exception:
 tenant ones are named after their projects, so the grant covers any AppProject and
 prune's label check is what keeps it to this install's. An object only an older
 version rendered under another name is never read, and left for an admin to delete.
-`spec.forge.credentialsSecret`, an admin-chosen name, still needs get, create and
-patch on Secrets without names.
+A forge credential under an admin-chosen name is reached only through the
+`dotvirt-forge-credential` grant a cluster admin installs (Forge, above).
 
 The labels are `dotvirt.io/instance` (the CR name) and
 `dotvirt.io/instance-namespace` (its namespace). Objects from versions that set only
