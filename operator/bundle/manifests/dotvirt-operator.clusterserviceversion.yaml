@@ -292,6 +292,22 @@ spec:
               verbs:
                 - delete
             - apiGroups:
+                - admissionregistration.k8s.io
+              resources:
+                - validatingadmissionpolicies
+                - validatingadmissionpolicybindings
+              verbs:
+                - create
+            - apiGroups:
+                - admissionregistration.k8s.io
+              resourceNames:
+                - dotvirt-operator-no-token-secrets
+              resources:
+                - validatingadmissionpolicies
+                - validatingadmissionpolicybindings
+              verbs:
+                - get
+            - apiGroups:
                 - apps
               resources:
                 - deployments
@@ -517,6 +533,10 @@ spec:
                       - --leader-elect
                       - --health-probe-bind-address=:8081
                     env:
+                      - name: OPERATOR_SERVICE_ACCOUNT
+                        valueFrom:
+                          fieldRef:
+                            fieldPath: spec.serviceAccountName
                       - name: RELATED_IMAGE_DOTVIRT
                         value: quay.io/epheo/dotvirt@sha256:3226b44e8c1a2060f3f672d82d4e1b5cdc7b8e4b54cb6c4ab3a6c0301743c032
                       - name: RELATED_IMAGE_FORGEJO
