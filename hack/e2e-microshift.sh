@@ -360,6 +360,8 @@ if [ -n "${APP_IMAGE_TAR}" ]; then
 	kc -n dotvirt-operator set image deploy/dotvirt-operator-controller manager=localhost/dotvirt-operator:e2e
 	kc -n dotvirt-operator set env deploy/dotvirt-operator-controller RELATED_IMAGE_DOTVIRT=localhost/dotvirt:e2e
 fi
+# The install lives in dotvirt, not the operator's own namespace: name it.
+kc -n dotvirt-operator set env deploy/dotvirt-operator-controller OPERATOR_INSTALL_NAMESPACE=dotvirt
 retry "operator rolled out" "${TIMEOUT_INSTALL}" \
 	kc -n dotvirt-operator rollout status deploy/dotvirt-operator-controller --timeout=10s
 retry "operator available" "${TIMEOUT_INSTALL}" \

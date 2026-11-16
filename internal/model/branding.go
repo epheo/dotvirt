@@ -16,4 +16,8 @@ type Branding struct {
 type BrandingLink struct {
 	Label string `json:"label"`
 	URL   string `json:"url"`
+	// Icon is a file name in the branding directory, served at
+	// /api/branding/icon/<icon>; with one the link shows icon-only, its label
+	// the accessible name. Info leaves it out when the file is not there.
+	Icon string `json:"icon,omitempty"`
 }

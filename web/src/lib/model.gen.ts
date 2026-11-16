@@ -26,6 +26,12 @@ export interface Branding {
 export interface BrandingLink {
   label: string;
   url: string;
+  /**
+   * Icon is a file name in the branding directory, served at
+   * /api/branding/icon/<icon>; with one the link shows icon-only, its label
+   * the accessible name. Info leaves it out when the file is not there.
+   */
+  icon?: string;
 }
 
 //////////
@@ -1738,6 +1744,11 @@ export interface StorageClassInfo {
    */
   free?: number /* int64 */;
   segments?: CapacitySegment[];
+  /**
+   * Forbidden is set on a list asked for one namespace: a ResourceQuota
+   * there allows no claim on the class, so a disk on it would be refused.
+   */
+  forbidden?: boolean;
 }
 /**
  * StorageProfile is what a DataVolume gets on the class when its template
@@ -1752,7 +1763,12 @@ export interface StorageProfile {
    */
   shared?: boolean;
   cloneStrategy?: string; // snapshot | copy | csi-clone
-  recognized: boolean; // CDI knows the provisioner's capabilities
+  /**
+   * Recognized is true when CDI fills a DataVolume's access and volume modes on
+   * this class: its StorageProfile's status carries claim settings, from CDI's
+   * provisioner table, the profile's spec or existing PVs.
+   */
+  recognized: boolean;
 }
 /**
  * CapacitySegment is one CSIStorageCapacity entry: free capacity in one

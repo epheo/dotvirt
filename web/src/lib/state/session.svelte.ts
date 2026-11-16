@@ -1,3 +1,4 @@
+import { goto } from '$app/navigation';
 import { api, HttpError, retryDelay, Unauthorized, type AuthMethods, type User } from '#lib/api.js';
 import { friendlyError } from '#lib/format.js';
 import { resource, type Resource } from '#lib/resource.svelte.js';
@@ -16,6 +17,10 @@ class Session {
 	// the next person reload straight back in.
 	logoutError = $state('');
 	signingOut = $state(false);
+	// A sign-out ended this page's session. The sign-in screen mounts on the
+	// old URL before the ?signed_out navigation lands, and must not redirect to
+	// the provider, whose live session would sign the user straight back in.
+	signedOutHere = $state(false);
 	#wake: (() => void) | null = null;
 
 	// Only a 401 means "sign in": anything else (backend restarting, network
@@ -24,7 +29,7 @@ class Session {
 	async check() {
 		for (let attempt = 1; ; attempt++) {
 			try {
-				this.user = await api.me();
+				this.signIn(await api.me());
 				break;
 			} catch (e) {
 				if (e instanceof Unauthorized) {
@@ -53,20 +58,33 @@ class Session {
 
 	// Only the server's yes signs out here. A 401 means it already ended the
 	// session (the api layer's sink signs out too); any other failure, network
-	// included, keeps the session and says so.
+	// included, keeps the session and says so. A sign-out lands on ?signed_out:
+	// the sign-in screen would otherwise redirect to the provider, whose own
+	// live session signs the user straight back in.
 	async logout() {
 		if (this.signingOut) return;
 		this.signingOut = true;
 		this.logoutError = '';
 		try {
 			await api.logout();
-			this.user = null;
+			this.signedOut();
 		} catch (e) {
-			if (e instanceof Unauthorized) this.user = null;
+			if (e instanceof Unauthorized) this.signedOut();
 			else this.logoutError = 'Sign-out did not complete. Your session is still active.';
 		} finally {
 			this.signingOut = false;
 		}
+	}
+
+	signIn(user: User) {
+		this.signedOutHere = false;
+		this.user = user;
+	}
+
+	private signedOut() {
+		this.signedOutHere = true;
+		this.user = null;
+		void goto('/?signed_out');
 	}
 }
 

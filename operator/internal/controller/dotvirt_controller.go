@@ -5,10 +5,13 @@ import (
 	"errors"
 	"fmt"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
+	rbacv1 "k8s.io/api/rbac/v1"
+	"k8s.io/apimachinery/pkg/api/equality"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -28,6 +31,7 @@ import (
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
+	"sigs.k8s.io/controller-runtime/pkg/source"
 
 	dotvirtv1alpha1 "github.com/epheo/dotvirt/operator/api/v1alpha1"
 	"github.com/epheo/dotvirt/operator/internal/deps"
@@ -40,8 +44,9 @@ import (
 // DotvirtReconciler provisions a dotvirt install from a Dotvirt resource (see the
 // api package doc for what an install comprises). dotvirt's RUNTIME still owns
 // nothing - this operator is the install-time provisioner, so it holds the
-// privileged install RBAC and forge-admin credential the app never touches.
-// Its RBAC markers live in rbac_markers.go.
+// privileged install RBAC the app never has. The forge credential is shared
+// with the app (spec.forge.credentialsSecret). Its RBAC markers live in
+// rbac_markers.go.
 type DotvirtReconciler struct {
 	client.Client
 	Scheme   *runtime.Scheme
@@ -57,6 +62,18 @@ type DotvirtReconciler struct {
 	APIReader client.Reader
 	// OperatorNamespace is admitted by the NetworkPolicies; "" when unknown.
 	OperatorNamespace string
+	// InstallNamespace is the namespace a cluster admin names on the operator's
+	// Deployment for the install; "" leaves it to installNamespace's resolution.
+	InstallNamespace string
+	// resolved remembers the last namespace installNamespace resolved, so event
+	// mappings fan out without a read of their own.
+	resolved atomic.Value
+	// moved is set when the resolution changes, so the next pass rewrites the
+	// status of every ignored Dotvirt, whose message names the install, and
+	// wakes the Dotvirts of the new install namespace through wake: no event of
+	// their own says they became the install.
+	moved atomic.Bool
+	wake  chan event.GenericEvent
 
 	// probe is a test seam (not config): deps.Probe needs a live discovery
 	// endpoint, so tests stub it. nil = the real probe.
@@ -110,9 +127,22 @@ func (r *DotvirtReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 	// lag the previous pass's own write. Diffed against that stale base, a field
 	// flipping back (Ready after a Provisioning the cache never saw) would drop
 	// out of the patch and stay wrong on the server.
+	// Resolved first: the pass for a Dotvirt just deleted is often the only
+	// one to see the install namespace move.
+	installNS, adopted, err := r.installNamespace(ctx)
+	if err != nil {
+		return ctrl.Result{}, err
+	}
+	if r.moved.Swap(false) {
+		r.restateIgnored(ctx, installNS)
+		r.wakeInstall(ctx, installNS, req.NamespacedName)
+	}
 	var dv dotvirtv1alpha1.Dotvirt
 	if err := r.reader().Get(ctx, req.NamespacedName, &dv); err != nil {
 		return ctrl.Result{}, client.IgnoreNotFound(err)
+	}
+	if dv.Namespace != installNS || installNS == "" {
+		return ctrl.Result{}, r.ignore(ctx, &dv, installNS)
 	}
 	log.Info("reconciling dotvirt install", "platform", r.Platform)
 
@@ -130,7 +160,6 @@ func (r *DotvirtReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 	}
 	base := dv.DeepCopy()
 	var res ctrl.Result
-	var err error
 	// One install per cluster: the ClusterRoleBindings it provisions carry fixed
 	// cluster-scoped names, so two CRs would rewrite each other's subjects on every
 	// reconcile and each finalizer would delete the other's bindings. The oldest CR
@@ -144,6 +173,7 @@ func (r *DotvirtReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 			other.Namespace, other.Name)
 		res = *r.waitPhase(&dv, dotvirtv1alpha1.ConditionAvailable, "Conflict", msg,
 			dotvirtv1alpha1.PhaseProvisioning, time.Minute)
+		r.markAdopted(&dv, adopted)
 	} else {
 		// Ensure the finalizer is present before provisioning anything cluster-scoped.
 		// Skipped under -dry-run so a validation run mutates nothing (and the CR stays
@@ -156,6 +186,9 @@ func (r *DotvirtReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 			// status patch and turn it into an optimistic lock.
 			base = dv.DeepCopy()
 		}
+		// After the finalizer add, whose Update reads the status back from the
+		// server.
+		r.markAdopted(&dv, adopted)
 		// Only after the finalizer add, the reconcile's one spec write: the
 		// effective spec the phases fill in must never reach the stored CR.
 		res, err = r.provision(ctx, req.NamespacedName, &dv)
@@ -227,9 +260,11 @@ func (r *DotvirtReconciler) provision(ctx context.Context, key types.NamespacedN
 			return ctrl.Result{}, fmt.Errorf("prune: %w", err)
 		}
 		r.markPruned(key, digest)
+		// Every other recorded namespace was just swept by name.
+		dv.Status.ArgoNamespaces = []string{rc.argoNS}
 	}
-	// The watches cover the CR, Deployments, Secrets, Routes and project
-	// namespaces; the drift timer heals the rest. No watch reports the platform
+	// The watches cover the CR, Deployments, Routes and project namespaces;
+	// the drift timer heals the rest. No watch reports the platform
 	// repo or the ApplicationSet and its Applications, so their recovery polls.
 	// Argo gets driftResync to recover on its own; past that, a state only a
 	// person fixes waits on the drift timer like any other drift.
@@ -241,6 +276,9 @@ func (r *DotvirtReconciler) provision(ctx context.Context, key types.NamespacedN
 	}
 	if argo != nil && argo.Reason == reasonRefreshing {
 		wait = min(wait, refreshRetry)
+	}
+	if rc.grantLanding {
+		wait = min(wait, grantLagRetry)
 	}
 	return ctrl.Result{RequeueAfter: wait}, nil
 }
@@ -261,12 +299,13 @@ func (r *DotvirtReconciler) syncWait(dv *dotvirtv1alpha1.Dotvirt) time.Duration 
 	}
 }
 
-// olderInstall returns the Dotvirt CR that precedes dv, if any: by creation time,
-// then namespace/name, so every reconciler picks the same winner. A CR already
-// being deleted no longer counts, which is what unblocks its successor.
+// olderInstall returns the Dotvirt CR in the install namespace that precedes dv,
+// if any: by creation time, then name, so every reconciler picks the same
+// winner. A CR already being deleted no longer counts, which is what unblocks
+// its successor.
 func (r *DotvirtReconciler) olderInstall(ctx context.Context, dv *dotvirtv1alpha1.Dotvirt) (*dotvirtv1alpha1.Dotvirt, bool, error) {
 	var list dotvirtv1alpha1.DotvirtList
-	if err := r.List(ctx, &list); err != nil {
+	if err := r.List(ctx, &list, client.InNamespace(dv.Namespace)); err != nil {
 		return nil, false, err
 	}
 	for i := range list.Items {
@@ -329,6 +368,9 @@ type reconcileCtx struct {
 	tenantKindsRead bool
 	// impersonation is impersonating's answer for this pass, nil until asked.
 	impersonation *bool
+	// grantLanding: the forge credential is refused though its grant's
+	// RoleBinding exists, which the apiserver's RBAC caches may still lag.
+	grantLanding bool
 }
 
 func (r *DotvirtReconciler) newReconcileCtx(ctx context.Context, dv *dotvirtv1alpha1.Dotvirt) *reconcileCtx {
@@ -412,7 +454,7 @@ func (r *DotvirtReconciler) dryRunSkip(dv *dotvirtv1alpha1.Dotvirt, condType, wh
 // builds the app's shared forge client (pkg/forge) scoped to the platform repo.
 func (r *DotvirtReconciler) forgeClient(ctx context.Context, dv *dotvirtv1alpha1.Dotvirt) (*forge.Client, error) {
 	name := install.ForgeSecretName(dv)
-	s, err := r.secret(ctx, dv.Namespace, name)
+	s, err := r.forgeSecret(ctx, dv)
 	if err != nil {
 		return nil, fmt.Errorf("read forge credentials %q: %w", name, err)
 	}
@@ -548,21 +590,25 @@ func (r *DotvirtReconciler) waitPhase(dv *dotvirtv1alpha1.Dotvirt, condType, rea
 }
 
 // CacheByObject scopes the manager's cache: the watched kinds only where they
-// carry the instance label, so the operator never holds every Secret in the
-// cluster in memory, and namespaces only where they carry the project label,
-// the ones tenant AppProjects derive from. A namespace that loses the label
-// leaves the cache, which reads as its deletion.
+// carry the instance label, and namespaces only where they carry the project
+// label, the ones tenant AppProjects derive from. A namespace that loses the
+// label leaves the cache, which reads as its deletion. No Secret informer: one
+// needs list and watch on every Secret in the cluster, which RBAC cannot narrow
+// by label.
 func CacheByObject(plat platform.Platform) map[client.Object]cache.ByObject {
 	hasInstance, _ := labels.NewRequirement(install.InstanceLabel, selection.Exists, nil)
 	instanceOnly := cache.ByObject{Label: labels.NewSelector().Add(*hasInstance)}
 	hasProject, _ := labels.NewRequirement(install.ProjectLabel, selection.Exists, nil)
 	byObject := map[client.Object]cache.ByObject{
-		&corev1.Secret{}:     instanceOnly,
 		&appsv1.Deployment{}: instanceOnly,
 		&corev1.Namespace{}:  {Label: labels.NewSelector().Add(*hasProject)},
 		// The watch on Argo's settings selects argocd-cm by name, the only
 		// ConfigMap the RBAC lets the operator watch; reads stay direct.
 		&corev1.ConfigMap{}: {Field: fields.OneTermEqualSelector("metadata.name", argoSettings)},
+		// The forge credential's grant, by name, the only RoleBinding the RBAC
+		// lets the operator watch; RoleBinding reads stay direct.
+		&rbacv1.RoleBinding{}: {Field: fields.OneTermEqualSelector("metadata.name", install.ForgeCredentialGrantName)},
+		&rbacv1.Role{}:        {Field: fields.OneTermEqualSelector("metadata.name", install.ForgeCredentialGrantName)},
 	}
 	// Registering the Route kind on vanilla Kubernetes fails the cache's REST lookup.
 	if plat == platform.OpenShift {
@@ -577,18 +623,20 @@ func CacheByObject(plat platform.Platform) map[client.Object]cache.ByObject {
 // (main.go detects it, failing startup rather than guessing).
 func (r *DotvirtReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	// Watch only the owned kinds the RBAC already lets the cache list: a deleted or
-	// drifted Deployment/Secret re-reconciles promptly. Services, SAs, PVCs and
+	// drifted Deployment re-reconciles promptly. Secrets, Services, SAs, PVCs and
 	// Ingresses stay unwatched by design (least-privilege RBAC); their drift heals
 	// on the driftResync requeue.
 	// The CR triggers on spec changes and deletion (which bumps the generation of
 	// an object holding finalizers), never on the pass's own status write: an
 	// error message carrying an ephemeral port would otherwise re-run the pass
 	// back to back against a struggling forge.
+	if r.wake == nil {
+		r.wake = make(chan event.GenericEvent, 16)
+	}
 	b := ctrl.NewControllerManagedBy(mgr).
 		For(&dotvirtv1alpha1.Dotvirt{}, builder.WithPredicates(predicate.GenerationChangedPredicate{})).
 		Named("dotvirt").
 		Owns(&appsv1.Deployment{}).
-		Owns(&corev1.Secret{}).
 		// A project's namespaces and repo are its AppProject's destinations and
 		// source, so a project namespace appearing, leaving or changing either
 		// re-derives them.
@@ -599,7 +647,13 @@ func (r *DotvirtReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		// pass re-renders their AppProjects at once, not on the next drift
 		// requeue.
 		Watches(&corev1.ConfigMap{}, handler.EnqueueRequestsFromMapFunc(r.installs),
-			builder.WithPredicates(predicate.Funcs{UpdateFunc: impersonationChanged, GenericFunc: func(event.GenericEvent) bool { return false }}))
+			builder.WithPredicates(predicate.Funcs{UpdateFunc: impersonationChanged, GenericFunc: func(event.GenericEvent) bool { return false }})).
+		// A cluster admin granting or revoking the forge credential, its Role
+		// and RoleBinding in either order: the phases waiting on it go on at
+		// once, not on the drift timer.
+		Watches(&rbacv1.RoleBinding{}, handler.EnqueueRequestsFromMapFunc(r.installs)).
+		Watches(&rbacv1.Role{}, handler.EnqueueRequestsFromMapFunc(r.installs)).
+		WatchesRawSource(source.Channel(r.wake, &handler.EnqueueRequestForObject{}))
 	// Routes exist only where the route API does, so gate the watch on the same
 	// platform detection that gates rendering them; on vanilla Kubernetes the
 	// informer could never sync. Unstructured because the module carries no
@@ -612,10 +666,22 @@ func (r *DotvirtReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return b.Complete(r)
 }
 
-// installs enqueues every install: a project namespace is an input to each.
+// installs enqueues every Dotvirt in the install namespace: a project namespace
+// is an input to each.
 func (r *DotvirtReconciler) installs(ctx context.Context, _ client.Object) []reconcile.Request {
+	ns, known := r.resolved.Load().(string)
+	if !known {
+		var err error
+		if ns, _, err = r.installNamespace(ctx); err != nil {
+			logf.FromContext(ctx).Error(err, "resolve the install namespace for an event")
+			return nil
+		}
+	}
+	if ns == "" {
+		return nil
+	}
 	var list dotvirtv1alpha1.DotvirtList
-	if err := r.List(ctx, &list); err != nil {
+	if err := r.List(ctx, &list, client.InNamespace(ns)); err != nil {
 		logf.FromContext(ctx).Error(err, "list installs for a project namespace event")
 		return nil
 	}
@@ -659,4 +725,186 @@ func tenancyChanged(e event.UpdateEvent) bool {
 // derived field the pass cleared goes out as a null, so it still converges.
 func (r *DotvirtReconciler) writeStatus(ctx context.Context, dv, base *dotvirtv1alpha1.Dotvirt) error {
 	return r.Status().Patch(ctx, dv, client.MergeFrom(base))
+}
+
+// InstallNamespaceEnv names the operator Deployment's env that sets
+// InstallNamespace when it is not the operator's own namespace.
+const InstallNamespaceEnv = "OPERATOR_INSTALL_NAMESPACE"
+
+// installNamespace resolves the namespace whose Dotvirt is the install, each
+// pass, in this order:
+//  1. the namespace a cluster admin names on the operator's Deployment;
+//  2. the operator's own namespace, once it holds a Dotvirt;
+//  3. the namespace ClusterRoleBinding dotvirt binds the ServiceAccount dotvirt
+//     in, the install an earlier operator provisioned (adopted is then true).
+//
+// The admin and edit roles let any namespace admin create a Dotvirt, so the
+// namespace never comes from a Dotvirt alone. Step 3 trusts the binding because
+// only cluster admins and this operator may write it, and the operator wrote it
+// for the install it acted on. Its limit: before the operator stopped acting on
+// Dotvirts anywhere, a tenant's could have been that install, and the binding
+// then names the tenant's namespace (the README says what to check). "" means
+// no install: every Dotvirt is ignored.
+func (r *DotvirtReconciler) installNamespace(ctx context.Context) (ns string, adopted bool, err error) {
+	defer func() {
+		if err != nil {
+			return
+		}
+		if prev, known := r.resolved.Swap(ns).(string); known && prev != ns {
+			r.moved.Store(true)
+		}
+	}()
+	if r.InstallNamespace != "" {
+		return r.InstallNamespace, false, nil
+	}
+	if r.OperatorNamespace != "" {
+		var list dotvirtv1alpha1.DotvirtList
+		if err := r.List(ctx, &list, client.InNamespace(r.OperatorNamespace), client.Limit(1)); err != nil {
+			return "", false, err
+		}
+		if len(list.Items) > 0 {
+			return r.OperatorNamespace, false, nil
+		}
+	}
+	var crb rbacv1.ClusterRoleBinding
+	if err := r.reader().Get(ctx, client.ObjectKey{Name: install.AppName}, &crb); err != nil {
+		return "", false, client.IgnoreNotFound(err)
+	}
+	if crb.RoleRef.Kind != "ClusterRole" || crb.RoleRef.Name != install.AppName {
+		return "", false, nil
+	}
+	bound := ""
+	for _, s := range crb.Subjects {
+		if s.Kind != rbacv1.ServiceAccountKind || s.Name != install.AppName {
+			continue
+		}
+		if s.Namespace == "" || (bound != "" && s.Namespace != bound) {
+			return "", false, nil
+		}
+		bound = s.Namespace
+	}
+	if bound == "" {
+		return "", false, nil
+	}
+	// The operator applies the binding after the Dotvirt it acts on exists. A
+	// Dotvirt there only newer than the binding was created after it: the
+	// binding outlived its install (the operator removed first, the finalizer
+	// stripped by hand) and the namespace has since changed hands, which
+	// self-provisioning lets any user do.
+	var there dotvirtv1alpha1.DotvirtList
+	if err := r.List(ctx, &there, client.InNamespace(bound)); err != nil {
+		return "", false, err
+	}
+	for i := range there.Items {
+		if !crb.CreationTimestamp.Before(&there.Items[i].CreationTimestamp) {
+			return bound, true, nil
+		}
+	}
+	return "", false, nil
+}
+
+// markAdopted records on the install whether its namespace was adopted from
+// ClusterRoleBinding dotvirt, with the override that makes it explicit.
+func (r *DotvirtReconciler) markAdopted(dv *dotvirtv1alpha1.Dotvirt, adopted bool) {
+	if !adopted {
+		meta.RemoveStatusCondition(&dv.Status.Conditions, dotvirtv1alpha1.ConditionInstallNamespaceAdopted)
+		return
+	}
+	r.setCondition(dv, dotvirtv1alpha1.ConditionInstallNamespaceAdopted, metav1.ConditionTrue, "FromExistingInstall",
+		fmt.Sprintf("this install lives outside the operator's namespace and was adopted because ClusterRoleBinding dotvirt "+
+			"binds it; name it explicitly with %s=%s on the operator's Deployment (through OLM: the Subscription's "+
+			"spec.config.env)", InstallNamespaceEnv, dv.Namespace))
+}
+
+// restateIgnored rewrites the status of every Dotvirt outside installNS after
+// the install namespace changed: each names where the install lives. One write
+// per ignored Dotvirt per change; a failure waits for that Dotvirt's next event.
+// The pass that noticed reads its own Dotvirt after this, so it writes nothing
+// twice.
+func (r *DotvirtReconciler) restateIgnored(ctx context.Context, installNS string) {
+	var all dotvirtv1alpha1.DotvirtList
+	if err := r.List(ctx, &all); err != nil {
+		logf.FromContext(ctx).Error(err, "list Dotvirts to restate the ignored ones")
+		return
+	}
+	for i := range all.Items {
+		dv := &all.Items[i]
+		if dv.Namespace == installNS || !dv.DeletionTimestamp.IsZero() {
+			continue
+		}
+		if err := r.ignore(ctx, dv, installNS); err != nil {
+			logf.FromContext(ctx).Error(err, "restate an ignored Dotvirt", "namespace", dv.Namespace, "name", dv.Name)
+		}
+	}
+}
+
+// wakeInstall queues the Dotvirts of a new install namespace, but self: the
+// pass that ignored them cancelled their requeue, and nothing else says they
+// became the install.
+func (r *DotvirtReconciler) wakeInstall(ctx context.Context, installNS string, self types.NamespacedName) {
+	if r.wake == nil || installNS == "" {
+		return
+	}
+	var list dotvirtv1alpha1.DotvirtList
+	if err := r.List(ctx, &list, client.InNamespace(installNS)); err != nil {
+		logf.FromContext(ctx).Error(err, "list the new install namespace's Dotvirts")
+		return
+	}
+	for i := range list.Items {
+		if client.ObjectKeyFromObject(&list.Items[i]) == self {
+			continue
+		}
+		select {
+		case r.wake <- event.GenericEvent{Object: &list.Items[i]}:
+		case <-ctx.Done():
+			return
+		}
+	}
+}
+
+// ignore handles a Dotvirt outside the install namespace: no finalizer, render,
+// binding or prune, only a status saying where the install lives. What the
+// status said of a past install (phase, URLs, other conditions) goes; what
+// prune remembers (argoNamespaces, syncImpersonationInstance) stays, for when a
+// cluster admin names its namespace again. Its deletion drops the operator's
+// finalizer, should it carry one, WITHOUT finalize: prune matches objects by
+// instance labels, so cleaning up on this CR's say could take the real
+// install's objects.
+func (r *DotvirtReconciler) ignore(ctx context.Context, dv *dotvirtv1alpha1.Dotvirt, installNS string) error {
+	if !dv.DeletionTimestamp.IsZero() {
+		if !r.DryRun && controllerutil.RemoveFinalizer(dv, dotvirtFinalizer) {
+			return r.Update(ctx, dv)
+		}
+		return nil
+	}
+	msg := fmt.Sprintf("the operator acts only on the Dotvirt in namespace %s, so this one is ignored. "+
+		"Create the install there, or a cluster admin names %s with %s on the operator's Deployment "+
+		"(through OLM: the Subscription's spec.config.env)", installNS, dv.Namespace, InstallNamespaceEnv)
+	if installNS == "" {
+		own := r.OperatorNamespace
+		if own == "" {
+			own = "the operator's namespace"
+		}
+		msg = fmt.Sprintf("no install exists yet, and a Dotvirt outside %s is never taken as one. Create the install "+
+			"in %s, or a cluster admin names %s with %s on the operator's Deployment (through OLM: the Subscription's "+
+			"spec.config.env)", own, own, dv.Namespace, InstallNamespaceEnv)
+	}
+	want := dotvirtv1alpha1.DotvirtStatus{
+		ObservedGeneration:        dv.Status.ObservedGeneration,
+		SyncImpersonationInstance: dv.Status.SyncImpersonationInstance,
+		ArgoNamespaces:            dv.Status.ArgoNamespaces,
+	}
+	if c := meta.FindStatusCondition(dv.Status.Conditions, dotvirtv1alpha1.ConditionAvailable); c != nil {
+		want.Conditions = []metav1.Condition{*c}
+	}
+	meta.SetStatusCondition(&want.Conditions, metav1.Condition{
+		Type: dotvirtv1alpha1.ConditionAvailable, Status: metav1.ConditionFalse,
+		Reason: "WrongNamespace", Message: msg, ObservedGeneration: dv.Generation,
+	})
+	if equality.Semantic.DeepEqual(dv.Status, want) {
+		return nil
+	}
+	base := dv.DeepCopy()
+	dv.Status = want
+	return r.writeStatus(ctx, dv, base)
 }

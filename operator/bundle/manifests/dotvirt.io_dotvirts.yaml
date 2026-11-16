@@ -216,9 +216,9 @@ spec:
                     description: |-
                       ConfigMap names a ConfigMap in dotvirt's namespace holding theme.css,
                       loaded after the console's own stylesheet so it may override its
-                      tokens, and logo.svg or logo.png. dotvirt serves them itself, each up to
-                      256 KiB: the console never loads a remote URL. An edit shows on the next
-                      page load.
+                      tokens, logo.svg or logo.png, and the links' icons. dotvirt serves them
+                      itself, each up to 256 KiB: the console never loads a remote URL. An
+                      edit shows on the next page load.
                     maxLength: 253
                     pattern: ^[a-z0-9]([-a-z0-9.]*[a-z0-9])?$
                     type: string
@@ -228,6 +228,14 @@ spec:
                     items:
                       description: BrandingLink is one masthead link.
                       properties:
+                        icon:
+                          description: |-
+                            Icon names an .svg or .png file in spec.branding.configMap, up to 256
+                            KiB. With one the link shows as that icon alone, its label the tooltip
+                            and accessible name; a file that is not there leaves it as text.
+                          maxLength: 64
+                          pattern: ^[A-Za-z0-9][A-Za-z0-9._-]*\.(svg|png)$
+                          type: string
                         label:
                           description: Label is the link's text.
                           maxLength: 32
@@ -253,18 +261,28 @@ spec:
                     pattern: ^[^\x00-\x1f\x7f-\x9f]*$
                     type: string
                 type: object
+                x-kubernetes-validations:
+                - message: 'a link icon is a file of spec.branding.configMap: set
+                    configMap'
+                  rule: '!has(self.links) || has(self.configMap) || self.links.all(l,
+                    !has(l.icon))'
               forge:
                 description: |-
-                  ForgeSpec points dotvirt at its git forge and the platform-tier repo. The forge
-                  credential here is the INSTALL-TIME admin token the operator uses to create the
-                  platform repo, distinct from (and more privileged than) dotvirt's runtime
-                  clone/push token, preserving the install-provisioner vs runtime-owns-nothing split.
+                  ForgeSpec points dotvirt at its git forge and the platform-tier repo. One forge
+                  credential serves the operator (platform repo, webhooks), the app (git over
+                  HTTPS and the forge API) and ArgoCD's repo-creds.
                 properties:
                   credentialsSecret:
                     description: |-
-                      CredentialsSecret names a Secret holding the forge-admin credential (keys: url,
+                      CredentialsSecret names a Secret holding the forge credential (keys: url,
                       username, token). For a managed forge the operator WRITES this secret; point it at
-                      an existing secret only for a bring-your-own forge.
+                      an existing secret only for a bring-your-own forge. Its account creates the
+                      platform and project repos in their org and writes to them; registering the org
+                      webhooks needs an org owner, and without one dotvirt and ArgoCD fall back to
+                      polling. Any name but dotvirt-forge needs a cluster admin's grant: the
+                      operator reads only the Secrets its own role names, and reports the Role and
+                      RoleBinding to install (ForgeCredentialReady). A name the operator gives one
+                      of its own Secrets (dotvirt-session, ...) is refused there too.
                     type: string
                   insecureTLS:
                     description: |-
@@ -371,12 +389,67 @@ spec:
                   MetricsSpec points the Performance tab at a Prometheus/Thanos query API; empty
                   disables it.
                 properties:
+                  ca:
+                    description: |-
+                      CA is the key of a ConfigMap in dotvirt's namespace holding the PEM bundle
+                      that signs both endpoints' serving certs. Unset: an https in-cluster
+                      (.svc) url trusts OpenShift's service CA; any other uses the system pool,
+                      or skips verification when forge.insecureTLS is set. A missing ConfigMap
+                      or key leaves the system pool, so a private CA fails verification. The
+                      console reads it when it starts: restart it after a rotation.
+                    properties:
+                      key:
+                        description: 'Key is a ConfigMap key: not ".", and not starting
+                          with "..".'
+                        maxLength: 253
+                        pattern: ^\.?[-_a-zA-Z0-9][-._a-zA-Z0-9]*$
+                        type: string
+                      name:
+                        maxLength: 253
+                        pattern: ^[a-z0-9]([-a-z0-9.]*[a-z0-9])?$
+                        type: string
+                    required:
+                    - key
+                    - name
+                    type: object
+                  tenancyURL:
+                    description: |-
+                      TenancyURL is the per-namespace query API for every other caller: dotvirt
+                      sends one query per namespace with the caller's token, a namespace=<ns>
+                      parameter and a {namespace="<ns>"} matcher. The endpoint must allow only
+                      a caller who may get pods.metrics.k8s.io in that namespace, and force the
+                      query to it (as kube-rbac-proxy and prom-label-proxy do): dotvirt keeps
+                      tenants apart only through that check. Unset: derived for OpenShift's
+                      Thanos querier (port 9092 beside 9091); other endpoints get none, and
+                      those callers no metrics.
+                    maxLength: 2048
+                    pattern: ^https?://([A-Za-z0-9]([-A-Za-z0-9.]*[A-Za-z0-9])?|\[[0-9A-Fa-f:.]+\])(:[0-9]{1,5})?(/([^?#@%\s\x00-\x1f\x7f]|%[0-9A-Fa-f]{2})*)?$
+                    type: string
                   url:
                     description: |-
                       URL is a Prometheus-compatible query API base URL (for OpenShift, the
-                      cluster Thanos querier service).
+                      cluster Thanos querier service). dotvirt sends it only the queries of a
+                      caller allowed get on prometheuses/api (monitoring.coreos.com) named k8s
+                      in openshift-monitoring, with that caller's own token. It must check the
+                      token itself: anyone with network reach to an unauthenticated endpoint
+                      reads every namespace's series.
                     type: string
                 type: object
+                x-kubernetes-validations:
+                - message: tenancyURL needs url
+                  rule: '!has(self.tenancyURL) || (has(self.url) && size(self.url)
+                    > 0)'
+                - message: 'tenancyURL must differ from url: one endpoint cannot be
+                    both the cluster-wide and the per-namespace one'
+                  rule: '!has(self.tenancyURL) || !has(self.url) || (self.tenancyURL
+                    != self.url && self.tenancyURL != self.url + ''/'' && self.tenancyURL
+                    + ''/'' != self.url)'
+                - message: ca needs url
+                  rule: '!has(self.ca) || (has(self.url) && size(self.url) > 0)'
+                - message: 'ca needs an https url or tenancyURL: plain http never
+                    uses it'
+                  rule: '!has(self.ca) || (has(self.url) && self.url.lowerAscii().startsWith(''https://''))
+                    || (has(self.tenancyURL) && self.tenancyURL.lowerAscii().startsWith(''https://''))'
               publishing:
                 description: Publishing is off until Domain and GatewayClassName are
                   set.
@@ -407,6 +480,14 @@ spec:
           status:
             description: DotvirtStatus is the observed install state.
             properties:
+              argoNamespaces:
+                description: |-
+                  ArgoNamespaces are the ArgoCD namespaces the install wrote that no
+                  completed prune has swept since: a pass adds the one it writes, and a
+                  completed prune, having swept the others by name, leaves the current one.
+                items:
+                  type: string
+                type: array
               conditions:
                 description: Conditions follow the standard k8s conventions (see the
                   Condition* consts).

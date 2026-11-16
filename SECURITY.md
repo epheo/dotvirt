@@ -16,11 +16,20 @@ a GitHub Security Advisory.
 ## Scope
 
 dotvirt's runtime **owns nothing**: it reads git/cluster/Argo and proposes pull
-requests, riding the calling user's RBAC. The privileged install RBAC and the
-forge-admin credential live only in the **operator** (install-time), kept distinct
-from the app's narrow clone/push token. Reports that concern privilege boundaries
-between these two identities, the user-token pass-through, or the GitOps PR-merge
-gate are especially welcome.
+requests, riding the calling user's RBAC. The privileged install RBAC lives only
+in the **operator** (install-time). One forge credential serves the operator, the
+app (git and the forge API, including creating project repos) and ArgoCD's
+repo-creds. Reports that concern the operator's privileges, the forge credential,
+the user-token pass-through, or the GitOps PR-merge gate are especially welcome.
+
+The operator acts only on the Dotvirt in its install namespace: one a cluster admin
+names on its Deployment, else its own namespace, else the install it already
+provisioned (from ClusterRoleBinding `dotvirt`, which only cluster admins and the
+operator may write). OLM lets every namespace admin create a Dotvirt in their
+namespace; earlier versions acted on the oldest Dotvirt anywhere, so a tenant's
+could become the install while none existed and receive its cluster-wide
+bindings. After upgrading, check that ClusterRoleBinding `dotvirt` names the
+namespace you installed in (operator README, Install namespace).
 
 ## Supported versions
 

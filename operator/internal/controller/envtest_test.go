@@ -5,9 +5,11 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"os"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -26,6 +28,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	utilyaml "k8s.io/apimachinery/pkg/util/yaml"
+	rbacv1ac "k8s.io/client-go/applyconfigurations/rbac/v1"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -135,10 +138,63 @@ func TestEnvtest(t *testing.T) {
 			{authzv1.ResourceAttributes{Verb: "bind", Group: "rbac.authorization.k8s.io", Resource: "clusterroles", Name: tenancy.TenantEgressRole}, false},
 			{authzv1.ResourceAttributes{Verb: "delete", Group: "rbac.authorization.k8s.io", Resource: "clusterrolebindings", Name: tenancy.PlatformSyncAccount}, true},
 			{authzv1.ResourceAttributes{Verb: "delete", Resource: "serviceaccounts", Namespace: "argocd", Name: "dotvirt-p-team-a"}, false},
-			// The platform RoleBindings are read one by one, never listed or watched.
+			// RoleBindings are read one by one, never listed or watched. The one the
+			// install writes is created (server-side apply authorizes create with the
+			// name), patched and deleted by name, and no other.
 			{authzv1.ResourceAttributes{Verb: "get", Group: "rbac.authorization.k8s.io", Resource: "rolebindings", Namespace: "team-a", Name: "team-a-admins"}, true},
 			{authzv1.ResourceAttributes{Verb: "list", Group: "rbac.authorization.k8s.io", Resource: "rolebindings"}, false},
+			// The forge credential's grant is watched by name, never written.
+			{authzv1.ResourceAttributes{Verb: "list", Group: "rbac.authorization.k8s.io", Resource: "rolebindings", Name: install.ForgeCredentialGrantName}, true},
+			{authzv1.ResourceAttributes{Verb: "watch", Group: "rbac.authorization.k8s.io", Resource: "rolebindings", Name: install.ForgeCredentialGrantName}, true},
+			{authzv1.ResourceAttributes{Verb: "list", Group: "rbac.authorization.k8s.io", Resource: "roles", Name: install.ForgeCredentialGrantName}, true},
+			{authzv1.ResourceAttributes{Verb: "watch", Group: "rbac.authorization.k8s.io", Resource: "roles", Name: install.ForgeCredentialGrantName}, true},
+			{authzv1.ResourceAttributes{Verb: "list", Group: "rbac.authorization.k8s.io", Resource: "roles"}, false},
+			{authzv1.ResourceAttributes{Verb: "get", Group: "rbac.authorization.k8s.io", Resource: "roles", Namespace: "dotvirt", Name: install.ForgeCredentialGrantName}, true},
+			{authzv1.ResourceAttributes{Verb: "get", Group: "rbac.authorization.k8s.io", Resource: "roles", Namespace: "dotvirt", Name: "admin"}, false},
+			// Before minting into an admin-named credential, the operator asks
+			// whether it may store it.
+			{authzv1.ResourceAttributes{Verb: "create", Group: "authorization.k8s.io", Resource: "selfsubjectaccessreviews"}, true},
+			{authzv1.ResourceAttributes{Verb: "create", Group: "rbac.authorization.k8s.io", Resource: "rolebindings", Namespace: "dotvirt", Name: install.ForgeCredentialGrantName}, false},
+			{authzv1.ResourceAttributes{Verb: "create", Group: "rbac.authorization.k8s.io", Resource: "roles", Namespace: "dotvirt", Name: install.ForgeCredentialGrantName}, false},
+			{authzv1.ResourceAttributes{Verb: "watch", Group: "rbac.authorization.k8s.io", Resource: "rolebindings"}, false},
+			{authzv1.ResourceAttributes{Verb: "create", Group: "rbac.authorization.k8s.io", Resource: "rolebindings", Namespace: "argocd", Name: install.SyncRequestName}, true},
 			{authzv1.ResourceAttributes{Verb: "create", Group: "rbac.authorization.k8s.io", Resource: "rolebindings", Namespace: "team-a"}, false},
+			{authzv1.ResourceAttributes{Verb: "create", Group: "rbac.authorization.k8s.io", Resource: "rolebindings", Namespace: "team-a", Name: "team-a-admins"}, false},
+			{authzv1.ResourceAttributes{Verb: "patch", Group: "rbac.authorization.k8s.io", Resource: "rolebindings", Namespace: "argocd", Name: install.SyncRequestName}, true},
+			{authzv1.ResourceAttributes{Verb: "patch", Group: "rbac.authorization.k8s.io", Resource: "rolebindings", Namespace: "team-a", Name: "team-a-admins"}, false},
+			{authzv1.ResourceAttributes{Verb: "delete", Group: "rbac.authorization.k8s.io", Resource: "rolebindings", Namespace: "argocd", Name: install.SyncRequestName}, true},
+			{authzv1.ResourceAttributes{Verb: "delete", Group: "rbac.authorization.k8s.io", Resource: "rolebindings", Namespace: "team-a", Name: "team-a-admins"}, false},
+			// Proved by this row alone: the operator also holds the role's one rule,
+			// so the escalation check would admit its binding without bind.
+			{authzv1.ResourceAttributes{Verb: "bind", Group: "rbac.authorization.k8s.io", Resource: "clusterroles", Name: install.SyncRequestName}, true},
+			// Secrets are never listed or watched, and read or written by name.
+			{authzv1.ResourceAttributes{Verb: "list", Resource: "secrets"}, false},
+			{authzv1.ResourceAttributes{Verb: "watch", Resource: "secrets"}, false},
+			{authzv1.ResourceAttributes{Verb: "get", Resource: "secrets", Namespace: "argocd", Name: install.ArgoSecretName}, true},
+			{authzv1.ResourceAttributes{Verb: "patch", Resource: "secrets", Namespace: "dotvirt", Name: install.SessionSecretName}, true},
+			{authzv1.ResourceAttributes{Verb: "get", Resource: "secrets", Namespace: "kube-system", Name: "some-token"}, false},
+			{authzv1.ResourceAttributes{Verb: "create", Resource: "secrets", Namespace: "kube-system", Name: "some-token"}, false},
+			{authzv1.ResourceAttributes{Verb: "get", Resource: "secrets", Namespace: "dotvirt", Name: "byo-creds"}, false},
+			// ConfigMaps, all by name: argocd-cm listed and watched by name for the
+			// cache, Argo's RBAC settings never touched.
+			{authzv1.ResourceAttributes{Verb: "list", Resource: "configmaps"}, false},
+			{authzv1.ResourceAttributes{Verb: "list", Resource: "configmaps", Name: "argocd-cm"}, true},
+			{authzv1.ResourceAttributes{Verb: "watch", Resource: "configmaps", Name: "argocd-cm"}, true},
+			{authzv1.ResourceAttributes{Verb: "patch", Resource: "configmaps", Namespace: "argocd", Name: "argocd-tls-certs-cm"}, true},
+			{authzv1.ResourceAttributes{Verb: "get", Resource: "configmaps", Namespace: "argocd", Name: "argocd-rbac-cm"}, false},
+			{authzv1.ResourceAttributes{Verb: "patch", Resource: "configmaps", Namespace: "argocd", Name: "argocd-rbac-cm"}, false},
+			// Bindings, the operand and the Argo objects: the names the install
+			// renders, never listed.
+			{authzv1.ResourceAttributes{Verb: "create", Group: "rbac.authorization.k8s.io", Resource: "clusterrolebindings", Name: "dotvirt"}, true},
+			{authzv1.ResourceAttributes{Verb: "create", Group: "rbac.authorization.k8s.io", Resource: "clusterrolebindings", Name: "escalation-probe"}, false},
+			{authzv1.ResourceAttributes{Verb: "list", Group: "rbac.authorization.k8s.io", Resource: "clusterrolebindings"}, false},
+			{authzv1.ResourceAttributes{Verb: "create", Resource: "serviceaccounts", Namespace: "kube-system", Name: "builder"}, false},
+			{authzv1.ResourceAttributes{Verb: "list", Resource: "services"}, false},
+			{authzv1.ResourceAttributes{Verb: "create", Group: "apps", Resource: "deployments", Namespace: "dotvirt", Name: "other"}, false},
+			{authzv1.ResourceAttributes{Verb: "list", Group: "networking.k8s.io", Resource: "networkpolicies"}, false},
+			{authzv1.ResourceAttributes{Verb: "create", Group: "argoproj.io", Resource: "applicationsets", Namespace: "argocd", Name: install.ApplicationSetName}, true},
+			{authzv1.ResourceAttributes{Verb: "list", Group: "argoproj.io", Resource: "applicationsets"}, false},
+			{authzv1.ResourceAttributes{Verb: "create", Group: "argoproj.io", Resource: "applications", Namespace: "argocd", Name: "other"}, false},
 		} {
 			res, err := kube.AuthorizationV1().SelfSubjectAccessReviews().Create(ctx,
 				&authzv1.SelfSubjectAccessReview{Spec: authzv1.SelfSubjectAccessReviewSpec{ResourceAttributes: &c.attrs}}, metav1.CreateOptions{})
@@ -150,14 +206,28 @@ func TestEnvtest(t *testing.T) {
 			}
 		}
 		// The bind grant is what lets the operator create its bindings without
-		// holding the operand roles' rules; a binding to any other role is refused.
-		crb := &rbacv1.ClusterRoleBinding{
-			ObjectMeta: metav1.ObjectMeta{Name: "escalation-probe"},
-			RoleRef:    rbacv1.RoleRef{APIGroup: rbacv1.GroupName, Kind: "ClusterRole", Name: "cluster-admin"},
-			Subjects:   []rbacv1.Subject{{Kind: rbacv1.UserKind, Name: operatorUser}},
+		// holding the operand roles' rules; under a name it may create, as it
+		// creates them (server-side apply), a binding to any other role is
+		// refused by the escalation check.
+		crb := rbacv1ac.ClusterRoleBinding("dotvirt").
+			WithRoleRef(rbacv1ac.RoleRef().WithAPIGroup(rbacv1.GroupName).WithKind("ClusterRole").WithName("cluster-admin")).
+			WithSubjects(rbacv1ac.Subject().WithKind(rbacv1.UserKind).WithName(operatorUser))
+		if _, err := kube.RbacV1().ClusterRoleBindings().Apply(ctx, crb, metav1.ApplyOptions{FieldManager: "dotvirt-operator"}); !apierrors.IsForbidden(err) ||
+			!strings.Contains(err.Error(), "attempting to grant RBAC permissions not currently held") {
+			t.Errorf("binding cluster-admin: err=%v, want the escalation check's Forbidden", err)
 		}
-		if _, err := kube.RbacV1().ClusterRoleBindings().Create(ctx, crb, metav1.CreateOptions{}); !apierrors.IsForbidden(err) {
-			t.Errorf("binding cluster-admin: err=%v, want Forbidden", err)
+		// Under the one name it may create, as the operator creates it (server-side
+		// apply, authorized with that name), a RoleBinding to another role is still
+		// refused: RBAC's escalation check stops it, not the name. A POST create
+		// would carry no name and stop at authorization instead. cluster-admin, not
+		// admin: envtest runs no aggregation controller, so its admin role is empty
+		// and anyone may bind it.
+		rb := rbacv1ac.RoleBinding(install.SyncRequestName, "team-a").
+			WithRoleRef(rbacv1ac.RoleRef().WithAPIGroup(rbacv1.GroupName).WithKind("ClusterRole").WithName("cluster-admin")).
+			WithSubjects(rbacv1ac.Subject().WithKind(rbacv1.UserKind).WithName(operatorUser))
+		_, err := kube.RbacV1().RoleBindings("team-a").Apply(ctx, rb, metav1.ApplyOptions{FieldManager: "dotvirt-operator"})
+		if !apierrors.IsForbidden(err) || !strings.Contains(err.Error(), "attempting to grant RBAC permissions not currently held") {
+			t.Errorf("binding cluster-admin in team-a: err=%v, want the escalation check's Forbidden", err)
 		}
 	})
 
@@ -202,6 +272,35 @@ func TestEnvtest(t *testing.T) {
 		// network admins, and the storage catalog off OpenShift.
 		if len(crbs.Items) != 5 {
 			t.Errorf("instance ClusterRoleBindings = %d, want 5", len(crbs.Items))
+		}
+		// dotvirt's ServiceAccount reads Applications everywhere and patches
+		// them only in the ArgoCD namespace.
+		eventually(t, "sync-request RoleBinding", func() bool {
+			return admin.Get(ctx, types.NamespacedName{Namespace: "argocd", Name: install.SyncRequestName}, &rbacv1.RoleBinding{}) == nil
+		})
+		adminKube := kubernetes.NewForConfigOrDie(adminCfg)
+		sa := "system:serviceaccount:" + dv.Namespace + ":" + install.AppName
+		for _, c := range []struct {
+			verb, ns string
+			want     bool
+		}{
+			{"patch", "argocd", true},
+			{"patch", "team-a", false},
+			{"patch", "", false},
+			{"update", "argocd", false},
+			{"list", "", true},
+		} {
+			res, err := adminKube.AuthorizationV1().SubjectAccessReviews().Create(ctx, &authzv1.SubjectAccessReview{Spec: authzv1.SubjectAccessReviewSpec{
+				User:               sa,
+				Groups:             []string{"system:serviceaccounts", "system:serviceaccounts:" + dv.Namespace},
+				ResourceAttributes: &authzv1.ResourceAttributes{Verb: c.verb, Group: "argoproj.io", Resource: "applications", Namespace: c.ns},
+			}}, metav1.CreateOptions{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if res.Status.Allowed != c.want {
+				t.Errorf("dotvirt %s applications in %q: allowed=%v, want %v", c.verb, c.ns, res.Status.Allowed, c.want)
+			}
 		}
 		appset := install.ApplicationSet(got, "argocd", nil, nil)
 		if err := admin.Get(ctx, client.ObjectKeyFromObject(appset), argoObj("ApplicationSet", "", "", nil)); err != nil {
@@ -312,6 +411,61 @@ func TestEnvtest(t *testing.T) {
 		}
 	})
 
+	t.Run("admission takes metrics endpoints the console can query", func(t *testing.T) {
+		ca := &dotvirtv1alpha1.ConfigMapKeyRef{Name: "metrics-ca", Key: "ca.crt"}
+		const wide, tenancy = "https://prom-wide.monitoring.svc:8443", "https://prom-tenancy.monitoring.svc:8443"
+		for name, m := range map[string]dotvirtv1alpha1.MetricsSpec{
+			"tenancyURL without url":         {TenancyURL: tenancy},
+			"ca without url":                 {CA: ca},
+			"tenancyURL not http":            {URL: wide, TenancyURL: "prom-tenancy.monitoring.svc:8443"},
+			"tenancyURL with a query":        {URL: wide, TenancyURL: tenancy + "?x=1"},
+			"tenancyURL with an empty query": {URL: wide, TenancyURL: tenancy + "/?"},
+			"tenancyURL with a fragment":     {URL: wide, TenancyURL: tenancy + "#f"},
+			"tenancyURL with credentials":    {URL: wide, TenancyURL: "https://u:p@prom-tenancy.monitoring.svc:8443"},
+			"tenancyURL equal to url":        {URL: wide, TenancyURL: wide},
+			"tenancyURL equal to url plus /": {URL: wide, TenancyURL: wide + "/"},
+			"url equal to tenancyURL plus /": {URL: wide + "/", TenancyURL: wide},
+			"ca with only http endpoints":    {URL: "http://prom.monitoring.svc:9090", TenancyURL: "http://proxy.monitoring.svc:8080", CA: ca},
+			"ca with a slash in its key":     {URL: wide, CA: &dotvirtv1alpha1.ConfigMapKeyRef{Name: "metrics-ca", Key: "a/b"}},
+			"ca key .":                       {URL: wide, CA: &dotvirtv1alpha1.ConfigMapKeyRef{Name: "metrics-ca", Key: "."}},
+			"ca key ..":                      {URL: wide, CA: &dotvirtv1alpha1.ConfigMapKeyRef{Name: "metrics-ca", Key: ".."}},
+			"ca key starting with ..":        {URL: wide, CA: &dotvirtv1alpha1.ConfigMapKeyRef{Name: "metrics-ca", Key: "..ca"}},
+			"ca with a bad ConfigMap name":   {URL: wide, CA: &dotvirtv1alpha1.ConfigMapKeyRef{Name: "Metrics_CA", Key: "ca.crt"}},
+		} {
+			dv := testCR()
+			dv.Spec.Metrics = m
+			if err := admin.Create(ctx, dv, client.DryRunAll); !apierrors.IsInvalid(err) {
+				t.Errorf("%s: got %v, want Invalid", name, err)
+			}
+		}
+		// Unstructured: the typed client drops an empty url before it is sent.
+		emptyURL := &unstructured.Unstructured{Object: map[string]any{
+			"apiVersion": "dotvirt.io/v1alpha1", "kind": "Dotvirt",
+			"metadata": map[string]any{"name": "empty-metrics-url", "namespace": "dotvirt"},
+			"spec":     map[string]any{"metrics": map[string]any{"url": "", "tenancyURL": tenancy}},
+		}}
+		if err := admin.Create(ctx, emptyURL, client.DryRunAll); !apierrors.IsInvalid(err) {
+			t.Errorf("tenancyURL with an empty url: got %v, want Invalid", err)
+		}
+		for name, m := range map[string]dotvirtv1alpha1.MetricsSpec{
+			"OpenShift's querier alone":       {URL: "https://thanos-querier.openshift-monitoring.svc.cluster.local:9091"},
+			"both endpoints and a CA":         {URL: wide, TenancyURL: tenancy + "/", CA: ca},
+			"plain http in-cluster":           {URL: "http://prometheus-operated.monitoring.svc:9090", TenancyURL: "http://prom-label-proxy.monitoring.svc:8080"},
+			"ca for an https tenancyURL only": {URL: "http://prom.monitoring.svc:9090", TenancyURL: tenancy, CA: ca},
+			"bracketed IPv6 tenancyURL":       {URL: "https://[fd00::10]:9091", TenancyURL: "https://[fd00::10]:9092"},
+			"ca key starting with one dot":    {URL: wide, CA: &dotvirtv1alpha1.ConfigMapKeyRef{Name: "metrics-ca", Key: ".ca.crt"}},
+			// url shipped without validation, so any stored value still admits.
+			"url with an uppercase scheme": {URL: "HTTPS://thanos-querier.openshift-monitoring.svc:9091"},
+			"url with a trailing-dot FQDN": {URL: "https://prom.monitoring.svc.cluster.local.:9091"},
+		} {
+			dv := testCR()
+			dv.Spec.Metrics = m
+			if err := admin.Create(ctx, dv, client.DryRunAll); client.IgnoreAlreadyExists(err) != nil {
+				t.Errorf("%s: %v", name, err)
+			}
+		}
+	})
+
 	t.Run("admission takes one sign-in flow", func(t *testing.T) {
 		oidc := &dotvirtv1alpha1.OIDCSpec{IssuerURL: "https://idm.example/oauth2/openid/dotvirt", ClientID: "dotvirt"}
 		dv := testCR()
@@ -393,6 +547,11 @@ func TestEnvtest(t *testing.T) {
 			"bad escape":          {Links: link("a", "https://c.example/%zz")},
 			"control in url":      {Links: link("a", "https://c.example/a\x01b")},
 			"configmap uppercase": {ConfigMap: "Theme"},
+			"icon path":           {ConfigMap: "t", Links: []dotvirtv1alpha1.BrandingLink{{Label: "a", URL: "https://c.example", Icon: "../theme.css"}}},
+			"icon url":            {ConfigMap: "t", Links: []dotvirtv1alpha1.BrandingLink{{Label: "a", URL: "https://c.example", Icon: "https://c.example/a.svg"}}},
+			"icon type":           {ConfigMap: "t", Links: []dotvirtv1alpha1.BrandingLink{{Label: "a", URL: "https://c.example", Icon: "a.gif"}}},
+			"icon long":           {ConfigMap: "t", Links: []dotvirtv1alpha1.BrandingLink{{Label: "a", URL: "https://c.example", Icon: strings.Repeat("a", 61) + ".svg"}}},
+			"icon no configmap":   {Links: []dotvirtv1alpha1.BrandingLink{{Label: "a", URL: "https://c.example", Icon: "a.svg"}}},
 		} {
 			dv := testCR()
 			dv.Spec.Branding = b
@@ -403,10 +562,17 @@ func TestEnvtest(t *testing.T) {
 		dv := testCR()
 		dv.Spec.Branding = dotvirtv1alpha1.BrandingSpec{
 			ProductName: "Uniwatt Cloud", ConfigMap: "uniwatt-theme",
-			Links: link("Billing", "https://c.example/billing?tab=open#due"),
+			Links: append(link("Billing", "https://c.example/billing?tab=open#due"),
+				dotvirtv1alpha1.BrandingLink{Label: "Projects", URL: "https://c.example/", Icon: "projects.svg"}),
 		}
 		if err := admin.Create(ctx, dv, client.DryRunAll); client.IgnoreAlreadyExists(err) != nil {
 			t.Errorf("a provider's branding: %v", err)
+		}
+		// Text links need no ConfigMap: CRs from before link icons stay valid.
+		text := testCR()
+		text.Spec.Branding = dotvirtv1alpha1.BrandingSpec{Links: link("Billing", "https://c.example/billing")}
+		if err := admin.Create(ctx, text, client.DryRunAll); client.IgnoreAlreadyExists(err) != nil {
+			t.Errorf("text links without a ConfigMap: %v", err)
 		}
 	})
 
@@ -481,6 +647,56 @@ func TestEnvtest(t *testing.T) {
 		}
 	})
 
+	t.Run("a moved ArgoCD namespace is swept by name", func(t *testing.T) {
+		dv := &dotvirtv1alpha1.Dotvirt{}
+		if err := admin.Get(ctx, types.NamespacedName{Namespace: "dotvirt", Name: "x"}, dv); err != nil {
+			t.Fatal(err)
+		}
+		mustCreate(t, admin, &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "argocd-moved"}})
+		moveTo := func(ns string) {
+			value := "null"
+			if ns != "" {
+				value = strconv.Quote(ns)
+			}
+			patch := fmt.Appendf(nil, `{"spec":{"argocd":{"namespace":%s}}}`, value)
+			if err := admin.Patch(ctx, dv, client.RawPatch(types.MergePatchType, patch)); err != nil {
+				t.Fatal(err)
+			}
+		}
+		// What the install writes in the ArgoCD namespace.
+		written := func(ns string) int {
+			n := 0
+			for _, obj := range []client.Object{
+				&rbacv1.RoleBinding{ObjectMeta: metav1.ObjectMeta{Name: install.SyncRequestName}},
+				&corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Name: install.AppsetConfigMapName}},
+				&corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: install.AppsetSecretName}},
+				argoObj("ApplicationSet", "", install.ApplicationSetName, nil),
+				argoObj("AppProject", "", "dotvirt-p-team-a", nil),
+			} {
+				if admin.Get(ctx, types.NamespacedName{Namespace: ns, Name: obj.GetName()}, obj) == nil {
+					n++
+				}
+			}
+			return n
+		}
+		recorded := func() string {
+			got := &dotvirtv1alpha1.Dotvirt{}
+			if admin.Get(ctx, client.ObjectKeyFromObject(dv), got) != nil {
+				return ""
+			}
+			return strings.Join(got.Status.ArgoNamespaces, ",")
+		}
+		eventually(t, "argocd recorded", func() bool { return recorded() == "argocd" && written("argocd") == 5 })
+		moveTo("argocd-moved")
+		eventually(t, "argocd swept after the move", func() bool {
+			return recorded() == "argocd-moved" && written("argocd-moved") == 5 && written("argocd") == 0
+		})
+		moveTo("")
+		eventually(t, "argocd-moved swept after the move back", func() bool {
+			return recorded() == "argocd" && written("argocd") == 5 && written("argocd-moved") == 0
+		})
+	})
+
 	// envtest runs no aggregation controller: admin takes the rules OpenShift
 	// aggregates into it (testdata, read from a cluster), RoleBinding writes
 	// included, NetworkAttachmentDefinition writes and EgressFirewalls not.
@@ -523,6 +739,84 @@ func TestEnvtest(t *testing.T) {
 		}
 		return res.Status.Allowed
 	}
+
+	t.Run("an admin's credential grant reaches that one Secret only", func(t *testing.T) {
+		// The operator's ServiceAccount holds nothing else here (the suite binds
+		// its role to a user), so each review sees the grant alone.
+		account := "system:serviceaccount:dotvirt-operator:" + install.OperatorServiceAccount
+		groups := []string{"system:serviceaccounts", "system:serviceaccounts:dotvirt-operator"}
+		for _, c := range []struct {
+			ns      string
+			managed bool
+		}{{"cred-byo", false}, {"cred-managed", true}} {
+			mustCreate(t, admin, &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: c.ns}})
+			// Not the install the deletion subtest takes down: its labels differ.
+			// The owner never exists, and envtest runs no garbage collector.
+			dv := &dotvirtv1alpha1.Dotvirt{ObjectMeta: metav1.ObjectMeta{Name: "cred", Namespace: c.ns, UID: "0f7c1d2e-cred"}}
+			dv.Spec.Forge.CredentialsSecret, dv.Spec.Forge.Managed = "byo-creds", c.managed
+			role, binding := install.ForgeCredentialGrant(dv, "dotvirt-operator")
+			// Either half landing (and, below, going) is a pass at once, not one
+			// on the drift timer: the binding first here, its Role after.
+			before := passes.Load()
+			mustCreate(t, admin, binding)
+			soon(t, "a pass after the grant's binding lands", func() bool { return passes.Load() > before })
+			before = passes.Load()
+			mustCreate(t, admin, role)
+			soon(t, "a pass after the grant's Role lands", func() bool { return passes.Load() > before })
+			for _, r := range []struct {
+				verb, ns, name string
+				want           bool
+			}{
+				{"get", c.ns, "byo-creds", true},
+				{"create", c.ns, "byo-creds", c.managed},
+				{"patch", c.ns, "byo-creds", c.managed},
+				{"update", c.ns, "byo-creds", false},
+				{"delete", c.ns, "byo-creds", false},
+				{"get", c.ns, install.SessionSecretName, false},
+				{"create", c.ns, "other", false},
+				{"list", c.ns, "", false},
+				{"watch", c.ns, "", false},
+				{"get", "dotvirt", "byo-creds", false},
+				{"get", "kube-system", "byo-creds", false},
+			} {
+				if got := review(account, groups, authzv1.ResourceAttributes{Verb: r.verb, Resource: "secrets", Namespace: r.ns, Name: r.name}); got != r.want {
+					t.Errorf("%s: %s secrets %s/%s: allowed=%v, want %v", c.ns, r.verb, r.ns, r.name, got, r.want)
+				}
+			}
+		}
+		before := passes.Load()
+		if err := admin.Delete(ctx, &rbacv1.RoleBinding{ObjectMeta: metav1.ObjectMeta{Name: install.ForgeCredentialGrantName, Namespace: "cred-byo"}}); err != nil {
+			t.Fatal(err)
+		}
+		soon(t, "a pass after the grant is revoked", func() bool { return passes.Load() > before })
+
+		// A half grant (the Role alone) is what GrantIncomplete reports: its
+		// replace commands, run as a cluster admin would, end with the grant.
+		mustCreate(t, admin, &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "cred-half"}})
+		dv := &dotvirtv1alpha1.Dotvirt{ObjectMeta: metav1.ObjectMeta{Name: "cred", Namespace: "cred-half", UID: "0f7c1d2e-cred"}}
+		dv.Spec.Forge.CredentialsSecret = "byo-creds"
+		role, _ := install.ForgeCredentialGrant(dv, "dotvirt-operator")
+		mustCreate(t, admin, role)
+		clusterAdmin, err := env.AddUser(envtest.User{Name: "grant-admin", Groups: []string{"system:masters"}}, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		kubectl, err := clusterAdmin.Kubectl()
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, cmd := range install.ForgeCredentialReplaceCommands(dv, "dotvirt-operator") {
+			stdout, stderr, err := kubectl.Run(strings.Fields(cmd)[1:]...)
+			if err != nil {
+				out, _ := io.ReadAll(stdout)
+				msg, _ := io.ReadAll(stderr)
+				t.Fatalf("%s: %v: %s %s", cmd, err, out, msg)
+			}
+		}
+		if !review(account, groups, authzv1.ResourceAttributes{Verb: "get", Resource: "secrets", Namespace: "cred-half", Name: "byo-creds"}) {
+			t.Error("the replace commands left the operator without the grant")
+		}
+	})
 
 	t.Run("a project's sync account holds its project's rights only", func(t *testing.T) {
 		mustCreate(t, admin, projectNS("team-c", "team-c", "https://forge.example/dotvirt/team-c.git"))
@@ -668,20 +962,135 @@ func TestEnvtest(t *testing.T) {
 		eventually(t, "impersonation set again", func() bool { return key() == "true" })
 	})
 
+	// The operator's apply holds one key of a Secret the gitops operator runs:
+	// a key another manager set stays theirs, and only what the operator wrote
+	// is ever removed.
+	t.Run("argocd-secret's webhook keys are taken only when free", func(t *testing.T) {
+		op, err := client.New(opCfg, client.Options{Scheme: scheme})
+		if err != nil {
+			t.Fatal(err)
+		}
+		r := newReconciler(op, depsOK)
+		// Each namespace stands for both the install's, holding its webhook
+		// secret "dotvirt", and Argo's, holding argocd-secret written to data
+		// as the argocd-operator and kubectl do.
+		argoSecret := func(ns string, data map[string]string) *dotvirtv1alpha1.Dotvirt {
+			t.Helper()
+			mustCreate(t, admin, &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: ns}})
+			mustCreate(t, admin, &corev1.Secret{
+				ObjectMeta: metav1.ObjectMeta{Name: install.ArgoWebhookSecretName, Namespace: ns},
+				Data:       map[string][]byte{"secret": []byte("dotvirt")},
+			})
+			s := &corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: install.ArgoSecretName, Namespace: ns}, Data: map[string][]byte{}}
+			for k, v := range data {
+				s.Data[k] = []byte(v)
+			}
+			if err := admin.Create(ctx, s, client.FieldOwner("argocd-operator")); err != nil {
+				t.Fatal(err)
+			}
+			return &dotvirtv1alpha1.Dotvirt{ObjectMeta: metav1.ObjectMeta{Name: "x", Namespace: ns}}
+		}
+		data := func(ns string) map[string][]byte {
+			t.Helper()
+			var s corev1.Secret
+			if err := admin.Get(ctx, types.NamespacedName{Namespace: ns, Name: install.ArgoSecretName}, &s); err != nil {
+				t.Fatal(err)
+			}
+			return s.Data
+		}
+
+		argoSecret("argo-held", map[string]string{install.ArgoWebhookKey: "declared"})
+		if err := r.applyArgoWebhookKey(ctx, "argo-held", "dotvirt", "https://argo/api/webhook"); !apierrors.IsConflict(err) {
+			t.Errorf("apply over another manager's key: err = %v, want a conflict", err)
+		}
+		if got := string(data("argo-held")[install.ArgoWebhookKey]); got != "declared" {
+			t.Errorf("another manager's key = %q, want it kept", got)
+		}
+
+		// What an operator before 0.2.3 left: its secret under the key Argo never
+		// reads, written through stringData.
+		upgraded := argoSecret("argo-upgrade", map[string]string{"admin.password": "x"})
+		legacy := &corev1.Secret{
+			TypeMeta:   metav1.TypeMeta{APIVersion: "v1", Kind: "Secret"},
+			ObjectMeta: metav1.ObjectMeta{Name: install.ArgoSecretName, Namespace: "argo-upgrade"},
+			StringData: map[string]string{install.LegacyArgoWebhookKey: "dotvirt"},
+		}
+		if err := install.Apply(ctx, op, legacy, false); err != nil {
+			t.Fatal(err)
+		}
+		if err := r.applyArgoWebhookKey(ctx, "argo-upgrade", "dotvirt", "https://argo/api/webhook"); err != nil {
+			t.Fatal(err)
+		}
+		got := data("argo-upgrade")
+		if _, left := got[install.LegacyArgoWebhookKey]; left || string(got[install.ArgoWebhookKey]) != "dotvirt" || string(got["admin.password"]) != "x" {
+			t.Errorf("upgraded argocd-secret keys = %v, want %s set, %s gone, admin.password kept", slices.Sorted(maps.Keys(got)), install.ArgoWebhookKey, install.LegacyArgoWebhookKey)
+		}
+		if err := r.releaseArgoWebhookKey(ctx, upgraded, "argo-upgrade"); err != nil {
+			t.Fatal(err)
+		}
+		if got := data("argo-upgrade"); len(got) != 1 || string(got["admin.password"]) != "x" {
+			t.Errorf("released argocd-secret keys = %v, want admin.password only", slices.Sorted(maps.Keys(got)))
+		}
+
+		foreign := argoSecret("argo-foreign", map[string]string{install.LegacyArgoWebhookKey: "theirs"})
+		if err := r.applyArgoWebhookKey(ctx, "argo-foreign", "dotvirt", "https://argo/api/webhook"); err != nil {
+			t.Fatal(err)
+		}
+		if err := r.releaseArgoWebhookKey(ctx, foreign, "argo-foreign"); err != nil {
+			t.Fatal(err)
+		}
+		if got := data("argo-foreign"); len(got) != 1 || string(got[install.LegacyArgoWebhookKey]) != "theirs" {
+			t.Errorf("argocd-secret keys = %v, want only the other manager's %s", slices.Sorted(maps.Keys(got)), install.LegacyArgoWebhookKey)
+		}
+
+		if err := r.releaseArgoWebhookKey(ctx, foreign, "argo-absent"); err != nil {
+			t.Errorf("release with no argocd-secret: %v", err)
+		}
+	})
+
 	t.Run("deletion cleans up as the operator", func(t *testing.T) {
 		dv := &dotvirtv1alpha1.Dotvirt{ObjectMeta: metav1.ObjectMeta{Name: "x", Namespace: "dotvirt"}}
-		// A name only an older version rendered: the name-scoped delete grant
-		// refuses it, which must not wedge deletion.
+		// A name only an older version rendered: prune reads only the names this
+		// one renders, so it stays.
 		legacy := &rbacv1.ClusterRoleBinding{
 			ObjectMeta: metav1.ObjectMeta{Name: "dotvirt-legacy", Labels: install.Labels(dv)},
 			RoleRef:    rbacv1.RoleRef{APIGroup: rbacv1.GroupName, Kind: "ClusterRole", Name: "dotvirt"},
 		}
 		mustCreate(t, admin, legacy)
-		// Our instance label, another install's namespace: prune lists it, and
-		// OwnedBy is what keeps the unscoped AppProject delete off it.
+		// Our instance label, another install's namespace: prune lists AppProjects
+		// in the ArgoCD namespace, and OwnedBy keeps the unscoped delete off it.
 		foreign := argoObj("AppProject", "argocd", "dotvirt-p-foreign",
 			map[string]string{install.InstanceLabel: dv.Name, install.InstanceNamespaceLabel: "elsewhere"})
 		mustCreate(t, admin, foreign)
+		// The operator's key in Argo's own Secret, beside a key it never set.
+		argoSecret := &corev1.Secret{
+			ObjectMeta: metav1.ObjectMeta{Name: install.ArgoSecretName, Namespace: "argocd"},
+			Data:       map[string][]byte{"admin.password": []byte("x")},
+		}
+		if err := admin.Create(ctx, argoSecret, client.FieldOwner("argocd-operator")); err != nil {
+			t.Fatal(err)
+		}
+		op, err := client.New(opCfg, client.Options{Scheme: scheme})
+		if err != nil {
+			t.Fatal(err)
+		}
+		var hmac corev1.Secret
+		if err := admin.Get(ctx, types.NamespacedName{Namespace: dv.Namespace, Name: install.ArgoWebhookSecretName}, &hmac); err != nil {
+			t.Fatal(err)
+		}
+		value := string(hmac.Data["secret"])
+		// First the key an operator before 0.2.3 wrote, unread by Argo, then the
+		// one Argo verifies against: an upgrade not yet reconciled.
+		oldKey := &corev1.Secret{
+			TypeMeta:   metav1.TypeMeta{APIVersion: "v1", Kind: "Secret"},
+			ObjectMeta: metav1.ObjectMeta{Name: install.ArgoSecretName, Namespace: "argocd"},
+			StringData: map[string]string{install.LegacyArgoWebhookKey: value},
+		}
+		for _, s := range []*corev1.Secret{oldKey, install.ArgoWebhookSecret("argocd", value)} {
+			if err := install.ApplyShared(ctx, op, s, false); err != nil {
+				t.Fatal(err)
+			}
+		}
 		mark := ops.len()
 		if err := admin.Delete(ctx, dv); err != nil {
 			t.Fatal(err)
@@ -699,6 +1108,12 @@ func TestEnvtest(t *testing.T) {
 		if extra, _, _ := unstructured.NestedMap(inst.Object, "spec", "extraConfig"); extra[install.SyncImpersonationKey] != nil {
 			t.Errorf("uninstalled, extraConfig = %v", extra)
 		}
+		if err := admin.Get(ctx, client.ObjectKeyFromObject(argoSecret), argoSecret); err != nil {
+			t.Fatal(err)
+		}
+		if got := argoSecret.Data; len(got) != 1 || string(got["admin.password"]) != "x" {
+			t.Errorf("uninstalled, argocd-secret keys = %v, want admin.password only", slices.Sorted(maps.Keys(got)))
+		}
 		done := ops.since(mark)
 		released := slices.Index(done, "release argocd")
 		deleted := slices.IndexFunc(done, func(op string) bool { return strings.HasPrefix(op, "delete AppProject") })
@@ -708,6 +1123,7 @@ func TestEnvtest(t *testing.T) {
 		left := map[string]bool{}
 		for _, list := range []client.ObjectList{
 			&rbacv1.ClusterRoleBindingList{},
+			&rbacv1.RoleBindingList{},
 			&corev1.SecretList{},
 			&corev1.ConfigMapList{},
 			&appsv1.DeploymentList{},
@@ -733,7 +1149,74 @@ func TestEnvtest(t *testing.T) {
 			}
 		}
 		if len(left) != 2 || !left["/"+legacy.Name] || !left["argocd/"+foreign.GetName()] {
-			t.Errorf("left after deletion: %v, want only the refused legacy binding and the other install's AppProject", left)
+			t.Errorf("left after deletion: %v, want only the legacy binding and the other install's AppProject", left)
+		}
+	})
+
+	// The install is gone, so a namespace admin's Dotvirt is now the oldest in
+	// the cluster. The suite's install namespace is dotvirt, not the operator's
+	// own, which is the admin override at work; team-a is outside it.
+	t.Run("a Dotvirt outside the install namespace gets nothing even when oldest", func(t *testing.T) {
+		dv := &dotvirtv1alpha1.Dotvirt{ObjectMeta: metav1.ObjectMeta{
+			Name: "x", Namespace: "team-a", Finalizers: []string{dotvirtFinalizer},
+		}}
+		mustCreate(t, admin, dv)
+		eventually(t, "WrongNamespace status", func() bool {
+			var got dotvirtv1alpha1.Dotvirt
+			if admin.Get(ctx, client.ObjectKeyFromObject(dv), &got) != nil {
+				return false
+			}
+			c := apimeta.FindStatusCondition(got.Status.Conditions, dotvirtv1alpha1.ConditionAvailable)
+			return c != nil && c.Reason == "WrongNamespace"
+		})
+		var crbs rbacv1.ClusterRoleBindingList
+		if err := admin.List(ctx, &crbs); err != nil {
+			t.Fatal(err)
+		}
+		for _, b := range crbs.Items {
+			for _, s := range b.Subjects {
+				if s.Namespace == "team-a" {
+					t.Errorf("ClusterRoleBinding %s binds %s in team-a", b.Name, s.Name)
+				}
+			}
+		}
+		if err := admin.Get(ctx, types.NamespacedName{Namespace: "team-a", Name: install.AppName}, &appsv1.Deployment{}); !apierrors.IsNotFound(err) {
+			t.Errorf("console Deployment in team-a: err=%v, want NotFound", err)
+		}
+		// The finalizer its creator set is dropped on deletion, with no prune.
+		if err := admin.Delete(ctx, dv); err != nil {
+			t.Fatal(err)
+		}
+		eventually(t, "ignored Dotvirt gone", func() bool {
+			return apierrors.IsNotFound(admin.Get(ctx, client.ObjectKeyFromObject(dv), &dotvirtv1alpha1.Dotvirt{}))
+		})
+	})
+
+	// An upgrade with no override and no Dotvirt in the operator's namespace
+	// adopts the install ClusterRoleBinding dotvirt names, read as the operator.
+	t.Run("the operator adopts the install its binding names", func(t *testing.T) {
+		// Outside the suite's install namespace, so its manager leaves it be.
+		mustCreate(t, admin, &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "adopted"}})
+		dv := &dotvirtv1alpha1.Dotvirt{ObjectMeta: metav1.ObjectMeta{Name: "x", Namespace: "adopted"}}
+		mustCreate(t, admin, dv)
+		defer func() { _ = admin.Delete(ctx, dv) }()
+		// The binding comes after the Dotvirt it was made for.
+		time.Sleep(1100 * time.Millisecond)
+		crb := &rbacv1.ClusterRoleBinding{
+			ObjectMeta: metav1.ObjectMeta{Name: install.AppName},
+			RoleRef:    rbacv1.RoleRef{APIGroup: rbacv1.GroupName, Kind: "ClusterRole", Name: install.AppName},
+			Subjects:   []rbacv1.Subject{{Kind: rbacv1.ServiceAccountKind, Name: install.AppName, Namespace: "adopted"}},
+		}
+		mustCreate(t, admin, crb)
+		defer func() { _ = admin.Delete(ctx, crb) }()
+		op, err := client.New(opCfg, client.Options{Scheme: scheme})
+		if err != nil {
+			t.Fatal(err)
+		}
+		r := &DotvirtReconciler{Client: op, APIReader: op, OperatorNamespace: "dotvirt-operator"}
+		ns, adopted, err := r.installNamespace(ctx)
+		if err != nil || ns != "adopted" || !adopted {
+			t.Errorf("installNamespace = (%q, %v, %v), want (adopted, true, nil)", ns, adopted, err)
 		}
 	})
 }
@@ -797,7 +1280,7 @@ func runManager(t *testing.T, cfg *rest.Config, scheme *runtime.Scheme) (*atomic
 		Metrics:                metricsserver.Options{BindAddress: "0"},
 		HealthProbeBindAddress: "0",
 		Cache:                  cache.Options{ByObject: CacheByObject(platform.Kubernetes)},
-		Client:                 client.Options{Cache: &client.CacheOptions{DisableFor: []client.Object{&corev1.ConfigMap{}, &corev1.Secret{}}}},
+		Client:                 client.Options{Cache: &client.CacheOptions{DisableFor: []client.Object{&corev1.ConfigMap{}, &corev1.Secret{}, &rbacv1.RoleBinding{}, &rbacv1.Role{}}}},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -810,7 +1293,10 @@ func runManager(t *testing.T, cfg *rest.Config, scheme *runtime.Scheme) (*atomic
 		Config:    mgr.GetConfig(),
 		Platform:  platform.Kubernetes,
 		APIReader: mgr.GetAPIReader(),
-		syncCache: syncCache{syncRecheck: time.Second, syncTTL: time.Second},
+		// The suite's installs all live in dotvirt; the tenant subtest proves
+		// a Dotvirt elsewhere gets nothing.
+		InstallNamespace: "dotvirt",
+		syncCache:        syncCache{syncRecheck: time.Second, syncTTL: time.Second},
 		probe: func(c *rest.Config) (deps.Result, error) {
 			passes.Add(1)
 			return depsOK(c)
@@ -920,6 +1406,18 @@ func settle(t *testing.T, c client.Client, objs ...client.Object) {
 		}
 		return time.Since(stableSince) > 1500*time.Millisecond
 	})
+}
+
+// soon is eventually for what a watch delivers: seconds, well inside any timer.
+func soon(t *testing.T, what string, cond func() bool) {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for !cond() {
+		if time.Now().After(deadline) {
+			t.Fatalf("not within 5s: %s", what)
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
 }
 
 func eventually(t *testing.T, what string, cond func() bool) {

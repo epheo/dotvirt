@@ -1,5 +1,5 @@
-// Package metrics queries a Prometheus-compatible endpoint (OpenShift's Thanos
-// querier) for a VM's performance time-series - the data behind the Performance
+// Package metrics queries a Prometheus-compatible endpoint (on OpenShift, the
+// Thanos querier) for a VM's performance time-series - the data behind the Performance
 // tab. It runs a fixed, curated set of range queries per VM under the caller's
 // token (so the metrics backend's own RBAC is the access gate) and shapes the
 // results into chart-ready series aligned on a shared time axis.
@@ -52,8 +52,9 @@ const (
 	maxTenancyNamespaces = 50
 )
 
-// Client talks to a Prometheus query API: OpenShift's Thanos querier, its
-// cluster-wide port and its tenancy port. A nil Client is metrics switched
+// Client talks to a Prometheus query API through two endpoints: a
+// cluster-wide one and a per-namespace tenancy one (on OpenShift, the Thanos
+// querier's ports 9091 and 9092). A nil Client is metrics switched
 // off: every view taking a Caller answers model.MetricsUnconfigured.
 type Client struct {
 	base       string
@@ -81,11 +82,11 @@ type result[V any] struct {
 func newCache[V any]() *ttlcache.Cache[result[V]] { return ttlcache.New[result[V]](tenancyTTL) }
 
 // New builds a Client for the cluster-wide query API at baseURL and the
-// tenancy one at tenancyURL (the thanos-querier service's ports 9091 and
-// 9092). caPath, when set, is a PEM bundle to trust for both - in-cluster,
-// the mounted service-CA that signs thanos-querier's serving cert, so the
-// connection needn't be insecure. insecure skips TLS verification instead
-// (self-signed dev Route). Returns (nil, nil) when baseURL is empty - the
+// tenancy one at tenancyURL (on OpenShift, the thanos-querier service's ports
+// 9091 and 9092). caPath, when set, is a PEM bundle to trust for both (on
+// OpenShift, the mounted service-CA that signs thanos-querier's serving
+// cert); it wins over insecure, which otherwise skips TLS verification for
+// both (self-signed dev Route). Returns (nil, nil) when baseURL is empty - the
 // API treats a nil client as "Performance disabled".
 func New(baseURL, tenancyURL, caPath string, insecure bool) (*Client, error) {
 	if baseURL == "" {

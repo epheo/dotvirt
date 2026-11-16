@@ -42,7 +42,7 @@
 		missing
 			? { tone: 'danger' as const, text: 'Not on the cluster' }
 			: info?.profile && !info.profile.recognized
-				? { tone: 'warn' as const, text: 'Unrecognized by CDI' }
+				? { tone: 'warn' as const, text: 'No CDI claim settings' }
 				: info
 					? { tone: 'ok' as const, text: 'Available' }
 					: undefined,

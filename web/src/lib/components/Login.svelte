@@ -3,24 +3,57 @@
 	import { api, Unauthorized, type User } from '#lib/api.js';
 	import { action } from '#lib/resource.svelte.js';
 	import { branding } from '#lib/state/branding.svelte.js';
-	import { authMethods } from '#lib/state/session.svelte.js';
+	import { authMethods, session } from '#lib/state/session.svelte.js';
+	import { REPEAT_WINDOW_MS, signInView } from '#lib/signin.js';
 	import Button from './Button.svelte';
 
 	let { onlogin }: { onlogin: (user: User) => void } = $props();
 
 	let token = $state('');
 	const op = action();
-	// A sign-in flow is offered once the backend confirms it; the token form
-	// always stays. ssoPending: say "not finished" instead of offering a
-	// failing button.
+	// A ready sign-in provider is gone to straight away; the token form shows
+	// only when none is ready, or on ?token (an admin's way in when the
+	// provider is down). ssoPending: say "not finished" instead of offering a
+	// failing button. The callback bounces here with ?sso_error=1 on any
+	// failure (the detail is server-logged, never shown - it can carry endpoint
+	// internals).
 	const auth = authMethods();
 	const sso = $derived(auth.data?.sso ?? false);
 	const ssoPending = $derived(auth.data?.ssoPending ?? false);
 	const oidc = $derived(auth.data?.oidc ?? '');
 	const flow = $derived(sso || !!oidc);
-	// The sign-in callback bounces here with ?sso_error=1 on any failure (the
-	// detail is server-logged, never shown - it can carry endpoint internals).
 	const ssoError = $derived(page.url.searchParams.get('sso_error') !== null);
+	const loaded = $derived(auth.data !== null || auth.failed);
+
+	// When this tab last redirected to the provider: a second redirect within
+	// the window shows the button instead of bouncing forever. A tab that
+	// cannot record it gets the button every time: nothing else would stop a
+	// provider round trip that leaves no session from looping.
+	const REDIRECTED_AT = 'signin.redirectedAt';
+	let noStorage = $state(false);
+	let recent = false;
+	try {
+		const at = Number(sessionStorage.getItem(REDIRECTED_AT));
+		recent = at > 0 && Date.now() - at < REPEAT_WINDOW_MS;
+	} catch {
+		noStorage = true;
+	}
+	const view = $derived(
+		loaded
+			? signInView(auth.data, page.url, { signedOut: session.signedOutHere, recent, noStorage })
+			: null,
+	);
+	const redirectTo = $derived(view?.kind === 'redirect' ? view.to : '');
+	$effect(() => {
+		if (!redirectTo) return;
+		try {
+			sessionStorage.setItem(REDIRECTED_AT, String(Date.now()));
+		} catch {
+			noStorage = true;
+			return;
+		}
+		window.location.assign(redirectTo);
+	});
 
 	function submit(e: SubmitEvent) {
 		e.preventDefault();
@@ -42,76 +75,98 @@
 			}
 		});
 	}
+
+	const REASONS = {
+		failed: (name: string) => `Sign-in with ${name} failed. Try again.`,
+		'signed-out': () => 'You are signed out.',
+		repeat: (name: string) => `Signing in with ${name} did not keep you signed in. Try again.`,
+		'no-storage': (name: string) => `Continue to sign in with ${name}.`,
+	};
 </script>
 
 <div class="flex h-screen items-center justify-center bg-inset-strong">
-	<form
-		onsubmit={submit}
-		class="w-full max-w-md rounded-lg border border-line bg-panel p-6 shadow-sm"
-	>
-		{#if branding.value?.logo}
-			<img src="/api/branding/logo" alt="" class="mb-3 h-8 w-auto" />
-		{/if}
-		<h1 class="mb-1 text-xl font-semibold text-ink">Sign in to {branding.name}</h1>
-		<p class="mb-4 text-sm text-ink-muted">
-			{branding.name} acts as you — you see only the projects your cluster permissions allow.
+	{#if !view || view.kind === 'redirect'}
+		<p class="text-sm text-ink-muted" aria-live="polite">
+			{view ? `Signing in with ${view.name}...` : ''}
 		</p>
-
-		{#if ssoError}
-			<p
-				class="mb-3 rounded border border-danger-soft bg-danger-soft/60 px-3 py-2 text-sm text-danger-ink"
-			>
-				{oidc ? `Sign-in with ${oidc}` : 'OpenShift sign-in'} failed. Try again, or paste a token below.
-			</p>
-		{/if}
-
-		{#if oidc}
-			<Button class="mb-4 w-full" href="/api/auth/oidc">Sign in with {oidc}</Button>
-		{:else if sso && ssoPending}
-			<p class="mb-4 rounded bg-warn-soft/60 px-3 py-2 text-sm text-warn-ink">
-				OpenShift SSO is enabled but not ready: its OAuthClient is missing or holds an outdated
-				secret. A cluster admin can sign in with a token below and fix it in one click.
-			</p>
-		{:else if sso}
-			<Button class="mb-4 w-full" href="/api/auth/openshift">Sign in with OpenShift</Button>
-		{/if}
-		{#if oidc || (sso && !ssoPending)}
-			<div class="mb-3 flex items-center gap-2 text-xs text-ink-faint">
-				<span class="h-px flex-1 bg-line"></span>
-				or paste a token
-				<span class="h-px flex-1 bg-line"></span>
-			</div>
-		{/if}
-
-		<textarea
-			bind:value={token}
-			placeholder="sha256~…  or  eyJhbGci…"
-			rows="4"
-			autocomplete="off"
-			spellcheck="false"
-			class="w-full rounded border border-line-strong px-3 py-2 font-mono text-xs break-all"
-		></textarea>
-
-		{#if op.error}
-			<p class="mt-2 text-sm text-danger">{op.error}</p>
-		{/if}
-
-		<button
-			type="submit"
-			disabled={op.busy || !token.trim()}
-			class="mt-3 w-full rounded {flow
-				? 'border border-line bg-inset text-ink-soft hover:bg-inset-strong'
-				: 'bg-accent text-accent-on hover:bg-accent-deep'} px-4 py-2 text-sm font-medium disabled:opacity-40"
-		>
-			{op.busy ? 'Signing in…' : 'Sign in with token'}
-		</button>
-
-		<div class="mt-4 border-t border-line-soft pt-3 text-xs text-ink-muted">
-			<p class="mb-1 font-medium text-ink-soft">Get a token:</p>
-			<pre class="rounded bg-inset px-2 py-1 text-ink-soft">oc whoami -t</pre>
-			<p class="my-1">or for a ServiceAccount:</p>
-			<pre
-				class="rounded bg-inset px-2 py-1 text-ink-soft">kubectl create token &lt;sa&gt; -n &lt;namespace&gt;</pre>
+	{:else if view.kind === 'button'}
+		<div class="w-full max-w-md rounded-lg border border-line bg-panel p-6 shadow-sm">
+			{#if branding.value?.logo}
+				<img src="/api/branding/logo" alt="" class="mb-3 h-8 w-auto" />
+			{/if}
+			<h1 class="mb-1 text-xl font-semibold text-ink">Sign in to {branding.name}</h1>
+			<p class="mb-4 text-sm text-ink-muted">{REASONS[view.reason](view.name)}</p>
+			<Button class="w-full" href={view.to}>Sign in with {view.name}</Button>
 		</div>
-	</form>
+	{:else}
+		<form
+			onsubmit={submit}
+			class="w-full max-w-md rounded-lg border border-line bg-panel p-6 shadow-sm"
+		>
+			{#if branding.value?.logo}
+				<img src="/api/branding/logo" alt="" class="mb-3 h-8 w-auto" />
+			{/if}
+			<h1 class="mb-1 text-xl font-semibold text-ink">Sign in to {branding.name}</h1>
+			<p class="mb-4 text-sm text-ink-muted">
+				{branding.name} acts as you — you see only the projects your cluster permissions allow.
+			</p>
+
+			{#if ssoError}
+				<p
+					class="mb-3 rounded border border-danger-soft bg-danger-soft/60 px-3 py-2 text-sm text-danger-ink"
+				>
+					{oidc ? `Sign-in with ${oidc}` : 'OpenShift sign-in'} failed. Try again, or paste a token below.
+				</p>
+			{/if}
+
+			{#if oidc}
+				<Button class="mb-4 w-full" href="/api/auth/oidc">Sign in with {oidc}</Button>
+			{:else if sso && ssoPending}
+				<p class="mb-4 rounded bg-warn-soft/60 px-3 py-2 text-sm text-warn-ink">
+					OpenShift SSO is enabled but not ready: its OAuthClient is missing or holds an outdated
+					secret. A cluster admin can sign in with a token below and fix it in one click.
+				</p>
+			{:else if sso}
+				<Button class="mb-4 w-full" href="/api/auth/openshift">Sign in with OpenShift</Button>
+			{/if}
+			{#if oidc || (sso && !ssoPending)}
+				<div class="mb-3 flex items-center gap-2 text-xs text-ink-faint">
+					<span class="h-px flex-1 bg-line"></span>
+					or paste a token
+					<span class="h-px flex-1 bg-line"></span>
+				</div>
+			{/if}
+
+			<textarea
+				bind:value={token}
+				placeholder="sha256~…  or  eyJhbGci…"
+				rows="4"
+				autocomplete="off"
+				spellcheck="false"
+				class="w-full rounded border border-line-strong px-3 py-2 font-mono text-xs break-all"
+			></textarea>
+
+			{#if op.error}
+				<p class="mt-2 text-sm text-danger">{op.error}</p>
+			{/if}
+
+			<button
+				type="submit"
+				disabled={op.busy || !token.trim()}
+				class="mt-3 w-full rounded {flow
+					? 'border border-line bg-inset text-ink-soft hover:bg-inset-strong'
+					: 'bg-accent text-accent-on hover:bg-accent-deep'} px-4 py-2 text-sm font-medium disabled:opacity-40"
+			>
+				{op.busy ? 'Signing in…' : 'Sign in with token'}
+			</button>
+
+			<div class="mt-4 border-t border-line-soft pt-3 text-xs text-ink-muted">
+				<p class="mb-1 font-medium text-ink-soft">Get a token:</p>
+				<pre class="rounded bg-inset px-2 py-1 text-ink-soft">oc whoami -t</pre>
+				<p class="my-1">or for a ServiceAccount:</p>
+				<pre
+					class="rounded bg-inset px-2 py-1 text-ink-soft">kubectl create token &lt;sa&gt; -n &lt;namespace&gt;</pre>
+			</div>
+		</form>
+	{/if}
 </div>

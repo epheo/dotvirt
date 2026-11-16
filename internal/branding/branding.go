@@ -17,7 +17,9 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"path"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -31,6 +33,7 @@ const (
 	MaxName  = 40
 	MaxLinks = 5
 	MaxLabel = 32
+	MaxIcon  = 64
 	MaxFile  = 256 << 10
 )
 
@@ -60,9 +63,22 @@ func CheckName(name string) error {
 	return nil
 }
 
-// ParseLinks reads a JSON list of {label, url}: at most MaxLinks, each label
-// plain text of at most MaxLabel characters, each URL https with a host and
-// no credentials.
+// iconName is the CRD's pattern for a link icon: a plain file name, so it can
+// only ever name a file of the branding directory.
+var iconName = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]*\.(svg|png)$`)
+
+// CheckIcon refuses a link icon that is not a plain .svg or .png file name of
+// at most MaxIcon characters: never a path, never a URL.
+func CheckIcon(name string) error {
+	if len(name) > MaxIcon || !iconName.MatchString(name) || path.Base(name) != name {
+		return fmt.Errorf("link icon %q: a file name in the branding ConfigMap ending in .svg or .png, at most %d characters", name, MaxIcon)
+	}
+	return nil
+}
+
+// ParseLinks reads a JSON list of {label, url, icon}: at most MaxLinks, each
+// label plain text of at most MaxLabel characters, each URL https with a host
+// and no credentials, each icon a name CheckIcon accepts.
 func ParseLinks(raw string) ([]model.BrandingLink, error) {
 	if strings.TrimSpace(raw) == "" {
 		return nil, nil
@@ -71,7 +87,7 @@ func ParseLinks(raw string) ([]model.BrandingLink, error) {
 	dec := json.NewDecoder(strings.NewReader(raw))
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(&links); err != nil {
-		return nil, fmt.Errorf("not a JSON list of {label, url}: %v", err)
+		return nil, fmt.Errorf("not a JSON list of {label, url, icon}: %v", err)
 	}
 	if len(links) > MaxLinks {
 		return nil, fmt.Errorf("at most %d links", MaxLinks)
@@ -83,6 +99,11 @@ func ParseLinks(raw string) ([]model.BrandingLink, error) {
 		u, err := url.Parse(l.URL)
 		if err != nil || u.Scheme != "https" || u.Hostname() == "" || u.User != nil || strings.ContainsAny(l.URL, " \t\n") {
 			return nil, fmt.Errorf("link %q: an https URL with a host and no credentials", l.URL)
+		}
+		if l.Icon != "" {
+			if err := CheckIcon(l.Icon); err != nil {
+				return nil, err
+			}
 		}
 	}
 	return links, nil
@@ -97,7 +118,17 @@ func printable(s string) bool {
 // Info is what the console asks before anyone signs in: the login screen
 // wears the branding too.
 func (s Settings) Info() model.Branding {
-	b := model.Branding{ProductName: s.ProductName, Links: s.Links}
+	b := model.Branding{ProductName: s.ProductName}
+	if len(s.Links) > 0 {
+		b.Links = make([]model.BrandingLink, len(s.Links))
+		for i, l := range s.Links {
+			// A missing icon leaves the link as text rather than a broken image.
+			if l.Icon != "" && !s.present(l.Icon) {
+				l.Icon = ""
+			}
+			b.Links[i] = l
+		}
+	}
 	b.Theme = s.present(ThemeFile)
 	b.Logo = s.present(LogoSVG) || s.present(LogoPNG)
 	return b
@@ -108,8 +139,8 @@ func (s Settings) Info() model.Branding {
 const ShellID = "dotvirt-branding"
 
 // Shell is the console's index.html dressed for its first paint: the product
-// name as its title, the stylesheet after the console's own, and Info as a
-// JSON block. None of them is a script the browser runs, so the
+// name as its title, the logo as its icon, the stylesheet after the console's
+// own, and Info as a JSON block. None of them is a script the browser runs, so the
 // content-security policy derived from the plain index still holds. Called per
 // page load, like Info: a ConfigMap change shows on the next one. An index
 // with no </head> is returned as it is.
@@ -121,6 +152,11 @@ func (s Settings) Shell(index []byte) []byte {
 	info := s.Info()
 	var b bytes.Buffer
 	fmt.Fprintf(&b, "<title>%s</title>", html.EscapeString(cmp.Or(info.ProductName, "dotvirt")))
+	if info.Logo {
+		// The index carries no icon of its own: until the layout mounts and
+		// names the logo too, this is the page's only one.
+		b.WriteString(`<link rel="icon" href="/api/branding/logo">`)
+	}
 	if info.Theme {
 		b.WriteString(`<link rel="stylesheet" href="/api/branding/theme.css">`)
 	}
@@ -154,15 +190,46 @@ func (s Settings) ServeTheme(w http.ResponseWriter, r *http.Request) {
 	serve(w, r, "text/css; charset=utf-8", content)
 }
 
-// ServeLogo answers the logo. An SVG is a document that may carry script, so
-// one opened directly runs sandboxed, with nothing to load.
+// ServeLogo answers the logo.
 func (s Settings) ServeLogo(w http.ResponseWriter, r *http.Request) {
 	name, content, ok := s.logo()
 	if !ok {
 		http.NotFound(w, r)
 		return
 	}
-	if name == LogoSVG {
+	serveImage(w, r, name, content)
+}
+
+// ServeIcon answers a masthead link's icon, the request's {name}: only a name
+// a configured link references, so the route reads no other file of the
+// directory.
+func (s Settings) ServeIcon(w http.ResponseWriter, r *http.Request) {
+	name := r.PathValue("name")
+	if CheckIcon(name) != nil || !s.references(name) {
+		http.NotFound(w, r)
+		return
+	}
+	content, ok := s.read(name)
+	if !ok {
+		http.NotFound(w, r)
+		return
+	}
+	serveImage(w, r, name, content)
+}
+
+func (s Settings) references(icon string) bool {
+	for _, l := range s.Links {
+		if l.Icon == icon {
+			return true
+		}
+	}
+	return false
+}
+
+// serveImage answers an .svg or .png. An SVG is a document that may carry
+// script, so one opened directly runs sandboxed, with nothing to load.
+func serveImage(w http.ResponseWriter, r *http.Request, name string, content []byte) {
+	if strings.HasSuffix(name, ".svg") {
 		w.Header().Set("Content-Security-Policy", "default-src 'none'; style-src 'unsafe-inline'; sandbox")
 		serve(w, r, "image/svg+xml", content)
 		return

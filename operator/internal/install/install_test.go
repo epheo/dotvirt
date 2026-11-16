@@ -306,6 +306,22 @@ func TestArgoSourcesExcludeTemplateLibrary(t *testing.T) {
 	}
 }
 
+// Every dotvirt Application (the platform app and the tenant template share
+// argoAppSpec) tracks main by its full ref: Argo matches a short name against
+// every ref's short name, a tag named main included.
+func TestArgoAppsTrackMainExactly(t *testing.T) {
+	dv := testDotvirt()
+	for name, spec := range map[string]map[string]any{
+		"platform": PlatformApplication(dv, "argocd", "https://forge/x/platform.git").Object["spec"].(map[string]any),
+		"tenant":   ApplicationSet(dv, "argocd", nil, nil).Object["spec"].(map[string]any)["template"].(map[string]any)["spec"].(map[string]any),
+	} {
+		obj := map[string]any{"spec": spec}
+		if rev, _, _ := unstructured.NestedString(obj, "spec", "source", "targetRevision"); rev != "refs/heads/main" {
+			t.Errorf("%s: targetRevision = %q, want refs/heads/main", name, rev)
+		}
+	}
+}
+
 // repo-creds templates ignore `insecure`; emitting it reads as a fix while doing
 // nothing. Trust is real instead (argocd-tls-certs-cm).
 func TestRepoCredsNeverEmitsIgnoredInsecure(t *testing.T) {
@@ -378,6 +394,77 @@ func TestDeploymentMetricsTenancyURL(t *testing.T) {
 		got, ok := envValue(Deployment(dv, "argocd", nil).Spec.Template.Spec.Containers[0].Env, "DOTVIRT_METRICS_TENANCY_URL")
 		if got != want || ok != (want != "") {
 			t.Errorf("%s: tenancy URL = %q (set %t), want %q", url, got, ok, want)
+		}
+	}
+}
+
+// A tenancy URL the CR names wins over the derived one, and serves a querier
+// with no known tenancy port; without url there is no metrics at all.
+func TestDeploymentMetricsExplicitTenancyURL(t *testing.T) {
+	for _, tc := range []struct{ url, tenancy, want string }{
+		{"https://prom-wide.monitoring.svc:8443", "https://prom-tenancy.monitoring.svc:8443", "https://prom-tenancy.monitoring.svc:8443"},
+		{"https://thanos-querier.openshift-monitoring.svc:9091", "https://own-proxy.monitoring.svc:9443", "https://own-proxy.monitoring.svc:9443"},
+		{"", "https://prom-tenancy.monitoring.svc:8443", ""},
+	} {
+		dv := testDotvirt()
+		dv.Spec.Metrics.URL, dv.Spec.Metrics.TenancyURL = tc.url, tc.tenancy
+		got, ok := envValue(Deployment(dv, "argocd", nil).Spec.Template.Spec.Containers[0].Env, "DOTVIRT_METRICS_TENANCY_URL")
+		if got != tc.want || ok != (tc.want != "") {
+			t.Errorf("url %q tenancy %q: tenancy URL = %q (set %t), want %q", tc.url, tc.tenancy, got, ok, tc.want)
+		}
+	}
+}
+
+// The metrics CA the CR names is the one both metrics endpoints trust, in
+// place of the service CA; unset, OpenShift's in-cluster default stands.
+func TestDeploymentMetricsCA(t *testing.T) {
+	ref := &dotvirtv1alpha1.ConfigMapKeyRef{Name: "metrics-ca", Key: "bundle.pem"}
+	for _, tc := range []struct {
+		name   string
+		url    string
+		ca     *dotvirtv1alpha1.ConfigMapKeyRef
+		want   string
+		volume bool
+	}{
+		{"named CA", "https://prom.monitoring.svc:8443", ref, "/var/run/dotvirt/tls-metrics/ca.crt", true},
+		{"named CA beats the service CA", "https://thanos-querier.openshift-monitoring.svc:9091", ref, "/var/run/dotvirt/tls-metrics/ca.crt", true},
+		{"in-cluster default", "https://thanos-querier.openshift-monitoring.svc:9091", nil, "/var/run/dotvirt/tls-service/service-ca.crt", false},
+		{"external, system pool", "https://prom.example.com", nil, "", false},
+		{"no url", "", ref, "", false},
+	} {
+		dv := testDotvirt()
+		dv.Spec.Metrics.URL, dv.Spec.Metrics.CA = tc.url, tc.ca
+		d := Deployment(dv, "argocd", nil)
+		c := d.Spec.Template.Spec.Containers[0]
+		if got, ok := envValue(c.Env, "DOTVIRT_METRICS_CA"); got != tc.want || ok != (tc.want != "") {
+			t.Errorf("%s: DOTVIRT_METRICS_CA = %q (set %t), want %q", tc.name, got, ok, tc.want)
+		}
+		if hasVolume(d, "metrics-ca") != tc.volume {
+			t.Errorf("%s: metrics-ca volume present = %t, want %t", tc.name, !tc.volume, tc.volume)
+		}
+		if !tc.volume {
+			continue
+		}
+		for _, v := range d.Spec.Template.Spec.Volumes {
+			if v.Name != "metrics-ca" {
+				continue
+			}
+			cm := v.ConfigMap
+			if cm == nil || cm.Name != "metrics-ca" || len(cm.Items) != 1 || cm.Items[0].Key != "bundle.pem" || cm.Items[0].Path != "ca.crt" {
+				t.Errorf("%s: metrics-ca volume = %+v, want key bundle.pem of ConfigMap metrics-ca as ca.crt", tc.name, cm)
+			}
+			if cm != nil && (cm.Optional == nil || !*cm.Optional) {
+				t.Errorf("%s: metrics-ca must be optional: a missing CA must not keep the console down", tc.name)
+			}
+		}
+		mounted := false
+		for _, m := range c.VolumeMounts {
+			if m.Name == "metrics-ca" {
+				mounted = m.MountPath == "/var/run/dotvirt/tls-metrics" && m.ReadOnly
+			}
+		}
+		if !mounted {
+			t.Errorf("%s: metrics-ca not mounted read-only at /var/run/dotvirt/tls-metrics", tc.name)
 		}
 	}
 }
@@ -675,13 +762,13 @@ func TestDeploymentCarriesTheBranding(t *testing.T) {
 	}
 	dv.Spec.Branding = dotvirtv1alpha1.BrandingSpec{
 		ProductName: "Uniwatt Cloud", ConfigMap: "uniwatt-theme",
-		Links: []dotvirtv1alpha1.BrandingLink{{Label: "Account", URL: "https://c.example/account"}},
+		Links: []dotvirtv1alpha1.BrandingLink{{Label: "Account", URL: "https://c.example/account", Icon: "account.svg"}},
 	}
 	env := pod().Containers[0].Env
 	if v, _ := envValue(env, "DOTVIRT_PRODUCT_NAME"); v != "Uniwatt Cloud" {
 		t.Errorf("product name = %q", v)
 	}
-	if v, _ := envValue(env, "DOTVIRT_MASTHEAD_LINKS"); v != `[{"label":"Account","url":"https://c.example/account"}]` {
+	if v, _ := envValue(env, "DOTVIRT_MASTHEAD_LINKS"); v != `[{"label":"Account","url":"https://c.example/account","icon":"account.svg"}]` {
 		t.Errorf("links = %q", v)
 	}
 	if v, _ := envValue(env, "DOTVIRT_BRANDING_DIR"); v != brandingMountPath {
@@ -802,5 +889,14 @@ func TestArgocdApplyBindingSubjects(t *testing.T) {
 	r := ArgocdReadClusterRoleBinding(dv, "argocd", "ctl")
 	if r.RoleRef.Name != "dotvirt-argocd-read" || len(r.Subjects) != 1 || r.Subjects[0].Name != "ctl" {
 		t.Errorf("read binding = %+v, want the controller on dotvirt-argocd-read", r)
+	}
+}
+
+// Forgejo deliveries carry Gogs headers, so Argo verifies them against its
+// Gogs key; any other key leaves every delivery accepted unsigned.
+func TestArgoWebhookSecretUsesTheKeyArgoVerifies(t *testing.T) {
+	s := ArgoWebhookSecret("argocd", "s3cret")
+	if s.Name != "argocd-secret" || len(s.Data) != 1 || s.StringData != nil || string(s.Data["webhook.gogs.secret"]) != "s3cret" {
+		t.Errorf("argocd-secret patch = %v, want only webhook.gogs.secret", s.Data)
 	}
 }

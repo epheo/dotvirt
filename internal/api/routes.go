@@ -19,6 +19,7 @@ func (s *Server) routes(mux *http.ServeMux) {
 	})
 	mux.HandleFunc("GET /api/branding/theme.css", s.cfg.Branding.ServeTheme)
 	mux.HandleFunc("GET /api/branding/logo", s.cfg.Branding.ServeLogo)
+	mux.HandleFunc("GET /api/branding/icon/{name}", s.cfg.Branding.ServeIcon)
 
 	if s.auth != nil {
 		mux.HandleFunc("POST /api/login", s.auth.Login)

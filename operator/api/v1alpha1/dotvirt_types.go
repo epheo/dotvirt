@@ -36,6 +36,18 @@ const (
 	// that the controller's own rights let a tenant DataVolume clone from any
 	// namespace (CloneAnywhere). It never gates Available.
 	ConditionSyncImpersonationReady = "SyncImpersonationReady"
+	// ConditionForgeCredentialReady says whether the operator may use the Secret
+	// spec.forge.credentialsSecret names, set for any name but dotvirt-forge.
+	// False NotGranted until a cluster admin installs the Role and RoleBinding
+	// dotvirt-forge-credential in the install namespace (the message carries the
+	// commands); False NameTaken for a Secret the operator generates for itself.
+	// Meanwhile the phases needing the credential wait and the rest runs.
+	ConditionForgeCredentialReady = "ForgeCredentialReady"
+	// ConditionInstallNamespaceAdopted is True when the operator took this
+	// install's namespace from ClusterRoleBinding dotvirt, the one an earlier
+	// operator provisioned, because no override names it and the operator's own
+	// namespace holds no Dotvirt. The message suggests naming it explicitly.
+	ConditionInstallNamespaceAdopted = "InstallNamespaceAdopted"
 	// ConditionAvailable is the roll-up: the full install is reconciled and serving.
 	ConditionAvailable = "Available"
 )
@@ -61,10 +73,9 @@ const (
 	IngressGateway IngressType = "gateway"
 )
 
-// ForgeSpec points dotvirt at its git forge and the platform-tier repo. The forge
-// credential here is the INSTALL-TIME admin token the operator uses to create the
-// platform repo, distinct from (and more privileged than) dotvirt's runtime
-// clone/push token, preserving the install-provisioner vs runtime-owns-nothing split.
+// ForgeSpec points dotvirt at its git forge and the platform-tier repo. One forge
+// credential serves the operator (platform repo, webhooks), the app (git over
+// HTTPS and the forge API) and ArgoCD's repo-creds.
 type ForgeSpec struct {
 	// URL is the forge base URL. Leave empty with managed on OpenShift: the operator
 	// exposes Forgejo on a router-assigned host and reports it in status.forgeURL. Set it
@@ -85,9 +96,15 @@ type ForgeSpec struct {
 	PlatformRepo string `json:"platformRepo,omitempty"`
 	// Managed deploys a self-hosted Forgejo for evaluation; false = bring your own.
 	Managed bool `json:"managed,omitempty"`
-	// CredentialsSecret names a Secret holding the forge-admin credential (keys: url,
+	// CredentialsSecret names a Secret holding the forge credential (keys: url,
 	// username, token). For a managed forge the operator WRITES this secret; point it at
-	// an existing secret only for a bring-your-own forge.
+	// an existing secret only for a bring-your-own forge. Its account creates the
+	// platform and project repos in their org and writes to them; registering the org
+	// webhooks needs an org owner, and without one dotvirt and ArgoCD fall back to
+	// polling. Any name but dotvirt-forge needs a cluster admin's grant: the
+	// operator reads only the Secrets its own role names, and reports the Role and
+	// RoleBinding to install (ForgeCredentialReady). A name the operator gives one
+	// of its own Secrets (dotvirt-session, ...) is refused there too.
 	CredentialsSecret string `json:"credentialsSecret,omitempty"`
 	// InsecureTLS skips TLS verification when calling the forge API (a self-signed forge
 	// Route, e.g. the bundled Forgejo). DEV/EVAL ONLY; never enable against a forge with
@@ -202,10 +219,49 @@ type GatewayRef struct {
 
 // MetricsSpec points the Performance tab at a Prometheus/Thanos query API; empty
 // disables it.
+// +kubebuilder:validation:XValidation:rule="!has(self.tenancyURL) || (has(self.url) && size(self.url) > 0)",message="tenancyURL needs url"
+// +kubebuilder:validation:XValidation:rule="!has(self.tenancyURL) || !has(self.url) || (self.tenancyURL != self.url && self.tenancyURL != self.url + '/' && self.tenancyURL + '/' != self.url)",message="tenancyURL must differ from url: one endpoint cannot be both the cluster-wide and the per-namespace one"
+// +kubebuilder:validation:XValidation:rule="!has(self.ca) || (has(self.url) && size(self.url) > 0)",message="ca needs url"
+// +kubebuilder:validation:XValidation:rule="!has(self.ca) || (has(self.url) && self.url.lowerAscii().startsWith('https://')) || (has(self.tenancyURL) && self.tenancyURL.lowerAscii().startsWith('https://'))",message="ca needs an https url or tenancyURL: plain http never uses it"
 type MetricsSpec struct {
 	// URL is a Prometheus-compatible query API base URL (for OpenShift, the
-	// cluster Thanos querier service).
+	// cluster Thanos querier service). dotvirt sends it only the queries of a
+	// caller allowed get on prometheuses/api (monitoring.coreos.com) named k8s
+	// in openshift-monitoring, with that caller's own token. It must check the
+	// token itself: anyone with network reach to an unauthenticated endpoint
+	// reads every namespace's series.
 	URL string `json:"url,omitempty"`
+	// TenancyURL is the per-namespace query API for every other caller: dotvirt
+	// sends one query per namespace with the caller's token, a namespace=<ns>
+	// parameter and a {namespace="<ns>"} matcher. The endpoint must allow only
+	// a caller who may get pods.metrics.k8s.io in that namespace, and force the
+	// query to it (as kube-rbac-proxy and prom-label-proxy do): dotvirt keeps
+	// tenants apart only through that check. Unset: derived for OpenShift's
+	// Thanos querier (port 9092 beside 9091); other endpoints get none, and
+	// those callers no metrics.
+	// +kubebuilder:validation:MaxLength=2048
+	// +kubebuilder:validation:Pattern=`^https?://([A-Za-z0-9]([-A-Za-z0-9.]*[A-Za-z0-9])?|\[[0-9A-Fa-f:.]+\])(:[0-9]{1,5})?(/([^?#@%\s\x00-\x1f\x7f]|%[0-9A-Fa-f]{2})*)?$`
+	// +optional
+	TenancyURL string `json:"tenancyURL,omitempty"`
+	// CA is the key of a ConfigMap in dotvirt's namespace holding the PEM bundle
+	// that signs both endpoints' serving certs. Unset: an https in-cluster
+	// (.svc) url trusts OpenShift's service CA; any other uses the system pool,
+	// or skips verification when forge.insecureTLS is set. A missing ConfigMap
+	// or key leaves the system pool, so a private CA fails verification. The
+	// console reads it when it starts: restart it after a rotation.
+	// +optional
+	CA *ConfigMapKeyRef `json:"ca,omitempty"`
+}
+
+// ConfigMapKeyRef is one key of a ConfigMap in dotvirt's namespace.
+type ConfigMapKeyRef struct {
+	// +kubebuilder:validation:MaxLength=253
+	// +kubebuilder:validation:Pattern=`^[a-z0-9]([-a-z0-9.]*[a-z0-9])?$`
+	Name string `json:"name"`
+	// Key is a ConfigMap key: not ".", and not starting with "..".
+	// +kubebuilder:validation:MaxLength=253
+	// +kubebuilder:validation:Pattern=`^\.?[-_a-zA-Z0-9][-._a-zA-Z0-9]*$`
+	Key string `json:"key"`
 }
 
 // AuthSpec adds a sign-in flow beside the always-present token login: OpenShift
@@ -303,6 +359,7 @@ type DotvirtSpec struct {
 }
 
 // BrandingSpec is a provider's dress for the console.
+// +kubebuilder:validation:XValidation:rule="!has(self.links) || has(self.configMap) || self.links.all(l, !has(l.icon))",message="a link icon is a file of spec.branding.configMap: set configMap"
 type BrandingSpec struct {
 	// ProductName replaces dotvirt throughout the console and in what it
 	// writes to the forge.
@@ -312,9 +369,9 @@ type BrandingSpec struct {
 	ProductName string `json:"productName,omitempty"`
 	// ConfigMap names a ConfigMap in dotvirt's namespace holding theme.css,
 	// loaded after the console's own stylesheet so it may override its
-	// tokens, and logo.svg or logo.png. dotvirt serves them itself, each up to
-	// 256 KiB: the console never loads a remote URL. An edit shows on the next
-	// page load.
+	// tokens, logo.svg or logo.png, and the links' icons. dotvirt serves them
+	// itself, each up to 256 KiB: the console never loads a remote URL. An
+	// edit shows on the next page load.
 	// +kubebuilder:validation:MaxLength=253
 	// +kubebuilder:validation:Pattern=`^[a-z0-9]([-a-z0-9.]*[a-z0-9])?$`
 	// +optional
@@ -336,6 +393,13 @@ type BrandingLink struct {
 	// URL is an https URL with a host and no credentials.
 	// +kubebuilder:validation:Pattern=`^https://[A-Za-z0-9]([-A-Za-z0-9.]*[A-Za-z0-9])?(:[0-9]{1,5})?([/?#]([^%@\s\x00-\x1f\x7f]|%[0-9A-Fa-f]{2})*)?$`
 	URL string `json:"url"`
+	// Icon names an .svg or .png file in spec.branding.configMap, up to 256
+	// KiB. With one the link shows as that icon alone, its label the tooltip
+	// and accessible name; a file that is not there leaves it as text.
+	// +kubebuilder:validation:MaxLength=64
+	// +kubebuilder:validation:Pattern=`^[A-Za-z0-9][A-Za-z0-9._-]*\.(svg|png)$`
+	// +optional
+	Icon string `json:"icon,omitempty"`
 }
 
 // DotvirtStatus is the observed install state.
@@ -365,6 +429,10 @@ type DotvirtStatus struct {
 	// install is deleted, so no Application is left needing an account dotvirt
 	// no longer maps.
 	SyncImpersonationInstance string `json:"syncImpersonationInstance,omitempty"`
+	// ArgoNamespaces are the ArgoCD namespaces the install wrote that no
+	// completed prune has swept since: a pass adds the one it writes, and a
+	// completed prune, having swept the others by name, leaves the current one.
+	ArgoNamespaces []string `json:"argoNamespaces,omitempty"`
 	// ForgeAdminHint is the command that reveals the managed Forgejo bootstrap admin
 	// password (user dotvirt-bot); the value stays in the Secret, never in status.
 	// Set only for a managed forge.

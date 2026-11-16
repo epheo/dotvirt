@@ -1408,6 +1408,9 @@ const oidc = {
 	name: 'oidc',
 	authMethods: { sso: false, ssoPending: false, oidc: 'Kanidm' },
 };
+// A provider round trip that never leaves a session behind: the sign-in screen
+// must stop redirecting instead of bouncing forever.
+const oidcsessionless = { ...oidc, name: 'oidcsessionless', sessionless: true };
 // A managed forge whose admin Secret the caller may read.
 const forgeadmin = {
 	...base,
@@ -2105,11 +2108,21 @@ const branded = {
 			logo: true,
 			links: [
 				{ label: 'Account', url: 'https://c.example/account' },
-				{ label: 'Billing', url: 'https://c.example/billing' },
+				{ label: 'Billing', url: 'https://c.example/billing', icon: 'billing.svg' },
+				// The fixture's own origin: the console itself.
+				{
+					label: 'Console',
+					url: `http://localhost:${process.env.FIXTURE_PORT ?? 4173}/`,
+					icon: 'console.svg',
+				},
 			],
 		},
 		theme: ':root { --branded-marker: 1; }',
 		logo: '<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24"/>',
+		icons: {
+			'billing.svg': '<svg xmlns="http://www.w3.org/2000/svg" width="22" height="22"/>',
+			'console.svg': '<svg xmlns="http://www.w3.org/2000/svg" width="22" height="22"/>',
+		},
 	},
 };
 // Each of team-db's namespaces has a VM Network of its own: not offered.
@@ -2119,7 +2132,27 @@ const publishingapart = {
 	capabilities: { ...publishing.capabilities, 'db-prod': { project: { publishingApart: true } } },
 };
 
+// web-prod's quotas forbid fast-ssd, the cluster default; db-prod's forbid
+// bulk-hdd, the shared class; batch-prod's forbid every class.
+const classquota = {
+	...base,
+	name: 'classquota',
+	classQuotas: {
+		'web-prod': ['fast-ssd'],
+		'db-prod': ['bulk-hdd'],
+		'batch-prod': ['fast-ssd', 'bulk-hdd'],
+	},
+};
+// On r-drbd, web-prod's quotas forbid the nvme two-copy class.
+const replicatedquota = {
+	...replicated,
+	name: 'replicatedquota',
+	classQuotas: { 'web-prod': ['r-drbd-replicated'] },
+};
+
 export const scenarios = {
+	classquota,
+	replicatedquota,
 	publishing,
 	publishingwaits,
 	publishingunhoused,
@@ -2140,6 +2173,7 @@ export const scenarios = {
 	nomachineconfig,
 	residue,
 	sso,
+	oidcsessionless,
 	ssoready,
 	oidc,
 	forgeadmin,

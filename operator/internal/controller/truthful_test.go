@@ -28,6 +28,7 @@ import (
 	"github.com/epheo/dotvirt/operator/internal/deps"
 	"github.com/epheo/dotvirt/operator/internal/install"
 	"github.com/epheo/dotvirt/operator/internal/platform"
+	"github.com/epheo/dotvirt/pkg/tenancy"
 )
 
 // byoForgeCR is a CR wired to a bring-your-own forge at url, with its
@@ -105,46 +106,69 @@ func TestPruneDeletesOnlyUnrenderedInstanceObjects(t *testing.T) {
 	mine := install.Labels(dv)
 	legacy := map[string]string{install.InstanceLabel: dv.Name}
 	sameNameElsewhere := map[string]string{install.InstanceLabel: dv.Name, install.InstanceNamespaceLabel: "elsewhere"}
+	// spec.argocd.namespace moved from here: status remembers it.
 	oldArgo := "argo-old"
+	dv.Status.ArgoNamespaces = []string{oldArgo}
+	role := readOperatorRole(t)
 
 	c := testBuilder(t).WithObjects(
 		dv,
-		&networkingv1.Ingress{ObjectMeta: metav1.ObjectMeta{Name: "stale-exposure", Namespace: dv.Namespace, Labels: mine}},
+		// The exposure before it moved to a Route.
+		&networkingv1.Ingress{ObjectMeta: metav1.ObjectMeta{Name: install.AppName, Namespace: dv.Namespace, Labels: mine}},
 		&corev1.Service{ObjectMeta: metav1.ObjectMeta{Name: install.ForgejoServiceName, Namespace: dv.Namespace, Labels: mine}},
 		&corev1.Service{ObjectMeta: metav1.ObjectMeta{Name: "hand-made", Namespace: dv.Namespace}},
 		&corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: install.ForgejoAdminSecret, Namespace: dv.Namespace, Labels: mine}},
 		&corev1.PersistentVolumeClaim{ObjectMeta: metav1.ObjectMeta{Name: "dotvirt-forgejo-data", Namespace: dv.Namespace, Labels: mine}},
 		&corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Name: install.IngressCAConfigMap, Namespace: dv.Namespace, Labels: mine}},
-		&rbacv1.ClusterRoleBinding{ObjectMeta: metav1.ObjectMeta{Name: "dotvirt-renamed", Labels: legacy}},
+		// No platformRepo, so not rendered.
+		&rbacv1.ClusterRoleBinding{ObjectMeta: metav1.ObjectMeta{Name: tenancy.PlatformSyncAccount, Labels: legacy}},
 		&rbacv1.ClusterRoleBinding{ObjectMeta: metav1.ObjectMeta{Name: "dotvirt", Labels: legacy}},
-		&rbacv1.ClusterRoleBinding{ObjectMeta: metav1.ObjectMeta{Name: "other-install", Labels: sameNameElsewhere}},
+		&rbacv1.ClusterRoleBinding{ObjectMeta: metav1.ObjectMeta{Name: "dotvirt-platform-network-admin", Labels: sameNameElsewhere}},
+		// A name this version never renders: prune never reads it.
+		&rbacv1.ClusterRoleBinding{ObjectMeta: metav1.ObjectMeta{Name: "dotvirt-renamed", Labels: mine}},
 		argoObj("AppProject", "argocd", "dotvirt-platform", mine),
 		argoObj("AppProject", oldArgo, "dotvirt-tenants", mine),
 		&corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: install.AppsetSecretName, Namespace: oldArgo, Labels: mine}},
 		&corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Name: "dotvirt-appset-plugin", Namespace: oldArgo, Labels: legacy}},
-		&corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: "foreign", Namespace: oldArgo, Labels: sameNameElsewhere}},
+		&corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: install.RepoCredsName, Namespace: oldArgo, Labels: sameNameElsewhere}},
 		// An admin's `get -o yaml | apply -n` copy keeps the labels.
 		&corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: "dotvirt-forge", Namespace: "admin-copy", Labels: mine}},
 		&corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Name: "dotvirt-appset-plugin", Namespace: "admin-copy", Labels: mine}},
 		&corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "team-a", Labels: map[string]string{install.ProjectLabel: "team-a"}}},
-	).Build()
+		syncRequestBinding(oldArgo, mine),
+		syncRequestBinding("admin-copy", mine),
+	).WithInterceptorFuncs(interceptor.Funcs{
+		List: func(ctx context.Context, cl client.WithWatch, list client.ObjectList, opts ...client.ListOption) error {
+			if c, ok := callOf(cl.Scheme(), "list", list, "", ""); ok && !role.allows("list", c.group, c.resource, "", func(string) bool { return true }) {
+				t.Errorf("listed %s; the operator may only read its own names", c.resource)
+			}
+			if u, ok := list.(*unstructured.UnstructuredList); ok && u.GetKind() == "AppProjectList" && (&client.ListOptions{}).ApplyOptions(opts).Namespace == "" {
+				t.Error("listed AppProjects cluster-wide; prune lists them in the namespaces it wrote")
+			}
+			return cl.List(ctx, list, opts...)
+		},
+	}).Build()
 	r := newReconciler(c, depsOK)
 	reconcileOnce(t, r, dv)
+	if got := getCR(t, c, dv).Status.ArgoNamespaces; len(got) != 1 || got[0] != "argocd" {
+		t.Errorf("status.argoNamespaces = %v after the sweep, want [argocd]", got)
+	}
 
 	type ref struct {
 		obj      client.Object
 		ns, name string
 	}
 	for _, gone := range []ref{
-		{&networkingv1.Ingress{}, dv.Namespace, "stale-exposure"},
+		{&networkingv1.Ingress{}, dv.Namespace, install.AppName},
 		{&corev1.Service{}, dv.Namespace, install.ForgejoServiceName},
-		{&rbacv1.ClusterRoleBinding{}, "", "dotvirt-renamed"},
+		{&rbacv1.ClusterRoleBinding{}, "", tenancy.PlatformSyncAccount},
 		{argoObj("AppProject", "", "", nil), "argocd", "dotvirt-platform"},
 		{argoObj("AppProject", "", "", nil), oldArgo, "dotvirt-tenants"},
 		// No Application references the shared tier, so it is not rendered.
 		{argoObj("AppProject", "", "", nil), "argocd", "dotvirt-tenants"},
 		{&corev1.Secret{}, oldArgo, install.AppsetSecretName},
 		{&corev1.ConfigMap{}, oldArgo, "dotvirt-appset-plugin"},
+		{&rbacv1.RoleBinding{}, oldArgo, install.SyncRequestName},
 	} {
 		if exists(t, c, gone.obj, gone.ns, gone.name) {
 			t.Errorf("%s/%s survived prune", gone.ns, gone.name)
@@ -156,10 +180,13 @@ func TestPruneDeletesOnlyUnrenderedInstanceObjects(t *testing.T) {
 		{&corev1.Secret{}, dv.Namespace, install.ForgejoAdminSecret},
 		{&corev1.PersistentVolumeClaim{}, dv.Namespace, "dotvirt-forgejo-data"},
 		{&corev1.ConfigMap{}, dv.Namespace, install.IngressCAConfigMap},
-		{&rbacv1.ClusterRoleBinding{}, "", "other-install"},
-		{&corev1.Secret{}, oldArgo, "foreign"},
+		{&rbacv1.ClusterRoleBinding{}, "", "dotvirt-platform-network-admin"},
+		{&rbacv1.ClusterRoleBinding{}, "", "dotvirt-renamed"},
+		{&corev1.Secret{}, oldArgo, install.RepoCredsName},
 		{&corev1.Secret{}, "admin-copy", "dotvirt-forge"},
 		{&corev1.ConfigMap{}, "admin-copy", "dotvirt-appset-plugin"},
+		{&rbacv1.RoleBinding{}, "admin-copy", install.SyncRequestName},
+		{&rbacv1.RoleBinding{}, "argocd", install.SyncRequestName},
 		{argoObj("AppProject", "", "", nil), "argocd", "dotvirt-p-team-a"},
 		{argoObj("ApplicationSet", "", "", nil), "argocd", "dotvirt-projects"},
 	} {
@@ -196,16 +223,16 @@ func TestFinalizeTakesLegacyLabels(t *testing.T) {
 	dv.DeletionTimestamp = &now
 	c := testBuilder(t).WithObjects(
 		dv,
-		&rbacv1.ClusterRoleBinding{ObjectMeta: metav1.ObjectMeta{Name: "legacy", Labels: map[string]string{install.InstanceLabel: dv.Name}}},
-		&rbacv1.ClusterRoleBinding{ObjectMeta: metav1.ObjectMeta{Name: "elsewhere", Labels: map[string]string{
+		&rbacv1.ClusterRoleBinding{ObjectMeta: metav1.ObjectMeta{Name: "dotvirt", Labels: map[string]string{install.InstanceLabel: dv.Name}}},
+		&rbacv1.ClusterRoleBinding{ObjectMeta: metav1.ObjectMeta{Name: "dotvirt-argocd-read", Labels: map[string]string{
 			install.InstanceLabel: dv.Name, install.InstanceNamespaceLabel: "elsewhere",
 		}}},
 	).Build()
 	reconcileOnce(t, newReconciler(c, depsOK), dv)
-	if exists(t, c, &rbacv1.ClusterRoleBinding{}, "", "legacy") {
+	if exists(t, c, &rbacv1.ClusterRoleBinding{}, "", "dotvirt") {
 		t.Error("legacy-labelled binding survived deletion")
 	}
-	if !exists(t, c, &rbacv1.ClusterRoleBinding{}, "", "elsewhere") {
+	if !exists(t, c, &rbacv1.ClusterRoleBinding{}, "", "dotvirt-argocd-read") {
 		t.Error("deletion took a same-named install's binding")
 	}
 }
@@ -271,11 +298,11 @@ func TestPruneRunsOnRenderChangeOrTimer(t *testing.T) {
 	dv := testCR()
 	lists := 0
 	c := testBuilder(t).WithObjects(dv).WithInterceptorFuncs(interceptor.Funcs{
-		List: func(ctx context.Context, cl client.WithWatch, list client.ObjectList, opts ...client.ListOption) error {
-			if _, ok := list.(*rbacv1.ClusterRoleBindingList); ok {
+		Get: func(ctx context.Context, cl client.WithWatch, key client.ObjectKey, obj client.Object, opts ...client.GetOption) error {
+			if obj.GetObjectKind().GroupVersionKind().Kind == "ClusterRoleBinding" && key.Name == install.ClusterRoleBindingNames[0] {
 				lists++
 			}
-			return cl.List(ctx, list, opts...)
+			return cl.Get(ctx, key, obj, opts...)
 		},
 	}).Build()
 	r := newReconciler(c, depsOK)
@@ -550,84 +577,81 @@ func TestDeleteGrantCoversEveryRenderedName(t *testing.T) {
 			if !granted[gr+"/"+k.name] && !granted[gr+"/*"] {
 				t.Errorf("%s: %s %s/%s is rendered, but the delete grant does not name it", pass.name, k.gk.Kind, k.namespace, k.name)
 			}
+			// Prune reads only the names it knows: one missing is never swept.
+			if len(sc.names) > 0 && !slices.Contains(sc.names, k.name) {
+				t.Errorf("%s: %s %s/%s is rendered, but prune never reads that name", pass.name, k.gk.Kind, k.namespace, k.name)
+			}
 		}
 	}
 }
 
-// The operator patches its exposures and network policies by name only: an
-// unscoped patch would let it rewrite any route or policy in the cluster. Every
-// one it renders must be named in the grant, or its apply is refused.
-func TestPatchGrantNamesEveryRenderedExposure(t *testing.T) {
-	scoped := map[string]bool{
-		"route.openshift.io/routes":            true,
-		"gateway.networking.k8s.io/httproutes": true,
-		"networking.k8s.io/ingresses":          true,
-		"networking.k8s.io/networkpolicies":    true,
+func syncRequestBinding(ns string, labels map[string]string) *rbacv1.RoleBinding {
+	return &rbacv1.RoleBinding{
+		ObjectMeta: metav1.ObjectMeta{Name: install.SyncRequestName, Namespace: ns, Labels: labels},
+		RoleRef:    rbacv1.RoleRef{APIGroup: rbacv1.GroupName, Kind: "ClusterRole", Name: install.SyncRequestName},
 	}
-	granted := map[string]bool{}
-	for _, role := range readClusterRoles(t, filepath.Join("..", "..", "config", "rbac", "role.yaml")) {
-		for _, rule := range role.Rules {
-			if !slices.Contains(rule.Verbs, "patch") && !slices.Contains(rule.Verbs, "update") {
-				continue
-			}
-			for _, g := range rule.APIGroups {
-				for _, res := range rule.Resources {
-					if !scoped[g+"/"+res] {
-						continue
-					}
-					if len(rule.ResourceNames) == 0 {
-						t.Errorf("patch on %s/%s is not scoped by name", g, res)
-					}
-					for _, name := range rule.ResourceNames {
-						granted[g+"/"+res+"/"+name] = true
-					}
-				}
-			}
+}
+
+// dotvirt's ServiceAccount reads Applications everywhere but patches them only
+// in the ArgoCD namespace: a cluster-wide patch would let it rewrite any
+// Application, including ones it does not own.
+func TestDotvirtPatchesApplicationsOnlyInTheArgoNamespace(t *testing.T) {
+	roles := map[string]*rbacv1.ClusterRole{}
+	for _, r := range readClusterRoles(t, filepath.Join("..", "..", "config", "rbac", "operand_roles.yaml")) {
+		roles[r.Name] = r
+	}
+	for _, rule := range roles["dotvirt"].Rules {
+		if slices.Contains(rule.APIGroups, "argoproj.io") && !slices.Equal(rule.Verbs, []string{"get", "list", "watch"}) {
+			t.Errorf("ClusterRole dotvirt grants %v on %v, want reads only", rule.Verbs, rule.Resources)
 		}
 	}
-	withIngress := managedForgeCR()
-	withIngress.Spec.Ingress.Host = "dotvirt.example"
-	withGateway := managedForgeCR()
-	withGateway.Spec.Ingress = dotvirtv1alpha1.IngressSpec{Host: "dotvirt.example", Gateway: &dotvirtv1alpha1.GatewayRef{Name: "edge"}}
-	seen := map[string]bool{}
-	for _, pass := range []struct {
-		name     string
-		dv       *dotvirtv1alpha1.Dotvirt
-		platform platform.Platform
-	}{
-		{"Routes", managedForgeCR(), platform.OpenShift},
-		{"Ingresses", withIngress, platform.Kubernetes},
-		{"HTTPRoutes", withGateway, platform.Kubernetes},
-	} {
-		var applied []objKey
-		c := testBuilder(t).WithObjects(pass.dv).WithInterceptorFuncs(interceptor.Funcs{
-			Patch: func(ctx context.Context, cl client.WithWatch, obj client.Object, patch client.Patch, opts ...client.PatchOption) error {
-				gvk, err := apiutil.GVKForObject(obj, cl.Scheme())
-				if err != nil {
-					return err
-				}
-				applied = append(applied, objKey{gvk.GroupKind(), obj.GetNamespace(), obj.GetName()})
-				return cl.Patch(ctx, obj, patch, opts...)
-			},
-		}).Build()
-		r := newReconciler(c, depsOK)
-		r.Platform, r.DryRun = pass.platform, true
-		reconcileOnce(t, r, pass.dv)
-		for _, k := range applied {
-			resource, _ := apimeta.UnsafeGuessKindToResource(k.gk.WithVersion(""))
-			gr := k.gk.Group + "/" + resource.Resource
-			if !scoped[gr] {
-				continue
-			}
-			seen[gr] = true
-			if !granted[gr+"/"+k.name] {
-				t.Errorf("%s: %s %s/%s is rendered, but the patch grant does not name it", pass.name, k.gk.Kind, k.namespace, k.name)
-			}
+	sync := roles[install.SyncRequestName]
+	if sync == nil || len(sync.Rules) != 1 || !slices.Equal(sync.Rules[0].APIGroups, []string{"argoproj.io"}) ||
+		!slices.Equal(sync.Rules[0].Resources, []string{"applications"}) || !slices.Equal(sync.Rules[0].Verbs, []string{"patch"}) {
+		t.Errorf("%s = %+v, want patch on applications alone", install.SyncRequestName, sync)
+	}
+
+	dv := testCR()
+	c := testBuilder(t).WithObjects(dv).Build()
+	reconcileOnce(t, newReconciler(c, depsOK), dv)
+	var rb rbacv1.RoleBinding
+	if !exists(t, c, &rb, "argocd", install.SyncRequestName) {
+		t.Fatalf("no RoleBinding %s in the ArgoCD namespace", install.SyncRequestName)
+	}
+	want := []rbacv1.Subject{{Kind: "ServiceAccount", Name: install.AppName, Namespace: dv.Namespace}}
+	if rb.RoleRef.Kind != "ClusterRole" || rb.RoleRef.Name != install.SyncRequestName || !slices.Equal(rb.Subjects, want) {
+		t.Errorf("RoleBinding = %+v %+v, want %s to dotvirt's ServiceAccount", rb.RoleRef, rb.Subjects, install.SyncRequestName)
+	}
+	var crbs rbacv1.ClusterRoleBindingList
+	if err := c.List(t.Context(), &crbs); err != nil {
+		t.Fatal(err)
+	}
+	for _, b := range crbs.Items {
+		if b.RoleRef.Name == install.SyncRequestName {
+			t.Errorf("ClusterRoleBinding %s binds %s cluster-wide", b.Name, install.SyncRequestName)
 		}
 	}
-	for gr := range scoped {
-		if !seen[gr] {
-			t.Errorf("no pass renders %s, so its grant goes unchecked", gr)
+}
+
+// With ArgoCD in the install namespace, prune never sweeps there: the
+// RoleBinding carries the CR's ownerRef so the garbage collector takes it.
+func TestSyncRequestBindingOwnedWhenArgoSharesTheNamespace(t *testing.T) {
+	for _, argoNS := range []string{"", "dotvirt"} {
+		dv := testCR()
+		dv.Spec.ArgoCD.Namespace = argoNS
+		c := testBuilder(t).WithObjects(dv).Build()
+		reconcileOnce(t, newReconciler(c, depsOK), dv)
+		ns := argoNS
+		if ns == "" {
+			ns = "argocd"
+		}
+		var rb rbacv1.RoleBinding
+		if !exists(t, c, &rb, ns, install.SyncRequestName) {
+			t.Fatalf("no RoleBinding in %s", ns)
+		}
+		owned := len(rb.OwnerReferences) == 1 && rb.OwnerReferences[0].Name == dv.Name
+		if owned != (ns == dv.Namespace) {
+			t.Errorf("ArgoCD in %s: ownerRefs = %v, want one exactly when it is the install namespace", ns, rb.OwnerReferences)
 		}
 	}
 }

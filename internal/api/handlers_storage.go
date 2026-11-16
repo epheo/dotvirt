@@ -31,7 +31,8 @@ var (
 // they may list CSIStorageCapacities. A capacity segment's topology is
 // usually a node's hostname, so the per-segment split also needs nodes. The
 // classes themselves need list on StorageClasses. The cached sheet is never
-// mutated.
+// mutated. ?namespace= marks the classes that namespace's ResourceQuotas
+// forbid, read under the caller's token: the disk forms offer the others.
 func (s *Server) handleStorageClasses(w http.ResponseWriter, r *http.Request) {
 	id, c, classes, ok := saCached(s, w, r, s.storage, (*cluster.Client).ListStorageClasses)
 	if !ok {
@@ -70,6 +71,15 @@ func (s *Server) handleStorageClasses(w http.ResponseWriter, r *http.Request) {
 			c.Segments = nil
 		}
 		out = append(out, c)
+	}
+	if ns := r.URL.Query().Get("namespace"); ns != "" {
+		// A caller who may not read the quotas there is offered every class:
+		// the apiserver still refuses a claim the quota forbids.
+		if forbidden, err := c.ForbiddenStorageClasses(r.Context(), ns); err == nil {
+			for i := range out {
+				out[i].Forbidden = forbidden[out[i].Name]
+			}
+		}
 	}
 	writeJSON(w, out)
 }

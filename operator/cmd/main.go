@@ -16,6 +16,7 @@ import (
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 
 	corev1 "k8s.io/api/core/v1"
+	rbacv1 "k8s.io/api/rbac/v1"
 	"sigs.k8s.io/controller-runtime/pkg/cache"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
@@ -43,16 +44,20 @@ func init() {
 func main() {
 	var metricsAddr, probeAddr string
 	var enableLeaderElection, dryRun bool
+	var installNamespace string
 	flag.StringVar(&metricsAddr, "metrics-bind-address", "0", "metrics endpoint (0 disables)")
 	flag.StringVar(&probeAddr, "health-probe-bind-address", ":8081", "health probe endpoint")
 	flag.BoolVar(&enableLeaderElection, "leader-elect", false, "enable leader election for HA")
 	flag.BoolVar(&dryRun, "dry-run", false, "validate rendered resources via server-side dry-run apply; persist nothing")
+	flag.StringVar(&installNamespace, "install-namespace", os.Getenv(controller.InstallNamespaceEnv),
+		"the one namespace whose Dotvirt the operator acts on (empty: its own namespace, else the install it already provisioned)")
 	opts := zap.Options{Development: true}
 	opts.BindFlags(flag.CommandLine)
 	flag.Parse()
 
 	ctrl.SetLogger(zap.New(zap.UseFlagOptions(&opts)))
 	setupLog := ctrl.Log.WithName("setup")
+	opNS := operatorNamespace()
 
 	cfg := ctrl.GetConfigOrDie()
 	// Detection FAILS startup rather than defaulting: a wrong platform silently
@@ -78,13 +83,12 @@ func main() {
 		LeaderElection:         enableLeaderElection,
 		LeaderElectionID:       "dotvirt-operator.dotvirt.io",
 		Cache:                  cache.Options{ByObject: controller.CacheByObject(plat)},
-		// ConfigMaps are read point-wise, never watched: the cached client would
-		// spin a CLUSTER-WIDE informer on first Get, exceeding the narrow RBAC
-		// (get, no list/watch) and blocking that Get forever, wedging reconcile
-		// and deletion alike. Secrets are read direct too: the label-filtered
-		// cache cannot see the unlabelled ones the operator reads (a BYO forge
-		// credential, a pre-existing generated secret).
-		Client: client.Options{Cache: &client.CacheOptions{DisableFor: []client.Object{&corev1.ConfigMap{}, &corev1.Secret{}}}},
+		// ConfigMaps, Secrets and RoleBindings are read point-wise: the cached
+		// client would spin a CLUSTER-WIDE informer on first Get, exceeding the
+		// RBAC (get by name, no list or watch) and blocking that Get forever,
+		// wedging reconcile and deletion alike. The ones watched by name
+		// (argocd-cm, the credential grant) feed events only.
+		Client: client.Options{Cache: &client.CacheOptions{DisableFor: []client.Object{&corev1.ConfigMap{}, &corev1.Secret{}, &rbacv1.RoleBinding{}, &rbacv1.Role{}}}},
 	})
 	if err != nil {
 		setupLog.Error(err, "unable to start manager")
@@ -100,7 +104,8 @@ func main() {
 		DryRun:           dryRun,
 
 		APIReader:         mgr.GetAPIReader(),
-		OperatorNamespace: operatorNamespace(),
+		OperatorNamespace: opNS,
+		InstallNamespace:  installNamespace,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "Dotvirt")
 		os.Exit(1)

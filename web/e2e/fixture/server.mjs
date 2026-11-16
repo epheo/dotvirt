@@ -11,9 +11,11 @@
 //   POST /__fixture/ws-drop            close every live inventory socket
 //   POST /__fixture/ws-refuse/{n}      destroy the next n WS handshakes pre-open
 //   POST /__fixture/login-status/{s}   next POST /api/login answers status s
+//   POST /__fixture/logout-status/{s}  next POST /api/logout answers status s
 //   POST /__fixture/fail/{plane}/{n}   the next n calls of a plane answer 503 (events, logout)
 //   POST /__fixture/proxy-down/{0|1}   the upload proxy drops connections, as one the browser cannot reach or trust
 //   GET  /__fixture/scenario           current scenario name
+//   GET  /__fixture/provider-starts    sign-in provider starts since the scenario switch
 
 import { createReadStream, existsSync, readFileSync, statSync } from 'node:fs';
 import { createServer } from 'node:http';
@@ -399,6 +401,31 @@ async function handleAPI(req, res, url) {
 		res.writeHead(200, { 'Content-Type': 'image/svg+xml' });
 		return res.end(s.branding.logo);
 	}
+	// Only an icon a link names, as branding.Settings.ServeIcon.
+	if (path.startsWith('/api/branding/icon/')) {
+		const name = decodeURIComponent(path.slice('/api/branding/icon/'.length));
+		const named = (s.branding?.info?.links ?? []).some((l) => l.icon === name);
+		if (!named || !s.branding?.icons?.[name]) return sendText(res, 404, 'not found');
+		res.writeHead(200, { 'Content-Type': 'image/svg+xml' });
+		return res.end(s.branding.icons[name]);
+	}
+
+	// A provider whose user is already signed in there: the start URL comes
+	// straight back to the callback, which lands on ?return= with a session, as
+	// the Go callback does (SafeReturn, simplified). sessionless: a provider
+	// round trip whose session the browser never keeps.
+	if (
+		(path === '/api/auth/oidc' && s.authMethods?.oidc) ||
+		(path === '/api/auth/openshift' && s.authMethods?.sso && !s.authMethods?.ssoPending)
+	) {
+		state.providerStarts = (state.providerStarts ?? 0) + 1;
+		const ret = url.searchParams.get('return') ?? '/';
+		const to = ret.startsWith('/') && !ret.startsWith('//') && !ret.startsWith('/api') ? ret : '/';
+		const headers = { Location: to };
+		if (!s.sessionless) headers['Set-Cookie'] = `${COOKIE}; Path=/; HttpOnly`;
+		res.writeHead(302, headers);
+		return res.end();
+	}
 
 	if (path === '/api/login' && req.method === 'POST') {
 		if (state.loginStatus) {
@@ -418,6 +445,11 @@ async function handleAPI(req, res, url) {
 		return sendJSON(res, 200, s.authMethods ?? { sso: false, ssoPending: false });
 	if (path === '/api/logout') {
 		if (failing('logout')) return sendText(res, 503, 'sign-out failed: fixture failure hook');
+		if (state.logoutStatus) {
+			const st = state.logoutStatus;
+			state.logoutStatus = 0;
+			return sendText(res, st, 'no session');
+		}
 		res.writeHead(204, { 'Set-Cookie': 'dv_fixture=; Path=/; Max-Age=0' });
 		return res.end();
 	}
@@ -439,7 +471,17 @@ async function handleAPI(req, res, url) {
 	}
 	if (path === '/api/inventory') return sendJSON(res, 200, s.inventory);
 	if (path === '/api/options') return sendJSON(res, 200, s.options);
-	if (path === '/api/storage/classes') return sendJSON(res, 200, s.storageClasses ?? []);
+	if (path === '/api/storage/classes') {
+		// Asked for a namespace, the classes its quotas forbid come back marked.
+		const ns = url.searchParams.get('namespace');
+		const shut = new Set((ns && s.classQuotas?.[ns]) || []);
+		const classes = s.storageClasses ?? [];
+		return sendJSON(
+			res,
+			200,
+			classes.map((c) => (shut.has(c.name) ? { ...c, forbidden: true } : c)),
+		);
+	}
 	if (req.method === 'POST') {
 		const repair = await handleRepair(req, res, path, url, s);
 		if (repair) return;
@@ -1278,6 +1320,9 @@ function handleControl(req, res, url) {
 	if (path === '/__fixture/scenario' && req.method === 'GET') {
 		return sendJSON(res, 200, { scenario: state.scenario.name });
 	}
+	if (path === '/__fixture/provider-starts' && req.method === 'GET') {
+		return sendJSON(res, 200, { starts: state.providerStarts ?? 0 });
+	}
 	let m = path.match(/^\/__fixture\/scenario\/([a-z]+)$/);
 	if (m && req.method === 'POST') {
 		const next = scenarios[m[1]];
@@ -1289,6 +1334,7 @@ function handleControl(req, res, url) {
 		state.fail.clear();
 		state.uploads.clear();
 		state.proxyDown = false;
+		state.providerStarts = 0;
 		broadcastInventory();
 		return sendJSON(res, 200, { scenario: next.name });
 	}
@@ -1331,6 +1377,11 @@ function handleControl(req, res, url) {
 		state.fail.set(m[1], Number(m[2]));
 		return sendJSON(res, 200, { plane: m[1], fail: Number(m[2]) });
 	}
+	m = path.match(/^\/__fixture\/logout-status\/(\d+)$/);
+	if (m && req.method === 'POST') {
+		state.logoutStatus = Number(m[1]);
+		return sendJSON(res, 200, { logoutStatus: state.logoutStatus });
+	}
 	m = path.match(/^\/__fixture\/login-status\/(\d+)$/);
 	if (m && req.method === 'POST') {
 		state.loginStatus = Number(m[1]);
@@ -1350,13 +1401,15 @@ function serveStatic(req, res, url) {
 }
 
 // The shell dressed as dotvirt's server dresses it (branding.Settings.Shell):
-// the title, the stylesheet after the console's own, and the branding block.
+// the title, the logo as the icon, the stylesheet after the console's own,
+// and the branding block.
 function serveShell(res) {
 	const info = state.scenario.branding?.info ?? {};
 	const esc = (v) => v.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 	const block = JSON.stringify(info).replace(/</g, '\\u003c').replace(/>/g, '\\u003e');
 	const head =
 		`<title>${esc(info.productName || 'dotvirt')}</title>` +
+		(info.logo ? '<link rel="icon" href="/api/branding/logo">' : '') +
 		(info.theme ? '<link rel="stylesheet" href="/api/branding/theme.css">' : '') +
 		`<script type="application/json" id="dotvirt-branding">${block}</script>`;
 	const index = readFileSync(join(buildDir, 'index.html'), 'utf8');
