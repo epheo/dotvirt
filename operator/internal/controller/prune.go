@@ -4,6 +4,8 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"maps"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -63,17 +65,17 @@ func (r *DotvirtReconciler) recordRender(ctx context.Context, obj client.Object)
 	s[objKey{gvk.GroupKind(), obj.GetNamespace(), obj.GetName()}] = struct{}{}
 }
 
-// pruneWhere says which namespaces prune lists a kind in.
+// pruneWhere says which namespaces prune reads a kind in.
 type pruneWhere int
 
 const (
 	// installNS: the install namespace only.
 	installNS pruneWhere = iota
-	// anywhere: cluster-scoped kinds, and the argoproj kinds, which only this
-	// operator labels; where they sit tells prune which namespaces it wrote.
-	anywhere
-	// writtenNS: the namespaces this install wrote, never the install namespace.
-	// A cluster-wide sweep would delete an admin's labelled copy elsewhere.
+	// cluster: cluster-scoped kinds.
+	cluster
+	// writtenNS: the ArgoCD namespaces this install wrote (the current one and
+	// the one status records), never the install namespace. Reading anywhere
+	// else would take an admin's labelled copy.
 	writtenNS
 )
 
@@ -81,9 +83,10 @@ const (
 type pruneScope struct {
 	list  func() client.ObjectList
 	where pruneWhere
-	// name, when set, is the one name the install renders of a kind the
-	// operator may not list: prune reads that name in each namespace instead.
-	name string
+	// names are the names the install renders of the kind; prune reads each by
+	// name, the only read the operator's RBAC allows. Empty only for the tenant
+	// AppProjects, named after their projects, which prune lists.
+	names []string
 }
 
 func typedList(l client.ObjectList) func() client.ObjectList {
@@ -98,30 +101,28 @@ func unstructuredList(gvk schema.GroupVersionKind) func() client.ObjectList {
 	}
 }
 
-// pruneScopes are the rendered kinds, the anywhere ones before the writtenNS
-// ones they discover namespaces for. Left out on purpose, in the install
-// namespace: Secrets and PVCs are state, not render (create-once keys, the
-// minted forge token, the forge's git data); the CA ConfigMaps are best-effort
-// copies a transient read failure must not delete.
+// pruneScopes are the rendered kinds and the names the install renders of each.
+// Left out on purpose, in the install namespace: Secrets and PVCs are state, not
+// render (create-once keys, the minted forge token, the forge's git data); the
+// CA ConfigMaps are best-effort copies a transient read failure must not delete.
 func pruneScopes() []pruneScope {
-	scopes := []pruneScope{
-		{list: typedList(&appsv1.DeploymentList{}), where: installNS},
-		{list: typedList(&corev1.ServiceList{}), where: installNS},
-		{list: typedList(&corev1.ServiceAccountList{}), where: installNS},
-		{list: typedList(&networkingv1.NetworkPolicyList{}), where: installNS},
-		{list: typedList(&networkingv1.IngressList{}), where: installNS},
-		{list: unstructuredList(install.RouteGVK), where: installNS},
-		{list: unstructuredList(install.HTTPRouteGVK), where: installNS},
-		{list: typedList(&rbacv1.ClusterRoleBindingList{}), where: anywhere},
+	operand := []string{install.AppName, install.ForgejoServiceName}
+	return []pruneScope{
+		{list: typedList(&appsv1.DeploymentList{}), where: installNS, names: operand},
+		{list: typedList(&corev1.ServiceList{}), where: installNS, names: operand},
+		{list: typedList(&corev1.ServiceAccountList{}), where: installNS, names: operand},
+		{list: typedList(&networkingv1.NetworkPolicyList{}), where: installNS, names: operand},
+		{list: typedList(&networkingv1.IngressList{}), where: installNS, names: operand},
+		{list: unstructuredList(install.RouteGVK), where: installNS, names: operand},
+		{list: unstructuredList(install.HTTPRouteGVK), where: installNS, names: operand},
+		{list: typedList(&rbacv1.ClusterRoleBindingList{}), where: cluster, names: install.ClusterRoleBindingNames},
+		{list: unstructuredList(install.ArgoGVK("AppProject")), where: writtenNS},
+		{list: unstructuredList(install.ArgoGVK("Application")), where: writtenNS, names: []string{install.PlatformApplicationName}},
+		{list: unstructuredList(install.ArgoGVK("ApplicationSet")), where: writtenNS, names: []string{install.ApplicationSetName}},
+		{list: typedList(&corev1.SecretList{}), where: writtenNS, names: []string{install.AppsetSecretName, install.RepoCredsName}},
+		{list: typedList(&corev1.ConfigMapList{}), where: writtenNS, names: []string{install.AppsetConfigMapName}},
+		{list: typedList(&rbacv1.RoleBindingList{}), where: writtenNS, names: []string{install.SyncRequestName}},
 	}
-	for _, kind := range []string{"AppProject", "Application", "ApplicationSet"} {
-		scopes = append(scopes, pruneScope{list: unstructuredList(install.ArgoGVK(kind)), where: anywhere})
-	}
-	return append(scopes,
-		pruneScope{list: typedList(&corev1.SecretList{}), where: writtenNS},
-		pruneScope{list: typedList(&corev1.ConfigMapList{}), where: writtenNS},
-		pruneScope{list: typedList(&rbacv1.RoleBindingList{}), where: writtenNS, name: install.SyncRequestName},
-	)
 }
 
 // renderedNamespaces are the namespaces other than the install's that the pass
@@ -178,32 +179,32 @@ func (r *DotvirtReconciler) syncInstances(dv *dotvirtv1alpha1.Dotvirt) []string 
 // prune deletes this install's objects that the completed pass did not render:
 // an exposure whose type changed, the platform tier after platformRepo is
 // cleared, the ArgoCD-namespace objects after the namespace moves, a managed
-// forge switched off, a name a newer version no longer renders. Only objects
-// install.OwnedBy marks as this install's are candidates. Listing goes to the
-// API server directly: the cache holds none of these kinds cluster-wide.
+// forge switched off. Only objects install.OwnedBy marks as this install's are
+// candidates. Reads go to the API server directly: the cache holds none of
+// these kinds.
 func (r *DotvirtReconciler) prune(ctx context.Context, dv *dotvirtv1alpha1.Dotvirt, rendered renderSet) error {
-	// Seeded with this pass's namespaces and the current ArgoCD namespace, which
-	// finalize must sweep though it renders nothing there (and a pass always
-	// writes). A former ArgoCD namespace joins when an argoproj object of this
-	// install is found there.
+	// This pass's namespaces, the current ArgoCD namespace, which finalize must
+	// sweep though it renders nothing there, and the ones status records, which
+	// the objects of a moved spec.argocd.namespace are left in.
 	written := renderedNamespaces(dv, rendered)
-	if argoNS, _ := r.argoTarget(dv); argoNS != dv.Namespace {
-		written[argoNS] = true
+	argoNS, _ := r.argoTarget(dv)
+	for _, ns := range append([]string{argoNS}, dv.Status.ArgoNamespaces...) {
+		if ns != "" && ns != dv.Namespace {
+			written[ns] = true
+		}
 	}
 	for _, sc := range pruneScopes() {
 		var namespaces []string
 		switch sc.where {
 		case installNS:
 			namespaces = []string{dv.Namespace}
-		case anywhere:
+		case cluster:
 			namespaces = []string{""}
 		case writtenNS:
-			for ns := range written {
-				namespaces = append(namespaces, ns)
-			}
+			namespaces = slices.Sorted(maps.Keys(written))
 		}
 		for _, ns := range namespaces {
-			if err := r.pruneList(ctx, dv, sc, ns, rendered, written); err != nil {
+			if err := r.pruneList(ctx, dv, sc, ns, rendered); err != nil {
 				return err
 			}
 		}
@@ -211,7 +212,7 @@ func (r *DotvirtReconciler) prune(ctx context.Context, dv *dotvirtv1alpha1.Dotvi
 	return nil
 }
 
-func (r *DotvirtReconciler) pruneList(ctx context.Context, dv *dotvirtv1alpha1.Dotvirt, sc pruneScope, ns string, rendered renderSet, written map[string]bool) error {
+func (r *DotvirtReconciler) pruneList(ctx context.Context, dv *dotvirtv1alpha1.Dotvirt, sc pruneScope, ns string, rendered renderSet) error {
 	items, err := r.pruneCandidates(ctx, dv, sc, ns)
 	if err != nil {
 		return err
@@ -220,12 +221,6 @@ func (r *DotvirtReconciler) pruneList(ctx context.Context, dv *dotvirtv1alpha1.D
 		obj, ok := item.(client.Object)
 		if !ok || !install.OwnedBy(obj.GetLabels(), dv) {
 			continue
-		}
-		if sc.where != installNS && obj.GetNamespace() == dv.Namespace {
-			continue
-		}
-		if sc.where == anywhere && obj.GetNamespace() != "" {
-			written[obj.GetNamespace()] = true
 		}
 		gvk, err := apiutil.GVKForObject(obj, r.Scheme)
 		if err != nil {
@@ -238,8 +233,8 @@ func (r *DotvirtReconciler) pruneList(ctx context.Context, dv *dotvirtv1alpha1.D
 		log.Info("pruning object the install no longer renders")
 		err = r.Delete(ctx, obj)
 		if apierrors.IsForbidden(err) {
-			// The delete grant names only what this version renders (rbac_markers.go);
-			// a name only an older version rendered must not wedge prune or deletion.
+			// The delete grant names what this version renders (rbac_markers.go); a
+			// refusal, say an older role mid-upgrade, must not wedge prune or deletion.
 			log.Info("left in place: the operator may delete only names it renders; delete it by hand")
 			continue
 		}
@@ -250,34 +245,37 @@ func (r *DotvirtReconciler) pruneList(ctx context.Context, dv *dotvirtv1alpha1.D
 	return nil
 }
 
-// pruneCandidates are the objects of sc's kind in ns ("" every namespace) that
-// carry this install's instance label: listed, or the one name read.
+// pruneCandidates are the objects of sc's kind in ns ("" for a cluster-scoped
+// kind) that carry this install's instance label: each rendered name read, or,
+// for the tenant AppProjects, listed in ns.
 func (r *DotvirtReconciler) pruneCandidates(ctx context.Context, dv *dotvirtv1alpha1.Dotvirt, sc pruneScope, ns string) ([]runtime.Object, error) {
 	list := sc.list()
-	if sc.name != "" {
+	if len(sc.names) > 0 {
 		gvk, err := apiutil.GVKForObject(list, r.Scheme)
 		if err != nil {
 			return nil, err
 		}
-		obj := &unstructured.Unstructured{}
-		obj.SetGroupVersionKind(gvk.GroupVersion().WithKind(strings.TrimSuffix(gvk.Kind, "List")))
-		err = r.reader().Get(ctx, client.ObjectKey{Namespace: ns, Name: sc.name}, obj)
-		if apierrors.IsNotFound(err) || meta.IsNoMatchError(err) {
-			return nil, nil
+		var found []runtime.Object
+		for _, name := range sc.names {
+			obj := &unstructured.Unstructured{}
+			obj.SetGroupVersionKind(gvk.GroupVersion().WithKind(strings.TrimSuffix(gvk.Kind, "List")))
+			err = r.reader().Get(ctx, client.ObjectKey{Namespace: ns, Name: name}, obj)
+			if meta.IsNoMatchError(err) {
+				return nil, nil
+			}
+			if apierrors.IsNotFound(err) {
+				continue
+			}
+			if err != nil {
+				return nil, err
+			}
+			if obj.GetLabels()[install.InstanceLabel] == dv.Name {
+				found = append(found, obj)
+			}
 		}
-		if err != nil {
-			return nil, err
-		}
-		if obj.GetLabels()[install.InstanceLabel] != dv.Name {
-			return nil, nil
-		}
-		return []runtime.Object{obj}, nil
+		return found, nil
 	}
-	opts := []client.ListOption{client.MatchingLabels{install.InstanceLabel: dv.Name}}
-	if ns != "" {
-		opts = append(opts, client.InNamespace(ns))
-	}
-	if err := r.reader().List(ctx, list, opts...); err != nil {
+	if err := r.reader().List(ctx, list, client.InNamespace(ns), client.MatchingLabels{install.InstanceLabel: dv.Name}); err != nil {
 		if meta.IsNoMatchError(err) {
 			return nil, nil
 		}

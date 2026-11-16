@@ -279,7 +279,10 @@ spec:
                       an existing secret only for a bring-your-own forge. Its account creates the
                       platform and project repos in their org and writes to them; registering the org
                       webhooks needs an org owner, and without one dotvirt and ArgoCD fall back to
-                      polling.
+                      polling. Any name but dotvirt-forge needs a cluster admin's grant: the
+                      operator reads only the Secrets its own role names, and reports the Role and
+                      RoleBinding to install (ForgeCredentialReady). A name the operator gives one
+                      of its own Secrets (dotvirt-session, ...) is refused there too.
                     type: string
                   insecureTLS:
                     description: |-
@@ -477,6 +480,14 @@ spec:
           status:
             description: DotvirtStatus is the observed install state.
             properties:
+              argoNamespaces:
+                description: |-
+                  ArgoNamespaces are the ArgoCD namespaces the install wrote that no
+                  completed prune has swept since: a pass adds the one it writes, and a
+                  completed prune, having swept the others by name, leaves the current one.
+                items:
+                  type: string
+                type: array
               conditions:
                 description: Conditions follow the standard k8s conventions (see the
                   Condition* consts).

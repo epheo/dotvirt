@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -142,6 +143,19 @@ func TestEnvtest(t *testing.T) {
 			// name), patched and deleted by name, and no other.
 			{authzv1.ResourceAttributes{Verb: "get", Group: "rbac.authorization.k8s.io", Resource: "rolebindings", Namespace: "team-a", Name: "team-a-admins"}, true},
 			{authzv1.ResourceAttributes{Verb: "list", Group: "rbac.authorization.k8s.io", Resource: "rolebindings"}, false},
+			// The forge credential's grant is watched by name, never written.
+			{authzv1.ResourceAttributes{Verb: "list", Group: "rbac.authorization.k8s.io", Resource: "rolebindings", Name: install.ForgeCredentialGrantName}, true},
+			{authzv1.ResourceAttributes{Verb: "watch", Group: "rbac.authorization.k8s.io", Resource: "rolebindings", Name: install.ForgeCredentialGrantName}, true},
+			{authzv1.ResourceAttributes{Verb: "list", Group: "rbac.authorization.k8s.io", Resource: "roles", Name: install.ForgeCredentialGrantName}, true},
+			{authzv1.ResourceAttributes{Verb: "watch", Group: "rbac.authorization.k8s.io", Resource: "roles", Name: install.ForgeCredentialGrantName}, true},
+			{authzv1.ResourceAttributes{Verb: "list", Group: "rbac.authorization.k8s.io", Resource: "roles"}, false},
+			{authzv1.ResourceAttributes{Verb: "get", Group: "rbac.authorization.k8s.io", Resource: "roles", Namespace: "dotvirt", Name: install.ForgeCredentialGrantName}, true},
+			{authzv1.ResourceAttributes{Verb: "get", Group: "rbac.authorization.k8s.io", Resource: "roles", Namespace: "dotvirt", Name: "admin"}, false},
+			// Before minting into an admin-named credential, the operator asks
+			// whether it may store it.
+			{authzv1.ResourceAttributes{Verb: "create", Group: "authorization.k8s.io", Resource: "selfsubjectaccessreviews"}, true},
+			{authzv1.ResourceAttributes{Verb: "create", Group: "rbac.authorization.k8s.io", Resource: "rolebindings", Namespace: "dotvirt", Name: install.ForgeCredentialGrantName}, false},
+			{authzv1.ResourceAttributes{Verb: "create", Group: "rbac.authorization.k8s.io", Resource: "roles", Namespace: "dotvirt", Name: install.ForgeCredentialGrantName}, false},
 			{authzv1.ResourceAttributes{Verb: "watch", Group: "rbac.authorization.k8s.io", Resource: "rolebindings"}, false},
 			{authzv1.ResourceAttributes{Verb: "create", Group: "rbac.authorization.k8s.io", Resource: "rolebindings", Namespace: "argocd", Name: install.SyncRequestName}, true},
 			{authzv1.ResourceAttributes{Verb: "create", Group: "rbac.authorization.k8s.io", Resource: "rolebindings", Namespace: "team-a"}, false},
@@ -153,6 +167,34 @@ func TestEnvtest(t *testing.T) {
 			// Proved by this row alone: the operator also holds the role's one rule,
 			// so the escalation check would admit its binding without bind.
 			{authzv1.ResourceAttributes{Verb: "bind", Group: "rbac.authorization.k8s.io", Resource: "clusterroles", Name: install.SyncRequestName}, true},
+			// Secrets are never listed or watched, and read or written by name.
+			{authzv1.ResourceAttributes{Verb: "list", Resource: "secrets"}, false},
+			{authzv1.ResourceAttributes{Verb: "watch", Resource: "secrets"}, false},
+			{authzv1.ResourceAttributes{Verb: "get", Resource: "secrets", Namespace: "argocd", Name: install.ArgoSecretName}, true},
+			{authzv1.ResourceAttributes{Verb: "patch", Resource: "secrets", Namespace: "dotvirt", Name: install.SessionSecretName}, true},
+			{authzv1.ResourceAttributes{Verb: "get", Resource: "secrets", Namespace: "kube-system", Name: "some-token"}, false},
+			{authzv1.ResourceAttributes{Verb: "create", Resource: "secrets", Namespace: "kube-system", Name: "some-token"}, false},
+			{authzv1.ResourceAttributes{Verb: "get", Resource: "secrets", Namespace: "dotvirt", Name: "byo-creds"}, false},
+			// ConfigMaps, all by name: argocd-cm listed and watched by name for the
+			// cache, Argo's RBAC settings never touched.
+			{authzv1.ResourceAttributes{Verb: "list", Resource: "configmaps"}, false},
+			{authzv1.ResourceAttributes{Verb: "list", Resource: "configmaps", Name: "argocd-cm"}, true},
+			{authzv1.ResourceAttributes{Verb: "watch", Resource: "configmaps", Name: "argocd-cm"}, true},
+			{authzv1.ResourceAttributes{Verb: "patch", Resource: "configmaps", Namespace: "argocd", Name: "argocd-tls-certs-cm"}, true},
+			{authzv1.ResourceAttributes{Verb: "get", Resource: "configmaps", Namespace: "argocd", Name: "argocd-rbac-cm"}, false},
+			{authzv1.ResourceAttributes{Verb: "patch", Resource: "configmaps", Namespace: "argocd", Name: "argocd-rbac-cm"}, false},
+			// Bindings, the operand and the Argo objects: the names the install
+			// renders, never listed.
+			{authzv1.ResourceAttributes{Verb: "create", Group: "rbac.authorization.k8s.io", Resource: "clusterrolebindings", Name: "dotvirt"}, true},
+			{authzv1.ResourceAttributes{Verb: "create", Group: "rbac.authorization.k8s.io", Resource: "clusterrolebindings", Name: "escalation-probe"}, false},
+			{authzv1.ResourceAttributes{Verb: "list", Group: "rbac.authorization.k8s.io", Resource: "clusterrolebindings"}, false},
+			{authzv1.ResourceAttributes{Verb: "create", Resource: "serviceaccounts", Namespace: "kube-system", Name: "builder"}, false},
+			{authzv1.ResourceAttributes{Verb: "list", Resource: "services"}, false},
+			{authzv1.ResourceAttributes{Verb: "create", Group: "apps", Resource: "deployments", Namespace: "dotvirt", Name: "other"}, false},
+			{authzv1.ResourceAttributes{Verb: "list", Group: "networking.k8s.io", Resource: "networkpolicies"}, false},
+			{authzv1.ResourceAttributes{Verb: "create", Group: "argoproj.io", Resource: "applicationsets", Namespace: "argocd", Name: install.ApplicationSetName}, true},
+			{authzv1.ResourceAttributes{Verb: "list", Group: "argoproj.io", Resource: "applicationsets"}, false},
+			{authzv1.ResourceAttributes{Verb: "create", Group: "argoproj.io", Resource: "applications", Namespace: "argocd", Name: "other"}, false},
 		} {
 			res, err := kube.AuthorizationV1().SelfSubjectAccessReviews().Create(ctx,
 				&authzv1.SelfSubjectAccessReview{Spec: authzv1.SelfSubjectAccessReviewSpec{ResourceAttributes: &c.attrs}}, metav1.CreateOptions{})
@@ -164,14 +206,15 @@ func TestEnvtest(t *testing.T) {
 			}
 		}
 		// The bind grant is what lets the operator create its bindings without
-		// holding the operand roles' rules; a binding to any other role is refused.
-		crb := &rbacv1.ClusterRoleBinding{
-			ObjectMeta: metav1.ObjectMeta{Name: "escalation-probe"},
-			RoleRef:    rbacv1.RoleRef{APIGroup: rbacv1.GroupName, Kind: "ClusterRole", Name: "cluster-admin"},
-			Subjects:   []rbacv1.Subject{{Kind: rbacv1.UserKind, Name: operatorUser}},
-		}
-		if _, err := kube.RbacV1().ClusterRoleBindings().Create(ctx, crb, metav1.CreateOptions{}); !apierrors.IsForbidden(err) {
-			t.Errorf("binding cluster-admin: err=%v, want Forbidden", err)
+		// holding the operand roles' rules; under a name it may create, as it
+		// creates them (server-side apply), a binding to any other role is
+		// refused by the escalation check.
+		crb := rbacv1ac.ClusterRoleBinding("dotvirt").
+			WithRoleRef(rbacv1ac.RoleRef().WithAPIGroup(rbacv1.GroupName).WithKind("ClusterRole").WithName("cluster-admin")).
+			WithSubjects(rbacv1ac.Subject().WithKind(rbacv1.UserKind).WithName(operatorUser))
+		if _, err := kube.RbacV1().ClusterRoleBindings().Apply(ctx, crb, metav1.ApplyOptions{FieldManager: "dotvirt-operator"}); !apierrors.IsForbidden(err) ||
+			!strings.Contains(err.Error(), "attempting to grant RBAC permissions not currently held") {
+			t.Errorf("binding cluster-admin: err=%v, want the escalation check's Forbidden", err)
 		}
 		// Under the one name it may create, as the operator creates it (server-side
 		// apply, authorized with that name), a RoleBinding to another role is still
@@ -604,6 +647,56 @@ func TestEnvtest(t *testing.T) {
 		}
 	})
 
+	t.Run("a moved ArgoCD namespace is swept by name", func(t *testing.T) {
+		dv := &dotvirtv1alpha1.Dotvirt{}
+		if err := admin.Get(ctx, types.NamespacedName{Namespace: "dotvirt", Name: "x"}, dv); err != nil {
+			t.Fatal(err)
+		}
+		mustCreate(t, admin, &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "argocd-moved"}})
+		moveTo := func(ns string) {
+			value := "null"
+			if ns != "" {
+				value = strconv.Quote(ns)
+			}
+			patch := fmt.Appendf(nil, `{"spec":{"argocd":{"namespace":%s}}}`, value)
+			if err := admin.Patch(ctx, dv, client.RawPatch(types.MergePatchType, patch)); err != nil {
+				t.Fatal(err)
+			}
+		}
+		// What the install writes in the ArgoCD namespace.
+		written := func(ns string) int {
+			n := 0
+			for _, obj := range []client.Object{
+				&rbacv1.RoleBinding{ObjectMeta: metav1.ObjectMeta{Name: install.SyncRequestName}},
+				&corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Name: install.AppsetConfigMapName}},
+				&corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: install.AppsetSecretName}},
+				argoObj("ApplicationSet", "", install.ApplicationSetName, nil),
+				argoObj("AppProject", "", "dotvirt-p-team-a", nil),
+			} {
+				if admin.Get(ctx, types.NamespacedName{Namespace: ns, Name: obj.GetName()}, obj) == nil {
+					n++
+				}
+			}
+			return n
+		}
+		recorded := func() string {
+			got := &dotvirtv1alpha1.Dotvirt{}
+			if admin.Get(ctx, client.ObjectKeyFromObject(dv), got) != nil {
+				return ""
+			}
+			return strings.Join(got.Status.ArgoNamespaces, ",")
+		}
+		eventually(t, "argocd recorded", func() bool { return recorded() == "argocd" && written("argocd") == 5 })
+		moveTo("argocd-moved")
+		eventually(t, "argocd swept after the move", func() bool {
+			return recorded() == "argocd-moved" && written("argocd-moved") == 5 && written("argocd") == 0
+		})
+		moveTo("")
+		eventually(t, "argocd-moved swept after the move back", func() bool {
+			return recorded() == "argocd" && written("argocd") == 5 && written("argocd-moved") == 0
+		})
+	})
+
 	// envtest runs no aggregation controller: admin takes the rules OpenShift
 	// aggregates into it (testdata, read from a cluster), RoleBinding writes
 	// included, NetworkAttachmentDefinition writes and EgressFirewalls not.
@@ -646,6 +739,84 @@ func TestEnvtest(t *testing.T) {
 		}
 		return res.Status.Allowed
 	}
+
+	t.Run("an admin's credential grant reaches that one Secret only", func(t *testing.T) {
+		// The operator's ServiceAccount holds nothing else here (the suite binds
+		// its role to a user), so each review sees the grant alone.
+		account := "system:serviceaccount:dotvirt-operator:" + install.OperatorServiceAccount
+		groups := []string{"system:serviceaccounts", "system:serviceaccounts:dotvirt-operator"}
+		for _, c := range []struct {
+			ns      string
+			managed bool
+		}{{"cred-byo", false}, {"cred-managed", true}} {
+			mustCreate(t, admin, &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: c.ns}})
+			// Not the install the deletion subtest takes down: its labels differ.
+			// The owner never exists, and envtest runs no garbage collector.
+			dv := &dotvirtv1alpha1.Dotvirt{ObjectMeta: metav1.ObjectMeta{Name: "cred", Namespace: c.ns, UID: "0f7c1d2e-cred"}}
+			dv.Spec.Forge.CredentialsSecret, dv.Spec.Forge.Managed = "byo-creds", c.managed
+			role, binding := install.ForgeCredentialGrant(dv, "dotvirt-operator")
+			// Either half landing (and, below, going) is a pass at once, not one
+			// on the drift timer: the binding first here, its Role after.
+			before := passes.Load()
+			mustCreate(t, admin, binding)
+			soon(t, "a pass after the grant's binding lands", func() bool { return passes.Load() > before })
+			before = passes.Load()
+			mustCreate(t, admin, role)
+			soon(t, "a pass after the grant's Role lands", func() bool { return passes.Load() > before })
+			for _, r := range []struct {
+				verb, ns, name string
+				want           bool
+			}{
+				{"get", c.ns, "byo-creds", true},
+				{"create", c.ns, "byo-creds", c.managed},
+				{"patch", c.ns, "byo-creds", c.managed},
+				{"update", c.ns, "byo-creds", false},
+				{"delete", c.ns, "byo-creds", false},
+				{"get", c.ns, install.SessionSecretName, false},
+				{"create", c.ns, "other", false},
+				{"list", c.ns, "", false},
+				{"watch", c.ns, "", false},
+				{"get", "dotvirt", "byo-creds", false},
+				{"get", "kube-system", "byo-creds", false},
+			} {
+				if got := review(account, groups, authzv1.ResourceAttributes{Verb: r.verb, Resource: "secrets", Namespace: r.ns, Name: r.name}); got != r.want {
+					t.Errorf("%s: %s secrets %s/%s: allowed=%v, want %v", c.ns, r.verb, r.ns, r.name, got, r.want)
+				}
+			}
+		}
+		before := passes.Load()
+		if err := admin.Delete(ctx, &rbacv1.RoleBinding{ObjectMeta: metav1.ObjectMeta{Name: install.ForgeCredentialGrantName, Namespace: "cred-byo"}}); err != nil {
+			t.Fatal(err)
+		}
+		soon(t, "a pass after the grant is revoked", func() bool { return passes.Load() > before })
+
+		// A half grant (the Role alone) is what GrantIncomplete reports: its
+		// replace commands, run as a cluster admin would, end with the grant.
+		mustCreate(t, admin, &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "cred-half"}})
+		dv := &dotvirtv1alpha1.Dotvirt{ObjectMeta: metav1.ObjectMeta{Name: "cred", Namespace: "cred-half", UID: "0f7c1d2e-cred"}}
+		dv.Spec.Forge.CredentialsSecret = "byo-creds"
+		role, _ := install.ForgeCredentialGrant(dv, "dotvirt-operator")
+		mustCreate(t, admin, role)
+		clusterAdmin, err := env.AddUser(envtest.User{Name: "grant-admin", Groups: []string{"system:masters"}}, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		kubectl, err := clusterAdmin.Kubectl()
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, cmd := range install.ForgeCredentialReplaceCommands(dv, "dotvirt-operator") {
+			stdout, stderr, err := kubectl.Run(strings.Fields(cmd)[1:]...)
+			if err != nil {
+				out, _ := io.ReadAll(stdout)
+				msg, _ := io.ReadAll(stderr)
+				t.Fatalf("%s: %v: %s %s", cmd, err, out, msg)
+			}
+		}
+		if !review(account, groups, authzv1.ResourceAttributes{Verb: "get", Resource: "secrets", Namespace: "cred-half", Name: "byo-creds"}) {
+			t.Error("the replace commands left the operator without the grant")
+		}
+	})
 
 	t.Run("a project's sync account holds its project's rights only", func(t *testing.T) {
 		mustCreate(t, admin, projectNS("team-c", "team-c", "https://forge.example/dotvirt/team-c.git"))
@@ -879,15 +1050,15 @@ func TestEnvtest(t *testing.T) {
 
 	t.Run("deletion cleans up as the operator", func(t *testing.T) {
 		dv := &dotvirtv1alpha1.Dotvirt{ObjectMeta: metav1.ObjectMeta{Name: "x", Namespace: "dotvirt"}}
-		// A name only an older version rendered: the name-scoped delete grant
-		// refuses it, which must not wedge deletion.
+		// A name only an older version rendered: prune reads only the names this
+		// one renders, so it stays.
 		legacy := &rbacv1.ClusterRoleBinding{
 			ObjectMeta: metav1.ObjectMeta{Name: "dotvirt-legacy", Labels: install.Labels(dv)},
 			RoleRef:    rbacv1.RoleRef{APIGroup: rbacv1.GroupName, Kind: "ClusterRole", Name: "dotvirt"},
 		}
 		mustCreate(t, admin, legacy)
-		// Our instance label, another install's namespace: prune lists it, and
-		// OwnedBy is what keeps the unscoped AppProject delete off it.
+		// Our instance label, another install's namespace: prune lists AppProjects
+		// in the ArgoCD namespace, and OwnedBy keeps the unscoped delete off it.
 		foreign := argoObj("AppProject", "argocd", "dotvirt-p-foreign",
 			map[string]string{install.InstanceLabel: dv.Name, install.InstanceNamespaceLabel: "elsewhere"})
 		mustCreate(t, admin, foreign)
@@ -978,7 +1149,7 @@ func TestEnvtest(t *testing.T) {
 			}
 		}
 		if len(left) != 2 || !left["/"+legacy.Name] || !left["argocd/"+foreign.GetName()] {
-			t.Errorf("left after deletion: %v, want only the refused legacy binding and the other install's AppProject", left)
+			t.Errorf("left after deletion: %v, want only the legacy binding and the other install's AppProject", left)
 		}
 	})
 }
@@ -1042,7 +1213,7 @@ func runManager(t *testing.T, cfg *rest.Config, scheme *runtime.Scheme) (*atomic
 		Metrics:                metricsserver.Options{BindAddress: "0"},
 		HealthProbeBindAddress: "0",
 		Cache:                  cache.Options{ByObject: CacheByObject(platform.Kubernetes)},
-		Client:                 client.Options{Cache: &client.CacheOptions{DisableFor: []client.Object{&corev1.ConfigMap{}, &corev1.Secret{}}}},
+		Client:                 client.Options{Cache: &client.CacheOptions{DisableFor: []client.Object{&corev1.ConfigMap{}, &corev1.Secret{}, &rbacv1.RoleBinding{}, &rbacv1.Role{}}}},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -1165,6 +1336,18 @@ func settle(t *testing.T, c client.Client, objs ...client.Object) {
 		}
 		return time.Since(stableSince) > 1500*time.Millisecond
 	})
+}
+
+// soon is eventually for what a watch delivers: seconds, well inside any timer.
+func soon(t *testing.T, what string, cond func() bool) {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for !cond() {
+		if time.Now().After(deadline) {
+			t.Fatalf("not within 5s: %s", what)
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
 }
 
 func eventually(t *testing.T, what string, cond func() bool) {
