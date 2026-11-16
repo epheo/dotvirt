@@ -239,6 +239,7 @@ rules:
   - dotvirt-platform-network-admin
   - dotvirt-platform-sync
   - dotvirt-storage-catalog
+  - dotvirt-sync-request
   resources:
   - clusterroles
   verbs:
@@ -248,7 +249,17 @@ rules:
   resources:
   - rolebindings
   verbs:
+  - create
   - get
+- apiGroups:
+  - rbac.authorization.k8s.io
+  resourceNames:
+  - dotvirt-sync-request
+  resources:
+  - rolebindings
+  verbs:
+  - delete
+  - patch
 - apiGroups:
   - route.openshift.io
   resources:

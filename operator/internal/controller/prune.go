@@ -16,6 +16,7 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -80,6 +81,9 @@ const (
 type pruneScope struct {
 	list  func() client.ObjectList
 	where pruneWhere
+	// name, when set, is the one name the install renders of a kind the
+	// operator may not list: prune reads that name in each namespace instead.
+	name string
 }
 
 func typedList(l client.ObjectList) func() client.ObjectList {
@@ -101,21 +105,22 @@ func unstructuredList(gvk schema.GroupVersionKind) func() client.ObjectList {
 // copies a transient read failure must not delete.
 func pruneScopes() []pruneScope {
 	scopes := []pruneScope{
-		{typedList(&appsv1.DeploymentList{}), installNS},
-		{typedList(&corev1.ServiceList{}), installNS},
-		{typedList(&corev1.ServiceAccountList{}), installNS},
-		{typedList(&networkingv1.NetworkPolicyList{}), installNS},
-		{typedList(&networkingv1.IngressList{}), installNS},
-		{unstructuredList(install.RouteGVK), installNS},
-		{unstructuredList(install.HTTPRouteGVK), installNS},
-		{typedList(&rbacv1.ClusterRoleBindingList{}), anywhere},
+		{list: typedList(&appsv1.DeploymentList{}), where: installNS},
+		{list: typedList(&corev1.ServiceList{}), where: installNS},
+		{list: typedList(&corev1.ServiceAccountList{}), where: installNS},
+		{list: typedList(&networkingv1.NetworkPolicyList{}), where: installNS},
+		{list: typedList(&networkingv1.IngressList{}), where: installNS},
+		{list: unstructuredList(install.RouteGVK), where: installNS},
+		{list: unstructuredList(install.HTTPRouteGVK), where: installNS},
+		{list: typedList(&rbacv1.ClusterRoleBindingList{}), where: anywhere},
 	}
 	for _, kind := range []string{"AppProject", "Application", "ApplicationSet"} {
-		scopes = append(scopes, pruneScope{unstructuredList(install.ArgoGVK(kind)), anywhere})
+		scopes = append(scopes, pruneScope{list: unstructuredList(install.ArgoGVK(kind)), where: anywhere})
 	}
 	return append(scopes,
-		pruneScope{typedList(&corev1.SecretList{}), writtenNS},
-		pruneScope{typedList(&corev1.ConfigMapList{}), writtenNS},
+		pruneScope{list: typedList(&corev1.SecretList{}), where: writtenNS},
+		pruneScope{list: typedList(&corev1.ConfigMapList{}), where: writtenNS},
+		pruneScope{list: typedList(&rbacv1.RoleBindingList{}), where: writtenNS, name: install.SyncRequestName},
 	)
 }
 
@@ -207,18 +212,7 @@ func (r *DotvirtReconciler) prune(ctx context.Context, dv *dotvirtv1alpha1.Dotvi
 }
 
 func (r *DotvirtReconciler) pruneList(ctx context.Context, dv *dotvirtv1alpha1.Dotvirt, sc pruneScope, ns string, rendered renderSet, written map[string]bool) error {
-	list := sc.list()
-	opts := []client.ListOption{client.MatchingLabels{install.InstanceLabel: dv.Name}}
-	if ns != "" {
-		opts = append(opts, client.InNamespace(ns))
-	}
-	if err := r.reader().List(ctx, list, opts...); err != nil {
-		if meta.IsNoMatchError(err) {
-			return nil
-		}
-		return err
-	}
-	items, err := meta.ExtractList(list)
+	items, err := r.pruneCandidates(ctx, dv, sc, ns)
 	if err != nil {
 		return err
 	}
@@ -254,6 +248,42 @@ func (r *DotvirtReconciler) pruneList(ctx context.Context, dv *dotvirtv1alpha1.D
 		}
 	}
 	return nil
+}
+
+// pruneCandidates are the objects of sc's kind in ns ("" every namespace) that
+// carry this install's instance label: listed, or the one name read.
+func (r *DotvirtReconciler) pruneCandidates(ctx context.Context, dv *dotvirtv1alpha1.Dotvirt, sc pruneScope, ns string) ([]runtime.Object, error) {
+	list := sc.list()
+	if sc.name != "" {
+		gvk, err := apiutil.GVKForObject(list, r.Scheme)
+		if err != nil {
+			return nil, err
+		}
+		obj := &unstructured.Unstructured{}
+		obj.SetGroupVersionKind(gvk.GroupVersion().WithKind(strings.TrimSuffix(gvk.Kind, "List")))
+		err = r.reader().Get(ctx, client.ObjectKey{Namespace: ns, Name: sc.name}, obj)
+		if apierrors.IsNotFound(err) || meta.IsNoMatchError(err) {
+			return nil, nil
+		}
+		if err != nil {
+			return nil, err
+		}
+		if obj.GetLabels()[install.InstanceLabel] != dv.Name {
+			return nil, nil
+		}
+		return []runtime.Object{obj}, nil
+	}
+	opts := []client.ListOption{client.MatchingLabels{install.InstanceLabel: dv.Name}}
+	if ns != "" {
+		opts = append(opts, client.InNamespace(ns))
+	}
+	if err := r.reader().List(ctx, list, opts...); err != nil {
+		if meta.IsNoMatchError(err) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return meta.ExtractList(list)
 }
 
 // reader is the uncached API reader; tests leave APIReader nil and read the fake.

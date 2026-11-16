@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
+	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -463,5 +465,36 @@ func TestResyncHidesTheSAStatus(t *testing.T) {
 	_, err := s.Resync(context.Background(), "alice", "prod", "vm-a")
 	if apierrors.IsUnauthorized(err) || !errors.Is(err, model.ErrUnavailable) {
 		t.Fatalf("err = %v; want ErrUnavailable with the SA status dropped", err)
+	}
+}
+
+// The SA may patch Applications only in the ArgoCD namespace: one elsewhere is
+// refused with a reason, never patched, and never refreshed.
+func TestApplicationWritesStayInTheArgoNamespace(t *testing.T) {
+	in := dotvirtApp("argocd", "team-a", "https://forge/team-a.git",
+		[]any{vmResource("prod", "vm-a", "Synced", "Healthy")})
+	out := dotvirtApp("elsewhere", "team-b", "https://forge/team-a.git",
+		[]any{vmResource("dev", "vm-b", "Synced", "Healthy")})
+	dyn := dynamicfake.NewSimpleDynamicClient(runtime.NewScheme(), in, out)
+	var patched []string
+	dyn.PrependReactor("patch", "applications", func(a k8stesting.Action) (bool, runtime.Object, error) {
+		patched = append(patched, a.GetNamespace()+"/"+a.(k8stesting.PatchAction).GetName())
+		return false, nil, nil
+	})
+	s := NewSnapshot(&Client{dyn: dyn}, nil).WithWriteNamespace("argocd")
+	_ = s.apps.Add(in)
+	_ = s.apps.Add(out)
+	s.synced.Mark()
+
+	_, err := s.Resync(context.Background(), "alice", "dev", "vm-b")
+	if !errors.Is(err, model.ErrUnavailable) || !strings.Contains(err.Error(), "only in the ArgoCD namespace argocd") {
+		t.Errorf("Resync outside the ArgoCD namespace: err = %v, want ErrUnavailable naming it", err)
+	}
+	if _, err := s.Resync(context.Background(), "alice", "prod", "vm-a"); err != nil {
+		t.Errorf("Resync in the ArgoCD namespace: %v", err)
+	}
+	s.RefreshForRepo(context.Background(), "https://forge/team-a")
+	if want := []string{"argocd/team-a", "argocd/team-a"}; !slices.Equal(patched, want) {
+		t.Errorf("patched %v, want %v", patched, want)
 	}
 }

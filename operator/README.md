@@ -74,11 +74,15 @@ owns one status condition; a phase that fails or waits records why there, so
    then, without holding back the later phases. Single replica, see below.
 5. **GitOps wiring** (`ArgoReady`): mirrors the plugin token into the ArgoCD
    namespace and trusts the managed forge's Route there (below), then applies the
-   bindings of the three static operand ClusterRoles (shipped in
+   bindings of the static operand ClusterRoles (shipped in
    `config/rbac/operand_roles.yaml`; the operator only `bind`s them, never authors
    roles), one AppProject per tenant project plus `dotvirt-platform`, the per-project
    ApplicationSet, the static platform Application and the Argo repo-credentials.
    These live outside the CR's namespace, so a finalizer reclaims them on delete.
+   dotvirt's own ServiceAccount reads Applications cluster-wide but may patch them
+   only in the ArgoCD namespace (RoleBinding `dotvirt-sync-request`): a one-VM sync
+   request and the refresh annotation, never spec. An Application elsewhere is
+   not resynced or refreshed by dotvirt; Argo's own webhook and poll still apply.
    A tenant AppProject (`dotvirt-p-<project>`) is derived from the namespaces
    labeled `dotvirt.io/project=<project>`: those namespaces are its only
    destinations and the `dotvirt.io/repo` they name its only source, so a manifest
@@ -139,9 +143,10 @@ ArgoCD namespace, a managed forge switched off. A tenant AppProject whose projec
 is gone, and the shared `dotvirt-tenants` AppProject of earlier versions, are kept
 while an Application still references them (the former admitting nothing), then
 pruned.
-Secrets and ConfigMaps are swept only in the namespaces the install writes (the
-ArgoCD namespace, and a former one still holding its argoproj objects), so a
-labelled copy an admin made elsewhere survives.
+Secrets, ConfigMaps and the `dotvirt-sync-request` RoleBinding are swept only in
+the namespaces the install writes (the ArgoCD namespace, and a former one still
+holding its argoproj objects), so a labelled copy an admin made elsewhere survives.
+The RoleBinding is read by name there: the operator may not list RoleBindings.
 Never pruned: anything without the labels, and Secrets, PersistentVolumeClaims and
 the CA ConfigMaps in the install namespace (generated keys, the minted forge token
 and the forge's git data are state, not render). A pass that halts prunes nothing.

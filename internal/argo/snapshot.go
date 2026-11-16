@@ -40,6 +40,9 @@ type Snapshot struct {
 	dirty chan struct{}
 	// view is the latest derivation, shared by every identity's frame.
 	view atomic.Pointer[driftView]
+	// writeNS is the only namespace whose Applications the SA may patch
+	// (WithWriteNamespace); "" leaves the refusal to RBAC.
+	writeNS string
 }
 
 // driftView is one derivation of the Application store: the per-object map, its
@@ -60,6 +63,20 @@ type driftView struct {
 // nil (signalling disabled, e.g. in tests).
 func NewSnapshot(sa *Client, bus *eventbus.Bus) *Snapshot {
 	return &Snapshot{sa: sa, apps: reflect.NewIndexer(), bus: bus, dirty: make(chan struct{}, 1)}
+}
+
+// WithWriteNamespace names the ArgoCD namespace, the only one where the
+// operator grants the SA patch on Applications: Resync refuses an Application
+// elsewhere with a reason instead of a 403, and RefreshForRepo skips it. Set
+// once, before Run.
+func (s *Snapshot) WithWriteNamespace(ns string) *Snapshot {
+	s.writeNS = ns
+	return s
+}
+
+// writable reports whether the SA may patch Applications in namespace.
+func (s *Snapshot) writable(namespace string) bool {
+	return s.writeNS == "" || namespace == s.writeNS
 }
 
 // Run starts the Applications reflector and the deriver; both stop when ctx is
@@ -423,6 +440,10 @@ func (s *Snapshot) Resync(ctx context.Context, username, namespace, name string)
 			return model.ResyncResult{}, fmt.Errorf("%w: no ArgoCD Application manages %s/%s", model.ErrNotFound, namespace, name)
 		}
 	}
+	if !s.writable(ref.Namespace) {
+		return model.ResyncResult{}, fmt.Errorf("%w: Application %s/%s manages %s, but dotvirt may request syncs only in the ArgoCD namespace %s",
+			model.ErrUnavailable, ref.Namespace, ref.Name, name, s.writeNS)
+	}
 	revision := ref.TargetRevision
 	if revision == "" {
 		revision = "HEAD"
@@ -473,9 +494,11 @@ func resyncPatch(username, revision, namespace, name string) ([]byte, error) {
 	return json.Marshal(op)
 }
 
-// RefreshForRepo asks ArgoCD to re-pull git and re-sync every Application sourcing
-// any of repoURLs - the deterministic "pick up on push" path, driven by the forge
-// webhook dotvirt already receives and HMAC-verifies. It matches spec.source.repoURL
+// RefreshForRepo asks ArgoCD to re-pull git and re-sync every Application in the
+// write namespace sourcing any of repoURLs - the deterministic "pick up on push"
+// path, driven by the forge webhook dotvirt already receives and HMAC-verifies.
+// Applications elsewhere are skipped: the SA may not patch them, and Argo's own
+// webhook and poll still refresh them. It matches spec.source.repoURL
 // (and any spec.sources[]) against the pushed URLs by canonical form, then sets the
 // argocd.argoproj.io/refresh=hard annotation: a hard refresh re-pulls git, and with
 // auto-sync (every dotvirt-generated app) the resulting OutOfSync syncs itself.
@@ -495,7 +518,7 @@ func (s *Snapshot) RefreshForRepo(ctx context.Context, repoURLs ...string) {
 		return
 	}
 	for _, app := range reflect.List(s.apps) {
-		if !appSourcesAny(app.Object, want) {
+		if !s.writable(app.GetNamespace()) || !appSourcesAny(app.Object, want) {
 			continue
 		}
 		patch := []byte(`{"metadata":{"annotations":{"argocd.argoproj.io/refresh":"hard"}}}`)

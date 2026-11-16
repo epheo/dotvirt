@@ -127,7 +127,16 @@ func TestPruneDeletesOnlyUnrenderedInstanceObjects(t *testing.T) {
 		&corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: "dotvirt-forge", Namespace: "admin-copy", Labels: mine}},
 		&corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Name: "dotvirt-appset-plugin", Namespace: "admin-copy", Labels: mine}},
 		&corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "team-a", Labels: map[string]string{install.ProjectLabel: "team-a"}}},
-	).Build()
+		syncRequestBinding(oldArgo, mine),
+		syncRequestBinding("admin-copy", mine),
+	).WithInterceptorFuncs(interceptor.Funcs{
+		List: func(ctx context.Context, cl client.WithWatch, list client.ObjectList, opts ...client.ListOption) error {
+			if _, ok := list.(*rbacv1.RoleBindingList); ok {
+				t.Error("prune listed RoleBindings; the operator may only read its one by name")
+			}
+			return cl.List(ctx, list, opts...)
+		},
+	}).Build()
 	r := newReconciler(c, depsOK)
 	reconcileOnce(t, r, dv)
 
@@ -145,6 +154,7 @@ func TestPruneDeletesOnlyUnrenderedInstanceObjects(t *testing.T) {
 		{argoObj("AppProject", "", "", nil), "argocd", "dotvirt-tenants"},
 		{&corev1.Secret{}, oldArgo, install.AppsetSecretName},
 		{&corev1.ConfigMap{}, oldArgo, "dotvirt-appset-plugin"},
+		{&rbacv1.RoleBinding{}, oldArgo, install.SyncRequestName},
 	} {
 		if exists(t, c, gone.obj, gone.ns, gone.name) {
 			t.Errorf("%s/%s survived prune", gone.ns, gone.name)
@@ -160,6 +170,8 @@ func TestPruneDeletesOnlyUnrenderedInstanceObjects(t *testing.T) {
 		{&corev1.Secret{}, oldArgo, "foreign"},
 		{&corev1.Secret{}, "admin-copy", "dotvirt-forge"},
 		{&corev1.ConfigMap{}, "admin-copy", "dotvirt-appset-plugin"},
+		{&rbacv1.RoleBinding{}, "admin-copy", install.SyncRequestName},
+		{&rbacv1.RoleBinding{}, "argocd", install.SyncRequestName},
 		{argoObj("AppProject", "", "", nil), "argocd", "dotvirt-p-team-a"},
 		{argoObj("ApplicationSet", "", "", nil), "argocd", "dotvirt-projects"},
 	} {
@@ -628,6 +640,54 @@ func TestPatchGrantNamesEveryRenderedExposure(t *testing.T) {
 	for gr := range scoped {
 		if !seen[gr] {
 			t.Errorf("no pass renders %s, so its grant goes unchecked", gr)
+		}
+	}
+}
+
+func syncRequestBinding(ns string, labels map[string]string) *rbacv1.RoleBinding {
+	return &rbacv1.RoleBinding{
+		ObjectMeta: metav1.ObjectMeta{Name: install.SyncRequestName, Namespace: ns, Labels: labels},
+		RoleRef:    rbacv1.RoleRef{APIGroup: rbacv1.GroupName, Kind: "ClusterRole", Name: install.SyncRequestName},
+	}
+}
+
+// dotvirt's ServiceAccount reads Applications everywhere but patches them only
+// in the ArgoCD namespace: a cluster-wide patch would let it rewrite any
+// Application, including ones it does not own.
+func TestDotvirtPatchesApplicationsOnlyInTheArgoNamespace(t *testing.T) {
+	roles := map[string]*rbacv1.ClusterRole{}
+	for _, r := range readClusterRoles(t, filepath.Join("..", "..", "config", "rbac", "operand_roles.yaml")) {
+		roles[r.Name] = r
+	}
+	for _, rule := range roles["dotvirt"].Rules {
+		if slices.Contains(rule.APIGroups, "argoproj.io") && !slices.Equal(rule.Verbs, []string{"get", "list", "watch"}) {
+			t.Errorf("ClusterRole dotvirt grants %v on %v, want reads only", rule.Verbs, rule.Resources)
+		}
+	}
+	sync := roles[install.SyncRequestName]
+	if sync == nil || len(sync.Rules) != 1 || !slices.Equal(sync.Rules[0].APIGroups, []string{"argoproj.io"}) ||
+		!slices.Equal(sync.Rules[0].Resources, []string{"applications"}) || !slices.Equal(sync.Rules[0].Verbs, []string{"patch"}) {
+		t.Errorf("%s = %+v, want patch on applications alone", install.SyncRequestName, sync)
+	}
+
+	dv := testCR()
+	c := testBuilder(t).WithObjects(dv).Build()
+	reconcileOnce(t, newReconciler(c, depsOK), dv)
+	var rb rbacv1.RoleBinding
+	if !exists(t, c, &rb, "argocd", install.SyncRequestName) {
+		t.Fatalf("no RoleBinding %s in the ArgoCD namespace", install.SyncRequestName)
+	}
+	want := []rbacv1.Subject{{Kind: "ServiceAccount", Name: install.AppName, Namespace: dv.Namespace}}
+	if rb.RoleRef.Kind != "ClusterRole" || rb.RoleRef.Name != install.SyncRequestName || !slices.Equal(rb.Subjects, want) {
+		t.Errorf("RoleBinding = %+v %+v, want %s to dotvirt's ServiceAccount", rb.RoleRef, rb.Subjects, install.SyncRequestName)
+	}
+	var crbs rbacv1.ClusterRoleBindingList
+	if err := c.List(t.Context(), &crbs); err != nil {
+		t.Fatal(err)
+	}
+	for _, b := range crbs.Items {
+		if b.RoleRef.Name == install.SyncRequestName {
+			t.Errorf("ClusterRoleBinding %s binds %s cluster-wide", b.Name, install.SyncRequestName)
 		}
 	}
 }

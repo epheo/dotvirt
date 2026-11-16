@@ -52,6 +52,7 @@ func (r *DotvirtReconciler) reconcileArgo(ctx context.Context, dv *dotvirtv1alph
 	appset := install.ApplicationSet(dv, argoNS, platformNS, tenants.unconfined)
 	objs := []client.Object{
 		install.DotvirtClusterRoleBinding(dv),
+		install.SyncRequestRoleBinding(dv, argoNS),
 		install.ArgocdReadClusterRoleBinding(dv, argoNS, argoSA),
 		install.PlatformNetworkAdminBinding(dv),
 	}

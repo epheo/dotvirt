@@ -163,7 +163,9 @@ type Config struct {
 	ArgoEnabled bool // enable ArgoCD drift reads + re-sync
 	// ArgoNamespace holds the per-project sync ServiceAccounts Argo impersonates
 	// (tenancy.SyncAccount); the project grants dotvirt stages name them. Empty
-	// stages owner grants only.
+	// stages owner grants only. It is also the one namespace whose Applications
+	// dotvirt patches (a sync request, a refresh); empty patches wherever RBAC
+	// allows.
 	ArgoNamespace string
 
 	// TenantKinds is what a tenant repo may declare beyond the listed kinds, as
@@ -232,7 +234,7 @@ func Load(args []string) (*Config, error) {
 	// Default on: ArgoCD is the normal deployment shape. The off switch stays for
 	// dev/BYO runs without Argo, whose Application reflector would error-loop.
 	fs.BoolVar(&c.ArgoEnabled, "argo", envBool("DOTVIRT_ARGO", true), "enable ArgoCD drift reads (set -argo=false on clusters without ArgoCD)")
-	fs.StringVar(&c.ArgoNamespace, "argo-namespace", os.Getenv("DOTVIRT_ARGO_NAMESPACE"), "ArgoCD namespace holding the per-project sync ServiceAccounts the project grants name (empty: owner grants only)")
+	fs.StringVar(&c.ArgoNamespace, "argo-namespace", os.Getenv("DOTVIRT_ARGO_NAMESPACE"), "ArgoCD namespace holding the per-project sync ServiceAccounts the project grants name, and the only one whose Applications dotvirt patches (empty: owner grants only, patches wherever RBAC allows)")
 
 	var tenantAllowed string
 	fs.StringVar(&tenantAllowed, "tenant-kinds-allowed", os.Getenv("DOTVIRT_TENANT_KINDS_ALLOWED"), "kinds tenant repos may declare beyond the listed ones, as group/kind,... (the core group is /kind; set by the operator)")
