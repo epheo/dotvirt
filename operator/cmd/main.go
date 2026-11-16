@@ -50,7 +50,7 @@ func main() {
 	flag.BoolVar(&enableLeaderElection, "leader-elect", false, "enable leader election for HA")
 	flag.BoolVar(&dryRun, "dry-run", false, "validate rendered resources via server-side dry-run apply; persist nothing")
 	flag.StringVar(&installNamespace, "install-namespace", os.Getenv(controller.InstallNamespaceEnv),
-		"the one namespace whose Dotvirt the operator acts on (empty: the operator's own namespace)")
+		"the one namespace whose Dotvirt the operator acts on (empty: its own namespace, else the install it already provisioned)")
 	opts := zap.Options{Development: true}
 	opts.BindFlags(flag.CommandLine)
 	flag.Parse()
@@ -58,13 +58,6 @@ func main() {
 	ctrl.SetLogger(zap.New(zap.UseFlagOptions(&opts)))
 	setupLog := ctrl.Log.WithName("setup")
 	opNS := operatorNamespace()
-	if installNamespace == "" {
-		installNamespace = opNS
-	}
-	if installNamespace == "" {
-		setupLog.Error(nil, "no install namespace: outside a cluster, pass -install-namespace or set "+controller.InstallNamespaceEnv)
-		os.Exit(1)
-	}
 
 	cfg := ctrl.GetConfigOrDie()
 	// Detection FAILS startup rather than defaulting: a wrong platform silently

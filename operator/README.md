@@ -50,13 +50,20 @@ make docker-build # image (built from the repo root context)
 
 ## Install namespace
 
-The operator acts on one Dotvirt only: the one in its install namespace.
+The operator acts on one Dotvirt only: the one in its install namespace, resolved
+on every pass in this order.
 
-- By default that is the operator's own namespace (`dotvirt-operator` from the
-  bundled manifests and OperatorHub's suggestion).
-- A cluster admin can name another namespace with `OPERATOR_INSTALL_NAMESPACE` on
-  the operator's Deployment (or its `-install-namespace` flag). Through OLM, set it
-  on the Subscription:
+1. The namespace a cluster admin names with `OPERATOR_INSTALL_NAMESPACE` on the
+   operator's Deployment (or its `-install-namespace` flag).
+2. The operator's own namespace (`dotvirt-operator` from the bundled manifests and
+   OperatorHub's suggestion), once it holds a Dotvirt.
+3. The namespace ClusterRoleBinding `dotvirt` binds the ServiceAccount `dotvirt` in:
+   the install an earlier operator provisioned. This keeps an install created
+   elsewhere (in `dotvirt`, as the earlier sample did) working across the upgrade.
+   Its `InstallNamespaceAdopted` condition names the namespace and suggests the
+   override.
+
+Through OLM, set the override on the Subscription:
 
   ```yaml
   spec:
@@ -74,6 +81,20 @@ The operator acts on one Dotvirt only: the one in its install namespace.
 - Deleting a Dotvirt outside the install namespace only drops the operator's
   finalizer: nothing is pruned on its say. To uninstall an install that lives
   outside it, name its namespace first, then delete it.
+- Why step 3 is safe: only cluster admins and this operator may write
+  ClusterRoleBinding `dotvirt`, and the operator wrote it for the install it acted
+  on. Its limit: an operator before this rule acted on the oldest Dotvirt anywhere,
+  so a tenant's could have been that install. After upgrading, check the namespace
+  the binding names:
+
+  ```sh
+  kubectl get clusterrolebinding dotvirt -o jsonpath='{.subjects[0].namespace}'
+  ```
+
+  It must be the namespace you installed dotvirt in. If it names a tenant's
+  namespace, delete that Dotvirt (nothing is pruned on its say), remove its
+  bindings, and create the install in the operator's namespace or name yours with
+  the override.
 
 ## What it provisions
 
@@ -673,11 +694,11 @@ A restart of dotvirt signs every OIDC session out: the next sign-in is one redir
 ## Upgrading
 
 - The operator acts only on the Dotvirt in its install namespace (see Install
-  namespace). An install whose Dotvirt lives elsewhere, `dotvirt` from the earlier
-  sample for instance, stops being reconciled after the upgrade: nothing is deleted
-  and its workloads keep running, while its `Available` condition reads
-  `WrongNamespace`. Set `OPERATOR_INSTALL_NAMESPACE` to that namespace, through the
-  Subscription's `spec.config.env` under OLM, and it resumes.
+  namespace). An existing install keeps working: one in the operator's namespace
+  as before, one elsewhere (`dotvirt`, from the earlier sample) adopted from the
+  ClusterRoleBinding the earlier operator provisioned for it. Its
+  `InstallNamespaceAdopted` condition suggests setting `OPERATOR_INSTALL_NAMESPACE`
+  explicitly; check the namespace it names, as Install namespace says.
 - The CSV supports only the `AllNamespaces` install mode: one install per cluster,
   watched cluster-wide.
   - An OperatorGroup with `targetNamespaces` (OwnNamespace or SingleNamespace) fails

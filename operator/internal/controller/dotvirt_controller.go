@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	appsv1 "k8s.io/api/apps/v1"
@@ -59,13 +60,12 @@ type DotvirtReconciler struct {
 	APIReader client.Reader
 	// OperatorNamespace is admitted by the NetworkPolicies; "" when unknown.
 	OperatorNamespace string
-	// InstallNamespace is the one namespace whose Dotvirt the operator acts on:
-	// its own, or the one a cluster admin names on its Deployment. A Dotvirt
-	// elsewhere only gets a status saying so, because the admin and edit roles
-	// let any namespace admin create one, and acting on it would bind the
-	// install's cluster-wide roles to accounts in that tenant's namespace.
-	// "" acts on none.
+	// InstallNamespace is the namespace a cluster admin names on the operator's
+	// Deployment for the install; "" leaves it to installNamespace's resolution.
 	InstallNamespace string
+	// resolved remembers the last namespace installNamespace resolved, so event
+	// mappings fan out without a read of their own.
+	resolved atomic.Value
 
 	// probe is a test seam (not config): deps.Probe needs a live discovery
 	// endpoint, so tests stub it. nil = the real probe.
@@ -123,8 +123,12 @@ func (r *DotvirtReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 	if err := r.reader().Get(ctx, req.NamespacedName, &dv); err != nil {
 		return ctrl.Result{}, client.IgnoreNotFound(err)
 	}
-	if dv.Namespace != r.InstallNamespace || r.InstallNamespace == "" {
-		return ctrl.Result{}, r.ignore(ctx, &dv)
+	installNS, adopted, err := r.installNamespace(ctx)
+	if err != nil {
+		return ctrl.Result{}, err
+	}
+	if dv.Namespace != installNS || installNS == "" {
+		return ctrl.Result{}, r.ignore(ctx, &dv, installNS)
 	}
 	log.Info("reconciling dotvirt install", "platform", r.Platform)
 
@@ -142,7 +146,7 @@ func (r *DotvirtReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 	}
 	base := dv.DeepCopy()
 	var res ctrl.Result
-	var err error
+	r.markAdopted(&dv, adopted)
 	// One install per cluster: the ClusterRoleBindings it provisions carry fixed
 	// cluster-scoped names, so two CRs would rewrite each other's subjects on every
 	// reconcile and each finalizer would delete the other's bindings. The oldest CR
@@ -284,7 +288,7 @@ func (r *DotvirtReconciler) syncWait(dv *dotvirtv1alpha1.Dotvirt) time.Duration 
 // its successor.
 func (r *DotvirtReconciler) olderInstall(ctx context.Context, dv *dotvirtv1alpha1.Dotvirt) (*dotvirtv1alpha1.Dotvirt, bool, error) {
 	var list dotvirtv1alpha1.DotvirtList
-	if err := r.List(ctx, &list, client.InNamespace(r.InstallNamespace)); err != nil {
+	if err := r.List(ctx, &list, client.InNamespace(dv.Namespace)); err != nil {
 		return nil, false, err
 	}
 	for i := range list.Items {
@@ -644,11 +648,19 @@ func (r *DotvirtReconciler) SetupWithManager(mgr ctrl.Manager) error {
 // installs enqueues every Dotvirt in the install namespace: a project namespace
 // is an input to each.
 func (r *DotvirtReconciler) installs(ctx context.Context, _ client.Object) []reconcile.Request {
-	if r.InstallNamespace == "" {
+	ns, known := r.resolved.Load().(string)
+	if !known {
+		var err error
+		if ns, _, err = r.installNamespace(ctx); err != nil {
+			logf.FromContext(ctx).Error(err, "resolve the install namespace for an event")
+			return nil
+		}
+	}
+	if ns == "" {
 		return nil
 	}
 	var list dotvirtv1alpha1.DotvirtList
-	if err := r.List(ctx, &list, client.InNamespace(r.InstallNamespace)); err != nil {
+	if err := r.List(ctx, &list, client.InNamespace(ns)); err != nil {
 		logf.FromContext(ctx).Error(err, "list installs for a project namespace event")
 		return nil
 	}
@@ -698,24 +710,90 @@ func (r *DotvirtReconciler) writeStatus(ctx context.Context, dv, base *dotvirtv1
 // InstallNamespace when it is not the operator's own namespace.
 const InstallNamespaceEnv = "OPERATOR_INSTALL_NAMESPACE"
 
+// installNamespace resolves the namespace whose Dotvirt is the install, each
+// pass, in this order:
+//  1. the namespace a cluster admin names on the operator's Deployment;
+//  2. the operator's own namespace, once it holds a Dotvirt;
+//  3. the namespace ClusterRoleBinding dotvirt binds the ServiceAccount dotvirt
+//     in, the install an earlier operator provisioned (adopted is then true).
+//
+// The admin and edit roles let any namespace admin create a Dotvirt, so the
+// namespace never comes from a Dotvirt alone. Step 3 trusts the binding because
+// only cluster admins and this operator may write it, and the operator wrote it
+// for the install it acted on. Its limit: before the operator stopped acting on
+// Dotvirts anywhere, a tenant's could have been that install, and the binding
+// then names the tenant's namespace (the README says what to check). "" means
+// no install: every Dotvirt is ignored.
+func (r *DotvirtReconciler) installNamespace(ctx context.Context) (ns string, adopted bool, err error) {
+	defer func() {
+		if err == nil {
+			r.resolved.Store(ns)
+		}
+	}()
+	if r.InstallNamespace != "" {
+		return r.InstallNamespace, false, nil
+	}
+	if r.OperatorNamespace != "" {
+		var list dotvirtv1alpha1.DotvirtList
+		if err := r.List(ctx, &list, client.InNamespace(r.OperatorNamespace), client.Limit(1)); err != nil {
+			return "", false, err
+		}
+		if len(list.Items) > 0 {
+			return r.OperatorNamespace, false, nil
+		}
+	}
+	var crb rbacv1.ClusterRoleBinding
+	if err := r.reader().Get(ctx, client.ObjectKey{Name: install.AppName}, &crb); err != nil {
+		return "", false, client.IgnoreNotFound(err)
+	}
+	if crb.RoleRef.Kind != "ClusterRole" || crb.RoleRef.Name != install.AppName {
+		return "", false, nil
+	}
+	for _, s := range crb.Subjects {
+		if s.Kind == rbacv1.ServiceAccountKind && s.Name == install.AppName && s.Namespace != "" {
+			return s.Namespace, true, nil
+		}
+	}
+	return "", false, nil
+}
+
+// markAdopted records on the install whether its namespace was adopted from
+// ClusterRoleBinding dotvirt, with the override that makes it explicit.
+func (r *DotvirtReconciler) markAdopted(dv *dotvirtv1alpha1.Dotvirt, adopted bool) {
+	if !adopted {
+		meta.RemoveStatusCondition(&dv.Status.Conditions, dotvirtv1alpha1.ConditionInstallNamespaceAdopted)
+		return
+	}
+	r.setCondition(dv, dotvirtv1alpha1.ConditionInstallNamespaceAdopted, metav1.ConditionTrue, "FromExistingInstall",
+		fmt.Sprintf("this install lives outside the operator's namespace and was adopted because ClusterRoleBinding dotvirt "+
+			"binds it; name it explicitly with %s=%s on the operator's Deployment (through OLM: the Subscription's "+
+			"spec.config.env)", InstallNamespaceEnv, dv.Namespace))
+}
+
 // ignore handles a Dotvirt outside the install namespace: no finalizer, render,
 // binding or prune, only a status saying where the install lives. Its deletion
 // drops the operator's finalizer, should it carry one, WITHOUT finalize: prune
 // matches objects by instance labels, so cleaning up on this CR's say could take
-// the real install's objects. An install moved out of the install namespace
-// keeps its objects until a cluster admin names its namespace again.
-func (r *DotvirtReconciler) ignore(ctx context.Context, dv *dotvirtv1alpha1.Dotvirt) error {
+// the real install's objects. An install outside the install namespace keeps its
+// objects until a cluster admin names its namespace.
+func (r *DotvirtReconciler) ignore(ctx context.Context, dv *dotvirtv1alpha1.Dotvirt, installNS string) error {
 	if !dv.DeletionTimestamp.IsZero() {
 		if !r.DryRun && controllerutil.RemoveFinalizer(dv, dotvirtFinalizer) {
 			return r.Update(ctx, dv)
 		}
 		return nil
 	}
-	msg := fmt.Sprintf("the operator could not tell its install namespace; set %s on its Deployment", InstallNamespaceEnv)
-	if r.InstallNamespace != "" {
-		msg = fmt.Sprintf("the operator acts only on the Dotvirt in namespace %s, so this one is ignored. "+
-			"Create the install there, or a cluster admin names %s with %s on the operator's Deployment "+
-			"(through OLM: the Subscription's spec.config.env)", r.InstallNamespace, dv.Namespace, InstallNamespaceEnv)
+	msg := fmt.Sprintf("the operator acts only on the Dotvirt in namespace %s, so this one is ignored. "+
+		"Create the install there, or a cluster admin names %s with %s on the operator's Deployment "+
+		"(through OLM: the Subscription's spec.config.env)", installNS, dv.Namespace, InstallNamespaceEnv)
+	if installNS == "" {
+		own := r.OperatorNamespace
+		if own == "" {
+			own = "the operator's namespace"
+		}
+		msg = fmt.Sprintf("no install exists yet, and a Dotvirt outside %s is never taken as one. Create the install "+
+			"in %s, or a cluster admin names %s with %s on the operator's Deployment (through OLM: the Subscription's "+
+			"spec.config.env)", own, own, dv.Namespace, InstallNamespaceEnv)
 	}
 	if c := meta.FindStatusCondition(dv.Status.Conditions, dotvirtv1alpha1.ConditionAvailable); c != nil &&
 		c.Status == metav1.ConditionFalse && c.Reason == "WrongNamespace" && c.Message == msg && c.ObservedGeneration == dv.Generation {

@@ -1191,6 +1191,27 @@ func TestEnvtest(t *testing.T) {
 			return apierrors.IsNotFound(admin.Get(ctx, client.ObjectKeyFromObject(dv), &dotvirtv1alpha1.Dotvirt{}))
 		})
 	})
+
+	// An upgrade with no override and no Dotvirt in the operator's namespace
+	// adopts the install ClusterRoleBinding dotvirt names, read as the operator.
+	t.Run("the operator adopts the install its binding names", func(t *testing.T) {
+		crb := &rbacv1.ClusterRoleBinding{
+			ObjectMeta: metav1.ObjectMeta{Name: install.AppName},
+			RoleRef:    rbacv1.RoleRef{APIGroup: rbacv1.GroupName, Kind: "ClusterRole", Name: install.AppName},
+			Subjects:   []rbacv1.Subject{{Kind: rbacv1.ServiceAccountKind, Name: install.AppName, Namespace: "dotvirt"}},
+		}
+		mustCreate(t, admin, crb)
+		defer func() { _ = admin.Delete(ctx, crb) }()
+		op, err := client.New(opCfg, client.Options{Scheme: scheme})
+		if err != nil {
+			t.Fatal(err)
+		}
+		r := &DotvirtReconciler{Client: op, APIReader: op, OperatorNamespace: "dotvirt-operator"}
+		ns, adopted, err := r.installNamespace(ctx)
+		if err != nil || ns != "dotvirt" || !adopted {
+			t.Errorf("installNamespace = (%q, %v, %v), want (dotvirt, true, nil)", ns, adopted, err)
+		}
+	})
 }
 
 // runManager starts the controller as cmd/main.go wires it, under cfg, and
