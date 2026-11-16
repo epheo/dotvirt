@@ -29,8 +29,10 @@ const (
 	projectPlatform    = PlatformApplicationName
 
 	// appTargetRevision is the branch every dotvirt Application syncs, spelled once so
-	// the tenant template and the platform app cannot drift apart.
-	appTargetRevision = "main"
+	// the tenant template and the platform app cannot drift apart. The full ref:
+	// Argo matches a short name against every ref's short name, so a tag or other
+	// ref named main would be synced without passing main's review.
+	appTargetRevision = "refs/heads/main"
 
 	// InClusterServer is the cluster every dotvirt Application deploys to.
 	InClusterServer = "https://kubernetes.default.svc"

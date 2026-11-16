@@ -306,6 +306,22 @@ func TestArgoSourcesExcludeTemplateLibrary(t *testing.T) {
 	}
 }
 
+// Every dotvirt Application (the platform app and the tenant template share
+// argoAppSpec) tracks main by its full ref: Argo matches a short name against
+// every ref's short name, a tag named main included.
+func TestArgoAppsTrackMainExactly(t *testing.T) {
+	dv := testDotvirt()
+	for name, spec := range map[string]map[string]any{
+		"platform": PlatformApplication(dv, "argocd", "https://forge/x/platform.git").Object["spec"].(map[string]any),
+		"tenant":   ApplicationSet(dv, "argocd", nil, nil).Object["spec"].(map[string]any)["template"].(map[string]any)["spec"].(map[string]any),
+	} {
+		obj := map[string]any{"spec": spec}
+		if rev, _, _ := unstructured.NestedString(obj, "spec", "source", "targetRevision"); rev != "refs/heads/main" {
+			t.Errorf("%s: targetRevision = %q, want refs/heads/main", name, rev)
+		}
+	}
+}
+
 // repo-creds templates ignore `insecure`; emitting it reads as a fix while doing
 // nothing. Trust is real instead (argocd-tls-certs-cm).
 func TestRepoCredsNeverEmitsIgnoredInsecure(t *testing.T) {

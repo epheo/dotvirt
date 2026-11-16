@@ -40,8 +40,9 @@ import (
 // DotvirtReconciler provisions a dotvirt install from a Dotvirt resource (see the
 // api package doc for what an install comprises). dotvirt's RUNTIME still owns
 // nothing - this operator is the install-time provisioner, so it holds the
-// privileged install RBAC and forge-admin credential the app never touches.
-// Its RBAC markers live in rbac_markers.go.
+// privileged install RBAC the app never has. The forge credential is shared
+// with the app (spec.forge.credentialsSecret). Its RBAC markers live in
+// rbac_markers.go.
 type DotvirtReconciler struct {
 	client.Client
 	Scheme   *runtime.Scheme
