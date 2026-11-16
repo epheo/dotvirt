@@ -216,7 +216,8 @@ func TestUpgradeAdoptsTheInstallTheBindingNames(t *testing.T) {
 // ignored: the binding names the install's namespace, not theirs.
 func TestTenantDotvirtStaysIgnoredWhenTheInstallIsAdopted(t *testing.T) {
 	dv := testCR()
-	tenant := tenantCR() // older than the install
+	dv.CreationTimestamp = metav1.Now()
+	tenant := tenantCR() // an hour older than the install
 	c := testBuilder(t).WithObjects(dv, tenant, dotvirtBinding(dv.Namespace)).Build()
 	r := adoptingReconciler(c)
 
