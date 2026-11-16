@@ -27,6 +27,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	utilyaml "k8s.io/apimachinery/pkg/util/yaml"
+	rbacv1ac "k8s.io/client-go/applyconfigurations/rbac/v1"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -172,17 +173,18 @@ func TestEnvtest(t *testing.T) {
 		if _, err := kube.RbacV1().ClusterRoleBindings().Create(ctx, crb, metav1.CreateOptions{}); !apierrors.IsForbidden(err) {
 			t.Errorf("binding cluster-admin: err=%v, want Forbidden", err)
 		}
-		// Under the one name it may create, a RoleBinding to another role is still
-		// refused: RBAC's escalation check stops it, not the name. cluster-admin,
-		// not admin: envtest runs no aggregation controller, so its admin role is
-		// empty and anyone may bind it.
-		rb := &rbacv1.RoleBinding{
-			ObjectMeta: metav1.ObjectMeta{Name: install.SyncRequestName, Namespace: "team-a"},
-			RoleRef:    rbacv1.RoleRef{APIGroup: rbacv1.GroupName, Kind: "ClusterRole", Name: "cluster-admin"},
-			Subjects:   []rbacv1.Subject{{Kind: rbacv1.UserKind, Name: operatorUser}},
-		}
-		if _, err := kube.RbacV1().RoleBindings("team-a").Create(ctx, rb, metav1.CreateOptions{}); !apierrors.IsForbidden(err) {
-			t.Errorf("binding cluster-admin in team-a: err=%v, want Forbidden", err)
+		// Under the one name it may create, as the operator creates it (server-side
+		// apply, authorized with that name), a RoleBinding to another role is still
+		// refused: RBAC's escalation check stops it, not the name. A POST create
+		// would carry no name and stop at authorization instead. cluster-admin, not
+		// admin: envtest runs no aggregation controller, so its admin role is empty
+		// and anyone may bind it.
+		rb := rbacv1ac.RoleBinding(install.SyncRequestName, "team-a").
+			WithRoleRef(rbacv1ac.RoleRef().WithAPIGroup(rbacv1.GroupName).WithKind("ClusterRole").WithName("cluster-admin")).
+			WithSubjects(rbacv1ac.Subject().WithKind(rbacv1.UserKind).WithName(operatorUser))
+		_, err := kube.RbacV1().RoleBindings("team-a").Apply(ctx, rb, metav1.ApplyOptions{FieldManager: "dotvirt-operator"})
+		if !apierrors.IsForbidden(err) || !strings.Contains(err.Error(), "attempting to grant RBAC permissions not currently held") {
+			t.Errorf("binding cluster-admin in team-a: err=%v, want the escalation check's Forbidden", err)
 		}
 	})
 
