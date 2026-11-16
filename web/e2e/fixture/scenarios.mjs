@@ -2105,11 +2105,12 @@ const branded = {
 			logo: true,
 			links: [
 				{ label: 'Account', url: 'https://c.example/account' },
-				{ label: 'Billing', url: 'https://c.example/billing' },
+				{ label: 'Billing', url: 'https://c.example/billing', icon: 'billing.svg' },
 			],
 		},
 		theme: ':root { --branded-marker: 1; }',
 		logo: '<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24"/>',
+		icons: { 'billing.svg': '<svg xmlns="http://www.w3.org/2000/svg" width="22" height="22"/>' },
 	},
 };
 // Each of team-db's namespaces has a VM Network of its own: not offered.

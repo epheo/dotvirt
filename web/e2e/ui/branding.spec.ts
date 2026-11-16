@@ -24,6 +24,17 @@ test("the console wears a provider's branding, sign-in included", async ({ page 
 	const account = header.getByRole('link', { name: 'Account' });
 	await expect(account).toHaveAttribute('href', 'https://c.example/account');
 	await expect(account).toHaveAttribute('rel', 'noopener noreferrer');
+	await expect(account).toHaveText('Account');
+	// A link with an icon shows the icon alone, named by its label, which
+	// keyboard focus shows as a tooltip.
+	const billing = header.getByRole('link', { name: 'Billing' });
+	await expect(billing).toHaveAttribute('href', 'https://c.example/billing');
+	await expect(billing.locator('img')).toHaveAttribute('src', '/api/branding/icon/billing.svg');
+	await expect(billing.locator('img')).toHaveJSProperty('naturalWidth', 22);
+	const tip = billing.getByText('Billing');
+	await expect(tip).toBeHidden();
+	await billing.focus();
+	await expect(tip).toBeVisible();
 	await expect(page.locator('link[rel="stylesheet"][href="/api/branding/theme.css"]')).toHaveCount(
 		1,
 	);

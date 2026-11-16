@@ -74,14 +74,32 @@
 
 	<div class="flex-1"></div>
 
-	<!-- A provider's links back to its own app. -->
+	<!-- A provider's links back to its own app. An icon link names itself by
+	     its label, shown as a tooltip on hover and on keyboard focus alike. -->
 	{#each branding.value?.links ?? [] as l, i (i)}
-		<a
-			href={l.url}
-			target="_blank"
-			rel="noopener noreferrer"
-			class="text-[13px] text-side-dim hover:text-white">{l.label}</a
-		>
+		{#if l.icon}
+			<a
+				href={l.url}
+				target="_blank"
+				rel="noopener noreferrer"
+				aria-label={l.label}
+				class="group relative flex items-center opacity-80 hover:opacity-100 focus-visible:opacity-100"
+			>
+				<img src="/api/branding/icon/{encodeURIComponent(l.icon)}" alt="" class="size-[22px]" />
+				<span
+					aria-hidden="true"
+					class="pointer-events-none absolute top-full right-0 z-50 mt-2 hidden rounded bg-side px-2 py-1 text-xs whitespace-nowrap text-side-ink shadow-lg group-hover:block group-focus-visible:block"
+					>{l.label}</span
+				>
+			</a>
+		{:else}
+			<a
+				href={l.url}
+				target="_blank"
+				rel="noopener noreferrer"
+				class="text-[13px] text-side-dim hover:text-white">{l.label}</a
+			>
+		{/if}
 	{/each}
 
 	<!-- Issues: standing problems and firing alerts (never pending applies), one
