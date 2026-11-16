@@ -34,19 +34,23 @@ them. Until an admin installs them, nothing below is enforced.
 What the guard closes:
 - minting a ServiceAccount token through a Secret, and writing Secrets outside the
   install and ArgoCD namespaces;
-- running anything but the console and the forge, each as its own account, from its
-  own repository (or the image an admin chose) and with its rendered command, on the
-  host, as root, privileged or with added capabilities;
-- harvesting the tokens signed-in admins send the console: no kubeconfig, apiserver
-  address or `envFrom` of the operator's choosing, and nothing mounted over the
-  console's ServiceAccount token and cluster CA;
+- running anything but the console and the forge, each as its own account and from its
+  own repository (or the image an admin chose), on the host, as root, privileged or with
+  added capabilities, or the console with another entrypoint or an init container;
+- sending the tokens signed-in users give the console anywhere an admin did not choose:
+  no kubeconfig, apiserver address or `envFrom` of the operator's choosing, nothing
+  mounted over the console's ServiceAccount token and cluster CA, the metrics endpoints
+  and CA only as the admin set them, TLS verification off only as the admin set it, and
+  no pages served from elsewhere;
 - binding any operand role to itself or another subject;
-- rewriting its own install's spec, where an admin chose the images, the ArgoCD target
-  and the forge credential.
+- rewriting its own install's spec, where an admin chose the images, the ArgoCD target,
+  the metrics endpoints and the forge credential.
 
 What stays open:
-- the console's other configuration the operator writes as `DOTVIRT_*` env, such as
-  the sign-in issuer, which allows phishing an admin's credentials;
+- the console's other configuration the operator writes as flags or `DOTVIRT_*` env,
+  among them the OIDC issuer, which allows phishing an admin's credentials at a page of
+  the operator's choosing, and the image upload proxy, which receives the upload tokens
+  the console mints for each upload;
 - an older official release: any tag or digest in the official repositories passes,
   rollbacks included;
 - reads: the operator lists Deployments, Routes, Namespaces and Argo Applications and

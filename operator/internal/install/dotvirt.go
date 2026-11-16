@@ -3,8 +3,6 @@ package install
 import (
 	"encoding/json"
 	"fmt"
-	"net"
-	"net/url"
 	"os"
 	"strings"
 
@@ -58,22 +56,6 @@ const (
 	IngressCAKey = "ca-bundle.crt"
 	ServiceCAKey = "service-ca.crt"
 )
-
-// metricsTenancyURL is the thanos-querier tenancy port beside its
-// cluster-wide one: the service serves every namespace on 9091 and one
-// namespace per query on 9092, under the same serving cert. "" for any other
-// endpoint, prometheus-k8s on 9091 included: none has a known tenancy port.
-func metricsTenancyURL(raw string) string {
-	u, err := url.Parse(raw)
-	if err != nil || u.Port() != "9091" {
-		return ""
-	}
-	if h := u.Hostname(); h != "thanos-querier.openshift-monitoring.svc" && h != "thanos-querier.openshift-monitoring.svc.cluster.local" {
-		return ""
-	}
-	u.Host = net.JoinHostPort(u.Hostname(), "9092")
-	return u.String()
-}
 
 // OAuthClientName is the OpenShift OAuthClient this install registers as. An OAuthClient
 // is CLUSTER-scoped, so the name carries the install's namespace: a shared constant would
@@ -216,15 +198,13 @@ func dotvirtEnv(dv *dotvirtv1alpha1.Dotvirt, argoNS string, tenantAllowed []tena
 			env = append(env, corev1.EnvVar{Name: "DOTVIRT_PUBLISH_PORTAIL_NAMESPACE", Value: p.PortailNamespace})
 		}
 	}
-	if m := dv.Spec.Metrics; m.URL != "" {
+	// One render with the operator guard's, which pins where users' queries go.
+	m := adminobjects.MetricsFor(dv.Spec.Metrics.URL, dv.Spec.Metrics.TenancyURL, dv.Spec.Metrics.CA != nil)
+	if m.URL != "" {
 		env = append(env, corev1.EnvVar{Name: "DOTVIRT_METRICS_URL", Value: m.URL})
-		t := m.TenancyURL
-		if t == "" {
-			t = metricsTenancyURL(m.URL)
-		}
-		if t != "" {
-			env = append(env, corev1.EnvVar{Name: "DOTVIRT_METRICS_TENANCY_URL", Value: t})
-		}
+	}
+	if m.TenancyURL != "" {
+		env = append(env, corev1.EnvVar{Name: "DOTVIRT_METRICS_TENANCY_URL", Value: m.TenancyURL})
 	}
 	// OpenShift SSO: the operator generates the client secret and wires it here; the admin
 	// applies the OAuthClient (a cluster-admin act it deliberately doesn't perform; no
@@ -275,13 +255,8 @@ func dotvirtEnv(dv *dotvirtv1alpha1.Dotvirt, argoNS string, tenantAllowed []tena
 		// The oauth token endpoint is router-served: same ingress CA.
 		env = append(env, corev1.EnvVar{Name: "DOTVIRT_OAUTH_CA", Value: ingressCAMountPath + "/" + IngressCAKey})
 	}
-	switch m := dv.Spec.Metrics; {
-	case m.URL == "":
-	case m.CA != nil:
-		env = append(env, corev1.EnvVar{Name: "DOTVIRT_METRICS_CA", Value: metricsCAMountPath + "/" + metricsCAFile})
-	case strings.HasPrefix(m.URL, "https://") && strings.Contains(m.URL, ".svc"):
-		// In-cluster metrics serve the service-CA-signed cert.
-		env = append(env, corev1.EnvVar{Name: "DOTVIRT_METRICS_CA", Value: serviceCAMountPath + "/" + ServiceCAKey})
+	if m.CA != "" {
+		env = append(env, corev1.EnvVar{Name: "DOTVIRT_METRICS_CA", Value: m.CA})
 	}
 	return env
 }
@@ -309,10 +284,27 @@ func oidcEnv(o *dotvirtv1alpha1.OIDCSpec) []corev1.EnvVar {
 	return env
 }
 
-// dotvirtArgs are the console's arguments, which the operator guard pins
-// (pkg/adminobjects).
 func dotvirtArgs(dv *dotvirtv1alpha1.Dotvirt) []string {
-	return adminobjects.ConsoleArgs(dv.Spec.Forge.InsecureTLS)
+	args := []string{
+		fmt.Sprintf("-addr=:%d", HTTPPort),
+		"-ui-origin=", // same-origin: the binary serves the SPA
+		"-argo=true",
+		"-draft-dir=/var/lib/dotvirt/drafts",
+		// Webhooks (self-registered above) are the primary trigger for inventory
+		// updates; the git poll is only the missed-event backstop, so keep it slow
+		// to spare the forge - the managed Forgejo is a single SQLite-backed pod.
+		"-git-poll-interval=5m",
+		// The keys the tenant AppProjects are derived from (TenantAppProject).
+		"-project-label=" + ProjectLabel,
+		"-repo-annotation=" + RepoAnnotation,
+	}
+	if dv.Spec.Forge.InsecureTLS {
+		// A self-signed forge Route: skip TLS verification for forge API calls +
+		// git clones. Metrics too, unless DOTVIRT_METRICS_CA names a CA (an https
+		// .svc URL, or spec.metrics.ca): the app's metrics client lets a CA win.
+		args = append(args, "-insecure-tls")
+	}
+	return args
 }
 
 // brandingMountPath holds the branding ConfigMap's files.

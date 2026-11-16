@@ -88,8 +88,8 @@ func TestGuardShape(t *testing.T) {
 	holds(t, "deployments", dep, `request.namespace == "dotvirt"`)
 	holds(t, "deployments", dep, `c.image.startsWith("quay.io/epheo/dotvirt@sha256:")`)
 	holds(t, "deployments", dep, `c.image in ["registry.example/team/dotvirt:custom", ""]`)
-	holds(t, "deployments", dep, `c.args == `+list(ConsoleArgs(false)...))
-	holds(t, "deployments", dep, `c.command == `+list(ForgejoBootstrap()...))
+	holds(t, "deployments", dep, `a.startsWith("-metrics-url=")`)
+	holds(t, "deployments", dep, `e.name != "KUBECONFIG"`)
 	holds(t, "install", inst, `object.spec == oldObject.spec`)
 	holds(t, "bindings", bind, `"ServiceAccount/openshift-gitops/openshift-gitops-argocd-application-controller"`)
 	holds(t, "bindings", bind, `request.namespace == "openshift-gitops"`)
@@ -217,7 +217,7 @@ func TestReleaseTemplate(t *testing.T) {
 	for k, v := range map[string]string{
 		"${OPERATOR_USERNAME}": params.Operator, "${INSTALL_NAMESPACE}": params.Namespace, "${ARGO_NAMESPACE}": params.ArgoNamespace,
 		"${ARGO_CONTROLLER}": params.ArgoController, "${SPEC_IMAGE}": params.SpecImage, "${RELATED_IMAGE_DOTVIRT}": "", "${RELATED_IMAGE_FORGEJO}": "",
-		"${FORGE_INSECURE_TLS}": "false",
+		"${FORGE_INSECURE_TLS}": "false", "${METRICS_URL}": "", "${METRICS_TENANCY_URL}": "", "${METRICS_CA}": "",
 	} {
 		filled = strings.ReplaceAll(filled, k, v)
 	}
@@ -255,7 +255,22 @@ func TestArgoTargetDefaults(t *testing.T) {
 			t.Errorf("ArgoTarget(%q, %q, %v) = %s, %s; want %s, %s", c.ns, c.sa, c.openShift, ns, sa, c.wantNS, c.wantSA)
 		}
 	}
-	if got := ConsoleArgs(true); got[len(got)-1] != "-insecure-tls" || slices.Contains(ConsoleArgs(false), "-insecure-tls") {
-		t.Errorf("console args: %v / %v", ConsoleArgs(false), got)
+}
+
+func TestMetricsFor(t *testing.T) {
+	const thanos = "https://thanos-querier.openshift-monitoring.svc:9091"
+	for _, c := range []struct {
+		url, tenancy string
+		ca           bool
+		want         Metrics
+	}{
+		{"", "", true, Metrics{}},
+		{thanos, "", false, Metrics{thanos, "https://thanos-querier.openshift-monitoring.svc:9092", ServiceCAPath}},
+		{thanos, "https://t.example", true, Metrics{thanos, "https://t.example", MetricsCAPath}},
+		{"http://prom.example:9090", "", false, Metrics{URL: "http://prom.example:9090"}},
+	} {
+		if got := MetricsFor(c.url, c.tenancy, c.ca); got != c.want {
+			t.Errorf("MetricsFor(%q, %q, %v) = %+v, want %+v", c.url, c.tenancy, c.ca, got, c.want)
+		}
 	}
 }

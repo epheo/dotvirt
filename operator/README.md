@@ -67,11 +67,14 @@ owns one status condition; a phase that fails or waits records why there, so
      forge (`dotvirt-forgejo`, as `dotvirt-forgejo`), in the install namespace. The
      console's images come from `quay.io/epheo/dotvirt` and the forge's from
      `codeberg.org/forgejo/forgejo` (any tag or digest), or exactly the image an admin
-     chose (`spec.image`, the operator Deployment's `RELATED_IMAGE_*`). Their command and
-     arguments are the ones rendered (`-insecure-tls` only with `spec.forge.insecureTLS`).
-     The console keeps its own token mounted where client-go reads it, with no
-     `KUBECONFIG`, `KUBERNETES_SERVICE_*` or `envFrom`. Nothing is mounted at, above or
-     inside the token directory. Every container runs non-root with a RuntimeDefault or
+     chose (`spec.image`, the operator Deployment's `RELATED_IMAGE_*`). The console runs
+     its image's entrypoint with no init container. Its arguments stay free, so a release
+     may add flags, except the settings that send users' tokens or its pages elsewhere,
+     by flag or env: the metrics endpoints and CA only as rendered from `spec.metrics`,
+     TLS verification off only with `spec.forge.insecureTLS`, and never a kubeconfig or
+     a directory of pages. It keeps its own token mounted where client-go reads it, with
+     no `KUBERNETES_SERVICE_*` or `envFrom`. Nothing is mounted at, above or inside the
+     token directory. Every container runs non-root with a RuntimeDefault or
      Localhost seccomp profile, `allowPrivilegeEscalation: false`, all capabilities
      dropped and none added, unprivileged, off the host network, PID and IPC, with no
      host path;
@@ -88,9 +91,9 @@ owns one status condition; a phase that fails or waits records why there, so
    another version, or changed since) or `Installed`; see [Admin objects](#admin-objects).
    The apiserver evaluates them in-process, only for those kinds' writes, with the
    username check first. Best-effort: never a halt, never `Available`. A new release
-   in the same repositories passes as it is; an admin changing `spec.image`,
-   `spec.argocd`, `spec.forge.insecureTLS`, the operator's `RELATED_IMAGE_*` or the
-   namespace makes them `Outdated`, and until re-installed they refuse the operator's
+   in the same repositories passes as it is, new console flags included; an admin
+   changing `spec.image`, `spec.argocd`, `spec.forge.insecureTLS`, `spec.metrics`, the
+   operator's `RELATED_IMAGE_*` or the namespace makes them `Outdated`, and until re-installed they refuse the operator's
    writes that need the change.
 3. **Forge** (`ForgeReady`): converges the trust anchors (below) first, then, with
    `spec.forge.managed`, stands up the eval-grade Forgejo (single pod, SQLite, a PVC
@@ -262,11 +265,13 @@ A cluster admin signed in to the console sees a banner listing what is missing o
 differs (and what differs), the pins the render uses, one **Install** button, and the
 same render to download. Install applies the render under the admin's own token:
 - the console reads every pin under the admin's token, never from anything the
-  operator writes (its status, or the console's own environment): the Dotvirt
-  resource's spec (`spec.argocd`, `spec.image`, `spec.forge.insecureTLS`), the one
-  Deployment named `dotvirt-operator-controller` in the cluster (the operator's
-  account and its `RELATED_IMAGE_*`; the operator may create no Deployment of that
-  name), and whether routes are served (the ArgoCD defaults);
+  operator writes (its status, or the console's own environment): its own namespace
+  (from its ServiceAccount mount, which the guard keeps from the operator), the one
+  Dotvirt resource there (`spec.argocd`, `spec.image`, `spec.forge.insecureTLS`,
+  `spec.metrics`), the operator's Deployment (among those named
+  `dotvirt-operator-controller`, the one whose account may patch Dotvirt status there:
+  its account and `RELATED_IMAGE_*`), and whether routes are served (the ArgoCD
+  defaults);
 - it is offered only when reviews say that token may read those, and read, create and
   patch every object an install may ask for (`pkg/adminobjects` allowlist);
 - it takes back any field someone changed since (a forced server-side apply): it

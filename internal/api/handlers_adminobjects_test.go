@@ -9,8 +9,10 @@ import (
 	"testing"
 
 	appsv1 "k8s.io/api/apps/v1"
+	authzv1 "k8s.io/api/authorization/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/client-go/kubernetes/scheme"
 
 	"github.com/epheo/dotvirt/internal/config"
 	"github.com/epheo/dotvirt/internal/model"
@@ -18,7 +20,9 @@ import (
 )
 
 var (
-	installRef = config.InstallRef{Namespace: "dotvirt", Name: "x"}
+	// The install env the operator writes, steered at a tenant's Dotvirt: the
+	// console reads its own namespace's instead.
+	installRef = config.InstallRef{Namespace: "team-a", Name: "decoy"}
 	// The pins the console must render from its reads: the operator's
 	// Deployment's account, the install's spec, the default ArgoCD target off
 	// OpenShift, and the images an admin chose.
@@ -31,7 +35,7 @@ var (
 )
 
 const (
-	installPath  = "/apis/dotvirt.io/v1alpha1/namespaces/dotvirt/dotvirts/x"
+	installPath  = "/apis/dotvirt.io/v1alpha1/namespaces/dotvirt/dotvirts"
 	operatorPath = "/apis/apps/v1/deployments"
 )
 
@@ -53,7 +57,7 @@ func adminObjectsServer(t *testing.T) (*Server, *fakeCluster, func() map[string]
 		if !adminOnly(w, r) {
 			return
 		}
-		writeObj(w, map[string]any{
+		writeObj(w, map[string]any{"apiVersion": "dotvirt.io/v1alpha1", "kind": "DotvirtList", "metadata": map[string]any{}, "items": []any{map[string]any{
 			"apiVersion": "dotvirt.io/v1alpha1", "kind": "Dotvirt", "metadata": map[string]any{"name": "x", "namespace": "dotvirt"},
 			"spec": map[string]any{"image": adminWant.SpecImage},
 			"status": map[string]any{"adminObjects": []any{
@@ -65,7 +69,7 @@ func adminObjectsServer(t *testing.T) (*Server, *fakeCluster, func() map[string]
 					"apiVersion": "rbac.authorization.k8s.io/v1", "kind": "ClusterRoleBinding", "metadata": map[string]any{"name": "rogue"},
 					"roleRef": map[string]any{"apiGroup": "rbac.authorization.k8s.io", "kind": "ClusterRole", "name": "cluster-admin"}}},
 			}},
-		})
+		}}})
 	})
 	fc.on(http.MethodGet, operatorPath, func(w http.ResponseWriter, r *http.Request) {
 		if !adminOnly(w, r) {
@@ -80,7 +84,28 @@ func adminObjectsServer(t *testing.T) (*Server, *fakeCluster, func() map[string]
 			{Name: "RELATED_IMAGE_DOTVIRT", Value: adminWant.DotvirtImage},
 			{Name: "RELATED_IMAGE_FORGEJO", Value: adminWant.ForgejoImage},
 		}}}
-		writeObj(w, appsv1.DeploymentList{TypeMeta: metav1.TypeMeta{Kind: "DeploymentList", APIVersion: "apps/v1"}, Items: []appsv1.Deployment{d}})
+		// A tenant's lookalike, whose account holds no right on Dotvirt status.
+		decoy := appsv1.Deployment{ObjectMeta: metav1.ObjectMeta{Name: adminobjects.OperatorDeployment, Namespace: "team-a"}}
+		decoy.Spec.Template.Spec.Containers = []corev1.Container{{Name: "manager", Env: []corev1.EnvVar{
+			{Name: "RELATED_IMAGE_DOTVIRT", Value: "registry.example/evil:1"},
+		}}}
+		writeObj(w, appsv1.DeploymentList{TypeMeta: metav1.TypeMeta{Kind: "DeploymentList", APIVersion: "apps/v1"}, Items: []appsv1.Deployment{decoy, d}})
+	})
+	fc.on(http.MethodPost, "/apis/authorization.k8s.io/v1/subjectaccessreviews", func(w http.ResponseWriter, r *http.Request) {
+		if !adminOnly(w, r) {
+			return
+		}
+		body, _ := io.ReadAll(r.Body)
+		obj, _, err := scheme.Codecs.UniversalDeserializer().Decode(body, nil, &authzv1.SubjectAccessReview{})
+		if err != nil {
+			t.Errorf("review body: %v", err)
+			return
+		}
+		review := obj.(*authzv1.SubjectAccessReview)
+		a := review.Spec.ResourceAttributes
+		review.Status.Allowed = review.Spec.User == adminWant.Operator && a != nil && a.Verb == "patch" &&
+			a.Resource == "dotvirts" && a.Subresource == "status" && a.Namespace == "dotvirt"
+		writeObj(w, review)
 	})
 	var mu sync.Mutex
 	stored := map[string]map[string]any{}
@@ -124,7 +149,7 @@ func adminObjectsServer(t *testing.T) (*Server, *fakeCluster, func() map[string]
 		mu.Unlock()
 		writeObj(w, map[string]any{})
 	})
-	s := fc.server(nil, Config{Install: installRef})
+	s := fc.server(nil, Config{Install: installRef, OwnNamespace: "dotvirt"})
 	return s, fc, func() map[string]applied {
 		mu.Lock()
 		defer mu.Unlock()

@@ -56,12 +56,12 @@ const PlatformSyncAccount = "dotvirt-platform-sync"
 // username condition runs first, so every other caller's write costs one
 // string comparison.
 func Guard(p Params) []Object {
-	return guard(p, strconv.FormatBool(p.InsecureTLS))
+	return guard(p, strconv.FormatBool(p.InsecureTLS), p.Metrics)
 }
 
 // guard renders with insecure, the CEL literal for p.InsecureTLS, which the
 // release template leaves a placeholder.
-func guard(p Params, insecure string) []Object {
+func guard(p Params, insecure string, metrics Metrics) []Object {
 	operator := `request.userInfo.username == ` + quote(p.Operator)
 	policies := []*admissionregistrationv1.ValidatingAdmissionPolicy{
 		policy(GuardSecretsName, rules("", "secrets"), operator, []admissionregistrationv1.Validation{
@@ -85,14 +85,14 @@ func guard(p Params, insecure string) []Object {
 				` ? `+eachContainer(imageFrom(Repositories[0], p.SpecImage, p.DotvirtImage))+
 				` : `+eachContainer(imageFrom(Repositories[1], p.ForgejoImage)),
 				"the operator runs the console only from "+Repositories[0]+" and the forge only from "+Repositories[1]+", or the image an admin chose"),
-			// The console's arguments are pinned (an admin's insecureTLS aside) and
-			// it has no init container; the forge runs its bootstrap and nothing else.
-			deny(`object.metadata.name == `+quote(ConsoleDeployment)+
-				` ? (`+pod+`.containers.all(c, !has(c.command) && has(c.args) && (c.args == `+list(ConsoleArgs(false)...)+
-				` || (`+insecure+` && c.args == `+list(ConsoleArgs(true)...)+`))) && (!has(`+pod+`.initContainers) || size(`+pod+`.initContainers) == 0))`+
-				` : (`+pod+`.containers.all(c, !has(c.command) && !has(c.args)) && (!has(`+pod+`.initContainers) || `+
-				pod+`.initContainers.all(c, has(c.command) && c.command == `+list(ForgejoBootstrap()...)+` && !has(c.args))))`,
-				"the operator runs its Deployments only with the commands and arguments it renders"),
+			// The console runs its image's own entrypoint and nothing before it.
+			// Its arguments stay free, so a release may add flags; the ones that
+			// send users' tokens elsewhere are pinned below.
+			deny(`object.metadata.name != `+quote(ConsoleDeployment)+` || (`+pod+`.containers.all(c, !has(c.command)) && `+
+				`(!has(`+pod+`.initContainers) || size(`+pod+`.initContainers) == 0))`,
+				"the operator runs the console with its image's own entrypoint and no init container"),
+			deny(`object.metadata.name != `+quote(ConsoleDeployment)+` || `+pod+`.containers.all(c, `+consoleSettings(p, metrics, insecure)+`)`,
+				"the operator sets none of the console's settings that send users' tokens or the console's pages elsewhere, but as an admin chose them"),
 			// The console's apiserver endpoint and credentials are the in-cluster
 			// ones: no kubeconfig, no service address of its own, its token and CA
 			// mounted where client-go reads them. Proxy env stays allowed (cluster
@@ -166,6 +166,41 @@ func guard(p Params, insecure string) []Object {
 		})})
 	}
 	return out
+}
+
+// consoleSettings is console container c setting nothing that sends users'
+// tokens, or the pages they run, anywhere an admin did not choose, by flag
+// (-name, --name, with =value; the bare form is never rendered) or by env:
+//   - the metrics endpoints and their CA, where each user's queries go with
+//     the user's token: only as rendered from the admin's spec.metrics;
+//   - TLS verification off: only with the admin's spec.forge.insecureTLS;
+//   - a kubeconfig, or a directory of pages to serve: never (the image sets
+//     its own pages; served from elsewhere they would run as every user).
+//
+// The rest stays free, so a release may add settings. Among them, kept free
+// for a reason: the public URL and the OAuth and OIDC client settings, since
+// the provider sends codes only to the redirect URI an admin registered; and
+// the OIDC issuer, which can only phish (SECURITY.md keeps it open).
+func consoleSettings(p Params, m Metrics, insecure string) string {
+	forms := func(flag string) string {
+		return `(a == "-` + flag + `" || a == "--` + flag + `" || a.startsWith("-` + flag + `=") || a.startsWith("--` + flag + `="))`
+	}
+	never := func(flag, env string) string {
+		return `(!has(c.args) || c.args.all(a, !` + forms(flag) + `)) && (!has(c.env) || c.env.all(e, e.name != "` + env + `"))`
+	}
+	pinned := func(flag, env, value string) string {
+		v := quote(value)
+		return `(!has(c.args) || c.args.all(a, !` + forms(flag) + ` || (` + v + ` != "" && (a == "-` + flag + `=" + ` + v + ` || a == "--` + flag + `=" + ` + v + `)))) && ` +
+			`(!has(c.env) || c.env.all(e, e.name != "` + env + `" || (` + v + ` != "" && !has(e.valueFrom) && has(e.value) && e.value == ` + v + `)))`
+	}
+	return strings.Join([]string{
+		pinned("metrics-url", "DOTVIRT_METRICS_URL", m.URL),
+		pinned("metrics-tenancy-url", "DOTVIRT_METRICS_TENANCY_URL", m.TenancyURL),
+		pinned("metrics-ca", "DOTVIRT_METRICS_CA", m.CA),
+		`(` + insecure + ` || (` + never("insecure-tls", "DOTVIRT_INSECURE_TLS") + `))`,
+		never("kubeconfig", "KUBECONFIG"),
+		never("static-dir", "DOTVIRT_STATIC_DIR"),
+	}, " && ")
 }
 
 // pod is the Deployment's pod spec in CEL.

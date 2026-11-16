@@ -36,6 +36,7 @@ func (r *DotvirtReconciler) guardParams(dv *dotvirtv1alpha1.Dotvirt, rc *reconci
 		Operator: r.OperatorUsername, Namespace: dv.Namespace, ArgoNamespace: rc.argoNS, ArgoController: rc.argoSA,
 		SpecImage: dv.Spec.Image, DotvirtImage: os.Getenv("RELATED_IMAGE_DOTVIRT"), ForgejoImage: os.Getenv("RELATED_IMAGE_FORGEJO"),
 		InsecureTLS: dv.Spec.Forge.InsecureTLS,
+		Metrics:     adminobjects.MetricsFor(dv.Spec.Metrics.URL, dv.Spec.Metrics.TenancyURL, dv.Spec.Metrics.CA != nil),
 	}
 }
 

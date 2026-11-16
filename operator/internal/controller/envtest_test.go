@@ -473,9 +473,16 @@ func TestEnvtest(t *testing.T) {
 		newDigest.Spec.Template.Spec.Containers[0].Image = "quay.io/epheo/dotvirt@sha256:" + strings.Repeat("b", 64)
 		newTag := forge()
 		newTag.Spec.Template.Spec.Containers[0].Image = "codeberg.org/forgejo/forgejo:12-rootless"
+		// A release that adds a console flag, or changes the forge's
+		// bootstrap, upgrades without a new guard.
+		newFlag := app()
+		newFlag.Spec.Template.Spec.Containers[0].Args = append(newFlag.Spec.Template.Spec.Containers[0].Args, "-new-setting=1", "--git-poll-interval=10m")
+		newBootstrap := forge()
+		newBootstrap.Spec.Template.Spec.InitContainers[0].Command = []string{"sh", "-c", "forgejo migrate"}
 		for name, d := range map[string]*appsv1.Deployment{
 			"the console as rendered": app(), "the forge as rendered": forge(),
 			"a new release by digest": newDigest, "a new forge release by tag": newTag,
+			"a release with a new console flag": newFlag, "a release with a new forge bootstrap": newBootstrap,
 		} {
 			if err := dryApply(d); err != nil {
 				t.Errorf("%s: %v", name, err)
@@ -512,20 +519,39 @@ func TestEnvtest(t *testing.T) {
 			"the console with a command": {app, func(d *appsv1.Deployment) {
 				d.Spec.Template.Spec.Containers[0].Command = []string{"sh", "-c", "env"}
 			}},
-			"the console with other arguments": {app, func(d *appsv1.Deployment) {
+			"the console skipping TLS no admin chose": {app, func(d *appsv1.Deployment) {
 				d.Spec.Template.Spec.Containers[0].Args = append(d.Spec.Template.Spec.Containers[0].Args, "-insecure-tls")
+			}},
+			"the console skipping TLS by env": {app, func(d *appsv1.Deployment) {
+				c := &d.Spec.Template.Spec.Containers[0]
+				c.Env = append(c.Env, corev1.EnvVar{Name: "DOTVIRT_INSECURE_TLS", Value: "true"})
+			}},
+			"the console sending metrics queries elsewhere": {app, func(d *appsv1.Deployment) {
+				d.Spec.Template.Spec.Containers[0].Args = append(d.Spec.Template.Spec.Containers[0].Args, "-metrics-url=https://evil.example")
+			}},
+			"the console sending metrics queries elsewhere, bare flag": {app, func(d *appsv1.Deployment) {
+				d.Spec.Template.Spec.Containers[0].Args = append(d.Spec.Template.Spec.Containers[0].Args, "--metrics-tenancy-url", "https://evil.example")
+			}},
+			"the console sending metrics queries elsewhere by env": {app, func(d *appsv1.Deployment) {
+				c := &d.Spec.Template.Spec.Containers[0]
+				c.Env = append(c.Env, corev1.EnvVar{Name: "DOTVIRT_METRICS_URL", Value: "https://evil.example"})
+			}},
+			"the console with a kubeconfig flag": {app, func(d *appsv1.Deployment) {
+				d.Spec.Template.Spec.Containers[0].Args = append(d.Spec.Template.Spec.Containers[0].Args, "-kubeconfig=/evil/kubeconfig")
+			}},
+			"the console serving other pages": {app, func(d *appsv1.Deployment) {
+				d.Spec.Template.Spec.Containers[0].Args = append(d.Spec.Template.Spec.Containers[0].Args, "-static-dir=/evil")
+			}},
+			"the console serving other pages by env": {app, func(d *appsv1.Deployment) {
+				c := &d.Spec.Template.Spec.Containers[0]
+				c.Env = append(c.Env, corev1.EnvVar{Name: "DOTVIRT_STATIC_DIR", Value: "/evil"})
 			}},
 			"the console with an init container": {app, func(d *appsv1.Deployment) {
 				c := d.Spec.Template.Spec.Containers[0]
 				c.Name, c.LivenessProbe, c.ReadinessProbe, c.Ports = "init", nil, nil, nil
 				d.Spec.Template.Spec.InitContainers = []corev1.Container{c}
 			}},
-			"the forge with arguments": {forge, func(d *appsv1.Deployment) {
-				d.Spec.Template.Spec.Containers[0].Args = []string{"web"}
-			}},
-			"the forge bootstrap rewritten": {forge, func(d *appsv1.Deployment) {
-				d.Spec.Template.Spec.InitContainers[0].Command = []string{"sh", "-c", "true"}
-			}},
+
 			"the console with a kubeconfig": {app, func(d *appsv1.Deployment) {
 				c := &d.Spec.Template.Spec.Containers[0]
 				c.Env = append(c.Env, corev1.EnvVar{Name: "KUBECONFIG", Value: "/evil/kubeconfig"})
@@ -548,6 +574,10 @@ func TestEnvtest(t *testing.T) {
 			"a mount above the token directory": {app, func(d *appsv1.Deployment) {
 				c := &d.Spec.Template.Spec.Containers[0]
 				c.VolumeMounts = append(c.VolumeMounts, corev1.VolumeMount{Name: "drafts", MountPath: "/run"})
+			}},
+			"a mount over the token directory, doubled slash": {app, func(d *appsv1.Deployment) {
+				c := &d.Spec.Template.Spec.Containers[0]
+				c.VolumeMounts = append(c.VolumeMounts, corev1.VolumeMount{Name: "drafts", MountPath: "/var/run//secrets/kubernetes.io/serviceaccount"})
 			}},
 			"a mount inside the token directory": {forge, func(d *appsv1.Deployment) {
 				c := &d.Spec.Template.Spec.Containers[0]
@@ -716,8 +746,24 @@ func TestEnvtest(t *testing.T) {
 		}
 		chosen := pins
 		chosen.SpecImage = custom.Spec.Template.Spec.Containers[0].Image
+		// Where an admin sends metrics queries: as the operator renders it.
+		chosen.Metrics = adminobjects.MetricsFor("https://thanos-querier.openshift-monitoring.svc:9091", "", false)
+		metrics := app()
+		mc := &metrics.Spec.Template.Spec.Containers[0]
+		mc.Env = append(mc.Env,
+			corev1.EnvVar{Name: "DOTVIRT_METRICS_URL", Value: chosen.Metrics.URL},
+			corev1.EnvVar{Name: "DOTVIRT_METRICS_TENANCY_URL", Value: chosen.Metrics.TenancyURL},
+			corev1.EnvVar{Name: "DOTVIRT_METRICS_CA", Value: chosen.Metrics.CA})
+		elsewhere := metrics.DeepCopy()
+		elsewhere.Spec.Template.Spec.Containers[0].Args = append(elsewhere.Spec.Template.Spec.Containers[0].Args, "-metrics-url=https://evil.example")
 		installGuard(chosen)
 		eventually(t, "the admin's image admitted", func() bool { return dryApply(custom) == nil })
+		if err := dryApply(metrics); err != nil {
+			t.Errorf("the admin's metrics endpoints: %v", err)
+		}
+		if err := dryApply(elsewhere); !refused(err) {
+			t.Errorf("metrics queries beside the admin's choice: err=%v, want the guard's Forbidden", err)
+		}
 		installGuard(pins)
 
 		// The operator can neither re-apply nor remove its guard.

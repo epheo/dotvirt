@@ -50,9 +50,11 @@ type Params struct {
 	// unset: the Dotvirt resource's spec.image, and the operator Deployment's
 	// RELATED_IMAGE_DOTVIRT and RELATED_IMAGE_FORGEJO.
 	SpecImage, DotvirtImage, ForgejoImage string
-	// InsecureTLS is the admin's spec.forge.insecureTLS, the one console
-	// argument an admin adds.
+	// InsecureTLS is the admin's spec.forge.insecureTLS: the console may skip
+	// TLS verification only when it is set.
 	InsecureTLS bool
+	// Metrics is the admin's spec.metrics as rendered (MetricsFor).
+	Metrics Metrics
 }
 
 // Valid reports whether every pin is known and well formed: a render missing

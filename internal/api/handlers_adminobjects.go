@@ -13,23 +13,25 @@ import (
 	"github.com/epheo/dotvirt/pkg/adminobjects"
 )
 
-// adminObjectsOffered is whether this console renders admin objects: it
-// belongs to an install. Every pin comes from reads under the caller's token.
+// adminObjectsOffered is whether this console renders admin objects: the
+// operator says it belongs to an install, and it knows its own namespace.
+// Every pin comes from reads under the caller's token.
 func (s *Server) adminObjectsOffered() bool {
-	return s.cfg.Install.Name != ""
+	return s.cfg.Install.Name != "" && s.cfg.OwnNamespace != ""
 }
 
 // adminObjectsAction is what installing the admin objects takes: reading the
-// install (the pins an admin chose) and finding the operator's Deployment (its
-// account, its images), then reading, creating and patching every object an
+// install in the console's namespace, finding the operator's Deployment and
+// reviewing its account, then reading, creating and patching every object an
 // install may ask for. Asked of the allowlist, so the capability reads nothing.
 func (s *Server) adminObjectsAction() action {
-	in := s.cfg.Install
+	ns := s.cfg.OwnNamespace
 	act := action{
-		{Verb: verbGet, Group: "dotvirt.io", Resource: "dotvirts", Namespace: in.Namespace, Name: in.Name},
+		{Verb: verbList, Group: "dotvirt.io", Resource: "dotvirts", Namespace: ns},
 		{Verb: verbList, Group: "apps", Resource: "deployments", Name: adminobjects.OperatorDeployment},
+		{Verb: verbCreate, Group: "authorization.k8s.io", Resource: "subjectaccessreviews"},
 	}
-	for _, r := range adminobjects.Allowed(in.Namespace) {
+	for _, r := range adminobjects.Allowed(ns) {
 		act = append(act,
 			question{Verb: verbCreate, Group: r.Group, Resource: r.Resource, Namespace: r.Namespace},
 			question{Verb: verbPatch, Group: r.Group, Resource: r.Resource, Namespace: r.Namespace, Name: r.Name},
@@ -66,17 +68,18 @@ func (s *Server) serveAdminObjects(w http.ResponseWriter, r *http.Request, insta
 }
 
 // adminParams are the guard's pins, every one read as the caller, none from
-// anything the operator writes: the install's spec (its ArgoCD target, its
-// image, its TLS choice; the operator may only patch its finalizers once the
+// anything the operator writes: the console's own namespace (its
+// ServiceAccount mount), the one install there (its ArgoCD target, image, TLS
+// and metrics choices; the operator may only patch its finalizers once the
 // guard is in), and the operator's Deployment (its account and images; OLM or
 // GitOps writes it).
 func (s *Server) adminParams(ctx context.Context, c *cluster.Client) (adminobjects.Params, error) {
-	in := s.cfg.Install
-	spec, err := c.InstallSpec(ctx, in.Namespace, in.Name)
+	ns := s.cfg.OwnNamespace
+	spec, err := c.InstallIn(ctx, ns)
 	if err != nil {
-		return adminobjects.Params{}, unavailable(fmt.Errorf("read the install %s/%s: %w", in.Namespace, in.Name, err))
+		return adminobjects.Params{}, unavailable(fmt.Errorf("read the install: %w", err))
 	}
-	op, err := c.OperatorDeployment(ctx, adminobjects.OperatorDeployment)
+	op, err := c.OperatorDeployment(ctx, adminobjects.OperatorDeployment, ns)
 	if err != nil {
 		return adminobjects.Params{}, unavailable(fmt.Errorf("find the operator: %w", err))
 	}
@@ -86,8 +89,9 @@ func (s *Server) adminParams(ctx context.Context, c *cluster.Client) (adminobjec
 	}
 	p := adminobjects.Params{
 		Operator:  "system:serviceaccount:" + op.Namespace + ":" + op.ServiceAccount,
-		Namespace: in.Namespace, SpecImage: spec.Image, DotvirtImage: op.DotvirtImage, ForgejoImage: op.ForgejoImage,
+		Namespace: ns, SpecImage: spec.Image, DotvirtImage: op.DotvirtImage, ForgejoImage: op.ForgejoImage,
 		InsecureTLS: spec.InsecureTLS,
+		Metrics:     adminobjects.MetricsFor(spec.MetricsURL, spec.MetricsTenancyURL, spec.MetricsCA),
 	}
 	p.ArgoNamespace, p.ArgoController = adminobjects.ArgoTarget(spec.ArgoNamespace, spec.ArgoController, openShift)
 	if !p.Valid() {

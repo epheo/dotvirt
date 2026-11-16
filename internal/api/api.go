@@ -204,7 +204,8 @@ type Config struct {
 	Publish           publish.Settings     // the platform's publishing settings; zero: publishing off
 	Branding          branding.Settings    // a provider's dress for the console; zero: dotvirt's own
 	ForgeAdmin        config.ForgeAdminRef // a managed forge's admin credential, read as the caller; zero: none
-	Install           config.InstallRef    // the Dotvirt resource the console renders admin objects for; zero: none
+	Install           config.InstallRef    // set by the operator: the console offers admin objects; zero: none
+	OwnNamespace      string               // the console pod's namespace, from its ServiceAccount mount: the install's namespace
 }
 
 // visibleTTL bounds a token's cached verdicts, and the view derived from them,

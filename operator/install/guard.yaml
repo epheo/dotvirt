@@ -16,6 +16,11 @@
 #   spec() { kubectl get dotvirt -A -o jsonpath="{.items[0].spec.$1}"; }
 #   export SPEC_IMAGE="$(spec image)"
 #   export FORGE_INSECURE_TLS="$( [ "$(spec forge.insecureTLS)" = true ] && echo true || echo false )"
+#   # Where users' metrics queries go: spec.metrics.url; its tenancyURL, else for
+#   # https://thanos-querier.openshift-monitoring.svc:9091 the same URL on 9092;
+#   # the CA, /var/run/dotvirt/tls-metrics/ca.crt when spec.metrics.ca is set, else
+#   # /var/run/dotvirt/tls-service/service-ca.crt for an https .svc url. Empty when unset.
+#   export METRICS_URL="$(spec metrics.url)" METRICS_TENANCY_URL=... METRICS_CA=...
 #   # spec.argocd, else the defaults: openshift-gitops where routes are served
 #   # (OpenShift, MicroShift), argocd elsewhere, and that instance's controller:
 #   ARGO_NAMESPACE="$(spec argocd.namespace)"
@@ -33,7 +38,8 @@
 #     -e "s|\${ARGO_NAMESPACE}|$ARGO_NAMESPACE|g" -e "s|\${ARGO_CONTROLLER}|$ARGO_CONTROLLER|g" \
 #     -e "s|\${SPEC_IMAGE}|$SPEC_IMAGE|g" -e "s|\${FORGE_INSECURE_TLS}|$FORGE_INSECURE_TLS|g" \
 #     -e "s|\${RELATED_IMAGE_DOTVIRT}|$RELATED_IMAGE_DOTVIRT|g" -e "s|\${RELATED_IMAGE_FORGEJO}|$RELATED_IMAGE_FORGEJO|g" \
-#     guard.yaml | kubectl apply --server-side --field-manager=dotvirt -f -
+#     -e "s|\${METRICS_URL}|$METRICS_URL|g" -e "s|\${METRICS_TENANCY_URL}|$METRICS_TENANCY_URL|g" \
+#     -e "s|\${METRICS_CA}|$METRICS_CA|g" guard.yaml | kubectl apply --server-side --field-manager=dotvirt -f -
 #
 # Every object carries the label app.kubernetes.io/part-of=dotvirt-operator-guard.
 #
@@ -127,23 +133,41 @@ spec:
       forge only from codeberg.org/forgejo/forgejo, or the image an admin chose (dotvirt
       operator guard)
     reason: Forbidden
-  - expression: 'object.metadata.name == "dotvirt" ? (object.spec.template.spec.containers.all(c,
-      !has(c.command) && has(c.args) && (c.args == ["-addr=:8080", "-ui-origin=",
-      "-argo=true", "-draft-dir=/var/lib/dotvirt/drafts", "-git-poll-interval=5m",
-      "-project-label=dotvirt.io/project", "-repo-annotation=dotvirt.io/repo"] ||
-      (${FORGE_INSECURE_TLS} && c.args == ["-addr=:8080", "-ui-origin=", "-argo=true",
-      "-draft-dir=/var/lib/dotvirt/drafts", "-git-poll-interval=5m", "-project-label=dotvirt.io/project",
-      "-repo-annotation=dotvirt.io/repo", "-insecure-tls"]))) && (!has(object.spec.template.spec.initContainers)
-      || size(object.spec.template.spec.initContainers) == 0)) : (object.spec.template.spec.containers.all(c,
-      !has(c.command) && !has(c.args)) && (!has(object.spec.template.spec.initContainers)
-      || object.spec.template.spec.initContainers.all(c, has(c.command) && c.command
-      == ["sh", "-c", "set -e\nmkdir -p \"$(dirname \"$GITEA_APP_INI\")\"\nenvironment-to-ini\nforgejo
-      migrate\nforgejo admin user create --admin --username dotvirt-bot --password
-      \"$ADMIN_PW\" --email dotvirt-bot@dotvirt.local --must-change-password=false
-      || forgejo admin user change-password --username dotvirt-bot --password \"$ADMIN_PW\"
-      --must-change-password=false"] && !has(c.args))))'
-    message: the operator runs its Deployments only with the commands and arguments
-      it renders (dotvirt operator guard)
+  - expression: object.metadata.name != "dotvirt" || (object.spec.template.spec.containers.all(c,
+      !has(c.command)) && (!has(object.spec.template.spec.initContainers) || size(object.spec.template.spec.initContainers)
+      == 0))
+    message: the operator runs the console with its image's own entrypoint and no
+      init container (dotvirt operator guard)
+    reason: Forbidden
+  - expression: object.metadata.name != "dotvirt" || object.spec.template.spec.containers.all(c,
+      (!has(c.args) || c.args.all(a, !(a == "-metrics-url" || a == "--metrics-url"
+      || a.startsWith("-metrics-url=") || a.startsWith("--metrics-url=")) || ("${METRICS_URL}"
+      != "" && (a == "-metrics-url=" + "${METRICS_URL}" || a == "--metrics-url=" +
+      "${METRICS_URL}")))) && (!has(c.env) || c.env.all(e, e.name != "DOTVIRT_METRICS_URL"
+      || ("${METRICS_URL}" != "" && !has(e.valueFrom) && has(e.value) && e.value ==
+      "${METRICS_URL}"))) && (!has(c.args) || c.args.all(a, !(a == "-metrics-tenancy-url"
+      || a == "--metrics-tenancy-url" || a.startsWith("-metrics-tenancy-url=") ||
+      a.startsWith("--metrics-tenancy-url=")) || ("${METRICS_TENANCY_URL}" != "" &&
+      (a == "-metrics-tenancy-url=" + "${METRICS_TENANCY_URL}" || a == "--metrics-tenancy-url="
+      + "${METRICS_TENANCY_URL}")))) && (!has(c.env) || c.env.all(e, e.name != "DOTVIRT_METRICS_TENANCY_URL"
+      || ("${METRICS_TENANCY_URL}" != "" && !has(e.valueFrom) && has(e.value) && e.value
+      == "${METRICS_TENANCY_URL}"))) && (!has(c.args) || c.args.all(a, !(a == "-metrics-ca"
+      || a == "--metrics-ca" || a.startsWith("-metrics-ca=") || a.startsWith("--metrics-ca="))
+      || ("${METRICS_CA}" != "" && (a == "-metrics-ca=" + "${METRICS_CA}" || a ==
+      "--metrics-ca=" + "${METRICS_CA}")))) && (!has(c.env) || c.env.all(e, e.name
+      != "DOTVIRT_METRICS_CA" || ("${METRICS_CA}" != "" && !has(e.valueFrom) && has(e.value)
+      && e.value == "${METRICS_CA}"))) && (${FORGE_INSECURE_TLS} || ((!has(c.args)
+      || c.args.all(a, !(a == "-insecure-tls" || a == "--insecure-tls" || a.startsWith("-insecure-tls=")
+      || a.startsWith("--insecure-tls=")))) && (!has(c.env) || c.env.all(e, e.name
+      != "DOTVIRT_INSECURE_TLS")))) && (!has(c.args) || c.args.all(a, !(a == "-kubeconfig"
+      || a == "--kubeconfig" || a.startsWith("-kubeconfig=") || a.startsWith("--kubeconfig="))))
+      && (!has(c.env) || c.env.all(e, e.name != "KUBECONFIG")) && (!has(c.args) ||
+      c.args.all(a, !(a == "-static-dir" || a == "--static-dir" || a.startsWith("-static-dir=")
+      || a.startsWith("--static-dir=")))) && (!has(c.env) || c.env.all(e, e.name !=
+      "DOTVIRT_STATIC_DIR")))
+    message: the operator sets none of the console's settings that send users' tokens
+      or the console's pages elsewhere, but as an admin chose them (dotvirt operator
+      guard)
     reason: Forbidden
   - expression: object.metadata.name != "dotvirt" || (!(has(object.spec.template.spec.automountServiceAccountToken)
       && !object.spec.template.spec.automountServiceAccountToken) && object.spec.template.spec.containers.all(c,

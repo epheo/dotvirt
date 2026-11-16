@@ -1,13 +1,13 @@
 package adminobjects
 
-import "fmt"
+import (
+	"net"
+	"net/url"
+	"strings"
+)
 
-// What the operator's Deployments run with, beyond what an admin chose: the
-// operator renders these and the guard pins them, so neither drifts from the
-// other.
-
-// ConsolePort is the console container's HTTP port.
-const ConsolePort = 8080
+// What the operator renders and the guard pins alike, so neither drifts from
+// the other.
 
 // ConsoleAccount and ForgeAccount are the ServiceAccounts the console and the
 // managed forge run as; ConsoleDeployment and ForgeDeployment their
@@ -18,44 +18,6 @@ const (
 	ConsoleDeployment = "dotvirt"
 	ForgeDeployment   = "dotvirt-forgejo"
 )
-
-// ForgeBotUser is the managed forge's service user.
-const ForgeBotUser = "dotvirt-bot"
-
-// ConsoleArgs are the console container's arguments. insecureTLS is the
-// admin's spec.forge.insecureTLS: it also lets the metrics client skip TLS,
-// and metrics queries carry each user's token, so only an admin may add it.
-func ConsoleArgs(insecureTLS bool) []string {
-	args := []string{
-		fmt.Sprintf("-addr=:%d", ConsolePort),
-		"-ui-origin=", // same-origin: the binary serves the SPA
-		"-argo=true",
-		"-draft-dir=/var/lib/dotvirt/drafts",
-		// Webhooks are the primary trigger for inventory updates; the git poll
-		// is only the missed-event backstop, so keep it slow to spare the
-		// forge - the managed Forgejo is a single SQLite-backed pod.
-		"-git-poll-interval=5m",
-		"-project-label=dotvirt.io/project",
-		"-repo-annotation=dotvirt.io/repo",
-	}
-	if insecureTLS {
-		args = append(args, "-insecure-tls")
-	}
-	return args
-}
-
-// ForgejoBootstrap is the managed forge's init container command. Every pod
-// start converges the bot's password to the current admin secret: the init
-// container has local DB access, so it needs no prior password to reset it.
-func ForgejoBootstrap() []string {
-	return []string{"sh", "-c", `set -e
-mkdir -p "$(dirname "$GITEA_APP_INI")"
-environment-to-ini
-forgejo migrate
-forgejo admin user create --admin --username ` + ForgeBotUser +
-		` --password "$ADMIN_PW" --email ` + ForgeBotUser + `@dotvirt.local --must-change-password=false ` +
-		`|| forgejo admin user change-password --username ` + ForgeBotUser + ` --password "$ADMIN_PW" --must-change-password=false`}
-}
 
 // ArgoTarget is the ArgoCD namespace and controller ServiceAccount an install
 // writes into: the spec's, else the defaults. The operator and the console
@@ -79,4 +41,53 @@ func ArgoTarget(specNamespace, specController string, openShift bool) (namespace
 		}
 	}
 	return namespace, controller
+}
+
+// The console's metrics CA paths: the admin's spec.metrics.ca, mounted, or
+// OpenShift's service CA for an in-cluster https querier.
+const (
+	MetricsCAPath = "/var/run/dotvirt/tls-metrics/ca.crt"
+	ServiceCAPath = "/var/run/dotvirt/tls-service/service-ca.crt"
+)
+
+// Metrics is the console's metrics configuration as rendered from an
+// admin's spec.metrics: where every user's query goes with the user's token,
+// and the CA it trusts there; "" when unset. The guard pins these, so only an
+// admin chooses where the tokens go.
+type Metrics struct {
+	URL, TenancyURL, CA string
+}
+
+// MetricsFor renders spec.metrics: its url, its tenancyURL (else OpenShift's
+// thanos-querier tenancy port beside 9091), and caSet whether spec.metrics.ca
+// names a ConfigMap.
+func MetricsFor(queryURL, tenancyURL string, caSet bool) Metrics {
+	if queryURL == "" {
+		return Metrics{}
+	}
+	m := Metrics{URL: queryURL, TenancyURL: tenancyURL}
+	if m.TenancyURL == "" {
+		m.TenancyURL = thanosTenancy(queryURL)
+	}
+	switch {
+	case caSet:
+		m.CA = MetricsCAPath
+	case strings.HasPrefix(queryURL, "https://") && strings.Contains(queryURL, ".svc"):
+		m.CA = ServiceCAPath
+	}
+	return m
+}
+
+// thanosTenancy is OpenShift's thanos-querier tenancy port for its 9091
+// query port, "" for any other URL.
+func thanosTenancy(raw string) string {
+	u, err := url.Parse(raw)
+	if err != nil || u.Port() != "9091" {
+		return ""
+	}
+	if h := u.Hostname(); h != "thanos-querier.openshift-monitoring.svc" && h != "thanos-querier.openshift-monitoring.svc.cluster.local" {
+		return ""
+	}
+	u.Host = net.JoinHostPort(u.Hostname(), "9092")
+	return u.String()
 }

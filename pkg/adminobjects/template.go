@@ -37,6 +37,11 @@ const templateHeader = `# The dotvirt operator guard: admission policies boundin
 #   spec() { kubectl get dotvirt -A -o jsonpath="{.items[0].spec.$1}"; }
 #   export SPEC_IMAGE="$(spec image)"
 #   export FORGE_INSECURE_TLS="$( [ "$(spec forge.insecureTLS)" = true ] && echo true || echo false )"
+#   # Where users' metrics queries go: spec.metrics.url; its tenancyURL, else for
+#   # https://thanos-querier.openshift-monitoring.svc:9091 the same URL on 9092;
+#   # the CA, ` + MetricsCAPath + ` when spec.metrics.ca is set, else
+#   # ` + ServiceCAPath + ` for an https .svc url. Empty when unset.
+#   export METRICS_URL="$(spec metrics.url)" METRICS_TENANCY_URL=... METRICS_CA=...
 #   # spec.argocd, else the defaults: openshift-gitops where routes are served
 #   # (OpenShift, MicroShift), argocd elsewhere, and that instance's controller:
 #   ARGO_NAMESPACE="$(spec argocd.namespace)"
@@ -54,7 +59,8 @@ const templateHeader = `# The dotvirt operator guard: admission policies boundin
 #     -e "s|\${ARGO_NAMESPACE}|$ARGO_NAMESPACE|g" -e "s|\${ARGO_CONTROLLER}|$ARGO_CONTROLLER|g" \
 #     -e "s|\${SPEC_IMAGE}|$SPEC_IMAGE|g" -e "s|\${FORGE_INSECURE_TLS}|$FORGE_INSECURE_TLS|g" \
 #     -e "s|\${RELATED_IMAGE_DOTVIRT}|$RELATED_IMAGE_DOTVIRT|g" -e "s|\${RELATED_IMAGE_FORGEJO}|$RELATED_IMAGE_FORGEJO|g" \
-#     guard.yaml | ` + ApplyCommand + ` -
+#     -e "s|\${METRICS_URL}|$METRICS_URL|g" -e "s|\${METRICS_TENANCY_URL}|$METRICS_TENANCY_URL|g" \
+#     -e "s|\${METRICS_CA}|$METRICS_CA|g" guard.yaml | ` + ApplyCommand + ` -
 #
 # Every object carries the label app.kubernetes.io/part-of=dotvirt-operator-guard.
 #
@@ -66,7 +72,7 @@ const templateHeader = `# The dotvirt operator guard: admission policies boundin
 func Template() ([]byte, error) {
 	var b bytes.Buffer
 	b.WriteString(templateHeader)
-	for _, o := range guard(TemplateParams, "${FORGE_INSECURE_TLS}") {
+	for _, o := range guard(TemplateParams, "${FORGE_INSECURE_TLS}", Metrics{URL: "${METRICS_URL}", TenancyURL: "${METRICS_TENANCY_URL}", CA: "${METRICS_CA}"}) {
 		y, err := yaml.Marshal(o.Object.Object)
 		if err != nil {
 			return nil, err

@@ -273,6 +273,7 @@ func run() error {
 			UploadProxyURL:    uploadProxyURL(ctx, cfg.UploadProxyURL, saCluster),
 			ForgeAdmin:        cfg.ForgeAdmin,
 			Install:           cfg.Install,
+			OwnNamespace:      ownNamespace(),
 			PlatformRepo:      cfg.PlatformRepo,
 			ProjectLabel:      cfg.ProjectLabel,
 			RepoAnnotation:    cfg.RepoAnnotation,
@@ -470,4 +471,15 @@ func uploadProxyURL(ctx context.Context, flag string, sa *cluster.Client) string
 		log.Printf("upload: CDI's upload proxy is unknown, image upload stays off: %v", err)
 	}
 	return url
+}
+
+// ownNamespace is the namespace this pod runs in, "" out of cluster. It is
+// read from the ServiceAccount mount, which the operator guard keeps from the
+// operator: the env the operator writes cannot steer it.
+func ownNamespace() string {
+	b, err := os.ReadFile("/var/run/secrets/kubernetes.io/serviceaccount/namespace")
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(b))
 }
