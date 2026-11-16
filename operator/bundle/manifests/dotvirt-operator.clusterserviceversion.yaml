@@ -458,7 +458,6 @@ spec:
               resources:
                 - rolebindings
               verbs:
-                - create
                 - get
             - apiGroups:
                 - rbac.authorization.k8s.io
@@ -467,6 +466,7 @@ spec:
               resources:
                 - rolebindings
               verbs:
+                - create
                 - delete
                 - patch
             - apiGroups:

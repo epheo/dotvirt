@@ -135,9 +135,9 @@ only when they change its spec (or delete it), never a status write.
 
 ### Prune
 
-After a completed pass whose render changed, or at least every 5 minutes, the
-operator deletes the objects carrying this install's instance labels that the pass
-did not render: a Route left by a switch to Ingress,
+After a completed pass whose render changed, and otherwise at most once every 5
+minutes, the operator deletes the objects carrying this install's instance labels
+that the pass did not render: a Route left by a switch to Ingress,
 the platform tier after `spec.forge.platformRepo` is cleared, everything in a former
 ArgoCD namespace, a managed forge switched off. A tenant AppProject whose project
 is gone, and the shared `dotvirt-tenants` AppProject of earlier versions, are kept

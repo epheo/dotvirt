@@ -13,6 +13,7 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 
 	dotvirtv1alpha1 "github.com/epheo/dotvirt/operator/api/v1alpha1"
@@ -50,9 +51,17 @@ func (r *DotvirtReconciler) reconcileArgo(ctx context.Context, dv *dotvirtv1alph
 		return nil, err
 	}
 	appset := install.ApplicationSet(dv, argoNS, platformNS, tenants.unconfined)
+	syncRequest := install.SyncRequestRoleBinding(dv, argoNS)
+	if argoNS == dv.Namespace {
+		// Prune never sweeps the install namespace: the ownerRef lets the
+		// garbage collector take the binding with the CR.
+		if err := controllerutil.SetControllerReference(dv, syncRequest, r.Scheme); err != nil {
+			return nil, err
+		}
+	}
 	objs := []client.Object{
 		install.DotvirtClusterRoleBinding(dv),
-		install.SyncRequestRoleBinding(dv, argoNS),
+		syncRequest,
 		install.ArgocdReadClusterRoleBinding(dv, argoNS, argoSA),
 		install.PlatformNetworkAdminBinding(dv),
 	}

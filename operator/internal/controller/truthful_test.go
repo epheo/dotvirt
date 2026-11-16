@@ -691,3 +691,26 @@ func TestDotvirtPatchesApplicationsOnlyInTheArgoNamespace(t *testing.T) {
 		}
 	}
 }
+
+// With ArgoCD in the install namespace, prune never sweeps there: the
+// RoleBinding carries the CR's ownerRef so the garbage collector takes it.
+func TestSyncRequestBindingOwnedWhenArgoSharesTheNamespace(t *testing.T) {
+	for _, argoNS := range []string{"", "dotvirt"} {
+		dv := testCR()
+		dv.Spec.ArgoCD.Namespace = argoNS
+		c := testBuilder(t).WithObjects(dv).Build()
+		reconcileOnce(t, newReconciler(c, depsOK), dv)
+		ns := argoNS
+		if ns == "" {
+			ns = "argocd"
+		}
+		var rb rbacv1.RoleBinding
+		if !exists(t, c, &rb, ns, install.SyncRequestName) {
+			t.Fatalf("no RoleBinding in %s", ns)
+		}
+		owned := len(rb.OwnerReferences) == 1 && rb.OwnerReferences[0].Name == dv.Name
+		if owned != (ns == dv.Namespace) {
+			t.Errorf("ArgoCD in %s: ownerRefs = %v, want one exactly when it is the install namespace", ns, rb.OwnerReferences)
+		}
+	}
+}

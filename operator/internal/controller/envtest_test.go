@@ -137,15 +137,20 @@ func TestEnvtest(t *testing.T) {
 			{authzv1.ResourceAttributes{Verb: "delete", Group: "rbac.authorization.k8s.io", Resource: "clusterrolebindings", Name: tenancy.PlatformSyncAccount}, true},
 			{authzv1.ResourceAttributes{Verb: "delete", Resource: "serviceaccounts", Namespace: "argocd", Name: "dotvirt-p-team-a"}, false},
 			// RoleBindings are read one by one, never listed or watched. The one the
-			// install writes is patched and deleted by name; its create cannot be
-			// scoped, and bind bounds what it may grant.
+			// install writes is created (server-side apply authorizes create with the
+			// name), patched and deleted by name, and no other.
 			{authzv1.ResourceAttributes{Verb: "get", Group: "rbac.authorization.k8s.io", Resource: "rolebindings", Namespace: "team-a", Name: "team-a-admins"}, true},
 			{authzv1.ResourceAttributes{Verb: "list", Group: "rbac.authorization.k8s.io", Resource: "rolebindings"}, false},
 			{authzv1.ResourceAttributes{Verb: "watch", Group: "rbac.authorization.k8s.io", Resource: "rolebindings"}, false},
+			{authzv1.ResourceAttributes{Verb: "create", Group: "rbac.authorization.k8s.io", Resource: "rolebindings", Namespace: "argocd", Name: install.SyncRequestName}, true},
+			{authzv1.ResourceAttributes{Verb: "create", Group: "rbac.authorization.k8s.io", Resource: "rolebindings", Namespace: "team-a"}, false},
+			{authzv1.ResourceAttributes{Verb: "create", Group: "rbac.authorization.k8s.io", Resource: "rolebindings", Namespace: "team-a", Name: "team-a-admins"}, false},
 			{authzv1.ResourceAttributes{Verb: "patch", Group: "rbac.authorization.k8s.io", Resource: "rolebindings", Namespace: "argocd", Name: install.SyncRequestName}, true},
 			{authzv1.ResourceAttributes{Verb: "patch", Group: "rbac.authorization.k8s.io", Resource: "rolebindings", Namespace: "team-a", Name: "team-a-admins"}, false},
 			{authzv1.ResourceAttributes{Verb: "delete", Group: "rbac.authorization.k8s.io", Resource: "rolebindings", Namespace: "argocd", Name: install.SyncRequestName}, true},
 			{authzv1.ResourceAttributes{Verb: "delete", Group: "rbac.authorization.k8s.io", Resource: "rolebindings", Namespace: "team-a", Name: "team-a-admins"}, false},
+			// Proved by this row alone: the operator also holds the role's one rule,
+			// so the escalation check would admit its binding without bind.
 			{authzv1.ResourceAttributes{Verb: "bind", Group: "rbac.authorization.k8s.io", Resource: "clusterroles", Name: install.SyncRequestName}, true},
 		} {
 			res, err := kube.AuthorizationV1().SelfSubjectAccessReviews().Create(ctx,
@@ -167,10 +172,12 @@ func TestEnvtest(t *testing.T) {
 		if _, err := kube.RbacV1().ClusterRoleBindings().Create(ctx, crb, metav1.CreateOptions{}); !apierrors.IsForbidden(err) {
 			t.Errorf("binding cluster-admin: err=%v, want Forbidden", err)
 		}
-		// cluster-admin, not admin: envtest runs no aggregation controller, so
-		// its admin role is empty and anyone may bind it.
+		// Under the one name it may create, a RoleBinding to another role is still
+		// refused: RBAC's escalation check stops it, not the name. cluster-admin,
+		// not admin: envtest runs no aggregation controller, so its admin role is
+		// empty and anyone may bind it.
 		rb := &rbacv1.RoleBinding{
-			ObjectMeta: metav1.ObjectMeta{Name: "escalation-probe", Namespace: "team-a"},
+			ObjectMeta: metav1.ObjectMeta{Name: install.SyncRequestName, Namespace: "team-a"},
 			RoleRef:    rbacv1.RoleRef{APIGroup: rbacv1.GroupName, Kind: "ClusterRole", Name: "cluster-admin"},
 			Subjects:   []rbacv1.Subject{{Kind: rbacv1.UserKind, Name: operatorUser}},
 		}

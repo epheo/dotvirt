@@ -413,12 +413,29 @@ func (s *Snapshot) managingApp(namespace, name string) (AppRef, bool) {
 	if !s.synced.Done() {
 		return AppRef{}, false
 	}
-	for _, app := range reflect.List(s.apps) {
-		if resyncable(app, namespace, name) {
+	return pickManaging(reflect.List(s.apps), namespace, name, s.writable)
+}
+
+// pickManaging is the dotvirt Application among apps managing the VM
+// namespace/name, one in a writable namespace first: a hand-labelled copy
+// elsewhere must not make Resync refuse depending on list order.
+func pickManaging(apps []*unstructured.Unstructured, namespace, name string, writable func(string) bool) (AppRef, bool) {
+	var other *unstructured.Unstructured
+	for _, app := range apps {
+		if !resyncable(app, namespace, name) {
+			continue
+		}
+		if writable(app.GetNamespace()) {
 			return appRefOf(app), true
 		}
+		if other == nil {
+			other = app
+		}
 	}
-	return AppRef{}, false
+	if other == nil {
+		return AppRef{}, false
+	}
+	return appRefOf(other), true
 }
 
 // Resync triggers an ArgoCD sync of the given VM alone, from the dotvirt
@@ -435,7 +452,7 @@ func (s *Snapshot) managingApp(namespace, name string) (AppRef, bool) {
 func (s *Snapshot) Resync(ctx context.Context, username, namespace, name string) (model.ResyncResult, error) {
 	ref, ok := s.managingApp(namespace, name)
 	if !ok {
-		ref, ok = s.sa.findmanagingAppLive(ctx, namespace, name)
+		ref, ok = s.sa.findmanagingAppLive(ctx, namespace, name, s.writable)
 		if !ok {
 			return model.ResyncResult{}, fmt.Errorf("%w: no ArgoCD Application manages %s/%s", model.ErrNotFound, namespace, name)
 		}
@@ -536,17 +553,16 @@ func (c *Client) patchApp(ctx context.Context, namespace, name string, patch []b
 
 // findmanagingAppLive is managingApp's cluster fallback: a one-shot LIST used only
 // when the snapshot hasn't synced yet, so an early resync still resolves its app.
-func (c *Client) findmanagingAppLive(ctx context.Context, namespace, name string) (AppRef, bool) {
+func (c *Client) findmanagingAppLive(ctx context.Context, namespace, name string, writable func(string) bool) (AppRef, bool) {
 	apps, err := c.dyn.Resource(applicationsGVR).Namespace(metav1.NamespaceAll).List(ctx, metav1.ListOptions{})
 	if err != nil {
 		return AppRef{}, false
 	}
+	items := make([]*unstructured.Unstructured, len(apps.Items))
 	for i := range apps.Items {
-		if resyncable(&apps.Items[i], namespace, name) {
-			return appRefOf(&apps.Items[i]), true
-		}
+		items[i] = &apps.Items[i]
 	}
-	return AppRef{}, false
+	return pickManaging(items, namespace, name, writable)
 }
 
 // resyncable reports whether app is a dotvirt Application managing the VM

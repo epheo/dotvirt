@@ -2,9 +2,9 @@
 # bundle, or by `kustomize build config/default` for a non-OLM install), NOT authored
 # by the operator at runtime. Shipping them statically is what lets the operator drop
 # `escalate` and all ClusterRole writes: at reconcile it only creates the matching
-# ClusterRoleBindings (see internal/install/rbac.go), which needs just `bind` on these
-# named roles (and the one RoleBinding in the Argo namespace). Keep the names in sync
-# with the roleRefs in rbac.go.
+# bindings (see internal/install/rbac.go: ClusterRoleBindings, plus one RoleBinding in
+# the Argo namespace), which needs just `bind` on these named roles. Keep the names in
+# sync with the roleRefs in rbac.go.
 ---
 # dotvirt's runtime ServiceAccount read RBAC (TokenReview, namespace/VM reads, Argo
 # Application reads, wizard catalogs, network read). Read-only: Argo owns the apply

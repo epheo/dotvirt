@@ -40,13 +40,15 @@ package controller
 // to the dotvirt SA / Argo controller / platform-admins / every authenticated user.
 // +kubebuilder:rbac:groups=rbac.authorization.k8s.io,resources=clusterrolebindings,verbs=list;create;patch
 // rolebindings: the one RoleBinding, dotvirt-sync-request in the Argo namespace, which
-// keeps dotvirt's Application patch off every other namespace. create cannot be scoped
-// by name; bind (below) bounds what any binding it creates may grant, as it does for
-// the ClusterRoleBindings. Never listed: prune reads it by name.
-// +kubebuilder:rbac:groups=rbac.authorization.k8s.io,resources=rolebindings,verbs=create
-// +kubebuilder:rbac:groups=rbac.authorization.k8s.io,resources=rolebindings,resourceNames=dotvirt-sync-request,verbs=patch;delete
-// clusterroles `bind`: the operator's ONLY rbac-authoring right - bind these named
-// static roles into the bindings above. No escalate, no role create/update/delete.
+// keeps dotvirt's Application patch off every other namespace. All three verbs are
+// scoped by name: install.Apply creates through server-side apply, which the apiserver
+// authorizes as create WITH the object's name (a POST create could not be scoped).
+// Never listed: prune reads it by name.
+// +kubebuilder:rbac:groups=rbac.authorization.k8s.io,resources=rolebindings,resourceNames=dotvirt-sync-request,verbs=create;patch;delete
+// clusterroles `bind`: the operator's ONLY rbac-authoring right - it permits binding
+// these named static roles even where the operator does not hold their rules (RBAC's
+// escalation check refuses a binding otherwise). No escalate, no role
+// create/update/delete.
 // +kubebuilder:rbac:groups=rbac.authorization.k8s.io,resources=clusterroles,resourceNames=dotvirt;dotvirt-argocd-apply;dotvirt-argocd-read;dotvirt-platform-network-admin;dotvirt-platform-sync;dotvirt-storage-catalog;dotvirt-sync-request,verbs=bind
 // Sync impersonation: SubjectAccessReviews ask what each sync account may do before
 // the operator turns it on, the RoleBindings the platform Application manages say
