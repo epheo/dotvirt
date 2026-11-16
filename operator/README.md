@@ -79,17 +79,22 @@ owns one status condition; a phase that fails or waits records why there, so
    A managed forge, which writes its minted token there, needs
    `--verb=get,create,patch`. Created by hand, the grant outlives the install:
    delete both with the CR. The operator watches that Role and RoleBinding by
-   name, so a grant (or its removal), in either order, takes effect at once; while
-   the binding exists but the read is still refused (the apiserver's RBAC caches
-   catching up), it retries within a minute. Until then, conditions wait with
-   `WaitingForCredential` and the rest of the install runs:
+   name, so a grant (or its removal), in either order, takes effect at once. A
+   grant changed under 5 minutes ago but still refused is rechecked every minute
+   (the apiserver's RBAC caches catching up); past that it is wrong (a verb, the
+   Secret's name or the account), and `ForgeCredentialReady` says `GrantIncomplete`
+   with the commands to replace it: `kubectl -n <install-ns> delete
+   role,rolebinding dotvirt-forge-credential`, then the two above. Until the
+   grant works, conditions wait with `WaitingForCredential` and the rest of the
+   install runs:
    - a bring-your-own forge: the ArgoCD tier waits before writing anything, since
      tenant repo refs resolve against the credential's url (the app's forge URL).
      New projects, and namespaces added to a project, do not sync, sync
      impersonation does not change, and the platform repo and both webhooks wait;
      what Argo already syncs keeps syncing.
-   - a managed forge: no token is minted or checked, and the platform repo and
-     both webhooks wait. The ArgoCD tier goes on (its base is `spec.forge.url`),
+   - a managed forge: no token is minted or replaced (before minting into an
+     admin-named credential the operator asks whether it may store it, so it never
+     mints a token it would lose), and the platform repo and both webhooks wait. The ArgoCD tier goes on (its base is `spec.forge.url`),
      keeping the repo credentials Argo already has; after a move to another ArgoCD
      namespace it has none there, so private repos do not clone until the grant.
 
