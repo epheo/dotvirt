@@ -707,7 +707,7 @@ func TestEnvtest(t *testing.T) {
 		}
 
 		argoSecret("argo-held", map[string]string{install.ArgoWebhookKey: "declared"})
-		if err := r.applyArgoWebhookKey(ctx, "argo-held", "dotvirt"); !apierrors.IsConflict(err) {
+		if err := r.applyArgoWebhookKey(ctx, "argo-held", "dotvirt", "https://argo/api/webhook"); !apierrors.IsConflict(err) {
 			t.Errorf("apply over another manager's key: err = %v, want a conflict", err)
 		}
 		if got := string(data("argo-held")[install.ArgoWebhookKey]); got != "declared" {
@@ -725,7 +725,7 @@ func TestEnvtest(t *testing.T) {
 		if err := install.Apply(ctx, op, legacy, false); err != nil {
 			t.Fatal(err)
 		}
-		if err := r.applyArgoWebhookKey(ctx, "argo-upgrade", "dotvirt"); err != nil {
+		if err := r.applyArgoWebhookKey(ctx, "argo-upgrade", "dotvirt", "https://argo/api/webhook"); err != nil {
 			t.Fatal(err)
 		}
 		got := data("argo-upgrade")
@@ -740,7 +740,7 @@ func TestEnvtest(t *testing.T) {
 		}
 
 		foreign := argoSecret("argo-foreign", map[string]string{install.LegacyArgoWebhookKey: "theirs"})
-		if err := r.applyArgoWebhookKey(ctx, "argo-foreign", "dotvirt"); err != nil {
+		if err := r.applyArgoWebhookKey(ctx, "argo-foreign", "dotvirt", "https://argo/api/webhook"); err != nil {
 			t.Fatal(err)
 		}
 		if err := r.releaseArgoWebhookKey(ctx, foreign, "argo-foreign"); err != nil {

@@ -14,10 +14,12 @@ import (
 
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 
 	dotvirtv1alpha1 "github.com/epheo/dotvirt/operator/api/v1alpha1"
 	"github.com/epheo/dotvirt/operator/internal/install"
@@ -583,16 +585,66 @@ func TestManagedOrgExistsBeforeOrgWebhook(t *testing.T) {
 	}
 }
 
-// An ArgoCD resource setting spec.webhookSecrets has the argocd-operator own
-// argocd-secret's webhook keys: it would delete or rewrite the operator's key,
-// so the operator writes none and registers no hook that would then verify
-// nothing. Without that field, or without an ArgoCD resource at all, the hook
-// is registered for pushes, the only event Argo parses.
-func TestArgoWebhookStepsAsideWhenArgoCDOwnsTheKeys(t *testing.T) {
-	declared := argoCDInstance(nil)
-	declared.Object["spec"].(map[string]any)["webhookSecrets"] = map[string]any{
-		"gogs": map[string]any{"webhookSecretRef": map[string]any{"name": "forge-hook", "key": "secret"}},
+// argoWebhookPass runs the ArgoCD webhook phase once against a forge that
+// records the events of the org hook it is asked to create.
+func argoWebhookPass(t *testing.T, funcs interceptor.Funcs, objs ...client.Object) (*dotvirtv1alpha1.Dotvirt, client.Client, []string) {
+	t.Helper()
+	var events []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.URL.Path == "/api/v1/user":
+			w.WriteHeader(http.StatusOK)
+		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/orgs/dotvirt/hooks":
+			_, _ = w.Write([]byte(`[]`))
+		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/orgs/dotvirt/hooks":
+			var body struct {
+				Events []string `json:"events"`
+			}
+			_ = json.NewDecoder(r.Body).Decode(&body)
+			events = body.Events
+			w.WriteHeader(http.StatusCreated)
+			_, _ = w.Write([]byte(`{"id":1}`))
+		default:
+			t.Errorf("unexpected %s %s", r.Method, r.URL.Path)
+		}
+	}))
+	defer srv.Close()
+	dv := managedForgeCR()
+	dv.Spec.ArgoCD.ServerURL = "https://argocd.example"
+	objs = append(objs, dv,
+		&corev1.Secret{
+			ObjectMeta: metav1.ObjectMeta{Name: install.ForgeSecretName(dv), Namespace: dv.Namespace},
+			Data: map[string][]byte{
+				"url": []byte(dv.Spec.Forge.URL), "username": []byte(install.ForgejoBotUser), "token": []byte("tok"),
+			},
+		},
+		&corev1.Secret{
+			ObjectMeta: metav1.ObjectMeta{Name: install.ArgoWebhookSecretName, Namespace: dv.Namespace},
+			Data:       map[string][]byte{"secret": []byte("hmac")},
+		},
+	)
+	c := testBuilder(t).WithObjects(objs...).WithInterceptorFuncs(funcs).WithReturnManagedFields().Build()
+	r := newReconciler(c, depsOK)
+	r.forgeAPIBase = func(*dotvirtv1alpha1.Dotvirt) string { return srv.URL }
+	if _, err := r.reconcileArgoWebhook(context.Background(), dv, phaseCtx(r, dv)); err != nil {
+		t.Fatal(err)
 	}
+	return dv, c, events
+}
+
+// An ArgoCD resource setting spec.webhookSecrets, whatever it declares, has
+// the argocd-operator own argocd-secret's webhook keys: it deletes the Gogs key
+// unless declared there and rewrites it if declared, so the operator writes
+// none and registers no hook that would then verify nothing. Without that
+// field, or without an ArgoCD resource at all, the hook is registered for
+// pushes, the only event Argo parses.
+func TestArgoWebhookStepsAsideWhenArgoCDOwnsTheKeys(t *testing.T) {
+	declaring := func(webhookSecrets map[string]any) client.Object {
+		inst := argoCDInstance(nil)
+		inst.Object["spec"].(map[string]any)["webhookSecrets"] = webhookSecrets
+		return inst
+	}
+	ref := map[string]any{"webhookSecretRef": map[string]any{"name": "forge-hook", "key": "secret"}}
 	for _, tc := range []struct {
 		name   string
 		inst   client.Object
@@ -602,53 +654,16 @@ func TestArgoWebhookStepsAsideWhenArgoCDOwnsTheKeys(t *testing.T) {
 	}{
 		{"no ArgoCD resource", nil, metav1.ConditionTrue, "Registered", []string{"push"}},
 		{"ArgoCD without webhookSecrets", argoCDInstance(nil), metav1.ConditionTrue, "Registered", []string{"push"}},
-		{"ArgoCD with webhookSecrets", declared, metav1.ConditionUnknown, "ManagedByArgoCD", nil},
+		{"ArgoCD declaring gogs", declaring(map[string]any{"gogs": ref}), metav1.ConditionUnknown, "ManagedByArgoCD", nil},
+		{"ArgoCD declaring github only", declaring(map[string]any{"github": ref}), metav1.ConditionUnknown, "ManagedByArgoCD", nil},
+		{"ArgoCD declaring nothing", declaring(map[string]any{}), metav1.ConditionUnknown, "ManagedByArgoCD", nil},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			var events []string
-			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				switch {
-				case r.URL.Path == "/api/v1/user":
-					w.WriteHeader(http.StatusOK)
-				case r.Method == http.MethodGet && r.URL.Path == "/api/v1/orgs/dotvirt/hooks":
-					_, _ = w.Write([]byte(`[]`))
-				case r.Method == http.MethodPost && r.URL.Path == "/api/v1/orgs/dotvirt/hooks":
-					var body struct {
-						Events []string `json:"events"`
-					}
-					_ = json.NewDecoder(r.Body).Decode(&body)
-					events = body.Events
-					w.WriteHeader(http.StatusCreated)
-					_, _ = w.Write([]byte(`{"id":1}`))
-				default:
-					t.Errorf("unexpected %s %s", r.Method, r.URL.Path)
-				}
-			}))
-			defer srv.Close()
-			dv := managedForgeCR()
-			dv.Spec.ArgoCD.ServerURL = "https://argocd.example"
-			objs := []client.Object{dv,
-				&corev1.Secret{
-					ObjectMeta: metav1.ObjectMeta{Name: install.ForgeSecretName(dv), Namespace: dv.Namespace},
-					Data: map[string][]byte{
-						"url": []byte(dv.Spec.Forge.URL), "username": []byte(install.ForgejoBotUser), "token": []byte("tok"),
-					},
-				},
-				&corev1.Secret{
-					ObjectMeta: metav1.ObjectMeta{Name: install.ArgoWebhookSecretName, Namespace: dv.Namespace},
-					Data:       map[string][]byte{"secret": []byte("hmac")},
-				},
-			}
+			var objs []client.Object
 			if tc.inst != nil {
 				objs = append(objs, tc.inst)
 			}
-			c := testBuilder(t).WithObjects(objs...).WithReturnManagedFields().Build()
-			r := newReconciler(c, depsOK)
-			r.forgeAPIBase = func(*dotvirtv1alpha1.Dotvirt) string { return srv.URL }
-
-			if _, err := r.reconcileArgoWebhook(context.Background(), dv, phaseCtx(r, dv)); err != nil {
-				t.Fatal(err)
-			}
+			dv, c, events := argoWebhookPass(t, interceptor.Funcs{}, objs...)
 			if got := cond(dv, dotvirtv1alpha1.ConditionArgoWebhook); got == nil || got.Status != tc.status || got.Reason != tc.reason {
 				t.Errorf("ArgoWebhook = %+v, want %s/%s", got, tc.status, tc.reason)
 			}
@@ -665,6 +680,46 @@ func TestArgoWebhookStepsAsideWhenArgoCDOwnsTheKeys(t *testing.T) {
 			}
 			if !written || string(argoSecret.Data[install.ArgoWebhookKey]) != "hmac" || !install.HoldsArgoWebhookKey(&argoSecret) {
 				t.Errorf("argocd-secret = %v, want %s applied by the operator", argoSecret.Data, install.ArgoWebhookKey)
+			}
+		})
+	}
+}
+
+// Only the apply's conflict says another manager holds the key. The legacy
+// key's patch carries a resourceVersion, and its conflict is a race the next
+// pass retries, not someone else's key.
+func TestArgoWebhookConflictBlamesAnotherManagerOnlyOnApply(t *testing.T) {
+	legacy := &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{Name: install.ArgoSecretName, Namespace: "argocd"},
+		Data:       map[string][]byte{install.LegacyArgoWebhookKey: []byte("hmac")},
+	}
+	conflictOn := func(apply bool) interceptor.Funcs {
+		return interceptor.Funcs{Patch: func(ctx context.Context, cl client.WithWatch, obj client.Object, patch client.Patch, opts ...client.PatchOption) error {
+			if obj.GetName() == install.ArgoSecretName && (patch.Type() == types.ApplyPatchType) == apply {
+				return apierrors.NewConflict(corev1.Resource("secrets"), obj.GetName(), errors.New("conflict"))
+			}
+			return cl.Patch(ctx, obj, patch, opts...)
+		}}
+	}
+	for _, tc := range []struct {
+		name         string
+		apply        bool
+		otherManager bool
+	}{
+		{"on the apply", true, true},
+		{"on the legacy key's patch", false, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dv, _, events := argoWebhookPass(t, conflictOn(tc.apply), legacy.DeepCopy())
+			got := cond(dv, dotvirtv1alpha1.ConditionArgoWebhook)
+			if got == nil || got.Status != metav1.ConditionFalse {
+				t.Fatalf("ArgoWebhook = %+v, want False", got)
+			}
+			if blamed := strings.Contains(got.Message, "under another manager"); blamed != tc.otherManager {
+				t.Errorf("message %q names another manager: %v, want %v", got.Message, blamed, tc.otherManager)
+			}
+			if events != nil {
+				t.Errorf("hook registered (%v) with the key unset", events)
 			}
 		})
 	}

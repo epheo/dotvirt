@@ -194,7 +194,7 @@ func (r *DotvirtReconciler) argoWebhook(ctx context.Context, dv *dotvirtv1alpha1
 	}
 	if install.DeclaresWebhookSecrets(inst) {
 		return metav1.ConditionUnknown, "ManagedByArgoCD", fmt.Sprintf(
-			"ArgoCD %s sets spec.webhookSecrets, so it owns argocd-secret's webhook keys: declare spec.webhookSecrets.gogs and register a Forgejo org webhook (push events) to %s with that secret; Argo falls back to its poll meanwhile",
+			"ArgoCD %s sets spec.webhookSecrets, so it owns argocd-secret's webhook keys: declare spec.webhookSecrets.gogs, then give the Forgejo org webhook to %s (push events) that secret, replacing the one dotvirt registered there, if any, rather than adding a second; Argo falls back to its poll meanwhile",
 			instance, hookURL)
 	}
 	// The shared webhook secret, generated create-once in the dotvirt namespace.
@@ -203,11 +203,8 @@ func (r *DotvirtReconciler) argoWebhook(ctx context.Context, dv *dotvirtv1alpha1
 		return failed(err)
 	}
 	value := string(s.Data["secret"])
-	if err := r.applyArgoWebhookKey(ctx, rc.argoNS, value); apierrors.IsConflict(err) {
-		return failed(fmt.Errorf("%s/%s already sets %s under another manager, which the operator leaves alone: remove that key to hand it to the operator, or register a Forgejo org webhook (push events) to %s with its value: %w",
-			rc.argoNS, install.ArgoSecretName, install.ArgoWebhookKey, hookURL, err))
-	} else if err != nil {
-		return failed(fmt.Errorf("set argo webhook secret: %w", err))
+	if err := r.applyArgoWebhookKey(ctx, rc.argoNS, value, hookURL); err != nil {
+		return failed(err)
 	}
 	// One org webhook covers every repo, using the forge credential to register it.
 	fc, err := r.forgeClient(ctx, dv)
@@ -227,11 +224,17 @@ func (r *DotvirtReconciler) argoWebhook(ctx context.Context, dv *dotvirtv1alpha1
 }
 
 // applyArgoWebhookKey sets the operator's key in argoNS's argocd-secret, then
-// drops the legacy key.
-func (r *DotvirtReconciler) applyArgoWebhookKey(ctx context.Context, argoNS, value string) error {
+// drops the legacy key. Only the apply's conflict means another manager holds
+// the key: the legacy patch's is a resourceVersion race.
+func (r *DotvirtReconciler) applyArgoWebhookKey(ctx context.Context, argoNS, value, hookURL string) error {
 	s := install.ArgoWebhookSecret(argoNS, value)
-	if err := r.applyShared(ctx, s); err != nil {
-		return err
+	err := r.applyShared(ctx, s)
+	if apierrors.IsConflict(err) {
+		return fmt.Errorf("%s/%s already sets %s under another manager, which the operator leaves alone: remove that key to hand it to the operator, or register a Forgejo org webhook (push events) to %s with its value: %w",
+			argoNS, install.ArgoSecretName, install.ArgoWebhookKey, hookURL, err)
+	}
+	if err != nil {
+		return fmt.Errorf("set argo webhook secret: %w", err)
 	}
 	return r.dropLegacyArgoWebhookKey(ctx, s, value)
 }
