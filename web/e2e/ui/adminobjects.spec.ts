@@ -20,6 +20,27 @@ test('a cluster admin installs what the install asks for, and the banner clears'
 		'Enforces dotvirt-operator-secrets',
 		'Enforces dotvirt-operator-deployments',
 	]);
+	// The manifest an admin applies with kubectl instead: the listed objects, as one List.
+	const [file] = await Promise.all([
+		page.waitForEvent('download'),
+		page.getByRole('button', { name: 'Download manifest' }).click(),
+	]);
+	expect(file.suggestedFilename()).toBe('dotvirt-admin-objects.json');
+	const manifest = JSON.parse(
+		await (await file.createReadStream()).toArray().then((c) => Buffer.concat(c).toString()),
+	);
+	expect(manifest.kind).toBe('List');
+	expect(manifest.items.map((o: { metadata: { name: string } }) => o.metadata.name)).toEqual([
+		'dotvirt-operator-secrets',
+		'dotvirt-operator-deployments',
+		'dotvirt-operator-secrets',
+		'dotvirt-operator-deployments',
+	]);
+	await expect(
+		page.getByText(
+			'kubectl apply --server-side --field-manager=dotvirt -f dotvirt-admin-objects.json',
+		),
+	).toBeVisible();
 	await page.getByRole('button', { name: 'Install', exact: true }).click();
 	await expect(
 		page.getByText('Installed what the install asked a cluster admin for.'),

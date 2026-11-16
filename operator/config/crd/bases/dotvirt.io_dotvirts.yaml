@@ -477,17 +477,18 @@ spec:
           status:
             description: DotvirtStatus is the observed install state.
             properties:
-              adminApply:
+              adminManifest:
                 description: |-
-                  AdminApply is a ready-to-run command applying every AdminObjects entry,
-                  for a cluster admin without the console.
+                  AdminManifest is every AdminObjects entry as one List, for a cluster
+                  admin without the console to save to a file and apply with
+                  `kubectl apply --server-side --field-manager=dotvirt -f <file>`.
                 type: string
               adminObjects:
                 description: |-
                   AdminObjects are objects the install needs but the operator may not
                   create, each with its purpose and state: a cluster admin installs them
                   from the console (one Install action, under the admin's own token), or
-                  with AdminApply.
+                  by applying AdminManifest.
                 items:
                   description: |-
                     AdminObject is one object the install needs but the operator may not

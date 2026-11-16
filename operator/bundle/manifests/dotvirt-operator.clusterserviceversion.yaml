@@ -124,8 +124,8 @@ spec:
             path: ssoOAuthClient
             x-descriptors:
               - urn:alm:descriptor:com.tectonic.ui:text
-          - displayName: Admin objects (a cluster admin installs them)
-            path: adminApply
+          - displayName: Admin objects manifest (a cluster admin applies it)
+            path: adminManifest
             x-descriptors:
               - urn:alm:descriptor:com.tectonic.ui:text
           - displayName: Forge Admin (reveal bootstrap password)
@@ -193,7 +193,7 @@ spec:
     command that reveals the managed forge's admin password), `ssoOAuthClient`,
     `adminObjects` (what a cluster admin installs from the console, such as
     the admission policies bounding the operator's own account, with
-    `adminApply` to run instead), and one condition per install step, so
+    `adminManifest` to apply instead), and one condition per install step, so
     `kubectl describe dotvirt` explains a stuck install.
 
     ### Prerequisites

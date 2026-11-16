@@ -292,7 +292,7 @@ func TestEnvtest(t *testing.T) {
 				return false
 			}
 			c := apimeta.FindStatusCondition(got.Status.Conditions, dotvirtv1alpha1.ConditionOperatorGuard)
-			return c != nil && c.Reason == want && len(got.Status.AdminObjects) == 4 && got.Status.AdminApply != ""
+			return c != nil && c.Reason == want && len(got.Status.AdminObjects) == 4 && got.Status.AdminManifest != ""
 		}
 		eventually(t, "OperatorGuard NotInstalled", func() bool { return guardCond(string(adminobjects.NotInstalled)) })
 

@@ -193,15 +193,29 @@ forge bootstrap, the workload rollout, both webhooks, the platform repo) record 
 
 Some objects an install needs are ones its operator must not be able to create,
 because the operator could then grant itself anything. The operator renders them
-and lists each in `status.adminObjects` with its purpose and state; `status.adminApply`
-is one command applying them all.
+and lists each in `status.adminObjects` with its purpose and state.
+`status.adminManifest` is all of them as one List; a cluster admin without the
+console saves it to a file and applies it:
+
+```sh
+kubectl -n <install ns> get dotvirt <name> -o jsonpath='{.status.adminManifest}' > admin-objects.json
+kubectl apply --server-side --field-manager=dotvirt -f admin-objects.json
+```
+
+kubectl reports a conflict on any field someone else changed since; review it, and
+add `--force-conflicts` to take the field back.
 
 A cluster admin signed in to the console sees a banner listing what is missing,
-and one **Install** button. The console applies the list under the admin's own
-token: it is offered only when a review says that token may read the install and
-create and patch every object an install may ask for, and the console applies
-only the kinds and names in its allowlist (`pkg/adminobjects`), whatever the
-status lists. dotvirt's own ServiceAccount and the operator hold no right to them.
+one **Install** button, and the same manifest to download. Install applies the
+list under the admin's own token:
+- it is offered only when a review says that token may read the install, and
+  create and patch every object an install may ask for;
+- it applies only the kinds and names in the console's allowlist
+  (`pkg/adminobjects`), whatever the status lists;
+- it takes back any field someone changed since (a forced server-side apply):
+  it exists to restore the render, an `Outdated` object included.
+
+dotvirt's own ServiceAccount and the operator hold no right to these objects.
 
 The operator does not watch them: their state in status follows on its next pass
 (within 10 minutes), the console's banner at once. After an upgrade that renders

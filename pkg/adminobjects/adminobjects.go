@@ -12,8 +12,6 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
-	"errors"
-	"strings"
 
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -118,19 +116,18 @@ func stamp(o *unstructured.Unstructured) {
 	o.SetAnnotations(a)
 }
 
-// ApplyCommand is a one-line server-side apply of objs, for an admin without
-// the console.
-func ApplyCommand(objs []Object) (string, error) {
+// ApplyCommand applies a manifest an admin saved to a file. It takes no data:
+// the objects travel as the manifest, never through a shell. Without
+// --force-conflicts, kubectl names any field someone else changed instead of
+// taking it back; the admin decides.
+const ApplyCommand = "kubectl apply --server-side --field-manager=dotvirt -f"
+
+// Manifest is objs as one List, for an admin without the console to save and
+// apply with ApplyCommand.
+func Manifest(objs []Object) ([]byte, error) {
 	items := make([]any, len(objs))
 	for i, o := range objs {
 		items[i] = o.Object.Object
 	}
-	b, err := json.Marshal(map[string]any{"apiVersion": "v1", "kind": "List", "items": items})
-	if err != nil {
-		return "", err
-	}
-	if strings.Contains(string(b), "'") {
-		return "", errors.New("an admin object holds a single quote")
-	}
-	return "echo '" + string(b) + "' | kubectl apply --server-side --field-manager=dotvirt --force-conflicts -f -", nil
+	return json.MarshalIndent(map[string]any{"apiVersion": "v1", "kind": "List", "items": items}, "", "  ")
 }

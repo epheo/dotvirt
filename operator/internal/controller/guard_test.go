@@ -93,8 +93,8 @@ func TestOperatorGuardStates(t *testing.T) {
 				t.Errorf("message %q gives no next action", cond.Message)
 			}
 			want := adminobjects.Guard(here)
-			if len(dv.Status.AdminObjects) != len(want) || dv.Status.AdminApply == "" {
-				t.Fatalf("status lists %d admin objects (apply %q), want %d", len(dv.Status.AdminObjects), dv.Status.AdminApply, len(want))
+			if m, _ := adminobjects.Manifest(want); len(dv.Status.AdminObjects) != len(want) || dv.Status.AdminManifest != string(m) {
+				t.Fatalf("status lists %d admin objects (manifest %q), want %d and their manifest", len(dv.Status.AdminObjects), dv.Status.AdminManifest, len(want))
 			}
 			for i, e := range dv.Status.AdminObjects {
 				var got map[string]any
@@ -139,7 +139,7 @@ func TestOperatorGuardKeepsOtherAdminObjects(t *testing.T) {
 
 func TestOperatorGuardNeedsItsAccount(t *testing.T) {
 	cond, dv := guardPass(t, "", nil)
-	if cond.Status != metav1.ConditionUnknown || cond.Reason != "AccountUnknown" || len(dv.Status.AdminObjects) != 0 || dv.Status.AdminApply != "" {
+	if cond.Status != metav1.ConditionUnknown || cond.Reason != "AccountUnknown" || len(dv.Status.AdminObjects) != 0 || dv.Status.AdminManifest != "" {
 		t.Errorf("%s %s, status %+v", cond.Status, cond.Reason, dv.Status.AdminObjects)
 	}
 }

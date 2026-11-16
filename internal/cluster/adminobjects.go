@@ -51,7 +51,8 @@ func (c *Client) AdminObject(ctx context.Context, ref adminobjects.Ref) (*unstru
 
 // ApplyAdminObject server-side applies obj as ref under THIS client's
 // identity: the caller's RBAC is the gate, so dotvirt's ServiceAccount and the
-// operator hold no right to it.
+// operator hold no right to it. Forced: the console's Install exists to
+// restore the render, a field someone changed since included.
 func (c *Client) ApplyAdminObject(ctx context.Context, ref adminobjects.Ref, obj *unstructured.Unstructured) error {
 	_, err := c.dyn.Resource(ref.GVR()).Namespace(ref.Namespace).Apply(ctx, ref.Name, obj, metav1.ApplyOptions{FieldManager: "dotvirt", Force: true})
 	return err

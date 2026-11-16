@@ -19,7 +19,8 @@ import (
 
 // adminNextAction is what a cluster admin does about an admin object not in
 // place.
-const adminNextAction = "a cluster admin installs it from the console (Install), or runs the command in status.adminApply"
+const adminNextAction = "a cluster admin installs it from the console (Install), or saves status.adminManifest to a file and applies it with `" +
+	adminobjects.ApplyCommand + " <file>`"
 
 // reconcileOperatorGuard reports whether the admission policies bounding the
 // operator's own account are installed as rendered for this install, and
@@ -100,7 +101,7 @@ func publishAdminObjects(dv *dotvirtv1alpha1.Dotvirt, owned func(*unstructured.U
 		kept = append(kept, dotvirtv1alpha1.AdminObject{Purpose: w.Purpose, State: string(states[i]), Object: runtime.RawExtension{Raw: raw}})
 	}
 	dv.Status.AdminObjects = kept
-	dv.Status.AdminApply = ""
+	dv.Status.AdminManifest = ""
 	var all []adminobjects.Object
 	for _, e := range kept {
 		o := &unstructured.Unstructured{}
@@ -110,9 +111,8 @@ func publishAdminObjects(dv *dotvirtv1alpha1.Dotvirt, owned func(*unstructured.U
 		all = append(all, adminobjects.Object{Purpose: e.Purpose, Object: o})
 	}
 	if len(all) > 0 {
-		cmd, err := adminobjects.ApplyCommand(all)
-		if err == nil {
-			dv.Status.AdminApply = cmd
+		if b, err := adminobjects.Manifest(all); err == nil {
+			dv.Status.AdminManifest = string(b)
 		}
 	}
 }

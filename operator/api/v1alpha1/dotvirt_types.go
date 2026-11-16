@@ -436,12 +436,13 @@ type DotvirtStatus struct {
 	// AdminObjects are objects the install needs but the operator may not
 	// create, each with its purpose and state: a cluster admin installs them
 	// from the console (one Install action, under the admin's own token), or
-	// with AdminApply.
+	// by applying AdminManifest.
 	// +optional
 	AdminObjects []AdminObject `json:"adminObjects,omitempty"`
-	// AdminApply is a ready-to-run command applying every AdminObjects entry,
-	// for a cluster admin without the console.
-	AdminApply string `json:"adminApply,omitempty"`
+	// AdminManifest is every AdminObjects entry as one List, for a cluster
+	// admin without the console to save to a file and apply with
+	// `kubectl apply --server-side --field-manager=dotvirt -f <file>`.
+	AdminManifest string `json:"adminManifest,omitempty"`
 	// SyncImpersonationInstance is the ArgoCD resource, as namespace/name, the
 	// operator set application.sync.impersonation.enabled on: it removes the
 	// setting there when spec.argocd moves to another instance and before the

@@ -2,6 +2,7 @@ package adminobjects
 
 import (
 	"encoding/base64"
+	"encoding/json"
 	"slices"
 	"strings"
 	"testing"
@@ -108,18 +109,29 @@ func TestAllowRefusesAnythingElse(t *testing.T) {
 	}
 }
 
-func TestApplyCommandIsOneQuotedLine(t *testing.T) {
-	cmd, err := ApplyCommand(Guard(params))
+func TestManifestIsOneList(t *testing.T) {
+	b, err := Manifest(Guard(params))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if strings.Contains(cmd, "\n") || strings.Count(cmd, "'") != 2 || !strings.Contains(cmd, "kubectl apply --server-side") {
-		t.Errorf("command = %s", cmd)
+	var list struct {
+		APIVersion string
+		Kind       string
+		Items      []map[string]any
 	}
-	for _, name := range GuardNames {
-		if !strings.Contains(cmd, `"name":"`+name+`"`) {
-			t.Errorf("command misses %s", name)
+	if err := json.Unmarshal(b, &list); err != nil {
+		t.Fatal(err)
+	}
+	if list.APIVersion != "v1" || list.Kind != "List" || len(list.Items) != 4 {
+		t.Fatalf("manifest = %s %s with %d items", list.APIVersion, list.Kind, len(list.Items))
+	}
+	for i, name := range []string{GuardSecretsName, GuardDeploymentsName, GuardSecretsName, GuardDeploymentsName} {
+		if md, _ := list.Items[i]["metadata"].(map[string]any); md["name"] != name {
+			t.Errorf("item %d = %v, want %s", i, md, name)
 		}
+	}
+	if strings.Contains(ApplyCommand, "force") || !strings.HasSuffix(ApplyCommand, "-f") {
+		t.Errorf("ApplyCommand = %q: a fixed command ending in -f, never forcing", ApplyCommand)
 	}
 }
 
