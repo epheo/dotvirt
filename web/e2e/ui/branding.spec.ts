@@ -33,8 +33,20 @@ test("the console wears a provider's branding, sign-in included", async ({ page 
 	await expect(billing.locator('img')).toHaveJSProperty('naturalWidth', 22);
 	const tip = billing.getByText('Billing');
 	await expect(tip).toBeHidden();
+	await billing.hover();
+	await expect(tip).toBeVisible();
+	// Below the bar, not over its edge.
+	const bar = await header.boundingBox();
+	const box = await tip.boundingBox();
+	expect(box!.y).toBeGreaterThanOrEqual(bar!.y + bar!.height);
+	// Escape dismisses it without moving the pointer.
+	await page.keyboard.press('Escape');
+	await expect(tip).toBeHidden();
+	await page.mouse.move(0, 300);
 	await billing.focus();
 	await expect(tip).toBeVisible();
+	await page.keyboard.press('Escape');
+	await expect(tip).toBeHidden();
 	// The link back to this console is the current item: marked, not a link.
 	const current = header.locator('[aria-current="page"]');
 	await expect(current).toHaveCount(1);

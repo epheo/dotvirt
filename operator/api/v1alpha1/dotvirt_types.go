@@ -315,9 +315,9 @@ type BrandingSpec struct {
 	ProductName string `json:"productName,omitempty"`
 	// ConfigMap names a ConfigMap in dotvirt's namespace holding theme.css,
 	// loaded after the console's own stylesheet so it may override its
-	// tokens, and logo.svg or logo.png. dotvirt serves them itself, each up to
-	// 256 KiB: the console never loads a remote URL. An edit shows on the next
-	// page load.
+	// tokens, logo.svg or logo.png, and the links' icons. dotvirt serves them
+	// itself, each up to 256 KiB: the console never loads a remote URL. An
+	// edit shows on the next page load.
 	// +kubebuilder:validation:MaxLength=253
 	// +kubebuilder:validation:Pattern=`^[a-z0-9]([-a-z0-9.]*[a-z0-9])?$`
 	// +optional

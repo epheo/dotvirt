@@ -262,3 +262,22 @@ func TestServeIcon(t *testing.T) {
 		t.Error("Info changed the settings' own links")
 	}
 }
+
+// A name only ever reaches ServeIcon through ParseLinks, which refuses a path;
+// should one bypass it, the route still serves no file it does not name plainly.
+func TestServeIconRefusesABadNameEvenWhenReferenced(t *testing.T) {
+	d := dir(t, map[string]string{ThemeFile: ":root{}", "a.css": "x"})
+	s := Settings{Dir: d, Links: []model.BrandingLink{
+		{Label: "a", URL: "https://h/", Icon: ThemeFile},
+		{Label: "b", URL: "https://h/b", Icon: "a.css"},
+	}}
+	for _, name := range []string{ThemeFile, "a.css"} {
+		r := httptest.NewRequest(http.MethodGet, "/", nil)
+		r.SetPathValue("name", name)
+		w := httptest.NewRecorder()
+		s.ServeIcon(w, r)
+		if w.Code != http.StatusNotFound {
+			t.Errorf("%q = %d, want 404", name, w.Code)
+		}
+	}
+}

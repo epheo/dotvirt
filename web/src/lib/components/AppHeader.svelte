@@ -57,7 +57,26 @@
 	const issues = $derived(inventory.issues);
 	const suggestions = $derived(inventory.suggestions);
 	const worstTone = $derived(issues.some((i) => i.severity === 'danger') ? 'danger' : 'warn');
+
+	// A link icon's tooltip sits under the bar whatever the item's height:
+	// both are centred in it, so half the bar (24px) and a 4px gap below.
+	const TIP =
+		'pointer-events-none absolute top-[calc(50%+28px)] right-0 z-50 hidden rounded bg-side px-2 py-1 text-xs whitespace-nowrap text-side-ink shadow-lg';
+	// Escape hides the tooltips without moving the pointer or focus (WCAG
+	// 1.4.13); they come back once the pointer has left the items, or on the
+	// next keyboard focus of one.
+	let tipsOff = $state(false);
 </script>
+
+<svelte:window
+	onkeydown={(e) => {
+		if (e.key === 'Escape') tipsOff = true;
+	}}
+	onpointerover={(e) => {
+		if (tipsOff && !(e.target instanceof Element && e.target.closest('[data-tip]')))
+			tipsOff = false;
+	}}
+/>
 
 <!-- The bar stays dark in both themes, so its chrome uses the rail's side-*
      tokens, not ink tokens. -->
@@ -84,16 +103,19 @@
 		{#if isConsoleLink(l.url, page.url.origin)}
 			<span
 				aria-current="page"
+				data-tip
 				class="group relative flex items-center border-b-2 border-accent pb-0.5 {l.icon
 					? ''
 					: 'text-[13px] text-white'}"
 			>
 				{#if l.icon}
-					<img src="/api/branding/icon/{encodeURIComponent(l.icon)}" alt="" class="size-[22px]" />
+					<img
+						src="/api/branding/icon/{encodeURIComponent(l.icon)}"
+						alt=""
+						class="size-[22px] object-contain"
+					/>
 					<span class="sr-only">{l.label}</span>
-					<span
-						aria-hidden="true"
-						class="pointer-events-none absolute top-full right-0 z-50 mt-2 hidden rounded bg-side px-2 py-1 text-xs whitespace-nowrap text-side-ink shadow-lg group-hover:block"
+					<span aria-hidden="true" class="{TIP} {tipsOff ? '' : 'group-hover:block'}"
 						>{l.label}</span
 					>
 				{:else}{l.label}{/if}
@@ -104,12 +126,18 @@
 				target="_blank"
 				rel="noopener noreferrer"
 				aria-label={l.label}
+				data-tip
+				onfocus={() => (tipsOff = false)}
 				class="group relative flex items-center opacity-80 hover:opacity-100 focus-visible:opacity-100"
 			>
-				<img src="/api/branding/icon/{encodeURIComponent(l.icon)}" alt="" class="size-[22px]" />
+				<img
+					src="/api/branding/icon/{encodeURIComponent(l.icon)}"
+					alt=""
+					class="size-[22px] object-contain"
+				/>
 				<span
 					aria-hidden="true"
-					class="pointer-events-none absolute top-full right-0 z-50 mt-2 hidden rounded bg-side px-2 py-1 text-xs whitespace-nowrap text-side-ink shadow-lg group-hover:block group-focus-visible:block"
+					class="{TIP} {tipsOff ? '' : 'group-hover:block group-focus-visible:block'}"
 					>{l.label}</span
 				>
 			</a>

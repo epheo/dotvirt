@@ -414,6 +414,12 @@ func TestEnvtest(t *testing.T) {
 		if err := admin.Create(ctx, dv, client.DryRunAll); client.IgnoreAlreadyExists(err) != nil {
 			t.Errorf("a provider's branding: %v", err)
 		}
+		// Text links need no ConfigMap: CRs from before link icons stay valid.
+		text := testCR()
+		text.Spec.Branding = dotvirtv1alpha1.BrandingSpec{Links: link("Billing", "https://c.example/billing")}
+		if err := admin.Create(ctx, text, client.DryRunAll); client.IgnoreAlreadyExists(err) != nil {
+			t.Errorf("text links without a ConfigMap: %v", err)
+		}
 	})
 
 	t.Run("admission refuses allowed tenant kinds without sync impersonation", func(t *testing.T) {
