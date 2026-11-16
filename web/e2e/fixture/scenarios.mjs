@@ -2107,7 +2107,11 @@ const branded = {
 				{ label: 'Account', url: 'https://c.example/account' },
 				{ label: 'Billing', url: 'https://c.example/billing', icon: 'billing.svg' },
 				// The fixture's own origin: the console itself.
-				{ label: 'Console', url: 'http://localhost:4173/', icon: 'console.svg' },
+				{
+					label: 'Console',
+					url: `http://localhost:${process.env.FIXTURE_PORT ?? 4173}/`,
+					icon: 'console.svg',
+				},
 			],
 		},
 		theme: ':root { --branded-marker: 1; }',

@@ -104,7 +104,7 @@
 			<span
 				aria-current="page"
 				data-tip
-				class="group relative flex items-center border-b-2 border-accent pb-0.5 {l.icon
+				class="group relative flex items-center after:absolute after:inset-x-0 after:-bottom-1 after:h-0.5 after:bg-accent {l.icon
 					? ''
 					: 'text-[13px] text-white'}"
 			>
