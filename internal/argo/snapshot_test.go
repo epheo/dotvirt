@@ -504,14 +504,16 @@ func TestApplicationWritesStayInTheArgoNamespace(t *testing.T) {
 func TestResyncPrefersTheArgoNamespace(t *testing.T) {
 	vm := []any{vmResource("prod", "vm-a", "Synced", "Healthy")}
 	in := dotvirtApp("argocd", "team-a", "https://forge/team-a.git", vm)
-	out := dotvirtApp("elsewhere", "team-a-copy", "https://forge/team-a.git", vm)
+	// "apps" sorts before "argocd", and the fake LIST sorts by namespace: the
+	// live fallback meets the copy first.
+	out := dotvirtApp("apps", "team-a-copy", "https://forge/team-a.git", vm)
 	s := NewSnapshot(&Client{}, nil).WithWriteNamespace("argocd")
 	for _, apps := range [][]*unstructured.Unstructured{{in, out}, {out, in}} {
 		if ref, ok := pickManaging(apps, "prod", "vm-a", s.writable); !ok || ref.Namespace != "argocd" {
 			t.Errorf("order %s first: picked %+v, want the ArgoCD namespace's", apps[0].GetNamespace(), ref)
 		}
 	}
-	if ref, ok := pickManaging([]*unstructured.Unstructured{out}, "prod", "vm-a", s.writable); !ok || ref.Namespace != "elsewhere" {
+	if ref, ok := pickManaging([]*unstructured.Unstructured{out}, "prod", "vm-a", s.writable); !ok || ref.Namespace != "apps" {
 		t.Errorf("only a copy elsewhere: picked %+v ok=%v, want it, for Resync to refuse with a reason", ref, ok)
 	}
 	for _, synced := range []bool{true, false} {
