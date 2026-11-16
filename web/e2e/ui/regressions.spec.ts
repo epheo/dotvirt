@@ -147,14 +147,15 @@ test('#146: SSO pending guides instead of offering a failing button', async ({ p
 	// The token path must stay available for the admin who will fix it.
 	await expect(page.locator('textarea')).toBeVisible();
 
+	// Ready, the screen goes straight to it; ?token shows the button beside the form.
 	await setScenario(page, 'ssoready');
-	await page.reload();
+	await page.goto('/?token');
 	await expect(page.getByRole('link', { name: 'Sign in with OpenShift' })).toBeVisible();
 });
 
 test('an OIDC issuer is offered by its name, the token path beside it', async ({ page }) => {
 	await setScenario(page, 'oidc');
-	await page.goto('/');
+	await page.goto('/?token');
 	const signIn = page.getByRole('link', { name: 'Sign in with Kanidm' });
 	await expect(signIn).toHaveAttribute('href', '/api/auth/oidc');
 	await expect(page.getByRole('link', { name: 'Sign in with OpenShift' })).toHaveCount(0);

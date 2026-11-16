@@ -48,6 +48,67 @@ make run          # run against the current kubecontext
 make docker-build # image (built from the repo root context)
 ```
 
+## Install namespace
+
+The operator acts on one Dotvirt only: the one in its install namespace, resolved
+on every pass in this order.
+
+1. The namespace a cluster admin names with `OPERATOR_INSTALL_NAMESPACE` on the
+   operator's Deployment (or its `-install-namespace` flag).
+2. The operator's own namespace (`dotvirt-operator` from the bundled manifests and
+   OperatorHub's suggestion), once it holds a Dotvirt.
+3. The namespace ClusterRoleBinding `dotvirt` binds the ServiceAccount `dotvirt` in:
+   the install an earlier operator provisioned. This keeps an install created
+   elsewhere (in `dotvirt`, as the earlier sample did) working across the upgrade.
+   Its `InstallNamespaceAdopted` condition names the namespace and suggests the
+   override. Only a Dotvirt there created before the binding is adopted, and the
+   binding must name one namespace. Deleting the binding by hand drops an adopted
+   install to `WrongNamespace` (nothing is deleted): set the override to keep it.
+
+Through OLM, set the override on the Subscription:
+
+  ```yaml
+  spec:
+    config:
+      env:
+        - name: OPERATOR_INSTALL_NAMESPACE
+          value: dotvirt
+  ```
+
+- A Dotvirt in any other namespace gets no finalizer, render or binding. Its
+  `Available` condition reads `WrongNamespace` and says where the install lives.
+- Why: OLM adds create rights on Dotvirts to every namespace's `admin` and `edit`
+  roles. Acting on a Dotvirt in a tenant's namespace would bind the install's
+  cluster-wide roles to accounts the tenant controls.
+- The override, and the operator's own namespace, must name a namespace only
+  cluster admins control. Where users may create projects (OpenShift
+  self-provisioning), a user could create a namespace of that name first and own
+  the install. Create the namespace before naming it.
+- Deleting a Dotvirt outside the install namespace only drops the operator's
+  finalizer: nothing is pruned on its say. To uninstall an install that lives
+  outside it, name its namespace first, then delete it.
+- Why step 3 is safe: only cluster admins and this operator may write
+  ClusterRoleBinding `dotvirt`, and the operator wrote it for the install it acted
+  on. Its limit: an operator before this rule acted on the oldest Dotvirt anywhere,
+  so a tenant's could have been that install. After upgrading, check the namespace
+  the binding names:
+
+  ```sh
+  kubectl get clusterrolebinding dotvirt -o jsonpath='{.subjects[?(@.name=="dotvirt")].namespace}'
+  ```
+
+  It must be the namespace you installed dotvirt in. If it names a tenant's
+  namespace, in this order:
+
+  1. Create the install in the operator's namespace, or name yours with the
+     override. The tenant's Dotvirt is then ignored.
+  2. Delete the tenant's Dotvirt. Ignored, it prunes nothing; deleted while still
+     adopted, it would run its own cleanup.
+  3. Delete what its install left: objects labelled
+     `dotvirt.io/instance-namespace=<tenant namespace>` in the Argo namespace
+     (AppProjects, the ApplicationSet, Secrets), and any binding still naming the
+     tenant's accounts.
+
 ## What it provisions
 
 From one `Dotvirt` resource the controller runs the phases below in order. Each
@@ -65,6 +126,44 @@ owns one status condition; a phase that fails or waits records why there, so
    `spec.forge.credentialsSecret` exists, `CredentialsSecretMissing` naming it when
    not (the dotvirt pod cannot start without it). No forge at all records
    `NotConfigured` (push-only).
+   A credential under any name but `dotvirt-forge` is a cluster admin's to grant:
+   the operator's own role names only its own Secrets. `ForgeCredentialReady` is
+   False (`NotGranted`) until the Role and RoleBinding `dotvirt-forge-credential`
+   are in the install namespace; its message carries the commands, with the real
+   names:
+
+   ```sh
+   kubectl -n <install-ns> create role dotvirt-forge-credential --verb=get --resource=secrets --resource-name=<credential>
+   kubectl -n <install-ns> create rolebinding dotvirt-forge-credential --role=dotvirt-forge-credential --serviceaccount=<operator-ns>:dotvirt-operator-controller
+   ```
+
+   A managed forge, which writes its minted token there, needs
+   `--verb=get,create,patch`. Created by hand, the grant outlives the install:
+   delete both with the CR. The operator watches that Role and RoleBinding by
+   name, so a grant (or its removal), in either order, takes effect at once. A
+   grant changed under 5 minutes ago but still refused is rechecked every minute
+   (the apiserver's RBAC caches catching up); past that it is wrong (a verb, the
+   Secret's name or the account), and `ForgeCredentialReady` says `GrantIncomplete`
+   with the commands to replace it: `kubectl -n <install-ns> delete
+   role,rolebinding dotvirt-forge-credential --ignore-not-found` (a half grant
+   included), then the two above. Until the grant works, conditions wait with
+   `WaitingForCredential`, the steps needing the credential do not read it, and
+   the rest of the install runs:
+   - a bring-your-own forge: the ArgoCD tier waits before writing anything, since
+     tenant repo refs resolve against the credential's url (the app's forge URL).
+     New projects, and namespaces added to a project, do not sync, sync
+     impersonation does not change, and the platform repo and both webhooks wait;
+     what Argo already syncs keeps syncing.
+   - a managed forge: no token is minted or replaced (before minting into an
+     admin-named credential the operator asks whether it may store it, patch and,
+     while it is absent, create, so it never mints a token it would lose), and the
+     platform repo and both webhooks wait. The ArgoCD tier goes on (its base is `spec.forge.url`),
+     keeping the repo credentials Argo already has; after a move to another ArgoCD
+     namespace it has none there, so private repos do not clone until the grant.
+
+   A credential named like one of the operator's own Secrets (`dotvirt-session`,
+   ...) is refused (`NameTaken`): a managed forge's token would replace that
+   Secret's keys. Name another Secret.
 3. **Secrets** (`SecretsReady`): generates the session key, the ApplicationSet-plugin
    token, the webhook secrets and, with SSO, the OAuth client secret. Create-once:
    they survive restarts and are never regenerated.
@@ -74,11 +173,15 @@ owns one status condition; a phase that fails or waits records why there, so
    then, without holding back the later phases. Single replica, see below.
 5. **GitOps wiring** (`ArgoReady`): mirrors the plugin token into the ArgoCD
    namespace and trusts the managed forge's Route there (below), then applies the
-   bindings of the three static operand ClusterRoles (shipped in
+   bindings of the static operand ClusterRoles (shipped in
    `config/rbac/operand_roles.yaml`; the operator only `bind`s them, never authors
    roles), one AppProject per tenant project plus `dotvirt-platform`, the per-project
    ApplicationSet, the static platform Application and the Argo repo-credentials.
    These live outside the CR's namespace, so a finalizer reclaims them on delete.
+   dotvirt's own ServiceAccount reads Applications cluster-wide but may patch them
+   only in the ArgoCD namespace (RoleBinding `dotvirt-sync-request`): a one-VM sync
+   request and the refresh annotation, never spec. An Application elsewhere is
+   not resynced or refreshed by dotvirt; Argo's own webhook and poll still apply.
    A tenant AppProject (`dotvirt-p-<project>`) is derived from the namespaces
    labeled `dotvirt.io/project=<project>`: those namespaces are its only
    destinations and the `dotvirt.io/repo` they name its only source, so a manifest
@@ -131,29 +234,39 @@ only when they change its spec (or delete it), never a status write.
 
 ### Prune
 
-After a completed pass whose render changed, or at least every 5 minutes, the
-operator deletes the objects carrying this install's instance labels that the pass
-did not render: a Route left by a switch to Ingress,
+After a completed pass whose render changed, and otherwise at most once every 5
+minutes, the operator deletes the objects carrying this install's instance labels
+that the pass did not render: a Route left by a switch to Ingress,
 the platform tier after `spec.forge.platformRepo` is cleared, everything in a former
 ArgoCD namespace, a managed forge switched off. A tenant AppProject whose project
 is gone, and the shared `dotvirt-tenants` AppProject of earlier versions, are kept
 while an Application still references them (the former admitting nothing), then
 pruned.
-Secrets and ConfigMaps are swept only in the namespaces the install writes (the
-ArgoCD namespace, and a former one still holding its argoproj objects), so a
-labelled copy an admin made elsewhere survives.
+Prune reads each name the install renders instead of listing: the operator may
+not list Secrets, ConfigMaps or bindings beyond the two it watches by name
+(argocd-cm and the forge credential's grant). Tenant AppProjects, named after
+their projects, are the one kind prune lists, and only in the ArgoCD namespaces
+the install wrote. The ArgoCD-namespace objects are swept only there: the current
+namespace and the ones `status.argoNamespaces` records (each one a pass wrote
+since the last completed prune), so a labelled copy an admin made elsewhere
+survives.
 Never pruned: anything without the labels, and Secrets, PersistentVolumeClaims and
 the CA ConfigMaps in the install namespace (generated keys, the minted forge token
 and the forge's git data are state, not render). A pass that halts prunes nothing.
 Deleting the CR runs the same prune with nothing rendered, after taking sync
 impersonation off the ArgoCD instance if the operator set it there (below).
 
-The operator's delete grant names each object it renders (`rbac_markers.go`), so it
-cannot delete any other Secret, binding or Application in the cluster. AppProjects
-are the exception: tenant ones are named after their projects, so the grant covers
-any AppProject and prune's label check is what keeps it to this install's. An object
-only an older version rendered under another name is refused, logged and left for
-an admin to delete; it never blocks prune or deletion.
+The operator's own RBAC names each object it writes (`rbac_markers.go`), so it
+cannot write any other Secret, ConfigMap, binding or Application in the cluster,
+nor read any other Secret or ConfigMap. A rule without names says why beside it:
+the reads that stay wider are any RoleBinding by name (the ones the platform
+repo manages), every Application listed (sync impersonation), and Deployments
+and Routes listed and watched (the cache, by label). AppProjects are the one
+write exception: tenant ones are named after their projects, so the grant covers
+any AppProject and prune's label check is what keeps it to this install's. An object only an older
+version rendered under another name is never read, and left for an admin to delete.
+A forge credential under an admin-chosen name is reached only through the
+`dotvirt-forge-credential` grant a cluster admin installs (Forge, above).
 
 The labels are `dotvirt.io/instance` (the CR name) and
 `dotvirt.io/instance-namespace` (its namespace). Objects from versions that set only
@@ -508,7 +621,7 @@ namespace) beside the `create`/`patch` every server-side apply needs.
 
 ## OpenShift SSO
 
-dotvirt offers "Sign in with OpenShift" beside the always-present token login:
+dotvirt offers "Sign in with OpenShift" (see [Sign-in screen](#sign-in-screen)):
 the OAuth access token the cluster hands back is a normal bearer token, so it rides
 the same TokenReview + per-request pass-through path as a pasted one.
 
@@ -579,6 +692,28 @@ The issuer must send a new ID token on refresh, as Kanidm and Keycloak do; one t
 Logout revokes the refresh token at the issuer, when it publishes a `revocation_endpoint`.
 A restart of dotvirt signs every OIDC session out: the next sign-in is one redirect through the issuer.
 
+## Sign-in screen
+
+With a sign-in flow ready (OIDC, or OpenShift SSO with its OAuthClient registered), the sign-in screen goes straight to it.
+A user already signed in at the provider comes back signed in, with no click, to the page they opened.
+
+| The screen | What it shows |
+|---|---|
+| A flow is ready | Nothing: it redirects to the provider |
+| `?sso_error` (the last sign-in failed) | One "Sign in with ..." button and the failure |
+| `?signed_out`, or a sign-out just ended the session on this page | One button: a redirect would sign the user straight back in through the provider's own session |
+| A redirect already ran in this tab within a minute | One button: the provider round trip left no session, so it is not retried in a loop |
+| The tab cannot record its redirects (browser storage blocked) | One button, every time: nothing else would stop such a loop |
+| No flow ready (none configured, or OpenShift SSO not finished) | The token form, as the only way in |
+| `?token` | The token form, whatever is configured |
+
+`https://<console host>/?token` is the break-glass for admins: a pasted token (`oc whoami -t`, or `kubectl create token`) signs in when the provider is down.
+The screen links to it nowhere.
+
+A sign-in returns only to a page of the console itself: dotvirt refuses another origin, any `/api/` path (decoded, as the router reads it), and a return whose part before the `?` (fragment included) cleaning would change.
+A provider that cannot be reached when a sign-in starts lands on the failure button, with the detail in dotvirt's log.
+Each sign-in keeps its own state cookie, so tabs signing in at once do not undo each other.
+
 ## Packaging
 
 - **`make run`**: run the controller against the current kubecontext (prepend
@@ -593,6 +728,12 @@ A restart of dotvirt signs every OIDC session out: the next sign-in is one redir
 
 ## Upgrading
 
+- The operator acts only on the Dotvirt in its install namespace (see Install
+  namespace). An existing install keeps working: one in the operator's namespace
+  as before, one elsewhere (`dotvirt`, from the earlier sample) adopted from the
+  ClusterRoleBinding the earlier operator provisioned for it. Its
+  `InstallNamespaceAdopted` condition suggests setting `OPERATOR_INSTALL_NAMESPACE`
+  explicitly; check the namespace it names, as Install namespace says.
 - The CSV supports only the `AllNamespaces` install mode: one install per cluster,
   watched cluster-wide.
   - An OperatorGroup with `targetNamespaces` (OwnNamespace or SingleNamespace) fails
@@ -648,18 +789,52 @@ dotvirt's API and git calls still go to `spec.forge.url`.
 Unset, links start with `spec.forge.url`.
 A managed forge also takes `webURL` as its `ROOT_URL`, so its own pages and clone links name it.
 
+## Metrics
+
+`spec.metrics.url` turns on the Performance tab, host load and alarms.
+dotvirt queries with each caller's own token, never its ServiceAccount's.
+
+- A caller allowed `get` on `prometheuses/api` (`monitoring.coreos.com`) named `k8s` in `openshift-monitoring` queries `url` across every namespace.
+  Through dotvirt no one else reaches it, but the endpoint must still check the token itself: unauthenticated, anyone with network reach to it reads every namespace's series.
+- Every other caller queries `tenancyURL`, once per namespace, with a `namespace=<ns>` parameter and a `{namespace="<ns>"}` matcher.
+  That endpoint must allow only a caller who may `get` `pods.metrics.k8s.io` in that namespace, and force the query to it (kube-rbac-proxy plus prom-label-proxy, as OpenShift's Thanos querier does on 9092).
+  That check is what keeps tenants apart.
+
+On OpenShift, `url: https://thanos-querier.openshift-monitoring.svc.cluster.local:9091` is enough: the tenancy port and the service CA are derived.
+Elsewhere, set both endpoints and the CA that signs them:
+
+```yaml
+spec:
+  metrics:
+    url: https://prometheus-wide.monitoring.svc:8443
+    tenancyURL: https://prometheus-tenancy.monitoring.svc:8443
+    ca: {name: metrics-ca, key: ca.crt}
+```
+
+- `tenancyURL` unset, outside OpenShift: callers without the cluster-wide right get no metrics.
+  It must differ from `url`.
+- `ca`: a ConfigMap key in dotvirt's namespace, trusted for both endpoints; it needs an https `url` or `tenancyURL`.
+  Unset, an https `.svc` `url` trusts OpenShift's service CA, any other the system pool; with `spec.forge.insecureTLS`, that other skips verification.
+  It is mounted optional: missing, metrics TLS fails verification and the console stays up.
+  The console reads it when it starts: restart it after a rotation.
+
+The series read: KubeVirt's `kubevirt_vmi_*` (labels `namespace`, `name`, `node`), kube-state-metrics' `kube_node*`, node-exporter's `node_cpu_seconds_total` and `node_memory_*` with `instance` set to the node name, and firing `ALERTS` carrying `namespace`.
+
 ## Branding
 
 `spec.branding` dresses the console as a provider's; unset, it is dotvirt's own.
 
 - `productName`: shown in place of dotvirt throughout the console, and in the pull request titles, descriptions and commits it writes to the forge. Messages the server writes say "the console". At most 40 characters, no control characters.
-- `links`: up to 5 masthead links back to your own app (account, billing). Each a text `label` of at most 32 characters and an `https` `url` with a host and no credentials. They open in a new tab.
+- `links`: up to 5 masthead links back to your own app (account, billing). Each a text `label` of at most 32 characters and an `https` `url` with a host and no credentials. They open in the same tab, without a Referer.
+  An optional `icon` names an `.svg` or `.png` file of `configMap`: the link then shows as that icon alone, its label the tooltip and accessible name. A missing file leaves the link as text.
+  A link whose URL has the console's own origin is shown as the current item, marked and not a link.
 - `configMap`: a ConfigMap in dotvirt's namespace holding:
-  - `theme.css`, loaded after the console's own stylesheet, so it may override its tokens (`--color-accent`, the status fills `--color-ok`, `--color-warn`, `--color-danger` with their ink `--color-ok-on`, `--color-warn-on`, `--color-danger-on`; surfaces, ink, `--font-sans`); dark-theme values go under `:root[data-theme='dark']`, where the console declares its own;
-  - `logo.svg` or `logo.png`, shown beside the product name.
+  - `theme.css`, loaded after the console's own stylesheet, so it may override its tokens (`--color-accent` with its hover fill `--color-accent-deep` and their ink `--color-accent-on`; the status fills `--color-ok`, `--color-warn`, `--color-danger` with their ink `--color-ok-on`, `--color-warn-on`, `--color-danger-on`; surfaces, ink, `--font-sans`); dark-theme values go under `:root[data-theme='dark']`, where the console declares its own;
+  - `logo.svg` or `logo.png`, shown beside the product name;
+  - the links' icons.
 
 dotvirt serves these files itself, each up to 256 KiB, from the same origin: the console's content-security policy stays as it is, so a stylesheet that loads a remote font or image is refused. Embed fonts as `data:` URLs instead.
-An SVG logo opened on its own runs sandboxed, with nothing to load.
+An SVG logo or icon opened on its own runs sandboxed, with nothing to load. dotvirt serves only the icons a link names, never another file of the ConfigMap.
 The ConfigMap is mounted optional: missing, the console keeps dotvirt's look. An edit shows on the next page load.
 The sign-in screen reads the branding before any session, so it holds nothing private.
 

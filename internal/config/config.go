@@ -91,12 +91,14 @@ type Config struct {
 	// MetricsURL is the Prometheus/Thanos query API base URL backing the per-VM
 	// Performance tab; empty disables the tab. InsecureTLS also covers this client.
 	MetricsURL string
-	// MetricsTenancyURL is the same querier's tenancy API (thanos-querier port
-	// 9092): the per-namespace path for a caller who may not query
-	// MetricsURL. Empty leaves such callers without metrics. MetricsCA covers it.
+	// MetricsTenancyURL is the per-namespace query API (on OpenShift,
+	// thanos-querier port 9092) for a caller who may not query MetricsURL; it
+	// must authorize the caller per namespace and pin the query to it. Empty
+	// leaves such callers without metrics. MetricsCA covers it.
 	MetricsTenancyURL string
-	// MetricsCA is a PEM bundle to trust for MetricsURL - in-cluster, the mounted
-	// service-CA that signs thanos-querier's serving cert (so no -insecure-tls).
+	// MetricsCA is a PEM bundle to trust for both metrics URLs - on OpenShift,
+	// the mounted service-CA that signs thanos-querier's serving cert (so no
+	// -insecure-tls).
 	MetricsCA string
 
 	// UploadProxyURL is the cdi-uploadproxy base the browser streams uploaded
@@ -163,7 +165,9 @@ type Config struct {
 	ArgoEnabled bool // enable ArgoCD drift reads + re-sync
 	// ArgoNamespace holds the per-project sync ServiceAccounts Argo impersonates
 	// (tenancy.SyncAccount); the project grants dotvirt stages name them. Empty
-	// stages owner grants only.
+	// stages owner grants only. It is also the one namespace whose Applications
+	// dotvirt patches (a sync request, a refresh); empty patches wherever RBAC
+	// allows.
 	ArgoNamespace string
 
 	// TenantKinds is what a tenant repo may declare beyond the listed kinds, as
@@ -199,14 +203,14 @@ func Load(args []string) (*Config, error) {
 	fs.StringVar(&c.ForgeAdmin.Key, "forge-admin-key", envOr("DOTVIRT_FORGE_ADMIN_KEY", "password"), "key of the admin password in -forge-admin-secret")
 	fs.StringVar(&c.ForgeAdmin.User, "forge-admin-user", os.Getenv("DOTVIRT_FORGE_ADMIN_USER"), "the forge admin's user name")
 	fs.StringVar(&c.ProductName, "product-name", os.Getenv("DOTVIRT_PRODUCT_NAME"), "product name shown in place of dotvirt, in the console and the forge (empty = dotvirt)")
-	links := fs.String("masthead-links", os.Getenv("DOTVIRT_MASTHEAD_LINKS"), `masthead links back to a provider's app, JSON [{"label":..,"url":"https://.."}] (empty = none)`)
-	fs.StringVar(&c.BrandingDir, "branding-dir", os.Getenv("DOTVIRT_BRANDING_DIR"), "directory holding theme.css and logo.svg or logo.png, served same-origin (empty = none)")
+	links := fs.String("masthead-links", os.Getenv("DOTVIRT_MASTHEAD_LINKS"), `masthead links back to a provider's app, JSON [{"label":..,"url":"https://..","icon":"<file in -branding-dir>"}] (empty = none)`)
+	fs.StringVar(&c.BrandingDir, "branding-dir", os.Getenv("DOTVIRT_BRANDING_DIR"), "directory holding theme.css, logo.svg or logo.png, and the masthead links' icons, served same-origin (empty = none)")
 	fs.StringVar(&c.ForgeToken, "forge-token", os.Getenv("DOTVIRT_FORGE_TOKEN"), "Forgejo API token (git https + API)")
 	fs.StringVar(&c.ForgeTokenFile, "forge-token-file", os.Getenv("DOTVIRT_FORGE_TOKEN_FILE"), "path to a mounted secret holding the forge token, re-read per call (rotation-safe; overrides -forge-token)")
 	fs.BoolVar(&c.InsecureTLS, "insecure-tls", envBool("DOTVIRT_INSECURE_TLS", false), "skip TLS verification for git+forge (dev only)")
 	fs.StringVar(&c.MetricsURL, "metrics-url", os.Getenv("DOTVIRT_METRICS_URL"), "Prometheus/Thanos query API base URL for the Performance tab (empty disables)")
 	fs.StringVar(&c.MetricsTenancyURL, "metrics-tenancy-url", os.Getenv("DOTVIRT_METRICS_TENANCY_URL"), "per-namespace (tenancy) query API of the same querier, for callers who may not query -metrics-url (empty leaves them without metrics)")
-	fs.StringVar(&c.MetricsCA, "metrics-ca", os.Getenv("DOTVIRT_METRICS_CA"), "PEM CA bundle path to trust for -metrics-url (e.g. the mounted service-CA)")
+	fs.StringVar(&c.MetricsCA, "metrics-ca", os.Getenv("DOTVIRT_METRICS_CA"), "PEM CA bundle path to trust for -metrics-url and -metrics-tenancy-url (e.g. the mounted service-CA)")
 	fs.StringVar(&c.UploadProxyURL, "upload-proxy-url", os.Getenv("DOTVIRT_UPLOAD_PROXY_URL"), "cdi-uploadproxy base URL for image uploads (empty: the one CDI publishes)")
 	fs.StringVar(&c.WebhookSecret, "webhook-secret", os.Getenv("DOTVIRT_WEBHOOK_SECRET"), "HMAC secret for the Forgejo webhook endpoint (empty disables it)")
 	fs.StringVar(&c.PublicURL, "public-url", os.Getenv("DOTVIRT_PUBLIC_URL"), "dotvirt's externally reachable base URL, for webhook auto-registration (empty disables)")
@@ -232,7 +236,7 @@ func Load(args []string) (*Config, error) {
 	// Default on: ArgoCD is the normal deployment shape. The off switch stays for
 	// dev/BYO runs without Argo, whose Application reflector would error-loop.
 	fs.BoolVar(&c.ArgoEnabled, "argo", envBool("DOTVIRT_ARGO", true), "enable ArgoCD drift reads (set -argo=false on clusters without ArgoCD)")
-	fs.StringVar(&c.ArgoNamespace, "argo-namespace", os.Getenv("DOTVIRT_ARGO_NAMESPACE"), "ArgoCD namespace holding the per-project sync ServiceAccounts the project grants name (empty: owner grants only)")
+	fs.StringVar(&c.ArgoNamespace, "argo-namespace", os.Getenv("DOTVIRT_ARGO_NAMESPACE"), "ArgoCD namespace holding the per-project sync ServiceAccounts the project grants name, and the only one whose Applications dotvirt patches (empty: owner grants only, patches wherever RBAC allows)")
 
 	var tenantAllowed string
 	fs.StringVar(&tenantAllowed, "tenant-kinds-allowed", os.Getenv("DOTVIRT_TENANT_KINDS_ALLOWED"), "kinds tenant repos may declare beyond the listed ones, as group/kind,... (the core group is /kind; set by the operator)")

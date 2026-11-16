@@ -30,6 +30,10 @@ type StorageClassInfo struct {
 	// nothing rather than zero.
 	Free     *int64            `json:"free,omitempty"`
 	Segments []CapacitySegment `json:"segments,omitempty"`
+
+	// Forbidden is set on a list asked for one namespace: a ResourceQuota
+	// there allows no claim on the class, so a disk on it would be refused.
+	Forbidden bool `json:"forbidden,omitempty"`
 }
 
 // StorageProfile is what a DataVolume gets on the class when its template
@@ -41,7 +45,10 @@ type StorageProfile struct {
 	// mode KubeVirt needs to live-migrate a VM with a disk on this class.
 	Shared        bool   `json:"shared,omitempty"`
 	CloneStrategy string `json:"cloneStrategy,omitempty"` // snapshot | copy | csi-clone
-	Recognized    bool   `json:"recognized"`              // CDI knows the provisioner's capabilities
+	// Recognized is true when CDI fills a DataVolume's access and volume modes on
+	// this class: its StorageProfile's status carries claim settings, from CDI's
+	// provisioner table, the profile's spec or existing PVs.
+	Recognized bool `json:"recognized"`
 }
 
 // CapacitySegment is one CSIStorageCapacity entry: free capacity in one

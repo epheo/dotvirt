@@ -605,8 +605,10 @@ func TestOIDCDiscoveryChecksTheIssuer(t *testing.T) {
 	rig.f.mu.Unlock()
 	rec := httptest.NewRecorder()
 	rig.o.LoginRedirect(rec, httptest.NewRequest(http.MethodGet, "/api/auth/oidc", nil))
-	if rec.Code != http.StatusServiceUnavailable {
-		t.Fatalf("redirect with a mismatched issuer = %d", rec.Code)
+	// The sign-in screen's failure button, not a bare error page: the screen
+	// redirects to this start URL on its own.
+	if loc := rec.Header().Get("Location"); rec.Code != http.StatusFound || loc != "/?sso_error=1" || len(rec.Result().Cookies()) != 0 {
+		t.Fatalf("redirect with a mismatched issuer = %d %q, cookies %v", rec.Code, loc, rec.Result().Cookies())
 	}
 	if _, err := rig.o.discover(context.Background()); err == nil || !strings.Contains(err.Error(), "names itself") {
 		t.Fatalf("discover = %v", err)

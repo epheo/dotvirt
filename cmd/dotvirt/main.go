@@ -166,7 +166,7 @@ func run() error {
 		// store and publishes DriftChanged, so reads are lock-free and the hub
 		// rebroadcasts when drift moves. It is also the resyncer - it owns the app
 		// index the per-VM re-sync resolves.
-		argoSnapshot = argo.NewSnapshot(saArgo, bus)
+		argoSnapshot = argo.NewSnapshot(saArgo, bus).WithWriteNamespace(cfg.ArgoNamespace)
 		argoSnapshot.Run(ctx)
 		resyncer = argoSnapshot
 	}

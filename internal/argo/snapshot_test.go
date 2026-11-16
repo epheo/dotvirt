@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
+	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -463,5 +465,69 @@ func TestResyncHidesTheSAStatus(t *testing.T) {
 	_, err := s.Resync(context.Background(), "alice", "prod", "vm-a")
 	if apierrors.IsUnauthorized(err) || !errors.Is(err, model.ErrUnavailable) {
 		t.Fatalf("err = %v; want ErrUnavailable with the SA status dropped", err)
+	}
+}
+
+// The SA may patch Applications only in the ArgoCD namespace: one elsewhere is
+// refused with a reason, never patched, and never refreshed.
+func TestApplicationWritesStayInTheArgoNamespace(t *testing.T) {
+	in := dotvirtApp("argocd", "team-a", "https://forge/team-a.git",
+		[]any{vmResource("prod", "vm-a", "Synced", "Healthy")})
+	out := dotvirtApp("elsewhere", "team-b", "https://forge/team-a.git",
+		[]any{vmResource("dev", "vm-b", "Synced", "Healthy")})
+	dyn := dynamicfake.NewSimpleDynamicClient(runtime.NewScheme(), in, out)
+	var patched []string
+	dyn.PrependReactor("patch", "applications", func(a k8stesting.Action) (bool, runtime.Object, error) {
+		patched = append(patched, a.GetNamespace()+"/"+a.(k8stesting.PatchAction).GetName())
+		return false, nil, nil
+	})
+	s := NewSnapshot(&Client{dyn: dyn}, nil).WithWriteNamespace("argocd")
+	_ = s.apps.Add(in)
+	_ = s.apps.Add(out)
+	s.synced.Mark()
+
+	_, err := s.Resync(context.Background(), "alice", "dev", "vm-b")
+	if !errors.Is(err, model.ErrUnavailable) || !strings.Contains(err.Error(), "only in the ArgoCD namespace argocd") {
+		t.Errorf("Resync outside the ArgoCD namespace: err = %v, want ErrUnavailable naming it", err)
+	}
+	if _, err := s.Resync(context.Background(), "alice", "prod", "vm-a"); err != nil {
+		t.Errorf("Resync in the ArgoCD namespace: %v", err)
+	}
+	s.RefreshForRepo(context.Background(), "https://forge/team-a")
+	if want := []string{"argocd/team-a", "argocd/team-a"}; !slices.Equal(patched, want) {
+		t.Errorf("patched %v, want %v", patched, want)
+	}
+}
+
+// A hand-labelled copy outside the ArgoCD namespace never wins over the
+// Application inside it, whatever order the store or the LIST returns.
+func TestResyncPrefersTheArgoNamespace(t *testing.T) {
+	vm := []any{vmResource("prod", "vm-a", "Synced", "Healthy")}
+	in := dotvirtApp("argocd", "team-a", "https://forge/team-a.git", vm)
+	// "apps" sorts before "argocd", and the fake LIST sorts by namespace: the
+	// live fallback meets the copy first.
+	out := dotvirtApp("apps", "team-a-copy", "https://forge/team-a.git", vm)
+	s := NewSnapshot(&Client{}, nil).WithWriteNamespace("argocd")
+	for _, apps := range [][]*unstructured.Unstructured{{in, out}, {out, in}} {
+		if ref, ok := pickManaging(apps, "prod", "vm-a", s.writable); !ok || ref.Namespace != "argocd" {
+			t.Errorf("order %s first: picked %+v, want the ArgoCD namespace's", apps[0].GetNamespace(), ref)
+		}
+	}
+	if ref, ok := pickManaging([]*unstructured.Unstructured{out}, "prod", "vm-a", s.writable); !ok || ref.Namespace != "apps" {
+		t.Errorf("only a copy elsewhere: picked %+v ok=%v, want it, for Resync to refuse with a reason", ref, ok)
+	}
+	for _, synced := range []bool{true, false} {
+		dyn := dynamicfake.NewSimpleDynamicClientWithCustomListKinds(runtime.NewScheme(),
+			map[schema.GroupVersionResource]string{applicationsGVR: "ApplicationList"}, out.DeepCopy(), in.DeepCopy())
+		s := NewSnapshot(&Client{dyn: dyn}, nil).WithWriteNamespace("argocd")
+		if synced {
+			_ = s.apps.Add(out)
+			_ = s.apps.Add(in)
+			s.synced.Mark()
+		}
+		res, err := s.Resync(context.Background(), "alice", "prod", "vm-a")
+		if err != nil || res.Application != "team-a" {
+			t.Errorf("synced=%v: Resync = %+v, %v; want team-a in the ArgoCD namespace", synced, res, err)
+		}
 	}
 }

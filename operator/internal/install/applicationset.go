@@ -10,8 +10,8 @@ import (
 )
 
 const (
-	applicationSetName  = "dotvirt-projects"
-	appsetConfigMapName = "dotvirt-appset-plugin"
+	ApplicationSetName  = "dotvirt-projects"
+	AppsetConfigMapName = "dotvirt-appset-plugin"
 )
 
 // ApplicationSet generates one Argo Application per dotvirt project - each in its
@@ -35,7 +35,7 @@ func ApplicationSet(dv *dotvirtv1alpha1.Dotvirt, argoNS string, platformNS, unco
 		"spec": argoAppSpec(tenancy.AppProjectPrefix+"{{.project}}", "{{.repo}}", "{{.path}}", "{{.namespace}}"),
 	}
 	generator := map[string]any{"plugin": map[string]any{
-		"configMapRef":        map[string]any{"name": appsetConfigMapName},
+		"configMapRef":        map[string]any{"name": AppsetConfigMapName},
 		"input":               map[string]any{"parameters": map[string]any{"reservedNamespaces": toAny(platformNS)}},
 		"requeueAfterSeconds": int64(60),
 	}}
@@ -44,7 +44,7 @@ func ApplicationSet(dv *dotvirtv1alpha1.Dotvirt, argoNS string, platformNS, unco
 			map[string]any{"key": "project", "operator": "NotIn", "values": toAny(unconfined)},
 		}}
 	}
-	return argoObject("ApplicationSet", applicationSetName, argoNS, dv, map[string]any{
+	return argoObject("ApplicationSet", ApplicationSetName, argoNS, dv, map[string]any{
 		"goTemplate":        true,
 		"goTemplateOptions": []any{"missingkey=error"},
 		// Renaming generated apps prunes the old ones; preserve their resources so a
@@ -69,10 +69,10 @@ func toAny(ss []string) []any {
 func AppsetPluginConfigMap(dv *dotvirtv1alpha1.Dotvirt, argoNS, dotvirtNS string) *corev1.ConfigMap {
 	return &corev1.ConfigMap{
 		TypeMeta:   metav1.TypeMeta{APIVersion: "v1", Kind: "ConfigMap"},
-		ObjectMeta: metav1.ObjectMeta{Name: appsetConfigMapName, Namespace: argoNS, Labels: Labels(dv)},
+		ObjectMeta: metav1.ObjectMeta{Name: AppsetConfigMapName, Namespace: argoNS, Labels: Labels(dv)},
 		Data: map[string]string{
 			"baseUrl": svcURL(AppName, dotvirtNS, HTTPPort),
-			"token":   "$" + appsetConfigMapName + ":token",
+			"token":   "$" + AppsetConfigMapName + ":token",
 		},
 	}
 }

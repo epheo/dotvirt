@@ -51,6 +51,8 @@ const (
 
 	ingressCAMountPath = "/var/run/dotvirt/tls-ingress"
 	serviceCAMountPath = "/var/run/dotvirt/tls-service"
+	metricsCAMountPath = "/var/run/dotvirt/tls-metrics"
+	metricsCAFile      = "ca.crt"
 	// Keys mirror default-ingress-cert and the injector respectively.
 	IngressCAKey = "ca-bundle.crt"
 	ServiceCAKey = "service-ca.crt"
@@ -207,9 +209,13 @@ func dotvirtEnv(dv *dotvirtv1alpha1.Dotvirt, argoNS string, tenantAllowed []tena
 			env = append(env, corev1.EnvVar{Name: "DOTVIRT_PUBLISH_PORTAIL_NAMESPACE", Value: p.PortailNamespace})
 		}
 	}
-	if dv.Spec.Metrics.URL != "" {
-		env = append(env, corev1.EnvVar{Name: "DOTVIRT_METRICS_URL", Value: dv.Spec.Metrics.URL})
-		if t := metricsTenancyURL(dv.Spec.Metrics.URL); t != "" {
+	if m := dv.Spec.Metrics; m.URL != "" {
+		env = append(env, corev1.EnvVar{Name: "DOTVIRT_METRICS_URL", Value: m.URL})
+		t := m.TenancyURL
+		if t == "" {
+			t = metricsTenancyURL(m.URL)
+		}
+		if t != "" {
 			env = append(env, corev1.EnvVar{Name: "DOTVIRT_METRICS_TENANCY_URL", Value: t})
 		}
 	}
@@ -262,7 +268,11 @@ func dotvirtEnv(dv *dotvirtv1alpha1.Dotvirt, argoNS string, tenantAllowed []tena
 		// The oauth token endpoint is router-served: same ingress CA.
 		env = append(env, corev1.EnvVar{Name: "DOTVIRT_OAUTH_CA", Value: ingressCAMountPath + "/" + IngressCAKey})
 	}
-	if strings.HasPrefix(dv.Spec.Metrics.URL, "https://") && strings.Contains(dv.Spec.Metrics.URL, ".svc") {
+	switch m := dv.Spec.Metrics; {
+	case m.URL == "":
+	case m.CA != nil:
+		env = append(env, corev1.EnvVar{Name: "DOTVIRT_METRICS_CA", Value: metricsCAMountPath + "/" + metricsCAFile})
+	case strings.HasPrefix(m.URL, "https://") && strings.Contains(m.URL, ".svc"):
 		// In-cluster metrics serve the service-CA-signed cert.
 		env = append(env, corev1.EnvVar{Name: "DOTVIRT_METRICS_CA", Value: serviceCAMountPath + "/" + ServiceCAKey})
 	}
@@ -308,7 +318,8 @@ func dotvirtArgs(dv *dotvirtv1alpha1.Dotvirt) []string {
 	}
 	if dv.Spec.Forge.InsecureTLS {
 		// A self-signed forge Route: skip TLS verification for forge API calls +
-		// git clones. Metrics stays verified (its own CA env).
+		// git clones. Metrics too, unless DOTVIRT_METRICS_CA names a CA (an https
+		// .svc URL, or spec.metrics.ca): the app's metrics client lets a CA win.
 		args = append(args, "-insecure-tls")
 	}
 	return args
@@ -365,6 +376,20 @@ func dotvirtVolumes(dv *dotvirtv1alpha1.Dotvirt) ([]corev1.VolumeMount, []corev1
 			Name: "branding",
 			VolumeSource: corev1.VolumeSource{ConfigMap: &corev1.ConfigMapVolumeSource{
 				LocalObjectReference: corev1.LocalObjectReference{Name: cm}, Optional: &optional,
+			}},
+		})
+	}
+	if m := dv.Spec.Metrics; m.URL != "" && m.CA != nil {
+		// Optional: a missing CA must not keep the console down; metrics TLS
+		// then fails verification on the system pool instead.
+		optional := true
+		volumeMounts = append(volumeMounts, corev1.VolumeMount{Name: "metrics-ca", MountPath: metricsCAMountPath, ReadOnly: true})
+		volumes = append(volumes, corev1.Volume{
+			Name: "metrics-ca",
+			VolumeSource: corev1.VolumeSource{ConfigMap: &corev1.ConfigMapVolumeSource{
+				LocalObjectReference: corev1.LocalObjectReference{Name: m.CA.Name},
+				Items:                []corev1.KeyToPath{{Key: m.CA.Key, Path: metricsCAFile}},
+				Optional:             &optional,
 			}},
 		})
 	}

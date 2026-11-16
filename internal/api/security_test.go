@@ -4,6 +4,8 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -109,7 +111,16 @@ func TestWithBodyLimit(t *testing.T) {
 // The branding the shell carries runs no script: the policy derived from the
 // plain index holds for the branded shell.
 func TestBrandedShellKeepsTheCSP(t *testing.T) {
-	shell := branding.Settings{ProductName: "Uniwatt Cloud"}.Shell([]byte(testIndex))
+	dir := t.TempDir()
+	for name, body := range map[string]string{branding.ThemeFile: ":root{}", branding.LogoSVG: "<svg/>"} {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	shell := branding.Settings{ProductName: "Uniwatt Cloud", Dir: dir}.Shell([]byte(testIndex))
+	if !strings.Contains(string(shell), `rel="icon"`) || !strings.Contains(string(shell), "theme.css") {
+		t.Fatalf("the shell carries no icon or stylesheet to check: %q", shell)
+	}
 	if got, want := buildCSP(shell, ""), buildCSP([]byte(testIndex), ""); got != want {
 		t.Errorf("branded shell CSP = %q, want the plain one %q", got, want)
 	}

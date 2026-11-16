@@ -2,11 +2,14 @@
 # bundle, or by `kustomize build config/default` for a non-OLM install), NOT authored
 # by the operator at runtime. Shipping them statically is what lets the operator drop
 # `escalate` and all ClusterRole writes: at reconcile it only creates the matching
-# ClusterRoleBindings (see internal/install/rbac.go), which needs just `bind` on these
-# named roles. Keep the names in sync with the roleRefs in rbac.go.
+# bindings (see internal/install/rbac.go: ClusterRoleBindings, plus one RoleBinding in
+# the Argo namespace), which needs just `bind` on these named roles. Keep the names in
+# sync with the roleRefs in rbac.go.
 ---
-# dotvirt's runtime ServiceAccount read RBAC (TokenReview, namespace/VM reads, Argo app
-# patch for re-sync, wizard catalogs, network read). Read-only — Argo owns the apply path.
+# dotvirt's runtime ServiceAccount read RBAC (TokenReview, namespace/VM reads, Argo
+# Application reads, wizard catalogs, network read). Read-only: Argo owns the apply
+# path, and the one Application write is dotvirt-sync-request, bound in the Argo
+# namespace only.
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
@@ -59,7 +62,7 @@ rules:
     verbs: ["get", "list", "watch"]
   - apiGroups: ["argoproj.io"]
     resources: ["applications"]
-    verbs: ["get", "list", "watch", "patch"]
+    verbs: ["get", "list", "watch"]
   - apiGroups: ["instancetype.kubevirt.io"]
     resources: ["virtualmachineclusterinstancetypes", "virtualmachineclusterpreferences"]
     verbs: ["get", "list", "watch"]
@@ -388,3 +391,22 @@ rules:
   - apiGroups: ["storage.k8s.io"]
     resources: ["storageclasses"]
     verbs: ["get", "list"]
+---
+# The one Application write dotvirt's ServiceAccount makes, bound by a RoleBinding in
+# the Argo namespace only, so Applications elsewhere stay out of reach. patch serves
+# exactly two merge patches (internal/argo/snapshot.go), never spec: a top-level
+# `operation` syncing one VirtualMachine, sent only after the caller passes a
+# CanUpdateVM review, and the argocd.argoproj.io/refresh annotation, set for a push
+# the forge webhook's HMAC verified. RBAC cannot scope patch to fields: a guard on
+# spec, if wanted, is an admission policy on this ServiceAccount.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: dotvirt-sync-request
+  labels:
+    app.kubernetes.io/name: dotvirt
+    app.kubernetes.io/managed-by: dotvirt-operator
+rules:
+  - apiGroups: ["argoproj.io"]
+    resources: ["applications"]
+    verbs: ["patch"]

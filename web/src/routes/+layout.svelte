@@ -218,7 +218,7 @@
 </script>
 
 <svelte:head>
-	<link rel="icon" href={favicon} />
+	<link rel="icon" href={branding.value?.logo ? '/api/branding/logo' : favicon} />
 	<title>{branding.name}</title>
 	<!-- After the console's own stylesheet, so it may override its tokens;
 	     same-origin, as the content-security policy requires. A served shell
@@ -241,7 +241,7 @@
 		{/if}
 	</div>
 {:else if !session.user}
-	<Login onlogin={(u) => (session.user = u)} />
+	<Login onlogin={(u) => session.signIn(u)} />
 {:else}
 	<div class="flex h-screen flex-col">
 		<AppHeader />

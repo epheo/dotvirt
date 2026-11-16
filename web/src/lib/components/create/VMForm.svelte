@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { untrack } from 'svelte';
 	import { Check, CircleCheck, Copy, TriangleAlert, X } from '@lucide/svelte';
-	import { api, type CreateVMRequest, type Network, type StorageClassInfo } from '#lib/api.js';
+	import { api, type CreateVMRequest, type Network } from '#lib/api.js';
 	import {
 		defaultUser,
 		generatePassword,
@@ -24,13 +24,15 @@
 	import { bytes, plural, quantity, quantityBytes } from '#lib/format.js';
 	import { placement } from '#lib/headroom.js';
 	import { attachRef, attachableNetworks } from '#lib/networks.js';
-	import { action, resource } from '#lib/resource.svelte.js';
+	import { action } from '#lib/resource.svelte.js';
 	import { rowList, type RowList } from '#lib/rowlist.svelte.js';
 	import { diskNameError, freeName, RESERVED_DISKS } from '#lib/devices.js';
 	import { drafts } from '#lib/state/drafts.svelte.js';
 	import { memoryRoom } from '#lib/state/hosts.svelte.js';
 	import { vmGate } from '#lib/gates.js';
 	import { inventory } from '#lib/state/inventory.svelte.js';
+	import { keepClassesAllowed, namespaceClasses } from '#lib/state/storage.svelte.js';
+	import { noClassAllowed, offeredClasses } from '#lib/storage.js';
 	import { persisted } from '#lib/state/persisted.svelte.js';
 	import { ui } from '#lib/state/ui.svelte.js';
 	import { NAME_HINT, validName } from '#lib/validate.js';
@@ -226,10 +228,20 @@
 			...RESERVED_DISKS,
 			...disks.rows.filter((_, j) => j !== i).map((d) => d.name),
 		]);
-	const classesRes = resource<StorageClassInfo[]>(() => 'storage-classes', api.storageClasses);
+	const classesRes = namespaceClasses(() => namespace);
 	const classes = $derived(classesRes.data ?? []);
 	// Facts when the class list loaded, else the bare names the options carry.
 	const classRows = $derived(classes.length ? classes : (options?.storageClasses ?? []));
+	keepClassesAllowed(
+		() => classRows,
+		() => [
+			[storageClass, (c) => (storageClass = c)],
+			...disks.rows.map((d): [string, (c: string) => void] => [
+				d.storageClass,
+				(c) => (d.storageClass = c),
+			]),
+		],
+	);
 	const classOf = (c: string) =>
 		classes.find((x) => x.name === (c || inventory.defaultStorageClass));
 	const rootClass = $derived(classOf(storageClass));
@@ -249,7 +261,7 @@
 			return info && !liveMigrates(info);
 		}),
 	);
-	const keep = $derived(pinned ? sharedClass(classes) : undefined);
+	const keep = $derived(pinned ? sharedClass(offeredClasses(classes)) : undefined);
 	function keepMigration() {
 		if (!keep) return;
 		storageClass = keep.name;
@@ -404,6 +416,7 @@
 		if (!preference) m.push('Pick an OS tuning');
 		else if (short) m.push(short);
 		if (!sizeOK(diskSize)) m.push('The disk size needs a unit, like 30Gi');
+		if (noClassAllowed(classRows)) m.push(`No storage class may be used in ${namespace}`);
 		if (!hasNetwork) m.push('Keep at least one network');
 		for (const e of disks.rows.map((_, i) => diskError(i))) if (e) m.push(e);
 		return m;

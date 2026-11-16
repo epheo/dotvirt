@@ -14,6 +14,13 @@ import (
 // named roles (no `escalate`, no ClusterRole writes). Keep the role names below in sync
 // with operand_roles.yaml.
 
+// ClusterRoleBindingNames is every ClusterRoleBinding the install renders: the
+// operator's create, patch and delete name them, and prune reads each by name.
+var ClusterRoleBindingNames = []string{
+	"dotvirt", "dotvirt-argocd-apply", "dotvirt-argocd-read",
+	"dotvirt-platform-network-admin", tenancy.PlatformSyncAccount, "dotvirt-storage-catalog",
+}
+
 // clusterMeta is ObjectMeta for a cluster-scoped resource: no namespace, but labeled
 // so the CR's finalizer can find + delete it (a namespaced CR can't ownerRef it).
 func clusterMeta(name string, dv *dotvirtv1alpha1.Dotvirt) metav1.ObjectMeta {
@@ -29,11 +36,29 @@ func crb(name, role string, dv *dotvirtv1alpha1.Dotvirt, subjects []rbacv1.Subje
 	}
 }
 
-// DotvirtClusterRoleBinding binds the "dotvirt" read role to dotvirt's ServiceAccount.
+// DotvirtClusterRoleBinding binds the "dotvirt" read role to dotvirt's ServiceAccount;
+// its one Application write is SyncRequestRoleBinding.
 func DotvirtClusterRoleBinding(dv *dotvirtv1alpha1.Dotvirt) *rbacv1.ClusterRoleBinding {
 	return crb("dotvirt", "dotvirt", dv, []rbacv1.Subject{
 		{Kind: "ServiceAccount", Name: AppName, Namespace: dv.Namespace},
 	})
+}
+
+// SyncRequestName names the operand role and its RoleBinding in the Argo
+// namespace: dotvirt's one Application write (a sync request or a refresh).
+const SyncRequestName = "dotvirt-sync-request"
+
+// SyncRequestRoleBinding grants dotvirt's ServiceAccount patch on the
+// Applications in argoNS, where the ApplicationSet generates every dotvirt
+// Application: a ClusterRoleBinding would reach every Application on the
+// cluster, including ones dotvirt does not own.
+func SyncRequestRoleBinding(dv *dotvirtv1alpha1.Dotvirt, argoNS string) *rbacv1.RoleBinding {
+	return &rbacv1.RoleBinding{
+		TypeMeta:   metav1.TypeMeta{APIVersion: "rbac.authorization.k8s.io/v1", Kind: "RoleBinding"},
+		ObjectMeta: metav1.ObjectMeta{Name: SyncRequestName, Namespace: argoNS, Labels: Labels(dv)},
+		RoleRef:    rbacv1.RoleRef{APIGroup: "rbac.authorization.k8s.io", Kind: "ClusterRole", Name: SyncRequestName},
+		Subjects:   []rbacv1.Subject{{Kind: "ServiceAccount", Name: AppName, Namespace: dv.Namespace}},
+	}
 }
 
 // ArgocdApplyClusterRoleBinding binds the "dotvirt-argocd-apply" role to the

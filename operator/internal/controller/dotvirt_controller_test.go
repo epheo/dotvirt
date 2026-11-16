@@ -98,7 +98,7 @@ func (c nilStatusConverter) ObjectToTyped(obj runtime.Object, opts ...typed.Vali
 func depsOK(*rest.Config) (deps.Result, error) { return deps.Result{}, nil }
 
 func newReconciler(c client.Client, probe func(*rest.Config) (deps.Result, error)) *DotvirtReconciler {
-	return &DotvirtReconciler{Client: c, Scheme: c.Scheme(), Platform: platform.Kubernetes, probe: probe}
+	return &DotvirtReconciler{Client: c, Scheme: c.Scheme(), Platform: platform.Kubernetes, InstallNamespace: "dotvirt", probe: probe}
 }
 
 // phaseCtx derives the per-pass values the way Reconcile does, for tests that
@@ -388,7 +388,7 @@ func TestReconcileRefusesSecondInstall(t *testing.T) {
 	older := testCR()
 	older.CreationTimestamp = metav1.NewTime(time.Now().Add(-time.Hour))
 	newer := testCR()
-	newer.Name, newer.Namespace = "staging", "dotvirt-staging"
+	newer.Name = "staging"
 	newer.CreationTimestamp = metav1.Now()
 	c := testBuilder(t).WithObjects(older, newer).Build()
 	r := newReconciler(c, depsOK)
@@ -580,16 +580,16 @@ func TestFinalizeDeletesOnlyThisInstance(t *testing.T) {
 
 	c := testBuilder(t).WithObjects(
 		dv,
-		&rbacv1.ClusterRoleBinding{ObjectMeta: metav1.ObjectMeta{Name: "crb-mine", Labels: mine}},
-		&rbacv1.ClusterRoleBinding{ObjectMeta: metav1.ObjectMeta{Name: "crb-other", Labels: other}},
-		&corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: "sec-mine", Namespace: argoNS, Labels: mine}},
-		&corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: "sec-other", Namespace: argoNS, Labels: other}},
-		&corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Name: "cm-mine", Namespace: argoNS, Labels: mine}},
-		&corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: "sec-home", Namespace: dv.Namespace, Labels: mine}},
+		&rbacv1.ClusterRoleBinding{ObjectMeta: metav1.ObjectMeta{Name: "dotvirt", Labels: mine}},
+		&rbacv1.ClusterRoleBinding{ObjectMeta: metav1.ObjectMeta{Name: "dotvirt-argocd-read", Labels: other}},
+		&corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: install.AppsetSecretName, Namespace: argoNS, Labels: mine}},
+		&corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: install.RepoCredsName, Namespace: argoNS, Labels: other}},
+		&corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Name: install.AppsetConfigMapName, Namespace: argoNS, Labels: mine}},
+		&corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: install.SessionSecretName, Namespace: dv.Namespace, Labels: mine}},
 		argoObj("AppProject", argoNS, "proj-mine", mine),
 		argoObj("AppProject", argoNS, "proj-other", other),
-		argoObj("Application", argoNS, "app-mine", mine),
-		argoObj("ApplicationSet", argoNS, "as-mine", mine),
+		argoObj("Application", argoNS, install.PlatformApplicationName, mine),
+		argoObj("ApplicationSet", argoNS, install.ApplicationSetName, mine),
 	).Build()
 	r := newReconciler(c, depsOK) // probe must not matter on the deletion path
 
@@ -605,12 +605,12 @@ func TestFinalizeDeletesOnlyThisInstance(t *testing.T) {
 		ns  string
 		nam string
 	}{
-		{&rbacv1.ClusterRoleBinding{}, "", "crb-mine"},
-		{&corev1.Secret{}, argoNS, "sec-mine"},
-		{&corev1.ConfigMap{}, argoNS, "cm-mine"},
+		{&rbacv1.ClusterRoleBinding{}, "", "dotvirt"},
+		{&corev1.Secret{}, argoNS, install.AppsetSecretName},
+		{&corev1.ConfigMap{}, argoNS, install.AppsetConfigMapName},
 		{argoObj("AppProject", "", "", nil), argoNS, "proj-mine"},
-		{argoObj("Application", "", "", nil), argoNS, "app-mine"},
-		{argoObj("ApplicationSet", "", "", nil), argoNS, "as-mine"},
+		{argoObj("Application", "", "", nil), argoNS, install.PlatformApplicationName},
+		{argoObj("ApplicationSet", "", "", nil), argoNS, install.ApplicationSetName},
 	} {
 		if exists(t, c, del.obj, del.ns, del.nam) {
 			t.Errorf("%s/%s not cleaned up", del.ns, del.nam)
@@ -621,11 +621,11 @@ func TestFinalizeDeletesOnlyThisInstance(t *testing.T) {
 		ns  string
 		nam string
 	}{
-		{&rbacv1.ClusterRoleBinding{}, "", "crb-other"},
-		{&corev1.Secret{}, argoNS, "sec-other"},
+		{&rbacv1.ClusterRoleBinding{}, "", "dotvirt-argocd-read"},
+		{&corev1.Secret{}, argoNS, install.RepoCredsName},
 		{argoObj("AppProject", "", "", nil), argoNS, "proj-other"},
 		// Own-namespace state is ownerRef-GC'd by Kubernetes, never by the finalizer.
-		{&corev1.Secret{}, dv.Namespace, "sec-home"},
+		{&corev1.Secret{}, dv.Namespace, install.SessionSecretName},
 	} {
 		if !exists(t, c, kept.obj, kept.ns, kept.nam) {
 			t.Errorf("%s/%s deleted; deletion must only take this instance's tracked resources", kept.ns, kept.nam)
@@ -634,9 +634,9 @@ func TestFinalizeDeletesOnlyThisInstance(t *testing.T) {
 }
 
 // Deletion tolerates what the operator cannot or need not delete: a missing
-// argoproj.io CRD (ArgoCD uninstalled first), an object gone between list and
-// delete, and a name only an older version rendered, which the name-scoped
-// delete grant refuses. None may wedge it; the finalizer still comes off.
+// argoproj.io CRD (ArgoCD uninstalled first), an object gone between read and
+// delete, and a delete the operator's role refuses (an older role mid-upgrade).
+// None may wedge it; the finalizer still comes off.
 func TestFinalizeToleratesMissingCRDGoneAndForbidden(t *testing.T) {
 	now := metav1.Now()
 	dv := testCR()
@@ -647,9 +647,15 @@ func TestFinalizeToleratesMissingCRDGoneAndForbidden(t *testing.T) {
 	c := testBuilder(t).WithObjects(
 		dv,
 		&corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Name: "dotvirt-appset-plugin", Namespace: "argocd", Labels: mine}},
-		&rbacv1.ClusterRoleBinding{ObjectMeta: metav1.ObjectMeta{Name: "dotvirt-legacy", Labels: mine}},
+		&rbacv1.ClusterRoleBinding{ObjectMeta: metav1.ObjectMeta{Name: "dotvirt-argocd-read", Labels: mine}},
 		&rbacv1.ClusterRoleBinding{ObjectMeta: metav1.ObjectMeta{Name: "dotvirt-platform-network-admin", Labels: mine}},
 	).WithInterceptorFuncs(interceptor.Funcs{
+		Get: func(ctx context.Context, cl client.WithWatch, key client.ObjectKey, obj client.Object, opts ...client.GetOption) error {
+			if gvk := obj.GetObjectKind().GroupVersionKind(); gvk.Group == "argoproj.io" {
+				return &apimeta.NoKindMatchError{GroupKind: gvk.GroupKind(), SearchedVersions: []string{gvk.Version}}
+			}
+			return cl.Get(ctx, key, obj, opts...)
+		},
 		List: func(ctx context.Context, cl client.WithWatch, list client.ObjectList, opts ...client.ListOption) error {
 			if u, ok := list.(*unstructured.UnstructuredList); ok && u.GroupVersionKind().Group == "argoproj.io" {
 				gvk := u.GroupVersionKind()
@@ -661,7 +667,7 @@ func TestFinalizeToleratesMissingCRDGoneAndForbidden(t *testing.T) {
 			switch obj.GetName() {
 			case "dotvirt-appset-plugin":
 				return apierrors.NewNotFound(schema.GroupResource{Resource: "configmaps"}, obj.GetName())
-			case "dotvirt-legacy":
+			case "dotvirt-argocd-read":
 				return apierrors.NewForbidden(schema.GroupResource{Group: "rbac.authorization.k8s.io", Resource: "clusterrolebindings"}, obj.GetName(), errors.New("not in resourceNames"))
 			}
 			return cl.Delete(ctx, obj, opts...)

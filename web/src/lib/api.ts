@@ -393,7 +393,9 @@ export const api = {
 
 	tasks: () => get<TaskEntry[]>('/api/tasks'),
 	options: () => get<gen.Options>('/api/options'),
-	storageClasses: () => get<gen.StorageClassInfo[]>('/api/storage/classes'),
+	// With a namespace, the classes its ResourceQuotas forbid come back marked.
+	storageClasses: (namespace?: string) =>
+		get<gen.StorageClassInfo[]>(`/api/storage/classes${qs({ namespace })}`),
 	// Every VM snapshot and disk claim in the caller's managed namespaces: live
 	// reads under the caller's token, fetched when the Storage section opens.
 	storageSnapshots: () => get<gen.Snapshot[]>('/api/storage/snapshots'),
