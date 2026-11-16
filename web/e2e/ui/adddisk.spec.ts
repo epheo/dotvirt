@@ -61,7 +61,7 @@ const keeps: [string, string, ((p: Page) => Promise<unknown>) | undefined][] = [
 	[
 		'for a caller who may not list classes',
 		'replicated',
-		(p) => p.route('**/api/storage/classes', (r) => r.fulfill({ json: [] })),
+		(p) => p.route('**/api/storage/classes**', (r) => r.fulfill({ json: [] })),
 	],
 ];
 for (const [what, scenario, before] of keeps)
