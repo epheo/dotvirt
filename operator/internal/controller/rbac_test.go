@@ -9,8 +9,10 @@ import (
 	"strings"
 	"testing"
 
+	corev1 "k8s.io/api/core/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
 	apimeta "k8s.io/apimachinery/pkg/api/meta"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
@@ -171,8 +173,20 @@ func TestApplyGrantNamesEveryRenderedObject(t *testing.T) {
 	withIngress.Spec.Ingress.Host = "dotvirt.example"
 	withGateway := managedForgeCR()
 	withGateway.Spec.Ingress = dotvirtv1alpha1.IngressSpec{Host: "dotvirt.example", Gateway: &dotvirtv1alpha1.GatewayRef{Name: "edge"}}
+	// The router's CA, which the managed forge's trust in Argo copies.
+	ingressCA := &corev1.ConfigMap{
+		ObjectMeta: metav1.ObjectMeta{Name: "default-ingress-cert", Namespace: "openshift-config-managed"},
+		Data:       map[string]string{"ca-bundle.crt": "PEM"},
+	}
 	sso := testCR()
 	sso.Spec.Auth.OpenShiftSSO = new(true)
+	// A managed forge that never answers fails its phase, before the Argo phase
+	// merges the forge's host into Argo's trust: that step runs on its own.
+	trust := func(r *DotvirtReconciler, dv *dotvirtv1alpha1.Dotvirt) {
+		if err := r.ensureForgeTLSTrust(context.Background(), dv, phaseCtx(r, dv)); err != nil {
+			t.Error(err)
+		}
+	}
 	seen := map[string]bool{}
 	for _, pass := range []struct {
 		name     string
@@ -180,21 +194,26 @@ func TestApplyGrantNamesEveryRenderedObject(t *testing.T) {
 		objs     []client.Object
 		platform platform.Platform
 		dryRun   bool
+		run      func(*DotvirtReconciler, *dotvirtv1alpha1.Dotvirt)
 	}{
-		{"BYO forge on OpenShift", byo, []client.Object{creds}, platform.OpenShift, false},
-		{"managed forge on OpenShift", managedForgeCR(), nil, platform.OpenShift, false},
-		{"managed forge, dry run", managedForgeCR(), nil, platform.OpenShift, true},
-		{"Ingresses", withIngress, nil, platform.Kubernetes, true},
-		{"HTTPRoutes", withGateway, nil, platform.Kubernetes, true},
-		{"OpenShift SSO", sso, nil, platform.OpenShift, false},
+		{"BYO forge on OpenShift", byo, []client.Object{creds}, platform.OpenShift, false, nil},
+		{"managed forge on OpenShift", managedForgeCR(), []client.Object{ingressCA}, platform.OpenShift, false, nil},
+		{"managed forge, dry run", managedForgeCR(), []client.Object{ingressCA}, platform.OpenShift, true, nil},
+		{"managed forge's trust in Argo", managedForgeCR(), []client.Object{ingressCA}, platform.OpenShift, false, trust},
+		{"Ingresses", withIngress, nil, platform.Kubernetes, true, nil},
+		{"HTTPRoutes", withGateway, nil, platform.Kubernetes, true, nil},
+		{"OpenShift SSO", sso, nil, platform.OpenShift, false, nil},
 	} {
 		var calls []operatorCall
 		c := testBuilder(t).WithObjects(append(pass.objs, pass.dv)...).WithInterceptorFuncs(recordCalls(&calls)).Build()
 		r := newReconciler(c, depsOK)
 		r.Platform, r.DryRun = pass.platform, pass.dryRun
-		// A managed forge that never answers fails its phase: what ran up to
-		// there is what is checked.
-		_, _ = r.Reconcile(context.Background(), ctrl.Request{NamespacedName: client.ObjectKeyFromObject(pass.dv)})
+		if pass.run != nil {
+			pass.run(r, pass.dv)
+		} else {
+			// What ran up to a phase that fails is what is checked.
+			_, _ = r.Reconcile(context.Background(), ctrl.Request{NamespacedName: client.ObjectKeyFromObject(pass.dv)})
+		}
 		credentials := install.ForgeSecretName(pass.dv)
 		for _, call := range calls {
 			if call.group == "dotvirt.io" {
@@ -220,6 +239,9 @@ func TestApplyGrantNamesEveryRenderedObject(t *testing.T) {
 		"/secrets/" + install.ForgejoAdminSecret,
 		"/secrets/" + install.RepoCredsName,
 		"/configmaps/" + install.AppsetConfigMapName,
+		"/configmaps/default-ingress-cert",
+		"/configmaps/argocd-tls-certs-cm",
+		"/configmaps/" + install.IngressCAConfigMap,
 		"route.openshift.io/routes/" + install.AppName,
 		"networking.k8s.io/ingresses/" + install.AppName,
 		"gateway.networking.k8s.io/httproutes/" + install.AppName,
