@@ -17,6 +17,8 @@ func TestSafeReturnKeepsOnlySameOriginPages(t *testing.T) {
 		"":                      "/",
 		"compute":               "/",
 		"//evil.example/x":      "/",
+		"///evil.example":       "/",
+		"//":                    "/",
 		"/\\evil.example":       "/",
 		"/a\\b":                 "/",
 		"https://evil.example/": "/",
