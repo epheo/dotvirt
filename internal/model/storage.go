@@ -41,7 +41,10 @@ type StorageProfile struct {
 	// mode KubeVirt needs to live-migrate a VM with a disk on this class.
 	Shared        bool   `json:"shared,omitempty"`
 	CloneStrategy string `json:"cloneStrategy,omitempty"` // snapshot | copy | csi-clone
-	Recognized    bool   `json:"recognized"`              // CDI knows the provisioner's capabilities
+	// Recognized is true when CDI fills a DataVolume's access and volume modes on
+	// this class: its StorageProfile's status carries claim settings, from CDI's
+	// provisioner table, the profile's spec or existing PVs.
+	Recognized bool `json:"recognized"`
 }
 
 // CapacitySegment is one CSIStorageCapacity entry: free capacity in one
