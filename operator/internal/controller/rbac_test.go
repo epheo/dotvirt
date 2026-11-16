@@ -35,17 +35,18 @@ import (
 // unscopedRules are the operator's rules without resourceNames, each for the
 // reason its marker gives (rbac_markers.go). Every other rule names its objects.
 var unscopedRules = map[string][]string{
-	"dotvirt.io/dotvirts":                       {"get", "list", "update", "watch"},
-	"dotvirt.io/dotvirts/status":                {"get", "patch", "update"},
-	"dotvirt.io/dotvirts/finalizers":            {"update"},
-	"apps/deployments":                          {"get", "list", "watch"},
-	"route.openshift.io/routes":                 {"get", "list", "watch"},
-	"route.openshift.io/routes/custom-host":     {"create", "update"},
-	"/namespaces":                               {"list", "watch"},
-	"argoproj.io/applications":                  {"list"},
-	"argoproj.io/appprojects":                   {"create", "delete", "list", "patch"},
-	"authorization.k8s.io/subjectaccessreviews": {"create"},
-	"rbac.authorization.k8s.io/rolebindings":    {"get"},
+	"dotvirt.io/dotvirts":                           {"get", "list", "update", "watch"},
+	"dotvirt.io/dotvirts/status":                    {"get", "patch", "update"},
+	"dotvirt.io/dotvirts/finalizers":                {"update"},
+	"apps/deployments":                              {"get", "list", "watch"},
+	"route.openshift.io/routes":                     {"get", "list", "watch"},
+	"route.openshift.io/routes/custom-host":         {"create", "update"},
+	"/namespaces":                                   {"list", "watch"},
+	"argoproj.io/applications":                      {"list"},
+	"argoproj.io/appprojects":                       {"create", "delete", "list", "patch"},
+	"authorization.k8s.io/subjectaccessreviews":     {"create"},
+	"authorization.k8s.io/selfsubjectaccessreviews": {"create"},
+	"rbac.authorization.k8s.io/rolebindings":        {"get"},
 }
 
 // operatorRole is the operator's own ClusterRole, as generated.

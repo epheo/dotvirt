@@ -86,7 +86,7 @@ package controller
 // selects them by name): a cluster admin granting or revoking the forge
 // credential, in either order, triggers a pass. The operator never writes them.
 // +kubebuilder:rbac:groups=rbac.authorization.k8s.io,resources=rolebindings,resourceNames=dotvirt-forge-credential,verbs=list;watch
-// +kubebuilder:rbac:groups=rbac.authorization.k8s.io,resources=roles,resourceNames=dotvirt-forge-credential,verbs=list;watch
+// +kubebuilder:rbac:groups=rbac.authorization.k8s.io,resources=roles,resourceNames=dotvirt-forge-credential,verbs=get;list;watch
 // clusterroles `bind`: the operator's ONLY rbac-authoring right - it permits binding
 // these named static roles even where the operator does not hold their rules (RBAC's
 // escalation check refuses a binding otherwise). No escalate, no role
@@ -99,5 +99,8 @@ package controller
 // watched; any name, since the platform repo names them), and the operator sets
 // that one key on the ArgoCD instance (get + patch on its two conventional names only).
 // +kubebuilder:rbac:groups=authorization.k8s.io,resources=subjectaccessreviews,verbs=create
+// selfsubjectaccessreviews: before minting a managed forge's token into an
+// admin-named credential, the operator asks whether it may store it.
+// +kubebuilder:rbac:groups=authorization.k8s.io,resources=selfsubjectaccessreviews,verbs=create
 // +kubebuilder:rbac:groups=rbac.authorization.k8s.io,resources=rolebindings,verbs=get
 // +kubebuilder:rbac:groups=argoproj.io,resources=argocds,resourceNames=openshift-gitops;argocd,verbs=get;patch

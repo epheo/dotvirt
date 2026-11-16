@@ -6,9 +6,12 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	appsv1 "k8s.io/api/apps/v1"
+	authorizationv1 "k8s.io/api/authorization/v1"
 	corev1 "k8s.io/api/core/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -44,15 +47,40 @@ func refuseSecret(name string, refused *bool) interceptor.Funcs {
 	}
 }
 
+// answerReviews answers the operator's SelfSubjectAccessReviews with allowed,
+// recording what each asked in asked.
+func answerReviews(allowed bool, asked *[]authorizationv1.ResourceAttributes) func(context.Context, client.WithWatch, client.Object, ...client.CreateOption) error {
+	return func(ctx context.Context, cl client.WithWatch, obj client.Object, opts ...client.CreateOption) error {
+		review, ok := obj.(*authorizationv1.SelfSubjectAccessReview)
+		if !ok {
+			return cl.Create(ctx, obj, opts...)
+		}
+		*asked = append(*asked, *review.Spec.ResourceAttributes)
+		review.Status.Allowed = allowed
+		return nil
+	}
+}
+
 // fakeForgejo answers the managed forge's token mint, and a ready Forgejo and
 // its admin Secret stand beside dv.
 func fakeForgejo(t *testing.T, dv *dotvirtv1alpha1.Dotvirt) (*httptest.Server, []client.Object) {
+	srv, objs, _ := countingForgejo(t, dv)
+	return srv, objs
+}
+
+// countingForgejo is fakeForgejo counting the tokens it mints.
+func countingForgejo(t *testing.T, dv *dotvirtv1alpha1.Dotvirt) (*httptest.Server, []client.Object, *atomic.Int64) {
 	t.Helper()
+	mints := &atomic.Int64{}
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/tokens"):
+			mints.Add(1)
 			w.WriteHeader(http.StatusCreated)
 			_, _ = w.Write([]byte(`{"sha1":"tok123"}`))
+		case r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/user"):
+			// The minted token validates, so a later pass keeps it.
+			_, _ = w.Write([]byte(`{"login":"dotvirt-bot"}`))
 		default:
 			w.WriteHeader(http.StatusNotFound)
 		}
@@ -67,7 +95,7 @@ func fakeForgejo(t *testing.T, dv *dotvirtv1alpha1.Dotvirt) (*httptest.Server, [
 			ObjectMeta: metav1.ObjectMeta{Name: install.ForgejoAdminSecret, Namespace: dv.Namespace},
 			Data:       map[string][]byte{"password": []byte("adminpw")},
 		},
-	}
+	}, mints
 }
 
 // A bring-your-own forge's credential the operator may not read: its ArgoCD
@@ -178,8 +206,11 @@ func TestManagedForgeWaitsOnACredentialItMayNotWrite(t *testing.T) {
 	srv, objs := fakeForgejo(t, dv)
 	refused := true
 	funcs := refuseSecret("custom-forge", &refused)
-	// The read is allowed (the Secret is simply absent); only the write is refused.
+	// The read is allowed (the Secret is simply absent); only the write is
+	// refused, though asked it read as allowed.
 	funcs.Get = nil
+	var asked []authorizationv1.ResourceAttributes
+	funcs.Create = answerReviews(true, &asked)
 	c := testBuilder(t).WithObjects(append(objs, dv)...).WithInterceptorFuncs(funcs).Build()
 	r := newReconciler(c, depsOK)
 	r.forgeAPIBase = func(*dotvirtv1alpha1.Dotvirt) string { return srv.URL }
@@ -284,6 +315,7 @@ func TestArgoNamespacesStayRecordedUntilAPruneCompletes(t *testing.T) {
 func TestLandedGrantStillRefusedRetriesSoon(t *testing.T) {
 	binding := func(dv *dotvirtv1alpha1.Dotvirt) *rbacv1.RoleBinding {
 		_, b := install.ForgeCredentialGrant(dv, "dotvirt-operator")
+		b.CreationTimestamp = metav1.Now()
 		return b
 	}
 	forgeDown := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
@@ -305,5 +337,77 @@ func TestLandedGrantStillRefusedRetriesSoon(t *testing.T) {
 	r.forgeAPIBase = func(*dotvirtv1alpha1.Dotvirt) string { return srv.URL }
 	if res := reconcileOnce(t, r, managed); res.RequeueAfter == 0 || res.RequeueAfter > grantLagRetry {
 		t.Errorf("managed: requeue = %v, want within %v", res.RequeueAfter, grantLagRetry)
+	}
+}
+
+// A grant that stays refused past the lag window is wrong (a verb, the
+// Secret's name or the account): the pass falls back to the drift cadence, and
+// the condition says what to replace and how, rather than repeating a create
+// that would fail on the objects already there.
+func TestWrongGrantRechecksBrieflyThenSaysReplace(t *testing.T) {
+	forgeDown := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusServiceUnavailable)
+	}))
+	defer forgeDown.Close()
+	dv, creds := byoForgeCR(forgeDown.URL)
+	now := time.Now().Truncate(time.Second)
+	role, binding := install.ForgeCredentialGrant(dv, "dotvirt-operator")
+	role.Rules[0].ResourceNames = []string{"another-secret"}
+	role.CreationTimestamp, binding.CreationTimestamp = metav1.NewTime(now.Add(-time.Minute)), metav1.NewTime(now.Add(-time.Minute))
+	refused := true
+	c := testBuilder(t).WithObjects(dv, creds, role, binding).WithInterceptorFuncs(refuseSecret(creds.Name, &refused)).Build()
+	r := newReconciler(c, depsOK)
+	r.OperatorNamespace = "dotvirt-operator"
+	r.now = func() time.Time { return now }
+
+	if res := reconcileOnce(t, r, dv); res.RequeueAfter != grantLagRetry {
+		t.Errorf("a minute after the grant changed: requeue = %v, want %v", res.RequeueAfter, grantLagRetry)
+	}
+	now = now.Add(grantLagWindow + time.Minute)
+	if res := reconcileOnce(t, r, dv); res.RequeueAfter != driftResync {
+		t.Errorf("past the window: requeue = %v, want %v", res.RequeueAfter, driftResync)
+	}
+	ready := cond(getCR(t, c, dv), dotvirtv1alpha1.ConditionForgeCredentialReady)
+	if ready == nil || ready.Reason != "GrantIncomplete" || strings.Contains(ready.Message, "rechecked") {
+		t.Fatalf("ForgeCredentialReady = %+v, want GrantIncomplete without the recheck", ready)
+	}
+	for _, want := range append([]string{"Role and RoleBinding " + install.ForgeCredentialGrantName + " in dotvirt exist but do not grant get on Secret byo-creds to dotvirt-operator:dotvirt-operator-controller"},
+		install.ForgeCredentialReplaceCommands(dv, "dotvirt-operator")...) {
+		if !strings.Contains(ready.Message, want) {
+			t.Errorf("ForgeCredentialReady message lacks %q:\n%s", want, ready.Message)
+		}
+	}
+}
+
+// A managed forge never mints a token it may not store in an admin-named
+// credential: it asks first, and mints only once the answer is yes.
+func TestManagedForgeMintsOnlyWhatItMayStore(t *testing.T) {
+	for _, allowed := range []bool{false, true} {
+		dv := managedForgeCR()
+		dv.Spec.Forge.CredentialsSecret = "custom-forge"
+		srv, objs, mints := countingForgejo(t, dv)
+		var asked []authorizationv1.ResourceAttributes
+		c := testBuilder(t).WithObjects(append(objs, dv)...).WithInterceptorFuncs(interceptor.Funcs{Create: answerReviews(allowed, &asked)}).Build()
+		r := newReconciler(c, depsOK)
+		r.forgeAPIBase = func(*dotvirtv1alpha1.Dotvirt) string { return srv.URL }
+		for range 3 {
+			if _, err := r.reconcileForge(context.Background(), dv, phaseCtx(r, dv)); err != nil {
+				t.Fatal(err)
+			}
+		}
+		want := int64(0)
+		if allowed {
+			want = 1
+		}
+		if got := mints.Load(); got != want {
+			t.Errorf("allowed=%v: %d tokens minted over three passes, want %d", allowed, got, want)
+		}
+		if len(asked) == 0 || asked[0] != (authorizationv1.ResourceAttributes{Namespace: dv.Namespace, Verb: "create", Resource: "secrets", Name: "custom-forge"}) {
+			t.Errorf("allowed=%v: asked %+v, want create on the absent credential", allowed, asked)
+		}
+		ready := cond(dv, dotvirtv1alpha1.ConditionForgeCredentialReady)
+		if allowed != (ready != nil && ready.Status == metav1.ConditionTrue) {
+			t.Errorf("allowed=%v: ForgeCredentialReady = %+v", allowed, ready)
+		}
 	}
 }

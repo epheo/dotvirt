@@ -40,9 +40,9 @@ func ForgeCredentialNameTaken(dv *dotvirtv1alpha1.Dotvirt) bool {
 	return name != defaultForgeSecret && slices.Contains(OperatorSecretNames, name)
 }
 
-// forgeCredentialVerbs are what the operator does with the credential: read
+// ForgeCredentialVerbs are what the operator does with the credential: read
 // it, and for a managed forge write the minted token into it.
-func forgeCredentialVerbs(dv *dotvirtv1alpha1.Dotvirt) []string {
+func ForgeCredentialVerbs(dv *dotvirtv1alpha1.Dotvirt) []string {
 	if dv.Spec.Forge.Managed {
 		return []string{"get", "create", "patch"}
 	}
@@ -72,7 +72,7 @@ func ForgeCredentialGrant(dv *dotvirtv1alpha1.Dotvirt, operatorNS string) (*rbac
 		ObjectMeta: meta,
 		Rules: []rbacv1.PolicyRule{{
 			APIGroups: []string{""}, Resources: []string{"secrets"},
-			ResourceNames: []string{dv.Spec.Forge.CredentialsSecret}, Verbs: forgeCredentialVerbs(dv),
+			ResourceNames: []string{dv.Spec.Forge.CredentialsSecret}, Verbs: ForgeCredentialVerbs(dv),
 		}},
 	}
 	binding := &rbacv1.RoleBinding{
@@ -89,13 +89,26 @@ func ForgeCredentialGrant(dv *dotvirtv1alpha1.Dotvirt, operatorNS string) (*rbac
 // ForgeCredentialGrant, without its owner, so they outlive the install.
 // operatorNS "" leaves a placeholder.
 func ForgeCredentialCommands(dv *dotvirtv1alpha1.Dotvirt, operatorNS string) []string {
+	return []string{
+		fmt.Sprintf("kubectl -n %s create role %s --verb=%s --resource=secrets --resource-name=%s",
+			dv.Namespace, ForgeCredentialGrantName, strings.Join(ForgeCredentialVerbs(dv), ","), dv.Spec.Forge.CredentialsSecret),
+		fmt.Sprintf("kubectl -n %s create rolebinding %s --role=%s --serviceaccount=%s",
+			dv.Namespace, ForgeCredentialGrantName, ForgeCredentialGrantName, OperatorAccount(operatorNS)),
+	}
+}
+
+// ForgeCredentialReplaceCommands replace a Role and RoleBinding that do not
+// grant what the credential needs: delete both, then ForgeCredentialCommands.
+func ForgeCredentialReplaceCommands(dv *dotvirtv1alpha1.Dotvirt, operatorNS string) []string {
+	return append([]string{fmt.Sprintf("kubectl -n %s delete role,rolebinding %s", dv.Namespace, ForgeCredentialGrantName)},
+		ForgeCredentialCommands(dv, operatorNS)...)
+}
+
+// OperatorAccount is the operator's ServiceAccount as namespace:name, a
+// placeholder namespace when it is unknown.
+func OperatorAccount(operatorNS string) string {
 	if operatorNS == "" {
 		operatorNS = "<operator-namespace>"
 	}
-	return []string{
-		fmt.Sprintf("kubectl -n %s create role %s --verb=%s --resource=secrets --resource-name=%s",
-			dv.Namespace, ForgeCredentialGrantName, strings.Join(forgeCredentialVerbs(dv), ","), dv.Spec.Forge.CredentialsSecret),
-		fmt.Sprintf("kubectl -n %s create rolebinding %s --role=%s --serviceaccount=%s:%s",
-			dv.Namespace, ForgeCredentialGrantName, ForgeCredentialGrantName, operatorNS, OperatorServiceAccount),
-	}
+	return operatorNS + ":" + OperatorServiceAccount
 }

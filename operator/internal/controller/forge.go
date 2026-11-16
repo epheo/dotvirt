@@ -41,7 +41,7 @@ func (r *DotvirtReconciler) reconcileForge(ctx context.Context, dv *dotvirtv1alp
 	if !credentialChecked(dv) {
 		meta.RemoveStatusCondition(&dv.Status.Conditions, dotvirtv1alpha1.ConditionForgeCredentialReady)
 	}
-	defer func() { rc.grantLanding = r.grantLanding(ctx, dv) }()
+	defer func() { rc.grantLanding = r.observeGrant(ctx, dv) }()
 	if !dv.Spec.Forge.Managed {
 		// Derived status, so a switch off managed retires the stale bootstrap hint too.
 		dv.Status.ForgeURL = dv.Spec.Forge.URL
@@ -395,7 +395,8 @@ func (r *DotvirtReconciler) bootstrapForgejo(ctx context.Context, dv *dotvirtv1a
 	// rotation (Argo + the app then fail auth). Validate it; only short-circuit when
 	// it's genuinely valid, else fall through to re-mint. A forge blip surfaces as
 	// err (requeue) rather than a needless re-mint.
-	if existing, err := r.forgeSecret(ctx, dv); err == nil {
+	existing, err := r.forgeSecret(ctx, dv)
+	if err == nil {
 		r.recordRender(ctx, existing)
 		valid, err := forge.NewFactory(apiBase, forge.StaticToken("unused"), false, "").
 			ValidateToken(string(existing.Data["token"]))
@@ -425,6 +426,9 @@ func (r *DotvirtReconciler) bootstrapForgejo(ctx context.Context, dv *dotvirtv1a
 	}
 	if d.Status.AvailableReplicas < 1 {
 		return false, nil
+	}
+	if err := r.mayStoreCredential(ctx, dv, existing != nil); err != nil {
+		return false, err
 	}
 	// Mint the scoped token via basic auth as the bootstrapped admin.
 	admin, err := r.secret(ctx, dv.Namespace, install.ForgejoAdminSecret)

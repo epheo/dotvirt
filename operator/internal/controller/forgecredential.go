@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	authorizationv1 "k8s.io/api/authorization/v1"
 	corev1 "k8s.io/api/core/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -14,6 +15,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	dotvirtv1alpha1 "github.com/epheo/dotvirt/operator/api/v1alpha1"
 	"github.com/epheo/dotvirt/operator/internal/install"
@@ -40,20 +42,93 @@ const reasonCredentialWait = "WaitingForCredential"
 // credentialWaitMessage is the message of every condition waiting on the credential.
 const credentialWaitMessage = "waiting for " + dotvirtv1alpha1.ConditionForgeCredentialReady
 
-// grantLagRetry is how soon a pass comes back while the credential's grant
-// exists but its read is still refused: the apiserver's RBAC caches lag a new
-// binding briefly, and no further event arrives once they catch up.
+// grantLagRetry is how soon a pass comes back while a freshly changed grant is
+// still refused: the apiserver's RBAC caches lag a new binding briefly, and no
+// further event arrives once they catch up.
 const grantLagRetry = time.Minute
 
-// grantLanding reports whether the credential is refused (this pass recorded
-// NotGranted) though its grant's RoleBinding exists: one direct GET, only then.
-func (r *DotvirtReconciler) grantLanding(ctx context.Context, dv *dotvirtv1alpha1.Dotvirt) bool {
+// grantLagWindow is how long after its newest change a grant that is present
+// but still refused reads as the apiserver catching up. Past it the grant is
+// wrong, and the pass keeps the drift cadence: the Role and RoleBinding watches
+// still catch the admin's fix.
+const grantLagWindow = 5 * time.Minute
+
+// observeGrant refines a refused credential (this pass recorded NotGranted) by
+// what a cluster admin installed: when the Role or RoleBinding is there but
+// does not grant what the operator needs, the condition says so and how to
+// replace them. It reports whether that grant changed within grantLagWindow.
+// Two direct GETs, only while the credential is refused.
+func (r *DotvirtReconciler) observeGrant(ctx context.Context, dv *dotvirtv1alpha1.Dotvirt) bool {
 	c := meta.FindStatusCondition(dv.Status.Conditions, dotvirtv1alpha1.ConditionForgeCredentialReady)
 	if c == nil || c.Reason != "NotGranted" {
 		return false
 	}
-	err := r.reader().Get(ctx, types.NamespacedName{Namespace: dv.Namespace, Name: install.ForgeCredentialGrantName}, &rbacv1.RoleBinding{})
-	return err == nil
+	key := types.NamespacedName{Namespace: dv.Namespace, Name: install.ForgeCredentialGrantName}
+	var present []string
+	var newest time.Time
+	for _, obj := range []client.Object{&rbacv1.Role{}, &rbacv1.RoleBinding{}} {
+		if r.reader().Get(ctx, key, obj) != nil {
+			continue
+		}
+		present = append(present, strings.TrimPrefix(fmt.Sprintf("%T", obj), "*v1."))
+		newest = latestChange(obj, newest)
+	}
+	if len(present) == 0 {
+		return false
+	}
+	landing := r.clock().Sub(newest) < grantLagWindow
+	exist := "exists but does"
+	if len(present) == 2 {
+		exist = "exist but do"
+	}
+	recheck := ""
+	if landing {
+		recheck = " (changed under " + grantLagWindow.String() + " ago: rechecked every minute while the apiserver applies it)"
+	}
+	r.setCondition(dv, dotvirtv1alpha1.ConditionForgeCredentialReady, metav1.ConditionFalse, "GrantIncomplete", fmt.Sprintf(
+		"%s %s in %s %s not grant %s on Secret %s to %s%s. Replace them: %s; %s",
+		strings.Join(present, " and "), install.ForgeCredentialGrantName, dv.Namespace, exist,
+		strings.Join(install.ForgeCredentialVerbs(dv), ", "), dv.Spec.Forge.CredentialsSecret, install.OperatorAccount(r.OperatorNamespace),
+		recheck, strings.Join(install.ForgeCredentialReplaceCommands(dv, r.OperatorNamespace), " && "), credentialWaitEffects(dv)))
+	return landing
+}
+
+// latestChange is the newest of after and obj's creation and field updates.
+func latestChange(obj client.Object, after time.Time) time.Time {
+	if t := obj.GetCreationTimestamp().Time; t.After(after) {
+		after = t
+	}
+	for _, f := range obj.GetManagedFields() {
+		if f.Time != nil && f.Time.After(after) {
+			after = f.Time.Time
+		}
+	}
+	return after
+}
+
+// mayStoreCredential asks, for an admin-named credential, whether the operator
+// may write it (create while absent, patch once present) before a token is
+// minted: one minted but never stored is a dangling forge token every pass.
+func (r *DotvirtReconciler) mayStoreCredential(ctx context.Context, dv *dotvirtv1alpha1.Dotvirt, present bool) error {
+	if !install.ForgeCredentialNeedsGrant(dv) {
+		return nil
+	}
+	verb := "create"
+	if present {
+		verb = "patch"
+	}
+	review := &authorizationv1.SelfSubjectAccessReview{Spec: authorizationv1.SelfSubjectAccessReviewSpec{
+		ResourceAttributes: &authorizationv1.ResourceAttributes{
+			Namespace: dv.Namespace, Verb: verb, Resource: "secrets", Name: dv.Spec.Forge.CredentialsSecret,
+		},
+	}}
+	if err := r.Create(ctx, review); err != nil {
+		return fmt.Errorf("ask whether the operator may %s Secret %s/%s: %w", verb, dv.Namespace, dv.Spec.Forge.CredentialsSecret, err)
+	}
+	if !review.Status.Allowed {
+		return errCredentialNotGranted
+	}
+	return nil
 }
 
 // forgeSecret reads the forge credential: a refusal is errCredentialNotGranted,
@@ -107,7 +182,7 @@ func (r *DotvirtReconciler) recordCredential(dv *dotvirtv1alpha1.Dotvirt, err er
 // credentialWaitEffects says what waits on the credential meanwhile.
 func credentialWaitEffects(dv *dotvirtv1alpha1.Dotvirt) string {
 	if dv.Spec.Forge.Managed {
-		return "until then no forge token is minted or checked, and the platform repo and both webhooks wait; the ArgoCD tier keeps the repo credentials it has, and after a move to another ArgoCD namespace has none there"
+		return "until then no forge token is minted or replaced, and the platform repo and both webhooks wait; the ArgoCD tier keeps the repo credentials it has, and after a move to another ArgoCD namespace has none there"
 	}
 	return "until then the platform repo, both webhooks and the ArgoCD tier wait: new projects, and namespaces added to a project, do not sync, and sync impersonation does not change"
 }
@@ -134,7 +209,7 @@ func (r *DotvirtReconciler) waitForCredential(dv *dotvirtv1alpha1.Dotvirt, rc *r
 	}
 	// The drift cadence, not sooner: a grant can stay pending for days. Its
 	// Role and RoleBinding are watched, so it landing (or going) triggers a
-	// pass; one that landed but is still refused is RBAC-cache lag.
+	// pass; one changed within grantLagWindow but still refused is RBAC-cache lag.
 	if rc.grantLanding {
 		return &ctrl.Result{RequeueAfter: grantLagRetry}
 	}
