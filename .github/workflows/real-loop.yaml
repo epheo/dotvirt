@@ -5,7 +5,8 @@
 # harness are the ones that release published: main's RBAC can move ahead of a
 # release, and a released operator under a newer role crash-loops. On a PR or a
 # dispatch the round-trip runs this tree's images and manifests instead, so a
-# branch is proven by its own code. hack/e2e-microshift.sh
+# branch is proven by its own code; a dispatch with release: true runs the
+# nightly's pin path on demand. hack/e2e-microshift.sh
 # boots ghcr.io/epheo/microshift as a privileged container, installs ArgoCD +
 # KubeVirt (emulation) + the digest-pinned dotvirt operator, creates a tenant
 # project through dotvirt's own API, and runs the stage -> PR -> merge -> Argo
@@ -20,6 +21,11 @@ on:
   schedule:
     - cron: '7 4 * * *'
   workflow_dispatch:
+    inputs:
+      release:
+        description: Run the round-trip on the latest release's pin commit, as the nightly does
+        type: boolean
+        default: false
   # Path-scoped PR trigger: the loop's own harness is the one thing PRs can
   # break that only this job would notice — normal PRs never pay for it.
   pull_request:
@@ -35,29 +41,45 @@ jobs:
   microshift-roundtrip:
     runs-on: ubuntu-latest
     timeout-minutes: 50
+    env:
+      PUBLISHED: ${{ github.event_name == 'schedule' || inputs.release }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          fetch-depth: ${{ github.event_name == 'schedule' && '0' || '1' }}
+          fetch-depth: ${{ (github.event_name == 'schedule' || inputs.release) && '0' || '1' }}
+      # The newest release tag whose pin commit is on main, matched on the
+      # subject release.yaml writes, along the first-parent chain. A pin whose
+      # parent is not its tag would mix later changes into the release: red,
+      # not a mixed tree.
       - name: Check out the latest release's pin commit
-        if: github.event_name == 'schedule'
+        if: github.event_name == 'schedule' || inputs.release
         run: |
-          pin="$(git log -1 --format=%H --grep='^release v[0-9][0-9.]*: digest-pinned' HEAD)"
-          test -n "$pin"
-          git checkout -q --detach "$pin"
-          git log -1 --format='release under test: %h %s'
+          pin=
+          for tag in $(git tag -l 'v[0-9]*' --merged HEAD --sort=-v:refname | grep -v -e -); do
+            while read -r hash subject; do
+              case "${subject}" in
+              "release ${tag}: digest-pinned (replaces v"*) pin="${hash}"; break ;;
+              esac
+            done < <(git log --first-parent --reverse --format='%H %s' "${tag}..HEAD")
+            [ -n "${pin}" ] && break
+          done
+          [ -n "${pin}" ] || { echo "::error::no release tag has its pin commit on main"; exit 1; }
+          [ "$(git rev-parse "${pin}^")" = "$(git rev-parse "${tag}^{commit}")" ] \
+            || { echo "::error::${pin} is not ${tag} plus its pins"; exit 1; }
+          git checkout -q --detach "${pin}"
+          git log -1 --format="release under test: ${tag} at %h %s"
       - name: Free runner disk (the bootc image embeds its payload)
         run: |
           sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc /usr/local/.ghcup
           df -h / | tail -1
       - run: grep -v '^#' hack/versions.env >> "$GITHUB_ENV"
-        if: github.event_name != 'schedule'
+        if: env.PUBLISHED != 'true'
       - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
-        if: github.event_name != 'schedule'
+        if: env.PUBLISHED != 'true'
         with:
           driver-opts: image=${{ env.BUILDKIT_IMAGE }}
       - name: Build both images from this tree
-        if: github.event_name != 'schedule'
+        if: env.PUBLISHED != 'true'
         run: |
           mkdir -p "$RUNNER_TEMP/images"
           docker buildx bake \
@@ -77,7 +99,7 @@ jobs:
       - name: Run the round-trip on MicroShift
         run: |
           vars=(WORKDIR="$RUNNER_TEMP/e2e")
-          if [ "$GITHUB_EVENT_NAME" != schedule ]; then
+          if [ "${PUBLISHED}" != true ]; then
             vars+=(APP_IMAGE_TAR="$RUNNER_TEMP/images/app.tar" OPERATOR_IMAGE_TAR="$RUNNER_TEMP/images/operator.tar")
           fi
           sudo "${vars[@]}" hack/e2e-microshift.sh
