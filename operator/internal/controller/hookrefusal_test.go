@@ -27,8 +27,8 @@ func (f *hookForge) serve(t *testing.T) *httptest.Server {
 	t.Helper()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		f.calls.Add(1)
-		switch {
-		case r.URL.Path == "/api/v1/orgs/dotvirt/hooks":
+		switch r.URL.Path {
+		case "/api/v1/orgs/dotvirt/hooks":
 			if s := int(f.hooks.Load()); s != http.StatusOK {
 				w.WriteHeader(s)
 				return
@@ -39,7 +39,7 @@ func (f *hookForge) serve(t *testing.T) *httptest.Server {
 				return
 			}
 			_, _ = w.Write([]byte(`[]`))
-		case r.URL.Path == "/api/v1/orgs/dotvirt":
+		case "/api/v1/orgs/dotvirt":
 			w.WriteHeader(int(f.org.Load()))
 		default:
 			t.Errorf("unexpected %s %s", r.Method, r.URL.Path)
