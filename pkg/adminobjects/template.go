@@ -34,6 +34,14 @@ const templateHeader = `# The dotvirt operator guard: admission policies boundin
 #     -o jsonpath='{.spec.template.spec.containers[0].env[?(@.name=="RELATED_IMAGE_FORGEJO")].value}')"
 #   envsubst < guard.yaml | ` + ApplyCommand + ` -
 #
+# Without envsubst, sed with the named placeholders does the same:
+#   sed -e "s|\${OPERATOR_USERNAME}|$OPERATOR_USERNAME|g" -e "s|\${INSTALL_NAMESPACE}|$INSTALL_NAMESPACE|g" \
+#     -e "s|\${ARGO_NAMESPACE}|$ARGO_NAMESPACE|g" -e "s|\${ARGO_CONTROLLER}|$ARGO_CONTROLLER|g" \
+#     -e "s|\${SPEC_IMAGE}|$SPEC_IMAGE|g" -e "s|\${RELATED_IMAGE_DOTVIRT}|$RELATED_IMAGE_DOTVIRT|g" \
+#     -e "s|\${RELATED_IMAGE_FORGEJO}|$RELATED_IMAGE_FORGEJO|g" guard.yaml | ` + ApplyCommand + ` -
+#
+# Every object carries the label app.kubernetes.io/part-of=dotvirt-operator-guard.
+#
 # Generated from pkg/adminobjects (go test ./pkg/adminobjects -run TestReleaseTemplate -update).
 `
 
