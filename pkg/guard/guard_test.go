@@ -111,7 +111,8 @@ func TestCompare(t *testing.T) {
 		edit func(map[string]*admissionregistrationv1.ValidatingAdmissionPolicy, map[string]*admissionregistrationv1.ValidatingAdmissionPolicyBinding)
 		want State
 	}{
-		"as rendered": {func(map[string]*admissionregistrationv1.ValidatingAdmissionPolicy, map[string]*admissionregistrationv1.ValidatingAdmissionPolicyBinding) {}, Installed},
+		"as rendered": {func(map[string]*admissionregistrationv1.ValidatingAdmissionPolicy, map[string]*admissionregistrationv1.ValidatingAdmissionPolicyBinding) {
+		}, Installed},
 		"a binding missing": {func(_ map[string]*admissionregistrationv1.ValidatingAdmissionPolicy, b map[string]*admissionregistrationv1.ValidatingAdmissionPolicyBinding) {
 			delete(b, DeploymentsName)
 		}, NotInstalled},
