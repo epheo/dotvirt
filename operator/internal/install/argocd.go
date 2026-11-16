@@ -15,8 +15,8 @@ import (
 	"github.com/epheo/dotvirt/pkg/tenancy"
 )
 
-// repoCredsName is the Argo repo-credentials template secret (in the ArgoCD ns).
-const repoCredsName = "dotvirt-repo-creds"
+// RepoCredsName is the Argo repo-credentials template secret (in the ArgoCD ns).
+const RepoCredsName = "dotvirt-repo-creds"
 
 const (
 	argoGroup   = "argoproj.io"
@@ -142,7 +142,7 @@ func RepoCredsSecret(dv *dotvirtv1alpha1.Dotvirt, argoNS, urlPrefix, username, t
 	labels["argocd.argoproj.io/secret-type"] = "repo-creds"
 	return &corev1.Secret{
 		TypeMeta:   metav1.TypeMeta{APIVersion: "v1", Kind: "Secret"},
-		ObjectMeta: metav1.ObjectMeta{Name: repoCredsName, Namespace: argoNS, Labels: labels},
+		ObjectMeta: metav1.ObjectMeta{Name: RepoCredsName, Namespace: argoNS, Labels: labels},
 		StringData: map[string]string{
 			"type": "git",
 			// Argo matches a template by plain string prefix: without the

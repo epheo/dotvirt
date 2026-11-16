@@ -414,6 +414,10 @@ type DotvirtStatus struct {
 	// install is deleted, so no Application is left needing an account dotvirt
 	// no longer maps.
 	SyncImpersonationInstance string `json:"syncImpersonationInstance,omitempty"`
+	// ArgoNamespace is the ArgoCD namespace the install last wrote, recorded once
+	// a prune there completes: when spec.argocd.namespace moves, prune reads the
+	// objects left in this one by name and deletes them, then records the new one.
+	ArgoNamespace string `json:"argoNamespace,omitempty"`
 	// ForgeAdminHint is the command that reveals the managed Forgejo bootstrap admin
 	// password (user dotvirt-bot); the value stays in the Secret, never in status.
 	// Set only for a managed forge.

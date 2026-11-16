@@ -228,9 +228,10 @@ func (r *DotvirtReconciler) provision(ctx context.Context, key types.NamespacedN
 			return ctrl.Result{}, fmt.Errorf("prune: %w", err)
 		}
 		r.markPruned(key, digest)
+		dv.Status.ArgoNamespace = rc.argoNS
 	}
-	// The watches cover the CR, Deployments, Secrets, Routes and project
-	// namespaces; the drift timer heals the rest. No watch reports the platform
+	// The watches cover the CR, Deployments, Routes and project namespaces;
+	// the drift timer heals the rest. No watch reports the platform
 	// repo or the ApplicationSet and its Applications, so their recovery polls.
 	// Argo gets driftResync to recover on its own; past that, a state only a
 	// person fixes waits on the drift timer like any other drift.
@@ -549,16 +550,16 @@ func (r *DotvirtReconciler) waitPhase(dv *dotvirtv1alpha1.Dotvirt, condType, rea
 }
 
 // CacheByObject scopes the manager's cache: the watched kinds only where they
-// carry the instance label, so the operator never holds every Secret in the
-// cluster in memory, and namespaces only where they carry the project label,
-// the ones tenant AppProjects derive from. A namespace that loses the label
-// leaves the cache, which reads as its deletion.
+// carry the instance label, and namespaces only where they carry the project
+// label, the ones tenant AppProjects derive from. A namespace that loses the
+// label leaves the cache, which reads as its deletion. No Secret informer: one
+// needs list and watch on every Secret in the cluster, which RBAC cannot narrow
+// by label.
 func CacheByObject(plat platform.Platform) map[client.Object]cache.ByObject {
 	hasInstance, _ := labels.NewRequirement(install.InstanceLabel, selection.Exists, nil)
 	instanceOnly := cache.ByObject{Label: labels.NewSelector().Add(*hasInstance)}
 	hasProject, _ := labels.NewRequirement(install.ProjectLabel, selection.Exists, nil)
 	byObject := map[client.Object]cache.ByObject{
-		&corev1.Secret{}:     instanceOnly,
 		&appsv1.Deployment{}: instanceOnly,
 		&corev1.Namespace{}:  {Label: labels.NewSelector().Add(*hasProject)},
 		// The watch on Argo's settings selects argocd-cm by name, the only
@@ -578,7 +579,7 @@ func CacheByObject(plat platform.Platform) map[client.Object]cache.ByObject {
 // (main.go detects it, failing startup rather than guessing).
 func (r *DotvirtReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	// Watch only the owned kinds the RBAC already lets the cache list: a deleted or
-	// drifted Deployment/Secret re-reconciles promptly. Services, SAs, PVCs and
+	// drifted Deployment re-reconciles promptly. Secrets, Services, SAs, PVCs and
 	// Ingresses stay unwatched by design (least-privilege RBAC); their drift heals
 	// on the driftResync requeue.
 	// The CR triggers on spec changes and deletion (which bumps the generation of
@@ -589,7 +590,6 @@ func (r *DotvirtReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		For(&dotvirtv1alpha1.Dotvirt{}, builder.WithPredicates(predicate.GenerationChangedPredicate{})).
 		Named("dotvirt").
 		Owns(&appsv1.Deployment{}).
-		Owns(&corev1.Secret{}).
 		// A project's namespaces and repo are its AppProject's destinations and
 		// source, so a project namespace appearing, leaving or changing either
 		// re-derives them.

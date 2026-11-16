@@ -14,6 +14,13 @@ import (
 // named roles (no `escalate`, no ClusterRole writes). Keep the role names below in sync
 // with operand_roles.yaml.
 
+// ClusterRoleBindingNames is every ClusterRoleBinding the install renders: the
+// operator's create, patch and delete name them, and prune reads each by name.
+var ClusterRoleBindingNames = []string{
+	"dotvirt", "dotvirt-argocd-apply", "dotvirt-argocd-read",
+	"dotvirt-platform-network-admin", tenancy.PlatformSyncAccount, "dotvirt-storage-catalog",
+}
+
 // clusterMeta is ObjectMeta for a cluster-scoped resource: no namespace, but labeled
 // so the CR's finalizer can find + delete it (a namespaced CR can't ownerRef it).
 func clusterMeta(name string, dv *dotvirtv1alpha1.Dotvirt) metav1.ObjectMeta {

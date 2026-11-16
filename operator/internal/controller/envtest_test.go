@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -54,6 +55,11 @@ const operatorFieldManager = "dotvirt-operator"
 // semantics and the least-privilege RBAC the fake client cannot check. It
 // needs the envtest binaries (`make -C operator test-envtest`); plain
 // `go test` skips it so the unit suite stays hermetic.
+// credentialsSecretUnscoped: spec.forge.credentialsSecret, an admin-chosen
+// name, keeps the operator's get, create and patch on Secrets unscoped until it
+// is granted another way; the rows probing a foreign Secret flip with it.
+const credentialsSecretUnscoped = true
+
 func TestEnvtest(t *testing.T) {
 	if os.Getenv("KUBEBUILDER_ASSETS") == "" {
 		t.Skip("KUBEBUILDER_ASSETS unset; run `make -C operator test-envtest`")
@@ -153,6 +159,33 @@ func TestEnvtest(t *testing.T) {
 			// Proved by this row alone: the operator also holds the role's one rule,
 			// so the escalation check would admit its binding without bind.
 			{authzv1.ResourceAttributes{Verb: "bind", Group: "rbac.authorization.k8s.io", Resource: "clusterroles", Name: install.SyncRequestName}, true},
+			// Secrets are never listed or watched, and read or written by name.
+			{authzv1.ResourceAttributes{Verb: "list", Resource: "secrets"}, false},
+			{authzv1.ResourceAttributes{Verb: "watch", Resource: "secrets"}, false},
+			{authzv1.ResourceAttributes{Verb: "get", Resource: "secrets", Namespace: "argocd", Name: install.ArgoSecretName}, true},
+			{authzv1.ResourceAttributes{Verb: "patch", Resource: "secrets", Namespace: "dotvirt", Name: install.SessionSecretName}, true},
+			{authzv1.ResourceAttributes{Verb: "get", Resource: "secrets", Namespace: "kube-system", Name: "some-token"}, credentialsSecretUnscoped},
+			{authzv1.ResourceAttributes{Verb: "create", Resource: "secrets", Namespace: "kube-system", Name: "some-token"}, credentialsSecretUnscoped},
+			// ConfigMaps, all by name: argocd-cm listed and watched by name for the
+			// cache, Argo's RBAC settings never touched.
+			{authzv1.ResourceAttributes{Verb: "list", Resource: "configmaps"}, false},
+			{authzv1.ResourceAttributes{Verb: "list", Resource: "configmaps", Name: "argocd-cm"}, true},
+			{authzv1.ResourceAttributes{Verb: "watch", Resource: "configmaps", Name: "argocd-cm"}, true},
+			{authzv1.ResourceAttributes{Verb: "patch", Resource: "configmaps", Namespace: "argocd", Name: "argocd-tls-certs-cm"}, true},
+			{authzv1.ResourceAttributes{Verb: "get", Resource: "configmaps", Namespace: "argocd", Name: "argocd-rbac-cm"}, false},
+			{authzv1.ResourceAttributes{Verb: "patch", Resource: "configmaps", Namespace: "argocd", Name: "argocd-rbac-cm"}, false},
+			// Bindings, the operand and the Argo objects: the names the install
+			// renders, never listed.
+			{authzv1.ResourceAttributes{Verb: "create", Group: "rbac.authorization.k8s.io", Resource: "clusterrolebindings", Name: "dotvirt"}, true},
+			{authzv1.ResourceAttributes{Verb: "create", Group: "rbac.authorization.k8s.io", Resource: "clusterrolebindings", Name: "escalation-probe"}, false},
+			{authzv1.ResourceAttributes{Verb: "list", Group: "rbac.authorization.k8s.io", Resource: "clusterrolebindings"}, false},
+			{authzv1.ResourceAttributes{Verb: "create", Resource: "serviceaccounts", Namespace: "kube-system", Name: "builder"}, false},
+			{authzv1.ResourceAttributes{Verb: "list", Resource: "services"}, false},
+			{authzv1.ResourceAttributes{Verb: "create", Group: "apps", Resource: "deployments", Namespace: "dotvirt", Name: "other"}, false},
+			{authzv1.ResourceAttributes{Verb: "list", Group: "networking.k8s.io", Resource: "networkpolicies"}, false},
+			{authzv1.ResourceAttributes{Verb: "create", Group: "argoproj.io", Resource: "applicationsets", Namespace: "argocd", Name: install.ApplicationSetName}, true},
+			{authzv1.ResourceAttributes{Verb: "list", Group: "argoproj.io", Resource: "applicationsets"}, false},
+			{authzv1.ResourceAttributes{Verb: "create", Group: "argoproj.io", Resource: "applications", Namespace: "argocd", Name: "other"}, false},
 		} {
 			res, err := kube.AuthorizationV1().SelfSubjectAccessReviews().Create(ctx,
 				&authzv1.SelfSubjectAccessReview{Spec: authzv1.SelfSubjectAccessReviewSpec{ResourceAttributes: &c.attrs}}, metav1.CreateOptions{})
@@ -164,14 +197,15 @@ func TestEnvtest(t *testing.T) {
 			}
 		}
 		// The bind grant is what lets the operator create its bindings without
-		// holding the operand roles' rules; a binding to any other role is refused.
-		crb := &rbacv1.ClusterRoleBinding{
-			ObjectMeta: metav1.ObjectMeta{Name: "escalation-probe"},
-			RoleRef:    rbacv1.RoleRef{APIGroup: rbacv1.GroupName, Kind: "ClusterRole", Name: "cluster-admin"},
-			Subjects:   []rbacv1.Subject{{Kind: rbacv1.UserKind, Name: operatorUser}},
-		}
-		if _, err := kube.RbacV1().ClusterRoleBindings().Create(ctx, crb, metav1.CreateOptions{}); !apierrors.IsForbidden(err) {
-			t.Errorf("binding cluster-admin: err=%v, want Forbidden", err)
+		// holding the operand roles' rules; under a name it may create, as it
+		// creates them (server-side apply), a binding to any other role is
+		// refused by the escalation check.
+		crb := rbacv1ac.ClusterRoleBinding("dotvirt").
+			WithRoleRef(rbacv1ac.RoleRef().WithAPIGroup(rbacv1.GroupName).WithKind("ClusterRole").WithName("cluster-admin")).
+			WithSubjects(rbacv1ac.Subject().WithKind(rbacv1.UserKind).WithName(operatorUser))
+		if _, err := kube.RbacV1().ClusterRoleBindings().Apply(ctx, crb, metav1.ApplyOptions{FieldManager: "dotvirt-operator"}); !apierrors.IsForbidden(err) ||
+			!strings.Contains(err.Error(), "attempting to grant RBAC permissions not currently held") {
+			t.Errorf("binding cluster-admin: err=%v, want the escalation check's Forbidden", err)
 		}
 		// Under the one name it may create, as the operator creates it (server-side
 		// apply, authorized with that name), a RoleBinding to another role is still
@@ -604,6 +638,56 @@ func TestEnvtest(t *testing.T) {
 		}
 	})
 
+	t.Run("a moved ArgoCD namespace is swept by name", func(t *testing.T) {
+		dv := &dotvirtv1alpha1.Dotvirt{}
+		if err := admin.Get(ctx, types.NamespacedName{Namespace: "dotvirt", Name: "x"}, dv); err != nil {
+			t.Fatal(err)
+		}
+		mustCreate(t, admin, &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "argocd-moved"}})
+		moveTo := func(ns string) {
+			value := "null"
+			if ns != "" {
+				value = strconv.Quote(ns)
+			}
+			patch := fmt.Appendf(nil, `{"spec":{"argocd":{"namespace":%s}}}`, value)
+			if err := admin.Patch(ctx, dv, client.RawPatch(types.MergePatchType, patch)); err != nil {
+				t.Fatal(err)
+			}
+		}
+		// What the install writes in the ArgoCD namespace.
+		written := func(ns string) int {
+			n := 0
+			for _, obj := range []client.Object{
+				&rbacv1.RoleBinding{ObjectMeta: metav1.ObjectMeta{Name: install.SyncRequestName}},
+				&corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Name: install.AppsetConfigMapName}},
+				&corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: install.AppsetSecretName}},
+				argoObj("ApplicationSet", "", install.ApplicationSetName, nil),
+				argoObj("AppProject", "", "dotvirt-p-team-a", nil),
+			} {
+				if admin.Get(ctx, types.NamespacedName{Namespace: ns, Name: obj.GetName()}, obj) == nil {
+					n++
+				}
+			}
+			return n
+		}
+		recorded := func() string {
+			got := &dotvirtv1alpha1.Dotvirt{}
+			if admin.Get(ctx, client.ObjectKeyFromObject(dv), got) != nil {
+				return ""
+			}
+			return got.Status.ArgoNamespace
+		}
+		eventually(t, "argocd recorded", func() bool { return recorded() == "argocd" && written("argocd") == 5 })
+		moveTo("argocd-moved")
+		eventually(t, "argocd swept after the move", func() bool {
+			return recorded() == "argocd-moved" && written("argocd-moved") == 5 && written("argocd") == 0
+		})
+		moveTo("")
+		eventually(t, "argocd-moved swept after the move back", func() bool {
+			return recorded() == "argocd" && written("argocd") == 5 && written("argocd-moved") == 0
+		})
+	})
+
 	// envtest runs no aggregation controller: admin takes the rules OpenShift
 	// aggregates into it (testdata, read from a cluster), RoleBinding writes
 	// included, NetworkAttachmentDefinition writes and EgressFirewalls not.
@@ -879,15 +963,15 @@ func TestEnvtest(t *testing.T) {
 
 	t.Run("deletion cleans up as the operator", func(t *testing.T) {
 		dv := &dotvirtv1alpha1.Dotvirt{ObjectMeta: metav1.ObjectMeta{Name: "x", Namespace: "dotvirt"}}
-		// A name only an older version rendered: the name-scoped delete grant
-		// refuses it, which must not wedge deletion.
+		// A name only an older version rendered: prune reads only the names this
+		// one renders, so it stays.
 		legacy := &rbacv1.ClusterRoleBinding{
 			ObjectMeta: metav1.ObjectMeta{Name: "dotvirt-legacy", Labels: install.Labels(dv)},
 			RoleRef:    rbacv1.RoleRef{APIGroup: rbacv1.GroupName, Kind: "ClusterRole", Name: "dotvirt"},
 		}
 		mustCreate(t, admin, legacy)
-		// Our instance label, another install's namespace: prune lists it, and
-		// OwnedBy is what keeps the unscoped AppProject delete off it.
+		// Our instance label, another install's namespace: prune lists AppProjects
+		// in the ArgoCD namespace, and OwnedBy keeps the unscoped delete off it.
 		foreign := argoObj("AppProject", "argocd", "dotvirt-p-foreign",
 			map[string]string{install.InstanceLabel: dv.Name, install.InstanceNamespaceLabel: "elsewhere"})
 		mustCreate(t, admin, foreign)
@@ -978,7 +1062,7 @@ func TestEnvtest(t *testing.T) {
 			}
 		}
 		if len(left) != 2 || !left["/"+legacy.Name] || !left["argocd/"+foreign.GetName()] {
-			t.Errorf("left after deletion: %v, want only the refused legacy binding and the other install's AppProject", left)
+			t.Errorf("left after deletion: %v, want only the legacy binding and the other install's AppProject", left)
 		}
 	})
 }
