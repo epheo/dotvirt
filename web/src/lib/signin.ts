@@ -6,7 +6,12 @@ import type { AuthMethods } from './api';
 // ?token asked for it).
 export type SignInView =
 	| { kind: 'redirect'; name: string; to: string }
-	| { kind: 'button'; name: string; to: string; reason: 'failed' | 'signed-out' | 'repeat' }
+	| {
+			kind: 'button';
+			name: string;
+			to: string;
+			reason: 'failed' | 'signed-out' | 'repeat' | 'no-storage';
+	  }
 	| { kind: 'token' };
 
 // The URL markers the screen reads. sso_error: the callback failed. signed_out:
@@ -43,16 +48,28 @@ type PageURL = Pick<URL, 'pathname' | 'search' | 'hash'> & {
 	searchParams: { has(name: string): boolean };
 };
 
+// Why the screen must not redirect, beyond the URL. signedOut: a sign-out just
+// ended this page's session (the ?signed_out navigation may not have landed).
+// recent: a redirect ran within REPEAT_WINDOW_MS. noStorage: the tab cannot
+// record redirects, so nothing would stop a loop: one click instead.
+export interface Hold {
+	signedOut?: boolean;
+	recent?: boolean;
+	noStorage?: boolean;
+}
+
 // methods is null while they load (or when they failed: the token form, as the
-// only path known to work). recent: a redirect ran within REPEAT_WINDOW_MS.
-export function signInView(methods: AuthMethods | null, url: PageURL, recent: boolean): SignInView {
+// only path known to work).
+export function signInView(methods: AuthMethods | null, url: PageURL, hold: Hold = {}): SignInView {
 	const q = url.searchParams;
 	const p = methods && provider(methods);
 	if (!p || q.has('token')) return { kind: 'token' };
 	const ret = returnPath(url);
 	const to = ret ? `${p.start}?return=${encodeURIComponent(ret)}` : p.start;
 	if (q.has('sso_error')) return { kind: 'button', name: p.name, to, reason: 'failed' };
-	if (q.has('signed_out')) return { kind: 'button', name: p.name, to, reason: 'signed-out' };
-	if (recent) return { kind: 'button', name: p.name, to, reason: 'repeat' };
+	if (q.has('signed_out') || hold.signedOut)
+		return { kind: 'button', name: p.name, to, reason: 'signed-out' };
+	if (hold.noStorage) return { kind: 'button', name: p.name, to, reason: 'no-storage' };
+	if (hold.recent) return { kind: 'button', name: p.name, to, reason: 'repeat' };
 	return { kind: 'redirect', name: p.name, to };
 }

@@ -79,7 +79,10 @@ describe('session.logout', () => {
 		answer();
 		await retry;
 		expect(session.user).toBeNull();
+		expect(session.signedOutHere).toBe(true);
 		expect(navigations.at(-1)).toBe('/?signed_out');
+		session.signIn({ username: 'ada', groups: [] });
+		expect(session.signedOutHere).toBe(false);
 		expect(session.logoutError).toBe('');
 	});
 
@@ -99,6 +102,7 @@ describe('session.logout', () => {
 		api.api.logout.mockRejectedValueOnce(new api.Unauthorized());
 		await session.logout();
 		expect(session.user).toBeNull();
+		expect(session.signedOutHere).toBe(true);
 		expect(navigations).toEqual(['/?signed_out']);
 		expect(session.logoutError).toBe('');
 	});

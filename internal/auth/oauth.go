@@ -130,21 +130,30 @@ func (o *OAuth) oauth2Config(m *oauthMeta) *oauth2.Config {
 	}
 }
 
-// stateCookie carries the CSRF state across the round-trip to the OAuth server,
-// sealed with the session secret under its own purpose.
+// stateCookie prefixes the cookie carrying the CSRF state across the round-trip
+// to the OAuth server, sealed with the session secret under its own purpose.
+// One cookie per sign-in, named by its state: tabs signing in at once (every
+// tab of a restarted console redirects) must not overwrite or clear each
+// other's.
 const stateCookie = "dotvirt_oauth_state"
+
+// stateCookieName is the cookie of the sign-in whose state is state.
+func stateCookieName(state string) string { return stateCookie + "_" + state }
 
 // LoginRedirect (GET /api/auth/openshift) sends the browser to the cluster's
 // authorize endpoint with a fresh signed state. ?return= names the page the
-// callback lands on, sealed with the state (SafeReturn).
+// callback lands on, sealed with the state (SafeReturn). An unreachable OAuth
+// server lands on the sign-in screen's failure button, not a bare error page:
+// the screen redirects here on its own.
 func (o *OAuth) LoginRedirect(w http.ResponseWriter, r *http.Request) {
 	m, err := o.discover(r.Context(), true)
 	if err != nil {
-		http.Error(w, "OpenShift SSO unavailable: "+err.Error(), http.StatusServiceUnavailable)
+		log.Printf("oauth: sign-in start: %v", err)
+		http.Redirect(w, r, "/?sso_error=1", http.StatusFound)
 		return
 	}
 	state := randomToken()
-	setStateCookie(w, r, withReturn(state, r.URL.Query().Get("return")), o.auth.sealer)
+	setStateCookie(w, r, state, withReturn(state, r.URL.Query().Get("return")), o.auth.sealer)
 	http.Redirect(w, r, o.oauth2Config(m).AuthCodeURL(state), http.StatusFound)
 }
 
@@ -153,20 +162,22 @@ func (o *OAuth) LoginRedirect(w http.ResponseWriter, r *http.Request) {
 // same session cookie. Failures land back on the login screen with a generic
 // sso_error flag - the detail is logged, not shown (it can carry endpoint URLs).
 func (o *OAuth) Callback(w http.ResponseWriter, r *http.Request) {
+	state := r.URL.Query().Get("state")
+	c, err := r.Cookie(stateCookieName(state))
 	failLogin := func(why string, err error) {
 		log.Printf("oauth callback: %s: %v", why, err)
-		clearStateCookie(w, r)
+		if c != nil {
+			clearStateCookie(w, r, c.Name)
+		}
 		http.Redirect(w, r, "/?sso_error=1", http.StatusFound)
 	}
-	c, err := r.Cookie(stateCookie)
-	if err != nil {
+	if state == "" || err != nil {
 		failLogin("state cookie missing", err)
 		return
 	}
 	sealed, ok := parseStateValue(c.Value, o.auth.sealer)
 	want, ret := splitReturn(sealed)
-	state := r.URL.Query().Get("state")
-	if !ok || state == "" || !hmac.Equal([]byte(state), []byte(want)) {
+	if !ok || !hmac.Equal([]byte(state), []byte(want)) {
 		failLogin("state mismatch", nil)
 		return
 	}
@@ -201,7 +212,7 @@ func (o *OAuth) Callback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	log.Printf("oauth: %s signed in via OpenShift SSO", id.Username)
-	clearStateCookie(w, r)
+	clearStateCookie(w, r, c.Name)
 	setCookie(w, r, session{token: tok.AccessToken, issued: time.Now(), sso: true}, o.auth.sealer)
 	http.Redirect(w, r, ret, http.StatusFound)
 }
@@ -231,9 +242,9 @@ func randomToken() string {
 }
 
 // setStateCookie seals value, a sign-in round-trip's secrets, for the callback.
-func setStateCookie(w http.ResponseWriter, r *http.Request, value string, sealer cipher.AEAD) {
+func setStateCookie(w http.ResponseWriter, r *http.Request, state, value string, sealer cipher.AEAD) {
 	http.SetCookie(w, &http.Cookie{
-		Name:     stateCookie,
+		Name:     stateCookieName(state),
 		Value:    stateValue(value, sealer),
 		Path:     "/api/auth",
 		HttpOnly: true,
@@ -244,9 +255,9 @@ func setStateCookie(w http.ResponseWriter, r *http.Request, value string, sealer
 	})
 }
 
-func clearStateCookie(w http.ResponseWriter, r *http.Request) {
+func clearStateCookie(w http.ResponseWriter, r *http.Request, name string) {
 	http.SetCookie(w, &http.Cookie{
-		Name: stateCookie, Value: "", Path: "/api/auth",
+		Name: name, Value: "", Path: "/api/auth",
 		HttpOnly: true, Secure: isTLS(r), SameSite: http.SameSiteLaxMode, MaxAge: -1,
 	})
 }

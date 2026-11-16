@@ -3,7 +3,7 @@
 	import { api, Unauthorized, type User } from '#lib/api.js';
 	import { action } from '#lib/resource.svelte.js';
 	import { branding } from '#lib/state/branding.svelte.js';
-	import { authMethods } from '#lib/state/session.svelte.js';
+	import { authMethods, session } from '#lib/state/session.svelte.js';
 	import { REPEAT_WINDOW_MS, signInView } from '#lib/signin.js';
 	import Button from './Button.svelte';
 
@@ -26,25 +26,31 @@
 	const loaded = $derived(auth.data !== null || auth.failed);
 
 	// When this tab last redirected to the provider: a second redirect within
-	// the window shows the button instead of bouncing forever. Per tab, best
-	// effort: without storage the URL markers still stop the common loops.
+	// the window shows the button instead of bouncing forever. A tab that
+	// cannot record it gets the button every time: nothing else would stop a
+	// provider round trip that leaves no session from looping.
 	const REDIRECTED_AT = 'signin.redirectedAt';
-	const recent = (() => {
-		try {
-			const at = Number(sessionStorage.getItem(REDIRECTED_AT));
-			return at > 0 && Date.now() - at < REPEAT_WINDOW_MS;
-		} catch {
-			return false;
-		}
-	})();
-	const view = $derived(loaded ? signInView(auth.data, page.url, recent) : null);
+	let noStorage = $state(false);
+	let recent = false;
+	try {
+		const at = Number(sessionStorage.getItem(REDIRECTED_AT));
+		recent = at > 0 && Date.now() - at < REPEAT_WINDOW_MS;
+	} catch {
+		noStorage = true;
+	}
+	const view = $derived(
+		loaded
+			? signInView(auth.data, page.url, { signedOut: session.signedOutHere, recent, noStorage })
+			: null,
+	);
 	const redirectTo = $derived(view?.kind === 'redirect' ? view.to : '');
 	$effect(() => {
 		if (!redirectTo) return;
 		try {
 			sessionStorage.setItem(REDIRECTED_AT, String(Date.now()));
 		} catch {
-			// storage refused: the redirect still runs
+			noStorage = true;
+			return;
 		}
 		window.location.assign(redirectTo);
 	});
@@ -74,6 +80,7 @@
 		failed: (name: string) => `Sign-in with ${name} failed. Try again.`,
 		'signed-out': () => 'You are signed out.',
 		repeat: (name: string) => `Signing in with ${name} did not keep you signed in. Try again.`,
+		'no-storage': (name: string) => `Continue to sign in with ${name}.`,
 	};
 </script>
 

@@ -640,15 +640,18 @@ A user already signed in at the provider comes back signed in, with no click, to
 |---|---|
 | A flow is ready | Nothing: it redirects to the provider |
 | `?sso_error` (the last sign-in failed) | One "Sign in with ..." button and the failure |
-| `?signed_out` (a sign-out just landed here) | One button: a redirect would sign the user straight back in through the provider's own session |
+| `?signed_out`, or a sign-out just ended the session on this page | One button: a redirect would sign the user straight back in through the provider's own session |
 | A redirect already ran in this tab within a minute | One button: the provider round trip left no session, so it is not retried in a loop |
+| The tab cannot record its redirects (browser storage blocked) | One button, every time: nothing else would stop such a loop |
 | No flow ready (none configured, or OpenShift SSO not finished) | The token form, as the only way in |
 | `?token` | The token form, whatever is configured |
 
 `https://<console host>/?token` is the break-glass for admins: a pasted token (`oc whoami -t`, or `kubectl create token`) signs in when the provider is down.
 The screen links to it nowhere.
 
-A sign-in returns only to a page of the console itself: dotvirt refuses another origin, and any `/api/` path, as the place to land.
+A sign-in returns only to a page of the console itself: dotvirt refuses another origin, any `/api/` path (decoded, as the router reads it), and a path that cleaning would change.
+A provider that cannot be reached when a sign-in starts lands on the failure button, with the detail in dotvirt's log.
+Each sign-in keeps its own state cookie, so tabs signing in at once do not undo each other.
 
 ## Packaging
 

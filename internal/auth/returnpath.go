@@ -2,6 +2,7 @@ package auth
 
 import (
 	"net/url"
+	"path"
 	"strings"
 )
 
@@ -13,24 +14,30 @@ const maxReturnPath = 1024
 // else "/". A relative path only: no scheme or host, and none of the prefixes
 // a browser reads as another origin ("//", or a backslash it treats as a
 // slash). Never an API path: landing on /api/auth/... would start the sign-in
-// again and loop.
+// again and loop. That check runs on the path as the router sees it, decoded
+// (%61pi is api), and a path that cleaning would change is refused outright,
+// as http.Redirect cleans it (/./api is /api).
 func SafeReturn(p string) string {
-	if p == "" || len(p) > maxReturnPath || p[0] != '/' || strings.ContainsAny(p, "\\\x00\r\n\t") {
-		return "/"
-	}
-	if strings.HasPrefix(p, "//") || p == "/api" || strings.HasPrefix(p, "/api/") || strings.HasPrefix(p, "/api?") {
+	if p == "" || len(p) > maxReturnPath || p[0] != '/' || strings.HasPrefix(p, "//") || unsafeChars(p) {
 		return "/"
 	}
 	u, err := url.Parse(p)
 	if err != nil || u.Scheme != "" || u.Host != "" || u.User != nil || u.Opaque != "" {
 		return "/"
 	}
-	for _, r := range p {
-		if r < 0x20 || r == 0x7f {
-			return "/"
-		}
+	d := u.Path
+	if clean := path.Clean(d); unsafeChars(d) || (clean != d && clean != strings.TrimSuffix(d, "/")) {
+		return "/"
+	}
+	if d == "/api" || strings.HasPrefix(d, "/api/") {
+		return "/"
 	}
 	return p
+}
+
+// unsafeChars: a control character, or a backslash a browser reads as a slash.
+func unsafeChars(s string) bool {
+	return strings.ContainsFunc(s, func(r rune) bool { return r < 0x20 || r == 0x7f || r == '\\' })
 }
 
 // withReturn appends the return path to a sealed state value. A newline never

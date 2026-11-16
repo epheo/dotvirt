@@ -17,6 +17,10 @@ class Session {
 	// the next person reload straight back in.
 	logoutError = $state('');
 	signingOut = $state(false);
+	// A sign-out ended this page's session. The sign-in screen mounts on the
+	// old URL before the ?signed_out navigation lands, and must not redirect to
+	// the provider, whose live session would sign the user straight back in.
+	signedOutHere = $state(false);
 	#wake: (() => void) | null = null;
 
 	// Only a 401 means "sign in": anything else (backend restarting, network
@@ -25,7 +29,7 @@ class Session {
 	async check() {
 		for (let attempt = 1; ; attempt++) {
 			try {
-				this.user = await api.me();
+				this.signIn(await api.me());
 				break;
 			} catch (e) {
 				if (e instanceof Unauthorized) {
@@ -72,7 +76,13 @@ class Session {
 		}
 	}
 
+	signIn(user: User) {
+		this.signedOutHere = false;
+		this.user = user;
+	}
+
 	private signedOut() {
+		this.signedOutHere = true;
 		this.user = null;
 		void goto('/?signed_out');
 	}
