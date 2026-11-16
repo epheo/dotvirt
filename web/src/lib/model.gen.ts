@@ -1752,7 +1752,12 @@ export interface StorageProfile {
    */
   shared?: boolean;
   cloneStrategy?: string; // snapshot | copy | csi-clone
-  recognized: boolean; // CDI knows the provisioner's capabilities
+  /**
+   * Recognized is true when CDI fills a DataVolume's access and volume modes on
+   * this class: from its own provisioner table, or from claim settings an admin
+   * put on the StorageProfile.
+   */
+  recognized: boolean;
 }
 /**
  * CapacitySegment is one CSIStorageCapacity entry: free capacity in one

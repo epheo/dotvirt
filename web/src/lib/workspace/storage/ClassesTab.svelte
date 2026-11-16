@@ -57,9 +57,9 @@
 		if (info.profile && !info.profile.recognized)
 			return {
 				tone: 'warn',
-				label: 'Unrecognized',
+				label: 'No claim settings',
 				title:
-					'CDI does not know this provisioner: DataVolumes need explicit access and volume modes',
+					'CDI has no access or volume modes for this class (an unknown provisioner, and none set on its StorageProfile): DataVolumes need them explicit',
 			};
 		return null;
 	}
