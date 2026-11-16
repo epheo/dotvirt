@@ -27,6 +27,9 @@ rules:
   # The OpenShift SSO client the console signs users in with: named for its
   # namespace, redirecting to its install's host, else the router's host on
   # the cluster's ingress domain; never the env the operator writes.
+  # Cluster-wide, as a ClusterRole can only be: the console reads its own
+  # install once at startup and serves no Dotvirt to users, and a Dotvirt
+  # holds Secret and ConfigMap names, never their contents.
   - apiGroups: ["dotvirt.io"]
     resources: ["dotvirts"]
     verbs: ["get", "list"]

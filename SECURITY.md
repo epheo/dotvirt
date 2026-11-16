@@ -48,9 +48,16 @@ What the guard closes:
   added capabilities, or the console with another entrypoint, an init container, an exec
   probe or hook, or a shared process namespace (the operator holds no right on pods, so
   it cannot exec into one or add an ephemeral container either);
+- mounting anything over the console's binary or trust store: its volumes are its own,
+  from the claim, ConfigMaps and Secret rendered or an admin chose, each mounted whole at
+  its own path;
+- giving the forge any Secret but its admin password, by env, `envFrom` or volume;
+- unmounting the console's token through its ServiceAccount;
 - leading the console's host anywhere but the console: its Service selects only the
   console's pods and port, its Route, Ingress or HTTPRoute leads only there, on the
-  console's host, and no other exposure may claim that host;
+  console's host, and no other exposure may claim that host, by name or by wildcard, or
+  serve every host;
+- exposing a Service outside the cluster: no node port, load balancer or external IP;
 - sending the tokens signed-in users give the console anywhere an admin did not choose:
   no kubeconfig, apiserver address, `envFrom`, proxy or trust store of the operator's
   choosing; nothing mounted over the console's ServiceAccount token and cluster CA; no
@@ -83,7 +90,16 @@ What stays open:
 - reads: the operator lists Deployments, Routes, Namespaces and Argo Applications and
   AppProjects cluster-wide;
 - Argo objects: AppProjects, Applications, the ArgoCD resource, `argocd-cm`,
-  `argocd-rbac-cm` and `argocd-secret` reach Argo's own rights.
+  `argocd-rbac-cm` and `argocd-secret` reach Argo's own rights;
+- the forge's commands, and its exposures on hosts of its own: it holds no user token;
+- the Secrets the console reads by env: the operator writes those Secrets itself, so a
+  reference it steered reaches nothing a write could not;
+- where no ingress domain can be read (MicroShift) and `spec.ingress.host` is unset, the
+  console's host is the one routers report for its Route when the guard is installed:
+  one the operator chose for that Route before then, or none yet admitted, is what the
+  guard pins;
+- the Route rules hold only where the apiserver serving Routes evaluates admission
+  policies; verify it on each platform.
 
 ## Supported versions
 

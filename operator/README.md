@@ -128,13 +128,18 @@ owns one status condition; a phase that fails or waits records why there, so
    and controller (`spec.argocd`, else the defaults):
    - `dotvirt-operator-secrets`: Secrets only in those two namespaces, never of type
      `kubernetes.io/service-account-token` nor carrying `kubernetes.io/service-account.name`;
+     the console's ServiceAccount never with its token unmounted;
    - `dotvirt-operator-deployments`: only the console (`dotvirt`, as `dotvirt`) and the
      forge (`dotvirt-forgejo`, as `dotvirt-forgejo`), in the install namespace. The
      console's images come from `quay.io/epheo/dotvirt` and the forge's from
      `codeberg.org/forgejo/forgejo` (any tag or digest), or exactly the image an admin
      chose (`spec.image`, the operator Deployment's `RELATED_IMAGE_*`). The console runs
      its image's entrypoint with no init container, no exec probe or hook, and no shared
-     process namespace; the forge's pods never carry the console's `app` label. Its arguments stay free, so a release
+     process namespace. Its volumes are its own (drafts claim, CA ConfigMaps, forge
+     credential Secret, and the branding and metrics CA ConfigMaps an admin chose), each
+     mounted whole at its own path: nothing over its binary or the system trust store.
+     The forge's pods never carry the console's `app` label and read no Secret but their
+     admin password. The console's arguments stay free, so a release
      may add flags, except the settings that send users' tokens or its pages elsewhere,
      by flag or env: the metrics endpoints and CA only as rendered from `spec.metrics`,
      TLS verification off only with `spec.forge.insecureTLS`, and never a kubeconfig or
@@ -155,9 +160,17 @@ owns one status condition; a phase that fails or waits records why there, so
      on its port (ClusterIP, no external name, no unready pods), and its Route, Ingress
      or HTTPRoute leads only to that Service, on the console's host (`spec.ingress.host`,
      else the router's host on the cluster's ingress domain), edge-terminated, with no
-     filter and no annotation the operator adds. No other exposure the operator writes
-     may claim the console's host or a wildcard. The forge's own exposures are otherwise
-     free: it holds no user token.
+     filter and no annotation the operator adds. Where no ingress domain can be read
+     (MicroShift), the console's host is the one routers report for its Route. Every
+     other exposure the operator writes names its own hosts: none the console's, no
+     wildcard over it, no Ingress default backend, no HTTPRoute without hostnames. No
+     Service the operator writes leaves the cluster: no node port, load balancer or
+     external IP. The forge's own exposures are otherwise free: it holds no user token.
+
+   The Route rules assume the apiserver serving Routes evaluates admission policies,
+   and that OpenShift's route API marks a host it generates
+   (`openshift.io/host.generated`) on create, which the rules allow. Verify both on
+   each platform before relying on them.
 
    The operator never installs them: it reads them back by name and reports each in
    `status.adminObjects` as `NotInstalled`, `Outdated` (rendered for other pins or
@@ -165,7 +178,8 @@ owns one status condition; a phase that fails or waits records why there, so
    The apiserver evaluates them in-process, only for those kinds' writes, with the
    username check first. Best-effort: never a halt, never `Available`. A new release
    in the same repositories passes as it is, new console flags included; an admin
-   changing `spec.image`, `spec.argocd`, `spec.forge.insecureTLS`, `spec.metrics`, the
+   changing `spec.image`, `spec.argocd`, `spec.forge.insecureTLS`, `spec.metrics`,
+   `spec.ingress.host`, `spec.branding.configMap`, `spec.forge.credentialsSecret`, the
    operator's `RELATED_IMAGE_*` or the namespace makes them `Outdated`, and until re-installed they refuse the operator's
    writes that need the change.
 3. **Forge** (`ForgeReady`): converges the trust anchors (below) first, then, with
