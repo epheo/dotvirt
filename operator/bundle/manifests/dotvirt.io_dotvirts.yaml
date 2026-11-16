@@ -279,7 +279,9 @@ spec:
                       an existing secret only for a bring-your-own forge. Its account creates the
                       platform and project repos in their org and writes to them; registering the org
                       webhooks needs an org owner, and without one dotvirt and ArgoCD fall back to
-                      polling.
+                      polling. Any name but dotvirt-forge needs a cluster admin's grant: the
+                      operator reads only the Secrets its own role names, and reports the Role and
+                      RoleBinding to install (ForgeCredentialGranted).
                     type: string
                   insecureTLS:
                     description: |-

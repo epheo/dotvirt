@@ -273,14 +273,6 @@ spec:
                 - patch
             - apiGroups:
                 - ""
-              resources:
-                - secrets
-              verbs:
-                - create
-                - get
-                - patch
-            - apiGroups:
-                - ""
               resourceNames:
                 - argocd-secret
                 - dotvirt-appset-plugin
