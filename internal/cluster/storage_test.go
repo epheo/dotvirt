@@ -4,7 +4,9 @@ import (
 	"context"
 	"testing"
 
+	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/resource"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -141,5 +143,34 @@ func TestClassReplicationReadsOnlyR_DRBD(t *testing.T) {
 	}
 	if got := classReplication(class(map[string]any{"tier": "nvme"}), "r-drbd.io"); got == nil || got.Copies != 1 {
 		t.Fatalf("absent replicas should read as r-drbd's default of one: %+v", got)
+	}
+}
+
+// A class is shut out of a namespace by a hard limit of zero on its storage
+// requests or its claim count; a non-zero limit, another class's limit or
+// any other resource leaves it offered.
+func TestForbiddenClasses(t *testing.T) {
+	quota := func(hard map[string]string) corev1.ResourceQuota {
+		q := corev1.ResourceQuota{Spec: corev1.ResourceQuotaSpec{Hard: corev1.ResourceList{}}}
+		for k, v := range hard {
+			q.Spec.Hard[corev1.ResourceName(k)] = resource.MustParse(v)
+		}
+		return q
+	}
+	got := forbiddenClasses([]corev1.ResourceQuota{
+		quota(map[string]string{
+			"lab.storageclass.storage.k8s.io/requests.storage":  "0",
+			"fast.storageclass.storage.k8s.io/requests.storage": "100Gi",
+			"requests.storage": "0",
+			"pods":             "0",
+		}),
+		quota(map[string]string{
+			"replicated.storageclass.storage.k8s.io/persistentvolumeclaims": "0",
+			"fast.storageclass.storage.k8s.io/persistentvolumeclaims":       "5",
+			"x.storageclass.storage.k8s.io/requests.cpu":                    "0",
+		}),
+	})
+	if len(got) != 2 || !got["lab"] || !got["replicated"] {
+		t.Errorf("forbidden = %v, want lab and replicated", got)
 	}
 }

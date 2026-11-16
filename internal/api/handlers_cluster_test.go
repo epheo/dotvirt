@@ -663,6 +663,58 @@ func TestStorageClassesSegmentsNeedNodeRead(t *testing.T) {
 	}
 }
 
+// Asked for one namespace, the sheet marks the classes its ResourceQuotas
+// shut out, read with the caller's own token. A caller who may not read the
+// quotas there, or a sheet asked for no namespace, gets no mark: the
+// apiserver still refuses a claim the quota forbids.
+func TestStorageClassesMarkWhatANamespaceForbids(t *testing.T) {
+	fc := newFakeCluster(t)
+	fc.ssar = func(token string, a *authzv1.ResourceAttributes) bool {
+		return a.Verb == verbList && a.Resource == "storageclasses" && a.Namespace == "" && (token == adminToken || token == tenantToken)
+	}
+	class := func(name string) map[string]any {
+		return map[string]any{"apiVersion": "storage.k8s.io/v1", "kind": "StorageClass", "metadata": map[string]any{"name": name}, "provisioner": "csi.example"}
+	}
+	fc.on(http.MethodGet, "/apis/storage.k8s.io/v1/storageclasses", unstructuredList("storage.k8s.io/v1", "StorageClass", class("fast"), class("slow")))
+	var quotaReads atomic.Int32
+	fc.on(http.MethodGet, "/api/v1/namespaces/team-a-dev/resourcequotas", func(w http.ResponseWriter, r *http.Request) {
+		quotaReads.Add(1)
+		if bearer(r) != adminToken {
+			http.Error(w, `{"kind":"Status","apiVersion":"v1","status":"Failure","reason":"Forbidden","code":403}`, http.StatusForbidden)
+			return
+		}
+		unstructuredList("v1", "ResourceQuota", map[string]any{
+			"apiVersion": "v1", "kind": "ResourceQuota",
+			"metadata": map[string]any{"name": "classes", "namespace": "team-a-dev"},
+			"spec":     map[string]any{"hard": map[string]any{"slow.storageclass.storage.k8s.io/requests.storage": "0"}},
+		})(w, r)
+	})
+	s := fc.server(nil, Config{})
+	marks := func(token, path string) map[string]bool {
+		t.Helper()
+		rec := do(s, token, http.MethodGet, path, "")
+		wantStatus(t, rec, http.StatusOK)
+		out := map[string]bool{}
+		for _, c := range decodeBody[[]model.StorageClassInfo](t, rec) {
+			out[c.Name] = c.Forbidden
+		}
+		return out
+	}
+	if got := marks(adminToken, "/api/storage/classes?namespace=team-a-dev"); !got["slow"] || got["fast"] || len(got) != 2 {
+		t.Errorf("admin in team-a-dev: forbidden = %v, want slow alone", got)
+	}
+	if got := marks(tenantToken, "/api/storage/classes?namespace=team-a-dev"); got["slow"] || got["fast"] || len(got) != 2 {
+		t.Errorf("a caller who may not read the quotas: forbidden = %v, want none", got)
+	}
+	reads := quotaReads.Load()
+	if got := marks(adminToken, "/api/storage/classes"); got["slow"] || got["fast"] {
+		t.Errorf("no namespace asked: forbidden = %v, want none", got)
+	}
+	if quotaReads.Load() != reads {
+		t.Error("the quotas were read for a sheet asked for no namespace")
+	}
+}
+
 // An SA-side read failure is dotvirt's, never the caller's: a 503 naming no
 // internals, and above all never a 401, which would sign the caller out.
 func TestStorageClassesFailure(t *testing.T) {
