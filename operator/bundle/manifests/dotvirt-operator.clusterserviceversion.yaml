@@ -218,21 +218,36 @@ spec:
         - rules:
             - apiGroups:
                 - ""
-              resources:
-                - configmaps
-              verbs:
-                - create
-                - get
-                - list
-                - patch
-            - apiGroups:
-                - ""
               resourceNames:
                 - argocd-cm
               resources:
                 - configmaps
               verbs:
+                - list
                 - watch
+            - apiGroups:
+                - ""
+              resourceNames:
+                - argocd-cm
+                - argocd-cmd-params-cm
+                - default-ingress-cert
+                - dotvirt-appset-plugin
+              resources:
+                - configmaps
+              verbs:
+                - get
+            - apiGroups:
+                - ""
+              resourceNames:
+                - argocd-tls-certs-cm
+                - dotvirt-appset-plugin
+                - dotvirt-ingress-ca
+                - dotvirt-service-ca
+              resources:
+                - configmaps
+              verbs:
+                - create
+                - patch
             - apiGroups:
                 - ""
               resourceNames:
@@ -250,6 +265,9 @@ spec:
                 - watch
             - apiGroups:
                 - ""
+              resourceNames:
+                - dotvirt-drafts
+                - dotvirt-forgejo-data
               resources:
                 - persistentvolumeclaims
               verbs:
@@ -257,14 +275,22 @@ spec:
                 - patch
             - apiGroups:
                 - ""
+              resourceNames:
+                - argocd-secret
+                - dotvirt-appset-plugin
+                - dotvirt-argo-webhook
+                - dotvirt-forge
+                - dotvirt-forgejo-admin
+                - dotvirt-oauth
+                - dotvirt-repo-creds
+                - dotvirt-session
+                - dotvirt-webhook
               resources:
                 - secrets
               verbs:
                 - create
                 - get
-                - list
                 - patch
-                - watch
             - apiGroups:
                 - ""
               resourceNames:
@@ -276,15 +302,6 @@ spec:
                 - delete
             - apiGroups:
                 - ""
-              resources:
-                - serviceaccounts
-                - services
-              verbs:
-                - create
-                - list
-                - patch
-            - apiGroups:
-                - ""
               resourceNames:
                 - dotvirt
                 - dotvirt-forgejo
@@ -292,7 +309,10 @@ spec:
                 - serviceaccounts
                 - services
               verbs:
+                - create
                 - delete
+                - get
+                - patch
             - apiGroups:
                 - admissionregistration.k8s.io
               resourceNames:
@@ -309,10 +329,8 @@ spec:
               resources:
                 - deployments
               verbs:
-                - create
                 - get
                 - list
-                - patch
                 - watch
             - apiGroups:
                 - apps
@@ -322,7 +340,15 @@ spec:
               resources:
                 - deployments
               verbs:
+                - create
                 - delete
+                - patch
+            - apiGroups:
+                - argoproj.io
+              resources:
+                - applications
+              verbs:
+                - list
             - apiGroups:
                 - argoproj.io
               resourceNames:
@@ -330,15 +356,9 @@ spec:
               resources:
                 - applications
               verbs:
-                - delete
-            - apiGroups:
-                - argoproj.io
-              resources:
-                - applications
-                - applicationsets
-              verbs:
                 - create
-                - list
+                - delete
+                - get
                 - patch
             - apiGroups:
                 - argoproj.io
@@ -347,7 +367,10 @@ spec:
               resources:
                 - applicationsets
               verbs:
+                - create
                 - delete
+                - get
+                - patch
             - apiGroups:
                 - argoproj.io
               resources:
@@ -370,6 +393,7 @@ spec:
             - apiGroups:
                 - authorization.k8s.io
               resources:
+                - selfsubjectaccessreviews
                 - subjectaccessreviews
               verbs:
                 - create
@@ -398,29 +422,16 @@ spec:
                 - update
             - apiGroups:
                 - gateway.networking.k8s.io
-              resources:
-                - httproutes
-              verbs:
-                - create
-                - list
-            - apiGroups:
-                - gateway.networking.k8s.io
               resourceNames:
                 - dotvirt
                 - dotvirt-forgejo
               resources:
                 - httproutes
               verbs:
-                - delete
-                - patch
-            - apiGroups:
-                - networking.k8s.io
-              resources:
-                - ingresses
-                - networkpolicies
-              verbs:
                 - create
-                - list
+                - delete
+                - get
+                - patch
             - apiGroups:
                 - networking.k8s.io
               resourceNames:
@@ -430,15 +441,9 @@ spec:
                 - ingresses
                 - networkpolicies
               verbs:
-                - delete
-                - patch
-            - apiGroups:
-                - rbac.authorization.k8s.io
-              resources:
-                - clusterrolebindings
-              verbs:
                 - create
-                - list
+                - delete
+                - get
                 - patch
             - apiGroups:
                 - rbac.authorization.k8s.io
@@ -452,7 +457,10 @@ spec:
               resources:
                 - clusterrolebindings
               verbs:
+                - create
                 - delete
+                - get
+                - patch
             - apiGroups:
                 - rbac.authorization.k8s.io
               resourceNames:
@@ -476,6 +484,15 @@ spec:
             - apiGroups:
                 - rbac.authorization.k8s.io
               resourceNames:
+                - dotvirt-forge-credential
+              resources:
+                - rolebindings
+              verbs:
+                - list
+                - watch
+            - apiGroups:
+                - rbac.authorization.k8s.io
+              resourceNames:
                 - dotvirt-sync-request
               resources:
                 - rolebindings
@@ -484,11 +501,20 @@ spec:
                 - delete
                 - patch
             - apiGroups:
+                - rbac.authorization.k8s.io
+              resourceNames:
+                - dotvirt-forge-credential
+              resources:
+                - roles
+              verbs:
+                - get
+                - list
+                - watch
+            - apiGroups:
                 - route.openshift.io
               resources:
                 - routes
               verbs:
-                - create
                 - get
                 - list
                 - watch
@@ -500,6 +526,7 @@ spec:
               resources:
                 - routes
               verbs:
+                - create
                 - delete
                 - patch
             - apiGroups:

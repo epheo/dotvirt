@@ -9,6 +9,7 @@ import (
 
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
+	rbacv1 "k8s.io/api/rbac/v1"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -234,9 +235,11 @@ func (r *DotvirtReconciler) provision(ctx context.Context, key types.NamespacedN
 			return ctrl.Result{}, fmt.Errorf("prune: %w", err)
 		}
 		r.markPruned(key, digest)
+		// Every other recorded namespace was just swept by name.
+		dv.Status.ArgoNamespaces = []string{rc.argoNS}
 	}
-	// The watches cover the CR, Deployments, Secrets, Routes and project
-	// namespaces; the drift timer heals the rest. No watch reports the platform
+	// The watches cover the CR, Deployments, Routes and project namespaces;
+	// the drift timer heals the rest. No watch reports the platform
 	// repo or the ApplicationSet and its Applications, so their recovery polls.
 	// Argo gets driftResync to recover on its own; past that, a state only a
 	// person fixes waits on the drift timer like any other drift.
@@ -248,6 +251,9 @@ func (r *DotvirtReconciler) provision(ctx context.Context, key types.NamespacedN
 	}
 	if argo != nil && argo.Reason == reasonRefreshing {
 		wait = min(wait, refreshRetry)
+	}
+	if rc.grantLanding {
+		wait = min(wait, grantLagRetry)
 	}
 	return ctrl.Result{RequeueAfter: wait}, nil
 }
@@ -336,6 +342,9 @@ type reconcileCtx struct {
 	tenantKindsRead bool
 	// impersonation is impersonating's answer for this pass, nil until asked.
 	impersonation *bool
+	// grantLanding: the forge credential is refused though its grant's
+	// RoleBinding exists, which the apiserver's RBAC caches may still lag.
+	grantLanding bool
 }
 
 func (r *DotvirtReconciler) newReconcileCtx(ctx context.Context, dv *dotvirtv1alpha1.Dotvirt) *reconcileCtx {
@@ -419,7 +428,7 @@ func (r *DotvirtReconciler) dryRunSkip(dv *dotvirtv1alpha1.Dotvirt, condType, wh
 // builds the app's shared forge client (pkg/forge) scoped to the platform repo.
 func (r *DotvirtReconciler) forgeClient(ctx context.Context, dv *dotvirtv1alpha1.Dotvirt) (*forge.Client, error) {
 	name := install.ForgeSecretName(dv)
-	s, err := r.secret(ctx, dv.Namespace, name)
+	s, err := r.forgeSecret(ctx, dv)
 	if err != nil {
 		return nil, fmt.Errorf("read forge credentials %q: %w", name, err)
 	}
@@ -555,21 +564,25 @@ func (r *DotvirtReconciler) waitPhase(dv *dotvirtv1alpha1.Dotvirt, condType, rea
 }
 
 // CacheByObject scopes the manager's cache: the watched kinds only where they
-// carry the instance label, so the operator never holds every Secret in the
-// cluster in memory, and namespaces only where they carry the project label,
-// the ones tenant AppProjects derive from. A namespace that loses the label
-// leaves the cache, which reads as its deletion.
+// carry the instance label, and namespaces only where they carry the project
+// label, the ones tenant AppProjects derive from. A namespace that loses the
+// label leaves the cache, which reads as its deletion. No Secret informer: one
+// needs list and watch on every Secret in the cluster, which RBAC cannot narrow
+// by label.
 func CacheByObject(plat platform.Platform) map[client.Object]cache.ByObject {
 	hasInstance, _ := labels.NewRequirement(install.InstanceLabel, selection.Exists, nil)
 	instanceOnly := cache.ByObject{Label: labels.NewSelector().Add(*hasInstance)}
 	hasProject, _ := labels.NewRequirement(install.ProjectLabel, selection.Exists, nil)
 	byObject := map[client.Object]cache.ByObject{
-		&corev1.Secret{}:     instanceOnly,
 		&appsv1.Deployment{}: instanceOnly,
 		&corev1.Namespace{}:  {Label: labels.NewSelector().Add(*hasProject)},
 		// The watch on Argo's settings selects argocd-cm by name, the only
 		// ConfigMap the RBAC lets the operator watch; reads stay direct.
 		&corev1.ConfigMap{}: {Field: fields.OneTermEqualSelector("metadata.name", argoSettings)},
+		// The forge credential's grant, by name, the only RoleBinding the RBAC
+		// lets the operator watch; RoleBinding reads stay direct.
+		&rbacv1.RoleBinding{}: {Field: fields.OneTermEqualSelector("metadata.name", install.ForgeCredentialGrantName)},
+		&rbacv1.Role{}:        {Field: fields.OneTermEqualSelector("metadata.name", install.ForgeCredentialGrantName)},
 	}
 	// Registering the Route kind on vanilla Kubernetes fails the cache's REST lookup.
 	if plat == platform.OpenShift {
@@ -584,7 +597,7 @@ func CacheByObject(plat platform.Platform) map[client.Object]cache.ByObject {
 // (main.go detects it, failing startup rather than guessing).
 func (r *DotvirtReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	// Watch only the owned kinds the RBAC already lets the cache list: a deleted or
-	// drifted Deployment/Secret re-reconciles promptly. Services, SAs, PVCs and
+	// drifted Deployment re-reconciles promptly. Secrets, Services, SAs, PVCs and
 	// Ingresses stay unwatched by design (least-privilege RBAC); their drift heals
 	// on the driftResync requeue.
 	// The CR triggers on spec changes and deletion (which bumps the generation of
@@ -595,7 +608,6 @@ func (r *DotvirtReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		For(&dotvirtv1alpha1.Dotvirt{}, builder.WithPredicates(predicate.GenerationChangedPredicate{})).
 		Named("dotvirt").
 		Owns(&appsv1.Deployment{}).
-		Owns(&corev1.Secret{}).
 		// A project's namespaces and repo are its AppProject's destinations and
 		// source, so a project namespace appearing, leaving or changing either
 		// re-derives them.
@@ -606,7 +618,12 @@ func (r *DotvirtReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		// pass re-renders their AppProjects at once, not on the next drift
 		// requeue.
 		Watches(&corev1.ConfigMap{}, handler.EnqueueRequestsFromMapFunc(r.installs),
-			builder.WithPredicates(predicate.Funcs{UpdateFunc: impersonationChanged, GenericFunc: func(event.GenericEvent) bool { return false }}))
+			builder.WithPredicates(predicate.Funcs{UpdateFunc: impersonationChanged, GenericFunc: func(event.GenericEvent) bool { return false }})).
+		// A cluster admin granting or revoking the forge credential, its Role
+		// and RoleBinding in either order: the phases waiting on it go on at
+		// once, not on the drift timer.
+		Watches(&rbacv1.RoleBinding{}, handler.EnqueueRequestsFromMapFunc(r.installs)).
+		Watches(&rbacv1.Role{}, handler.EnqueueRequestsFromMapFunc(r.installs))
 	// Routes exist only where the route API does, so gate the watch on the same
 	// platform detection that gates rendering them; on vanilla Kubernetes the
 	// informer could never sync. Unstructured because the module carries no

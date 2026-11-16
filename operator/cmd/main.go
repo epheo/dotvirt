@@ -22,6 +22,7 @@ import (
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 
 	corev1 "k8s.io/api/core/v1"
+	rbacv1 "k8s.io/api/rbac/v1"
 	"sigs.k8s.io/controller-runtime/pkg/cache"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
@@ -102,13 +103,12 @@ func main() {
 		LeaderElection:         enableLeaderElection,
 		LeaderElectionID:       "dotvirt-operator.dotvirt.io",
 		Cache:                  cache.Options{ByObject: controller.CacheByObject(plat)},
-		// ConfigMaps are read point-wise, never watched: the cached client would
-		// spin a CLUSTER-WIDE informer on first Get, exceeding the narrow RBAC
-		// (get, no list/watch) and blocking that Get forever, wedging reconcile
-		// and deletion alike. Secrets are read direct too: the label-filtered
-		// cache cannot see the unlabelled ones the operator reads (a BYO forge
-		// credential, a pre-existing generated secret).
-		Client: client.Options{Cache: &client.CacheOptions{DisableFor: []client.Object{&corev1.ConfigMap{}, &corev1.Secret{}}}},
+		// ConfigMaps, Secrets and RoleBindings are read point-wise: the cached
+		// client would spin a CLUSTER-WIDE informer on first Get, exceeding the
+		// RBAC (get by name, no list or watch) and blocking that Get forever,
+		// wedging reconcile and deletion alike. The ones watched by name
+		// (argocd-cm, the credential grant) feed events only.
+		Client: client.Options{Cache: &client.CacheOptions{DisableFor: []client.Object{&corev1.ConfigMap{}, &corev1.Secret{}, &rbacv1.RoleBinding{}, &rbacv1.Role{}}}},
 	})
 	if err != nil {
 		setupLog.Error(err, "unable to start manager")

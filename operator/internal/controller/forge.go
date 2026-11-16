@@ -38,6 +38,10 @@ func (r *DotvirtReconciler) reconcileForge(ctx context.Context, dv *dotvirtv1alp
 	// install needs it (the app's OAuth exchange verifies against the same copy),
 	// so it precedes the managed check.
 	r.ensureTrustAnchors(ctx, dv, rc)
+	if !credentialChecked(dv) {
+		meta.RemoveStatusCondition(&dv.Status.Conditions, dotvirtv1alpha1.ConditionForgeCredentialReady)
+	}
+	defer func() { rc.grantLanding = r.observeGrant(ctx, dv) }()
 	if !dv.Spec.Forge.Managed {
 		// Derived status, so a switch off managed retires the stale bootstrap hint too.
 		dv.Status.ForgeURL = dv.Spec.Forge.URL
@@ -67,6 +71,14 @@ func (r *DotvirtReconciler) reconcileForge(ctx context.Context, dv *dotvirtv1alp
 		return nil, nil
 	}
 	ready, err := r.bootstrapForgejo(ctx, dv)
+	if ready || err != nil {
+		r.recordCredential(dv, err)
+	}
+	if credentialWaits(err) {
+		// The forge serves; only what needs its credential waits.
+		r.setCondition(dv, dotvirtv1alpha1.ConditionForgeReady, metav1.ConditionFalse, reasonCredentialWait, credentialWaitMessage)
+		return nil, nil
+	}
 	if errors.Is(err, forge.ErrUnauthorized) {
 		// Forgejo rejected the operator's admin credential. The bootstrap initContainer
 		// reconciles the DB password to the admin secret on every start, so this should
@@ -102,7 +114,11 @@ func (r *DotvirtReconciler) observeForge(ctx context.Context, dv *dotvirtv1alpha
 		r.setCondition(dv, dotvirtv1alpha1.ConditionForgeReady, metav1.ConditionFalse, "NotConfigured",
 			"no forge configured; propose pushes a branch but opens no pull request")
 	default:
-		if _, err := r.secret(ctx, dv.Namespace, name); apierrors.IsNotFound(err) {
+		_, err := r.forgeSecret(ctx, dv)
+		r.recordCredential(dv, err)
+		if credentialWaits(err) {
+			r.setCondition(dv, dotvirtv1alpha1.ConditionForgeReady, metav1.ConditionFalse, reasonCredentialWait, credentialWaitMessage)
+		} else if apierrors.IsNotFound(err) {
 			r.setCondition(dv, dotvirtv1alpha1.ConditionForgeReady, metav1.ConditionFalse, "CredentialsSecretMissing",
 				fmt.Sprintf("spec.forge.credentialsSecret names %s/%s, which does not exist; the dotvirt pod cannot start without it", dv.Namespace, name))
 		} else if err != nil {
@@ -191,7 +207,14 @@ func (r *DotvirtReconciler) reconcilePlatformRepo(ctx context.Context, dv *dotvi
 		meta.RemoveStatusCondition(&dv.Status.Conditions, dotvirtv1alpha1.ConditionForgeRepoReady)
 		return nil, nil
 	}
-	if err := r.ensurePlatformRepo(ctx, dv); err != nil {
+	if credentialRefused(dv) {
+		r.setCondition(dv, dotvirtv1alpha1.ConditionForgeRepoReady, metav1.ConditionUnknown, reasonCredentialWait, credentialWaitMessage)
+		return nil, nil
+	}
+	if err := r.ensurePlatformRepo(ctx, dv); credentialWaits(err) {
+		r.setCondition(dv, dotvirtv1alpha1.ConditionForgeRepoReady, metav1.ConditionUnknown, reasonCredentialWait, credentialWaitMessage)
+		return nil, nil
+	} else if err != nil {
 		r.setCondition(dv, dotvirtv1alpha1.ConditionForgeRepoReady, metav1.ConditionFalse, "Error", err.Error())
 		return nil, nil
 	}
@@ -376,7 +399,8 @@ func (r *DotvirtReconciler) bootstrapForgejo(ctx context.Context, dv *dotvirtv1a
 	// rotation (Argo + the app then fail auth). Validate it; only short-circuit when
 	// it's genuinely valid, else fall through to re-mint. A forge blip surfaces as
 	// err (requeue) rather than a needless re-mint.
-	if existing, err := r.secret(ctx, dv.Namespace, credName); err == nil {
+	existing, err := r.forgeSecret(ctx, dv)
+	if err == nil {
 		r.recordRender(ctx, existing)
 		valid, err := forge.NewFactory(apiBase, forge.StaticToken("unused"), false, "").
 			ValidateToken(string(existing.Data["token"]))
@@ -406,6 +430,9 @@ func (r *DotvirtReconciler) bootstrapForgejo(ctx context.Context, dv *dotvirtv1a
 	}
 	if d.Status.AvailableReplicas < 1 {
 		return false, nil
+	}
+	if err := r.mayStoreCredential(ctx, dv, existing != nil); err != nil {
+		return false, err
 	}
 	// Mint the scoped token via basic auth as the bootstrapped admin.
 	admin, err := r.secret(ctx, dv.Namespace, install.ForgejoAdminSecret)
@@ -439,5 +466,10 @@ func (r *DotvirtReconciler) writeForgeSecret(ctx context.Context, dv *dotvirtv1a
 		// lingers, and the value is readable without the API server's StringData merge.
 		Data: map[string][]byte{"url": []byte(url), "username": []byte(username), "token": []byte(token)},
 	}
-	return r.applyOwned(ctx, dv, s)
+	if err := r.applyOwned(ctx, dv, s); apierrors.IsForbidden(err) {
+		return errCredentialNotGranted
+	} else if err != nil {
+		return err
+	}
+	return nil
 }

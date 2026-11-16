@@ -90,6 +90,44 @@ owns one status condition; a phase that fails or waits records why there, so
    `spec.forge.credentialsSecret` exists, `CredentialsSecretMissing` naming it when
    not (the dotvirt pod cannot start without it). No forge at all records
    `NotConfigured` (push-only).
+   A credential under any name but `dotvirt-forge` is a cluster admin's to grant:
+   the operator's own role names only its own Secrets. `ForgeCredentialReady` is
+   False (`NotGranted`) until the Role and RoleBinding `dotvirt-forge-credential`
+   are in the install namespace; its message carries the commands, with the real
+   names:
+
+   ```sh
+   kubectl -n <install-ns> create role dotvirt-forge-credential --verb=get --resource=secrets --resource-name=<credential>
+   kubectl -n <install-ns> create rolebinding dotvirt-forge-credential --role=dotvirt-forge-credential --serviceaccount=<operator-ns>:dotvirt-operator-controller
+   ```
+
+   A managed forge, which writes its minted token there, needs
+   `--verb=get,create,patch`. Created by hand, the grant outlives the install:
+   delete both with the CR. The operator watches that Role and RoleBinding by
+   name, so a grant (or its removal), in either order, takes effect at once. A
+   grant changed under 5 minutes ago but still refused is rechecked every minute
+   (the apiserver's RBAC caches catching up); past that it is wrong (a verb, the
+   Secret's name or the account), and `ForgeCredentialReady` says `GrantIncomplete`
+   with the commands to replace it: `kubectl -n <install-ns> delete
+   role,rolebinding dotvirt-forge-credential --ignore-not-found` (a half grant
+   included), then the two above. Until the grant works, conditions wait with
+   `WaitingForCredential`, the steps needing the credential do not read it, and
+   the rest of the install runs:
+   - a bring-your-own forge: the ArgoCD tier waits before writing anything, since
+     tenant repo refs resolve against the credential's url (the app's forge URL).
+     New projects, and namespaces added to a project, do not sync, sync
+     impersonation does not change, and the platform repo and both webhooks wait;
+     what Argo already syncs keeps syncing.
+   - a managed forge: no token is minted or replaced (before minting into an
+     admin-named credential the operator asks whether it may store it, patch and,
+     while it is absent, create, so it never mints a token it would lose), and the
+     platform repo and both webhooks wait. The ArgoCD tier goes on (its base is `spec.forge.url`),
+     keeping the repo credentials Argo already has; after a move to another ArgoCD
+     namespace it has none there, so private repos do not clone until the grant.
+
+   A credential named like one of the operator's own Secrets (`dotvirt-session`,
+   ...) is refused (`NameTaken`): a managed forge's token would replace that
+   Secret's keys. Name another Secret.
 4. **Secrets** (`SecretsReady`): generates the session key, the ApplicationSet-plugin
    token, the webhook secrets and, with SSO, the OAuth client secret. Create-once:
    they survive restarts and are never regenerated.
@@ -168,22 +206,31 @@ ArgoCD namespace, a managed forge switched off. A tenant AppProject whose projec
 is gone, and the shared `dotvirt-tenants` AppProject of earlier versions, are kept
 while an Application still references them (the former admitting nothing), then
 pruned.
-Secrets, ConfigMaps and the `dotvirt-sync-request` RoleBinding are swept only in
-the namespaces the install writes (the ArgoCD namespace, and a former one still
-holding its argoproj objects), so a labelled copy an admin made elsewhere survives.
-The RoleBinding is read by name there: the operator may not list RoleBindings.
+Prune reads each name the install renders instead of listing: the operator may
+not list Secrets, ConfigMaps or bindings beyond the two it watches by name
+(argocd-cm and the forge credential's grant). Tenant AppProjects, named after
+their projects, are the one kind prune lists, and only in the ArgoCD namespaces
+the install wrote. The ArgoCD-namespace objects are swept only there: the current
+namespace and the ones `status.argoNamespaces` records (each one a pass wrote
+since the last completed prune), so a labelled copy an admin made elsewhere
+survives.
 Never pruned: anything without the labels, and Secrets, PersistentVolumeClaims and
 the CA ConfigMaps in the install namespace (generated keys, the minted forge token
 and the forge's git data are state, not render). A pass that halts prunes nothing.
 Deleting the CR runs the same prune with nothing rendered, after taking sync
 impersonation off the ArgoCD instance if the operator set it there (below).
 
-The operator's delete grant names each object it renders (`rbac_markers.go`), so it
-cannot delete any other Secret, binding or Application in the cluster. AppProjects
-are the exception: tenant ones are named after their projects, so the grant covers
-any AppProject and prune's label check is what keeps it to this install's. An object
-only an older version rendered under another name is refused, logged and left for
-an admin to delete; it never blocks prune or deletion.
+The operator's own RBAC names each object it writes (`rbac_markers.go`), so it
+cannot write any other Secret, ConfigMap, binding or Application in the cluster,
+nor read any other Secret or ConfigMap. A rule without names says why beside it:
+the reads that stay wider are any RoleBinding by name (the ones the platform
+repo manages), every Application listed (sync impersonation), and Deployments
+and Routes listed and watched (the cache, by label). AppProjects are the one
+write exception: tenant ones are named after their projects, so the grant covers
+any AppProject and prune's label check is what keeps it to this install's. An object only an older
+version rendered under another name is never read, and left for an admin to delete.
+A forge credential under an admin-chosen name is reached only through the
+`dotvirt-forge-credential` grant a cluster admin installs (Forge, above).
 
 The labels are `dotvirt.io/instance` (the CR name) and
 `dotvirt.io/instance-namespace` (its namespace). Objects from versions that set only
