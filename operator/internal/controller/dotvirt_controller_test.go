@@ -98,7 +98,7 @@ func (c nilStatusConverter) ObjectToTyped(obj runtime.Object, opts ...typed.Vali
 func depsOK(*rest.Config) (deps.Result, error) { return deps.Result{}, nil }
 
 func newReconciler(c client.Client, probe func(*rest.Config) (deps.Result, error)) *DotvirtReconciler {
-	return &DotvirtReconciler{Client: c, Scheme: c.Scheme(), Platform: platform.Kubernetes, probe: probe}
+	return &DotvirtReconciler{Client: c, Scheme: c.Scheme(), Platform: platform.Kubernetes, InstallNamespace: "dotvirt", probe: probe}
 }
 
 // phaseCtx derives the per-pass values the way Reconcile does, for tests that
@@ -388,7 +388,7 @@ func TestReconcileRefusesSecondInstall(t *testing.T) {
 	older := testCR()
 	older.CreationTimestamp = metav1.NewTime(time.Now().Add(-time.Hour))
 	newer := testCR()
-	newer.Name, newer.Namespace = "staging", "dotvirt-staging"
+	newer.Name = "staging"
 	newer.CreationTimestamp = metav1.Now()
 	c := testBuilder(t).WithObjects(older, newer).Build()
 	r := newReconciler(c, depsOK)

@@ -43,6 +43,11 @@ const (
 	// commands); False NameTaken for a Secret the operator generates for itself.
 	// Meanwhile the phases needing the credential wait and the rest runs.
 	ConditionForgeCredentialReady = "ForgeCredentialReady"
+	// ConditionInstallNamespaceAdopted is True when the operator took this
+	// install's namespace from ClusterRoleBinding dotvirt, the one an earlier
+	// operator provisioned, because no override names it and the operator's own
+	// namespace holds no Dotvirt. The message suggests naming it explicitly.
+	ConditionInstallNamespaceAdopted = "InstallNamespaceAdopted"
 	// ConditionAvailable is the roll-up: the full install is reconciled and serving.
 	ConditionAvailable = "Available"
 )
