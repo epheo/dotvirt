@@ -35,6 +35,46 @@ func (c *Client) ListQuotas(ctx context.Context, namespaces []string) ([]model.N
 	return out, nil
 }
 
+// storageClassQuota is the suffix of the ResourceQuota resources that limit
+// one storage class: <class>.storageclass.storage.k8s.io/<resource>.
+const storageClassQuota = ".storageclass.storage.k8s.io/"
+
+// ForbiddenStorageClasses names the storage classes namespace's
+// ResourceQuotas allow no claim on, read under THIS client's identity.
+func (c *Client) ForbiddenStorageClasses(ctx context.Context, namespace string) (map[string]bool, error) {
+	list, err := c.kube.CoreV1().ResourceQuotas(namespace).List(ctx, metav1.ListOptions{})
+	if err != nil {
+		return nil, err
+	}
+	return forbiddenClasses(list.Items), nil
+}
+
+// forbiddenClasses are the classes a hard limit of zero on their storage
+// requests or their claim count shuts out. A scoped quota never does: the
+// claim evaluator matches no scope but a VolumeAttributesClass one, which
+// limits only claims naming that class. The limit read is Status.Hard, what
+// admission enforces; Spec.Hard while the controller has not filled status,
+// when admission already refuses claims the quota covers.
+func forbiddenClasses(quotas []corev1.ResourceQuota) map[string]bool {
+	out := map[string]bool{}
+	for _, q := range quotas {
+		if len(q.Spec.Scopes) > 0 || q.Spec.ScopeSelector != nil {
+			continue
+		}
+		hard := q.Status.Hard
+		if len(hard) == 0 {
+			hard = q.Spec.Hard
+		}
+		for name, qty := range hard {
+			class, res, ok := strings.Cut(string(name), storageClassQuota)
+			if ok && class != "" && (res == "requests.storage" || res == "persistentvolumeclaims") && qty.IsZero() {
+				out[class] = true
+			}
+		}
+	}
+	return out
+}
+
 // quotaFrom flattens one quota's status into sorted usage rows. Status.Hard is
 // the enforced cap (Spec.Hard not yet reconciled is invisible to usage anyway).
 func quotaFrom(q *corev1.ResourceQuota) model.NamespaceQuota {
