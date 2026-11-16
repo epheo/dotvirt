@@ -221,6 +221,18 @@ owns one status condition; a phase that fails or waits records why there, so
 9. **dotvirt webhook** (`DotvirtWebhook`): the forge-to-dotvirt hook is registered by
    the app itself; the operator only observes it.
 
+When the forge refuses dotvirt's forge account the owner's webhooks (it owns no
+org, or staff manage the hooks, e.g. as a system hook), both conditions read
+`Unknown` with reason `RegistrationRefused`, and the message gives the hook to
+create by hand: its URL, `application/json`, its events (push and pull_request
+for dotvirt, push only for ArgoCD) and the Secret and key holding its shared
+secret. Neither the operator nor the app asks the forge again until spec.forge,
+the forge credential, the hook's secret or the ArgoCD URL changes, or they
+restart. The operator cannot observe deliveries, so check a hand-made hook in
+the forge's delivery log. An owner that is a user account reads `PerRepoHooks`:
+the app then registers a hook on each project repo, which the operator does not
+observe.
+
 `Available` is `True` only after a completed pass with the dotvirt pod ready. A
 phase that fails or blocks sets it `False` with that phase's reason; the
 best-effort phases (sync impersonation, platform repo, both webhooks) never do,
