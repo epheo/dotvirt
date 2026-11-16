@@ -14,6 +14,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	dotvirtv1alpha1 "github.com/epheo/dotvirt/operator/api/v1alpha1"
+	"github.com/epheo/dotvirt/operator/internal/install"
 	"github.com/epheo/dotvirt/operator/internal/platform"
 	"github.com/epheo/dotvirt/pkg/adminobjects"
 )
@@ -34,13 +35,35 @@ func (r *DotvirtReconciler) reconcileOperatorGuard(ctx context.Context, dv *dotv
 // them: the images from the CR and from the operator's own environment, which
 // its Deployment sets.
 func (r *DotvirtReconciler) guardParams(ctx context.Context, dv *dotvirtv1alpha1.Dotvirt, rc *reconcileCtx) adminobjects.Params {
-	return adminobjects.Params{
-		ConsoleHost: adminobjects.ConsoleHost(dv.Spec.Ingress.Host, dv.Namespace, r.appsDomain(ctx, dv)),
-		Operator:    r.OperatorUsername, Namespace: dv.Namespace, ArgoNamespace: rc.argoNS, ArgoController: rc.argoSA,
+	p := adminobjects.Params{
+		Operator: r.OperatorUsername, Namespace: dv.Namespace, ArgoNamespace: rc.argoNS, ArgoController: rc.argoSA,
 		SpecImage: dv.Spec.Image, DotvirtImage: os.Getenv("RELATED_IMAGE_DOTVIRT"), ForgejoImage: os.Getenv("RELATED_IMAGE_FORGEJO"),
-		InsecureTLS: dv.Spec.Forge.InsecureTLS,
-		Metrics:     adminobjects.MetricsFor(dv.Spec.Metrics.URL, dv.Spec.Metrics.TenancyURL, dv.Spec.Metrics.CA != nil),
+		InsecureTLS:       dv.Spec.Forge.InsecureTLS,
+		Metrics:           adminobjects.MetricsFor(dv.Spec.Metrics.URL, dv.Spec.Metrics.TenancyURL, dv.Spec.Metrics.CA != nil),
+		BrandingConfigMap: dv.Spec.Branding.ConfigMap,
+		ForgeSecret:       adminobjects.ForgeSecret(dv.Spec.Forge.CredentialsSecret),
 	}
+	if dv.Spec.Metrics.CA != nil {
+		p.MetricsCAConfigMap = dv.Spec.Metrics.CA.Name
+	}
+	domain := r.appsDomain(ctx, dv)
+	router := ""
+	if dv.Spec.Ingress.Host == "" && domain == "" && r.Platform == platform.OpenShift {
+		router = r.routerHost(ctx, dv)
+	}
+	p.ConsoleHost = adminobjects.ConsoleHost(dv.Spec.Ingress.Host, dv.Namespace, domain, router)
+	return p
+}
+
+// routerHost is the host routers report serving the console's Route under,
+// read as the console reads it where no cluster ingress domain is served.
+func (r *DotvirtReconciler) routerHost(ctx context.Context, dv *dotvirtv1alpha1.Dotvirt) string {
+	u := &unstructured.Unstructured{}
+	u.SetGroupVersionKind(install.RouteGVK)
+	if err := r.reader().Get(ctx, client.ObjectKey{Namespace: dv.Namespace, Name: install.AppName}, u); err != nil {
+		return ""
+	}
+	return adminobjects.RouterHost(u.Object)
 }
 
 func (r *DotvirtReconciler) operatorGuard(ctx context.Context, dv *dotvirtv1alpha1.Dotvirt, rc *reconcileCtx) (metav1.ConditionStatus, string, string) {

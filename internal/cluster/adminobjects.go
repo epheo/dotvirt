@@ -26,6 +26,9 @@ type InstallSpec struct {
 	MetricsURL, MetricsTenancyURL        string
 	MetricsCA                            bool
 	IngressHost                          string
+	// The console's volumes an admin chose: the branding and metrics CA
+	// ConfigMaps, and the forge credential Secret (empty: the default).
+	BrandingConfigMap, MetricsCAConfigMap, ForgeCredentials string
 }
 
 // InstallIn reads, under THIS client's identity, the one install in
@@ -48,6 +51,9 @@ func (c *Client) InstallIn(ctx context.Context, namespace string) (InstallSpec, 
 	out.MetricsTenancyURL, _, _ = unstructured.NestedString(o, "spec", "metrics", "tenancyURL")
 	_, out.MetricsCA, _ = unstructured.NestedMap(o, "spec", "metrics", "ca")
 	out.IngressHost, _, _ = unstructured.NestedString(o, "spec", "ingress", "host")
+	out.BrandingConfigMap, _, _ = unstructured.NestedString(o, "spec", "branding", "configMap")
+	out.MetricsCAConfigMap, _, _ = unstructured.NestedString(o, "spec", "metrics", "ca", "name")
+	out.ForgeCredentials, _, _ = unstructured.NestedString(o, "spec", "forge", "credentialsSecret")
 	return out, nil
 }
 
@@ -217,4 +223,15 @@ func (c *Client) OperatorInstall(ctx context.Context, op OperatorInfo) (string, 
 		}
 	}
 	return "", nil
+}
+
+// RouterHost is the host routers report serving the Route named name in
+// namespace under, as THIS client reads it (adminobjects.RouterHost).
+func (c *Client) RouterHost(ctx context.Context, namespace, name string) (string, error) {
+	r, err := c.dyn.Resource(schema.GroupVersionResource{Group: "route.openshift.io", Version: "v1", Resource: "routes"}).
+		Namespace(namespace).Get(ctx, name, metav1.GetOptions{})
+	if err != nil {
+		return "", err
+	}
+	return adminobjects.RouterHost(r.Object), nil
 }

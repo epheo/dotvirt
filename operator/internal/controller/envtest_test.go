@@ -349,7 +349,8 @@ func TestEnvtest(t *testing.T) {
 
 		// The console's install, as a cluster admin: its own render, from the
 		// pins it is configured with, server-side applied.
-		pins := adminobjects.Params{Operator: operatorUser, Namespace: "dotvirt", ArgoNamespace: "argocd", ArgoController: "argocd-application-controller"}
+		pins := adminobjects.Params{Operator: operatorUser, Namespace: "dotvirt", ArgoNamespace: "argocd", ArgoController: "argocd-application-controller",
+			ForgeSecret: adminobjects.DefaultForgeSecret}
 		var objs []*unstructured.Unstructured
 		installGuard := func(p adminobjects.Params) {
 			objs = nil
@@ -497,6 +498,29 @@ func TestEnvtest(t *testing.T) {
 		sc := func(d *appsv1.Deployment) *corev1.SecurityContext {
 			return d.Spec.Template.Spec.Containers[0].SecurityContext
 		}
+		// withVolume gives the Deployment's first container v mounted by m, in
+		// place of any volume or mount of their names.
+		withVolume := func(v corev1.Volume, m corev1.VolumeMount) func(*appsv1.Deployment) {
+			return func(d *appsv1.Deployment) {
+				pod := &d.Spec.Template.Spec
+				pod.Volumes = append(slices.DeleteFunc(slices.Clone(pod.Volumes), func(x corev1.Volume) bool { return x.Name == v.Name }), v)
+				c := &pod.Containers[0]
+				c.VolumeMounts = append(slices.DeleteFunc(slices.Clone(c.VolumeMounts), func(x corev1.VolumeMount) bool { return x.Name == m.Name }), m)
+			}
+		}
+		configMapVol := func(name, cm string) corev1.Volume {
+			return corev1.Volume{Name: name, VolumeSource: corev1.VolumeSource{ConfigMap: &corev1.ConfigMapVolumeSource{LocalObjectReference: corev1.LocalObjectReference{Name: cm}}}}
+		}
+		secretVol := func(name, secret string) corev1.Volume {
+			return corev1.Volume{Name: name, VolumeSource: corev1.VolumeSource{Secret: &corev1.SecretVolumeSource{SecretName: secret}}}
+		}
+		claimVol := func(name, claim string) corev1.Volume {
+			return corev1.Volume{Name: name, VolumeSource: corev1.VolumeSource{PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{ClaimName: claim}}}
+		}
+		secretEnv := func(secret string) corev1.EnvVar {
+			return corev1.EnvVar{Name: "LEAK", ValueFrom: &corev1.EnvVarSource{SecretKeyRef: &corev1.SecretKeySelector{
+				LocalObjectReference: corev1.LocalObjectReference{Name: secret}, Key: "secret"}}}
+		}
 		for name, c := range map[string]struct {
 			d    func() *appsv1.Deployment
 			edit func(*appsv1.Deployment)
@@ -574,6 +598,36 @@ func TestEnvtest(t *testing.T) {
 				c := &d.Spec.Template.Spec.Containers[0]
 				c.Env = append(c.Env, corev1.EnvVar{Name: "DOTVIRT_UI_ORIGIN", Value: "https://evil.example"})
 			}},
+			"the console with a ConfigMap over its binary": {app, withVolume(configMapVol("evil", "evil"),
+				corev1.VolumeMount{Name: "evil", MountPath: "/dotvirt", SubPath: "dotvirt"})},
+			"the console trusting the operator's certificates": {app, withVolume(configMapVol("evil", "evil"),
+				corev1.VolumeMount{Name: "evil", MountPath: "/etc/ssl/certs"})},
+			"the console branded from a ConfigMap no admin chose": {app, withVolume(configMapVol("branding", "evil"),
+				corev1.VolumeMount{Name: "branding", MountPath: adminobjects.BrandingMountPath})},
+			"the console's drafts on another claim": {app, withVolume(claimVol("drafts", "dotvirt-forgejo-data"),
+				corev1.VolumeMount{Name: "drafts", MountPath: "/var/lib/dotvirt/drafts"})},
+			"the console's drafts mounted over its trust store": {app, withVolume(claimVol("drafts", adminobjects.DraftsClaim),
+				corev1.VolumeMount{Name: "drafts", MountPath: "/etc/ssl/certs"})},
+			"the console mounting part of a volume": {app, withVolume(claimVol("drafts", adminobjects.DraftsClaim),
+				corev1.VolumeMount{Name: "drafts", MountPath: "/var/lib/dotvirt/drafts", SubPath: "x"})},
+			"the console's forge token from another Secret": {app, withVolume(secretVol("forge-token", adminobjects.ForgeAdminSecret),
+				corev1.VolumeMount{Name: "forge-token", MountPath: adminobjects.ForgeMountPath})},
+			"the forge reading another Secret": {forge, func(d *appsv1.Deployment) {
+				c := &d.Spec.Template.Spec.Containers[0]
+				c.Env = append(c.Env, secretEnv(install.SessionSecretName))
+			}},
+			"the forge's bootstrap reading another Secret": {forge, func(d *appsv1.Deployment) {
+				c := &d.Spec.Template.Spec.InitContainers[0]
+				c.Env = append(c.Env, secretEnv(install.OAuthSecretName))
+			}},
+			"the forge taking a Secret as env": {forge, func(d *appsv1.Deployment) {
+				c := &d.Spec.Template.Spec.Containers[0]
+				c.EnvFrom = append(c.EnvFrom, corev1.EnvFromSource{SecretRef: &corev1.SecretEnvSource{LocalObjectReference: corev1.LocalObjectReference{Name: install.SessionSecretName}}})
+			}},
+			"the forge mounting a Secret": {forge, withVolume(secretVol("leak", install.SessionSecretName), corev1.VolumeMount{Name: "leak", MountPath: "/leak"})},
+			"the forge mounting a projected Secret": {forge, withVolume(corev1.Volume{Name: "leak", VolumeSource: corev1.VolumeSource{Projected: &corev1.ProjectedVolumeSource{
+				Sources: []corev1.VolumeProjection{{Secret: &corev1.SecretProjection{LocalObjectReference: corev1.LocalObjectReference{Name: install.SessionSecretName}}}}}}},
+				corev1.VolumeMount{Name: "leak", MountPath: "/leak"})},
 			"the console with an exec probe": {app, func(d *appsv1.Deployment) {
 				d.Spec.Template.Spec.Containers[0].LivenessProbe = &corev1.Probe{ProbeHandler: corev1.ProbeHandler{
 					Exec: &corev1.ExecAction{Command: []string{"/dotvirt", "-addr=:9090", "-kubeconfig=/evil"}}}}
@@ -741,7 +795,31 @@ func TestEnvtest(t *testing.T) {
 			}
 			return r
 		}
+		generated := func(extra map[string]string) *unstructured.Unstructured {
+			r := route(install.AppName, "", nil)
+			a := map[string]string{"openshift.io/host.generated": "true"}
+			maps.Copy(a, extra)
+			r.SetAnnotations(a)
+			return r
+		}
+		forgeSvc := func(namespace string, edit func(*corev1.ServiceSpec)) *corev1.Service {
+			s := install.ForgejoService(dv)
+			s.Namespace = namespace
+			edit(&s.Spec)
+			return s
+		}
+		account := func(automount bool) *corev1.ServiceAccount {
+			sa := install.ServiceAccount(dv)
+			sa.AutomountServiceAccountToken = &automount
+			return sa
+		}
 		for name, o := range map[string]client.Object{
+			"the console's account":         install.ServiceAccount(dv),
+			"the console's account mounted": account(true),
+			"the forge's account":           install.ForgejoServiceAccount(dv),
+			// OpenShift's route API marks the host it generates, on create,
+			// before admission.
+			"the console's Route with OpenShift's generated-host mark": generated(nil),
 			"the console's Service": svc(nil),
 			"the console's Route":   route(install.AppName, "", nil),
 			// The host the router gives a hostless Route, while the guard
@@ -770,6 +848,11 @@ func TestEnvtest(t *testing.T) {
 			"the console's Route passed through": route(install.AppName, "", func(spec map[string]any) {
 				spec["tls"] = map[string]any{"termination": "passthrough"}
 			}),
+			"the console's account without its token":               account(false),
+			"the forge's Service on node ports":                     forgeSvc(dv.Namespace, func(s *corev1.ServiceSpec) { s.Type = corev1.ServiceTypeNodePort }),
+			"the forge's Service on an external IP":                 forgeSvc(dv.Namespace, func(s *corev1.ServiceSpec) { s.ExternalIPs = []string{"203.0.113.7"} }),
+			"a forge Service elsewhere as a load balancer":          forgeSvc("team-a", func(s *corev1.ServiceSpec) { s.Type = corev1.ServiceTypeLoadBalancer }),
+			"the console's Route with OpenShift's mark and another": generated(map[string]string{"haproxy.router.openshift.io/rewrite-target": "/evil"}),
 			"the console's Route annotated": func() client.Object {
 				r := route(install.AppName, "", nil)
 				r.SetAnnotations(map[string]string{"haproxy.router.openshift.io/rewrite-target": "/evil"})
@@ -897,6 +980,27 @@ func TestEnvtest(t *testing.T) {
 			corev1.EnvVar{Name: "DOTVIRT_METRICS_CA", Value: chosen.Metrics.CA})
 		elsewhere := metrics.DeepCopy()
 		elsewhere.Spec.Template.Spec.Containers[0].Args = append(elsewhere.Spec.Template.Spec.Containers[0].Args, "-metrics-url=https://evil.example")
+		// The branding ConfigMap an admin chose.
+		chosen.BrandingConfigMap = "brand"
+		branded := app()
+		withVolume(configMapVol("branding", "brand"), corev1.VolumeMount{Name: "branding", MountPath: adminobjects.BrandingMountPath})(branded)
+		forgeRoute := func(hostnames ...any) *unstructured.Unstructured {
+			return httpRoute(install.ForgejoServiceName, func(spec map[string]any) {
+				delete(spec, "hostnames")
+				if hostnames != nil {
+					spec["hostnames"] = hostnames
+				}
+				spec["rules"] = []any{map[string]any{"backendRefs": []any{map[string]any{"name": install.ForgejoServiceName, "port": int64(3000)}}}}
+			})
+		}
+		forgeIngress := func(host string, edit func(*networkingv1.Ingress)) *networkingv1.Ingress {
+			return ingress(install.ForgejoServiceName, func(i *networkingv1.Ingress) {
+				i.Spec.Rules[0].Host = host
+				if edit != nil {
+					edit(i)
+				}
+			})
+		}
 		installGuard(chosen)
 		eventually(t, "the admin's image admitted", func() bool { return dryApply(custom) == nil })
 		if err := dryApply(metrics); err != nil {
@@ -906,17 +1010,27 @@ func TestEnvtest(t *testing.T) {
 			t.Errorf("metrics queries beside the admin's choice: err=%v, want the guard's Forbidden", err)
 		}
 		for name, o := range map[string]client.Object{
-			"the console's Route on its host":     route(install.AppName, chosen.ConsoleHost, nil),
-			"the console's Ingress on its host":   ingress(install.AppName, nil),
-			"the console's HTTPRoute on its host": httpRoute(install.AppName, nil),
+			"the console branded from the admin's ConfigMap": branded,
+			"the forge's Ingress on its own host":            forgeIngress("forge.example", nil),
+			"the forge's HTTPRoute on its own host":          forgeRoute("forge.example"),
+			"the console's Route on its host":                route(install.AppName, chosen.ConsoleHost, nil),
+			"the console's Ingress on its host":              ingress(install.AppName, nil),
+			"the console's HTTPRoute on its host":            httpRoute(install.AppName, nil),
 		} {
 			if err := dryApply(o); err != nil {
 				t.Errorf("%s: %v", name, err)
 			}
 		}
 		for name, o := range map[string]client.Object{
-			"the forge's Route claiming the console's host":   route(install.ForgejoServiceName, chosen.ConsoleHost, nil),
-			"the forge's Ingress claiming the console's host": ingress(install.ForgejoServiceName, nil),
+			"the forge's Ingress for every host":                        forgeIngress("", nil),
+			"the forge's Ingress on a wildcard over the console's host": forgeIngress("*.example", nil),
+			"the forge's Ingress with a default backend": forgeIngress("forge.example", func(i *networkingv1.Ingress) {
+				i.Spec.DefaultBackend = i.Spec.Rules[0].HTTP.Paths[0].Backend.DeepCopy()
+			}),
+			"the forge's HTTPRoute for every host":                        forgeRoute(),
+			"the forge's HTTPRoute on a wildcard over the console's host": forgeRoute("*.example"),
+			"the forge's Route claiming the console's host":               route(install.ForgejoServiceName, chosen.ConsoleHost, nil),
+			"the forge's Ingress claiming the console's host":             ingress(install.ForgejoServiceName, nil),
 			"the forge's HTTPRoute claiming the console's host": func() client.Object {
 				r := httpRoute(install.ForgejoServiceName, nil)
 				r.Object["spec"].(map[string]any)["rules"] = []any{map[string]any{"backendRefs": []any{map[string]any{"name": install.ForgejoServiceName, "port": int64(3000)}}}}
@@ -985,7 +1099,7 @@ func TestEnvtest(t *testing.T) {
 			"${OPERATOR_USERNAME}": operatorUser, "${INSTALL_NAMESPACE}": "dotvirt", "${ARGO_NAMESPACE}": "argocd",
 			"${ARGO_CONTROLLER}": "argocd-application-controller", "${SPEC_IMAGE}": "", "${FORGE_INSECURE_TLS}": "false",
 			"${RELATED_IMAGE_DOTVIRT}": "", "${RELATED_IMAGE_FORGEJO}": "", "${METRICS_URL}": "", "${METRICS_TENANCY_URL}": "", "${METRICS_CA}": "",
-			"${CONSOLE_HOST}": "",
+			"${CONSOLE_HOST}": "", "${BRANDING_CONFIGMAP}": "", "${METRICS_CA_CONFIGMAP}": "", "${FORGE_SECRET}": adminobjects.DefaultForgeSecret,
 		} {
 			filled = strings.ReplaceAll(filled, k, v)
 		}
@@ -1900,7 +2014,8 @@ func TestEnvtest(t *testing.T) {
 	// installs for the suite's install, in force before they start.
 	guarded := func(t *testing.T) {
 		t.Helper()
-		p := adminobjects.Params{Operator: operatorUser, Namespace: "dotvirt", ArgoNamespace: "argocd", ArgoController: "argocd-application-controller"}
+		p := adminobjects.Params{Operator: operatorUser, Namespace: "dotvirt", ArgoNamespace: "argocd", ArgoController: "argocd-application-controller",
+			ForgeSecret: adminobjects.DefaultForgeSecret}
 		objs := adminobjects.Render(p)
 		for _, o := range objs {
 			if err := admin.Apply(ctx, client.ApplyConfigurationFromUnstructured(o.Object.DeepCopy()), client.FieldOwner("dotvirt"), client.ForceOwnership); err != nil {

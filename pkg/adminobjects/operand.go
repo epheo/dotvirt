@@ -3,6 +3,7 @@ package adminobjects
 import (
 	"net"
 	"net/url"
+	"path"
 	"strings"
 )
 
@@ -119,18 +120,86 @@ func SSOClientName(namespace string) string { return "dotvirt-" + namespace }
 // choosing would receive every login code, and the operator holds the
 // client secret.
 func SSORedirect(specHost, namespace, appsDomain string) string {
-	return "https://" + ConsoleHost(specHost, namespace, appsDomain) + "/api/auth/callback"
+	return "https://" + ConsoleHost(specHost, namespace, appsDomain, "") + "/api/auth/callback"
 }
 
 // ConsoleHost is the console's host: spec.ingress.host, else the host
 // OpenShift's router gives the hostless Route named dotvirt in namespace on
-// appsDomain, else "" (no router, no host: nothing is exposed).
-func ConsoleHost(specHost, namespace, appsDomain string) string {
+// appsDomain, else the one host routers report admitting that Route under
+// (routerHost, RouterHost: where no domain can be read, as on MicroShift),
+// else "" (no router, no host: nothing is exposed).
+func ConsoleHost(specHost, namespace, appsDomain, routerHost string) string {
 	switch {
 	case specHost != "":
 		return specHost
 	case appsDomain != "":
 		return ConsoleDeployment + "-" + namespace + "." + appsDomain
 	}
-	return ""
+	return routerHost
 }
+
+// RouterHost is the one host a Route's status reports routers serving it
+// under, "" for none or several. Routers write that status: the operator
+// holds no right on routes/status.
+func RouterHost(route map[string]any) string {
+	status, _ := route["status"].(map[string]any)
+	ingress, _ := status["ingress"].([]any)
+	host := ""
+	for _, i := range ingress {
+		h, _ := i.(map[string]any)["host"].(string)
+		switch {
+		case h == "" || h == host:
+		case host == "":
+			host = h
+		default:
+			return ""
+		}
+	}
+	return host
+}
+
+// ConsoleVolume is one of the console's volumes as rendered: where the
+// console mounts it, and the claim, ConfigMap or Secret it takes.
+type ConsoleVolume struct {
+	Name, MountPath string
+	// Kind is the volume source's field: persistentVolumeClaim, configMap or
+	// secret.
+	Kind, Source string
+}
+
+// DraftsClaim and the CA ConfigMaps are the console's own; the branding and
+// metrics CA ConfigMaps and the forge Secret are the admin's choice.
+const (
+	DraftsClaim        = "dotvirt-drafts"
+	IngressCAConfigMap = "dotvirt-ingress-ca"
+	ServiceCAConfigMap = "dotvirt-service-ca"
+	DefaultForgeSecret = "dotvirt-forge"
+	BrandingMountPath  = "/etc/dotvirt/branding"
+	ForgeMountPath     = "/var/run/dotvirt/forge"
+)
+
+// ConsoleVolumes are every volume the console may have, each mounted at its
+// path only; an empty source name is a volume the install does not ask for.
+func ConsoleVolumes(brandingConfigMap, metricsCAConfigMap, forgeSecret string) []ConsoleVolume {
+	return []ConsoleVolume{
+		{"drafts", "/var/lib/dotvirt/drafts", "persistentVolumeClaim", DraftsClaim},
+		{"ingress-ca", path.Dir(IngressCAPath), "configMap", IngressCAConfigMap},
+		{"service-ca", path.Dir(ServiceCAPath), "configMap", ServiceCAConfigMap},
+		{"branding", BrandingMountPath, "configMap", brandingConfigMap},
+		{"metrics-ca", path.Dir(MetricsCAPath), "configMap", metricsCAConfigMap},
+		{"forge-token", ForgeMountPath, "secret", forgeSecret},
+	}
+}
+
+// ForgeSecret is the install's forge credential Secret: spec.forge's
+// credentialsSecret, else the one the managed forge's bootstrap writes.
+func ForgeSecret(credentialsSecret string) string {
+	if credentialsSecret != "" {
+		return credentialsSecret
+	}
+	return DefaultForgeSecret
+}
+
+// ForgeAdminSecret is the only Secret the forge's pod reads: the bot
+// account's password its bootstrap sets.
+const ForgeAdminSecret = "dotvirt-forgejo-admin"

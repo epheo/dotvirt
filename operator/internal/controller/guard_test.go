@@ -69,7 +69,8 @@ func live(objs []adminobjects.Object) []client.Object {
 	return out
 }
 
-var guardHere = adminobjects.Params{Operator: guardOperator, Namespace: "dotvirt", ArgoNamespace: "argocd", ArgoController: "argocd-application-controller"}
+var guardHere = adminobjects.Params{Operator: guardOperator, Namespace: "dotvirt", ArgoNamespace: "argocd", ArgoController: "argocd-application-controller",
+	ForgeSecret: adminobjects.DefaultForgeSecret}
 
 func TestOperatorGuardStates(t *testing.T) {
 	elsewhere := guardHere
@@ -132,6 +133,22 @@ func TestOperatorGuardFollowsTheAdminImage(t *testing.T) {
 	dv.Spec.Ingress.Host = "console.example"
 	if p := r.guardParams(t.Context(), dv, guardRC); p.ConsoleHost != "console.example" {
 		t.Errorf("an admin's host: %q", p.ConsoleHost)
+	}
+
+	// No ingress domain served (MicroShift): the host routers report for the
+	// console's Route.
+	route := &unstructured.Unstructured{Object: map[string]any{
+		"apiVersion": "route.openshift.io/v1", "kind": "Route", "metadata": map[string]any{"name": "dotvirt", "namespace": "dotvirt"},
+		"status": map[string]any{"ingress": []any{map[string]any{"host": "dotvirt-dotvirt.apps.micro"}, map[string]any{"host": "dotvirt-dotvirt.apps.micro"}}},
+	}}
+	r.Client = fake.NewClientBuilder().WithScheme(testScheme(t)).WithObjects(route).Build()
+	dv.Spec.Ingress.Host = ""
+	if p := r.guardParams(t.Context(), dv, guardRC); p.ConsoleHost != "dotvirt-dotvirt.apps.micro" {
+		t.Errorf("the router's host: %q", p.ConsoleHost)
+	}
+	r.Platform = platform.Kubernetes
+	if p := r.guardParams(t.Context(), dv, guardRC); p.ConsoleHost != "" {
+		t.Errorf("no router: %q", p.ConsoleHost)
 	}
 }
 

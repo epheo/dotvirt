@@ -5,6 +5,7 @@ import (
 	"io"
 	"net/http"
 	"slices"
+	"strings"
 	"sync"
 	"testing"
 
@@ -33,6 +34,8 @@ var (
 		SpecImage:    "registry.example/team/dotvirt:custom",
 		DotvirtImage: "quay.io/epheo/dotvirt@sha256:aaaa", ForgejoImage: "codeberg.org/forgejo/forgejo:12-rootless",
 		ConsoleHost: "console.example",
+
+		BrandingConfigMap: "brand", ForgeSecret: "creds",
 	}
 )
 
@@ -78,7 +81,8 @@ func adminObjectsServer(t *testing.T) (*Server, *fakeCluster, func() map[string]
 		}
 		writeObj(w, map[string]any{"apiVersion": "dotvirt.io/v1alpha1", "kind": "DotvirtList", "metadata": map[string]any{}, "items": []any{map[string]any{
 			"apiVersion": "dotvirt.io/v1alpha1", "kind": "Dotvirt", "metadata": map[string]any{"name": "x", "namespace": "dotvirt"},
-			"spec": map[string]any{"image": adminWant.SpecImage, "ingress": map[string]any{"host": adminWant.ConsoleHost}},
+			"spec": map[string]any{"image": adminWant.SpecImage, "ingress": map[string]any{"host": adminWant.ConsoleHost},
+				"branding": map[string]any{"configMap": adminWant.BrandingConfigMap}, "forge": map[string]any{"credentialsSecret": adminWant.ForgeSecret}},
 			"status": map[string]any{"adminObjects": []any{
 				map[string]any{"purpose": "tampered", "state": "NotInstalled", "kind": "ValidatingAdmissionPolicy", "name": adminobjects.GuardSecretsName,
 					"object": map[string]any{"apiVersion": "admissionregistration.k8s.io/v1", "kind": "ValidatingAdmissionPolicy",
@@ -310,4 +314,31 @@ func TestAdminObjectsPinOnlyTheOperatorsInstall(t *testing.T) {
 	s, fc, _ := adminObjectsServer(t)
 	fc.on(http.MethodGet, operatorPath, operator(corev1.EnvVar{Name: adminobjects.InstallNamespaceEnv, Value: "dotvirt"}))
 	wantStatus(t, do(s, adminToken, http.MethodGet, "/api/admin-objects", ""), http.StatusOK)
+}
+
+// Where routes are served but no cluster ingress domain is (MicroShift), the
+// console's host is the one routers report for its Route, read as the admin.
+func TestAdminObjectsPinTheRoutersHost(t *testing.T) {
+	s, fc, seen := adminObjectsServer(t)
+	fc.on(http.MethodGet, installPath, func(w http.ResponseWriter, r *http.Request) {
+		writeObj(w, dotvirtList(map[string]any{"apiVersion": "dotvirt.io/v1alpha1", "kind": "Dotvirt",
+			"metadata": map[string]any{"name": "x", "namespace": "dotvirt"}, "spec": map[string]any{"image": adminWant.SpecImage}}))
+	})
+	fc.on(http.MethodGet, "/apis/route.openshift.io/v1", func(w http.ResponseWriter, r *http.Request) {
+		writeObj(w, metav1.APIResourceList{TypeMeta: metav1.TypeMeta{Kind: "APIResourceList", APIVersion: "v1"}, GroupVersion: "route.openshift.io/v1",
+			APIResources: []metav1.APIResource{{Name: "routes", Kind: "Route", Namespaced: true}}})
+	})
+	fc.on(http.MethodGet, "/apis/route.openshift.io/v1/namespaces/dotvirt/routes/dotvirt", func(w http.ResponseWriter, r *http.Request) {
+		if bearer(r) != adminToken {
+			writeStatus(w, http.StatusForbidden, metav1.StatusReasonForbidden)
+			return
+		}
+		writeObj(w, map[string]any{"apiVersion": "route.openshift.io/v1", "kind": "Route", "metadata": map[string]any{"name": "dotvirt", "namespace": "dotvirt"},
+			"status": map[string]any{"ingress": []any{map[string]any{"host": "dotvirt-dotvirt.apps.micro"}}}})
+	})
+	wantStatus(t, do(s, adminToken, http.MethodPost, "/api/admin-objects", ""), http.StatusOK)
+	body, _ := json.Marshal(seen()["ValidatingAdmissionPolicy/"+adminobjects.GuardFrontDoorName].body)
+	if !strings.Contains(string(body), `\"dotvirt-dotvirt.apps.micro\"`) {
+		t.Errorf("the front door does not pin the router's host:\n%s", body)
+	}
 }

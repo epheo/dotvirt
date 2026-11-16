@@ -16,6 +16,10 @@ var TemplateParams = Params{
 	DotvirtImage:   "${RELATED_IMAGE_DOTVIRT}",
 	ForgejoImage:   "${RELATED_IMAGE_FORGEJO}",
 	ConsoleHost:    "${CONSOLE_HOST}",
+
+	BrandingConfigMap:  "${BRANDING_CONFIGMAP}",
+	MetricsCAConfigMap: "${METRICS_CA_CONFIGMAP}",
+	ForgeSecret:        "${FORGE_SECRET}",
 }
 
 // templateHeader says how to fill and apply the template, each value derived
@@ -68,11 +72,17 @@ const templateHeader = `# The dotvirt operator guard: admission policies boundin
 #     && echo openshift-gitops-argocd-application-controller || echo argocd-application-controller)"
 #   export ARGO_NAMESPACE ARGO_CONTROLLER
 #   # The console's host: spec.ingress.host, else the router's host for the
-#   # console's Route (OpenShift), else empty:
+#   # console's Route on the cluster's ingress domain (OpenShift), else the one
+#   # host routers report serving that Route under (MicroShift), else empty:
 #   CONSOLE_HOST="$(spec ingress.host)"
 #   [ -n "$CONSOLE_HOST" ] || CONSOLE_HOST="$(kubectl get ingresses.config.openshift.io cluster \
 #     -o jsonpath='{.spec.domain}' 2>/dev/null | sed "s|^.|dotvirt-$INSTALL_NAMESPACE.&|")"
+#   [ -n "$CONSOLE_HOST" ] || CONSOLE_HOST="$(kubectl -n "$INSTALL_NAMESPACE" get route.route.openshift.io dotvirt \
+#     -o jsonpath='{range .status.ingress[*]}{.host}{"\n"}{end}' 2>/dev/null | sort -u | awk 'NF { n++; h = $0 } END { if (n == 1) print h }')"
 #   export CONSOLE_HOST
+#   # The console's volumes an admin chose, and the forge credential Secret:
+#   export BRANDING_CONFIGMAP="$(spec branding.configMap)" METRICS_CA_CONFIGMAP="$(spec metrics.ca.name)"
+#   FORGE_SECRET="$(spec forge.credentialsSecret)"; export FORGE_SECRET="${FORGE_SECRET:-` + DefaultForgeSecret + `}"
 #
 #   envsubst < guard.yaml | ` + ApplyCommand + ` -
 #
@@ -82,7 +92,9 @@ const templateHeader = `# The dotvirt operator guard: admission policies boundin
 #     -e "s|\${SPEC_IMAGE}|$SPEC_IMAGE|g" -e "s|\${FORGE_INSECURE_TLS}|$FORGE_INSECURE_TLS|g" \
 #     -e "s|\${RELATED_IMAGE_DOTVIRT}|$RELATED_IMAGE_DOTVIRT|g" -e "s|\${RELATED_IMAGE_FORGEJO}|$RELATED_IMAGE_FORGEJO|g" \
 #     -e "s|\${METRICS_URL}|$METRICS_URL|g" -e "s|\${METRICS_TENANCY_URL}|$METRICS_TENANCY_URL|g" \
-#     -e "s|\${METRICS_CA}|$METRICS_CA|g" -e "s|\${CONSOLE_HOST}|$CONSOLE_HOST|g" guard.yaml | ` + ApplyCommand + ` -
+#     -e "s|\${METRICS_CA}|$METRICS_CA|g" -e "s|\${CONSOLE_HOST}|$CONSOLE_HOST|g" \
+#     -e "s|\${BRANDING_CONFIGMAP}|$BRANDING_CONFIGMAP|g" -e "s|\${METRICS_CA_CONFIGMAP}|$METRICS_CA_CONFIGMAP|g" \
+#     -e "s|\${FORGE_SECRET}|$FORGE_SECRET|g" guard.yaml | ` + ApplyCommand + ` -
 #
 # Every object carries the label app.kubernetes.io/part-of=dotvirt-operator-guard.
 #

@@ -58,13 +58,20 @@ type Params struct {
 	// ConsoleHost is the host the console is reached by (ConsoleHost), ""
 	// when nothing exposes it.
 	ConsoleHost string
+	// BrandingConfigMap, MetricsCAConfigMap and ForgeSecret are the volumes
+	// an admin chose for the console (spec.branding.configMap,
+	// spec.metrics.ca.name, ForgeSecret).
+	BrandingConfigMap, MetricsCAConfigMap, ForgeSecret string
 }
 
 // Valid reports whether every pin is known and well formed: a render missing
 // one would pin nothing.
 func (p Params) Valid() bool {
+	optional := func(name string) bool { return name == "" || len(validation.IsDNS1123Subdomain(name)) == 0 }
 	return ValidUsername(p.Operator) && len(validation.IsDNS1123Label(p.Namespace)) == 0 &&
-		len(validation.IsDNS1123Label(p.ArgoNamespace)) == 0 && len(validation.IsDNS1123Subdomain(p.ArgoController)) == 0
+		len(validation.IsDNS1123Label(p.ArgoNamespace)) == 0 && len(validation.IsDNS1123Subdomain(p.ArgoController)) == 0 &&
+		len(validation.IsDNS1123Subdomain(p.ForgeSecret)) == 0 && optional(p.BrandingConfigMap) && optional(p.MetricsCAConfigMap) &&
+		optional(p.ConsoleHost)
 }
 
 // OperatorNamespace is the namespace of p.Operator's ServiceAccount.

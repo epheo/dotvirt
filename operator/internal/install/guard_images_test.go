@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	dotvirtv1alpha1 "github.com/epheo/dotvirt/operator/api/v1alpha1"
 	"github.com/epheo/dotvirt/pkg/adminobjects"
 )
 
@@ -31,9 +32,71 @@ func TestRenderMatchesTheGuardsPins(t *testing.T) {
 		"metrics CA":         {metricsCAMountPath + "/" + metricsCAFile, adminobjects.MetricsCAPath},
 		"service CA":         {serviceCAMountPath + "/" + ServiceCAKey, adminobjects.ServiceCAPath},
 		"router CA":          {ingressCAMountPath + "/" + IngressCAKey, adminobjects.IngressCAPath},
+		"router CA map":      {IngressCAConfigMap, adminobjects.IngressCAConfigMap},
+		"service CA map":     {ServiceCAConfigMap, adminobjects.ServiceCAConfigMap},
+		"drafts claim":       {DraftsPVC(&dotvirtv1alpha1.Dotvirt{}).Name, adminobjects.DraftsClaim},
+		"forge Secret":       {defaultForgeSecret, adminobjects.DefaultForgeSecret},
+		"forge admin Secret": {ForgejoAdminSecret, adminobjects.ForgeAdminSecret},
+		"branding path":      {brandingMountPath, adminobjects.BrandingMountPath},
 	} {
 		if c[0] != c[1] {
 			t.Errorf("%s: install %q, guard %q", name, c[0], c[1])
+		}
+	}
+}
+
+// The console's volumes and mounts, every one an install may render, are the
+// guard's table; the forge reads no Secret but its admin password.
+func TestRenderMatchesTheGuardsVolumes(t *testing.T) {
+	dv := &dotvirtv1alpha1.Dotvirt{}
+	dv.Name, dv.Namespace = "x", "dotvirt"
+	dv.Spec.Branding.ConfigMap = "brand"
+	dv.Spec.Metrics.URL = "https://thanos.example:9091"
+	dv.Spec.Metrics.CA = &dotvirtv1alpha1.ConfigMapKeyRef{Name: "metrics-ca", Key: "ca.crt"}
+	dv.Spec.Forge.CredentialsSecret = "creds"
+	want := map[string]adminobjects.ConsoleVolume{}
+	for _, v := range adminobjects.ConsoleVolumes("brand", "metrics-ca", "creds") {
+		want[v.Name] = v
+	}
+	pod := Deployment(dv, "argocd", nil).Spec.Template.Spec
+	if len(pod.Volumes) != len(want) {
+		t.Errorf("rendered %d volumes, the guard knows %d", len(pod.Volumes), len(want))
+	}
+	for _, v := range pod.Volumes {
+		w, ok := want[v.Name]
+		var kind, source string
+		switch {
+		case v.PersistentVolumeClaim != nil:
+			kind, source = "persistentVolumeClaim", v.PersistentVolumeClaim.ClaimName
+		case v.ConfigMap != nil:
+			kind, source = "configMap", v.ConfigMap.Name
+		case v.Secret != nil:
+			kind, source = "secret", v.Secret.SecretName
+		}
+		if !ok || kind != w.Kind || source != w.Source {
+			t.Errorf("volume %s from %s %q; the guard wants %+v", v.Name, kind, source, w)
+		}
+	}
+	for _, m := range pod.Containers[0].VolumeMounts {
+		if w := want[m.Name]; m.MountPath != w.MountPath || m.SubPath != "" {
+			t.Errorf("mount %s at %s (subPath %q); the guard wants %s", m.Name, m.MountPath, m.SubPath, w.MountPath)
+		}
+	}
+
+	forge := ForgejoDeployment(dv, false, "", "").Spec.Template.Spec
+	for _, c := range append(forge.InitContainers, forge.Containers...) {
+		for _, e := range c.Env {
+			if e.ValueFrom != nil && e.ValueFrom.SecretKeyRef != nil && e.ValueFrom.SecretKeyRef.Name != adminobjects.ForgeAdminSecret {
+				t.Errorf("forge %s reads Secret %s", c.Name, e.ValueFrom.SecretKeyRef.Name)
+			}
+		}
+		if len(c.EnvFrom) > 0 {
+			t.Errorf("forge %s takes envFrom", c.Name)
+		}
+	}
+	for _, v := range forge.Volumes {
+		if v.Secret != nil || v.Projected != nil || v.CSI != nil {
+			t.Errorf("forge volume %s reads a Secret", v.Name)
 		}
 	}
 }

@@ -21,6 +21,8 @@ var params = Params{
 	ArgoNamespace:  "openshift-gitops",
 	ArgoController: "openshift-gitops-argocd-application-controller",
 	SpecImage:      "registry.example/team/dotvirt:custom",
+	ConsoleHost:    "dotvirt-dotvirt.apps.example",
+	ForgeSecret:    DefaultForgeSecret,
 }
 
 func policyOf(t *testing.T, o Object) admissionregistrationv1.ValidatingAdmissionPolicy {
@@ -55,7 +57,7 @@ func TestGuardShape(t *testing.T) {
 		t.Fatalf("render = %d objects, want a policy and a binding per guard name", len(objs))
 	}
 	match := map[string][][2]string{
-		GuardSecretsName:     {{"", "secrets"}},
+		GuardSecretsName:     {{"", "secrets"}, {"", "serviceaccounts"}},
 		GuardDeploymentsName: {{"apps", "deployments"}},
 		GuardBindingsName:    {{"rbac.authorization.k8s.io", "clusterrolebindings"}, {"rbac.authorization.k8s.io", "rolebindings"}},
 		GuardInstallName:     {{"dotvirt.io", "dotvirts"}},
@@ -97,6 +99,10 @@ func TestGuardShape(t *testing.T) {
 	holds(t, "deployments", dep, `a in ["-ui-origin=", "--ui-origin="]`)
 	holds(t, "deployments", dep, `"-oauth-ca=`+IngressCAPath+`"`)
 	holds(t, "install", inst, `object.spec == oldObject.spec`)
+	holds(t, "secrets", sec, `object.metadata.name != "dotvirt" || !has(object.automountServiceAccountToken)`)
+	holds(t, "deployments", dep, `m.mountPath == "/var/run/dotvirt/forge"`)
+	holds(t, "deployments", dep, `v.secret.secretName == "dotvirt-forge"`)
+	holds(t, "deployments", dep, `e.valueFrom.secretKeyRef.name == "dotvirt-forgejo-admin"`)
 	holds(t, "bindings", bind, `"ServiceAccount/openshift-gitops/openshift-gitops-argocd-application-controller"`)
 	holds(t, "bindings", bind, `request.namespace == "openshift-gitops"`)
 	for _, o := range objs {
@@ -121,6 +127,9 @@ func TestParamsValid(t *testing.T) {
 		"a quote in a namespace":  func(p *Params) { p.ArgoNamespace = `argo"cd` },
 		"no controller":           func(p *Params) { p.ArgoController = "" },
 		"a quote in a controller": func(p *Params) { p.ArgoController = `a"b` },
+		"no forge Secret":         func(p *Params) { p.ForgeSecret = "" },
+		"a quote in a ConfigMap":  func(p *Params) { p.BrandingConfigMap = `a"b` },
+		"a wildcard host":         func(p *Params) { p.ConsoleHost = "*.apps.example" },
 	} {
 		p := params
 		edit(&p)
@@ -224,7 +233,8 @@ func TestReleaseTemplate(t *testing.T) {
 		"${OPERATOR_USERNAME}": params.Operator, "${INSTALL_NAMESPACE}": params.Namespace, "${ARGO_NAMESPACE}": params.ArgoNamespace,
 		"${ARGO_CONTROLLER}": params.ArgoController, "${SPEC_IMAGE}": params.SpecImage, "${RELATED_IMAGE_DOTVIRT}": "", "${RELATED_IMAGE_FORGEJO}": "",
 		"${FORGE_INSECURE_TLS}": "false", "${METRICS_URL}": "", "${METRICS_TENANCY_URL}": "", "${METRICS_CA}": "",
-		"${CONSOLE_HOST}": params.ConsoleHost,
+		"${CONSOLE_HOST}": params.ConsoleHost, "${BRANDING_CONFIGMAP}": params.BrandingConfigMap,
+		"${METRICS_CA_CONFIGMAP}": params.MetricsCAConfigMap, "${FORGE_SECRET}": params.ForgeSecret,
 	} {
 		filled = strings.ReplaceAll(filled, k, v)
 	}

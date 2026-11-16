@@ -33,6 +33,7 @@ func (s *Server) adminObjectsAction() action {
 		{Verb: verbGet, Group: "rbac.authorization.k8s.io", Resource: "clusterrolebindings", Name: adminobjects.ConsoleAccount},
 		{Verb: verbCreate, Group: "authorization.k8s.io", Resource: "subjectaccessreviews"},
 		{Verb: verbGet, Group: "config.openshift.io", Resource: "ingresses", Name: "cluster"},
+		{Verb: verbGet, Group: "route.openshift.io", Resource: "routes", Namespace: ns, Name: adminobjects.ConsoleDeployment},
 	}
 	for _, r := range adminobjects.Allowed(ns) {
 		act = append(act,
@@ -104,6 +105,9 @@ func (s *Server) adminParams(ctx context.Context, c *cluster.Client) (adminobjec
 		Namespace: ns, SpecImage: spec.Image, DotvirtImage: op.DotvirtImage, ForgejoImage: op.ForgejoImage,
 		InsecureTLS: spec.InsecureTLS,
 		Metrics:     adminobjects.MetricsFor(spec.MetricsURL, spec.MetricsTenancyURL, spec.MetricsCA),
+
+		BrandingConfigMap: spec.BrandingConfigMap, MetricsCAConfigMap: spec.MetricsCAConfigMap,
+		ForgeSecret: adminobjects.ForgeSecret(spec.ForgeCredentials),
 	}
 	p.ArgoNamespace, p.ArgoController = adminobjects.ArgoTarget(spec.ArgoNamespace, spec.ArgoController, openShift)
 	domain := ""
@@ -115,7 +119,16 @@ func (s *Server) adminParams(ctx context.Context, c *cluster.Client) (adminobjec
 			return adminobjects.Params{}, unavailable(fmt.Errorf("read the cluster's ingress domain: %w", err))
 		}
 	}
-	p.ConsoleHost = adminobjects.ConsoleHost(spec.IngressHost, ns, domain)
+	router := ""
+	if spec.IngressHost == "" && domain == "" && openShift {
+		switch h, err := c.RouterHost(ctx, ns, adminobjects.ConsoleDeployment); {
+		case err == nil:
+			router = h
+		case !apierrors.IsNotFound(err):
+			return adminobjects.Params{}, unavailable(fmt.Errorf("read the console's Route: %w", err))
+		}
+	}
+	p.ConsoleHost = adminobjects.ConsoleHost(spec.IngressHost, ns, domain, router)
 	if !p.Valid() {
 		return adminobjects.Params{}, unavailable(fmt.Errorf("the install's pins are not well formed: %+v", p))
 	}
