@@ -84,7 +84,7 @@ func main() {
 		// RBAC (get by name, no list or watch) and blocking that Get forever,
 		// wedging reconcile and deletion alike. The ones watched by name
 		// (argocd-cm, the credential grant) feed events only.
-		Client: client.Options{Cache: &client.CacheOptions{DisableFor: []client.Object{&corev1.ConfigMap{}, &corev1.Secret{}, &rbacv1.RoleBinding{}}}},
+		Client: client.Options{Cache: &client.CacheOptions{DisableFor: []client.Object{&corev1.ConfigMap{}, &corev1.Secret{}, &rbacv1.RoleBinding{}, &rbacv1.Role{}}}},
 	})
 	if err != nil {
 		setupLog.Error(err, "unable to start manager")

@@ -260,15 +260,6 @@ rules:
 - apiGroups:
   - rbac.authorization.k8s.io
   resourceNames:
-  - dotvirt-forge-credential
-  resources:
-  - rolebindings
-  verbs:
-  - list
-  - watch
-- apiGroups:
-  - rbac.authorization.k8s.io
-  resourceNames:
   - dotvirt-sync-request
   resources:
   - rolebindings
@@ -276,6 +267,16 @@ rules:
   - create
   - delete
   - patch
+- apiGroups:
+  - rbac.authorization.k8s.io
+  resourceNames:
+  - dotvirt-forge-credential
+  resources:
+  - rolebindings
+  - roles
+  verbs:
+  - list
+  - watch
 - apiGroups:
   - route.openshift.io
   resources:

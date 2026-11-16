@@ -5,11 +5,14 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	corev1 "k8s.io/api/core/v1"
+	rbacv1 "k8s.io/api/rbac/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
 
 	dotvirtv1alpha1 "github.com/epheo/dotvirt/operator/api/v1alpha1"
@@ -36,6 +39,22 @@ const reasonCredentialWait = "WaitingForCredential"
 
 // credentialWaitMessage is the message of every condition waiting on the credential.
 const credentialWaitMessage = "waiting for " + dotvirtv1alpha1.ConditionForgeCredentialReady
+
+// grantLagRetry is how soon a pass comes back while the credential's grant
+// exists but its read is still refused: the apiserver's RBAC caches lag a new
+// binding briefly, and no further event arrives once they catch up.
+const grantLagRetry = time.Minute
+
+// grantLanding reports whether the credential is refused (this pass recorded
+// NotGranted) though its grant's RoleBinding exists: one direct GET, only then.
+func (r *DotvirtReconciler) grantLanding(ctx context.Context, dv *dotvirtv1alpha1.Dotvirt) bool {
+	c := meta.FindStatusCondition(dv.Status.Conditions, dotvirtv1alpha1.ConditionForgeCredentialReady)
+	if c == nil || c.Reason != "NotGranted" {
+		return false
+	}
+	err := r.reader().Get(ctx, types.NamespacedName{Namespace: dv.Namespace, Name: install.ForgeCredentialGrantName}, &rbacv1.RoleBinding{})
+	return err == nil
+}
 
 // forgeSecret reads the forge credential: a refusal is errCredentialNotGranted,
 // and a name the operator's own Secrets hold is errCredentialNameTaken, never read.
@@ -88,7 +107,7 @@ func (r *DotvirtReconciler) recordCredential(dv *dotvirtv1alpha1.Dotvirt, err er
 // credentialWaitEffects says what waits on the credential meanwhile.
 func credentialWaitEffects(dv *dotvirtv1alpha1.Dotvirt) string {
 	if dv.Spec.Forge.Managed {
-		return "until then no forge token is minted, and the platform repo and both webhooks wait; the ArgoCD tier keeps the repo credentials it has"
+		return "until then no forge token is minted or checked, and the platform repo and both webhooks wait; the ArgoCD tier keeps the repo credentials it has, and after a move to another ArgoCD namespace has none there"
 	}
 	return "until then the platform repo, both webhooks and the ArgoCD tier wait: new projects, and namespaces added to a project, do not sync, and sync impersonation does not change"
 }
@@ -99,7 +118,7 @@ func credentialWaitEffects(dv *dotvirtv1alpha1.Dotvirt) string {
 // applied or pruned meanwhile, so what an earlier pass rendered stays as it
 // was; the phases after it (sync impersonation, the platform repo, both
 // webhooks) do not run.
-func (r *DotvirtReconciler) waitForCredential(dv *dotvirtv1alpha1.Dotvirt) *ctrl.Result {
+func (r *DotvirtReconciler) waitForCredential(dv *dotvirtv1alpha1.Dotvirt, rc *reconcileCtx) *ctrl.Result {
 	conds := []string{
 		dotvirtv1alpha1.ConditionArgoReady, dotvirtv1alpha1.ConditionSyncImpersonationReady,
 		dotvirtv1alpha1.ConditionArgoWebhook, dotvirtv1alpha1.ConditionDotvirtWebhook,
@@ -113,7 +132,11 @@ func (r *DotvirtReconciler) waitForCredential(dv *dotvirtv1alpha1.Dotvirt) *ctrl
 	if dv.Status.Phase == "" {
 		dv.Status.Phase = dotvirtv1alpha1.PhaseProvisioning
 	}
-	// The drift cadence, not sooner: a grant can stay pending for days. The
-	// grant's RoleBinding is watched, so it landing (or going) triggers a pass.
+	// The drift cadence, not sooner: a grant can stay pending for days. Its
+	// Role and RoleBinding are watched, so it landing (or going) triggers a
+	// pass; one that landed but is still refused is RBAC-cache lag.
+	if rc.grantLanding {
+		return &ctrl.Result{RequeueAfter: grantLagRetry}
+	}
 	return &ctrl.Result{RequeueAfter: driftResync}
 }

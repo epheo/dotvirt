@@ -246,6 +246,9 @@ func (r *DotvirtReconciler) provision(ctx context.Context, key types.NamespacedN
 	if argo != nil && argo.Reason == reasonRefreshing {
 		wait = min(wait, refreshRetry)
 	}
+	if rc.grantLanding {
+		wait = min(wait, grantLagRetry)
+	}
 	return ctrl.Result{RequeueAfter: wait}, nil
 }
 
@@ -333,6 +336,9 @@ type reconcileCtx struct {
 	tenantKindsRead bool
 	// impersonation is impersonating's answer for this pass, nil until asked.
 	impersonation *bool
+	// grantLanding: the forge credential is refused though its grant's
+	// RoleBinding exists, which the apiserver's RBAC caches may still lag.
+	grantLanding bool
 }
 
 func (r *DotvirtReconciler) newReconcileCtx(ctx context.Context, dv *dotvirtv1alpha1.Dotvirt) *reconcileCtx {
@@ -570,6 +576,7 @@ func CacheByObject(plat platform.Platform) map[client.Object]cache.ByObject {
 		// The forge credential's grant, by name, the only RoleBinding the RBAC
 		// lets the operator watch; RoleBinding reads stay direct.
 		&rbacv1.RoleBinding{}: {Field: fields.OneTermEqualSelector("metadata.name", install.ForgeCredentialGrantName)},
+		&rbacv1.Role{}:        {Field: fields.OneTermEqualSelector("metadata.name", install.ForgeCredentialGrantName)},
 	}
 	// Registering the Route kind on vanilla Kubernetes fails the cache's REST lookup.
 	if plat == platform.OpenShift {
@@ -606,9 +613,11 @@ func (r *DotvirtReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		// requeue.
 		Watches(&corev1.ConfigMap{}, handler.EnqueueRequestsFromMapFunc(r.installs),
 			builder.WithPredicates(predicate.Funcs{UpdateFunc: impersonationChanged, GenericFunc: func(event.GenericEvent) bool { return false }})).
-		// A cluster admin granting or revoking the forge credential: the phases
-		// waiting on it go on at once, not on the drift timer.
-		Watches(&rbacv1.RoleBinding{}, handler.EnqueueRequestsFromMapFunc(r.installs))
+		// A cluster admin granting or revoking the forge credential, its Role
+		// and RoleBinding in either order: the phases waiting on it go on at
+		// once, not on the drift timer.
+		Watches(&rbacv1.RoleBinding{}, handler.EnqueueRequestsFromMapFunc(r.installs)).
+		Watches(&rbacv1.Role{}, handler.EnqueueRequestsFromMapFunc(r.installs))
 	// Routes exist only where the route API does, so gate the watch on the same
 	// platform detection that gates rendering them; on vanilla Kubernetes the
 	// informer could never sync. Unstructured because the module carries no

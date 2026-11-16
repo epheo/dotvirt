@@ -41,6 +41,7 @@ func (r *DotvirtReconciler) reconcileForge(ctx context.Context, dv *dotvirtv1alp
 	if !credentialChecked(dv) {
 		meta.RemoveStatusCondition(&dv.Status.Conditions, dotvirtv1alpha1.ConditionForgeCredentialReady)
 	}
+	defer func() { rc.grantLanding = r.grantLanding(ctx, dv) }()
 	if !dv.Spec.Forge.Managed {
 		// Derived status, so a switch off managed retires the stale bootstrap hint too.
 		dv.Status.ForgeURL = dv.Spec.Forge.URL

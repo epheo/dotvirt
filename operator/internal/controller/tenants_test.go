@@ -288,9 +288,10 @@ func TestCacheByObjectScope(t *testing.T) {
 				}
 				continue
 			}
-			if _, rb := obj.(*rbacv1.RoleBinding); rb {
+			_, rb := obj.(*rbacv1.RoleBinding)
+			if _, role := obj.(*rbacv1.Role); rb || role {
 				if !opts.Field.Matches(fields.Set{"metadata.name": install.ForgeCredentialGrantName}) || opts.Field.Matches(fields.Set{"metadata.name": "other"}) {
-					t.Errorf("%s: RoleBinding selector %q does not select the credential grant alone", plat, opts.Field)
+					t.Errorf("%s: %T selector %q does not select the credential grant alone", plat, obj, opts.Field)
 				}
 				continue
 			}

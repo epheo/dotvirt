@@ -146,6 +146,9 @@ func TestEnvtest(t *testing.T) {
 			// The forge credential's grant is watched by name, never written.
 			{authzv1.ResourceAttributes{Verb: "list", Group: "rbac.authorization.k8s.io", Resource: "rolebindings", Name: install.ForgeCredentialGrantName}, true},
 			{authzv1.ResourceAttributes{Verb: "watch", Group: "rbac.authorization.k8s.io", Resource: "rolebindings", Name: install.ForgeCredentialGrantName}, true},
+			{authzv1.ResourceAttributes{Verb: "list", Group: "rbac.authorization.k8s.io", Resource: "roles", Name: install.ForgeCredentialGrantName}, true},
+			{authzv1.ResourceAttributes{Verb: "watch", Group: "rbac.authorization.k8s.io", Resource: "roles", Name: install.ForgeCredentialGrantName}, true},
+			{authzv1.ResourceAttributes{Verb: "list", Group: "rbac.authorization.k8s.io", Resource: "roles"}, false},
 			{authzv1.ResourceAttributes{Verb: "create", Group: "rbac.authorization.k8s.io", Resource: "rolebindings", Namespace: "dotvirt", Name: install.ForgeCredentialGrantName}, false},
 			{authzv1.ResourceAttributes{Verb: "create", Group: "rbac.authorization.k8s.io", Resource: "roles", Namespace: "dotvirt", Name: install.ForgeCredentialGrantName}, false},
 			{authzv1.ResourceAttributes{Verb: "watch", Group: "rbac.authorization.k8s.io", Resource: "rolebindings"}, false},
@@ -747,12 +750,14 @@ func TestEnvtest(t *testing.T) {
 			dv := &dotvirtv1alpha1.Dotvirt{ObjectMeta: metav1.ObjectMeta{Name: "cred", Namespace: c.ns, UID: "0f7c1d2e-cred"}}
 			dv.Spec.Forge.CredentialsSecret, dv.Spec.Forge.Managed = "byo-creds", c.managed
 			role, binding := install.ForgeCredentialGrant(dv, "dotvirt-operator")
-			mustCreate(t, admin, role)
-			// The binding landing (and, below, going) is a pass at once, not
-			// one on the drift timer.
+			// Either half landing (and, below, going) is a pass at once, not one
+			// on the drift timer: the binding first here, its Role after.
 			before := passes.Load()
 			mustCreate(t, admin, binding)
-			soon(t, "a pass after the grant lands", func() bool { return passes.Load() > before })
+			soon(t, "a pass after the grant's binding lands", func() bool { return passes.Load() > before })
+			before = passes.Load()
+			mustCreate(t, admin, role)
+			soon(t, "a pass after the grant's Role lands", func() bool { return passes.Load() > before })
 			for _, r := range []struct {
 				verb, ns, name string
 				want           bool
@@ -1176,7 +1181,7 @@ func runManager(t *testing.T, cfg *rest.Config, scheme *runtime.Scheme) (*atomic
 		Metrics:                metricsserver.Options{BindAddress: "0"},
 		HealthProbeBindAddress: "0",
 		Cache:                  cache.Options{ByObject: CacheByObject(platform.Kubernetes)},
-		Client:                 client.Options{Cache: &client.CacheOptions{DisableFor: []client.Object{&corev1.ConfigMap{}, &corev1.Secret{}, &rbacv1.RoleBinding{}}}},
+		Client:                 client.Options{Cache: &client.CacheOptions{DisableFor: []client.Object{&corev1.ConfigMap{}, &corev1.Secret{}, &rbacv1.RoleBinding{}, &rbacv1.Role{}}}},
 	})
 	if err != nil {
 		t.Fatal(err)

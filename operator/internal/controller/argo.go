@@ -37,7 +37,7 @@ func (r *DotvirtReconciler) reconcileArgo(ctx context.Context, dv *dotvirtv1alph
 	// resolve against, is its credential's url.
 	forgeBase, err := r.appForgeBase(ctx, dv)
 	if credentialWaits(err) {
-		return r.waitForCredential(dv), nil
+		return r.waitForCredential(dv, rc), nil
 	}
 	if err != nil {
 		return nil, err

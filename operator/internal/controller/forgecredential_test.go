@@ -10,6 +10,7 @@ import (
 
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
+	rbacv1 "k8s.io/api/rbac/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -274,5 +275,35 @@ func TestArgoNamespacesStayRecordedUntilAPruneCompletes(t *testing.T) {
 	}
 	if got := getCR(t, c, dv).Status.ArgoNamespaces; len(got) != 1 || got[0] != "argocd" {
 		t.Errorf("after a completed prune, status.argoNamespaces = %v, want [argocd]", got)
+	}
+}
+
+// A grant that landed but is still refused is the apiserver's RBAC caches
+// lagging the new binding: no further event comes once they catch up, so the
+// pass retries within a minute instead of the drift cadence, in either mode.
+func TestLandedGrantStillRefusedRetriesSoon(t *testing.T) {
+	binding := func(dv *dotvirtv1alpha1.Dotvirt) *rbacv1.RoleBinding {
+		_, b := install.ForgeCredentialGrant(dv, "dotvirt-operator")
+		return b
+	}
+	forgeDown := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusServiceUnavailable)
+	}))
+	defer forgeDown.Close()
+	byo, creds := byoForgeCR(forgeDown.URL)
+	refused := true
+	c := testBuilder(t).WithObjects(byo, creds, binding(byo)).WithInterceptorFuncs(refuseSecret(creds.Name, &refused)).Build()
+	if res := reconcileOnce(t, newReconciler(c, depsOK), byo); res.RequeueAfter != grantLagRetry {
+		t.Errorf("bring your own: requeue = %v, want %v", res.RequeueAfter, grantLagRetry)
+	}
+
+	managed := managedForgeCR()
+	managed.Spec.Forge.CredentialsSecret = "custom-forge"
+	srv, objs := fakeForgejo(t, managed)
+	c = testBuilder(t).WithObjects(append(objs, managed, binding(managed))...).WithInterceptorFuncs(refuseSecret("custom-forge", &refused)).Build()
+	r := newReconciler(c, depsOK)
+	r.forgeAPIBase = func(*dotvirtv1alpha1.Dotvirt) string { return srv.URL }
+	if res := reconcileOnce(t, r, managed); res.RequeueAfter == 0 || res.RequeueAfter > grantLagRetry {
+		t.Errorf("managed: requeue = %v, want within %v", res.RequeueAfter, grantLagRetry)
 	}
 }
