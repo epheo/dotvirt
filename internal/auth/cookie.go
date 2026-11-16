@@ -28,6 +28,9 @@ const (
 const (
 	sessionPurpose = cookiePrefix + "session"
 	statePurpose   = cookiePrefix + "oauth-state"
+	// forgeStatePurpose seals a forge connect's state apart from a sign-in's,
+	// so neither cookie opens as the other.
+	forgeStatePurpose = cookiePrefix + "forge-state"
 )
 
 // sealedHeader is the issue time (8 bytes, big-endian Unix nanoseconds) and a

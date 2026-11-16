@@ -260,6 +260,7 @@ type Server struct {
 	auth          *auth.Authenticator // nil leaves the API open (dev)
 	oauth         *auth.OAuth         // nil hides the OpenShift SSO login path
 	oidc          *auth.OIDC          // nil hides the OIDC sign-in path
+	delegated     *auth.Forge         // users' own forge accounts (pullRequests: Delegated); nil when off
 	stream        StreamHandler
 	vnc           VNCHandler
 	cfg           Config
@@ -312,6 +313,7 @@ type Deps struct {
 	Auth           *auth.Authenticator
 	OAuth          *auth.OAuth // OpenShift SSO flow; nil hides it
 	OIDC           *auth.OIDC  // OIDC sign-in flow; nil hides it, and it excludes OAuth
+	Delegated      *auth.Forge // users' own forge accounts; nil keeps every forge action dotvirt's
 	Config         Config
 }
 
@@ -349,6 +351,7 @@ func NewServer(d Deps) *Server {
 		auth:          d.Auth,
 		oauth:         d.OAuth,
 		oidc:          d.OIDC,
+		delegated:     d.Delegated,
 		cfg:           d.Config,
 
 		revokeTimeout: revokeTimeout,

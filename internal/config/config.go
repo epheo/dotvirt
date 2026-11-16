@@ -56,6 +56,17 @@ type Config struct {
 	BaseBranch     string // branch the inventory reads + PRs target (the GitOps trunk)
 	ProposedBranch string // dotvirt-owned working branch holding a draft
 	DraftDir       string // root dir for persisted drafts (<dir>/<user>/<project>.json)
+	// ForgeDelegated acts with each user's own forge account for their pull
+	// requests (pullRequests: Delegated): the user connects it once through the
+	// forge's OAuth2 application, ForgeClientID/Secret, whose authorize page
+	// browsers reach at ForgeAuthorizeURL. ForgeTokenURL is the server-to-server
+	// token endpoint; empty, ForgeURL plus /login/oauth/access_token.
+	ForgeDelegated    bool
+	ForgeClientID     string
+	ForgeClientSecret string
+	ForgeAuthorizeURL string
+	ForgeTokenURL     string
+
 	// UsersOpenPRs leaves every pull request to the user: dotvirt pushes the
 	// branch and links the forge's compare page, so the forge's review rules
 	// see the requester as the PR's poster, not dotvirt's account.
@@ -195,6 +206,11 @@ func Load(args []string) (*Config, error) {
 
 	fs.StringVar(&c.BaseBranch, "base-branch", envOr("DOTVIRT_BASE_BRANCH", "main"), "branch the inventory reads + PRs target")
 	fs.StringVar(&c.ProposedBranch, "proposed-branch", envOr("DOTVIRT_PROPOSED_BRANCH", "dotvirt/proposed"), "working branch holding the draft changeset")
+	fs.BoolVar(&c.ForgeDelegated, "forge-delegated", envBool("DOTVIRT_FORGE_DELEGATED", false), "act with each user's own forge account for their pull requests, connected once through -forge-client-id (needs -public-url and -forge-url)")
+	fs.StringVar(&c.ForgeClientID, "forge-client-id", os.Getenv("DOTVIRT_FORGE_CLIENT_ID"), "client ID of dotvirt's OAuth2 application at the forge, for -forge-delegated")
+	fs.StringVar(&c.ForgeClientSecret, "forge-client-secret", os.Getenv("DOTVIRT_FORGE_CLIENT_SECRET"), "client secret of that application (confidential client)")
+	fs.StringVar(&c.ForgeAuthorizeURL, "forge-authorize-url", os.Getenv("DOTVIRT_FORGE_AUTHORIZE_URL"), "the forge's OAuth2 authorize page as browsers reach it")
+	fs.StringVar(&c.ForgeTokenURL, "forge-token-url", os.Getenv("DOTVIRT_FORGE_TOKEN_URL"), "the forge's OAuth2 token endpoint, server to server (empty = -forge-url + /login/oauth/access_token)")
 	fs.BoolVar(&c.UsersOpenPRs, "users-open-prs", envBool("DOTVIRT_USERS_OPEN_PRS", false), "push proposal and revert branches without opening, reopening or editing their pull requests; users open them in the forge")
 	fs.StringVar(&c.DraftDir, "draft-dir", envOr("DOTVIRT_DRAFT_DIR", "./.dotvirt-drafts"), "root dir for persisted drafts (<dir>/<user>/<project>.json)")
 	fs.StringVar(&c.ForgeURL, "forge-url", os.Getenv("DOTVIRT_FORGE_URL"), "Forgejo base URL (empty = push-only, no PR, anonymous git)")

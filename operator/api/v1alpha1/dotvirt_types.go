@@ -76,6 +76,7 @@ const (
 // ForgeSpec points dotvirt at its git forge and the platform-tier repo. One forge
 // credential serves the operator (platform repo, webhooks), the app (git over
 // HTTPS and the forge API) and ArgoCD's repo-creds.
+// +kubebuilder:validation:XValidation:rule="!has(self.pullRequests) || self.pullRequests != 'Delegated' || has(self.userAuth)",message="pullRequests Delegated needs userAuth: the OAuth2 application dotvirt acts through"
 type ForgeSpec struct {
 	// URL is the forge base URL. Leave empty with managed on OpenShift: the operator
 	// exposes Forgejo on a router-assigned host and reports it in status.forgeURL. Set it
@@ -117,9 +118,45 @@ type ForgeSpec struct {
 	// rules see them as its poster. Leave dotvirt/proposed/** unprotected:
 	// dotvirt force-pushes each proposal's branch, which a protected branch
 	// refuses on Forgejo. Require approvals from a reviewer team instead.
-	// +kubebuilder:validation:Enum=Dotvirt;Users
+	// Delegated pushes and opens each pull request with the requester's own
+	// forge account, which they connect once through userAuth: the forge's
+	// rules see the person as pusher and poster, within their own rights there.
+	// It needs a forge its users sign in to through the same identity provider
+	// as this console.
+	// +kubebuilder:validation:Enum=Dotvirt;Users;Delegated
 	// +optional
 	PullRequests string `json:"pullRequests,omitempty"`
+	// UserAuth is the OAuth2 application dotvirt is registered as at the forge,
+	// for pullRequests: Delegated. Register it as a confidential client with the
+	// redirect URI https://<console host>/api/forge/callback.
+	// +optional
+	UserAuth *ForgeUserAuthSpec `json:"userAuth,omitempty"`
+}
+
+// ForgeUserAuthSpec is the forge's OAuth2 application dotvirt acts through for
+// each user. Each user grants it once, at the forge; the token lives in their
+// console session only, never on disk, and is dropped at sign-out.
+type ForgeUserAuthSpec struct {
+	// ClientID is the application's client ID at the forge.
+	// +kubebuilder:validation:MinLength=1
+	// +kubebuilder:validation:MaxLength=256
+	ClientID string `json:"clientID"`
+	// ClientSecret is the key of a Secret in dotvirt's namespace holding the
+	// application's client secret. The console's pod reads it at start; the
+	// operator never does. Restart the console after a rotation.
+	ClientSecret SecretKeyRef `json:"clientSecret"`
+	// AuthorizeURL is the forge's authorize page as users' browsers reach it
+	// (https://<forge>/login/oauth/authorize). Users must be able to sign in to
+	// the forge there; the rest of the forge may stay private.
+	// +kubebuilder:validation:MaxLength=2048
+	// +kubebuilder:validation:Pattern=`^https?://([A-Za-z0-9]([-A-Za-z0-9.]*[A-Za-z0-9])?|\[[0-9A-Fa-f:.]+\])(:[0-9]{1,5})?(/([^?#@%\s\x00-\x1f\x7f]|%[0-9A-Fa-f]{2})*)?$`
+	AuthorizeURL string `json:"authorizeURL"`
+	// TokenURL is where dotvirt exchanges and refreshes tokens, server to
+	// server. Empty: the forge's URL plus /login/oauth/access_token.
+	// +kubebuilder:validation:MaxLength=2048
+	// +kubebuilder:validation:Pattern=`^https?://([A-Za-z0-9]([-A-Za-z0-9.]*[A-Za-z0-9])?|\[[0-9A-Fa-f:.]+\])(:[0-9]{1,5})?(/([^?#@%\s\x00-\x1f\x7f]|%[0-9A-Fa-f]{2})*)?$`
+	// +optional
+	TokenURL string `json:"tokenURL,omitempty"`
 }
 
 // ArgoCDSpec locates the ArgoCD install dotvirt rides. Defaults suit OpenShift

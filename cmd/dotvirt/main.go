@@ -222,6 +222,36 @@ func run() error {
 		}
 	}
 
+	// Delegated pull requests: each user's own forge account, connected once
+	// through the forge's OAuth2 provider. Anything missing keeps every forge
+	// action dotvirt's, said once here rather than on every user's connect.
+	var delegated *auth.Forge
+	if cfg.ForgeDelegated {
+		switch {
+		case cfg.PublicURL == "":
+			log.Printf("forge: -forge-delegated set but -public-url empty; delegation off")
+		case cfg.ForgeURL == "":
+			log.Printf("forge: -forge-delegated set but -forge-url empty; delegation off")
+		case cfg.ForgeClientID == "" || cfg.ForgeClientSecret == "" || cfg.ForgeAuthorizeURL == "":
+			log.Printf("forge: -forge-delegated needs -forge-client-id, -forge-client-secret and -forge-authorize-url; delegation off")
+		default:
+			tokenURL := cfg.ForgeTokenURL
+			if tokenURL == "" {
+				tokenURL = strings.TrimRight(cfg.ForgeURL, "/") + "/login/oauth/access_token"
+			}
+			delegated = auth.NewForge(auth.ForgeConfig{
+				ClientID:     cfg.ForgeClientID,
+				ClientSecret: cfg.ForgeClientSecret,
+				AuthorizeURL: cfg.ForgeAuthorizeURL,
+				TokenURL:     tokenURL,
+				APIURL:       cfg.ForgeURL,
+				RedirectURL:  strings.TrimRight(cfg.PublicURL, "/") + "/api/forge/callback",
+				CAFile:       cfg.ForgeCA,
+				InsecureTLS:  cfg.InsecureTLS,
+			}, authenticator)
+		}
+	}
+
 	// Typed-nil guard: a nil *argo.Snapshot in the interface would read as wired.
 	var pruneSource changeset.PruneSource
 	if argoSnapshot != nil {
@@ -263,6 +293,7 @@ func run() error {
 		Auth:           authenticator,
 		OAuth:          oauthFlow,
 		OIDC:           oidcFlow,
+		Delegated:      delegated,
 		Config: api.Config{
 			BaseBranch:        cfg.BaseBranch,
 			ProposedBranch:    cfg.ProposedBranch,

@@ -112,12 +112,21 @@ func (a *Authenticator) Middleware(next http.Handler) http.Handler {
 			next.ServeHTTP(w, r)
 			return
 		}
+		nav := isNavigation(r.URL.Path)
+		deny := func(msg string, code int) {
+			if nav {
+				// A top-level page load: the console's root, which signs in.
+				http.Redirect(w, r, "/", http.StatusFound)
+				return
+			}
+			http.Error(w, msg, code)
+		}
 		s, ok := tokenFromRequest(r, a.sealer)
 		if !ok {
 			if _, err := r.Cookie(cookieName); err == nil {
 				clearCookie(w, r) // unreadable: another key, an old format
 			}
-			http.Error(w, "authentication required", http.StatusUnauthorized)
+			deny("authentication required", http.StatusUnauthorized)
 			return
 		}
 		var session string
@@ -127,10 +136,10 @@ func (a *Authenticator) Middleware(next http.Handler) http.Handler {
 			switch {
 			case errors.Is(err, ErrRejected):
 				clearCookie(w, r)
-				http.Error(w, "session ended", http.StatusUnauthorized)
+				deny("session ended", http.StatusUnauthorized)
 				return
 			case err != nil:
-				http.Error(w, "unable to renew the session, try again", http.StatusServiceUnavailable)
+				deny("unable to renew the session, try again", http.StatusServiceUnavailable)
 				return
 			}
 			s.token = token
@@ -139,7 +148,7 @@ func (a *Authenticator) Middleware(next http.Handler) http.Handler {
 		// Ahead of the verdict cache: a signed-out session's token still validates.
 		if !a.sessions.live(key, s.issued) {
 			clearCookie(w, r)
-			http.Error(w, "session ended", http.StatusUnauthorized)
+			deny("session ended", http.StatusUnauthorized)
 			return
 		}
 		id, err := a.validate(r.Context(), s.token, key, true)
@@ -153,11 +162,11 @@ func (a *Authenticator) Middleware(next http.Handler) http.Handler {
 					clearCookie(w, r)
 				}
 				a.endRejected(session)
-				http.Error(w, "invalid or expired session", http.StatusUnauthorized)
-			case errors.Is(err, ErrThrottled):
+				deny("invalid or expired session", http.StatusUnauthorized)
+			case errors.Is(err, ErrThrottled) && !nav:
 				throttled(w, "session validation throttled, try again shortly")
 			default:
-				http.Error(w, "unable to validate session, try again", http.StatusServiceUnavailable)
+				deny("unable to validate session, try again", http.StatusServiceUnavailable)
 			}
 			return
 		}
@@ -203,6 +212,12 @@ func isOpenPath(path string) bool {
 	}
 	// A masthead link's icon: part of the provider's dress, like the logo.
 	return strings.HasPrefix(path, "/api/branding/icon/")
+}
+
+// isNavigation reports whether path is a browser's top-level page load into
+// the API, which must land on a page whatever the session's state.
+func isNavigation(path string) bool {
+	return path == "/api/forge/connect" || path == "/api/forge/callback"
 }
 
 // tokenFromRequest pulls the bearer token from the session cookie, falling back

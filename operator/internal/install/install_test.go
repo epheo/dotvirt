@@ -838,6 +838,52 @@ func TestDeploymentCarriesOIDC(t *testing.T) {
 	}
 }
 
+// Delegated pull requests reach the console as its OAuth2 application, the
+// client secret a secretKeyRef the kubelet resolves; any other mode sends none.
+func TestDeploymentCarriesTheDelegatedForgeApplication(t *testing.T) {
+	dv := testDotvirt()
+	dv.Spec.Forge.Managed = true
+	dv.Spec.Forge.UserAuth = &dotvirtv1alpha1.ForgeUserAuthSpec{
+		ClientID: "dotvirt", ClientSecret: dotvirtv1alpha1.SecretKeyRef{Name: "dotvirt-forge-app", Key: "secret"},
+		AuthorizeURL: "https://forge.example/login/oauth/authorize",
+		TokenURL:     "http://forgejo.lan/login/oauth/access_token",
+	}
+	env := func() []corev1.EnvVar { return Deployment(dv, "argocd", nil).Spec.Template.Spec.Containers[0].Env }
+	for _, mode := range []string{"", "Dotvirt", "Users"} {
+		dv.Spec.Forge.PullRequests = mode
+		if _, ok := envValue(env(), "DOTVIRT_FORGE_DELEGATED"); ok {
+			t.Errorf("pullRequests %q: delegation env rendered", mode)
+		}
+	}
+	dv.Spec.Forge.PullRequests = "Delegated"
+	for name, want := range map[string]string{
+		"DOTVIRT_FORGE_DELEGATED":     "true",
+		"DOTVIRT_FORGE_CLIENT_ID":     "dotvirt",
+		"DOTVIRT_FORGE_AUTHORIZE_URL": "https://forge.example/login/oauth/authorize",
+		"DOTVIRT_FORGE_TOKEN_URL":     "http://forgejo.lan/login/oauth/access_token",
+	} {
+		if v, _ := envValue(env(), name); v != want {
+			t.Errorf("%s = %q, want %q", name, v, want)
+		}
+	}
+	if _, ok := envValue(env(), "DOTVIRT_USERS_OPEN_PRS"); ok {
+		t.Error("Delegated also rendered the users-open mode")
+	}
+	var ref *corev1.SecretKeySelector
+	for _, e := range env() {
+		if e.Name == "DOTVIRT_FORGE_CLIENT_SECRET" && e.ValueFrom != nil {
+			ref = e.ValueFrom.SecretKeyRef
+		}
+	}
+	if ref == nil || ref.Name != "dotvirt-forge-app" || ref.Key != "secret" || ref.Optional == nil || *ref.Optional {
+		t.Errorf("client secret ref = %+v, want dotvirt-forge-app/secret, required", ref)
+	}
+	dv.Spec.Forge.UserAuth.TokenURL = ""
+	if _, ok := envValue(env(), "DOTVIRT_FORGE_TOKEN_URL"); ok {
+		t.Error("an unset tokenURL rendered, which hides the app's default")
+	}
+}
+
 // Users opening their own pull requests reaches dotvirt as one env var; the
 // default leaves it out.
 func TestDeploymentCarriesWhoOpensPullRequests(t *testing.T) {

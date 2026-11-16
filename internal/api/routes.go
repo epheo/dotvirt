@@ -47,6 +47,15 @@ func (s *Server) routes(mux *http.ServeMux) {
 		}
 	}
 
+	// The session's own forge account, for pullRequests: Delegated. Connect
+	// and its callback are page loads the forge round-trips through.
+	mux.HandleFunc("GET /api/forge/session", s.handleForgeSession)
+	if s.auth != nil && s.delegated != nil {
+		mux.HandleFunc("GET /api/forge/connect", s.delegated.Connect)
+		mux.HandleFunc("GET /api/forge/callback", s.delegated.Callback)
+		mux.HandleFunc("POST /api/forge/disconnect", s.handleForgeDisconnect)
+	}
+
 	mux.HandleFunc("GET /api/inventory", s.handleInventory)
 	if s.cfg.ForgeAdmin.Name != "" {
 		mux.HandleFunc("POST /api/forge/admin-password", s.handleForgeAdminPassword)

@@ -309,9 +309,15 @@ spec:
                       rules see them as its poster. Leave dotvirt/proposed/** unprotected:
                       dotvirt force-pushes each proposal's branch, which a protected branch
                       refuses on Forgejo. Require approvals from a reviewer team instead.
+                      Delegated pushes and opens each pull request with the requester's own
+                      forge account, which they connect once through userAuth: the forge's
+                      rules see the person as pusher and poster, within their own rights there.
+                      It needs a forge its users sign in to through the same identity provider
+                      as this console.
                     enum:
                     - Dotvirt
                     - Users
+                    - Delegated
                     type: string
                   url:
                     description: |-
@@ -319,6 +325,54 @@ spec:
                       exposes Forgejo on a router-assigned host and reports it in status.forgeURL. Set it
                       for a bring-your-own forge, or to pin the managed forge's host.
                     type: string
+                  userAuth:
+                    description: |-
+                      UserAuth is the OAuth2 application dotvirt is registered as at the forge,
+                      for pullRequests: Delegated. Register it as a confidential client with the
+                      redirect URI https://<console host>/api/forge/callback.
+                    properties:
+                      authorizeURL:
+                        description: |-
+                          AuthorizeURL is the forge's authorize page as users' browsers reach it
+                          (https://<forge>/login/oauth/authorize). Users must be able to sign in to
+                          the forge there; the rest of the forge may stay private.
+                        maxLength: 2048
+                        pattern: ^https?://([A-Za-z0-9]([-A-Za-z0-9.]*[A-Za-z0-9])?|\[[0-9A-Fa-f:.]+\])(:[0-9]{1,5})?(/([^?#@%\s\x00-\x1f\x7f]|%[0-9A-Fa-f]{2})*)?$
+                        type: string
+                      clientID:
+                        description: ClientID is the application's client ID at the
+                          forge.
+                        maxLength: 256
+                        minLength: 1
+                        type: string
+                      clientSecret:
+                        description: |-
+                          ClientSecret is the key of a Secret in dotvirt's namespace holding the
+                          application's client secret. The console's pod reads it at start; the
+                          operator never does. Restart the console after a rotation.
+                        properties:
+                          key:
+                            minLength: 1
+                            type: string
+                          name:
+                            minLength: 1
+                            type: string
+                        required:
+                        - key
+                        - name
+                        type: object
+                      tokenURL:
+                        description: |-
+                          TokenURL is where dotvirt exchanges and refreshes tokens, server to
+                          server. Empty: the forge's URL plus /login/oauth/access_token.
+                        maxLength: 2048
+                        pattern: ^https?://([A-Za-z0-9]([-A-Za-z0-9.]*[A-Za-z0-9])?|\[[0-9A-Fa-f:.]+\])(:[0-9]{1,5})?(/([^?#@%\s\x00-\x1f\x7f]|%[0-9A-Fa-f]{2})*)?$
+                        type: string
+                    required:
+                    - authorizeURL
+                    - clientID
+                    - clientSecret
+                    type: object
                   webURL:
                     description: |-
                       WebURL is where browsers open the forge's pages: pull requests, compare
@@ -330,6 +384,11 @@ spec:
                     pattern: ^https?://[A-Za-z0-9]([-A-Za-z0-9.]*[A-Za-z0-9])?(:[0-9]{1,5})?(/([^?#@%\s\x00-\x1f\x7f]|%[0-9A-Fa-f]{2})*)?$
                     type: string
                 type: object
+                x-kubernetes-validations:
+                - message: 'pullRequests Delegated needs userAuth: the OAuth2 application
+                    dotvirt acts through'
+                  rule: '!has(self.pullRequests) || self.pullRequests != ''Delegated''
+                    || has(self.userAuth)'
               image:
                 description: Image is the dotvirt app image to deploy.
                 type: string
