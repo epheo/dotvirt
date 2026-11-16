@@ -305,6 +305,7 @@ type DotvirtSpec struct {
 }
 
 // BrandingSpec is a provider's dress for the console.
+// +kubebuilder:validation:XValidation:rule="!has(self.links) || has(self.configMap) || self.links.all(l, !has(l.icon))",message="a link icon is a file of spec.branding.configMap: set configMap"
 type BrandingSpec struct {
 	// ProductName replaces dotvirt throughout the console and in what it
 	// writes to the forge.
@@ -338,6 +339,13 @@ type BrandingLink struct {
 	// URL is an https URL with a host and no credentials.
 	// +kubebuilder:validation:Pattern=`^https://[A-Za-z0-9]([-A-Za-z0-9.]*[A-Za-z0-9])?(:[0-9]{1,5})?([/?#]([^%@\s\x00-\x1f\x7f]|%[0-9A-Fa-f]{2})*)?$`
 	URL string `json:"url"`
+	// Icon names an .svg or .png file in spec.branding.configMap, up to 256
+	// KiB. With one the link shows as that icon alone, its label the tooltip
+	// and accessible name; a file that is not there leaves it as text.
+	// +kubebuilder:validation:MaxLength=64
+	// +kubebuilder:validation:Pattern=`^[A-Za-z0-9][A-Za-z0-9._-]*\.(svg|png)$`
+	// +optional
+	Icon string `json:"icon,omitempty"`
 }
 
 // DotvirtStatus is the observed install state.
