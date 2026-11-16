@@ -1,5 +1,5 @@
-// Webhook reconciliation: converging one push+pull_request hook per repo or
-// org, with a secret-fingerprint cache to keep steady-state sweeps write-free.
+// Webhook reconciliation: converging one hook per repo or org, with a
+// secret-fingerprint cache to keep steady-state sweeps write-free.
 
 package forge
 
@@ -21,16 +21,30 @@ type hook struct {
 // migrates the hook in place when targetURL's host changes and re-asserts the secret at
 // most once per process. See ensureHook.
 func (c *Client) EnsureWebhook(targetURL, secret string) error {
-	return c.ensureHook(c.repoPath("/hooks"), targetURL, secret)
+	return c.ensureHook(c.repoPath("/hooks"), targetURL, secret, pushAndPullRequest)
 }
+
+var (
+	pushAndPullRequest = []string{"push", "pull_request"}
+	pushOnly           = []string{"push"}
+)
 
 // EnsureOrgWebhook registers the same push+pull_request webhook on the client's
 // ORGANIZATION rather than a single repo, so one hook covers every repo in the org -
-// present and future. Used to point ArgoCD at all project repos with a single
-// registration, with no per-repo enumeration. Same reconcile semantics as
+// present and future - with no per-repo enumeration. Same reconcile semantics as
 // EnsureWebhook (see ensureHook).
 func (c *Client) EnsureOrgWebhook(targetURL, secret string) error {
-	return c.ensureHook(fmt.Sprintf("/api/v1/orgs/%s/hooks", c.owner), targetURL, secret)
+	return c.ensureHook(c.orgHooksPath(), targetURL, secret, pushAndPullRequest)
+}
+
+// EnsureOrgPushWebhook registers an org webhook delivering pushes only, for a
+// receiver that parses nothing else: Argo CD answers any other event 400.
+func (c *Client) EnsureOrgPushWebhook(targetURL, secret string) error {
+	return c.ensureHook(c.orgHooksPath(), targetURL, secret, pushOnly)
+}
+
+func (c *Client) orgHooksPath() string {
+	return fmt.Sprintf("/api/v1/orgs/%s/hooks", c.owner)
 }
 
 // OwnerIsOrg reports whether the client's owner is an organization. Only an org has a
@@ -41,8 +55,8 @@ func (c *Client) OwnerIsOrg() (bool, error) {
 	return c.exists("/api/v1/orgs/" + c.owner)
 }
 
-// ensureHook converges a single "gitea" (Forgejo-compatible) push+pull_request webhook
-// delivering to targetURL within the given hooks collection (repo- or org-level).
+// ensureHook converges a single "gitea" (Forgejo-compatible) webhook subscribed to
+// events, delivering to targetURL within the given hooks collection (repo- or org-level).
 //
 // The hook is identified by its URL PATH, not its full URL. The host legitimately
 // changes - an external Route giving way to the in-cluster Service - and matching on the
@@ -57,8 +71,9 @@ func (c *Client) OwnerIsOrg() (bool, error) {
 // re-asserted at most once per process - on first sight or after a rotation - not on
 // every sweep. That keeps steady-state sweeps write-free against Forgejo's single-replica
 // sqlite, and leaves a converged hook exactly as the forge has it (active or not) instead
-// of fighting its failure-driven auto-disable.
-func (c *Client) ensureHook(hooksPath, targetURL, secret string) error {
+// of fighting its failure-driven auto-disable. Events are not compared either: the
+// first sweep of each process recreates the hook, which lands a changed event set.
+func (c *Client) ensureHook(hooksPath, targetURL, secret string, events []string) error {
 	var hooks []hook
 	if err := c.do("GET", hooksPath, nil, &hooks); err != nil {
 		return err
@@ -66,7 +81,7 @@ func (c *Client) ensureHook(hooksPath, targetURL, secret string) error {
 	cfg := map[string]string{"url": targetURL, "content_type": "json", "secret": secret}
 	// One desired payload; the create API additionally requires "type" (the edit API
 	// rejects it), added on the POST branch only.
-	desired := map[string]any{"active": true, "events": []string{"push", "pull_request"}, "config": cfg}
+	desired := map[string]any{"active": true, "events": events, "config": cfg}
 
 	targetPath := urlPath(targetURL)
 	var ours []hook

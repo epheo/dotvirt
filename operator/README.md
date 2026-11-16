@@ -684,13 +684,16 @@ The series read: KubeVirt's `kubevirt_vmi_*` (labels `namespace`, `name`, `node`
 `spec.branding` dresses the console as a provider's; unset, it is dotvirt's own.
 
 - `productName`: shown in place of dotvirt throughout the console, and in the pull request titles, descriptions and commits it writes to the forge. Messages the server writes say "the console". At most 40 characters, no control characters.
-- `links`: up to 5 masthead links back to your own app (account, billing). Each a text `label` of at most 32 characters and an `https` `url` with a host and no credentials. They open in a new tab.
+- `links`: up to 5 masthead links back to your own app (account, billing). Each a text `label` of at most 32 characters and an `https` `url` with a host and no credentials. They open in the same tab, without a Referer.
+  An optional `icon` names an `.svg` or `.png` file of `configMap`: the link then shows as that icon alone, its label the tooltip and accessible name. A missing file leaves the link as text.
+  A link whose URL has the console's own origin is shown as the current item, marked and not a link.
 - `configMap`: a ConfigMap in dotvirt's namespace holding:
   - `theme.css`, loaded after the console's own stylesheet, so it may override its tokens (`--color-accent`, surfaces, ink, `--font-sans`);
-  - `logo.svg` or `logo.png`, shown beside the product name.
+  - `logo.svg` or `logo.png`, shown beside the product name;
+  - the links' icons.
 
 dotvirt serves these files itself, each up to 256 KiB, from the same origin: the console's content-security policy stays as it is, so a stylesheet that loads a remote font or image is refused. Embed fonts as `data:` URLs instead.
-An SVG logo opened on its own runs sandboxed, with nothing to load.
+An SVG logo or icon opened on its own runs sandboxed, with nothing to load. dotvirt serves only the icons a link names, never another file of the ConfigMap.
 The ConfigMap is mounted optional: missing, the console keeps dotvirt's look. An edit shows on the next page load.
 The sign-in screen reads the branding before any session, so it holds nothing private.
 

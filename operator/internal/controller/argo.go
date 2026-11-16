@@ -10,6 +10,7 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
@@ -114,13 +115,8 @@ func (r *DotvirtReconciler) reconcileArgo(ctx context.Context, dv *dotvirtv1alph
 // model). A registration failure is recorded on the condition but doesn't halt
 // the pipeline - Argo falls back to its poll.
 func (r *DotvirtReconciler) reconcileArgoWebhook(ctx context.Context, dv *dotvirtv1alpha1.Dotvirt, rc *reconcileCtx) (*ctrl.Result, error) {
-	if configured, err := r.ensureArgoWebhook(ctx, dv, rc); err != nil {
-		r.setCondition(dv, dotvirtv1alpha1.ConditionArgoWebhook, metav1.ConditionFalse, "Error", err.Error())
-	} else if configured {
-		r.setCondition(dv, dotvirtv1alpha1.ConditionArgoWebhook, metav1.ConditionTrue, "Registered", "org webhook -> ArgoCD")
-	} else {
-		r.setCondition(dv, dotvirtv1alpha1.ConditionArgoWebhook, metav1.ConditionUnknown, "NotRegistered", "ArgoCD webhook not registered (no Argo URL, or registration deferred); Argo falls back to its poll")
-	}
+	status, reason, msg := r.argoWebhook(ctx, dv, rc)
+	r.setCondition(dv, dotvirtv1alpha1.ConditionArgoWebhook, status, reason, msg)
 	return nil, nil
 }
 
@@ -162,50 +158,132 @@ func (r *DotvirtReconciler) mirrorAppsetToken(ctx context.Context, dv *dotvirtv1
 	})
 }
 
-// ensureArgoWebhook registers one ORG-level forge webhook -> ArgoCD and sets the
+// argoWebhook registers one ORG-level forge webhook -> ArgoCD and sets the
 // matching webhook secret in argocd-secret, so a merge triggers an immediate sync
-// instead of waiting for Argo's poll. Best-effort: returns configured=false (no error)
-// when no Argo URL is resolvable, no platform repo names the org, or the forge
-// registration itself transiently fails (logged) - Argo's poll backstops a missed nudge,
-// so none of those should fail the install. err is reserved for operator-internal
-// failures (reading the ArgoCD Route, the webhook secret or the forge credentials,
-// applying argocd-secret).
+// instead of waiting for Argo's poll. Best-effort: Unknown (no error) when no Argo
+// URL is resolvable, no platform repo names the org, the ArgoCD resource manages
+// the webhook keys itself, or the forge registration transiently fails (logged) -
+// Argo's poll backstops a missed nudge, so none of those should fail the install.
+// False is reserved for operator-side failures (reading the ArgoCD Route or
+// resource, the webhook secret or the forge credentials, setting argocd-secret's key).
 // Real-only (the caller skips it in dry-run) - it mutates the forge + argocd-secret.
-func (r *DotvirtReconciler) ensureArgoWebhook(ctx context.Context, dv *dotvirtv1alpha1.Dotvirt, rc *reconcileCtx) (configured bool, err error) {
+func (r *DotvirtReconciler) argoWebhook(ctx context.Context, dv *dotvirtv1alpha1.Dotvirt, rc *reconcileCtx) (metav1.ConditionStatus, string, string) {
+	failed := func(err error) (metav1.ConditionStatus, string, string) {
+		return metav1.ConditionFalse, "Error", err.Error()
+	}
+	notRegistered := func() (metav1.ConditionStatus, string, string) {
+		return metav1.ConditionUnknown, "NotRegistered", "ArgoCD webhook not registered (no Argo URL, or registration deferred); Argo falls back to its poll"
+	}
 	if dv.Spec.Forge.URL == "" || dv.Spec.Forge.PlatformRepo == "" {
-		return false, nil
+		return notRegistered()
 	}
 	if rc.argoURLErr != nil {
-		return false, fmt.Errorf("read the ArgoCD Route: %w", rc.argoURLErr)
+		return failed(fmt.Errorf("read the ArgoCD Route: %w", rc.argoURLErr))
 	}
 	if rc.argoURL == "" {
-		return false, nil
+		return notRegistered()
+	}
+	hookURL := strings.TrimRight(rc.argoURL, "/") + "/api/webhook"
+	// With spec.webhookSecrets set, the argocd-operator writes the webhook keys
+	// declared there and deletes the rest, so a key set here would verify
+	// nothing; the hook is left to whoever declares the secret there.
+	instance := rc.argoNS + "/" + argoInstance(rc.argoNS)
+	inst, _, err := r.argoInstanceState(ctx, instance)
+	if err != nil {
+		return failed(err)
+	}
+	if install.DeclaresWebhookSecrets(inst) {
+		return metav1.ConditionUnknown, "ManagedByArgoCD", fmt.Sprintf(
+			"ArgoCD %s sets spec.webhookSecrets, so it owns argocd-secret's webhook keys: declare spec.webhookSecrets.gogs, then give the Forgejo org webhook to %s (push events) that secret, replacing the one dotvirt registered there, if any, rather than adding a second; Argo falls back to its poll meanwhile",
+			instance, hookURL)
 	}
 	// The shared webhook secret, generated create-once in the dotvirt namespace.
 	s, err := r.secret(ctx, dv.Namespace, install.ArgoWebhookSecretName)
 	if err != nil {
-		return false, err
+		return failed(err)
 	}
 	value := string(s.Data["secret"])
-	// Argo verifies the delivery signature against this key (own only the key).
-	if err := r.apply(ctx, install.ArgoWebhookSecret(rc.argoNS, value)); err != nil {
-		return false, fmt.Errorf("set argo webhook secret: %w", err)
+	if err := r.applyArgoWebhookKey(ctx, rc.argoNS, value, hookURL); err != nil {
+		return failed(err)
 	}
 	// One org webhook covers every repo, using the forge credential to register it.
-	client, err := r.forgeClient(ctx, dv)
+	fc, err := r.forgeClient(ctx, dv)
 	if err != nil {
-		return false, err
+		return failed(err)
 	}
 	// Registering the hook is best-effort, like the app's own webhook sweep
 	// (cmd/dotvirt logs and moves on): a transient forge hiccup here must not read as a
 	// hard install error, because ArgoCD's poll already backstops a missed nudge. Log it
 	// and report unconfigured so the next reconcile retries. The secret/credential steps
 	// above stay hard errors - those are operator-internal, not forge-transient.
-	if err := client.EnsureOrgWebhook(strings.TrimRight(rc.argoURL, "/")+"/api/webhook", value); err != nil {
+	if err := fc.EnsureOrgPushWebhook(hookURL, value); err != nil {
 		logf.FromContext(ctx).Info("argo webhook registration deferred; ArgoCD poll backstops", "error", err.Error())
-		return false, nil
+		return notRegistered()
 	}
-	return true, nil
+	return metav1.ConditionTrue, "Registered", "org webhook -> ArgoCD"
+}
+
+// applyArgoWebhookKey sets the operator's key in argoNS's argocd-secret, then
+// drops the legacy key. Only the apply's conflict means another manager holds
+// the key: the legacy patch's is a resourceVersion race.
+func (r *DotvirtReconciler) applyArgoWebhookKey(ctx context.Context, argoNS, value, hookURL string) error {
+	s := install.ArgoWebhookSecret(argoNS, value)
+	err := r.applyShared(ctx, s)
+	if apierrors.IsConflict(err) {
+		return fmt.Errorf("%s/%s already sets %s under another manager, which the operator leaves alone: remove that key to hand it to the operator, or register a Forgejo org webhook (push events) to %s with its value: %w",
+			argoNS, install.ArgoSecretName, install.ArgoWebhookKey, hookURL, err)
+	}
+	if err != nil {
+		return fmt.Errorf("set argo webhook secret: %w", err)
+	}
+	return r.dropLegacyArgoWebhookKey(ctx, s, value)
+}
+
+// releaseArgoWebhookKey removes from argoNS's argocd-secret the webhook keys
+// the operator wrote. A key another manager also set stays; nothing to do when
+// the Secret is gone.
+func (r *DotvirtReconciler) releaseArgoWebhookKey(ctx context.Context, dv *dotvirtv1alpha1.Dotvirt, argoNS string) error {
+	s := &corev1.Secret{}
+	err := r.reader().Get(ctx, types.NamespacedName{Namespace: argoNS, Name: install.ArgoSecretName}, s)
+	if apierrors.IsNotFound(err) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("read %s/%s: %w", argoNS, install.ArgoSecretName, err)
+	}
+	if install.HoldsArgoWebhookKey(s) {
+		// An apply naming no key drops the ones only this manager held.
+		s = install.ArgoWebhookSecret(argoNS, "")
+		if err := r.applyShared(ctx, s); err != nil {
+			return fmt.Errorf("release %s from %s/%s: %w", install.ArgoWebhookKey, argoNS, install.ArgoSecretName, err)
+		}
+	}
+	own, err := r.secret(ctx, dv.Namespace, install.ArgoWebhookSecretName)
+	if apierrors.IsNotFound(err) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	return r.dropLegacyArgoWebhookKey(ctx, s, string(own.Data["secret"]))
+}
+
+// dropLegacyArgoWebhookKey removes install.LegacyArgoWebhookKey from s, the
+// live argocd-secret, when it holds value, the operator's own secret. The
+// value is the proof of authorship: the operator wrote that key through
+// stringData, whose field ownership its next apply discards, and SSA never
+// removes a data key on its behalf. Any other value is another manager's and
+// stays.
+func (r *DotvirtReconciler) dropLegacyArgoWebhookKey(ctx context.Context, s *corev1.Secret, value string) error {
+	if value == "" || string(s.Data[install.LegacyArgoWebhookKey]) != value {
+		return nil
+	}
+	base := s.DeepCopy()
+	delete(s.Data, install.LegacyArgoWebhookKey)
+	if err := r.Patch(ctx, s, client.MergeFromWithOptions(base, client.MergeFromWithOptimisticLock{})); err != nil {
+		return fmt.Errorf("remove %s from %s/%s: %w", install.LegacyArgoWebhookKey, s.Namespace, install.ArgoSecretName, err)
+	}
+	return nil
 }
 
 // repoCreds builds the Argo repo-credentials Secret from the forge credential, or

@@ -399,6 +399,14 @@ async function handleAPI(req, res, url) {
 		res.writeHead(200, { 'Content-Type': 'image/svg+xml' });
 		return res.end(s.branding.logo);
 	}
+	// Only an icon a link names, as branding.Settings.ServeIcon.
+	if (path.startsWith('/api/branding/icon/')) {
+		const name = decodeURIComponent(path.slice('/api/branding/icon/'.length));
+		const named = (s.branding?.info?.links ?? []).some((l) => l.icon === name);
+		if (!named || !s.branding?.icons?.[name]) return sendText(res, 404, 'not found');
+		res.writeHead(200, { 'Content-Type': 'image/svg+xml' });
+		return res.end(s.branding.icons[name]);
+	}
 
 	if (path === '/api/login' && req.method === 'POST') {
 		if (state.loginStatus) {

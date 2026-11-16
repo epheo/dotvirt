@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"os"
 	"path/filepath"
 	"slices"
@@ -448,6 +449,11 @@ func TestEnvtest(t *testing.T) {
 			"bad escape":          {Links: link("a", "https://c.example/%zz")},
 			"control in url":      {Links: link("a", "https://c.example/a\x01b")},
 			"configmap uppercase": {ConfigMap: "Theme"},
+			"icon path":           {ConfigMap: "t", Links: []dotvirtv1alpha1.BrandingLink{{Label: "a", URL: "https://c.example", Icon: "../theme.css"}}},
+			"icon url":            {ConfigMap: "t", Links: []dotvirtv1alpha1.BrandingLink{{Label: "a", URL: "https://c.example", Icon: "https://c.example/a.svg"}}},
+			"icon type":           {ConfigMap: "t", Links: []dotvirtv1alpha1.BrandingLink{{Label: "a", URL: "https://c.example", Icon: "a.gif"}}},
+			"icon long":           {ConfigMap: "t", Links: []dotvirtv1alpha1.BrandingLink{{Label: "a", URL: "https://c.example", Icon: strings.Repeat("a", 61) + ".svg"}}},
+			"icon no configmap":   {Links: []dotvirtv1alpha1.BrandingLink{{Label: "a", URL: "https://c.example", Icon: "a.svg"}}},
 		} {
 			dv := testCR()
 			dv.Spec.Branding = b
@@ -458,10 +464,17 @@ func TestEnvtest(t *testing.T) {
 		dv := testCR()
 		dv.Spec.Branding = dotvirtv1alpha1.BrandingSpec{
 			ProductName: "Uniwatt Cloud", ConfigMap: "uniwatt-theme",
-			Links: link("Billing", "https://c.example/billing?tab=open#due"),
+			Links: append(link("Billing", "https://c.example/billing?tab=open#due"),
+				dotvirtv1alpha1.BrandingLink{Label: "Projects", URL: "https://c.example/", Icon: "projects.svg"}),
 		}
 		if err := admin.Create(ctx, dv, client.DryRunAll); client.IgnoreAlreadyExists(err) != nil {
 			t.Errorf("a provider's branding: %v", err)
+		}
+		// Text links need no ConfigMap: CRs from before link icons stay valid.
+		text := testCR()
+		text.Spec.Branding = dotvirtv1alpha1.BrandingSpec{Links: link("Billing", "https://c.example/billing")}
+		if err := admin.Create(ctx, text, client.DryRunAll); client.IgnoreAlreadyExists(err) != nil {
+			t.Errorf("text links without a ConfigMap: %v", err)
 		}
 	})
 
@@ -723,6 +736,92 @@ func TestEnvtest(t *testing.T) {
 		eventually(t, "impersonation set again", func() bool { return key() == "true" })
 	})
 
+	// The operator's apply holds one key of a Secret the gitops operator runs:
+	// a key another manager set stays theirs, and only what the operator wrote
+	// is ever removed.
+	t.Run("argocd-secret's webhook keys are taken only when free", func(t *testing.T) {
+		op, err := client.New(opCfg, client.Options{Scheme: scheme})
+		if err != nil {
+			t.Fatal(err)
+		}
+		r := newReconciler(op, depsOK)
+		// Each namespace stands for both the install's, holding its webhook
+		// secret "dotvirt", and Argo's, holding argocd-secret written to data
+		// as the argocd-operator and kubectl do.
+		argoSecret := func(ns string, data map[string]string) *dotvirtv1alpha1.Dotvirt {
+			t.Helper()
+			mustCreate(t, admin, &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: ns}})
+			mustCreate(t, admin, &corev1.Secret{
+				ObjectMeta: metav1.ObjectMeta{Name: install.ArgoWebhookSecretName, Namespace: ns},
+				Data:       map[string][]byte{"secret": []byte("dotvirt")},
+			})
+			s := &corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: install.ArgoSecretName, Namespace: ns}, Data: map[string][]byte{}}
+			for k, v := range data {
+				s.Data[k] = []byte(v)
+			}
+			if err := admin.Create(ctx, s, client.FieldOwner("argocd-operator")); err != nil {
+				t.Fatal(err)
+			}
+			return &dotvirtv1alpha1.Dotvirt{ObjectMeta: metav1.ObjectMeta{Name: "x", Namespace: ns}}
+		}
+		data := func(ns string) map[string][]byte {
+			t.Helper()
+			var s corev1.Secret
+			if err := admin.Get(ctx, types.NamespacedName{Namespace: ns, Name: install.ArgoSecretName}, &s); err != nil {
+				t.Fatal(err)
+			}
+			return s.Data
+		}
+
+		argoSecret("argo-held", map[string]string{install.ArgoWebhookKey: "declared"})
+		if err := r.applyArgoWebhookKey(ctx, "argo-held", "dotvirt", "https://argo/api/webhook"); !apierrors.IsConflict(err) {
+			t.Errorf("apply over another manager's key: err = %v, want a conflict", err)
+		}
+		if got := string(data("argo-held")[install.ArgoWebhookKey]); got != "declared" {
+			t.Errorf("another manager's key = %q, want it kept", got)
+		}
+
+		// What an operator before 0.2.3 left: its secret under the key Argo never
+		// reads, written through stringData.
+		upgraded := argoSecret("argo-upgrade", map[string]string{"admin.password": "x"})
+		legacy := &corev1.Secret{
+			TypeMeta:   metav1.TypeMeta{APIVersion: "v1", Kind: "Secret"},
+			ObjectMeta: metav1.ObjectMeta{Name: install.ArgoSecretName, Namespace: "argo-upgrade"},
+			StringData: map[string]string{install.LegacyArgoWebhookKey: "dotvirt"},
+		}
+		if err := install.Apply(ctx, op, legacy, false); err != nil {
+			t.Fatal(err)
+		}
+		if err := r.applyArgoWebhookKey(ctx, "argo-upgrade", "dotvirt", "https://argo/api/webhook"); err != nil {
+			t.Fatal(err)
+		}
+		got := data("argo-upgrade")
+		if _, left := got[install.LegacyArgoWebhookKey]; left || string(got[install.ArgoWebhookKey]) != "dotvirt" || string(got["admin.password"]) != "x" {
+			t.Errorf("upgraded argocd-secret keys = %v, want %s set, %s gone, admin.password kept", slices.Sorted(maps.Keys(got)), install.ArgoWebhookKey, install.LegacyArgoWebhookKey)
+		}
+		if err := r.releaseArgoWebhookKey(ctx, upgraded, "argo-upgrade"); err != nil {
+			t.Fatal(err)
+		}
+		if got := data("argo-upgrade"); len(got) != 1 || string(got["admin.password"]) != "x" {
+			t.Errorf("released argocd-secret keys = %v, want admin.password only", slices.Sorted(maps.Keys(got)))
+		}
+
+		foreign := argoSecret("argo-foreign", map[string]string{install.LegacyArgoWebhookKey: "theirs"})
+		if err := r.applyArgoWebhookKey(ctx, "argo-foreign", "dotvirt", "https://argo/api/webhook"); err != nil {
+			t.Fatal(err)
+		}
+		if err := r.releaseArgoWebhookKey(ctx, foreign, "argo-foreign"); err != nil {
+			t.Fatal(err)
+		}
+		if got := data("argo-foreign"); len(got) != 1 || string(got[install.LegacyArgoWebhookKey]) != "theirs" {
+			t.Errorf("argocd-secret keys = %v, want only the other manager's %s", slices.Sorted(maps.Keys(got)), install.LegacyArgoWebhookKey)
+		}
+
+		if err := r.releaseArgoWebhookKey(ctx, foreign, "argo-absent"); err != nil {
+			t.Errorf("release with no argocd-secret: %v", err)
+		}
+	})
+
 	t.Run("deletion cleans up as the operator", func(t *testing.T) {
 		dv := &dotvirtv1alpha1.Dotvirt{ObjectMeta: metav1.ObjectMeta{Name: "x", Namespace: "dotvirt"}}
 		// A name only an older version rendered: the name-scoped delete grant
@@ -737,6 +836,35 @@ func TestEnvtest(t *testing.T) {
 		foreign := argoObj("AppProject", "argocd", "dotvirt-p-foreign",
 			map[string]string{install.InstanceLabel: dv.Name, install.InstanceNamespaceLabel: "elsewhere"})
 		mustCreate(t, admin, foreign)
+		// The operator's key in Argo's own Secret, beside a key it never set.
+		argoSecret := &corev1.Secret{
+			ObjectMeta: metav1.ObjectMeta{Name: install.ArgoSecretName, Namespace: "argocd"},
+			Data:       map[string][]byte{"admin.password": []byte("x")},
+		}
+		if err := admin.Create(ctx, argoSecret, client.FieldOwner("argocd-operator")); err != nil {
+			t.Fatal(err)
+		}
+		op, err := client.New(opCfg, client.Options{Scheme: scheme})
+		if err != nil {
+			t.Fatal(err)
+		}
+		var hmac corev1.Secret
+		if err := admin.Get(ctx, types.NamespacedName{Namespace: dv.Namespace, Name: install.ArgoWebhookSecretName}, &hmac); err != nil {
+			t.Fatal(err)
+		}
+		value := string(hmac.Data["secret"])
+		// First the key an operator before 0.2.3 wrote, unread by Argo, then the
+		// one Argo verifies against: an upgrade not yet reconciled.
+		oldKey := &corev1.Secret{
+			TypeMeta:   metav1.TypeMeta{APIVersion: "v1", Kind: "Secret"},
+			ObjectMeta: metav1.ObjectMeta{Name: install.ArgoSecretName, Namespace: "argocd"},
+			StringData: map[string]string{install.LegacyArgoWebhookKey: value},
+		}
+		for _, s := range []*corev1.Secret{oldKey, install.ArgoWebhookSecret("argocd", value)} {
+			if err := install.ApplyShared(ctx, op, s, false); err != nil {
+				t.Fatal(err)
+			}
+		}
 		mark := ops.len()
 		if err := admin.Delete(ctx, dv); err != nil {
 			t.Fatal(err)
@@ -753,6 +881,12 @@ func TestEnvtest(t *testing.T) {
 		}
 		if extra, _, _ := unstructured.NestedMap(inst.Object, "spec", "extraConfig"); extra[install.SyncImpersonationKey] != nil {
 			t.Errorf("uninstalled, extraConfig = %v", extra)
+		}
+		if err := admin.Get(ctx, client.ObjectKeyFromObject(argoSecret), argoSecret); err != nil {
+			t.Fatal(err)
+		}
+		if got := argoSecret.Data; len(got) != 1 || string(got["admin.password"]) != "x" {
+			t.Errorf("uninstalled, argocd-secret keys = %v, want admin.password only", slices.Sorted(maps.Keys(got)))
 		}
 		done := ops.since(mark)
 		released := slices.Index(done, "release argocd")
