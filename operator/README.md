@@ -655,6 +655,7 @@ A managed forge also takes `webURL` as its `ROOT_URL`, so its own pages and clon
 - `productName`: shown in place of dotvirt throughout the console, and in the pull request titles, descriptions and commits it writes to the forge. Messages the server writes say "the console". At most 40 characters, no control characters.
 - `links`: up to 5 masthead links back to your own app (account, billing). Each a text `label` of at most 32 characters and an `https` `url` with a host and no credentials. They open in a new tab.
   An optional `icon` names an `.svg` or `.png` file of `configMap`: the link then shows as that icon alone, its label the tooltip and accessible name. A missing file leaves the link as text.
+  A link whose URL has the console's own origin is shown as the current item, marked and not a link.
 - `configMap`: a ConfigMap in dotvirt's namespace holding:
   - `theme.css`, loaded after the console's own stylesheet, so it may override its tokens (`--color-accent`, surfaces, ink, `--font-sans`);
   - `logo.svg` or `logo.png`, shown beside the product name;

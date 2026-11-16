@@ -1,6 +1,8 @@
 <script lang="ts">
 	import { branding } from '#lib/state/branding.svelte.js';
+	import { isConsoleLink } from '#lib/branding.js';
 	import { goto } from '$app/navigation';
+	import { page } from '$app/state';
 	import {
 		Check,
 		ChevronDown,
@@ -75,9 +77,28 @@
 	<div class="flex-1"></div>
 
 	<!-- A provider's links back to its own app. An icon link names itself by
-	     its label, shown as a tooltip on hover and on keyboard focus alike. -->
+	     its label, shown as a tooltip on hover and on keyboard focus alike. The
+	     one leading to this console is the current item, marked, not a link:
+	     nothing to act on, so no tab stop; its label stays readable as text. -->
 	{#each branding.value?.links ?? [] as l, i (i)}
-		{#if l.icon}
+		{#if isConsoleLink(l.url, page.url.origin)}
+			<span
+				aria-current="page"
+				class="group relative flex items-center border-b-2 border-accent pb-0.5 {l.icon
+					? ''
+					: 'text-[13px] text-white'}"
+			>
+				{#if l.icon}
+					<img src="/api/branding/icon/{encodeURIComponent(l.icon)}" alt="" class="size-[22px]" />
+					<span class="sr-only">{l.label}</span>
+					<span
+						aria-hidden="true"
+						class="pointer-events-none absolute top-full right-0 z-50 mt-2 hidden rounded bg-side px-2 py-1 text-xs whitespace-nowrap text-side-ink shadow-lg group-hover:block"
+						>{l.label}</span
+					>
+				{:else}{l.label}{/if}
+			</span>
+		{:else if l.icon}
 			<a
 				href={l.url}
 				target="_blank"

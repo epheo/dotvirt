@@ -35,6 +35,15 @@ test("the console wears a provider's branding, sign-in included", async ({ page 
 	await expect(tip).toBeHidden();
 	await billing.focus();
 	await expect(tip).toBeVisible();
+	// The link back to this console is the current item: marked, not a link.
+	const current = header.locator('[aria-current="page"]');
+	await expect(current).toHaveCount(1);
+	await expect(current).not.toHaveAttribute('href');
+	await expect(current).not.toHaveAttribute('tabindex');
+	await expect(current.locator('img')).toHaveAttribute('src', '/api/branding/icon/console.svg');
+	await expect(current.getByText('Console').first()).toBeAttached();
+	await expect(header.getByRole('link', { name: 'Console' })).toHaveCount(0);
+	await expect(header.getByRole('link')).not.toHaveCount(0);
 	await expect(page.locator('link[rel="stylesheet"][href="/api/branding/theme.css"]')).toHaveCount(
 		1,
 	);
