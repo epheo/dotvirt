@@ -5,6 +5,10 @@ import { friendlyError } from '#lib/format.js';
 // holds the cluster-scoped network + namespace changeset, proposable by authors.
 export const PLATFORM_PROJECT = 'platform';
 
+// Everything merging a draft lets the sync delete: what the caller is shown,
+// and what lies in namespaces they cannot see, which goes all the same.
+export const pruneTotal = (d?: DraftView) => (d?.prune?.length ?? 0) + (d?.pruneHidden ?? 0);
+
 // Per-project drafts (the Changes panel + header badge). Refreshed when the set
 // of projects or PR lanes changes (the layout's keyed effect), when the Changes
 // drawer opens, and directly after every staging action. `loaded`/`refreshing`

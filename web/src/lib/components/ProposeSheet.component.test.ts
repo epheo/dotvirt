@@ -77,6 +77,30 @@ describe('ProposeSheet', () => {
 		expect(screen.getByRole('button', { name: 'Add to PR #41' })).toBeTruthy();
 	});
 
+	it('counts what the caller cannot see, sends what was acknowledged, and asks again when it moved', async () => {
+		inventory.apply({ projects: [], proposals: [] } as unknown as Inventory);
+		const shown = { kind: 'VirtualMachine', namespace: 'db-prod', name: 'old-vm' };
+		drafts.drafts = [{ project: 'team-db', draft: { ...draft, prune: [shown], pruneHidden: 2 } }];
+		render(ProposeSheet, { project: 'team-db', onclose: vi.fn() });
+		expect(screen.getByText(/deletes 3 objects from the cluster/)).toBeTruthy();
+		expect(screen.getByText(/2 more outside your view/)).toBeTruthy();
+		const open = screen.getByRole('button', { name: 'Open pull request' }) as HTMLButtonElement;
+		expect(open.disabled).toBe(true);
+		const yes = screen.getByLabelText(/Delete these 3 when this merges/) as HTMLInputElement;
+		await fireEvent.click(yes);
+		refuse(
+			409,
+			'conflict: merging this now deletes objects the review did not list; review it again before proposing\n',
+		);
+		await fireEvent.click(open);
+		await screen.findByRole('alert');
+		const [, init] = fetchMock.mock.calls.find(([url]) =>
+			String(url).startsWith('/api/draft/propose'),
+		)!;
+		expect(JSON.parse(init.body)).toMatchObject({ prune: [shown], pruneHidden: 2 });
+		expect(yes.checked).toBe(false);
+	});
+
 	it('a conflict is said in place, with the PR it names one click away', async () => {
 		setup([openPR]);
 		refuse(

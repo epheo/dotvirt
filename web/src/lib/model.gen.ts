@@ -482,11 +482,15 @@ export interface VolumeMigration {
   storageClass: string;
 }
 /**
- * ProposeRequest is the body of a propose: PR title + description.
+ * ProposeRequest is the body of a propose: PR title + description, and the
+ * prune the caller acknowledged as the review showed it (DraftView.Prune,
+ * PruneHidden). Propose refuses a merge that would now delete beyond it.
  */
 export interface ProposeRequest {
   title: string;
   message: string;
+  prune?: ObjectRef[];
+  pruneHidden?: number /* int */;
 }
 /**
  * DriftResult is a VM's drift (running vs main) as semantic changes.
@@ -576,11 +580,13 @@ export interface DraftView {
   items: DraftItem[];
   warning?: string;
   /**
-   * Prune lists every object the next merged change lets ArgoCD delete: live,
-   * no longer declared, and not spoken for by the draft itself. The review
-   * asks for an explicit yes before proposing when it is non-empty.
+   * Prune lists the objects the next merged change lets ArgoCD delete (live,
+   * not declared, and not spoken for by the draft itself) that the caller
+   * may be told of; PruneHidden counts the rest of the project's. The review
+   * asks for an explicit yes before proposing when either is non-zero.
    */
   prune?: ObjectRef[];
+  pruneHidden?: number /* int */;
   /**
    * What an untitled, unannotated propose pushes, so the form can show it and
    * let the user accept or edit it instead of guessing.

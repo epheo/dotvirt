@@ -13,7 +13,7 @@
 	import { memoryHint } from '#lib/headroom.js';
 	import { draftResourceLabel } from '#lib/labels.js';
 	import { action } from '#lib/resource.svelte.js';
-	import { drafts } from '#lib/state/drafts.svelte.js';
+	import { drafts, pruneTotal } from '#lib/state/drafts.svelte.js';
 	import { memoryRoom } from '#lib/state/hosts.svelte.js';
 	import { inventory } from '#lib/state/inventory.svelte.js';
 	import { tray } from '#lib/state/tray.svelte.js';
@@ -36,6 +36,8 @@
 
 	const lane = $derived(drafts.drafts.find((d) => d.project === project)?.draft);
 	const prune = $derived(lane?.prune ?? []);
+	const pruneHidden = $derived(lane?.pruneHidden ?? 0);
+	const pruning = $derived(pruneTotal(lane) > 0);
 
 	// This user's open PR for the project's draft. A propose rebuilds it with
 	// what it carries plus this draft: an empty title retitles it for the
@@ -60,7 +62,7 @@
 
 	const isVM = (it: DraftItem) => !it.resource || it.resource === 'vm';
 	const kindName = (it: DraftItem) => draftResourceLabel(it.resource);
-	const blocked = $derived(prune.length > 0 && !ack);
+	const blocked = $derived(pruning && !ack);
 	const word = (f: string) => (f === f.toUpperCase() ? f : f.toLowerCase());
 	const list = (xs: string[]) =>
 		xs.length < 2 ? xs.join('') : `${xs.slice(0, -1).join(', ')} and ${xs[xs.length - 1]}`;
@@ -153,15 +155,25 @@
 	// The refused answer's status: what the server's sentence asks of the reader.
 	let refusedStatus = $state(0);
 	async function propose() {
-		if (op.busy || (prune.length && !ack)) return;
+		if (op.busy || blocked) return;
 		// Read before the refresh empties the lane.
 		const declared = changeSummary(lane?.items ?? []);
 		const prTitle = title.trim() || (openPR ? openPR.title : lane?.defaultTitle) || '';
 		const ok = await op.run(async () => {
 			const r = await api
-				.propose(project, title.trim(), editingText ? message : '')
+				.propose(
+					project,
+					title.trim(),
+					editingText ? message : '',
+					pruning ? { prune, pruneHidden } : undefined,
+				)
 				.catch((e: unknown) => {
 					refusedStatus = e instanceof HttpError ? e.status : 0;
+					// The prune moved since the review: show the new set and ask again.
+					if (refusedStatus === 409) {
+						ack = false;
+						drafts.refresh();
+					}
 					throw e;
 				});
 			if (r.prNumber)
@@ -294,12 +306,12 @@
 				</ul>
 			</section>
 
-			{#if prune.length}
+			{#if pruning}
 				<section class="space-y-2">
 					<h3 class="text-xs font-semibold tracking-wide text-ink-muted uppercase">
 						Also in this merge
 					</h3>
-					<PruneAck {prune} bind:ack />
+					<PruneAck {prune} hidden={pruneHidden} bind:ack />
 				</section>
 			{:else if lane.warning}
 				<p class="rounded border border-warn/50 bg-warn-soft px-3 py-2 text-warn-ink">

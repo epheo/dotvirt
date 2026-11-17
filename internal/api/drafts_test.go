@@ -34,6 +34,7 @@ type draftsRig struct {
 	fc    *fakeCluster
 	store *draft.Store
 	repo  map[string]string // project -> repo
+	stray stray
 }
 
 func newDraftsRig(t *testing.T, platformMissing bool) *draftsRig {
@@ -68,25 +69,17 @@ func newDraftsRig(t *testing.T, platformMissing bool) *draftsRig {
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
 	repos := git.NewRepoSet(ctx, "", "", nil, false, nil, time.Hour)
-	c := changeset.New(g.store, repos, nil, nil, nil, strayIn(g.repo["team-a"]), "main", "dotvirt/proposed")
+	g.stray = stray{g.repo["team-a"]: {{Kind: "VirtualMachine", Namespace: "team-a-dev", Name: "stray"}}}
+	c := changeset.New(g.store, repos, nil, nil, nil, g.stray, "main", "dotvirt/proposed")
 	g.s = fc.server(c, Config{PlatformRepo: g.repo[platformProjectName], BaseBranch: "main"})
 	c.UseAuthorizer(g.s)
 	return g
 }
 
-// strayIn is ArgoCD about to prune one VM in each namespace of repo.
-type strayIn string
+// stray is what ArgoCD is about to prune, per repo.
+type stray map[string][]model.ObjectRef
 
-func (r strayIn) PrunePending(repo string, namespaces []string) []model.ObjectRef {
-	if repo != string(r) {
-		return nil
-	}
-	var out []model.ObjectRef
-	for _, ns := range namespaces {
-		out = append(out, model.ObjectRef{Kind: "VirtualMachine", Namespace: ns, Name: "stray"})
-	}
-	return out
-}
+func (s stray) PrunePending(repo, _ string) []model.ObjectRef { return s[repo] }
 
 // stage puts one removal into user's draft of project, as any route would.
 func (g *draftsRig) stage(t *testing.T, user, project string) {
@@ -176,6 +169,36 @@ func TestDraftsAnswerEveryDraftOfTheCaller(t *testing.T) {
 	}
 	if calls := g.fc.seen(); len(calls) > 0 {
 		t.Errorf("drafts read the cluster beyond its reviews: %q", calls)
+	}
+}
+
+// After a platform-repo loss, the platform app holds every object it tracks
+// and any platform merge prunes them all. Every caller reaching the platform
+// lane is warned of all of them: named to a platform reader, counted to a
+// holder without platform read, so the warning neither hides the blast radius
+// nor names what the caller's RBAC does not show.
+func TestPlatformPruneWarnsEveryCallerOfTheWholeRepo(t *testing.T) {
+	g := newDraftsRig(t, false)
+	g.stray[g.repo[platformProjectName]] = []model.ObjectRef{
+		{Kind: "Namespace", Name: "team-b-dev"},
+		{Kind: "RoleBinding", Namespace: "team-b-dev", Name: "admins"},
+	}
+	g.stage(t, "holder", platformProjectName)
+	lane := func(user string) model.DraftView {
+		t.Helper()
+		for _, d := range g.drafts(t, user).Drafts {
+			if d.Project == platformProjectName {
+				return d.Draft
+			}
+		}
+		t.Fatalf("%s: no platform lane", user)
+		return model.DraftView{}
+	}
+	if v := lane("reader"); len(v.Prune) != 2 || v.PruneHidden != 0 || !strings.Contains(v.Warning, "Namespace team-b-dev") {
+		t.Errorf("reader: %+v, want both objects named", v)
+	}
+	if v := lane("holder"); len(v.Prune) != 0 || v.PruneHidden != 2 || strings.Contains(v.Warning, "team-b") {
+		t.Errorf("holder: %+v, want 2 counted and none named", v)
 	}
 }
 

@@ -53,6 +53,9 @@ func (c *Coordinator) Propose(id auth.Identity, proj project.ProjectInfo, req mo
 	if err := c.gate(id, proj, slices.Clone(entries)); err != nil {
 		return model.ProposeResult{}, run.commitFailed(err, entries, 0)
 	}
+	if shown, hidden := c.prunePending(id, proj, entries); unacknowledged(req, shown, hidden) {
+		return model.ProposeResult{}, fmt.Errorf("%w: merging this now deletes objects the review did not list; review it again before proposing", model.ErrConflict)
+	}
 	if run.h, err = c.hand(id, proj, write); err != nil {
 		return model.ProposeResult{}, err
 	}

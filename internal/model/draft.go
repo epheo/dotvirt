@@ -124,10 +124,14 @@ type VolumeMigration struct {
 	StorageClass string `json:"storageClass"`
 }
 
-// ProposeRequest is the body of a propose: PR title + description.
+// ProposeRequest is the body of a propose: PR title + description, and the
+// prune the caller acknowledged as the review showed it (DraftView.Prune,
+// PruneHidden). Propose refuses a merge that would now delete beyond it.
 type ProposeRequest struct {
-	Title   string `json:"title"`
-	Message string `json:"message"`
+	Title       string      `json:"title"`
+	Message     string      `json:"message"`
+	Prune       []ObjectRef `json:"prune,omitempty"`
+	PruneHidden int         `json:"pruneHidden,omitempty"`
 }
 
 // DriftResult is a VM's drift (running vs main) as semantic changes.
@@ -200,10 +204,12 @@ type DraftView struct {
 	Count   int         `json:"count"`
 	Items   []DraftItem `json:"items"`
 	Warning string      `json:"warning,omitempty"`
-	// Prune lists every object the next merged change lets ArgoCD delete: live,
-	// no longer declared, and not spoken for by the draft itself. The review
-	// asks for an explicit yes before proposing when it is non-empty.
-	Prune []ObjectRef `json:"prune,omitempty"`
+	// Prune lists the objects the next merged change lets ArgoCD delete (live,
+	// not declared, and not spoken for by the draft itself) that the caller
+	// may be told of; PruneHidden counts the rest of the project's. The review
+	// asks for an explicit yes before proposing when either is non-zero.
+	Prune       []ObjectRef `json:"prune,omitempty"`
+	PruneHidden int         `json:"pruneHidden,omitempty"`
 	// What an untitled, unannotated propose pushes, so the form can show it and
 	// let the user accept or edit it instead of guessing.
 	DefaultTitle string `json:"defaultTitle,omitempty"`

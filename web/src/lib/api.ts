@@ -571,8 +571,20 @@ export const api = {
 			'/api/drafts',
 		),
 	discardDraft: (project: string) => del(`/api/draft?project=${enc(project)}`),
-	propose: (project: string, title: string, message: string) =>
-		post<gen.ProposeResult>(`/api/draft/propose?project=${enc(project)}`, { title, message }),
+	// acked is the prune the review showed and the user said yes to; the server
+	// refuses a merge that would now delete beyond it.
+	propose: (
+		project: string,
+		title: string,
+		message: string,
+		acked?: Pick<DraftView, 'prune' | 'pruneHidden'>,
+	) =>
+		post<gen.ProposeResult>(`/api/draft/propose?project=${enc(project)}`, {
+			title,
+			message,
+			prune: acked?.prune,
+			pruneHidden: acked?.pruneHidden,
+		}),
 
 	// Drift + reconcile for one VM (project resolved from the namespace).
 	drift: (namespace: string, name: string) => get<DriftResult>(`${vmPath(namespace, name)}/drift`),

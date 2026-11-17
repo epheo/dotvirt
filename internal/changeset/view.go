@@ -81,8 +81,8 @@ func (c *Coordinator) Holds(id auth.Identity, proj project.ProjectInfo) (bool, e
 // render is entries as the draft view renders them against the base branch.
 func (c *Coordinator) render(id auth.Identity, proj project.ProjectInfo, entries []draft.Entry) (model.DraftView, error) {
 	view := model.DraftView{Base: c.baseBranch, Branch: c.proposedBranch(id.Username, proj.Name), Count: len(entries), Items: []model.DraftItem{}}
-	view.Prune = c.prunePending(proj, entries)
-	view.Warning = pruneWarning(view.Prune)
+	view.Prune, view.PruneHidden = c.prunePending(id, proj, entries)
+	view.Warning = pruneWarning(view.Prune, view.PruneHidden)
 	if len(entries) == 0 {
 		return view, nil
 	}
@@ -172,15 +172,17 @@ func wizardChanges(e draft.Entry) []model.Change {
 }
 
 // prunePending: what a merge lets ArgoCD delete, from Argo's own requiresPruning
-// minus what the draft speaks for. Derived every render, never stored: a stored
+// minus what the draft speaks for, over the whole project whatever part of it
+// id sees: the merge prunes the rest too. shown is what id may be told by name;
+// hidden counts the others. Derived every render, never stored: a stored
 // warning outlived the state and read partial captures as complete.
-func (c *Coordinator) prunePending(proj project.ProjectInfo, entries []draft.Entry) []model.ObjectRef {
+func (c *Coordinator) prunePending(id auth.Identity, proj project.ProjectInfo, entries []draft.Entry) (shown []model.ObjectRef, hidden int) {
 	if c.prune == nil {
-		return nil
+		return nil, 0
 	}
-	pending := c.prune.PrunePending(proj.Repo, proj.Namespaces)
+	pending := c.prune.PrunePending(proj.Repo, proj.Path)
 	if len(pending) == 0 {
-		return nil
+		return nil, 0
 	}
 	covered := map[model.ObjectRef]bool{}
 	for _, e := range entries {
@@ -188,33 +190,71 @@ func (c *Coordinator) prunePending(proj project.ProjectInfo, entries []draft.Ent
 			covered[ref] = true
 		}
 	}
-	var missing []model.ObjectRef
+	var tells func(model.ObjectRef) bool
 	for _, ref := range pending {
-		if !covered[ref] {
-			missing = append(missing, ref)
+		if covered[ref] {
+			continue
+		}
+		if tells == nil {
+			tells = c.tells(id, proj)
+		}
+		if tells(ref) {
+			shown = append(shown, ref)
+		} else {
+			hidden++
 		}
 	}
-	return missing
+	return shown, hidden
+}
+
+// tells is what id may be told of proj's pending prune by name: of a tenant
+// project, its objects in the namespaces id sees (proj as id resolves it); of
+// the platform tier, everything to a platform reader and nothing otherwise.
+func (c *Coordinator) tells(id auth.Identity, proj project.ProjectInfo) func(model.ObjectRef) bool {
+	if proj.Name == project.PlatformName {
+		reads := c.authz != nil && c.authz.ReadsPlatform(id)
+		return func(model.ObjectRef) bool { return reads }
+	}
+	return func(ref model.ObjectRef) bool { return slices.Contains(proj.Namespaces, ref.Namespace) }
 }
 
 // pruneWarning words the pending prune for the PR body and the views that show
-// one sentence; the review lists every object from DraftView.Prune.
-func pruneWarning(refs []model.ObjectRef) string {
-	if len(refs) == 0 {
+// one sentence; the review lists every shown object from DraftView.Prune.
+// "Not shown here" holds for both readers: the caller's view, and a PR body a
+// merger reads, whose proposer may see less than they do.
+func pruneWarning(refs []model.ObjectRef, hidden int) string {
+	if len(refs) == 0 && hidden == 0 {
 		return ""
 	}
-	missing := make([]string, len(refs))
+	names := make([]string, len(refs))
 	for i, ref := range refs {
-		missing[i] = ref.Kind + " " + ref.Namespace + "/" + ref.Name
+		names[i] = ref.Kind + " " + qualified(ref.Namespace, ref.Name)
 	}
 	const maxShown = 4
-	more := ""
-	if len(missing) > maxShown {
-		more = fmt.Sprintf(" (+%d more)", len(missing)-maxShown)
-		missing = missing[:maxShown]
+	listed := ""
+	if len(names) > maxShown {
+		listed = fmt.Sprintf("%s (+%d more)", strings.Join(names[:maxShown], ", "), len(names)-maxShown)
+	} else {
+		listed = strings.Join(names, ", ")
 	}
-	return fmt.Sprintf("Running but not in git: %s%s. ArgoCD deletes them on the next merged change unless they are adopted first.",
-		strings.Join(missing, ", "), more)
+	switch {
+	case hidden > 0 && listed != "":
+		listed += fmt.Sprintf(", and %d more not shown here", hidden)
+	case hidden == 1:
+		listed = "1 object not shown here"
+	case hidden > 0:
+		listed = fmt.Sprintf("%d objects not shown here", hidden)
+	}
+	return fmt.Sprintf("Running but not in git: %s. ArgoCD deletes them on the next merged change unless they are adopted first.", listed)
+}
+
+// unacknowledged reports whether merging would now delete beyond what req
+// acknowledged: a shown object it does not name, or more hidden ones than it
+// counted. The review's yes is only as good as the set it was given.
+func unacknowledged(req model.ProposeRequest, shown []model.ObjectRef, hidden int) bool {
+	return hidden > req.PruneHidden || slices.ContainsFunc(shown, func(ref model.ObjectRef) bool {
+		return !slices.Contains(req.Prune, ref)
+	})
 }
 
 // entryRefs: what a draft entry speaks for. Manifest entries declare their

@@ -26,6 +26,7 @@ type allowAll struct{}
 func (allowAll) Authorize(auth.Identity, []Access) error { return nil }
 func (allowAll) ClusterScoped(string, string) bool       { return false }
 func (allowAll) ProjectNamespace(string) (bool, bool)    { return false, true }
+func (allowAll) ReadsPlatform(auth.Identity) bool        { return true }
 
 // rbac grants every access deny does not, recording what it was asked.
 type rbac struct {
@@ -35,6 +36,7 @@ type rbac struct {
 }
 
 func (*rbac) ClusterScoped(string, string) bool { return false }
+func (*rbac) ReadsPlatform(auth.Identity) bool  { return false }
 
 // ProjectNamespace reads the test projects' namespaces: alpha, beta, gamma.
 func (*rbac) ProjectNamespace(ns string) (bool, bool) {

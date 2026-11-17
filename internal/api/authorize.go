@@ -486,6 +486,23 @@ func (s *Server) Authorize(id auth.Identity, need []changeset.Access) error {
 	return nil
 }
 
+// ReadsPlatform implements changeset.Authorizer: canReadPlatform under id's
+// own token, off the cached reviews. Asked only while a platform merge would
+// prune something, so it adds no review to a quiet render.
+func (s *Server) ReadsPlatform(id auth.Identity) bool {
+	if s.clusterF == nil {
+		return false
+	}
+	c, err := s.clusterF.For(id.Token)
+	if err != nil {
+		return false
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), authorizeTimeout)
+	defer cancel()
+	ok, err := s.canReadPlatform(ctx, id, c)
+	return ok && err == nil
+}
+
 // weighAll weighs every access of need, each distinct one once, at most
 // authConcurrency at once: the ones denied, or the first weighing that
 // failed. A create the change pairs with a delete is a replace and stays a

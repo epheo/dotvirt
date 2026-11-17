@@ -289,3 +289,4 @@ type scopeOnly func(group, kind string) bool
 func (scopeOnly) Authorize(auth.Identity, []Access) error { return nil }
 func (f scopeOnly) ClusterScoped(group, kind string) bool { return f(group, kind) }
 func (scopeOnly) ProjectNamespace(string) (bool, bool)    { return false, true }
+func (scopeOnly) ReadsPlatform(auth.Identity) bool        { return false }

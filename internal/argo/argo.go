@@ -8,7 +8,9 @@ package argo
 import (
 	"context"
 	"fmt"
+	"path"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 
@@ -324,6 +326,25 @@ func appRepos(app map[string]any) []string {
 		}
 	}
 	return out
+}
+
+// sourcesDir reports whether one of app's sources is dir of the normalized
+// repo: projects in folders of one repo each have their own Application. ""
+// and "." are the repo root, as the ApplicationSet renders a root project.
+func sourcesDir(app map[string]any, repo, dir string) bool {
+	want := cleanDir(dir)
+	at := func(raw any) bool {
+		src, ok := raw.(map[string]any)
+		return ok && forge.NormalizeRepoURL(asString(src, "repoURL")) == repo && cleanDir(asString(src, "path")) == want
+	}
+	if src, ok, _ := unstructured.NestedFieldNoCopy(app, "spec", "source"); ok && at(src) {
+		return true
+	}
+	return slices.ContainsFunc(nestedSlice(app, "spec", "sources"), at)
+}
+
+func cleanDir(dir string) string {
+	return strings.TrimPrefix(path.Clean("/"+dir), "/")
 }
 
 // appRepo is the Application's canonical primary repoURL, the key tying an

@@ -46,10 +46,11 @@ type LiveSource interface {
 	Ready() bool
 }
 
-// PruneSource: what ArgoCD would prune for a repo, per Argo's OWN comparison.
-// The draft view relays it; re-deriving from git could diverge.
+// PruneSource: what ArgoCD would prune for the apps sourcing dir of repo, per
+// Argo's OWN comparison. The draft view relays it; re-deriving from git could
+// diverge.
 type PruneSource interface {
-	PrunePending(repo string, namespaces []string) []model.ObjectRef
+	PrunePending(repo, dir string) []model.ObjectRef
 }
 
 // InstancetypeReader reads one instancetype object under id's own token: the

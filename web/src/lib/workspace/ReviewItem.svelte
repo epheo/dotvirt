@@ -10,7 +10,7 @@
 	} from '#lib/api.js';
 	import { bytes, plural, quantityBytes } from '#lib/format.js';
 	import { action } from '#lib/resource.svelte.js';
-	import { drafts } from '#lib/state/drafts.svelte.js';
+	import { drafts, pruneTotal } from '#lib/state/drafts.svelte.js';
 	import Button from '#lib/components/Button.svelte';
 	import Card from '#lib/components/Card.svelte';
 	import ChangeList from '#lib/components/ChangeList.svelte';
@@ -86,7 +86,9 @@
 	// explicit yes the review sheet asks for, reset with the project.
 	let ack = $state(false);
 	const prune = $derived(lane?.prune ?? []);
-	const blocked = $derived(prune.length > 0 && !ack);
+	const pruneHidden = $derived(lane?.pruneHidden ?? 0);
+	const pruning = $derived(pruneTotal(lane) > 0);
+	const blocked = $derived(pruning && !ack);
 	$effect(() => {
 		project;
 		title = '';
@@ -97,12 +99,20 @@
 	async function propose() {
 		if (proposeOp.busy || blocked) return;
 		unstageOp.clear();
-		await proposeOp.run(async () => {
-			const r = await api.propose(project, title, message);
+		const ok = await proposeOp.run(async () => {
+			const r = await api.propose(
+				project,
+				title,
+				message,
+				pruning ? { prune, pruneHidden } : undefined,
+			);
 			onproposed({ ...r, title: title || lane?.defaultTitle });
 			title = '';
 			message = '';
 		});
+		// A refusal may be a prune that moved since the review: ask again on the
+		// re-read set.
+		if (!ok) ack = false;
 		// Success or failure, re-read: the push may have landed before an error.
 		drafts.refresh();
 	}
@@ -180,7 +190,9 @@
 <Card title="Propose {project}" meta={plural(count, 'staged change')}>
 	<div class="flex flex-col gap-3">
 		<GitOpsStepper stage="staged" />
-		{#if prune.length}<div class="text-[13px]"><PruneAck {prune} bind:ack /></div>{/if}
+		{#if pruning}<div class="text-[13px]">
+				<PruneAck {prune} hidden={pruneHidden} bind:ack />
+			</div>{/if}
 		<TextInput
 			bind:value={title}
 			suggest={lane?.defaultTitle}

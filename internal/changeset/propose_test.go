@@ -355,6 +355,42 @@ func TestProposeCreatesPR(t *testing.T) {
 	}
 }
 
+// The review's yes is enforced here, not only in the UI: a propose that does
+// not acknowledge everything the merge would delete is refused before the
+// forge hears of it, and passes once it does.
+func TestProposeRefusesAnUnacknowledgedPrune(t *testing.T) {
+	f := newProposeFixture(t,
+		when("GET", "/pulls", http.StatusOK, "[]"),
+		when("POST", "/pulls", http.StatusCreated, `{"number":1,"state":"open","html_url":"http://forge/pulls/1"}`),
+	)
+	f.proj.Namespaces = []string{"alpha"}
+	shown := model.ObjectRef{Kind: "VirtualMachine", Namespace: "alpha", Name: "stray"}
+	f.c.prune = fakePrune{shown, {Kind: "VirtualMachine", Namespace: "beta", Name: "hidden"}}
+	req := model.EditRequest{SourceFile: "web.yaml", VMEdit: model.VMEdit{SetLabels: map[string]string{"env": "prod"}}}
+	if _, err := f.c.StageEdit(f.id, f.proj, "alpha", "web", req); err != nil {
+		t.Fatalf("StageEdit: %v", err)
+	}
+	for _, ack := range []model.ProposeRequest{
+		{Title: "edit web"},
+		{Title: "edit web", Prune: []model.ObjectRef{shown}},
+		{Title: "edit web", PruneHidden: 1},
+	} {
+		if _, err := f.c.Propose(f.id, f.proj, ack); !errors.Is(err, model.ErrConflict) {
+			t.Fatalf("ack %+v: err = %v, want ErrConflict", ack, err)
+		}
+	}
+	f.mu.Lock()
+	sent := len(f.sent)
+	f.mu.Unlock()
+	if sent != 0 {
+		t.Fatalf("a refused propose reached the forge: %d calls", sent)
+	}
+	out, err := f.c.Propose(f.id, f.proj, model.ProposeRequest{Title: "edit web", Prune: []model.ObjectRef{shown}, PruneHidden: 1})
+	if err != nil || !webPR(out.PRURL, 1) {
+		t.Fatalf("acknowledged propose: %+v, %v; want the PR", out, err)
+	}
+}
+
 // A closed-not-merged PR on the reused branch is reopened, and its URL returned.
 func TestProposeReopensClosedPR(t *testing.T) {
 	f := newProposeFixture(t,

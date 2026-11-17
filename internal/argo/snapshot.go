@@ -281,22 +281,20 @@ func (s *Snapshot) ForeignApps(ownRepo string) map[string]bool {
 	return out
 }
 
-// PrunePending: what Argo itself would prune for the apps sourcing repo, within
-// namespaces (status.resources[].requiresPruning). Argo's comparison is the one
-// authority on what a sync deletes; re-deriving from git could drift from it.
+// PrunePending: what Argo itself would prune for the apps sourcing dir of repo
+// (status.resources[].requiresPruning), cluster-scoped objects included. Argo's
+// comparison is the one authority on what a sync deletes; re-deriving from git
+// could drift from it. Never narrowed to what a caller sees: what they may be
+// told is the caller's to filter, and a narrowed answer reads as a safe merge.
 // nil before the initial LIST.
-func (s *Snapshot) PrunePending(repo string, namespaces []string) []model.ObjectRef {
-	want := make(map[string]bool, len(namespaces))
-	for _, ns := range namespaces {
-		want[ns] = true
-	}
+func (s *Snapshot) PrunePending(repo, dir string) []model.ObjectRef {
 	own := forge.NormalizeRepoURL(repo)
 	if !s.synced.Done() || own == "" {
 		return nil
 	}
 	var out []model.ObjectRef
 	for _, u := range reflect.List(s.apps) {
-		if !slices.Contains(appRepos(u.Object), own) {
+		if !sourcesDir(u.Object, own, dir) {
 			continue
 		}
 		for _, raw := range nestedSlice(u.Object, "status", "resources") {
@@ -312,7 +310,7 @@ func (s *Snapshot) PrunePending(repo string, namespaces []string) []model.Object
 				Namespace: asString(res, "namespace"),
 				Name:      asString(res, "name"),
 			}
-			if ref.Kind == "" || ref.Name == "" || !want[ref.Namespace] {
+			if ref.Kind == "" || ref.Name == "" {
 				continue
 			}
 			out = append(out, ref)
