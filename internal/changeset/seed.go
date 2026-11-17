@@ -61,6 +61,7 @@ type seedState struct {
 	retryAt time.Time // after a failure, the next attempt's earliest time
 	pr      int       // the open offer, from the lane
 	prURL   string
+	head    string // the commit this process pushed for its open offer
 	err     string // the last failure, as a user may read it
 }
 
@@ -101,10 +102,19 @@ func (c *Coordinator) SeedTemplates(proj project.ProjectInfo, lane []model.Propo
 	}
 	c.seedMu.Lock()
 	st := c.seedFor(key)
-	if open != nil {
-		st.pr, st.prURL, st.err, st.decided = open.PRNumber, open.PRURL, "", true
-	} else {
+	switch {
+	case open == nil:
 		st.pr, st.prURL = 0, "" // merged or closed since
+	case st.head != "" && !seedMoved(open.Head, st.head):
+		st.pr, st.prURL, st.err, st.decided = open.PRNumber, open.PRURL, "", true
+	default:
+		// Its head is not one this process pushed, a restarted process
+		// knowing none: never shown as dotvirt's offer. A withdrawn offer,
+		// left open by a failed close, keeps saying it was withdrawn.
+		if !st.decided {
+			st.err = ""
+		}
+		st.pr, st.prURL, st.decided = 0, "", true
 	}
 	skip := st.queued || st.decided && st.err == ""
 	c.seedMu.Unlock()
@@ -207,7 +217,7 @@ func (c *Coordinator) offerSeed(repoURL, key string, ask bool) {
 	}
 	st.decided, st.err = true, ""
 	if pr.Number != 0 {
-		st.pr, st.prURL = pr.Number, c.forge.PullPage(repoURL, pr.Number)
+		st.pr, st.prURL, st.head = pr.Number, c.forge.PullPage(repoURL, pr.Number), pr.Head.Sha
 	}
 }
 
@@ -215,7 +225,8 @@ func (c *Coordinator) offerSeed(repoURL, key string, ask bool) {
 // starter files and the marker (one force push: whatever anyone else left on
 // it is dropped) and opens its PR as dotvirt's own account, whatever
 // pullRequests says. A PR from the seed branch in any state means the offer
-// was made, a declined one included: nothing to do.
+// was made, a declined one included: nothing to do. The PR returned carries
+// the head dotvirt pushed.
 func (c *Coordinator) proposeSeed(repoURL string, ask bool) (forge.PR, error) {
 	fc := c.forgeFor(repoURL)
 	if fc == nil {
@@ -251,13 +262,21 @@ func (c *Coordinator) proposeSeed(repoURL string, ask bool) (forge.PR, error) {
 	if err != nil {
 		return forge.PR{}, seedForgeError{err}
 	}
-	if pr.Head.Sha != "" && pr.Head.Sha != res.Hash {
+	if seedMoved(pr.Head.Sha, res.Hash) {
 		if _, cerr := fc.EditPR(pr.Number, forge.PREdit{State: "closed"}); cerr != nil {
 			log.Printf("changeset: starter templates PR #%d: close: %v", pr.Number, cerr)
 		}
 		return forge.PR{}, errSeedMoved
 	}
+	pr.Head.Sha = res.Hash // the forge may leave it out
 	return pr, nil
+}
+
+// seedMoved reports whether the offer's head, as the forge or the mirror
+// reports it, is not the commit dotvirt pushed. An unreported head ("") is no
+// evidence of a move: the forge may omit it, the mirror may not have fetched.
+func seedMoved(head, pushed string) bool {
+	return head != "" && head != pushed
 }
 
 // seedBody is the offer's PR description: what it adds and that declining

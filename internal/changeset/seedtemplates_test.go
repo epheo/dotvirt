@@ -22,16 +22,18 @@ import (
 const testSeedBranch = "dotvirt/proposed/_seed/starter-templates"
 
 // seedPRs is a PR plane that keeps each PR's head and base as created, can
-// refuse creates, and can answer a create with another head than was pushed.
+// refuse creates or closes, and can answer a create with another head than
+// was pushed.
 type seedPRs struct {
 	f *proposeFixture
 
-	mu      sync.Mutex
-	prs     []forge.PR
-	refuse  bool   // creates answer 403 with a forge message
-	movedTo string // creates report this head commit, as if the branch moved
-	lists   int
-	creates int
+	mu          sync.Mutex
+	prs         []forge.PR
+	refuse      bool   // creates answer 403 with a forge message
+	refuseClose bool   // closes answer 500
+	movedTo     string // creates report this head commit, as if the branch moved
+	lists       int
+	creates     int
 }
 
 func newSeedFixture(t *testing.T) (*proposeFixture, *seedPRs) {
@@ -53,6 +55,9 @@ func (p *seedPRs) route(m, path string) (int, string, bool) {
 		}
 		var edit forge.PREdit
 		_ = json.Unmarshal([]byte(p.f.lastBody()), &edit)
+		if edit.State == "closed" && p.refuseClose {
+			return http.StatusInternalServerError, `{"message":"try again"}`, true
+		}
 		if edit.State != "" {
 			p.prs[n-1].State = edit.State
 		}
@@ -349,6 +354,54 @@ func TestAnOfferWhoseBranchMovedIsClosed(t *testing.T) {
 	time.Sleep(50 * time.Millisecond)
 	if _, creates := prs.counts(); creates != 1 {
 		t.Errorf("a withdrawn offer was made again: %d creates", creates)
+	}
+}
+
+// A moved offer whose close failed stays open: the lane lists it, and the
+// Templates tab still says it was withdrawn, never shows it as the offer.
+func TestAMovedOfferLeftOpenIsNotShown(t *testing.T) {
+	f, prs := newSeedFixture(t)
+	foreign := "0123456789abcdef0123456789abcdef01234567"
+	prs.movedTo, prs.refuseClose = foreign, true
+	f.c.seedCreated(f.proj.Repo)
+	if all := prs.all(); len(all) != 1 || all[0].State != "open" {
+		t.Fatalf("want the offer left open by the failed close, got %+v", all)
+	}
+	openMirror(t, f)
+	// "" is the lane before the mirror fetched the branch.
+	for _, head := range []string{foreign, ""} {
+		f.c.SeedTemplates(f.proj, []model.Proposal{{Project: "p", PRNumber: 1, Branch: testSeedBranch, Seed: true, Head: head}})
+		seed, _ := f.c.TemplateSeed(f.proj)
+		if seed.PRNumber != 0 || !strings.Contains(seed.Error, "withdrew the offer") {
+			t.Errorf("lane head %q: want the withdrawal, not the PR, got %+v", head, seed)
+		}
+	}
+}
+
+// An open offer is shown only while its head is the commit this process
+// pushed: not once its branch moves, nor by a process that pushed nothing.
+func TestAnOfferIsShownOnlyOnItsPushedHead(t *testing.T) {
+	f, _ := newSeedFixture(t)
+	f.c.seedCreated(f.proj.Repo)
+	pushed := revParse(t, f.proj.Repo, testSeedBranch)
+	shown := func(head string) bool {
+		t.Helper()
+		f.c.SeedTemplates(f.proj, []model.Proposal{{Project: "p", PRNumber: 1, Branch: testSeedBranch, Seed: true, Head: head}})
+		seed, ok := f.c.TemplateSeed(f.proj)
+		if seed.Error != "" {
+			t.Errorf("lane head %q: an open offer reports %q", head, seed.Error)
+		}
+		return ok && seed.PRNumber == 1
+	}
+	if !shown(pushed) || !shown("") {
+		t.Fatal("the offer on its pushed head, or before the mirror fetched it, must be shown")
+	}
+	if shown("0123456789abcdef0123456789abcdef01234567") {
+		t.Error("an offer whose branch moved after it opened was shown")
+	}
+	f.c.seeds = nil
+	if shown(pushed) {
+		t.Error("a restarted process showed an offer it did not push")
 	}
 }
 
