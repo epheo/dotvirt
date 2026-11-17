@@ -199,7 +199,9 @@ owns one status condition; a phase that fails or waits records why there, so
    A credential under any name but `dotvirt-forge` is a cluster admin's to grant:
    the operator's own role names only its own Secrets. `ForgeCredentialReady` is
    False (`NotGranted`) until the Role and RoleBinding `dotvirt-forge-credential`
-   are in the install namespace; its message carries the commands, with the real
+   are in the install namespace. A cluster admin installs them from the console
+   (the [Admin objects](#admin-objects) banner's **Install**, owned by the CR so
+   they go with it), or with the commands the message carries, with the real
    names:
 
    ```sh
@@ -367,10 +369,18 @@ same render to download. Install applies the render under the admin's own token:
   defaults);
 - it is offered only when reviews say that token may read those, and read, create and
   patch every object an install may ask for (`pkg/adminobjects` allowlist);
+- besides the guard, an install whose `spec.forge.credentialsSecret` names an admin's
+  Secret (not `dotvirt-forge`, nor one the operator generates for itself) asks for
+  the forge credential's grant: Role and RoleBinding `dotvirt-forge-credential` in the
+  install namespace, get on that Secret (plus create and patch for a managed forge)
+  for the operator's account, owned by the Dotvirt resource; the operator renders the
+  same objects (one source) and watches them by name, so its forge steps go on at once;
 - it takes back any field someone changed since (a forced server-side apply): it
   exists to restore the render, which is why the banner says what differs first.
 
-Without the console, use the release's `install/guard.yaml`: derive each value from
+Without the console, use the release's `install/guard.yaml` for the guard (the forge
+credential's grant is the two kubectl commands `ForgeCredentialReady` carries; the
+template, which renders the guard for any install, leaves it out): derive each value from
 the cluster as its header shows (never copy one from the operator's status or
 conditions, which the operator writes), fill its placeholders and apply it with
 `kubectl apply --server-side --field-manager=dotvirt`. kubectl reports a
