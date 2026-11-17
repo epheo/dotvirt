@@ -167,8 +167,11 @@ func (fc *fakeCluster) serve(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		attrs := obj.(*authzv1.SelfSubjectAccessReview).Spec.ResourceAttributes
-		if fc.ssarFail != nil {
-			switch code := fc.ssarFail(attrs); code {
+		fc.mu.Lock()
+		ssarFail, readsVMs, ssar := fc.ssarFail, fc.readsVMs, fc.ssar
+		fc.mu.Unlock()
+		if ssarFail != nil {
+			switch code := ssarFail(attrs); code {
 			case 0:
 			case http.StatusUnauthorized:
 				writeStatus(w, code, metav1.StatusReasonUnauthorized)
@@ -179,9 +182,6 @@ func (fc *fakeCluster) serve(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		allow := bearer(r) == adminToken
-		fc.mu.Lock()
-		readsVMs, ssar := fc.readsVMs, fc.ssar
-		fc.mu.Unlock()
 		switch {
 		case readsVMs != nil && readsVMs(bearer(r), attrs.Namespace) && attrs.Verb == "get" && attrs.Resource == "namespaces":
 			allow = true

@@ -868,6 +868,12 @@ func (s *Server) authorNamespaces(ctx context.Context, id auth.Identity, c *clus
 			bound[ns] = true
 		}
 	}
+	// Before any goroutine starts, so these writes need no lock.
+	for _, ns := range nss {
+		if !bound[ns] {
+			set(ns, vmWide, anyWide)
+		}
+	}
 	var (
 		mu  sync.Mutex
 		wg  sync.WaitGroup
@@ -875,7 +881,6 @@ func (s *Server) authorNamespaces(ctx context.Context, id auth.Identity, c *clus
 	)
 	for _, ns := range nss {
 		if !bound[ns] {
-			set(ns, vmWide, anyWide)
 			continue
 		}
 		wg.Go(func() {
