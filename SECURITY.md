@@ -31,6 +31,14 @@ could become the install while none existed and receive its cluster-wide
 bindings. After upgrading, check that ClusterRoleBinding `dotvirt` names the
 namespace you installed in (operator README, Install namespace).
 
+Every image CI pushes is signed with sigstore, keyless under the workflow that built
+it, and also by a published key once one is committed. A cluster that enforces those
+signatures refuses a tampered dotvirt operator or console image before it runs; the
+operator README (Image signatures) gives the identities, `cosign verify`, and the
+OpenShift and Kubernetes policies. A signature proves only that dotvirt's own
+workflow built the image: it cannot vouch for that workflow's inputs or for who may
+push a release tag.
+
 ## Supported versions
 
 Only the latest released version is supported. dotvirt is pre-1.0 (`v1alpha1`); fixes
