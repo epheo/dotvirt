@@ -51,7 +51,15 @@ What the guard closes:
 - mounting anything over the console's binary or trust store: its volumes are its own,
   from the claim, ConfigMaps and Secret rendered or an admin chose, each mounted whole at
   its own path;
-- giving the forge any Secret but its admin password, by env, `envFrom` or volume;
+- giving the forge any Secret but its admin password, by env, `envFrom` or volume, or any
+  claim but its own;
+- giving the console any Secret it was not rendered with: the kubelet resolves any Secret
+  in the namespace a pod names, whatever the operator may read, and the console sends
+  some env out (the forge token, to the forge URL). Each Secret-backed env is pinned
+  whole, by env name, Secret and key: the console's own, the forge credential, and the
+  OIDC client secret an admin chose;
+- sending a forge credential an admin brought anywhere but the URL its Secret names;
+- binding the operator's claims to a volume, selector or data source of its choosing;
 - unmounting the console's token through its ServiceAccount;
 - leading the console's host anywhere but the console: its Service selects only the
   console's pods and port, its Route, Ingress or HTTPRoute leads only there, on the
@@ -92,8 +100,8 @@ What stays open:
 - Argo objects: AppProjects, Applications, the ArgoCD resource, `argocd-cm`,
   `argocd-rbac-cm` and `argocd-secret` reach Argo's own rights;
 - the forge's commands, and its exposures on hosts of its own: it holds no user token;
-- the Secrets the console reads by env: the operator writes those Secrets itself, so a
-  reference it steered reaches nothing a write could not;
+- a managed forge's URL: the operator runs that forge and mints its credential;
+- the storage class, size and access modes of the operator's claims;
 - where no ingress domain can be read (MicroShift) and `spec.ingress.host` is unset, the
   console's host is the one routers report for its Route when the guard is installed:
   one the operator chose for that Route before then, or none yet admitted, is what the

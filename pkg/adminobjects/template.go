@@ -20,6 +20,8 @@ var TemplateParams = Params{
 	BrandingConfigMap:  "${BRANDING_CONFIGMAP}",
 	MetricsCAConfigMap: "${METRICS_CA_CONFIGMAP}",
 	ForgeSecret:        "${FORGE_SECRET}",
+	OIDCSecret:         "${OIDC_SECRET}",
+	OIDCSecretKey:      "${OIDC_SECRET_KEY}",
 }
 
 // templateHeader says how to fill and apply the template, each value derived
@@ -83,6 +85,9 @@ const templateHeader = `# The dotvirt operator guard: admission policies boundin
 #   # The console's volumes an admin chose, and the forge credential Secret:
 #   export BRANDING_CONFIGMAP="$(spec branding.configMap)" METRICS_CA_CONFIGMAP="$(spec metrics.ca.name)"
 #   FORGE_SECRET="$(spec forge.credentialsSecret)"; export FORGE_SECRET="${FORGE_SECRET:-` + DefaultForgeSecret + `}"
+#   export FORGE_MANAGED="$( [ "$(spec forge.managed)" = true ] && echo true || echo false )"
+#   # The OIDC client secret an admin chose, if any:
+#   export OIDC_SECRET="$(spec auth.oidc.clientSecret.name)" OIDC_SECRET_KEY="$(spec auth.oidc.clientSecret.key)"
 #
 #   envsubst < guard.yaml | ` + ApplyCommand + ` -
 #
@@ -94,7 +99,8 @@ const templateHeader = `# The dotvirt operator guard: admission policies boundin
 #     -e "s|\${METRICS_URL}|$METRICS_URL|g" -e "s|\${METRICS_TENANCY_URL}|$METRICS_TENANCY_URL|g" \
 #     -e "s|\${METRICS_CA}|$METRICS_CA|g" -e "s|\${CONSOLE_HOST}|$CONSOLE_HOST|g" \
 #     -e "s|\${BRANDING_CONFIGMAP}|$BRANDING_CONFIGMAP|g" -e "s|\${METRICS_CA_CONFIGMAP}|$METRICS_CA_CONFIGMAP|g" \
-#     -e "s|\${FORGE_SECRET}|$FORGE_SECRET|g" guard.yaml | ` + ApplyCommand + ` -
+#     -e "s|\${FORGE_SECRET}|$FORGE_SECRET|g" -e "s|\${FORGE_MANAGED}|$FORGE_MANAGED|g" \
+#     -e "s|\${OIDC_SECRET}|$OIDC_SECRET|g" -e "s|\${OIDC_SECRET_KEY}|$OIDC_SECRET_KEY|g" guard.yaml | ` + ApplyCommand + ` -
 #
 # Every object carries the label app.kubernetes.io/part-of=dotvirt-operator-guard.
 #
@@ -106,7 +112,7 @@ const templateHeader = `# The dotvirt operator guard: admission policies boundin
 func Template() ([]byte, error) {
 	var b bytes.Buffer
 	b.WriteString(templateHeader)
-	for _, o := range guard(TemplateParams, "${FORGE_INSECURE_TLS}", Metrics{URL: "${METRICS_URL}", TenancyURL: "${METRICS_TENANCY_URL}", CA: "${METRICS_CA}"}) {
+	for _, o := range guard(TemplateParams, "${FORGE_INSECURE_TLS}", "${FORGE_MANAGED}", Metrics{URL: "${METRICS_URL}", TenancyURL: "${METRICS_TENANCY_URL}", CA: "${METRICS_CA}"}) {
 		y, err := yaml.Marshal(o.Object.Object)
 		if err != nil {
 			return nil, err

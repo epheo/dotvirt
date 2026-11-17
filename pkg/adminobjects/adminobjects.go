@@ -62,6 +62,12 @@ type Params struct {
 	// an admin chose for the console (spec.branding.configMap,
 	// spec.metrics.ca.name, ForgeSecret).
 	BrandingConfigMap, MetricsCAConfigMap, ForgeSecret string
+	// OIDCSecret and OIDCSecretKey are spec.auth.oidc.clientSecret.
+	OIDCSecret, OIDCSecretKey string
+	// ForgeManaged is spec.forge.managed: a forge the operator runs, whose
+	// credential it mints. Otherwise the credential is an admin's, and the
+	// console sends it only to the URL its Secret names.
+	ForgeManaged bool
 }
 
 // Valid reports whether every pin is known and well formed: a render missing
@@ -71,7 +77,7 @@ func (p Params) Valid() bool {
 	return ValidUsername(p.Operator) && len(validation.IsDNS1123Label(p.Namespace)) == 0 &&
 		len(validation.IsDNS1123Label(p.ArgoNamespace)) == 0 && len(validation.IsDNS1123Subdomain(p.ArgoController)) == 0 &&
 		len(validation.IsDNS1123Subdomain(p.ForgeSecret)) == 0 && optional(p.BrandingConfigMap) && optional(p.MetricsCAConfigMap) &&
-		optional(p.ConsoleHost)
+		optional(p.ConsoleHost) && optional(p.OIDCSecret) && (p.OIDCSecretKey == "" || len(validation.IsConfigMapKey(p.OIDCSecretKey)) == 0)
 }
 
 // OperatorNamespace is the namespace of p.Operator's ServiceAccount.

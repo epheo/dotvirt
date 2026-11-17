@@ -201,5 +201,32 @@ func ForgeSecret(credentialsSecret string) string {
 }
 
 // ForgeAdminSecret is the only Secret the forge's pod reads: the bot
-// account's password its bootstrap sets.
-const ForgeAdminSecret = "dotvirt-forgejo-admin"
+// account's password its bootstrap sets. ForgeClaim is the only claim it
+// mounts.
+const (
+	ForgeAdminSecret = "dotvirt-forgejo-admin"
+	ForgeClaim       = "dotvirt-forgejo-data"
+)
+
+// The console's own Secrets, which the operator generates.
+const (
+	SessionSecret = "dotvirt-session"
+	OAuthSecret   = "dotvirt-oauth"
+	AppsetSecret  = "dotvirt-appset-plugin"
+	WebhookSecret = "dotvirt-webhook"
+)
+
+// ConsoleSecretEnv are the env the console takes from Secrets, as rendered,
+// each as its env name, Secret and key: its own Secrets, the forge
+// credential (ForgeSecret), and the OIDC client secret an admin chose.
+func ConsoleSecretEnv(forgeSecret, oidcSecret, oidcKey string) [][3]string {
+	return [][3]string{
+		{"DOTVIRT_SESSION_SECRET", SessionSecret, "secret"},
+		{"DOTVIRT_OAUTH_CLIENT_SECRET", OAuthSecret, "clientSecret"},
+		{"DOTVIRT_APPSET_PLUGIN_TOKEN", AppsetSecret, "token"},
+		{"DOTVIRT_WEBHOOK_SECRET", WebhookSecret, "secret"},
+		{"DOTVIRT_GIT_USERNAME", forgeSecret, "username"},
+		{"DOTVIRT_FORGE_URL", forgeSecret, "url"},
+		{"DOTVIRT_OIDC_CLIENT_SECRET", oidcSecret, oidcKey},
+	}
+}

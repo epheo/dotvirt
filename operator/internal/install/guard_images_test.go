@@ -38,6 +38,11 @@ func TestRenderMatchesTheGuardsPins(t *testing.T) {
 		"forge Secret":       {defaultForgeSecret, adminobjects.DefaultForgeSecret},
 		"forge admin Secret": {ForgejoAdminSecret, adminobjects.ForgeAdminSecret},
 		"branding path":      {brandingMountPath, adminobjects.BrandingMountPath},
+		"forge claim":        {forgejoPVCName, adminobjects.ForgeClaim},
+		"session Secret":     {SessionSecretName, adminobjects.SessionSecret},
+		"OAuth Secret":       {OAuthSecretName, adminobjects.OAuthSecret},
+		"appset Secret":      {AppsetSecretName, adminobjects.AppsetSecret},
+		"webhook Secret":     {WebhookSecretName, adminobjects.WebhookSecret},
 	} {
 		if c[0] != c[1] {
 			t.Errorf("%s: install %q, guard %q", name, c[0], c[1])
@@ -58,7 +63,22 @@ func TestRenderMatchesTheGuardsVolumes(t *testing.T) {
 	for _, v := range adminobjects.ConsoleVolumes("brand", "metrics-ca", "creds") {
 		want[v.Name] = v
 	}
+	dv.Spec.Auth.OIDC = &dotvirtv1alpha1.OIDCSpec{IssuerURL: "https://idp.example", ClientID: "dotvirt",
+		ClientSecret: &dotvirtv1alpha1.SecretKeyRef{Name: "oidc", Key: "client-secret"}}
 	pod := Deployment(dv, "argocd", nil).Spec.Template.Spec
+	secretEnv := adminobjects.ConsoleSecretEnv("creds", "oidc", "client-secret")
+	for _, sso := range []bool{false, true} {
+		sd := dv.DeepCopy()
+		if sso {
+			sd.Spec.Auth.OIDC = nil
+			sd.Spec.Auth.OpenShiftSSO = new(true)
+		}
+		for _, e := range Deployment(sd, "argocd", nil).Spec.Template.Spec.Containers[0].Env {
+			if r := e.ValueFrom; r != nil && r.SecretKeyRef != nil && !slices.Contains(secretEnv, [3]string{e.Name, r.SecretKeyRef.Name, r.SecretKeyRef.Key}) {
+				t.Errorf("console env %s from %s/%s is not in the guard's %v", e.Name, r.SecretKeyRef.Name, r.SecretKeyRef.Key, secretEnv)
+			}
+		}
+	}
 	if len(pod.Volumes) != len(want) {
 		t.Errorf("rendered %d volumes, the guard knows %d", len(pod.Volumes), len(want))
 	}

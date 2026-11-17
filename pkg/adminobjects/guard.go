@@ -57,12 +57,16 @@ const PlatformSyncAccount = "dotvirt-platform-sync"
 // username condition runs first, so every other caller's write costs one
 // string comparison.
 func Guard(p Params) []Object {
-	return guard(p, strconv.FormatBool(p.InsecureTLS), p.Metrics)
+	return guard(p, strconv.FormatBool(p.InsecureTLS), strconv.FormatBool(p.ForgeManaged), p.Metrics)
 }
 
 // guard renders with insecure, the CEL literal for p.InsecureTLS, which the
 // release template leaves a placeholder.
-func guard(p Params, insecure string, metrics Metrics) []Object {
+func guard(p Params, insecure, managed string, metrics Metrics) []Object {
+	var secretEnv []string
+	for _, e := range ConsoleSecretEnv(p.ForgeSecret, p.OIDCSecret, p.OIDCSecretKey) {
+		secretEnv = append(secretEnv, e[0]+"/"+e[1]+"/"+e[2])
+	}
 	volumes, mounts := consoleVolumes(p)
 	operator := `request.userInfo.username == ` + quote(p.Operator)
 	policies := []*admissionregistrationv1.ValidatingAdmissionPolicy{
@@ -82,7 +86,7 @@ func guard(p Params, insecure string, metrics Metrics) []Object {
 				`!has(object.automountServiceAccountToken) || object.automountServiceAccountToken`,
 				"the operator keeps the console's ServiceAccount token mounted"),
 		}),
-		policy(GuardDeploymentsName, rules("apps", "deployments"), operator, []admissionregistrationv1.Validation{
+		policy(GuardDeploymentsName, append(rules("apps", "deployments"), rules("", "persistentvolumeclaims")...), operator, append(only("deployments", []admissionregistrationv1.Validation{
 			deny(`request.namespace == `+quote(p.Namespace),
 				"the operator runs Deployments only in "+p.Namespace),
 			deny(`object.metadata.name == `+quote(ConsoleDeployment)+` ? `+pod+`.serviceAccountName == `+quote(ConsoleAccount)+
@@ -136,6 +140,22 @@ func guard(p Params, insecure string, metrics Metrics) []Object {
 				`(has(e.valueFrom.secretKeyRef.name) && e.valueFrom.secretKeyRef.name == `+quote(ForgeAdminSecret)+`)))`)+` && `+
 				`(!has(`+pod+`.volumes) || `+pod+`.volumes.all(v, !has(v.secret) && !has(v.projected) && !has(v.csi))))`,
 				"the operator gives the forge no Secret but its own admin password"),
+			deny(`object.metadata.name != `+quote(ForgeDeployment)+` || !has(`+pod+`.volumes) || `+pod+`.volumes.all(v, !has(v.ephemeral) && `+
+				`(!has(v.persistentVolumeClaim) || v.persistentVolumeClaim.claimName == `+quote(ForgeClaim)+`))`,
+				"the operator gives the forge only its own claim"),
+			// The kubelet resolves any Secret in the namespace a pod names,
+			// whatever the operator may read: an env the console sends out
+			// (the forge token, to the forge URL) could carry another Secret.
+			deny(`object.metadata.name != `+quote(ConsoleDeployment)+` || `+pod+`.containers.all(c, !has(c.env) || c.env.all(e, `+
+				`!has(e.valueFrom) || !has(e.valueFrom.secretKeyRef) || (has(e.valueFrom.secretKeyRef.name) && `+
+				`(e.name + "/" + e.valueFrom.secretKeyRef.name + "/" + e.valueFrom.secretKeyRef.key) in `+list(secretEnv...)+`)))`,
+				"the operator gives the console only its own Secrets and the ones an admin chose, each under its rendered env name and key"),
+			// A credential an admin brought goes only to the forge its Secret
+			// names; a managed forge's the operator mints itself.
+			deny(`object.metadata.name != `+quote(ConsoleDeployment)+` || `+managed+` || `+pod+`.containers.all(c, `+
+				`(!has(c.args) || c.args.all(a, !`+flagForms("forge-url")+`)) && `+
+				`(!has(c.env) || c.env.all(e, e.name != "DOTVIRT_FORGE_URL" || (has(e.valueFrom) && has(e.valueFrom.secretKeyRef)))))`,
+				"the operator sends a forge credential an admin brought only to the forge its Secret names"),
 			deny(`!(has(`+pod+`.hostNetwork) && `+pod+`.hostNetwork) && !(has(`+pod+`.hostPID) && `+pod+`.hostPID) && !(has(`+pod+`.hostIPC) && `+pod+`.hostIPC)`,
 				"the operator runs no Deployment in the host network, PID or IPC namespace"),
 			deny(`!has(`+pod+`.volumes) || `+pod+`.volumes.all(v, !has(v.hostPath))`,
@@ -158,7 +178,16 @@ func guard(p Params, insecure string, metrics Metrics) []Object {
 			deny(eachContainer(`(has(c.securityContext) && has(c.securityContext.seccompProfile)) ? c.securityContext.seccompProfile.type in ["RuntimeDefault", "Localhost"] : `+
 				`(has(`+pod+`.securityContext) && has(`+pod+`.securityContext.seccompProfile) && `+pod+`.securityContext.seccompProfile.type in ["RuntimeDefault", "Localhost"])`),
 				"the operator runs every container with a RuntimeDefault or Localhost seccomp profile"),
-		}),
+		}), only("persistentvolumeclaims", []admissionregistrationv1.Validation{
+			// A claim the operator binds to a volume, a selector or a data
+			// source of its choosing hands the console or the forge data it
+			// picked, or copies another claim's. The binder sets volumeName
+			// once it binds; the apiserver keeps the others immutable.
+			deny(`!has(object.spec.selector) && !has(object.spec.dataSource) && !has(object.spec.dataSourceRef) && `+
+				`(request.operation == "CREATE" ? (!has(object.spec.volumeName) || object.spec.volumeName == "") : `+
+				unchanged("object.spec.volumeName", "oldObject.spec.volumeName")+`)`,
+				"the operator binds its claims to no volume, selector or data source of its choosing"),
+		})...)),
 		policy(GuardBindingsName, append(rules("rbac.authorization.k8s.io", "clusterrolebindings"), rules("rbac.authorization.k8s.io", "rolebindings")...), operator, []admissionregistrationv1.Validation{
 			deny(`request.resource.resource == "clusterrolebindings" ? object.metadata.name in `+list(slices.Sorted(mapKeys(clusterBindings(p)))...)+
 				` : (object.metadata.name in `+list(slices.Sorted(mapKeys(roleBindings(p)))...)+` && request.namespace == `+quote(p.ArgoNamespace)+`)`,
@@ -187,7 +216,7 @@ func guard(p Params, insecure string, metrics Metrics) []Object {
 	}
 	purpose := map[string]string{
 		GuardSecretsName:     "Bounds the operator's Secrets and accounts: no Secret outside " + p.Namespace + " and " + p.ArgoNamespace + ", never a ServiceAccount token, the console's token mounted",
-		GuardDeploymentsName: "Bounds the operator's Deployments: the console and the forge only, in " + p.Namespace + ", with their own accounts, images, commands, volumes, Secrets and token, unprivileged and off the host",
+		GuardDeploymentsName: "Bounds the operator's Deployments and claims: the console and the forge only, in " + p.Namespace + ", with their own accounts, images, commands, volumes, Secrets and token, unprivileged and off the host; claims bound to nothing of its choosing",
 		GuardBindingsName:    "Bounds the operator's RBAC bindings: only the ones it renders, to their own roles and rendered subjects",
 		GuardInstallName:     "Bounds the operator's writes to its install: its finalizers only, never the spec an admin wrote",
 		GuardFrontDoorName:   "Bounds the console's front door: its Service and exposure lead to the console on the host an admin chose, nothing else claims that host, no Service leaves the cluster",
@@ -229,11 +258,15 @@ func guard(p Params, insecure string, metrics Metrics) []Object {
 // OpenShift SSO client the console registers itself is derived from admin
 // data, not from these); and the OIDC issuer, which can only phish
 // (SECURITY.md keeps it open).
+// flagForms is argument a being flag, in any form Go's flag package parses:
+// -flag, --flag, -flag=value, --flag=value.
+func flagForms(flag string) string {
+	return `(a == ` + quote("-"+flag) + ` || a == ` + quote("--"+flag) +
+		` || a.startsWith(` + quote("-"+flag+"=") + `) || a.startsWith(` + quote("--"+flag+"=") + `))`
+}
+
 func consoleSettings(m Metrics, insecure string) string {
-	forms := func(flag string) string {
-		return `(a == ` + quote("-"+flag) + ` || a == ` + quote("--"+flag) +
-			` || a.startsWith(` + quote("-"+flag+"=") + `) || a.startsWith(` + quote("--"+flag+"=") + `))`
-	}
+	forms := flagForms
 	never := func(flag, env string) string {
 		return `(!has(c.args) || c.args.all(a, !` + forms(flag) + `)) && (!has(c.env) || c.env.all(e, e.name != ` + quote(env) + `))`
 	}
@@ -441,6 +474,16 @@ func rule(group, version, resource string, ops ...admissionregistrationv1.Operat
 
 // unchanged is the field at path in object equal to the one in oldObject,
 // absent in both included.
+// only applies validations to resource alone, in a policy that matches more.
+func only(resource string, validations []admissionregistrationv1.Validation) []admissionregistrationv1.Validation {
+	out := make([]admissionregistrationv1.Validation, len(validations))
+	for i, v := range validations {
+		v.Expression = `request.resource.resource != ` + quote(resource) + ` || (` + v.Expression + `)`
+		out[i] = v
+	}
+	return out
+}
+
 func unchanged(path, oldPath string) string {
 	return `has(` + path + `) == has(` + oldPath + `) && (!has(` + path + `) || ` + path + ` == ` + oldPath + `)`
 }

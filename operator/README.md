@@ -138,8 +138,13 @@ owns one status condition; a phase that fails or waits records why there, so
      process namespace. Its volumes are its own (drafts claim, CA ConfigMaps, forge
      credential Secret, and the branding and metrics CA ConfigMaps an admin chose), each
      mounted whole at its own path: nothing over its binary or the system trust store.
-     The forge's pods never carry the console's `app` label and read no Secret but their
-     admin password. The console's arguments stay free, so a release
+     Its Secret-backed env is pinned by env name, Secret and key: its own Secrets, the
+     forge credential and the OIDC client secret an admin chose; a forge credential an
+     admin brought (`spec.forge.managed` false) goes only to the URL its Secret names.
+     The forge's pods never carry the console's `app` label, read no Secret but their
+     admin password, and mount no claim but their own. The operator's claims bind to no
+     volume, selector or data source of its choosing (the binder's `volumeName` stays as
+     it set it). The console's arguments stay free, so a release
      may add flags, except the settings that send users' tokens or its pages elsewhere,
      by flag or env: the metrics endpoints and CA only as rendered from `spec.metrics`,
      TLS verification off only with `spec.forge.insecureTLS`, and never a kubeconfig or
@@ -179,8 +184,9 @@ owns one status condition; a phase that fails or waits records why there, so
    username check first. Best-effort: never a halt, never `Available`. A new release
    in the same repositories passes as it is, new console flags included; an admin
    changing `spec.image`, `spec.argocd`, `spec.forge.insecureTLS`, `spec.metrics`,
-   `spec.ingress.host`, `spec.branding.configMap`, `spec.forge.credentialsSecret`, the
-   operator's `RELATED_IMAGE_*` or the namespace makes them `Outdated`, and until re-installed they refuse the operator's
+   `spec.ingress.host`, `spec.branding.configMap`, `spec.forge.credentialsSecret`,
+   `spec.forge.managed`, `spec.auth.oidc.clientSecret`, the operator's `RELATED_IMAGE_*`
+   or the namespace makes them `Outdated`, and until re-installed they refuse the operator's
    writes that need the change.
 3. **Forge** (`ForgeReady`): converges the trust anchors (below) first, then, with
    `spec.forge.managed`, stands up the eval-grade Forgejo (single pod, SQLite, a PVC

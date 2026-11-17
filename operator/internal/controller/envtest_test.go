@@ -24,6 +24,7 @@ import (
 	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	apimeta "k8s.io/apimachinery/pkg/api/meta"
+	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -521,6 +522,19 @@ func TestEnvtest(t *testing.T) {
 			return corev1.EnvVar{Name: "LEAK", ValueFrom: &corev1.EnvVarSource{SecretKeyRef: &corev1.SecretKeySelector{
 				LocalObjectReference: corev1.LocalObjectReference{Name: secret}, Key: "secret"}}}
 		}
+		fromSecret := func(env, secret, key string) corev1.EnvVar {
+			return corev1.EnvVar{Name: env, ValueFrom: &corev1.EnvVarSource{SecretKeyRef: &corev1.SecretKeySelector{
+				LocalObjectReference: corev1.LocalObjectReference{Name: secret}, Key: key}}}
+		}
+		// withEnv sets env on the first container, in place of any of its names.
+		withEnv := func(env ...corev1.EnvVar) func(*appsv1.Deployment) {
+			return func(d *appsv1.Deployment) {
+				c := &d.Spec.Template.Spec.Containers[0]
+				c.Env = append(slices.DeleteFunc(slices.Clone(c.Env), func(x corev1.EnvVar) bool {
+					return slices.ContainsFunc(env, func(e corev1.EnvVar) bool { return e.Name == x.Name })
+				}), env...)
+			}
+		}
 		for name, c := range map[string]struct {
 			d    func() *appsv1.Deployment
 			edit func(*appsv1.Deployment)
@@ -598,6 +612,26 @@ func TestEnvtest(t *testing.T) {
 				c := &d.Spec.Template.Spec.Containers[0]
 				c.Env = append(c.Env, corev1.EnvVar{Name: "DOTVIRT_UI_ORIGIN", Value: "https://evil.example"})
 			}},
+			// An env the console sends out, carrying a Secret it was never given.
+			"the console sending another Secret as its forge token": {app, withEnv(
+				fromSecret("DOTVIRT_FORGE_TOKEN", "admin-oidc-client", "clientSecret"),
+				corev1.EnvVar{Name: "DOTVIRT_FORGE_URL", Value: "https://evil.example"})},
+			"the console reading its own Secret under another env": {app, withEnv(fromSecret("DOTVIRT_GIT_USERNAME", adminobjects.OAuthSecret, "clientSecret"))},
+			"the console reading another key of its own Secret":    {app, withEnv(fromSecret("DOTVIRT_SESSION_SECRET", adminobjects.SessionSecret, "other"))},
+			// The admin brings the forge credential here (spec.forge.managed false).
+			"the console sending an admin's forge credential elsewhere by env": {app, withEnv(corev1.EnvVar{Name: "DOTVIRT_FORGE_URL", Value: "https://evil.example"})},
+			"the console sending an admin's forge credential elsewhere by flag": {app, func(d *appsv1.Deployment) {
+				c := &d.Spec.Template.Spec.Containers[0]
+				c.Args = append(slices.Clone(c.Args), "-forge-url=https://evil.example")
+			}},
+			"the forge on the console's drafts": {forge, withVolume(claimVol("data", adminobjects.DraftsClaim), corev1.VolumeMount{Name: "data", MountPath: "/var/lib/gitea"})},
+			"the forge with another claim":      {forge, withVolume(claimVol("more", "other"), corev1.VolumeMount{Name: "more", MountPath: "/more"})},
+			"the forge with an ephemeral claim": {forge, withVolume(corev1.Volume{Name: "more", VolumeSource: corev1.VolumeSource{Ephemeral: &corev1.EphemeralVolumeSource{
+				VolumeClaimTemplate: &corev1.PersistentVolumeClaimTemplate{Spec: corev1.PersistentVolumeClaimSpec{
+					AccessModes: []corev1.PersistentVolumeAccessMode{corev1.ReadWriteOnce},
+					DataSource:  &corev1.TypedLocalObjectReference{Kind: "PersistentVolumeClaim", Name: adminobjects.DraftsClaim},
+					Resources:   corev1.VolumeResourceRequirements{Requests: corev1.ResourceList{corev1.ResourceStorage: resource.MustParse("1Gi")}},
+				}}}}}, corev1.VolumeMount{Name: "more", MountPath: "/more"})},
 			"the console with a ConfigMap over its binary": {app, withVolume(configMapVol("evil", "evil"),
 				corev1.VolumeMount{Name: "evil", MountPath: "/dotvirt", SubPath: "dotvirt"})},
 			"the console trusting the operator's certificates": {app, withVolume(configMapVol("evil", "evil"),
@@ -731,6 +765,54 @@ func TestEnvtest(t *testing.T) {
 			c.edit(d)
 			if err := dryApply(d); !refused(err) {
 				t.Errorf("operator's Deployment %s: err=%v, want the guard's Forbidden", name, err)
+			}
+		}
+		// The forge credential an admin brings, read from its Secret as rendered;
+		// a managed forge's literal URL is not that.
+		byo := dv.DeepCopy()
+		byo.Spec.Forge.CredentialsSecret = adminobjects.DefaultForgeSecret
+		managed := dv.DeepCopy()
+		managed.Spec.Forge.Managed, managed.Spec.Forge.URL = true, "https://forge.example"
+		if err := dryApply(install.Deployment(byo, "argocd", nil)); err != nil {
+			t.Errorf("the console with an admin's forge credential: %v", err)
+		}
+		if err := dryApply(install.Deployment(managed, "argocd", nil)); !refused(err) {
+			t.Errorf("a managed forge's URL while an admin brings the credential: err=%v, want the guard's Forbidden", err)
+		}
+
+		// Claims: as rendered, and bound to nothing of the operator's choosing.
+		// Elsewhere they are new, so the apiserver's immutability does not
+		// answer first.
+		claim := func(namespace string, edit func(*corev1.PersistentVolumeClaimSpec)) *corev1.PersistentVolumeClaim {
+			c := install.DraftsPVC(dv)
+			c.Namespace = namespace
+			if edit != nil {
+				edit(&c.Spec)
+			}
+			return c
+		}
+		for name, o := range map[string]client.Object{
+			"the drafts claim": claim(dv.Namespace, nil), "a new drafts claim": claim("team-a", nil), "the forge's claim": install.ForgejoPVC(dv),
+		} {
+			if err := dryApply(o); err != nil {
+				t.Errorf("%s as rendered: %v", name, err)
+			}
+		}
+		for name, o := range map[string]client.Object{
+			"the drafts claim bound to a volume of its choosing": claim(dv.Namespace, func(c *corev1.PersistentVolumeClaimSpec) { c.VolumeName = "pv-evil" }),
+			"a new claim bound to a volume":                      claim("team-a", func(c *corev1.PersistentVolumeClaimSpec) { c.VolumeName = "pv-evil" }),
+			"a new claim selecting volumes": claim("team-a", func(c *corev1.PersistentVolumeClaimSpec) {
+				c.Selector = &metav1.LabelSelector{MatchLabels: map[string]string{"tenant": "b"}}
+			}),
+			"a new claim copying another": claim("team-a", func(c *corev1.PersistentVolumeClaimSpec) {
+				c.DataSource = &corev1.TypedLocalObjectReference{Kind: "PersistentVolumeClaim", Name: adminobjects.ForgeClaim}
+			}),
+			"a new claim populated from another": claim("team-a", func(c *corev1.PersistentVolumeClaimSpec) {
+				c.DataSourceRef = &corev1.TypedObjectReference{Kind: "PersistentVolumeClaim", Name: adminobjects.ForgeClaim}
+			}),
+		} {
+			if err := dryApply(o); !refused(err) {
+				t.Errorf("operator's %s: err=%v, want the guard's Forbidden", name, err)
 			}
 		}
 
@@ -980,8 +1062,15 @@ func TestEnvtest(t *testing.T) {
 			corev1.EnvVar{Name: "DOTVIRT_METRICS_CA", Value: chosen.Metrics.CA})
 		elsewhere := metrics.DeepCopy()
 		elsewhere.Spec.Template.Spec.Containers[0].Args = append(elsewhere.Spec.Template.Spec.Containers[0].Args, "-metrics-url=https://evil.example")
-		// The branding ConfigMap an admin chose.
+		// The branding ConfigMap and the OIDC client secret an admin chose: the
+		// secret reaches the console under its own env only.
 		chosen.BrandingConfigMap = "brand"
+		chosen.OIDCSecret, chosen.OIDCSecretKey = "admin-oidc", "client-secret"
+		oidc := app()
+		withEnv(fromSecret("DOTVIRT_OIDC_CLIENT_SECRET", "admin-oidc", "client-secret"))(oidc)
+		oidcElsewhere := app()
+		withEnv(fromSecret("DOTVIRT_FORGE_TOKEN", "admin-oidc", "client-secret"),
+			fromSecret("DOTVIRT_FORGE_URL", adminobjects.DefaultForgeSecret, "url"))(oidcElsewhere)
 		branded := app()
 		withVolume(configMapVol("branding", "brand"), corev1.VolumeMount{Name: "branding", MountPath: adminobjects.BrandingMountPath})(branded)
 		forgeRoute := func(hostnames ...any) *unstructured.Unstructured {
@@ -1010,20 +1099,22 @@ func TestEnvtest(t *testing.T) {
 			t.Errorf("metrics queries beside the admin's choice: err=%v, want the guard's Forbidden", err)
 		}
 		for name, o := range map[string]client.Object{
-			"the console branded from the admin's ConfigMap": branded,
-			"the forge's Ingress on its own host":            forgeIngress("forge.example", nil),
-			"the forge's HTTPRoute on its own host":          forgeRoute("forge.example"),
-			"the console's Route on its host":                route(install.AppName, chosen.ConsoleHost, nil),
-			"the console's Ingress on its host":              ingress(install.AppName, nil),
-			"the console's HTTPRoute on its host":            httpRoute(install.AppName, nil),
+			"the console branded from the admin's ConfigMap":  branded,
+			"the console with the admin's OIDC client secret": oidc,
+			"the forge's Ingress on its own host":             forgeIngress("forge.example", nil),
+			"the forge's HTTPRoute on its own host":           forgeRoute("forge.example"),
+			"the console's Route on its host":                 route(install.AppName, chosen.ConsoleHost, nil),
+			"the console's Ingress on its host":               ingress(install.AppName, nil),
+			"the console's HTTPRoute on its host":             httpRoute(install.AppName, nil),
 		} {
 			if err := dryApply(o); err != nil {
 				t.Errorf("%s: %v", name, err)
 			}
 		}
 		for name, o := range map[string]client.Object{
-			"the forge's Ingress for every host":                        forgeIngress("", nil),
-			"the forge's Ingress on a wildcard over the console's host": forgeIngress("*.example", nil),
+			"the console sending the admin's OIDC client secret as its forge token": oidcElsewhere,
+			"the forge's Ingress for every host":                                    forgeIngress("", nil),
+			"the forge's Ingress on a wildcard over the console's host":             forgeIngress("*.example", nil),
 			"the forge's Ingress with a default backend": forgeIngress("forge.example", func(i *networkingv1.Ingress) {
 				i.Spec.DefaultBackend = i.Spec.Rules[0].HTTP.Paths[0].Backend.DeepCopy()
 			}),
@@ -1100,6 +1191,7 @@ func TestEnvtest(t *testing.T) {
 			"${ARGO_CONTROLLER}": "argocd-application-controller", "${SPEC_IMAGE}": "", "${FORGE_INSECURE_TLS}": "false",
 			"${RELATED_IMAGE_DOTVIRT}": "", "${RELATED_IMAGE_FORGEJO}": "", "${METRICS_URL}": "", "${METRICS_TENANCY_URL}": "", "${METRICS_CA}": "",
 			"${CONSOLE_HOST}": "", "${BRANDING_CONFIGMAP}": "", "${METRICS_CA_CONFIGMAP}": "", "${FORGE_SECRET}": adminobjects.DefaultForgeSecret,
+			"${FORGE_MANAGED}": "false", "${OIDC_SECRET}": "", "${OIDC_SECRET_KEY}": "",
 		} {
 			filled = strings.ReplaceAll(filled, k, v)
 		}

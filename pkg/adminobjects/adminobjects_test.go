@@ -58,7 +58,7 @@ func TestGuardShape(t *testing.T) {
 	}
 	match := map[string][][2]string{
 		GuardSecretsName:     {{"", "secrets"}, {"", "serviceaccounts"}},
-		GuardDeploymentsName: {{"apps", "deployments"}},
+		GuardDeploymentsName: {{"apps", "deployments"}, {"", "persistentvolumeclaims"}},
 		GuardBindingsName:    {{"rbac.authorization.k8s.io", "clusterrolebindings"}, {"rbac.authorization.k8s.io", "rolebindings"}},
 		GuardInstallName:     {{"dotvirt.io", "dotvirts"}},
 		GuardFrontDoorName: {{"", "services"}, {"route.openshift.io", "routes"}, {"networking.k8s.io", "ingresses"},
@@ -103,6 +103,9 @@ func TestGuardShape(t *testing.T) {
 	holds(t, "deployments", dep, `m.mountPath == "/var/run/dotvirt/forge"`)
 	holds(t, "deployments", dep, `v.secret.secretName == "dotvirt-forge"`)
 	holds(t, "deployments", dep, `e.valueFrom.secretKeyRef.name == "dotvirt-forgejo-admin"`)
+	holds(t, "deployments", dep, `"DOTVIRT_FORGE_URL/dotvirt-forge/url"`)
+	holds(t, "deployments", dep, `v.persistentVolumeClaim.claimName == "dotvirt-forgejo-data"`)
+	holds(t, "deployments", dep, `request.resource.resource != "persistentvolumeclaims" || (!has(object.spec.selector)`)
 	holds(t, "bindings", bind, `"ServiceAccount/openshift-gitops/openshift-gitops-argocd-application-controller"`)
 	holds(t, "bindings", bind, `request.namespace == "openshift-gitops"`)
 	for _, o := range objs {
@@ -235,6 +238,7 @@ func TestReleaseTemplate(t *testing.T) {
 		"${FORGE_INSECURE_TLS}": "false", "${METRICS_URL}": "", "${METRICS_TENANCY_URL}": "", "${METRICS_CA}": "",
 		"${CONSOLE_HOST}": params.ConsoleHost, "${BRANDING_CONFIGMAP}": params.BrandingConfigMap,
 		"${METRICS_CA_CONFIGMAP}": params.MetricsCAConfigMap, "${FORGE_SECRET}": params.ForgeSecret,
+		"${FORGE_MANAGED}": "false", "${OIDC_SECRET}": params.OIDCSecret, "${OIDC_SECRET_KEY}": params.OIDCSecretKey,
 	} {
 		filled = strings.ReplaceAll(filled, k, v)
 	}

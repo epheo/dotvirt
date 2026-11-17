@@ -46,6 +46,10 @@ func (r *DotvirtReconciler) guardParams(ctx context.Context, dv *dotvirtv1alpha1
 	if dv.Spec.Metrics.CA != nil {
 		p.MetricsCAConfigMap = dv.Spec.Metrics.CA.Name
 	}
+	if o := dv.Spec.Auth.OIDC; o != nil && o.ClientSecret != nil {
+		p.OIDCSecret, p.OIDCSecretKey = o.ClientSecret.Name, o.ClientSecret.Key
+	}
+	p.ForgeManaged = dv.Spec.Forge.Managed
 	domain := r.appsDomain(ctx, dv)
 	router := ""
 	if dv.Spec.Ingress.Host == "" && domain == "" && r.Platform == platform.OpenShift {

@@ -29,6 +29,9 @@ type InstallSpec struct {
 	// The console's volumes an admin chose: the branding and metrics CA
 	// ConfigMaps, and the forge credential Secret (empty: the default).
 	BrandingConfigMap, MetricsCAConfigMap, ForgeCredentials string
+	ForgeManaged                                            bool
+	// OIDCSecret and OIDCSecretKey are the OIDC client secret an admin chose.
+	OIDCSecret, OIDCSecretKey string
 }
 
 // InstallIn reads, under THIS client's identity, the one install in
@@ -54,6 +57,9 @@ func (c *Client) InstallIn(ctx context.Context, namespace string) (InstallSpec, 
 	out.BrandingConfigMap, _, _ = unstructured.NestedString(o, "spec", "branding", "configMap")
 	out.MetricsCAConfigMap, _, _ = unstructured.NestedString(o, "spec", "metrics", "ca", "name")
 	out.ForgeCredentials, _, _ = unstructured.NestedString(o, "spec", "forge", "credentialsSecret")
+	out.ForgeManaged, _, _ = unstructured.NestedBool(o, "spec", "forge", "managed")
+	out.OIDCSecret, _, _ = unstructured.NestedString(o, "spec", "auth", "oidc", "clientSecret", "name")
+	out.OIDCSecretKey, _, _ = unstructured.NestedString(o, "spec", "auth", "oidc", "clientSecret", "key")
 	return out, nil
 }
 
