@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -337,6 +338,83 @@ func TestAppSetPluginLiftsAllowEmptyOnlyForADeliberateRemoval(t *testing.T) {
 	s.drift = syncedSnapshot(t, fc2)
 	if lifted := generated(t, s, want); lifted["team-del"] != false {
 		t.Errorf("after the removal synced: allowEmpty = %v, want false", lifted["team-del"])
+	}
+}
+
+// After a forge-loss recovery, adopting the running objects back changes
+// nothing live, so Argo goes Synced with no sync and records no history: its
+// last entry stays the re-created repo's empty revision. Deleting the
+// project's last VM then is still a removal of what the adoption declared:
+// dotvirt saw the app Synced at that revision, and lifts. A console restarted
+// in between has not seen it, and keeps the hold.
+func TestAppSetPluginLiftsAfterAnAdoptionSyncedWithoutASync(t *testing.T) {
+	repo := newRepoWith(t, map[string]string{"README.md": "recovered\n"})
+	recreated := repo.head(t)
+	repo.add(t, "team/web.yaml", "kind: VirtualMachine\nmetadata: {name: web, namespace: team}\n")
+	adopted := repo.head(t)
+	repo.drop(t, "team/web.yaml")
+	deleted := repo.head(t)
+
+	state := func(sync, revision string, prune bool) map[string]any {
+		app := heldApp("drill", repo.url, revision, recreated, ".")
+		_ = unstructured.SetNestedField(app, sync, "status", "sync", "status")
+		_ = unstructured.SetNestedSlice(app, []any{map[string]any{"kind": "VirtualMachine", "namespace": "drill", "name": "web", "requiresPruning": prune}}, "status", "resources")
+		return app
+	}
+	var mu sync.Mutex
+	current := state("Synced", adopted, false)
+	fc := newFakeCluster(t)
+	fc.namespaces = append(fc.namespaces, corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "drill",
+		Labels: map[string]string{"dotvirt.io/project": "drill"}, Annotations: map[string]string{"dotvirt.io/repo": repo.url}}})
+	fc.on(http.MethodGet, "/apis/argoproj.io/v1alpha1/applications", func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		app := current
+		mu.Unlock()
+		unstructuredList("argoproj.io/v1alpha1", "Application", app)(w, r)
+	})
+	s := fc.server(nil, Config{AppSetPluginToken: "tok", BaseBranch: "main"})
+	s.drift = syncedSnapshot(t, fc)
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	s.repos = git.NewRepoSet(ctx, "", "", nil, false, nil, time.Hour)
+	if _, _, err := s.repos.Get(repo.url, ""); err != nil {
+		t.Fatal(err)
+	}
+	drill, ok := s.projectByName("drill")
+	if !ok || s.EmptyHold(drill) != "" {
+		t.Fatalf("synced after the adoption: %v hold %q, want no hold", ok, s.EmptyHold(drill))
+	}
+
+	// The deletion merges; Argo holds it, its history still at the re-created revision.
+	mu.Lock()
+	current = state("OutOfSync", deleted, true)
+	mu.Unlock()
+	fc.srv.CloseClientConnections() // the watch ends; the snapshot lists again
+	for deadline := time.Now().Add(10 * time.Second); ; time.Sleep(20 * time.Millisecond) {
+		if _, held := s.drift.EmptyHold("drill"); held {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("the snapshot never saw the hold")
+		}
+	}
+	want := map[string]model.Hold{"drill": model.HoldDeleting}
+	if got := s.EmptyHold(drill); got != model.HoldDeleting {
+		t.Errorf("hold = %q, want deleting", got)
+	}
+	if lifted := generated(t, s, want); lifted["drill"] != true {
+		t.Errorf("allowEmpty = %v, want true", lifted["drill"])
+	}
+
+	fc2 := newFakeCluster(t)
+	fc2.on(http.MethodGet, "/apis/argoproj.io/v1alpha1/applications", unstructuredList("argoproj.io/v1alpha1", "Application", state("OutOfSync", deleted, true)))
+	_ = fc2.server(nil, Config{})
+	s.drift = syncedSnapshot(t, fc2)
+	if got := s.EmptyHold(drill); got != model.HoldMismatch {
+		t.Errorf("restarted console: hold = %q, want mismatch", got)
+	}
+	if lifted := generated(t, s, want); lifted["drill"] != false {
+		t.Errorf("restarted console: allowEmpty = %v, want false", lifted["drill"])
 	}
 }
 

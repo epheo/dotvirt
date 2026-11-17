@@ -782,3 +782,59 @@ func TestPrunePendingLeavesSettledProjectsOut(t *testing.T) {
 		t.Fatalf("team-a settled: %v known=%v, want %v", got, known, want)
 	}
 }
+
+// A change that leaves live as it was (an adoption) runs no sync, so Argo's
+// history keeps an older revision. Applied is the last revision dotvirt saw
+// the app Synced at, from the same source; else Argo's history, as after a
+// restart, a re-pointed source, or an app gone and back.
+func TestEmptyHoldAppliedIsTheLastSyncedRevision(t *testing.T) {
+	const repo = "https://forge.example/dotvirt/p.git"
+	app := func(status, revision, path string, prune bool) *unstructured.Unstructured {
+		a := appWithSource("argocd", "dotvirt-p", repo, []any{
+			map[string]any{"kind": "VirtualMachine", "namespace": "p", "name": "web", "requiresPruning": prune},
+		})
+		a.SetLabels(map[string]string{projectAppLabel: "p"})
+		_ = unstructured.SetNestedField(a.Object, path, "spec", "source", "path")
+		_ = unstructured.SetNestedField(a.Object, true, "spec", "syncPolicy", "automated", "prune")
+		_ = unstructured.SetNestedField(a.Object, status, "status", "sync", "status")
+		_ = unstructured.SetNestedField(a.Object, revision, "status", "sync", "revision")
+		_ = unstructured.SetNestedSlice(a.Object, []any{
+			map[string]any{"revision": "h0", "source": map[string]any{"repoURL": repo, "path": "."}},
+		}, "status", "history")
+		return a
+	}
+	show := func(s *Snapshot, objs ...any) {
+		t.Helper()
+		_ = s.store().Replace(objs, "1")
+		settle(s)
+	}
+	applied := func(s *Snapshot) (string, bool) {
+		t.Helper()
+		h := s.mustHold(t, "p")
+		return h.Applied, h.SameSource
+	}
+
+	s := NewSnapshot(nil, nil).WithWriteNamespace("argocd")
+	show(s, app("Synced", "s1", ".", false))
+	show(s, app("OutOfSync", "c2", ".", true))
+	if rev, same := applied(s); rev != "s1" || !same {
+		t.Errorf("held after a sync-free adoption: applied %q same=%v, want s1 from the same source", rev, same)
+	}
+	show(s, app("OutOfSync", "c2", "other", true))
+	if rev, same := applied(s); rev != "h0" || same {
+		t.Errorf("re-pointed since: applied %q same=%v, want Argo's history h0 from another source", rev, same)
+	}
+
+	restarted := NewSnapshot(nil, nil).WithWriteNamespace("argocd")
+	show(restarted, app("OutOfSync", "c2", ".", true))
+	if rev, _ := applied(restarted); rev != "h0" {
+		t.Errorf("after a restart: applied %q, want Argo's history h0", rev)
+	}
+
+	show(s, app("Synced", "s1", ".", false))
+	show(s)
+	show(s, app("OutOfSync", "c2", ".", true))
+	if rev, _ := applied(s); rev != "h0" {
+		t.Errorf("app gone and back: applied %q, want Argo's history h0", rev)
+	}
+}
