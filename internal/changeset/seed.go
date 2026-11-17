@@ -62,6 +62,9 @@ type seedState struct {
 	pr      int       // the open offer, from the lane
 	prURL   string
 	err     string // the last failure, as a user may read it
+	// judged is the base and seed-branch commits exact was read at.
+	judged string
+	exact  bool
 }
 
 func (c *Coordinator) seedFor(key string) *seedState {
@@ -99,21 +102,36 @@ func (c *Coordinator) SeedTemplates(proj project.ProjectInfo, lane []model.Propo
 			break
 		}
 	}
+	read, ok := c.repos.Peek(proj.Repo)
+	if ok && read.Root() != "" {
+		read, ok = nil, false // a later refresh decides, once the repo-root mirror is open
+	}
+	var exact, known bool
+	if open != nil {
+		exact, known = c.seedExact(key, read, open.ForgeHead)
+	}
 	c.seedMu.Lock()
 	st := c.seedFor(key)
-	if open != nil {
-		st.pr, st.prURL, st.err, st.decided = open.PRNumber, open.PRURL, "", true
-	} else {
+	switch {
+	case open == nil:
 		st.pr, st.prURL = 0, "" // merged or closed since
+	case st.decided && st.err != "":
+		// Withdrawn: its pull request, left open by a failed close, is never shown.
+	default:
+		st.err, st.decided = "", true
+		// Shown only while it holds exactly the starter set, whoever pushed
+		// it; while the mirror cannot tell, what this process knows stands.
+		if known {
+			st.pr, st.prURL = 0, ""
+			if exact {
+				st.pr, st.prURL = open.PRNumber, open.PRURL
+			}
+		}
 	}
 	skip := st.queued || st.decided && st.err == ""
 	c.seedMu.Unlock()
-	if skip {
+	if skip || !ok {
 		return
-	}
-	read, ok := c.repos.Peek(proj.Repo)
-	if !ok || read.Root() != "" {
-		return // a later refresh decides, once the repo-root mirror is open
 	}
 	need, err := c.libraryMissing(read)
 	if err != nil {
@@ -144,6 +162,52 @@ func (c *Coordinator) libraryMissing(read *git.Repo) (bool, error) {
 		return false, err
 	}
 	return len(files) == 0, nil
+}
+
+// seedExact reports whether the seed branch, as the mirror read holds it, is
+// exactly the starter set committed on the base branch
+// (git.Repo.ChangesExactly). known is false while read cannot tell. A forge
+// head the mirror has not fetched yet is not exact. The verdict is kept per
+// base and head commit, and read outside seedMu: it walks history.
+func (c *Coordinator) seedExact(key string, read *git.Repo, forgeHead string) (exact, known bool) {
+	if read == nil {
+		return false, false
+	}
+	base, head := read.BranchHash(c.baseBranch), read.BranchHash(c.seedBranch())
+	if base == "" || head == "" {
+		return false, false
+	}
+	if forgeHead != "" && forgeHead != head {
+		return false, true
+	}
+	at := base + ".." + head
+	c.seedMu.Lock()
+	st := c.seedFor(key)
+	judged, cached := st.judged, st.exact
+	c.seedMu.Unlock()
+	if at == judged {
+		return cached, true
+	}
+	exact, err := read.ChangesExactly(base, head, starterSet())
+	if errors.Is(err, git.ErrNoCommit) {
+		return false, false // the mirror moved between the reads; the next refresh judges
+	}
+	if err != nil {
+		// The same commits fail the same way: kept as not exact.
+		log.Printf("changeset: starter templates for %s at %s: %v", key, at, err)
+		exact = false
+	}
+	c.seedMu.Lock()
+	st = c.seedFor(key)
+	st.judged, st.exact = at, exact
+	c.seedMu.Unlock()
+	return exact, true
+}
+
+// starterSet is every file the offer adds: the starter templates and the
+// marker.
+func starterSet() []model.File {
+	return append(vmtemplate.SeedFiles(), model.File{Path: SeedMarker, Content: []byte(seedMarkerContent)})
 }
 
 type seedJob struct{ repo, key string }
@@ -235,7 +299,7 @@ func (c *Coordinator) proposeSeed(repoURL string, ask bool) (forge.PR, error) {
 	if err != nil {
 		return forge.PR{}, err
 	}
-	files := append(vmtemplate.SeedFiles(), model.File{Path: SeedMarker, Content: []byte(seedMarkerContent)})
+	files := starterSet()
 	items := make([]git.ChangesetItem, len(files))
 	for i, f := range files {
 		items[i] = git.ChangesetItem{Path: f.Path, NewContent: f.Content}

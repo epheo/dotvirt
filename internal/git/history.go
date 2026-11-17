@@ -8,6 +8,7 @@ import (
 
 	"github.com/go-git/go-git/v5"
 	"github.com/go-git/go-git/v5/plumbing"
+	"github.com/go-git/go-git/v5/plumbing/filemode"
 	"github.com/go-git/go-git/v5/plumbing/object"
 
 	"github.com/epheo/dotvirt/internal/model"
@@ -260,6 +261,56 @@ func (r *Repo) BranchDiff(base, head string) ([]FileChange, error) {
 		return nil, err
 	}
 	return r.scopedDiff(fromTree, toTree)
+}
+
+// ChangesExactly reports whether commit head is files committed on base's
+// history: one commit, whose only parent base holds, adding each path, absent
+// from the parent, with that content as a regular file and touching no other
+// path, whatever its kind. More commits past the fork, a merge among them, are
+// not: a forge that replays them on merge brings their changes in, whatever
+// head's tree shows. Nor is a change to an existing file: a merge carries it
+// to wherever base has since renamed that file. Paths are the repo's,
+// whatever folder this mirror is scoped to.
+func (r *Repo) ChangesExactly(base, head string, files []model.File) (bool, error) {
+	repo := r.repo.Load()
+	tip, err := commitAt(repo, base)
+	if err != nil {
+		return false, err
+	}
+	to, err := commitAt(repo, head)
+	if err != nil || to.NumParents() != 1 {
+		return false, err
+	}
+	parent, err := to.Parent(0)
+	if err != nil {
+		return false, err
+	}
+	if onBase, err := parent.IsAncestor(tip); err != nil || !onBase {
+		return false, err
+	}
+	fromTree, err := parent.Tree()
+	if err != nil {
+		return false, err
+	}
+	toTree, err := to.Tree()
+	if err != nil {
+		return false, err
+	}
+	changes, err := object.DiffTree(fromTree, toTree)
+	if err != nil || len(changes) != len(files) {
+		return false, err
+	}
+	want := make(map[string]plumbing.Hash, len(files))
+	for _, f := range files {
+		want[f.Path] = plumbing.ComputeHash(plumbing.BlobObject, f.Content)
+	}
+	for _, ch := range changes {
+		hash, ok := want[ch.To.Name]
+		if !ok || ch.From.Name != "" || ch.To.TreeEntry.Mode != filemode.Regular || ch.To.TreeEntry.Hash != hash {
+			return false, nil
+		}
+	}
+	return true, nil
 }
 
 // ErrForeignCommit: a branch carries, past its fork from base, a commit

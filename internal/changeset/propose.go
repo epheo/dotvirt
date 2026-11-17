@@ -219,7 +219,7 @@ func (r *Reader) proposalRow(proj project.ProjectInfo, pr forge.PR, read *git.Re
 	}
 	return model.Proposal{
 		Project: proj.Name, PRNumber: pr.Number, PRURL: r.forge.PullPage(proj.Repo, pr.Number), Title: pr.Title,
-		Branch: branch, Head: head,
+		Branch: branch, Head: head, ForgeHead: pr.Head.Sha,
 		By:     tasks.MergeAuthor(branch, r.proposed, pr.User.Login),
 		Revert: strings.HasPrefix(branch, r.proposed+"/"+tasks.RevertSegment+"/"),
 		Seed:   branch == r.seedBranch(),
