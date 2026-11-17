@@ -142,12 +142,14 @@ owns one status condition; a phase that fails or waits records why there, so
      forge credential and the OIDC client secret an admin chose; a forge credential an
      admin brought (`spec.forge.managed` false) goes only to the URL its Secret names.
      The forge's pods never carry the console's `app` label, read no Secret but their
-     admin password, and mount no claim but their own. The operator's claims bind to no
+     admin password, and mount only their own claim, a scratch directory and the router
+     CA: no network or host volume. The operator's claims bind to no
      volume, selector or data source of its choosing (the binder's `volumeName` stays as
      it set it). The console's arguments stay free, so a release
      may add flags, except the settings that send users' tokens or its pages elsewhere,
      by flag or env: the metrics endpoints and CA only as rendered from `spec.metrics`,
-     TLS verification off only with `spec.forge.insecureTLS`, and never a kubeconfig or
+     TLS verification off only with `spec.forge.insecureTLS`, the OIDC issuer only as
+     `spec.auth.oidc.issuerURL`, and never a kubeconfig or
      a directory of pages. It keeps its own token mounted where client-go reads it, with
      no `KUBERNETES_SERVICE_*` or `envFrom`. Nothing is mounted at, above or inside the
      token directory. Every container runs non-root with a RuntimeDefault or

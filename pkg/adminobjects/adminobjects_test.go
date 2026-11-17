@@ -104,7 +104,8 @@ func TestGuardShape(t *testing.T) {
 	holds(t, "deployments", dep, `v.secret.secretName == "dotvirt-forge"`)
 	holds(t, "deployments", dep, `e.valueFrom.secretKeyRef.name == "dotvirt-forgejo-admin"`)
 	holds(t, "deployments", dep, `"DOTVIRT_FORGE_URL/dotvirt-forge/url"`)
-	holds(t, "deployments", dep, `v.persistentVolumeClaim.claimName == "dotvirt-forgejo-data"`)
+	holds(t, "deployments", dep, `v.persistentVolumeClaim.claimName == "dotvirt-forgejo-data") || has(v.emptyDir)`)
+	holds(t, "deployments", dep, `e.name != "DOTVIRT_OIDC_ISSUER"`)
 	holds(t, "deployments", dep, `request.resource.resource != "persistentvolumeclaims" || (!has(object.spec.selector)`)
 	holds(t, "bindings", bind, `"ServiceAccount/openshift-gitops/openshift-gitops-argocd-application-controller"`)
 	holds(t, "bindings", bind, `request.namespace == "openshift-gitops"`)
@@ -133,6 +134,7 @@ func TestParamsValid(t *testing.T) {
 		"no forge Secret":         func(p *Params) { p.ForgeSecret = "" },
 		"a quote in a ConfigMap":  func(p *Params) { p.BrandingConfigMap = `a"b` },
 		"a wildcard host":         func(p *Params) { p.ConsoleHost = "*.apps.example" },
+		"an http issuer":          func(p *Params) { p.OIDCIssuer = "http://idp.example" },
 	} {
 		p := params
 		edit(&p)
@@ -239,6 +241,7 @@ func TestReleaseTemplate(t *testing.T) {
 		"${CONSOLE_HOST}": params.ConsoleHost, "${BRANDING_CONFIGMAP}": params.BrandingConfigMap,
 		"${METRICS_CA_CONFIGMAP}": params.MetricsCAConfigMap, "${FORGE_SECRET}": params.ForgeSecret,
 		"${FORGE_MANAGED}": "false", "${OIDC_SECRET}": params.OIDCSecret, "${OIDC_SECRET_KEY}": params.OIDCSecretKey,
+		"${OIDC_ISSUER}": params.OIDCIssuer,
 	} {
 		filled = strings.ReplaceAll(filled, k, v)
 	}
