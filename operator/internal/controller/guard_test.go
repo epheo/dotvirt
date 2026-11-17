@@ -78,12 +78,29 @@ func live(objs []adminobjects.Object) []client.Object {
 var guardHere = adminobjects.Params{Operator: guardOperator, Namespace: "dotvirt", ArgoNamespace: "argocd", ArgoController: "argocd-application-controller",
 	ForgeSecret: adminobjects.DefaultForgeSecret}
 
+// An upgrade moves the operator's RELATED_IMAGE_* digests inside the
+// official repositories; the guard installed for the previous ones stays
+// Installed, so upgrades stay automatic.
+func TestOperatorGuardStaysInstalledAcrossReleases(t *testing.T) {
+	previous := guardHere
+	previous.DotvirtImage = adminobjects.Repositories[0] + "@sha256:" + strings.Repeat("a", 64)
+	previous.ForgejoImage = adminobjects.Repositories[1] + ":11-rootless@sha256:" + strings.Repeat("a", 64)
+	t.Setenv("RELATED_IMAGE_DOTVIRT", adminobjects.Repositories[0]+"@sha256:"+strings.Repeat("b", 64))
+	t.Setenv("RELATED_IMAGE_FORGEJO", adminobjects.Repositories[1]+":12-rootless@sha256:"+strings.Repeat("b", 64))
+	if cond, _ := guardPass(t, guardOperator, nil, live(adminobjects.Render(previous))...); cond.Reason != string(adminobjects.Installed) {
+		t.Errorf("after an upgrade: %s %s", cond.Reason, cond.Message)
+	}
+}
+
 func TestOperatorGuardStates(t *testing.T) {
 	elsewhere := guardHere
 	elsewhere.ArgoNamespace = "openshift-gitops"
 	edited := adminobjects.Render(guardHere)
-	v, _, _ := unstructured.NestedSlice(edited[1].Object.Object, "spec", "validations")
-	_ = unstructured.SetNestedSlice(edited[1].Object.Object, v[:1], "spec", "validations")
+	deployments := edited[slices.IndexFunc(edited, func(o adminobjects.Object) bool {
+		return o.Object.GetKind() == "ValidatingAdmissionPolicy" && o.Object.GetName() == adminobjects.GuardDeploymentsName
+	})].Object.Object
+	v, _, _ := unstructured.NestedSlice(deployments, "spec", "validations")
+	_ = unstructured.SetNestedSlice(deployments, v[:1], "spec", "validations")
 	for name, c := range map[string]struct {
 		objs   []client.Object
 		status metav1.ConditionStatus
@@ -141,6 +158,17 @@ func TestOperatorGuardFollowsTheAdminImage(t *testing.T) {
 		t.Errorf("an admin's host: %q", p.ConsoleHost)
 	}
 
+	// Delegated: the forge application the spec names.
+	delegated := dv.DeepCopy()
+	delegated.Spec.Forge.PullRequests, delegated.Spec.Forge.URL = "Delegated", "https://forge.example"
+	delegated.Spec.Forge.UserAuth = &dotvirtv1alpha1.ForgeUserAuthSpec{ClientID: "dotvirt", AuthorizeURL: "https://forge.example/login/oauth/authorize",
+		TokenURL: "https://forge.internal/token", ClientSecret: dotvirtv1alpha1.SecretKeyRef{Name: "forge-app", Key: "client-secret"}}
+	if p := r.guardParams(t.Context(), delegated, guardRC); !p.ForgeDelegated || p.ForgeURL != "https://forge.example" || p.ForgeClientID != "dotvirt" ||
+		p.ForgeAuthorizeURL != "https://forge.example/login/oauth/authorize" || p.ForgeTokenURL != "https://forge.internal/token" ||
+		p.ForgeClientSecret != "forge-app" || p.ForgeClientSecretKey != "client-secret" {
+		t.Errorf("Delegated params = %+v", p)
+	}
+
 	// No ingress domain served (MicroShift): the host routers report for the
 	// console's Route.
 	route := &unstructured.Unstructured{Object: map[string]any{
@@ -176,6 +204,16 @@ func TestOperatorGuardNeedsItsAccount(t *testing.T) {
 	cond, dv := guardPass(t, "", nil)
 	if cond.Status != metav1.ConditionUnknown || cond.Reason != "AccountUnknown" || len(dv.Status.AdminObjects) != 0 {
 		t.Errorf("%s %s, status %+v", cond.Status, cond.Reason, dv.Status.AdminObjects)
+	}
+}
+
+// A pin the spec gets wrong is named, never its value, with where to fix it.
+func TestOperatorGuardNamesAMalformedPin(t *testing.T) {
+	dv := &dotvirtv1alpha1.Dotvirt{ObjectMeta: metav1.ObjectMeta{Name: "x", Namespace: "dotvirt"}}
+	dv.Spec.Branding.ConfigMap = "Not_A_Name"
+	cond, _ := guardPassOn(t, guardOperator, dv)
+	if cond.Reason != "PinMalformed" || !strings.Contains(cond.Message, "branding ConfigMap") || strings.Contains(cond.Message, "Not_A_Name") {
+		t.Errorf("%s: %s", cond.Reason, cond.Message)
 	}
 }
 

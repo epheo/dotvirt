@@ -53,6 +53,11 @@ func (r *DotvirtReconciler) guardParams(ctx context.Context, dv *dotvirtv1alpha1
 		}
 	}
 	p.ForgeManaged = dv.Spec.Forge.Managed
+	p.ForgeDelegated, p.ForgeURL = dv.Spec.Forge.PullRequests == "Delegated", dv.Spec.Forge.URL
+	if u := dv.Spec.Forge.UserAuth; u != nil {
+		p.ForgeClientID, p.ForgeAuthorizeURL, p.ForgeTokenURL = u.ClientID, u.AuthorizeURL, u.TokenURL
+		p.ForgeClientSecret, p.ForgeClientSecretKey = u.ClientSecret.Name, u.ClientSecret.Key
+	}
 	p.InstallName, p.InstallUID = dv.Name, dv.UID
 	domain := r.appsDomain(ctx, dv)
 	router := ""
@@ -85,10 +90,15 @@ func (r *DotvirtReconciler) operatorGuard(ctx context.Context, dv *dotvirtv1alph
 		return (o.GetKind() == "ValidatingAdmissionPolicy" || o.GetKind() == "ValidatingAdmissionPolicyBinding") && slices.Contains(adminobjects.GuardNames, o.GetName())
 	}
 	p := r.guardParams(ctx, dv, rc)
-	if !p.Valid() {
+	switch bad := p.Malformed(); {
+	case !adminobjects.ValidUsername(p.Operator):
 		publishAdminObjects(dv, isAdminObject, nil, nil)
 		return metav1.ConditionUnknown, "AccountUnknown",
 			"the operator does not know the account it runs as (its SelfSubjectReview failed at startup), so no guard can pin it"
+	case bad != "":
+		publishAdminObjects(dv, isAdminObject, nil, nil)
+		return metav1.ConditionUnknown, "PinMalformed",
+			"the install's " + bad + " is not well formed, so no guard can pin it: correct it in the Dotvirt resource"
 	}
 	// Every admin object is listed; the guard's alone decide this condition
 	// (the forge credential's grant is ForgeCredentialReady's).

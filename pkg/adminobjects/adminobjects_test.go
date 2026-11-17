@@ -6,6 +6,7 @@ import (
 	"flag"
 	"os"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -57,16 +58,24 @@ func TestGuardShape(t *testing.T) {
 		t.Fatalf("render = %d objects, want a policy and a binding per guard name", len(objs))
 	}
 	match := map[string][][2]string{
-		GuardSecretsName:     {{"", "secrets"}, {"", "serviceaccounts"}},
-		GuardDeploymentsName: {{"apps", "deployments"}, {"", "persistentvolumeclaims"}},
+		GuardSecretsName:     {{"", "secrets"}},
+		GuardAccountsName:    {{"", "serviceaccounts"}},
+		GuardDeploymentsName: {{"apps", "deployments"}},
+		GuardClaimsName:      {{"", "persistentvolumeclaims"}},
 		GuardBindingsName:    {{"rbac.authorization.k8s.io", "clusterrolebindings"}, {"rbac.authorization.k8s.io", "rolebindings"}},
 		GuardInstallName:     {{"dotvirt.io", "dotvirts"}},
-		GuardFrontDoorName: {{"", "services"}, {"route.openshift.io", "routes"}, {"networking.k8s.io", "ingresses"},
-			{"gateway.networking.k8s.io", "httproutes"}},
+		GuardFrontDoorName:   {{"", "services"}},
+		GuardRoutesName:      {{"route.openshift.io", "routes"}},
+		GuardIngressesName:   {{"networking.k8s.io", "ingresses"}},
+		GuardHTTPRoutesName:  {{"gateway.networking.k8s.io", "httproutes"}},
 	}
-	for i, name := range GuardNames {
+	for _, name := range GuardNames {
+		i := index(objs, "ValidatingAdmissionPolicy", name)
+		if i < 0 || index(objs, "ValidatingAdmissionPolicyBinding", name) != i+1 {
+			t.Fatalf("%s: policy at %d, want its binding right after", name, i)
+		}
 		p := policyOf(t, objs[i])
-		if p.Name != name || *p.Spec.FailurePolicy != admissionregistrationv1.Fail || objs[i].Purpose == "" {
+		if *p.Spec.FailurePolicy != admissionregistrationv1.Fail || objs[i].Purpose == "" {
 			t.Errorf("policy %d = %s %q", i, p.Name, objs[i].Purpose)
 		}
 		var got [][2]string
@@ -87,7 +96,11 @@ func TestGuardShape(t *testing.T) {
 			t.Errorf("%s condition = %+v, want the exact username", name, p.Spec.MatchConditions)
 		}
 	}
-	sec, dep, bind, inst := exprs(policyOf(t, objs[0])), exprs(policyOf(t, objs[1])), exprs(policyOf(t, objs[2])), exprs(policyOf(t, objs[3]))
+	named := func(name string) []string {
+		return exprs(policyOf(t, objs[index(objs, "ValidatingAdmissionPolicy", name)]))
+	}
+	sec, acc, dep, claims := named(GuardSecretsName), named(GuardAccountsName), named(GuardDeploymentsName), named(GuardClaimsName)
+	bind, inst := named(GuardBindingsName), named(GuardInstallName)
 	holds(t, "secrets", sec, `request.namespace in ["dotvirt", "openshift-gitops"]`)
 	holds(t, "deployments", dep, `request.namespace == "dotvirt"`)
 	holds(t, "deployments", dep, `c.image.startsWith("quay.io/epheo/dotvirt@sha256:")`)
@@ -99,14 +112,14 @@ func TestGuardShape(t *testing.T) {
 	holds(t, "deployments", dep, `a in ["-ui-origin=", "--ui-origin="]`)
 	holds(t, "deployments", dep, `"-oauth-ca=`+IngressCAPath+`"`)
 	holds(t, "install", inst, `object.spec == oldObject.spec`)
-	holds(t, "secrets", sec, `object.metadata.name != "dotvirt" || !has(object.automountServiceAccountToken)`)
+	holds(t, "accounts", acc, `object.metadata.name != "dotvirt" || !has(object.automountServiceAccountToken)`)
 	holds(t, "deployments", dep, `m.mountPath == "/var/run/dotvirt/forge"`)
 	holds(t, "deployments", dep, `v.secret.secretName == "dotvirt-forge"`)
 	holds(t, "deployments", dep, `e.valueFrom.secretKeyRef.name == "dotvirt-forgejo-admin"`)
 	holds(t, "deployments", dep, `"DOTVIRT_FORGE_URL/dotvirt-forge/url"`)
 	holds(t, "deployments", dep, `v.persistentVolumeClaim.claimName == "dotvirt-forgejo-data") || has(v.emptyDir)`)
 	holds(t, "deployments", dep, `e.name != "DOTVIRT_OIDC_ISSUER"`)
-	holds(t, "deployments", dep, `request.resource.resource != "persistentvolumeclaims" || (!has(object.spec.selector)`)
+	holds(t, "claims", claims, `!has(object.spec.selector) && !has(object.spec.dataSource)`)
 	holds(t, "bindings", bind, `"ServiceAccount/openshift-gitops/openshift-gitops-argocd-application-controller"`)
 	holds(t, "bindings", bind, `request.namespace == "openshift-gitops"`)
 	for _, o := range objs {
@@ -168,39 +181,46 @@ func TestCompareSaysWhatDiffers(t *testing.T) {
 	moved.ArgoNamespace = "argocd"
 	other := params
 	other.Operator = "system:serviceaccount:x:y"
+	secrets, deployments := index(want, "ValidatingAdmissionPolicy", GuardSecretsName), index(want, "ValidatingAdmissionPolicy", GuardDeploymentsName)
+	install, binding := index(want, "ValidatingAdmissionPolicy", GuardInstallName), index(want, "ValidatingAdmissionPolicyBinding", GuardSecretsName)
 	for name, c := range map[string]struct {
 		live   func() *unstructured.Unstructured
 		which  int
 		state  State
 		detail string
 	}{
-		"as rendered":         {func() *unstructured.Unstructured { return want[0].Object.DeepCopy() }, 0, Installed, ""},
-		"missing":             {func() *unstructured.Unstructured { return nil }, 5, NotInstalled, "is missing"},
-		"for another ArgoCD":  {func() *unstructured.Unstructured { return Render(moved)[0].Object }, 0, Outdated, "lacks the rule"},
-		"for another account": {func() *unstructured.Unstructured { return Render(other)[1].Object }, 1, Outdated, "applies to another account"},
+		"as rendered":         {func() *unstructured.Unstructured { return want[secrets].Object.DeepCopy() }, secrets, Installed, ""},
+		"missing":             {func() *unstructured.Unstructured { return nil }, binding, NotInstalled, "is missing"},
+		"for another ArgoCD":  {func() *unstructured.Unstructured { return Render(moved)[secrets].Object }, secrets, Outdated, "lacks the rule"},
+		"for another account": {func() *unstructured.Unstructured { return Render(other)[deployments].Object }, deployments, Outdated, "applies to another account"},
 		"the install rule off": {func() *unstructured.Unstructured {
-			o := want[3].Object.DeepCopy()
+			o := want[install].Object.DeepCopy()
 			_ = unstructured.SetNestedSlice(o.Object, nil, "spec", "validations")
 			return o
-		}, 3, Outdated, "lacks the rule"},
-		"an extra deny-all rule": {func() *unstructured.Unstructured { return withValidations(want[1].Object, "false") }, 1, Outdated, "holds rules the render does not"},
+		}, install, Outdated, "lacks the rule"},
+		"an extra deny-all rule": {func() *unstructured.Unstructured { return withValidations(want[deployments].Object, "false") }, deployments, Outdated, "holds rules the render does not"},
 		"a rule dropped": {func() *unstructured.Unstructured {
-			o := want[1].Object.DeepCopy()
+			o := want[deployments].Object.DeepCopy()
 			v, _, _ := unstructured.NestedSlice(o.Object, "spec", "validations")
 			_ = unstructured.SetNestedSlice(o.Object, v[1:], "spec", "validations")
 			return o
-		}, 1, Outdated, "lacks the rule"},
+		}, deployments, Outdated, "lacks the rule"},
 		"a warn-only binding": {func() *unstructured.Unstructured {
-			o := want[len(GuardNames)].Object.DeepCopy()
+			o := want[binding].Object.DeepCopy()
 			_ = unstructured.SetNestedStringSlice(o.Object, []string{"Warn"}, "spec", "validationActions")
 			return o
-		}, len(GuardNames), Outdated, "does not only deny"},
+		}, binding, Outdated, "does not only deny"},
 	} {
 		got, detail := Compare(want[c.which].Object, c.live())
 		if got != c.state || !strings.Contains(detail, c.detail) {
 			t.Errorf("%s: %s (%s), want %s with %q", name, got, detail, c.state, c.detail)
 		}
 	}
+}
+
+// index is where objs holds the kind named name, -1 if nowhere.
+func index(objs []Object, kind, name string) int {
+	return slices.IndexFunc(objs, func(o Object) bool { return o.Object.GetKind() == kind && o.Object.GetName() == name })
 }
 
 func withValidations(o *unstructured.Unstructured, extra string) *unstructured.Unstructured {
@@ -233,34 +253,114 @@ func TestReleaseTemplate(t *testing.T) {
 	if !bytes.Equal(committed, got) {
 		t.Fatalf("%s is stale: go test ./pkg/adminobjects -run TestReleaseTemplate -update", path)
 	}
-	filled := string(committed)
-	for k, v := range map[string]string{
-		"${OPERATOR_USERNAME}": params.Operator, "${INSTALL_NAMESPACE}": params.Namespace, "${ARGO_NAMESPACE}": params.ArgoNamespace,
-		"${ARGO_CONTROLLER}": params.ArgoController, "${SPEC_IMAGE}": params.SpecImage, "${RELATED_IMAGE_DOTVIRT}": "", "${RELATED_IMAGE_FORGEJO}": "",
-		"${FORGE_INSECURE_TLS}": "false", "${METRICS_URL}": "", "${METRICS_TENANCY_URL}": "", "${METRICS_CA}": "",
-		"${CONSOLE_HOST}": params.ConsoleHost, "${BRANDING_CONFIGMAP}": params.BrandingConfigMap,
-		"${METRICS_CA_CONFIGMAP}": params.MetricsCAConfigMap, "${FORGE_SECRET}": params.ForgeSecret,
-		"${FORGE_MANAGED}": "false", "${OIDC_SECRET}": params.OIDCSecret, "${OIDC_SECRET_KEY}": params.OIDCSecretKey,
-		"${OIDC_ISSUER}": params.OIDCIssuer,
-	} {
-		filled = strings.ReplaceAll(filled, k, v)
-	}
-	docs := strings.Split(filled, "\n---\n")[1:]
+	docs := filledTemplate(t, committed, params)
 	want := Render(params)
 	if len(docs) != len(want) {
 		t.Fatalf("template holds %d objects, want %d", len(docs), len(want))
 	}
 	for i, doc := range docs {
-		var got map[string]any
-		if err := yaml.Unmarshal([]byte(doc), &got); err != nil {
-			t.Fatal(err)
-		}
-		a, _ := json.Marshal(got)
+		a, _ := json.Marshal(doc.Object)
 		b, _ := json.Marshal(want[i].Object.Object)
 		if string(a) != string(b) {
 			t.Errorf("filled template object %d differs from the render:\n%s\n%s", i, a, b)
 		}
 	}
+}
+
+// filledTemplate is template filled with p as its recipe fills it: an image
+// in its official repository left empty.
+func filledTemplate(t *testing.T, template []byte, p Params) []*unstructured.Unstructured {
+	t.Helper()
+	outside := func(repository, img string) string {
+		if InRepository(repository, img) {
+			return ""
+		}
+		return img
+	}
+	if !p.ForgeDelegated {
+		p.ForgeURL, p.ForgeClientID, p.ForgeAuthorizeURL, p.ForgeTokenURL, p.ForgeClientSecret, p.ForgeClientSecretKey = "", "", "", "", "", ""
+	}
+	filled := string(template)
+	for k, v := range map[string]string{
+		"${OPERATOR_USERNAME}": p.Operator, "${INSTALL_NAMESPACE}": p.Namespace, "${ARGO_NAMESPACE}": p.ArgoNamespace,
+		"${ARGO_CONTROLLER}": p.ArgoController, "${SPEC_IMAGE}": outside(Repositories[0], p.SpecImage),
+		"${RELATED_IMAGE_DOTVIRT}": outside(Repositories[0], p.DotvirtImage), "${RELATED_IMAGE_FORGEJO}": outside(Repositories[1], p.ForgejoImage),
+		"${FORGE_INSECURE_TLS}": strconv.FormatBool(p.InsecureTLS), "${METRICS_URL}": p.Metrics.URL,
+		"${METRICS_TENANCY_URL}": p.Metrics.TenancyURL, "${METRICS_CA}": p.Metrics.CA,
+		"${CONSOLE_HOST}": p.ConsoleHost, "${BRANDING_CONFIGMAP}": p.BrandingConfigMap,
+		"${METRICS_CA_CONFIGMAP}": p.MetricsCAConfigMap, "${FORGE_SECRET}": p.ForgeSecret,
+		"${FORGE_MANAGED}": strconv.FormatBool(p.ForgeManaged), "${OIDC_SECRET}": p.OIDCSecret, "${OIDC_SECRET_KEY}": p.OIDCSecretKey,
+		"${OIDC_ISSUER}": p.OIDCIssuer, "${FORGE_DELEGATED}": strconv.FormatBool(p.ForgeDelegated),
+		"${FORGE_URL}": p.ForgeURL, "${FORGE_CLIENT_ID}": p.ForgeClientID, "${FORGE_AUTHORIZE_URL}": p.ForgeAuthorizeURL,
+		"${FORGE_TOKEN_URL}": p.ForgeTokenURL, "${FORGE_CLIENT_SECRET}": p.ForgeClientSecret, "${FORGE_CLIENT_SECRET_KEY}": p.ForgeClientSecretKey,
+	} {
+		filled = strings.ReplaceAll(filled, k, v)
+	}
+	if m := placeholder.FindString(filled); m != "" {
+		t.Fatalf("the fill leaves %s", m)
+	}
+	var out []*unstructured.Unstructured
+	for _, doc := range strings.Split(filled, "\n---\n")[1:] {
+		var o map[string]any
+		if err := yaml.Unmarshal([]byte(doc), &o); err != nil {
+			t.Fatal(err)
+		}
+		out = append(out, &unstructured.Unstructured{Object: o})
+	}
+	return out
+}
+
+// A release that only moves its images' digests inside the official
+// repositories leaves an installed guard Installed, whether the console or
+// the release template rendered it: upgrades stay automatic. An image an
+// admin chose outside them stays pinned.
+func TestDigestOnlyReleasesStayInstalled(t *testing.T) {
+	release := func(digest, specImage string) Params {
+		p := params
+		p.SpecImage = specImage
+		p.DotvirtImage = Repositories[0] + "@sha256:" + strings.Repeat(digest, 64)
+		p.ForgejoImage = Repositories[1] + ":11-rootless@sha256:" + strings.Repeat(digest, 64)
+		return p
+	}
+	template, err := Template()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, specImage := range []string{"", Repositories[0] + ":pinned-by-the-admin"} {
+		prev, next := release("a", specImage), release("b", specImage)
+		for source, installed := range map[string][]*unstructured.Unstructured{
+			"the console's render":        objects(Render(prev)),
+			"the filled release template": filledTemplate(t, template, prev),
+		} {
+			for i, want := range Render(next) {
+				if state, detail := Compare(want.Object, installed[i]); state != Installed {
+					t.Errorf("spec.image %q, installed from %s: %s %s", specImage, source, state, detail)
+				}
+			}
+		}
+	}
+	// A mirror (a disconnected install) is no official repository: its
+	// release image stays pinned, and a new one reads Outdated.
+	prev, next := release("a", ""), release("b", "")
+	prev.DotvirtImage = "registry.example/mirror/dotvirt@sha256:" + strings.Repeat("a", 64)
+	next.DotvirtImage = "registry.example/mirror/dotvirt@sha256:" + strings.Repeat("b", 64)
+	outdated := false
+	for i, want := range Render(next) {
+		if state, _ := Compare(want.Object, Render(prev)[i].Object); state == Outdated {
+			outdated = true
+		}
+	}
+	if !outdated {
+		t.Error("a mirrored release image moved, and the installed guard still reads Installed")
+	}
+}
+
+func objects(os []Object) []*unstructured.Unstructured {
+	var out []*unstructured.Unstructured
+	for _, o := range os {
+		out = append(out, o.Object)
+	}
+	return out
 }
 
 func TestArgoTargetDefaults(t *testing.T) {
@@ -308,5 +408,218 @@ func TestMetricsFor(t *testing.T) {
 		if got := MetricsFor(c.url, c.tenancy, c.ca); got != c.want {
 			t.Errorf("MetricsFor(%q, %q, %v) = %+v, want %+v", c.url, c.tenancy, c.ca, got, c.want)
 		}
+	}
+}
+
+// Turning Delegated on changes what the console may be given (its forge
+// application and the URLs users' tokens go to), so a guard installed before
+// reads Outdated until an admin re-installs it.
+func TestDelegatedReadsOutdated(t *testing.T) {
+	delegated := params
+	delegated.ForgeDelegated, delegated.ForgeURL = true, "https://forge.example"
+	delegated.ForgeClientID, delegated.ForgeAuthorizeURL = "dotvirt", "https://forge.example/login/oauth/authorize"
+	delegated.ForgeClientSecret, delegated.ForgeClientSecretKey = "forge-app", "client-secret"
+	installed := Render(params)
+	outdated := false
+	for i, want := range Render(delegated) {
+		if state, _ := Compare(want.Object, installed[i].Object); state == Outdated {
+			outdated = true
+		}
+	}
+	if !outdated {
+		t.Error("Delegated turned on, and the guard installed before reads Installed")
+	}
+}
+
+// Installing over the previous release's guard, object by object in the
+// render's order, never leaves a kind it guarded unguarded: an install that
+// stops partway keeps every kind the previous guard covered.
+func TestInstallKeepsEveryKindGuarded(t *testing.T) {
+	previous, err := os.ReadFile("../../operator/internal/controller/testdata/guard-previous.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	live := map[string]*unstructured.Unstructured{}
+	key := func(o *unstructured.Unstructured) string { return o.GetKind() + "/" + o.GetName() }
+	for _, doc := range strings.Split(string(previous), "\n---\n")[1:] {
+		var o map[string]any
+		if err := yaml.Unmarshal([]byte(doc), &o); err != nil {
+			t.Fatal(err)
+		}
+		u := &unstructured.Unstructured{Object: o}
+		live[key(u)] = u
+	}
+	// guarded are the kinds a bound policy matches.
+	guarded := func() map[string]bool {
+		out := map[string]bool{}
+		for _, b := range live {
+			if b.GetKind() != "ValidatingAdmissionPolicyBinding" {
+				continue
+			}
+			name, _, _ := unstructured.NestedString(b.Object, "spec", "policyName")
+			p := live["ValidatingAdmissionPolicy/"+name]
+			if p == nil {
+				continue
+			}
+			rules, _, _ := unstructured.NestedSlice(p.Object, "spec", "matchConstraints", "resourceRules")
+			for _, r := range rules {
+				groups, _, _ := unstructured.NestedStringSlice(r.(map[string]any), "apiGroups")
+				resources, _, _ := unstructured.NestedStringSlice(r.(map[string]any), "resources")
+				for _, g := range groups {
+					for _, res := range resources {
+						out[g+"/"+res] = true
+					}
+				}
+			}
+		}
+		return out
+	}
+	before := guarded()
+	if len(before) == 0 {
+		t.Fatal("the previous guard guards nothing; the check would prove nothing")
+	}
+	for i, o := range Render(params) {
+		live[key(o.Object)] = o.Object
+		now := guarded()
+		for kind := range before {
+			if !now[kind] {
+				t.Errorf("after %d objects (up to %s), %s is unguarded", i+1, key(o.Object), kind)
+			}
+		}
+	}
+}
+
+// An admin's userAuth set while pull requests are not Delegated renders the
+// same guard as none: it pins nothing, so it admits nothing extra.
+func TestUserAuthWithoutDelegatedPinsNothing(t *testing.T) {
+	ahead := params
+	ahead.ForgeURL, ahead.ForgeClientID, ahead.ForgeAuthorizeURL = "https://forge.example", "dotvirt", "https://forge.example/login/oauth/authorize"
+	ahead.ForgeClientSecret, ahead.ForgeClientSecretKey = "forge-app", "client-secret"
+	a, _ := json.Marshal(objects(Render(ahead)))
+	b, _ := json.Marshal(objects(Render(params)))
+	if string(a) != string(b) {
+		t.Error("userAuth without Delegated changes the guard")
+	}
+}
+
+// A lookalike of an official repository is no official repository: an
+// admin's image there stays pinned.
+func TestLookalikeImagesStayPinned(t *testing.T) {
+	for img, forge := range map[string]bool{
+		Repositories[0] + "-mirror:x": false, Repositories[0] + "x@sha256:" + strings.Repeat("a", 64): false, Repositories[1] + "-fork:12": true,
+	} {
+		// Each in its own repository's place only, so no other list holds it.
+		p := params
+		p.SpecImage, p.DotvirtImage, p.ForgejoImage = img, img, ""
+		if forge {
+			p.SpecImage, p.DotvirtImage, p.ForgejoImage = "", "", img
+		}
+		deployments := Render(p)[index(Render(p), "ValidatingAdmissionPolicy", GuardDeploymentsName)].Object
+		body, _ := json.Marshal(deployments.Object)
+		if !strings.Contains(string(body), `\"`+img+`\"`) {
+			t.Errorf("%s is left out of the admin's images", img)
+		}
+	}
+}
+
+// expand is the kubelet's expansion of a container's env value or argument
+// (k8s.io/kubernetes third_party/forked/golang/expansion, ported): $$ is a $,
+// $(NAME) is NAME's value, or kept as written when env lacks NAME.
+func expand(input string, env map[string]string) string {
+	var buf strings.Builder
+	checkpoint := 0
+	for cursor := 0; cursor < len(input); cursor++ {
+		if input[cursor] == '$' && cursor+1 < len(input) {
+			buf.WriteString(input[checkpoint:cursor])
+			read, isVar, advance := readVariableName(input[cursor+1:])
+			if isVar {
+				if v, ok := env[read]; ok {
+					buf.WriteString(v)
+				} else {
+					buf.WriteString("$(" + read + ")")
+				}
+			} else {
+				buf.WriteString(read)
+			}
+			cursor += advance
+			checkpoint = cursor + 1
+		}
+	}
+	return buf.String() + input[checkpoint:]
+}
+
+func readVariableName(input string) (string, bool, int) {
+	switch input[0] {
+	case '$':
+		return input[0:1], false, 1
+	case '(':
+		for i := 1; i < len(input); i++ {
+			if input[i] == ')' {
+				return input[1:i], true, i + 1
+			}
+		}
+		return "$(", false, 1
+	default:
+		return "$" + string(input[0]), false, 1
+	}
+}
+
+// Every string over $, (, ) and a letter, up to seven long: what the operator
+// renders through KubeletLiteral reaches the console as written, resolves no
+// reference, passes the guard's rule, and is unchanged when it holds neither
+// $( nor $$, as an earlier guard pinned it.
+func TestKubeletLiteralExhaustively(t *testing.T) {
+	env := map[string]string{"": "RESOLVED", "x": "RESOLVED", "x)": "RESOLVED"}
+	strs := []string{""}
+	for n := 1; n <= 7; n++ {
+		var next []string
+		for _, s := range strs {
+			if len(s) == n-1 {
+				for _, c := range []string{"$", "(", ")", "x"} {
+					next = append(next, s+c)
+				}
+			}
+		}
+		strs = append(strs, next...)
+	}
+	for _, s := range strs {
+		lit := KubeletLiteral(s)
+		if got := expand(lit, env); got != s {
+			t.Fatalf("%q renders %q, which reaches the console as %q", s, lit, got)
+		}
+		if strings.Contains(strings.ReplaceAll(lit, "$$", ""), "$(") {
+			t.Fatalf("%q renders %q, which the guard refuses", s, lit)
+		}
+		if !strings.Contains(s, "$(") && !strings.Contains(s, "$$") && lit != s {
+			t.Fatalf("%q renders %q, not as an earlier guard pinned it", s, lit)
+		}
+	}
+}
+
+// What the operator renders through KubeletLiteral reaches the console as an
+// admin wrote it, $(NAME) of a defined env included.
+func TestKubeletLiteralReachesTheConsoleAsWritten(t *testing.T) {
+	env := map[string]string{"beta": "B", "DOTVIRT_FORGE_CLIENT_SECRET": "secret"}
+	for _, s := range []string{"Acme $(beta)", "a$$b", "$$$(DOTVIRT_FORGE_CLIENT_SECRET)", "costs $5", "https://idp.example/$tenant", "$", "$(", "plain"} {
+		if got := expand(KubeletLiteral(s), env); got != s {
+			t.Errorf("%q reaches the console as %q", s, got)
+		}
+	}
+	if expand("$(DOTVIRT_FORGE_CLIENT_SECRET)", env) != "secret" {
+		t.Error("the expander does not expand; the check above proves nothing")
+	}
+}
+
+// A userAuth half written while pull requests are not Delegated blocks no
+// Install: the console takes none of it then.
+func TestUserAuthWithoutDelegatedIsNeverMalformed(t *testing.T) {
+	p := params
+	p.ForgeClientSecret, p.ForgeURL = "Forge_App", "not a url"
+	if bad := p.Malformed(); bad != "" {
+		t.Errorf("not Delegated: %s malformed", bad)
+	}
+	p.ForgeDelegated = true
+	if bad := p.Malformed(); bad == "" {
+		t.Error("Delegated with a malformed userAuth: well formed")
 	}
 }

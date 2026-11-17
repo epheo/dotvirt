@@ -362,9 +362,9 @@ func TestAdminObjectsPinTheRoutersHost(t *testing.T) {
 			"status": map[string]any{"ingress": []any{map[string]any{"host": "dotvirt-dotvirt.apps.micro"}}}})
 	})
 	wantStatus(t, do(s, adminToken, http.MethodPost, "/api/admin-objects", ""), http.StatusOK)
-	body, _ := json.Marshal(seen()["ValidatingAdmissionPolicy/"+adminobjects.GuardFrontDoorName].body)
+	body, _ := json.Marshal(seen()["ValidatingAdmissionPolicy/"+adminobjects.GuardRoutesName].body)
 	if !strings.Contains(string(body), `\"dotvirt-dotvirt.apps.micro\"`) {
-		t.Errorf("the front door does not pin the router's host:\n%s", body)
+		t.Errorf("the Route rules do not pin the router's host:\n%s", body)
 	}
 }
 

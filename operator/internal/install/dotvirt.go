@@ -442,8 +442,8 @@ func Deployment(dv *dotvirtv1alpha1.Dotvirt, argoNS string, tenantAllowed []tena
 					Containers: []corev1.Container{{
 						Name:            AppName,
 						Image:           image,
-						Args:            dotvirtArgs(dv),
-						Env:             dotvirtEnv(dv, argoNS, tenantAllowed),
+						Args:            kubeletLiterals(dotvirtArgs(dv)),
+						Env:             kubeletLiteralEnv(dotvirtEnv(dv, argoNS, tenantAllowed)),
 						Ports:           []corev1.ContainerPort{{Name: "http", ContainerPort: HTTPPort}},
 						VolumeMounts:    volumeMounts,
 						SecurityContext: hardenedContainerSecurityContext(),
@@ -459,4 +459,24 @@ func Deployment(dv *dotvirtv1alpha1.Dotvirt, argoNS string, tenantAllowed []tena
 			},
 		},
 	}
+}
+
+// kubeletLiterals and kubeletLiteralEnv hand the console every argument and
+// env value as written: the kubelet would expand $(NAME) in an admin's text
+// (a product name, a link), and the operator guard refuses it there.
+func kubeletLiterals(args []string) []string {
+	out := make([]string, len(args))
+	for i, a := range args {
+		out[i] = adminobjects.KubeletLiteral(a)
+	}
+	return out
+}
+
+func kubeletLiteralEnv(env []corev1.EnvVar) []corev1.EnvVar {
+	for i := range env {
+		if env[i].ValueFrom == nil {
+			env[i].Value = adminobjects.KubeletLiteral(env[i].Value)
+		}
+	}
+	return env
 }

@@ -23,13 +23,17 @@ YQ ?= go run github.com/mikefarah/yq/v4@$(YQ_VERSION)
 help: ## Show targets.
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN{FS=":.*?## "}{printf "  %-14s %s\n", $$1, $$2}'
 
+# The operator's packages, never ./...: controller-gen would load test/typecheck,
+# its own module outside the workspace, and fail.
+GEN_PATHS = {./api/...,./cmd/...,./internal/...}
+
 .PHONY: generate
 generate: ## Generate DeepCopy methods (zz_generated.deepcopy.go).
-	$(CONTROLLER_GEN) object:headerFile="hack/boilerplate.go.txt" paths="./..."
+	$(CONTROLLER_GEN) object:headerFile="hack/boilerplate.go.txt" paths="$(GEN_PATHS)"
 
 .PHONY: manifests
 manifests: ## Generate the CRD + RBAC role into config/.
-	$(CONTROLLER_GEN) crd rbac:roleName=dotvirt-operator paths="./..." \
+	$(CONTROLLER_GEN) crd rbac:roleName=dotvirt-operator paths="$(GEN_PATHS)" \
 		output:crd:artifacts:config=config/crd/bases \
 		output:rbac:artifacts:config=config/rbac
 
@@ -45,8 +49,10 @@ SETUP_ENVTEST ?= go run sigs.k8s.io/controller-runtime/tools/setup-envtest@$(SET
 ENVTEST_INDEX ?= https://raw.githubusercontent.com/kubernetes-sigs/controller-tools/$(ENVTEST_INDEX_COMMIT)/envtest-releases.yaml
 ENVTEST_ASSETS ?= $$($(SETUP_ENVTEST) use $(ENVTEST_K8S_VERSION) --index $(ENVTEST_INDEX) --bin-dir $(CURDIR)/bin/envtest -p path)
 .PHONY: test-envtest
-test-envtest: ## Run the envtest suite (server-side apply + the operator's RBAC).
+test-envtest: ## Run the envtest suite (server-side apply + the operator's RBAC), and type-check the guard.
 	KUBEBUILDER_ASSETS="$(ENVTEST_ASSETS)" go test ./internal/controller/ -run TestEnvtest -count=1 -v
+	# Its own module, outside the workspace: see test/typecheck.
+	cd test/typecheck && KUBEBUILDER_ASSETS="$(ENVTEST_ASSETS)" GOWORK=off go test ./... -count=1 -v
 
 .PHONY: build
 build: generate fmt vet ## Build the manager binary.

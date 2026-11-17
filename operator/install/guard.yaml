@@ -30,12 +30,29 @@
 #   export INSTALL_NAMESPACE
 #   spec() { kubectl -n "$INSTALL_NAMESPACE" get dotvirt -o jsonpath="{.items[0].spec.$1}"; }
 #   export SPEC_IMAGE="$(spec image)"
+#   # An image in an official repository is left out: the repository admits it
+#   # already, and a pinned digest would read Outdated at every release.
+#   inrepo() { case "$1" in "$2":*|"$2"@sha256:*) return 0;; esac; return 1; }
+#   inrepo "$SPEC_IMAGE" quay.io/epheo/dotvirt && SPEC_IMAGE=
+#   inrepo "$RELATED_IMAGE_DOTVIRT" quay.io/epheo/dotvirt && RELATED_IMAGE_DOTVIRT=
+#   inrepo "$RELATED_IMAGE_FORGEJO" codeberg.org/forgejo/forgejo && RELATED_IMAGE_FORGEJO=
 #   export FORGE_INSECURE_TLS="$( [ "$(spec forge.insecureTLS)" = true ] && echo true || echo false )"
 #   # Where users' metrics queries go: spec.metrics.url; its tenancyURL, else for
 #   # https://thanos-querier.openshift-monitoring.svc:9091 the same URL on 9092;
 #   # the CA, /var/run/dotvirt/tls-metrics/ca.crt when spec.metrics.ca is set, else
 #   # /var/run/dotvirt/tls-service/service-ca.crt for an https .svc url. Empty when unset.
-#   export METRICS_URL="$(spec metrics.url)" METRICS_TENANCY_URL=... METRICS_CA=...
+#   METRICS_URL="$(spec metrics.url)" METRICS_TENANCY_URL= METRICS_CA=
+#   if [ -n "$METRICS_URL" ]; then
+#     METRICS_TENANCY_URL="$(spec metrics.tenancyURL)"
+#     [ -n "$METRICS_TENANCY_URL" ] || case "$METRICS_URL" in
+#       *://thanos-querier.openshift-monitoring.svc:9091|*://thanos-querier.openshift-monitoring.svc:9091/*|\
+#       *://thanos-querier.openshift-monitoring.svc.cluster.local:9091|*://thanos-querier.openshift-monitoring.svc.cluster.local:9091/*)
+#         METRICS_TENANCY_URL="$(printf '%s' "$METRICS_URL" | sed 's|:9091|:9092|')";;
+#     esac
+#     if [ -n "$(spec metrics.ca)" ]; then METRICS_CA=/var/run/dotvirt/tls-metrics/ca.crt
+#     else case "$METRICS_URL" in https://*.svc*) METRICS_CA=/var/run/dotvirt/tls-service/service-ca.crt;; esac; fi
+#   fi
+#   export METRICS_URL METRICS_TENANCY_URL METRICS_CA
 #   # spec.argocd, else the defaults: openshift-gitops where routes are served
 #   # (OpenShift, MicroShift), argocd elsewhere, and that instance's controller:
 #   ARGO_NAMESPACE="$(spec argocd.namespace)"
@@ -61,6 +78,22 @@
 #   # The OIDC issuer and client secret an admin chose, if any:
 #   export OIDC_SECRET="$(spec auth.oidc.clientSecret.name)" OIDC_SECRET_KEY="$(spec auth.oidc.clientSecret.key)"
 #   export OIDC_ISSUER="$(spec auth.oidc.issuerURL)"
+#   # Delegated pull requests: the forge application an admin registered.
+#   export FORGE_DELEGATED="$( [ "$(spec forge.pullRequests)" = Delegated ] && echo true || echo false )"
+#   export FORGE_URL="$(spec forge.url)" FORGE_CLIENT_ID="$(spec forge.userAuth.clientID)"
+#   export FORGE_AUTHORIZE_URL="$(spec forge.userAuth.authorizeURL)" FORGE_TOKEN_URL="$(spec forge.userAuth.tokenURL)"
+#   export FORGE_CLIENT_SECRET="$(spec forge.userAuth.clientSecret.name)" FORGE_CLIENT_SECRET_KEY="$(spec forge.userAuth.clientSecret.key)"
+#   # Not delegating, the guard pins none of them:
+#   [ "$FORGE_DELEGATED" = true ] || { FORGE_URL=; FORGE_CLIENT_ID=; FORGE_AUTHORIZE_URL=; FORGE_TOKEN_URL=; FORGE_CLIENT_SECRET=; FORGE_CLIENT_SECRET_KEY=; }
+#
+#   # Every value lands inside a quoted string in a YAML document: one holding
+#   # any other character (a quote, a backslash, a line break, a space) is
+#   # refused, never escaped. The console's Install builds the guard in Go.
+#   for v in ARGO_CONTROLLER ARGO_NAMESPACE BRANDING_CONFIGMAP CONSOLE_HOST FORGE_AUTHORIZE_URL FORGE_CLIENT_ID FORGE_CLIENT_SECRET FORGE_CLIENT_SECRET_KEY FORGE_DELEGATED FORGE_INSECURE_TLS FORGE_MANAGED FORGE_SECRET FORGE_TOKEN_URL FORGE_URL INSTALL_NAMESPACE METRICS_CA METRICS_CA_CONFIGMAP METRICS_TENANCY_URL METRICS_URL OIDC_ISSUER OIDC_SECRET OIDC_SECRET_KEY OPERATOR_USERNAME RELATED_IMAGE_DOTVIRT RELATED_IMAGE_FORGEJO SPEC_IMAGE; do
+#     eval "x=\${$v-}"
+#     case "$x" in *[!]A-Za-z0-9._:/@%+=~,[-]*)
+#       echo "$v holds a character the template cannot carry: install the guard from the console" >&2; exit 1;; esac
+#   done
 #
 #   envsubst < guard.yaml | kubectl apply --server-side --field-manager=dotvirt -f -
 #
@@ -74,13 +107,293 @@
 #     -e "s|\${BRANDING_CONFIGMAP}|$BRANDING_CONFIGMAP|g" -e "s|\${METRICS_CA_CONFIGMAP}|$METRICS_CA_CONFIGMAP|g" \
 #     -e "s|\${FORGE_SECRET}|$FORGE_SECRET|g" -e "s|\${FORGE_MANAGED}|$FORGE_MANAGED|g" \
 #     -e "s|\${OIDC_SECRET}|$OIDC_SECRET|g" -e "s|\${OIDC_SECRET_KEY}|$OIDC_SECRET_KEY|g" \
-#     -e "s|\${OIDC_ISSUER}|$OIDC_ISSUER|g" guard.yaml | kubectl apply --server-side --field-manager=dotvirt -f -
+#     -e "s|\${OIDC_ISSUER}|$OIDC_ISSUER|g" -e "s|\${FORGE_DELEGATED}|$FORGE_DELEGATED|g" \
+#     -e "s|\${FORGE_URL}|$FORGE_URL|g" -e "s|\${FORGE_CLIENT_ID}|$FORGE_CLIENT_ID|g" \
+#     -e "s|\${FORGE_AUTHORIZE_URL}|$FORGE_AUTHORIZE_URL|g" -e "s|\${FORGE_TOKEN_URL}|$FORGE_TOKEN_URL|g" \
+#     -e "s|\${FORGE_CLIENT_SECRET}|$FORGE_CLIENT_SECRET|g" -e "s|\${FORGE_CLIENT_SECRET_KEY}|$FORGE_CLIENT_SECRET_KEY|g" guard.yaml | kubectl apply --server-side --field-manager=dotvirt -f -
 #
 # Every object carries the label app.kubernetes.io/part-of=dotvirt-operator-guard.
 #
 # Generated from pkg/adminobjects (go test ./pkg/adminobjects -run TestReleaseTemplate -update).
 ---
-# Bounds the operator's Secrets and accounts: no Secret outside ${INSTALL_NAMESPACE} and ${ARGO_NAMESPACE}, never a ServiceAccount token, the console's token mounted
+# Bounds the operator's ServiceAccounts: the console's keeps its token mounted
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  labels:
+    app.kubernetes.io/name: dotvirt
+    app.kubernetes.io/part-of: dotvirt-operator-guard
+  name: dotvirt-operator-accounts
+spec:
+  failurePolicy: Fail
+  matchConditions:
+  - expression: request.userInfo.username == "${OPERATOR_USERNAME}"
+    name: operator
+  matchConstraints:
+    resourceRules:
+    - apiGroups:
+      - ""
+      apiVersions:
+      - v1
+      operations:
+      - CREATE
+      - UPDATE
+      resources:
+      - serviceaccounts
+  validations:
+  - expression: object.metadata.name != "dotvirt" || !has(object.automountServiceAccountToken)
+      || object.automountServiceAccountToken
+    message: the operator keeps the console's ServiceAccount token mounted (dotvirt
+      operator guard)
+    reason: Forbidden
+---
+# Enforces dotvirt-operator-accounts
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  labels:
+    app.kubernetes.io/name: dotvirt
+    app.kubernetes.io/part-of: dotvirt-operator-guard
+  name: dotvirt-operator-accounts
+spec:
+  policyName: dotvirt-operator-accounts
+  validationActions:
+  - Deny
+---
+# Bounds the operator's claims: bound to no volume, selector or data source of its choosing
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  labels:
+    app.kubernetes.io/name: dotvirt
+    app.kubernetes.io/part-of: dotvirt-operator-guard
+  name: dotvirt-operator-claims
+spec:
+  failurePolicy: Fail
+  matchConditions:
+  - expression: request.userInfo.username == "${OPERATOR_USERNAME}"
+    name: operator
+  matchConstraints:
+    resourceRules:
+    - apiGroups:
+      - ""
+      apiVersions:
+      - v1
+      operations:
+      - CREATE
+      - UPDATE
+      resources:
+      - persistentvolumeclaims
+  validations:
+  - expression: '!has(object.spec.selector) && !has(object.spec.dataSource) && !has(object.spec.dataSourceRef)
+      && (request.operation == "CREATE" ? (!has(object.spec.volumeName) || object.spec.volumeName
+      == "") : has(object.spec.volumeName) == has(oldObject.spec.volumeName) && (!has(object.spec.volumeName)
+      || object.spec.volumeName == oldObject.spec.volumeName))'
+    message: the operator binds its claims to no volume, selector or data source of
+      its choosing (dotvirt operator guard)
+    reason: Forbidden
+---
+# Enforces dotvirt-operator-claims
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  labels:
+    app.kubernetes.io/name: dotvirt
+    app.kubernetes.io/part-of: dotvirt-operator-guard
+  name: dotvirt-operator-claims
+spec:
+  policyName: dotvirt-operator-claims
+  validationActions:
+  - Deny
+---
+# Bounds the operator's Routes: the console's leads only to the console on its host, no other claims that host
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  labels:
+    app.kubernetes.io/name: dotvirt
+    app.kubernetes.io/part-of: dotvirt-operator-guard
+  name: dotvirt-operator-routes
+spec:
+  failurePolicy: Fail
+  matchConditions:
+  - expression: request.userInfo.username == "${OPERATOR_USERNAME}"
+    name: operator
+  matchConstraints:
+    resourceRules:
+    - apiGroups:
+      - route.openshift.io
+      apiVersions:
+      - v1
+      operations:
+      - CREATE
+      - UPDATE
+      resources:
+      - routes
+  validations:
+  - expression: '!(object.metadata.name == "dotvirt" && request.namespace == "${INSTALL_NAMESPACE}")
+      || ((request.operation == "CREATE" ? (!has(object.metadata.annotations) || object.metadata.annotations.all(k,
+      k == "openshift.io/host.generated" && object.metadata.annotations[k] == "true"))
+      : ((!has(object.metadata.annotations) || object.metadata.annotations.all(k,
+      k == "openshift.io/host.generated" || (has(oldObject.metadata.annotations) &&
+      k in oldObject.metadata.annotations && oldObject.metadata.annotations[k] ==
+      object.metadata.annotations[k]))) && (!has(oldObject.metadata.annotations) ||
+      oldObject.metadata.annotations.all(k, k == "openshift.io/host.generated" ||
+      (has(object.metadata.annotations) && k in object.metadata.annotations))))) &&
+      object.spec.to.kind == "Service" && object.spec.to.name == "dotvirt" && (!has(object.spec.alternateBackends)
+      || size(object.spec.alternateBackends) == 0) && has(object.spec.port) && string(object.spec.port.targetPort)
+      == "http" && has(object.spec.tls) && object.spec.tls.termination == "edge" &&
+      !has(object.spec.tls.destinationCACertificate) && ("${CONSOLE_HOST}" == "" ||
+      !has(object.spec.host) || object.spec.host == "" || object.spec.host == "${CONSOLE_HOST}"))'
+    message: the operator routes the console's host only to the console's Service,
+      edge-terminated (dotvirt operator guard)
+    reason: Forbidden
+  - expression: (object.metadata.name == "dotvirt" && request.namespace == "${INSTALL_NAMESPACE}")
+      || ((!has(object.spec.host) || object.spec.host == "" || object.spec.host !=
+      "${CONSOLE_HOST}") && (!has(object.spec.wildcardPolicy) || object.spec.wildcardPolicy
+      == "None"))
+    message: the operator exposes nothing else on the console's host, and nothing
+      on every host (dotvirt operator guard)
+    reason: Forbidden
+---
+# Enforces dotvirt-operator-routes
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  labels:
+    app.kubernetes.io/name: dotvirt
+    app.kubernetes.io/part-of: dotvirt-operator-guard
+  name: dotvirt-operator-routes
+spec:
+  policyName: dotvirt-operator-routes
+  validationActions:
+  - Deny
+---
+# Bounds the operator's Ingresses: the console's leads only to the console on its host, no other claims that host or every host
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  labels:
+    app.kubernetes.io/name: dotvirt
+    app.kubernetes.io/part-of: dotvirt-operator-guard
+  name: dotvirt-operator-ingresses
+spec:
+  failurePolicy: Fail
+  matchConditions:
+  - expression: request.userInfo.username == "${OPERATOR_USERNAME}"
+    name: operator
+  matchConstraints:
+    resourceRules:
+    - apiGroups:
+      - networking.k8s.io
+      apiVersions:
+      - v1
+      operations:
+      - CREATE
+      - UPDATE
+      resources:
+      - ingresses
+  validations:
+  - expression: '!(object.metadata.name == "dotvirt" && request.namespace == "${INSTALL_NAMESPACE}")
+      || ((request.operation == "CREATE" ? (!has(object.metadata.annotations) || object.metadata.annotations.all(k,
+      k == "openshift.io/host.generated" && object.metadata.annotations[k] == "true"))
+      : ((!has(object.metadata.annotations) || object.metadata.annotations.all(k,
+      k == "openshift.io/host.generated" || (has(oldObject.metadata.annotations) &&
+      k in oldObject.metadata.annotations && oldObject.metadata.annotations[k] ==
+      object.metadata.annotations[k]))) && (!has(oldObject.metadata.annotations) ||
+      oldObject.metadata.annotations.all(k, k == "openshift.io/host.generated" ||
+      (has(object.metadata.annotations) && k in object.metadata.annotations))))) &&
+      (!has(object.spec.defaultBackend) || (has(object.spec.defaultBackend.service)
+      && object.spec.defaultBackend.service.name == "dotvirt")) && object.spec.rules.all(r,
+      has(r.host) && r.host == "${CONSOLE_HOST}" && has(r.http) && r.http.paths.all(path,
+      has(path.backend.service) && path.backend.service.name == "dotvirt" && path.backend.service.port.number
+      == 8080)))'
+    message: the operator sends the console's Ingress only to the console's Service,
+      on the console's host (dotvirt operator guard)
+    reason: Forbidden
+  - expression: (object.metadata.name == "dotvirt" && request.namespace == "${INSTALL_NAMESPACE}")
+      || (!has(object.spec.defaultBackend) && (!has(object.spec.rules) || object.spec.rules.all(r,
+      has(r.host) && r.host != "" && r.host != "${CONSOLE_HOST}" && !(r.host.startsWith("*.")
+      && "${CONSOLE_HOST}".endsWith(r.host.substring(1))))))
+    message: the operator exposes nothing else on the console's host, and nothing
+      on every host (dotvirt operator guard)
+    reason: Forbidden
+---
+# Enforces dotvirt-operator-ingresses
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  labels:
+    app.kubernetes.io/name: dotvirt
+    app.kubernetes.io/part-of: dotvirt-operator-guard
+  name: dotvirt-operator-ingresses
+spec:
+  policyName: dotvirt-operator-ingresses
+  validationActions:
+  - Deny
+---
+# Bounds the operator's HTTPRoutes: the console's leads only to the console on its host, unfiltered, no other claims that host or every host
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  labels:
+    app.kubernetes.io/name: dotvirt
+    app.kubernetes.io/part-of: dotvirt-operator-guard
+  name: dotvirt-operator-httproutes
+spec:
+  failurePolicy: Fail
+  matchConditions:
+  - expression: request.userInfo.username == "${OPERATOR_USERNAME}"
+    name: operator
+  matchConstraints:
+    resourceRules:
+    - apiGroups:
+      - gateway.networking.k8s.io
+      apiVersions:
+      - v1
+      operations:
+      - CREATE
+      - UPDATE
+      resources:
+      - httproutes
+  validations:
+  - expression: '!(object.metadata.name == "dotvirt" && request.namespace == "${INSTALL_NAMESPACE}")
+      || ((request.operation == "CREATE" ? (!has(object.metadata.annotations) || object.metadata.annotations.all(k,
+      k == "openshift.io/host.generated" && object.metadata.annotations[k] == "true"))
+      : ((!has(object.metadata.annotations) || object.metadata.annotations.all(k,
+      k == "openshift.io/host.generated" || (has(oldObject.metadata.annotations) &&
+      k in oldObject.metadata.annotations && oldObject.metadata.annotations[k] ==
+      object.metadata.annotations[k]))) && (!has(oldObject.metadata.annotations) ||
+      oldObject.metadata.annotations.all(k, k == "openshift.io/host.generated" ||
+      (has(object.metadata.annotations) && k in object.metadata.annotations))))) &&
+      object.spec.hostnames == ["${CONSOLE_HOST}"] && object.spec.rules.all(r, !has(r.filters)
+      && r.backendRefs.all(b, !has(b.filters) && (!has(b.kind) || b.kind == "Service")
+      && (!has(b.group) || b.group == "") && (!has(b.namespace) || b.namespace ==
+      "${INSTALL_NAMESPACE}") && b.name == "dotvirt" && b.port == 8080)))'
+    message: the operator sends the console's HTTPRoute only to the console's Service,
+      on the console's host, unfiltered (dotvirt operator guard)
+    reason: Forbidden
+  - expression: (object.metadata.name == "dotvirt" && request.namespace == "${INSTALL_NAMESPACE}")
+      || (has(object.spec.hostnames) && size(object.spec.hostnames) > 0 && object.spec.hostnames.all(h,
+      h != "${CONSOLE_HOST}" && !(h.startsWith("*.") && "${CONSOLE_HOST}".endsWith(h.substring(1)))))
+    message: the operator exposes nothing else on the console's host, and nothing
+      on every host (dotvirt operator guard)
+    reason: Forbidden
+---
+# Enforces dotvirt-operator-httproutes
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  labels:
+    app.kubernetes.io/name: dotvirt
+    app.kubernetes.io/part-of: dotvirt-operator-guard
+  name: dotvirt-operator-httproutes
+spec:
+  policyName: dotvirt-operator-httproutes
+  validationActions:
+  - Deny
+---
+# Bounds the operator's Secrets: none outside ${INSTALL_NAMESPACE} and ${ARGO_NAMESPACE}, never a ServiceAccount token
 apiVersion: admissionregistration.k8s.io/v1
 kind: ValidatingAdmissionPolicy
 metadata:
@@ -104,38 +417,35 @@ spec:
       - UPDATE
       resources:
       - secrets
-    - apiGroups:
-      - ""
-      apiVersions:
-      - v1
-      operations:
-      - CREATE
-      - UPDATE
-      resources:
-      - serviceaccounts
   validations:
-  - expression: request.resource.resource != "secrets" || !has(object.type) || object.type
-      != "kubernetes.io/service-account-token"
+  - expression: '!has(object.type) || object.type != "kubernetes.io/service-account-token"'
     message: the operator never writes ServiceAccount token Secrets (dotvirt operator
       guard)
     reason: Forbidden
-  - expression: request.resource.resource != "secrets" || !has(object.metadata.annotations)
-      || !("kubernetes.io/service-account.name" in object.metadata.annotations)
+  - expression: '!has(object.metadata.annotations) || !("kubernetes.io/service-account.name"
+      in object.metadata.annotations)'
     message: the operator never asks for a ServiceAccount token (dotvirt operator
       guard)
     reason: Forbidden
-  - expression: request.resource.resource != "secrets" || request.namespace in ["${INSTALL_NAMESPACE}",
-      "${ARGO_NAMESPACE}"]
+  - expression: request.namespace in ["${INSTALL_NAMESPACE}", "${ARGO_NAMESPACE}"]
     message: the operator writes Secrets only in ${INSTALL_NAMESPACE} and ${ARGO_NAMESPACE}
       (dotvirt operator guard)
     reason: Forbidden
-  - expression: request.resource.resource != "serviceaccounts" || object.metadata.name
-      != "dotvirt" || !has(object.automountServiceAccountToken) || object.automountServiceAccountToken
-    message: the operator keeps the console's ServiceAccount token mounted (dotvirt
-      operator guard)
-    reason: Forbidden
 ---
-# Bounds the operator's Deployments and claims: the console and the forge only, in ${INSTALL_NAMESPACE}, with their own accounts, images, commands, volumes, Secrets and token, unprivileged and off the host; claims bound to nothing of its choosing
+# Enforces dotvirt-operator-secrets
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  labels:
+    app.kubernetes.io/name: dotvirt
+    app.kubernetes.io/part-of: dotvirt-operator-guard
+  name: dotvirt-operator-secrets
+spec:
+  policyName: dotvirt-operator-secrets
+  validationActions:
+  - Deny
+---
+# Bounds the operator's Deployments: the console and the forge only, in ${INSTALL_NAMESPACE}, with their own accounts, images, commands, volumes, Secrets and token, unprivileged and off the host
 apiVersion: admissionregistration.k8s.io/v1
 kind: ValidatingAdmissionPolicy
 metadata:
@@ -159,73 +469,60 @@ spec:
       - UPDATE
       resources:
       - deployments
-    - apiGroups:
-      - ""
-      apiVersions:
-      - v1
-      operations:
-      - CREATE
-      - UPDATE
-      resources:
-      - persistentvolumeclaims
   validations:
-  - expression: request.resource.resource != "deployments" || (request.namespace ==
-      "${INSTALL_NAMESPACE}")
+  - expression: request.namespace == "${INSTALL_NAMESPACE}"
     message: the operator runs Deployments only in ${INSTALL_NAMESPACE} (dotvirt operator
       guard)
     reason: Forbidden
-  - expression: 'request.resource.resource != "deployments" || (object.metadata.name
-      == "dotvirt" ? object.spec.template.spec.serviceAccountName == "dotvirt" : (object.metadata.name
-      == "dotvirt-forgejo" && object.spec.template.spec.serviceAccountName == "dotvirt-forgejo"))'
+  - expression: 'object.metadata.name == "dotvirt" ? object.spec.template.spec.serviceAccountName
+      == "dotvirt" : (object.metadata.name == "dotvirt-forgejo" && object.spec.template.spec.serviceAccountName
+      == "dotvirt-forgejo")'
     message: the operator runs only the console as dotvirt and the forge as dotvirt-forgejo
       (dotvirt operator guard)
     reason: Forbidden
-  - expression: 'request.resource.resource != "deployments" || (object.metadata.name
-      == "dotvirt" ? (object.spec.template.spec.containers.all(c, (c.image.startsWith("quay.io/epheo/dotvirt@sha256:")
-      || c.image.startsWith("quay.io/epheo/dotvirt:") || c.image in ["${SPEC_IMAGE}",
-      "${RELATED_IMAGE_DOTVIRT}"])) && (!has(object.spec.template.spec.initContainers)
+  - expression: 'object.metadata.name == "dotvirt" ? (object.spec.template.spec.containers.all(c,
+      (c.image.startsWith("quay.io/epheo/dotvirt@sha256:") || c.image.startsWith("quay.io/epheo/dotvirt:")
+      || c.image in ["${SPEC_IMAGE}", "${RELATED_IMAGE_DOTVIRT}"])) && (!has(object.spec.template.spec.initContainers)
       || object.spec.template.spec.initContainers.all(c, (c.image.startsWith("quay.io/epheo/dotvirt@sha256:")
       || c.image.startsWith("quay.io/epheo/dotvirt:") || c.image in ["${SPEC_IMAGE}",
       "${RELATED_IMAGE_DOTVIRT}"])))) : (object.spec.template.spec.containers.all(c,
       (c.image.startsWith("codeberg.org/forgejo/forgejo@sha256:") || c.image.startsWith("codeberg.org/forgejo/forgejo:")
       || c.image in ["${RELATED_IMAGE_FORGEJO}"])) && (!has(object.spec.template.spec.initContainers)
       || object.spec.template.spec.initContainers.all(c, (c.image.startsWith("codeberg.org/forgejo/forgejo@sha256:")
-      || c.image.startsWith("codeberg.org/forgejo/forgejo:") || c.image in ["${RELATED_IMAGE_FORGEJO}"])))))'
+      || c.image.startsWith("codeberg.org/forgejo/forgejo:") || c.image in ["${RELATED_IMAGE_FORGEJO}"]))))'
     message: the operator runs the console only from quay.io/epheo/dotvirt and the
       forge only from codeberg.org/forgejo/forgejo, or the image an admin chose (dotvirt
       operator guard)
     reason: Forbidden
-  - expression: request.resource.resource != "deployments" || (object.metadata.name
-      != "dotvirt" || (object.spec.template.spec.containers.all(c, !has(c.command)
-      && (!has(c.lifecycle) || ((!has(c.lifecycle.postStart) || !has(c.lifecycle.postStart.exec))
+  - expression: object.metadata.name != "dotvirt" || (object.spec.template.spec.containers.all(c,
+      !has(c.command) && (!has(c.lifecycle) || ((!has(c.lifecycle.postStart) || !has(c.lifecycle.postStart.exec))
       && (!has(c.lifecycle.preStop) || !has(c.lifecycle.preStop.exec)))) && !(has(c.livenessProbe)
       && has(c.livenessProbe.exec)) && !(has(c.readinessProbe) && has(c.readinessProbe.exec))
       && !(has(c.startupProbe) && has(c.startupProbe.exec))) && (!has(object.spec.template.spec.initContainers)
       || size(object.spec.template.spec.initContainers) == 0) && !(has(object.spec.template.spec.shareProcessNamespace)
-      && object.spec.template.spec.shareProcessNamespace)))
+      && object.spec.template.spec.shareProcessNamespace))
     message: the operator runs the console with its image's own entrypoint, no exec
       hook or probe, no init container, no shared process namespace (dotvirt operator
       guard)
     reason: Forbidden
-  - expression: request.resource.resource != "deployments" || (object.metadata.name
-      != "dotvirt-forgejo" || !has(object.spec.template.metadata.labels) || !("app"
-      in object.spec.template.metadata.labels && object.spec.template.metadata.labels["app"]
-      == "dotvirt"))
+  - expression: object.metadata.name != "dotvirt-forgejo" || !has(object.spec.template.metadata.labels)
+      || !("app" in object.spec.template.metadata.labels && object.spec.template.metadata.labels["app"]
+      == "dotvirt")
     message: the operator gives the forge's pods none of the console's labels (dotvirt
       operator guard)
     reason: Forbidden
-  - expression: 'request.resource.resource != "deployments" || (object.metadata.name
-      != "dotvirt" || object.spec.template.spec.containers.all(c, (!has(c.args) ||
-      c.args.all(a, !(a == "-metrics-url" || a == "--metrics-url" || a.startsWith("-metrics-url=")
-      || a.startsWith("--metrics-url=")) || a in ["-metrics-url=${METRICS_URL}", "--metrics-url=${METRICS_URL}"]))
-      && (!has(c.env) || c.env.all(e, e.name != "DOTVIRT_METRICS_URL" || (!has(e.valueFrom)
-      && (has(e.value) ? e.value : "") in ["${METRICS_URL}"]))) && (!has(c.args) ||
-      c.args.all(a, !(a == "-metrics-tenancy-url" || a == "--metrics-tenancy-url"
-      || a.startsWith("-metrics-tenancy-url=") || a.startsWith("--metrics-tenancy-url="))
-      || a in ["-metrics-tenancy-url=${METRICS_TENANCY_URL}", "--metrics-tenancy-url=${METRICS_TENANCY_URL}"]))
-      && (!has(c.env) || c.env.all(e, e.name != "DOTVIRT_METRICS_TENANCY_URL" || (!has(e.valueFrom)
-      && (has(e.value) ? e.value : "") in ["${METRICS_TENANCY_URL}"]))) && (!has(c.args)
-      || c.args.all(a, !(a == "-metrics-ca" || a == "--metrics-ca" || a.startsWith("-metrics-ca=")
+  - expression: 'object.metadata.name != "dotvirt" || object.spec.template.spec.containers.all(c,
+      (!has(c.args) || c.args.all(a, !(a == "-metrics-url" || a == "--metrics-url"
+      || a.startsWith("-metrics-url=") || a.startsWith("--metrics-url=")) || a in
+      ["-metrics-url=${METRICS_URL}", "--metrics-url=${METRICS_URL}"])) && (!has(c.env)
+      || c.env.all(e, e.name != "DOTVIRT_METRICS_URL" || (!has(e.valueFrom) && (has(e.value)
+      ? e.value : "") in ["${METRICS_URL}"]))) && (!has(c.args) || c.args.all(a, !(a
+      == "-metrics-tenancy-url" || a == "--metrics-tenancy-url" || a.startsWith("-metrics-tenancy-url=")
+      || a.startsWith("--metrics-tenancy-url=")) || a in ["-metrics-tenancy-url=${METRICS_TENANCY_URL}",
+      "--metrics-tenancy-url=${METRICS_TENANCY_URL}"])) && (!has(c.env) || c.env.all(e,
+      e.name != "DOTVIRT_METRICS_TENANCY_URL" || (!has(e.valueFrom) && (has(e.value)
+      ? e.value : "") in ["${METRICS_TENANCY_URL}"]))) && (!has(c.args) || c.args.all(a,
+      !(a == "-metrics-ca" || a == "--metrics-ca" || a.startsWith("-metrics-ca=")
       || a.startsWith("--metrics-ca=")) || a in ["-metrics-ca=${METRICS_CA}", "--metrics-ca=${METRICS_CA}"]))
       && (!has(c.env) || c.env.all(e, e.name != "DOTVIRT_METRICS_CA" || (!has(e.valueFrom)
       && (has(e.value) ? e.value : "") in ["${METRICS_CA}"]))) && (!has(c.args) ||
@@ -241,34 +538,83 @@ spec:
       || c.args.all(a, !(a == "-oidc-issuer" || a == "--oidc-issuer" || a.startsWith("-oidc-issuer=")
       || a.startsWith("--oidc-issuer=")) || a in ["-oidc-issuer=${OIDC_ISSUER}", "--oidc-issuer=${OIDC_ISSUER}"]))
       && (!has(c.env) || c.env.all(e, e.name != "DOTVIRT_OIDC_ISSUER" || (!has(e.valueFrom)
-      && (has(e.value) ? e.value : "") in ["${OIDC_ISSUER}"]))) && (${FORGE_INSECURE_TLS}
-      || ((!has(c.args) || c.args.all(a, !(a == "-insecure-tls" || a == "--insecure-tls"
-      || a.startsWith("-insecure-tls=") || a.startsWith("--insecure-tls=")))) && (!has(c.env)
-      || c.env.all(e, e.name != "DOTVIRT_INSECURE_TLS")))) && (!has(c.args) || c.args.all(a,
-      !(a == "-kubeconfig" || a == "--kubeconfig" || a.startsWith("-kubeconfig=")
-      || a.startsWith("--kubeconfig=")))) && (!has(c.env) || c.env.all(e, e.name !=
-      "KUBECONFIG")) && (!has(c.args) || c.args.all(a, !(a == "-static-dir" || a ==
-      "--static-dir" || a.startsWith("-static-dir=") || a.startsWith("--static-dir="))))
-      && (!has(c.env) || c.env.all(e, e.name != "DOTVIRT_STATIC_DIR")) && (!has(c.env)
-      || c.env.all(e, !(e.name in ["HTTPS_PROXY", "https_proxy", "HTTP_PROXY", "http_proxy",
-      "NO_PROXY", "no_proxy", "ALL_PROXY", "all_proxy", "SSL_CERT_FILE", "SSL_CERT_DIR"])))))'
+      && (has(e.value) ? e.value : "") in ["${OIDC_ISSUER}"]))) && (${FORGE_DELEGATED}
+      ? ((!has(c.args) || c.args.all(a, !(a == "-forge-delegated-url" || a == "--forge-delegated-url"
+      || a.startsWith("-forge-delegated-url=") || a.startsWith("--forge-delegated-url="))
+      || a in ["-forge-delegated-url=${FORGE_URL}", "--forge-delegated-url=${FORGE_URL}"]))
+      && (!has(c.env) || c.env.all(e, e.name != "DOTVIRT_FORGE_DELEGATED_URL" || (!has(e.valueFrom)
+      && (has(e.value) ? e.value : "") in ["${FORGE_URL}"]))) && (!has(c.args) ||
+      c.args.all(a, !(a == "-forge-client-id" || a == "--forge-client-id" || a.startsWith("-forge-client-id=")
+      || a.startsWith("--forge-client-id=")) || a in ["-forge-client-id=${FORGE_CLIENT_ID}",
+      "--forge-client-id=${FORGE_CLIENT_ID}"])) && (!has(c.env) || c.env.all(e, e.name
+      != "DOTVIRT_FORGE_CLIENT_ID" || (!has(e.valueFrom) && (has(e.value) ? e.value
+      : "") in ["${FORGE_CLIENT_ID}"]))) && (!has(c.args) || c.args.all(a, !(a ==
+      "-forge-authorize-url" || a == "--forge-authorize-url" || a.startsWith("-forge-authorize-url=")
+      || a.startsWith("--forge-authorize-url=")) || a in ["-forge-authorize-url=${FORGE_AUTHORIZE_URL}",
+      "--forge-authorize-url=${FORGE_AUTHORIZE_URL}"])) && (!has(c.env) || c.env.all(e,
+      e.name != "DOTVIRT_FORGE_AUTHORIZE_URL" || (!has(e.valueFrom) && (has(e.value)
+      ? e.value : "") in ["${FORGE_AUTHORIZE_URL}"]))) && (!has(c.args) || c.args.all(a,
+      !(a == "-forge-token-url" || a == "--forge-token-url" || a.startsWith("-forge-token-url=")
+      || a.startsWith("--forge-token-url=")) || a in ["-forge-token-url=${FORGE_TOKEN_URL}",
+      "--forge-token-url=${FORGE_TOKEN_URL}"])) && (!has(c.env) || c.env.all(e, e.name
+      != "DOTVIRT_FORGE_TOKEN_URL" || (!has(e.valueFrom) && (has(e.value) ? e.value
+      : "") in ["${FORGE_TOKEN_URL}"])))) : ((!has(c.args) || c.args.all(a, !(a ==
+      "-forge-delegated" || a == "--forge-delegated" || a.startsWith("-forge-delegated=")
+      || a.startsWith("--forge-delegated=")))) && (!has(c.env) || c.env.all(e, e.name
+      != "DOTVIRT_FORGE_DELEGATED")) && (!has(c.args) || c.args.all(a, !(a == "-forge-delegated-url"
+      || a == "--forge-delegated-url" || a.startsWith("-forge-delegated-url=") ||
+      a.startsWith("--forge-delegated-url=")))) && (!has(c.env) || c.env.all(e, e.name
+      != "DOTVIRT_FORGE_DELEGATED_URL")) && (!has(c.args) || c.args.all(a, !(a ==
+      "-forge-client-id" || a == "--forge-client-id" || a.startsWith("-forge-client-id=")
+      || a.startsWith("--forge-client-id=")))) && (!has(c.env) || c.env.all(e, e.name
+      != "DOTVIRT_FORGE_CLIENT_ID")) && (!has(c.args) || c.args.all(a, !(a == "-forge-authorize-url"
+      || a == "--forge-authorize-url" || a.startsWith("-forge-authorize-url=") ||
+      a.startsWith("--forge-authorize-url=")))) && (!has(c.env) || c.env.all(e, e.name
+      != "DOTVIRT_FORGE_AUTHORIZE_URL")) && (!has(c.args) || c.args.all(a, !(a ==
+      "-forge-token-url" || a == "--forge-token-url" || a.startsWith("-forge-token-url=")
+      || a.startsWith("--forge-token-url=")))) && (!has(c.env) || c.env.all(e, e.name
+      != "DOTVIRT_FORGE_TOKEN_URL")) && (!has(c.args) || c.args.all(a, !(a == "-forge-client-secret"
+      || a == "--forge-client-secret" || a.startsWith("-forge-client-secret=") ||
+      a.startsWith("--forge-client-secret=")))) && (!has(c.env) || c.env.all(e, e.name
+      != "DOTVIRT_FORGE_CLIENT_SECRET")))) && (!has(c.args) || c.args.all(a, !(a ==
+      "-forge-ca" || a == "--forge-ca" || a.startsWith("-forge-ca=") || a.startsWith("--forge-ca="))
+      || a in ["-forge-ca=", "--forge-ca=", "-forge-ca=/var/run/dotvirt/tls-ingress/ca-bundle.crt",
+      "--forge-ca=/var/run/dotvirt/tls-ingress/ca-bundle.crt"])) && (!has(c.env) ||
+      c.env.all(e, e.name != "DOTVIRT_FORGE_CA" || (!has(e.valueFrom) && (has(e.value)
+      ? e.value : "") in ["", "/var/run/dotvirt/tls-ingress/ca-bundle.crt"]))) &&
+      (!has(c.command) || c.command.all(x, !x.replace("$$", "").contains("$("))) &&
+      (!has(c.args) || c.args.all(a, !a.replace("$$", "").contains("$("))) && (!has(c.env)
+      || c.env.all(e, !has(e.value) || !e.value.replace("$$", "").contains("$(")))
+      && (!has(c.args) || c.args.all(a, !(a == "-forge-client-secret" || a == "--forge-client-secret"
+      || a.startsWith("-forge-client-secret=") || a.startsWith("--forge-client-secret="))))
+      && (!has(c.env) || c.env.all(e, e.name != "DOTVIRT_FORGE_CLIENT_SECRET" || (has(e.valueFrom)
+      && has(e.valueFrom.secretKeyRef)))) && (${FORGE_INSECURE_TLS} || ((!has(c.args)
+      || c.args.all(a, !(a == "-insecure-tls" || a == "--insecure-tls" || a.startsWith("-insecure-tls=")
+      || a.startsWith("--insecure-tls=")))) && (!has(c.env) || c.env.all(e, e.name
+      != "DOTVIRT_INSECURE_TLS")))) && (!has(c.args) || c.args.all(a, !(a == "-kubeconfig"
+      || a == "--kubeconfig" || a.startsWith("-kubeconfig=") || a.startsWith("--kubeconfig="))))
+      && (!has(c.env) || c.env.all(e, e.name != "KUBECONFIG")) && (!has(c.args) ||
+      c.args.all(a, !(a == "-static-dir" || a == "--static-dir" || a.startsWith("-static-dir=")
+      || a.startsWith("--static-dir=")))) && (!has(c.env) || c.env.all(e, e.name !=
+      "DOTVIRT_STATIC_DIR")) && (!has(c.env) || c.env.all(e, !(e.name in ["HTTPS_PROXY",
+      "https_proxy", "HTTP_PROXY", "http_proxy", "NO_PROXY", "no_proxy", "ALL_PROXY",
+      "all_proxy", "SSL_CERT_FILE", "SSL_CERT_DIR"]))))'
     message: the operator sets none of the console's settings that send users' tokens
       or the console's pages elsewhere, but as an admin chose them (dotvirt operator
       guard)
     reason: Forbidden
-  - expression: request.resource.resource != "deployments" || (object.metadata.name
-      != "dotvirt" || (!(has(object.spec.template.spec.automountServiceAccountToken)
+  - expression: object.metadata.name != "dotvirt" || (!(has(object.spec.template.spec.automountServiceAccountToken)
       && !object.spec.template.spec.automountServiceAccountToken) && (!has(object.spec.template.spec.hostAliases)
       || size(object.spec.template.spec.hostAliases) == 0) && !has(object.spec.template.spec.dnsConfig)
       && (!has(object.spec.template.spec.dnsPolicy) || object.spec.template.spec.dnsPolicy
       == "ClusterFirst") && object.spec.template.spec.containers.all(c, !has(c.envFrom)
-      && (!has(c.env) || c.env.all(e, e.name != "KUBECONFIG" && !e.name.startsWith("KUBERNETES_SERVICE_"))))))
+      && (!has(c.env) || c.env.all(e, e.name != "KUBECONFIG" && !e.name.startsWith("KUBERNETES_SERVICE_")))))
     message: the operator runs the console with its own ServiceAccount token, the
       cluster's DNS, and no kubeconfig or apiserver address of its own (dotvirt operator
       guard)
     reason: Forbidden
-  - expression: 'request.resource.resource != "deployments" || ((object.spec.template.spec.containers.all(c,
-      !has(c.volumeMounts) || c.volumeMounts.all(m, !"/var/run/secrets/kubernetes.io/serviceaccount/".startsWith(m.mountPath.endsWith("/")
+  - expression: '(object.spec.template.spec.containers.all(c, !has(c.volumeMounts)
+      || c.volumeMounts.all(m, !"/var/run/secrets/kubernetes.io/serviceaccount/".startsWith(m.mountPath.endsWith("/")
       ? m.mountPath : m.mountPath + "/") && !m.mountPath.startsWith("/var/run/secrets/kubernetes.io/serviceaccount/")
       && !"/run/secrets/kubernetes.io/serviceaccount/".startsWith(m.mountPath.endsWith("/")
       ? m.mountPath : m.mountPath + "/") && !m.mountPath.startsWith("/run/secrets/kubernetes.io/serviceaccount/")
@@ -280,130 +626,124 @@ spec:
       && !"/run/secrets/kubernetes.io/serviceaccount/".startsWith(m.mountPath.endsWith("/")
       ? m.mountPath : m.mountPath + "/") && !m.mountPath.startsWith("/run/secrets/kubernetes.io/serviceaccount/")
       && !m.mountPath.contains("//") && !m.mountPath.contains("/./") && !m.mountPath.contains("/../")
-      && !m.mountPath.endsWith("/.") && !m.mountPath.endsWith("/.."))))))'
+      && !m.mountPath.endsWith("/.") && !m.mountPath.endsWith("/..")))))'
     message: the operator mounts nothing at, above or inside the ServiceAccount token
       directory (dotvirt operator guard)
     reason: Forbidden
-  - expression: request.resource.resource != "deployments" || (object.metadata.name
-      != "dotvirt" || ((!has(object.spec.template.spec.volumes) || object.spec.template.spec.volumes.all(v,
-      (v.name == "drafts" && has(v.persistentVolumeClaim) && has(v.persistentVolumeClaim.claimName)
-      && v.persistentVolumeClaim.claimName == "dotvirt-drafts") || (v.name == "ingress-ca"
-      && has(v.configMap) && has(v.configMap.name) && v.configMap.name == "dotvirt-ingress-ca")
-      || (v.name == "service-ca" && has(v.configMap) && has(v.configMap.name) && v.configMap.name
-      == "dotvirt-service-ca") || (v.name == "branding" && has(v.configMap) && has(v.configMap.name)
-      && v.configMap.name == "${BRANDING_CONFIGMAP}") || (v.name == "metrics-ca" &&
-      has(v.configMap) && has(v.configMap.name) && v.configMap.name == "${METRICS_CA_CONFIGMAP}")
-      || (v.name == "forge-token" && has(v.secret) && has(v.secret.secretName) &&
-      v.secret.secretName == "${FORGE_SECRET}"))) && object.spec.template.spec.containers.all(c,
-      !has(c.volumeMounts) || c.volumeMounts.all(m, (!has(m.subPath) || m.subPath
-      == "") && (!has(m.subPathExpr) || m.subPathExpr == "") && ((m.name == "drafts"
-      && m.mountPath == "/var/lib/dotvirt/drafts") || (m.name == "ingress-ca" && m.mountPath
-      == "/var/run/dotvirt/tls-ingress") || (m.name == "service-ca" && m.mountPath
-      == "/var/run/dotvirt/tls-service") || (m.name == "branding" && m.mountPath ==
-      "/etc/dotvirt/branding") || (m.name == "metrics-ca" && m.mountPath == "/var/run/dotvirt/tls-metrics")
-      || (m.name == "forge-token" && m.mountPath == "/var/run/dotvirt/forge"))))))
+  - expression: object.metadata.name != "dotvirt" || ((!has(object.spec.template.spec.volumes)
+      || object.spec.template.spec.volumes.all(v, (v.name == "drafts" && has(v.persistentVolumeClaim)
+      && has(v.persistentVolumeClaim.claimName) && v.persistentVolumeClaim.claimName
+      == "dotvirt-drafts") || (v.name == "ingress-ca" && has(v.configMap) && has(v.configMap.name)
+      && v.configMap.name == "dotvirt-ingress-ca") || (v.name == "service-ca" && has(v.configMap)
+      && has(v.configMap.name) && v.configMap.name == "dotvirt-service-ca") || (v.name
+      == "branding" && has(v.configMap) && has(v.configMap.name) && v.configMap.name
+      == "${BRANDING_CONFIGMAP}") || (v.name == "metrics-ca" && has(v.configMap) &&
+      has(v.configMap.name) && v.configMap.name == "${METRICS_CA_CONFIGMAP}") || (v.name
+      == "forge-token" && has(v.secret) && has(v.secret.secretName) && v.secret.secretName
+      == "${FORGE_SECRET}"))) && object.spec.template.spec.containers.all(c, !has(c.volumeMounts)
+      || c.volumeMounts.all(m, (!has(m.subPath) || m.subPath == "") && (!has(m.subPathExpr)
+      || m.subPathExpr == "") && ((m.name == "drafts" && m.mountPath == "/var/lib/dotvirt/drafts")
+      || (m.name == "ingress-ca" && m.mountPath == "/var/run/dotvirt/tls-ingress")
+      || (m.name == "service-ca" && m.mountPath == "/var/run/dotvirt/tls-service")
+      || (m.name == "branding" && m.mountPath == "/etc/dotvirt/branding") || (m.name
+      == "metrics-ca" && m.mountPath == "/var/run/dotvirt/tls-metrics") || (m.name
+      == "forge-token" && m.mountPath == "/var/run/dotvirt/forge")))))
     message: the operator gives the console only its own volumes, from the claim,
       ConfigMaps and Secret rendered or an admin chose, each mounted whole at its
       own path (dotvirt operator guard)
     reason: Forbidden
-  - expression: request.resource.resource != "deployments" || (object.metadata.name
-      != "dotvirt-forgejo" || ((object.spec.template.spec.containers.all(c, (!has(c.envFrom)
-      || c.envFrom.all(e, !has(e.secretRef))) && (!has(c.env) || c.env.all(e, !has(e.valueFrom)
-      || !has(e.valueFrom.secretKeyRef) || (has(e.valueFrom.secretKeyRef.name) &&
-      e.valueFrom.secretKeyRef.name == "dotvirt-forgejo-admin")))) && (!has(object.spec.template.spec.initContainers)
+  - expression: object.metadata.name != "dotvirt-forgejo" || ((object.spec.template.spec.containers.all(c,
+      (!has(c.envFrom) || c.envFrom.all(e, !has(e.secretRef))) && (!has(c.env) ||
+      c.env.all(e, !has(e.valueFrom) || !has(e.valueFrom.secretKeyRef) || (has(e.valueFrom.secretKeyRef.name)
+      && e.valueFrom.secretKeyRef.name == "dotvirt-forgejo-admin")))) && (!has(object.spec.template.spec.initContainers)
       || object.spec.template.spec.initContainers.all(c, (!has(c.envFrom) || c.envFrom.all(e,
       !has(e.secretRef))) && (!has(c.env) || c.env.all(e, !has(e.valueFrom) || !has(e.valueFrom.secretKeyRef)
-      || (has(e.valueFrom.secretKeyRef.name) && e.valueFrom.secretKeyRef.name == "dotvirt-forgejo-admin"))))))))
+      || (has(e.valueFrom.secretKeyRef.name) && e.valueFrom.secretKeyRef.name == "dotvirt-forgejo-admin")))))))
     message: the operator gives the forge no Secret but its own admin password (dotvirt
       operator guard)
     reason: Forbidden
-  - expression: request.resource.resource != "deployments" || (object.metadata.name
-      != "dotvirt-forgejo" || !has(object.spec.template.spec.volumes) || object.spec.template.spec.volumes.all(v,
-      (has(v.persistentVolumeClaim) && v.persistentVolumeClaim.claimName == "dotvirt-forgejo-data")
-      || has(v.emptyDir) || (has(v.configMap) && has(v.configMap.name) && v.configMap.name
-      == "dotvirt-ingress-ca")))
+  - expression: object.metadata.name != "dotvirt-forgejo" || !has(object.spec.template.spec.volumes)
+      || object.spec.template.spec.volumes.all(v, (has(v.persistentVolumeClaim) &&
+      v.persistentVolumeClaim.claimName == "dotvirt-forgejo-data") || has(v.emptyDir)
+      || (has(v.configMap) && has(v.configMap.name) && v.configMap.name == "dotvirt-ingress-ca"))
     message: the operator gives the forge only its own claim, a scratch directory
       and the router CA (dotvirt operator guard)
     reason: Forbidden
-  - expression: request.resource.resource != "deployments" || (object.metadata.name
-      != "dotvirt" || object.spec.template.spec.containers.all(c, !has(c.env) || c.env.all(e,
-      !has(e.valueFrom) || !has(e.valueFrom.secretKeyRef) || (has(e.valueFrom.secretKeyRef.name)
-      && (e.name + "/" + e.valueFrom.secretKeyRef.name + "/" + e.valueFrom.secretKeyRef.key)
-      in ["DOTVIRT_SESSION_SECRET/dotvirt-session/secret", "DOTVIRT_OAUTH_CLIENT_SECRET/dotvirt-oauth/clientSecret",
-      "DOTVIRT_APPSET_PLUGIN_TOKEN/dotvirt-appset-plugin/token", "DOTVIRT_WEBHOOK_SECRET/dotvirt-webhook/secret",
-      "DOTVIRT_GIT_USERNAME/${FORGE_SECRET}/username", "DOTVIRT_FORGE_URL/${FORGE_SECRET}/url",
-      "DOTVIRT_OIDC_CLIENT_SECRET/${OIDC_SECRET}/${OIDC_SECRET_KEY}"]))))
+  - expression: object.metadata.name != "dotvirt" || object.spec.template.spec.containers.all(c,
+      !has(c.env) || c.env.all(e, !has(e.valueFrom) || !has(e.valueFrom.secretKeyRef)
+      || (has(e.valueFrom.secretKeyRef.name) && (e.name + "/" + e.valueFrom.secretKeyRef.name
+      + "/" + e.valueFrom.secretKeyRef.key) in ["DOTVIRT_SESSION_SECRET/dotvirt-session/secret",
+      "DOTVIRT_OAUTH_CLIENT_SECRET/dotvirt-oauth/clientSecret", "DOTVIRT_APPSET_PLUGIN_TOKEN/dotvirt-appset-plugin/token",
+      "DOTVIRT_WEBHOOK_SECRET/dotvirt-webhook/secret", "DOTVIRT_GIT_USERNAME/${FORGE_SECRET}/username",
+      "DOTVIRT_FORGE_URL/${FORGE_SECRET}/url", "DOTVIRT_OIDC_CLIENT_SECRET/${OIDC_SECRET}/${OIDC_SECRET_KEY}",
+      "DOTVIRT_FORGE_CLIENT_SECRET/${FORGE_CLIENT_SECRET}/${FORGE_CLIENT_SECRET_KEY}"])))
     message: the operator gives the console only its own Secrets and the ones an admin
       chose, each under its rendered env name and key (dotvirt operator guard)
     reason: Forbidden
-  - expression: request.resource.resource != "deployments" || (object.metadata.name
-      != "dotvirt" || ${FORGE_MANAGED} || object.spec.template.spec.containers.all(c,
+  - expression: object.metadata.name != "dotvirt" || ${FORGE_MANAGED} || object.spec.template.spec.containers.all(c,
       (!has(c.args) || c.args.all(a, !(a == "-forge-url" || a == "--forge-url" ||
       a.startsWith("-forge-url=") || a.startsWith("--forge-url=")))) && (!has(c.env)
-      || c.env.all(e, e.name != "DOTVIRT_FORGE_URL" || (has(e.valueFrom) && has(e.valueFrom.secretKeyRef))))))
+      || c.env.all(e, e.name != "DOTVIRT_FORGE_URL" || (has(e.valueFrom) && has(e.valueFrom.secretKeyRef)))))
     message: the operator sends a forge credential an admin brought only to the forge
       its Secret names (dotvirt operator guard)
     reason: Forbidden
-  - expression: request.resource.resource != "deployments" || (!(has(object.spec.template.spec.hostNetwork)
-      && object.spec.template.spec.hostNetwork) && !(has(object.spec.template.spec.hostPID)
-      && object.spec.template.spec.hostPID) && !(has(object.spec.template.spec.hostIPC)
-      && object.spec.template.spec.hostIPC))
+  - expression: '!(has(object.spec.template.spec.hostNetwork) && object.spec.template.spec.hostNetwork)
+      && !(has(object.spec.template.spec.hostPID) && object.spec.template.spec.hostPID)
+      && !(has(object.spec.template.spec.hostIPC) && object.spec.template.spec.hostIPC)'
     message: the operator runs no Deployment in the host network, PID or IPC namespace
       (dotvirt operator guard)
     reason: Forbidden
-  - expression: request.resource.resource != "deployments" || (!has(object.spec.template.spec.volumes)
-      || object.spec.template.spec.volumes.all(v, !has(v.hostPath)))
+  - expression: '!has(object.spec.template.spec.volumes) || object.spec.template.spec.volumes.all(v,
+      !has(v.hostPath))'
     message: the operator mounts no host path (dotvirt operator guard)
     reason: Forbidden
-  - expression: request.resource.resource != "deployments" || (!(has(object.spec.template.spec.securityContext)
-      && has(object.spec.template.spec.securityContext.runAsUser) && object.spec.template.spec.securityContext.runAsUser
-      == 0))
+  - expression: '!(has(object.spec.template.spec.securityContext) && has(object.spec.template.spec.securityContext.runAsUser)
+      && object.spec.template.spec.securityContext.runAsUser == 0)'
     message: the operator runs no pod as root (dotvirt operator guard)
     reason: Forbidden
-  - expression: request.resource.resource != "deployments" || ((object.spec.template.spec.containers.all(c,
-      !(has(c.securityContext) && has(c.securityContext.privileged) && c.securityContext.privileged))
-      && (!has(object.spec.template.spec.initContainers) || object.spec.template.spec.initContainers.all(c,
-      !(has(c.securityContext) && has(c.securityContext.privileged) && c.securityContext.privileged)))))
+  - expression: (object.spec.template.spec.containers.all(c, !(has(c.securityContext)
+      && has(c.securityContext.privileged) && c.securityContext.privileged)) && (!has(object.spec.template.spec.initContainers)
+      || object.spec.template.spec.initContainers.all(c, !(has(c.securityContext)
+      && has(c.securityContext.privileged) && c.securityContext.privileged))))
     message: the operator runs no privileged container (dotvirt operator guard)
     reason: Forbidden
-  - expression: request.resource.resource != "deployments" || ((object.spec.template.spec.containers.all(c,
+  - expression: (object.spec.template.spec.containers.all(c, has(c.securityContext)
+      && has(c.securityContext.allowPrivilegeEscalation) && c.securityContext.allowPrivilegeEscalation
+      == false) && (!has(object.spec.template.spec.initContainers) || object.spec.template.spec.initContainers.all(c,
       has(c.securityContext) && has(c.securityContext.allowPrivilegeEscalation) &&
-      c.securityContext.allowPrivilegeEscalation == false) && (!has(object.spec.template.spec.initContainers)
-      || object.spec.template.spec.initContainers.all(c, has(c.securityContext) &&
-      has(c.securityContext.allowPrivilegeEscalation) && c.securityContext.allowPrivilegeEscalation
-      == false))))
+      c.securityContext.allowPrivilegeEscalation == false)))
     message: the operator runs every container with allowPrivilegeEscalation false
       (dotvirt operator guard)
     reason: Forbidden
-  - expression: request.resource.resource != "deployments" || ((object.spec.template.spec.containers.all(c,
-      has(c.securityContext) && has(c.securityContext.capabilities) && has(c.securityContext.capabilities.drop)
+  - expression: (object.spec.template.spec.containers.all(c, has(c.securityContext)
+      && has(c.securityContext.capabilities) && has(c.securityContext.capabilities.drop)
       && "ALL" in c.securityContext.capabilities.drop && !(has(c.securityContext.capabilities.add)
       && size(c.securityContext.capabilities.add) > 0)) && (!has(object.spec.template.spec.initContainers)
       || object.spec.template.spec.initContainers.all(c, has(c.securityContext) &&
       has(c.securityContext.capabilities) && has(c.securityContext.capabilities.drop)
       && "ALL" in c.securityContext.capabilities.drop && !(has(c.securityContext.capabilities.add)
-      && size(c.securityContext.capabilities.add) > 0)))))
+      && size(c.securityContext.capabilities.add) > 0))))
     message: the operator runs every container with all capabilities dropped and none
       added (dotvirt operator guard)
     reason: Forbidden
-  - expression: request.resource.resource != "deployments" || ((object.spec.template.spec.containers.all(c,
+  - expression: (object.spec.template.spec.containers.all(c, !(has(c.securityContext)
+      && has(c.securityContext.runAsUser) && c.securityContext.runAsUser == 0)) &&
+      (!has(object.spec.template.spec.initContainers) || object.spec.template.spec.initContainers.all(c,
       !(has(c.securityContext) && has(c.securityContext.runAsUser) && c.securityContext.runAsUser
-      == 0)) && (!has(object.spec.template.spec.initContainers) || object.spec.template.spec.initContainers.all(c,
-      !(has(c.securityContext) && has(c.securityContext.runAsUser) && c.securityContext.runAsUser
-      == 0)))))
+      == 0))))
     message: the operator runs no container as root (dotvirt operator guard)
     reason: Forbidden
-  - expression: 'request.resource.resource != "deployments" || ((object.spec.template.spec.containers.all(c,
+  - expression: '(object.spec.template.spec.containers.all(c, (has(c.securityContext)
+      && has(c.securityContext.runAsNonRoot)) ? c.securityContext.runAsNonRoot : (has(object.spec.template.spec.securityContext)
+      && has(object.spec.template.spec.securityContext.runAsNonRoot) && object.spec.template.spec.securityContext.runAsNonRoot))
+      && (!has(object.spec.template.spec.initContainers) || object.spec.template.spec.initContainers.all(c,
       (has(c.securityContext) && has(c.securityContext.runAsNonRoot)) ? c.securityContext.runAsNonRoot
       : (has(object.spec.template.spec.securityContext) && has(object.spec.template.spec.securityContext.runAsNonRoot)
-      && object.spec.template.spec.securityContext.runAsNonRoot)) && (!has(object.spec.template.spec.initContainers)
-      || object.spec.template.spec.initContainers.all(c, (has(c.securityContext) &&
-      has(c.securityContext.runAsNonRoot)) ? c.securityContext.runAsNonRoot : (has(object.spec.template.spec.securityContext)
-      && has(object.spec.template.spec.securityContext.runAsNonRoot) && object.spec.template.spec.securityContext.runAsNonRoot)))))'
+      && object.spec.template.spec.securityContext.runAsNonRoot))))'
     message: the operator runs every container as non-root (dotvirt operator guard)
     reason: Forbidden
-  - expression: 'request.resource.resource != "deployments" || ((object.spec.template.spec.containers.all(c,
-      (has(c.securityContext) && has(c.securityContext.seccompProfile)) ? c.securityContext.seccompProfile.type
+  - expression: '(object.spec.template.spec.containers.all(c, (has(c.securityContext)
+      && has(c.securityContext.seccompProfile)) ? c.securityContext.seccompProfile.type
       in ["RuntimeDefault", "Localhost"] : (has(object.spec.template.spec.securityContext)
       && has(object.spec.template.spec.securityContext.seccompProfile) && object.spec.template.spec.securityContext.seccompProfile.type
       in ["RuntimeDefault", "Localhost"])) && (!has(object.spec.template.spec.initContainers)
@@ -411,18 +751,23 @@ spec:
       has(c.securityContext.seccompProfile)) ? c.securityContext.seccompProfile.type
       in ["RuntimeDefault", "Localhost"] : (has(object.spec.template.spec.securityContext)
       && has(object.spec.template.spec.securityContext.seccompProfile) && object.spec.template.spec.securityContext.seccompProfile.type
-      in ["RuntimeDefault", "Localhost"])))))'
+      in ["RuntimeDefault", "Localhost"]))))'
     message: the operator runs every container with a RuntimeDefault or Localhost
       seccomp profile (dotvirt operator guard)
     reason: Forbidden
-  - expression: 'request.resource.resource != "persistentvolumeclaims" || (!has(object.spec.selector)
-      && !has(object.spec.dataSource) && !has(object.spec.dataSourceRef) && (request.operation
-      == "CREATE" ? (!has(object.spec.volumeName) || object.spec.volumeName == "")
-      : has(object.spec.volumeName) == has(oldObject.spec.volumeName) && (!has(object.spec.volumeName)
-      || object.spec.volumeName == oldObject.spec.volumeName)))'
-    message: the operator binds its claims to no volume, selector or data source of
-      its choosing (dotvirt operator guard)
-    reason: Forbidden
+---
+# Enforces dotvirt-operator-deployments
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  labels:
+    app.kubernetes.io/name: dotvirt
+    app.kubernetes.io/part-of: dotvirt-operator-guard
+  name: dotvirt-operator-deployments
+spec:
+  policyName: dotvirt-operator-deployments
+  validationActions:
+  - Deny
 ---
 # Bounds the operator's RBAC bindings: only the ones it renders, to their own roles and rendered subjects
 apiVersion: admissionregistration.k8s.io/v1
@@ -482,6 +827,19 @@ spec:
       operator guard)
     reason: Forbidden
 ---
+# Enforces dotvirt-operator-bindings
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  labels:
+    app.kubernetes.io/name: dotvirt
+    app.kubernetes.io/part-of: dotvirt-operator-guard
+  name: dotvirt-operator-bindings
+spec:
+  policyName: dotvirt-operator-bindings
+  validationActions:
+  - Deny
+---
 # Bounds the operator's writes to its install: its finalizers only, never the spec an admin wrote
 apiVersion: admissionregistration.k8s.io/v1
 kind: ValidatingAdmissionPolicy
@@ -528,7 +886,20 @@ spec:
       (dotvirt operator guard)
     reason: Forbidden
 ---
-# Bounds the console's front door: its Service and exposure lead to the console on the host an admin chose, nothing else claims that host, no Service leaves the cluster
+# Enforces dotvirt-operator-install
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  labels:
+    app.kubernetes.io/name: dotvirt
+    app.kubernetes.io/part-of: dotvirt-operator-guard
+  name: dotvirt-operator-install
+spec:
+  policyName: dotvirt-operator-install
+  validationActions:
+  - Deny
+---
+# Bounds the operator's Services: the console's selects only the console, and none leaves the cluster
 apiVersion: admissionregistration.k8s.io/v1
 kind: ValidatingAdmissionPolicy
 metadata:
@@ -552,168 +923,22 @@ spec:
       - UPDATE
       resources:
       - services
-    - apiGroups:
-      - route.openshift.io
-      apiVersions:
-      - v1
-      operations:
-      - CREATE
-      - UPDATE
-      resources:
-      - routes
-    - apiGroups:
-      - networking.k8s.io
-      apiVersions:
-      - v1
-      operations:
-      - CREATE
-      - UPDATE
-      resources:
-      - ingresses
-    - apiGroups:
-      - gateway.networking.k8s.io
-      apiVersions:
-      - v1
-      operations:
-      - CREATE
-      - UPDATE
-      resources:
-      - httproutes
   validations:
-  - expression: '!(request.resource.resource == "services") || ((!has(object.spec.type)
-      || object.spec.type == "ClusterIP") && (!has(object.spec.externalIPs) || size(object.spec.externalIPs)
-      == 0) && (!has(object.spec.loadBalancerIP) || object.spec.loadBalancerIP ==
-      ""))'
+  - expression: (!has(object.spec.type) || object.spec.type == "ClusterIP") && (!has(object.spec.externalIPs)
+      || size(object.spec.externalIPs) == 0) && (!has(object.spec.loadBalancerIP)
+      || object.spec.loadBalancerIP == "")
     message: 'the operator exposes no Service outside the cluster: no node port, load
       balancer, external IP or external name (dotvirt operator guard)'
     reason: Forbidden
-  - expression: '!(request.resource.resource == "services" && (object.metadata.name
-      == "dotvirt" && request.namespace == "${INSTALL_NAMESPACE}")) || (has(object.spec.selector)
-      && object.spec.selector == {"app": "dotvirt"} && (!has(object.spec.type) ||
-      object.spec.type == "ClusterIP") && !has(object.spec.externalName) && !(has(object.spec.publishNotReadyAddresses)
-      && object.spec.publishNotReadyAddresses) && object.spec.ports.all(port, has(port.targetPort)
-      && string(port.targetPort) in ["8080", "http"]))'
+  - expression: '!(object.metadata.name == "dotvirt" && request.namespace == "${INSTALL_NAMESPACE}")
+      || (has(object.spec.selector) && object.spec.selector == {"app": "dotvirt"}
+      && (!has(object.spec.type) || object.spec.type == "ClusterIP") && !has(object.spec.externalName)
+      && !(has(object.spec.publishNotReadyAddresses) && object.spec.publishNotReadyAddresses)
+      && object.spec.ports.all(port, has(port.targetPort) && string(port.targetPort)
+      in ["8080", "http"]))'
     message: the operator points the console's Service only at the console's pods
       and port (dotvirt operator guard)
     reason: Forbidden
-  - expression: '!(request.resource.resource == "routes" && (object.metadata.name
-      == "dotvirt" && request.namespace == "${INSTALL_NAMESPACE}")) || ((request.operation
-      == "CREATE" ? (!has(object.metadata.annotations) || object.metadata.annotations.all(k,
-      k == "openshift.io/host.generated" && object.metadata.annotations[k] == "true"))
-      : ((!has(object.metadata.annotations) || object.metadata.annotations.all(k,
-      k == "openshift.io/host.generated" || (has(oldObject.metadata.annotations) &&
-      k in oldObject.metadata.annotations && oldObject.metadata.annotations[k] ==
-      object.metadata.annotations[k]))) && (!has(oldObject.metadata.annotations) ||
-      oldObject.metadata.annotations.all(k, k == "openshift.io/host.generated" ||
-      (has(object.metadata.annotations) && k in object.metadata.annotations))))) &&
-      object.spec.to.kind == "Service" && object.spec.to.name == "dotvirt" && (!has(object.spec.alternateBackends)
-      || size(object.spec.alternateBackends) == 0) && has(object.spec.port) && string(object.spec.port.targetPort)
-      == "http" && has(object.spec.tls) && object.spec.tls.termination == "edge" &&
-      !has(object.spec.tls.destinationCACertificate) && ("${CONSOLE_HOST}" == "" ||
-      !has(object.spec.host) || object.spec.host == "" || object.spec.host == "${CONSOLE_HOST}"))'
-    message: the operator routes the console's host only to the console's Service,
-      edge-terminated (dotvirt operator guard)
-    reason: Forbidden
-  - expression: '!(request.resource.resource == "ingresses" && (object.metadata.name
-      == "dotvirt" && request.namespace == "${INSTALL_NAMESPACE}")) || ((request.operation
-      == "CREATE" ? (!has(object.metadata.annotations) || object.metadata.annotations.all(k,
-      k == "openshift.io/host.generated" && object.metadata.annotations[k] == "true"))
-      : ((!has(object.metadata.annotations) || object.metadata.annotations.all(k,
-      k == "openshift.io/host.generated" || (has(oldObject.metadata.annotations) &&
-      k in oldObject.metadata.annotations && oldObject.metadata.annotations[k] ==
-      object.metadata.annotations[k]))) && (!has(oldObject.metadata.annotations) ||
-      oldObject.metadata.annotations.all(k, k == "openshift.io/host.generated" ||
-      (has(object.metadata.annotations) && k in object.metadata.annotations))))) &&
-      (!has(object.spec.defaultBackend) || (has(object.spec.defaultBackend.service)
-      && object.spec.defaultBackend.service.name == "dotvirt")) && object.spec.rules.all(r,
-      has(r.host) && r.host == "${CONSOLE_HOST}" && has(r.http) && r.http.paths.all(path,
-      has(path.backend.service) && path.backend.service.name == "dotvirt" && path.backend.service.port.number
-      == 8080)))'
-    message: the operator sends the console's Ingress only to the console's Service,
-      on the console's host (dotvirt operator guard)
-    reason: Forbidden
-  - expression: '!(request.resource.resource == "httproutes" && (object.metadata.name
-      == "dotvirt" && request.namespace == "${INSTALL_NAMESPACE}")) || ((request.operation
-      == "CREATE" ? (!has(object.metadata.annotations) || object.metadata.annotations.all(k,
-      k == "openshift.io/host.generated" && object.metadata.annotations[k] == "true"))
-      : ((!has(object.metadata.annotations) || object.metadata.annotations.all(k,
-      k == "openshift.io/host.generated" || (has(oldObject.metadata.annotations) &&
-      k in oldObject.metadata.annotations && oldObject.metadata.annotations[k] ==
-      object.metadata.annotations[k]))) && (!has(oldObject.metadata.annotations) ||
-      oldObject.metadata.annotations.all(k, k == "openshift.io/host.generated" ||
-      (has(object.metadata.annotations) && k in object.metadata.annotations))))) &&
-      object.spec.hostnames == ["${CONSOLE_HOST}"] && object.spec.rules.all(r, !has(r.filters)
-      && r.backendRefs.all(b, !has(b.filters) && (!has(b.kind) || b.kind == "Service")
-      && (!has(b.group) || b.group == "") && (!has(b.namespace) || b.namespace ==
-      "${INSTALL_NAMESPACE}") && b.name == "dotvirt" && b.port == 8080)))'
-    message: the operator sends the console's HTTPRoute only to the console's Service,
-      on the console's host, unfiltered (dotvirt operator guard)
-    reason: Forbidden
-  - expression: (object.metadata.name == "dotvirt" && request.namespace == "${INSTALL_NAMESPACE}")
-      || ((!(request.resource.resource == "routes") || ((!has(object.spec.host) ||
-      object.spec.host == "" || object.spec.host != "${CONSOLE_HOST}") && (!has(object.spec.wildcardPolicy)
-      || object.spec.wildcardPolicy == "None"))) && (!(request.resource.resource ==
-      "ingresses") || (!has(object.spec.defaultBackend) && (!has(object.spec.rules)
-      || object.spec.rules.all(r, has(r.host) && r.host != "" && r.host != "${CONSOLE_HOST}"
-      && !(r.host.startsWith("*.") && "${CONSOLE_HOST}".endsWith(r.host.substring(1)))))))
-      && (!(request.resource.resource == "httproutes") || (has(object.spec.hostnames)
-      && size(object.spec.hostnames) > 0 && object.spec.hostnames.all(h, h != "${CONSOLE_HOST}"
-      && !(h.startsWith("*.") && "${CONSOLE_HOST}".endsWith(h.substring(1)))))))
-    message: the operator exposes nothing else on the console's host, and nothing
-      on every host (dotvirt operator guard)
-    reason: Forbidden
----
-# Enforces dotvirt-operator-secrets
-apiVersion: admissionregistration.k8s.io/v1
-kind: ValidatingAdmissionPolicyBinding
-metadata:
-  labels:
-    app.kubernetes.io/name: dotvirt
-    app.kubernetes.io/part-of: dotvirt-operator-guard
-  name: dotvirt-operator-secrets
-spec:
-  policyName: dotvirt-operator-secrets
-  validationActions:
-  - Deny
----
-# Enforces dotvirt-operator-deployments
-apiVersion: admissionregistration.k8s.io/v1
-kind: ValidatingAdmissionPolicyBinding
-metadata:
-  labels:
-    app.kubernetes.io/name: dotvirt
-    app.kubernetes.io/part-of: dotvirt-operator-guard
-  name: dotvirt-operator-deployments
-spec:
-  policyName: dotvirt-operator-deployments
-  validationActions:
-  - Deny
----
-# Enforces dotvirt-operator-bindings
-apiVersion: admissionregistration.k8s.io/v1
-kind: ValidatingAdmissionPolicyBinding
-metadata:
-  labels:
-    app.kubernetes.io/name: dotvirt
-    app.kubernetes.io/part-of: dotvirt-operator-guard
-  name: dotvirt-operator-bindings
-spec:
-  policyName: dotvirt-operator-bindings
-  validationActions:
-  - Deny
----
-# Enforces dotvirt-operator-install
-apiVersion: admissionregistration.k8s.io/v1
-kind: ValidatingAdmissionPolicyBinding
-metadata:
-  labels:
-    app.kubernetes.io/name: dotvirt
-    app.kubernetes.io/part-of: dotvirt-operator-guard
-  name: dotvirt-operator-install
-spec:
-  policyName: dotvirt-operator-install
-  validationActions:
-  - Deny
 ---
 # Enforces dotvirt-operator-frontdoor
 apiVersion: admissionregistration.k8s.io/v1

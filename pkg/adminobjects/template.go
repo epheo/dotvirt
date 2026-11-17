@@ -2,6 +2,9 @@ package adminobjects
 
 import (
 	"bytes"
+	"regexp"
+	"slices"
+	"strings"
 
 	"sigs.k8s.io/yaml"
 )
@@ -23,11 +26,18 @@ var TemplateParams = Params{
 	OIDCSecret:         "${OIDC_SECRET}",
 	OIDCSecretKey:      "${OIDC_SECRET_KEY}",
 	OIDCIssuer:         "${OIDC_ISSUER}",
+
+	ForgeURL:             "${FORGE_URL}",
+	ForgeClientID:        "${FORGE_CLIENT_ID}",
+	ForgeAuthorizeURL:    "${FORGE_AUTHORIZE_URL}",
+	ForgeTokenURL:        "${FORGE_TOKEN_URL}",
+	ForgeClientSecret:    "${FORGE_CLIENT_SECRET}",
+	ForgeClientSecretKey: "${FORGE_CLIENT_SECRET_KEY}",
 }
 
 // templateHeader says how to fill and apply the template, each value derived
 // from the cluster: never from the operator's status, which it writes.
-const templateHeader = `# The dotvirt operator guard: admission policies bounding the operator's own
+var templateHeader = `# The dotvirt operator guard: admission policies bounding the operator's own
 # account. A cluster admin installs it from the console (Install). Without the
 # console, derive each value from the cluster yourself (never copy one from the
 # operator's status or conditions, which the operator writes), fill the
@@ -59,12 +69,29 @@ const templateHeader = `# The dotvirt operator guard: admission policies boundin
 #   export INSTALL_NAMESPACE
 #   spec() { kubectl -n "$INSTALL_NAMESPACE" get dotvirt -o jsonpath="{.items[0].spec.$1}"; }
 #   export SPEC_IMAGE="$(spec image)"
+#   # An image in an official repository is left out: the repository admits it
+#   # already, and a pinned digest would read Outdated at every release.
+#   inrepo() { case "$1" in "$2":*|"$2"@sha256:*) return 0;; esac; return 1; }
+#   inrepo "$SPEC_IMAGE" ` + Repositories[0] + ` && SPEC_IMAGE=
+#   inrepo "$RELATED_IMAGE_DOTVIRT" ` + Repositories[0] + ` && RELATED_IMAGE_DOTVIRT=
+#   inrepo "$RELATED_IMAGE_FORGEJO" ` + Repositories[1] + ` && RELATED_IMAGE_FORGEJO=
 #   export FORGE_INSECURE_TLS="$( [ "$(spec forge.insecureTLS)" = true ] && echo true || echo false )"
 #   # Where users' metrics queries go: spec.metrics.url; its tenancyURL, else for
 #   # https://thanos-querier.openshift-monitoring.svc:9091 the same URL on 9092;
 #   # the CA, ` + MetricsCAPath + ` when spec.metrics.ca is set, else
 #   # ` + ServiceCAPath + ` for an https .svc url. Empty when unset.
-#   export METRICS_URL="$(spec metrics.url)" METRICS_TENANCY_URL=... METRICS_CA=...
+#   METRICS_URL="$(spec metrics.url)" METRICS_TENANCY_URL= METRICS_CA=
+#   if [ -n "$METRICS_URL" ]; then
+#     METRICS_TENANCY_URL="$(spec metrics.tenancyURL)"
+#     [ -n "$METRICS_TENANCY_URL" ] || case "$METRICS_URL" in
+#       *://thanos-querier.openshift-monitoring.svc:9091|*://thanos-querier.openshift-monitoring.svc:9091/*|\
+#       *://thanos-querier.openshift-monitoring.svc.cluster.local:9091|*://thanos-querier.openshift-monitoring.svc.cluster.local:9091/*)
+#         METRICS_TENANCY_URL="$(printf '%s' "$METRICS_URL" | sed 's|:9091|:9092|')";;
+#     esac
+#     if [ -n "$(spec metrics.ca)" ]; then METRICS_CA=` + MetricsCAPath + `
+#     else case "$METRICS_URL" in https://*.svc*) METRICS_CA=` + ServiceCAPath + `;; esac; fi
+#   fi
+#   export METRICS_URL METRICS_TENANCY_URL METRICS_CA
 #   # spec.argocd, else the defaults: openshift-gitops where routes are served
 #   # (OpenShift, MicroShift), argocd elsewhere, and that instance's controller:
 #   ARGO_NAMESPACE="$(spec argocd.namespace)"
@@ -90,6 +117,22 @@ const templateHeader = `# The dotvirt operator guard: admission policies boundin
 #   # The OIDC issuer and client secret an admin chose, if any:
 #   export OIDC_SECRET="$(spec auth.oidc.clientSecret.name)" OIDC_SECRET_KEY="$(spec auth.oidc.clientSecret.key)"
 #   export OIDC_ISSUER="$(spec auth.oidc.issuerURL)"
+#   # Delegated pull requests: the forge application an admin registered.
+#   export FORGE_DELEGATED="$( [ "$(spec forge.pullRequests)" = Delegated ] && echo true || echo false )"
+#   export FORGE_URL="$(spec forge.url)" FORGE_CLIENT_ID="$(spec forge.userAuth.clientID)"
+#   export FORGE_AUTHORIZE_URL="$(spec forge.userAuth.authorizeURL)" FORGE_TOKEN_URL="$(spec forge.userAuth.tokenURL)"
+#   export FORGE_CLIENT_SECRET="$(spec forge.userAuth.clientSecret.name)" FORGE_CLIENT_SECRET_KEY="$(spec forge.userAuth.clientSecret.key)"
+#   # Not delegating, the guard pins none of them:
+#   [ "$FORGE_DELEGATED" = true ] || { FORGE_URL=; FORGE_CLIENT_ID=; FORGE_AUTHORIZE_URL=; FORGE_TOKEN_URL=; FORGE_CLIENT_SECRET=; FORGE_CLIENT_SECRET_KEY=; }
+#
+#   # Every value lands inside a quoted string in a YAML document: one holding
+#   # any other character (a quote, a backslash, a line break, a space) is
+#   # refused, never escaped. The console's Install builds the guard in Go.
+#   for v in ` + placeholderList + `; do
+#     eval "x=\${$v-}"
+#     case "$x" in *[!]A-Za-z0-9._:/@%+=~,[-]*)
+#       echo "$v holds a character the template cannot carry: install the guard from the console" >&2; exit 1;; esac
+#   done
 #
 #   envsubst < guard.yaml | ` + ApplyCommand + ` -
 #
@@ -103,7 +146,10 @@ const templateHeader = `# The dotvirt operator guard: admission policies boundin
 #     -e "s|\${BRANDING_CONFIGMAP}|$BRANDING_CONFIGMAP|g" -e "s|\${METRICS_CA_CONFIGMAP}|$METRICS_CA_CONFIGMAP|g" \
 #     -e "s|\${FORGE_SECRET}|$FORGE_SECRET|g" -e "s|\${FORGE_MANAGED}|$FORGE_MANAGED|g" \
 #     -e "s|\${OIDC_SECRET}|$OIDC_SECRET|g" -e "s|\${OIDC_SECRET_KEY}|$OIDC_SECRET_KEY|g" \
-#     -e "s|\${OIDC_ISSUER}|$OIDC_ISSUER|g" guard.yaml | ` + ApplyCommand + ` -
+#     -e "s|\${OIDC_ISSUER}|$OIDC_ISSUER|g" -e "s|\${FORGE_DELEGATED}|$FORGE_DELEGATED|g" \
+#     -e "s|\${FORGE_URL}|$FORGE_URL|g" -e "s|\${FORGE_CLIENT_ID}|$FORGE_CLIENT_ID|g" \
+#     -e "s|\${FORGE_AUTHORIZE_URL}|$FORGE_AUTHORIZE_URL|g" -e "s|\${FORGE_TOKEN_URL}|$FORGE_TOKEN_URL|g" \
+#     -e "s|\${FORGE_CLIENT_SECRET}|$FORGE_CLIENT_SECRET|g" -e "s|\${FORGE_CLIENT_SECRET_KEY}|$FORGE_CLIENT_SECRET_KEY|g" guard.yaml | ` + ApplyCommand + ` -
 #
 # Every object carries the label app.kubernetes.io/part-of=dotvirt-operator-guard.
 #
@@ -113,15 +159,27 @@ const templateHeader = `# The dotvirt operator guard: admission policies boundin
 // Template is the guard with TemplateParams' placeholders, published with
 // each release for an admin without the console.
 func Template() ([]byte, error) {
-	var b bytes.Buffer
-	b.WriteString(templateHeader)
-	for _, o := range guard(TemplateParams, "${FORGE_INSECURE_TLS}", "${FORGE_MANAGED}", Metrics{URL: "${METRICS_URL}", TenancyURL: "${METRICS_TENANCY_URL}", CA: "${METRICS_CA}"}) {
+	var body bytes.Buffer
+	for _, o := range guard(TemplateParams, "${FORGE_INSECURE_TLS}", "${FORGE_MANAGED}", "${FORGE_DELEGATED}", Metrics{URL: "${METRICS_URL}", TenancyURL: "${METRICS_TENANCY_URL}", CA: "${METRICS_CA}"}) {
 		y, err := yaml.Marshal(o.Object.Object)
 		if err != nil {
 			return nil, err
 		}
-		b.WriteString("---\n# " + o.Purpose + "\n")
-		b.Write(y)
+		body.WriteString("---\n# " + o.Purpose + "\n")
+		body.Write(y)
 	}
-	return b.Bytes(), nil
+	// The quote check covers every placeholder the body holds.
+	var names []string
+	for _, m := range placeholder.FindAllStringSubmatch(body.String(), -1) {
+		if !slices.Contains(names, m[1]) {
+			names = append(names, m[1])
+		}
+	}
+	slices.Sort(names)
+	return append([]byte(strings.Replace(templateHeader, placeholderList, strings.Join(names, " "), 1)), body.Bytes()...), nil
 }
+
+// placeholderList marks where the header lists the placeholders.
+const placeholderList = "<placeholders>"
+
+var placeholder = regexp.MustCompile(`\$\{([A-Z_]+)\}`)
