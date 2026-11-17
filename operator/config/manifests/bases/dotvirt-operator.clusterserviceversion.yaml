@@ -4,7 +4,7 @@ metadata:
   annotations:
     capabilities: Seamless Upgrades
     categories: Developer Tools, Modernization & Migration
-    containerImage: quay.io/epheo/dotvirt-operator@sha256:a881d0a3d502044bfe03706c4735b5e9f03e58df4a8728f3a0f8c0c39a04a92f
+    containerImage: quay.io/epheo/dotvirt-operator@sha256:383015eade61716905faf0115a073ecea88976e2d957fce8fb6d48c02e42c966
     description: Installs dotvirt, a GitOps web console for KubeVirt with a point-and-click
       workflow familiar to virtualization admins, plus its platform/tenant tier.
     features.operators.openshift.io/disconnected: "true"
