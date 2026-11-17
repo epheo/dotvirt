@@ -46,10 +46,14 @@ func (r *DotvirtReconciler) guardParams(ctx context.Context, dv *dotvirtv1alpha1
 	if dv.Spec.Metrics.CA != nil {
 		p.MetricsCAConfigMap = dv.Spec.Metrics.CA.Name
 	}
-	if o := dv.Spec.Auth.OIDC; o != nil && o.ClientSecret != nil {
-		p.OIDCSecret, p.OIDCSecretKey = o.ClientSecret.Name, o.ClientSecret.Key
+	if o := dv.Spec.Auth.OIDC; o != nil {
+		p.OIDCIssuer = o.IssuerURL
+		if o.ClientSecret != nil {
+			p.OIDCSecret, p.OIDCSecretKey = o.ClientSecret.Name, o.ClientSecret.Key
+		}
 	}
 	p.ForgeManaged = dv.Spec.Forge.Managed
+	p.InstallName, p.InstallUID = dv.Name, dv.UID
 	domain := r.appsDomain(ctx, dv)
 	router := ""
 	if dv.Spec.Ingress.Host == "" && domain == "" && r.Platform == platform.OpenShift {
@@ -71,29 +75,49 @@ func (r *DotvirtReconciler) routerHost(ctx context.Context, dv *dotvirtv1alpha1.
 }
 
 func (r *DotvirtReconciler) operatorGuard(ctx context.Context, dv *dotvirtv1alpha1.Dotvirt, rc *reconcileCtx) (metav1.ConditionStatus, string, string) {
-	isGuard := func(e dotvirtv1alpha1.AdminObject) bool {
-		return (e.Kind == "ValidatingAdmissionPolicy" || e.Kind == "ValidatingAdmissionPolicyBinding") && slices.Contains(adminobjects.GuardNames, e.Name)
+	allowed := adminobjects.Allowed(dv.Namespace)
+	isAdminObject := func(e dotvirtv1alpha1.AdminObject) bool {
+		return slices.ContainsFunc(allowed, func(r adminobjects.Ref) bool {
+			return r.Kind == e.Kind && r.Name == e.Name && r.Namespace == e.Namespace
+		})
+	}
+	isGuard := func(o *unstructured.Unstructured) bool {
+		return (o.GetKind() == "ValidatingAdmissionPolicy" || o.GetKind() == "ValidatingAdmissionPolicyBinding") && slices.Contains(adminobjects.GuardNames, o.GetName())
 	}
 	p := r.guardParams(ctx, dv, rc)
 	if !p.Valid() {
-		publishAdminObjects(dv, isGuard, nil, nil)
+		publishAdminObjects(dv, isAdminObject, nil, nil)
 		return metav1.ConditionUnknown, "AccountUnknown",
 			"the operator does not know the account it runs as (its SelfSubjectReview failed at startup), so no guard can pin it"
 	}
+	// Every admin object is listed; the guard's alone decide this condition
+	// (the forge credential's grant is ForgeCredentialReady's).
 	want := adminobjects.Render(p)
 	states, details, err := r.adminObjectStates(ctx, want)
 	switch {
 	case meta.IsNoMatchError(err):
-		publishAdminObjects(dv, isGuard, nil, nil)
+		publishAdminObjects(dv, isAdminObject, nil, nil)
 		return metav1.ConditionUnknown, "Unsupported",
 			"the cluster does not serve admissionregistration.k8s.io/v1 ValidatingAdmissionPolicy (Kubernetes 1.30+), so no guard can bound the operator"
 	case err != nil:
 		return metav1.ConditionUnknown, "Unreadable", "could not read the operator guard: " + err.Error()
 	}
-	publishAdminObjects(dv, isGuard, want, states)
+	// What the install no longer asks for but is still there: reported to remove.
+	for _, ref := range adminobjects.Leftovers(p) {
+		left := &unstructured.Unstructured{}
+		left.SetGroupVersionKind(schema.GroupVersionKind{Group: ref.Group, Version: ref.Version, Kind: ref.Kind})
+		if r.reader().Get(ctx, client.ObjectKey{Namespace: ref.Namespace, Name: ref.Name}, left) != nil {
+			continue
+		}
+		want = append(want, adminobjects.Object{Purpose: adminobjects.LeftoverPurpose, Object: left})
+		states = append(states, adminobjects.Stale)
+	}
+	publishAdminObjects(dv, isAdminObject, want, states)
 	for _, s := range []adminobjects.State{adminobjects.NotInstalled, adminobjects.Outdated} {
-		if i := slices.Index(states, s); i >= 0 {
-			return metav1.ConditionFalse, string(s), details[i] + "; " + guardNextAction
+		for i, w := range want {
+			if states[i] == s && isGuard(w.Object) {
+				return metav1.ConditionFalse, string(s), details[i] + "; " + guardNextAction
+			}
 		}
 	}
 	return metav1.ConditionTrue, string(adminobjects.Installed), "the admission policies bounding " + p.Operator + " are installed as rendered"

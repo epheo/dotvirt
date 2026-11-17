@@ -5,6 +5,8 @@ import (
 	"strings"
 	"testing"
 
+	corev1 "k8s.io/api/core/v1"
+
 	dotvirtv1alpha1 "github.com/epheo/dotvirt/operator/api/v1alpha1"
 	"github.com/epheo/dotvirt/pkg/adminobjects"
 )
@@ -67,6 +69,11 @@ func TestRenderMatchesTheGuardsVolumes(t *testing.T) {
 		ClientSecret: &dotvirtv1alpha1.SecretKeyRef{Name: "oidc", Key: "client-secret"}}
 	pod := Deployment(dv, "argocd", nil).Spec.Template.Spec
 	secretEnv := adminobjects.ConsoleSecretEnv("creds", "oidc", "client-secret")
+	// The guard pins the issuer to spec.auth.oidc.issuerURL.
+	if i := slices.IndexFunc(pod.Containers[0].Env, func(e corev1.EnvVar) bool { return e.Name == "DOTVIRT_OIDC_ISSUER" }); i < 0 ||
+		pod.Containers[0].Env[i].Value != dv.Spec.Auth.OIDC.IssuerURL {
+		t.Errorf("console issuer env at %d, want spec.auth.oidc.issuerURL %q", i, dv.Spec.Auth.OIDC.IssuerURL)
+	}
 	for _, sso := range []bool{false, true} {
 		sd := dv.DeepCopy()
 		if sso {

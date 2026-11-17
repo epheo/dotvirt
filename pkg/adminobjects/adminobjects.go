@@ -8,10 +8,12 @@ package adminobjects
 
 import (
 	"fmt"
+	"net/url"
 	"strings"
 
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/validation"
 )
 
@@ -24,6 +26,8 @@ const (
 	// changed after it was installed.
 	Outdated  State = "Outdated"
 	Installed State = "Installed"
+	// Stale: an object the install no longer asks for, still there (Leftovers).
+	Stale State = "Stale"
 )
 
 // Object is one rendered object and what it is for.
@@ -62,12 +66,17 @@ type Params struct {
 	// an admin chose for the console (spec.branding.configMap,
 	// spec.metrics.ca.name, ForgeSecret).
 	BrandingConfigMap, MetricsCAConfigMap, ForgeSecret string
-	// OIDCSecret and OIDCSecretKey are spec.auth.oidc.clientSecret.
-	OIDCSecret, OIDCSecretKey string
+	// OIDCSecret and OIDCSecretKey are spec.auth.oidc.clientSecret, and
+	// OIDCIssuer spec.auth.oidc.issuerURL.
+	OIDCSecret, OIDCSecretKey, OIDCIssuer string
 	// ForgeManaged is spec.forge.managed: a forge the operator runs, whose
 	// credential it mints. Otherwise the credential is an admin's, and the
 	// console sends it only to the URL its Secret names.
 	ForgeManaged bool
+	// InstallName and InstallUID are the install resource's, which owns what
+	// is rendered for it alone (CredentialGrant).
+	InstallName string
+	InstallUID  types.UID
 }
 
 // Valid reports whether every pin is known and well formed: a render missing
@@ -93,6 +102,7 @@ func (p Params) Malformed() string {
 		{"console host", optional(p.ConsoleHost)},
 		{"OIDC client Secret", optional(p.OIDCSecret)},
 		{"OIDC client Secret key", p.OIDCSecretKey == "" || len(validation.IsConfigMapKey(p.OIDCSecretKey)) == 0},
+		{"OIDC issuer", p.OIDCIssuer == "" || httpsURL(p.OIDCIssuer)},
 	} {
 		if !c.ok {
 			return c.pin
@@ -118,10 +128,12 @@ func ValidUsername(u string) bool {
 		len(validation.IsDNS1123Label(parts[2])) == 0 && len(validation.IsDNS1123Subdomain(parts[3])) == 0
 }
 
-// Render is every admin object an install asks for, rendered from p. Append
-// here to ask for more, and to Allowed and diff.
+// Render is every admin object an install asks for, rendered from p: the
+// guard, and the forge credential's grant when the credential is an admin's
+// Secret the operator's role does not name. Append here to ask for more, and
+// to Allowed and diff.
 func Render(p Params) []Object {
-	return Guard(p)
+	return append(Guard(p), credentialObjects(p)...)
 }
 
 // Ref names one object an install may ask an admin to apply.
@@ -145,7 +157,9 @@ func Allowed(installNS string) []Ref {
 			Ref{"admissionregistration.k8s.io", "v1", "ValidatingAdmissionPolicy", "validatingadmissionpolicies", "", name},
 			Ref{"admissionregistration.k8s.io", "v1", "ValidatingAdmissionPolicyBinding", "validatingadmissionpolicybindings", "", name})
 	}
-	return out
+	return append(out,
+		Ref{"rbac.authorization.k8s.io", "v1", "Role", "roles", installNS, CredentialGrantName},
+		Ref{"rbac.authorization.k8s.io", "v1", "RoleBinding", "rolebindings", installNS, CredentialGrantName})
 }
 
 // Allow is the entry of allowed o is, by group, version, kind, namespace and
@@ -169,6 +183,8 @@ func Allow(allowed []Ref, o *unstructured.Unstructured) (Ref, bool) {
 var diff = map[schema.GroupKind]func(want, live *unstructured.Unstructured) string{
 	{Group: "admissionregistration.k8s.io", Kind: "ValidatingAdmissionPolicy"}:        diffPolicy,
 	{Group: "admissionregistration.k8s.io", Kind: "ValidatingAdmissionPolicyBinding"}: diffBinding,
+	{Group: "rbac.authorization.k8s.io", Kind: "Role"}:                                diffRole,
+	{Group: "rbac.authorization.k8s.io", Kind: "RoleBinding"}:                         diffRoleBinding,
 }
 
 // Compare weighs live, nil when absent, against want. detail says what
@@ -193,3 +209,10 @@ func Compare(want, live *unstructured.Unstructured) (state State, detail string)
 // --force-conflicts, kubectl names any field someone else changed instead of
 // taking it back; the admin decides.
 const ApplyCommand = "kubectl apply --server-side --field-manager=dotvirt -f"
+
+// httpsURL reports whether s is an absolute https URL, as the CRD admits an
+// issuer.
+func httpsURL(s string) bool {
+	u, err := url.Parse(s)
+	return err == nil && u.Scheme == "https" && u.Host != ""
+}

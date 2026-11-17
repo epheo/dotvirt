@@ -33,6 +33,7 @@ import (
 	utilyaml "k8s.io/apimachinery/pkg/util/yaml"
 	admissionregistrationv1ac "k8s.io/client-go/applyconfigurations/admissionregistration/v1"
 	rbacv1ac "k8s.io/client-go/applyconfigurations/rbac/v1"
+	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -624,6 +625,19 @@ func TestEnvtest(t *testing.T) {
 				c := &d.Spec.Template.Spec.Containers[0]
 				c.Args = append(slices.Clone(c.Args), "-forge-url=https://evil.example")
 			}},
+			// The console sends the admin's OIDC client secret to its issuer.
+			"the console signing in at an issuer no admin chose": {app, withEnv(corev1.EnvVar{Name: "DOTVIRT_OIDC_ISSUER", Value: "https://evil.example"})},
+			"the console signing in at an issuer no admin chose, by flag": {app, func(d *appsv1.Deployment) {
+				c := &d.Spec.Template.Spec.Containers[0]
+				c.Args = append(slices.Clone(c.Args), "-oidc-issuer=https://evil.example")
+			}},
+			// The forge runs its own commands: a network volume reaches any
+			// export the nodes can.
+			"the forge on an NFS export": {forge, withVolume(corev1.Volume{Name: "more", VolumeSource: corev1.VolumeSource{
+				NFS: &corev1.NFSVolumeSource{Server: "nfs.example", Path: "/exports"}}}, corev1.VolumeMount{Name: "more", MountPath: "/more"})},
+			"the forge on an iSCSI target": {forge, withVolume(corev1.Volume{Name: "more", VolumeSource: corev1.VolumeSource{
+				ISCSI: &corev1.ISCSIVolumeSource{TargetPortal: "203.0.113.7:3260", IQN: "iqn.2001-04.com.example:storage", Lun: 0}}}, corev1.VolumeMount{Name: "more", MountPath: "/more"})},
+			"the forge with another ConfigMap":  {forge, withVolume(configMapVol("more", "brand"), corev1.VolumeMount{Name: "more", MountPath: "/more"})},
 			"the forge on the console's drafts": {forge, withVolume(claimVol("data", adminobjects.DraftsClaim), corev1.VolumeMount{Name: "data", MountPath: "/var/lib/gitea"})},
 			"the forge with another claim":      {forge, withVolume(claimVol("more", "other"), corev1.VolumeMount{Name: "more", MountPath: "/more"})},
 			"the forge with an ephemeral claim": {forge, withVolume(corev1.Volume{Name: "more", VolumeSource: corev1.VolumeSource{Ephemeral: &corev1.EphemeralVolumeSource{
@@ -1065,9 +1079,12 @@ func TestEnvtest(t *testing.T) {
 		// The branding ConfigMap and the OIDC client secret an admin chose: the
 		// secret reaches the console under its own env only.
 		chosen.BrandingConfigMap = "brand"
-		chosen.OIDCSecret, chosen.OIDCSecretKey = "admin-oidc", "client-secret"
+		chosen.OIDCSecret, chosen.OIDCSecretKey, chosen.OIDCIssuer = "admin-oidc", "client-secret", "https://idp.example"
 		oidc := app()
-		withEnv(fromSecret("DOTVIRT_OIDC_CLIENT_SECRET", "admin-oidc", "client-secret"))(oidc)
+		withEnv(fromSecret("DOTVIRT_OIDC_CLIENT_SECRET", "admin-oidc", "client-secret"),
+			corev1.EnvVar{Name: "DOTVIRT_OIDC_ISSUER", Value: chosen.OIDCIssuer})(oidc)
+		oidcIssuerElsewhere := oidc.DeepCopy()
+		withEnv(corev1.EnvVar{Name: "DOTVIRT_OIDC_ISSUER", Value: "https://evil.example"})(oidcIssuerElsewhere)
 		oidcElsewhere := app()
 		withEnv(fromSecret("DOTVIRT_FORGE_TOKEN", "admin-oidc", "client-secret"),
 			fromSecret("DOTVIRT_FORGE_URL", adminobjects.DefaultForgeSecret, "url"))(oidcElsewhere)
@@ -1112,6 +1129,7 @@ func TestEnvtest(t *testing.T) {
 			}
 		}
 		for name, o := range map[string]client.Object{
+			"the console sending the admin's OIDC client secret to another issuer":  oidcIssuerElsewhere,
 			"the console sending the admin's OIDC client secret as its forge token": oidcElsewhere,
 			"the forge's Ingress for every host":                                    forgeIngress("", nil),
 			"the forge's Ingress on a wildcard over the console's host":             forgeIngress("*.example", nil),
@@ -1191,7 +1209,7 @@ func TestEnvtest(t *testing.T) {
 			"${ARGO_CONTROLLER}": "argocd-application-controller", "${SPEC_IMAGE}": "", "${FORGE_INSECURE_TLS}": "false",
 			"${RELATED_IMAGE_DOTVIRT}": "", "${RELATED_IMAGE_FORGEJO}": "", "${METRICS_URL}": "", "${METRICS_TENANCY_URL}": "", "${METRICS_CA}": "",
 			"${CONSOLE_HOST}": "", "${BRANDING_CONFIGMAP}": "", "${METRICS_CA_CONFIGMAP}": "", "${FORGE_SECRET}": adminobjects.DefaultForgeSecret,
-			"${FORGE_MANAGED}": "false", "${OIDC_SECRET}": "", "${OIDC_SECRET_KEY}": "",
+			"${FORGE_MANAGED}": "false", "${OIDC_SECRET}": "", "${OIDC_SECRET_KEY}": "", "${OIDC_ISSUER}": "",
 		} {
 			filled = strings.ReplaceAll(filled, k, v)
 		}
@@ -1751,7 +1769,10 @@ func TestEnvtest(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		for _, cmd := range install.ForgeCredentialReplaceCommands(dv, "dotvirt-operator") {
+		// The README's commands, each variable as an admin derives it.
+		vars := strings.NewReplacer(`"$INSTALL_NS"`, "cred-half", `"$VERBS"`, "get", `"$CREDENTIAL"`, "byo-creds",
+			`"$OPERATOR"`, "dotvirt-operator:"+install.OperatorServiceAccount)
+		for _, cmd := range strings.Split(vars.Replace(adminobjects.CredentialGrantCommands), "\n") {
 			stdout, stderr, err := kubectl.Run(strings.Fields(cmd)[1:]...)
 			if err != nil {
 				out, _ := io.ReadAll(stdout)
@@ -1761,6 +1782,50 @@ func TestEnvtest(t *testing.T) {
 		}
 		if !review(account, groups, authzv1.ResourceAttributes{Verb: "get", Resource: "secrets", Namespace: "cred-half", Name: "byo-creds"}) {
 			t.Error("the replace commands left the operator without the grant")
+		}
+
+		// As the console installs it: its own render (adminobjects.Render for the
+		// pins it reads), server-side applied under the cluster admin's token
+		// with the console's field manager, forced. The operator's watch sees it
+		// land, and the operator's account reads exactly that Secret.
+		mustCreate(t, admin, &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "cred-console"}})
+		p := adminobjects.Params{
+			Operator: account, Namespace: "cred-console", ForgeSecret: "byo-creds", ForgeManaged: true,
+			InstallName: "cred", InstallUID: "0f7c1d2e-cred",
+		}
+		dyn := dynamic.NewForConfigOrDie(adminCfg)
+		allowed := adminobjects.Allowed(p.Namespace)
+		before = passes.Load()
+		var installed int
+		for _, o := range adminobjects.Render(p) {
+			ref, ok := adminobjects.Allow(allowed, o.Object)
+			if !ok || ref.Namespace == "" {
+				continue
+			}
+			if _, err := dyn.Resource(ref.GVR()).Namespace(ref.Namespace).Apply(ctx, ref.Name, o.Object, metav1.ApplyOptions{FieldManager: "dotvirt", Force: true}); err != nil {
+				t.Fatalf("install %s %s: %v", ref.Kind, ref.Name, err)
+			}
+			installed++
+		}
+		if installed != 2 {
+			t.Fatalf("the console's render held %d namespaced objects, want the grant's Role and RoleBinding", installed)
+		}
+		soon(t, "a pass after the console installs the grant", func() bool { return passes.Load() > before })
+		for _, r := range []struct {
+			verb, ns, name string
+			want           bool
+		}{
+			{"get", "cred-console", "byo-creds", true},
+			{"create", "cred-console", "byo-creds", true},
+			{"patch", "cred-console", "byo-creds", true},
+			{"delete", "cred-console", "byo-creds", false},
+			{"list", "cred-console", "", false},
+			{"get", "cred-console", install.SessionSecretName, false},
+			{"get", "kube-system", "byo-creds", false},
+		} {
+			if got := review(account, groups, authzv1.ResourceAttributes{Verb: r.verb, Resource: "secrets", Namespace: r.ns, Name: r.name}); got != r.want {
+				t.Errorf("console grant: %s secrets %s/%s: allowed=%v, want %v", r.verb, r.ns, r.name, got, r.want)
+			}
 		}
 	})
 

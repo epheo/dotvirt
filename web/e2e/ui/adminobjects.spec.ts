@@ -64,3 +64,53 @@ test('a caller who may not install it is neither offered it nor reads it', async
 	await expect(page.getByRole('button', { name: 'Install', exact: true })).toHaveCount(0);
 	expect(calls).toEqual([]);
 });
+
+test('an admin-named forge credential: the banner offers its grant, and only it', async ({
+	page,
+}) => {
+	await setScenario(page, 'adminobjectscredential');
+	await login(page);
+	const list = page.getByTestId('admin-objects');
+	// The guard is in: the grant alone is pending, each saying what differs.
+	await expect(list.getByRole('listitem')).toHaveText([
+		'Lets the operator use the forge credential creds (missing)',
+		"Grants it to the operator's account (differs: RoleBinding dotvirt-forge-credential binds other accounts than dotvirt-operator:dotvirt-operator-controller)",
+	]);
+	await page.getByRole('button', { name: 'Install', exact: true }).click();
+	await expect(list).toHaveCount(0);
+});
+
+test('the default credential asks for no grant, and a caller without the capability sees none', async ({
+	page,
+}) => {
+	await setScenario(page, 'adminobjects');
+	await login(page);
+	await expect(page.getByTestId('admin-objects')).toBeVisible();
+	await expect(page.getByText('forge credential')).toHaveCount(0);
+
+	await setScenario(page, 'adminobjectscredentialdenied');
+	await page.reload();
+	await expect(page.getByRole('main')).toBeVisible();
+	await expect(page.getByTestId('admin-objects')).toHaveCount(0);
+	await expect(page.getByText('forge credential')).toHaveCount(0);
+});
+
+test('a grant left from an earlier credential is listed stale, to remove, never in the manifest', async ({
+	page,
+}) => {
+	await setScenario(page, 'adminobjectsstale');
+	await login(page);
+	const list = page.getByTestId('admin-objects');
+	await expect(list.getByRole('listitem')).toHaveText([
+		'Left from an earlier forge credential: still grants the operator that Secret (stale, remove it: kubectl -n "$INSTALL_NS" delete role,rolebinding dotvirt-forge-credential)',
+		'Left from an earlier forge credential: still grants the operator that Secret (stale, remove it: kubectl -n "$INSTALL_NS" delete role,rolebinding dotvirt-forge-credential)',
+	]);
+	const [file] = await Promise.all([
+		page.waitForEvent('download'),
+		page.getByRole('button', { name: 'Download manifest' }).click(),
+	]);
+	const manifest = JSON.parse(
+		await (await file.createReadStream()).toArray().then((c) => Buffer.concat(c).toString()),
+	);
+	expect(manifest.items.map((o: { kind: string }) => o.kind)).not.toContain('Role');
+});
