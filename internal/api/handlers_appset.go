@@ -96,11 +96,16 @@ func (s *Server) handleAppSetPlugin(w http.ResponseWriter, r *http.Request) {
 
 // EmptyHold is what it means that ArgoCD holds p's generated app at an empty
 // source (argo.Snapshot.EmptyHold), "" while it does not; changeset.HoldReader.
-// Deleting needs git itself to have emptied by moving on from what Argo
-// applied, read from the source Argo applied: the held revision descends from
-// the applied one in dotvirt's mirror, differs from it, and declares nothing
-// in the project's folder. An empty render alone (a re-pointed path, an Argo
-// that reads the source otherwise) is a mismatch and never lifts the guard.
+// Deleting needs git itself to have removed what Argo applied, read from the
+// source Argo applied: the held revision descends from the applied one in
+// dotvirt's mirror and declares nothing in the project's folder, while the
+// applied one declared something there, unless the lift is already on and
+// Argo has applied the empty revision. A removal must remove something: an
+// applied revision that declared nothing is a repo re-created and synced by
+// hand without prune, whose objects still run, and a later commit adding no
+// manifest (a starter-library seed, a README) must not read as their removal.
+// An empty render alone (a re-pointed path, an Argo that reads the source
+// otherwise) is a mismatch too, and never lifts the guard.
 // A held project's mirror is kept open (RepoSet.Warm): the merge that emptied
 // it may land long after anyone last opened the repo.
 func (s *Server) EmptyHold(p project.ProjectInfo) model.Hold {
@@ -124,11 +129,7 @@ func (s *Server) EmptyHold(p project.ProjectInfo) model.Hold {
 		return model.HoldPending
 	case !f.descends:
 		return model.HoldReplaced
-	// Argo applying the revision it holds at, while still pruning, is the
-	// lift being applied (allowEmpty already on), or a sync run without prune:
-	// an admin syncing a re-created empty repo by hand records it as applied
-	// while its objects still run. Only the first is a removal.
-	case h.Compared == h.Applied && !h.Lifted, !h.SameSource, f.declares:
+	case !h.SameSource, f.declares, !f.appliedDeclares && !h.Lifted:
 		return model.HoldMismatch
 	}
 	return model.HoldDeleting
@@ -144,14 +145,14 @@ func (s *Server) liftsAllowEmpty(p project.ProjectInfo) bool {
 
 // holdMemo keeps what git says of a held app's two revisions, which never
 // changes once known: whether the held one descends from the applied one, and
-// whether it declares anything. Every frame and generator run asks per held
+// whether each declares anything. Every frame and generator run asks per held
 // project; an unknown answer (a mirror behind) is asked again.
 type holdMemo struct {
 	mu sync.Mutex
 	m  map[string]holdFact
 }
 
-type holdFact struct{ descends, declares bool }
+type holdFact struct{ descends, declares, appliedDeclares bool }
 
 // holdMemoMax bounds the memo; holds are rare and short-lived.
 const holdMemoMax = 256
@@ -171,6 +172,9 @@ func (m *holdMemo) of(read *git.Repo, branch string, h argo.EmptyHold) (holdFact
 	f.descends = descends
 	if descends {
 		if f.declares, err = read.DeclaresAt(h.Compared); err != nil {
+			return holdFact{}, false
+		}
+		if f.appliedDeclares, err = read.DeclaresAt(h.Applied); err != nil {
 			return holdFact{}, false
 		}
 	}

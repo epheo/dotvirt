@@ -194,6 +194,16 @@ func TestAppSetPluginLiftsAllowEmptyOnlyForADeliberateRemoval(t *testing.T) {
 	nosrc.remove(t)
 	lifting := newRemovalRepo(t)
 	lifting.remove(t)
+	// The forge lost the repo; it came back empty (R0), and an admin synced it
+	// in Argo without prune, so R0 reads as applied while the objects run.
+	// Then a commit adding no manifest (the starter-library seed) lands (R1).
+	chain := newRepoWith(t, map[string]string{"README.md": "recovered\n"})
+	chainR0 := chain.head(t)
+	chain.add(t, "templates/web.yaml", "kind: VirtualMachineTemplate\n")
+	hand := newRepoWith(t, map[string]string{"README.md": "recovered\n"})
+	relift := newRepoWith(t, map[string]string{"README.md": "recovered\n"})
+	liftfull := newRemovalRepo(t)
+	liftfull.edit(t)
 	platform := "file://" + seedPlatformRepo(t, map[string]string{"README.md": "lost\n"})
 
 	fc := newFakeCluster(t)
@@ -211,6 +221,10 @@ func TestAppSetPluginLiftsAllowEmptyOnlyForADeliberateRemoval(t *testing.T) {
 		{"team-old", old.url, old.head(t), old.applied, "."},
 		{"team-nosrc", nosrc.url, nosrc.head(t), nosrc.applied, "."},
 		{"team-lifting", lifting.url, lifting.head(t), lifting.head(t), "."},
+		{"team-chain", chain.url, chain.head(t), chainR0, "."},
+		{"team-hand", hand.url, hand.head(t), hand.head(t), "."},
+		{"team-relift", relift.url, relift.head(t), removed.applied, "."},
+		{"team-liftfull", liftfull.url, liftfull.head(t), liftfull.applied, "."},
 	} {
 		fc.namespaces = append(fc.namespaces, corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: p.name,
 			Labels: map[string]string{"dotvirt.io/project": p.name}, Annotations: map[string]string{"dotvirt.io/repo": p.repo}}})
@@ -223,7 +237,7 @@ func TestAppSetPluginLiftsAllowEmptyOnlyForADeliberateRemoval(t *testing.T) {
 			_ = unstructured.SetNestedField(app, recreated, "spec", "source", "repoURL")
 		case "team-nosrc":
 			_ = unstructured.SetNestedSlice(app, []any{map[string]any{"revision": p.applied}}, "status", "history")
-		case "team-lifting": // Argo applied the lifted removal and is pruning
+		case "team-lifting", "team-relift", "team-liftfull": // allowEmpty already on
 			_ = unstructured.SetNestedField(app, true, "spec", "syncPolicy", "automated", "allowEmpty")
 		}
 		apps = append(apps, app)
@@ -231,7 +245,8 @@ func TestAppSetPluginLiftsAllowEmptyOnlyForADeliberateRemoval(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
 	repos := git.NewRepoSet(ctx, "", "", nil, false, nil, time.Hour)
-	for _, repo := range []string{removed.url, same.url, moved.url, recreated, stale.url, declared.url, old.url, nosrc.url, lifting.url} {
+	for _, repo := range []string{removed.url, same.url, moved.url, recreated, stale.url, declared.url, old.url, nosrc.url, lifting.url,
+		chain.url, hand.url, relift.url, liftfull.url} {
 		if _, _, err := repos.Get(repo, ""); err != nil {
 			t.Fatal(err)
 		}
@@ -251,7 +266,8 @@ func TestAppSetPluginLiftsAllowEmptyOnlyForADeliberateRemoval(t *testing.T) {
 		"team-del": model.HoldDeleting, "team-rec": model.HoldReplaced, "team-new": model.HoldPending,
 		"team-same": model.HoldMismatch, "team-full": model.HoldMismatch, "team-moved": model.HoldMismatch,
 		"team-stale": model.HoldPending, "team-old": model.HoldPending, "team-nosrc": model.HoldMismatch,
-		"team-lifting": model.HoldDeleting, "team-a": "",
+		"team-lifting": model.HoldDeleting, "team-chain": model.HoldMismatch, "team-hand": model.HoldMismatch,
+		"team-relift": model.HoldReplaced, "team-liftfull": model.HoldMismatch, "team-a": "",
 	}
 	got := map[string]model.Hold{}
 	for _, p := range s.AllProjects() {
@@ -268,7 +284,8 @@ func TestAppSetPluginLiftsAllowEmptyOnlyForADeliberateRemoval(t *testing.T) {
 	lifted := generated(t, s, want)
 	if want := map[string]any{"team-del": true, "team-rec": false, "team-new": false, "team-same": false,
 		"team-full": false, "team-moved": false, "team-stale": false, "team-old": false, "team-nosrc": false,
-		"team-lifting": true, "team-a": false}; !maps.Equal(lifted, want) {
+		"team-lifting": true, "team-chain": false, "team-hand": false, "team-relift": false, "team-liftfull": false,
+		"team-a": false}; !maps.Equal(lifted, want) {
 		t.Errorf("allowEmpty = %v, want %v", lifted, want)
 	}
 
@@ -330,10 +347,29 @@ type removalRepo struct {
 
 func newRemovalRepo(t *testing.T) *removalRepo {
 	t.Helper()
-	bare := seedPlatformRepo(t, map[string]string{"team/web.yaml": "kind: VirtualMachine\nmetadata: {name: web, namespace: team}\n"})
+	return newRepoWith(t, map[string]string{"team/web.yaml": "kind: VirtualMachine\nmetadata: {name: web, namespace: team}\n"})
+}
+
+// newRepoWith is a repo whose main holds files, what Argo last applied.
+func newRepoWith(t *testing.T, files map[string]string) *removalRepo {
+	t.Helper()
+	bare := seedPlatformRepo(t, files)
 	r := &removalRepo{url: "file://" + bare, bare: bare, work: filepath.Join(t.TempDir(), "work"), applied: gitHead(t, bare)}
 	r.git(t, "clone", "-q", bare, r.work)
 	return r
+}
+
+func (r *removalRepo) add(t *testing.T, path, content string) {
+	full := filepath.Join(r.work, path)
+	if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(full, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	r.git(t, "-C", r.work, "add", "-A")
+	r.git(t, "-C", r.work, "commit", "-qm", "add "+path)
+	r.git(t, "-C", r.work, "push", "-q", "origin", "main")
 }
 
 func (r *removalRepo) git(t *testing.T, args ...string) {
