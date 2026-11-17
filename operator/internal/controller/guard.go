@@ -53,6 +53,11 @@ func (r *DotvirtReconciler) guardParams(ctx context.Context, dv *dotvirtv1alpha1
 		}
 	}
 	p.ForgeManaged = dv.Spec.Forge.Managed
+	p.ForgeDelegated, p.ForgeURL = dv.Spec.Forge.PullRequests == "Delegated", dv.Spec.Forge.URL
+	if u := dv.Spec.Forge.UserAuth; u != nil {
+		p.ForgeClientID, p.ForgeAuthorizeURL, p.ForgeTokenURL = u.ClientID, u.AuthorizeURL, u.TokenURL
+		p.ForgeClientSecret, p.ForgeClientSecretKey = u.ClientSecret.Name, u.ClientSecret.Key
+	}
 	p.InstallName, p.InstallUID = dv.Name, dv.UID
 	domain := r.appsDomain(ctx, dv)
 	router := ""

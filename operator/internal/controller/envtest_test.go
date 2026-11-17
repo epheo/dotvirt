@@ -1126,12 +1126,13 @@ func TestEnvtest(t *testing.T) {
 		// spec says.
 		chosen.ForgeDelegated, chosen.ForgeURL, chosen.ForgeClientID = true, "https://forge.example", "dotvirt"
 		chosen.ForgeAuthorizeURL, chosen.ForgeClientSecret, chosen.ForgeClientSecretKey = "https://forge.example/login/oauth/authorize", "forge-app", "client-secret"
-		delegated := app()
-		withEnv(corev1.EnvVar{Name: "DOTVIRT_FORGE_DELEGATED", Value: "true"},
-			corev1.EnvVar{Name: "DOTVIRT_FORGE_DELEGATED_URL", Value: chosen.ForgeURL},
-			corev1.EnvVar{Name: "DOTVIRT_FORGE_CLIENT_ID", Value: chosen.ForgeClientID},
-			fromSecret("DOTVIRT_FORGE_CLIENT_SECRET", chosen.ForgeClientSecret, chosen.ForgeClientSecretKey),
-			corev1.EnvVar{Name: "DOTVIRT_FORGE_AUTHORIZE_URL", Value: chosen.ForgeAuthorizeURL})(delegated)
+		// The console as the operator renders it for that spec.
+		delegatedDV := dv.DeepCopy()
+		delegatedDV.Spec.Forge.CredentialsSecret, delegatedDV.Spec.Forge.URL = adminobjects.DefaultForgeSecret, chosen.ForgeURL
+		delegatedDV.Spec.Forge.PullRequests = "Delegated"
+		delegatedDV.Spec.Forge.UserAuth = &dotvirtv1alpha1.ForgeUserAuthSpec{ClientID: chosen.ForgeClientID, AuthorizeURL: chosen.ForgeAuthorizeURL,
+			ClientSecret: dotvirtv1alpha1.SecretKeyRef{Name: chosen.ForgeClientSecret, Key: chosen.ForgeClientSecretKey}}
+		delegated := install.Deployment(delegatedDV, "argocd", nil)
 		delegatedWith := func(env ...corev1.EnvVar) *appsv1.Deployment {
 			d := delegated.DeepCopy()
 			withEnv(env...)(d)

@@ -156,6 +156,17 @@ func TestOperatorGuardFollowsTheAdminImage(t *testing.T) {
 		t.Errorf("an admin's host: %q", p.ConsoleHost)
 	}
 
+	// Delegated: the forge application the spec names.
+	delegated := dv.DeepCopy()
+	delegated.Spec.Forge.PullRequests, delegated.Spec.Forge.URL = "Delegated", "https://forge.example"
+	delegated.Spec.Forge.UserAuth = &dotvirtv1alpha1.ForgeUserAuthSpec{ClientID: "dotvirt", AuthorizeURL: "https://forge.example/login/oauth/authorize",
+		TokenURL: "https://forge.internal/token", ClientSecret: dotvirtv1alpha1.SecretKeyRef{Name: "forge-app", Key: "client-secret"}}
+	if p := r.guardParams(t.Context(), delegated, guardRC); !p.ForgeDelegated || p.ForgeURL != "https://forge.example" || p.ForgeClientID != "dotvirt" ||
+		p.ForgeAuthorizeURL != "https://forge.example/login/oauth/authorize" || p.ForgeTokenURL != "https://forge.internal/token" ||
+		p.ForgeClientSecret != "forge-app" || p.ForgeClientSecretKey != "client-secret" {
+		t.Errorf("Delegated params = %+v", p)
+	}
+
 	// No ingress domain served (MicroShift): the host routers report for the
 	// console's Route.
 	route := &unstructured.Unstructured{Object: map[string]any{

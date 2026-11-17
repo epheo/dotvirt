@@ -127,3 +127,37 @@ func TestRenderMatchesTheGuardsVolumes(t *testing.T) {
 		}
 	}
 }
+
+// Delegated pull requests: the console's forge application settings are the
+// ones the guard pins from the spec, and its client secret is in the guard's
+// Secret env.
+func TestDelegatedRenderMatchesTheGuardsPins(t *testing.T) {
+	dv := &dotvirtv1alpha1.Dotvirt{}
+	dv.Name, dv.Namespace = "x", "dotvirt"
+	dv.Spec.Forge.CredentialsSecret, dv.Spec.Forge.URL, dv.Spec.Forge.PullRequests = "creds", "https://forge.example/", "Delegated"
+	dv.Spec.Forge.UserAuth = &dotvirtv1alpha1.ForgeUserAuthSpec{ClientID: "dotvirt", AuthorizeURL: "https://forge.example/login/oauth/authorize",
+		TokenURL: "https://forge.internal/login/oauth/access_token", ClientSecret: dotvirtv1alpha1.SecretKeyRef{Name: "forge-app", Key: "client-secret"}}
+	u := dv.Spec.Forge.UserAuth
+	p := adminobjects.Params{ForgeSecret: "creds", ForgeClientSecret: u.ClientSecret.Name, ForgeClientSecretKey: u.ClientSecret.Key}
+	want := map[string]string{
+		"DOTVIRT_FORGE_DELEGATED": "true", "DOTVIRT_FORGE_DELEGATED_URL": dv.Spec.Forge.URL, "DOTVIRT_FORGE_CLIENT_ID": u.ClientID,
+		"DOTVIRT_FORGE_AUTHORIZE_URL": u.AuthorizeURL, "DOTVIRT_FORGE_TOKEN_URL": u.TokenURL,
+	}
+	got := map[string]string{}
+	for _, e := range Deployment(dv, "argocd", nil).Spec.Template.Spec.Containers[0].Env {
+		if r := e.ValueFrom; r != nil && r.SecretKeyRef != nil {
+			if !slices.Contains(adminobjects.ConsoleSecretEnv(p), [3]string{e.Name, r.SecretKeyRef.Name, r.SecretKeyRef.Key}) {
+				t.Errorf("console env %s from %s/%s is not in the guard's Secret env", e.Name, r.SecretKeyRef.Name, r.SecretKeyRef.Key)
+			}
+			continue
+		}
+		if _, ok := want[e.Name]; ok {
+			got[e.Name] = e.Value
+		}
+	}
+	for name, v := range want {
+		if got[name] != v {
+			t.Errorf("%s = %q, the guard pins %q", name, got[name], v)
+		}
+	}
+}
