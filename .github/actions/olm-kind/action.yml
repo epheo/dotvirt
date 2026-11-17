@@ -20,7 +20,8 @@ runs:
       uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
       with:
         path: ~/.cache/olm-kind-images.tar
-        key: olm-kind-images-${{ hashFiles('hack/versions.env', '.github/actions/olm-kind/action.yml') }}
+        # The archive holds this runner's platform only.
+        key: olm-kind-images-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('hack/versions.env', '.github/actions/olm-kind/action.yml') }}
     - name: Pull + save preloaded images (cache miss)
       if: steps.images.outputs.cache-hit != 'true'
       shell: bash
@@ -30,18 +31,23 @@ runs:
       # the index but fetches only this host's platform, so the saved archive names
       # blobs it lacks and kind's `ctr import --all-platforms` fails ("content digest
       # ... not found"). Pulling this platform's manifest, resolved from the pinned
-      # index, saves a single-platform image.
+      # index, saves a single-platform image. imagetools never hashes what it fetches,
+      # so the index is checked against the pin before its platform digest is trusted.
       run: |
         mkdir -p ~/.cache
         arch=$(docker version -f '{{.Server.Arch}}')
+        idx="$RUNNER_TEMP/olm-kind-index.json"
         images=("$KIND_NODE_IMAGE" "$REGISTRY_IMAGE" "$SCORECARD_TEST_IMAGE")
         for img in "${images[@]}"; do
           name="${img%@*}"
           ref="$img"
-          digest=$(docker buildx imagetools inspect --raw "$img" | jq -r --arg a "$arch" \
-            'if .manifests then [.manifests[] | select(.platform.os == "linux" and .platform.architecture == $a) | .digest][0] // "" else "" end')
-          [ -n "$digest" ] && ref="${name%:*}@$digest"
-          docker pull "$ref" && docker tag "$ref" "$name"
+          docker buildx imagetools inspect --raw "$img" > "$idx"
+          echo "${img#*@sha256:}  $idx" | sha256sum -c --quiet
+          digest=$(jq -r --arg a "$arch" \
+            'if .manifests then [.manifests[] | select(.platform.os == "linux" and .platform.architecture == $a) | .digest][0] // "" else "" end' "$idx")
+          if [ -n "$digest" ]; then ref="${name%:*}@$digest"; fi
+          docker pull "$ref"
+          docker tag "$ref" "$name"
         done
         docker save -o ~/.cache/olm-kind-images.tar "${images[@]%@*}"
     - name: Load preloaded images (cache hit)
