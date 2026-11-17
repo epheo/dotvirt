@@ -30,6 +30,12 @@
 #   export INSTALL_NAMESPACE
 #   spec() { kubectl -n "$INSTALL_NAMESPACE" get dotvirt -o jsonpath="{.items[0].spec.$1}"; }
 #   export SPEC_IMAGE="$(spec image)"
+#   # An image in an official repository is left out: the repository admits it
+#   # already, and a pinned digest would read Outdated at every release.
+#   inrepo() { case "$1" in "$2":*|"$2"@sha256:*) return 0;; esac; return 1; }
+#   inrepo "$SPEC_IMAGE" quay.io/epheo/dotvirt && SPEC_IMAGE=
+#   inrepo "$RELATED_IMAGE_DOTVIRT" quay.io/epheo/dotvirt && RELATED_IMAGE_DOTVIRT=
+#   inrepo "$RELATED_IMAGE_FORGEJO" codeberg.org/forgejo/forgejo && RELATED_IMAGE_FORGEJO=
 #   export FORGE_INSECURE_TLS="$( [ "$(spec forge.insecureTLS)" = true ] && echo true || echo false )"
 #   # Where users' metrics queries go: spec.metrics.url; its tenancyURL, else for
 #   # https://thanos-querier.openshift-monitoring.svc:9091 the same URL on 9092;
@@ -61,6 +67,12 @@
 #   # The OIDC issuer and client secret an admin chose, if any:
 #   export OIDC_SECRET="$(spec auth.oidc.clientSecret.name)" OIDC_SECRET_KEY="$(spec auth.oidc.clientSecret.key)"
 #   export OIDC_ISSUER="$(spec auth.oidc.issuerURL)"
+#
+#   # Every value lands inside a quoted string; one that could end it is refused,
+#   # never escaped:
+#   for v in ARGO_CONTROLLER ARGO_NAMESPACE BRANDING_CONFIGMAP CONSOLE_HOST FORGE_INSECURE_TLS FORGE_MANAGED FORGE_SECRET INSTALL_NAMESPACE METRICS_CA METRICS_CA_CONFIGMAP METRICS_TENANCY_URL METRICS_URL OIDC_ISSUER OIDC_SECRET OIDC_SECRET_KEY OPERATOR_USERNAME RELATED_IMAGE_DOTVIRT RELATED_IMAGE_FORGEJO SPEC_IMAGE; do
+#     case "$(printenv "$v")" in *'"'*|*\\*) echo "$v holds a quote or a backslash" >&2; exit 1;; esac
+#   done
 #
 #   envsubst < guard.yaml | kubectl apply --server-side --field-manager=dotvirt -f -
 #

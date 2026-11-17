@@ -426,9 +426,25 @@ var trustEnv = []string{
 const pod = "object.spec.template.spec"
 
 // imageFrom is container c's image coming from repository (then a tag or a
-// digest, so a lookalike name fails) or being one an admin chose.
+// digest, so a lookalike name fails) or being one an admin chose. A choice
+// inside repository is left out (rendered empty, never an image): the
+// repository admits it already, and pinning its digest would make every
+// release's new digest read Outdated.
 func imageFrom(repository string, chosen ...string) string {
-	return `(c.image.startsWith(` + quote(repository+"@sha256:") + `) || c.image.startsWith(` + quote(repository+":") + `) || c.image in ` + list(chosen...) + `)`
+	var outside []string
+	for _, img := range chosen {
+		if InRepository(repository, img) {
+			img = ""
+		}
+		outside = append(outside, img)
+	}
+	return `(c.image.startsWith(` + quote(repository+"@sha256:") + `) || c.image.startsWith(` + quote(repository+":") + `) || c.image in ` + list(outside...) + `)`
+}
+
+// InRepository is img coming from repository, as the guard's repository pin
+// reads it: the repository, then a tag or a digest.
+func InRepository(repository, img string) bool {
+	return strings.HasPrefix(img, repository+":") || strings.HasPrefix(img, repository+"@sha256:")
 }
 
 // mountClear is mount m neither at or above the ServiceAccount token

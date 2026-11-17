@@ -2,6 +2,9 @@ package adminobjects
 
 import (
 	"bytes"
+	"regexp"
+	"slices"
+	"strings"
 
 	"sigs.k8s.io/yaml"
 )
@@ -27,7 +30,7 @@ var TemplateParams = Params{
 
 // templateHeader says how to fill and apply the template, each value derived
 // from the cluster: never from the operator's status, which it writes.
-const templateHeader = `# The dotvirt operator guard: admission policies bounding the operator's own
+var templateHeader = `# The dotvirt operator guard: admission policies bounding the operator's own
 # account. A cluster admin installs it from the console (Install). Without the
 # console, derive each value from the cluster yourself (never copy one from the
 # operator's status or conditions, which the operator writes), fill the
@@ -59,6 +62,12 @@ const templateHeader = `# The dotvirt operator guard: admission policies boundin
 #   export INSTALL_NAMESPACE
 #   spec() { kubectl -n "$INSTALL_NAMESPACE" get dotvirt -o jsonpath="{.items[0].spec.$1}"; }
 #   export SPEC_IMAGE="$(spec image)"
+#   # An image in an official repository is left out: the repository admits it
+#   # already, and a pinned digest would read Outdated at every release.
+#   inrepo() { case "$1" in "$2":*|"$2"@sha256:*) return 0;; esac; return 1; }
+#   inrepo "$SPEC_IMAGE" ` + Repositories[0] + ` && SPEC_IMAGE=
+#   inrepo "$RELATED_IMAGE_DOTVIRT" ` + Repositories[0] + ` && RELATED_IMAGE_DOTVIRT=
+#   inrepo "$RELATED_IMAGE_FORGEJO" ` + Repositories[1] + ` && RELATED_IMAGE_FORGEJO=
 #   export FORGE_INSECURE_TLS="$( [ "$(spec forge.insecureTLS)" = true ] && echo true || echo false )"
 #   # Where users' metrics queries go: spec.metrics.url; its tenancyURL, else for
 #   # https://thanos-querier.openshift-monitoring.svc:9091 the same URL on 9092;
@@ -91,6 +100,12 @@ const templateHeader = `# The dotvirt operator guard: admission policies boundin
 #   export OIDC_SECRET="$(spec auth.oidc.clientSecret.name)" OIDC_SECRET_KEY="$(spec auth.oidc.clientSecret.key)"
 #   export OIDC_ISSUER="$(spec auth.oidc.issuerURL)"
 #
+#   # Every value lands inside a quoted string; one that could end it is refused,
+#   # never escaped:
+#   for v in ` + placeholderList + `; do
+#     case "$(printenv "$v")" in *'"'*|*\\*) echo "$v holds a quote or a backslash" >&2; exit 1;; esac
+#   done
+#
 #   envsubst < guard.yaml | ` + ApplyCommand + ` -
 #
 # Without envsubst, sed with the named placeholders does the same:
@@ -113,15 +128,27 @@ const templateHeader = `# The dotvirt operator guard: admission policies boundin
 // Template is the guard with TemplateParams' placeholders, published with
 // each release for an admin without the console.
 func Template() ([]byte, error) {
-	var b bytes.Buffer
-	b.WriteString(templateHeader)
+	var body bytes.Buffer
 	for _, o := range guard(TemplateParams, "${FORGE_INSECURE_TLS}", "${FORGE_MANAGED}", Metrics{URL: "${METRICS_URL}", TenancyURL: "${METRICS_TENANCY_URL}", CA: "${METRICS_CA}"}) {
 		y, err := yaml.Marshal(o.Object.Object)
 		if err != nil {
 			return nil, err
 		}
-		b.WriteString("---\n# " + o.Purpose + "\n")
-		b.Write(y)
+		body.WriteString("---\n# " + o.Purpose + "\n")
+		body.Write(y)
 	}
-	return b.Bytes(), nil
+	// The quote check covers every placeholder the body holds.
+	var names []string
+	for _, m := range placeholder.FindAllStringSubmatch(body.String(), -1) {
+		if !slices.Contains(names, m[1]) {
+			names = append(names, m[1])
+		}
+	}
+	slices.Sort(names)
+	return append([]byte(strings.Replace(templateHeader, placeholderList, strings.Join(names, " "), 1)), body.Bytes()...), nil
 }
+
+// placeholderList marks where the header lists the placeholders.
+const placeholderList = "<placeholders>"
+
+var placeholder = regexp.MustCompile(`\$\{([A-Z_]+)\}`)

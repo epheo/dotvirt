@@ -78,12 +78,27 @@ func live(objs []adminobjects.Object) []client.Object {
 var guardHere = adminobjects.Params{Operator: guardOperator, Namespace: "dotvirt", ArgoNamespace: "argocd", ArgoController: "argocd-application-controller",
 	ForgeSecret: adminobjects.DefaultForgeSecret}
 
+// An upgrade moves the operator's RELATED_IMAGE_* digests inside the
+// official repositories; the guard installed for the previous ones stays
+// Installed, so upgrades stay automatic.
+func TestOperatorGuardStaysInstalledAcrossReleases(t *testing.T) {
+	previous := guardHere
+	previous.DotvirtImage = adminobjects.Repositories[0] + "@sha256:" + strings.Repeat("a", 64)
+	previous.ForgejoImage = adminobjects.Repositories[1] + ":11-rootless@sha256:" + strings.Repeat("a", 64)
+	t.Setenv("RELATED_IMAGE_DOTVIRT", adminobjects.Repositories[0]+"@sha256:"+strings.Repeat("b", 64))
+	t.Setenv("RELATED_IMAGE_FORGEJO", adminobjects.Repositories[1]+":12-rootless@sha256:"+strings.Repeat("b", 64))
+	if cond, _ := guardPass(t, guardOperator, nil, live(adminobjects.Render(previous))...); cond.Reason != string(adminobjects.Installed) {
+		t.Errorf("after an upgrade: %s %s", cond.Reason, cond.Message)
+	}
+}
+
 func TestOperatorGuardStates(t *testing.T) {
 	elsewhere := guardHere
 	elsewhere.ArgoNamespace = "openshift-gitops"
 	edited := adminobjects.Render(guardHere)
-	v, _, _ := unstructured.NestedSlice(edited[1].Object.Object, "spec", "validations")
-	_ = unstructured.SetNestedSlice(edited[1].Object.Object, v[:1], "spec", "validations")
+	deployments := edited[slices.Index(adminobjects.GuardNames, adminobjects.GuardDeploymentsName)].Object.Object
+	v, _, _ := unstructured.NestedSlice(deployments, "spec", "validations")
+	_ = unstructured.SetNestedSlice(deployments, v[:1], "spec", "validations")
 	for name, c := range map[string]struct {
 		objs   []client.Object
 		status metav1.ConditionStatus

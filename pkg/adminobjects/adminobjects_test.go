@@ -6,6 +6,7 @@ import (
 	"flag"
 	"os"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -239,34 +240,109 @@ func TestReleaseTemplate(t *testing.T) {
 	if !bytes.Equal(committed, got) {
 		t.Fatalf("%s is stale: go test ./pkg/adminobjects -run TestReleaseTemplate -update", path)
 	}
-	filled := string(committed)
-	for k, v := range map[string]string{
-		"${OPERATOR_USERNAME}": params.Operator, "${INSTALL_NAMESPACE}": params.Namespace, "${ARGO_NAMESPACE}": params.ArgoNamespace,
-		"${ARGO_CONTROLLER}": params.ArgoController, "${SPEC_IMAGE}": params.SpecImage, "${RELATED_IMAGE_DOTVIRT}": "", "${RELATED_IMAGE_FORGEJO}": "",
-		"${FORGE_INSECURE_TLS}": "false", "${METRICS_URL}": "", "${METRICS_TENANCY_URL}": "", "${METRICS_CA}": "",
-		"${CONSOLE_HOST}": params.ConsoleHost, "${BRANDING_CONFIGMAP}": params.BrandingConfigMap,
-		"${METRICS_CA_CONFIGMAP}": params.MetricsCAConfigMap, "${FORGE_SECRET}": params.ForgeSecret,
-		"${FORGE_MANAGED}": "false", "${OIDC_SECRET}": params.OIDCSecret, "${OIDC_SECRET_KEY}": params.OIDCSecretKey,
-		"${OIDC_ISSUER}": params.OIDCIssuer,
-	} {
-		filled = strings.ReplaceAll(filled, k, v)
-	}
-	docs := strings.Split(filled, "\n---\n")[1:]
+	docs := filledTemplate(t, committed, params)
 	want := Render(params)
 	if len(docs) != len(want) {
 		t.Fatalf("template holds %d objects, want %d", len(docs), len(want))
 	}
 	for i, doc := range docs {
-		var got map[string]any
-		if err := yaml.Unmarshal([]byte(doc), &got); err != nil {
-			t.Fatal(err)
-		}
-		a, _ := json.Marshal(got)
+		a, _ := json.Marshal(doc.Object)
 		b, _ := json.Marshal(want[i].Object.Object)
 		if string(a) != string(b) {
 			t.Errorf("filled template object %d differs from the render:\n%s\n%s", i, a, b)
 		}
 	}
+}
+
+// filledTemplate is template filled with p as its recipe fills it: an image
+// in its official repository left empty.
+func filledTemplate(t *testing.T, template []byte, p Params) []*unstructured.Unstructured {
+	t.Helper()
+	outside := func(repository, img string) string {
+		if InRepository(repository, img) {
+			return ""
+		}
+		return img
+	}
+	filled := string(template)
+	for k, v := range map[string]string{
+		"${OPERATOR_USERNAME}": p.Operator, "${INSTALL_NAMESPACE}": p.Namespace, "${ARGO_NAMESPACE}": p.ArgoNamespace,
+		"${ARGO_CONTROLLER}": p.ArgoController, "${SPEC_IMAGE}": outside(Repositories[0], p.SpecImage),
+		"${RELATED_IMAGE_DOTVIRT}": outside(Repositories[0], p.DotvirtImage), "${RELATED_IMAGE_FORGEJO}": outside(Repositories[1], p.ForgejoImage),
+		"${FORGE_INSECURE_TLS}": strconv.FormatBool(p.InsecureTLS), "${METRICS_URL}": p.Metrics.URL,
+		"${METRICS_TENANCY_URL}": p.Metrics.TenancyURL, "${METRICS_CA}": p.Metrics.CA,
+		"${CONSOLE_HOST}": p.ConsoleHost, "${BRANDING_CONFIGMAP}": p.BrandingConfigMap,
+		"${METRICS_CA_CONFIGMAP}": p.MetricsCAConfigMap, "${FORGE_SECRET}": p.ForgeSecret,
+		"${FORGE_MANAGED}": strconv.FormatBool(p.ForgeManaged), "${OIDC_SECRET}": p.OIDCSecret, "${OIDC_SECRET_KEY}": p.OIDCSecretKey,
+		"${OIDC_ISSUER}": p.OIDCIssuer,
+	} {
+		filled = strings.ReplaceAll(filled, k, v)
+	}
+	if m := placeholder.FindString(filled); m != "" {
+		t.Fatalf("the fill leaves %s", m)
+	}
+	var out []*unstructured.Unstructured
+	for _, doc := range strings.Split(filled, "\n---\n")[1:] {
+		var o map[string]any
+		if err := yaml.Unmarshal([]byte(doc), &o); err != nil {
+			t.Fatal(err)
+		}
+		out = append(out, &unstructured.Unstructured{Object: o})
+	}
+	return out
+}
+
+// A release that only moves its images' digests inside the official
+// repositories leaves an installed guard Installed, whether the console or
+// the release template rendered it: upgrades stay automatic. An image an
+// admin chose outside them stays pinned.
+func TestDigestOnlyReleasesStayInstalled(t *testing.T) {
+	release := func(digest, specImage string) Params {
+		p := params
+		p.SpecImage = specImage
+		p.DotvirtImage = Repositories[0] + "@sha256:" + strings.Repeat(digest, 64)
+		p.ForgejoImage = Repositories[1] + ":11-rootless@sha256:" + strings.Repeat(digest, 64)
+		return p
+	}
+	template, err := Template()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, specImage := range []string{"", Repositories[0] + ":pinned-by-the-admin"} {
+		prev, next := release("a", specImage), release("b", specImage)
+		for source, installed := range map[string][]*unstructured.Unstructured{
+			"the console's render":        objects(Render(prev)),
+			"the filled release template": filledTemplate(t, template, prev),
+		} {
+			for i, want := range Render(next) {
+				if state, detail := Compare(want.Object, installed[i]); state != Installed {
+					t.Errorf("spec.image %q, installed from %s: %s %s", specImage, source, state, detail)
+				}
+			}
+		}
+	}
+	// A mirror (a disconnected install) is no official repository: its
+	// release image stays pinned, and a new one reads Outdated.
+	prev, next := release("a", ""), release("b", "")
+	prev.DotvirtImage = "registry.example/mirror/dotvirt@sha256:" + strings.Repeat("a", 64)
+	next.DotvirtImage = "registry.example/mirror/dotvirt@sha256:" + strings.Repeat("b", 64)
+	outdated := false
+	for i, want := range Render(next) {
+		if state, _ := Compare(want.Object, Render(prev)[i].Object); state == Outdated {
+			outdated = true
+		}
+	}
+	if !outdated {
+		t.Error("a mirrored release image moved, and the installed guard still reads Installed")
+	}
+}
+
+func objects(os []Object) []*unstructured.Unstructured {
+	var out []*unstructured.Unstructured
+	for _, o := range os {
+		out = append(out, o.Object)
+	}
+	return out
 }
 
 func TestArgoTargetDefaults(t *testing.T) {
