@@ -398,8 +398,12 @@ type AppRef struct {
 	Namespace      string
 	Name           string
 	TargetRevision string
-	// Operating: an operation is requested or still running. A resync merged
-	// into it would rewrite the running operation's fields, so none is sent.
+	// Operating: an operation is requested or still running. A merge rewrites
+	// a requested operation's fields; a running one resumes from
+	// status.operationState and drops ours at completion. The phase check
+	// covers an operation cleared by hand while the phase still reads Running
+	// (the usual stuck-sync workaround): a patch then would make the
+	// controller resume that stale operation.
 	Operating bool
 }
 
@@ -465,11 +469,11 @@ func (s *Snapshot) Resync(ctx context.Context, username, namespace, name string)
 			model.ErrUnavailable, ref.Namespace, ref.Name, name, s.writeNS)
 	}
 	// Read from the snapshot, so an operation starting after it is not seen.
-	// That window is accepted: no precondition can close it without adding a
-	// field to a patch installs pin in admission, and Argo's own resourceVersion
-	// churn would refuse most honest resyncs.
+	// That window is accepted rather than closed with a resourceVersion
+	// precondition: this patch's bytes stay exactly as installs know them,
+	// and any change to it is announced to them first.
 	if ref.Operating {
-		return model.ResyncResult{}, fmt.Errorf("%w: a sync of %s is already running; try again when it finishes",
+		return model.ResyncResult{}, fmt.Errorf("%w: a sync of %s is already requested or running; try again when it finishes",
 			model.ErrConflict, ref.Name)
 	}
 	revision := ref.TargetRevision

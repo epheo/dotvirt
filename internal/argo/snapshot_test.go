@@ -567,6 +567,7 @@ func TestResyncWaitsForTheRunningOperation(t *testing.T) {
 		{"operation terminating", withPhase("Terminating"), true},
 		{"last operation succeeded", withPhase("Succeeded"), false},
 		{"last operation failed", withPhase("Failed"), false},
+		{"last operation errored", withPhase("Error"), false},
 	}
 	for _, tc := range cases {
 		for _, synced := range []bool{true, false} {
@@ -587,7 +588,7 @@ func TestResyncWaitsForTheRunningOperation(t *testing.T) {
 			}
 			_, err := s.Resync(context.Background(), "alice", "prod", "vm-a")
 			if tc.busy {
-				if !errors.Is(err, model.ErrConflict) || !strings.Contains(err.Error(), "already running") {
+				if !errors.Is(err, model.ErrConflict) || !strings.Contains(err.Error(), "already requested or running") {
 					t.Errorf("%s, synced=%v: err = %v, want a conflict saying a sync is already running", tc.name, synced, err)
 				}
 				if patched {
@@ -629,5 +630,30 @@ func TestResyncReadsInFlightFromTheSnapshot(t *testing.T) {
 	}
 	if gets != 0 {
 		t.Errorf("a synced resync read the cluster %d times, want none", gets)
+	}
+}
+
+// An Application tracking no explicit revision is synced at HEAD, Argo's own
+// default; installs pin that value too.
+func TestResyncWithoutTargetRevisionSyncsHEAD(t *testing.T) {
+	a := dotvirtApp("argocd", "team-a", "https://forge/team-a.git",
+		[]any{vmResource("prod", "vm-a", "Synced", "Healthy")})
+	unstructured.RemoveNestedField(a.Object, "spec", "source", "targetRevision")
+	dyn := dynamicfake.NewSimpleDynamicClient(runtime.NewScheme(), a)
+	var sent []byte
+	dyn.PrependReactor("patch", "applications", func(act k8stesting.Action) (bool, runtime.Object, error) {
+		sent = act.(k8stesting.PatchAction).GetPatch()
+		return false, nil, nil
+	})
+	s := NewSnapshot(&Client{dyn: dyn}, nil)
+	_ = s.apps.Add(a)
+	s.synced.Mark()
+	res, err := s.Resync(context.Background(), "alice", "prod", "vm-a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want, _ := resyncPatch("alice", "HEAD", "prod", "vm-a")
+	if res.Revision != "HEAD" || string(sent) != string(want) {
+		t.Errorf("revision = %q, patch = %s; want HEAD and %s", res.Revision, sent, want)
 	}
 }
