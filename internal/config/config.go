@@ -170,6 +170,11 @@ type Config struct {
 	// allows.
 	ArgoNamespace string
 
+	// Install is the Dotvirt resource this console belongs to, read under a
+	// cluster admin's token for the admin objects the console renders: the
+	// operator cannot create one, and there is one per cluster. Name "" is none.
+	Install InstallRef
+
 	// TenantKinds is what a tenant repo may declare beyond the listed kinds, as
 	// the operator put it on the tenant AppProjects. The AppProjects enforce
 	// it; dotvirt reads it to stage nothing they would refuse.
@@ -236,6 +241,8 @@ func Load(args []string) (*Config, error) {
 	// Default on: ArgoCD is the normal deployment shape. The off switch stays for
 	// dev/BYO runs without Argo, whose Application reflector would error-loop.
 	fs.BoolVar(&c.ArgoEnabled, "argo", envBool("DOTVIRT_ARGO", true), "enable ArgoCD drift reads (set -argo=false on clusters without ArgoCD)")
+	fs.StringVar(&c.Install.Namespace, "install-namespace", os.Getenv("DOTVIRT_INSTALL_NAMESPACE"), "namespace of the Dotvirt resource this console belongs to, whose status lists the objects a cluster admin installs from the console (empty: none)")
+	fs.StringVar(&c.Install.Name, "install-name", os.Getenv("DOTVIRT_INSTALL_NAME"), "name of that Dotvirt resource")
 	fs.StringVar(&c.ArgoNamespace, "argo-namespace", os.Getenv("DOTVIRT_ARGO_NAMESPACE"), "ArgoCD namespace holding the per-project sync ServiceAccounts the project grants name, and the only one whose Applications dotvirt patches (empty: owner grants only, patches wherever RBAC allows)")
 
 	var tenantAllowed string
@@ -273,6 +280,10 @@ func Load(args []string) (*Config, error) {
 			return nil, fmt.Errorf("-forge-admin-secret (DOTVIRT_FORGE_ADMIN_SECRET) %q is not namespace/name, or -forge-admin-key is empty", *adminSecret)
 		}
 		c.ForgeAdmin.Namespace, c.ForgeAdmin.Name = ns, name
+	}
+	if (c.Install.Namespace == "") != (c.Install.Name == "") ||
+		(c.Install.Name != "" && (len(validation.IsDNS1123Label(c.Install.Namespace)) > 0 || len(validation.IsDNS1123Subdomain(c.Install.Name)) > 0)) {
+		return nil, fmt.Errorf("-install-namespace %q and -install-name %q name no Dotvirt resource: set both, or neither", c.Install.Namespace, c.Install.Name)
 	}
 	// The snapshot selects project namespaces by this key: a malformed one
 	// would select none and look like an empty cluster, so it fails here.
@@ -331,6 +342,11 @@ func envBool(key string, def bool) bool {
 	default:
 		return def
 	}
+}
+
+// InstallRef names a Dotvirt resource.
+type InstallRef struct {
+	Namespace, Name string
 }
 
 // ForgeAdminRef is the Secret, and its key, holding a managed forge's admin

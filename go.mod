@@ -6,6 +6,7 @@ go 1.27.4
 ignore ./web/node_modules
 
 require (
+	github.com/epheo/dotvirt/pkg/adminobjects v0.0.0
 	github.com/epheo/dotvirt/pkg/forge v0.0.0
 	github.com/epheo/dotvirt/pkg/tenancy v0.0.0
 	github.com/go-git/go-billy/v5 v5.9.2
@@ -36,6 +37,10 @@ replace github.com/epheo/dotvirt/pkg/forge => ./pkg/forge
 
 // pkg/tenancy: the tenant Argo rules the operator applies too, same arrangement.
 replace github.com/epheo/dotvirt/pkg/tenancy => ./pkg/tenancy
+
+// pkg/adminobjects: what the operator renders and a cluster admin installs from
+// the console, same arrangement.
+replace github.com/epheo/dotvirt/pkg/adminobjects => ./pkg/adminobjects
 
 require (
 	dario.cat/mergo v1.0.0 // indirect

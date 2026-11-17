@@ -281,11 +281,13 @@ type Proposal struct {
 	PRURL    string `json:"prURL"`
 	Title    string `json:"title,omitempty"`
 	// Branch is the head branch; By the proposing user, from the branch name
-	// (else the forge poster); Revert marks an undo PR. Mine is set per reader:
-	// the lane is project-wide, ownership is the caller's.
+	// (else the forge poster); Revert marks an undo PR, Seed the starter
+	// template library, which no user proposed. Mine is set per reader: the
+	// lane is project-wide, ownership is the caller's.
 	Branch string `json:"branch,omitempty"`
 	By     string `json:"by,omitempty"`
 	Revert bool   `json:"revert,omitempty"`
+	Seed   bool   `json:"seed,omitempty"`
 	Mine   bool   `json:"mine,omitempty"`
 	// Head is the head branch's commit as dotvirt's mirror holds it: the
 	// version a review renders (ProposalDetail), so a review cache keys on

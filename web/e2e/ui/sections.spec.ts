@@ -101,6 +101,35 @@ test('templates: a tab of Compute, with a rail row; the open template rides the 
 	await expect(main.getByText('Issues in All VMs')).toBeVisible();
 });
 
+test('templates: a pending starter-library offer shows its PR or why it failed', async ({
+	page,
+}) => {
+	await setScenario(page, 'seedoffer');
+	await login(page);
+	await page.goto('/compute?tab=templates');
+	const main = page.locator('main');
+	const seeds = main.getByTestId('template-seed');
+	await expect(seeds).toHaveCount(3);
+	await expect(seeds.getByRole('link', { name: 'pull request #7' })).toHaveAttribute(
+		'href',
+		'https://forge.example/dotvirt/team-web/pulls/7',
+	);
+	const refused = seeds.filter({ hasText: 'team-db' });
+	await expect(refused).toContainText(
+		"could not be proposed: the forge refused the console's account (403).",
+	);
+	await expect(refused).toContainText('The console tries again within the hour.');
+	// A withdrawn offer is final: nothing promises a retry.
+	const withdrawn = seeds.filter({ hasText: 'team-batch' });
+	await expect(withdrawn).toContainText('the console withdrew the offer; it is not made again.');
+	await expect(withdrawn).not.toContainText('tries again');
+
+	// A project shows only its own offer.
+	await page.goto('/compute/team-web?tab=templates');
+	await expect(seeds).toHaveCount(1);
+	await expect(seeds.getByRole('link', { name: 'pull request #7' })).toBeVisible();
+});
+
 test('templates: a project lists its own library and the shared one', async ({ page }) => {
 	await setScenario(page, 'base');
 	await login(page);

@@ -21,6 +21,7 @@ WORKDIR /src
 COPY go.mod go.sum ./
 COPY pkg/forge/go.mod pkg/forge/
 COPY pkg/tenancy/go.mod pkg/tenancy/
+COPY pkg/adminobjects/go.mod pkg/adminobjects/go.sum pkg/adminobjects/
 RUN --mount=type=cache,target=/go/pkg/mod go mod download
 # Declared after the download so every arch shares that layer.
 ARG TARGETOS TARGETARCH

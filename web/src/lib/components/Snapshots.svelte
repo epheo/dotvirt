@@ -157,7 +157,7 @@
 								{#if armedRestore === s.name}
 									<button
 										onclick={() => restore(s.name)}
-										class="mr-2 rounded bg-warn px-1.5 py-0.5 text-[11px] font-medium text-white"
+										class="mr-2 rounded bg-warn px-1.5 py-0.5 text-[11px] font-medium text-warn-on"
 										>Yes, restore</button
 									>
 								{/if}
@@ -173,7 +173,7 @@
 								{#if armedDelete === s.name}
 									<button
 										onclick={() => remove(s.name)}
-										class="ml-2 rounded bg-danger px-1.5 py-0.5 text-[11px] font-medium text-white"
+										class="ml-2 rounded bg-danger px-1.5 py-0.5 text-[11px] font-medium text-danger-on"
 										>Yes, delete</button
 									>
 								{/if}

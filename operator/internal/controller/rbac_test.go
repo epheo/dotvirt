@@ -35,7 +35,7 @@ import (
 // unscopedRules are the operator's rules without resourceNames, each for the
 // reason its marker gives (rbac_markers.go). Every other rule names its objects.
 var unscopedRules = map[string][]string{
-	"dotvirt.io/dotvirts":                           {"get", "list", "update", "watch"},
+	"dotvirt.io/dotvirts":                           {"get", "list", "patch", "watch"},
 	"dotvirt.io/dotvirts/status":                    {"get", "patch", "update"},
 	"dotvirt.io/dotvirts/finalizers":                {"update"},
 	"apps/deployments":                              {"get", "list", "watch"},

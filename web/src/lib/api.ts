@@ -436,6 +436,11 @@ export const api = {
 	authMethods: () => get<AuthMethods>('/api/auth/methods'),
 	// Applies the OAuthClient under the CALLER's token; RBAC is the gate.
 	finishSSO: () => req<void>('/api/auth/oauthclient', { method: 'POST' }),
+	// What the install asks a cluster admin to install, and the install,
+	// both under the CALLER's token; the server applies only what an install
+	// may ask for.
+	adminObjects: () => get<gen.AdminObjects>('/api/admin-objects'),
+	installAdminObjects: () => req<gen.AdminObjects>('/api/admin-objects', { method: 'POST' }),
 	// A managed forge's admin sign-in, read under the CALLER's token on their
 	// click only: the answer goes to the clipboard and is kept nowhere.
 	forgeAdminPassword: () =>
@@ -628,7 +633,7 @@ export const api = {
 	// The template library. Deploy renders server-side
 	// and stages the VM into the draft; save derives a template from a VM's git
 	// manifest ("Clone to Template") - both land as PR-gated changes.
-	templates: () => get<{ templates: gen.Template[] }>('/api/templates'),
+	templates: () => get<gen.TemplateList>('/api/templates'),
 	deployTemplate: (req: gen.DeployTemplateRequest) => post<DraftView>(createRoutes.template, req),
 	saveTemplate: (req: gen.SaveTemplateRequest) => post<DraftView>('/api/templates', req),
 	updateTemplate: (req: gen.UpdateTemplateRequest) => put<DraftView>('/api/templates', req),

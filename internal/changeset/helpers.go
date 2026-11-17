@@ -9,6 +9,7 @@ import (
 
 	"github.com/epheo/dotvirt/internal/draft"
 	"github.com/epheo/dotvirt/internal/model"
+	"github.com/epheo/dotvirt/internal/tasks"
 )
 
 // authorEmail derives a stable noreply commit email from a k8s username, which is
@@ -46,6 +47,22 @@ func refSegment(s string) string {
 	out = strings.Trim(out, "-.")
 	if out == "" {
 		out = "x"
+	}
+	return out
+}
+
+// userSegment is refSegment for the user, the first segment of a proposal
+// branch, kept out of the segments that name no user: a leading '_' is
+// reserved (tasks.SeedSegment) and RevertSegment heads revert branches, which
+// review services read as "a revert by the next segment". The escape is one
+// prefix, applied one-to-one on top of refSegment: a segment starting with
+// '_' or the escape itself, or equal to "revert", gains a leading "u-", so an
+// escaped segment always starts with "u-", an unescaped one never does, and
+// stripping one "u-" decodes it.
+func userSegment(user string) string {
+	out := refSegment(user)
+	if strings.HasPrefix(out, "_") || strings.HasPrefix(out, tasks.UserEscape) || out == tasks.RevertSegment {
+		out = tasks.UserEscape + out
 	}
 	return out
 }

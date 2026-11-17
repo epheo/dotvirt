@@ -234,20 +234,6 @@ func TestARenamedInstallKeepsItsOpenPRsMessage(t *testing.T) {
 	}
 }
 
-// The starter templates' commit names the console as the provider calls it.
-func TestSeedCommitNamesTheProduct(t *testing.T) {
-	f, _ := newPRFixture(t)
-	f.c.WithProductName("Uniwatt Cloud")
-	f.c.seedTemplates(f.proj.Repo)
-	out, err := exec.Command("git", "-C", f.proj.Repo, "log", "-1", "--format=%s", "main").Output()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got := strings.TrimSpace(string(out)); got != "Uniwatt Cloud: seed starter templates" {
-		t.Errorf("seed commit = %q", got)
-	}
-}
-
 // Main moves after the PR is cut. The rebuild runs on the new main: a field
 // main changed and the draft changes back is no no-op, and the PR keeps what
 // it carried.

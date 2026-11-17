@@ -30,7 +30,7 @@ jobs:
             operator/go.sum
       # ./... stops at nested modules, so the pkg modules and the operator are named.
       # go vet runs in lint, as golangci-lint's govet.
-      - run: go test ./... ./pkg/forge/... ./pkg/tenancy/... ./operator/...
+      - run: go test ./... ./pkg/forge/... ./pkg/tenancy/... ./pkg/adminobjects/... ./operator/...
       - uses: ./.github/actions/tools
         with:
           tools: envtest
@@ -64,6 +64,10 @@ jobs:
         with:
           install-mode: none
           working-directory: pkg/tenancy
+      - uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9.3.0
+        with:
+          install-mode: none
+          working-directory: pkg/adminobjects
 
   web:
     runs-on: ubuntu-latest
