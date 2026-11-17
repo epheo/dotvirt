@@ -314,13 +314,17 @@ jobs:
         # with "pods ... already exists". One namespace per test rules the clash out.
         run: |
           set -o pipefail
-          tests=$(operator-sdk scorecard ./operator/bundle --list -o json | jq -er '.items[].spec.labels.test')
+          # An unlabeled test would select nothing, and scorecard passes zero tests.
+          tests=$(operator-sdk scorecard ./operator/bundle --list -o json |
+            jq -er '.items[] | .spec.labels.test // error("scorecard test without a test label")')
+          for t in $tests; do
+            kubectl create namespace "scorecard-$t"
+            # A pod is refused until its namespace's default ServiceAccount exists.
+            kubectl -n "scorecard-$t" wait --for=create serviceaccount/default --timeout=60s
+          done
           pids=()
           for t in $tests; do
             ns="scorecard-$t"
-            kubectl create namespace "$ns"
-            # A pod is refused until its namespace's default ServiceAccount exists.
-            timeout 60 sh -c "until kubectl -n $ns get serviceaccount default >/dev/null 2>&1; do sleep 1; done"
             operator-sdk scorecard ./operator/bundle --namespace "$ns" --selector "test=$t" --wait-time 180s \
               > "$RUNNER_TEMP/$ns.txt" 2>&1 &
             pids+=("$!")
