@@ -92,7 +92,7 @@ func newGateRig(t *testing.T) *gateRig {
 		g.d.declared[ref] = ref.Name + ".yaml"
 	}
 	g.fc.vms = []kubevirtcorev1.VirtualMachine{{ObjectMeta: metav1.ObjectMeta{Namespace: "team-a-dev", Name: "web"}}}
-	g.s = g.fc.server(g.d, Config{PlatformRepo: platformRepo, UploadProxyURL: "https://upload.example"})
+	g.s = g.fc.server(g.d, Config{PlatformRepo: platformRepo, UploadProxyURL: "https://upload.example", OwnNamespace: "dotvirt"})
 	g.d.authz = g.s
 	o, err := auth.NewOAuth(auth.OAuthConfig{ClientID: "dotvirt", ClientSecret: "s", RedirectURL: "https://dotvirt.example/api/auth/callback"}, nil, nil)
 	if err != nil {
@@ -295,7 +295,7 @@ func gateCases() []gateCase {
 			routeNeeds: []grant{kind(verbDelete, model.KindNAD, "team-a-dev")}, needs: []grant{kind(verbDelete, model.KindNAD, "team-a-dev")},
 			cap: nsCap(func(n model.NamespaceCaps) bool { return n.NetworkAttachment.Delete })},
 		// The apply runs under the caller's token; the apiserver asks these.
-		{name: "finish SSO", needs: []grant{{verb: verbCreate, group: "oauth.openshift.io", resource: "oauthclients"}, {verb: verbPatch, group: "oauth.openshift.io", resource: "oauthclients", name: "dotvirt"}},
+		{name: "finish SSO", needs: []grant{{verb: verbCreate, group: "oauth.openshift.io", resource: "oauthclients"}, {verb: verbPatch, group: "oauth.openshift.io", resource: "oauthclients", name: "dotvirt-dotvirt"}},
 			cap: clCap(func(c model.ClusterCaps) bool { return c.OAuthClient })},
 	}
 	cases = append(cases, objectCases("project network", model.KindUDN, "team-a-dev", "network/team-a-dev/n1", "/api/networks", `{"scope":"project","namespace":"team-a-dev"}`)...)

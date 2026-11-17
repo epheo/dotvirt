@@ -171,8 +171,10 @@ spec:
 
     Status reports the rest: `consoleURL`, `forgeURL`, `forgeAdminHint` (the
     command that reveals the managed forge's admin password), `ssoOAuthClient`,
-    and one condition per install step, so `kubectl describe dotvirt` explains
-    a stuck install.
+    `adminObjects` (what a cluster admin installs from the console, such as
+    the admission policies bounding the operator's own account), and one
+    condition per install step, so
+    `kubectl describe dotvirt` explains a stuck install.
 
     ### Prerequisites
 

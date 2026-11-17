@@ -1418,6 +1418,71 @@ const forgeadmin = {
 	capabilities: { ...base.capabilities, cluster: { forgeAdmin: true } },
 };
 
+// ── adminobjects: what the install asks a cluster admin to install ─────────────
+// The operator guard as the console renders it, pinned and not installed yet,
+// one policy edited by another admin. Only a caller holding the capability is
+// offered it; the install flips each object to Installed.
+const guardObject = (kind, name) => ({
+	apiVersion: 'admissionregistration.k8s.io/v1',
+	kind,
+	metadata: { name },
+});
+const adminobjects = {
+	...base,
+	name: 'adminobjects',
+	capabilities: { ...base.capabilities, cluster: { adminObjects: true } },
+	adminObjects: {
+		operator: 'system:serviceaccount:dotvirt-operator:dotvirt-operator-controller',
+		namespace: 'dotvirt',
+		argoNamespace: 'openshift-gitops',
+		argoController: 'openshift-gitops-argocd-application-controller',
+		images: ['registry.example/team/dotvirt:custom'],
+		objects: [
+			[
+				'ValidatingAdmissionPolicy',
+				'dotvirt-operator-secrets',
+				"Bounds the operator's Secrets",
+				'NotInstalled',
+				'',
+			],
+			[
+				'ValidatingAdmissionPolicy',
+				'dotvirt-operator-deployments',
+				"Bounds the operator's Deployments",
+				'Outdated',
+				'ValidatingAdmissionPolicy dotvirt-operator-deployments lacks the rule "the operator mounts no host path"',
+			],
+			[
+				'ValidatingAdmissionPolicy',
+				'dotvirt-operator-bindings',
+				"Bounds the operator's RBAC bindings",
+				'NotInstalled',
+				'',
+			],
+			[
+				'ValidatingAdmissionPolicyBinding',
+				'dotvirt-operator-secrets',
+				'Enforces dotvirt-operator-secrets',
+				'Installed',
+				'',
+			],
+		].map(([kind, name, purpose, state, detail]) => ({
+			purpose,
+			kind,
+			name,
+			state,
+			detail,
+			object: guardObject(kind, name),
+		})),
+	},
+};
+// The same install, seen by a caller who may not install it.
+const adminobjectsdenied = {
+	...adminobjects,
+	name: 'adminobjectsdenied',
+	capabilities: base.capabilities,
+};
+
 // ── residue: a labeled project with no repo (an old install's leftover) ────────
 // The "no repo configured" dead-end Release resolves: the project label stands
 // on namespaces nothing in git describes.
@@ -2205,6 +2270,8 @@ export const scenarios = {
 	ssoready,
 	oidc,
 	forgeadmin,
+	adminobjects,
+	adminobjectsdenied,
 	base,
 	empty,
 	degraded,
