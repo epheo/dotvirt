@@ -210,12 +210,12 @@ func (c *Coordinator) pruning(id auth.Identity, proj project.ProjectInfo, covere
 // refuse is why a change acknowledging ack must not be proposed: Argo's view
 // not loaded, or a merge that would now delete beyond ack. The review's yes is
 // only as good as the set it was given.
-func (p pruning) refuse(ack model.PruneAck) error {
+func (p pruning) refuse(ack model.PruneSet) error {
 	if !p.known {
-		return fmt.Errorf("%w: what merging deletes is not known yet, as ArgoCD's view has not loaded; nothing was pushed, so try again in a moment", model.ErrUnavailable)
+		return fmt.Errorf("%w: what merging deletes is not known yet, as ArgoCD's Applications have not been read; nothing was pushed: try again in a moment, and if it lasts, an admin must restore the console's read of them", model.ErrUnavailable)
 	}
 	if p.hidden > ack.PruneHidden || slices.ContainsFunc(p.shown, func(ref model.ObjectRef) bool { return !slices.Contains(ack.Prune, ref) }) {
-		return fmt.Errorf("%w: merging this now deletes objects the review did not list; review it again before proposing", model.ErrConflict)
+		return fmt.Errorf("%w: merging this now deletes objects the review did not list; review them again", model.ErrConflict)
 	}
 	return nil
 }

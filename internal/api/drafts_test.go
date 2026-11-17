@@ -203,6 +203,25 @@ func TestPlatformPruneWarnsEveryCallerOfTheWholeRepo(t *testing.T) {
 	}
 }
 
+// A tenant caller is told a pending object by name only if they may list its
+// kind where it lives: seeing the namespace is not enough. idle lists VMs in
+// team-a-dev, not DataVolumes.
+func TestTenantPruneNamesOnlyKindsTheCallerLists(t *testing.T) {
+	g := newDraftsRig(t, false)
+	vm := model.ObjectRef{Kind: "VirtualMachine", Namespace: "team-a-dev", Name: "stray"}
+	g.stray[g.repo["team-a"]] = []model.ObjectRef{vm, {Kind: "DataVolume", Namespace: "team-a-dev", Name: "stray-disk"}}
+	for _, d := range g.drafts(t, "idle").Drafts {
+		if d.Project != "team-a" {
+			continue
+		}
+		if !slices.Equal(d.Draft.Prune, []model.ObjectRef{vm}) || d.Draft.PruneHidden != 1 || strings.Contains(d.Draft.Warning, "stray-disk") {
+			t.Errorf("idle team-a = %+v, want the VM named and the DataVolume counted", d.Draft)
+		}
+		return
+	}
+	t.Fatal("idle: no team-a lane")
+}
+
 // The forge's word on a PR the user opened on the head dotvirt pushed takes
 // the changes off their draft, whether or not they look: opened, it becomes
 // the branch's PR; merged first, the record goes. A PR on another head, or

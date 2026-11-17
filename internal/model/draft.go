@@ -127,15 +127,16 @@ type VolumeMigration struct {
 // ProposeRequest is the body of a propose: PR title + description, and the
 // prune the caller acknowledged.
 type ProposeRequest struct {
-	Title   string `json:"title"`
-	Message string `json:"message"`
-	PruneAck
+	Title    string `json:"title"`
+	Message  string `json:"message"`
+	PruneSet `tstype:",extends"`
 }
 
-// PruneAck is the prune a caller acknowledged, as the review showed it
-// (DraftView.Prune, PruneHidden): a propose or revert that would now delete
-// beyond it is refused.
-type PruneAck struct {
+// PruneSet is what a merge lets ArgoCD delete beyond the change's own
+// deletions, as one caller may be told it: what they may see by name, the
+// rest counted. A propose or revert carries the one its review showed, as
+// acknowledged; one that would now delete beyond it is refused.
+type PruneSet struct {
 	Prune       []ObjectRef `json:"prune,omitempty"`
 	PruneHidden int         `json:"pruneHidden,omitempty"`
 }

@@ -10,7 +10,7 @@
 	} from '#lib/api.js';
 	import { bytes, plural, quantityBytes } from '#lib/format.js';
 	import { action } from '#lib/resource.svelte.js';
-	import { drafts, pruneKey, pruneTotal } from '#lib/state/drafts.svelte.js';
+	import { drafts, PruneYes, pruneTotal } from '#lib/state/drafts.svelte.js';
 	import Button from '#lib/components/Button.svelte';
 	import Card from '#lib/components/Card.svelte';
 	import ChangeList from '#lib/components/ChangeList.svelte';
@@ -84,22 +84,16 @@
 	let message = $state('');
 	// Merging this draft may let the sync delete live objects: the same
 	// explicit yes the review sheet asks for, reset with the project.
-	let ack = $state(false);
+	const yes = new PruneYes(() => lane);
 	const prune = $derived(lane?.prune ?? []);
 	const pruneHidden = $derived(lane?.pruneHidden ?? 0);
 	const pruning = $derived(pruneTotal(lane) > 0);
-	const blocked = $derived(pruning && !ack);
+	const blocked = $derived(pruning && !yes.ack);
 	$effect(() => {
 		project;
 		title = '';
 		message = '';
-		ack = false;
-	});
-	// A yes holds for the set it was given to.
-	const acked = $derived(pruneKey(lane));
-	$effect(() => {
-		void acked;
-		ack = false;
+		yes.ack = false;
 	});
 	const proposeOp = action();
 	async function propose() {
@@ -194,7 +188,7 @@
 	<div class="flex flex-col gap-3">
 		<GitOpsStepper stage="staged" />
 		{#if pruning}<div class="text-[13px]">
-				<PruneAck {prune} hidden={pruneHidden} bind:ack />
+				<PruneAck {prune} hidden={pruneHidden} bind:ack={yes.ack} />
 			</div>{/if}
 		<TextInput
 			bind:value={title}

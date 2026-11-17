@@ -138,7 +138,7 @@ func (d *reachedDraft) DeclaredKinds(project.ProjectInfo) ([]schema.GroupKind, e
 func (d *reachedDraft) Commit(project.ProjectInfo, string) (model.CommitDetail, error) {
 	return model.CommitDetail{Items: d.items}, nil
 }
-func (d *reachedDraft) Revert(auth.Identity, project.ProjectInfo, string, model.PruneAck) (model.ProposeResult, error) {
+func (d *reachedDraft) Revert(auth.Identity, project.ProjectInfo, string, model.PruneSet) (model.ProposeResult, error) {
 	d.hit("Revert")
 	return model.ProposeResult{}, nil
 }

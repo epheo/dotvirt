@@ -488,14 +488,15 @@ func (s *Server) Authorize(id auth.Identity, need []changeset.Access) error {
 }
 
 // Tellable implements changeset.Authorizer: what id's token would read in
-// Kubernetes, as shownRows weighs it: a kind it may list where the object
-// lives (cluster-wide for a cluster-scoped one), a Namespace also by its name.
-// Per object, never per repo: what a merge prunes is what git no longer
-// declares, so a repo-wide read verdict (one answered from what git declares)
-// would name objects id cannot list. Only an Argo app's objects get here, and
-// an AppProject admits only dotvirt's kinds, so the kind table places them
-// with no discovery read; any other kind is never named. Asked only while a
-// merge would prune something, off the cached reviews.
+// Kubernetes, the rule shownRows applies to a rollup's rows: a kind it may
+// list where the object lives (cluster-wide for a cluster-scoped one), a
+// Namespace also by its name. Per object, never per repo: what a merge prunes
+// is what git no longer declares, so a repo-wide read verdict (one answered
+// from what git declares) would name objects id cannot list. Only an Argo
+// app's objects get here, and an AppProject admits only dotvirt's kinds, one
+// group per kind name, so the kind table places them with no discovery read;
+// any other kind is never named. Asked only while a merge would prune
+// something, each kind's namespaces in one batch, off the cached reviews.
 func (s *Server) Tellable(id auth.Identity, refs []model.ObjectRef) []model.ObjectRef {
 	if s.clusterF == nil || len(refs) == 0 {
 		return nil
@@ -510,13 +511,26 @@ func (s *Server) Tellable(id auth.Identity, refs []model.ObjectRef) []model.Obje
 	if err != nil {
 		return nil
 	}
+	asked := map[ssarRef][]string{}
+	for _, ref := range refs {
+		if k, ok := tenancy.LookupKind(ref.Kind); ok {
+			r := ssarRef{k.Group, k.Resource}
+			if !slices.Contains(asked[r], ref.Namespace) {
+				asked[r] = append(asked[r], ref.Namespace)
+			}
+		}
+	}
+	lists := make(map[ssarRef][]string, len(asked))
+	for r, namespaces := range asked {
+		lists[r] = v.listsIn(r, namespaces)
+	}
 	var out []model.ObjectRef
 	for _, ref := range refs {
 		k, ok := tenancy.LookupKind(ref.Kind)
 		switch {
 		case !ok:
 		case k.Group == "" && k.Kind == model.KindNS.Kind && v.names[ref.Name],
-			v.lists(ssarRef{k.Group, k.Resource}, ref.Namespace):
+			slices.Contains(lists[ssarRef{k.Group, k.Resource}], ref.Namespace):
 			out = append(out, ref)
 		}
 	}

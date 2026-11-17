@@ -13,7 +13,7 @@
 	import { memoryHint } from '#lib/headroom.js';
 	import { draftResourceLabel } from '#lib/labels.js';
 	import { action } from '#lib/resource.svelte.js';
-	import { drafts, pruneKey, pruneTotal } from '#lib/state/drafts.svelte.js';
+	import { drafts, PruneYes, pruneTotal } from '#lib/state/drafts.svelte.js';
 	import { memoryRoom } from '#lib/state/hosts.svelte.js';
 	import { inventory } from '#lib/state/inventory.svelte.js';
 	import { tray } from '#lib/state/tray.svelte.js';
@@ -58,17 +58,11 @@
 			filled = true;
 		}
 	});
-	let ack = $state(false);
-	// A yes holds for the set it was given to.
-	const acked = $derived(pruneKey(lane));
-	$effect(() => {
-		void acked;
-		ack = false;
-	});
+	const yes = new PruneYes(() => lane);
 
 	const isVM = (it: DraftItem) => !it.resource || it.resource === 'vm';
 	const kindName = (it: DraftItem) => draftResourceLabel(it.resource);
-	const blocked = $derived(pruning && !ack);
+	const blocked = $derived(pruning && !yes.ack);
 	const word = (f: string) => (f === f.toUpperCase() ? f : f.toLowerCase());
 	const list = (xs: string[]) =>
 		xs.length < 2 ? xs.join('') : `${xs.slice(0, -1).join(', ')} and ${xs[xs.length - 1]}`;
@@ -316,7 +310,7 @@
 					<h3 class="text-xs font-semibold tracking-wide text-ink-muted uppercase">
 						Also in this merge
 					</h3>
-					<PruneAck {prune} hidden={pruneHidden} bind:ack />
+					<PruneAck {prune} hidden={pruneHidden} bind:ack={yes.ack} />
 				</section>
 			{:else if lane.warning}
 				<p class="rounded border border-warn/50 bg-warn-soft px-3 py-2 text-warn-ink">

@@ -53,7 +53,7 @@ func (c *Coordinator) Propose(id auth.Identity, proj project.ProjectInfo, req mo
 	if err := c.gate(id, proj, slices.Clone(entries)); err != nil {
 		return model.ProposeResult{}, run.commitFailed(err, entries, 0)
 	}
-	if err := c.pruning(id, proj, coveredBy(entries)).refuse(req.PruneAck); err != nil {
+	if err := c.pruning(id, proj, coveredBy(entries)).refuse(req.PruneSet); err != nil {
 		return model.ProposeResult{}, err
 	}
 	if run.h, err = c.hand(id, proj, write); err != nil {

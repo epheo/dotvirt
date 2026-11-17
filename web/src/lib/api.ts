@@ -478,6 +478,10 @@ export const api = {
 		),
 	commit: (project: string, hash: string) =>
 		get<CommitDetail>(`/api/projects/${enc(project)}/history/${hash}`),
+	// What merging a revert of hash prunes beyond its own restores, read live:
+	// the set Undo asks a yes for.
+	revertPrune: (project: string, hash: string) =>
+		get<gen.PruneSet>(`/api/projects/${enc(project)}/history/${hash}/prune`),
 	// acked as propose's: a revert's merge prunes like any other.
 	revert: (project: string, hash: string, acked?: Pick<DraftView, 'prune' | 'pruneHidden'>) =>
 		post<gen.ProposeResult>(`/api/projects/${enc(project)}/revert`, {

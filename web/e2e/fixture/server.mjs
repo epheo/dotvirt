@@ -840,6 +840,13 @@ async function handleAPI(req, res, url) {
 		if (ns && ns !== 'web-prod') return sendJSON(res, 200, [initialCommit()]);
 		return sendJSON(res, 200, [mergeCommit(m[1]), initialCommit()]);
 	}
+	// What reverting it would let Argo delete beyond its own restores: nothing
+	// here, so Undo asks no yes.
+	m = path.match(/^\/api\/projects\/([^/]+)\/history\/([0-9a-f]{40})\/prune$/);
+	if (m) {
+		if (m[2] !== MERGE_HASH) return sendText(res, 404, 'not found: commit');
+		return sendJSON(res, 200, {});
+	}
 	// One past change under review: the same items a staged draft renders.
 	m = path.match(/^\/api\/projects\/([^/]+)\/history\/([0-9a-f]{40})$/);
 	if (m) {

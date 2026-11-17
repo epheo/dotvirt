@@ -373,8 +373,8 @@ func TestProposeRefusesAnUnacknowledgedPrune(t *testing.T) {
 	}
 	for _, ack := range []model.ProposeRequest{
 		{Title: "edit web"},
-		{Title: "edit web", PruneAck: model.PruneAck{Prune: []model.ObjectRef{shown}}},
-		{Title: "edit web", PruneAck: model.PruneAck{PruneHidden: 1}},
+		{Title: "edit web", PruneSet: model.PruneSet{Prune: []model.ObjectRef{shown}}},
+		{Title: "edit web", PruneSet: model.PruneSet{PruneHidden: 1}},
 	} {
 		if _, err := f.c.Propose(f.id, f.proj, ack); !errors.Is(err, model.ErrConflict) {
 			t.Fatalf("ack %+v: err = %v, want ErrConflict", ack, err)
@@ -386,7 +386,7 @@ func TestProposeRefusesAnUnacknowledgedPrune(t *testing.T) {
 	if sent != 0 {
 		t.Fatalf("a refused propose reached the forge: %d calls", sent)
 	}
-	out, err := f.c.Propose(f.id, f.proj, model.ProposeRequest{Title: "edit web", PruneAck: model.PruneAck{Prune: []model.ObjectRef{shown}, PruneHidden: 1}})
+	out, err := f.c.Propose(f.id, f.proj, model.ProposeRequest{Title: "edit web", PruneSet: model.PruneSet{Prune: []model.ObjectRef{shown}, PruneHidden: 1}})
 	if err != nil || !webPR(out.PRURL, 1) {
 		t.Fatalf("acknowledged propose: %+v, %v; want the PR", out, err)
 	}

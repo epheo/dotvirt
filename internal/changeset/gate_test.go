@@ -411,10 +411,10 @@ func TestPlatformRevertByATemplateCurator(t *testing.T) {
 	c.UseAuthorizer(&rbac{deny: curator})
 	id := auth.Identity{Username: "carol"}
 	plat := project.ProjectInfo{Name: project.PlatformName, Repo: bare}
-	if _, err := c.Revert(id, plat, network, model.PruneAck{}); !errors.Is(err, model.ErrForbidden) {
+	if _, err := c.Revert(id, plat, network, model.PruneSet{}); !errors.Is(err, model.ErrForbidden) {
 		t.Errorf("reverting a network: err = %v, want ErrForbidden", err)
 	}
-	if _, err := c.Revert(id, plat, library, model.PruneAck{}); err != nil {
+	if _, err := c.Revert(id, plat, library, model.PruneSet{}); err != nil {
 		t.Errorf("reverting a template: %v", err)
 	}
 }

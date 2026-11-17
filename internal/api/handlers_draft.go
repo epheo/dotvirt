@@ -417,6 +417,23 @@ func (s *Server) handleCommit(w http.ResponseWriter, r *http.Request) {
 	respond(w, detail, err)
 }
 
+// handleRevertPrune answers what reverting one past commit would let ArgoCD
+// delete beyond the revert's own restores: the yes Undo asks for. Read live,
+// unlike the commit's review, which never changes.
+func (s *Server) handleRevertPrune(w http.ResponseWriter, r *http.Request) {
+	sc, ok := s.pickProject(w, r, r.PathValue("project"))
+	if !ok || !s.gateRepo(w, r, sc, "") {
+		return
+	}
+	hash := r.PathValue("hash")
+	if !commitHash.MatchString(hash) {
+		fail(w, invalid(errors.New("commit hash must be the full 40-character hash")))
+		return
+	}
+	set, err := s.draft.RevertPrune(sc.id, sc.proj, hash)
+	respond(w, set, err)
+}
+
 // handleProposal renders what merging one open PR would change - the Changes
 // pane's review of a proposal, read from the mirrored head branch. A caller
 // who may not read the repo reviews their own proposals there alone
@@ -487,7 +504,7 @@ func (s *Server) handleRevert(w http.ResponseWriter, r *http.Request) {
 	}
 	req, ok := decode[struct {
 		Hash string `json:"hash"`
-		model.PruneAck
+		model.PruneSet
 	}](w, r)
 	if !ok {
 		return
@@ -507,7 +524,7 @@ func (s *Server) handleRevert(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	result, err := s.draft.Revert(sc.id, sc.proj, hash, req.PruneAck)
+	result, err := s.draft.Revert(sc.id, sc.proj, hash, req.PruneSet)
 	if err == nil {
 		s.proposalOpened(sc)
 	}
