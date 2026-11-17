@@ -178,6 +178,16 @@ type Draft interface {
 	RestoreVersion(id auth.Identity, proj project.ProjectInfo, resource, namespace, name, hash string) (model.DraftView, error)
 }
 
+// TemplateSeeder offers the starter template library to project repos that
+// have none, and reports the pending offer. Implemented by the changeset
+// coordinator; a Draft without it offers nothing.
+type TemplateSeeder interface {
+	// SeedTemplates decides from lane (the repo's open PRs, just read) and the
+	// mirror; any forge write runs off the caller.
+	SeedTemplates(proj project.ProjectInfo, lane []model.Proposal)
+	TemplateSeed(proj project.ProjectInfo) (model.TemplateSeed, bool)
+}
+
 // StreamHandler upgrades a request to a WebSocket that pushes live inventory.
 type StreamHandler interface {
 	Handler(w http.ResponseWriter, r *http.Request)

@@ -1632,6 +1632,34 @@ const pushedbranch = {
 	},
 };
 
+// --- seedoffer: the starter library offered to a project's repo ---
+// team-web's offer is an open pull request; team-db's was refused by its
+// forge and will be retried; team-batch's was withdrawn for good.
+const seedoffer = {
+	...base,
+	name: 'seedoffer',
+	templates: {
+		...base.templates,
+		seeds: [
+			{
+				library: 'team-web',
+				prNumber: 7,
+				prURL: 'https://forge.example/dotvirt/team-web/pulls/7',
+			},
+			{
+				library: 'team-db',
+				error: "the forge refused the console's account (403)",
+				retries: true,
+			},
+			{
+				library: 'team-batch',
+				error:
+					"someone else changed the offer's branch while its pull request was opened, so the console withdrew the offer; it is not made again",
+			},
+		],
+	},
+};
+
 // --- platstager: stages to the platform, cannot read it ---
 // The server lists only the caller's own platform PRs, serves the review of
 // the ones that still match what dotvirt proposed, refuses the platform's
@@ -2203,4 +2231,5 @@ export const scenarios = {
 	kindrepo,
 	forkpr,
 	pushedbranch,
+	seedoffer,
 };

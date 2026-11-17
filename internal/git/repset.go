@@ -179,8 +179,8 @@ func (s *RepoSet) retryNow(key string) {
 }
 
 // Created clears repoURL's cached open failure: dotvirt just made the repo on
-// the forge, so a "not found" from before must not fail the seed or the first
-// propose for the rest of the backoff.
+// the forge, so a "not found" from before must not fail its starter-template
+// offer or the first propose for the rest of the backoff.
 func (s *RepoSet) Created(repoURL string) {
 	s.mu.Lock()
 	s.retryNow(forge.NormalizeRepoURL(repoURL))
