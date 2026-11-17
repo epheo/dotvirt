@@ -61,8 +61,10 @@ type seedState struct {
 	retryAt time.Time // after a failure, the next attempt's earliest time
 	pr      int       // the open offer, from the lane
 	prURL   string
-	head    string // the commit this process pushed for its open offer
 	err     string // the last failure, as a user may read it
+	// judged is the base and seed-branch commits exact was read at.
+	judged string
+	exact  bool
 }
 
 func (c *Coordinator) seedFor(key string) *seedState {
@@ -100,30 +102,32 @@ func (c *Coordinator) SeedTemplates(proj project.ProjectInfo, lane []model.Propo
 			break
 		}
 	}
+	read, ok := c.repos.Peek(proj.Repo)
+	if ok && read.Root() != "" {
+		read, ok = nil, false // a later refresh decides, once the repo-root mirror is open
+	}
 	c.seedMu.Lock()
 	st := c.seedFor(key)
 	switch {
 	case open == nil:
 		st.pr, st.prURL = 0, "" // merged or closed since
-	case st.head != "" && !seedMoved(open.Head, st.head):
-		st.pr, st.prURL, st.err, st.decided = open.PRNumber, open.PRURL, "", true
+	case st.decided && st.err != "":
+		// Withdrawn: its pull request, left open by a failed close, is never shown.
 	default:
-		// Its head is not one this process pushed, a restarted process
-		// knowing none: never shown as dotvirt's offer. A withdrawn offer,
-		// left open by a failed close, keeps saying it was withdrawn.
-		if !st.decided {
-			st.err = ""
+		st.err, st.decided = "", true
+		// Shown only while it holds exactly the starter set, whoever pushed
+		// it; while the mirror cannot tell, what this process knows stands.
+		if exact, known := c.seedExactLocked(st, read); known {
+			st.pr, st.prURL = 0, ""
+			if exact {
+				st.pr, st.prURL = open.PRNumber, open.PRURL
+			}
 		}
-		st.pr, st.prURL, st.decided = 0, "", true
 	}
 	skip := st.queued || st.decided && st.err == ""
 	c.seedMu.Unlock()
-	if skip {
+	if skip || !ok {
 		return
-	}
-	read, ok := c.repos.Peek(proj.Repo)
-	if !ok || read.Root() != "" {
-		return // a later refresh decides, once the repo-root mirror is open
 	}
 	need, err := c.libraryMissing(read)
 	if err != nil {
@@ -154,6 +158,34 @@ func (c *Coordinator) libraryMissing(read *git.Repo) (bool, error) {
 		return false, err
 	}
 	return len(files) == 0, nil
+}
+
+// seedExactLocked reports whether the seed branch, as read holds it, changes
+// exactly the starter set against the base branch. known is false while read
+// cannot tell. The verdict is kept per base and head commit: finding the fork
+// point walks history. Holds seedMu.
+func (c *Coordinator) seedExactLocked(st *seedState, read *git.Repo) (exact, known bool) {
+	if read == nil {
+		return false, false
+	}
+	base, head := read.BranchHash(c.baseBranch), read.BranchHash(c.seedBranch())
+	if base == "" || head == "" {
+		return false, false
+	}
+	if at := base + ".." + head; at != st.judged {
+		ok, err := read.ChangesExactly(base, head, starterSet())
+		if err != nil {
+			return false, false // a later refresh reads it again
+		}
+		st.judged, st.exact = at, ok
+	}
+	return st.exact, true
+}
+
+// starterSet is every file the offer adds: the starter templates and the
+// marker.
+func starterSet() []model.File {
+	return append(vmtemplate.SeedFiles(), model.File{Path: SeedMarker, Content: []byte(seedMarkerContent)})
 }
 
 type seedJob struct{ repo, key string }
@@ -217,7 +249,7 @@ func (c *Coordinator) offerSeed(repoURL, key string, ask bool) {
 	}
 	st.decided, st.err = true, ""
 	if pr.Number != 0 {
-		st.pr, st.prURL, st.head = pr.Number, c.forge.PullPage(repoURL, pr.Number), pr.Head.Sha
+		st.pr, st.prURL = pr.Number, c.forge.PullPage(repoURL, pr.Number)
 	}
 }
 
@@ -225,8 +257,7 @@ func (c *Coordinator) offerSeed(repoURL, key string, ask bool) {
 // starter files and the marker (one force push: whatever anyone else left on
 // it is dropped) and opens its PR as dotvirt's own account, whatever
 // pullRequests says. A PR from the seed branch in any state means the offer
-// was made, a declined one included: nothing to do. The PR returned carries
-// the head dotvirt pushed.
+// was made, a declined one included: nothing to do.
 func (c *Coordinator) proposeSeed(repoURL string, ask bool) (forge.PR, error) {
 	fc := c.forgeFor(repoURL)
 	if fc == nil {
@@ -246,7 +277,7 @@ func (c *Coordinator) proposeSeed(repoURL string, ask bool) (forge.PR, error) {
 	if err != nil {
 		return forge.PR{}, err
 	}
-	files := append(vmtemplate.SeedFiles(), model.File{Path: SeedMarker, Content: []byte(seedMarkerContent)})
+	files := starterSet()
 	items := make([]git.ChangesetItem, len(files))
 	for i, f := range files {
 		items[i] = git.ChangesetItem{Path: f.Path, NewContent: f.Content}
@@ -262,21 +293,13 @@ func (c *Coordinator) proposeSeed(repoURL string, ask bool) (forge.PR, error) {
 	if err != nil {
 		return forge.PR{}, seedForgeError{err}
 	}
-	if seedMoved(pr.Head.Sha, res.Hash) {
+	if pr.Head.Sha != "" && pr.Head.Sha != res.Hash {
 		if _, cerr := fc.EditPR(pr.Number, forge.PREdit{State: "closed"}); cerr != nil {
 			log.Printf("changeset: starter templates PR #%d: close: %v", pr.Number, cerr)
 		}
 		return forge.PR{}, errSeedMoved
 	}
-	pr.Head.Sha = res.Hash // the forge may leave it out
 	return pr, nil
-}
-
-// seedMoved reports whether the offer's head, as the forge or the mirror
-// reports it, is not the commit dotvirt pushed. An unreported head ("") is no
-// evidence of a move: the forge may omit it, the mirror may not have fetched.
-func seedMoved(head, pushed string) bool {
-	return head != "" && head != pushed
 }
 
 // seedBody is the offer's PR description: what it adds and that declining

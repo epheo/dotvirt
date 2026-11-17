@@ -8,6 +8,7 @@ import (
 
 	"github.com/go-git/go-git/v5"
 	"github.com/go-git/go-git/v5/plumbing"
+	"github.com/go-git/go-git/v5/plumbing/filemode"
 	"github.com/go-git/go-git/v5/plumbing/object"
 
 	"github.com/epheo/dotvirt/internal/model"
@@ -260,6 +261,50 @@ func (r *Repo) BranchDiff(base, head string) ([]FileChange, error) {
 		return nil, err
 	}
 	return r.scopedDiff(fromTree, toTree)
+}
+
+// ChangesExactly reports whether merging commit head into commit base changes
+// exactly files: each path set to that content as a regular file, and no
+// other path touched, whatever its kind. The change is read from their one
+// fork point; none, or several, is not such a change. Paths are the repo's,
+// whatever folder this mirror is scoped to.
+func (r *Repo) ChangesExactly(base, head string, files []model.File) (bool, error) {
+	repo := r.repo.Load()
+	from, err := commitAt(repo, base)
+	if err != nil {
+		return false, err
+	}
+	to, err := commitAt(repo, head)
+	if err != nil {
+		return false, err
+	}
+	bases, err := from.MergeBase(to)
+	if err != nil || len(bases) != 1 {
+		return false, err
+	}
+	fromTree, err := bases[0].Tree()
+	if err != nil {
+		return false, err
+	}
+	toTree, err := to.Tree()
+	if err != nil {
+		return false, err
+	}
+	changes, err := object.DiffTree(fromTree, toTree)
+	if err != nil || len(changes) != len(files) {
+		return false, err
+	}
+	want := make(map[string]plumbing.Hash, len(files))
+	for _, f := range files {
+		want[f.Path] = plumbing.ComputeHash(plumbing.BlobObject, f.Content)
+	}
+	for _, ch := range changes {
+		hash, ok := want[ch.To.Name]
+		if !ok || ch.To.TreeEntry.Mode != filemode.Regular || ch.To.TreeEntry.Hash != hash {
+			return false, nil
+		}
+	}
+	return true, nil
 }
 
 // ErrForeignCommit: a branch carries, past its fork from base, a commit
