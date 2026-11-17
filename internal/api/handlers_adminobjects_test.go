@@ -14,6 +14,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/client-go/kubernetes/scheme"
 
 	"github.com/epheo/dotvirt/internal/config"
@@ -351,5 +352,75 @@ func TestAdminObjectsPinTheRoutersHost(t *testing.T) {
 	body, _ := json.Marshal(seen()["ValidatingAdmissionPolicy/"+adminobjects.GuardFrontDoorName].body)
 	if !strings.Contains(string(body), `\"dotvirt-dotvirt.apps.micro\"`) {
 		t.Errorf("the front door does not pin the router's host:\n%s", body)
+	}
+}
+
+// The forge credential's grant is the console's render from the install's
+// spec.forge, read as the admin: listed for an admin's Secret, with write verbs
+// for a managed forge, and never for the default credential or a Secret the
+// operator generates for itself. A grant planted in status changes nothing.
+func TestAdminObjectsGrantTheCredentialFromTheSpec(t *testing.T) {
+	for _, c := range []struct {
+		forge map[string]any
+		verbs []string
+	}{
+		{map[string]any{}, nil},
+		{map[string]any{"credentialsSecret": adminobjects.DefaultForgeSecret, "managed": true}, nil},
+		{map[string]any{"credentialsSecret": adminobjects.SessionSecret, "managed": true}, nil},
+		{map[string]any{"credentialsSecret": "creds"}, []string{"get"}},
+		{map[string]any{"credentialsSecret": "creds", "managed": true}, []string{"get", "create", "patch"}},
+	} {
+		s, fc, _ := adminObjectsServer(t)
+		fc.on(http.MethodGet, installPath, func(w http.ResponseWriter, r *http.Request) {
+			writeObj(w, dotvirtList(map[string]any{"apiVersion": "dotvirt.io/v1alpha1", "kind": "Dotvirt",
+				"metadata": map[string]any{"name": "x", "namespace": "dotvirt", "uid": "uid-x"},
+				"spec":     map[string]any{"image": adminWant.SpecImage, "ingress": map[string]any{"host": adminWant.ConsoleHost}, "forge": c.forge},
+				"status": map[string]any{"adminObjects": []any{map[string]any{"kind": "Role", "name": adminobjects.CredentialGrantName, "namespace": "dotvirt",
+					"object": map[string]any{"rules": []any{map[string]any{"verbs": []any{"*"}}}}}}},
+			}))
+		})
+		rec := do(s, adminToken, http.MethodGet, "/api/admin-objects", "")
+		wantStatus(t, rec, http.StatusOK)
+		var role map[string]any
+		for _, o := range decodeBody[model.AdminObjects](t, rec).Objects {
+			if o.Kind == "Role" && o.Name == adminobjects.CredentialGrantName {
+				role = o.Object
+			}
+		}
+		if c.verbs == nil {
+			if role != nil {
+				t.Errorf("forge %v: the grant is offered", c.forge)
+			}
+			continue
+		}
+		rules, _, _ := unstructured.NestedSlice(role, "rules")
+		if len(rules) != 1 {
+			t.Fatalf("forge %v: Role rules %v", c.forge, rules)
+		}
+		verbs, _, _ := unstructured.NestedStringSlice(rules[0].(map[string]any), "verbs")
+		names, _, _ := unstructured.NestedStringSlice(rules[0].(map[string]any), "resourceNames")
+		if !slices.Equal(verbs, c.verbs) || !slices.Equal(names, []string{"creds"}) {
+			t.Errorf("forge %v: the grant gives %v on %v, want %v on creds", c.forge, verbs, names, c.verbs)
+		}
+	}
+}
+
+// Installing the grant takes the caller's own right to create and patch it:
+// an admin who may write everything but Roles and RoleBindings in the install
+// namespace is not offered the install, and the handler reads nothing.
+func TestAdminObjectsCapabilityCoversTheCredentialGrant(t *testing.T) {
+	s, fc, seen := adminObjectsServer(t)
+	fc.ssar = func(token string, a *authzv1.ResourceAttributes) bool {
+		return token == adminToken && !(a.Group == "rbac.authorization.k8s.io" && (a.Resource == "roles" || a.Resource == "rolebindings"))
+	}
+	c := decodeBody[model.Capabilities](t, do(s, adminToken, http.MethodGet, "/api/capabilities", "")).Cluster
+	if c != nil && c.AdminObjects {
+		t.Error("offered without the right to install the forge credential's grant")
+	}
+	for _, method := range []string{http.MethodGet, http.MethodPost} {
+		wantStatus(t, do(s, adminToken, method, "/api/admin-objects", ""), http.StatusForbidden)
+	}
+	if got := seen(); len(got) != 0 || fc.called(http.MethodGet, installPath) {
+		t.Errorf("a caller without the grant's rights reached the cluster: applied %v", got)
 	}
 }
