@@ -193,16 +193,28 @@ owns one status condition; a phase that fails or waits records why there, so
    another version, or changed since) or `Installed`; see [Admin objects](#admin-objects).
    The apiserver evaluates them in-process, only for those kinds' writes, with the
    username check first. Best-effort: never a halt, never `Available`. A new release
-   in the same repositories passes as it is, new console flags included; an admin
-   changing `spec.image`, `spec.argocd`, `spec.forge.insecureTLS`, `spec.metrics`,
-   `spec.ingress.host`, `spec.branding.configMap`, `spec.forge.credentialsSecret`,
-   `spec.forge.managed`, `spec.forge.pullRequests` Delegated or `spec.forge.userAuth`,
-   `spec.auth.oidc`, an image outside the official repositories or the namespace makes
-   them `Outdated`, and until re-installed they refuse the operator's writes that need the
-   change. A release that only moves its images' digests inside the official
-   repositories leaves them `Installed`. Upgrading from 0.2.3 reads `Outdated` once: the
-   five policies of that release keep their names and narrow to one kind each, and five
-   new ones join them; Install re-applies them all.
+   in the same repositories passes as it is, new console flags included.
+
+   An installed guard reads `Outdated`, and until an admin re-installs it refuses the
+   operator's writes that need the change, when:
+   - the install namespace, `spec.argocd`, `spec.forge.insecureTLS`, `spec.forge.managed`,
+     `spec.forge.credentialsSecret`, `spec.metrics`, `spec.ingress.host` or
+     `spec.branding.configMap` changes;
+   - `spec.auth.oidc` (its issuer or client secret) changes;
+   - `spec.forge.pullRequests` turns Delegated on or off, or, while Delegated,
+     `spec.forge.url` or `spec.forge.userAuth` changes;
+   - `spec.image` or the operator's `RELATED_IMAGE_*` names an image outside the
+     official repositories (a mirror), or a new one there;
+   - the console's host moves (the cluster's ingress domain, or where none is served,
+     the host routers report for its Route);
+   - a release changes the guard itself, as 0.2.3 to 0.2.4 does once: the five policies
+     of 0.2.3 keep their names and narrow to one kind each, and five new ones join them.
+
+   It stays `Installed` when a release only moves its images' digests inside the
+   official repositories, and when `spec.forge.userAuth` changes while pull requests are
+   not Delegated. A pin the spec gets wrong reads `PinMalformed`, naming the field.
+   Install applies each policy just before its binding, new names first, so an install
+   that stops partway leaves no kind the earlier guard covered unguarded.
 3. **Forge** (`ForgeReady`): converges the trust anchors (below) first, then, with
    `spec.forge.managed`, stands up the eval-grade Forgejo (single pod, SQLite, a PVC
    that survives uninstall), resolves its external URL (an explicit `spec.forge.url`,

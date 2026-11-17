@@ -70,8 +70,11 @@ What the guard closes:
   console's issuer is `spec.auth.oidc.issuerURL`, whose token endpoint receives that
   secret at every sign-in;
 - with Delegated pull requests, sending users' forge tokens or the forge application's
-  client secret anywhere `spec.forge.url` and `spec.forge.userAuth` do not name, or
-  delegating at all when the spec does not ask for it;
+  client secret anywhere `spec.forge.url` and `spec.forge.userAuth` do not name; without
+  them, delegating at all or naming a forge application, its URLs or its secret;
+- carrying a Secret's value in a setting the console sends out (a webhook URL, a URL every
+  browser loads) through the kubelet's `$(NAME)` expansion: no command, argument or env
+  value of the console's holds `$(`;
 - binding the operator's claims to a volume, selector or data source of its choosing;
 - unmounting the console's token through its ServiceAccount;
 - leading the console's host anywhere but the console: its Service selects only the
@@ -98,6 +101,13 @@ operator does not have.
 
 The OpenShift SSO client the console registers (Finish SSO), and signs users in with,
 is named and redirected from the install, never from the console's environment.
+
+Install applies each policy just before its binding, the ones that took kinds over from
+an earlier guard's policies first, so an install that stops partway leaves every kind
+the earlier guard covered covered. The release template, the path without the console,
+refuses any value outside a small safe charset, as a value lands inside a quoted string
+in a YAML document; the console's Install builds the guard in Go and needs no such
+limit.
 
 What stays open:
 - the console's other configuration the operator writes as flags or `DOTVIRT_*` env,
