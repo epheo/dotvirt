@@ -169,10 +169,11 @@ const SeedSegment = "_seed"
 // the plain ref-safe name.
 const UserEscape = "u-"
 
-// MergeAuthor resolves who a merged PR belongs to. dotvirt's bot opens every
-// proposal PR, so the poster is always the bot - the proposing user is encoded
-// (sanitized) as the first head-branch segment under the proposed prefix, one
-// segment deeper for a revert. The seed belongs to no user: it stays its
+// MergeAuthor resolves who a merged PR belongs to. A proposal PR's poster is
+// dotvirt's account, or the user's own forge account, named apart from the
+// console's user - so the proposing user is read from the head branch, encoded
+// (sanitized) as its first segment under the proposed prefix, one segment
+// deeper for a revert. The seed belongs to no user: it stays its
 // poster's, dotvirt's own account. A head outside that prefix is a human PR,
 // attributed to its real poster.
 func MergeAuthor(headRef, proposedPrefix, poster string) string {

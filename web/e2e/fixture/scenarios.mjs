@@ -1417,6 +1417,12 @@ const oidcsessionless = { ...oidc, name: 'oidcsessionless', sessionless: true };
 // once; abandon: the user leaves its authorize page without answering.
 const delegated = { ...base, name: 'delegated', forgeDelegated: { mode: 'consent' } };
 const delegatedabandon = { ...base, name: 'delegatedabandon', forgeDelegated: { mode: 'abandon' } };
+// A forge account without write on the project repos.
+const delegatednowrite = {
+	...base,
+	name: 'delegatednowrite',
+	forgeDelegated: { mode: 'consent', noWrite: true },
+};
 // A forge dotvirt cannot reach: no connect starts on its own.
 const delegateddown = {
 	...base,
@@ -2344,6 +2350,7 @@ export const scenarios = {
 	oidcsessionless,
 	delegated,
 	delegatedabandon,
+	delegatednowrite,
 	delegateddown,
 	ssoready,
 	oidc,

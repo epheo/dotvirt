@@ -2,6 +2,7 @@ package api
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/cookiejar"
 	"net/http/httptest"
@@ -14,6 +15,7 @@ import (
 	k8stesting "k8s.io/client-go/testing"
 
 	"github.com/epheo/dotvirt/internal/auth"
+	"github.com/epheo/dotvirt/internal/model"
 )
 
 // forgeSessionOf reads GET /api/forge/session with client's session.
@@ -93,5 +95,30 @@ func TestForgeSessionWithoutDelegation(t *testing.T) {
 	resp.Body.Close()
 	if resp.StatusCode == http.StatusFound {
 		t.Fatal("connect mounted with delegation off")
+	}
+}
+
+// A refusal whose way forward the console offers as one click names it
+// beside the server's sentence; any other refusal names none.
+func TestRefusalNamesItsNextStep(t *testing.T) {
+	cases := []struct {
+		err  error
+		next string
+	}{
+		{fmt.Errorf("%w: %w: connect your git account, then try again", model.ErrForbidden, model.ErrForgeConnect), "forge-connect"},
+		{fmt.Errorf("%w: %w: ask the owners of o/r in the forge", model.ErrForbidden, model.ErrForgeWrite), "forge-write"},
+		{fmt.Errorf("%w: not authorized", model.ErrForbidden), ""},
+	}
+	for _, c := range cases {
+		s := draftServer(t, &stagingDraft{refuse: c.err})
+		rec := httptest.NewRecorder()
+		s.Handler().ServeHTTP(rec, asUser(httptest.NewRequest(http.MethodPost,
+			"/api/draft/propose?project=platform", strings.NewReader(`{"title":"t"}`)), "admin-token"))
+		if rec.Code != http.StatusForbidden || rec.Header().Get(nextHeader) != c.next {
+			t.Errorf("%v: %d with %s %q, want 403 with %q", c.err, rec.Code, nextHeader, rec.Header().Get(nextHeader), c.next)
+		}
+		if body := rec.Body.String(); !strings.Contains(body, strings.TrimPrefix(c.err.Error(), "forbidden: ")) {
+			t.Errorf("body %q must carry the server's sentence", body)
+		}
 	}
 }

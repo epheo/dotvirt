@@ -24,6 +24,7 @@
 	import ChangeList from './ChangeList.svelte';
 	import ErrorNote from './ErrorNote.svelte';
 	import Modal from './Modal.svelte';
+	import NextStepButton from './NextStepButton.svelte';
 	import PruneAck from './PruneAck.svelte';
 	import TextArea from './TextArea.svelte';
 	import TextInput from './TextInput.svelte';
@@ -179,8 +180,8 @@
 	}
 
 	// A refused propose, said where the button is: the server's sentence
-	// names the way forward, and a PR it names is one click away. The error
-	// kind is not for the reader.
+	// names the way forward, and a PR it names, or the step it offers, is
+	// one click away. The error kind is not for the reader.
 	const refused = $derived.by(() => {
 		if (!op.error) return null;
 		const text = serverReason(op.error);
@@ -188,6 +189,7 @@
 		return {
 			status: refusedStatus,
 			text,
+			next: op.next,
 			pr: inventory.proposals.find((p) => p.project === project && p.prNumber === n),
 		};
 	});
@@ -341,7 +343,7 @@
 						<TriangleAlert size={14} class="mt-0.5 shrink-0" />
 						<span
 							><strong
-								>{refused.status === 503
+								>{refused.status === 503 || refused.next === 'forge-connect'
 									? 'Not proposed yet.'
 									: refused.status === 409
 										? 'Not proposed: this needs a decision first.'
@@ -350,8 +352,9 @@
 							{refused.text}</span
 						>
 					</p>
-					{#if refused.pr || refused.status === 503}
+					{#if refused.pr || refused.status === 503 || refused.next}
 						<div class="flex gap-2 pl-6">
+							<NextStepButton next={refused.next} {project} />
 							{#if refused.pr}
 								<Button
 									size="sm"

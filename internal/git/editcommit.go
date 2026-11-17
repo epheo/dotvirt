@@ -137,8 +137,7 @@ func (w *WriteRepo) commitItems(repo *git.Repository, wt *git.Worktree, branch, 
 		return CommitResult{Branch: branch}, nil
 	}
 
-	// Author = whoever the change is attributed to; committer = dotvirt (the SA pushing).
-	hash, err := wt.Commit(message, &git.CommitOptions{Author: by.signature(), Committer: dotvirtSig()})
+	hash, err := wt.Commit(message, &git.CommitOptions{Author: by.signature(), Committer: by.committer()})
 	if err != nil {
 		return CommitResult{}, fmt.Errorf("commit: %w", err)
 	}

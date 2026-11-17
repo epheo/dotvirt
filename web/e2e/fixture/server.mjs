@@ -208,6 +208,29 @@ function sendText(res, status, text) {
 	res.end(text);
 }
 
+// forgeRefused refuses a write that goes to the forge as the user
+// (pullRequests: Delegated) as the coordinator does: without a connection it
+// offers the connect; without write on the repo it names what to ask for.
+function forgeRefused(s, res, project) {
+	if (!s.forgeDelegated) return false;
+	const refuse = (next, text) => {
+		res.writeHead(403, { 'Content-Type': 'text/plain; charset=utf-8', 'Dotvirt-Next': next });
+		res.end(`forbidden: ${text}`);
+		return true;
+	};
+	if (!state.forge.connected)
+		return refuse(
+			'forge-connect',
+			'your git account is not connected to this console session: this change goes to the forge as you; connect your git account, then try again (nothing was pushed)',
+		);
+	if (s.forgeDelegated.noWrite)
+		return refuse(
+			'forge-write',
+			`your git account cannot write to this project's repo in the forge: ask the owners of dotvirt/${project} in the forge to give ${state.forge.login} write access, then try again (nothing was pushed)`,
+		);
+	return false;
+}
+
 function authed(req) {
 	return (req.headers.cookie ?? '').includes(COOKIE);
 }
@@ -641,6 +664,7 @@ async function handleAPI(req, res, url) {
 		// path needs a deterministic trigger, so a literal sentinel title fails.
 		if (body?.title === '!fail') return sendText(res, 400, 'propose refused: fixture failure hook');
 		if (!draftFor(project).count) return sendText(res, 400, 'nothing staged');
+		if (forgeRefused(s, res, project)) return;
 		state.staged.delete(project);
 		return sendJSON(res, 200, {
 			branch: `dotvirt/proposed/admin/${project}`,
@@ -882,6 +906,7 @@ async function handleAPI(req, res, url) {
 		const body = await readBody(req);
 		if (body?.hash !== MERGE_HASH)
 			return sendText(res, 400, 'commit hash must be the full 40-character hash');
+		if (forgeRefused(s, res, m[1])) return;
 		return sendJSON(res, 200, {
 			branch: `dotvirt/proposed/revert/admin/${m[1]}-${MERGE_HASH.slice(0, 8)}`,
 			pushed: true,

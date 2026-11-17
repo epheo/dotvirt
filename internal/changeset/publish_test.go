@@ -814,7 +814,7 @@ func TestPublishRecloseAfterAFailedPush(t *testing.T) {
 		t.Fatal(err)
 	}
 	items := []git.ChangesetItem{{Path: "new.yaml", NewContent: []byte("kind: ConfigMap\n")}}
-	if _, _, _, err := f.c.publish(f.c.forgeFor(f.proj.Repo), write, prs.head, "m", "t", "b", items, git.Author{}, closed, true, nil); err == nil {
+	if _, _, _, err := f.c.publish(hand{write: write, fc: f.c.forgeFor(f.proj.Repo)}, prs.head, "m", "t", "b", items, closed, true, nil); err == nil {
 		t.Fatal("want the push to fail")
 	}
 	if got := prs.pr(1).State; got != "closed" {

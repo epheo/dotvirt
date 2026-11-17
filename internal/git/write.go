@@ -28,7 +28,8 @@ type WriteRepo struct {
 	push bool   // push commits to the remote (false for local/offline testing)
 	root string // the folder writes land in, "" for the whole repo; set before first use
 
-	mu sync.Mutex
+	// mu serializes the repo's writes; every view As makes shares it.
+	mu *sync.Mutex
 }
 
 // OpenWrite prepares a writable view of the repo. Cloning happens per-operation
@@ -36,7 +37,17 @@ type WriteRepo struct {
 // auth, resolved on each clone/push. push controls whether commits are pushed back
 // (set false when there's no writable remote, e.g. tests).
 func OpenWrite(url, username string, tokenFn forge.TokenSource, push bool) *WriteRepo {
-	return &WriteRepo{creds: creds{url: url, username: username, tokenFn: tokenFn}, push: push}
+	return &WriteRepo{creds: creds{url: url, username: username, tokenFn: tokenFn}, push: push, mu: &sync.Mutex{}}
+}
+
+// As is a view of w whose every clone, listing and push goes to url as
+// username with token: one user's write, under their own forge account. It
+// keeps w's folder and push setting and shares w's lock. url must be where
+// token may go; w is unchanged.
+func (w *WriteRepo) As(url, username, token string) *WriteRepo {
+	as := *w
+	as.creds = creds{url: url, username: username, tokenFn: forge.StaticToken(token)}
+	return &as
 }
 
 // CommitResult reports what a write did on branch. Committed is false when the
@@ -49,8 +60,7 @@ type CommitResult struct {
 }
 
 // dotvirtSig is the signature for dotvirt's own commits (the starter-template
-// offer) and
-// the committer of user proposals (the SA that pushes). Built per call so the
+// offer) and the committer of user proposals it pushes. Built per call so the
 // time is real: git history shows when a change actually landed. A fixed epoch
 // would only make identical re-proposes a push no-op, not worth misdating
 // every commit.
@@ -59,10 +69,22 @@ func dotvirtSig() *object.Signature {
 }
 
 // Author identifies who a change is attributed to (the k8s user proposing it).
-// The committer stays dotvirt (the SA that pushes); git separates the two.
+// The committer is dotvirt, which pushes, unless Commits; git separates the
+// two.
 type Author struct {
 	Name  string
 	Email string
+	// Commits: the author is the committer too, pushing under their own
+	// forge account.
+	Commits bool
+}
+
+// committer is the signature committing a's change.
+func (a Author) committer() *object.Signature {
+	if a.Commits {
+		return a.signature()
+	}
+	return dotvirtSig()
 }
 
 // signature builds the commit author signature: the user when given, else dotvirt.

@@ -16,6 +16,7 @@
 	import ChangeList from '#lib/components/ChangeList.svelte';
 	import Consequence from '#lib/components/Consequence.svelte';
 	import ErrorNote from '#lib/components/ErrorNote.svelte';
+	import NextStepButton from '#lib/components/NextStepButton.svelte';
 	import GitOpsStepper from '#lib/components/GitOpsStepper.svelte';
 	import ManifestDiff from '#lib/components/ManifestDiff.svelte';
 	import PruneAck from '#lib/components/PruneAck.svelte';
@@ -196,6 +197,7 @@
 			Blank fields use the text shown; Tab takes it to edit.
 		</p>
 		<ErrorNote error={proposeOp.error} />
+		<NextStepButton next={proposeOp.next} {project} class="self-start" />
 		<div class="flex flex-col gap-1.5">
 			<div class="flex flex-wrap items-center gap-2">
 				<Button onclick={propose} disabled={proposeOp.busy || blocked}>

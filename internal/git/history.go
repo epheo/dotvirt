@@ -324,8 +324,10 @@ const byCommitsMax = 16
 // BranchDiffBy is BranchDiff for a branch only by may have changed: every
 // commit head carries past its fork from base must be one dotvirt committed
 // for by, signed as ProposeChangeset signs it, else ErrForeignCommit and no
-// diff. at is the head diffed. The check and the diff read one snapshot, so a
-// fetch between them cannot slip another commit in.
+// diff. When by commits its own changes, a commit dotvirt committed for by
+// still counts: one pushed before by's writes ran under their own forge
+// account. at is the head diffed. The check and the diff read one snapshot,
+// so a fetch between them cannot slip another commit in.
 func (r *Repo) BranchDiffBy(base, head string, by Author) (files []FileChange, at string, err error) {
 	repo := r.repo.Load()
 	from, err := branchCommit(repo, base)
@@ -345,9 +347,10 @@ func (r *Repo) BranchDiffBy(base, head string, by Author) (files []FileChange, a
 	if len(bases) != 1 {
 		return nil, "", ErrForeignCommit
 	}
-	fork, author, committer := bases[0], by.signature(), dotvirtSig()
+	fork, author, dotvirt := bases[0], by.signature(), dotvirtSig()
 	for c, n := to, 0; c.Hash != fork.Hash; n++ {
-		if n == byCommitsMax || c.NumParents() != 1 || !sameSigner(c.Author, author) || !sameSigner(c.Committer, committer) {
+		committed := sameSigner(c.Committer, dotvirt) || by.Commits && sameSigner(c.Committer, author)
+		if n == byCommitsMax || c.NumParents() != 1 || !sameSigner(c.Author, author) || !committed {
 			return nil, "", ErrForeignCommit
 		}
 		if c, err = c.Parent(0); err != nil {

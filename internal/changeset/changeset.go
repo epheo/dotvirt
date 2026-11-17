@@ -72,6 +72,9 @@ type Reader struct {
 
 	baseBranch string
 	proposed   string // working branch prefix, e.g. dotvirt/proposed
+	// delegation, when set, writes users' changes with their own forge
+	// accounts (WithDelegation); it decides who signs them, read here too.
+	delegation *Delegation
 
 	reviewMu sync.Mutex
 	reviewed map[string]map[int]reviewed // per repo: open PR -> review state at its last head
@@ -233,7 +236,8 @@ func isNotFound(err error) bool {
 }
 
 // write is read's write-side sibling: the mirror beside the push clone a
-// commit goes through. Only the write half may hand out the push clone.
+// commit goes through. Only the write half may hand out the push clone, and
+// a user's write uses it only through hand, which picks who it runs as.
 func (c *Coordinator) write(proj project.ProjectInfo) (*git.Repo, *git.WriteRepo, error) {
 	return c.pair(proj)
 }

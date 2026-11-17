@@ -135,7 +135,7 @@ func (r *Reader) OwnProposal(id auth.Identity, proj project.ProjectInfo, row mod
 	if err != nil {
 		return model.ProposalDetail{}, err
 	}
-	files, head, err := read.BranchDiffBy(r.baseBranch, row.Branch, git.Author{Name: id.Username, Email: authorEmail(id.Username)})
+	files, head, err := read.BranchDiffBy(r.baseBranch, row.Branch, r.author(id, proj))
 	if errors.Is(err, git.ErrNoBranch) {
 		return model.ProposalDetail{}, fmt.Errorf("%w: branch %s is not mirrored yet; retry in a moment", model.ErrNotFound, row.Branch)
 	}

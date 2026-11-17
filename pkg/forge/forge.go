@@ -8,10 +8,13 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log"
+	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"strconv"
 	"strings"
@@ -90,6 +93,18 @@ func (f *Factory) WithWebURL(webURL string) *Factory {
 	return f
 }
 
+// As is a copy of f whose every call carries token instead of f's own: one
+// request's caller, for a write the forge must see as theirs. f is unchanged,
+// and the copy shares its base, its web base and its HTTP client.
+func (f *Factory) As(token string) *Factory {
+	if f == nil {
+		return nil
+	}
+	as := *f
+	as.tokenFn = StaticToken(token)
+	return &as
+}
+
 // RepoPage is the browser URL of the repo at repoURL: its page under the web
 // base when this forge serves it, else repoURL as written.
 func (f *Factory) RepoPage(repoURL string) string {
@@ -149,7 +164,7 @@ func (f *Factory) SameForge(repoURL string) bool {
 }
 
 func httpClient(insecure bool, caFile string) *http.Client {
-	hc := &http.Client{Timeout: 15 * time.Second}
+	hc := &http.Client{Timeout: 15 * time.Second, CheckRedirect: SameOrigin}
 	if insecure {
 		hc.Transport = TLSTransport(&tls.Config{InsecureSkipVerify: true}) // #nosec G402 - dev flag
 		return hc
@@ -160,6 +175,38 @@ func httpClient(insecure bool, caFile string) *http.Client {
 		}
 	}
 	return hc
+}
+
+// maxRedirects is net/http's own limit.
+const maxRedirects = 10
+
+// SameOrigin is a CheckRedirect refusing a redirect off the origin (scheme,
+// host and port) the request was first sent to, before anything goes there:
+// a forge token rides every request, and net/http would carry it on to a
+// subdomain. One change is followed: http on port 80 upgraded to https on
+// 443 of the same host, which the token already reached in the clear, so a
+// forge configured with http:// keeps working.
+func SameOrigin(req *http.Request, via []*http.Request) error {
+	if len(via) >= maxRedirects {
+		return fmt.Errorf("stopped after %d redirects", maxRedirects)
+	}
+	from, to := origin(via[0].URL), origin(req.URL)
+	host := strings.ToLower(via[0].URL.Hostname())
+	upgrade := from == "http://"+net.JoinHostPort(host, "80") && to == "https://"+net.JoinHostPort(host, "443")
+	if from != to && !upgrade {
+		return fmt.Errorf("refused a redirect from %s to another origin, %s", from, to)
+	}
+	return nil
+}
+
+// origin is u's scheme://host:port, the port spelled out when u leaves it to
+// the scheme.
+func origin(u *url.URL) string {
+	scheme, port := strings.ToLower(u.Scheme), u.Port()
+	if port == "" {
+		port = map[string]string{"http": "80", "https": "443"}[scheme]
+	}
+	return scheme + "://" + net.JoinHostPort(strings.ToLower(u.Hostname()), port)
 }
 
 // TLSTransport is the default transport with tlsCfg. A bare Transport would
@@ -260,6 +307,36 @@ func (c *Client) PrivatizeOrgRepos() (changed int, failed map[string]error, err 
 
 // Owner is the organization or user the client's repo lives under.
 func (c *Client) Owner() string { return c.owner }
+
+// FullName is the client's repo as the forge names it: owner/repo.
+func (c *Client) FullName() string { return c.owner + "/" + c.repo }
+
+// CloneURL is the client's repo as git reaches it under the factory's base,
+// the one address the factory's token is sent to, whatever host the repo
+// URL it came from named.
+func (c *Client) CloneURL() string {
+	return fmt.Sprintf("%s/%s/%s.git", c.f.baseURL, c.owner, c.repo)
+}
+
+// CanPush reports whether the factory's token may push to the client's repo.
+// A repo the token cannot see is false: the forge answers 404 for a private
+// repo to anyone without access to it.
+func (c *Client) CanPush() (bool, error) {
+	var repo struct {
+		Permissions struct {
+			Push bool `json:"push"`
+		} `json:"permissions"`
+	}
+	err := c.do("GET", c.repoPath(""), nil, &repo)
+	var se *StatusError
+	if errors.As(err, &se) && se.Status == http.StatusNotFound {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	return repo.Permissions.Push, nil
+}
 
 // RepoExists reports whether the client's repo is present on the forge, so a caller
 // can tell a dotvirt.io/repo annotation that still resolves from one the forge has

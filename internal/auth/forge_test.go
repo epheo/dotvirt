@@ -403,6 +403,37 @@ func TestForgeDisconnectAndSignOut(t *testing.T) {
 	}
 }
 
+// A token the forge refused drops the connection that holds it, and only it:
+// a connection made since is another token.
+func TestForgeRejectedDropsOnlyThatToken(t *testing.T) {
+	rig := newForgeRig(t)
+	session := rig.signIn(t, "tok-alice")
+	state, code, st := rig.connect(t, session, "/")
+	rig.callback(t, session, state, "code="+code+"&state="+st)
+	id := rig.identity(t, session)
+	cred, err := rig.f.Credential(context.Background(), id)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	rig.f.Rejected(id, "an-older-token")
+	if !rig.f.Status(context.Background(), id).Connected {
+		t.Fatal("a refusal of another token dropped the connection")
+	}
+	bob := rig.identity(t, rig.signIn(t, "tok-bob"))
+	rig.f.Rejected(bob, cred.Token)
+	if !rig.f.Status(context.Background(), id).Connected {
+		t.Fatal("another session's refusal dropped the connection")
+	}
+	rig.f.Rejected(id, cred.Token)
+	if s := rig.f.Status(context.Background(), id); s.Connected || !s.Asked {
+		t.Fatalf("after the forge refused its token: %+v, want asked and not connected", s)
+	}
+	if _, err := rig.f.Credential(context.Background(), id); !errors.Is(err, ErrForgeNotConnected) {
+		t.Fatalf("credential after the refusal: %v", err)
+	}
+}
+
 func TestForgeConnectionEndsWithItsConsoleSession(t *testing.T) {
 	f := newForgeSessions()
 	issued := time.Now().Add(-sessionMaxAge - time.Minute)
@@ -643,6 +674,27 @@ func TestForgeAccountRefusalIsNoOutage(t *testing.T) {
 	f := NewForge(ForgeConfig{APIURL: down.URL}, rig.a)
 	if _, err := f.account(context.Background(), "x"); !errors.Is(err, errForgeUnreachable) {
 		t.Fatalf("a forge that does not answer: %v, want an outage", err)
+	}
+}
+
+// The account lookup carries the user's token: a redirect off the forge's
+// origin is refused, and nothing reaches the other address.
+func TestForgeAccountLookupStaysOnTheOrigin(t *testing.T) {
+	rig := newForgeRig(t)
+	reached := 0
+	other := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		reached++
+		_, _ = w.Write([]byte(`{"login":"elsewhere"}`))
+	}))
+	defer other.Close()
+	api := httptest.NewServer(http.RedirectHandler(other.URL+"/api/v1/user", http.StatusFound))
+	defer api.Close()
+	rig.withForgeAPI(api.URL)
+	if login, err := rig.f.account(context.Background(), "access-1"); err == nil {
+		t.Fatalf("the lookup followed the redirect to %q", login)
+	}
+	if reached != 0 {
+		t.Fatalf("the other address got %d requests", reached)
 	}
 }
 
