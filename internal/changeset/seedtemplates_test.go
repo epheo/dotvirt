@@ -355,11 +355,14 @@ func TestAnOfferWhoseBranchMovedIsClosed(t *testing.T) {
 	}
 }
 
-// seedLane is a lane listing the open offer as PR #1.
-var seedLane = []model.Proposal{{Project: "p", PRNumber: 1, Branch: testSeedBranch, Seed: true}}
+// seedLane is a lane listing the open offer as PR #1, at forgeHead as the
+// forge reports it ("" for not reported).
+func seedLane(forgeHead string) []model.Proposal {
+	return []model.Proposal{{Project: "p", PRNumber: 1, Branch: testSeedBranch, Seed: true, ForgeHead: forgeHead}}
+}
 
-// pushOnSeed commits edit onto the seed branch from outside the console and
-// waits for the mirror to fetch it.
+// pushOnSeed rewrites the seed branch from outside the console with edit, run
+// in a clone on that branch, and waits for the mirror to fetch it.
 func pushOnSeed(t *testing.T, f *proposeFixture, edit func(work string)) {
 	t.Helper()
 	work := t.TempDir()
@@ -367,6 +370,18 @@ func pushOnSeed(t *testing.T, f *proposeFixture, edit func(work string)) {
 	edit(work)
 	gitRun(t, work, "push", "-q", "-f", "origin", testSeedBranch)
 	waitMirror(t, f, testSeedBranch, revParse(t, f.proj.Repo, testSeedBranch))
+}
+
+// shownOffer offers the starter library, waits for the mirror to hold its
+// branch, and checks the lane shows it.
+func shownOffer(t *testing.T, f *proposeFixture) {
+	t.Helper()
+	f.c.seedCreated(f.proj.Repo)
+	waitMirror(t, f, testSeedBranch, revParse(t, f.proj.Repo, testSeedBranch))
+	f.c.SeedTemplates(f.proj, seedLane(""))
+	if seed, _ := f.c.TemplateSeed(f.proj); seed.PRNumber != 1 {
+		t.Fatalf("want the offer shown, got %+v", seed)
+	}
 }
 
 func seedDecided(f *proposeFixture) bool {
@@ -386,7 +401,7 @@ func TestAMovedOfferLeftOpenIsNotShown(t *testing.T) {
 		t.Fatalf("want the offer left open by the failed close, got %+v", all)
 	}
 	waitMirror(t, f, testSeedBranch, revParse(t, f.proj.Repo, testSeedBranch))
-	f.c.SeedTemplates(f.proj, seedLane)
+	f.c.SeedTemplates(f.proj, seedLane(""))
 	seed, _ := f.c.TemplateSeed(f.proj)
 	if seed.PRNumber != 0 || !strings.Contains(seed.Error, "withdrew the offer") {
 		t.Errorf("want the withdrawal, not the PR, got %+v", seed)
@@ -394,15 +409,17 @@ func TestAMovedOfferLeftOpenIsNotShown(t *testing.T) {
 }
 
 // An open offer holding exactly the starter set is shown by a process that
-// did not push it: after a restart, and whoever committed it.
+// did not push it: after a restart, whoever committed it, and after the base
+// branch moved on.
 func TestAnExactStarterHeadIsShownAfterARestart(t *testing.T) {
 	f, prs := newSeedFixture(t)
 	f.c.seedCreated(f.proj.Repo)
 	pushOnSeed(t, f, func(work string) {
 		gitRun(t, work, "commit", "-q", "--amend", "--no-edit", "--reset-author")
 	})
+	f.commitMain(t, "alpha/next.yaml", "kind: ConfigMap\n")
 	f.c.seeds = nil
-	f.c.SeedTemplates(f.proj, seedLane)
+	f.c.SeedTemplates(f.proj, seedLane(revParse(t, f.proj.Repo, testSeedBranch)))
 	if seed, ok := f.c.TemplateSeed(f.proj); !ok || seed.PRNumber != 1 || seed.Error != "" {
 		t.Errorf("want the open offer shown, got %+v %v", seed, ok)
 	}
@@ -411,43 +428,81 @@ func TestAnExactStarterHeadIsShownAfterARestart(t *testing.T) {
 	}
 }
 
-// An offer whose branch holds anything but exactly the starter set is not
-// shown, and is not made again.
+// The mirror can lag the forge by a poll: while the forge reports another
+// head than the mirror holds, the offer is not shown.
+func TestAnOfferAheadOfTheMirrorIsNotShown(t *testing.T) {
+	f, _ := newSeedFixture(t)
+	shownOffer(t, f)
+	f.c.SeedTemplates(f.proj, seedLane("0123456789abcdef0123456789abcdef01234567"))
+	if seed, ok := f.c.TemplateSeed(f.proj); ok {
+		t.Errorf("an offer the mirror has not fetched was shown: %+v", seed)
+	}
+	f.c.SeedTemplates(f.proj, seedLane(revParse(t, f.proj.Repo, testSeedBranch)))
+	if seed, _ := f.c.TemplateSeed(f.proj); seed.PRNumber != 1 {
+		t.Errorf("want the offer shown once the heads agree, got %+v", seed)
+	}
+}
+
+// An offer whose branch holds anything but the starter set as one commit on
+// the base branch is not shown, is not made again, and is not read again for
+// the same commits, an unreadable one included.
 func TestAnOfferNotExactlyTheStarterSetIsNotShown(t *testing.T) {
+	amend := func(t *testing.T, work string) { gitRun(t, work, "commit", "-q", "--amend", "--no-edit") }
 	for name, edit := range map[string]func(t *testing.T, work string){
 		"extra file": func(t *testing.T, work string) {
 			writeWorkFile(t, work, "alpha/evil.yaml", []byte("kind: ClusterRoleBinding\n"))
 			gitRun(t, work, "add", "-A")
+			amend(t, work)
 		},
 		"changed file": func(t *testing.T, work string) {
 			writeWorkFile(t, work, "templates/fedora-minimal.yaml", []byte("kind: VirtualMachineTemplate\n"))
 			gitRun(t, work, "add", "-A")
+			amend(t, work)
 		},
 		"missing file": func(t *testing.T, work string) {
 			gitRun(t, work, "rm", "-q", "templates/fedora-server.yaml")
+			amend(t, work)
 		},
 		"executable file": func(t *testing.T, work string) {
 			gitRun(t, work, "update-index", "--chmod=+x", "templates/fedora-minimal.yaml")
+			amend(t, work)
+		},
+		// git takes the name; go-git cannot diff the tree.
+		"unreadable tree": func(t *testing.T, work string) {
+			writeWorkFile(t, work, "x\x01/y.yaml", []byte("kind: ClusterRoleBinding\n"))
+			gitRun(t, work, "add", "-A")
+			amend(t, work)
+		},
+		"second commit": func(t *testing.T, work string) {
+			gitRun(t, work, "commit", "-q", "--allow-empty", "-m", "more")
+		},
+		// The tree stays the starter set; a forge rebasing the PR replays the side commit.
+		"merge keeping its tree": func(t *testing.T, work string) {
+			gitRun(t, work, "checkout", "-q", "-b", "side", "origin/main")
+			writeWorkFile(t, work, "alpha/evil.yaml", []byte("kind: ClusterRoleBinding\n"))
+			gitRun(t, work, "add", "-A")
+			gitRun(t, work, "commit", "-qm", "side")
+			gitRun(t, work, "checkout", "-q", testSeedBranch)
+			gitRun(t, work, "merge", "-q", "-s", "ours", "--no-edit", "side")
 		},
 	} {
 		t.Run(name, func(t *testing.T) {
 			f, prs := newSeedFixture(t)
-			f.c.seedCreated(f.proj.Repo)
-			waitMirror(t, f, testSeedBranch, revParse(t, f.proj.Repo, testSeedBranch))
-			f.c.SeedTemplates(f.proj, seedLane)
-			if seed, _ := f.c.TemplateSeed(f.proj); seed.PRNumber != 1 {
-				t.Fatalf("want the offer shown before its branch moves, got %+v", seed)
-			}
-			pushOnSeed(t, f, func(work string) {
-				edit(t, work)
-				gitRun(t, work, "commit", "-qm", name)
-			})
-			f.c.SeedTemplates(f.proj, seedLane)
+			shownOffer(t, f)
+			pushOnSeed(t, f, func(work string) { edit(t, work) })
+			f.c.SeedTemplates(f.proj, seedLane(""))
 			if seed, ok := f.c.TemplateSeed(f.proj); ok {
-				t.Errorf("an offer with %s was shown: %+v", name, seed)
+				t.Errorf("an offer with a %s was shown: %+v", name, seed)
 			}
 			if _, creates := prs.counts(); creates != 1 || !seedDecided(f) {
 				t.Errorf("the repo must stay decided: %d creates", creates)
+			}
+			at := revParse(t, f.proj.Repo, "main") + ".." + revParse(t, f.proj.Repo, testSeedBranch)
+			f.c.seedMu.Lock()
+			judged := f.c.seeds[forge.NormalizeRepoURL(f.proj.Repo)].judged
+			f.c.seedMu.Unlock()
+			if judged != at {
+				t.Errorf("the verdict must be kept for %s, got %q", at, judged)
 			}
 		})
 	}

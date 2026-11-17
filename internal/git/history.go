@@ -263,26 +263,30 @@ func (r *Repo) BranchDiff(base, head string) ([]FileChange, error) {
 	return r.scopedDiff(fromTree, toTree)
 }
 
-// ChangesExactly reports whether merging commit head into commit base changes
-// exactly files: each path set to that content as a regular file, and no
-// other path touched, whatever its kind. The change is read from their one
-// fork point; none, or several, is not such a change. Paths are the repo's,
-// whatever folder this mirror is scoped to.
+// ChangesExactly reports whether commit head is files committed on base's
+// history: one commit, whose only parent base holds, setting each path to
+// that content as a regular file and touching no other path, whatever its
+// kind. More commits past the fork, a merge among them, are not: a forge that
+// replays them on merge brings their changes in, whatever head's tree shows.
+// Paths are the repo's, whatever folder this mirror is scoped to.
 func (r *Repo) ChangesExactly(base, head string, files []model.File) (bool, error) {
 	repo := r.repo.Load()
-	from, err := commitAt(repo, base)
+	tip, err := commitAt(repo, base)
 	if err != nil {
 		return false, err
 	}
 	to, err := commitAt(repo, head)
+	if err != nil || to.NumParents() != 1 {
+		return false, err
+	}
+	parent, err := to.Parent(0)
 	if err != nil {
 		return false, err
 	}
-	bases, err := from.MergeBase(to)
-	if err != nil || len(bases) != 1 {
+	if onBase, err := parent.IsAncestor(tip); err != nil || !onBase {
 		return false, err
 	}
-	fromTree, err := bases[0].Tree()
+	fromTree, err := parent.Tree()
 	if err != nil {
 		return false, err
 	}

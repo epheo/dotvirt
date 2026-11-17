@@ -106,6 +106,10 @@ func (c *Coordinator) SeedTemplates(proj project.ProjectInfo, lane []model.Propo
 	if ok && read.Root() != "" {
 		read, ok = nil, false // a later refresh decides, once the repo-root mirror is open
 	}
+	var exact, known bool
+	if open != nil {
+		exact, known = c.seedExact(key, read, open.ForgeHead)
+	}
 	c.seedMu.Lock()
 	st := c.seedFor(key)
 	switch {
@@ -117,7 +121,7 @@ func (c *Coordinator) SeedTemplates(proj project.ProjectInfo, lane []model.Propo
 		st.err, st.decided = "", true
 		// Shown only while it holds exactly the starter set, whoever pushed
 		// it; while the mirror cannot tell, what this process knows stands.
-		if exact, known := c.seedExactLocked(st, read); known {
+		if known {
 			st.pr, st.prURL = 0, ""
 			if exact {
 				st.pr, st.prURL = open.PRNumber, open.PRURL
@@ -160,11 +164,12 @@ func (c *Coordinator) libraryMissing(read *git.Repo) (bool, error) {
 	return len(files) == 0, nil
 }
 
-// seedExactLocked reports whether the seed branch, as read holds it, changes
-// exactly the starter set against the base branch. known is false while read
-// cannot tell. The verdict is kept per base and head commit: finding the fork
-// point walks history. Holds seedMu.
-func (c *Coordinator) seedExactLocked(st *seedState, read *git.Repo) (exact, known bool) {
+// seedExact reports whether the seed branch, as the mirror read holds it, is
+// exactly the starter set committed on the base branch
+// (git.Repo.ChangesExactly). known is false while read cannot tell. A forge
+// head the mirror has not fetched yet is not exact. The verdict is kept per
+// base and head commit, and read outside seedMu: it walks history.
+func (c *Coordinator) seedExact(key string, read *git.Repo, forgeHead string) (exact, known bool) {
 	if read == nil {
 		return false, false
 	}
@@ -172,14 +177,31 @@ func (c *Coordinator) seedExactLocked(st *seedState, read *git.Repo) (exact, kno
 	if base == "" || head == "" {
 		return false, false
 	}
-	if at := base + ".." + head; at != st.judged {
-		ok, err := read.ChangesExactly(base, head, starterSet())
-		if err != nil {
-			return false, false // a later refresh reads it again
-		}
-		st.judged, st.exact = at, ok
+	if forgeHead != "" && forgeHead != head {
+		return false, true
 	}
-	return st.exact, true
+	at := base + ".." + head
+	c.seedMu.Lock()
+	st := c.seedFor(key)
+	judged, cached := st.judged, st.exact
+	c.seedMu.Unlock()
+	if at == judged {
+		return cached, true
+	}
+	exact, err := read.ChangesExactly(base, head, starterSet())
+	if errors.Is(err, git.ErrNoCommit) {
+		return false, false // the mirror moved between the reads; the next refresh judges
+	}
+	if err != nil {
+		// The same commits fail the same way: kept as not exact.
+		log.Printf("changeset: starter templates for %s at %s: %v", key, at, err)
+		exact = false
+	}
+	c.seedMu.Lock()
+	st = c.seedFor(key)
+	st.judged, st.exact = at, exact
+	c.seedMu.Unlock()
+	return exact, true
 }
 
 // starterSet is every file the offer adds: the starter templates and the
