@@ -204,6 +204,25 @@ func TestAppSetPluginLiftsAllowEmptyOnlyForADeliberateRemoval(t *testing.T) {
 	relift := newRepoWith(t, map[string]string{"README.md": "recovered\n"})
 	liftfull := newRemovalRepo(t)
 	liftfull.edit(t)
+	// A re-created repo given a file Argo never renders (a .yml workflow, a
+	// comment-only .yaml), synced by hand without prune, then that file dropped.
+	yml := newRepoWith(t, map[string]string{"README.md": "recovered\n"})
+	yml.add(t, ".forgejo/workflows/ci.yml", "on: push\n")
+	ymlApplied := yml.head(t)
+	yml.drop(t, ".forgejo/workflows/ci.yml")
+	comment := newRepoWith(t, map[string]string{"README.md": "recovered\n"})
+	comment.add(t, "notes.yaml", "# nothing yet\n")
+	commentApplied := comment.head(t)
+	comment.drop(t, "notes.yaml")
+	// A deliberate removal in a repo keeping its CI workflow.
+	ci := newRepoWith(t, map[string]string{
+		"team/web.yaml":             "kind: VirtualMachine\nmetadata: {name: web, namespace: team}\n",
+		".forgejo/workflows/ci.yml": "on: push\n",
+	})
+	ci.remove(t)
+	// A history replaced, then joined back to the old one keeping its tree.
+	rejoin := newRemovalRepo(t)
+	rejoin.rejoin(t)
 	platform := "file://" + seedPlatformRepo(t, map[string]string{"README.md": "lost\n"})
 
 	fc := newFakeCluster(t)
@@ -225,6 +244,10 @@ func TestAppSetPluginLiftsAllowEmptyOnlyForADeliberateRemoval(t *testing.T) {
 		{"team-hand", hand.url, hand.head(t), hand.head(t), "."},
 		{"team-relift", relift.url, relift.head(t), removed.applied, "."},
 		{"team-liftfull", liftfull.url, liftfull.head(t), liftfull.applied, "."},
+		{"team-yml", yml.url, yml.head(t), ymlApplied, "."},
+		{"team-comment", comment.url, comment.head(t), commentApplied, "."},
+		{"team-ci", ci.url, ci.head(t), ci.applied, "."},
+		{"team-rejoin", rejoin.url, rejoin.head(t), rejoin.applied, "."},
 	} {
 		fc.namespaces = append(fc.namespaces, corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: p.name,
 			Labels: map[string]string{"dotvirt.io/project": p.name}, Annotations: map[string]string{"dotvirt.io/repo": p.repo}}})
@@ -246,7 +269,7 @@ func TestAppSetPluginLiftsAllowEmptyOnlyForADeliberateRemoval(t *testing.T) {
 	t.Cleanup(cancel)
 	repos := git.NewRepoSet(ctx, "", "", nil, false, nil, time.Hour)
 	for _, repo := range []string{removed.url, same.url, moved.url, recreated, stale.url, declared.url, old.url, nosrc.url, lifting.url,
-		chain.url, hand.url, relift.url, liftfull.url} {
+		chain.url, hand.url, relift.url, liftfull.url, yml.url, comment.url, ci.url, rejoin.url} {
 		if _, _, err := repos.Get(repo, ""); err != nil {
 			t.Fatal(err)
 		}
@@ -267,7 +290,9 @@ func TestAppSetPluginLiftsAllowEmptyOnlyForADeliberateRemoval(t *testing.T) {
 		"team-same": model.HoldMismatch, "team-full": model.HoldMismatch, "team-moved": model.HoldMismatch,
 		"team-stale": model.HoldPending, "team-old": model.HoldPending, "team-nosrc": model.HoldMismatch,
 		"team-lifting": model.HoldDeleting, "team-chain": model.HoldMismatch, "team-hand": model.HoldMismatch,
-		"team-relift": model.HoldReplaced, "team-liftfull": model.HoldMismatch, "team-a": "",
+		"team-relift": model.HoldReplaced, "team-liftfull": model.HoldMismatch,
+		"team-yml": model.HoldMismatch, "team-comment": model.HoldMismatch, "team-ci": model.HoldDeleting,
+		"team-rejoin": model.HoldReplaced, "team-a": "",
 	}
 	got := map[string]model.Hold{}
 	for _, p := range s.AllProjects() {
@@ -285,6 +310,7 @@ func TestAppSetPluginLiftsAllowEmptyOnlyForADeliberateRemoval(t *testing.T) {
 	if want := map[string]any{"team-del": true, "team-rec": false, "team-new": false, "team-same": false,
 		"team-full": false, "team-moved": false, "team-stale": false, "team-old": false, "team-nosrc": false,
 		"team-lifting": true, "team-chain": false, "team-hand": false, "team-relift": false, "team-liftfull": false,
+		"team-yml": false, "team-comment": false, "team-ci": true, "team-rejoin": false,
 		"team-a": false}; !maps.Equal(lifted, want) {
 		t.Errorf("allowEmpty = %v, want %v", lifted, want)
 	}
@@ -379,6 +405,27 @@ func (r *removalRepo) git(t *testing.T, args ...string) {
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("git %v: %v\n%s", args, err, out)
 	}
+}
+
+func (r *removalRepo) drop(t *testing.T, path string) {
+	r.git(t, "-C", r.work, "rm", "-q", path)
+	r.git(t, "-C", r.work, "commit", "-qm", "drop "+path)
+	r.git(t, "-C", r.work, "push", "-q", "origin", "main")
+}
+
+// rejoin re-creates main with a history of its own (a README), then merges
+// the old main into it keeping the new tree, as `git merge -s ours
+// --allow-unrelated-histories` does.
+func (r *removalRepo) rejoin(t *testing.T) {
+	r.git(t, "-C", r.work, "checkout", "-q", "--orphan", "fresh")
+	r.git(t, "-C", r.work, "rm", "-rqf", ".")
+	if err := os.WriteFile(filepath.Join(r.work, "README.md"), []byte("recovered\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	r.git(t, "-C", r.work, "add", "-A")
+	r.git(t, "-C", r.work, "commit", "-qm", "re-created")
+	r.git(t, "-C", r.work, "merge", "-q", "-s", "ours", "--allow-unrelated-histories", "-m", "rejoin", "main")
+	r.git(t, "-C", r.work, "push", "-qf", "origin", "fresh:main")
 }
 
 func (r *removalRepo) remove(t *testing.T) {

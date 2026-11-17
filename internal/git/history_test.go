@@ -538,15 +538,28 @@ func TestDescendsTellsMovingOnFromReplaced(t *testing.T) {
 		t.Fatalf("refresh: %v", err)
 	}
 	check("replaced history", revParse(t, h.bare, "main"), merge, false, true)
+
+	// The replaced history joined back to the old one, keeping its own tree:
+	// the old main is an ancestor again, through that merge alone.
+	h.run("admin", h.work, "merge", "-q", "-s", "ours", "--allow-unrelated-histories", "-m", "rejoin", "main")
+	h.run("admin", h.work, "push", "-qf", "origin", "fresh:main")
+	if err := r.refresh(); err != nil {
+		t.Fatalf("refresh: %v", err)
+	}
+	check("replaced, then rejoined", revParse(t, h.bare, "main"), merge, false, true)
 }
 
-// DeclaresAt asks git itself, at one commit and in the mirror's folder:
-// YAML outside the template library declares; the library alone does not.
-func TestDeclaresAtReadsGitNotTheRender(t *testing.T) {
+// DeclaresAt reads git as Argo's source renders it: an object (a kind and a
+// name) in a .yaml file outside the template library. A .yml file, a
+// comment-only .yaml, a nameless document and the library declare nothing.
+func TestDeclaresAtReadsWhatArgoRenders(t *testing.T) {
 	h := seedHistoryRepo(t)
 	h.run("alice", h.work, "rm", "-rq", "tenant-a")
-	h.write("templates/web.yaml", "kind: VirtualMachineTemplate\n")
+	h.write("templates/web.yaml", "kind: VirtualMachineTemplate\nmetadata: {name: web}\n")
 	h.write("README.md", "nothing declared\n")
+	h.write(".forgejo/workflows/ci.yml", "kind: VirtualMachine\nmetadata: {name: ci}\n")
+	h.write("notes.yaml", "# nothing here yet\n")
+	h.write("nameless.yaml", "kind: VirtualMachine\nmetadata: {}\n")
 	h.run("alice", h.work, "add", "-A")
 	h.run("alice", h.work, "commit", "-qm", "delete everything")
 	h.run("alice", h.work, "push", "-q", "origin", "main")
