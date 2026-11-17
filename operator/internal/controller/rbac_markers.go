@@ -11,7 +11,9 @@ package controller
 // ClusterRole writes.
 //
 // dotvirts: the CR, which may live in any namespace (the CSV installs AllNamespaces).
-// +kubebuilder:rbac:groups=dotvirt.io,resources=dotvirts,verbs=get;list;watch;update
+// patch, never update: the finalizer goes on and off by a merge patch of the
+// finalizers alone, so the operator never sends the spec.
+// +kubebuilder:rbac:groups=dotvirt.io,resources=dotvirts,verbs=get;list;watch;patch
 // +kubebuilder:rbac:groups=dotvirt.io,resources=dotvirts/status,verbs=get;update;patch
 // dotvirts/finalizers: unused on default clusters (AddFinalizer writes the main
 // resource), but SetControllerReference sets blockOwnerDeletion, which the
@@ -104,3 +106,10 @@ package controller
 // +kubebuilder:rbac:groups=authorization.k8s.io,resources=selfsubjectaccessreviews,verbs=create
 // +kubebuilder:rbac:groups=rbac.authorization.k8s.io,resources=rolebindings,verbs=get
 // +kubebuilder:rbac:groups=argoproj.io,resources=argocds,resourceNames=openshift-gitops;argocd,verbs=get;patch
+//
+// The cluster's ingress domain, by name: the console's router host, which the
+// operator guard pins as the console reads it.
+// +kubebuilder:rbac:groups=config.openshift.io,resources=ingresses,resourceNames=cluster,verbs=get
+// The operator guard (guard.go) is read by name to report it, never written: a
+// cluster admin installs it, so the operator cannot loosen what bounds it.
+// +kubebuilder:rbac:groups=admissionregistration.k8s.io,resources=validatingadmissionpolicies;validatingadmissionpolicybindings,resourceNames=dotvirt-operator-secrets;dotvirt-operator-deployments;dotvirt-operator-bindings;dotvirt-operator-install;dotvirt-operator-frontdoor,verbs=get

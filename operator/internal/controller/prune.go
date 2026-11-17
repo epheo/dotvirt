@@ -171,8 +171,12 @@ func (r *DotvirtReconciler) finalize(ctx context.Context, dv *dotvirtv1alpha1.Do
 		return err
 	}
 	r.markPruned(client.ObjectKeyFromObject(dv), "")
+	// A patch of the finalizers alone, locked to the version read: the
+	// operator never sends its install's spec, which an older binary would
+	// truncate to the fields it knows and the guard refuses.
+	lock := client.MergeFromWithOptions(dv.DeepCopy(), client.MergeFromWithOptimisticLock{})
 	controllerutil.RemoveFinalizer(dv, dotvirtFinalizer)
-	return r.Update(ctx, dv)
+	return r.Patch(ctx, dv, lock)
 }
 
 // syncInstances are the ArgoCD resources the operator may have set sync

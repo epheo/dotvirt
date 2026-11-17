@@ -172,6 +172,7 @@ export const clusterGate = {
 	rebalancePSI: () => cluster((c) => c.drsPSI, 'turn on host pressure readings'),
 	rebalanceOff: () => cluster((c) => c.drsDisable, 'turn off rebalancing'),
 	oauthClient: () => cluster((c) => c.oauthClient, 'finish single sign-on'),
+	adminObjects: () => cluster((c) => c.adminObjects, 'install what the install needs'),
 	forgeAdmin: () => cluster((c) => c.forgeAdmin, "read the forge's admin password"),
 };
 

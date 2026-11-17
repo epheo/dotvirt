@@ -14,6 +14,7 @@ import (
 	"github.com/epheo/dotvirt/internal/cluster"
 	"github.com/epheo/dotvirt/internal/model"
 	"github.com/epheo/dotvirt/internal/project"
+	"github.com/epheo/dotvirt/pkg/adminobjects"
 )
 
 // handleCapabilities answers GET /api/capabilities (see model.Capabilities):
@@ -110,6 +111,9 @@ func (s *Server) clusterCaps(ctx context.Context, id auth.Identity, c *cluster.C
 	if s.gateways != nil && s.gateways.Started() {
 		fields = append(fields, capField{&out.Gateways, gatewaysRead})
 	}
+	if s.adminObjectsOffered() {
+		fields = append(fields, capField{&out.AdminObjects, s.adminObjectsAction()})
+	}
 	if a := s.cfg.ForgeAdmin; a.Name != "" {
 		q := refQ(verbGet, ssarSecrets, a.Namespace)
 		q.Name = a.Name
@@ -117,8 +121,7 @@ func (s *Server) clusterCaps(ctx context.Context, id auth.Identity, c *cluster.C
 	}
 	s.fill(ctx, id, c, fields)
 	if s.oauth != nil {
-		clientID, _, _ := s.oauth.DesiredClient()
-		out.OAuthClient = s.oauthClientCap(ctx, id, c, clientID)
+		out.OAuthClient = s.cfg.OwnNamespace != "" && s.oauthClientCap(ctx, id, c, adminobjects.SSOClientName(s.cfg.OwnNamespace))
 	}
 	if s.cfg.PlatformRepo == "" {
 		return out
