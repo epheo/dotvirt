@@ -71,12 +71,13 @@ func (s *Server) serveAdminObjects(w http.ResponseWriter, r *http.Request, insta
 	writeJSON(w, out)
 }
 
-// adminParams are the guard's pins, every one read as the caller, none from
-// anything the operator writes: the console's own namespace (its
+// adminParams are the admin objects' pins, every one read as the caller, none
+// from anything the operator writes: the console's own namespace (its
 // ServiceAccount mount), the one install there (its ArgoCD target, image, TLS
-// and metrics choices; the operator may only patch its finalizers once the
-// guard is in), and the operator's Deployment (its account and images; OLM or
-// GitOps writes it).
+// and metrics choices, and its forge credential, whose grant the operator's
+// account gets; the operator may only patch its finalizers once the guard is
+// in), and the operator's Deployment (its account and images; OLM or GitOps
+// writes it).
 func (s *Server) adminParams(ctx context.Context, c *cluster.Client) (adminobjects.Params, error) {
 	ns := s.cfg.OwnNamespace
 	spec, err := c.InstallIn(ctx, ns)
@@ -109,6 +110,7 @@ func (s *Server) adminParams(ctx context.Context, c *cluster.Client) (adminobjec
 		BrandingConfigMap: spec.BrandingConfigMap, MetricsCAConfigMap: spec.MetricsCAConfigMap,
 		ForgeSecret: adminobjects.ForgeSecret(spec.ForgeCredentials), ForgeManaged: spec.ForgeManaged,
 		OIDCSecret: spec.OIDCSecret, OIDCSecretKey: spec.OIDCSecretKey,
+		InstallName: spec.Name, InstallUID: spec.UID,
 	}
 	p.ArgoNamespace, p.ArgoController = adminobjects.ArgoTarget(spec.ArgoNamespace, spec.ArgoController, openShift)
 	domain := ""

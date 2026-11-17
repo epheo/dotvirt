@@ -86,7 +86,7 @@ func (r *DotvirtReconciler) observeGrant(ctx context.Context, dv *dotvirtv1alpha
 		recheck = " (changed under " + grantLagWindow.String() + " ago: rechecked every minute while the apiserver applies it)"
 	}
 	r.setCondition(dv, dotvirtv1alpha1.ConditionForgeCredentialReady, metav1.ConditionFalse, "GrantIncomplete", fmt.Sprintf(
-		"%s %s in %s %s not grant %s on Secret %s to %s%s. Replace them: %s; %s",
+		"%s %s in %s %s not grant %s on Secret %s to %s%s. A cluster admin replaces them from the console (Install), or with: %s; %s",
 		strings.Join(present, " and "), install.ForgeCredentialGrantName, dv.Namespace, exist,
 		strings.Join(install.ForgeCredentialVerbs(dv), ", "), dv.Spec.Forge.CredentialsSecret, install.OperatorAccount(r.OperatorNamespace),
 		recheck, strings.Join(install.ForgeCredentialReplaceCommands(dv, r.OperatorNamespace), " && "), credentialWaitEffects(dv)))
@@ -181,7 +181,7 @@ func (r *DotvirtReconciler) recordCredential(dv *dotvirtv1alpha1.Dotvirt, err er
 			use = "read and write"
 		}
 		r.setCondition(dv, dotvirtv1alpha1.ConditionForgeCredentialReady, metav1.ConditionFalse, "NotGranted", fmt.Sprintf(
-			"the operator may not %s Secret %s, which spec.forge.credentialsSecret names. A cluster admin grants it: %s; %s",
+			"the operator may not %s Secret %s, which spec.forge.credentialsSecret names. A cluster admin grants it from the console (Install), or with: %s; %s",
 			use, name, strings.Join(install.ForgeCredentialCommands(dv, r.OperatorNamespace), " && "), credentialWaitEffects(dv)))
 	case err == nil || apierrors.IsNotFound(err):
 		r.setCondition(dv, dotvirtv1alpha1.ConditionForgeCredentialReady, metav1.ConditionTrue, "Granted",

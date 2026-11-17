@@ -1,14 +1,18 @@
 package install
 
 import (
+	"reflect"
 	"slices"
 	"strings"
 	"testing"
 
 	rbacv1 "k8s.io/api/rbac/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime"
 
 	dotvirtv1alpha1 "github.com/epheo/dotvirt/operator/api/v1alpha1"
+	"github.com/epheo/dotvirt/pkg/adminobjects"
 )
 
 // The grant covers the one Secret spec.forge.credentialsSecret names, in the
@@ -93,5 +97,50 @@ func TestForgeCredentialCommands(t *testing.T) {
 	dv.Spec.Forge.Managed = true
 	if got := ForgeCredentialCommands(dv, ""); !strings.Contains(got[0], "--verb=get,create,patch") || !strings.Contains(got[1], "<operator-namespace>:") {
 		t.Errorf("managed, operator namespace unknown: %q", got)
+	}
+}
+
+// The operator's grant is the console's render of it, one source: the Role and
+// RoleBinding in adminobjects.Render for the pins the console reads from the
+// same install (its spec, its name and uid, the operator's account) are the
+// operator's, object for object, and absent exactly where it renders none.
+func TestForgeCredentialGrantIsTheConsoles(t *testing.T) {
+	for _, c := range []struct {
+		secret  string
+		managed bool
+	}{
+		{"", false}, {"dotvirt-forge", true}, {SessionSecretName, true}, {"creds", false}, {"creds", true},
+	} {
+		dv := &dotvirtv1alpha1.Dotvirt{ObjectMeta: metav1.ObjectMeta{Name: "x", Namespace: "dotvirt", UID: "uid-x"}}
+		dv.Spec.Forge.CredentialsSecret, dv.Spec.Forge.Managed = c.secret, c.managed
+		// As the console's adminParams read them.
+		console := adminobjects.Params{
+			Operator: "system:serviceaccount:dotvirt-operator:" + OperatorServiceAccount, Namespace: dv.Namespace,
+			ForgeSecret: adminobjects.ForgeSecret(dv.Spec.Forge.CredentialsSecret), ForgeManaged: dv.Spec.Forge.Managed,
+			InstallName: dv.Name, InstallUID: dv.UID,
+		}
+		var rendered []any
+		for _, o := range adminobjects.Render(console) {
+			if o.Object.GetName() == ForgeCredentialGrantName {
+				rendered = append(rendered, o.Object.Object)
+			}
+		}
+		var operator []any
+		if role, binding := ForgeCredentialGrant(dv, "dotvirt-operator"); role != nil {
+			for _, obj := range []runtime.Object{role, binding} {
+				m, err := runtime.DefaultUnstructuredConverter.ToUnstructured(obj)
+				if err != nil {
+					t.Fatal(err)
+				}
+				unstructured.RemoveNestedField(m, "metadata", "creationTimestamp")
+				operator = append(operator, m)
+			}
+		}
+		if !reflect.DeepEqual(rendered, operator) {
+			t.Errorf("credentialsSecret %q managed %v:\nconsole  %v\noperator %v", c.secret, c.managed, rendered, operator)
+		}
+		if needs := ForgeCredentialNeedsGrant(dv); needs != (len(operator) > 0) {
+			t.Errorf("credentialsSecret %q: needs a grant %v, renders %d objects", c.secret, needs, len(operator))
+		}
 	}
 }

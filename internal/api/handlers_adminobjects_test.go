@@ -37,6 +37,7 @@ var (
 
 		BrandingConfigMap: "brand", ForgeSecret: "creds",
 		OIDCSecret: "admin-oidc", OIDCSecretKey: "client-secret",
+		InstallName: "x", InstallUID: "uid-x",
 	}
 )
 
@@ -81,7 +82,7 @@ func adminObjectsServer(t *testing.T) (*Server, *fakeCluster, func() map[string]
 			return
 		}
 		writeObj(w, map[string]any{"apiVersion": "dotvirt.io/v1alpha1", "kind": "DotvirtList", "metadata": map[string]any{}, "items": []any{map[string]any{
-			"apiVersion": "dotvirt.io/v1alpha1", "kind": "Dotvirt", "metadata": map[string]any{"name": "x", "namespace": "dotvirt"},
+			"apiVersion": "dotvirt.io/v1alpha1", "kind": "Dotvirt", "metadata": map[string]any{"name": "x", "namespace": "dotvirt", "uid": "uid-x"},
 			"spec": map[string]any{"image": adminWant.SpecImage, "ingress": map[string]any{"host": adminWant.ConsoleHost},
 				"branding": map[string]any{"configMap": adminWant.BrandingConfigMap}, "forge": map[string]any{"credentialsSecret": adminWant.ForgeSecret},
 				"auth": map[string]any{"oidc": map[string]any{"clientSecret": map[string]any{"name": adminWant.OIDCSecret, "key": adminWant.OIDCSecretKey}}}},
@@ -90,6 +91,11 @@ func adminObjectsServer(t *testing.T) (*Server, *fakeCluster, func() map[string]
 					"object": map[string]any{"apiVersion": "admissionregistration.k8s.io/v1", "kind": "ValidatingAdmissionPolicy",
 						"metadata": map[string]any{"name": adminobjects.GuardSecretsName},
 						"spec":     map[string]any{"validations": []any{map[string]any{"expression": "false"}}}}},
+				// The forge credential's grant, widened to every Secret.
+				map[string]any{"purpose": "tampered", "state": "NotInstalled", "kind": "Role", "name": adminobjects.CredentialGrantName, "namespace": "dotvirt",
+					"object": map[string]any{"apiVersion": "rbac.authorization.k8s.io/v1", "kind": "Role",
+						"metadata": map[string]any{"name": adminobjects.CredentialGrantName, "namespace": "dotvirt"},
+						"rules":    []any{map[string]any{"apiGroups": []any{""}, "resources": []any{"secrets"}, "verbs": []any{"*"}}}}},
 				map[string]any{"purpose": "rogue", "state": "NotInstalled", "object": map[string]any{
 					"apiVersion": "rbac.authorization.k8s.io/v1", "kind": "ClusterRoleBinding", "metadata": map[string]any{"name": "rogue"},
 					"roleRef": map[string]any{"apiGroup": "rbac.authorization.k8s.io", "kind": "ClusterRole", "name": "cluster-admin"}}},
@@ -147,6 +153,9 @@ func adminObjectsServer(t *testing.T) (*Server, *fakeCluster, func() map[string]
 	seen := map[string]applied{}
 	for _, ref := range adminobjects.Allowed("dotvirt") {
 		path := "/apis/" + ref.Group + "/" + ref.Version + "/" + ref.Resource + "/" + ref.Name
+		if ref.Namespace != "" {
+			path = "/apis/" + ref.Group + "/" + ref.Version + "/namespaces/" + ref.Namespace + "/" + ref.Resource + "/" + ref.Name
+		}
 		fc.on(http.MethodGet, path, func(w http.ResponseWriter, r *http.Request) {
 			if !adminOnly(w, r) {
 				return
