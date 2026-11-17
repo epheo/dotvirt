@@ -48,13 +48,16 @@ func (gitReads) Commit(project.ProjectInfo, string) (model.CommitDetail, error) 
 func (gitReads) Proposal(project.ProjectInfo, int) (model.ProposalDetail, error) {
 	return model.ProposalDetail{}, nil
 }
+func (gitReads) RevertPrune(auth.Identity, project.ProjectInfo, string) (model.PruneSet, error) {
+	return model.PruneSet{}, nil
+}
 
 // A repo holds every kind it declares, so a caller the apiserver would refuse
 // one of them is refused the repo.
 func TestRepoReadsNeedEveryDeclaredKind(t *testing.T) {
 	fc := newFakeCluster(t)
 	fc.readsVMs = tenantReadsTeamA
-	reads := []string{historyPath, historyPath + "?namespace=team-a-dev", historyPath + "/" + someCommit}
+	reads := []string{historyPath, historyPath + "?namespace=team-a-dev", historyPath + "/" + someCommit, historyPath + "/" + someCommit + "/prune"}
 
 	fc.serveKinds(model.KindNetpol, model.KindDV)
 	d := &planeDraft{kinds: []schema.GroupKind{declaresNP}}
@@ -72,6 +75,8 @@ func TestRepoReadsNeedEveryDeclaredKind(t *testing.T) {
 			t.Errorf("%s: admin got 403", path)
 		}
 	}
+	// Only a full hash, as every history route takes.
+	wantStatus(t, do(s, adminToken, http.MethodGet, historyPath+"/"+someCommit[:8]+"/prune", ""), http.StatusBadRequest)
 }
 
 // One namespace of a project opens that namespace's history; the whole repo
