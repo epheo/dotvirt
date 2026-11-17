@@ -74,8 +74,8 @@ What the guard closes:
   them, delegating at all or naming a forge application, its URLs or its secret;
 - carrying a Secret's value in a setting the console sends out (a webhook URL, a URL every
   browser loads) through the kubelet's `$(NAME)` expansion: no command, argument or env
-  value of the console's holds an unescaped `$(` (the operator renders every `$` as `$$`,
-  which the kubelet turns back into `$`);
+  value of the console's holds an unescaped `$(` (the operator doubles a `$` before a `$`
+  or a `(`, which the kubelet turns back into one);
 - binding the operator's claims to a volume, selector or data source of its choosing;
 - unmounting the console's token through its ServiceAccount;
 - leading the console's host anywhere but the console: its Service selects only the

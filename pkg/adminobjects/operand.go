@@ -235,5 +235,15 @@ func ConsoleSecretEnv(p Params) [][3]string {
 
 // KubeletLiteral is s as a container's env value or argument that the kubelet
 // hands the process unchanged: it expands $(NAME) there and turns $$ into $,
-// so every $ is doubled.
-func KubeletLiteral(s string) string { return strings.ReplaceAll(s, "$", "$$") }
+// so a $ before a $ or a ( is doubled. Any other $ stays as written, which
+// keeps a value without $( or $$ exactly what an earlier guard pinned.
+func KubeletLiteral(s string) string {
+	var b strings.Builder
+	for i := 0; i < len(s); i++ {
+		if s[i] == '$' && i+1 < len(s) && (s[i+1] == '$' || s[i+1] == '(') {
+			b.WriteByte('$')
+		}
+		b.WriteByte(s[i])
+	}
+	return b.String()
+}

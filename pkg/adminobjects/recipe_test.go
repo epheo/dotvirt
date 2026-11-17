@@ -102,11 +102,14 @@ func runRecipe(t *testing.T, fill string, env map[string]string) ([]map[string]a
 	return docs, stderr.String(), runErr
 }
 
-// fills are the fills an admin has here: sed always, envsubst where installed.
-func fills() []string {
+// fills are the fills an admin has here: sed always, envsubst where installed,
+// and always in CI, which must run the header's first form.
+func fills(t *testing.T) []string {
 	out := []string{"sed"}
 	if _, err := exec.LookPath("envsubst"); err == nil {
 		out = append(out, "envsubst")
+	} else if os.Getenv("GITHUB_ACTIONS") == "true" {
+		t.Fatal("no envsubst on this runner: the recipe's envsubst fill would go untested")
 	}
 	return out
 }
@@ -164,7 +167,7 @@ func TestRecipeAppliesTheConsolesRender(t *testing.T) {
 				env[k] = v
 			}
 		}
-		for _, fill := range fills() {
+		for _, fill := range fills(t) {
 			got, stderr, err := runRecipe(t, fill, env)
 			if err != nil {
 				t.Fatalf("%s, %s: %v\n%s", name, fill, err, stderr)

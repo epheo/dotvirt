@@ -522,43 +522,85 @@ func TestLookalikeImagesStayPinned(t *testing.T) {
 	}
 }
 
-// expand is the kubelet's reading of a container's env value or argument:
-// $$ is a $, $(NAME) is NAME's value when env holds it.
-func expand(s string, env map[string]string) string {
-	var b strings.Builder
-	for i := 0; i < len(s); i++ {
-		if s[i] != '$' || i+1 == len(s) {
-			b.WriteByte(s[i])
-			continue
-		}
-		switch s[i+1] {
-		case '$':
-			b.WriteByte('$')
-			i++
-		case '(':
-			end := strings.IndexByte(s[i+2:], ')')
-			if end < 0 {
-				b.WriteString(s[i:])
-				return b.String()
-			}
-			if v, ok := env[s[i+2:i+2+end]]; ok {
-				b.WriteString(v)
+// expand is the kubelet's expansion of a container's env value or argument
+// (k8s.io/kubernetes third_party/forked/golang/expansion, ported): $$ is a $,
+// $(NAME) is NAME's value, or kept as written when env lacks NAME.
+func expand(input string, env map[string]string) string {
+	var buf strings.Builder
+	checkpoint := 0
+	for cursor := 0; cursor < len(input); cursor++ {
+		if input[cursor] == '$' && cursor+1 < len(input) {
+			buf.WriteString(input[checkpoint:cursor])
+			read, isVar, advance := readVariableName(input[cursor+1:])
+			if isVar {
+				if v, ok := env[read]; ok {
+					buf.WriteString(v)
+				} else {
+					buf.WriteString("$(" + read + ")")
+				}
 			} else {
-				b.WriteString(s[i : i+3+end])
+				buf.WriteString(read)
 			}
-			i += 2 + end
-		default:
-			b.WriteByte('$')
+			cursor += advance
+			checkpoint = cursor + 1
 		}
 	}
-	return b.String()
+	return buf.String() + input[checkpoint:]
+}
+
+func readVariableName(input string) (string, bool, int) {
+	switch input[0] {
+	case '$':
+		return input[0:1], false, 1
+	case '(':
+		for i := 1; i < len(input); i++ {
+			if input[i] == ')' {
+				return input[1:i], true, i + 1
+			}
+		}
+		return "$(", false, 1
+	default:
+		return "$" + string(input[0]), false, 1
+	}
+}
+
+// Every string over $, (, ) and a letter, up to seven long: what the operator
+// renders through KubeletLiteral reaches the console as written, resolves no
+// reference, passes the guard's rule, and is unchanged when it holds neither
+// $( nor $$, as an earlier guard pinned it.
+func TestKubeletLiteralExhaustively(t *testing.T) {
+	env := map[string]string{"": "RESOLVED", "x": "RESOLVED", "x)": "RESOLVED"}
+	strs := []string{""}
+	for n := 1; n <= 7; n++ {
+		var next []string
+		for _, s := range strs {
+			if len(s) == n-1 {
+				for _, c := range []string{"$", "(", ")", "x"} {
+					next = append(next, s+c)
+				}
+			}
+		}
+		strs = append(strs, next...)
+	}
+	for _, s := range strs {
+		lit := KubeletLiteral(s)
+		if got := expand(lit, env); got != s {
+			t.Fatalf("%q renders %q, which reaches the console as %q", s, lit, got)
+		}
+		if strings.Contains(strings.ReplaceAll(lit, "$$", ""), "$(") {
+			t.Fatalf("%q renders %q, which the guard refuses", s, lit)
+		}
+		if !strings.Contains(s, "$(") && !strings.Contains(s, "$$") && lit != s {
+			t.Fatalf("%q renders %q, not as an earlier guard pinned it", s, lit)
+		}
+	}
 }
 
 // What the operator renders through KubeletLiteral reaches the console as an
 // admin wrote it, $(NAME) of a defined env included.
 func TestKubeletLiteralReachesTheConsoleAsWritten(t *testing.T) {
 	env := map[string]string{"beta": "B", "DOTVIRT_FORGE_CLIENT_SECRET": "secret"}
-	for _, s := range []string{"Acme $(beta)", "a$$b", "$$$(DOTVIRT_FORGE_CLIENT_SECRET)", "costs $5", "$", "$(", "plain"} {
+	for _, s := range []string{"Acme $(beta)", "a$$b", "$$$(DOTVIRT_FORGE_CLIENT_SECRET)", "costs $5", "https://idp.example/$tenant", "$", "$(", "plain"} {
 		if got := expand(KubeletLiteral(s), env); got != s {
 			t.Errorf("%q reaches the console as %q", s, got)
 		}

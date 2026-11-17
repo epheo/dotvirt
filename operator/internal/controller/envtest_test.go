@@ -1264,6 +1264,10 @@ func TestEnvtest(t *testing.T) {
 	// refreshed from the released asset at each release; a release that cannot
 	// pass it ships with a re-install note.
 	t.Run("the operand passes the previous release's guard", func(t *testing.T) {
+		// The previous guard pins the issuer raw; this release renders it
+		// as written when it holds neither $( nor $$, so an install with a
+		// $ in its issuer still rolls forward.
+		const dollarIssuer = "https://idp.example/$tenant"
 		raw, err := os.ReadFile(filepath.Join("testdata", "guard-previous.yaml"))
 		if err != nil {
 			t.Fatal(err)
@@ -1274,7 +1278,7 @@ func TestEnvtest(t *testing.T) {
 			"${ARGO_CONTROLLER}": "argocd-application-controller", "${SPEC_IMAGE}": "", "${FORGE_INSECURE_TLS}": "false",
 			"${RELATED_IMAGE_DOTVIRT}": "", "${RELATED_IMAGE_FORGEJO}": "", "${METRICS_URL}": "", "${METRICS_TENANCY_URL}": "", "${METRICS_CA}": "",
 			"${CONSOLE_HOST}": "", "${BRANDING_CONFIGMAP}": "", "${METRICS_CA_CONFIGMAP}": "", "${FORGE_SECRET}": adminobjects.DefaultForgeSecret,
-			"${FORGE_MANAGED}": "false", "${OIDC_SECRET}": "", "${OIDC_SECRET_KEY}": "", "${OIDC_ISSUER}": "",
+			"${FORGE_MANAGED}": "false", "${OIDC_SECRET}": "", "${OIDC_SECRET_KEY}": "", "${OIDC_ISSUER}": dollarIssuer,
 			"${FORGE_DELEGATED}": "false", "${FORGE_URL}": "", "${FORGE_CLIENT_ID}": "", "${FORGE_AUTHORIZE_URL}": "", "${FORGE_TOKEN_URL}": "",
 			"${FORGE_CLIENT_SECRET}": "", "${FORGE_CLIENT_SECRET_KEY}": "",
 		} {
@@ -1325,8 +1329,11 @@ func TestEnvtest(t *testing.T) {
 		if err := admin.Get(ctx, types.NamespacedName{Namespace: "dotvirt", Name: "x"}, dv); err != nil {
 			t.Fatal(err)
 		}
+		withIssuer := dv.DeepCopy()
+		withIssuer.Spec.Auth.OIDC = &dotvirtv1alpha1.OIDCSpec{IssuerURL: dollarIssuer, ClientID: "dotvirt"}
 		for _, o := range []client.Object{
 			install.Deployment(dv, "argocd", nil),
+			install.Deployment(withIssuer, "argocd", nil),
 			install.ForgejoDeployment(dv, false, "", ""),
 			install.DotvirtClusterRoleBinding(dv),
 			install.ArgocdApplyClusterRoleBinding(dv, "argocd", "argocd-application-controller", true, true),
