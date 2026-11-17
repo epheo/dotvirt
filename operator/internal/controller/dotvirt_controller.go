@@ -78,6 +78,10 @@ type DotvirtReconciler struct {
 	// their own says they became the install.
 	moved atomic.Bool
 	wake  chan event.GenericEvent
+	// hookRefusals remembers, per webhook and install, a forge's refusal and
+	// what it was met with (hookRefusal), so a refused registration is not
+	// asked again on every pass.
+	hookRefusals sync.Map
 
 	// probe is a test seam (not config): deps.Probe needs a live discovery
 	// endpoint, so tests stub it. nil = the real probe.
@@ -461,14 +465,20 @@ func (r *DotvirtReconciler) dryRunSkip(dv *dotvirtv1alpha1.Dotvirt, condType, wh
 // admin-supplied BYO secret, or the one the managed-Forgejo bootstrap minted) and
 // builds the app's shared forge client (pkg/forge) scoped to the platform repo.
 func (r *DotvirtReconciler) forgeClient(ctx context.Context, dv *dotvirtv1alpha1.Dotvirt) (*forge.Client, error) {
+	c, _, _, err := r.forgeClientToken(ctx, dv)
+	return c, err
+}
+
+// forgeClientToken is forgeClient plus the token and API base it was built with.
+func (r *DotvirtReconciler) forgeClientToken(ctx context.Context, dv *dotvirtv1alpha1.Dotvirt) (*forge.Client, string, string, error) {
 	name := install.ForgeSecretName(dv)
 	s, err := r.forgeSecret(ctx, dv)
 	if err != nil {
-		return nil, fmt.Errorf("read forge credentials %q: %w", name, err)
+		return nil, "", "", fmt.Errorf("read forge credentials %q: %w", name, err)
 	}
 	token := string(s.Data["token"])
 	if dv.Spec.Forge.URL == "" || token == "" {
-		return nil, fmt.Errorf("forge url (spec.forge.url) and a credential token (%s/token) are required", name)
+		return nil, "", "", fmt.Errorf("forge url (spec.forge.url) and a credential token (%s/token) are required", name)
 	}
 	// A managed forge is reached over its in-cluster Service (the operator pod may not
 	// route to the external Route); owner/repo still parse from the external platform
@@ -479,9 +489,9 @@ func (r *DotvirtReconciler) forgeClient(ctx context.Context, dv *dotvirtv1alpha1
 	}
 	c := forge.NewFactory(base, forge.StaticToken(token), dv.Spec.Forge.InsecureTLS, "").For(dv.Spec.Forge.PlatformRepo)
 	if c == nil {
-		return nil, fmt.Errorf("cannot parse platform repo URL %q", dv.Spec.Forge.PlatformRepo)
+		return nil, "", "", fmt.Errorf("cannot parse platform repo URL %q", dv.Spec.Forge.PlatformRepo)
 	}
-	return c, nil
+	return c, token, base, nil
 }
 
 // routeHost reads the spec.host an OpenShift Route carries: the explicit host, or the

@@ -20,11 +20,12 @@
 	const op = action({ toast: ui.toastError });
 
 	// The same render as a file, for an admin who applies it with kubectl: the
-	// command takes no data, so nothing passes through a shell.
+	// command takes no data, so nothing passes through a shell. A stale object
+	// is to remove, not to apply: it is not in the file.
 	const FILE = 'dotvirt-admin-objects.json';
 	const COMMAND = `kubectl apply --server-side --field-manager=dotvirt -f ${FILE}`;
 	function download() {
-		const items = (objects.data?.objects ?? []).map((o) => o.object);
+		const items = (objects.data?.objects ?? []).flatMap((o) => (o.object ? [o.object] : []));
 		const blob = new Blob([JSON.stringify({ apiVersion: 'v1', kind: 'List', items }, null, 2)], {
 			type: 'application/json',
 		});
@@ -55,7 +56,11 @@
 					<li>
 						{o.purpose}
 						<span class="text-xs"
-							>({o.state === 'Outdated' ? `differs: ${o.detail}` : 'missing'})</span
+							>({o.state === 'Outdated'
+								? `differs: ${o.detail}`
+								: o.state === 'Stale'
+									? `stale, ${o.detail}`
+									: 'missing'})</span
 						>
 					</li>
 				{/each}

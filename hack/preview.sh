@@ -30,17 +30,20 @@ trap restore EXIT   # preview is throwaway — never leave committed files chang
 echo ">> app  -> $REG/dotvirt:v$VERSION"
 build_push Containerfile . "$REG/dotvirt:v$VERSION" --build-arg VERSION="$VERSION"
 D_APP="$(digest "$REG/dotvirt:v$VERSION")"
+published "$REG/dotvirt" "$D_APP"
 repin "$REG/dotvirt" "$D_APP" operator/internal/install/dotvirt.go operator/config/manager/manager.yaml
 
 echo ">> operator -> $REG/dotvirt-operator:v$VERSION"
 build_push operator/Dockerfile . "$REG/dotvirt-operator:v$VERSION" --build-arg VERSION="$VERSION"
 D_OP="$(digest "$REG/dotvirt-operator:v$VERSION")"
+published "$REG/dotvirt-operator" "$D_OP"
 repin "$REG/dotvirt-operator" "$D_OP" "$CSV"
 sed -i -E "s#(digest: )sha256:[0-9a-f]{64}#\1${D_OP}#" operator/config/default/kustomization.yaml
 
 echo ">> bundle -> $REG/dotvirt-operator-bundle:v$VERSION"
 push_bundle
 D_BUNDLE="$(digest "$REG/dotvirt-operator-bundle:v$VERSION")"
+published "$REG/dotvirt-operator-bundle" "$D_BUNDLE"
 
 echo ">> catalog (stable-v0=v$REL_VER unchanged, candidate-v0=v$VERSION)"
 cat > "$TMPL" <<YAML
@@ -66,6 +69,7 @@ $(entry "$VERSION" "$REL_VER")
 YAML
 push_catalog
 D_CAT="$(digest "$REG/dotvirt-operator-catalog:v$VERSION")"
+published "$REG/dotvirt-operator-catalog" "$D_CAT"
 
 cat > operator/install/catalogsource-preview.yaml <<YAML
 # PREVIEW catalog (v$VERSION, candidate-v0 channel — stable-v0 stays v$REL_VER). Apply to a

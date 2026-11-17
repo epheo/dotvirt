@@ -243,9 +243,15 @@ func (r *DotvirtReconciler) argoWebhook(ctx context.Context, dv *dotvirtv1alpha1
 	if credentialRefused(dv) {
 		return metav1.ConditionUnknown, reasonCredentialWait, credentialWaitMessage
 	}
-	fc, err := r.forgeClient(ctx, dv)
+	fc, credKey, err := r.forgeAccess(ctx, dv)
 	if err != nil {
 		return failed(err)
+	}
+	// A refusal repeats on every pass, so it is held until the forge, the
+	// credential, the ArgoCD URL or the secret changes.
+	key := credKey + "|" + rc.argoNS + "|" + hookURL + "|" + fingerprint(value)
+	if ref, held := r.heldRefusal(dv, hookArgo, key); held {
+		return metav1.ConditionUnknown, ref.reason, ref.msg
 	}
 	// Registering the hook is best-effort, like the app's own webhook sweep
 	// (cmd/dotvirt logs and moves on): a transient forge hiccup here must not read as a
@@ -253,9 +259,24 @@ func (r *DotvirtReconciler) argoWebhook(ctx context.Context, dv *dotvirtv1alpha1
 	// and report unconfigured so the next reconcile retries. The secret/credential steps
 	// above stay hard errors - those are operator-internal, not forge-transient.
 	if err := fc.EnsureOrgPushWebhook(hookURL, value); err != nil {
+		if forge.Refused(err) {
+			also := fmt.Sprintf(", which the operator also sets in %s/%s key %s", rc.argoNS, install.ArgoSecretName, install.ArgoWebhookKey)
+			return r.refused(dv, fc, err, key, hookSpec{
+				kind: hookArgo, url: hookURL, events: "push only", secret: install.ArgoWebhookSecretName, also: also,
+				changes:  []string{"the webhook secret", "the ArgoCD URL or namespace"},
+				fallback: "Argo falls back to its poll meanwhile.",
+				perRepo: fmt.Sprintf("create a Forgejo (Gitea) webhook on each project repo, or a system hook: URL %s, content type application/json, push events only, secret the value of Secret %s/%s key \"secret\" (%s)%s. Argo falls back to its poll meanwhile.",
+					hookURL, dv.Namespace, install.ArgoWebhookSecretName, extractCommand(dv, install.ArgoWebhookSecretName), also),
+				outage: func(err error) (metav1.ConditionStatus, string, string) {
+					logf.FromContext(ctx).Info("argo webhook owner lookup failed; ArgoCD poll backstops", "error", err.Error())
+					return notRegistered()
+				},
+			})
+		}
 		logf.FromContext(ctx).Info("argo webhook registration deferred; ArgoCD poll backstops", "error", err.Error())
 		return notRegistered()
 	}
+	r.dropRefusal(dv, hookArgo)
 	return metav1.ConditionTrue, "Registered", "org webhook -> ArgoCD"
 }
 

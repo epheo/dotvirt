@@ -58,8 +58,9 @@
 #   export BRANDING_CONFIGMAP="$(spec branding.configMap)" METRICS_CA_CONFIGMAP="$(spec metrics.ca.name)"
 #   FORGE_SECRET="$(spec forge.credentialsSecret)"; export FORGE_SECRET="${FORGE_SECRET:-dotvirt-forge}"
 #   export FORGE_MANAGED="$( [ "$(spec forge.managed)" = true ] && echo true || echo false )"
-#   # The OIDC client secret an admin chose, if any:
+#   # The OIDC issuer and client secret an admin chose, if any:
 #   export OIDC_SECRET="$(spec auth.oidc.clientSecret.name)" OIDC_SECRET_KEY="$(spec auth.oidc.clientSecret.key)"
+#   export OIDC_ISSUER="$(spec auth.oidc.issuerURL)"
 #
 #   envsubst < guard.yaml | kubectl apply --server-side --field-manager=dotvirt -f -
 #
@@ -72,7 +73,8 @@
 #     -e "s|\${METRICS_CA}|$METRICS_CA|g" -e "s|\${CONSOLE_HOST}|$CONSOLE_HOST|g" \
 #     -e "s|\${BRANDING_CONFIGMAP}|$BRANDING_CONFIGMAP|g" -e "s|\${METRICS_CA_CONFIGMAP}|$METRICS_CA_CONFIGMAP|g" \
 #     -e "s|\${FORGE_SECRET}|$FORGE_SECRET|g" -e "s|\${FORGE_MANAGED}|$FORGE_MANAGED|g" \
-#     -e "s|\${OIDC_SECRET}|$OIDC_SECRET|g" -e "s|\${OIDC_SECRET_KEY}|$OIDC_SECRET_KEY|g" guard.yaml | kubectl apply --server-side --field-manager=dotvirt -f -
+#     -e "s|\${OIDC_SECRET}|$OIDC_SECRET|g" -e "s|\${OIDC_SECRET_KEY}|$OIDC_SECRET_KEY|g" \
+#     -e "s|\${OIDC_ISSUER}|$OIDC_ISSUER|g" guard.yaml | kubectl apply --server-side --field-manager=dotvirt -f -
 #
 # Every object carries the label app.kubernetes.io/part-of=dotvirt-operator-guard.
 #
@@ -235,7 +237,11 @@ spec:
       (!has(c.args) || c.args.all(a, !(a == "-ui-origin" || a == "--ui-origin" ||
       a.startsWith("-ui-origin=") || a.startsWith("--ui-origin=")) || a in ["-ui-origin=",
       "--ui-origin="])) && (!has(c.env) || c.env.all(e, e.name != "DOTVIRT_UI_ORIGIN"
-      || (!has(e.valueFrom) && (has(e.value) ? e.value : "") in [""]))) && (${FORGE_INSECURE_TLS}
+      || (!has(e.valueFrom) && (has(e.value) ? e.value : "") in [""]))) && (!has(c.args)
+      || c.args.all(a, !(a == "-oidc-issuer" || a == "--oidc-issuer" || a.startsWith("-oidc-issuer=")
+      || a.startsWith("--oidc-issuer=")) || a in ["-oidc-issuer=${OIDC_ISSUER}", "--oidc-issuer=${OIDC_ISSUER}"]))
+      && (!has(c.env) || c.env.all(e, e.name != "DOTVIRT_OIDC_ISSUER" || (!has(e.valueFrom)
+      && (has(e.value) ? e.value : "") in ["${OIDC_ISSUER}"]))) && (${FORGE_INSECURE_TLS}
       || ((!has(c.args) || c.args.all(a, !(a == "-insecure-tls" || a == "--insecure-tls"
       || a.startsWith("-insecure-tls=") || a.startsWith("--insecure-tls=")))) && (!has(c.env)
       || c.env.all(e, e.name != "DOTVIRT_INSECURE_TLS")))) && (!has(c.args) || c.args.all(a,
@@ -307,17 +313,17 @@ spec:
       e.valueFrom.secretKeyRef.name == "dotvirt-forgejo-admin")))) && (!has(object.spec.template.spec.initContainers)
       || object.spec.template.spec.initContainers.all(c, (!has(c.envFrom) || c.envFrom.all(e,
       !has(e.secretRef))) && (!has(c.env) || c.env.all(e, !has(e.valueFrom) || !has(e.valueFrom.secretKeyRef)
-      || (has(e.valueFrom.secretKeyRef.name) && e.valueFrom.secretKeyRef.name == "dotvirt-forgejo-admin"))))))
-      && (!has(object.spec.template.spec.volumes) || object.spec.template.spec.volumes.all(v,
-      !has(v.secret) && !has(v.projected) && !has(v.csi)))))
+      || (has(e.valueFrom.secretKeyRef.name) && e.valueFrom.secretKeyRef.name == "dotvirt-forgejo-admin"))))))))
     message: the operator gives the forge no Secret but its own admin password (dotvirt
       operator guard)
     reason: Forbidden
   - expression: request.resource.resource != "deployments" || (object.metadata.name
       != "dotvirt-forgejo" || !has(object.spec.template.spec.volumes) || object.spec.template.spec.volumes.all(v,
-      !has(v.ephemeral) && (!has(v.persistentVolumeClaim) || v.persistentVolumeClaim.claimName
-      == "dotvirt-forgejo-data")))
-    message: the operator gives the forge only its own claim (dotvirt operator guard)
+      (has(v.persistentVolumeClaim) && v.persistentVolumeClaim.claimName == "dotvirt-forgejo-data")
+      || has(v.emptyDir) || (has(v.configMap) && has(v.configMap.name) && v.configMap.name
+      == "dotvirt-ingress-ca")))
+    message: the operator gives the forge only its own claim, a scratch directory
+      and the router CA (dotvirt operator guard)
     reason: Forbidden
   - expression: request.resource.resource != "deployments" || (object.metadata.name
       != "dotvirt" || object.spec.template.spec.containers.all(c, !has(c.env) || c.env.all(e,

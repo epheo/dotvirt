@@ -221,9 +221,10 @@ type AdminObject struct {
 	Name      string `json:"name"`
 	Namespace string `json:"namespace,omitempty"`
 	// State is NotInstalled, Outdated or Installed; Detail says what differs,
-	// so installing over another admin's change is a choice.
+	// so installing over another admin's change is a choice. Stale is an object
+	// the install no longer asks for, still there: Detail says how to remove it.
 	State  string `json:"state"`
 	Detail string `json:"detail,omitempty"`
-	// Object is the console's render, which an install applies.
-	Object map[string]any `json:"object"`
+	// Object is the console's render, which an install applies; none for Stale.
+	Object map[string]any `json:"object,omitempty"`
 }

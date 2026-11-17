@@ -40,6 +40,12 @@ rights allow. The console renders them from what the admin's token reads, never 
 anything the operator writes; the operator holds no right to create, change or delete
 them. Until an admin installs them, nothing below is enforced.
 
+The operator's role names only its own Secrets. A forge credential an admin names
+(`spec.forge.credentialsSecret`) is granted the same way: a Role and RoleBinding
+`dotvirt-forge-credential` in the install namespace, on that one Secret, rendered by the
+console from the install's spec and installed under the admin's token; the operator
+cannot grant it to itself.
+
 What the guard closes:
 - minting a ServiceAccount token through a Secret, and writing Secrets outside the
   install and ArgoCD namespaces;
@@ -52,13 +58,17 @@ What the guard closes:
   from the claim, ConfigMaps and Secret rendered or an admin chose, each mounted whole at
   its own path;
 - giving the forge any Secret but its admin password, by env, `envFrom` or volume, or any
-  claim but its own;
+  volume but its own claim, a scratch directory and the router CA: no network volume
+  (NFS, iSCSI, RBD, CephFS and the like), which would reach any export the nodes can;
 - giving the console any Secret it was not rendered with: the kubelet resolves any Secret
   in the namespace a pod names, whatever the operator may read, and the console sends
   some env out (the forge token, to the forge URL). Each Secret-backed env is pinned
   whole, by env name, Secret and key: the console's own, the forge credential, and the
   OIDC client secret an admin chose;
 - sending a forge credential an admin brought anywhere but the URL its Secret names;
+- sending the OIDC client secret an admin chose to an issuer the admin did not name: the
+  console's issuer is `spec.auth.oidc.issuerURL`, whose token endpoint receives that
+  secret at every sign-in;
 - binding the operator's claims to a volume, selector or data source of its choosing;
 - unmounting the console's token through its ServiceAccount;
 - leading the console's host anywhere but the console: its Service selects only the
@@ -88,9 +98,8 @@ is named and redirected from the install, never from the console's environment.
 
 What stays open:
 - the console's other configuration the operator writes as flags or `DOTVIRT_*` env,
-  among them the OIDC issuer, which allows phishing an admin's credentials at a page of
-  the operator's choosing, and the image upload proxy, which receives the upload tokens
-  the console mints for each upload;
+  among them the image upload proxy, which receives the upload tokens the console mints
+  for each upload;
 - the `oc apply` command in `status.ssoOAuthClient`, which the operator writes: review
   its redirect before running it, or use Finish SSO;
 - an older official release: any tag or digest in the official repositories passes,
@@ -108,6 +117,38 @@ What stays open:
   guard pins;
 - the Route rules hold only where the apiserver serving Routes evaluates admission
   policies; verify it on each platform.
+
+### Image signatures
+
+Every image CI pushes is signed with sigstore, keyless under the workflow that built
+it, and by the key whose public half is `operator/install/cosign.pub`. A cluster that
+enforces those signatures refuses a tampered dotvirt operator or console image before
+it runs; the operator README (Image signatures) gives the identities, `cosign verify`,
+and the OpenShift and Kubernetes policies. A signature proves only that dotvirt's own
+workflow built the image: it cannot vouch for that workflow's inputs or for who may
+push a release tag.
+
+## Image signing key
+
+- **What it accepts:** one key signs releases, release candidates and the per-commit
+  app images from main, so a policy on it admits all three. A release-only policy needs
+  a second key held only by release.yaml; until then, the keyless identities tell them
+  apart.
+- **Custody:** the private key is the `COSIGN_PRIVATE_KEY` secret (with
+  `COSIGN_PASSWORD`) of the `QUAY` GitHub environment, read only by the jobs that sign,
+  never by the build. The maintainer keeps an encrypted offline backup.
+- **Rotation:**
+  1. Generate a new pair; replace the environment secrets and commit the new
+     `operator/install/cosign.pub`.
+  2. Re-sign the four image digests of every supported release with the new key before
+     announcing it (`cosign sign --yes --recursive --new-bundle-format=false
+     --use-signing-config=false --key <new key> <image>@<digest>`). OpenShift's
+     `PublicKey` policy holds one `keyData`, so the switch is a cutover: an image signed
+     only by the old key is refused on its next pull once an admin moves `keyData` to
+     the new key.
+  3. Admins then update `keyData` in their ClusterImagePolicy.
+- **Compromise:** rotate as above, and treat images signed by the old key after the
+  suspected exposure as untrusted.
 
 ## Supported versions
 

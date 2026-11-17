@@ -8,7 +8,7 @@ description: Pinned, sha256-verified and cached CI tools from hack/versions.env
 inputs:
   tools:
     description: >-
-      Space-separated: operator-sdk, opm, kind, golangci-lint (onto PATH), olm
+      Space-separated: operator-sdk, opm, kind, golangci-lint, cosign (onto PATH), olm
       ($RUNNER_TEMP/tools/olm/{crds,olm}.yaml), envtest ($RUNNER_TEMP/tools/envtest)
     required: true
 runs:
@@ -58,6 +58,9 @@ runs:
             v="${GOLANGCI_LINT_VERSION#v}"
             get golangci-lint.tar.gz "$GOLANGCI_LINT_SHA256" "$rel/golangci/golangci-lint/releases/download/$GOLANGCI_LINT_VERSION/golangci-lint-$v-linux-amd64.tar.gz"
             tar -xzf golangci-lint.tar.gz -C "$out/bin" --strip-components=1 "golangci-lint-$v-linux-amd64/golangci-lint" ;;
+          cosign)
+            get cosign "$COSIGN_SHA256" "$rel/sigstore/cosign/releases/download/$COSIGN_VERSION/cosign-linux-amd64"
+            install -m 0755 cosign "$out/bin/" ;;
           olm)
             u="$rel/operator-framework/operator-lifecycle-manager/releases/download/v$OLM_VERSION"
             get olm-crds.yaml "$OLM_CRDS_SHA256" "$u/crds.yaml"

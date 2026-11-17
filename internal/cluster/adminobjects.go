@@ -11,6 +11,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/apimachinery/pkg/types"
 
 	"github.com/epheo/dotvirt/pkg/adminobjects"
 )
@@ -21,6 +22,10 @@ var dotvirtsGVR = schema.GroupVersionResource{Group: "dotvirt.io", Version: "v1a
 // namespace and controller, whether forge TLS goes unverified, and where
 // metrics queries go.
 type InstallSpec struct {
+	// Name and UID are the install resource's, which owns what is rendered for
+	// it alone.
+	Name                                 string
+	UID                                  types.UID
 	Image, ArgoNamespace, ArgoController string
 	InsecureTLS                          bool
 	MetricsURL, MetricsTenancyURL        string
@@ -30,8 +35,9 @@ type InstallSpec struct {
 	// ConfigMaps, and the forge credential Secret (empty: the default).
 	BrandingConfigMap, MetricsCAConfigMap, ForgeCredentials string
 	ForgeManaged                                            bool
-	// OIDCSecret and OIDCSecretKey are the OIDC client secret an admin chose.
-	OIDCSecret, OIDCSecretKey string
+	// OIDCSecret and OIDCSecretKey are the OIDC client secret an admin chose,
+	// OIDCIssuer the issuer it is sent to.
+	OIDCSecret, OIDCSecretKey, OIDCIssuer string
 }
 
 // InstallIn reads, under THIS client's identity, the one install in
@@ -45,7 +51,7 @@ func (c *Client) InstallIn(ctx context.Context, namespace string) (InstallSpec, 
 		return InstallSpec{}, fmt.Errorf("%d Dotvirt resources in %s, want exactly one", len(list.Items), namespace)
 	}
 	o := list.Items[0].Object
-	var out InstallSpec
+	out := InstallSpec{Name: list.Items[0].GetName(), UID: list.Items[0].GetUID()}
 	out.Image, _, _ = unstructured.NestedString(o, "spec", "image")
 	out.ArgoNamespace, _, _ = unstructured.NestedString(o, "spec", "argocd", "namespace")
 	out.ArgoController, _, _ = unstructured.NestedString(o, "spec", "argocd", "controllerServiceAccount")
@@ -60,6 +66,7 @@ func (c *Client) InstallIn(ctx context.Context, namespace string) (InstallSpec, 
 	out.ForgeManaged, _, _ = unstructured.NestedBool(o, "spec", "forge", "managed")
 	out.OIDCSecret, _, _ = unstructured.NestedString(o, "spec", "auth", "oidc", "clientSecret", "name")
 	out.OIDCSecretKey, _, _ = unstructured.NestedString(o, "spec", "auth", "oidc", "clientSecret", "key")
+	out.OIDCIssuer, _, _ = unstructured.NestedString(o, "spec", "auth", "oidc", "issuerURL")
 	return out, nil
 }
 
