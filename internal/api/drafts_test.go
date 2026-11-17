@@ -79,7 +79,7 @@ func newDraftsRig(t *testing.T, platformMissing bool) *draftsRig {
 // stray is what ArgoCD is about to prune, per repo.
 type stray map[string][]model.ObjectRef
 
-func (s stray) PrunePending(repo, _ string) []model.ObjectRef { return s[repo] }
+func (s stray) PrunePending(repo string) ([]model.ObjectRef, bool) { return s[repo], true }
 
 // stage puts one removal into user's draft of project, as any route would.
 func (g *draftsRig) stage(t *testing.T, user, project string) {
@@ -174,9 +174,10 @@ func TestDraftsAnswerEveryDraftOfTheCaller(t *testing.T) {
 
 // After a platform-repo loss, the platform app holds every object it tracks
 // and any platform merge prunes them all. Every caller reaching the platform
-// lane is warned of all of them: named to a platform reader, counted to a
-// holder without platform read, so the warning neither hides the blast radius
-// nor names what the caller's RBAC does not show.
+// lane is warned of all of them, each named only to a caller who may list it
+// where it lives: the reader lists namespaces, not RoleBindings, and the
+// holder lists neither. A repo-wide read verdict would answer from what git
+// declares, which is exactly what these objects no longer are.
 func TestPlatformPruneWarnsEveryCallerOfTheWholeRepo(t *testing.T) {
 	g := newDraftsRig(t, false)
 	g.stray[g.repo[platformProjectName]] = []model.ObjectRef{
@@ -194,8 +195,8 @@ func TestPlatformPruneWarnsEveryCallerOfTheWholeRepo(t *testing.T) {
 		t.Fatalf("%s: no platform lane", user)
 		return model.DraftView{}
 	}
-	if v := lane("reader"); len(v.Prune) != 2 || v.PruneHidden != 0 || !strings.Contains(v.Warning, "Namespace team-b-dev") {
-		t.Errorf("reader: %+v, want both objects named", v)
+	if v := lane("reader"); len(v.Prune) != 1 || v.Prune[0].Kind != "Namespace" || v.PruneHidden != 1 || strings.Contains(v.Warning, "admins") {
+		t.Errorf("reader: %+v, want the Namespace named and the RoleBinding counted", v)
 	}
 	if v := lane("holder"); len(v.Prune) != 0 || v.PruneHidden != 2 || strings.Contains(v.Warning, "team-b") {
 		t.Errorf("holder: %+v, want 2 counted and none named", v)

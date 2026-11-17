@@ -73,9 +73,9 @@ type Authorizer interface {
 	// snapshot has listed the project namespaces: before that every namespace
 	// would read as no project's.
 	ProjectNamespace(namespace string) (project, known bool)
-	// ReadsPlatform reports whether id reads the platform repo, so may be told
-	// by name of everything a platform merge deletes. A failed review is false.
-	ReadsPlatform(id auth.Identity) bool
+	// Tellable is those of refs id may be told of by name: what its RBAC
+	// would show it in Kubernetes. A failed review tells none.
+	Tellable(id auth.Identity, refs []model.ObjectRef) []model.ObjectRef
 }
 
 // UseAuthorizer attaches the caller's RBAC to every stage, propose, restore

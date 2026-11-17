@@ -483,12 +483,19 @@ export interface VolumeMigration {
 }
 /**
  * ProposeRequest is the body of a propose: PR title + description, and the
- * prune the caller acknowledged as the review showed it (DraftView.Prune,
- * PruneHidden). Propose refuses a merge that would now delete beyond it.
+ * prune the caller acknowledged.
  */
 export interface ProposeRequest {
   title: string;
   message: string;
+  PruneAck: PruneAck;
+}
+/**
+ * PruneAck is the prune a caller acknowledged, as the review showed it
+ * (DraftView.Prune, PruneHidden): a propose or revert that would now delete
+ * beyond it is refused.
+ */
+export interface PruneAck {
   prune?: ObjectRef[];
   pruneHidden?: number /* int */;
 }

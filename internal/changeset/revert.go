@@ -21,8 +21,9 @@ import (
 // included, so the reviewer sees what merging it does today. Only a commit of
 // base reverts, and each file it restores passes the gate against what base
 // holds now: what the revert creates, changes or removes there is what the
-// caller must be allowed to.
-func (c *Coordinator) Revert(id auth.Identity, proj project.ProjectInfo, hash string) (model.ProposeResult, error) {
+// caller must be allowed to. Its merge prunes like any other: what Argo would
+// delete beyond the revert's own restores needs ack, and the PR body says it.
+func (c *Coordinator) Revert(id auth.Identity, proj project.ProjectInfo, hash string, ack model.PruneAck) (model.ProposeResult, error) {
 	read, write, err := c.write(proj)
 	if err != nil {
 		return model.ProposeResult{}, err
@@ -48,6 +49,16 @@ func (c *Coordinator) Revert(id auth.Identity, proj project.ProjectInfo, hash st
 	if err := c.authorize(id, need); err != nil {
 		return model.ProposeResult{}, err
 	}
+	var restored []model.ObjectRef
+	for _, it := range items {
+		if !it.Delete {
+			restored = append(restored, declaredRefs(it.Path, it.NewContent)...)
+		}
+	}
+	p := c.pruning(id, proj, restored)
+	if err := p.refuse(ack); err != nil {
+		return model.ProposeResult{}, err
+	}
 	h, err := c.hand(id, proj, write)
 	if err != nil {
 		return model.ProposeResult{}, err
@@ -62,6 +73,7 @@ func (c *Coordinator) Revert(id auth.Identity, proj project.ProjectInfo, hash st
 	title := fmt.Sprintf("Revert %q (%s)", d.Commit.Title, ref)
 	view := model.DraftView{Items: commitItems(c.revertFiles(read, items))}
 	view.Warning, _ = c.revertState(read, d.Files)
+	view.Warning = JoinWarning(view.Warning, pruneWarning(p.shown, p.hidden))
 	body := prBody(view, fmt.Sprintf("Reverts commit %s, %q.", short, d.Commit.Title), id.Username, c.productName())
 
 	fc := h.fc

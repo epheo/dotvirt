@@ -43,7 +43,9 @@
 			Delete {total === 1 ? 'it' : `these ${total}`} when this merges
 		</label>
 		<span class="text-xs text-ink-soft"
-			>Not meant to go? Adopt {total === 1 ? 'it' : 'them'} into git before proposing.</span
+			>Not meant to go? Adopt {total === 1 ? 'it' : 'them'} into git before proposing{hidden
+				? '; the ones outside your view need a project member who can see them'
+				: ''}.</span
 		>
 	</div>
 </div>

@@ -485,8 +485,16 @@ func (s *Server) handleRevert(w http.ResponseWriter, r *http.Request) {
 	if !ok || !s.gateRepo(w, r, sc, "") {
 		return
 	}
-	hash, ok := hashBody(w, r)
+	req, ok := decode[struct {
+		Hash string `json:"hash"`
+		model.PruneAck
+	}](w, r)
 	if !ok {
+		return
+	}
+	hash := req.Hash
+	if !commitHash.MatchString(hash) {
+		fail(w, invalid(errors.New("commit hash must be the full 40-character hash")))
 		return
 	}
 	if sc.proj.Name != platformProjectName {
@@ -499,7 +507,7 @@ func (s *Server) handleRevert(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	result, err := s.draft.Revert(sc.id, sc.proj, hash)
+	result, err := s.draft.Revert(sc.id, sc.proj, hash, req.PruneAck)
 	if err == nil {
 		s.proposalOpened(sc)
 	}

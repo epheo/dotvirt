@@ -23,10 +23,10 @@ import (
 // who may make it.
 type allowAll struct{}
 
-func (allowAll) Authorize(auth.Identity, []Access) error { return nil }
-func (allowAll) ClusterScoped(string, string) bool       { return false }
-func (allowAll) ProjectNamespace(string) (bool, bool)    { return false, true }
-func (allowAll) ReadsPlatform(auth.Identity) bool        { return true }
+func (allowAll) Authorize(auth.Identity, []Access) error                            { return nil }
+func (allowAll) ClusterScoped(string, string) bool                                  { return false }
+func (allowAll) ProjectNamespace(string) (bool, bool)                               { return false, true }
+func (allowAll) Tellable(_ auth.Identity, refs []model.ObjectRef) []model.ObjectRef { return refs }
 
 // rbac grants every access deny does not, recording what it was asked.
 type rbac struct {
@@ -35,8 +35,8 @@ type rbac struct {
 	asked []Access
 }
 
-func (*rbac) ClusterScoped(string, string) bool { return false }
-func (*rbac) ReadsPlatform(auth.Identity) bool  { return false }
+func (*rbac) ClusterScoped(string, string) bool                           { return false }
+func (*rbac) Tellable(auth.Identity, []model.ObjectRef) []model.ObjectRef { return nil }
 
 // ProjectNamespace reads the test projects' namespaces: alpha, beta, gamma.
 func (*rbac) ProjectNamespace(ns string) (bool, bool) {
@@ -411,10 +411,10 @@ func TestPlatformRevertByATemplateCurator(t *testing.T) {
 	c.UseAuthorizer(&rbac{deny: curator})
 	id := auth.Identity{Username: "carol"}
 	plat := project.ProjectInfo{Name: project.PlatformName, Repo: bare}
-	if _, err := c.Revert(id, plat, network); !errors.Is(err, model.ErrForbidden) {
+	if _, err := c.Revert(id, plat, network, model.PruneAck{}); !errors.Is(err, model.ErrForbidden) {
 		t.Errorf("reverting a network: err = %v, want ErrForbidden", err)
 	}
-	if _, err := c.Revert(id, plat, library); err != nil {
+	if _, err := c.Revert(id, plat, library, model.PruneAck{}); err != nil {
 		t.Errorf("reverting a template: %v", err)
 	}
 }

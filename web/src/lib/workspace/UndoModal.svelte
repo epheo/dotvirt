@@ -2,12 +2,13 @@
 	import { TriangleAlert } from '@lucide/svelte';
 	import { api, type Commit, type ProposeResult } from '#lib/api.js';
 	import { action } from '#lib/resource.svelte.js';
-	import { drafts } from '#lib/state/drafts.svelte.js';
+	import { drafts, pruneKey, pruneTotal } from '#lib/state/drafts.svelte.js';
 	import Button from '#lib/components/Button.svelte';
 	import ErrorNote from '#lib/components/ErrorNote.svelte';
 	import Modal from '#lib/components/Modal.svelte';
 	import NextStepButton from '#lib/components/NextStepButton.svelte';
 	import Note from '#lib/components/Note.svelte';
+	import PruneAck from '#lib/components/PruneAck.svelte';
 
 	// Undo asks once, in the app's confirm dialog, then opens the forward-commit
 	// pull request. Nothing changes until that PR merges.
@@ -29,10 +30,25 @@
 		onreverted: (r: ProposeResult) => void;
 	} = $props();
 
+	// Its merge prunes like any other: what the project's lane says Argo would
+	// delete needs the same yes, held to the set it was given to.
+	const lane = $derived(drafts.drafts.find((d) => d.project === project)?.draft);
+	const prune = $derived(lane?.prune ?? []);
+	const pruneHidden = $derived(lane?.pruneHidden ?? 0);
+	const pruning = $derived(pruneTotal(lane) > 0);
+	let ack = $state(false);
+	const acked = $derived(pruneKey(lane));
+	$effect(() => {
+		void acked;
+		ack = false;
+	});
+
 	const op = action();
 	async function undo() {
-		if (op.busy) return;
-		const ok = await op.run(async () => onreverted(await api.revert(project, hash)));
+		if (op.busy || (pruning && !ack)) return;
+		const ok = await op.run(async () =>
+			onreverted(await api.revert(project, hash, pruning ? { prune, pruneHidden } : undefined)),
+		);
 		if (ok) onclose();
 		drafts.refresh();
 	}
@@ -55,12 +71,13 @@
 				<span>{warning}</span>
 			</Note>
 		{/if}
+		{#if pruning}<PruneAck {prune} hidden={pruneHidden} bind:ack />{/if}
 		<ErrorNote error={op.error} />
 		<NextStepButton next={op.next} {project} />
 	</div>
 	{#snippet footer()}
 		<Button variant="secondary" class="ml-auto" onclick={onclose}>Cancel</Button>
-		<Button variant="danger" onclick={undo} disabled={op.busy}>
+		<Button variant="danger" onclick={undo} disabled={op.busy || (pruning && !ack)}>
 			{op.busy ? 'Opening...' : 'Open pull request'}
 		</Button>
 	{/snippet}

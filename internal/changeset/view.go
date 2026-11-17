@@ -81,8 +81,9 @@ func (c *Coordinator) Holds(id auth.Identity, proj project.ProjectInfo) (bool, e
 // render is entries as the draft view renders them against the base branch.
 func (c *Coordinator) render(id auth.Identity, proj project.ProjectInfo, entries []draft.Entry) (model.DraftView, error) {
 	view := model.DraftView{Base: c.baseBranch, Branch: c.proposedBranch(id.Username, proj.Name), Count: len(entries), Items: []model.DraftItem{}}
-	view.Prune, view.PruneHidden = c.prunePending(id, proj, entries)
-	view.Warning = pruneWarning(view.Prune, view.PruneHidden)
+	p := c.pruning(id, proj, coveredBy(entries))
+	view.Prune, view.PruneHidden = p.shown, p.hidden
+	view.Warning = pruneWarning(p.shown, p.hidden)
 	if len(entries) == 0 {
 		return view, nil
 	}
@@ -171,51 +172,61 @@ func wizardChanges(e draft.Entry) []model.Change {
 	return createChanges(docs.order[0])
 }
 
-// prunePending: what a merge lets ArgoCD delete, from Argo's own requiresPruning
-// minus what the draft speaks for, over the whole project whatever part of it
-// id sees: the merge prunes the rest too. shown is what id may be told by name;
-// hidden counts the others. Derived every render, never stored: a stored
-// warning outlived the state and read partial captures as complete.
-func (c *Coordinator) prunePending(id auth.Identity, proj project.ProjectInfo, entries []draft.Entry) (shown []model.ObjectRef, hidden int) {
-	if c.prune == nil {
-		return nil, 0
-	}
-	pending := c.prune.PrunePending(proj.Repo, proj.Path)
-	if len(pending) == 0 {
-		return nil, 0
-	}
-	covered := map[model.ObjectRef]bool{}
-	for _, e := range entries {
-		for _, ref := range entryRefs(e) {
-			covered[ref] = true
-		}
-	}
-	var tells func(model.ObjectRef) bool
-	for _, ref := range pending {
-		if covered[ref] {
-			continue
-		}
-		if tells == nil {
-			tells = c.tells(id, proj)
-		}
-		if tells(ref) {
-			shown = append(shown, ref)
-		} else {
-			hidden++
-		}
-	}
-	return shown, hidden
+// pruning is what a merge lets ArgoCD delete beyond the change's own
+// deletions: Argo's own requiresPruning for every app on the repo, minus what
+// the change speaks for, whatever part of it id sees, since the merge prunes
+// the rest too. shown is what id may be told by name (Authorizer.Tellable);
+// hidden counts the others. known is false while Argo's view has not loaded.
+// Derived on every read, never stored: a stored warning outlived the state and
+// read partial captures as complete.
+type pruning struct {
+	shown  []model.ObjectRef
+	hidden int
+	known  bool
 }
 
-// tells is what id may be told of proj's pending prune by name: of a tenant
-// project, its objects in the namespaces id sees (proj as id resolves it); of
-// the platform tier, everything to a platform reader and nothing otherwise.
-func (c *Coordinator) tells(id auth.Identity, proj project.ProjectInfo) func(model.ObjectRef) bool {
-	if proj.Name == project.PlatformName {
-		reads := c.authz != nil && c.authz.ReadsPlatform(id)
-		return func(model.ObjectRef) bool { return reads }
+func (c *Coordinator) pruning(id auth.Identity, proj project.ProjectInfo, covered []model.ObjectRef) pruning {
+	if c.prune == nil {
+		return pruning{known: true}
 	}
-	return func(ref model.ObjectRef) bool { return slices.Contains(proj.Namespaces, ref.Namespace) }
+	pending, known := c.prune.PrunePending(proj.Repo)
+	if !known {
+		return pruning{}
+	}
+	var missing []model.ObjectRef
+	for _, ref := range pending {
+		if !slices.Contains(covered, ref) {
+			missing = append(missing, ref)
+		}
+	}
+	p := pruning{known: true}
+	if len(missing) > 0 && c.authz != nil {
+		p.shown = c.authz.Tellable(id, missing)
+	}
+	p.hidden = max(len(missing)-len(p.shown), 0)
+	return p
+}
+
+// refuse is why a change acknowledging ack must not be proposed: Argo's view
+// not loaded, or a merge that would now delete beyond ack. The review's yes is
+// only as good as the set it was given.
+func (p pruning) refuse(ack model.PruneAck) error {
+	if !p.known {
+		return fmt.Errorf("%w: what merging deletes is not known yet, as ArgoCD's view has not loaded; nothing was pushed, so try again in a moment", model.ErrUnavailable)
+	}
+	if p.hidden > ack.PruneHidden || slices.ContainsFunc(p.shown, func(ref model.ObjectRef) bool { return !slices.Contains(ack.Prune, ref) }) {
+		return fmt.Errorf("%w: merging this now deletes objects the review did not list; review it again before proposing", model.ErrConflict)
+	}
+	return nil
+}
+
+// coveredBy is what entries speak for (entryRefs).
+func coveredBy(entries []draft.Entry) []model.ObjectRef {
+	var out []model.ObjectRef
+	for _, e := range entries {
+		out = append(out, entryRefs(e)...)
+	}
+	return out
 }
 
 // pruneWarning words the pending prune for the PR body and the views that show
@@ -246,15 +257,6 @@ func pruneWarning(refs []model.ObjectRef, hidden int) string {
 		listed = fmt.Sprintf("%d objects not shown here", hidden)
 	}
 	return fmt.Sprintf("Running but not in git: %s. ArgoCD deletes them on the next merged change unless they are adopted first.", listed)
-}
-
-// unacknowledged reports whether merging would now delete beyond what req
-// acknowledged: a shown object it does not name, or more hidden ones than it
-// counted. The review's yes is only as good as the set it was given.
-func unacknowledged(req model.ProposeRequest, shown []model.ObjectRef, hidden int) bool {
-	return hidden > req.PruneHidden || slices.ContainsFunc(shown, func(ref model.ObjectRef) bool {
-		return !slices.Contains(req.Prune, ref)
-	})
 }
 
 // entryRefs: what a draft entry speaks for. Manifest entries declare their

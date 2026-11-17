@@ -9,6 +9,14 @@ export const PLATFORM_PROJECT = 'platform';
 // and what lies in namespaces they cannot see, which goes all the same.
 export const pruneTotal = (d?: DraftView) => (d?.prune?.length ?? 0) + (d?.pruneHidden ?? 0);
 
+// The prune a yes was given to, as a stable string: an effect keyed on it
+// drops the yes the moment a refresh shows another set, never per frame.
+export const pruneKey = (d?: DraftView) =>
+	`${(d?.prune ?? [])
+		.map((r) => `${r.kind}/${r.namespace ?? ''}/${r.name}`)
+		.sort()
+		.join(',')}|${d?.pruneHidden ?? 0}`;
+
 // Per-project drafts (the Changes panel + header badge). Refreshed when the set
 // of projects or PR lanes changes (the layout's keyed effect), when the Changes
 // drawer opens, and directly after every staging action. `loaded`/`refreshing`

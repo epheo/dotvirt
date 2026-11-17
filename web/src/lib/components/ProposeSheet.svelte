@@ -13,7 +13,7 @@
 	import { memoryHint } from '#lib/headroom.js';
 	import { draftResourceLabel } from '#lib/labels.js';
 	import { action } from '#lib/resource.svelte.js';
-	import { drafts, pruneTotal } from '#lib/state/drafts.svelte.js';
+	import { drafts, pruneKey, pruneTotal } from '#lib/state/drafts.svelte.js';
 	import { memoryRoom } from '#lib/state/hosts.svelte.js';
 	import { inventory } from '#lib/state/inventory.svelte.js';
 	import { tray } from '#lib/state/tray.svelte.js';
@@ -59,6 +59,12 @@
 		}
 	});
 	let ack = $state(false);
+	// A yes holds for the set it was given to.
+	const acked = $derived(pruneKey(lane));
+	$effect(() => {
+		void acked;
+		ack = false;
+	});
 
 	const isVM = (it: DraftItem) => !it.resource || it.resource === 'vm';
 	const kindName = (it: DraftItem) => draftResourceLabel(it.resource);
@@ -170,10 +176,9 @@
 				.catch((e: unknown) => {
 					refusedStatus = e instanceof HttpError ? e.status : 0;
 					// The prune moved since the review: show the new set and ask again.
-					if (refusedStatus === 409) {
-						ack = false;
-						drafts.refresh();
-					}
+					// The prune may have moved since the review: the re-read set,
+					// if it differs, asks for a new yes.
+					if (refusedStatus === 409) drafts.refresh();
 					throw e;
 				});
 			if (r.prNumber)

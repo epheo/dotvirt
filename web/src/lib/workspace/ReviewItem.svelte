@@ -10,7 +10,7 @@
 	} from '#lib/api.js';
 	import { bytes, plural, quantityBytes } from '#lib/format.js';
 	import { action } from '#lib/resource.svelte.js';
-	import { drafts, pruneTotal } from '#lib/state/drafts.svelte.js';
+	import { drafts, pruneKey, pruneTotal } from '#lib/state/drafts.svelte.js';
 	import Button from '#lib/components/Button.svelte';
 	import Card from '#lib/components/Card.svelte';
 	import ChangeList from '#lib/components/ChangeList.svelte';
@@ -95,11 +95,17 @@
 		message = '';
 		ack = false;
 	});
+	// A yes holds for the set it was given to.
+	const acked = $derived(pruneKey(lane));
+	$effect(() => {
+		void acked;
+		ack = false;
+	});
 	const proposeOp = action();
 	async function propose() {
 		if (proposeOp.busy || blocked) return;
 		unstageOp.clear();
-		const ok = await proposeOp.run(async () => {
+		await proposeOp.run(async () => {
 			const r = await api.propose(
 				project,
 				title,
@@ -110,9 +116,6 @@
 			title = '';
 			message = '';
 		});
-		// A refusal may be a prune that moved since the review: ask again on the
-		// re-read set.
-		if (!ok) ack = false;
 		// Success or failure, re-read: the push may have landed before an error.
 		drafts.refresh();
 	}

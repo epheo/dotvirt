@@ -478,8 +478,13 @@ export const api = {
 		),
 	commit: (project: string, hash: string) =>
 		get<CommitDetail>(`/api/projects/${enc(project)}/history/${hash}`),
-	revert: (project: string, hash: string) =>
-		post<gen.ProposeResult>(`/api/projects/${enc(project)}/revert`, { hash }),
+	// acked as propose's: a revert's merge prunes like any other.
+	revert: (project: string, hash: string, acked?: Pick<DraftView, 'prune' | 'pruneHidden'>) =>
+		post<gen.ProposeResult>(`/api/projects/${enc(project)}/revert`, {
+			hash,
+			prune: acked?.prune,
+			pruneHidden: acked?.pruneHidden,
+		}),
 	// What merging one open PR would change, from its mirrored head branch.
 	proposal: (project: string, number: number) =>
 		get<ProposalDetail>(`/api/projects/${enc(project)}/proposals/${number}`),

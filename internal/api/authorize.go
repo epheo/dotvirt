@@ -22,6 +22,7 @@ import (
 	"github.com/epheo/dotvirt/internal/cluster"
 	"github.com/epheo/dotvirt/internal/drs"
 	"github.com/epheo/dotvirt/internal/model"
+	"github.com/epheo/dotvirt/pkg/tenancy"
 )
 
 // The access family. Every route gate, every capability field and the
@@ -486,21 +487,40 @@ func (s *Server) Authorize(id auth.Identity, need []changeset.Access) error {
 	return nil
 }
 
-// ReadsPlatform implements changeset.Authorizer: canReadPlatform under id's
-// own token, off the cached reviews. Asked only while a platform merge would
-// prune something, so it adds no review to a quiet render.
-func (s *Server) ReadsPlatform(id auth.Identity) bool {
-	if s.clusterF == nil {
-		return false
+// Tellable implements changeset.Authorizer: what id's token would read in
+// Kubernetes, as shownRows weighs it: a kind it may list where the object
+// lives (cluster-wide for a cluster-scoped one), a Namespace also by its name.
+// Per object, never per repo: what a merge prunes is what git no longer
+// declares, so a repo-wide read verdict (one answered from what git declares)
+// would name objects id cannot list. Only an Argo app's objects get here, and
+// an AppProject admits only dotvirt's kinds, so the kind table places them
+// with no discovery read; any other kind is never named. Asked only while a
+// merge would prune something, off the cached reviews.
+func (s *Server) Tellable(id auth.Identity, refs []model.ObjectRef) []model.ObjectRef {
+	if s.clusterF == nil || len(refs) == 0 {
+		return nil
 	}
 	c, err := s.clusterF.For(id.Token)
 	if err != nil {
-		return false
+		return nil
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), authorizeTimeout)
 	defer cancel()
-	ok, err := s.canReadPlatform(ctx, id, c)
-	return ok && err == nil
+	v, err := s.viewFor(ctx, id, c)
+	if err != nil {
+		return nil
+	}
+	var out []model.ObjectRef
+	for _, ref := range refs {
+		k, ok := tenancy.LookupKind(ref.Kind)
+		switch {
+		case !ok:
+		case k.Group == "" && k.Kind == model.KindNS.Kind && v.names[ref.Name],
+			v.lists(ssarRef{k.Group, k.Resource}, ref.Namespace):
+			out = append(out, ref)
+		}
+	}
+	return out
 }
 
 // weighAll weighs every access of need, each distinct one once, at most

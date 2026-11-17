@@ -125,11 +125,17 @@ type VolumeMigration struct {
 }
 
 // ProposeRequest is the body of a propose: PR title + description, and the
-// prune the caller acknowledged as the review showed it (DraftView.Prune,
-// PruneHidden). Propose refuses a merge that would now delete beyond it.
+// prune the caller acknowledged.
 type ProposeRequest struct {
-	Title       string      `json:"title"`
-	Message     string      `json:"message"`
+	Title   string `json:"title"`
+	Message string `json:"message"`
+	PruneAck
+}
+
+// PruneAck is the prune a caller acknowledged, as the review showed it
+// (DraftView.Prune, PruneHidden): a propose or revert that would now delete
+// beyond it is refused.
+type PruneAck struct {
 	Prune       []ObjectRef `json:"prune,omitempty"`
 	PruneHidden int         `json:"pruneHidden,omitempty"`
 }

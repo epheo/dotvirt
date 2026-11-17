@@ -339,34 +339,33 @@ func TestForeignAppsExcludesOwnRepo(t *testing.T) {
 	}
 }
 
-// PrunePending relays Argo's own requiresPruning for the apps sourcing one
-// folder of a repo: every namespace and cluster-scoped object they would
-// prune, never another repo's or folder's, sorted for a stable warning.
+// PrunePending relays Argo's own requiresPruning for every app on the repo,
+// whatever folder it reads (a merge moves the revision each of them syncs):
+// every namespace and cluster-scoped object, never another repo's, sorted for
+// a stable warning. Before the initial LIST it cannot say.
 func TestPrunePendingRelaysArgoComparison(t *testing.T) {
 	const teamA = "https://forge.example/dotvirt/team-a.git"
 	s := NewSnapshot(nil, nil)
-	if s.PrunePending(teamA, "") != nil {
-		t.Fatal("must be nil before the initial LIST")
+	if refs, known := s.PrunePending(teamA); known || refs != nil {
+		t.Fatalf("before the initial LIST: %v known=%v, want nothing known", refs, known)
 	}
 	s.synced.Mark()
 	res := func(kind, ns, name string, prune bool) map[string]any {
 		return map[string]any{"kind": kind, "namespace": ns, "name": name, "requiresPruning": prune}
 	}
-	inFolder := func(a *unstructured.Unstructured, dir string) *unstructured.Unstructured {
-		_ = unstructured.SetNestedField(a.Object, dir, "spec", "source", "path")
-		return a
-	}
+	folder := appWithSource("openshift-gitops", "dotvirt-team-c", teamA, []any{
+		res("VirtualMachine", "team-c", "folder", true),
+	})
+	_ = unstructured.SetNestedField(folder.Object, "team-c", "spec", "source", "path")
 	for _, a := range []*unstructured.Unstructured{
-		inFolder(appWithSource("openshift-gitops", "dotvirt-team-a", teamA, []any{
+		appWithSource("openshift-gitops", "dotvirt-team-a", teamA, []any{
 			res("VirtualMachine", "team-a", "web", true),
 			res("UserDefinedNetwork", "team-a", "backend", true),
 			res("VirtualMachine", "team-a", "db", false), // declared: not at risk
 			res("VirtualMachine", "team-a-ops", "ops", true),
 			res("Namespace", "", "team-a-old", true),
-		}), "."),
-		inFolder(appWithSource("openshift-gitops", "dotvirt-team-c", teamA, []any{
-			res("VirtualMachine", "team-c", "folder", true), // another folder's app
-		}), "team-c"),
+		}),
+		folder,
 		appWithSource("openshift-gitops", "dotvirt-b", "https://forge.example/dotvirt/team-b.git", []any{
 			res("VirtualMachine", "team-a", "foreign", true), // another repo's app
 		}),
@@ -380,12 +379,10 @@ func TestPrunePendingRelaysArgoComparison(t *testing.T) {
 		{Kind: "UserDefinedNetwork", Namespace: "team-a", Name: "backend"},
 		{Kind: "VirtualMachine", Namespace: "team-a", Name: "web"},
 		{Kind: "VirtualMachine", Namespace: "team-a-ops", Name: "ops"},
+		{Kind: "VirtualMachine", Namespace: "team-c", Name: "folder"},
 	}
-	if got := s.PrunePending(teamA, ""); !slices.Equal(got, want) {
-		t.Fatalf("root: got %v, want %v", got, want)
-	}
-	if got, want := s.PrunePending(teamA, "./team-c/"), []model.ObjectRef{{Kind: "VirtualMachine", Namespace: "team-c", Name: "folder"}}; !slices.Equal(got, want) {
-		t.Fatalf("folder: got %v, want %v", got, want)
+	if got, known := s.PrunePending(teamA); !known || !slices.Equal(got, want) {
+		t.Fatalf("got %v known=%v, want %v", got, known, want)
 	}
 }
 

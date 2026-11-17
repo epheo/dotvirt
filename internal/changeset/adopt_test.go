@@ -3,6 +3,7 @@ package changeset
 import (
 	"errors"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 
@@ -275,13 +276,36 @@ func TestAdoptAbsentFromRunningNotFound(t *testing.T) {
 // fakePrune stands in for the argo snapshot's requiresPruning relay.
 type fakePrune []model.ObjectRef
 
-func (f fakePrune) PrunePending(string, string) []model.ObjectRef { return f }
+func (f fakePrune) PrunePending(string) ([]model.ObjectRef, bool) { return f, true }
+
+// unloaded is an Argo view that has not loaded yet.
+type unloaded struct{}
+
+func (unloaded) PrunePending(string) ([]model.ObjectRef, bool) { return nil, false }
+
+// tellsIn names only the objects in its namespaces: a caller who may list
+// there and nowhere else.
+type tellsIn struct {
+	allowAll
+	ns []string
+}
+
+func (t tellsIn) Tellable(_ auth.Identity, refs []model.ObjectRef) []model.ObjectRef {
+	var out []model.ObjectRef
+	for _, r := range refs {
+		if slices.Contains(t.ns, r.Namespace) {
+			out = append(out, r)
+		}
+	}
+	return out
+}
 
 // A tenant's warning covers the whole project, whatever part of it the caller
 // sees: the merge prunes the rest too. What they see is named; the rest is
 // only counted, so the warning never names what their RBAC hides.
 func TestPruneWarningCoversTheWholeProject(t *testing.T) {
 	c := newTestCoordinator(t, false)
+	c.UseAuthorizer(tellsIn{ns: []string{"alpha"}})
 	c.prune = fakePrune{
 		{Kind: "VirtualMachine", Namespace: "alpha", Name: "web"},
 		{Kind: "VirtualMachine", Namespace: "beta", Name: "secret"},

@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen } from '@testing-library/svelte';
+import { tick } from 'svelte';
 import type { DraftView, Inventory } from '#lib/api.js';
 import { drafts } from '#lib/state/drafts.svelte.js';
 import { inventory } from '#lib/state/inventory.svelte.js';
@@ -98,7 +99,12 @@ describe('ProposeSheet', () => {
 			String(url).startsWith('/api/draft/propose'),
 		)!;
 		expect(JSON.parse(init.body)).toMatchObject({ prune: [shown], pruneHidden: 2 });
-		expect(yes.checked).toBe(false);
+		// A refusal alone keeps the yes; a set that moved asks for a new one.
+		expect(yes.checked).toBe(true);
+		drafts.drafts = [{ project: 'team-db', draft: { ...draft, prune: [shown], pruneHidden: 3 } }];
+		await tick();
+		const again = screen.getByLabelText(/Delete these 4 when this merges/) as HTMLInputElement;
+		expect(again.checked).toBe(false);
 	});
 
 	it('a conflict is said in place, with the PR it names one click away', async () => {

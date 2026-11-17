@@ -364,6 +364,7 @@ func TestProposeRefusesAnUnacknowledgedPrune(t *testing.T) {
 		when("POST", "/pulls", http.StatusCreated, `{"number":1,"state":"open","html_url":"http://forge/pulls/1"}`),
 	)
 	f.proj.Namespaces = []string{"alpha"}
+	f.c.UseAuthorizer(tellsIn{ns: []string{"alpha"}})
 	shown := model.ObjectRef{Kind: "VirtualMachine", Namespace: "alpha", Name: "stray"}
 	f.c.prune = fakePrune{shown, {Kind: "VirtualMachine", Namespace: "beta", Name: "hidden"}}
 	req := model.EditRequest{SourceFile: "web.yaml", VMEdit: model.VMEdit{SetLabels: map[string]string{"env": "prod"}}}
@@ -372,8 +373,8 @@ func TestProposeRefusesAnUnacknowledgedPrune(t *testing.T) {
 	}
 	for _, ack := range []model.ProposeRequest{
 		{Title: "edit web"},
-		{Title: "edit web", Prune: []model.ObjectRef{shown}},
-		{Title: "edit web", PruneHidden: 1},
+		{Title: "edit web", PruneAck: model.PruneAck{Prune: []model.ObjectRef{shown}}},
+		{Title: "edit web", PruneAck: model.PruneAck{PruneHidden: 1}},
 	} {
 		if _, err := f.c.Propose(f.id, f.proj, ack); !errors.Is(err, model.ErrConflict) {
 			t.Fatalf("ack %+v: err = %v, want ErrConflict", ack, err)
@@ -385,9 +386,28 @@ func TestProposeRefusesAnUnacknowledgedPrune(t *testing.T) {
 	if sent != 0 {
 		t.Fatalf("a refused propose reached the forge: %d calls", sent)
 	}
-	out, err := f.c.Propose(f.id, f.proj, model.ProposeRequest{Title: "edit web", Prune: []model.ObjectRef{shown}, PruneHidden: 1})
+	out, err := f.c.Propose(f.id, f.proj, model.ProposeRequest{Title: "edit web", PruneAck: model.PruneAck{Prune: []model.ObjectRef{shown}, PruneHidden: 1}})
 	if err != nil || !webPR(out.PRURL, 1) {
 		t.Fatalf("acknowledged propose: %+v, %v; want the PR", out, err)
+	}
+}
+
+// Until Argo's view has loaded, what a merge deletes is unknown: propose
+// waits for it rather than reading the silence as a safe merge.
+func TestProposeWaitsForArgosView(t *testing.T) {
+	f := newProposeFixture(t)
+	f.c.prune = unloaded{}
+	req := model.EditRequest{SourceFile: "web.yaml", VMEdit: model.VMEdit{SetLabels: map[string]string{"env": "prod"}}}
+	if _, err := f.c.StageEdit(f.id, f.proj, "alpha", "web", req); err != nil {
+		t.Fatalf("StageEdit: %v", err)
+	}
+	if _, err := f.c.Propose(f.id, f.proj, model.ProposeRequest{Title: "edit web"}); !errors.Is(err, model.ErrUnavailable) {
+		t.Fatalf("err = %v, want ErrUnavailable", err)
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if len(f.sent) != 0 {
+		t.Fatalf("a propose without Argo's view reached the forge: %d calls", len(f.sent))
 	}
 }
 
