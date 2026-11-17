@@ -38,16 +38,19 @@ permissions:
   contents: read
 
 jobs:
+  # Build, push and digest-pin. Holds no signing key and no OIDC token: the build tools
+  # (release.sh, go run, operator-sdk, opm) never share a runner with either.
   release:
     runs-on: ubuntu-latest
     environment: QUAY
     permissions:
-      contents: write
-      pull-requests: write
-      id-token: write # keyless image signing: the workflow's OIDC identity is the signer
+      contents: write # pushes the pin branch
     outputs:
       catalog-image: ${{ steps.pins.outputs.catalog-image }}
       version: ${{ steps.pins.outputs.version }}
+      prev: ${{ steps.pins.outputs.prev }}
+      skip: ${{ steps.pins.outputs.skip }}
+      refs: ${{ steps.pins.outputs.refs }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
@@ -71,14 +74,14 @@ jobs:
           # quay tags onto different digests — the moved-tag/pruned-digest failure
           # mode — so skip the build and let verify prove the published images instead.
           if [ "${{ github.event_name }}" = push ] && [ "$(current_stable_head)" = "$ver" ]; then
-            echo "::notice::v$ver is already digest-pinned at this commit — skipping the build; verifying the published release"
+            echo "::warning::v$ver is already digest-pinned at this commit, so CI skips the build and does NOT sign its images: a locally cut release ships unsigned (CONTRIBUTING.md)"
             echo "REL_SKIP=true" >> "$GITHUB_ENV"
           fi
           echo "Releasing v$ver (replaces v$prev)"
       - uses: ./.github/actions/tools # skopeo ships on the runner image
         if: env.REL_SKIP != 'true'
         with:
-          tools: operator-sdk opm cosign
+          tools: operator-sdk opm
       - name: Registry login (docker + skopeo)
         if: env.REL_SKIP != 'true'
         env:
@@ -102,23 +105,21 @@ jobs:
           FORCE: ${{ inputs.force && '1' || '' }}
           OPM: opm # the verified binary from the tools action; the scripts' default compiles opm from source
         run: VERSION="$REL_VERSION" PREV="$REL_PREV" CONTAINER_TOOL=docker ./hack/release.sh
-      # Before the pins are recorded: an image that does not verify stops the release here.
-      - name: Sign the pushed images
-        if: env.REL_SKIP != 'true'
-        env:
-          COSIGN_PRIVATE_KEY: ${{ secrets.COSIGN_PRIVATE_KEY }}
-          COSIGN_PASSWORD: ${{ secrets.COSIGN_PASSWORD }}
-        run: ./hack/sign-images.sh "$PUBLISHED_REFS"
-      - name: Record the pinned catalog image
+      - name: Record the pins
         id: pins
         run: |
           { echo "catalog-image=$(sed -n 's/^  image: //p' operator/install/catalogsource.yaml)"
             echo "version=$REL_VERSION"
+            echo "prev=$REL_PREV"
+            echo "skip=${REL_SKIP:-false}"
+            echo "refs<<REFS"
+            [ ! -f "$PUBLISHED_REFS" ] || cat "$PUBLISHED_REFS"
+            echo REFS
           } >> "$GITHUB_OUTPUT"
-      - name: Open digest-pin PR
+      - name: Push the pin branch
+        # The pin PR waits for the sign job: the branch is pushed here, opened as a PR
+        # only once every image verifies.
         if: env.REL_SKIP != 'true'
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           git config user.name "dotvirt-release[bot]"
           git config user.email "dotvirt-release[bot]@users.noreply.github.com"
@@ -130,6 +131,54 @@ jobs:
           # a tracking ref this tag checkout never fetched, and rejects every re-run.
           lease="$(git ls-remote origin "refs/heads/$branch" | cut -f1)"
           git push --force-with-lease="refs/heads/$branch:$lease" -u origin "$branch"
+
+  # Sign every image the release job pushed, then verify each one. Its own runner: the
+  # signing key and the OIDC token never meet the build tools.
+  sign:
+    needs: [release]
+    if: needs.release.outputs.skip != 'true'
+    runs-on: ubuntu-latest
+    environment: QUAY
+    permissions:
+      contents: read
+      id-token: write # keyless image signing: the workflow's OIDC identity is the signer
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/tools
+        with:
+          tools: cosign
+      - name: Registry login
+        env:
+          U: ${{ secrets.QUAY_USERNAME }}
+          P: ${{ secrets.QUAY_PASSWORD }}
+        run: echo "$P" | docker login quay.io -u "$U" --password-stdin
+      - name: Sign and verify
+        env:
+          REFS: ${{ needs.release.outputs.refs }}
+          COSIGN_PRIVATE_KEY: ${{ secrets.COSIGN_PRIVATE_KEY }}
+          COSIGN_PASSWORD: ${{ secrets.COSIGN_PASSWORD }}
+        run: |
+          printf '%s\n' "$REFS" > "$RUNNER_TEMP/published-refs"
+          ./hack/sign-images.sh "$RUNNER_TEMP/published-refs" 4 # app, operator, bundle, catalog
+
+  # Record the release only once every image verifies: the pin PR and the draft Release.
+  publish:
+    needs: [release, sign]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    env:
+      REL_VERSION: ${{ needs.release.outputs.version }}
+      REL_PREV: ${{ needs.release.outputs.prev }}
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: release-v${{ needs.release.outputs.version }}
+      - name: Open digest-pin PR
+        run: |
+          branch="release-v$REL_VERSION"
           open="$(gh pr list --head "$branch" --json number --jq length || echo 0)"
           [ "$open" = 0 ] || exit 0
           # PR creation needs the repo setting "Allow GitHub Actions to create and
@@ -138,14 +187,11 @@ jobs:
           # warn and leave the PR to be opened by hand.
           gh pr create --base main --head "$branch" \
             --title "release v$REL_VERSION" \
-            --body "Digest-pinned release cut by CI; images already pushed to quay.io/epheo. Merge to record the pins, then apply operator/install/catalogsource.yaml." \
+            --body "Digest-pinned release cut by CI; images already pushed to quay.io/epheo and signed. Merge to record the pins, then apply operator/install/catalogsource.yaml." \
             || echo "::warning::could not open the pin PR — open it manually: https://github.com/$GITHUB_REPOSITORY/compare/main...$branch"
       - name: Draft the GitHub Release
         # A draft: upgrade notes (manual steps, breaking changes) need a human before
         # it is published; the generated part lists the PRs since the previous tag.
-        if: env.REL_SKIP != 'true'
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           if gh release view "v$REL_VERSION" >/dev/null 2>&1; then
             # The asset must pin this run's catalog, which a forced re-run or a changed prev moved.

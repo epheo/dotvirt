@@ -27,12 +27,13 @@ permissions:
   contents: read
 
 jobs:
+  # Build and push. Holds no signing key and no OIDC token: the build tools never share a
+  # runner with either.
   preview:
     runs-on: ubuntu-latest
     environment: QUAY
-    permissions:
-      contents: read
-      id-token: write # keyless image signing: the workflow's OIDC identity is the signer
+    outputs:
+      refs: ${{ steps.refs.outputs.refs }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
@@ -40,7 +41,7 @@ jobs:
           go-version-file: go.mod
       - uses: ./.github/actions/tools # skopeo ships on the runner image
         with:
-          tools: operator-sdk opm cosign
+          tools: operator-sdk opm
       - name: Registry login (docker + skopeo)
         env:
           U: ${{ secrets.QUAY_USERNAME }}
@@ -61,12 +62,40 @@ jobs:
           OPM: opm # the verified binary from the tools action; the scripts' default compiles opm from source
           PUBLISHED_REFS: ${{ runner.temp }}/published-refs
         run: VERSION=${{ inputs.version }} CONTAINER_TOOL=docker ./hack/preview.sh
-      - name: Sign the pushed images
-        env:
-          COSIGN_PRIVATE_KEY: ${{ secrets.COSIGN_PRIVATE_KEY }}
-          COSIGN_PASSWORD: ${{ secrets.COSIGN_PASSWORD }}
-        run: ./hack/sign-images.sh "$RUNNER_TEMP/published-refs"
+      - name: Record the pushed images
+        id: refs
+        run: |
+          { echo "refs<<REFS"; cat "$RUNNER_TEMP/published-refs"; echo REFS; } >> "$GITHUB_OUTPUT"
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: catalogsource-preview-${{ inputs.version }}
           path: operator/install/catalogsource-preview.yaml
+
+  # Sign every image the preview job pushed, then verify each one. Its own runner: the
+  # signing key and the OIDC token never meet the build tools. A preview whose sign job
+  # failed is not to be applied.
+  sign:
+    needs: [preview]
+    runs-on: ubuntu-latest
+    environment: QUAY
+    permissions:
+      contents: read
+      id-token: write # keyless image signing: the workflow's OIDC identity is the signer
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/tools
+        with:
+          tools: cosign
+      - name: Registry login
+        env:
+          U: ${{ secrets.QUAY_USERNAME }}
+          P: ${{ secrets.QUAY_PASSWORD }}
+        run: echo "$P" | docker login quay.io -u "$U" --password-stdin
+      - name: Sign and verify
+        env:
+          REFS: ${{ needs.preview.outputs.refs }}
+          COSIGN_PRIVATE_KEY: ${{ secrets.COSIGN_PRIVATE_KEY }}
+          COSIGN_PASSWORD: ${{ secrets.COSIGN_PASSWORD }}
+        run: |
+          printf '%s\n' "$REFS" > "$RUNNER_TEMP/published-refs"
+          ./hack/sign-images.sh "$RUNNER_TEMP/published-refs" 4 # app, operator, bundle, catalog
