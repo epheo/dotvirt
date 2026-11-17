@@ -14,6 +14,7 @@ import (
 	"net/url"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -642,5 +643,75 @@ func TestForgeAccountRefusalIsNoOutage(t *testing.T) {
 	f := NewForge(ForgeConfig{APIURL: down.URL}, rig.a)
 	if _, err := f.account(context.Background(), "x"); !errors.Is(err, errForgeUnreachable) {
 		t.Fatalf("a forge that does not answer: %v, want an outage", err)
+	}
+}
+
+// withForgeAPI rebuilds rig's flow against api for the forge API (the account
+// lookup and the reachability probe); tokens still come from the fake forge.
+func (rig *forgeRig) withForgeAPI(api string) {
+	cfg := rig.f.cfg
+	cfg.APIURL = api
+	rig.f = NewForge(cfg, rig.a)
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /api/forge/connect", rig.f.Connect)
+	mux.HandleFunc("GET /api/forge/callback", rig.f.Callback)
+	mux.HandleFunc("GET /api/me", func(w http.ResponseWriter, r *http.Request) {
+		rig.seen, _ = FromContext(r.Context())
+	})
+	rig.h = rig.a.Middleware(mux)
+}
+
+// Through the real callback, only an outage at the account lookup holds every
+// session's automatic connect back: a refusal the forge answered does not.
+func TestForgeCallbackHoldsTheConnectOnlyOnAnOutage(t *testing.T) {
+	for code, reachable := range map[int]bool{http.StatusUnauthorized: true, http.StatusServiceUnavailable: false} {
+		rig := newForgeRig(t)
+		api := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.URL.Path == "/api/v1/version" {
+				return
+			}
+			http.Error(w, "account lookup", code)
+		}))
+		t.Cleanup(api.Close)
+		rig.withForgeAPI(api.URL)
+		session := rig.signIn(t, "tok-alice")
+		state, c, st := rig.connect(t, session, "/")
+		rig.callback(t, session, state, "code="+c+"&state="+st)
+		if rig.f.Status(context.Background(), rig.identity(t, session)).Connected {
+			t.Fatalf("account lookup answering %d: the session connected", code)
+		}
+		other := rig.identity(t, rig.signIn(t, "tok-bob"))
+		if got := rig.f.Status(context.Background(), other).Reachable; got != reachable {
+			t.Errorf("account lookup answering %d: another session reachable = %v, want %v", code, got, reachable)
+		}
+	}
+}
+
+// Concurrent status reads share one probe: the forge sees a single request.
+func TestForgeProbeRunsOneAtATime(t *testing.T) {
+	rig := newForgeRig(t)
+	var hits atomic.Int32
+	slow := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits.Add(1)
+		time.Sleep(200 * time.Millisecond)
+	}))
+	t.Cleanup(slow.Close)
+	rig.withForgeAPI(slow.URL)
+	id := rig.identity(t, rig.signIn(t, "tok-alice"))
+	var wg sync.WaitGroup
+	for range 20 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			rig.f.Status(context.Background(), id)
+		}()
+	}
+	wg.Wait()
+	if n := hits.Load(); n != 1 {
+		t.Fatalf("20 concurrent status reads made %d forge requests, want 1", n)
+	}
+	rig.f.Status(context.Background(), id)
+	if n := hits.Load(); n != 1 {
+		t.Fatalf("a read within the cache window probed again (%d requests)", n)
 	}
 }
