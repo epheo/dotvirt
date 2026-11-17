@@ -140,7 +140,8 @@ func TestDotvirtWebhookRefusalIsGuidedAndHeld(t *testing.T) {
 	}
 	lacks(t, got.Message, "Must be an organization owner", "owner of the org", "/api/webhooks/forge", "push and pull_request",
 		"application/json", dv.Namespace+"/"+install.WebhookSecretName, "oc extract secret/"+install.WebhookSecretName,
-		"Forgejo (Gitea)", "system hook", "repos created later", "delivery log", "Rechecked hourly", "operator restarts")
+		"Forgejo (Gitea)", "system hook", "repos created later", "delivery log",
+		"Rechecked hourly, and at once when spec.forge or the forge credential changes, or the operator restarts")
 
 	asked := f.calls.Load()
 	for range 5 {
@@ -216,7 +217,8 @@ func TestWebhookOwnerKinds(t *testing.T) {
 			[]string{"HTTP 404"}, []string{"HTTP 404"}},
 		{"a user account", http.StatusNotFound, http.StatusOK, reasonPerRepoHooks,
 			[]string{"user account", "each project repo", "does not observe"},
-			[]string{"user account", "each project repo", "system hook", "push events only", install.ArgoWebhookSecretName}},
+			[]string{"user account", "each project repo", "system hook", "push events only", install.ArgoWebhookSecretName,
+				"oc extract secret/" + install.ArgoWebhookSecretName, install.ArgoWebhookKey}},
 		{"no such owner", http.StatusNotFound, http.StatusNotFound, reasonOwnerNotFound,
 			[]string{"spec.forge.platformRepo", "spec.forge.url"}, []string{"spec.forge.platformRepo"}},
 	} {
@@ -259,7 +261,7 @@ func TestArgoWebhookRefusalIsGuidedAndHeld(t *testing.T) {
 	}
 	lacks(t, got.Message, "https://argocd.example/api/webhook", "push only", "Must be an organization owner",
 		dv.Namespace+"/"+install.ArgoWebhookSecretName, install.ArgoWebhookKey, "delivery log",
-		"the webhook secret, the ArgoCD URL or namespace")
+		"the forge credential, the webhook secret or the ArgoCD URL or namespace changes")
 	asked := f.calls.Load()
 	*clock = clock.Add(30 * time.Minute)
 	argoWebhookPassAt(t, r, dv)
@@ -283,5 +285,25 @@ func TestArgoWebhookRefusalIsGuidedAndHeld(t *testing.T) {
 	}
 	if f.calls.Load()-before != 2 {
 		t.Errorf("an outage made %d calls over two passes, want one each", f.calls.Load()-before)
+	}
+}
+
+// A 404 on org hooks followed by an outage on the owner lookup is not a
+// refusal: nothing is held, and the next pass asks again.
+func TestOwnerLookupOutageIsNotHeld(t *testing.T) {
+	f := &hookForge{}
+	f.hooks.Store(http.StatusNotFound)
+	f.org.Store(http.StatusBadGateway)
+	r, _, dv, _ := hookSetup(t, f)
+	if got := dotvirtWebhookPass(t, r, dv); got.Reason != "Unobservable" {
+		t.Errorf("DotvirtWebhook = %+v, want Unobservable", got)
+	}
+	asked := f.calls.Load()
+	dotvirtWebhookPass(t, r, dv)
+	if f.calls.Load() == asked {
+		t.Error("an outage on the owner lookup was held")
+	}
+	if got := argoWebhookPassAt(t, r, dv); got.Reason != "NotRegistered" {
+		t.Errorf("ArgoWebhook = %+v, want NotRegistered", got)
 	}
 }

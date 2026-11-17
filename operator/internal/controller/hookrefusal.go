@@ -95,37 +95,54 @@ type hookSpec struct {
 	// secret is the Secret, in the install namespace, holding the shared
 	// secret under key "secret"; also names where else that value lives.
 	secret, also string
-	// changes names what, beside the forge and its credential, asks again;
-	// fallback is what keeps working meanwhile.
-	changes, fallback string
+	// changes names what, beside spec.forge and the forge credential, asks
+	// again; fallback is what keeps working meanwhile.
+	changes  []string
+	fallback string
 	// perRepo is the advice for a user-owned forge, which has no org hooks.
 	perRepo string
+	// outage is the condition when the forge is unreachable, not refusing:
+	// never held, the next pass asks again.
+	outage func(error) (metav1.ConditionStatus, string, string)
+}
+
+// orList joins items as "a, b or c".
+func orList(items []string) string {
+	if len(items) < 2 {
+		return strings.Join(items, "")
+	}
+	return strings.Join(items[:len(items)-1], ", ") + " or " + items[len(items)-1]
 }
 
 // refused classifies the forge's refusal err of hook for owner and holds it
 // under key: a rejected token, a user or missing owner (a 404 on org hooks
-// asks which, once), or the account lacking the owner's webhooks.
+// asks which, at most twice), or the account lacking the owner's webhooks. An
+// outage on those lookups is not a refusal: it is returned unheld.
 func (r *DotvirtReconciler) refused(dv *dotvirtv1alpha1.Dotvirt, fc *forge.Client, err error, key string, hook hookSpec) (metav1.ConditionStatus, string, string) {
 	status := forge.RefusedStatus(err)
 	owner := fc.Owner()
-	recheck := "Rechecked hourly, and at once when spec.forge, the forge credential" + hook.changes + " changes, or the operator restarts."
+	recheck := "Rechecked hourly, and at once when " + orList(append([]string{"spec.forge", "the forge credential"}, hook.changes...)) +
+		" changes, or the operator restarts."
 	if status == http.StatusNotFound {
-		isOrg, oerr := fc.OwnerIsOrg()
-		if oerr == nil && !isOrg {
-			isUser, uerr := fc.OwnerIsUser()
+		isOrg, lerr := fc.OwnerIsOrg()
+		if lerr == nil && !isOrg {
+			var isUser bool
+			isUser, lerr = fc.OwnerIsUser()
 			switch {
-			case uerr == nil && isUser:
+			case lerr == nil && isUser:
 				return r.holdRefusal(dv, hook.kind, key, reasonPerRepoHooks, fmt.Sprintf(
 					"%s is a user account, which has no org webhooks: %s %s", owner, hook.perRepo, recheck))
-			case uerr == nil:
+			case lerr == nil:
 				return r.holdRefusal(dv, hook.kind, key, reasonOwnerNotFound, fmt.Sprintf(
 					"the forge has no org or user %q, the owner of spec.forge.platformRepo: check spec.forge.platformRepo and spec.forge.url. %s",
 					owner, recheck))
 			}
-			oerr = uerr
 		}
-		if oerr != nil && forge.RefusedStatus(oerr) != 0 {
-			err, status = oerr, forge.RefusedStatus(oerr)
+		if lerr != nil {
+			if !forge.Refused(lerr) {
+				return hook.outage(lerr)
+			}
+			err, status = lerr, forge.RefusedStatus(lerr)
 		}
 	}
 	reason := forge.RefusalText(err)
@@ -142,10 +159,16 @@ func (r *DotvirtReconciler) refused(dv *dotvirtv1alpha1.Dotvirt, fc *forge.Clien
 			"Make that account an owner of the org, or create the hook by hand as a Forgejo (Gitea) webhook: "+
 			"an org hook on %s, a system hook, or a hook on each project repo (repos created later need their own): "+
 			"URL %s, content type application/json, events %s, secret the value of Secret %s/%s key \"secret\" "+
-			"(oc extract secret/%s -n %s --keys=secret --to=-)%s. "+
+			"(%s)%s. "+
 			"The operator cannot observe deliveries: check the forge's delivery log for 2xx answers. %s %s",
-		owner, status, reason, owner, hook.url, hook.events, dv.Namespace, hook.secret, hook.secret, dv.Namespace,
+		owner, status, reason, owner, hook.url, hook.events, dv.Namespace, hook.secret, extractCommand(dv, hook.secret),
 		hook.also, hook.fallback, recheck))
+}
+
+// extractCommand prints the shared secret held in name, as forgeAdminHint does
+// for the admin password.
+func extractCommand(dv *dotvirtv1alpha1.Dotvirt, name string) string {
+	return fmt.Sprintf("oc extract secret/%s -n %s --keys=secret --to=-", name, dv.Namespace)
 }
 
 // dotvirtWebhookState is the DotvirtWebhook condition: the app registers the
@@ -176,6 +199,7 @@ func (r *DotvirtReconciler) dotvirtWebhookState(ctx context.Context, dv *dotvirt
 		return r.refused(dv, client, err, key, hookSpec{
 			kind: hookDotvirt, url: hookURL, events: "push and pull_request", secret: install.WebhookSecretName,
 			fallback: "Until then updates arrive via the app's git poll.",
+			outage:   unobservableDotvirtWebhook,
 			perRepo: "the app registers a webhook on each project repo, which the operator does not observe; " +
 				"a project repo's webhook settings show it.",
 		})

@@ -260,14 +260,17 @@ func (r *DotvirtReconciler) argoWebhook(ctx context.Context, dv *dotvirtv1alpha1
 	// above stay hard errors - those are operator-internal, not forge-transient.
 	if err := fc.EnsureOrgPushWebhook(hookURL, value); err != nil {
 		if forge.Refused(err) {
-			secretHow := fmt.Sprintf("secret the value of Secret %s/%s key \"secret\"", dv.Namespace, install.ArgoWebhookSecretName)
+			also := fmt.Sprintf(", which the operator also sets in %s/%s key %s", rc.argoNS, install.ArgoSecretName, install.ArgoWebhookKey)
 			return r.refused(dv, fc, err, key, hookSpec{
-				kind: hookArgo, url: hookURL, events: "push only", secret: install.ArgoWebhookSecretName,
-				also:     fmt.Sprintf(", which the operator also sets in %s/%s key %s", rc.argoNS, install.ArgoSecretName, install.ArgoWebhookKey),
-				changes:  ", the webhook secret, the ArgoCD URL or namespace",
+				kind: hookArgo, url: hookURL, events: "push only", secret: install.ArgoWebhookSecretName, also: also,
+				changes:  []string{"the webhook secret", "the ArgoCD URL or namespace"},
 				fallback: "Argo falls back to its poll meanwhile.",
-				perRepo: fmt.Sprintf("create a Forgejo (Gitea) webhook on each project repo, or a system hook: URL %s, content type application/json, push events only, %s. Argo falls back to its poll meanwhile.",
-					hookURL, secretHow),
+				perRepo: fmt.Sprintf("create a Forgejo (Gitea) webhook on each project repo, or a system hook: URL %s, content type application/json, push events only, secret the value of Secret %s/%s key \"secret\" (%s)%s. Argo falls back to its poll meanwhile.",
+					hookURL, dv.Namespace, install.ArgoWebhookSecretName, extractCommand(dv, install.ArgoWebhookSecretName), also),
+				outage: func(err error) (metav1.ConditionStatus, string, string) {
+					logf.FromContext(ctx).Info("argo webhook owner lookup failed; ArgoCD poll backstops", "error", err.Error())
+					return notRegistered()
+				},
 			})
 		}
 		logf.FromContext(ctx).Info("argo webhook registration deferred; ArgoCD poll backstops", "error", err.Error())
