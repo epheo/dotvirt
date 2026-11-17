@@ -224,6 +224,8 @@ func TestAppSetPluginLiftsAllowEmptyOnlyForADeliberateRemoval(t *testing.T) {
 	// A history replaced, then joined back to the old one keeping its tree.
 	rejoin := newRemovalRepo(t)
 	rejoin.rejoin(t)
+	stalecmp := newRemovalRepo(t)
+	stalecmp.remove(t)
 	platform := "file://" + seedPlatformRepo(t, map[string]string{"README.md": "lost\n"})
 
 	fc := newFakeCluster(t)
@@ -249,6 +251,7 @@ func TestAppSetPluginLiftsAllowEmptyOnlyForADeliberateRemoval(t *testing.T) {
 		{"team-comment", comment.url, comment.head(t), commentApplied, "."},
 		{"team-ci", ci.url, ci.head(t), ci.applied, "."},
 		{"team-rejoin", rejoin.url, rejoin.head(t), rejoin.applied, "."},
+		{"team-stalecmp", stalecmp.url, stalecmp.head(t), stalecmp.applied, "."},
 	} {
 		fc.namespaces = append(fc.namespaces, corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: p.name,
 			Labels: map[string]string{"dotvirt.io/project": p.name}, Annotations: map[string]string{"dotvirt.io/repo": p.repo}}})
@@ -259,6 +262,9 @@ func TestAppSetPluginLiftsAllowEmptyOnlyForADeliberateRemoval(t *testing.T) {
 		switch p.name {
 		case "team-old": // the generator has not caught up with the project's repo
 			_ = unstructured.SetNestedField(app, recreated, "spec", "source", "repoURL")
+			_ = unstructured.SetNestedField(app, recreated, "status", "sync", "comparedTo", "source", "repoURL")
+		case "team-stalecmp": // re-pointed, not compared again yet
+			_ = unstructured.SetNestedField(app, recreated, "status", "sync", "comparedTo", "source", "repoURL")
 		case "team-nosrc":
 			_ = unstructured.SetNestedSlice(app, []any{map[string]any{"revision": p.applied}}, "status", "history")
 		case "team-lifting", "team-relift", "team-liftfull": // allowEmpty already on
@@ -270,7 +276,7 @@ func TestAppSetPluginLiftsAllowEmptyOnlyForADeliberateRemoval(t *testing.T) {
 	t.Cleanup(cancel)
 	repos := git.NewRepoSet(ctx, "", "", nil, false, nil, time.Hour)
 	for _, repo := range []string{removed.url, same.url, moved.url, recreated, stale.url, declared.url, old.url, nosrc.url, lifting.url,
-		chain.url, hand.url, relift.url, liftfull.url, yml.url, comment.url, ci.url, rejoin.url} {
+		chain.url, hand.url, relift.url, liftfull.url, yml.url, comment.url, ci.url, rejoin.url, stalecmp.url} {
 		if _, _, err := repos.Get(repo, ""); err != nil {
 			t.Fatal(err)
 		}
@@ -293,7 +299,7 @@ func TestAppSetPluginLiftsAllowEmptyOnlyForADeliberateRemoval(t *testing.T) {
 		"team-lifting": model.HoldDeleting, "team-chain": model.HoldMismatch, "team-hand": model.HoldMismatch,
 		"team-relift": model.HoldReplaced, "team-liftfull": model.HoldMismatch,
 		"team-yml": model.HoldMismatch, "team-comment": model.HoldMismatch, "team-ci": model.HoldDeleting,
-		"team-rejoin": model.HoldReplaced, "team-a": "",
+		"team-rejoin": model.HoldReplaced, "team-stalecmp": model.HoldPending, "team-a": "",
 	}
 	got := map[string]model.Hold{}
 	for _, p := range s.AllProjects() {
@@ -311,7 +317,7 @@ func TestAppSetPluginLiftsAllowEmptyOnlyForADeliberateRemoval(t *testing.T) {
 	if want := map[string]any{"team-del": true, "team-rec": false, "team-new": false, "team-same": false,
 		"team-full": false, "team-moved": false, "team-stale": false, "team-old": false, "team-nosrc": false,
 		"team-lifting": true, "team-chain": false, "team-hand": false, "team-relift": false, "team-liftfull": false,
-		"team-yml": false, "team-comment": false, "team-ci": true, "team-rejoin": false,
+		"team-yml": false, "team-comment": false, "team-ci": true, "team-rejoin": false, "team-stalecmp": false,
 		"team-a": false}; !maps.Equal(lifted, want) {
 		t.Errorf("allowEmpty = %v, want %v", lifted, want)
 	}
@@ -543,7 +549,8 @@ func heldApp(project, repo, compared, applied, appliedPath string) map[string]an
 			"syncPolicy": map[string]any{"automated": map[string]any{"prune": true, "selfHeal": true}},
 		},
 		"status": map[string]any{
-			"sync":      map[string]any{"status": "OutOfSync", "revision": compared},
+			"sync": map[string]any{"status": "OutOfSync", "revision": compared,
+				"comparedTo": map[string]any{"source": map[string]any{"repoURL": repo, "path": "."}}},
 			"history":   []any{map[string]any{"revision": applied, "source": map[string]any{"repoURL": repo, "path": appliedPath}}},
 			"resources": []any{map[string]any{"kind": "VirtualMachine", "namespace": project, "name": "web", "requiresPruning": true}},
 		},

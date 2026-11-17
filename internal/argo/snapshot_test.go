@@ -682,6 +682,7 @@ func TestEmptyHoldReadsArgosRefusal(t *testing.T) {
 		_ = unstructured.SetNestedField(a.Object, true, "spec", "syncPolicy", "automated", "prune")
 		_ = unstructured.SetNestedField(a.Object, "OutOfSync", "status", "sync", "status")
 		_ = unstructured.SetNestedField(a.Object, "c2", "status", "sync", "revision")
+		_ = unstructured.SetNestedMap(a.Object, map[string]any{"repoURL": repo, "path": "."}, "status", "sync", "comparedTo", "source")
 		_ = unstructured.SetNestedSlice(a.Object, []any{
 			map[string]any{"revision": "c0"},
 			map[string]any{"revision": "c1", "source": map[string]any{"repoURL": repo + "/", "path": ""}},
@@ -697,6 +698,10 @@ func TestEmptyHoldReadsArgosRefusal(t *testing.T) {
 		held("argocd", "dotvirt-platform", "", nil),
 		held("elsewhere", "dotvirt-foreign", "foreign", nil),
 		held("argocd", "dotvirt-moved", "moved", func(o map[string]any) {
+			_ = unstructured.SetNestedField(o, "other", "spec", "source", "path")
+			_ = unstructured.SetNestedField(o, "other", "status", "sync", "comparedTo", "source", "path")
+		}),
+		held("argocd", "dotvirt-stale", "stale", func(o map[string]any) { // re-pointed, not compared again yet
 			_ = unstructured.SetNestedField(o, "other", "spec", "source", "path")
 		}),
 		held("argocd", "dotvirt-declared", "declared", func(o map[string]any) {
@@ -726,6 +731,9 @@ func TestEmptyHoldReadsArgosRefusal(t *testing.T) {
 	}
 	if h, ok := s.EmptyHold("moved"); !ok || h.SameSource || !h.Reads(repo, "other") {
 		t.Errorf("re-pointed app: %+v %v, want a hold read from another source", h, ok)
+	}
+	if h, ok := s.EmptyHold("stale"); !ok || !h.Reads(repo, "") || h.Reads(repo, "other") {
+		t.Errorf("a comparison older than the spec: %+v %v, want the hold read from the compared source", h, ok)
 	}
 	if h, ok := s.EmptyHold("nosrc"); !ok || h.SameSource {
 		t.Errorf("an applied entry naming no source: %+v %v, want no same source", h, ok)
@@ -795,6 +803,7 @@ func TestEmptyHoldAppliedIsTheLastSyncedRevision(t *testing.T) {
 		})
 		a.SetLabels(map[string]string{projectAppLabel: "p"})
 		_ = unstructured.SetNestedField(a.Object, path, "spec", "source", "path")
+		_ = unstructured.SetNestedMap(a.Object, map[string]any{"repoURL": repo, "path": path}, "status", "sync", "comparedTo", "source")
 		_ = unstructured.SetNestedField(a.Object, true, "spec", "syncPolicy", "automated", "prune")
 		_ = unstructured.SetNestedField(a.Object, status, "status", "sync", "status")
 		_ = unstructured.SetNestedField(a.Object, revision, "status", "sync", "revision")
@@ -836,5 +845,25 @@ func TestEmptyHoldAppliedIsTheLastSyncedRevision(t *testing.T) {
 	show(s, app("OutOfSync", "c2", ".", true))
 	if rev, _ := applied(s); rev != "h0" {
 		t.Errorf("app gone and back: applied %q, want Argo's history h0", rev)
+	}
+
+	// A re-point rewrites the spec before Argo compares again: Synced at s1
+	// was compared from the old folder, so it is no applied state of the new.
+	repointed := NewSnapshot(nil, nil).WithWriteNamespace("argocd")
+	window := app("Synced", "s1", ".", false)
+	_ = unstructured.SetNestedField(window.Object, "fork", "spec", "source", "path")
+	show(repointed, window)
+	show(repointed, app("OutOfSync", "c2", "fork", true))
+	if rev, _ := applied(repointed); rev == "s1" {
+		t.Errorf("re-pointed in the Synced window: applied %q, want no s1", rev)
+	}
+
+	// Only the generated app feeds the memory, not a copy carrying its label.
+	copied := NewSnapshot(nil, nil).WithWriteNamespace("argocd")
+	cp := app("Synced", "s9", ".", false)
+	cp.SetName("copy-of-p")
+	show(copied, cp, app("OutOfSync", "c2", ".", true))
+	if rev, _ := applied(copied); rev != "h0" {
+		t.Errorf("a labeled copy Synced at s9: applied %q, want Argo's history h0", rev)
 	}
 }

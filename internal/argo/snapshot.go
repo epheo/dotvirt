@@ -354,8 +354,10 @@ func (s *Snapshot) PrunePending(repo string, settled ...string) (refs []model.Ob
 // EmptyHold is a project's generated Application that ArgoCD will not
 // auto-sync because every object it tracks would be pruned while
 // automated.allowEmpty is off: the revision it holds at and the last one it
-// applied, the source it reads (normalized repo, folder), whether the last
-// apply read that same source, and whether allowEmpty is on already (the
+// applied, the source that hold was compared from (normalized repo, folder:
+// status.sync.comparedTo, written with the revision and the resources, never
+// the spec, which a re-point rewrites before Argo compares again), whether
+// the last apply read that same source, and whether allowEmpty is on already (the
 // generator's lift, being applied). Applied is the last revision dotvirt saw
 // the app Synced at from the same source, where git declared exactly what
 // runs; else the last entry of Argo's history.
@@ -416,8 +418,19 @@ func holdsFromApps(objs []*unstructured.Unstructured, argoNS string, syncedAt ma
 	return out
 }
 
+// comparedSource is the repo (normalized) and folder of the app's last
+// comparison; ok is false while Argo has recorded none.
+func comparedSource(app map[string]any) (repo, path string, ok bool) {
+	src, ok, _ := unstructured.NestedMap(app, "status", "sync", "comparedTo", "source")
+	if !ok {
+		return "", "", false
+	}
+	repo = forge.NormalizeRepoURL(asString(src, "repoURL"))
+	return repo, cleanDir(asString(src, "path")), repo != ""
+}
+
 // syncedRev is a revision a generated app was seen Synced at, and the
-// normalized repo and folder it read then.
+// normalized repo and folder that comparison read.
 type syncedRev struct{ revision, repo, path string }
 
 // syncedFromApps is seen moved on by objs: a generated app Synced now records
@@ -431,12 +444,9 @@ func syncedFromApps(objs []*unstructured.Unstructured, argoNS string, seen map[s
 			continue
 		}
 		rev := nestedString(app.Object, "status", "sync", "revision")
-		if nestedString(app.Object, "status", "sync", "status") == string(model.SyncSynced) && rev != "" {
-			out[project] = syncedRev{
-				revision: rev,
-				repo:     forge.NormalizeRepoURL(nestedString(app.Object, "spec", "source", "repoURL")),
-				path:     cleanDir(nestedString(app.Object, "spec", "source", "path")),
-			}
+		repo, path, compared := comparedSource(app.Object)
+		if nestedString(app.Object, "status", "sync", "status") == string(model.SyncSynced) && rev != "" && compared {
+			out[project] = syncedRev{revision: rev, repo: repo, path: path}
 		} else if r, ok := seen[project]; ok {
 			out[project] = r
 		}
@@ -463,11 +473,12 @@ func emptyHold(app map[string]any, seen syncedRev) (EmptyHold, bool) {
 		}
 	}
 	lifted, _, _ := unstructured.NestedBool(app, "spec", "syncPolicy", "automated", "allowEmpty")
+	repo, path, _ := comparedSource(app)
 	h := EmptyHold{
 		Lifted:   lifted,
 		Compared: nestedString(app, "status", "sync", "revision"),
-		Repo:     forge.NormalizeRepoURL(nestedString(app, "spec", "source", "repoURL")),
-		Path:     cleanDir(nestedString(app, "spec", "source", "path")),
+		Repo:     repo,
+		Path:     path,
 	}
 	if seen.revision != "" && seen.repo == h.Repo && seen.path == h.Path {
 		h.Applied, h.SameSource = seen.revision, true
