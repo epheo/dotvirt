@@ -117,35 +117,47 @@ func (rt *redirecting) RoundTrip(r *http.Request) (*http.Response, error) {
 }
 
 // A redirect off the forge's origin is refused before anything is sent
-// there: a subdomain, another port or scheme, another host. One within the
-// origin is followed.
+// there: a subdomain, another port or scheme, another host, https down to
+// http. One within the origin is followed, and so is http on port 80
+// upgraded to https on 443 of the same host.
 func TestForgeRedirectsStayOnTheOrigin(t *testing.T) {
-	for location, follows := range map[string]bool{
-		"https://sub.forge.example/api/v1/repos/o/r/pulls/1":  false,
-		"https://forge.example:8443/api/v1/repos/o/r/pulls/1": false,
-		"http://forge.example/api/v1/repos/o/r/pulls/1":       false,
-		"https://elsewhere.example/api/v1/repos/o/r/pulls/1":  false,
-		"https://FORGE.example:443/api/v1/repos/o/r/pulls/2":  true,
-		"/api/v1/repos/o/r/pulls/3":                           true,
-	} {
+	cases := []struct {
+		base, location string
+		follows        bool
+	}{
+		{"https://forge.example", "https://sub.forge.example/api/v1/repos/o/r/pulls/1", false},
+		{"https://forge.example", "https://forge.example:8443/api/v1/repos/o/r/pulls/1", false},
+		{"https://forge.example", "http://forge.example/api/v1/repos/o/r/pulls/1", false},
+		{"https://forge.example", "https://elsewhere.example/api/v1/repos/o/r/pulls/1", false},
+		{"https://forge.example", "https://FORGE.example:443/api/v1/repos/o/r/pulls/2", true},
+		{"https://forge.example", "/api/v1/repos/o/r/pulls/3", true},
+		{"http://forge.example", "https://forge.example/api/v1/repos/o/r/pulls/1", true},
+		{"http://forge.example", "https://forge.example:443/api/v1/repos/o/r/pulls/1", true},
+		{"http://forge.example:80", "https://forge.example/api/v1/repos/o/r/pulls/1", true},
+		{"http://forge.example", "https://forge.example:8443/api/v1/repos/o/r/pulls/1", false},
+		{"http://forge.example", "https://sub.forge.example/api/v1/repos/o/r/pulls/1", false},
+		{"http://forge.example", "http://forge.example:8080/api/v1/repos/o/r/pulls/1", false},
+		{"http://forge.example:3000", "https://forge.example/api/v1/repos/o/r/pulls/1", false},
+	}
+	for _, c := range cases {
 		for name, f := range map[string]*Factory{
-			"console": NewFactory("https://forge.example", StaticToken("bot-token"), false, ""),
-			"user":    NewFactory("https://forge.example", StaticToken(""), false, "").As("user-token"),
+			"console": NewFactory(c.base, StaticToken("bot-token"), false, ""),
+			"user":    NewFactory(c.base, StaticToken(""), false, "").As("user-token"),
 		} {
-			rt := &redirecting{location: location}
+			rt := &redirecting{location: c.location}
 			f.http.Transport = rt
 			_, err := f.For("o/r.git").PR(1)
-			if follows {
+			if c.follows {
 				if err != nil || len(rt.sent) != 2 || !strings.HasPrefix(strings.ToLower(rt.sent[1]), "forge.example") {
-					t.Errorf("%s, %s: %v, sent %q; want the redirect within the origin followed", name, location, err, rt.sent)
+					t.Errorf("%s, %s to %s: %v, sent %q; want the redirect followed", name, c.base, c.location, err, rt.sent)
 				}
 				continue
 			}
 			if err == nil || !strings.Contains(err.Error(), "another origin") {
-				t.Errorf("%s, %s: %v, want the redirect refused", name, location, err)
+				t.Errorf("%s, %s to %s: %v, want the redirect refused", name, c.base, c.location, err)
 			}
 			if len(rt.sent) != 1 {
-				t.Errorf("%s, %s: sent %q, want no request, so no token, past the forge", name, location, rt.sent)
+				t.Errorf("%s, %s to %s: sent %q, want no request, so no token, past the forge", name, c.base, c.location, rt.sent)
 			}
 		}
 	}

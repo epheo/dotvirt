@@ -183,12 +183,17 @@ const maxRedirects = 10
 // SameOrigin is a CheckRedirect refusing a redirect off the origin (scheme,
 // host and port) the request was first sent to, before anything goes there:
 // a forge token rides every request, and net/http would carry it on to a
-// subdomain.
+// subdomain. One change is followed: http on port 80 upgraded to https on
+// 443 of the same host, which the token already reached in the clear, so a
+// forge configured with http:// keeps working.
 func SameOrigin(req *http.Request, via []*http.Request) error {
 	if len(via) >= maxRedirects {
 		return fmt.Errorf("stopped after %d redirects", maxRedirects)
 	}
-	if from, to := origin(via[0].URL), origin(req.URL); from != to {
+	from, to := origin(via[0].URL), origin(req.URL)
+	host := strings.ToLower(via[0].URL.Hostname())
+	upgrade := from == "http://"+net.JoinHostPort(host, "80") && to == "https://"+net.JoinHostPort(host, "443")
+	if from != to && !upgrade {
 		return fmt.Errorf("refused a redirect from %s to another origin, %s", from, to)
 	}
 	return nil
