@@ -370,7 +370,11 @@ same render to download. Install applies the render under the admin's own token:
   for the operator's account, owned by the Dotvirt resource; the operator renders the
   same objects (one source) and watches them by name, so its forge steps go on at once;
 - it takes back any field someone changed since (a forced server-side apply): it
-  exists to restore the render, which is why the banner says what differs first.
+  exists to restore the render, which is why the banner says what differs first;
+  over a live object it keeps the owner references as they are, so a grant an admin
+  made by hand stays theirs (adding an owner would also take delete on it);
+- a forge credential grant no install asks for any more is listed `Stale`, with the
+  command to remove it ([Forge credential grant](#forge-credential-grant)), never applied.
 
 Without the console, use the release's `install/guard.yaml` for the guard (the forge
 credential's grant is [below](#forge-credential-grant); the template, which renders
