@@ -505,9 +505,15 @@ func TestUserAuthWithoutDelegatedPinsNothing(t *testing.T) {
 // A lookalike of an official repository is no official repository: an
 // admin's image there stays pinned.
 func TestLookalikeImagesStayPinned(t *testing.T) {
-	for _, img := range []string{Repositories[0] + "-mirror:x", Repositories[0] + "x@sha256:" + strings.Repeat("a", 64), Repositories[1] + "-fork:12"} {
+	for img, forge := range map[string]bool{
+		Repositories[0] + "-mirror:x": false, Repositories[0] + "x@sha256:" + strings.Repeat("a", 64): false, Repositories[1] + "-fork:12": true,
+	} {
+		// Each in its own repository's place only, so no other list holds it.
 		p := params
-		p.SpecImage, p.DotvirtImage, p.ForgejoImage = img, img, img
+		p.SpecImage, p.DotvirtImage, p.ForgejoImage = img, img, ""
+		if forge {
+			p.SpecImage, p.DotvirtImage, p.ForgejoImage = "", "", img
+		}
 		deployments := Render(p)[index(Render(p), "ValidatingAdmissionPolicy", GuardDeploymentsName)].Object
 		body, _ := json.Marshal(deployments.Object)
 		if !strings.Contains(string(body), `\"`+img+`\"`) {
