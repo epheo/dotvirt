@@ -3,9 +3,7 @@ package changeset
 import (
 	"encoding/json"
 	"net/http"
-	"os"
 	"os/exec"
-	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
@@ -22,16 +20,18 @@ import (
 const testSeedBranch = "dotvirt/proposed/_seed/starter-templates"
 
 // seedPRs is a PR plane that keeps each PR's head and base as created, can
-// refuse creates, and can answer a create with another head than was pushed.
+// refuse creates or closes, and can answer a create with another head than
+// was pushed.
 type seedPRs struct {
 	f *proposeFixture
 
-	mu      sync.Mutex
-	prs     []forge.PR
-	refuse  bool   // creates answer 403 with a forge message
-	movedTo string // creates report this head commit, as if the branch moved
-	lists   int
-	creates int
+	mu          sync.Mutex
+	prs         []forge.PR
+	refuse      bool   // creates answer 403 with a forge message
+	refuseClose bool   // closes answer 500
+	movedTo     string // creates report this head commit, as if the branch moved
+	lists       int
+	creates     int
 }
 
 func newSeedFixture(t *testing.T) (*proposeFixture, *seedPRs) {
@@ -53,6 +53,9 @@ func (p *seedPRs) route(m, path string) (int, string, bool) {
 		}
 		var edit forge.PREdit
 		_ = json.Unmarshal([]byte(p.f.lastBody()), &edit)
+		if edit.State == "closed" && p.refuseClose {
+			return http.StatusInternalServerError, `{"message":"try again"}`, true
+		}
 		if edit.State != "" {
 			p.prs[n-1].State = edit.State
 		}
@@ -352,16 +355,167 @@ func TestAnOfferWhoseBranchMovedIsClosed(t *testing.T) {
 	}
 }
 
-// A write that fails without a classified cause (here the repo's objects are
-// read-only, so the push fails) shows one fixed line, never the raw error,
-// and is retried.
+// seedLane is a lane listing the open offer as PR #1, at forgeHead as the
+// forge reports it ("" for not reported).
+func seedLane(forgeHead string) []model.Proposal {
+	return []model.Proposal{{Project: "p", PRNumber: 1, Branch: testSeedBranch, Seed: true, ForgeHead: forgeHead}}
+}
+
+// pushOnSeed rewrites the seed branch from outside the console with edit, run
+// in a clone on that branch, and waits for the mirror to fetch it.
+func pushOnSeed(t *testing.T, f *proposeFixture, edit func(work string)) {
+	t.Helper()
+	work := t.TempDir()
+	gitRun(t, work, "clone", "-q", "-b", testSeedBranch, f.proj.Repo, ".")
+	edit(work)
+	gitRun(t, work, "push", "-q", "-f", "origin", testSeedBranch)
+	waitMirror(t, f, testSeedBranch, revParse(t, f.proj.Repo, testSeedBranch))
+}
+
+// shownOffer offers the starter library, waits for the mirror to hold its
+// branch, and checks the lane shows it.
+func shownOffer(t *testing.T, f *proposeFixture) {
+	t.Helper()
+	f.c.seedCreated(f.proj.Repo)
+	waitMirror(t, f, testSeedBranch, revParse(t, f.proj.Repo, testSeedBranch))
+	f.c.SeedTemplates(f.proj, seedLane(""))
+	if seed, _ := f.c.TemplateSeed(f.proj); seed.PRNumber != 1 {
+		t.Fatalf("want the offer shown, got %+v", seed)
+	}
+}
+
+func seedDecided(f *proposeFixture) bool {
+	f.c.seedMu.Lock()
+	defer f.c.seedMu.Unlock()
+	st := f.c.seeds[forge.NormalizeRepoURL(f.proj.Repo)]
+	return st != nil && st.decided && !st.queued
+}
+
+// A moved offer whose close failed stays open: the lane lists it, and the
+// Templates tab still says it was withdrawn, whatever its branch holds.
+func TestAMovedOfferLeftOpenIsNotShown(t *testing.T) {
+	f, prs := newSeedFixture(t)
+	prs.movedTo, prs.refuseClose = "0123456789abcdef0123456789abcdef01234567", true
+	f.c.seedCreated(f.proj.Repo)
+	if all := prs.all(); len(all) != 1 || all[0].State != "open" {
+		t.Fatalf("want the offer left open by the failed close, got %+v", all)
+	}
+	waitMirror(t, f, testSeedBranch, revParse(t, f.proj.Repo, testSeedBranch))
+	f.c.SeedTemplates(f.proj, seedLane(""))
+	seed, _ := f.c.TemplateSeed(f.proj)
+	if seed.PRNumber != 0 || !strings.Contains(seed.Error, "withdrew the offer") {
+		t.Errorf("want the withdrawal, not the PR, got %+v", seed)
+	}
+}
+
+// An open offer holding exactly the starter set is shown by a process that
+// did not push it: after a restart, whoever committed it, and after the base
+// branch moved on.
+func TestAnExactStarterHeadIsShownAfterARestart(t *testing.T) {
+	f, prs := newSeedFixture(t)
+	f.c.seedCreated(f.proj.Repo)
+	pushOnSeed(t, f, func(work string) {
+		gitRun(t, work, "commit", "-q", "--amend", "--no-edit", "--reset-author")
+	})
+	f.commitMain(t, "alpha/next.yaml", "kind: ConfigMap\n")
+	f.c.seeds = nil
+	f.c.SeedTemplates(f.proj, seedLane(revParse(t, f.proj.Repo, testSeedBranch)))
+	if seed, ok := f.c.TemplateSeed(f.proj); !ok || seed.PRNumber != 1 || seed.Error != "" {
+		t.Errorf("want the open offer shown, got %+v %v", seed, ok)
+	}
+	if _, creates := prs.counts(); creates != 1 || !seedDecided(f) {
+		t.Errorf("an open offer must leave the repo decided: %d creates", creates)
+	}
+}
+
+// The mirror can lag the forge by a poll: while the forge reports another
+// head than the mirror holds, the offer is not shown.
+func TestAnOfferAheadOfTheMirrorIsNotShown(t *testing.T) {
+	f, _ := newSeedFixture(t)
+	shownOffer(t, f)
+	f.c.SeedTemplates(f.proj, seedLane("0123456789abcdef0123456789abcdef01234567"))
+	if seed, ok := f.c.TemplateSeed(f.proj); ok {
+		t.Errorf("an offer the mirror has not fetched was shown: %+v", seed)
+	}
+	f.c.SeedTemplates(f.proj, seedLane(revParse(t, f.proj.Repo, testSeedBranch)))
+	if seed, _ := f.c.TemplateSeed(f.proj); seed.PRNumber != 1 {
+		t.Errorf("want the offer shown once the heads agree, got %+v", seed)
+	}
+}
+
+// An offer whose branch holds anything but the starter set as one commit on
+// the base branch is not shown, is not made again, and is not read again for
+// the same commits, an unreadable one included.
+func TestAnOfferNotExactlyTheStarterSetIsNotShown(t *testing.T) {
+	amend := func(t *testing.T, work string) { gitRun(t, work, "commit", "-q", "--amend", "--no-edit") }
+	for name, edit := range map[string]func(t *testing.T, work string){
+		"extra file": func(t *testing.T, work string) {
+			writeWorkFile(t, work, "alpha/evil.yaml", []byte("kind: ClusterRoleBinding\n"))
+			gitRun(t, work, "add", "-A")
+			amend(t, work)
+		},
+		"changed file": func(t *testing.T, work string) {
+			writeWorkFile(t, work, "templates/fedora-minimal.yaml", []byte("kind: VirtualMachineTemplate\n"))
+			gitRun(t, work, "add", "-A")
+			amend(t, work)
+		},
+		"missing file": func(t *testing.T, work string) {
+			gitRun(t, work, "rm", "-q", "templates/fedora-server.yaml")
+			amend(t, work)
+		},
+		"executable file": func(t *testing.T, work string) {
+			gitRun(t, work, "update-index", "--chmod=+x", "templates/fedora-minimal.yaml")
+			amend(t, work)
+		},
+		// git takes the name; go-git cannot diff the tree.
+		"unreadable tree": func(t *testing.T, work string) {
+			writeWorkFile(t, work, "x\x01/y.yaml", []byte("kind: ClusterRoleBinding\n"))
+			gitRun(t, work, "add", "-A")
+			amend(t, work)
+		},
+		"second commit": func(t *testing.T, work string) {
+			gitRun(t, work, "commit", "-q", "--allow-empty", "-m", "more")
+		},
+		// The tree stays the starter set; a forge rebasing the PR replays the side commit.
+		"merge keeping its tree": func(t *testing.T, work string) {
+			gitRun(t, work, "checkout", "-q", "-b", "side", "origin/main")
+			writeWorkFile(t, work, "alpha/evil.yaml", []byte("kind: ClusterRoleBinding\n"))
+			gitRun(t, work, "add", "-A")
+			gitRun(t, work, "commit", "-qm", "side")
+			gitRun(t, work, "checkout", "-q", testSeedBranch)
+			gitRun(t, work, "merge", "-q", "-s", "ours", "--no-edit", "side")
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			f, prs := newSeedFixture(t)
+			shownOffer(t, f)
+			pushOnSeed(t, f, func(work string) { edit(t, work) })
+			f.c.SeedTemplates(f.proj, seedLane(""))
+			if seed, ok := f.c.TemplateSeed(f.proj); ok {
+				t.Errorf("an offer with a %s was shown: %+v", name, seed)
+			}
+			if _, creates := prs.counts(); creates != 1 || !seedDecided(f) {
+				t.Errorf("the repo must stay decided: %d creates", creates)
+			}
+			at := revParse(t, f.proj.Repo, "main") + ".." + revParse(t, f.proj.Repo, testSeedBranch)
+			f.c.seedMu.Lock()
+			judged := f.c.seeds[forge.NormalizeRepoURL(f.proj.Repo)].judged
+			f.c.seedMu.Unlock()
+			if judged != at {
+				t.Errorf("the verdict must be kept for %s, got %q", at, judged)
+			}
+		})
+	}
+}
+
+// A write that fails without a classified cause (here the remote refuses
+// every pack, so the push fails while reads still work) shows one fixed line,
+// never the raw error, and is retried.
 func TestAFailedWriteShowsTheFixedLine(t *testing.T) {
 	f, prs := newSeedFixture(t)
 	openMirror(t, f)
-	if err := os.Chmod(filepath.Join(f.proj.Repo, "objects"), 0o555); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = os.Chmod(filepath.Join(f.proj.Repo, "objects"), 0o755) })
+	// A server-side limit, not file modes: root ignores those.
+	gitRun(t, f.proj.Repo, "config", "receive.maxInputSize", "1")
 	f.c.seedCreated(f.proj.Repo)
 	seed, ok := f.c.TemplateSeed(f.proj)
 	if !ok || seed.Error != "the starter templates could not be written to the repository" || !seed.Retries {

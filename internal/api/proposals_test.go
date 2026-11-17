@@ -185,7 +185,8 @@ func TestProposalsLaneIsProjectScoped(t *testing.T) {
 
 // TestProposalsHeadMoveWakesHub pins the review caches' invalidation: a PR
 // whose head moves under the same number is a lane change, so the clients
-// keyed on the head re-read its review.
+// keyed on the head re-read its review. The forge's head alone is not: no
+// browser receives it.
 func TestProposalsHeadMoveWakesHub(t *testing.T) {
 	fd := &fakeDraft{prs: map[string]model.Proposal{
 		"team-a": {Project: "team-a", PRNumber: 7, Head: "aaa"},
@@ -201,6 +202,12 @@ func TestProposalsHeadMoveWakesHub(t *testing.T) {
 	fd.mu.Unlock()
 	if !s.refreshProposals(true) {
 		t.Fatal("a moved head should wake the hub")
+	}
+	fd.mu.Lock()
+	fd.prs["team-a"] = model.Proposal{Project: "team-a", PRNumber: 7, Head: "bbb", ForgeHead: "ccc"}
+	fd.mu.Unlock()
+	if s.refreshProposals(true) {
+		t.Fatal("a forge head alone must not wake the hub")
 	}
 }
 

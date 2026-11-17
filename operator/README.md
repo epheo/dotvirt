@@ -1177,6 +1177,7 @@ No first segment starts with `_` or equals `revert`. A first segment that would,
 The escape applies to the first segment only: a revert's user segment (`revert/<user>/...`) is the plain ref-safe name, so never strip `u-` there.
 The segment is a readable form, not an identity: names are made ref-safe first, so `uw:alice` and `uw-alice` share a segment, and their branches stay distinct by the hash. Credit a change to the requester dotvirt records where it records one, not to the segment alone.
 
+Proposal branches created before the upgrade keep their old names: the escape is not applied to them retroactively.
 After the upgrade, a user whose ref-safe name starts with `_` or `u-`, or equals `revert`, proposes on a new branch.
 A pull request still open on the old branch is no longer updated by the console: merge it as it is, or close it and stage those changes again.
 
@@ -1222,7 +1223,11 @@ The offer is always a pull request opened by dotvirt's forge account, in every `
 
 - Branch: `dotvirt/proposed/_seed/starter-templates`, into the base branch.
 - Marker: the PR also adds `templates/.dotvirt-seeded`. Merged, it keeps the library from being offered again, even after its examples are deleted.
-- Content: the branch is rebuilt from the base branch with exactly the two examples and the marker, whatever was on it before. If it moves between that push and the pull request, dotvirt closes the pull request rather than show content it did not write; that withdraws the offer for good, as any closed offer does.
+- Content: the branch is rebuilt from the base branch with exactly the two examples and the marker, whatever was on it before. If it moves between that push and the pull request, dotvirt closes the pull request rather than show content it did not write, and does not make the offer again.
+- Shown: the Templates tab shows an open offer only while its branch is one commit on the base branch adding exactly the two examples and the marker, byte for byte, as regular files, and the forge and the console's mirror agree on that commit. Such a branch is harmless whoever pushed it.
+- Anything else hides it there, an executable or other non-regular file included; the pull request stays in the lane, and the offer is not made again.
+- A release that changes the starter set hides open offers from earlier releases the same way; the repo stays decided.
+- After a console restart, a withdrawn offer whose close failed is shown again if its branch holds exactly the starter set.
 - When: a repo dotvirt creates is offered right away. Any other repo is offered when its pull request lane is next read, if its base branch holds neither the marker nor a template. Offers run one at a time.
 - Once: a pull request from the seed branch in any state, open, merged or closed, its branch since deleted included, means the offer was made. Closing it unmerged declines it for good.
 - Folder projects (`dotvirt.io/path`) are never offered: their mirror is scoped to the project's folder, and reading the repo root to decide or write the offer would evict it. They never were: the starter templates used to be committed only to a repo dotvirt had just created, which is always a whole-repo project.
