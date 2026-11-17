@@ -23,13 +23,17 @@ YQ ?= go run github.com/mikefarah/yq/v4@$(YQ_VERSION)
 help: ## Show targets.
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN{FS=":.*?## "}{printf "  %-14s %s\n", $$1, $$2}'
 
+# The operator's packages, never ./...: controller-gen would load test/typecheck,
+# its own module outside the workspace, and fail.
+GEN_PATHS = {./api/...,./cmd/...,./internal/...}
+
 .PHONY: generate
 generate: ## Generate DeepCopy methods (zz_generated.deepcopy.go).
-	$(CONTROLLER_GEN) object:headerFile="hack/boilerplate.go.txt" paths="./..."
+	$(CONTROLLER_GEN) object:headerFile="hack/boilerplate.go.txt" paths="$(GEN_PATHS)"
 
 .PHONY: manifests
 manifests: ## Generate the CRD + RBAC role into config/.
-	$(CONTROLLER_GEN) crd rbac:roleName=dotvirt-operator paths="./..." \
+	$(CONTROLLER_GEN) crd rbac:roleName=dotvirt-operator paths="$(GEN_PATHS)" \
 		output:crd:artifacts:config=config/crd/bases \
 		output:rbac:artifacts:config=config/rbac
 
