@@ -33,6 +33,7 @@ import (
 	utilyaml "k8s.io/apimachinery/pkg/util/yaml"
 	admissionregistrationv1ac "k8s.io/client-go/applyconfigurations/admissionregistration/v1"
 	rbacv1ac "k8s.io/client-go/applyconfigurations/rbac/v1"
+	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -1768,7 +1769,10 @@ func TestEnvtest(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		for _, cmd := range install.ForgeCredentialReplaceCommands(dv, "dotvirt-operator") {
+		// The README's commands, each variable as an admin derives it.
+		vars := strings.NewReplacer(`"$INSTALL_NS"`, "cred-half", `"$VERBS"`, "get", `"$CREDENTIAL"`, "byo-creds",
+			`"$OPERATOR"`, "dotvirt-operator:"+install.OperatorServiceAccount)
+		for _, cmd := range strings.Split(vars.Replace(adminobjects.CredentialGrantCommands), "\n") {
 			stdout, stderr, err := kubectl.Run(strings.Fields(cmd)[1:]...)
 			if err != nil {
 				out, _ := io.ReadAll(stdout)
@@ -1778,6 +1782,50 @@ func TestEnvtest(t *testing.T) {
 		}
 		if !review(account, groups, authzv1.ResourceAttributes{Verb: "get", Resource: "secrets", Namespace: "cred-half", Name: "byo-creds"}) {
 			t.Error("the replace commands left the operator without the grant")
+		}
+
+		// As the console installs it: its own render (adminobjects.Render for the
+		// pins it reads), server-side applied under the cluster admin's token
+		// with the console's field manager, forced. The operator's watch sees it
+		// land, and the operator's account reads exactly that Secret.
+		mustCreate(t, admin, &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "cred-console"}})
+		p := adminobjects.Params{
+			Operator: account, Namespace: "cred-console", ForgeSecret: "byo-creds", ForgeManaged: true,
+			InstallName: "cred", InstallUID: "0f7c1d2e-cred",
+		}
+		dyn := dynamic.NewForConfigOrDie(adminCfg)
+		allowed := adminobjects.Allowed(p.Namespace)
+		before = passes.Load()
+		var installed int
+		for _, o := range adminobjects.Render(p) {
+			ref, ok := adminobjects.Allow(allowed, o.Object)
+			if !ok || ref.Namespace == "" {
+				continue
+			}
+			if _, err := dyn.Resource(ref.GVR()).Namespace(ref.Namespace).Apply(ctx, ref.Name, o.Object, metav1.ApplyOptions{FieldManager: "dotvirt", Force: true}); err != nil {
+				t.Fatalf("install %s %s: %v", ref.Kind, ref.Name, err)
+			}
+			installed++
+		}
+		if installed != 2 {
+			t.Fatalf("the console's render held %d namespaced objects, want the grant's Role and RoleBinding", installed)
+		}
+		soon(t, "a pass after the console installs the grant", func() bool { return passes.Load() > before })
+		for _, r := range []struct {
+			verb, ns, name string
+			want           bool
+		}{
+			{"get", "cred-console", "byo-creds", true},
+			{"create", "cred-console", "byo-creds", true},
+			{"patch", "cred-console", "byo-creds", true},
+			{"delete", "cred-console", "byo-creds", false},
+			{"list", "cred-console", "", false},
+			{"get", "cred-console", install.SessionSecretName, false},
+			{"get", "kube-system", "byo-creds", false},
+		} {
+			if got := review(account, groups, authzv1.ResourceAttributes{Verb: r.verb, Resource: "secrets", Namespace: r.ns, Name: r.name}); got != r.want {
+				t.Errorf("console grant: %s secrets %s/%s: allowed=%v, want %v", r.verb, r.ns, r.name, got, r.want)
+			}
 		}
 	})
 

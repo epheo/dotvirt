@@ -14,6 +14,8 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/kubernetes/scheme"
 
 	"github.com/epheo/dotvirt/internal/config"
@@ -37,6 +39,7 @@ var (
 
 		BrandingConfigMap: "brand", ForgeSecret: "creds",
 		OIDCSecret: "admin-oidc", OIDCSecretKey: "client-secret", OIDCIssuer: "https://idp.example",
+		InstallName: "x", InstallUID: "uid-x",
 	}
 )
 
@@ -66,7 +69,7 @@ func dotvirtList(items ...any) map[string]any {
 // with (a deny-everything policy under the guard's name, and a binding no
 // install may ask for), the operator's Deployment, and the guard's objects;
 // all answer admin-token alone. Applies are recorded with bearer and body.
-func adminObjectsServer(t *testing.T) (*Server, *fakeCluster, func() map[string]applied) {
+func adminObjectsServer(t *testing.T, seed ...*unstructured.Unstructured) (*Server, *fakeCluster, func() map[string]applied) {
 	t.Helper()
 	fc := newFakeCluster(t)
 	adminOnly := func(w http.ResponseWriter, r *http.Request) bool {
@@ -81,7 +84,7 @@ func adminObjectsServer(t *testing.T) (*Server, *fakeCluster, func() map[string]
 			return
 		}
 		writeObj(w, map[string]any{"apiVersion": "dotvirt.io/v1alpha1", "kind": "DotvirtList", "metadata": map[string]any{}, "items": []any{map[string]any{
-			"apiVersion": "dotvirt.io/v1alpha1", "kind": "Dotvirt", "metadata": map[string]any{"name": "x", "namespace": "dotvirt"},
+			"apiVersion": "dotvirt.io/v1alpha1", "kind": "Dotvirt", "metadata": map[string]any{"name": "x", "namespace": "dotvirt", "uid": "uid-x"},
 			"spec": map[string]any{"image": adminWant.SpecImage, "ingress": map[string]any{"host": adminWant.ConsoleHost},
 				"branding": map[string]any{"configMap": adminWant.BrandingConfigMap}, "forge": map[string]any{"credentialsSecret": adminWant.ForgeSecret},
 				"auth": map[string]any{"oidc": map[string]any{"issuerURL": adminWant.OIDCIssuer,
@@ -91,6 +94,11 @@ func adminObjectsServer(t *testing.T) (*Server, *fakeCluster, func() map[string]
 					"object": map[string]any{"apiVersion": "admissionregistration.k8s.io/v1", "kind": "ValidatingAdmissionPolicy",
 						"metadata": map[string]any{"name": adminobjects.GuardSecretsName},
 						"spec":     map[string]any{"validations": []any{map[string]any{"expression": "false"}}}}},
+				// The forge credential's grant, widened to every Secret.
+				map[string]any{"purpose": "tampered", "state": "NotInstalled", "kind": "Role", "name": adminobjects.CredentialGrantName, "namespace": "dotvirt",
+					"object": map[string]any{"apiVersion": "rbac.authorization.k8s.io/v1", "kind": "Role",
+						"metadata": map[string]any{"name": adminobjects.CredentialGrantName, "namespace": "dotvirt"},
+						"rules":    []any{map[string]any{"apiGroups": []any{""}, "resources": []any{"secrets"}, "verbs": []any{"*"}}}}},
 				map[string]any{"purpose": "rogue", "state": "NotInstalled", "object": map[string]any{
 					"apiVersion": "rbac.authorization.k8s.io/v1", "kind": "ClusterRoleBinding", "metadata": map[string]any{"name": "rogue"},
 					"roleRef": map[string]any{"apiGroup": "rbac.authorization.k8s.io", "kind": "ClusterRole", "name": "cluster-admin"}}},
@@ -146,8 +154,22 @@ func adminObjectsServer(t *testing.T) (*Server, *fakeCluster, func() map[string]
 	var mu sync.Mutex
 	stored := map[string]map[string]any{}
 	seen := map[string]applied{}
-	for _, ref := range adminobjects.Allowed("dotvirt") {
-		path := "/apis/" + ref.Group + "/" + ref.Version + "/" + ref.Resource + "/" + ref.Name
+	allowed := adminobjects.Allowed("dotvirt")
+	pathOf := func(ref adminobjects.Ref) string {
+		if ref.Namespace != "" {
+			return "/apis/" + ref.Group + "/" + ref.Version + "/namespaces/" + ref.Namespace + "/" + ref.Resource + "/" + ref.Name
+		}
+		return "/apis/" + ref.Group + "/" + ref.Version + "/" + ref.Resource + "/" + ref.Name
+	}
+	for _, o := range seed {
+		ref, ok := adminobjects.Allow(allowed, o)
+		if !ok {
+			t.Fatalf("seeded %s %s, which no install may ask for", o.GetKind(), o.GetName())
+		}
+		stored[pathOf(ref)] = o.Object
+	}
+	for _, ref := range allowed {
+		path := pathOf(ref)
 		fc.on(http.MethodGet, path, func(w http.ResponseWriter, r *http.Request) {
 			if !adminOnly(w, r) {
 				return
@@ -343,5 +365,187 @@ func TestAdminObjectsPinTheRoutersHost(t *testing.T) {
 	body, _ := json.Marshal(seen()["ValidatingAdmissionPolicy/"+adminobjects.GuardFrontDoorName].body)
 	if !strings.Contains(string(body), `\"dotvirt-dotvirt.apps.micro\"`) {
 		t.Errorf("the front door does not pin the router's host:\n%s", body)
+	}
+}
+
+// The forge credential's grant is the console's render from the install's
+// spec.forge, read as the admin: listed for an admin's Secret, with write verbs
+// for a managed forge, and never for the default credential or a Secret the
+// operator generates for itself. A grant planted in status changes nothing.
+func TestAdminObjectsGrantTheCredentialFromTheSpec(t *testing.T) {
+	for _, c := range []struct {
+		forge map[string]any
+		verbs []string
+	}{
+		{map[string]any{}, nil},
+		{map[string]any{"credentialsSecret": adminobjects.DefaultForgeSecret, "managed": true}, nil},
+		{map[string]any{"credentialsSecret": adminobjects.SessionSecret, "managed": true}, nil},
+		{map[string]any{"credentialsSecret": "creds"}, []string{"get"}},
+		{map[string]any{"credentialsSecret": "creds", "managed": true}, []string{"get", "create", "patch"}},
+	} {
+		s, fc, _ := adminObjectsServer(t)
+		fc.on(http.MethodGet, installPath, func(w http.ResponseWriter, r *http.Request) {
+			writeObj(w, dotvirtList(map[string]any{"apiVersion": "dotvirt.io/v1alpha1", "kind": "Dotvirt",
+				"metadata": map[string]any{"name": "x", "namespace": "dotvirt", "uid": "uid-x"},
+				"spec":     map[string]any{"image": adminWant.SpecImage, "ingress": map[string]any{"host": adminWant.ConsoleHost}, "forge": c.forge},
+				"status": map[string]any{"adminObjects": []any{map[string]any{"kind": "Role", "name": adminobjects.CredentialGrantName, "namespace": "dotvirt",
+					"object": map[string]any{"rules": []any{map[string]any{"verbs": []any{"*"}}}}}}},
+			}))
+		})
+		rec := do(s, adminToken, http.MethodGet, "/api/admin-objects", "")
+		wantStatus(t, rec, http.StatusOK)
+		var role map[string]any
+		for _, o := range decodeBody[model.AdminObjects](t, rec).Objects {
+			if o.Kind == "Role" && o.Name == adminobjects.CredentialGrantName {
+				role = o.Object
+			}
+		}
+		if c.verbs == nil {
+			if role != nil {
+				t.Errorf("forge %v: the grant is offered", c.forge)
+			}
+			continue
+		}
+		rules, _, _ := unstructured.NestedSlice(role, "rules")
+		if len(rules) != 1 {
+			t.Fatalf("forge %v: Role rules %v", c.forge, rules)
+		}
+		verbs, _, _ := unstructured.NestedStringSlice(rules[0].(map[string]any), "verbs")
+		names, _, _ := unstructured.NestedStringSlice(rules[0].(map[string]any), "resourceNames")
+		if !slices.Equal(verbs, c.verbs) || !slices.Equal(names, []string{"creds"}) {
+			t.Errorf("forge %v: the grant gives %v on %v, want %v on creds", c.forge, verbs, names, c.verbs)
+		}
+	}
+}
+
+// Installing the grant takes the caller's own right to create and patch it:
+// an admin who may write everything but Roles and RoleBindings in the install
+// namespace is not offered the install, and the handler reads nothing.
+func TestAdminObjectsCapabilityCoversTheCredentialGrant(t *testing.T) {
+	s, fc, seen := adminObjectsServer(t)
+	fc.ssar = func(token string, a *authzv1.ResourceAttributes) bool {
+		grant := a.Group == "rbac.authorization.k8s.io" && slices.Contains([]string{"roles", "rolebindings"}, a.Resource)
+		return token == adminToken && !grant
+	}
+	c := decodeBody[model.Capabilities](t, do(s, adminToken, http.MethodGet, "/api/capabilities", "")).Cluster
+	if c != nil && c.AdminObjects {
+		t.Error("offered without the right to install the forge credential's grant")
+	}
+	for _, method := range []string{http.MethodGet, http.MethodPost} {
+		wantStatus(t, do(s, adminToken, method, "/api/admin-objects", ""), http.StatusForbidden)
+	}
+	if got := seen(); len(got) != 0 || fc.called(http.MethodGet, installPath) {
+		t.Errorf("a caller without the grant's rights reached the cluster: applied %v", got)
+	}
+}
+
+// handMadeGrant is the forge credential's grant as an admin made it with
+// kubectl: no owner, no labels.
+func handMadeGrant(t *testing.T, p adminobjects.Params) []*unstructured.Unstructured {
+	t.Helper()
+	role, binding := adminobjects.CredentialGrant(p)
+	var out []*unstructured.Unstructured
+	for _, o := range []runtime.Object{role, binding} {
+		m, err := runtime.DefaultUnstructuredConverter.ToUnstructured(o)
+		if err != nil {
+			t.Fatal(err)
+		}
+		u := &unstructured.Unstructured{Object: m}
+		u.SetOwnerReferences(nil)
+		u.SetLabels(nil)
+		unstructured.RemoveNestedField(u.Object, "metadata", "creationTimestamp")
+		out = append(out, u)
+	}
+	return out
+}
+
+// Install over a grant an admin made by hand keeps it ownerless: adding an
+// owner takes delete on the object where the apiserver enforces owner
+// permissions, and the admin's grant stays the admin's.
+func TestAdminObjectsInstallKeepsAHandMadeGrantsOwner(t *testing.T) {
+	s, _, seen := adminObjectsServer(t, handMadeGrant(t, adminWant)...)
+	wantStatus(t, do(s, adminToken, http.MethodPost, "/api/admin-objects", ""), http.StatusOK)
+	got := seen()
+	for _, kind := range []string{"Role", "RoleBinding"} {
+		a, ok := got[kind+"/"+adminobjects.CredentialGrantName]
+		if !ok {
+			t.Fatalf("%s not applied", kind)
+		}
+		if owners, found, _ := unstructured.NestedSlice(a.body, "metadata", "ownerReferences"); found && len(owners) > 0 {
+			t.Errorf("%s applied with owners %v over a hand-made grant", kind, owners)
+		}
+	}
+	// Fresh, the render's owner goes with it.
+	s, _, seen = adminObjectsServer(t)
+	wantStatus(t, do(s, adminToken, http.MethodPost, "/api/admin-objects", ""), http.StatusOK)
+	if owners, _, _ := unstructured.NestedSlice(seen()["Role/"+adminobjects.CredentialGrantName].body, "metadata", "ownerReferences"); len(owners) != 1 {
+		t.Errorf("a fresh grant applied with owners %v, want the install", owners)
+	}
+}
+
+// A grant left after the credential went back to the operator's own is listed
+// Stale with how to remove it, never applied.
+func TestAdminObjectsListAStaleGrant(t *testing.T) {
+	s, fc, seen := adminObjectsServer(t, handMadeGrant(t, adminWant)...)
+	fc.on(http.MethodGet, installPath, func(w http.ResponseWriter, r *http.Request) {
+		writeObj(w, dotvirtList(map[string]any{"apiVersion": "dotvirt.io/v1alpha1", "kind": "Dotvirt",
+			"metadata": map[string]any{"name": "x", "namespace": "dotvirt", "uid": "uid-x"},
+			"spec":     map[string]any{"image": adminWant.SpecImage, "ingress": map[string]any{"host": adminWant.ConsoleHost}}}))
+	})
+	for _, method := range []string{http.MethodGet, http.MethodPost} {
+		rec := do(s, adminToken, method, "/api/admin-objects", "")
+		wantStatus(t, rec, http.StatusOK)
+		var stale []string
+		for _, o := range decodeBody[model.AdminObjects](t, rec).Objects {
+			if o.State == string(adminobjects.Stale) {
+				stale = append(stale, o.Kind)
+				if o.Object != nil || !strings.Contains(o.Detail, adminobjects.CredentialStaleCommand) {
+					t.Errorf("%s: stale %s carries object %v, detail %q", method, o.Kind, o.Object, o.Detail)
+				}
+			}
+		}
+		if !slices.Equal(stale, []string{"Role", "RoleBinding"}) {
+			t.Errorf("%s: stale %v, want the grant's Role and RoleBinding", method, stale)
+		}
+	}
+	if _, ok := seen()["Role/"+adminobjects.CredentialGrantName]; ok {
+		t.Error("the stale grant was applied")
+	}
+}
+
+// The console's render of the grant, from its real reads (the install's spec,
+// name and uid, the operator's Deployment), is the shared render the operator
+// takes too (adminobjects.CredentialParams): one source.
+func TestAdminObjectsRenderTheSharedGrant(t *testing.T) {
+	s, fc, _ := adminObjectsServer(t)
+	fc.on(http.MethodGet, installPath, func(w http.ResponseWriter, r *http.Request) {
+		writeObj(w, dotvirtList(map[string]any{"apiVersion": "dotvirt.io/v1alpha1", "kind": "Dotvirt",
+			"metadata": map[string]any{"name": "x", "namespace": "dotvirt", "uid": "uid-x"},
+			"spec": map[string]any{"image": adminWant.SpecImage, "ingress": map[string]any{"host": adminWant.ConsoleHost},
+				"forge": map[string]any{"credentialsSecret": "creds", "managed": true}}}))
+	})
+	rec := do(s, adminToken, http.MethodGet, "/api/admin-objects", "")
+	wantStatus(t, rec, http.StatusOK)
+	role, binding := adminobjects.CredentialGrant(adminobjects.CredentialParams("dotvirt", "x", "uid-x", "creds", true, adminWant.Operator))
+	want := map[string]runtime.Object{"Role": role, "RoleBinding": binding}
+	for _, o := range decodeBody[model.AdminObjects](t, rec).Objects {
+		w, ok := want[o.Kind]
+		if !ok || o.Name != adminobjects.CredentialGrantName {
+			continue
+		}
+		m, err := runtime.DefaultUnstructuredConverter.ToUnstructured(w)
+		if err != nil {
+			t.Fatal(err)
+		}
+		unstructured.RemoveNestedField(m, "metadata", "creationTimestamp")
+		x, _ := json.Marshal(o.Object)
+		y, _ := json.Marshal(m)
+		if string(x) != string(y) {
+			t.Errorf("%s: the console renders\n%s\nthe shared render is\n%s", o.Kind, x, y)
+		}
+		delete(want, o.Kind)
+	}
+	if len(want) != 0 {
+		t.Errorf("not rendered: %v", want)
 	}
 }

@@ -40,6 +40,12 @@ rights allow. The console renders them from what the admin's token reads, never 
 anything the operator writes; the operator holds no right to create, change or delete
 them. Until an admin installs them, nothing below is enforced.
 
+The operator's role names only its own Secrets. A forge credential an admin names
+(`spec.forge.credentialsSecret`) is granted the same way: a Role and RoleBinding
+`dotvirt-forge-credential` in the install namespace, on that one Secret, rendered by the
+console from the install's spec and installed under the admin's token; the operator
+cannot grant it to itself.
+
 What the guard closes:
 - minting a ServiceAccount token through a Secret, and writing Secrets outside the
   install and ArgoCD namespaces;
