@@ -31,9 +31,12 @@ const (
 	GuardHTTPRoutesName  = "dotvirt-operator-httproutes"
 )
 
-// GuardNames are the guard's policy and binding names, in render order.
-var GuardNames = []string{GuardSecretsName, GuardAccountsName, GuardDeploymentsName, GuardClaimsName, GuardBindingsName,
-	GuardInstallName, GuardFrontDoorName, GuardRoutesName, GuardIngressesName, GuardHTTPRoutesName}
+// GuardNames are the guard's policy and binding names, in apply order: each
+// policy then its binding, the ones that took kinds over from an earlier
+// guard's policies first, so narrowing those never leaves a kind unguarded,
+// even when an install stops partway.
+var GuardNames = []string{GuardAccountsName, GuardClaimsName, GuardRoutesName, GuardIngressesName, GuardHTTPRoutesName,
+	GuardSecretsName, GuardDeploymentsName, GuardBindingsName, GuardInstallName, GuardFrontDoorName}
 
 // OperandAccounts are the ServiceAccounts the operator's Deployments run as:
 // the console's and the managed forge's.
@@ -244,11 +247,13 @@ func guard(p Params, insecure, managed, delegated string, metrics Metrics) []Obj
 		GuardIngressesName:   "Bounds the operator's Ingresses: the console's leads only to the console on its host, no other claims that host or every host",
 		GuardHTTPRoutesName:  "Bounds the operator's HTTPRoutes: the console's leads only to the console on its host, unfiltered, no other claims that host or every host",
 	}
-	var out []Object
+	byName := map[string]*admissionregistrationv1.ValidatingAdmissionPolicy{}
 	for _, pol := range policies {
-		out = append(out, Object{Purpose: purpose[pol.Name], Object: toUnstructured(pol)})
+		byName[pol.Name] = pol
 	}
+	var out []Object
 	for _, name := range GuardNames {
+		out = append(out, Object{Purpose: purpose[name], Object: toUnstructured(byName[name])})
 		out = append(out, Object{Purpose: "Enforces " + name, Object: toUnstructured(&admissionregistrationv1.ValidatingAdmissionPolicyBinding{
 			TypeMeta:   metav1.TypeMeta{APIVersion: "admissionregistration.k8s.io/v1", Kind: "ValidatingAdmissionPolicyBinding"},
 			ObjectMeta: metav1.ObjectMeta{Name: name, Labels: guardLabels()},

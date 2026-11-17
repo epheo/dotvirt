@@ -100,6 +100,283 @@
 #
 # Generated from pkg/adminobjects (go test ./pkg/adminobjects -run TestReleaseTemplate -update).
 ---
+# Bounds the operator's ServiceAccounts: the console's keeps its token mounted
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  labels:
+    app.kubernetes.io/name: dotvirt
+    app.kubernetes.io/part-of: dotvirt-operator-guard
+  name: dotvirt-operator-accounts
+spec:
+  failurePolicy: Fail
+  matchConditions:
+  - expression: request.userInfo.username == "${OPERATOR_USERNAME}"
+    name: operator
+  matchConstraints:
+    resourceRules:
+    - apiGroups:
+      - ""
+      apiVersions:
+      - v1
+      operations:
+      - CREATE
+      - UPDATE
+      resources:
+      - serviceaccounts
+  validations:
+  - expression: object.metadata.name != "dotvirt" || !has(object.automountServiceAccountToken)
+      || object.automountServiceAccountToken
+    message: the operator keeps the console's ServiceAccount token mounted (dotvirt
+      operator guard)
+    reason: Forbidden
+---
+# Enforces dotvirt-operator-accounts
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  labels:
+    app.kubernetes.io/name: dotvirt
+    app.kubernetes.io/part-of: dotvirt-operator-guard
+  name: dotvirt-operator-accounts
+spec:
+  policyName: dotvirt-operator-accounts
+  validationActions:
+  - Deny
+---
+# Bounds the operator's claims: bound to no volume, selector or data source of its choosing
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  labels:
+    app.kubernetes.io/name: dotvirt
+    app.kubernetes.io/part-of: dotvirt-operator-guard
+  name: dotvirt-operator-claims
+spec:
+  failurePolicy: Fail
+  matchConditions:
+  - expression: request.userInfo.username == "${OPERATOR_USERNAME}"
+    name: operator
+  matchConstraints:
+    resourceRules:
+    - apiGroups:
+      - ""
+      apiVersions:
+      - v1
+      operations:
+      - CREATE
+      - UPDATE
+      resources:
+      - persistentvolumeclaims
+  validations:
+  - expression: '!has(object.spec.selector) && !has(object.spec.dataSource) && !has(object.spec.dataSourceRef)
+      && (request.operation == "CREATE" ? (!has(object.spec.volumeName) || object.spec.volumeName
+      == "") : has(object.spec.volumeName) == has(oldObject.spec.volumeName) && (!has(object.spec.volumeName)
+      || object.spec.volumeName == oldObject.spec.volumeName))'
+    message: the operator binds its claims to no volume, selector or data source of
+      its choosing (dotvirt operator guard)
+    reason: Forbidden
+---
+# Enforces dotvirt-operator-claims
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  labels:
+    app.kubernetes.io/name: dotvirt
+    app.kubernetes.io/part-of: dotvirt-operator-guard
+  name: dotvirt-operator-claims
+spec:
+  policyName: dotvirt-operator-claims
+  validationActions:
+  - Deny
+---
+# Bounds the operator's Routes: the console's leads only to the console on its host, no other claims that host
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  labels:
+    app.kubernetes.io/name: dotvirt
+    app.kubernetes.io/part-of: dotvirt-operator-guard
+  name: dotvirt-operator-routes
+spec:
+  failurePolicy: Fail
+  matchConditions:
+  - expression: request.userInfo.username == "${OPERATOR_USERNAME}"
+    name: operator
+  matchConstraints:
+    resourceRules:
+    - apiGroups:
+      - route.openshift.io
+      apiVersions:
+      - v1
+      operations:
+      - CREATE
+      - UPDATE
+      resources:
+      - routes
+  validations:
+  - expression: '!(object.metadata.name == "dotvirt" && request.namespace == "${INSTALL_NAMESPACE}")
+      || ((request.operation == "CREATE" ? (!has(object.metadata.annotations) || object.metadata.annotations.all(k,
+      k == "openshift.io/host.generated" && object.metadata.annotations[k] == "true"))
+      : ((!has(object.metadata.annotations) || object.metadata.annotations.all(k,
+      k == "openshift.io/host.generated" || (has(oldObject.metadata.annotations) &&
+      k in oldObject.metadata.annotations && oldObject.metadata.annotations[k] ==
+      object.metadata.annotations[k]))) && (!has(oldObject.metadata.annotations) ||
+      oldObject.metadata.annotations.all(k, k == "openshift.io/host.generated" ||
+      (has(object.metadata.annotations) && k in object.metadata.annotations))))) &&
+      object.spec.to.kind == "Service" && object.spec.to.name == "dotvirt" && (!has(object.spec.alternateBackends)
+      || size(object.spec.alternateBackends) == 0) && has(object.spec.port) && string(object.spec.port.targetPort)
+      == "http" && has(object.spec.tls) && object.spec.tls.termination == "edge" &&
+      !has(object.spec.tls.destinationCACertificate) && ("${CONSOLE_HOST}" == "" ||
+      !has(object.spec.host) || object.spec.host == "" || object.spec.host == "${CONSOLE_HOST}"))'
+    message: the operator routes the console's host only to the console's Service,
+      edge-terminated (dotvirt operator guard)
+    reason: Forbidden
+  - expression: (object.metadata.name == "dotvirt" && request.namespace == "${INSTALL_NAMESPACE}")
+      || ((!has(object.spec.host) || object.spec.host == "" || object.spec.host !=
+      "${CONSOLE_HOST}") && (!has(object.spec.wildcardPolicy) || object.spec.wildcardPolicy
+      == "None"))
+    message: the operator exposes nothing else on the console's host, and nothing
+      on every host (dotvirt operator guard)
+    reason: Forbidden
+---
+# Enforces dotvirt-operator-routes
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  labels:
+    app.kubernetes.io/name: dotvirt
+    app.kubernetes.io/part-of: dotvirt-operator-guard
+  name: dotvirt-operator-routes
+spec:
+  policyName: dotvirt-operator-routes
+  validationActions:
+  - Deny
+---
+# Bounds the operator's Ingresses: the console's leads only to the console on its host, no other claims that host or every host
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  labels:
+    app.kubernetes.io/name: dotvirt
+    app.kubernetes.io/part-of: dotvirt-operator-guard
+  name: dotvirt-operator-ingresses
+spec:
+  failurePolicy: Fail
+  matchConditions:
+  - expression: request.userInfo.username == "${OPERATOR_USERNAME}"
+    name: operator
+  matchConstraints:
+    resourceRules:
+    - apiGroups:
+      - networking.k8s.io
+      apiVersions:
+      - v1
+      operations:
+      - CREATE
+      - UPDATE
+      resources:
+      - ingresses
+  validations:
+  - expression: '!(object.metadata.name == "dotvirt" && request.namespace == "${INSTALL_NAMESPACE}")
+      || ((request.operation == "CREATE" ? (!has(object.metadata.annotations) || object.metadata.annotations.all(k,
+      k == "openshift.io/host.generated" && object.metadata.annotations[k] == "true"))
+      : ((!has(object.metadata.annotations) || object.metadata.annotations.all(k,
+      k == "openshift.io/host.generated" || (has(oldObject.metadata.annotations) &&
+      k in oldObject.metadata.annotations && oldObject.metadata.annotations[k] ==
+      object.metadata.annotations[k]))) && (!has(oldObject.metadata.annotations) ||
+      oldObject.metadata.annotations.all(k, k == "openshift.io/host.generated" ||
+      (has(object.metadata.annotations) && k in object.metadata.annotations))))) &&
+      (!has(object.spec.defaultBackend) || (has(object.spec.defaultBackend.service)
+      && object.spec.defaultBackend.service.name == "dotvirt")) && object.spec.rules.all(r,
+      has(r.host) && r.host == "${CONSOLE_HOST}" && has(r.http) && r.http.paths.all(path,
+      has(path.backend.service) && path.backend.service.name == "dotvirt" && path.backend.service.port.number
+      == 8080)))'
+    message: the operator sends the console's Ingress only to the console's Service,
+      on the console's host (dotvirt operator guard)
+    reason: Forbidden
+  - expression: (object.metadata.name == "dotvirt" && request.namespace == "${INSTALL_NAMESPACE}")
+      || (!has(object.spec.defaultBackend) && (!has(object.spec.rules) || object.spec.rules.all(r,
+      has(r.host) && r.host != "" && r.host != "${CONSOLE_HOST}" && !(r.host.startsWith("*.")
+      && "${CONSOLE_HOST}".endsWith(r.host.substring(1))))))
+    message: the operator exposes nothing else on the console's host, and nothing
+      on every host (dotvirt operator guard)
+    reason: Forbidden
+---
+# Enforces dotvirt-operator-ingresses
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  labels:
+    app.kubernetes.io/name: dotvirt
+    app.kubernetes.io/part-of: dotvirt-operator-guard
+  name: dotvirt-operator-ingresses
+spec:
+  policyName: dotvirt-operator-ingresses
+  validationActions:
+  - Deny
+---
+# Bounds the operator's HTTPRoutes: the console's leads only to the console on its host, unfiltered, no other claims that host or every host
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  labels:
+    app.kubernetes.io/name: dotvirt
+    app.kubernetes.io/part-of: dotvirt-operator-guard
+  name: dotvirt-operator-httproutes
+spec:
+  failurePolicy: Fail
+  matchConditions:
+  - expression: request.userInfo.username == "${OPERATOR_USERNAME}"
+    name: operator
+  matchConstraints:
+    resourceRules:
+    - apiGroups:
+      - gateway.networking.k8s.io
+      apiVersions:
+      - v1
+      operations:
+      - CREATE
+      - UPDATE
+      resources:
+      - httproutes
+  validations:
+  - expression: '!(object.metadata.name == "dotvirt" && request.namespace == "${INSTALL_NAMESPACE}")
+      || ((request.operation == "CREATE" ? (!has(object.metadata.annotations) || object.metadata.annotations.all(k,
+      k == "openshift.io/host.generated" && object.metadata.annotations[k] == "true"))
+      : ((!has(object.metadata.annotations) || object.metadata.annotations.all(k,
+      k == "openshift.io/host.generated" || (has(oldObject.metadata.annotations) &&
+      k in oldObject.metadata.annotations && oldObject.metadata.annotations[k] ==
+      object.metadata.annotations[k]))) && (!has(oldObject.metadata.annotations) ||
+      oldObject.metadata.annotations.all(k, k == "openshift.io/host.generated" ||
+      (has(object.metadata.annotations) && k in object.metadata.annotations))))) &&
+      object.spec.hostnames == ["${CONSOLE_HOST}"] && object.spec.rules.all(r, !has(r.filters)
+      && r.backendRefs.all(b, !has(b.filters) && (!has(b.kind) || b.kind == "Service")
+      && (!has(b.group) || b.group == "") && (!has(b.namespace) || b.namespace ==
+      "${INSTALL_NAMESPACE}") && b.name == "dotvirt" && b.port == 8080)))'
+    message: the operator sends the console's HTTPRoute only to the console's Service,
+      on the console's host, unfiltered (dotvirt operator guard)
+    reason: Forbidden
+  - expression: (object.metadata.name == "dotvirt" && request.namespace == "${INSTALL_NAMESPACE}")
+      || (has(object.spec.hostnames) && size(object.spec.hostnames) > 0 && object.spec.hostnames.all(h,
+      h != "${CONSOLE_HOST}" && !(h.startsWith("*.") && "${CONSOLE_HOST}".endsWith(h.substring(1)))))
+    message: the operator exposes nothing else on the console's host, and nothing
+      on every host (dotvirt operator guard)
+    reason: Forbidden
+---
+# Enforces dotvirt-operator-httproutes
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  labels:
+    app.kubernetes.io/name: dotvirt
+    app.kubernetes.io/part-of: dotvirt-operator-guard
+  name: dotvirt-operator-httproutes
+spec:
+  policyName: dotvirt-operator-httproutes
+  validationActions:
+  - Deny
+---
 # Bounds the operator's Secrets: none outside ${INSTALL_NAMESPACE} and ${ARGO_NAMESPACE}, never a ServiceAccount token
 apiVersion: admissionregistration.k8s.io/v1
 kind: ValidatingAdmissionPolicy
@@ -139,36 +416,18 @@ spec:
       (dotvirt operator guard)
     reason: Forbidden
 ---
-# Bounds the operator's ServiceAccounts: the console's keeps its token mounted
+# Enforces dotvirt-operator-secrets
 apiVersion: admissionregistration.k8s.io/v1
-kind: ValidatingAdmissionPolicy
+kind: ValidatingAdmissionPolicyBinding
 metadata:
   labels:
     app.kubernetes.io/name: dotvirt
     app.kubernetes.io/part-of: dotvirt-operator-guard
-  name: dotvirt-operator-accounts
+  name: dotvirt-operator-secrets
 spec:
-  failurePolicy: Fail
-  matchConditions:
-  - expression: request.userInfo.username == "${OPERATOR_USERNAME}"
-    name: operator
-  matchConstraints:
-    resourceRules:
-    - apiGroups:
-      - ""
-      apiVersions:
-      - v1
-      operations:
-      - CREATE
-      - UPDATE
-      resources:
-      - serviceaccounts
-  validations:
-  - expression: object.metadata.name != "dotvirt" || !has(object.automountServiceAccountToken)
-      || object.automountServiceAccountToken
-    message: the operator keeps the console's ServiceAccount token mounted (dotvirt
-      operator guard)
-    reason: Forbidden
+  policyName: dotvirt-operator-secrets
+  validationActions:
+  - Deny
 ---
 # Bounds the operator's Deployments: the console and the forge only, in ${INSTALL_NAMESPACE}, with their own accounts, images, commands, volumes, Secrets and token, unprivileged and off the host
 apiVersion: admissionregistration.k8s.io/v1
@@ -463,38 +722,18 @@ spec:
       seccomp profile (dotvirt operator guard)
     reason: Forbidden
 ---
-# Bounds the operator's claims: bound to no volume, selector or data source of its choosing
+# Enforces dotvirt-operator-deployments
 apiVersion: admissionregistration.k8s.io/v1
-kind: ValidatingAdmissionPolicy
+kind: ValidatingAdmissionPolicyBinding
 metadata:
   labels:
     app.kubernetes.io/name: dotvirt
     app.kubernetes.io/part-of: dotvirt-operator-guard
-  name: dotvirt-operator-claims
+  name: dotvirt-operator-deployments
 spec:
-  failurePolicy: Fail
-  matchConditions:
-  - expression: request.userInfo.username == "${OPERATOR_USERNAME}"
-    name: operator
-  matchConstraints:
-    resourceRules:
-    - apiGroups:
-      - ""
-      apiVersions:
-      - v1
-      operations:
-      - CREATE
-      - UPDATE
-      resources:
-      - persistentvolumeclaims
-  validations:
-  - expression: '!has(object.spec.selector) && !has(object.spec.dataSource) && !has(object.spec.dataSourceRef)
-      && (request.operation == "CREATE" ? (!has(object.spec.volumeName) || object.spec.volumeName
-      == "") : has(object.spec.volumeName) == has(oldObject.spec.volumeName) && (!has(object.spec.volumeName)
-      || object.spec.volumeName == oldObject.spec.volumeName))'
-    message: the operator binds its claims to no volume, selector or data source of
-      its choosing (dotvirt operator guard)
-    reason: Forbidden
+  policyName: dotvirt-operator-deployments
+  validationActions:
+  - Deny
 ---
 # Bounds the operator's RBAC bindings: only the ones it renders, to their own roles and rendered subjects
 apiVersion: admissionregistration.k8s.io/v1
@@ -554,6 +793,19 @@ spec:
       operator guard)
     reason: Forbidden
 ---
+# Enforces dotvirt-operator-bindings
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  labels:
+    app.kubernetes.io/name: dotvirt
+    app.kubernetes.io/part-of: dotvirt-operator-guard
+  name: dotvirt-operator-bindings
+spec:
+  policyName: dotvirt-operator-bindings
+  validationActions:
+  - Deny
+---
 # Bounds the operator's writes to its install: its finalizers only, never the spec an admin wrote
 apiVersion: admissionregistration.k8s.io/v1
 kind: ValidatingAdmissionPolicy
@@ -600,6 +852,19 @@ spec:
       (dotvirt operator guard)
     reason: Forbidden
 ---
+# Enforces dotvirt-operator-install
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  labels:
+    app.kubernetes.io/name: dotvirt
+    app.kubernetes.io/part-of: dotvirt-operator-guard
+  name: dotvirt-operator-install
+spec:
+  policyName: dotvirt-operator-install
+  validationActions:
+  - Deny
+---
 # Bounds the operator's Services: the console's selects only the console, and none leaves the cluster
 apiVersion: admissionregistration.k8s.io/v1
 kind: ValidatingAdmissionPolicy
@@ -641,232 +906,6 @@ spec:
       and port (dotvirt operator guard)
     reason: Forbidden
 ---
-# Bounds the operator's Routes: the console's leads only to the console on its host, no other claims that host
-apiVersion: admissionregistration.k8s.io/v1
-kind: ValidatingAdmissionPolicy
-metadata:
-  labels:
-    app.kubernetes.io/name: dotvirt
-    app.kubernetes.io/part-of: dotvirt-operator-guard
-  name: dotvirt-operator-routes
-spec:
-  failurePolicy: Fail
-  matchConditions:
-  - expression: request.userInfo.username == "${OPERATOR_USERNAME}"
-    name: operator
-  matchConstraints:
-    resourceRules:
-    - apiGroups:
-      - route.openshift.io
-      apiVersions:
-      - v1
-      operations:
-      - CREATE
-      - UPDATE
-      resources:
-      - routes
-  validations:
-  - expression: '!(object.metadata.name == "dotvirt" && request.namespace == "${INSTALL_NAMESPACE}")
-      || ((request.operation == "CREATE" ? (!has(object.metadata.annotations) || object.metadata.annotations.all(k,
-      k == "openshift.io/host.generated" && object.metadata.annotations[k] == "true"))
-      : ((!has(object.metadata.annotations) || object.metadata.annotations.all(k,
-      k == "openshift.io/host.generated" || (has(oldObject.metadata.annotations) &&
-      k in oldObject.metadata.annotations && oldObject.metadata.annotations[k] ==
-      object.metadata.annotations[k]))) && (!has(oldObject.metadata.annotations) ||
-      oldObject.metadata.annotations.all(k, k == "openshift.io/host.generated" ||
-      (has(object.metadata.annotations) && k in object.metadata.annotations))))) &&
-      object.spec.to.kind == "Service" && object.spec.to.name == "dotvirt" && (!has(object.spec.alternateBackends)
-      || size(object.spec.alternateBackends) == 0) && has(object.spec.port) && string(object.spec.port.targetPort)
-      == "http" && has(object.spec.tls) && object.spec.tls.termination == "edge" &&
-      !has(object.spec.tls.destinationCACertificate) && ("${CONSOLE_HOST}" == "" ||
-      !has(object.spec.host) || object.spec.host == "" || object.spec.host == "${CONSOLE_HOST}"))'
-    message: the operator routes the console's host only to the console's Service,
-      edge-terminated (dotvirt operator guard)
-    reason: Forbidden
-  - expression: (object.metadata.name == "dotvirt" && request.namespace == "${INSTALL_NAMESPACE}")
-      || ((!has(object.spec.host) || object.spec.host == "" || object.spec.host !=
-      "${CONSOLE_HOST}") && (!has(object.spec.wildcardPolicy) || object.spec.wildcardPolicy
-      == "None"))
-    message: the operator exposes nothing else on the console's host, and nothing
-      on every host (dotvirt operator guard)
-    reason: Forbidden
----
-# Bounds the operator's Ingresses: the console's leads only to the console on its host, no other claims that host or every host
-apiVersion: admissionregistration.k8s.io/v1
-kind: ValidatingAdmissionPolicy
-metadata:
-  labels:
-    app.kubernetes.io/name: dotvirt
-    app.kubernetes.io/part-of: dotvirt-operator-guard
-  name: dotvirt-operator-ingresses
-spec:
-  failurePolicy: Fail
-  matchConditions:
-  - expression: request.userInfo.username == "${OPERATOR_USERNAME}"
-    name: operator
-  matchConstraints:
-    resourceRules:
-    - apiGroups:
-      - networking.k8s.io
-      apiVersions:
-      - v1
-      operations:
-      - CREATE
-      - UPDATE
-      resources:
-      - ingresses
-  validations:
-  - expression: '!(object.metadata.name == "dotvirt" && request.namespace == "${INSTALL_NAMESPACE}")
-      || ((request.operation == "CREATE" ? (!has(object.metadata.annotations) || object.metadata.annotations.all(k,
-      k == "openshift.io/host.generated" && object.metadata.annotations[k] == "true"))
-      : ((!has(object.metadata.annotations) || object.metadata.annotations.all(k,
-      k == "openshift.io/host.generated" || (has(oldObject.metadata.annotations) &&
-      k in oldObject.metadata.annotations && oldObject.metadata.annotations[k] ==
-      object.metadata.annotations[k]))) && (!has(oldObject.metadata.annotations) ||
-      oldObject.metadata.annotations.all(k, k == "openshift.io/host.generated" ||
-      (has(object.metadata.annotations) && k in object.metadata.annotations))))) &&
-      (!has(object.spec.defaultBackend) || (has(object.spec.defaultBackend.service)
-      && object.spec.defaultBackend.service.name == "dotvirt")) && object.spec.rules.all(r,
-      has(r.host) && r.host == "${CONSOLE_HOST}" && has(r.http) && r.http.paths.all(path,
-      has(path.backend.service) && path.backend.service.name == "dotvirt" && path.backend.service.port.number
-      == 8080)))'
-    message: the operator sends the console's Ingress only to the console's Service,
-      on the console's host (dotvirt operator guard)
-    reason: Forbidden
-  - expression: (object.metadata.name == "dotvirt" && request.namespace == "${INSTALL_NAMESPACE}")
-      || (!has(object.spec.defaultBackend) && (!has(object.spec.rules) || object.spec.rules.all(r,
-      has(r.host) && r.host != "" && r.host != "${CONSOLE_HOST}" && !(r.host.startsWith("*.")
-      && "${CONSOLE_HOST}".endsWith(r.host.substring(1))))))
-    message: the operator exposes nothing else on the console's host, and nothing
-      on every host (dotvirt operator guard)
-    reason: Forbidden
----
-# Bounds the operator's HTTPRoutes: the console's leads only to the console on its host, unfiltered, no other claims that host or every host
-apiVersion: admissionregistration.k8s.io/v1
-kind: ValidatingAdmissionPolicy
-metadata:
-  labels:
-    app.kubernetes.io/name: dotvirt
-    app.kubernetes.io/part-of: dotvirt-operator-guard
-  name: dotvirt-operator-httproutes
-spec:
-  failurePolicy: Fail
-  matchConditions:
-  - expression: request.userInfo.username == "${OPERATOR_USERNAME}"
-    name: operator
-  matchConstraints:
-    resourceRules:
-    - apiGroups:
-      - gateway.networking.k8s.io
-      apiVersions:
-      - v1
-      operations:
-      - CREATE
-      - UPDATE
-      resources:
-      - httproutes
-  validations:
-  - expression: '!(object.metadata.name == "dotvirt" && request.namespace == "${INSTALL_NAMESPACE}")
-      || ((request.operation == "CREATE" ? (!has(object.metadata.annotations) || object.metadata.annotations.all(k,
-      k == "openshift.io/host.generated" && object.metadata.annotations[k] == "true"))
-      : ((!has(object.metadata.annotations) || object.metadata.annotations.all(k,
-      k == "openshift.io/host.generated" || (has(oldObject.metadata.annotations) &&
-      k in oldObject.metadata.annotations && oldObject.metadata.annotations[k] ==
-      object.metadata.annotations[k]))) && (!has(oldObject.metadata.annotations) ||
-      oldObject.metadata.annotations.all(k, k == "openshift.io/host.generated" ||
-      (has(object.metadata.annotations) && k in object.metadata.annotations))))) &&
-      object.spec.hostnames == ["${CONSOLE_HOST}"] && object.spec.rules.all(r, !has(r.filters)
-      && r.backendRefs.all(b, !has(b.filters) && (!has(b.kind) || b.kind == "Service")
-      && (!has(b.group) || b.group == "") && (!has(b.namespace) || b.namespace ==
-      "${INSTALL_NAMESPACE}") && b.name == "dotvirt" && b.port == 8080)))'
-    message: the operator sends the console's HTTPRoute only to the console's Service,
-      on the console's host, unfiltered (dotvirt operator guard)
-    reason: Forbidden
-  - expression: (object.metadata.name == "dotvirt" && request.namespace == "${INSTALL_NAMESPACE}")
-      || (has(object.spec.hostnames) && size(object.spec.hostnames) > 0 && object.spec.hostnames.all(h,
-      h != "${CONSOLE_HOST}" && !(h.startsWith("*.") && "${CONSOLE_HOST}".endsWith(h.substring(1)))))
-    message: the operator exposes nothing else on the console's host, and nothing
-      on every host (dotvirt operator guard)
-    reason: Forbidden
----
-# Enforces dotvirt-operator-secrets
-apiVersion: admissionregistration.k8s.io/v1
-kind: ValidatingAdmissionPolicyBinding
-metadata:
-  labels:
-    app.kubernetes.io/name: dotvirt
-    app.kubernetes.io/part-of: dotvirt-operator-guard
-  name: dotvirt-operator-secrets
-spec:
-  policyName: dotvirt-operator-secrets
-  validationActions:
-  - Deny
----
-# Enforces dotvirt-operator-accounts
-apiVersion: admissionregistration.k8s.io/v1
-kind: ValidatingAdmissionPolicyBinding
-metadata:
-  labels:
-    app.kubernetes.io/name: dotvirt
-    app.kubernetes.io/part-of: dotvirt-operator-guard
-  name: dotvirt-operator-accounts
-spec:
-  policyName: dotvirt-operator-accounts
-  validationActions:
-  - Deny
----
-# Enforces dotvirt-operator-deployments
-apiVersion: admissionregistration.k8s.io/v1
-kind: ValidatingAdmissionPolicyBinding
-metadata:
-  labels:
-    app.kubernetes.io/name: dotvirt
-    app.kubernetes.io/part-of: dotvirt-operator-guard
-  name: dotvirt-operator-deployments
-spec:
-  policyName: dotvirt-operator-deployments
-  validationActions:
-  - Deny
----
-# Enforces dotvirt-operator-claims
-apiVersion: admissionregistration.k8s.io/v1
-kind: ValidatingAdmissionPolicyBinding
-metadata:
-  labels:
-    app.kubernetes.io/name: dotvirt
-    app.kubernetes.io/part-of: dotvirt-operator-guard
-  name: dotvirt-operator-claims
-spec:
-  policyName: dotvirt-operator-claims
-  validationActions:
-  - Deny
----
-# Enforces dotvirt-operator-bindings
-apiVersion: admissionregistration.k8s.io/v1
-kind: ValidatingAdmissionPolicyBinding
-metadata:
-  labels:
-    app.kubernetes.io/name: dotvirt
-    app.kubernetes.io/part-of: dotvirt-operator-guard
-  name: dotvirt-operator-bindings
-spec:
-  policyName: dotvirt-operator-bindings
-  validationActions:
-  - Deny
----
-# Enforces dotvirt-operator-install
-apiVersion: admissionregistration.k8s.io/v1
-kind: ValidatingAdmissionPolicyBinding
-metadata:
-  labels:
-    app.kubernetes.io/name: dotvirt
-    app.kubernetes.io/part-of: dotvirt-operator-guard
-  name: dotvirt-operator-install
-spec:
-  policyName: dotvirt-operator-install
-  validationActions:
-  - Deny
----
 # Enforces dotvirt-operator-frontdoor
 apiVersion: admissionregistration.k8s.io/v1
 kind: ValidatingAdmissionPolicyBinding
@@ -877,44 +916,5 @@ metadata:
   name: dotvirt-operator-frontdoor
 spec:
   policyName: dotvirt-operator-frontdoor
-  validationActions:
-  - Deny
----
-# Enforces dotvirt-operator-routes
-apiVersion: admissionregistration.k8s.io/v1
-kind: ValidatingAdmissionPolicyBinding
-metadata:
-  labels:
-    app.kubernetes.io/name: dotvirt
-    app.kubernetes.io/part-of: dotvirt-operator-guard
-  name: dotvirt-operator-routes
-spec:
-  policyName: dotvirt-operator-routes
-  validationActions:
-  - Deny
----
-# Enforces dotvirt-operator-ingresses
-apiVersion: admissionregistration.k8s.io/v1
-kind: ValidatingAdmissionPolicyBinding
-metadata:
-  labels:
-    app.kubernetes.io/name: dotvirt
-    app.kubernetes.io/part-of: dotvirt-operator-guard
-  name: dotvirt-operator-ingresses
-spec:
-  policyName: dotvirt-operator-ingresses
-  validationActions:
-  - Deny
----
-# Enforces dotvirt-operator-httproutes
-apiVersion: admissionregistration.k8s.io/v1
-kind: ValidatingAdmissionPolicyBinding
-metadata:
-  labels:
-    app.kubernetes.io/name: dotvirt
-    app.kubernetes.io/part-of: dotvirt-operator-guard
-  name: dotvirt-operator-httproutes
-spec:
-  policyName: dotvirt-operator-httproutes
   validationActions:
   - Deny

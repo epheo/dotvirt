@@ -69,9 +69,13 @@ func TestGuardShape(t *testing.T) {
 		GuardIngressesName:   {{"networking.k8s.io", "ingresses"}},
 		GuardHTTPRoutesName:  {{"gateway.networking.k8s.io", "httproutes"}},
 	}
-	for i, name := range GuardNames {
+	for _, name := range GuardNames {
+		i := index(objs, "ValidatingAdmissionPolicy", name)
+		if i < 0 || index(objs, "ValidatingAdmissionPolicyBinding", name) != i+1 {
+			t.Fatalf("%s: policy at %d, want its binding right after", name, i)
+		}
 		p := policyOf(t, objs[i])
-		if p.Name != name || *p.Spec.FailurePolicy != admissionregistrationv1.Fail || objs[i].Purpose == "" {
+		if *p.Spec.FailurePolicy != admissionregistrationv1.Fail || objs[i].Purpose == "" {
 			t.Errorf("policy %d = %s %q", i, p.Name, objs[i].Purpose)
 		}
 		var got [][2]string
@@ -92,7 +96,9 @@ func TestGuardShape(t *testing.T) {
 			t.Errorf("%s condition = %+v, want the exact username", name, p.Spec.MatchConditions)
 		}
 	}
-	named := func(name string) []string { return exprs(policyOf(t, objs[slices.Index(GuardNames, name)])) }
+	named := func(name string) []string {
+		return exprs(policyOf(t, objs[index(objs, "ValidatingAdmissionPolicy", name)]))
+	}
 	sec, acc, dep, claims := named(GuardSecretsName), named(GuardAccountsName), named(GuardDeploymentsName), named(GuardClaimsName)
 	bind, inst := named(GuardBindingsName), named(GuardInstallName)
 	holds(t, "secrets", sec, `request.namespace in ["dotvirt", "openshift-gitops"]`)
@@ -175,39 +181,46 @@ func TestCompareSaysWhatDiffers(t *testing.T) {
 	moved.ArgoNamespace = "argocd"
 	other := params
 	other.Operator = "system:serviceaccount:x:y"
+	secrets, deployments := index(want, "ValidatingAdmissionPolicy", GuardSecretsName), index(want, "ValidatingAdmissionPolicy", GuardDeploymentsName)
+	install, binding := index(want, "ValidatingAdmissionPolicy", GuardInstallName), index(want, "ValidatingAdmissionPolicyBinding", GuardSecretsName)
 	for name, c := range map[string]struct {
 		live   func() *unstructured.Unstructured
 		which  int
 		state  State
 		detail string
 	}{
-		"as rendered":         {func() *unstructured.Unstructured { return want[0].Object.DeepCopy() }, 0, Installed, ""},
-		"missing":             {func() *unstructured.Unstructured { return nil }, 5, NotInstalled, "is missing"},
-		"for another ArgoCD":  {func() *unstructured.Unstructured { return Render(moved)[0].Object }, 0, Outdated, "lacks the rule"},
-		"for another account": {func() *unstructured.Unstructured { return Render(other)[1].Object }, 1, Outdated, "applies to another account"},
+		"as rendered":         {func() *unstructured.Unstructured { return want[secrets].Object.DeepCopy() }, secrets, Installed, ""},
+		"missing":             {func() *unstructured.Unstructured { return nil }, binding, NotInstalled, "is missing"},
+		"for another ArgoCD":  {func() *unstructured.Unstructured { return Render(moved)[secrets].Object }, secrets, Outdated, "lacks the rule"},
+		"for another account": {func() *unstructured.Unstructured { return Render(other)[deployments].Object }, deployments, Outdated, "applies to another account"},
 		"the install rule off": {func() *unstructured.Unstructured {
-			o := want[3].Object.DeepCopy()
+			o := want[install].Object.DeepCopy()
 			_ = unstructured.SetNestedSlice(o.Object, nil, "spec", "validations")
 			return o
-		}, 3, Outdated, "lacks the rule"},
-		"an extra deny-all rule": {func() *unstructured.Unstructured { return withValidations(want[1].Object, "false") }, 1, Outdated, "holds rules the render does not"},
+		}, install, Outdated, "lacks the rule"},
+		"an extra deny-all rule": {func() *unstructured.Unstructured { return withValidations(want[deployments].Object, "false") }, deployments, Outdated, "holds rules the render does not"},
 		"a rule dropped": {func() *unstructured.Unstructured {
-			o := want[1].Object.DeepCopy()
+			o := want[deployments].Object.DeepCopy()
 			v, _, _ := unstructured.NestedSlice(o.Object, "spec", "validations")
 			_ = unstructured.SetNestedSlice(o.Object, v[1:], "spec", "validations")
 			return o
-		}, 1, Outdated, "lacks the rule"},
+		}, deployments, Outdated, "lacks the rule"},
 		"a warn-only binding": {func() *unstructured.Unstructured {
-			o := want[len(GuardNames)].Object.DeepCopy()
+			o := want[binding].Object.DeepCopy()
 			_ = unstructured.SetNestedStringSlice(o.Object, []string{"Warn"}, "spec", "validationActions")
 			return o
-		}, len(GuardNames), Outdated, "does not only deny"},
+		}, binding, Outdated, "does not only deny"},
 	} {
 		got, detail := Compare(want[c.which].Object, c.live())
 		if got != c.state || !strings.Contains(detail, c.detail) {
 			t.Errorf("%s: %s (%s), want %s with %q", name, got, detail, c.state, c.detail)
 		}
 	}
+}
+
+// index is where objs holds the kind named name, -1 if nowhere.
+func index(objs []Object, kind, name string) int {
+	return slices.IndexFunc(objs, func(o Object) bool { return o.Object.GetKind() == kind && o.Object.GetName() == name })
 }
 
 func withValidations(o *unstructured.Unstructured, extra string) *unstructured.Unstructured {
@@ -412,5 +425,63 @@ func TestDelegatedReadsOutdated(t *testing.T) {
 	}
 	if !outdated {
 		t.Error("Delegated turned on, and the guard installed before reads Installed")
+	}
+}
+
+// Installing over the previous release's guard, object by object in the
+// render's order, never leaves a kind it guarded unguarded: an install that
+// stops partway keeps every kind the previous guard covered.
+func TestInstallKeepsEveryKindGuarded(t *testing.T) {
+	previous, err := os.ReadFile("../../operator/internal/controller/testdata/guard-previous.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	live := map[string]*unstructured.Unstructured{}
+	key := func(o *unstructured.Unstructured) string { return o.GetKind() + "/" + o.GetName() }
+	for _, doc := range strings.Split(string(previous), "\n---\n")[1:] {
+		var o map[string]any
+		if err := yaml.Unmarshal([]byte(doc), &o); err != nil {
+			t.Fatal(err)
+		}
+		u := &unstructured.Unstructured{Object: o}
+		live[key(u)] = u
+	}
+	// guarded are the kinds a bound policy matches.
+	guarded := func() map[string]bool {
+		out := map[string]bool{}
+		for _, b := range live {
+			if b.GetKind() != "ValidatingAdmissionPolicyBinding" {
+				continue
+			}
+			name, _, _ := unstructured.NestedString(b.Object, "spec", "policyName")
+			p := live["ValidatingAdmissionPolicy/"+name]
+			if p == nil {
+				continue
+			}
+			rules, _, _ := unstructured.NestedSlice(p.Object, "spec", "matchConstraints", "resourceRules")
+			for _, r := range rules {
+				groups, _, _ := unstructured.NestedStringSlice(r.(map[string]any), "apiGroups")
+				resources, _, _ := unstructured.NestedStringSlice(r.(map[string]any), "resources")
+				for _, g := range groups {
+					for _, res := range resources {
+						out[g+"/"+res] = true
+					}
+				}
+			}
+		}
+		return out
+	}
+	before := guarded()
+	if len(before) == 0 {
+		t.Fatal("the previous guard guards nothing; the check would prove nothing")
+	}
+	for i, o := range Render(params) {
+		live[key(o.Object)] = o.Object
+		now := guarded()
+		for kind := range before {
+			if !now[kind] {
+				t.Errorf("after %d objects (up to %s), %s is unguarded", i+1, key(o.Object), kind)
+			}
+		}
 	}
 }
