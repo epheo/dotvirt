@@ -442,22 +442,23 @@ type hookSweep struct {
 	target, secret string
 	// refused maps a scope ("org:<owner>" or "repo:<url>") to the refusal held.
 	refused map[string]held
-	// owners remembers each owner's kind as long as a refusal, so a
-	// user-owned forge whose repo hooks are all held asks the forge nothing.
-	owners map[string]held
-	now    func() time.Time
-	logf   func(string, ...any)
+	// users remembers an owner confirmed as a user account as long as a
+	// refusal, so a user-owned forge whose repo hooks are all held asks the
+	// forge nothing. Never a missing owner: an org created later (a managed
+	// forge's, after the first sweep) gets its hook on the next tick.
+	users map[string]held
+	now   func() time.Time
+	logf  func(string, ...any)
 }
 
 // held is what an answer was met with: the credential and the time.
 type held struct {
-	cred  string
-	at    time.Time
-	isOrg bool
+	cred string
+	at   time.Time
 }
 
 func newHookSweep(ff *forge.Factory, target, secret string, logf func(string, ...any)) *hookSweep {
-	return &hookSweep{ff: ff, target: target, secret: secret, refused: map[string]held{}, owners: map[string]held{}, now: time.Now, logf: logf}
+	return &hookSweep{ff: ff, target: target, secret: secret, refused: map[string]held{}, users: map[string]held{}, now: time.Now, logf: logf}
 }
 
 func (h *hookSweep) run(repos []string) {
@@ -504,16 +505,20 @@ func (h *hookSweep) run(repos []string) {
 	}
 }
 
-// ownerIsOrg is fc's owner kind, asked once per refusalRecheck and credential.
+// ownerIsOrg is fc's owner kind. A confirmed user account is remembered for
+// refusalRecheck and the credential; an org, or no owner yet, is asked again.
 func (h *hookSweep) ownerIsOrg(fc *forge.Client) (bool, error) {
-	if h.holds(h.owners, fc.Owner()) {
-		return h.owners[fc.Owner()].isOrg, nil
+	if h.holds(h.users, fc.Owner()) {
+		return false, nil
 	}
 	isOrg, err := fc.OwnerIsOrg()
-	if err == nil {
-		h.owners[fc.Owner()] = held{cred: h.ff.CredentialFingerprint(), at: h.now(), isOrg: isOrg}
+	if err != nil || isOrg {
+		return isOrg, err
 	}
-	return isOrg, err
+	if isUser, uerr := fc.OwnerIsUser(); uerr == nil && isUser {
+		h.users[fc.Owner()] = held{cred: h.ff.CredentialFingerprint(), at: h.now()}
+	}
+	return false, nil
 }
 
 // holds reports whether m holds key under the current credential and within
@@ -541,12 +546,16 @@ func (h *hookSweep) failed(scope, what string, err error) {
 			"rechecked hourly, and at once when the token changes", what, reason)
 		return
 	}
+	grant := "an owner of the org"
+	if strings.HasPrefix(scope, "repo:") {
+		grant = "an admin of the repo"
+	}
 	h.logf("webhook: %s: the forge refused (HTTP %d: %s); rechecked hourly, and at once when the forge token changes. "+
-		"Make dotvirt's forge account an owner of the org, or create the hook by hand as a Forgejo (Gitea) webhook: "+
+		"Make dotvirt's forge account %s, or create the hook by hand as a Forgejo (Gitea) webhook: "+
 		"an org hook, a system hook, or a hook on each project repo (repos created later need their own): URL %s, "+
 		"content type application/json, events push and pull_request, secret the operator's dotvirt-webhook Secret, key secret "+
 		"(oc extract secret/dotvirt-webhook -n <dotvirt namespace> --keys=secret --to=-)",
-		what, status, reason, h.target)
+		what, status, reason, grant, h.target)
 }
 
 // uploadProxyURL is the flag's value, else the proxy CDI publishes. A cluster

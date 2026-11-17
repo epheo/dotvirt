@@ -12,11 +12,12 @@ import (
 	"github.com/epheo/dotvirt/pkg/forge"
 )
 
-// sweepForge answers the org lookup with org, the org's hooks with hooks, and
-// a user-owned repo's hooks with repo, counting every call.
+// sweepForge answers the org lookup with org, the user lookup with user, the
+// org's hooks with hooks, and a repo's hooks with repo, counting every call.
 type sweepForge struct {
-	org, hooks, repo atomic.Int32
-	calls            atomic.Int32
+	org, user, hooks, repo atomic.Int32
+	calls                  atomic.Int32
+	orgHookPosts           atomic.Int32
 }
 
 func (f *sweepForge) serve(t *testing.T) *httptest.Server {
@@ -30,6 +31,9 @@ func (f *sweepForge) serve(t *testing.T) *httptest.Server {
 				return
 			}
 			if r.Method == http.MethodPost {
+				if r.URL.Path == "/api/v1/orgs/acme/hooks" {
+					f.orgHookPosts.Add(1)
+				}
 				w.WriteHeader(http.StatusCreated)
 				_, _ = w.Write([]byte(`{"id":1}`))
 				return
@@ -39,9 +43,11 @@ func (f *sweepForge) serve(t *testing.T) *httptest.Server {
 		switch r.URL.Path {
 		case "/api/v1/orgs/acme", "/api/v1/orgs/alice":
 			w.WriteHeader(int(f.org.Load()))
+		case "/api/v1/users/acme", "/api/v1/users/alice":
+			w.WriteHeader(int(f.user.Load()))
 		case "/api/v1/orgs/acme/hooks":
 			answer(f.hooks.Load())
-		case "/api/v1/repos/alice/proj/hooks":
+		case "/api/v1/repos/alice/proj/hooks", "/api/v1/repos/acme/platform/hooks":
 			answer(f.repo.Load())
 		default:
 			t.Errorf("unexpected %s %s", r.Method, r.URL.Path)
@@ -116,6 +122,7 @@ func TestHookSweepHoldsAnOrgHookRefusal(t *testing.T) {
 func TestHookSweepHoldsPerRepoRefusals(t *testing.T) {
 	f := &sweepForge{}
 	f.org.Store(http.StatusNotFound) // a user, not an org
+	f.user.Store(http.StatusOK)
 	f.repo.Store(http.StatusForbidden)
 	srv := f.serve(t)
 	token, clock, logs := "tok", time.Unix(0, 0), []string{}
@@ -124,8 +131,11 @@ func TestHookSweepHoldsPerRepoRefusals(t *testing.T) {
 
 	h.run(repos)
 	asked := f.calls.Load()
-	if asked != 2 {
-		t.Fatalf("first sweep made %d calls, want the lookup and the repo's hooks", asked)
+	if asked != 3 {
+		t.Fatalf("first sweep made %d calls, want the org and user lookups and the repo's hooks", asked)
+	}
+	if len(logs) != 1 || !strings.Contains(logs[0], "admin of the repo") || strings.Contains(logs[0], "owner of the org") {
+		t.Errorf("logs = %q, want a repo admin named for a user-owned forge", logs)
 	}
 	for range 5 {
 		clock = clock.Add(10 * time.Minute)
@@ -139,6 +149,28 @@ func TestHookSweepHoldsPerRepoRefusals(t *testing.T) {
 	h.run(repos)
 	if _, held := h.refused["repo:"+repos[0]]; held {
 		t.Error("the repo stays held after the hour, once the forge allows it")
+	}
+}
+
+// A missing owner is not remembered as "not an org": a managed forge's org
+// created after the first sweep gets its hook on the next tick.
+func TestHookSweepAsksAgainForAMissingOwner(t *testing.T) {
+	f := &sweepForge{}
+	f.org.Store(http.StatusNotFound)
+	f.user.Store(http.StatusNotFound)
+	f.repo.Store(http.StatusNotFound)
+	f.hooks.Store(http.StatusOK)
+	srv := f.serve(t)
+	token, clock, logs := "tok", time.Unix(0, 0), []string{}
+	h := sweep(srv, &token, &clock, &logs)
+	repos := []string{"https://forge.example/acme/platform.git"}
+
+	h.run(repos)
+	f.org.Store(http.StatusOK) // the org now exists
+	clock = clock.Add(10 * time.Minute)
+	h.run(repos)
+	if f.orgHookPosts.Load() != 1 {
+		t.Errorf("the org's hook was registered %d times on the next tick, want once", f.orgHookPosts.Load())
 	}
 }
 
