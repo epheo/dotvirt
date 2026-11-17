@@ -361,19 +361,24 @@ project's last objects, so the ApplicationSet's `templatePatch` takes
 `allowEmpty` from the plugin generator. The generator turns it on for one
 project only while all of these hold: Argo holds that project's generated
 Application; git moved on from the revision Argo last applied, by commits on
-the default branch, from the same repo and folder; git itself declares nothing
-there now; and dotvirt reads the Applications live. Anything else keeps the
-hold. The removal applies within one generator requeue (60s). The platform
-Application keeps `allowEmpty` off: its repo is never empty on purpose.
+`main`, from the same repo and folder; that applied revision declared the
+objects, and git declares nothing there now; and dotvirt reads the
+Applications live. Anything else keeps the hold: a removal must remove
+something. The removal applies once Argo has seen the merge and dotvirt's
+mirror has fetched it (at once with the forge webhook, else within the git
+poll, 5 minutes by default), at the generator's next run (60s), one more for a
+mirror dotvirt opens on demand. The platform Application keeps `allowEmpty`
+off: its repo is never empty on purpose.
 
 Limits:
 
 - Argo CD 2.10 or later: before it, Argo drops `templatePatch`, and such a
   removal stays held.
-- A project in a folder of a shared repo (`dotvirt.io/path`) loses its folder
-  with its last file: Argo then reports the path missing instead of holding,
-  and the removal is not applied
-  ([#488](https://github.com/epheo/dotvirt/issues/488)).
+- A project scoped to a folder of its repo (`dotvirt.io/path`) whose last file
+  goes loses the folder (git holds no empty directory): Argo then reports the
+  path missing instead of holding, and the removal is not applied
+  ([#488](https://github.com/epheo/dotvirt/issues/488)). Any other file kept in
+  the folder, a README, keeps it, and the removal then applies.
 - Once on, `allowEmpty` goes off at the generator's next answer. If dotvirt is
   down right then, it stays on until dotvirt returns, and a repo lost and
   re-created empty meanwhile would let Argo prune that project.
