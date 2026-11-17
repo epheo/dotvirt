@@ -22,6 +22,7 @@ var TemplateParams = Params{
 	ForgeSecret:        "${FORGE_SECRET}",
 	OIDCSecret:         "${OIDC_SECRET}",
 	OIDCSecretKey:      "${OIDC_SECRET_KEY}",
+	OIDCIssuer:         "${OIDC_ISSUER}",
 }
 
 // templateHeader says how to fill and apply the template, each value derived
@@ -86,8 +87,9 @@ const templateHeader = `# The dotvirt operator guard: admission policies boundin
 #   export BRANDING_CONFIGMAP="$(spec branding.configMap)" METRICS_CA_CONFIGMAP="$(spec metrics.ca.name)"
 #   FORGE_SECRET="$(spec forge.credentialsSecret)"; export FORGE_SECRET="${FORGE_SECRET:-` + DefaultForgeSecret + `}"
 #   export FORGE_MANAGED="$( [ "$(spec forge.managed)" = true ] && echo true || echo false )"
-#   # The OIDC client secret an admin chose, if any:
+#   # The OIDC issuer and client secret an admin chose, if any:
 #   export OIDC_SECRET="$(spec auth.oidc.clientSecret.name)" OIDC_SECRET_KEY="$(spec auth.oidc.clientSecret.key)"
+#   export OIDC_ISSUER="$(spec auth.oidc.issuerURL)"
 #
 #   envsubst < guard.yaml | ` + ApplyCommand + ` -
 #
@@ -100,7 +102,8 @@ const templateHeader = `# The dotvirt operator guard: admission policies boundin
 #     -e "s|\${METRICS_CA}|$METRICS_CA|g" -e "s|\${CONSOLE_HOST}|$CONSOLE_HOST|g" \
 #     -e "s|\${BRANDING_CONFIGMAP}|$BRANDING_CONFIGMAP|g" -e "s|\${METRICS_CA_CONFIGMAP}|$METRICS_CA_CONFIGMAP|g" \
 #     -e "s|\${FORGE_SECRET}|$FORGE_SECRET|g" -e "s|\${FORGE_MANAGED}|$FORGE_MANAGED|g" \
-#     -e "s|\${OIDC_SECRET}|$OIDC_SECRET|g" -e "s|\${OIDC_SECRET_KEY}|$OIDC_SECRET_KEY|g" guard.yaml | ` + ApplyCommand + ` -
+#     -e "s|\${OIDC_SECRET}|$OIDC_SECRET|g" -e "s|\${OIDC_SECRET_KEY}|$OIDC_SECRET_KEY|g" \
+#     -e "s|\${OIDC_ISSUER}|$OIDC_ISSUER|g" guard.yaml | ` + ApplyCommand + ` -
 #
 # Every object carries the label app.kubernetes.io/part-of=dotvirt-operator-guard.
 #

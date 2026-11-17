@@ -108,7 +108,7 @@ func (s *Server) adminParams(ctx context.Context, c *cluster.Client) (adminobjec
 
 		BrandingConfigMap: spec.BrandingConfigMap, MetricsCAConfigMap: spec.MetricsCAConfigMap,
 		ForgeSecret: adminobjects.ForgeSecret(spec.ForgeCredentials), ForgeManaged: spec.ForgeManaged,
-		OIDCSecret: spec.OIDCSecret, OIDCSecretKey: spec.OIDCSecretKey,
+		OIDCSecret: spec.OIDCSecret, OIDCSecretKey: spec.OIDCSecretKey, OIDCIssuer: spec.OIDCIssuer,
 	}
 	p.ArgoNamespace, p.ArgoController = adminobjects.ArgoTarget(spec.ArgoNamespace, spec.ArgoController, openShift)
 	domain := ""

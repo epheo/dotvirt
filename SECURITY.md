@@ -52,13 +52,17 @@ What the guard closes:
   from the claim, ConfigMaps and Secret rendered or an admin chose, each mounted whole at
   its own path;
 - giving the forge any Secret but its admin password, by env, `envFrom` or volume, or any
-  claim but its own;
+  volume but its own claim, a scratch directory and the router CA: no network volume
+  (NFS, iSCSI, RBD, CephFS and the like), which would reach any export the nodes can;
 - giving the console any Secret it was not rendered with: the kubelet resolves any Secret
   in the namespace a pod names, whatever the operator may read, and the console sends
   some env out (the forge token, to the forge URL). Each Secret-backed env is pinned
   whole, by env name, Secret and key: the console's own, the forge credential, and the
   OIDC client secret an admin chose;
 - sending a forge credential an admin brought anywhere but the URL its Secret names;
+- sending the OIDC client secret an admin chose to an issuer the admin did not name: the
+  console's issuer is `spec.auth.oidc.issuerURL`, whose token endpoint receives that
+  secret at every sign-in;
 - binding the operator's claims to a volume, selector or data source of its choosing;
 - unmounting the console's token through its ServiceAccount;
 - leading the console's host anywhere but the console: its Service selects only the
@@ -88,9 +92,8 @@ is named and redirected from the install, never from the console's environment.
 
 What stays open:
 - the console's other configuration the operator writes as flags or `DOTVIRT_*` env,
-  among them the OIDC issuer, which allows phishing an admin's credentials at a page of
-  the operator's choosing, and the image upload proxy, which receives the upload tokens
-  the console mints for each upload;
+  among them the image upload proxy, which receives the upload tokens the console mints
+  for each upload;
 - the `oc apply` command in `status.ssoOAuthClient`, which the operator writes: review
   its redirect before running it, or use Finish SSO;
 - an older official release: any tag or digest in the official repositories passes,
