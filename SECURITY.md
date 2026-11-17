@@ -64,11 +64,14 @@ What the guard closes:
   in the namespace a pod names, whatever the operator may read, and the console sends
   some env out (the forge token, to the forge URL). Each Secret-backed env is pinned
   whole, by env name, Secret and key: the console's own, the forge credential, and the
-  OIDC client secret an admin chose;
+  OIDC and forge application client secrets an admin chose;
 - sending a forge credential an admin brought anywhere but the URL its Secret names;
 - sending the OIDC client secret an admin chose to an issuer the admin did not name: the
   console's issuer is `spec.auth.oidc.issuerURL`, whose token endpoint receives that
   secret at every sign-in;
+- with Delegated pull requests, sending users' forge tokens or the forge application's
+  client secret anywhere `spec.forge.url` and `spec.forge.userAuth` do not name, or
+  delegating at all when the spec does not ask for it;
 - binding the operator's claims to a volume, selector or data source of its choosing;
 - unmounting the console's token through its ServiceAccount;
 - leading the console's host anywhere but the console: its Service selects only the
