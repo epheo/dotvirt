@@ -545,6 +545,39 @@ spec:
           status:
             description: DotvirtStatus is the observed install state.
             properties:
+              adminObjects:
+                description: |-
+                  AdminObjects are objects the install needs but the operator may not
+                  create, each with its purpose and state: a cluster admin installs them
+                  from the console (one Install action, under the admin's own token), or
+                  from the release's install/guard.yaml.
+                items:
+                  description: |-
+                    AdminObject is one object the install needs but the operator may not
+                    create, as the operator sees it. A report only: the console renders what it
+                    installs itself, never from this.
+                  properties:
+                    kind:
+                      type: string
+                    name:
+                      type: string
+                    namespace:
+                      type: string
+                    purpose:
+                      description: Purpose says what the object is for.
+                      type: string
+                    state:
+                      description: |-
+                        State is NotInstalled, Outdated (rendered for other parameters or by
+                        another version, or changed after it was installed) or Installed.
+                      type: string
+                  required:
+                  - kind
+                  - name
+                  - purpose
+                  - state
+                  type: object
+                type: array
               argoNamespaces:
                 description: |-
                   ArgoNamespaces are the ArgoCD namespaces the install wrote that no

@@ -530,6 +530,22 @@ async function handleAPI(req, res, url) {
 		res.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' });
 		return res.end(JSON.stringify({ username: 'dotvirt-bot', password: FORGE_ADMIN_PASSWORD }));
 	}
+	// Mirrors the Go routes: both behind the capability the banner checks first.
+	if (path === '/api/admin-objects' && (req.method === 'GET' || req.method === 'POST')) {
+		if (!clusterCaps(s).adminObjects)
+			return sendText(
+				res,
+				403,
+				'forbidden: installing what the install needs takes a cluster admin',
+			);
+		if (req.method === 'POST')
+			s.adminObjects.objects = s.adminObjects.objects.map((o) => ({
+				...o,
+				state: 'Installed',
+				detail: '',
+			}));
+		return sendJSON(res, 200, s.adminObjects);
+	}
 	if (path === '/api/inventory') return sendJSON(res, 200, s.inventory);
 	if (path === '/api/options') return sendJSON(res, 200, s.options);
 	if (path === '/api/storage/classes') {
@@ -1157,6 +1173,7 @@ function clusterCaps(s) {
 		drsPSI: !!s.rebalancing?.canPSI,
 		drsDisable: !!s.rebalancing?.canManage,
 		oauthClient: !!n.canManage,
+		adminObjects: false,
 		forgeAdmin: false,
 		imageUpload: true,
 		uploadProxy: `http://localhost:${port}/__fixture/proxy`,

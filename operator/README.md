@@ -87,6 +87,10 @@ Through OLM, set the override on the Subscription:
 - Deleting a Dotvirt outside the install namespace only drops the operator's
   finalizer: nothing is pruned on its say. To uninstall an install that lives
   outside it, name its namespace first, then delete it.
+- The operator guard pins the install namespace, so it refuses a move: remove the
+  guard, move the install, then install the guard again from the console there (or
+  the template, which resolves the namespace in this same order). A console the
+  install moved away from refuses to install it.
 - Why step 3 is safe: only cluster admins and this operator may write
   ClusterRoleBinding `dotvirt`, and the operator wrote it for the install it acted
   on. Its limit: an operator before this rule acted on the oldest Dotvirt anywhere,
@@ -118,7 +122,73 @@ owns one status condition; a phase that fails or waits records why there, so
 1. **Dependencies** (`DependenciesReady`): probes for ArgoCD, a hard prerequisite
    it never installs (it waits and reports if it is absent), and for KubeVirt,
    OVN-K, NMState and CDI (soft: noted, the install proceeds).
-2. **Forge** (`ForgeReady`): converges the trust anchors (below) first, then, with
+2. **Operator guard** (`OperatorGuard`): renders five ValidatingAdmissionPolicies and
+   their bindings that bound the operator's own account, pinned to its exact username
+   (one SelfSubjectReview at startup), the install namespace, and the ArgoCD namespace
+   and controller (`spec.argocd`, else the defaults):
+   - `dotvirt-operator-secrets`: Secrets only in those two namespaces, never of type
+     `kubernetes.io/service-account-token` nor carrying `kubernetes.io/service-account.name`;
+     the console's ServiceAccount never with its token unmounted;
+   - `dotvirt-operator-deployments`: only the console (`dotvirt`, as `dotvirt`) and the
+     forge (`dotvirt-forgejo`, as `dotvirt-forgejo`), in the install namespace. The
+     console's images come from `quay.io/epheo/dotvirt` and the forge's from
+     `codeberg.org/forgejo/forgejo` (any tag or digest), or exactly the image an admin
+     chose (`spec.image`, the operator Deployment's `RELATED_IMAGE_*`). The console runs
+     its image's entrypoint with no init container, no exec probe or hook, and no shared
+     process namespace. Its volumes are its own (drafts claim, CA ConfigMaps, forge
+     credential Secret, and the branding and metrics CA ConfigMaps an admin chose), each
+     mounted whole at its own path: nothing over its binary or the system trust store.
+     Its Secret-backed env is pinned by env name, Secret and key: its own Secrets, the
+     forge credential and the OIDC client secret an admin chose; a forge credential an
+     admin brought (`spec.forge.managed` false) goes only to the URL its Secret names.
+     The forge's pods never carry the console's `app` label, read no Secret but their
+     admin password, and mount no claim but their own. The operator's claims bind to no
+     volume, selector or data source of its choosing (the binder's `volumeName` stays as
+     it set it). The console's arguments stay free, so a release
+     may add flags, except the settings that send users' tokens or its pages elsewhere,
+     by flag or env: the metrics endpoints and CA only as rendered from `spec.metrics`,
+     TLS verification off only with `spec.forge.insecureTLS`, and never a kubeconfig or
+     a directory of pages. It keeps its own token mounted where client-go reads it, with
+     no `KUBERNETES_SERVICE_*` or `envFrom`. Nothing is mounted at, above or inside the
+     token directory. Every container runs non-root with a RuntimeDefault or
+     Localhost seccomp profile, `allowPrivilegeEscalation: false`, all capabilities
+     dropped and none added, unprivileged, off the host network, PID and IPC, with no
+     host path;
+   - `dotvirt-operator-bindings`: only the ClusterRoleBindings and RoleBinding the
+     operator renders, each to the ClusterRole of its own name and to its rendered
+     subjects only;
+   - `dotvirt-operator-install`: the operator's updates to its Dotvirt resource keep
+     spec, labels, annotations and owners as they are. It adds and removes its finalizer
+     by a patch of the finalizers alone, so once the guard is in, the spec is the
+     admin's;
+   - `dotvirt-operator-frontdoor`: the console's Service selects only the console's pods
+     on its port (ClusterIP, no external name, no unready pods), and its Route, Ingress
+     or HTTPRoute leads only to that Service, on the console's host (`spec.ingress.host`,
+     else the router's host on the cluster's ingress domain), edge-terminated, with no
+     filter and no annotation the operator adds. Where no ingress domain can be read
+     (MicroShift), the console's host is the one routers report for its Route. Every
+     other exposure the operator writes names its own hosts: none the console's, no
+     wildcard over it, no Ingress default backend, no HTTPRoute without hostnames. No
+     Service the operator writes leaves the cluster: no node port, load balancer or
+     external IP. The forge's own exposures are otherwise free: it holds no user token.
+
+   The Route rules assume the apiserver serving Routes evaluates admission policies,
+   and that OpenShift's route API marks a host it generates
+   (`openshift.io/host.generated`) on create, which the rules allow. Verify both on
+   each platform before relying on them.
+
+   The operator never installs them: it reads them back by name and reports each in
+   `status.adminObjects` as `NotInstalled`, `Outdated` (rendered for other pins or
+   another version, or changed since) or `Installed`; see [Admin objects](#admin-objects).
+   The apiserver evaluates them in-process, only for those kinds' writes, with the
+   username check first. Best-effort: never a halt, never `Available`. A new release
+   in the same repositories passes as it is, new console flags included; an admin
+   changing `spec.image`, `spec.argocd`, `spec.forge.insecureTLS`, `spec.metrics`,
+   `spec.ingress.host`, `spec.branding.configMap`, `spec.forge.credentialsSecret`,
+   `spec.forge.managed`, `spec.auth.oidc.clientSecret`, the operator's `RELATED_IMAGE_*`
+   or the namespace makes them `Outdated`, and until re-installed they refuse the operator's
+   writes that need the change.
+3. **Forge** (`ForgeReady`): converges the trust anchors (below) first, then, with
    `spec.forge.managed`, stands up the eval-grade Forgejo (single pod, SQLite, a PVC
    that survives uninstall), resolves its external URL (an explicit `spec.forge.url`,
    or the host the router assigns to a hostless Route) and mints its scoped bot
@@ -164,14 +234,14 @@ owns one status condition; a phase that fails or waits records why there, so
    A credential named like one of the operator's own Secrets (`dotvirt-session`,
    ...) is refused (`NameTaken`): a managed forge's token would replace that
    Secret's keys. Name another Secret.
-3. **Secrets** (`SecretsReady`): generates the session key, the ApplicationSet-plugin
+4. **Secrets** (`SecretsReady`): generates the session key, the ApplicationSet-plugin
    token, the webhook secrets and, with SSO, the OAuth client secret. Create-once:
    they survive restarts and are never regenerated.
-4. **Workload** (`WorkloadReady`): the ServiceAccount, drafts PVC, Service, Route,
+5. **Workload** (`WorkloadReady`): the ServiceAccount, drafts PVC, Service, Route,
    Ingress or HTTPRoute, NetworkPolicy (below) and the Deployment, owner-referenced to the CR for
    automatic cleanup. `True` only once the dotvirt pod is ready; `Progressing` until
    then, without holding back the later phases. Single replica, see below.
-5. **GitOps wiring** (`ArgoReady`): mirrors the plugin token into the ArgoCD
+6. **GitOps wiring** (`ArgoReady`): mirrors the plugin token into the ArgoCD
    namespace and trusts the managed forge's Route there (below), then applies the
    bindings of the static operand ClusterRoles (shipped in
    `config/rbac/operand_roles.yaml`; the operator only `bind`s them, never authors
@@ -208,23 +278,23 @@ owns one status condition; a phase that fails or waits records why there, so
    impersonation is on (below): `<argoNS>/dotvirt-p-<project>` for a tenant,
    `<argoNS>/dotvirt-platform-sync` for the platform tier. Names only: Argo
    impersonates by username and RBAC binds by name, so no object is created.
-6. **Sync impersonation** (`SyncImpersonationReady`): on unless opted out, see
+7. **Sync impersonation** (`SyncImpersonationReady`): on unless opted out, see
    [Sync impersonation](#sync-impersonation). Best-effort: never a halt,
    never `Available`.
-7. **Platform repo** (`ForgeRepoReady`): ensures the platform git repo exists
+8. **Platform repo** (`ForgeRepoReady`): ensures the platform git repo exists
    (`forge.EnsureRepo`, the imperative step a declarative installer can't do) and,
    for a managed forge, its owner org. Best-effort: a failure is recorded and the
    pass goes on. The condition is absent when no platform repo is configured.
-8. **Argo webhook** (`ArgoWebhook`): registers one org-level forge-to-ArgoCD webhook
+9. **Argo webhook** (`ArgoWebhook`): registers one org-level forge-to-ArgoCD webhook
    for instant sync; `Unknown` when no ArgoCD URL resolves (Argo falls back to its
    poll).
-9. **dotvirt webhook** (`DotvirtWebhook`): the forge-to-dotvirt hook is registered by
+10. **dotvirt webhook** (`DotvirtWebhook`): the forge-to-dotvirt hook is registered by
    the app itself; the operator only observes it.
 
 `Available` is `True` only after a completed pass with the dotvirt pod ready. A
 phase that fails or blocks sets it `False` with that phase's reason; the
-best-effort phases (sync impersonation, platform repo, both webhooks) never do,
-since the operand serves without them.
+best-effort phases (operator guard, sync impersonation, platform repo, both
+webhooks) never do, since the operand serves without them.
 `status.phase` is `Provisioning`, `BlockedOnDependencies` or `Ready`.
 
 A completed pass requeues after 10 minutes, so drift on the kinds the operator does
@@ -277,6 +347,52 @@ server validates schema, admission, and RBAC, and nothing is persisted, a spec c
 against a real cluster. Phases whose work dry-run cannot model (the secrets, the
 forge bootstrap, the workload rollout, both webhooks, the platform repo) record a
 `DryRun` condition instead, and so does `Available`: nothing serves.
+
+## Admin objects
+
+Some objects an install needs are ones its operator must not be able to create,
+because the operator could then grant itself anything. The console renders them
+itself and a cluster admin installs them; the operator only reports them.
+
+A cluster admin signed in to the console sees a banner listing what is missing or
+differs (and what differs), the pins the render uses, one **Install** button, and the
+same render to download. Install applies the render under the admin's own token:
+- the console reads every pin under the admin's token, never from anything the
+  operator writes (its status, or the console's own environment): its own namespace
+  (from its ServiceAccount mount, which the guard keeps from the operator), the one
+  Dotvirt resource there (`spec.argocd`, `spec.image`, `spec.forge.insecureTLS`,
+  `spec.metrics`), the operator's Deployment (among those named
+  `dotvirt-operator-controller`, the one whose account may patch Dotvirt status there:
+  its account and `RELATED_IMAGE_*`), and whether routes are served (the ArgoCD
+  defaults);
+- it is offered only when reviews say that token may read those, and read, create and
+  patch every object an install may ask for (`pkg/adminobjects` allowlist);
+- it takes back any field someone changed since (a forced server-side apply): it
+  exists to restore the render, which is why the banner says what differs first.
+
+Without the console, use the release's `install/guard.yaml`: derive each value from
+the cluster as its header shows (never copy one from the operator's status or
+conditions, which the operator writes), fill its placeholders and apply it with
+`kubectl apply --server-side --field-manager=dotvirt`. kubectl reports a
+conflict on any field someone else changed; review it, and add `--force-conflicts` to
+take the field back.
+
+That template is also the path after moving the install to another namespace or
+reinstalling it elsewhere: the installed guard then refuses the operator's first
+Secret write in the new namespace, before the console is deployed there, so no
+console comes up to offer Install until the guard is re-applied for the new pins.
+
+The operator does not watch these objects: their state in status follows on its next
+pass (within 10 minutes), the console's banner at once.
+
+A release must keep its operand inside the previous release's guard, or every upgrade
+stops at the first refused write until an admin re-installs, while the old console
+still reads `Installed`. envtest checks this against
+`internal/controller/testdata/guard-previous.yaml`, the previous release's
+`install/guard.yaml`: refresh it from the released asset at each release. A release
+whose operand fails it ships with a re-install note. They stay after uninstall
+(nothing that ran can delete them); they match only the operator's username, and an
+admin may delete them.
 
 ## Serving through a Gateway
 
@@ -643,6 +759,16 @@ cluster-scoped object stays a cluster-admin act the operator deliberately leaves
 (it holds no `oauthclients` grant); the client secret is read from the generated Secret
 at apply time, so it never lands in status.
 
+A cluster admin signed in to the console can register it instead (Finish SSO). The
+console names the client `dotvirt-<namespace>` after its own namespace and takes its
+redirect, for registering and for signing users in alike, from the install (its own
+account reads it to sign users in, the admin's token to register): `spec.ingress.host`, else the host
+OpenShift's router gives the console's hostless Route (`dotvirt-<namespace>.<cluster
+ingress domain>`). It never takes either from the public URL the operator writes into
+its environment: a redirect of the operator's choosing would receive every login code,
+and the operator holds the client secret. Review `status.ssoOAuthClient` the same way
+before running it: its redirect comes from the operator.
+
 The simplest way: sign in to the console once with a token (`oc whoami -t`) as a
 cluster admin and click "Finish SSO setup"; it registers the client with your own
 rights. Or run the command yourself:
@@ -829,7 +955,8 @@ The series read: KubeVirt's `kubevirt_vmi_*` (labels `namespace`, `name`, `node`
   An optional `icon` names an `.svg` or `.png` file of `configMap`: the link then shows as that icon alone, its label the tooltip and accessible name. A missing file leaves the link as text.
   A link whose URL has the console's own origin is shown as the current item, marked and not a link.
 - `configMap`: a ConfigMap in dotvirt's namespace holding:
-  - `theme.css`, loaded after the console's own stylesheet, so it may override its tokens (`--color-accent`, surfaces, ink, `--font-sans`);
+  - `theme.css`, loaded after the console's own stylesheet, so it may override its tokens (`--color-accent` with its hover fill `--color-accent-deep` and their ink `--color-accent-on`; the status fills `--color-ok`, `--color-warn`, `--color-danger` with their ink `--color-ok-on`, `--color-warn-on`, `--color-danger-on`; surfaces, ink, `--font-sans`); dark-theme values go under `:root[data-theme='dark']`, where the console declares its own;
+    The console pairs each of these fills with its own ink (white, or dark on amber and on the dark theme's status fills) unless a theme says otherwise; a theme that changes a fill sets its ink with it (and, for the accent, `--color-accent-deep` too), each pair at 4.5:1 or more.
   - `logo.svg` or `logo.png`, shown beside the product name;
   - the links' icons.
 
@@ -850,7 +977,19 @@ their own change.
 - the requester opens the PR there, as themselves: the forge refuses their own approval;
 - a PR opened on the head dotvirt pushed is adopted, from the forge webhook or the lane's refresh: its changes leave the draft, and later proposes extend it;
 - one merged before dotvirt saw it open settles the draft the same way;
-- dotvirt never opens, reopens or edits a PR.
+- dotvirt never opens, reopens or edits a PR, except the starter-template offer below.
+
+The first segment under `dotvirt/proposed/` is the requester (`dotvirt/proposed/<user>/<project>-<hash>`), apart from two reserved segments that name no user:
+- `revert/<user>/<project>-...`: a revert, by the next segment;
+- `_seed/starter-templates`: the starter-template offer.
+
+Review services match these segments exactly and case-sensitively: `revert` is a revert, `Revert` a user.
+No first segment starts with `_` or equals `revert`. A first segment that would, or that starts with `u-`, gains a leading `u-` (`_bob` is `u-_bob`, `revert` is `u-revert`, `u-bob` is `u-u-bob`, `bob` stays `bob`). The escape is one-to-one: strip one leading `u-` from the first segment to read the name back.
+The escape applies to the first segment only: a revert's user segment (`revert/<user>/...`) is the plain ref-safe name, so never strip `u-` there.
+The segment is a readable form, not an identity: names are made ref-safe first, so `uw:alice` and `uw-alice` share a segment, and their branches stay distinct by the hash. Credit a change to the requester dotvirt records where it records one, not to the segment alone.
+
+After the upgrade, a user whose ref-safe name starts with `_` or `u-`, or equals `revert`, proposes on a new branch.
+A pull request still open on the old branch is no longer updated by the console: merge it as it is, or close it and stage those changes again.
 
 `spec.forge.pullRequests: Delegated` acts with the requester's own forge account.
 It suits a forge whose users sign in through the same identity provider as the console.
@@ -886,3 +1025,20 @@ Such a file can change which files sync and how, the source type included, whate
 dotvirt refuses to stage or revert one in, and lists one already in a project's repo as an issue; removing one stays open.
 A push from outside the console is the forge's to refuse: on Forgejo, add the protected file patterns `.argocd-source*.yaml;**/.argocd-source*.yaml` to the base branch's rule and turn on "Apply the rule to administrators".
 A pull request changing one, removal included, then cannot merge; only a forge instance administrator can still merge past it.
+
+## Starter templates
+
+A project repo with no template library is offered one, once: two example VirtualMachineTemplates under `templates/`.
+The offer is always a pull request opened by dotvirt's forge account, in every `pullRequests` mode: no user asked for it, and a base branch that refuses direct pushes still takes it.
+
+- Branch: `dotvirt/proposed/_seed/starter-templates`, into the base branch.
+- Marker: the PR also adds `templates/.dotvirt-seeded`. Merged, it keeps the library from being offered again, even after its examples are deleted.
+- Content: the branch is rebuilt from the base branch with exactly the two examples and the marker, whatever was on it before. If it moves between that push and the pull request, dotvirt closes the pull request rather than show content it did not write; that withdraws the offer for good, as any closed offer does.
+- When: a repo dotvirt creates is offered right away. Any other repo is offered when its pull request lane is next read, if its base branch holds neither the marker nor a template. Offers run one at a time.
+- Once: a pull request from the seed branch in any state, open, merged or closed, its branch since deleted included, means the offer was made. Closing it unmerged declines it for good.
+- Folder projects (`dotvirt.io/path`) are never offered: their mirror is scoped to the project's folder, and reading the repo root to decide or write the offer would evict it. They never were: the starter templates used to be committed only to a repo dotvirt had just created, which is always a whole-repo project.
+- To skip it: commit `templates/.dotvirt-seeded` (any content) to the base branch, or close the offer's pull request.
+- A failed offer is shown on the Templates tab, by its kind only (a hook's refusal keeps the hook's words), and retried at most once an hour; the detail is in the console's log. A withdrawn offer is shown as such and not retried.
+
+Nothing in `templates/` is applied to the cluster, the marker included.
+Protect the base branch as you like: the offer only needs `dotvirt/proposed/**` writable, as every proposal does.

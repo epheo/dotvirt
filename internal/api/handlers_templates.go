@@ -34,9 +34,16 @@ func (s *Server) handleTemplates(w http.ResponseWriter, r *http.Request) {
 	if s.cfg.PlatformRepo != "" {
 		s.appendTemplates(&list, platformProjectName, s.cfg.PlatformRepo)
 	}
+	seeder, seeds := s.draft.(TemplateSeeder)
 	for _, p := range projs {
 		if p.Repo != "" && s.readsRepo(r.Context(), scope{id, c, p}, "") == nil {
 			s.appendTemplates(&list, p.Name, p.Repo)
+			if !seeds {
+				continue
+			}
+			if seed, ok := seeder.TemplateSeed(p); ok {
+				list.Seeds = append(list.Seeds, seed)
+			}
 		}
 	}
 	writeJSON(w, list)

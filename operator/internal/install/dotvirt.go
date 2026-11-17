@@ -3,8 +3,6 @@ package install
 import (
 	"encoding/json"
 	"fmt"
-	"net"
-	"net/url"
 	"os"
 	"strings"
 
@@ -14,6 +12,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	dotvirtv1alpha1 "github.com/epheo/dotvirt/operator/api/v1alpha1"
+	"github.com/epheo/dotvirt/pkg/adminobjects"
 	"github.com/epheo/dotvirt/pkg/tenancy"
 )
 
@@ -39,8 +38,7 @@ const (
 	ArgoWebhookSecretName = "dotvirt-argo-webhook"
 	defaultForgeSecret    = "dotvirt-forge"
 	// OAuthSecretName holds the operator-generated OAuth client secret (key clientSecret).
-	OAuthSecretName   = "dotvirt-oauth"
-	oauthClientPrefix = "dotvirt"
+	OAuthSecretName = "dotvirt-oauth"
 
 	// IngressCAConfigMap: in-namespace copy of the default ingress CA, mounted so
 	// the app and the managed Forgejo VERIFY router-served TLS.
@@ -58,28 +56,12 @@ const (
 	ServiceCAKey = "service-ca.crt"
 )
 
-// metricsTenancyURL is the thanos-querier tenancy port beside its
-// cluster-wide one: the service serves every namespace on 9091 and one
-// namespace per query on 9092, under the same serving cert. "" for any other
-// endpoint, prometheus-k8s on 9091 included: none has a known tenancy port.
-func metricsTenancyURL(raw string) string {
-	u, err := url.Parse(raw)
-	if err != nil || u.Port() != "9091" {
-		return ""
-	}
-	if h := u.Hostname(); h != "thanos-querier.openshift-monitoring.svc" && h != "thanos-querier.openshift-monitoring.svc.cluster.local" {
-		return ""
-	}
-	u.Host = net.JoinHostPort(u.Hostname(), "9092")
-	return u.String()
-}
-
 // OAuthClientName is the OpenShift OAuthClient this install registers as. An OAuthClient
 // is CLUSTER-scoped, so the name carries the install's namespace: a shared constant would
 // have a second install overwrite the first's redirect URI and secret, breaking its SSO
 // with nothing to say why.
 func OAuthClientName(namespace string) string {
-	return oauthClientPrefix + "-" + namespace
+	return adminobjects.SSOClientName(namespace)
 }
 
 // ForgeSecretName is the forge-credential Secret for this install: the spec override,
@@ -168,7 +150,13 @@ func svcURL(name, namespace string, port int32) string {
 // platform-repo + metrics config and the secret-backed credentials. argoNS
 // holds the per-project sync accounts the app's project grants name.
 func dotvirtEnv(dv *dotvirtv1alpha1.Dotvirt, argoNS string, tenantAllowed []tenancy.GroupKind) []corev1.EnvVar {
-	env := []corev1.EnvVar{{Name: "DOTVIRT_ARGO_NAMESPACE", Value: argoNS}}
+	env := []corev1.EnvVar{
+		{Name: "DOTVIRT_ARGO_NAMESPACE", Value: argoNS},
+		// The console reads the install under a cluster admin's token for the
+		// admin objects it renders.
+		{Name: "DOTVIRT_INSTALL_NAMESPACE", Value: dv.Namespace},
+		{Name: "DOTVIRT_INSTALL_NAME", Value: dv.Name},
+	}
 	env = append(env, brandingEnv(dv.Spec.Branding)...)
 	// What tenant repos may apply beyond the listed kinds, as the AppProjects
 	// say it (TenantAllowed).
@@ -209,15 +197,13 @@ func dotvirtEnv(dv *dotvirtv1alpha1.Dotvirt, argoNS string, tenantAllowed []tena
 			env = append(env, corev1.EnvVar{Name: "DOTVIRT_PUBLISH_PORTAIL_NAMESPACE", Value: p.PortailNamespace})
 		}
 	}
-	if m := dv.Spec.Metrics; m.URL != "" {
+	// One render with the operator guard's, which pins where users' queries go.
+	m := adminobjects.MetricsFor(dv.Spec.Metrics.URL, dv.Spec.Metrics.TenancyURL, dv.Spec.Metrics.CA != nil)
+	if m.URL != "" {
 		env = append(env, corev1.EnvVar{Name: "DOTVIRT_METRICS_URL", Value: m.URL})
-		t := m.TenancyURL
-		if t == "" {
-			t = metricsTenancyURL(m.URL)
-		}
-		if t != "" {
-			env = append(env, corev1.EnvVar{Name: "DOTVIRT_METRICS_TENANCY_URL", Value: t})
-		}
+	}
+	if m.TenancyURL != "" {
+		env = append(env, corev1.EnvVar{Name: "DOTVIRT_METRICS_TENANCY_URL", Value: m.TenancyURL})
 	}
 	// OpenShift SSO: the operator generates the client secret and wires it here; the admin
 	// applies the OAuthClient (a cluster-admin act it deliberately doesn't perform; no
@@ -271,13 +257,8 @@ func dotvirtEnv(dv *dotvirtv1alpha1.Dotvirt, argoNS string, tenantAllowed []tena
 		// The oauth token endpoint is router-served: same ingress CA.
 		env = append(env, corev1.EnvVar{Name: "DOTVIRT_OAUTH_CA", Value: ingressCAMountPath + "/" + IngressCAKey})
 	}
-	switch m := dv.Spec.Metrics; {
-	case m.URL == "":
-	case m.CA != nil:
-		env = append(env, corev1.EnvVar{Name: "DOTVIRT_METRICS_CA", Value: metricsCAMountPath + "/" + metricsCAFile})
-	case strings.HasPrefix(m.URL, "https://") && strings.Contains(m.URL, ".svc"):
-		// In-cluster metrics serve the service-CA-signed cert.
-		env = append(env, corev1.EnvVar{Name: "DOTVIRT_METRICS_CA", Value: serviceCAMountPath + "/" + ServiceCAKey})
+	if m.CA != "" {
+		env = append(env, corev1.EnvVar{Name: "DOTVIRT_METRICS_CA", Value: m.CA})
 	}
 	return env
 }

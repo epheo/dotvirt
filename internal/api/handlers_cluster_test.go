@@ -738,12 +738,37 @@ func TestStorageClassesFailure(t *testing.T) {
 	}
 }
 
+// Finish SSO registers the OAuthClient the console derives from what the
+// caller reads (its namespace's install, the cluster's ingress domain), never
+// the name or redirect the operator wrote into the console's env: a redirect
+// of the operator's choosing would receive every login code.
 func TestFinishSSO(t *testing.T) {
 	fc := newFakeCluster(t)
+	host := "dotvirt.example"
 	var applied map[string]any
-	fc.on(http.MethodPatch, "/apis/oauth.openshift.io/v1/oauthclients/dotvirt", func(w http.ResponseWriter, r *http.Request) {
+	adminOnly := func(w http.ResponseWriter, r *http.Request) bool {
 		if bearer(r) != adminToken {
 			writeStatus(w, http.StatusForbidden, metav1.StatusReasonForbidden)
+			return false
+		}
+		return true
+	}
+	fc.on(http.MethodGet, "/apis/dotvirt.io/v1alpha1/namespaces/dotvirt/dotvirts", func(w http.ResponseWriter, r *http.Request) {
+		if adminOnly(w, r) {
+			writeObj(w, map[string]any{"apiVersion": "dotvirt.io/v1alpha1", "kind": "DotvirtList", "metadata": map[string]any{}, "items": []any{map[string]any{
+				"apiVersion": "dotvirt.io/v1alpha1", "kind": "Dotvirt", "metadata": map[string]any{"name": "x", "namespace": "dotvirt"},
+				"spec": map[string]any{"ingress": map[string]any{"host": host}},
+			}}})
+		}
+	})
+	fc.on(http.MethodGet, "/apis/config.openshift.io/v1/ingresses/cluster", func(w http.ResponseWriter, r *http.Request) {
+		if adminOnly(w, r) {
+			writeObj(w, map[string]any{"apiVersion": "config.openshift.io/v1", "kind": "Ingress", "metadata": map[string]any{"name": "cluster"},
+				"spec": map[string]any{"domain": "apps.example"}})
+		}
+	})
+	fc.on(http.MethodPatch, "/apis/oauth.openshift.io/v1/oauthclients/dotvirt-dotvirt", func(w http.ResponseWriter, r *http.Request) {
+		if !adminOnly(w, r) {
 			return
 		}
 		if ct := r.Header.Get("Content-Type"); ct != "application/apply-patch+yaml" {
@@ -752,7 +777,7 @@ func TestFinishSSO(t *testing.T) {
 		_ = json.NewDecoder(r.Body).Decode(&applied)
 		writeObj(w, applied)
 	})
-	s := fc.server(nil, Config{})
+	s := fc.server(nil, Config{OwnNamespace: "dotvirt"})
 	finish := func(token string) *httptest.ResponseRecorder {
 		rec := httptest.NewRecorder()
 		s.handleFinishSSO(rec, asUser(httptest.NewRequest(http.MethodPost, "/api/auth/oauthclient", nil), token))
@@ -761,7 +786,8 @@ func TestFinishSSO(t *testing.T) {
 
 	wantStatus(t, finish(adminToken), http.StatusNotFound) // SSO not enabled
 
-	o, err := auth.NewOAuth(auth.OAuthConfig{ClientID: "dotvirt", ClientSecret: "s3cret", RedirectURL: "https://dotvirt.example/api/auth/callback"}, nil, nil)
+	// The env the operator writes, steered at another client and redirect.
+	o, err := auth.NewOAuth(auth.OAuthConfig{ClientID: "console", ClientSecret: "s3cret", RedirectURL: "https://evil.example/api/auth/callback"}, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -773,12 +799,40 @@ func TestFinishSSO(t *testing.T) {
 		t.Errorf("forbidden message = %q, want the next action", rec.Body.String())
 	}
 
-	wantStatus(t, finish(adminToken), http.StatusNoContent)
-	if applied["secret"] != "s3cret" || applied["redirectURIs"].([]any)[0] != "https://dotvirt.example/api/auth/callback" {
-		t.Errorf("applied = %v", applied)
+	for _, c := range []struct{ host, redirect string }{
+		{"dotvirt.example", "https://dotvirt.example/api/auth/callback"},
+		{"", "https://dotvirt-dotvirt.apps.example/api/auth/callback"}, // the router's host for the console's Route
+	} {
+		host, applied = c.host, nil
+		wantStatus(t, finish(adminToken), http.StatusNoContent)
+		if applied["secret"] != "s3cret" || applied["redirectURIs"].([]any)[0] != c.redirect {
+			t.Errorf("host %q: applied = %v, want redirect %s", c.host, applied, c.redirect)
+		}
 	}
 	if !o.ClientRegistered(t.Context()) {
 		t.Error("a successful apply left SSO pending")
+	}
+}
+
+// Sign-in uses the client and redirect Finish SSO registers, read with the
+// console's own account; the env the operator writes only when they cannot be
+// read.
+func TestSSOClientConfig(t *testing.T) {
+	fc := newFakeCluster(t)
+	fc.on(http.MethodGet, "/apis/dotvirt.io/v1alpha1/namespaces/dotvirt/dotvirts", func(w http.ResponseWriter, r *http.Request) {
+		writeObj(w, map[string]any{"apiVersion": "dotvirt.io/v1alpha1", "kind": "DotvirtList", "metadata": map[string]any{}, "items": []any{map[string]any{
+			"apiVersion": "dotvirt.io/v1alpha1", "kind": "Dotvirt", "metadata": map[string]any{"name": "x", "namespace": "dotvirt"},
+			"spec": map[string]any{"ingress": map[string]any{"host": "dotvirt.example"}},
+		}}})
+	})
+	fc.server(nil, Config{})
+	id, redirect, err := SSOClientConfig(t.Context(), fc.sa, "dotvirt", "console", "https://evil.example")
+	if err != nil || id != "dotvirt-dotvirt" || redirect != "https://dotvirt.example/api/auth/callback" {
+		t.Errorf("derived = %q %q %v; want the install's, never the env's", id, redirect, err)
+	}
+	id, redirect, err = SSOClientConfig(t.Context(), fc.sa, "elsewhere", "console", "https://env.example/")
+	if err == nil || id != "console" || redirect != "https://env.example/api/auth/callback" {
+		t.Errorf("unreadable install = %q %q %v; want the env's, and why", id, redirect, err)
 	}
 }
 

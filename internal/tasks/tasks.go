@@ -157,16 +157,35 @@ func (f *Feed) Visit(op func(Op), merge func(Merge)) {
 // attribution that must skip it, so the two cannot drift apart.
 const RevertSegment = "revert"
 
+// SeedSegment is the branch segment under the proposed prefix that holds the
+// starter-template seed: <prefix>/_seed/starter-templates. No user segment
+// starts with '_' or equals RevertSegment (the changeset's userSegment), so
+// neither reserved segment ever names a user.
+const SeedSegment = "_seed"
+
+// UserEscape prefixes a first-segment user that would read as reserved (the
+// changeset's userSegment): one leading UserEscape is stripped to read the
+// name back. Only the first segment is escaped; a revert's user segment is
+// the plain ref-safe name.
+const UserEscape = "u-"
+
 // MergeAuthor resolves who a merged PR belongs to. dotvirt's bot opens every
 // proposal PR, so the poster is always the bot - the proposing user is encoded
 // (sanitized) as the first head-branch segment under the proposed prefix, one
-// segment deeper for a revert. A head outside that prefix is a human PR,
+// segment deeper for a revert. The seed belongs to no user: it stays its
+// poster's, dotvirt's own account. A head outside that prefix is a human PR,
 // attributed to its real poster.
 func MergeAuthor(headRef, proposedPrefix, poster string) string {
 	if proposedPrefix != "" {
 		if rest, ok := strings.CutPrefix(headRef, proposedPrefix+"/"); ok {
-			rest = strings.TrimPrefix(rest, RevertSegment+"/")
+			if strings.HasPrefix(rest, SeedSegment+"/") {
+				return poster
+			}
+			rest, revert := strings.CutPrefix(rest, RevertSegment+"/")
 			if user, _, found := strings.Cut(rest, "/"); found && user != "" {
+				if !revert {
+					user = strings.TrimPrefix(user, UserEscape)
+				}
 				return user
 			}
 		}

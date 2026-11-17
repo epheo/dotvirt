@@ -36,6 +36,13 @@ const (
 	// that the controller's own rights let a tenant DataVolume clone from any
 	// namespace (CloneAnywhere). It never gates Available.
 	ConditionSyncImpersonationReady = "SyncImpersonationReady"
+	// ConditionOperatorGuard is True while the admission policies bounding the
+	// operator's own account (status.adminObjects) are installed as rendered;
+	// False while they are missing (NotInstalled), or rendered for other
+	// namespaces or another version or changed since (Outdated): a cluster
+	// admin installs them from the console, the operator never does; Unknown
+	// when it cannot tell. It never gates Available.
+	ConditionOperatorGuard = "OperatorGuard"
 	// ConditionForgeCredentialReady says whether the operator may use the Secret
 	// spec.forge.credentialsSecret names, set for any name but dotvirt-forge.
 	// False NotGranted until a cluster admin installs the Role and RoleBinding
@@ -441,6 +448,21 @@ type BrandingLink struct {
 	Icon string `json:"icon,omitempty"`
 }
 
+// AdminObject is one object the install needs but the operator may not
+// create, as the operator sees it. A report only: the console renders what it
+// installs itself, never from this.
+type AdminObject struct {
+	// Purpose says what the object is for.
+	Purpose string `json:"purpose"`
+	Kind    string `json:"kind"`
+	Name    string `json:"name"`
+	// +optional
+	Namespace string `json:"namespace,omitempty"`
+	// State is NotInstalled, Outdated (rendered for other parameters or by
+	// another version, or changed after it was installed) or Installed.
+	State string `json:"state"`
+}
+
 // DotvirtStatus is the observed install state.
 type DotvirtStatus struct {
 	// ObservedGeneration is the .metadata.generation last reconciled.
@@ -462,6 +484,12 @@ type DotvirtStatus struct {
 	// OAuthClient SSO needs, with the redirect URI filled from the assigned console host.
 	// Set only while auth.openShiftSSO is on; run it once to finish SSO.
 	SSOOAuthClient string `json:"ssoOAuthClient,omitempty"`
+	// AdminObjects are objects the install needs but the operator may not
+	// create, each with its purpose and state: a cluster admin installs them
+	// from the console (one Install action, under the admin's own token), or
+	// from the release's install/guard.yaml.
+	// +optional
+	AdminObjects []AdminObject `json:"adminObjects,omitempty"`
 	// SyncImpersonationInstance is the ArgoCD resource, as namespace/name, the
 	// operator set application.sync.impersonation.enabled on: it removes the
 	// setting there when spec.argocd moves to another instance and before the

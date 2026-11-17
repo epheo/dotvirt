@@ -1,9 +1,9 @@
 // Go workspace tying the app, its installer operator, and the forge client and
-// tenancy rules they share, so editor tooling spans all four. Each is its own
+// tenancy rules and admin objects they share, so editor tooling spans them all. Each is its own
 // module on purpose:
 // controller-runtime's k8s.io/* tree must not constrain the app's KubeVirt/Argo
 // client versions, and the operator must not build against the app module.
-// The relative replaces in go.mod resolve pkg/forge and pkg/tenancy without the
+// The relative replaces in go.mod resolve the pkg modules without the
 // workspace, which is how the images build (GOWORK=off) and why ./... at the
 // root skips the operator and the pkg modules.
 go 1.27.4
@@ -11,6 +11,7 @@ go 1.27.4
 use (
 	.
 	./operator
+	./pkg/adminobjects
 	./pkg/forge
 	./pkg/tenancy
 )

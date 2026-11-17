@@ -187,8 +187,10 @@ spec:
 
     Status reports the rest: `consoleURL`, `forgeURL`, `forgeAdminHint` (the
     command that reveals the managed forge's admin password), `ssoOAuthClient`,
-    and one condition per install step, so `kubectl describe dotvirt` explains
-    a stuck install.
+    `adminObjects` (what a cluster admin installs from the console, such as
+    the admission policies bounding the operator's own account), and one
+    condition per install step, so
+    `kubectl describe dotvirt` explains a stuck install.
 
     ### Prerequisites
 
@@ -312,6 +314,19 @@ spec:
                 - get
                 - patch
             - apiGroups:
+                - admissionregistration.k8s.io
+              resourceNames:
+                - dotvirt-operator-bindings
+                - dotvirt-operator-deployments
+                - dotvirt-operator-frontdoor
+                - dotvirt-operator-install
+                - dotvirt-operator-secrets
+              resources:
+                - validatingadmissionpolicies
+                - validatingadmissionpolicybindings
+              verbs:
+                - get
+            - apiGroups:
                 - apps
               resources:
                 - deployments
@@ -385,13 +400,21 @@ spec:
               verbs:
                 - create
             - apiGroups:
+                - config.openshift.io
+              resourceNames:
+                - cluster
+              resources:
+                - ingresses
+              verbs:
+                - get
+            - apiGroups:
                 - dotvirt.io
               resources:
                 - dotvirts
               verbs:
                 - get
                 - list
-                - update
+                - patch
                 - watch
             - apiGroups:
                 - dotvirt.io

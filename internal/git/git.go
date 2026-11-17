@@ -84,6 +84,9 @@ func Open(url, username string, tokenFn forge.TokenSource) (*Repo, error) {
 // URL is the remote this mirror reads, for logs.
 func (r *Repo) URL() string { return r.url }
 
+// Root is the folder of the repo this mirror is scoped to, "" being all of it.
+func (r *Repo) Root() string { return r.root }
+
 // BranchHash returns branch's current commit hash from the local mirror (no fetch),
 // or "" if the branch can't be resolved - the memo and review-cache invalidation key.
 func (r *Repo) BranchHash(branch string) string {

@@ -37,6 +37,7 @@ import (
 	"github.com/epheo/dotvirt/operator/internal/deps"
 	"github.com/epheo/dotvirt/operator/internal/install"
 	"github.com/epheo/dotvirt/operator/internal/platform"
+	"github.com/epheo/dotvirt/pkg/adminobjects"
 	"github.com/epheo/dotvirt/pkg/forge"
 	"github.com/epheo/dotvirt/pkg/tenancy"
 )
@@ -62,6 +63,9 @@ type DotvirtReconciler struct {
 	APIReader client.Reader
 	// OperatorNamespace is admitted by the NetworkPolicies; "" when unknown.
 	OperatorNamespace string
+	// OperatorUsername is the username the operator authenticates as, which
+	// the operator guard pins; "" when unknown.
+	OperatorUsername string
 	// InstallNamespace is the namespace a cluster admin names on the operator's
 	// Deployment for the install; "" leaves it to installNamespace's resolution.
 	InstallNamespace string
@@ -178,15 +182,16 @@ func (r *DotvirtReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 		// Ensure the finalizer is present before provisioning anything cluster-scoped.
 		// Skipped under -dry-run so a validation run mutates nothing (and the CR stays
 		// freely deletable, since the finalizer would otherwise gate its removal).
+		lock := client.MergeFromWithOptions(dv.DeepCopy(), client.MergeFromWithOptimisticLock{})
 		if !r.DryRun && controllerutil.AddFinalizer(&dv, dotvirtFinalizer) {
-			if err := r.Update(ctx, &dv); err != nil {
+			if err := r.Patch(ctx, &dv, lock); err != nil {
 				return ctrl.Result{}, err
 			}
-			// The Update moved resourceVersion; a stale base would put it in the
+			// The patch moved resourceVersion; a stale base would put it in the
 			// status patch and turn it into an optimistic lock.
 			base = dv.DeepCopy()
 		}
-		// After the finalizer add, whose Update reads the status back from the
+		// After the finalizer add, whose patch reads the status back from the
 		// server.
 		r.markAdopted(&dv, adopted)
 		// Only after the finalizer add, the reconcile's one spec write: the
@@ -213,6 +218,9 @@ func (r *DotvirtReconciler) provision(ctx context.Context, key types.NamespacedN
 	// below.
 	for _, phase := range []reconcilePhase{
 		{dotvirtv1alpha1.ConditionDependenciesReady, r.reconcileDependencies, ""},
+		// Before the phases that write Secrets and Deployments: the guard bounds
+		// them, and a stale one refuses them, so its condition says why first.
+		{dotvirtv1alpha1.ConditionOperatorGuard, r.reconcileOperatorGuard, ""},
 		{dotvirtv1alpha1.ConditionForgeReady, r.reconcileForge, ""},
 		{dotvirtv1alpha1.ConditionSecretsReady, r.reconcileSecrets, "secret generation"},
 		{dotvirtv1alpha1.ConditionWorkloadReady, r.reconcileWorkload, ""},
@@ -515,24 +523,7 @@ const openShiftGitOpsNS = "openshift-gitops"
 // spec, defaulting to the platform's conventional install (OpenShift GitOps vs
 // community Argo CD).
 func (r *DotvirtReconciler) argoTarget(dv *dotvirtv1alpha1.Dotvirt) (ns, sa string) {
-	ns, sa = dv.Spec.ArgoCD.Namespace, dv.Spec.ArgoCD.ControllerServiceAccount
-	if ns == "" {
-		if r.Platform == platform.OpenShift {
-			ns = openShiftGitOpsNS
-		} else {
-			ns = "argocd"
-		}
-	}
-	if sa == "" {
-		// By the namespace, not the platform: MicroShift reads as OpenShift and
-		// runs community Argo CD.
-		if ns == openShiftGitOpsNS {
-			sa = "openshift-gitops-argocd-application-controller"
-		} else {
-			sa = "argocd-application-controller"
-		}
-	}
-	return ns, sa
+	return adminobjects.ArgoTarget(dv.Spec.ArgoCD.Namespace, dv.Spec.ArgoCD.ControllerServiceAccount, r.Platform == platform.OpenShift)
 }
 
 func (r *DotvirtReconciler) setCondition(dv *dotvirtv1alpha1.Dotvirt, condType string, status metav1.ConditionStatus, reason, msg string) {
@@ -729,7 +720,7 @@ func (r *DotvirtReconciler) writeStatus(ctx context.Context, dv, base *dotvirtv1
 
 // InstallNamespaceEnv names the operator Deployment's env that sets
 // InstallNamespace when it is not the operator's own namespace.
-const InstallNamespaceEnv = "OPERATOR_INSTALL_NAMESPACE"
+const InstallNamespaceEnv = adminobjects.InstallNamespaceEnv
 
 // installNamespace resolves the namespace whose Dotvirt is the install, each
 // pass, in this order:
@@ -872,8 +863,11 @@ func (r *DotvirtReconciler) wakeInstall(ctx context.Context, installNS string, s
 // install's objects.
 func (r *DotvirtReconciler) ignore(ctx context.Context, dv *dotvirtv1alpha1.Dotvirt, installNS string) error {
 	if !dv.DeletionTimestamp.IsZero() {
+		// A patch of the finalizers alone, as finalize drops it: never the
+		// spec, which the guard keeps the admin's.
+		lock := client.MergeFromWithOptions(dv.DeepCopy(), client.MergeFromWithOptimisticLock{})
 		if !r.DryRun && controllerutil.RemoveFinalizer(dv, dotvirtFinalizer) {
-			return r.Update(ctx, dv)
+			return r.Patch(ctx, dv, lock)
 		}
 		return nil
 	}
