@@ -502,6 +502,14 @@ func TestForgeBearerHeaderHoldsNoConnection(t *testing.T) {
 	if rec := rig.get("/api/forge/connect"); rec.Header().Get("Location") != "/" {
 		t.Errorf("a connect without a console session went to %q", rec.Header().Get("Location"))
 	}
+	held := rig.f.Held()
+	connect := httptest.NewRequest("GET", "/api/forge/connect", nil)
+	connect.Header.Set("Authorization", "Bearer tok-alice")
+	rec := httptest.NewRecorder()
+	rig.h.ServeHTTP(rec, connect)
+	if rec.Header().Get("Location") != "/" || rig.f.Held() != held {
+		t.Errorf("a bearer header started a connect: to %q, %d entries", rec.Header().Get("Location"), rig.f.Held())
+	}
 }
 
 // An expired access token without a refresh token is never served.
