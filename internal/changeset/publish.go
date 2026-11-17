@@ -256,6 +256,7 @@ func (r *proposeRun) extend(pr forge.PR, rec draft.Proposal, hasRec bool) (model
 	now, err := r.h.fc.PR(pr.Number)
 	switch {
 	case err != nil:
+		r.h.spent(err)
 		// Unknown: keep the draft staged and record what was pushed, so the
 		// next propose replays it on whatever the PR turned out to be.
 		log.Printf("changeset: PR #%d: re-read after push: %v", pr.Number, err)
@@ -269,6 +270,7 @@ func (r *proposeRun) extend(pr forge.PR, rec draft.Proposal, hasRec bool) (model
 	}
 	if !c.usersOpenPRs {
 		if _, err := r.h.fc.EditPR(pr.Number, forge.PREdit{Title: title, Body: body}); err != nil {
+			r.h.spent(err)
 			log.Printf("changeset: PR #%d: describe: %v", pr.Number, err)
 		}
 	}
@@ -376,7 +378,7 @@ func (r *proposeRun) afterMerge(pushed string) (model.ProposeResult, error) {
 		return model.ProposeResult{}, r.commitFailed(err, r.entries, 0)
 	}
 	out := model.ProposeResult{Branch: res.Branch}
-	if !r.c.createPR(r.h.fc, &out, r.branch, title, body) {
+	if !r.c.createPR(r.h, &out, r.branch, title, body) {
 		return out, r.record(r.proposal(0, res.Hash, r.entries))
 	}
 	return out, r.done(r.proposal(out.PRNumber, res.Hash, r.entries))
@@ -436,6 +438,7 @@ func (c *Coordinator) publish(h hand, branch, message, title, body string, items
 			return nil
 		}
 		if _, err := fc.EditPR(prior.Number, forge.PREdit{State: "open", Title: title, Body: body}); err != nil {
+			h.spent(err)
 			log.Printf("changeset: %s: reopen PR #%d: %v", branch, prior.Number, err)
 			return nil
 		}
@@ -446,6 +449,7 @@ func (c *Coordinator) publish(h hand, branch, message, title, body string, items
 	if err != nil {
 		if reopened {
 			if _, cerr := fc.EditPR(prior.Number, forge.PREdit{State: "closed"}); cerr != nil {
+				h.spent(cerr)
 				log.Printf("changeset: %s: re-close PR #%d after a failed push: %v", branch, prior.Number, cerr)
 			}
 		}
@@ -460,24 +464,27 @@ func (c *Coordinator) publish(h hand, branch, message, title, body string, items
 	case reopened:
 		out.PRURL, out.PRNumber, out.Existing = fc.PullURL(prior.Number), prior.Number, true
 	default:
-		if !c.createPR(fc, &out, branch, title, body) {
+		if !c.createPR(h, &out, branch, title, body) {
 			return out, res.Hash, false, nil
 		}
 	}
 	return out, res.Hash, true, nil
 }
 
-// createPR opens branch's PR and records it on out. When the forge will not,
-// or users open their own, out carries the compare URL instead and the result
-// is false: the branch IS pushed, so the user opens the PR there. That is a
-// 200, not an error - an error would make the handler drop the result body.
-func (c *Coordinator) createPR(fc *forge.Client, out *model.ProposeResult, branch, title, body string) bool {
+// createPR opens branch's PR as h and records it on out. When the forge will
+// not, or users open their own, out carries the compare URL instead and the
+// result is false: the branch IS pushed, so the user opens the PR there. That
+// is a 200, not an error - an error would make the handler drop the result
+// body.
+func (c *Coordinator) createPR(h hand, out *model.ProposeResult, branch, title, body string) bool {
+	fc := h.fc
 	if c.usersOpenPRs {
 		out.CompareURL = fc.CompareURL(branch, c.baseBranch)
 		return false
 	}
 	pr, err := fc.CreatePR(title, body, branch, c.baseBranch)
 	if err != nil {
+		h.spent(err)
 		log.Printf("changeset: %s: branch pushed but PR unavailable: %v", branch, err)
 		out.CompareURL = fc.CompareURL(branch, c.baseBranch)
 		return false

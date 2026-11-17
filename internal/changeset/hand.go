@@ -156,17 +156,34 @@ func (h hand) refusal(err error) error {
 	if h.as == nil || err == nil {
 		return nil
 	}
-	status := 0
-	if se := (*forge.StatusError)(nil); errors.As(err, &se) {
-		status = se.Status
-	}
 	switch {
-	case status == http.StatusUnauthorized, errors.Is(err, transport.ErrAuthenticationRequired):
-		h.as.accounts.Rejected(h.as.id, h.as.token)
+	case h.spent(err):
 		return errConnect
-	case status == http.StatusForbidden, errors.Is(err, transport.ErrAuthorizationFailed),
+	case forgeStatus(err) == http.StatusForbidden, errors.Is(err, transport.ErrAuthorizationFailed),
 		errors.Is(err, transport.ErrRepositoryNotFound):
 		return h.as.noWrite()
 	}
 	return nil
+}
+
+// spent reports whether err is the forge no longer taking the user's token,
+// and drops it from their session then, so their next write offers the
+// connect. Also called where a failed forge call is only logged.
+func (h hand) spent(err error) bool {
+	if h.as == nil || err == nil {
+		return false
+	}
+	if forgeStatus(err) != http.StatusUnauthorized && !errors.Is(err, transport.ErrAuthenticationRequired) {
+		return false
+	}
+	h.as.accounts.Rejected(h.as.id, h.as.token)
+	return true
+}
+
+// forgeStatus is the status the forge answered err with, 0 for none.
+func forgeStatus(err error) int {
+	if se := (*forge.StatusError)(nil); errors.As(err, &se) {
+		return se.Status
+	}
+	return 0
 }

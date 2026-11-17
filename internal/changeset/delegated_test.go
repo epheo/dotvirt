@@ -88,8 +88,9 @@ type fakeForgeState struct {
 	noPush map[string]bool
 	refuse map[string]int
 	// gitRefuse is the status git alone answers a token with; pushRefuse
-	// the status its pushes alone get, as a repo the token may read.
-	gitRefuse, pushRefuse map[string]int
+	// the status its pushes alone get, as a repo the token may read;
+	// prRefuse the status its pull request writes alone get.
+	gitRefuse, pushRefuse, prRefuse map[string]int
 }
 
 var pullPath = regexp.MustCompile(`^/api/v1/repos/([^/]+)/([^/]+)(/pulls(?:/(\d+))?)?$`)
@@ -114,6 +115,9 @@ func (f *fakeForgeState) site(name string) *httptest.Server {
 		status, gitStatus := f.refuse[token], f.gitRefuse[token]
 		if strings.Contains(r.URL.RequestURI(), "git-receive-pack") && f.pushRefuse[token] != 0 {
 			gitStatus = f.pushRefuse[token]
+		}
+		if strings.Contains(r.URL.Path, "/pulls") && r.Method != http.MethodGet && f.prRefuse[token] != 0 {
+			status = f.prRefuse[token]
 		}
 		f.mu.Unlock()
 		if _, known := logins[token]; !known {
@@ -230,6 +234,7 @@ func (a *fakeAccounts) Rejected(id auth.Identity, token string) {
 
 type delegatedFixture struct {
 	c        *Coordinator
+	repos    *git.RepoSet
 	forge    *fakeForgeState
 	accounts *fakeAccounts
 	root     string
@@ -252,7 +257,7 @@ func newDelegatedFixture(t *testing.T, bare string) *delegatedFixture {
 	if err != nil {
 		t.Skip(err)
 	}
-	ff := &fakeForgeState{t: t, root: root, git: h, noPush: map[string]bool{}, refuse: map[string]int{}, gitRefuse: map[string]int{}, pushRefuse: map[string]int{}}
+	ff := &fakeForgeState{t: t, root: root, git: h, noPush: map[string]bool{}, refuse: map[string]int{}, gitRefuse: map[string]int{}, pushRefuse: map[string]int{}, prRefuse: map[string]int{}}
 	f := &delegatedFixture{forge: ff, root: root, bot: ff.site("bot"), user: ff.site("user"), alice: auth.Identity{Username: "alice"}}
 	f.accounts = &fakeAccounts{creds: map[string]auth.ForgeCredential{
 		"alice": {Login: "alice-forge", Token: "alice-tok"},
@@ -266,6 +271,7 @@ func newDelegatedFixture(t *testing.T, bare string) *delegatedFixture {
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
 	repos := git.NewRepoSet(ctx, f.bot.URL, "dotvirt-bot", forge.StaticToken("bot-tok"), true, nil, time.Hour)
+	f.repos = repos
 	f.c = New(store, repos, forge.NewFactory(f.bot.URL, forge.StaticToken("bot-tok"), false, ""), nil, nil, nil, "main", "dotvirt/proposed")
 	f.c.UseAuthorizer(allowAll{})
 	f.proj = project.ProjectInfo{Name: "p", Repo: f.bot.URL + "/dotvirt/p.git"}
@@ -290,6 +296,23 @@ func (f *delegatedFixture) stage(t *testing.T, id auth.Identity, proj project.Pr
 func (f *delegatedFixture) signatures(t *testing.T, repo, branch string) string {
 	t.Helper()
 	return gitOut(t, f.root, "--git-dir", filepath.Join("dotvirt", repo+".git"), "log", "-1", "--format=%an <%ae> / %cn <%ce>", branch)
+}
+
+// mirrored waits until proj's mirror holds branch as the repo does.
+func (f *delegatedFixture) mirrored(t *testing.T, proj project.ProjectInfo, repo, branch string) {
+	t.Helper()
+	want := gitOut(t, f.root, "--git-dir", filepath.Join("dotvirt", repo+".git"), "rev-parse", branch)
+	read, err := f.c.read(proj)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.repos.Poke(proj.Repo)
+	for deadline := time.Now().Add(10 * time.Second); time.Now().Before(deadline); time.Sleep(20 * time.Millisecond) {
+		if read.BranchHash(branch) == want {
+			return
+		}
+	}
+	t.Fatalf("the mirror never saw %s", branch)
 }
 
 // writes are the recorded calls that change the forge.
@@ -472,17 +495,93 @@ func TestDelegatedPlatformProposeIsTheConsolesAttributed(t *testing.T) {
 	}
 }
 
-// A project merely named like the platform tier is no platform: its writes
-// are the user's.
+// The platform tier is its name and its repo together: a project merely
+// named like it, or a tenant project on its repo, is written as the user.
 func TestDelegatedPlatformIsItsRepo(t *testing.T) {
+	t.Run("named like it", func(t *testing.T) {
+		f := newDelegatedFixture(t, seedBare(t))
+		named := project.ProjectInfo{Name: project.PlatformName, Repo: f.proj.Repo}
+		delete(f.accounts.creds, "alice")
+		f.stage(t, f.alice, named)
+		if _, err := f.c.Propose(f.alice, named, model.ProposeRequest{Title: "label web"}); !errors.Is(err, model.ErrForgeConnect) {
+			t.Fatalf("Propose: %v, want the connect offer", err)
+		}
+		f.requireNoWrites(t)
+	})
+	t.Run("on its repo", func(t *testing.T) {
+		f := newDelegatedFixture(t, seedBare(t))
+		tenant := project.ProjectInfo{Name: "q", Repo: f.platform.Repo}
+		f.stage(t, f.alice, tenant)
+		if _, err := f.c.Propose(f.alice, tenant, model.ProposeRequest{Title: "label web"}); err != nil {
+			t.Fatalf("Propose: %v", err)
+		}
+		f.requireWritesAs(t, "user", "basic alice-forge:alice-tok", "alice-tok")
+	})
+}
+
+// A delegated user's own proposal reads as theirs though they committed it,
+// and as no one else's.
+func TestDelegatedOwnProposalIsTheUsers(t *testing.T) {
 	f := newDelegatedFixture(t, seedBare(t))
-	named := project.ProjectInfo{Name: project.PlatformName, Repo: f.proj.Repo}
-	delete(f.accounts.creds, "alice")
-	f.stage(t, f.alice, named)
-	if _, err := f.c.Propose(f.alice, named, model.ProposeRequest{Title: "label web"}); !errors.Is(err, model.ErrForgeConnect) {
-		t.Fatalf("Propose: %v, want the connect offer", err)
+	f.stage(t, f.alice, f.proj)
+	out, err := f.c.Propose(f.alice, f.proj, model.ProposeRequest{Title: "label web"})
+	if err != nil {
+		t.Fatalf("Propose: %v", err)
 	}
-	f.requireNoWrites(t)
+	f.mirrored(t, f.proj, "p", out.Branch)
+	row := model.Proposal{Project: f.proj.Name, PRNumber: out.PRNumber, Branch: out.Branch}
+	detail, err := f.c.OwnProposal(f.alice, f.proj, row)
+	if err != nil || len(detail.Items) != 1 || detail.Items[0].Name != "web" {
+		t.Fatalf("alice's own proposal: %+v, %v; want her edit of web", detail.Items, err)
+	}
+	if _, err := f.c.OwnProposal(auth.Identity{Username: "bob"}, f.proj, row); !errors.Is(err, git.ErrForeignCommit) {
+		t.Fatalf("alice's proposal read by bob: %v, want it foreign", err)
+	}
+}
+
+// A token the forge refuses once the branch is pushed, opening or retitling
+// the PR, is still dropped from the session: the push stands, and the next
+// save offers the connect.
+func TestDelegatedTokenRefusedAtThePRIsDropped(t *testing.T) {
+	t.Run("opening it", func(t *testing.T) {
+		f := newDelegatedFixture(t, seedBare(t))
+		f.stage(t, f.alice, f.proj)
+		f.forge.prRefuse["alice-tok"] = http.StatusUnauthorized
+		out, err := f.c.Propose(f.alice, f.proj, model.ProposeRequest{Title: "label web"})
+		if err != nil || out.PRNumber != 0 || out.CompareURL == "" {
+			t.Fatalf("Propose: %+v, %v; want the branch pushed and the compare link", out, err)
+		}
+		f.requireDropped(t)
+	})
+	t.Run("retitling it", func(t *testing.T) {
+		f := newDelegatedFixture(t, seedBare(t))
+		f.stage(t, f.alice, f.proj)
+		if _, err := f.c.Propose(f.alice, f.proj, model.ProposeRequest{Title: "label web"}); err != nil {
+			t.Fatal(err)
+		}
+		req := model.EditRequest{SourceFile: "web.yaml", VMEdit: model.VMEdit{SetLabels: map[string]string{"tier": "web"}}}
+		if _, err := f.c.StageEdit(f.alice, f.proj, "alpha", "web", req); err != nil {
+			t.Fatal(err)
+		}
+		f.forge.prRefuse["alice-tok"] = http.StatusUnauthorized
+		if out, err := f.c.Propose(f.alice, f.proj, model.ProposeRequest{}); err != nil || !out.Existing {
+			t.Fatalf("Propose: %+v, %v; want PR #1 extended", out, err)
+		}
+		f.requireDropped(t)
+	})
+}
+
+// requireDropped fails unless alice's token was dropped from her session,
+// so her next save offers the connect.
+func (f *delegatedFixture) requireDropped(t *testing.T) {
+	t.Helper()
+	if len(f.accounts.rejected) != 1 || f.accounts.rejected[0] != "alice:alice-tok" {
+		t.Fatalf("rejected %v, want alice's refused token dropped", f.accounts.rejected)
+	}
+	f.stage(t, f.alice, f.proj)
+	if _, err := f.c.Propose(f.alice, f.proj, model.ProposeRequest{Title: "again"}); !errors.Is(err, model.ErrForgeConnect) {
+		t.Fatalf("the next Propose: %v, want the connect offer", err)
+	}
 }
 
 // A revert is the user's write too: their branch, their pull request; and
