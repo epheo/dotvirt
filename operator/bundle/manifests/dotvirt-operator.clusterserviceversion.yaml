@@ -316,10 +316,15 @@ spec:
             - apiGroups:
                 - admissionregistration.k8s.io
               resourceNames:
+                - dotvirt-operator-accounts
                 - dotvirt-operator-bindings
+                - dotvirt-operator-claims
                 - dotvirt-operator-deployments
                 - dotvirt-operator-frontdoor
+                - dotvirt-operator-httproutes
+                - dotvirt-operator-ingresses
                 - dotvirt-operator-install
+                - dotvirt-operator-routes
                 - dotvirt-operator-secrets
               resources:
                 - validatingadmissionpolicies

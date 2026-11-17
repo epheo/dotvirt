@@ -122,40 +122,52 @@ owns one status condition; a phase that fails or waits records why there, so
 1. **Dependencies** (`DependenciesReady`): probes for ArgoCD, a hard prerequisite
    it never installs (it waits and reports if it is absent), and for KubeVirt,
    OVN-K, NMState and CDI (soft: noted, the install proceeds).
-2. **Operator guard** (`OperatorGuard`): renders five ValidatingAdmissionPolicies and
+2. **Operator guard** (`OperatorGuard`): renders ten ValidatingAdmissionPolicies and
    their bindings that bound the operator's own account, pinned to its exact username
    (one SelfSubjectReview at startup), the install namespace, and the ArgoCD namespace
-   and controller (`spec.argocd`, else the defaults):
+   and controller (`spec.argocd`, else the defaults). Each policy matches one kind, so
+   none type-checks against a kind it does not name:
    - `dotvirt-operator-secrets`: Secrets only in those two namespaces, never of type
      `kubernetes.io/service-account-token` nor carrying `kubernetes.io/service-account.name`;
-     the console's ServiceAccount never with its token unmounted;
+   - `dotvirt-operator-accounts`: the console's ServiceAccount never with its token
+     unmounted;
    - `dotvirt-operator-deployments`: only the console (`dotvirt`, as `dotvirt`) and the
      forge (`dotvirt-forgejo`, as `dotvirt-forgejo`), in the install namespace. The
      console's images come from `quay.io/epheo/dotvirt` and the forge's from
-     `codeberg.org/forgejo/forgejo` (any tag or digest), or exactly the image an admin
-     chose (`spec.image`, the operator Deployment's `RELATED_IMAGE_*`). The console runs
+     `codeberg.org/forgejo/forgejo` (any tag or digest), or exactly an image an admin
+     chose outside them (`spec.image`, the operator Deployment's `RELATED_IMAGE_*`, as a
+     mirror). An image inside them is not pinned, so a release's new digests leave the
+     guard `Installed`. The console runs
      its image's entrypoint with no init container, no exec probe or hook, and no shared
      process namespace. Its volumes are its own (drafts claim, CA ConfigMaps, forge
      credential Secret, and the branding and metrics CA ConfigMaps an admin chose), each
      mounted whole at its own path: nothing over its binary or the system trust store.
      Its Secret-backed env is pinned by env name, Secret and key: its own Secrets, the
-     forge credential and the OIDC client secret an admin chose; a forge credential an
-     admin brought (`spec.forge.managed` false) goes only to the URL its Secret names.
+     forge credential, and the OIDC and forge application client secrets an admin chose;
+     a forge credential an admin brought (`spec.forge.managed` false) goes only to the
+     URL its Secret names. With Delegated pull requests (`spec.forge.pullRequests`), the
+     forge application's client ID, authorize and token URLs and the forge URL users'
+     tokens go to are `spec.forge.userAuth` and `spec.forge.url`; otherwise the console
+     does not delegate at all and names no forge application. No command, argument or env
+     value of the console's holds an unescaped `$(`, which the kubelet would fill with
+     another env's value, a Secret's included; the operator doubles every `$` there that
+     the kubelet would read (one before a `$` or a `(`), so an admin's text (a product
+     name, a link, an issuer) reaches the console as written.
      The forge's pods never carry the console's `app` label, read no Secret but their
      admin password, and mount only their own claim, a scratch directory and the router
-     CA: no network or host volume. The operator's claims bind to no
-     volume, selector or data source of its choosing (the binder's `volumeName` stays as
-     it set it). The console's arguments stay free, so a release
+     CA: no network or host volume. The console's arguments stay free, so a release
      may add flags, except the settings that send users' tokens or its pages elsewhere,
      by flag or env: the metrics endpoints and CA only as rendered from `spec.metrics`,
      TLS verification off only with `spec.forge.insecureTLS`, the OIDC issuer only as
-     `spec.auth.oidc.issuerURL`, and never a kubeconfig or
+     `spec.auth.oidc.issuerURL`, the forge CA only the router CA, and never a kubeconfig or
      a directory of pages. It keeps its own token mounted where client-go reads it, with
      no `KUBERNETES_SERVICE_*` or `envFrom`. Nothing is mounted at, above or inside the
      token directory. Every container runs non-root with a RuntimeDefault or
      Localhost seccomp profile, `allowPrivilegeEscalation: false`, all capabilities
      dropped and none added, unprivileged, off the host network, PID and IPC, with no
      host path;
+   - `dotvirt-operator-claims`: the operator's claims bind to no volume, selector or data
+     source of its choosing (the binder's `volumeName` stays as it set it);
    - `dotvirt-operator-bindings`: only the ClusterRoleBindings and RoleBinding the
      operator renders, each to the ClusterRole of its own name and to its rendered
      subjects only;
@@ -163,16 +175,17 @@ owns one status condition; a phase that fails or waits records why there, so
      spec, labels, annotations and owners as they are. It adds and removes its finalizer
      by a patch of the finalizers alone, so once the guard is in, the spec is the
      admin's;
-   - `dotvirt-operator-frontdoor`: the console's Service selects only the console's pods
-     on its port (ClusterIP, no external name, no unready pods), and its Route, Ingress
-     or HTTPRoute leads only to that Service, on the console's host (`spec.ingress.host`,
-     else the router's host on the cluster's ingress domain), edge-terminated, with no
-     filter and no annotation the operator adds. Where no ingress domain can be read
-     (MicroShift), the console's host is the one routers report for its Route. Every
-     other exposure the operator writes names its own hosts: none the console's, no
-     wildcard over it, no Ingress default backend, no HTTPRoute without hostnames. No
-     Service the operator writes leaves the cluster: no node port, load balancer or
-     external IP. The forge's own exposures are otherwise free: it holds no user token.
+   - `dotvirt-operator-frontdoor` (Services): the console's selects only the console's
+     pods on its port (ClusterIP, no external name, no unready pods), and none the
+     operator writes leaves the cluster: no node port, load balancer or external IP;
+   - `dotvirt-operator-routes`, `dotvirt-operator-ingresses`, `dotvirt-operator-httproutes`:
+     the console's Route, Ingress or HTTPRoute leads only to its Service, on the console's
+     host (`spec.ingress.host`, else the router's host on the cluster's ingress domain),
+     edge-terminated, with no filter and no annotation the operator adds. Where no
+     ingress domain can be read (MicroShift), the console's host is the one routers report
+     for its Route. Every other exposure the operator writes names its own hosts: none the
+     console's, no wildcard over it, no Ingress default backend, no HTTPRoute without
+     hostnames. The forge's own exposures are otherwise free: it holds no user token.
 
    The Route rules assume the apiserver serving Routes evaluates admission policies,
    and that OpenShift's route API marks a host it generates
@@ -184,12 +197,28 @@ owns one status condition; a phase that fails or waits records why there, so
    another version, or changed since) or `Installed`; see [Admin objects](#admin-objects).
    The apiserver evaluates them in-process, only for those kinds' writes, with the
    username check first. Best-effort: never a halt, never `Available`. A new release
-   in the same repositories passes as it is, new console flags included; an admin
-   changing `spec.image`, `spec.argocd`, `spec.forge.insecureTLS`, `spec.metrics`,
-   `spec.ingress.host`, `spec.branding.configMap`, `spec.forge.credentialsSecret`,
-   `spec.forge.managed`, `spec.auth.oidc.clientSecret`, the operator's `RELATED_IMAGE_*`
-   or the namespace makes them `Outdated`, and until re-installed they refuse the operator's
-   writes that need the change.
+   in the same repositories passes as it is, new console flags included.
+
+   An installed guard reads `Outdated`, and until an admin re-installs it refuses the
+   operator's writes that need the change, when:
+   - the install namespace, `spec.argocd`, `spec.forge.insecureTLS`, `spec.forge.managed`,
+     `spec.forge.credentialsSecret`, `spec.metrics`, `spec.ingress.host` or
+     `spec.branding.configMap` changes;
+   - `spec.auth.oidc` (its issuer or client secret) changes;
+   - `spec.forge.pullRequests` turns Delegated on or off, or, while Delegated,
+     `spec.forge.url` or `spec.forge.userAuth` changes;
+   - `spec.image` or the operator's `RELATED_IMAGE_*` names an image outside the
+     official repositories (a mirror), or a new one there;
+   - the console's host moves (the cluster's ingress domain, or where none is served,
+     the host routers report for its Route);
+   - a release changes the guard itself, as 0.2.3 to 0.2.4 does once: the five policies
+     of 0.2.3 keep their names and narrow to one kind each, and five new ones join them.
+
+   It stays `Installed` when a release only moves its images' digests inside the
+   official repositories, and when `spec.forge.userAuth` changes while pull requests are
+   not Delegated. A pin the spec gets wrong reads `PinMalformed`, naming the field.
+   Install applies each policy just before its binding, new names first, so an install
+   that stops partway leaves no kind the earlier guard covered unguarded.
 3. **Forge** (`ForgeReady`): converges the trust anchors (below) first, then, with
    `spec.forge.managed`, stands up the eval-grade Forgejo (single pod, SQLite, a PVC
    that survives uninstall), resolves its external URL (an explicit `spec.forge.url`,

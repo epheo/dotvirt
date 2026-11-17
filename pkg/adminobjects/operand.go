@@ -218,15 +218,32 @@ const (
 
 // ConsoleSecretEnv are the env the console takes from Secrets, as rendered,
 // each as its env name, Secret and key: its own Secrets, the forge
-// credential (ForgeSecret), and the OIDC client secret an admin chose.
-func ConsoleSecretEnv(forgeSecret, oidcSecret, oidcKey string) [][3]string {
+// credential (ForgeSecret), and the OIDC and forge application client
+// secrets an admin chose.
+func ConsoleSecretEnv(p Params) [][3]string {
 	return [][3]string{
 		{"DOTVIRT_SESSION_SECRET", SessionSecret, "secret"},
 		{"DOTVIRT_OAUTH_CLIENT_SECRET", OAuthSecret, "clientSecret"},
 		{"DOTVIRT_APPSET_PLUGIN_TOKEN", AppsetSecret, "token"},
 		{"DOTVIRT_WEBHOOK_SECRET", WebhookSecret, "secret"},
-		{"DOTVIRT_GIT_USERNAME", forgeSecret, "username"},
-		{"DOTVIRT_FORGE_URL", forgeSecret, "url"},
-		{"DOTVIRT_OIDC_CLIENT_SECRET", oidcSecret, oidcKey},
+		{"DOTVIRT_GIT_USERNAME", p.ForgeSecret, "username"},
+		{"DOTVIRT_FORGE_URL", p.ForgeSecret, "url"},
+		{"DOTVIRT_OIDC_CLIENT_SECRET", p.OIDCSecret, p.OIDCSecretKey},
+		{"DOTVIRT_FORGE_CLIENT_SECRET", p.ForgeClientSecret, p.ForgeClientSecretKey},
 	}
+}
+
+// KubeletLiteral is s as a container's env value or argument that the kubelet
+// hands the process unchanged: it expands $(NAME) there and turns $$ into $,
+// so a $ before a $ or a ( is doubled. Any other $ stays as written, which
+// keeps a value without $( or $$ exactly what an earlier guard pinned.
+func KubeletLiteral(s string) string {
+	var b strings.Builder
+	for i := 0; i < len(s); i++ {
+		if s[i] == '$' && i+1 < len(s) && (s[i+1] == '$' || s[i+1] == '(') {
+			b.WriteByte('$')
+		}
+		b.WriteByte(s[i])
+	}
+	return b.String()
 }

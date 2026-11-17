@@ -68,7 +68,7 @@ func TestRenderMatchesTheGuardsVolumes(t *testing.T) {
 	dv.Spec.Auth.OIDC = &dotvirtv1alpha1.OIDCSpec{IssuerURL: "https://idp.example", ClientID: "dotvirt",
 		ClientSecret: &dotvirtv1alpha1.SecretKeyRef{Name: "oidc", Key: "client-secret"}}
 	pod := Deployment(dv, "argocd", nil).Spec.Template.Spec
-	secretEnv := adminobjects.ConsoleSecretEnv("creds", "oidc", "client-secret")
+	secretEnv := adminobjects.ConsoleSecretEnv(adminobjects.Params{ForgeSecret: "creds", OIDCSecret: "oidc", OIDCSecretKey: "client-secret"})
 	// The guard pins the issuer to spec.auth.oidc.issuerURL.
 	if i := slices.IndexFunc(pod.Containers[0].Env, func(e corev1.EnvVar) bool { return e.Name == "DOTVIRT_OIDC_ISSUER" }); i < 0 ||
 		pod.Containers[0].Env[i].Value != dv.Spec.Auth.OIDC.IssuerURL {
@@ -125,5 +125,58 @@ func TestRenderMatchesTheGuardsVolumes(t *testing.T) {
 		if v.Secret != nil || v.Projected != nil || v.CSI != nil {
 			t.Errorf("forge volume %s reads a Secret", v.Name)
 		}
+	}
+}
+
+// Delegated pull requests: the console's forge application settings are the
+// ones the guard pins from the spec, and its client secret is in the guard's
+// Secret env.
+func TestDelegatedRenderMatchesTheGuardsPins(t *testing.T) {
+	dv := &dotvirtv1alpha1.Dotvirt{}
+	dv.Name, dv.Namespace = "x", "dotvirt"
+	dv.Spec.Forge.CredentialsSecret, dv.Spec.Forge.URL, dv.Spec.Forge.PullRequests = "creds", "https://forge.example/", "Delegated"
+	dv.Spec.Forge.UserAuth = &dotvirtv1alpha1.ForgeUserAuthSpec{ClientID: "dotvirt", AuthorizeURL: "https://forge.example/login/oauth/authorize",
+		TokenURL: "https://forge.internal/login/oauth/access_token", ClientSecret: dotvirtv1alpha1.SecretKeyRef{Name: "forge-app", Key: "client-secret"}}
+	u := dv.Spec.Forge.UserAuth
+	p := adminobjects.Params{ForgeSecret: "creds", ForgeClientSecret: u.ClientSecret.Name, ForgeClientSecretKey: u.ClientSecret.Key}
+	want := map[string]string{
+		"DOTVIRT_FORGE_DELEGATED": "true", "DOTVIRT_FORGE_DELEGATED_URL": dv.Spec.Forge.URL, "DOTVIRT_FORGE_CLIENT_ID": u.ClientID,
+		"DOTVIRT_FORGE_AUTHORIZE_URL": u.AuthorizeURL, "DOTVIRT_FORGE_TOKEN_URL": u.TokenURL,
+	}
+	got := map[string]string{}
+	for _, e := range Deployment(dv, "argocd", nil).Spec.Template.Spec.Containers[0].Env {
+		if r := e.ValueFrom; r != nil && r.SecretKeyRef != nil {
+			if !slices.Contains(adminobjects.ConsoleSecretEnv(p), [3]string{e.Name, r.SecretKeyRef.Name, r.SecretKeyRef.Key}) {
+				t.Errorf("console env %s from %s/%s is not in the guard's Secret env", e.Name, r.SecretKeyRef.Name, r.SecretKeyRef.Key)
+			}
+			continue
+		}
+		if _, ok := want[e.Name]; ok {
+			got[e.Name] = e.Value
+		}
+	}
+	for name, v := range want {
+		if got[name] != v {
+			t.Errorf("%s = %q, the guard pins %q", name, got[name], v)
+		}
+	}
+}
+
+// An admin's text reaches the console as written: the kubelet would expand
+// $(NAME) in it, and the operator guard refuses an unescaped one.
+func TestRenderEscapesAnAdminsText(t *testing.T) {
+	dv := &dotvirtv1alpha1.Dotvirt{}
+	dv.Name, dv.Namespace = "x", "dotvirt"
+	dv.Spec.Branding.ProductName = "Acme $(beta)"
+	dv.Spec.Branding.Links = []dotvirtv1alpha1.BrandingLink{{Label: "Docs $(beta)", URL: "https://docs.example/$(beta)"}}
+	got := map[string]string{}
+	for _, e := range Deployment(dv, "argocd", nil).Spec.Template.Spec.Containers[0].Env {
+		got[e.Name] = e.Value
+	}
+	if got["DOTVIRT_PRODUCT_NAME"] != "Acme $$(beta)" {
+		t.Errorf("product name %q, want it escaped", got["DOTVIRT_PRODUCT_NAME"])
+	}
+	if !strings.Contains(got["DOTVIRT_MASTHEAD_LINKS"], "Docs $$(beta)") || strings.Contains(strings.ReplaceAll(got["DOTVIRT_MASTHEAD_LINKS"], "$$", ""), "$(") {
+		t.Errorf("masthead links %q, want them escaped", got["DOTVIRT_MASTHEAD_LINKS"])
 	}
 }

