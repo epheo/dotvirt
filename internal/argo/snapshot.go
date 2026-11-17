@@ -343,16 +343,18 @@ func (s *Snapshot) PrunePending(repo string, settled ...string) (refs []model.Ob
 // EmptyHold is a project's generated Application that ArgoCD will not
 // auto-sync because every object it tracks would be pruned while
 // automated.allowEmpty is off: the revision it holds at and the last one it
-// applied, the source it reads (normalized repo, folder), and whether the last
-// apply read that same source.
+// applied, the source it reads (normalized repo, folder), whether the last
+// apply read that same source, and whether allowEmpty is on already (the
+// generator's lift, being applied).
 type EmptyHold struct {
 	Compared, Applied string
 	Repo, Path        string
 	SameSource        bool
+	Lifted            bool
 }
 
-// EmptyHold reads that refusal for project's generated app (projectAppLabel,
-// in the ArgoCD namespace): only that app's allowEmpty the generator sets, so
+// EmptyHold reads that refusal for project's generated app (generatedProject):
+// only that app's allowEmpty the generator sets, so
 // no other app on the repo, the static platform app included, ever lends it a
 // hold. ok is false when it holds nothing, before the initial LIST, and for an
 // app that never applied a revision.
@@ -367,8 +369,19 @@ func (s *Snapshot) EmptyHold(project string) (EmptyHold, bool) {
 
 // generatedFor reports whether app is the generated app of one of projects.
 func (s *Snapshot) generatedFor(app *unstructured.Unstructured, projects []string) bool {
+	p := generatedProject(app, s.writeNS)
+	return p != "" && slices.Contains(projects, p)
+}
+
+// generatedProject is the project whose ApplicationSet app this is, as the
+// template names and labels it ("dotvirt-<project>", projectAppLabel) in the
+// ArgoCD namespace; "" for any other app, a copy carrying the label included.
+func generatedProject(app *unstructured.Unstructured, argoNS string) string {
 	p := app.GetLabels()[projectAppLabel]
-	return p != "" && slices.Contains(projects, p) && (s.writeNS == "" || app.GetNamespace() == s.writeNS)
+	if p == "" || app.GetName() != "dotvirt-"+p || argoNS != "" && app.GetNamespace() != argoNS {
+		return ""
+	}
+	return p
 }
 
 // Reads reports whether the app reads folder dir of repo.
@@ -379,8 +392,8 @@ func (h EmptyHold) Reads(repo, dir string) bool {
 func holdsFromApps(objs []*unstructured.Unstructured, argoNS string) map[string]EmptyHold {
 	out := map[string]EmptyHold{}
 	for _, app := range objs {
-		project := app.GetLabels()[projectAppLabel]
-		if project == "" || argoNS != "" && app.GetNamespace() != argoNS {
+		project := generatedProject(app, argoNS)
+		if project == "" {
 			continue
 		}
 		if h, ok := emptyHold(app.Object); ok {
@@ -408,7 +421,9 @@ func emptyHold(app map[string]any) (EmptyHold, bool) {
 			return EmptyHold{}, false
 		}
 	}
+	lifted, _, _ := unstructured.NestedBool(app, "spec", "syncPolicy", "automated", "allowEmpty")
 	h := EmptyHold{
+		Lifted:   lifted,
 		Compared: nestedString(app, "status", "sync", "revision"),
 		Repo:     forge.NormalizeRepoURL(nestedString(app, "spec", "source", "repoURL")),
 		Path:     cleanDir(nestedString(app, "spec", "source", "path")),

@@ -124,7 +124,11 @@ func (s *Server) EmptyHold(p project.ProjectInfo) model.Hold {
 		return model.HoldPending
 	case !f.descends:
 		return model.HoldReplaced
-	case h.Compared == h.Applied || !h.SameSource || f.declares:
+	// Argo applying the revision it holds at, while still pruning, is the
+	// lift being applied (allowEmpty already on), or a sync run without prune:
+	// an admin syncing a re-created empty repo by hand records it as applied
+	// while its objects still run. Only the first is a removal.
+	case h.Compared == h.Applied && !h.Lifted, !h.SameSource, f.declares:
 		return model.HoldMismatch
 	}
 	return model.HoldDeleting

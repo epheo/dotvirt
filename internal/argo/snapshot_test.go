@@ -711,6 +711,13 @@ func TestEmptyHoldReadsArgosRefusal(t *testing.T) {
 		held("argocd", "dotvirt-never", "never", func(o map[string]any) {
 			unstructured.RemoveNestedField(o, "status", "history")
 		}),
+		held("argocd", "copy-of-team-b", "team-b", nil), // the label, not the generated name
+		held("argocd", "dotvirt-nosrc", "nosrc", func(o map[string]any) {
+			_ = unstructured.SetNestedSlice(o, []any{map[string]any{"revision": "c1"}}, "status", "history")
+		}),
+		held("argocd", "dotvirt-lifted", "lifted", func(o map[string]any) {
+			_ = unstructured.SetNestedField(o, true, "spec", "syncPolicy", "automated", "allowEmpty")
+		}),
 	}, "1")
 	settle(s)
 	h, ok := s.EmptyHold("team-a")
@@ -720,11 +727,36 @@ func TestEmptyHoldReadsArgosRefusal(t *testing.T) {
 	if h, ok := s.EmptyHold("moved"); !ok || h.SameSource || !h.Reads(repo, "other") {
 		t.Errorf("re-pointed app: %+v %v, want a hold read from another source", h, ok)
 	}
-	for _, project := range []string{"", "foreign", "declared", "manual", "synced", "never", "elsewhere"} {
+	if h, ok := s.EmptyHold("nosrc"); !ok || h.SameSource {
+		t.Errorf("an applied entry naming no source: %+v %v, want no same source", h, ok)
+	}
+	if h, ok := s.EmptyHold("lifted"); !ok || !h.Lifted || h.Lifted == s.mustHold(t, "team-a").Lifted {
+		t.Errorf("an app already lifted: %+v %v, want Lifted", h, ok)
+	}
+	for _, project := range []string{"", "foreign", "declared", "manual", "synced", "never", "elsewhere", "team-b"} {
 		if h, ok := s.EmptyHold(project); ok {
 			t.Errorf("%q: read as held: %+v", project, h)
 		}
 	}
+
+	// Argo lets the removal through: the hold is gone from the next derive on.
+	synced := held("argocd", "dotvirt-team-a", "team-a", func(o map[string]any) {
+		_ = unstructured.SetNestedField(o, "Synced", "status", "sync", "status")
+	})
+	_ = s.store().Replace([]any{synced}, "2")
+	settle(s)
+	if h, ok := s.EmptyHold("team-a"); ok {
+		t.Errorf("after Argo synced: still held %+v", h)
+	}
+}
+
+func (s *Snapshot) mustHold(t *testing.T, project string) EmptyHold {
+	t.Helper()
+	h, ok := s.EmptyHold(project)
+	if !ok {
+		t.Fatalf("%s: not held", project)
+	}
+	return h
 }
 
 // A project whose generated app's prunes are on their way whatever merges
@@ -737,7 +769,8 @@ func TestPrunePendingLeavesSettledProjectsOut(t *testing.T) {
 	res := func(ns, name string) map[string]any {
 		return map[string]any{"kind": "VirtualMachine", "namespace": ns, "name": name, "requiresPruning": true}
 	}
-	own := dotvirtApp("argocd", "team-a", repo, []any{res("team-a", "web")})
+	own := appWithSource("argocd", "dotvirt-team-a", repo, []any{res("team-a", "web")})
+	own.SetLabels(map[string]string{projectAppLabel: "team-a"})
 	stale := appWithSource("argocd", "stale-copy", repo, []any{res("team-a", "old")})
 	for _, a := range []*unstructured.Unstructured{own, stale} {
 		if err := s.apps.Add(a); err != nil {

@@ -188,6 +188,12 @@ func TestAppSetPluginLiftsAllowEmptyOnlyForADeliberateRemoval(t *testing.T) {
 	stale := newRemovalRepo(t)
 	declared := newRemovalRepo(t)
 	declared.edit(t)
+	old := newRemovalRepo(t)
+	old.remove(t)
+	nosrc := newRemovalRepo(t)
+	nosrc.remove(t)
+	lifting := newRemovalRepo(t)
+	lifting.remove(t)
 	platform := "file://" + seedPlatformRepo(t, map[string]string{"README.md": "lost\n"})
 
 	fc := newFakeCluster(t)
@@ -202,18 +208,30 @@ func TestAppSetPluginLiftsAllowEmptyOnlyForADeliberateRemoval(t *testing.T) {
 		{"team-full", declared.url, declared.head(t), declared.applied, "."},
 		{"team-moved", moved.url, moved.head(t), moved.applied, "elsewhere"},
 		{"team-stale", stale.url, "", stale.applied, "."},
+		{"team-old", old.url, old.head(t), old.applied, "."},
+		{"team-nosrc", nosrc.url, nosrc.head(t), nosrc.applied, "."},
+		{"team-lifting", lifting.url, lifting.head(t), lifting.head(t), "."},
 	} {
 		fc.namespaces = append(fc.namespaces, corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: p.name,
 			Labels: map[string]string{"dotvirt.io/project": p.name}, Annotations: map[string]string{"dotvirt.io/repo": p.repo}}})
 		if p.name == "team-stale" {
 			continue // its app is added once the mirror is open, below
 		}
-		apps = append(apps, heldApp(p.name, p.repo, p.compared, p.applied, p.appliedPath))
+		app := heldApp(p.name, p.repo, p.compared, p.applied, p.appliedPath)
+		switch p.name {
+		case "team-old": // the generator has not caught up with the project's repo
+			_ = unstructured.SetNestedField(app, recreated, "spec", "source", "repoURL")
+		case "team-nosrc":
+			_ = unstructured.SetNestedSlice(app, []any{map[string]any{"revision": p.applied}}, "status", "history")
+		case "team-lifting": // Argo applied the lifted removal and is pruning
+			_ = unstructured.SetNestedField(app, true, "spec", "syncPolicy", "automated", "allowEmpty")
+		}
+		apps = append(apps, app)
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
 	repos := git.NewRepoSet(ctx, "", "", nil, false, nil, time.Hour)
-	for _, repo := range []string{removed.url, same.url, moved.url, recreated, stale.url, declared.url} {
+	for _, repo := range []string{removed.url, same.url, moved.url, recreated, stale.url, declared.url, old.url, nosrc.url, lifting.url} {
 		if _, _, err := repos.Get(repo, ""); err != nil {
 			t.Fatal(err)
 		}
@@ -232,7 +250,8 @@ func TestAppSetPluginLiftsAllowEmptyOnlyForADeliberateRemoval(t *testing.T) {
 	want := map[string]model.Hold{
 		"team-del": model.HoldDeleting, "team-rec": model.HoldReplaced, "team-new": model.HoldPending,
 		"team-same": model.HoldMismatch, "team-full": model.HoldMismatch, "team-moved": model.HoldMismatch,
-		"team-stale": model.HoldPending, "team-a": "",
+		"team-stale": model.HoldPending, "team-old": model.HoldPending, "team-nosrc": model.HoldMismatch,
+		"team-lifting": model.HoldDeleting, "team-a": "",
 	}
 	got := map[string]model.Hold{}
 	for _, p := range s.AllProjects() {
@@ -248,8 +267,21 @@ func TestAppSetPluginLiftsAllowEmptyOnlyForADeliberateRemoval(t *testing.T) {
 	}
 	lifted := generated(t, s, want)
 	if want := map[string]any{"team-del": true, "team-rec": false, "team-new": false, "team-same": false,
-		"team-full": false, "team-moved": false, "team-stale": false, "team-a": false}; !maps.Equal(lifted, want) {
+		"team-full": false, "team-moved": false, "team-stale": false, "team-old": false, "team-nosrc": false,
+		"team-lifting": true, "team-a": false}; !maps.Equal(lifted, want) {
 		t.Errorf("allowEmpty = %v, want %v", lifted, want)
+	}
+
+	// A snapshot whose watch fails may hold a hold that is gone: nothing lifts.
+	_ = fc.srv.Listener.Close()
+	fc.srv.CloseClientConnections()
+	for deadline := time.Now().Add(10 * time.Second); s.drift.Healthy(); time.Sleep(20 * time.Millisecond) {
+		if time.Now().After(deadline) {
+			t.Fatal("the Application snapshot never noticed its watch failing")
+		}
+	}
+	if lifted := generated(t, s, want); lifted["team-del"] != false {
+		t.Errorf("with the snapshot unhealthy: allowEmpty = %v, want false", lifted["team-del"])
 	}
 
 	// The removal lands: Argo syncs and holds nothing. The next run closes it.
