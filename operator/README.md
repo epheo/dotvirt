@@ -997,7 +997,7 @@ This build sets up the connection only: dotvirt still pushes and opens pull requ
 
 - Register dotvirt at the forge as an OAuth2 application: a confidential client, with the redirect URI `https://<console host>/api/forge/callback`.
 - Put its client secret in a Secret in dotvirt's namespace, and set `spec.forge.userAuth`: `clientID`, `clientSecret` (that Secret and key), and `authorizeURL`, the forge's `/login/oauth/authorize` as users' browsers reach it.
-- Set `spec.forge.url`: users' tokens go only to the forge the spec names, never to the url of the forge credential Secret.
+- Set `spec.forge.url`: users' tokens go only to the forge the spec names, never to the url of the forge credential Secret. With a managed forge this also pins the managed forge's host.
 - `tokenURL` defaults to `spec.forge.url` plus `/login/oauth/access_token`; set it when dotvirt reaches the token endpoint at another address.
 - The kubelet reads the client secret for the console's pod: the operator never does, so the Secret needs no grant. Restart the console after a rotation.
 - Users must be able to sign in to the forge at `authorizeURL`; the rest of the forge may stay private.

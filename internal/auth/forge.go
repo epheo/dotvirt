@@ -60,8 +60,13 @@ type Forge struct {
 	probeMu  sync.Mutex
 	probedAt time.Time
 	up       bool
+	probing  bool      // one probe at a time; callers meanwhile read the last answer
 	failedAt time.Time // the last forge call of this flow that could not reach it
 }
+
+// errForgeUnreachable marks a forge call that never got an answer (or a 5xx):
+// an outage, unlike a refusal the forge answered.
+var errForgeUnreachable = errors.New("the forge is unreachable")
 
 // reachTTL is how long a reachability answer, or a failed forge call, holds.
 const reachTTL = 30 * time.Second
@@ -189,7 +194,9 @@ func (f *Forge) Callback(w http.ResponseWriter, r *http.Request) {
 	}
 	login, err := f.account(r.Context(), t.access)
 	if err != nil {
-		f.noteFailure(err)
+		if errors.Is(err, errForgeUnreachable) {
+			f.noteFailure(err)
+		}
 		fail("name the forge account", err)
 		return
 	}
@@ -218,9 +225,12 @@ func (f *Forge) account(ctx context.Context, access string) (string, error) {
 	req.Header.Set("Accept", "application/json")
 	resp, err := f.client.Do(req)
 	if err != nil {
-		return "", fmt.Errorf("the forge is unreachable: %w", err)
+		return "", fmt.Errorf("%w: %w", errForgeUnreachable, err)
 	}
 	defer resp.Body.Close()
+	if resp.StatusCode >= 500 {
+		return "", fmt.Errorf("%w: it answered %s", errForgeUnreachable, resp.Status)
+	}
 	if resp.StatusCode != http.StatusOK {
 		return "", fmt.Errorf("the forge answered %s", resp.Status)
 	}
@@ -281,10 +291,14 @@ func forgeTokensFrom(tok *oauth2.Token) (forgeTokens, error) {
 
 // noteFailure records a forge call of this flow that could not reach the
 // forge (a transport error or a 5xx), which holds the automatic connect back.
+// A caller hanging up is no outage, nor is a refusal the forge answered.
 func (f *Forge) noteFailure(err error) {
+	if errors.Is(err, context.Canceled) {
+		return
+	}
 	var rerr *oauth2.RetrieveError
 	if errors.As(err, &rerr) && rerr.Response != nil && rerr.Response.StatusCode < 500 {
-		return // the forge answered: reachable, whatever it said
+		return
 	}
 	f.probeMu.Lock()
 	f.failedAt = time.Now()
@@ -298,25 +312,34 @@ func (f *Forge) noteFailure(err error) {
 // gets users sent to it on their own.
 func (f *Forge) reachable(ctx context.Context) bool {
 	f.probeMu.Lock()
-	defer f.probeMu.Unlock()
 	now := time.Now()
-	if now.Sub(f.failedAt) < reachTTL {
+	switch {
+	case now.Sub(f.failedAt) < reachTTL:
+		f.probeMu.Unlock()
 		return false
+	case now.Sub(f.probedAt) < reachTTL || f.probing:
+		up := f.up
+		f.probeMu.Unlock()
+		return up
 	}
-	if now.Sub(f.probedAt) < reachTTL {
-		return f.up
-	}
-	ctx, cancel := context.WithTimeout(ctx, 3*time.Second)
+	f.probing = true
+	f.probeMu.Unlock()
+
+	// Detached: the answer is cached for every session, so a caller hanging up
+	// mid-probe must not record the forge as down.
+	pctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 3*time.Second)
 	defer cancel()
-	f.up = false
-	if req, err := http.NewRequestWithContext(ctx, http.MethodGet, strings.TrimRight(f.cfg.APIURL, "/")+"/api/v1/version", nil); err == nil {
+	up := false
+	if req, err := http.NewRequestWithContext(pctx, http.MethodGet, strings.TrimRight(f.cfg.APIURL, "/")+"/api/v1/version", nil); err == nil {
 		if resp, err := f.client.Do(req); err == nil {
 			resp.Body.Close()
-			f.up = resp.StatusCode < 500
+			up = resp.StatusCode < 500
 		}
 	}
-	f.probedAt = now
-	return f.up
+	f.probeMu.Lock()
+	f.up, f.probedAt, f.probing = up, time.Now(), false
+	f.probeMu.Unlock()
+	return up
 }
 
 // ForgeStatus is a console session's forge connection, as the UI shows it.

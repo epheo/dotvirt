@@ -524,12 +524,18 @@ func TestForgeExpiredTokenWithoutRefreshIsNotServed(t *testing.T) {
 	}
 }
 
-// A status read never waits on a renewal in flight.
-func TestForgeStatusDoesNotWaitOnARenewal(t *testing.T) {
+// dueSessions is a store with one connection under "k" whose renewal is due
+// and blocks until release closes, timed out after a second so a regression
+// fails rather than hangs.
+func dueSessions(t *testing.T) (*forgeSessions, chan struct{}) {
+	t.Helper()
 	f := newForgeSessions()
 	release := make(chan struct{})
 	f.renew = func(context.Context, string) (forgeTokens, error) {
-		<-release
+		select {
+		case <-release:
+		case <-time.After(time.Second):
+		}
 		return forgeTokens{access: "next", refresh: "r2", expiry: time.Now().Add(time.Hour)}, nil
 	}
 	f.connect("k", time.Now(), "alice-forge", forgeTokens{access: "a", refresh: "r", expiry: time.Now().Add(time.Hour)})
@@ -537,6 +543,12 @@ func TestForgeStatusDoesNotWaitOnARenewal(t *testing.T) {
 	e.mu.Lock()
 	e.renewAt = time.Now().Add(-time.Second)
 	e.mu.Unlock()
+	return f, release
+}
+
+// A status read never waits on a renewal in flight.
+func TestForgeStatusDoesNotWaitOnARenewal(t *testing.T) {
+	f, release := dueSessions(t)
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
@@ -552,6 +564,28 @@ func TestForgeStatusDoesNotWaitOnARenewal(t *testing.T) {
 	}
 	close(release)
 	<-done
+}
+
+// A disconnect landing during a renewal wins: the renewal's tokens never
+// reconnect the session.
+func TestForgeDisconnectDuringARenewalWins(t *testing.T) {
+	f, release := dueSessions(t)
+	var err error
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		_, _, err = f.token(context.Background(), "k")
+	}()
+	time.Sleep(20 * time.Millisecond)
+	f.disconnect("k")
+	close(release)
+	<-done
+	if !errors.Is(err, ErrForgeNotConnected) {
+		t.Errorf("the renewal's caller got %v, want ErrForgeNotConnected", err)
+	}
+	if connected, _, _ := f.status("k"); connected {
+		t.Fatal("a renewal reconnected a session disconnected meanwhile")
+	}
 }
 
 // The automatic connect needs a forge that answers: a probe of its API, and
@@ -578,7 +612,35 @@ func TestForgeReachability(t *testing.T) {
 	rig.f.failedAt = time.Time{}
 	rig.f.probeMu.Unlock()
 	rig.f.noteFailure(&oauth2.RetrieveError{Response: &http.Response{StatusCode: 400}, ErrorCode: "invalid_grant"})
+	rig.f.noteFailure(fmt.Errorf("exchange: %w", context.Canceled))
 	if !rig.f.Status(context.Background(), id).Reachable {
-		t.Fatal("a forge's own refusal read as an outage")
+		t.Fatal("a forge's own refusal, or a caller hanging up, read as an outage")
+	}
+}
+
+// A caller hanging up mid-probe does not record the forge as down for
+// everyone: the probe runs detached.
+func TestForgeProbeOutlivesItsCaller(t *testing.T) {
+	rig := newForgeRig(t)
+	id := rig.identity(t, rig.signIn(t, "tok-alice"))
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	rig.f.Status(ctx, id)
+	if !rig.f.Status(context.Background(), id).Reachable {
+		t.Fatal("a cancelled caller's probe cached the forge as down")
+	}
+}
+
+// A refusal answered at the account lookup (a 401) is no outage.
+func TestForgeAccountRefusalIsNoOutage(t *testing.T) {
+	rig := newForgeRig(t)
+	if _, err := rig.f.account(context.Background(), "not-a-token"); err == nil || errors.Is(err, errForgeUnreachable) {
+		t.Fatalf("a 401 from the forge: %v, want a refusal, not an outage", err)
+	}
+	down := httptest.NewServer(http.NotFoundHandler())
+	down.Close()
+	f := NewForge(ForgeConfig{APIURL: down.URL}, rig.a)
+	if _, err := f.account(context.Background(), "x"); !errors.Is(err, errForgeUnreachable) {
+		t.Fatalf("a forge that does not answer: %v, want an outage", err)
 	}
 }
