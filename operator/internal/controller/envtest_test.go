@@ -16,6 +16,7 @@ import (
 	"testing"
 	"time"
 
+	admissionregistrationv1 "k8s.io/api/admissionregistration/v1"
 	appsv1 "k8s.io/api/apps/v1"
 	authzv1 "k8s.io/api/authorization/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -31,8 +32,11 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/intstr"
 	utilyaml "k8s.io/apimachinery/pkg/util/yaml"
+	"k8s.io/apiserver/pkg/admission/plugin/policy/validating"
+	"k8s.io/apiserver/pkg/cel/openapi/resolver"
 	admissionregistrationv1ac "k8s.io/client-go/applyconfigurations/admissionregistration/v1"
 	rbacv1ac "k8s.io/client-go/applyconfigurations/rbac/v1"
+	"k8s.io/client-go/discovery"
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
@@ -402,6 +406,36 @@ func TestEnvtest(t *testing.T) {
 		}
 		patchCR()
 		eventually(t, "OperatorGuard Installed", func() bool { return guardCond(string(adminobjects.Installed)) })
+
+		// Each policy type-checks clean against the one kind it matches, as the
+		// controller-manager checks it (envtest runs none to fill the status):
+		// a rule naming another kind's fields leaves a warning per rule and kind.
+		checker := &validating.TypeChecker{
+			SchemaResolver: &resolver.ClientDiscoveryResolver{Discovery: discovery.NewDiscoveryClientForConfigOrDie(adminCfg)},
+			RestMapper:     admin.RESTMapper(),
+		}
+		for _, o := range adminobjects.Render(pins) {
+			if o.Object.GetKind() != "ValidatingAdmissionPolicy" {
+				continue
+			}
+			var pol admissionregistrationv1.ValidatingAdmissionPolicy
+			if err := runtime.DefaultUnstructuredConverter.FromUnstructured(o.Object.Object, &pol); err != nil {
+				t.Fatal(err)
+			}
+			if w := checker.Check(&pol); len(w) > 0 {
+				t.Errorf("%s type-checks with %d warnings, the first: %s", pol.Name, len(w), w[0].Warning)
+			}
+		}
+		mixed := &admissionregistrationv1.ValidatingAdmissionPolicy{Spec: admissionregistrationv1.ValidatingAdmissionPolicySpec{
+			MatchConstraints: &admissionregistrationv1.MatchResources{ResourceRules: []admissionregistrationv1.NamedRuleWithOperations{{
+				RuleWithOperations: admissionregistrationv1.RuleWithOperations{Operations: []admissionregistrationv1.OperationType{admissionregistrationv1.Create},
+					Rule: admissionregistrationv1.Rule{APIGroups: []string{"", "apps"}, APIVersions: []string{"v1"}, Resources: []string{"services", "deployments"}}},
+			}}},
+			Validations: []admissionregistrationv1.Validation{{Expression: `has(object.spec.template.spec.hostNetwork)`}},
+		}}
+		if len(checker.Check(mixed)) == 0 {
+			t.Error("the type checker passes a rule naming a Deployment's field on Services; the check above proves nothing")
+		}
 
 		op := kubernetes.NewForConfigOrDie(opCfg)
 		opClient, err := client.New(opCfg, client.Options{Scheme: scheme})
@@ -2400,9 +2434,36 @@ func argoStubCRDs() []*apiextensionsv1.CustomResourceDefinition {
 }
 
 // exposureStubCRDs serve the Route and HTTPRoute kinds the console may be
-// exposed by, schemaless, so the front-door rules have something to judge.
+// exposed by, so the front-door rules have something to judge.
 func exposureStubCRDs() []*apiextensionsv1.CustomResourceDefinition {
-	preserve := true
+	preserve, intOrString := true, true
+	str := apiextensionsv1.JSONSchemaProps{Type: "string"}
+	num := apiextensionsv1.JSONSchemaProps{Type: "integer"}
+	open := func(props map[string]apiextensionsv1.JSONSchemaProps) apiextensionsv1.JSONSchemaProps {
+		return apiextensionsv1.JSONSchemaProps{Type: "object", XPreserveUnknownFields: &preserve, Properties: props}
+	}
+	list := func(item apiextensionsv1.JSONSchemaProps) apiextensionsv1.JSONSchemaProps {
+		return apiextensionsv1.JSONSchemaProps{Type: "array", Items: &apiextensionsv1.JSONSchemaPropsOrArray{Schema: &item}}
+	}
+	backend := open(map[string]apiextensionsv1.JSONSchemaProps{"kind": str, "name": str, "weight": num})
+	// The fields the guard's rules read, typed as these kinds' own schemas
+	// type them, so the rules type-check as on a cluster serving them.
+	specs := map[string]apiextensionsv1.JSONSchemaProps{
+		"routes": open(map[string]apiextensionsv1.JSONSchemaProps{
+			"host": str, "path": str, "wildcardPolicy": str, "to": backend, "alternateBackends": list(backend),
+			"port": open(map[string]apiextensionsv1.JSONSchemaProps{"targetPort": {XIntOrString: intOrString}}),
+			"tls":  open(map[string]apiextensionsv1.JSONSchemaProps{"termination": str, "destinationCACertificate": str, "insecureEdgeTerminationPolicy": str}),
+		}),
+		"httproutes": open(map[string]apiextensionsv1.JSONSchemaProps{
+			"hostnames": list(str), "parentRefs": list(open(nil)),
+			"rules": list(open(map[string]apiextensionsv1.JSONSchemaProps{
+				"filters": list(open(nil)), "matches": list(open(nil)),
+				"backendRefs": list(open(map[string]apiextensionsv1.JSONSchemaProps{
+					"group": str, "kind": str, "namespace": str, "name": str, "port": num, "weight": num, "filters": list(open(nil)),
+				})),
+			})),
+		}),
+	}
 	var out []*apiextensionsv1.CustomResourceDefinition
 	for _, k := range []struct{ group, kind, plural string }{
 		{"route.openshift.io", "Route", "routes"},
@@ -2413,6 +2474,7 @@ func exposureStubCRDs() []*apiextensionsv1.CustomResourceDefinition {
 			// The apiserver asks this of any CRD in a Kubernetes-owned group.
 			meta.Annotations = map[string]string{"api-approved.kubernetes.io": "unapproved, test stub"}
 		}
+		root := open(map[string]apiextensionsv1.JSONSchemaProps{"spec": specs[k.plural], "status": open(nil)})
 		out = append(out, &apiextensionsv1.CustomResourceDefinition{
 			ObjectMeta: meta,
 			Spec: apiextensionsv1.CustomResourceDefinitionSpec{
@@ -2421,9 +2483,7 @@ func exposureStubCRDs() []*apiextensionsv1.CustomResourceDefinition {
 				Scope: apiextensionsv1.NamespaceScoped,
 				Versions: []apiextensionsv1.CustomResourceDefinitionVersion{{
 					Name: "v1", Served: true, Storage: true,
-					Schema: &apiextensionsv1.CustomResourceValidation{OpenAPIV3Schema: &apiextensionsv1.JSONSchemaProps{
-						Type: "object", XPreserveUnknownFields: &preserve,
-					}},
+					Schema: &apiextensionsv1.CustomResourceValidation{OpenAPIV3Schema: &root},
 				}},
 			},
 		})

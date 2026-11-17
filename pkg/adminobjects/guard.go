@@ -20,14 +20,20 @@ import (
 // resource. Each policy and its binding share a name.
 const (
 	GuardSecretsName     = "dotvirt-operator-secrets"
+	GuardAccountsName    = "dotvirt-operator-accounts"
 	GuardDeploymentsName = "dotvirt-operator-deployments"
+	GuardClaimsName      = "dotvirt-operator-claims"
 	GuardBindingsName    = "dotvirt-operator-bindings"
 	GuardInstallName     = "dotvirt-operator-install"
 	GuardFrontDoorName   = "dotvirt-operator-frontdoor"
+	GuardRoutesName      = "dotvirt-operator-routes"
+	GuardIngressesName   = "dotvirt-operator-ingresses"
+	GuardHTTPRoutesName  = "dotvirt-operator-httproutes"
 )
 
 // GuardNames are the guard's policy and binding names, in render order.
-var GuardNames = []string{GuardSecretsName, GuardDeploymentsName, GuardBindingsName, GuardInstallName, GuardFrontDoorName}
+var GuardNames = []string{GuardSecretsName, GuardAccountsName, GuardDeploymentsName, GuardClaimsName, GuardBindingsName,
+	GuardInstallName, GuardFrontDoorName, GuardRoutesName, GuardIngressesName, GuardHTTPRoutesName}
 
 // OperandAccounts are the ServiceAccounts the operator's Deployments run as:
 // the console's and the managed forge's.
@@ -69,24 +75,30 @@ func guard(p Params, insecure, managed string, metrics Metrics) []Object {
 	}
 	volumes, mounts := consoleVolumes(p)
 	operator := `request.userInfo.username == ` + quote(p.Operator)
+	front := frontDoor(p)
+	// One kind per policy: the apiserver type-checks every rule against every
+	// kind its policy matches, and a rule naming another kind's fields leaves
+	// a warning per rule and kind in the policy's status.
 	policies := []*admissionregistrationv1.ValidatingAdmissionPolicy{
-		policy(GuardSecretsName, append(rules("", "secrets"), rules("", "serviceaccounts")...), operator, []admissionregistrationv1.Validation{
+		policy(GuardSecretsName, rules("", "secrets"), operator, []admissionregistrationv1.Validation{
 			// Kubernetes already requires the annotation on a token-type
 			// Secret, so the annotation rule refuses both today; the type
 			// rule holds if that requirement ever goes.
-			deny(`request.resource.resource != "secrets" || !has(object.type) || object.type != `+quote(string(corev1.SecretTypeServiceAccountToken)),
+			deny(`!has(object.type) || object.type != `+quote(string(corev1.SecretTypeServiceAccountToken)),
 				"the operator never writes ServiceAccount token Secrets"),
-			deny(`request.resource.resource != "secrets" || !has(object.metadata.annotations) || !(`+quote(corev1.ServiceAccountNameKey)+` in object.metadata.annotations)`,
+			deny(`!has(object.metadata.annotations) || !(`+quote(corev1.ServiceAccountNameKey)+` in object.metadata.annotations)`,
 				"the operator never asks for a ServiceAccount token"),
-			deny(`request.resource.resource != "secrets" || request.namespace in [`+quote(p.Namespace)+`, `+quote(p.ArgoNamespace)+`]`,
+			deny(`request.namespace in [`+quote(p.Namespace)+`, `+quote(p.ArgoNamespace)+`]`,
 				"the operator writes Secrets only in "+p.Namespace+" and "+p.ArgoNamespace),
+		}),
+		policy(GuardAccountsName, rules("", "serviceaccounts"), operator, []admissionregistrationv1.Validation{
 			// The console's pod leaves its token mount to its account, so the
 			// account's setting decides whether client-go finds it.
-			deny(`request.resource.resource != "serviceaccounts" || object.metadata.name != `+quote(ConsoleAccount)+` || `+
+			deny(`object.metadata.name != `+quote(ConsoleAccount)+` || `+
 				`!has(object.automountServiceAccountToken) || object.automountServiceAccountToken`,
 				"the operator keeps the console's ServiceAccount token mounted"),
 		}),
-		policy(GuardDeploymentsName, append(rules("apps", "deployments"), rules("", "persistentvolumeclaims")...), operator, append(only("deployments", []admissionregistrationv1.Validation{
+		policy(GuardDeploymentsName, rules("apps", "deployments"), operator, []admissionregistrationv1.Validation{
 			deny(`request.namespace == `+quote(p.Namespace),
 				"the operator runs Deployments only in "+p.Namespace),
 			deny(`object.metadata.name == `+quote(ConsoleDeployment)+` ? `+pod+`.serviceAccountName == `+quote(ConsoleAccount)+
@@ -182,7 +194,8 @@ func guard(p Params, insecure, managed string, metrics Metrics) []Object {
 			deny(eachContainer(`(has(c.securityContext) && has(c.securityContext.seccompProfile)) ? c.securityContext.seccompProfile.type in ["RuntimeDefault", "Localhost"] : `+
 				`(has(`+pod+`.securityContext) && has(`+pod+`.securityContext.seccompProfile) && `+pod+`.securityContext.seccompProfile.type in ["RuntimeDefault", "Localhost"])`),
 				"the operator runs every container with a RuntimeDefault or Localhost seccomp profile"),
-		}), only("persistentvolumeclaims", []admissionregistrationv1.Validation{
+		}),
+		policy(GuardClaimsName, rules("", "persistentvolumeclaims"), operator, []admissionregistrationv1.Validation{
 			// A claim the operator binds to a volume, a selector or a data
 			// source of its choosing hands the console or the forge data it
 			// picked, or copies another claim's. The binder sets volumeName
@@ -191,7 +204,7 @@ func guard(p Params, insecure, managed string, metrics Metrics) []Object {
 				`(request.operation == "CREATE" ? (!has(object.spec.volumeName) || object.spec.volumeName == "") : `+
 				unchanged("object.spec.volumeName", "oldObject.spec.volumeName")+`)`,
 				"the operator binds its claims to no volume, selector or data source of its choosing"),
-		})...)),
+		}),
 		policy(GuardBindingsName, append(rules("rbac.authorization.k8s.io", "clusterrolebindings"), rules("rbac.authorization.k8s.io", "rolebindings")...), operator, []admissionregistrationv1.Validation{
 			deny(`request.resource.resource == "clusterrolebindings" ? object.metadata.name in `+list(slices.Sorted(mapKeys(clusterBindings(p)))...)+
 				` : (object.metadata.name in `+list(slices.Sorted(mapKeys(roleBindings(p)))...)+` && request.namespace == `+quote(p.ArgoNamespace)+`)`,
@@ -214,16 +227,22 @@ func guard(p Params, insecure, managed string, metrics Metrics) []Object {
 		// host reaches it by, so its login codes reach the console and nothing
 		// else. The forge holds no user token; its exposures may only not claim
 		// the console's host.
-		policy(GuardFrontDoorName, append(append(append(rules("", "services"), rules("route.openshift.io", "routes")...),
-			rules("networking.k8s.io", "ingresses")...), rules("gateway.networking.k8s.io", "httproutes")...), operator,
-			frontDoor(p)),
+		policy(GuardFrontDoorName, rules("", "services"), operator, front.services),
+		policy(GuardRoutesName, rules("route.openshift.io", "routes"), operator, front.routes),
+		policy(GuardIngressesName, rules("networking.k8s.io", "ingresses"), operator, front.ingresses),
+		policy(GuardHTTPRoutesName, rules("gateway.networking.k8s.io", "httproutes"), operator, front.httproutes),
 	}
 	purpose := map[string]string{
-		GuardSecretsName:     "Bounds the operator's Secrets and accounts: no Secret outside " + p.Namespace + " and " + p.ArgoNamespace + ", never a ServiceAccount token, the console's token mounted",
-		GuardDeploymentsName: "Bounds the operator's Deployments and claims: the console and the forge only, in " + p.Namespace + ", with their own accounts, images, commands, volumes, Secrets and token, unprivileged and off the host; claims bound to nothing of its choosing",
+		GuardSecretsName:     "Bounds the operator's Secrets: none outside " + p.Namespace + " and " + p.ArgoNamespace + ", never a ServiceAccount token",
+		GuardAccountsName:    "Bounds the operator's ServiceAccounts: the console's keeps its token mounted",
+		GuardDeploymentsName: "Bounds the operator's Deployments: the console and the forge only, in " + p.Namespace + ", with their own accounts, images, commands, volumes, Secrets and token, unprivileged and off the host",
+		GuardClaimsName:      "Bounds the operator's claims: bound to no volume, selector or data source of its choosing",
 		GuardBindingsName:    "Bounds the operator's RBAC bindings: only the ones it renders, to their own roles and rendered subjects",
 		GuardInstallName:     "Bounds the operator's writes to its install: its finalizers only, never the spec an admin wrote",
-		GuardFrontDoorName:   "Bounds the console's front door: its Service and exposure lead to the console on the host an admin chose, nothing else claims that host, no Service leaves the cluster",
+		GuardFrontDoorName:   "Bounds the operator's Services: the console's selects only the console, and none leaves the cluster",
+		GuardRoutesName:      "Bounds the operator's Routes: the console's leads only to the console on its host, no other claims that host",
+		GuardIngressesName:   "Bounds the operator's Ingresses: the console's leads only to the console on its host, no other claims that host or every host",
+		GuardHTTPRoutesName:  "Bounds the operator's HTTPRoutes: the console's leads only to the console on its host, unfiltered, no other claims that host or every host",
 	}
 	var out []Object
 	for _, pol := range policies {
@@ -320,11 +339,14 @@ const noExec = `(!has(c.lifecycle) || ((!has(c.lifecycle.postStart) || !has(c.li
 	`!(has(c.livenessProbe) && has(c.livenessProbe.exec)) && !(has(c.readinessProbe) && has(c.readinessProbe.exec)) && ` +
 	`!(has(c.startupProbe) && has(c.startupProbe.exec))`
 
-// frontDoor are the front-door rules: the console's Service, Route, Ingress
-// and HTTPRoute (each named dotvirt in the install namespace) as rendered,
-// and no other exposure on the console's host.
-func frontDoor(p Params) []admissionregistrationv1.Validation {
-	kind := func(resource string) string { return `request.resource.resource == ` + quote(resource) }
+// frontDoorRules are the front-door rules by kind: the console's Service,
+// Route, Ingress and HTTPRoute (each named dotvirt in the install namespace)
+// as rendered, and no other exposure on the console's host.
+type frontDoorRules struct {
+	services, routes, ingresses, httproutes []admissionregistrationv1.Validation
+}
+
+func frontDoor(p Params) frontDoorRules {
 	console := `(object.metadata.name == ` + quote(ConsoleDeployment) + ` && request.namespace == ` + quote(p.Namespace) + `)`
 	host := quote(p.ConsoleHost)
 	// Annotations steer some controllers (an ingress controller's mirror or
@@ -341,49 +363,56 @@ func frontDoor(p Params) []admissionregistrationv1.Validation {
 	covers := func(h string) string {
 		return `(` + h + `.startsWith("*.") && ` + host + `.endsWith(` + h + `.substring(1)))`
 	}
-	return []admissionregistrationv1.Validation{
-		// External IPs and load balancers take traffic for addresses the
-		// cluster's own Services do not own.
-		deny(`!(`+kind("services")+`) || ((!has(object.spec.type) || object.spec.type == "ClusterIP") && `+
-			`(!has(object.spec.externalIPs) || size(object.spec.externalIPs) == 0) && `+
-			`(!has(object.spec.loadBalancerIP) || object.spec.loadBalancerIP == ""))`,
-			"the operator exposes no Service outside the cluster: no node port, load balancer, external IP or external name"),
-		deny(`!(`+kind("services")+` && `+console+`) || (`+
-			`has(object.spec.selector) && object.spec.selector == {`+quote(ConsoleSelectorKey)+`: `+quote(ConsoleSelectorValue)+`} && `+
-			`(!has(object.spec.type) || object.spec.type == "ClusterIP") && !has(object.spec.externalName) && `+
-			`!(has(object.spec.publishNotReadyAddresses) && object.spec.publishNotReadyAddresses) && `+
-			`object.spec.ports.all(port, has(port.targetPort) && string(port.targetPort) in ["8080", "http"]))`,
-			"the operator points the console's Service only at the console's pods and port"),
-		deny(`!(`+kind("routes")+` && `+console+`) || (`+sameAnnotations+` && `+
-			`object.spec.to.kind == "Service" && object.spec.to.name == `+quote(ConsoleDeployment)+` && `+
-			`(!has(object.spec.alternateBackends) || size(object.spec.alternateBackends) == 0) && `+
-			`has(object.spec.port) && string(object.spec.port.targetPort) == "http" && `+
-			`has(object.spec.tls) && object.spec.tls.termination == "edge" && !has(object.spec.tls.destinationCACertificate) && `+
-			// An unknown host (no cluster ingress domain to read, as on
-			// MicroShift) leaves the router's own host to the hostless Route.
-			`(`+host+` == "" || !has(object.spec.host) || object.spec.host == "" || object.spec.host == `+host+`))`,
-			"the operator routes the console's host only to the console's Service, edge-terminated"),
-		deny(`!(`+kind("ingresses")+` && `+console+`) || (`+sameAnnotations+` && `+
-			`(!has(object.spec.defaultBackend) || (has(object.spec.defaultBackend.service) && object.spec.defaultBackend.service.name == `+quote(ConsoleDeployment)+`)) && `+
-			`object.spec.rules.all(r, has(r.host) && r.host == `+host+` && has(r.http) && r.http.paths.all(path, `+
-			`has(path.backend.service) && path.backend.service.name == `+quote(ConsoleDeployment)+` && path.backend.service.port.number == 8080)))`,
-			"the operator sends the console's Ingress only to the console's Service, on the console's host"),
-		deny(`!(`+kind("httproutes")+` && `+console+`) || (`+sameAnnotations+` && `+
-			`object.spec.hostnames == [`+host+`] && object.spec.rules.all(r, !has(r.filters) && r.backendRefs.all(b, `+
-			`!has(b.filters) && (!has(b.kind) || b.kind == "Service") && (!has(b.group) || b.group == "") && `+
-			`(!has(b.namespace) || b.namespace == `+quote(p.Namespace)+`) && b.name == `+quote(ConsoleDeployment)+` && b.port == 8080)))`,
-			"the operator sends the console's HTTPRoute only to the console's Service, on the console's host, unfiltered"),
-		// Every other exposure names its hosts, none the console's: one with
-		// none (an Ingress default backend, an HTTPRoute without hostnames)
-		// answers for every host its gateway or controller serves.
-		deny(console+` || (`+
-			`(!(`+kind("routes")+`) || ((!has(object.spec.host) || object.spec.host == "" || object.spec.host != `+host+`) && `+
-			`(!has(object.spec.wildcardPolicy) || object.spec.wildcardPolicy == "None"))) && `+
-			`(!(`+kind("ingresses")+`) || (!has(object.spec.defaultBackend) && (!has(object.spec.rules) || `+
-			`object.spec.rules.all(r, has(r.host) && r.host != "" && r.host != `+host+` && !`+covers("r.host")+`)))) && `+
-			`(!(`+kind("httproutes")+`) || (has(object.spec.hostnames) && size(object.spec.hostnames) > 0 && `+
-			`object.spec.hostnames.all(h, h != `+host+` && !`+covers("h")+`))))`,
-			"the operator exposes nothing else on the console's host, and nothing on every host"),
+	// Every other exposure names its hosts, none the console's: one with none
+	// (an Ingress default backend, an HTTPRoute without hostnames) answers for
+	// every host its gateway or controller serves.
+	const others = "the operator exposes nothing else on the console's host, and nothing on every host"
+	return frontDoorRules{
+		services: []admissionregistrationv1.Validation{
+			// External IPs and load balancers take traffic for addresses the
+			// cluster's own Services do not own.
+			deny(`(!has(object.spec.type) || object.spec.type == "ClusterIP") && `+
+				`(!has(object.spec.externalIPs) || size(object.spec.externalIPs) == 0) && `+
+				`(!has(object.spec.loadBalancerIP) || object.spec.loadBalancerIP == "")`,
+				"the operator exposes no Service outside the cluster: no node port, load balancer, external IP or external name"),
+			deny(`!`+console+` || (`+
+				`has(object.spec.selector) && object.spec.selector == {`+quote(ConsoleSelectorKey)+`: `+quote(ConsoleSelectorValue)+`} && `+
+				`(!has(object.spec.type) || object.spec.type == "ClusterIP") && !has(object.spec.externalName) && `+
+				`!(has(object.spec.publishNotReadyAddresses) && object.spec.publishNotReadyAddresses) && `+
+				`object.spec.ports.all(port, has(port.targetPort) && string(port.targetPort) in ["8080", "http"]))`,
+				"the operator points the console's Service only at the console's pods and port"),
+		},
+		routes: []admissionregistrationv1.Validation{
+			deny(`!`+console+` || (`+sameAnnotations+` && `+
+				`object.spec.to.kind == "Service" && object.spec.to.name == `+quote(ConsoleDeployment)+` && `+
+				`(!has(object.spec.alternateBackends) || size(object.spec.alternateBackends) == 0) && `+
+				`has(object.spec.port) && string(object.spec.port.targetPort) == "http" && `+
+				`has(object.spec.tls) && object.spec.tls.termination == "edge" && !has(object.spec.tls.destinationCACertificate) && `+
+				// An unknown host (no cluster ingress domain to read, as on
+				// MicroShift) leaves the router's own host to the hostless Route.
+				`(`+host+` == "" || !has(object.spec.host) || object.spec.host == "" || object.spec.host == `+host+`))`,
+				"the operator routes the console's host only to the console's Service, edge-terminated"),
+			deny(console+` || ((!has(object.spec.host) || object.spec.host == "" || object.spec.host != `+host+`) && `+
+				`(!has(object.spec.wildcardPolicy) || object.spec.wildcardPolicy == "None"))`, others),
+		},
+		ingresses: []admissionregistrationv1.Validation{
+			deny(`!`+console+` || (`+sameAnnotations+` && `+
+				`(!has(object.spec.defaultBackend) || (has(object.spec.defaultBackend.service) && object.spec.defaultBackend.service.name == `+quote(ConsoleDeployment)+`)) && `+
+				`object.spec.rules.all(r, has(r.host) && r.host == `+host+` && has(r.http) && r.http.paths.all(path, `+
+				`has(path.backend.service) && path.backend.service.name == `+quote(ConsoleDeployment)+` && path.backend.service.port.number == 8080)))`,
+				"the operator sends the console's Ingress only to the console's Service, on the console's host"),
+			deny(console+` || (!has(object.spec.defaultBackend) && (!has(object.spec.rules) || `+
+				`object.spec.rules.all(r, has(r.host) && r.host != "" && r.host != `+host+` && !`+covers("r.host")+`)))`, others),
+		},
+		httproutes: []admissionregistrationv1.Validation{
+			deny(`!`+console+` || (`+sameAnnotations+` && `+
+				`object.spec.hostnames == [`+host+`] && object.spec.rules.all(r, !has(r.filters) && r.backendRefs.all(b, `+
+				`!has(b.filters) && (!has(b.kind) || b.kind == "Service") && (!has(b.group) || b.group == "") && `+
+				`(!has(b.namespace) || b.namespace == `+quote(p.Namespace)+`) && b.name == `+quote(ConsoleDeployment)+` && b.port == 8080)))`,
+				"the operator sends the console's HTTPRoute only to the console's Service, on the console's host, unfiltered"),
+			deny(console+` || (has(object.spec.hostnames) && size(object.spec.hostnames) > 0 && `+
+				`object.spec.hostnames.all(h, h != `+host+` && !`+covers("h")+`))`, others),
+		},
 	}
 }
 
@@ -481,16 +510,6 @@ func rule(group, version, resource string, ops ...admissionregistrationv1.Operat
 
 // unchanged is the field at path in object equal to the one in oldObject,
 // absent in both included.
-// only applies validations to resource alone, in a policy that matches more.
-func only(resource string, validations []admissionregistrationv1.Validation) []admissionregistrationv1.Validation {
-	out := make([]admissionregistrationv1.Validation, len(validations))
-	for i, v := range validations {
-		v.Expression = `request.resource.resource != ` + quote(resource) + ` || (` + v.Expression + `)`
-		out[i] = v
-	}
-	return out
-}
-
 func unchanged(path, oldPath string) string {
 	return `has(` + path + `) == has(` + oldPath + `) && (!has(` + path + `) || ` + path + ` == ` + oldPath + `)`
 }

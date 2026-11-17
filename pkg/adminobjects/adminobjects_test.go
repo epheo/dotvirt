@@ -57,12 +57,16 @@ func TestGuardShape(t *testing.T) {
 		t.Fatalf("render = %d objects, want a policy and a binding per guard name", len(objs))
 	}
 	match := map[string][][2]string{
-		GuardSecretsName:     {{"", "secrets"}, {"", "serviceaccounts"}},
-		GuardDeploymentsName: {{"apps", "deployments"}, {"", "persistentvolumeclaims"}},
+		GuardSecretsName:     {{"", "secrets"}},
+		GuardAccountsName:    {{"", "serviceaccounts"}},
+		GuardDeploymentsName: {{"apps", "deployments"}},
+		GuardClaimsName:      {{"", "persistentvolumeclaims"}},
 		GuardBindingsName:    {{"rbac.authorization.k8s.io", "clusterrolebindings"}, {"rbac.authorization.k8s.io", "rolebindings"}},
 		GuardInstallName:     {{"dotvirt.io", "dotvirts"}},
-		GuardFrontDoorName: {{"", "services"}, {"route.openshift.io", "routes"}, {"networking.k8s.io", "ingresses"},
-			{"gateway.networking.k8s.io", "httproutes"}},
+		GuardFrontDoorName:   {{"", "services"}},
+		GuardRoutesName:      {{"route.openshift.io", "routes"}},
+		GuardIngressesName:   {{"networking.k8s.io", "ingresses"}},
+		GuardHTTPRoutesName:  {{"gateway.networking.k8s.io", "httproutes"}},
 	}
 	for i, name := range GuardNames {
 		p := policyOf(t, objs[i])
@@ -87,7 +91,9 @@ func TestGuardShape(t *testing.T) {
 			t.Errorf("%s condition = %+v, want the exact username", name, p.Spec.MatchConditions)
 		}
 	}
-	sec, dep, bind, inst := exprs(policyOf(t, objs[0])), exprs(policyOf(t, objs[1])), exprs(policyOf(t, objs[2])), exprs(policyOf(t, objs[3]))
+	named := func(name string) []string { return exprs(policyOf(t, objs[slices.Index(GuardNames, name)])) }
+	sec, acc, dep, claims := named(GuardSecretsName), named(GuardAccountsName), named(GuardDeploymentsName), named(GuardClaimsName)
+	bind, inst := named(GuardBindingsName), named(GuardInstallName)
 	holds(t, "secrets", sec, `request.namespace in ["dotvirt", "openshift-gitops"]`)
 	holds(t, "deployments", dep, `request.namespace == "dotvirt"`)
 	holds(t, "deployments", dep, `c.image.startsWith("quay.io/epheo/dotvirt@sha256:")`)
@@ -99,14 +105,14 @@ func TestGuardShape(t *testing.T) {
 	holds(t, "deployments", dep, `a in ["-ui-origin=", "--ui-origin="]`)
 	holds(t, "deployments", dep, `"-oauth-ca=`+IngressCAPath+`"`)
 	holds(t, "install", inst, `object.spec == oldObject.spec`)
-	holds(t, "secrets", sec, `object.metadata.name != "dotvirt" || !has(object.automountServiceAccountToken)`)
+	holds(t, "accounts", acc, `object.metadata.name != "dotvirt" || !has(object.automountServiceAccountToken)`)
 	holds(t, "deployments", dep, `m.mountPath == "/var/run/dotvirt/forge"`)
 	holds(t, "deployments", dep, `v.secret.secretName == "dotvirt-forge"`)
 	holds(t, "deployments", dep, `e.valueFrom.secretKeyRef.name == "dotvirt-forgejo-admin"`)
 	holds(t, "deployments", dep, `"DOTVIRT_FORGE_URL/dotvirt-forge/url"`)
 	holds(t, "deployments", dep, `v.persistentVolumeClaim.claimName == "dotvirt-forgejo-data") || has(v.emptyDir)`)
 	holds(t, "deployments", dep, `e.name != "DOTVIRT_OIDC_ISSUER"`)
-	holds(t, "deployments", dep, `request.resource.resource != "persistentvolumeclaims" || (!has(object.spec.selector)`)
+	holds(t, "claims", claims, `!has(object.spec.selector) && !has(object.spec.dataSource)`)
 	holds(t, "bindings", bind, `"ServiceAccount/openshift-gitops/openshift-gitops-argocd-application-controller"`)
 	holds(t, "bindings", bind, `request.namespace == "openshift-gitops"`)
 	for _, o := range objs {
