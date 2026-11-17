@@ -340,6 +340,8 @@ jobs:
     needs: [go, web, image-build]
     runs-on: ubuntu-latest
     environment: QUAY # GitHub Actions environment holding the QUAY_* push secrets
+    outputs:
+      digest: ${{ fromJSON(steps.bake.outputs.metadata).app['containerimage.digest'] }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4.8.0
@@ -353,6 +355,7 @@ jobs:
           driver-opts: image=${{ env.BUILDKIT_IMAGE }}
       - run: echo "TAG=${GITHUB_SHA::7}" >> "$GITHUB_ENV"
       - name: Build & push (multi-arch)
+        id: bake
         # Push the immutable per-commit SHA tag only, never a moving :latest (a moving tag
         # orphans the digests that DefaultImage/relatedImages pin to). Multi-arch so arm64
         # nodes (e.g. hetznet) can run the per-commit image.
@@ -364,3 +367,31 @@ jobs:
           set: |
             app.tags=${{ env.IMAGE }}:${{ env.TAG }}
             app.cache-from=type=gha,scope=app
+
+  # Sign the image the image job pushed, then verify it. Its own runner: the signing key
+  # and the OIDC token never meet the build.
+  image-sign:
+    needs: [image]
+    runs-on: ubuntu-latest
+    environment: QUAY
+    permissions:
+      contents: read
+      id-token: write # keyless image signing: the workflow's OIDC identity is the signer
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/tools
+        with:
+          tools: cosign
+      - uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4.8.0
+        with:
+          registry: quay.io
+          username: ${{ secrets.QUAY_USERNAME }}
+          password: ${{ secrets.QUAY_PASSWORD }}
+      - name: Sign and verify
+        env:
+          DIGEST: ${{ needs.image.outputs.digest }}
+          COSIGN_PRIVATE_KEY: ${{ secrets.COSIGN_PRIVATE_KEY }}
+          COSIGN_PASSWORD: ${{ secrets.COSIGN_PASSWORD }}
+        run: |
+          echo "$IMAGE@$DIGEST" > "$RUNNER_TEMP/published-refs"
+          ./hack/sign-images.sh "$RUNNER_TEMP/published-refs" 1

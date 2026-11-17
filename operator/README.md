@@ -911,6 +911,107 @@ Each sign-in keeps its own state cookie, so tabs signing in at once do not undo 
   on PATH; merges the CSV base in `config/manifests/bases/` with the generated CRD +
   RBAC + Deployment). Building/pushing the bundle image to a catalog is a release step.
 
+## Image signatures
+
+Every image CI pushes to quay.io/epheo is signed with sigstore (`hack/sign-images.sh`).
+Enforcing them is opt-in for admins and adds no load to dotvirt: the container runtime
+checks a signature when it pulls.
+
+- **What is signed:** `dotvirt`, `dotvirt-operator`, `dotvirt-operator-bundle` and
+  `dotvirt-operator-catalog`, by digest, the multi-arch index and each platform
+  manifest. The signature sits beside the image as a `sha256-<hex>.sig` tag, the layout
+  container runtimes read.
+- **Keyless, always:** each signature is certified for the workflow that pushed the
+  image, with no key to leak. The identities, all with OIDC issuer
+  `https://token.actions.githubusercontent.com`:
+  - a release: `https://github.com/epheo/dotvirt/.github/workflows/release.yaml@refs/tags/vX.Y.Z`;
+  - a release candidate: `https://github.com/epheo/dotvirt/.github/workflows/preview.yaml@refs/heads/main`;
+  - a per-commit app image from main: `https://github.com/epheo/dotvirt/.github/workflows/ci.yaml@refs/heads/main`.
+- **By a key:** every image also carries a signature by the key whose public half is
+  `operator/install/cosign.pub`. OpenShift can enforce only that one (below).
+- **What the key accepts:** the same key signs releases, release candidates and the
+  per-commit app images from main. A policy on this key therefore admits all three, not
+  releases only. A stricter, release-only policy needs a second key that only
+  release.yaml holds; the keyless identities already tell the three apart.
+- **Before v0.2.4:** releases are unsigned. Enforce only once the cluster runs a signed
+  release, or a rollback to an older one is refused.
+
+Verify a release by hand (cosign 3 needs `--new-bundle-format=false` for this layout):
+
+```sh
+cosign verify --new-bundle-format=false \
+  --certificate-identity-regexp '^https://github\.com/epheo/dotvirt/\.github/workflows/release\.yaml@refs/tags/v[0-9]+\.[0-9]+\.[0-9]+$' \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+  quay.io/epheo/dotvirt@sha256:<digest>
+```
+
+With the key: `cosign verify --new-bundle-format=false --key operator/install/cosign.pub quay.io/epheo/dotvirt@sha256:<digest>`.
+
+### Enforcing on OpenShift
+
+OpenShift matches a keyless certificate by email only, and a workflow certificate
+carries none, so a ClusterImagePolicy enforces the key signature:
+
+```yaml
+apiVersion: config.openshift.io/v1
+kind: ClusterImagePolicy
+metadata:
+  name: dotvirt
+spec:
+  scopes:
+  - quay.io/epheo/dotvirt
+  - quay.io/epheo/dotvirt-operator
+  - quay.io/epheo/dotvirt-operator-bundle
+  - quay.io/epheo/dotvirt-operator-catalog
+  policy:
+    rootOfTrust:
+      policyType: PublicKey
+      publicKey:
+        keyData: <base64 -w0 operator/install/cosign.pub>
+        rekorKeyData: <curl -fsSL https://rekor.sigstore.dev/api/v1/log/publicKey | base64 -w0>
+    signedIdentity:
+      matchPolicy: MatchRepository
+```
+
+- `MatchRepository` is required: a cosign signature names the repository without a
+  tag or digest, which the default `MatchRepoDigestOrExact` refuses.
+- The scopes cover the operand, the operator, and the bundle and catalog OLM pulls.
+  Images dotvirt runs but does not build (the managed Forgejo, ArgoCD) are outside them.
+- The API is `config.openshift.io/v1` from OpenShift 4.20. OpenShift 4.19 serves it as
+  `v1alpha1`, only behind the `TechPreviewNoUpgrade` feature set. Check with
+  `oc api-resources | grep -i imagepolicies`.
+- After a key rotation, update `keyData` (SECURITY.md, Image signing key).
+- The Machine Config Operator rolls the policy out to every node; see your version's
+  documentation for how it updates them.
+- Mirrored (disconnected) installs must mirror the `.sig` tags too, or every dotvirt
+  image is refused.
+
+### Enforcing on other Kubernetes
+
+The sigstore policy-controller matches workflow identities, so it enforces the
+keyless signatures with no key:
+
+```yaml
+apiVersion: policy.sigstore.dev/v1beta1
+kind: ClusterImagePolicy
+metadata:
+  name: dotvirt
+spec:
+  images:
+  - glob: "quay.io/epheo/dotvirt*"
+  authorities:
+  - keyless:
+      url: https://fulcio.sigstore.dev
+      identities:
+      - issuer: https://token.actions.githubusercontent.com
+        subjectRegExp: '^https://github\.com/epheo/dotvirt/\.github/workflows/release\.yaml@refs/tags/v[0-9]+\.[0-9]+\.[0-9]+$'
+    ctlog:
+      url: https://rekor.sigstore.dev
+```
+
+Add the preview identity to accept release candidates too. The policy-controller
+enforces only in namespaces labelled `policy.sigstore.dev/include=true`.
+
 ## Upgrading
 
 - The operator acts only on the Dotvirt in its install namespace (see Install

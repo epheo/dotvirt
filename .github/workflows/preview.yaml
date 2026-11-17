@@ -3,6 +3,10 @@
 # `candidate-v0` channel only; `stable-v0` is untouched, so it's never a published release).
 # Uploads the preview CatalogSource as an artifact to apply on a candidate-v0
 # cluster (hetznet). Runs in the `QUAY` environment.
+#
+# Every pushed image is signed (hack/sign-images.sh) under this workflow's identity at the
+# ref it ran from; users verify an rc against preview.yaml@refs/heads/main, so cut rcs from
+# main (`gh workflow run preview.yaml --ref main -f version=...`).
 name: preview
 
 on:
@@ -23,9 +27,14 @@ permissions:
   contents: read
 
 jobs:
+  # Build and push. Holds no signing key and no OIDC token: the build tools never share a
+  # runner with either.
   preview:
     runs-on: ubuntu-latest
     environment: QUAY
+    outputs:
+      refs: ${{ steps.refs.outputs.refs }}
+      catalogsource: ${{ steps.refs.outputs.catalogsource }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
@@ -52,8 +61,50 @@ jobs:
         env:
           FORCE: ${{ inputs.force && '1' || '' }}
           OPM: opm # the verified binary from the tools action; the scripts' default compiles opm from source
+          PUBLISHED_REFS: ${{ runner.temp }}/published-refs
         run: VERSION=${{ inputs.version }} CONTAINER_TOOL=docker ./hack/preview.sh
+      # The CatalogSource is handed to the sign job, which publishes it only once every
+      # image verifies: a failed sign never leaves an rc to apply.
+      - name: Record the pushed images and the CatalogSource
+        id: refs
+        run: |
+          { echo "refs<<REFS"; cat "$RUNNER_TEMP/published-refs"; echo REFS
+            echo "catalogsource<<CATALOGSOURCE"; cat operator/install/catalogsource-preview.yaml; echo CATALOGSOURCE
+          } >> "$GITHUB_OUTPUT"
+
+  # Sign every image the preview job pushed, verify each one, then publish the
+  # CatalogSource. Its own runner: the signing key and the OIDC token never meet the
+  # build tools.
+  sign:
+    needs: [preview]
+    runs-on: ubuntu-latest
+    environment: QUAY
+    permissions:
+      contents: read
+      id-token: write # keyless image signing: the workflow's OIDC identity is the signer
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/tools
+        with:
+          tools: cosign
+      - name: Registry login
+        env:
+          U: ${{ secrets.QUAY_USERNAME }}
+          P: ${{ secrets.QUAY_PASSWORD }}
+        run: echo "$P" | docker login quay.io -u "$U" --password-stdin
+      - name: Sign and verify
+        env:
+          REFS: ${{ needs.preview.outputs.refs }}
+          COSIGN_PRIVATE_KEY: ${{ secrets.COSIGN_PRIVATE_KEY }}
+          COSIGN_PASSWORD: ${{ secrets.COSIGN_PASSWORD }}
+        run: |
+          printf '%s\n' "$REFS" > "$RUNNER_TEMP/published-refs"
+          ./hack/sign-images.sh "$RUNNER_TEMP/published-refs" 4 # app, operator, bundle, catalog
+      - name: Write the CatalogSource
+        env:
+          CATALOGSOURCE: ${{ needs.preview.outputs.catalogsource }}
+        run: printf '%s\n' "$CATALOGSOURCE" > "$RUNNER_TEMP/catalogsource-preview.yaml"
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: catalogsource-preview-${{ inputs.version }}
-          path: operator/install/catalogsource-preview.yaml
+          path: ${{ runner.temp }}/catalogsource-preview.yaml

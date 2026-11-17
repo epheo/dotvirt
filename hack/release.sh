@@ -23,11 +23,13 @@ source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib.sh"
 echo ">> [1/4] app  -> $REG/dotvirt:v$VERSION"
 build_push Containerfile . "$REG/dotvirt:v$VERSION" --build-arg VERSION="$VERSION"
 D_APP="$(digest "$REG/dotvirt:v$VERSION")"; echo "   app digest: $D_APP"
+published "$REG/dotvirt" "$D_APP"
 repin "$REG/dotvirt" "$D_APP" operator/internal/install/dotvirt.go operator/config/manager/manager.yaml
 
 echo ">> [2/4] operator -> $REG/dotvirt-operator:v$VERSION"
 build_push operator/Dockerfile . "$REG/dotvirt-operator:v$VERSION" --build-arg VERSION="$VERSION"
 D_OP="$(digest "$REG/dotvirt-operator:v$VERSION")"; echo "   operator digest: $D_OP"
+published "$REG/dotvirt-operator" "$D_OP"
 repin "$REG/dotvirt-operator" "$D_OP" "$CSV"
 sed -i -E "s#(digest: )sha256:[0-9a-f]{64}#\1${D_OP}#" operator/config/default/kustomization.yaml
 sed -i -E "s#(dotvirt-operator:)v[0-9.]+#\1v$VERSION#" operator/config/manager/manager.yaml
@@ -35,6 +37,7 @@ sed -i -E "s#(dotvirt-operator:)v[0-9.]+#\1v$VERSION#" operator/config/manager/m
 echo ">> [3/4] bundle -> $REG/dotvirt-operator-bundle:v$VERSION"
 push_bundle
 D_BUNDLE="$(digest "$REG/dotvirt-operator-bundle:v$VERSION")"; echo "   bundle digest: $D_BUNDLE"
+published "$REG/dotvirt-operator-bundle" "$D_BUNDLE"
 
 echo ">> [4/4] catalog -> $REG/dotvirt-operator-catalog:v$VERSION"
 cat >"$TMPL" <<YAML
@@ -60,6 +63,7 @@ $(entry "$VERSION" "$PREV")
 YAML
 push_catalog
 D_CAT="$(digest "$REG/dotvirt-operator-catalog:v$VERSION")"; echo "   catalog digest: $D_CAT"
+published "$REG/dotvirt-operator-catalog" "$D_CAT"
 repin "$REG/dotvirt-operator-catalog" "$D_CAT" operator/install/catalogsource.yaml
 
 echo ">> validate"

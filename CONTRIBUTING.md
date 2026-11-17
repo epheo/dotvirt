@@ -72,9 +72,19 @@ git tag v0.0.6 && git push origin v0.0.6
 `main` is branch-protected, so the run opens a **digest-pin PR** — the tag marks intent,
 the merged PR is the record. Merge it so `main` carries the pinned release commit, then
 roll a cluster with `kubectl apply -f operator/install/catalogsource.yaml`. To re-run or
-override `PREV`, trigger the workflow via `workflow_dispatch` (version + prev inputs); to
-cut one entirely locally, run `VERSION=0.0.6 PREV=0.0.5 hack/release.sh` and commit + tag
-the pinned tree yourself.
+override `PREV`, trigger the workflow via `workflow_dispatch` (version + prev inputs) ON
+THE TAG: `gh workflow run release.yaml --ref v0.0.6 -f version=0.0.6 -f prev=0.0.5`. A
+dispatch from any other ref fails before building, because release images are signed as
+`release.yaml@refs/tags/vX.Y.Z`, the identity users verify. To cut one entirely locally,
+run `VERSION=0.0.6 PREV=0.0.5 hack/release.sh` and commit + tag the pinned tree yourself;
+such a release ships UNSIGNED (the workflow finds it already pinned, skips the build and
+warns), so prefer the workflow.
+
+**Signing:** every image the release, preview and image workflows push is signed in a
+job of its own, after the build (`hack/sign-images.sh`), keyless and with the
+`operator/install/cosign.pub` key, and the pin PR opens only once every image verifies.
+Cut previews from `main`: an rc verifies against `preview.yaml@refs/heads/main`. Key
+custody and rotation: SECURITY.md, Image signing key.
 
 Re-runs (Re-run on the tag, or a dispatch of the same version) reuse every `:vVERSION`
 image already on quay, so the digests the first run pinned are never pruned; they then
