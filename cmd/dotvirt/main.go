@@ -400,7 +400,7 @@ func newHTTPServer(addr string, h http.Handler) *http.Server {
 // present and future, so no per-repo sweep is needed - and a from-scratch install with no
 // project namespaces yet still gets its hook. It anchors the org on the platform repo, or on
 // any resolved project when there is none. Failures are logged and retried next tick - a
-// forge hiccup must not affect serving.
+// forge hiccup must not affect serving - except a refusal, which hookSweep holds.
 func ensureWebhooks(ctx context.Context, state *clusterstate.State, projects func() []project.ProjectInfo, ff *forge.Factory, target, secret, platformRepo string) {
 	// Anchoring on a project needs the namespace reflector's initial LIST; the platform
 	// repo anchors the org hook without it, so only wait when there's no platform repo.
@@ -409,6 +409,7 @@ func ensureWebhooks(ctx context.Context, state *clusterstate.State, projects fun
 		_ = state.WaitForSync(syncCtx)
 		cancel()
 	}
+	hooks := newHookSweep(ff, target, secret, log.Printf)
 	sweep := func() {
 		repos := []string{}
 		if platformRepo != "" {
@@ -419,38 +420,7 @@ func ensureWebhooks(ctx context.Context, state *clusterstate.State, projects fun
 				repos = append(repos, p.Repo)
 			}
 		}
-		if len(repos) == 0 {
-			return // nothing to anchor on yet; the next tick retries
-		}
-		// Any repo anchors the owner: they share it, so one org hook covers them all,
-		// present and future.
-		fc := ff.For(repos[0])
-		if fc == nil {
-			return
-		}
-		isOrg, err := fc.OwnerIsOrg()
-		if err != nil {
-			log.Printf("webhook: resolve owner kind (anchor %s): %v", repos[0], err)
-			return
-		}
-		if isOrg {
-			if err := fc.EnsureOrgWebhook(target, secret); err != nil {
-				log.Printf("webhook: ensure org hook (anchor %s): %v", repos[0], err)
-			}
-			return
-		}
-		// A user account has no hooks endpoint, so nothing can cover every repo at once;
-		// register on each known repo instead. A repo added later is picked up by a
-		// later tick rather than automatically, which is the cost of a user-owned forge.
-		for _, repo := range repos {
-			c := ff.For(repo)
-			if c == nil {
-				continue
-			}
-			if err := c.EnsureWebhook(target, secret); err != nil {
-				log.Printf("webhook: ensure repo hook (%s): %v", repo, err)
-			}
-		}
+		hooks.run(repos)
 	}
 	sweep()
 	t := time.NewTicker(10 * time.Minute)
@@ -463,6 +433,138 @@ func ensureWebhooks(ctx context.Context, state *clusterstate.State, projects fun
 			sweep()
 		}
 	}
+}
+
+// refusalRecheck is how long a refused hook registration is held: a fix made
+// in the forge itself (the account made an owner, webhooks re-enabled) shows
+// no change dotvirt can see, so the forge is asked again at this pace.
+const refusalRecheck = time.Hour
+
+// hookSweep is one process's registration of dotvirt's forge webhook. A forge
+// that refuses dotvirt's account the owner's or a repo's webhooks (staff made
+// the hooks, or the account owns no org) refuses again on every tick, so a
+// refused scope is asked again only after refusalRecheck, or at once when the
+// forge credential changes; a restart, which any change of the forge, the
+// target or the secret is, starts over. An outage keeps the tick's retry.
+type hookSweep struct {
+	ff             *forge.Factory
+	target, secret string
+	// refused maps a scope ("org:<owner>" or "repo:<url>") to the refusal held.
+	refused map[string]held
+	// users remembers an owner confirmed as a user account as long as a
+	// refusal, so a user-owned forge whose repo hooks are all held asks the
+	// forge nothing. Never a missing owner: an org created later (a managed
+	// forge's, after the first sweep) gets its hook on the next tick.
+	users map[string]held
+	now   func() time.Time
+	logf  func(string, ...any)
+}
+
+// held is what an answer was met with: the credential and the time.
+type held struct {
+	cred string
+	at   time.Time
+}
+
+func newHookSweep(ff *forge.Factory, target, secret string, logf func(string, ...any)) *hookSweep {
+	return &hookSweep{ff: ff, target: target, secret: secret, refused: map[string]held{}, users: map[string]held{}, now: time.Now, logf: logf}
+}
+
+func (h *hookSweep) run(repos []string) {
+	if len(repos) == 0 {
+		return // nothing to anchor on yet; the next tick retries
+	}
+	// Any repo anchors the owner: they share it, so one org hook covers them all,
+	// present and future.
+	fc := h.ff.For(repos[0])
+	if fc == nil {
+		return
+	}
+	scope := "org:" + fc.Owner()
+	if h.holds(h.refused, scope) {
+		return
+	}
+	isOrg, err := h.ownerIsOrg(fc)
+	if err != nil {
+		h.failed(scope, "resolve owner kind (anchor "+repos[0]+")", err)
+		return
+	}
+	if isOrg {
+		if err := fc.EnsureOrgWebhook(h.target, h.secret); err != nil {
+			h.failed(scope, "ensure org hook (anchor "+repos[0]+")", err)
+			return
+		}
+		delete(h.refused, scope)
+		return
+	}
+	// A user account has no hooks endpoint, so nothing can cover every repo at once;
+	// register on each known repo instead. A repo added later is picked up by a
+	// later tick rather than automatically, which is the cost of a user-owned forge.
+	for _, repo := range repos {
+		c := h.ff.For(repo)
+		scope := "repo:" + repo
+		if c == nil || h.holds(h.refused, scope) {
+			continue
+		}
+		if err := c.EnsureWebhook(h.target, h.secret); err != nil {
+			h.failed(scope, "ensure repo hook ("+repo+")", err)
+			continue
+		}
+		delete(h.refused, scope)
+	}
+}
+
+// ownerIsOrg is fc's owner kind. A confirmed user account is remembered for
+// refusalRecheck and the credential; an org, or no owner yet, is asked again.
+func (h *hookSweep) ownerIsOrg(fc *forge.Client) (bool, error) {
+	if h.holds(h.users, fc.Owner()) {
+		return false, nil
+	}
+	isOrg, err := fc.OwnerIsOrg()
+	if err != nil || isOrg {
+		return isOrg, err
+	}
+	if isUser, uerr := fc.OwnerIsUser(); uerr == nil && isUser {
+		h.users[fc.Owner()] = held{cred: h.ff.CredentialFingerprint(), at: h.now()}
+	}
+	return false, nil
+}
+
+// holds reports whether m holds key under the current credential and within
+// refusalRecheck.
+func (h *hookSweep) holds(m map[string]held, key string) bool {
+	e, ok := m[key]
+	return ok && e.cred == h.ff.CredentialFingerprint() && h.now().Sub(e.at) < refusalRecheck
+}
+
+// failed logs err; a refusal is also held, and logged once with the forge's
+// own reason and what to do.
+func (h *hookSweep) failed(scope, what string, err error) {
+	status := forge.RefusedStatus(err)
+	if status == 0 {
+		h.logf("webhook: %s: %v", what, err)
+		return
+	}
+	h.refused[scope] = held{cred: h.ff.CredentialFingerprint(), at: h.now()}
+	reason := forge.RefusalText(err)
+	if reason == "" {
+		reason = http.StatusText(status)
+	}
+	if status == http.StatusUnauthorized {
+		h.logf("webhook: %s: the forge rejected dotvirt's forge token (HTTP 401: %s): replace the forge token; "+
+			"rechecked hourly, and at once when the token changes", what, reason)
+		return
+	}
+	grant := "an owner of the org"
+	if strings.HasPrefix(scope, "repo:") {
+		grant = "an admin of the repo"
+	}
+	h.logf("webhook: %s: the forge refused (HTTP %d: %s); rechecked hourly, and at once when the forge token changes. "+
+		"Make dotvirt's forge account %s, or create the hook by hand as a Forgejo (Gitea) webhook: "+
+		"an org hook, a system hook, or a hook on each project repo (repos created later need their own): URL %s, "+
+		"content type application/json, events push and pull_request, secret the operator's dotvirt-webhook Secret, key secret "+
+		"(oc extract secret/dotvirt-webhook -n <dotvirt namespace> --keys=secret --to=-)",
+		what, status, reason, grant, h.target)
 }
 
 // uploadProxyURL is the flag's value, else the proxy CDI publishes. A cluster

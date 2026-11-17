@@ -287,6 +287,30 @@ owns one status condition; a phase that fails or waits records why there, so
 10. **dotvirt webhook** (`DotvirtWebhook`): the forge-to-dotvirt hook is registered by
    the app itself; the operator only observes it.
 
+When the forge refuses dotvirt's forge account the owner's webhooks (it owns no
+org, or staff manage the hooks, e.g. as a system hook), both conditions read
+`Unknown` with reason `RegistrationRefused`, carrying the forge's own reason.
+The message says to make the account an owner of the org, or gives the hook to
+create by hand as a Forgejo (Gitea) webhook (an org hook, a system hook, or one
+on each project repo, repos created later included): its URL,
+`application/json`, its events (push and pull_request for dotvirt, push only for
+ArgoCD) and the Secret and key holding its shared secret, with the `oc extract`
+command that prints it. Other reasons:
+
+- `CredentialRejected`: the forge rejects the token itself (401); replace the
+  token in the forge credential Secret's `token` key.
+- `PerRepoHooks`: the owner is a user account, which has no org hooks; the app
+  registers a hook on each project repo (not observed by the operator), and the
+  ArgoCD hook is made by hand per repo or as a system hook.
+- `OwnerNotFound`: no org or user of the platform repo's owner exists; check
+  spec.forge.platformRepo and spec.forge.url.
+
+Neither the operator nor the app asks the forge again for an hour, or until
+spec.forge, the forge credential, the hook's secret or the ArgoCD URL changes,
+or they restart, so a refusal costs about one forge call per hour. The operator
+cannot observe deliveries, so check a hand-made hook in the forge's delivery
+log.
+
 `Available` is `True` only after a completed pass with the dotvirt pod ready. A
 phase that fails or blocks sets it `False` with that phase's reason; the
 best-effort phases (operator guard, sync impersonation, platform repo, both
