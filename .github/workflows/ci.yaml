@@ -28,6 +28,7 @@ jobs:
           cache-dependency-path: |
             go.sum
             operator/go.sum
+            operator/test/typecheck/go.sum
       # ./... stops at nested modules, so the pkg modules and the operator are named.
       # go vet runs in lint, as golangci-lint's govet.
       - run: go test -race ./... ./pkg/forge/... ./pkg/tenancy/... ./pkg/adminobjects/... ./operator/...
