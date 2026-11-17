@@ -163,6 +163,12 @@ const RevertSegment = "revert"
 // neither reserved segment ever names a user.
 const SeedSegment = "_seed"
 
+// UserEscape prefixes a first-segment user that would read as reserved (the
+// changeset's userSegment): one leading UserEscape is stripped to read the
+// name back. Only the first segment is escaped; a revert's user segment is
+// the plain ref-safe name.
+const UserEscape = "u-"
+
 // MergeAuthor resolves who a merged PR belongs to. dotvirt's bot opens every
 // proposal PR, so the poster is always the bot - the proposing user is encoded
 // (sanitized) as the first head-branch segment under the proposed prefix, one
@@ -175,8 +181,11 @@ func MergeAuthor(headRef, proposedPrefix, poster string) string {
 			if strings.HasPrefix(rest, SeedSegment+"/") {
 				return poster
 			}
-			rest = strings.TrimPrefix(rest, RevertSegment+"/")
+			rest, revert := strings.CutPrefix(rest, RevertSegment+"/")
 			if user, _, found := strings.Cut(rest, "/"); found && user != "" {
+				if !revert {
+					user = strings.TrimPrefix(user, UserEscape)
+				}
 				return user
 			}
 		}

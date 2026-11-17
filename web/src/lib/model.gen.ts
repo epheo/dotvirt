@@ -2000,13 +2000,15 @@ export interface TemplateList {
 }
 /**
  * TemplateSeed is the starter template library proposed to a project's repo:
- * its open pull request, or the forge's refusal when it could not be opened.
+ * its open pull request, or why it could not be opened. Retries is set while
+ * a failed offer will be attempted again; a withdrawn offer is final.
  */
 export interface TemplateSeed {
   library: string;
   prNumber?: number /* int */;
   prURL?: string;
   error?: string;
+  retries?: boolean;
 }
 /**
  * DeployTemplateRequest renders a library template and stages the resulting VM

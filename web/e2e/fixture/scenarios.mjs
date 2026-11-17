@@ -1633,7 +1633,8 @@ const pushedbranch = {
 };
 
 // --- seedoffer: the starter library offered to a project's repo ---
-// team-web's offer is an open pull request; team-db's was refused by its forge.
+// team-web's offer is an open pull request; team-db's was refused by its
+// forge and will be retried; team-batch's was withdrawn for good.
 const seedoffer = {
 	...base,
 	name: 'seedoffer',
@@ -1648,6 +1649,12 @@ const seedoffer = {
 			{
 				library: 'team-db',
 				error: "the forge refused the console's account (403)",
+				retries: true,
+			},
+			{
+				library: 'team-batch',
+				error:
+					"someone else changed the offer's branch while its pull request was opened, so the console withdrew the offer; it is not made again",
 			},
 		],
 	},

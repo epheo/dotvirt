@@ -44,7 +44,9 @@ const seedMarkerContent = "The starter VM template library was offered to this r
 
 // errSeedMoved is an offer whose branch was pushed to by someone else between
 // dotvirt's push and its pull request: closed rather than shown as dotvirt's.
-var errSeedMoved = errors.New("the offer's branch changed while its pull request was opened, so the pull request was closed")
+// Final, like any closed offer: the next attempt would find it and count it
+// declined, so "once per repo" holds and nothing promises a retry.
+var errSeedMoved = errors.New("someone else changed the offer's branch while its pull request was opened, so the console withdrew the offer; it is not made again")
 
 // seedBranch is the one branch the starter library is offered from:
 // <proposed>/_seed/starter-templates, never a user's (userSegment).
@@ -104,7 +106,7 @@ func (c *Coordinator) SeedTemplates(proj project.ProjectInfo, lane []model.Propo
 	} else {
 		st.pr, st.prURL = 0, "" // merged or closed since
 	}
-	skip := st.decided || st.queued
+	skip := st.queued || st.decided && st.err == ""
 	c.seedMu.Unlock()
 	if skip {
 		return
@@ -120,9 +122,10 @@ func (c *Coordinator) SeedTemplates(proj project.ProjectInfo, lane []model.Propo
 	c.seedMu.Lock()
 	defer c.seedMu.Unlock()
 	switch {
-	case st.decided || st.queued:
+	case st.queued:
 	case !need:
 		st.decided, st.err, st.retryAt = true, "", time.Time{}
+	case st.decided: // a withdrawn offer, still reported
 	case time.Now().Before(st.retryAt):
 	default:
 		st.queued = true
@@ -194,7 +197,12 @@ func (c *Coordinator) offerSeed(repoURL, key string, ask bool) {
 	st.queued = false
 	if err != nil {
 		log.Printf("changeset: starter templates for %s: %v", repoURL, err)
-		st.err, st.retryAt = seedFailure(err), time.Now().Add(seedRetry)
+		st.err = seedFailure(err)
+		if errors.Is(err, errSeedMoved) {
+			st.decided = true
+		} else {
+			st.retryAt = time.Now().Add(seedRetry)
+		}
 		return
 	}
 	st.decided, st.err = true, ""
@@ -317,5 +325,6 @@ func (c *Coordinator) TemplateSeed(proj project.ProjectInfo) (model.TemplateSeed
 	if st == nil || st.pr == 0 && st.err == "" {
 		return model.TemplateSeed{}, false
 	}
-	return model.TemplateSeed{Library: proj.Name, PRNumber: st.pr, PRURL: st.prURL, Error: st.err}, true
+	return model.TemplateSeed{Library: proj.Name, PRNumber: st.pr, PRURL: st.prURL, Error: st.err,
+		Retries: st.err != "" && !st.decided}, true
 }

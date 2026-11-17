@@ -3,7 +3,9 @@ package changeset
 import (
 	"encoding/json"
 	"net/http"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
@@ -336,8 +338,37 @@ func TestAnOfferWhoseBranchMovedIsClosed(t *testing.T) {
 	if len(all) != 1 || all[0].State != "closed" {
 		t.Fatalf("want the moved offer closed, got %+v", all)
 	}
-	if seed, _ := f.c.TemplateSeed(f.proj); !strings.Contains(seed.Error, "changed") {
-		t.Errorf("the failure must say the branch changed, got %+v", seed)
+	seed, _ := f.c.TemplateSeed(f.proj)
+	if !strings.Contains(seed.Error, "withdrew the offer") || seed.Retries {
+		t.Errorf("a withdrawn offer must say so and promise no retry, got %+v", seed)
+	}
+	// Final: no attempt follows, whatever the retry delay.
+	openMirror(t, f)
+	resetRetry(f)
+	f.c.SeedTemplates(f.proj, nil)
+	time.Sleep(50 * time.Millisecond)
+	if _, creates := prs.counts(); creates != 1 {
+		t.Errorf("a withdrawn offer was made again: %d creates", creates)
+	}
+}
+
+// A write that fails without a classified cause (here the repo's objects are
+// read-only, so the push fails) shows one fixed line, never the raw error,
+// and is retried.
+func TestAFailedWriteShowsTheFixedLine(t *testing.T) {
+	f, prs := newSeedFixture(t)
+	openMirror(t, f)
+	if err := os.Chmod(filepath.Join(f.proj.Repo, "objects"), 0o555); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(filepath.Join(f.proj.Repo, "objects"), 0o755) })
+	f.c.seedCreated(f.proj.Repo)
+	seed, ok := f.c.TemplateSeed(f.proj)
+	if !ok || seed.Error != "the starter templates could not be written to the repository" || !seed.Retries {
+		t.Errorf("want the fixed line and a retry, got %+v %v", seed, ok)
+	}
+	if _, creates := prs.counts(); creates != 0 {
+		t.Errorf("no PR may be opened for an offer that was not pushed: %d creates", creates)
 	}
 }
 
@@ -419,6 +450,18 @@ func TestTheSeedRowBelongsToNoUser(t *testing.T) {
 	if got := tasks.MergeAuthor(testSeedBranch, "dotvirt/proposed", "dotvirt-bot"); got != "dotvirt-bot" {
 		t.Errorf("a merged seed is attributed to %q", got)
 	}
+	// The lane and the feed read an escaped first segment back; a revert's user
+	// segment is never escaped, so it reads as it is.
+	for head, want := range map[string]string{
+		"dotvirt/proposed/u-_alice/p-0123456789":        "_alice",
+		"dotvirt/proposed/u-u-bob/p-0123456789":         "u-bob",
+		"dotvirt/proposed/u-revert/p-0123456789":        "revert",
+		"dotvirt/proposed/revert/u-bob/p-0123456789-ab": "u-bob",
+	} {
+		if got := tasks.MergeAuthor(head, "dotvirt/proposed", "dotvirt-bot"); got != want {
+			t.Errorf("MergeAuthor(%s) = %q, want %q", head, got, want)
+		}
+	}
 }
 
 // No username lands in a reserved first segment: neither the seed's '_'
@@ -465,7 +508,7 @@ func TestTheUserEscapeIsOneToOne(t *testing.T) {
 			t.Errorf("%q and %q share the segment %q", user, other, got)
 		}
 		seen[got] = user
-		if decoded := strings.TrimPrefix(got, userEscape); got != refSegment(user) && decoded != refSegment(user) {
+		if decoded := strings.TrimPrefix(got, tasks.UserEscape); got != refSegment(user) && decoded != refSegment(user) {
 			t.Errorf("%q does not decode to %q", got, refSegment(user))
 		}
 	}

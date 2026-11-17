@@ -61,14 +61,11 @@ func refSegment(s string) string {
 // stripping one "u-" decodes it.
 func userSegment(user string) string {
 	out := refSegment(user)
-	if strings.HasPrefix(out, "_") || strings.HasPrefix(out, userEscape) || out == tasks.RevertSegment {
-		out = userEscape + out
+	if strings.HasPrefix(out, "_") || strings.HasPrefix(out, tasks.UserEscape) || out == tasks.RevertSegment {
+		out = tasks.UserEscape + out
 	}
 	return out
 }
-
-// userEscape is the prefix userSegment escapes a reserved-looking segment with.
-const userEscape = "u-"
 
 // shortHash is a stable 10-hex-char fingerprint of the exact (user, project),
 // appended to the working branch so distinct identities get distinct branches
