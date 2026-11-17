@@ -351,6 +351,33 @@ not watch (Services, AppProjects, bindings) heals without a CR edit; while the
 platform repo is missing, after 1 minute instead. Edits to the CR trigger a pass
 only when they change its spec (or delete it), never a status write.
 
+### A project's last objects
+
+Tenant Applications sync with automated prune and `automated.allowEmpty` off:
+Argo will not apply a source that would prune every object an Application
+tracks. That holds a project whose repo was lost and re-created while its
+running objects are adopted back. It would also hold a deliberate removal of a
+project's last objects, so the ApplicationSet's `templatePatch` takes
+`allowEmpty` from the plugin generator. The generator turns it on for one
+project only while all of these hold: Argo holds that project's generated
+Application; git moved on from the revision Argo last applied, by commits on
+the default branch, from the same repo and folder; git itself declares nothing
+there now; and dotvirt reads the Applications live. Anything else keeps the
+hold. The removal applies within one generator requeue (60s). The platform
+Application keeps `allowEmpty` off: its repo is never empty on purpose.
+
+Limits:
+
+- Argo CD 2.10 or later: before it, Argo drops `templatePatch`, and such a
+  removal stays held.
+- A project in a folder of a shared repo (`dotvirt.io/path`) loses its folder
+  with its last file: Argo then reports the path missing instead of holding,
+  and the removal is not applied
+  ([#488](https://github.com/epheo/dotvirt/issues/488)).
+- Once on, `allowEmpty` goes off at the generator's next answer. If dotvirt is
+  down right then, it stays on until dotvirt returns, and a repo lost and
+  re-created empty meanwhile would let Argo prune that project.
+
 ### Prune
 
 After a completed pass whose render changed, and otherwise at most once every 5
