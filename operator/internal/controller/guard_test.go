@@ -29,6 +29,14 @@ var guardRC = &reconcileCtx{argoNS: "argocd", argoSA: "argocd-application-contro
 // its guard.
 func guardPass(t *testing.T, operator string, prior []dotvirtv1alpha1.AdminObject, objs ...client.Object) (metav1.Condition, *dotvirtv1alpha1.Dotvirt) {
 	t.Helper()
+	dv := &dotvirtv1alpha1.Dotvirt{ObjectMeta: metav1.ObjectMeta{Name: "x", Namespace: "dotvirt"}}
+	dv.Status.AdminObjects = prior
+	return guardPassOn(t, operator, dv, objs...)
+}
+
+// guardPassOn is guardPass over dv as it is.
+func guardPassOn(t *testing.T, operator string, dv *dotvirtv1alpha1.Dotvirt, objs ...client.Object) (metav1.Condition, *dotvirtv1alpha1.Dotvirt) {
+	t.Helper()
 	wrote := func(verb string) error {
 		t.Errorf("the guard phase must write nothing, but it called %s", verb)
 		return nil
@@ -48,8 +56,6 @@ func guardPass(t *testing.T, operator string, prior []dotvirtv1alpha1.AdminObjec
 		},
 	}).Build()
 	r := &DotvirtReconciler{Client: c, Scheme: c.Scheme(), OperatorUsername: operator}
-	dv := &dotvirtv1alpha1.Dotvirt{ObjectMeta: metav1.ObjectMeta{Name: "x", Namespace: "dotvirt"}}
-	dv.Status.AdminObjects = prior
 	if res, err := r.reconcileOperatorGuard(t.Context(), dv, guardRC); res != nil || err != nil {
 		t.Fatalf("the guard phase never halts: %v %v", res, err)
 	}
@@ -198,5 +204,65 @@ func TestOperatorGuardMatchesTheOperand(t *testing.T) {
 	if env["DOTVIRT_INSTALL_NAMESPACE"] != "dotvirt" || env["DOTVIRT_INSTALL_NAME"] != "x" ||
 		env["DOTVIRT_OPERATOR_USERNAME"] != "" || env["DOTVIRT_ARGO_CONTROLLER"] != "" {
 		t.Errorf("console env = %v", env)
+	}
+}
+
+// credentialInstall is an install whose forge credential is an admin's
+// Secret, and the guard as rendered for it, installed.
+func credentialInstall() (*dotvirtv1alpha1.Dotvirt, adminobjects.Params) {
+	dv := &dotvirtv1alpha1.Dotvirt{ObjectMeta: metav1.ObjectMeta{Name: "x", Namespace: "dotvirt", UID: "uid-x"}}
+	dv.Spec.Forge.CredentialsSecret = "creds"
+	p := guardHere
+	p.ForgeSecret, p.InstallName, p.InstallUID = "creds", "x", "uid-x"
+	return dv, p
+}
+
+// The forge credential's grant is listed with the guard, but only the guard
+// decides OperatorGuard: a missing grant is ForgeCredentialReady's to report.
+func TestOperatorGuardIgnoresTheCredentialGrant(t *testing.T) {
+	dv, p := credentialInstall()
+	cond, dv := guardPassOn(t, guardOperator, dv, live(adminobjects.Guard(p))...)
+	if cond.Status != metav1.ConditionTrue {
+		t.Errorf("OperatorGuard = %s %s (%s), want True: the guard is installed", cond.Status, cond.Reason, cond.Message)
+	}
+	var grant []string
+	for _, e := range dv.Status.AdminObjects {
+		if e.Name == adminobjects.CredentialGrantName {
+			grant = append(grant, e.Kind+" "+e.State)
+		}
+	}
+	if !slices.Equal(grant, []string{"Role NotInstalled", "RoleBinding NotInstalled"}) {
+		t.Errorf("status lists the grant as %v, want both NotInstalled", grant)
+	}
+}
+
+// Each pass replaces its own listing, the grant included: status lists every
+// admin object once, however many passes ran.
+func TestOperatorGuardListsEachAdminObjectOnce(t *testing.T) {
+	dv, p := credentialInstall()
+	objs := live(adminobjects.Guard(p))
+	for range 3 {
+		_, dv = guardPassOn(t, guardOperator, dv, objs...)
+	}
+	if want := len(adminobjects.Render(p)); len(dv.Status.AdminObjects) != want {
+		t.Errorf("after three passes status lists %d admin objects, want %d", len(dv.Status.AdminObjects), want)
+	}
+}
+
+// A grant left after the credential went back to the operator's own keeps
+// reaching the old Secret: status lists it Stale, to remove.
+func TestOperatorGuardListsAStaleCredentialGrant(t *testing.T) {
+	dv, p := credentialInstall()
+	role, binding := adminobjects.CredentialGrant(p)
+	dv.Spec.Forge.CredentialsSecret = ""
+	_, dv = guardPassOn(t, guardOperator, dv, append(live(adminobjects.Render(guardHere)), role, binding)...)
+	var stale []string
+	for _, e := range dv.Status.AdminObjects {
+		if e.State == string(adminobjects.Stale) {
+			stale = append(stale, e.Kind+" "+e.Namespace+"/"+e.Name)
+		}
+	}
+	if !slices.Equal(stale, []string{"Role dotvirt/" + adminobjects.CredentialGrantName, "RoleBinding dotvirt/" + adminobjects.CredentialGrantName}) {
+		t.Errorf("stale entries %v, want the grant's Role and RoleBinding", stale)
 	}
 }

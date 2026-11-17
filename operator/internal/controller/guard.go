@@ -53,6 +53,7 @@ func (r *DotvirtReconciler) guardParams(ctx context.Context, dv *dotvirtv1alpha1
 		}
 	}
 	p.ForgeManaged = dv.Spec.Forge.Managed
+	p.InstallName, p.InstallUID = dv.Name, dv.UID
 	domain := r.appsDomain(ctx, dv)
 	router := ""
 	if dv.Spec.Ingress.Host == "" && domain == "" && r.Platform == platform.OpenShift {
@@ -100,6 +101,16 @@ func (r *DotvirtReconciler) operatorGuard(ctx context.Context, dv *dotvirtv1alph
 			"the cluster does not serve admissionregistration.k8s.io/v1 ValidatingAdmissionPolicy (Kubernetes 1.30+), so no guard can bound the operator"
 	case err != nil:
 		return metav1.ConditionUnknown, "Unreadable", "could not read the operator guard: " + err.Error()
+	}
+	// What the install no longer asks for but is still there: reported to remove.
+	for _, ref := range adminobjects.Leftovers(p) {
+		left := &unstructured.Unstructured{}
+		left.SetGroupVersionKind(schema.GroupVersionKind{Group: ref.Group, Version: ref.Version, Kind: ref.Kind})
+		if r.reader().Get(ctx, client.ObjectKey{Namespace: ref.Namespace, Name: ref.Name}, left) != nil {
+			continue
+		}
+		want = append(want, adminobjects.Object{Purpose: adminobjects.LeftoverPurpose, Object: left})
+		states = append(states, adminobjects.Stale)
 	}
 	publishAdminObjects(dv, isAdminObject, want, states)
 	for _, s := range []adminobjects.State{adminobjects.NotInstalled, adminobjects.Outdated} {
