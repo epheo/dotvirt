@@ -149,8 +149,10 @@ owns one status condition; a phase that fails or waits records why there, so
      forge application's client ID, authorize and token URLs and the forge URL users'
      tokens go to are `spec.forge.userAuth` and `spec.forge.url`; otherwise the console
      does not delegate at all and names no forge application. No command, argument or env
-     value of the console's holds `$(`, which the kubelet would fill with another env's
-     value, a Secret's included.
+     value of the console's holds an unescaped `$(`, which the kubelet would fill with
+     another env's value, a Secret's included; the operator renders every `$` there as
+     `$$`, so an admin's text (a product name, a link, an issuer) reaches the console as
+     written.
      The forge's pods never carry the console's `app` label, read no Secret but their
      admin password, and mount only their own claim, a scratch directory and the router
      CA: no network or host volume. The console's arguments stay free, so a release
