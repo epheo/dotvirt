@@ -9,15 +9,15 @@ entries:
     package: dotvirt-operator
     name: stable-v0 # released versions only: the channel external consumers subscribe to
     entries:
-      - name: dotvirt-operator.v0.2.3
-        replaces: dotvirt-operator.v0.2.2
-        skipRange: '>=0.0.0 <0.2.3'
+      - name: dotvirt-operator.v0.2.4
+        replaces: dotvirt-operator.v0.2.3
+        skipRange: '>=0.0.0 <0.2.4'
   - schema: olm.channel
     package: dotvirt-operator
     name: candidate-v0 # release-candidates + releases: the QA/preview channel (hetznet)
     entries:
-      - name: dotvirt-operator.v0.2.3
-        replaces: dotvirt-operator.v0.2.2
-        skipRange: '>=0.0.0 <0.2.3'
+      - name: dotvirt-operator.v0.2.4
+        replaces: dotvirt-operator.v0.2.3
+        skipRange: '>=0.0.0 <0.2.4'
   - schema: olm.bundle
-    image: quay.io/epheo/dotvirt-operator-bundle@sha256:5fa951d4e8b2e7a0f99df46781e10ca5b4d3addd750248762cd26a1a9b02bc96
+    image: quay.io/epheo/dotvirt-operator-bundle@sha256:b56a0a3d6bbc865414dff374c1b6d8b1c3eaf6d1f66d858aadb5d3ea75199baa
