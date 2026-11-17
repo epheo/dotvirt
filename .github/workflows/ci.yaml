@@ -206,8 +206,9 @@ jobs:
   # bundle is pointed at THIS build's operator image (served from the kind-local
   # registry), so the job gates the diff; whether the published quay digests still
   # install is verify-published-bundle.yaml's subject, never a PR's. Everything else
-  # the install path pulls is preloaded by olm-kind, so a red here means the bundle
-  # broke — not that a registry hiccuped. No secrets, so it runs on fork PRs too.
+  # the install path pulls is preloaded by olm-kind, apart from scorecard's untar init
+  # image, which the node pulls; so a red here almost always means the bundle broke,
+  # not that a registry hiccuped. No secrets, so it runs on fork PRs too.
   bundle-test:
     runs-on: ubuntu-latest
     steps:
