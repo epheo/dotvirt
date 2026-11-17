@@ -742,9 +742,12 @@ checks a signature when it pulls.
   - a release: `https://github.com/epheo/dotvirt/.github/workflows/release.yaml@refs/tags/vX.Y.Z`;
   - a release candidate: `https://github.com/epheo/dotvirt/.github/workflows/preview.yaml@refs/heads/main`;
   - a per-commit app image from main: `https://github.com/epheo/dotvirt/.github/workflows/ci.yaml@refs/heads/main`.
-- **By a key, once published:** when the maintainers commit `operator/install/cosign.pub`,
-  every image also carries a signature by that key. OpenShift can enforce only that one
-  (below).
+- **By a key:** every image also carries a signature by the key whose public half is
+  `operator/install/cosign.pub`. OpenShift can enforce only that one (below).
+- **What the key accepts:** the same key signs releases, release candidates and the
+  per-commit app images from main. A policy on this key therefore admits all three, not
+  releases only. A stricter, release-only policy needs a second key that only
+  release.yaml holds; the keyless identities already tell the three apart.
 - **Before v0.2.4:** releases are unsigned. Enforce only once the cluster runs a signed
   release, or a rollback to an older one is refused.
 
@@ -789,9 +792,10 @@ spec:
   tag or digest, which the default `MatchRepoDigestOrExact` refuses.
 - The scopes cover the operand, the operator, and the bundle and catalog OLM pulls.
   Images dotvirt runs but does not build (the managed Forgejo, ArgoCD) are outside them.
-- The API is `config.openshift.io/v1` on current OpenShift; earlier releases served it
-  as `v1alpha1` behind the `TechPreviewNoUpgrade` feature set. Check with
+- The API is `config.openshift.io/v1` from OpenShift 4.20. OpenShift 4.19 serves it as
+  `v1alpha1`, only behind the `TechPreviewNoUpgrade` feature set. Check with
   `oc api-resources | grep -i imagepolicies`.
+- After a key rotation, update `keyData` (SECURITY.md, Image signing key).
 - The Machine Config Operator rolls the policy out to every node; see your version's
   documentation for how it updates them.
 - Mirrored (disconnected) installs must mirror the `.sig` tags too, or every dotvirt
@@ -820,7 +824,8 @@ spec:
       url: https://rekor.sigstore.dev
 ```
 
-Add the preview identity to accept release candidates too.
+Add the preview identity to accept release candidates too. The policy-controller
+enforces only in namespaces labelled `policy.sigstore.dev/include=true`.
 
 ## Upgrading
 
