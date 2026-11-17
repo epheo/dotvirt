@@ -309,7 +309,30 @@ jobs:
           EOF
           ./hack/wait-csv.sh dotvirt-ci dotvirt-operator "$CSV_NAME"
       - name: Scorecard (basic + olm)
-        run: operator-sdk scorecard ./operator/bundle --wait-time 180s
+        # Scorecard names each test pod scorecard-test-<4 random chars> and keeps them all
+        # until the run ends, so tests sharing a namespace can draw the same name and fail
+        # with "pods ... already exists". One namespace per test rules the clash out.
+        run: |
+          set -o pipefail
+          # An unlabeled test would select nothing, and scorecard passes zero tests.
+          tests=$(operator-sdk scorecard ./operator/bundle --list -o json |
+            jq -er '.items[] | .spec.labels.test // error("scorecard test without a test label")')
+          for t in $tests; do
+            kubectl create namespace "scorecard-$t"
+            # A pod is refused until its namespace's default ServiceAccount exists.
+            kubectl -n "scorecard-$t" wait --for=create serviceaccount/default --timeout=60s
+          done
+          pids=()
+          for t in $tests; do
+            ns="scorecard-$t"
+            operator-sdk scorecard ./operator/bundle --namespace "$ns" --selector "test=$t" --wait-time 180s \
+              > "$RUNNER_TEMP/$ns.txt" 2>&1 &
+            pids+=("$!")
+          done
+          fail=0
+          for p in "${pids[@]}"; do wait "$p" || fail=1; done
+          cat "$RUNNER_TEMP"/scorecard-*.txt
+          exit "$fail"
 
   # Both images at both release arches (docker-bake.hcl), so a broken Containerfile,
   # Dockerfile or arm64 cross-compile fails the PR, not the release. Layers cache per
