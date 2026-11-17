@@ -50,9 +50,9 @@ ENVTEST_INDEX ?= https://raw.githubusercontent.com/kubernetes-sigs/controller-to
 ENVTEST_ASSETS ?= $$($(SETUP_ENVTEST) use $(ENVTEST_K8S_VERSION) --index $(ENVTEST_INDEX) --bin-dir $(CURDIR)/bin/envtest -p path)
 .PHONY: test-envtest
 test-envtest: ## Run the envtest suite (server-side apply + the operator's RBAC), and type-check the guard.
-	KUBEBUILDER_ASSETS="$(ENVTEST_ASSETS)" go test ./internal/controller/ -run TestEnvtest -count=1 -v
+	KUBEBUILDER_ASSETS="$(ENVTEST_ASSETS)" go test -race ./internal/controller/ -run TestEnvtest -count=1 -v
 	# Its own module, outside the workspace: see test/typecheck.
-	cd test/typecheck && KUBEBUILDER_ASSETS="$(ENVTEST_ASSETS)" GOWORK=off go test ./... -count=1 -v
+	cd test/typecheck && KUBEBUILDER_ASSETS="$(ENVTEST_ASSETS)" GOWORK=off go test -race ./... -count=1 -v
 
 .PHONY: build
 build: generate fmt vet ## Build the manager binary.
