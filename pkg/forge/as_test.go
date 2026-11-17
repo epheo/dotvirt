@@ -2,8 +2,10 @@ package forge
 
 import (
 	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync"
 	"testing"
 )
@@ -88,6 +90,63 @@ func TestCanPush(t *testing.T) {
 			t.Errorf("%d: %v", c.status, err)
 		case got != c.want:
 			t.Errorf("%d %s: CanPush = %v, want %v", c.status, c.body, got, c.want)
+		}
+	}
+}
+
+// redirecting answers the base's first request with a redirect to location
+// and records every request the client sends, where and with what token.
+type redirecting struct {
+	location string
+	mu       sync.Mutex
+	sent     []string // "host path Authorization"
+}
+
+func (rt *redirecting) RoundTrip(r *http.Request) (*http.Response, error) {
+	rt.mu.Lock()
+	first := len(rt.sent) == 0
+	rt.sent = append(rt.sent, r.URL.Host+" "+r.URL.Path+" "+r.Header.Get("Authorization"))
+	rt.mu.Unlock()
+	h := http.Header{}
+	status := http.StatusOK
+	if first {
+		status = http.StatusFound
+		h.Set("Location", rt.location)
+	}
+	return &http.Response{StatusCode: status, Header: h, Body: io.NopCloser(strings.NewReader(`{"number":1}`)), Request: r}, nil
+}
+
+// A redirect off the forge's origin is refused before anything is sent
+// there: a subdomain, another port or scheme, another host. One within the
+// origin is followed.
+func TestForgeRedirectsStayOnTheOrigin(t *testing.T) {
+	for location, follows := range map[string]bool{
+		"https://sub.forge.example/api/v1/repos/o/r/pulls/1":  false,
+		"https://forge.example:8443/api/v1/repos/o/r/pulls/1": false,
+		"http://forge.example/api/v1/repos/o/r/pulls/1":       false,
+		"https://elsewhere.example/api/v1/repos/o/r/pulls/1":  false,
+		"https://FORGE.example:443/api/v1/repos/o/r/pulls/2":  true,
+		"/api/v1/repos/o/r/pulls/3":                           true,
+	} {
+		for name, f := range map[string]*Factory{
+			"console": NewFactory("https://forge.example", StaticToken("bot-token"), false, ""),
+			"user":    NewFactory("https://forge.example", StaticToken(""), false, "").As("user-token"),
+		} {
+			rt := &redirecting{location: location}
+			f.http.Transport = rt
+			_, err := f.For("o/r.git").PR(1)
+			if follows {
+				if err != nil || len(rt.sent) != 2 || !strings.HasPrefix(strings.ToLower(rt.sent[1]), "forge.example") {
+					t.Errorf("%s, %s: %v, sent %q; want the redirect within the origin followed", name, location, err, rt.sent)
+				}
+				continue
+			}
+			if err == nil || !strings.Contains(err.Error(), "another origin") {
+				t.Errorf("%s, %s: %v, want the redirect refused", name, location, err)
+			}
+			if len(rt.sent) != 1 {
+				t.Errorf("%s, %s: sent %q, want no request, so no token, past the forge", name, location, rt.sent)
+			}
 		}
 	}
 }

@@ -12,7 +12,9 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"strconv"
 	"strings"
@@ -162,7 +164,7 @@ func (f *Factory) SameForge(repoURL string) bool {
 }
 
 func httpClient(insecure bool, caFile string) *http.Client {
-	hc := &http.Client{Timeout: 15 * time.Second}
+	hc := &http.Client{Timeout: 15 * time.Second, CheckRedirect: SameOrigin}
 	if insecure {
 		hc.Transport = TLSTransport(&tls.Config{InsecureSkipVerify: true}) // #nosec G402 - dev flag
 		return hc
@@ -173,6 +175,33 @@ func httpClient(insecure bool, caFile string) *http.Client {
 		}
 	}
 	return hc
+}
+
+// maxRedirects is net/http's own limit.
+const maxRedirects = 10
+
+// SameOrigin is a CheckRedirect refusing a redirect off the origin (scheme,
+// host and port) the request was first sent to, before anything goes there:
+// a forge token rides every request, and net/http would carry it on to a
+// subdomain.
+func SameOrigin(req *http.Request, via []*http.Request) error {
+	if len(via) >= maxRedirects {
+		return fmt.Errorf("stopped after %d redirects", maxRedirects)
+	}
+	if from, to := origin(via[0].URL), origin(req.URL); from != to {
+		return fmt.Errorf("refused a redirect from %s to another origin, %s", from, to)
+	}
+	return nil
+}
+
+// origin is u's scheme://host:port, the port spelled out when u leaves it to
+// the scheme.
+func origin(u *url.URL) string {
+	scheme, port := strings.ToLower(u.Scheme), u.Port()
+	if port == "" {
+		port = map[string]string{"http": "80", "https": "443"}[scheme]
+	}
+	return scheme + "://" + net.JoinHostPort(strings.ToLower(u.Hostname()), port)
 }
 
 // TLSTransport is the default transport with tlsCfg. A bare Transport would

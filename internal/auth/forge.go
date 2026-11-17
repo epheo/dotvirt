@@ -21,6 +21,8 @@ import (
 	"time"
 
 	"golang.org/x/oauth2"
+
+	"github.com/epheo/dotvirt/pkg/forge"
 )
 
 // ForgeConfig is the OAuth2 application dotvirt is registered as at the forge.
@@ -75,6 +77,7 @@ const reachTTL = 30 * time.Second
 // a's sign-in answers say that pull requests are delegated.
 func NewForge(cfg ForgeConfig, a *Authenticator) *Forge {
 	f := &Forge{cfg: cfg, sealer: a.sealer, client: tlsClient("forge", cfg.CAFile, cfg.InsecureTLS), store: newForgeSessions()}
+	f.client.CheckRedirect = forge.SameOrigin
 	f.store.renew = f.renew
 	a.forgeDelegated = true
 	return f

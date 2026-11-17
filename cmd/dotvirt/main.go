@@ -240,7 +240,7 @@ func run() error {
 	if cfg.ForgeDelegated {
 		switch {
 		case cfg.PublicURL == "":
-			delegation.Off = "the console has no public URL for the forge to send users back to: set spec.ingress.host (-public-url)"
+			delegation.Off = "the console has no public URL for the forge to send users back to: set spec.ingress.host, or wait for the router to assign the Route's host (-public-url)"
 		case cfg.ForgeDelegatedURL == "":
 			delegation.Off = "no forge URL to send users' tokens to: set spec.forge.url (-forge-delegated-url)"
 		case cfg.ForgeClientID == "" || cfg.ForgeClientSecret == "" || cfg.ForgeAuthorizeURL == "":

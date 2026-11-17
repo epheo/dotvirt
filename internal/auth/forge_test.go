@@ -677,6 +677,27 @@ func TestForgeAccountRefusalIsNoOutage(t *testing.T) {
 	}
 }
 
+// The account lookup carries the user's token: a redirect off the forge's
+// origin is refused, and nothing reaches the other address.
+func TestForgeAccountLookupStaysOnTheOrigin(t *testing.T) {
+	rig := newForgeRig(t)
+	reached := 0
+	other := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		reached++
+		_, _ = w.Write([]byte(`{"login":"elsewhere"}`))
+	}))
+	defer other.Close()
+	api := httptest.NewServer(http.RedirectHandler(other.URL+"/api/v1/user", http.StatusFound))
+	defer api.Close()
+	rig.withForgeAPI(api.URL)
+	if login, err := rig.f.account(context.Background(), "access-1"); err == nil {
+		t.Fatalf("the lookup followed the redirect to %q", login)
+	}
+	if reached != 0 {
+		t.Fatalf("the other address got %d requests", reached)
+	}
+}
+
 // withForgeAPI rebuilds rig's flow against api for the forge API (the account
 // lookup and the reachability probe); tokens still come from the fake forge.
 func (rig *forgeRig) withForgeAPI(api string) {
