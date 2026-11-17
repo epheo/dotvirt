@@ -65,6 +65,24 @@ func TestChangesExactly(t *testing.T) {
 			run("add", "-A")
 			run("commit", "-q", "--amend", "--no-edit")
 		}},
+		// The offer rewrites an existing file that main then moves: a merge
+		// carries the rewrite to the new path.
+		{name: "rewrite of a file main renames", edit: func(run func(...string), write func(string, string)) {
+			run("checkout", "-q", "main")
+			write("templates/a.yaml", "kind: Old\n")
+			run("add", "-A")
+			run("commit", "-qm", "old a")
+			run("checkout", "-q", "-B", "offer", "main")
+			for _, f := range offerSet {
+				write(f.Path, string(f.Content))
+			}
+			run("add", "-A")
+			run("commit", "-qm", "offer")
+			run("checkout", "-q", "main")
+			run("mv", "templates/a.yaml", "tenant-a/a.yaml")
+			run("commit", "-qm", "move a")
+			run("checkout", "-q", "offer")
+		}},
 		{name: "second commit", edit: func(run func(...string), _ func(string, string)) {
 			run("commit", "-q", "--allow-empty", "-m", "more")
 		}},

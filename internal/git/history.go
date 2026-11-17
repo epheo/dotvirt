@@ -264,11 +264,13 @@ func (r *Repo) BranchDiff(base, head string) ([]FileChange, error) {
 }
 
 // ChangesExactly reports whether commit head is files committed on base's
-// history: one commit, whose only parent base holds, setting each path to
-// that content as a regular file and touching no other path, whatever its
-// kind. More commits past the fork, a merge among them, are not: a forge that
-// replays them on merge brings their changes in, whatever head's tree shows.
-// Paths are the repo's, whatever folder this mirror is scoped to.
+// history: one commit, whose only parent base holds, adding each path, absent
+// from the parent, with that content as a regular file and touching no other
+// path, whatever its kind. More commits past the fork, a merge among them, are
+// not: a forge that replays them on merge brings their changes in, whatever
+// head's tree shows. Nor is a change to an existing file: a merge carries it
+// to wherever base has since renamed that file. Paths are the repo's,
+// whatever folder this mirror is scoped to.
 func (r *Repo) ChangesExactly(base, head string, files []model.File) (bool, error) {
 	repo := r.repo.Load()
 	tip, err := commitAt(repo, base)
@@ -304,7 +306,7 @@ func (r *Repo) ChangesExactly(base, head string, files []model.File) (bool, erro
 	}
 	for _, ch := range changes {
 		hash, ok := want[ch.To.Name]
-		if !ok || ch.To.TreeEntry.Mode != filemode.Regular || ch.To.TreeEntry.Hash != hash {
+		if !ok || ch.From.Name != "" || ch.To.TreeEntry.Mode != filemode.Regular || ch.To.TreeEntry.Hash != hash {
 			return false, nil
 		}
 	}
