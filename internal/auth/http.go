@@ -16,6 +16,9 @@ import (
 type userResponse struct {
 	Username string   `json:"username"`
 	Groups   []string `json:"groups"`
+	// ForgeDelegated: the console connects the user's own forge account, so
+	// it reads the connection; absent on every other install.
+	ForgeDelegated bool `json:"forgeDelegated,omitempty"`
 }
 
 // Login validates the posted token and, on success, sets the session cookie.
@@ -46,7 +49,7 @@ func (a *Authenticator) Login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	setCookie(w, r, session{token: token, issued: time.Now()}, a.sealer)
-	writeJSON(w, http.StatusOK, userResponse{Username: id.Username, Groups: id.Groups})
+	writeJSON(w, http.StatusOK, userResponse{Username: id.Username, Groups: id.Groups, ForgeDelegated: a.forgeDelegated})
 }
 
 // Logout ends the session the request's cookie seals, with every older session
@@ -99,7 +102,7 @@ func (a *Authenticator) Me(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "not authenticated", http.StatusUnauthorized)
 		return
 	}
-	writeJSON(w, http.StatusOK, userResponse{Username: id.Username, Groups: id.Groups})
+	writeJSON(w, http.StatusOK, userResponse{Username: id.Username, Groups: id.Groups, ForgeDelegated: a.forgeDelegated})
 }
 
 // Middleware authenticates every request except the open endpoints (health and

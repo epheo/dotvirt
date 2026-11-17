@@ -17,6 +17,7 @@ import (
 	"log"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"golang.org/x/oauth2"
@@ -31,7 +32,9 @@ type ForgeConfig struct {
 	AuthorizeURL string
 	// TokenURL is the token endpoint, called server to server.
 	TokenURL string
-	// APIURL is the forge's base URL, for naming the connected account.
+	// APIURL is the forge's base URL users' tokens are sent to, from the
+	// admin's spec alone: never from the forge credential Secret, which the
+	// operator may write.
 	APIURL      string
 	RedirectURL string // {public-url}/api/forge/callback
 	CAFile      string
@@ -51,12 +54,24 @@ type Forge struct {
 	sealer cipher.AEAD
 	client *http.Client
 	store  *forgeSessions
+
+	// The forge's reachability, for the console's automatic connect: one
+	// that cannot complete would leave users on a browser error page.
+	probeMu  sync.Mutex
+	probedAt time.Time
+	up       bool
+	failedAt time.Time // the last forge call of this flow that could not reach it
 }
 
-// NewForge builds the flow. Its connections live beside a's sessions.
+// reachTTL is how long a reachability answer, or a failed forge call, holds.
+const reachTTL = 30 * time.Second
+
+// NewForge builds the flow. Its connections live beside a's sessions, and
+// a's sign-in answers say that pull requests are delegated.
 func NewForge(cfg ForgeConfig, a *Authenticator) *Forge {
 	f := &Forge{cfg: cfg, sealer: a.sealer, client: tlsClient("forge", cfg.CAFile, cfg.InsecureTLS), store: newForgeSessions()}
 	f.store.renew = f.renew
+	a.forgeDelegated = true
 	return f
 }
 
@@ -87,15 +102,16 @@ func forgeStateCookieName(state string) string { return forgeStateCookie + "_" +
 // It marks the session asked, so an abandoned connect is never restarted by
 // the console on its own.
 func (f *Forge) Connect(w http.ResponseWriter, r *http.Request) {
-	id, ok := FromContext(r.Context())
-	if !ok || id.Issued.IsZero() {
+	id, _ := FromContext(r.Context())
+	key, ok := forgeKey(id)
+	if !ok {
 		// A bearer header has no browser session to connect.
 		http.Redirect(w, r, "/", http.StatusFound)
 		return
 	}
-	f.store.markAsked(id.Key(), id.Issued)
+	f.store.markAsked(key, id.Issued)
 	state, verifier := randomToken(), oauth2.GenerateVerifier()
-	sealed := withReturn(strings.Join([]string{state, verifier, sessionTag(id)}, "."), r.URL.Query().Get("return"))
+	sealed := withReturn(strings.Join([]string{state, verifier, sessionTag(key)}, "."), r.URL.Query().Get("return"))
 	http.SetCookie(w, &http.Cookie{
 		Name:     forgeStateCookieName(state),
 		Value:    seal([]byte(sealed), forgeStatePurpose, f.sealer),
@@ -110,9 +126,10 @@ func (f *Forge) Connect(w http.ResponseWriter, r *http.Request) {
 }
 
 // sessionTag binds a connect to the console session that started it, so a
-// callback cannot hand one session's forge account to another.
-func sessionTag(id Identity) string {
-	return base64.RawURLEncoding.EncodeToString([]byte(id.Key()))
+// callback cannot hand one session's forge account to another, even another
+// session of the same user or of the same pasted token.
+func sessionTag(key string) string {
+	return base64.RawURLEncoding.EncodeToString([]byte(key))
 }
 
 // Callback (GET /api/forge/callback) checks the state against the session,
@@ -131,8 +148,9 @@ func (f *Forge) Callback(w http.ResponseWriter, r *http.Request) {
 		}
 		http.Redirect(w, r, ret, http.StatusFound)
 	}
-	id, ok := FromContext(r.Context())
-	if !ok || id.Issued.IsZero() {
+	id, _ := FromContext(r.Context())
+	key, ok := forgeKey(id)
+	if !ok {
 		fail("no console session", nil)
 		return
 	}
@@ -148,7 +166,7 @@ func (f *Forge) Callback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ret = back
-	if !hmac.Equal([]byte(parts[2]), []byte(sessionTag(id))) {
+	if !hmac.Equal([]byte(parts[2]), []byte(sessionTag(key))) {
 		fail("the connect was started by another console session", nil)
 		return
 	}
@@ -160,6 +178,7 @@ func (f *Forge) Callback(w http.ResponseWriter, r *http.Request) {
 	ctx := context.WithValue(r.Context(), oauth2.HTTPClient, f.client)
 	tok, err := f.oauth2Config().Exchange(ctx, code, oauth2.VerifierOption(parts[1]))
 	if err != nil {
+		f.noteFailure(err)
 		fail("code exchange", scrubbed(err))
 		return
 	}
@@ -170,10 +189,11 @@ func (f *Forge) Callback(w http.ResponseWriter, r *http.Request) {
 	}
 	login, err := f.account(r.Context(), t.access)
 	if err != nil {
+		f.noteFailure(err)
 		fail("name the forge account", err)
 		return
 	}
-	f.store.connect(id.Key(), id.Issued, login, t)
+	f.store.connect(key, id.Issued, login, t)
 	log.Printf("forge connect: %s connected forge account %s", id.Username, login)
 	f.clearState(w, r, c.Name)
 	http.Redirect(w, r, ret, http.StatusFound)
@@ -223,6 +243,7 @@ func (f *Forge) renew(ctx context.Context, refresh string) (forgeTokens, error) 
 		if errors.As(err, &rerr) && grantRefused(rerr.ErrorCode) {
 			return forgeTokens{}, fmt.Errorf("%w: %s", errGrantEnded, rerr.ErrorCode)
 		}
+		f.noteFailure(err)
 		return forgeTokens{}, scrubbed(err)
 	}
 	t, err := forgeTokensFrom(tok)
@@ -258,6 +279,46 @@ func forgeTokensFrom(tok *oauth2.Token) (forgeTokens, error) {
 	return forgeTokens{access: tok.AccessToken, refresh: tok.RefreshToken, expiry: expiry}, nil
 }
 
+// noteFailure records a forge call of this flow that could not reach the
+// forge (a transport error or a 5xx), which holds the automatic connect back.
+func (f *Forge) noteFailure(err error) {
+	var rerr *oauth2.RetrieveError
+	if errors.As(err, &rerr) && rerr.Response != nil && rerr.Response.StatusCode < 500 {
+		return // the forge answered: reachable, whatever it said
+	}
+	f.probeMu.Lock()
+	f.failedAt = time.Now()
+	f.probeMu.Unlock()
+}
+
+// reachable reports whether the forge answers dotvirt now: false within
+// reachTTL of a failed call, else a cached probe of its API (any answer below
+// 500 is reachable). The browser reaches the authorize page through another
+// address, so this only approximates it; a forge whose API is down never
+// gets users sent to it on their own.
+func (f *Forge) reachable(ctx context.Context) bool {
+	f.probeMu.Lock()
+	defer f.probeMu.Unlock()
+	now := time.Now()
+	if now.Sub(f.failedAt) < reachTTL {
+		return false
+	}
+	if now.Sub(f.probedAt) < reachTTL {
+		return f.up
+	}
+	ctx, cancel := context.WithTimeout(ctx, 3*time.Second)
+	defer cancel()
+	f.up = false
+	if req, err := http.NewRequestWithContext(ctx, http.MethodGet, strings.TrimRight(f.cfg.APIURL, "/")+"/api/v1/version", nil); err == nil {
+		if resp, err := f.client.Do(req); err == nil {
+			resp.Body.Close()
+			f.up = resp.StatusCode < 500
+		}
+	}
+	f.probedAt = now
+	return f.up
+}
+
 // ForgeStatus is a console session's forge connection, as the UI shows it.
 type ForgeStatus struct {
 	Connected bool   `json:"connected"`
@@ -265,23 +326,45 @@ type ForgeStatus struct {
 	// Asked: a connect already started in this session, so the console starts
 	// none on its own.
 	Asked bool `json:"asked"`
+	// Reachable: the forge answers, so an automatic connect can complete.
+	// Probed only for a session the console would connect on its own.
+	Reachable bool `json:"reachable"`
 }
 
-// Status reports id's connection.
-func (f *Forge) Status(id Identity) ForgeStatus {
-	connected, login, asked := f.store.status(id.Key())
-	return ForgeStatus{Connected: connected, Login: login, Asked: asked}
+// Status reports id's connection. A bearer header holds none.
+func (f *Forge) Status(ctx context.Context, id Identity) ForgeStatus {
+	key, ok := forgeKey(id)
+	if !ok {
+		return ForgeStatus{}
+	}
+	connected, login, asked := f.store.status(key)
+	st := ForgeStatus{Connected: connected, Login: login, Asked: asked}
+	if !connected && !asked {
+		st.Reachable = f.reachable(ctx)
+	}
+	return st
 }
 
 // Disconnect drops id's forge tokens. The grant stays at the forge: only the
 // user, the forge's admin, or deleting the forge account revokes it.
 func (f *Forge) Disconnect(id Identity) {
-	f.store.disconnect(id.Key())
+	if key, ok := forgeKey(id); ok {
+		f.store.disconnect(key)
+	}
 }
 
-// Forget drops the connection of the console session under key (sign-out).
-func (f *Forge) Forget(key string) {
-	f.store.forget(key)
+// Held is how many console sessions hold a forge entry, connected or asked.
+func (f *Forge) Held() int {
+	f.store.mu.Lock()
+	defer f.store.mu.Unlock()
+	return len(f.store.m)
+}
+
+// Forget drops the connection of id's console session (sign-out).
+func (f *Forge) Forget(id Identity) {
+	if key, ok := forgeKey(id); ok {
+		f.store.forget(key)
+	}
 }
 
 // ForgeCredential is what a delegated forge action runs with: the forge
@@ -294,7 +377,11 @@ type ForgeCredential struct {
 // Credential returns id's forge credential, renewed when due, or
 // ErrForgeNotConnected.
 func (f *Forge) Credential(ctx context.Context, id Identity) (ForgeCredential, error) {
-	login, token, err := f.store.token(ctx, id.Key())
+	key, ok := forgeKey(id)
+	if !ok {
+		return ForgeCredential{}, ErrForgeNotConnected
+	}
+	login, token, err := f.store.token(ctx, key)
 	if err != nil {
 		return ForgeCredential{}, err
 	}

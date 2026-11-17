@@ -5,16 +5,17 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"strconv"
 	"sync"
 	"time"
 )
 
 // forgeSessions holds each console session's forge tokens for delegated pull
-// requests, by the session's Identity.Key. In memory only, like oidcSessions:
-// a restart drops every connection, and the next forge action reconnects
-// through a grant the forge remembers. An entry ends with its console session,
-// so the provider ending that session (sign-out, expiry, an account it
-// suspends) also ends dotvirt's use of the forge token.
+// requests, by forgeKey. In memory only, like oidcSessions: a restart drops
+// every connection, and the next forge action reconnects through a grant the
+// forge remembers. An entry ends with its console session, so the provider
+// ending that session (sign-out, expiry, an account it suspends) also ends
+// dotvirt's use of the forge token.
 type forgeSessions struct {
 	mu    sync.Mutex
 	m     map[string]*forgeSession
@@ -33,12 +34,19 @@ type forgeTokens struct {
 }
 
 type forgeSession struct {
-	mu      sync.Mutex // held across a renewal: the forge accepts a refresh token once
-	issued  time.Time  // the console session's issue time
-	login   string     // the forge account the tokens act as
-	tokens  forgeTokens
-	renewAt time.Time
-	retryAt time.Time // set by a renewal that could not run
+	// renewing is held across a renewal, so the forge's single-use refresh
+	// token is spent once; mu guards the fields alone and is never held
+	// across a forge call, so a status read never waits on a renewal.
+	renewing sync.Mutex
+	mu       sync.Mutex
+	issued   time.Time // the console session's issue time
+	login    string    // the forge account the tokens act as
+	tokens   forgeTokens
+	renewAt  time.Time
+	retryAt  time.Time // set by a renewal that could not run
+	// gen counts connects and disconnects: a renewal that lands after one
+	// must not resurrect or overwrite the connection it was not for.
+	gen int
 	// asked: a connect started during this console session, so the console
 	// starts no further one on its own; the user's next save or sign-in asks.
 	asked bool
@@ -55,8 +63,19 @@ func newForgeSessions() *forgeSessions {
 	return &forgeSessions{m: map[string]*forgeSession{}, limit: maxForgeSessions}
 }
 
+// forgeKey is the console session a connection belongs to: its Identity.Key
+// and issue time. The issue time keeps apart two browsers signed in with one
+// pasted token, whose Key is the token's. A bearer header (zero issue time)
+// is no console session and holds no connection.
+func forgeKey(id Identity) (string, bool) {
+	if id.Issued.IsZero() {
+		return "", false
+	}
+	return id.Key() + "@" + strconv.FormatInt(id.Issued.UnixNano(), 10), true
+}
+
 // entry returns the live entry under key, creating it for a session issued at
-// issued. A zero issued (a bearer header) has no session to hold one.
+// issued.
 func (s *forgeSessions) entry(key string, issued time.Time) *forgeSession {
 	now := time.Now()
 	s.mu.Lock()
@@ -122,6 +141,7 @@ func (s *forgeSessions) connect(key string, issued time.Time, login string, t fo
 	e.mu.Lock()
 	e.login, e.tokens, e.asked = login, t, true
 	e.renewAt, e.retryAt = renewAt(time.Now(), t.expiry), time.Time{}
+	e.gen++
 	e.mu.Unlock()
 }
 
@@ -130,9 +150,14 @@ func (s *forgeSessions) connect(key string, issued time.Time, login string, t fo
 func (s *forgeSessions) disconnect(key string) {
 	if e := s.get(key); e != nil {
 		e.mu.Lock()
-		e.login, e.tokens = "", forgeTokens{}
+		e.dropLocked()
 		e.mu.Unlock()
 	}
+}
+
+func (e *forgeSession) dropLocked() {
+	e.login, e.tokens = "", forgeTokens{}
+	e.gen++
 }
 
 // forget drops the session's entry: the console session ended.
@@ -142,8 +167,13 @@ func (s *forgeSessions) forget(key string) {
 	s.mu.Unlock()
 }
 
-// status reports the session's connection. Unexpired tokens count; one whose
-// renewal is due still counts, as token() renews it on use.
+// usable: tokens a caller may still be served, now or after a renewal. An
+// expired access token with no refresh token is not.
+func (t forgeTokens) usable(now time.Time) bool {
+	return t.access != "" && (t.refresh != "" || now.Before(t.expiry))
+}
+
+// status reports the session's connection, without waiting on a renewal.
 func (s *forgeSessions) status(key string) (connected bool, login string, asked bool) {
 	e := s.get(key)
 	if e == nil {
@@ -151,8 +181,7 @@ func (s *forgeSessions) status(key string) (connected bool, login string, asked 
 	}
 	e.mu.Lock()
 	defer e.mu.Unlock()
-	live := e.tokens.access != "" && (e.tokens.refresh != "" || time.Now().Before(e.tokens.expiry))
-	if !live {
+	if !e.tokens.usable(time.Now()) {
 		return false, "", e.asked
 	}
 	return true, e.login, e.asked
@@ -167,41 +196,56 @@ func (s *forgeSessions) token(ctx context.Context, key string) (string, string, 
 	if e == nil {
 		return "", "", ErrForgeNotConnected
 	}
+	e.renewing.Lock()
+	defer e.renewing.Unlock()
+
 	e.mu.Lock()
-	defer e.mu.Unlock()
-	t := e.tokens
-	if t.access == "" {
+	t, login, gen := e.tokens, e.login, e.gen
+	now := time.Now()
+	due := !now.Before(e.renewAt) && !now.Before(e.retryAt) && t.refresh != ""
+	if !t.usable(now) {
+		if t.access != "" {
+			e.dropLocked()
+		}
+		e.mu.Unlock()
 		return "", "", ErrForgeNotConnected
 	}
-	now := time.Now()
-	if now.Before(e.renewAt) || now.Before(e.retryAt) || t.refresh == "" {
+	e.mu.Unlock()
+	if !due {
 		if now.Before(t.expiry) {
-			return e.login, t.access, nil
-		}
-		if t.refresh == "" {
-			e.login, e.tokens = "", forgeTokens{}
-			return "", "", ErrForgeNotConnected
+			return login, t.access, nil
 		}
 		return "", "", errors.New("the forge token expired and its renewal is failing")
 	}
+
 	// Detached: a renewal the forge completes and the caller abandons would
 	// leave the session holding a spent refresh token.
 	rctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), probeTimeout)
 	defer cancel()
 	next, err := s.renew(rctx, t.refresh)
+
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if e.gen != gen {
+		// A connect or disconnect landed meanwhile: it decides.
+		if !e.tokens.usable(time.Now()) {
+			return "", "", ErrForgeNotConnected
+		}
+		return e.login, e.tokens.access, nil
+	}
 	switch {
 	case errors.Is(err, errGrantEnded):
 		log.Printf("auth: forge connection ended by the forge: %v", err)
-		e.login, e.tokens = "", forgeTokens{}
+		e.dropLocked()
 		return "", "", ErrForgeNotConnected
 	case err != nil:
 		log.Printf("auth: renew a forge connection's token: %v", err)
 		e.retryAt = now.Add(probeTTL)
 		if now.Before(t.expiry) {
-			return e.login, t.access, nil
+			return login, t.access, nil
 		}
 		return "", "", fmt.Errorf("renew the forge token: %w", err)
 	}
 	e.tokens, e.renewAt, e.retryAt = next, renewAt(time.Now(), next.expiry), time.Time{}
-	return e.login, next.access, nil
+	return login, next.access, nil
 }

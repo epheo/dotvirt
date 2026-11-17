@@ -126,8 +126,9 @@ type forgeRig struct {
 
 func newForgeRig(t *testing.T) *forgeRig {
 	a, _ := fakeAuth(map[string]authnv1.UserInfo{
-		"tok-alice": {Username: "alice"},
-		"tok-bob":   {Username: "bob"},
+		"tok-alice":  {Username: "alice"},
+		"tok-alice2": {Username: "alice"},
+		"tok-bob":    {Username: "bob"},
 	})
 	ff := newFakeForge(t)
 	rig := &forgeRig{forge: ff, a: a}
@@ -200,6 +201,16 @@ func (rig *forgeRig) connect(t *testing.T, session *http.Cookie, page string) (*
 	return state, code, st
 }
 
+// keyOf is the store key of id's console session.
+func keyOf(t *testing.T, id Identity) string {
+	t.Helper()
+	k, ok := forgeKey(id)
+	if !ok {
+		t.Fatal("no console session")
+	}
+	return k
+}
+
 func (rig *forgeRig) callback(t *testing.T, session, state *http.Cookie, query string) *httptest.ResponseRecorder {
 	t.Helper()
 	return rig.get("/api/forge/callback?"+query, session, state)
@@ -214,7 +225,7 @@ func TestForgeConnectRoundTrip(t *testing.T) {
 		t.Fatalf("callback: %d to %q, want the page the connect started from", rec.Code, rec.Header().Get("Location"))
 	}
 	id := rig.identity(t, session)
-	if s := rig.f.Status(id); !s.Connected || s.Login != "alice-forge" || !s.Asked {
+	if s := rig.f.Status(context.Background(), id); !s.Connected || s.Login != "alice-forge" || !s.Asked {
 		t.Fatalf("status after connect = %+v", s)
 	}
 	cred, err := rig.f.Credential(context.Background(), id)
@@ -253,7 +264,7 @@ func TestForgeCallbackChecksTheState(t *testing.T) {
 	if rec := rig.get("/api/forge/callback?code="+code+"&state="+st, session); rec.Header().Get("Location") != "/" {
 		t.Errorf("no state cookie: landed on %q", rec.Header().Get("Location"))
 	}
-	if rig.f.Status(rig.identity(t, session)).Connected {
+	if rig.f.Status(context.Background(), rig.identity(t, session)).Connected {
 		t.Fatal("a callback that failed its state check connected the session")
 	}
 }
@@ -263,7 +274,7 @@ func TestForgeCallbackBindsTheConnectToItsSession(t *testing.T) {
 	alice, bob := rig.signIn(t, "tok-alice"), rig.signIn(t, "tok-bob")
 	state, code, st := rig.connect(t, alice, "/")
 	rig.callback(t, bob, state, "code="+code+"&state="+st)
-	if rig.f.Status(rig.identity(t, bob)).Connected || rig.f.Status(rig.identity(t, alice)).Connected {
+	if rig.f.Status(context.Background(), rig.identity(t, bob)).Connected || rig.f.Status(context.Background(), rig.identity(t, alice)).Connected {
 		t.Fatal("a connect started by one session connected another")
 	}
 }
@@ -276,7 +287,7 @@ func TestForgeCallbackNeedsTheVerifier(t *testing.T) {
 	// sealed verifier cannot redeem it.
 	other, _, otherState := rig.connect(t, session, "/")
 	rig.callback(t, session, other, "code="+code+"&state="+otherState)
-	if rig.f.Status(rig.identity(t, session)).Connected {
+	if rig.f.Status(context.Background(), rig.identity(t, session)).Connected {
 		t.Fatal("a code redeemed with another connect's verifier")
 	}
 }
@@ -289,7 +300,7 @@ func TestForgeNotGrantedLandsWithoutAConnection(t *testing.T) {
 	if rec.Header().Get("Location") != "/storage" {
 		t.Errorf("a declined connect landed on %q, want its page", rec.Header().Get("Location"))
 	}
-	if s := rig.f.Status(rig.identity(t, session)); s.Connected || !s.Asked {
+	if s := rig.f.Status(context.Background(), rig.identity(t, session)); s.Connected || !s.Asked {
 		t.Fatalf("status after a declined connect = %+v, want asked and not connected", s)
 	}
 }
@@ -323,7 +334,7 @@ func TestForgeRenewsOncePerConnection(t *testing.T) {
 	state, code, st := rig.connect(t, session, "/")
 	rig.callback(t, session, state, "code="+code+"&state="+st)
 	id := rig.identity(t, session)
-	e := rig.f.store.get(id.Key())
+	e := rig.f.store.get(keyOf(t, id))
 	e.mu.Lock()
 	e.renewAt = time.Now().Add(-time.Second)
 	e.mu.Unlock()
@@ -358,7 +369,7 @@ func TestForgeRefusedRenewalDisconnects(t *testing.T) {
 	state, code, st := rig.connect(t, session, "/")
 	rig.callback(t, session, state, "code="+code+"&state="+st)
 	id := rig.identity(t, session)
-	e := rig.f.store.get(id.Key())
+	e := rig.f.store.get(keyOf(t, id))
 	e.mu.Lock()
 	e.renewAt = time.Now().Add(-time.Second)
 	e.mu.Unlock()
@@ -366,7 +377,7 @@ func TestForgeRefusedRenewalDisconnects(t *testing.T) {
 	if _, err := rig.f.Credential(context.Background(), id); !errors.Is(err, ErrForgeNotConnected) {
 		t.Fatalf("credential after a refused renewal: %v, want ErrForgeNotConnected", err)
 	}
-	if rig.f.Status(id).Connected {
+	if rig.f.Status(context.Background(), id).Connected {
 		t.Fatal("a refused grant left the session connected")
 	}
 }
@@ -379,14 +390,14 @@ func TestForgeDisconnectAndSignOut(t *testing.T) {
 	id := rig.identity(t, session)
 
 	rig.f.Disconnect(id)
-	if s := rig.f.Status(id); s.Connected || !s.Asked {
+	if s := rig.f.Status(context.Background(), id); s.Connected || !s.Asked {
 		t.Fatalf("after disconnect: %+v, want asked and not connected (no automatic reconnect)", s)
 	}
 	if _, err := rig.f.Credential(context.Background(), id); !errors.Is(err, ErrForgeNotConnected) {
 		t.Fatalf("credential after disconnect: %v", err)
 	}
-	rig.f.Forget(id.Key())
-	if s := rig.f.Status(id); s.Asked {
+	rig.f.Forget(id)
+	if s := rig.f.Status(context.Background(), id); s.Asked {
 		t.Fatal("sign-out kept the session's forge entry")
 	}
 }
@@ -409,7 +420,7 @@ func TestForgeConnectionsAreLostOnRestart(t *testing.T) {
 	state, code, st := rig.connect(t, session, "/")
 	rig.callback(t, session, state, "code="+code+"&state="+st)
 	restarted := NewForge(rig.f.cfg, rig.a)
-	if restarted.Status(rig.identity(t, session)).Connected {
+	if restarted.Status(context.Background(), rig.identity(t, session)).Connected {
 		t.Fatal("a connection survived a restart")
 	}
 }
@@ -427,5 +438,139 @@ func TestForgeLogsNoTokens(t *testing.T) {
 	log.Print(err)
 	if out := buf.String(); strings.Contains(out, "secret-") || !strings.Contains(out, "400 invalid_grant") {
 		t.Fatalf("logged %q", out)
+	}
+}
+
+// Two browsers signed in with one pasted token are two console sessions: a
+// connect started in one never completes in the other, and each one's
+// sign-out leaves the other's connection.
+func TestForgeSameTokenTwoBrowsersStayApart(t *testing.T) {
+	rig := newForgeRig(t)
+	a := rig.signIn(t, "tok-alice")
+	time.Sleep(2 * time.Millisecond)
+	b := rig.signIn(t, "tok-alice")
+	ida, idb := rig.identity(t, a), rig.identity(t, b)
+	if ida.Key() != idb.Key() {
+		t.Fatal("the rig no longer shares the token key; this test needs it")
+	}
+	state, code, st := rig.connect(t, a, "/")
+	rig.callback(t, b, state, "code="+code+"&state="+st)
+	if rig.f.Status(context.Background(), idb).Connected || rig.f.Status(context.Background(), ida).Connected {
+		t.Fatal("a connect started in one browser completed in the other")
+	}
+	if _, err := rig.f.Credential(context.Background(), idb); !errors.Is(err, ErrForgeNotConnected) {
+		t.Fatalf("the other browser got a credential: %v", err)
+	}
+	stateB, codeB, stB := rig.connect(t, b, "/")
+	rig.callback(t, b, stateB, "code="+codeB+"&state="+stB)
+	rig.f.Forget(ida)
+	if !rig.f.Status(context.Background(), idb).Connected {
+		t.Fatal("one browser's sign-out dropped the other's connection")
+	}
+}
+
+// Another console session of the same user is still another session.
+func TestForgeSameUserOtherSessionStaysApart(t *testing.T) {
+	rig := newForgeRig(t)
+	a, b := rig.signIn(t, "tok-alice"), rig.signIn(t, "tok-alice2")
+	state, code, st := rig.connect(t, a, "/")
+	rig.callback(t, b, state, "code="+code+"&state="+st)
+	if rig.f.Status(context.Background(), rig.identity(t, b)).Connected {
+		t.Fatal("a connect completed in another session of the same user")
+	}
+}
+
+// A bearer header is no console session: it never reads a connection.
+func TestForgeBearerHeaderHoldsNoConnection(t *testing.T) {
+	rig := newForgeRig(t)
+	session := rig.signIn(t, "tok-alice")
+	state, code, st := rig.connect(t, session, "/")
+	rig.callback(t, session, state, "code="+code+"&state="+st)
+	req := httptest.NewRequest("GET", "/api/me", nil)
+	req.Header.Set("Authorization", "Bearer tok-alice")
+	rig.h.ServeHTTP(httptest.NewRecorder(), req)
+	bearer := rig.seen
+	if !bearer.Issued.IsZero() || bearer.Username != "alice" {
+		t.Fatalf("bearer identity = %+v", bearer)
+	}
+	if rig.f.Status(context.Background(), bearer).Connected {
+		t.Fatal("a bearer header read the session's connection")
+	}
+	if _, err := rig.f.Credential(context.Background(), bearer); !errors.Is(err, ErrForgeNotConnected) {
+		t.Fatalf("a bearer header got a credential: %v", err)
+	}
+	if rec := rig.get("/api/forge/connect"); rec.Header().Get("Location") != "/" {
+		t.Errorf("a connect without a console session went to %q", rec.Header().Get("Location"))
+	}
+}
+
+// An expired access token without a refresh token is never served.
+func TestForgeExpiredTokenWithoutRefreshIsNotServed(t *testing.T) {
+	f := newForgeSessions()
+	f.connect("k", time.Now(), "alice-forge", forgeTokens{access: "a", expiry: time.Now().Add(-time.Minute)})
+	if _, _, err := f.token(context.Background(), "k"); !errors.Is(err, ErrForgeNotConnected) {
+		t.Fatalf("an expired token with no refresh: %v, want ErrForgeNotConnected", err)
+	}
+	if connected, _, _ := f.status("k"); connected {
+		t.Fatal("an expired token with no refresh reads connected")
+	}
+}
+
+// A status read never waits on a renewal in flight.
+func TestForgeStatusDoesNotWaitOnARenewal(t *testing.T) {
+	f := newForgeSessions()
+	release := make(chan struct{})
+	f.renew = func(context.Context, string) (forgeTokens, error) {
+		<-release
+		return forgeTokens{access: "next", refresh: "r2", expiry: time.Now().Add(time.Hour)}, nil
+	}
+	f.connect("k", time.Now(), "alice-forge", forgeTokens{access: "a", refresh: "r", expiry: time.Now().Add(time.Hour)})
+	e := f.get("k")
+	e.mu.Lock()
+	e.renewAt = time.Now().Add(-time.Second)
+	e.mu.Unlock()
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		_, _, _ = f.token(context.Background(), "k")
+	}()
+	time.Sleep(20 * time.Millisecond) // the renewal is now in flight
+	start := time.Now()
+	if connected, _, _ := f.status("k"); !connected {
+		t.Error("status during a renewal: not connected")
+	}
+	if waited := time.Since(start); waited > 100*time.Millisecond {
+		t.Errorf("status waited %v on the renewal", waited)
+	}
+	close(release)
+	<-done
+}
+
+// The automatic connect needs a forge that answers: a probe of its API, and
+// any recent failed call of the flow, hold it back.
+func TestForgeReachability(t *testing.T) {
+	rig := newForgeRig(t)
+	id := rig.identity(t, rig.signIn(t, "tok-alice"))
+	if st := rig.f.Status(context.Background(), id); !st.Reachable {
+		t.Fatalf("a forge that answers reads unreachable: %+v", st)
+	}
+	rig.f.noteFailure(errors.New("dial tcp: connection refused"))
+	if rig.f.Status(context.Background(), id).Reachable {
+		t.Fatal("a failed forge call did not hold the automatic connect back")
+	}
+	down := httptest.NewServer(http.NotFoundHandler())
+	down.Close()
+	cfg := rig.f.cfg
+	cfg.APIURL = down.URL
+	if NewForge(cfg, rig.a).Status(context.Background(), id).Reachable {
+		t.Fatal("a forge that does not answer reads reachable")
+	}
+	// A refusal the forge answered is no outage.
+	rig.f.probeMu.Lock()
+	rig.f.failedAt = time.Time{}
+	rig.f.probeMu.Unlock()
+	rig.f.noteFailure(&oauth2.RetrieveError{Response: &http.Response{StatusCode: 400}, ErrorCode: "invalid_grant"})
+	if !rig.f.Status(context.Background(), id).Reachable {
+		t.Fatal("a forge's own refusal read as an outage")
 	}
 }

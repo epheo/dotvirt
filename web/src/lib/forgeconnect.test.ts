@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { connectURL, shouldChain } from './forgeconnect';
 
 const off = { delegated: false, connected: false, asked: false };
-const fresh = { delegated: true, connected: false, asked: false };
+const fresh = { delegated: true, connected: false, asked: false, reachable: true };
 
 describe('shouldChain', () => {
 	it('connects a delegated, unconnected session once', () => {
@@ -15,6 +15,10 @@ describe('shouldChain', () => {
 	});
 	it('never again in a session that already started one (an abandoned connect)', () => {
 		expect(shouldChain({ ...fresh, asked: true })).toBe(false);
+	});
+	it('never while the forge does not answer', () => {
+		expect(shouldChain({ ...fresh, reachable: false })).toBe(false);
+		expect(shouldChain({ ...fresh, reachable: undefined })).toBe(false);
 	});
 	it('never twice within the window, nor without storage to count it', () => {
 		expect(shouldChain(fresh, { recent: true })).toBe(false);

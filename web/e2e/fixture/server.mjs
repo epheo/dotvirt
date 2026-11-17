@@ -193,6 +193,11 @@ function sendJSON(res, status, body) {
 	res.end(data);
 }
 
+// userOf is the scenario's user as the sign-in answers carry it.
+function userOf(s) {
+	return s.forgeDelegated ? { ...s.user, forgeDelegated: true } : s.user;
+}
+
 function redirect(res, to) {
 	res.writeHead(302, { Location: to });
 	res.end();
@@ -452,7 +457,7 @@ async function handleAPI(req, res, url) {
 			'Content-Type': 'application/json',
 			'Set-Cookie': `${COOKIE}; Path=/; HttpOnly`,
 		});
-		return res.end(JSON.stringify(s.user));
+		return res.end(JSON.stringify(userOf(s)));
 	}
 	if (path === '/api/auth/methods')
 		return sendJSON(res, 200, s.authMethods ?? { sso: false, ssoPending: false });
@@ -493,7 +498,7 @@ async function handleAPI(req, res, url) {
 		return res.end();
 	}
 	if (path === '/api/me') {
-		return authed(req) ? sendJSON(res, 200, s.user) : sendText(res, 401, 'no session');
+		return authed(req) ? sendJSON(res, 200, userOf(s)) : sendText(res, 401, 'no session');
 	}
 	if (!authed(req)) return sendText(res, 401, 'no session');
 
@@ -504,6 +509,7 @@ async function handleAPI(req, res, url) {
 			connected,
 			...(connected ? { login } : {}),
 			asked,
+			reachable: !s.forgeDelegated?.down,
 		});
 	}
 	if (path === '/api/forge/disconnect' && req.method === 'POST' && s.forgeDelegated) {

@@ -74,6 +74,10 @@ type Authenticator struct {
 	sessions *sessions
 	oidc     *oidcSessions
 
+	// forgeDelegated: pull requests go through each user's own forge account
+	// (NewForge), which the sign-in answers carry to the console.
+	forgeDelegated bool
+
 	cache   *ttlcache.Cache[cachedIdentity] // keyed by sha256(token)
 	reviews *rate.Limiter                   // TokenReview budget for uncached tokens (reviewRate)
 }

@@ -230,21 +230,21 @@ func run() error {
 		switch {
 		case cfg.PublicURL == "":
 			log.Printf("forge: -forge-delegated set but -public-url empty; delegation off")
-		case cfg.ForgeURL == "":
-			log.Printf("forge: -forge-delegated set but -forge-url empty; delegation off")
+		case cfg.ForgeDelegatedURL == "":
+			log.Printf("forge: -forge-delegated set but -forge-delegated-url empty; delegation off")
 		case cfg.ForgeClientID == "" || cfg.ForgeClientSecret == "" || cfg.ForgeAuthorizeURL == "":
 			log.Printf("forge: -forge-delegated needs -forge-client-id, -forge-client-secret and -forge-authorize-url; delegation off")
 		default:
 			tokenURL := cfg.ForgeTokenURL
 			if tokenURL == "" {
-				tokenURL = strings.TrimRight(cfg.ForgeURL, "/") + "/login/oauth/access_token"
+				tokenURL = strings.TrimRight(cfg.ForgeDelegatedURL, "/") + "/login/oauth/access_token"
 			}
 			delegated = auth.NewForge(auth.ForgeConfig{
 				ClientID:     cfg.ForgeClientID,
 				ClientSecret: cfg.ForgeClientSecret,
 				AuthorizeURL: cfg.ForgeAuthorizeURL,
 				TokenURL:     tokenURL,
-				APIURL:       cfg.ForgeURL,
+				APIURL:       cfg.ForgeDelegatedURL,
 				RedirectURL:  strings.TrimRight(cfg.PublicURL, "/") + "/api/forge/callback",
 				CAFile:       cfg.ForgeCA,
 				InsecureTLS:  cfg.InsecureTLS,

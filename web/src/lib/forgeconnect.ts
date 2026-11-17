@@ -16,11 +16,20 @@ export interface ConnectHold {
 }
 
 // Whether the console connects the user's forge account on its own now: once
-// per console session (the backend's asked), never twice in a minute in a tab.
-// An abandoned connect is then never restarted this session; the next sign-in
-// asks again.
+// per console session and process (the backend's asked), never twice in a
+// minute in a tab, and only while the forge answers, so no one lands on a
+// browser error page. An abandoned connect is then never restarted this
+// session; the next sign-in, or the user menu, asks again.
 export function shouldChain(s: ForgeSession | null, hold: ConnectHold = {}): boolean {
-	return !!s && s.delegated && !s.connected && !s.asked && !hold.recent && !hold.noStorage;
+	return (
+		!!s &&
+		s.delegated &&
+		!s.connected &&
+		!s.asked &&
+		!!s.reachable &&
+		!hold.recent &&
+		!hold.noStorage
+	);
 }
 
 export { REPEAT_WINDOW_MS };

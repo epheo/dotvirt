@@ -313,7 +313,8 @@ spec:
                       forge account, which they connect once through userAuth: the forge's
                       rules see the person as pusher and poster, within their own rights there.
                       It needs a forge its users sign in to through the same identity provider
-                      as this console.
+                      as this console, and url set: users' tokens go only to the forge the spec
+                      names, never to the credential Secret's url.
                     enum:
                     - Dotvirt
                     - Users
@@ -364,7 +365,7 @@ spec:
                       tokenURL:
                         description: |-
                           TokenURL is where dotvirt exchanges and refreshes tokens, server to
-                          server. Empty: the forge's URL plus /login/oauth/access_token.
+                          server. Empty: spec.forge.url plus /login/oauth/access_token.
                         maxLength: 2048
                         pattern: ^https?://([A-Za-z0-9]([-A-Za-z0-9.]*[A-Za-z0-9])?|\[[0-9A-Fa-f:.]+\])(:[0-9]{1,5})?(/([^?#@%\s\x00-\x1f\x7f]|%[0-9A-Fa-f]{2})*)?$
                         type: string
@@ -389,6 +390,11 @@ spec:
                     dotvirt acts through'
                   rule: '!has(self.pullRequests) || self.pullRequests != ''Delegated''
                     || has(self.userAuth)'
+                - message: 'pullRequests Delegated needs url: users'' forge tokens
+                    go only to the forge the spec names, never to an address from
+                    the credential Secret'
+                  rule: '!has(self.pullRequests) || self.pullRequests != ''Delegated''
+                    || (has(self.url) && size(self.url) > 0)'
               image:
                 description: Image is the dotvirt app image to deploy.
                 type: string

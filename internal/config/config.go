@@ -59,9 +59,13 @@ type Config struct {
 	// ForgeDelegated acts with each user's own forge account for their pull
 	// requests (pullRequests: Delegated): the user connects it once through the
 	// forge's OAuth2 application, ForgeClientID/Secret, whose authorize page
-	// browsers reach at ForgeAuthorizeURL. ForgeTokenURL is the server-to-server
-	// token endpoint; empty, ForgeURL plus /login/oauth/access_token.
+	// browsers reach at ForgeAuthorizeURL. ForgeDelegatedURL is the forge base
+	// URL users' tokens go to, the admin's spec.forge.url, never ForgeURL (on a
+	// bring-your-own forge, the credential Secret's url). ForgeTokenURL is the
+	// server-to-server token endpoint; empty, ForgeDelegatedURL plus
+	// /login/oauth/access_token.
 	ForgeDelegated    bool
+	ForgeDelegatedURL string
 	ForgeClientID     string
 	ForgeClientSecret string
 	ForgeAuthorizeURL string
@@ -206,7 +210,8 @@ func Load(args []string) (*Config, error) {
 
 	fs.StringVar(&c.BaseBranch, "base-branch", envOr("DOTVIRT_BASE_BRANCH", "main"), "branch the inventory reads + PRs target")
 	fs.StringVar(&c.ProposedBranch, "proposed-branch", envOr("DOTVIRT_PROPOSED_BRANCH", "dotvirt/proposed"), "working branch holding the draft changeset")
-	fs.BoolVar(&c.ForgeDelegated, "forge-delegated", envBool("DOTVIRT_FORGE_DELEGATED", false), "act with each user's own forge account for their pull requests, connected once through -forge-client-id (needs -public-url and -forge-url)")
+	fs.BoolVar(&c.ForgeDelegated, "forge-delegated", envBool("DOTVIRT_FORGE_DELEGATED", false), "act with each user's own forge account for their pull requests, connected once through -forge-client-id (needs -public-url and -forge-delegated-url)")
+	fs.StringVar(&c.ForgeDelegatedURL, "forge-delegated-url", os.Getenv("DOTVIRT_FORGE_DELEGATED_URL"), "forge base URL users' tokens are sent to, for -forge-delegated (the admin's spec.forge.url)")
 	fs.StringVar(&c.ForgeClientID, "forge-client-id", os.Getenv("DOTVIRT_FORGE_CLIENT_ID"), "client ID of dotvirt's OAuth2 application at the forge, for -forge-delegated")
 	fs.StringVar(&c.ForgeClientSecret, "forge-client-secret", os.Getenv("DOTVIRT_FORGE_CLIENT_SECRET"), "client secret of that application (confidential client)")
 	fs.StringVar(&c.ForgeAuthorizeURL, "forge-authorize-url", os.Getenv("DOTVIRT_FORGE_AUTHORIZE_URL"), "the forge's OAuth2 authorize page as browsers reach it")

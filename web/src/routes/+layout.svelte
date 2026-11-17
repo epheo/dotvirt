@@ -154,12 +154,14 @@
 	});
 
 	// A delegated forge account connects once per console session, on its own:
-	// keyed on the user, so a sign-in starts it and a sign-out clears it.
+	// keyed on the user, so a sign-in starts it and a sign-out clears it. Only
+	// an install that delegates reads the connection at all.
 	$effect(() => {
 		const user = session.user?.username;
+		const delegated = session.user?.forgeDelegated ?? false;
 		untrack(() => {
 			if (!user) forge.reset();
-			else void forge.chainOnce(returnPath(page.url));
+			else if (delegated) void forge.chainOnce(returnPath(page.url));
 		});
 	});
 

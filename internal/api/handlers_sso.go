@@ -29,7 +29,7 @@ func (s *Server) handleLogout(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if s.delegated != nil {
-		s.delegated.Forget(id.Key())
+		s.delegated.Forget(id)
 	}
 	s.bus.Publish(eventbus.SessionEnded)
 	name, ok := auth.OAuthTokenName(id.Token)

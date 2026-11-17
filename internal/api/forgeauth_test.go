@@ -72,8 +72,8 @@ func TestForgeSessionAndSignOut(t *testing.T) {
 	if err != nil || resp.StatusCode != http.StatusNoContent {
 		t.Fatalf("logout: %v %v", resp, err)
 	}
-	if st := s.delegated.Status(auth.Identity{Token: tenantToken}); st.Asked || st.Connected {
-		t.Fatalf("sign-out kept the forge entry: %+v", st)
+	if n := s.delegated.Held(); n != 0 {
+		t.Fatalf("sign-out kept %d forge entries", n)
 	}
 }
 

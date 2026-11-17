@@ -77,6 +77,7 @@ const (
 // credential serves the operator (platform repo, webhooks), the app (git over
 // HTTPS and the forge API) and ArgoCD's repo-creds.
 // +kubebuilder:validation:XValidation:rule="!has(self.pullRequests) || self.pullRequests != 'Delegated' || has(self.userAuth)",message="pullRequests Delegated needs userAuth: the OAuth2 application dotvirt acts through"
+// +kubebuilder:validation:XValidation:rule="!has(self.pullRequests) || self.pullRequests != 'Delegated' || (has(self.url) && size(self.url) > 0)",message="pullRequests Delegated needs url: users' forge tokens go only to the forge the spec names, never to an address from the credential Secret"
 type ForgeSpec struct {
 	// URL is the forge base URL. Leave empty with managed on OpenShift: the operator
 	// exposes Forgejo on a router-assigned host and reports it in status.forgeURL. Set it
@@ -122,7 +123,8 @@ type ForgeSpec struct {
 	// forge account, which they connect once through userAuth: the forge's
 	// rules see the person as pusher and poster, within their own rights there.
 	// It needs a forge its users sign in to through the same identity provider
-	// as this console.
+	// as this console, and url set: users' tokens go only to the forge the spec
+	// names, never to the credential Secret's url.
 	// +kubebuilder:validation:Enum=Dotvirt;Users;Delegated
 	// +optional
 	PullRequests string `json:"pullRequests,omitempty"`
@@ -152,7 +154,7 @@ type ForgeUserAuthSpec struct {
 	// +kubebuilder:validation:Pattern=`^https?://([A-Za-z0-9]([-A-Za-z0-9.]*[A-Za-z0-9])?|\[[0-9A-Fa-f:.]+\])(:[0-9]{1,5})?(/([^?#@%\s\x00-\x1f\x7f]|%[0-9A-Fa-f]{2})*)?$`
 	AuthorizeURL string `json:"authorizeURL"`
 	// TokenURL is where dotvirt exchanges and refreshes tokens, server to
-	// server. Empty: the forge's URL plus /login/oauth/access_token.
+	// server. Empty: spec.forge.url plus /login/oauth/access_token.
 	// +kubebuilder:validation:MaxLength=2048
 	// +kubebuilder:validation:Pattern=`^https?://([A-Za-z0-9]([-A-Za-z0-9.]*[A-Za-z0-9])?|\[[0-9A-Fa-f:.]+\])(:[0-9]{1,5})?(/([^?#@%\s\x00-\x1f\x7f]|%[0-9A-Fa-f]{2})*)?$`
 	// +optional

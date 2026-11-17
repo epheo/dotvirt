@@ -842,7 +842,8 @@ func TestDeploymentCarriesOIDC(t *testing.T) {
 // client secret a secretKeyRef the kubelet resolves; any other mode sends none.
 func TestDeploymentCarriesTheDelegatedForgeApplication(t *testing.T) {
 	dv := testDotvirt()
-	dv.Spec.Forge.Managed = true
+	dv.Spec.Forge.URL = "https://forge.example"
+	dv.Spec.Forge.CredentialsSecret = "forge-creds"
 	dv.Spec.Forge.UserAuth = &dotvirtv1alpha1.ForgeUserAuthSpec{
 		ClientID: "dotvirt", ClientSecret: dotvirtv1alpha1.SecretKeyRef{Name: "dotvirt-forge-app", Key: "secret"},
 		AuthorizeURL: "https://forge.example/login/oauth/authorize",
@@ -858,6 +859,7 @@ func TestDeploymentCarriesTheDelegatedForgeApplication(t *testing.T) {
 	dv.Spec.Forge.PullRequests = "Delegated"
 	for name, want := range map[string]string{
 		"DOTVIRT_FORGE_DELEGATED":     "true",
+		"DOTVIRT_FORGE_DELEGATED_URL": "https://forge.example",
 		"DOTVIRT_FORGE_CLIENT_ID":     "dotvirt",
 		"DOTVIRT_FORGE_AUTHORIZE_URL": "https://forge.example/login/oauth/authorize",
 		"DOTVIRT_FORGE_TOKEN_URL":     "http://forgejo.lan/login/oauth/access_token",

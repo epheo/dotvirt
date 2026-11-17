@@ -125,9 +125,23 @@ test('a tab that cannot record its connects starts none on its own', async ({ pa
 	await expect(page.getByRole('button', { name: 'Connect git account' })).toBeVisible();
 });
 
+test('a forge that does not answer gets no automatic connect', async ({ page }) => {
+	await setScenario(page, 'delegateddown');
+	await signInAt(page, '/compute');
+	await signedIn(page);
+	await page.waitForTimeout(1000);
+	expect(await connects(page)).toBe(0);
+	await userMenu(page).click();
+	await expect(page.getByRole('button', { name: 'Connect git account' })).toBeVisible();
+});
+
 test('without delegation the console shows no git account and starts no connect', async ({
 	page,
 }) => {
+	const reads: string[] = [];
+	page.on('request', (r) => {
+		if (r.url().includes('/api/forge/')) reads.push(r.url());
+	});
 	await setScenario(page, 'base');
 	await login(page);
 	await page.goto('/compute');
@@ -135,4 +149,6 @@ test('without delegation the console shows no git account and starts no connect'
 	await userMenu(page).click();
 	await expect(page.getByText('Git account')).toHaveCount(0);
 	expect(await connects(page)).toBe(0);
+	// A default install reads nothing of the forge connection.
+	expect(reads).toEqual([]);
 });

@@ -18,7 +18,7 @@ type forgeSession struct {
 func (s *Server) handleForgeSession(w http.ResponseWriter, r *http.Request) {
 	out := forgeSession{Delegated: s.delegated != nil}
 	if id, ok := auth.FromContext(r.Context()); ok && s.delegated != nil {
-		out.ForgeStatus = s.delegated.Status(id)
+		out.ForgeStatus = s.delegated.Status(r.Context(), id)
 	}
 	writeJSON(w, out)
 }

@@ -1,6 +1,7 @@
 import { api, type ForgeSession } from '#lib/api.js';
 import { connectURL, REPEAT_WINDOW_MS, shouldChain, type ConnectHold } from '#lib/forgeconnect.js';
 import { friendlyError } from '#lib/format.js';
+import { ui } from '#lib/state/ui.svelte.js';
 
 // The tab's last automatic connect, against a forge round trip that keeps
 // coming back unconnected.
@@ -58,7 +59,9 @@ class ForgeConnection {
 			await api.forgeDisconnect();
 			await this.load();
 		} catch (e) {
+			// Said now, not on the menu's next opening: the menu closed on the click.
 			this.error = friendlyError(e);
+			ui.toastError(`Disconnecting your git account failed: ${this.error}`);
 		} finally {
 			this.busy = false;
 		}

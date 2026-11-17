@@ -259,7 +259,7 @@ func dotvirtEnv(dv *dotvirtv1alpha1.Dotvirt, argoNS string, tenantAllowed []tena
 		case "Users":
 			env = append(env, corev1.EnvVar{Name: "DOTVIRT_USERS_OPEN_PRS", Value: "true"})
 		case "Delegated":
-			env = append(env, delegatedEnv(dv.Spec.Forge.UserAuth)...)
+			env = append(env, delegatedEnv(dv.Spec.Forge.URL, dv.Spec.Forge.UserAuth)...)
 		}
 		if dv.Spec.Forge.Managed {
 			// Verified TLS instead of insecureTLS; an explicit insecureTLS still wins
@@ -286,12 +286,15 @@ func dotvirtEnv(dv *dotvirtv1alpha1.Dotvirt, argoNS string, tenantAllowed []tena
 // Delegated. The client secret is a secretKeyRef the kubelet resolves, so the
 // operator never reads it and needs no grant on an admin-named Secret; a
 // missing Secret fails the pod's start rather than every user's connect.
-func delegatedEnv(u *dotvirtv1alpha1.ForgeUserAuthSpec) []corev1.EnvVar {
+func delegatedEnv(forgeURL string, u *dotvirtv1alpha1.ForgeUserAuthSpec) []corev1.EnvVar {
 	if u == nil {
 		return nil
 	}
 	env := []corev1.EnvVar{
 		{Name: "DOTVIRT_FORGE_DELEGATED", Value: "true"},
+		// The spec's url, never the credential Secret's, which the operator
+		// may write: users' tokens go only where an admin pointed them.
+		{Name: "DOTVIRT_FORGE_DELEGATED_URL", Value: forgeURL},
 		{Name: "DOTVIRT_FORGE_CLIENT_ID", Value: u.ClientID},
 		secretEnv("DOTVIRT_FORGE_CLIENT_SECRET", u.ClientSecret.Name, u.ClientSecret.Key, false),
 		{Name: "DOTVIRT_FORGE_AUTHORIZE_URL", Value: u.AuthorizeURL},
