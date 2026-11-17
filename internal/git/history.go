@@ -97,30 +97,62 @@ func (r *Repo) OnBranch(branch, hash string) (bool, error) {
 	return false, nil
 }
 
-// Follows reports whether older is newer or one of newer's first-parent
-// ancestors, newer being a state branch held (OnBranch): git moved on from
-// older by commits on branch, not by a history that replaced it. known is
-// false while branch does not hold newer within historyScan, as when this
-// mirror has not fetched it yet: no answer either way.
-func (r *Repo) Follows(branch, newer, older string) (follows, known bool, err error) {
-	c, err := branchCommit(r.repo.Load(), branch)
+// Descends reports whether older is newer or one of its ancestors, newer being
+// a state branch held (OnBranch): git moved on from older by commits, not by a
+// history that replaced it. Any parent counts, so a merge that took the PR's
+// side as its first parent still moved on. known is false while branch does
+// not hold newer within historyScan, as when this mirror has not fetched it
+// yet: no answer either way.
+func (r *Repo) Descends(branch, newer, older string) (follows, known bool, err error) {
+	if on, err := r.OnBranch(branch, newer); err != nil || !on {
+		return false, false, err
+	}
+	if newer == older {
+		return true, true, nil
+	}
+	repo := r.repo.Load()
+	nc, err := repo.CommitObject(plumbing.NewHash(newer))
 	if err != nil {
 		return false, false, err
 	}
-	from, want := plumbing.NewHash(newer), plumbing.NewHash(older)
-	for seen := 0; seen < historyScan; seen++ {
-		known = known || c.Hash == from
-		if known && c.Hash == want {
-			return true, true, nil
-		}
-		if c.NumParents() == 0 {
-			return false, known, nil
-		}
-		if c, err = c.Parent(0); err != nil {
-			return false, known, err
-		}
+	oc, err := repo.CommitObject(plumbing.NewHash(older))
+	if errors.Is(err, plumbing.ErrObjectNotFound) {
+		return false, true, nil
 	}
-	return false, known, nil
+	if err != nil {
+		return false, false, err
+	}
+	follows, err = oc.IsAncestor(nc)
+	return follows, err == nil, err
+}
+
+// DeclaresAt reports whether commit hash holds, in this mirror's folder, a
+// file Argo's source could read: YAML outside the template library, the
+// ApplicationSet's include and exclude. Any such file counts, read or empty:
+// the question is whether git itself is empty there, never what renders.
+func (r *Repo) DeclaresAt(hash string) (bool, error) {
+	c, err := r.repo.Load().CommitObject(plumbing.NewHash(hash))
+	if err != nil {
+		return false, err
+	}
+	tree, err := c.Tree()
+	if err != nil {
+		return false, err
+	}
+	if tree, err = scopeTree(tree, r.root); err != nil || tree == nil {
+		return false, err
+	}
+	errFound := errors.New("found")
+	err = tree.Files().ForEach(func(f *object.File) error {
+		if isYAML(f.Name) && !InTemplatesDir(f.Name) {
+			return errFound
+		}
+		return nil
+	})
+	if errors.Is(err, errFound) {
+		return true, nil
+	}
+	return false, err
 }
 
 // historyScan bounds one walk: a file untouched for this many commits reads as

@@ -1,5 +1,6 @@
 <script lang="ts">
 	import type { ProjectSync } from '#lib/api.js';
+	import { holdSentence } from '#lib/gitops.js';
 	import { projectSyncView } from '#lib/status.js';
 	import ErrorNote from './ErrorNote.svelte';
 	import Modal from './Modal.svelte';
@@ -14,13 +15,7 @@
 	// Only a project ArgoCD couldn't apply has an error worth expanding; a hold
 	// on an emptied source is said in its own words, not Argo's.
 	const clickable = $derived(!!gitOps?.syncError && !gitOps.hold);
-	const held = $derived(
-		gitOps?.hold === 'replaced'
-			? "Git no longer declares this project's running objects: its repo was re-created or rewritten. ArgoCD keeps them until they are adopted into git."
-			: gitOps?.hold
-				? "ArgoCD is removing this project's last objects, as git now declares none."
-				: '',
-	);
+	const held = $derived(holdSentence(gitOps));
 	let open = $state(false);
 
 	function show(e: MouseEvent) {

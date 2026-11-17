@@ -490,9 +490,9 @@ func TestBranchDiffByCommittingAuthor(t *testing.T) {
 	}
 }
 
-// Follows tells git moving on by commits on main from a history that replaced
-// what was there, and says when the mirror cannot tell yet.
-func TestFollowsTellsMovingOnFromReplaced(t *testing.T) {
+// Descends tells git moving on by commits from a history that replaced what
+// was there, through any parent, and says when the mirror cannot tell yet.
+func TestDescendsTellsMovingOnFromReplaced(t *testing.T) {
 	h := seedMerge(t)
 	r, err := Open(h.bare, "", nil)
 	if err != nil {
@@ -500,36 +500,75 @@ func TestFollowsTellsMovingOnFromReplaced(t *testing.T) {
 	}
 	merge, addDB, seed := revParse(t, h.bare, "main"), revParse(t, h.bare, "main~1"), revParse(t, h.bare, "main~3")
 	inside := revParse(t, h.bare, "main^2")
-	for _, c := range []struct {
-		name           string
-		newer, older   string
-		follows, known bool
-	}{
-		{"moved on by a merge", merge, addDB, true, true},
-		{"moved on by commits", addDB, seed, true, true},
-		{"the same revision", merge, merge, true, true},
-		{"older is newer", addDB, merge, false, true},
-		{"older only inside a merged PR", merge, inside, false, true},
-		{"newer not fetched", strings.Repeat("a", 40), seed, false, false},
-	} {
-		follows, known, err := r.Follows("main", c.newer, c.older)
-		if err != nil || follows != c.follows || known != c.known {
-			t.Errorf("%s: follows=%v known=%v err=%v, want %v %v", c.name, follows, known, err, c.follows, c.known)
+	check := func(name, newer, older string, follows, known bool) {
+		t.Helper()
+		f, k, err := r.Descends("main", newer, older)
+		if err != nil || f != follows || k != known {
+			t.Errorf("%s: follows=%v known=%v err=%v, want %v %v", name, f, k, err, follows, known)
 		}
 	}
+	check("moved on by a merge", merge, addDB, true, true)
+	check("moved on by commits", addDB, seed, true, true)
+	check("the same revision", merge, merge, true, true)
+	check("older is newer", addDB, merge, false, true)
+	check("older inside a merged PR", merge, inside, true, true)
+	check("newer not fetched", strings.Repeat("a", 40), seed, false, false)
+
+	// A merge whose first parent is the PR's side still moved on from main.
+	h.run("bob", h.work, "checkout", "-qb", "side", "main~1")
+	h.write("tenant-a/side.yaml", "kind: VirtualMachine\nmetadata: {name: side, namespace: tenant-a}\n")
+	h.run("bob", h.work, "add", "-A")
+	h.run("bob", h.work, "commit", "-qm", "side")
+	h.run("bob", h.work, "merge", "-q", "--no-ff", "-m", "merge main into side", "main")
+	h.run("bob", h.work, "push", "-qf", "origin", "side:main")
+	if err := r.refresh(); err != nil {
+		t.Fatalf("refresh: %v", err)
+	}
+	check("first parent on the PR side", revParse(t, h.bare, "main"), merge, true, true)
 
 	// The forge loses the repo and it comes back with a history of its own.
 	h.run("admin", h.work, "checkout", "-q", "--orphan", "fresh")
 	h.run("admin", h.work, "rm", "-rqf", ".")
 	h.write("README.md", "recovered\n")
+	h.write("templates/web.yaml", "kind: VirtualMachineTemplate\n")
 	h.run("admin", h.work, "add", "-A")
 	h.run("admin", h.work, "commit", "-qm", "re-created")
 	h.run("admin", h.work, "push", "-qf", "origin", "fresh:main")
 	if err := r.refresh(); err != nil {
 		t.Fatalf("refresh: %v", err)
 	}
-	follows, known, err := r.Follows("main", revParse(t, h.bare, "main"), merge)
-	if err != nil || follows || !known {
-		t.Errorf("replaced history: follows=%v known=%v err=%v, want false true", follows, known, err)
+	check("replaced history", revParse(t, h.bare, "main"), merge, false, true)
+}
+
+// DeclaresAt asks git itself, at one commit and in the mirror's folder:
+// YAML outside the template library declares; the library alone does not.
+func TestDeclaresAtReadsGitNotTheRender(t *testing.T) {
+	h := seedHistoryRepo(t)
+	h.run("alice", h.work, "rm", "-rq", "tenant-a")
+	h.write("templates/web.yaml", "kind: VirtualMachineTemplate\n")
+	h.write("README.md", "nothing declared\n")
+	h.run("alice", h.work, "add", "-A")
+	h.run("alice", h.work, "commit", "-qm", "delete everything")
+	h.run("alice", h.work, "push", "-q", "origin", "main")
+	r, err := Open(h.bare, "", nil)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	for _, c := range []struct {
+		rev      string
+		declares bool
+	}{{"main~1", true}, {"main", false}} {
+		got, err := r.DeclaresAt(revParse(t, h.bare, c.rev))
+		if err != nil || got != c.declares {
+			t.Errorf("%s: declares=%v err=%v, want %v", c.rev, got, err, c.declares)
+		}
+	}
+	scoped, err := Open(h.bare, "", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	scoped.root = "elsewhere"
+	if got, err := scoped.DeclaresAt(revParse(t, h.bare, "main~1")); err != nil || got {
+		t.Errorf("a folder holding nothing: declares=%v err=%v, want false", got, err)
 	}
 }

@@ -90,11 +90,12 @@ describe('vmState', () => {
 describe('projectSyncView', () => {
 	it('says what an emptied source ArgoCD holds means', () => {
 		const wipe = 'Skipping sync attempt to 1a2b: auto-sync will wipe out all resources';
-		const label = (hold?: 'deleting' | 'replaced' | 'pending') =>
+		const label = (hold?: 'deleting' | 'replaced' | 'pending' | 'mismatch') =>
 			projectSyncView({ sync: 'OutOfSync', health: 'Healthy', syncError: wipe, hold })?.label;
 		expect(label('deleting')).toBe('Deleting…');
 		expect(label('pending')).toBe('Applying…');
 		expect(label('replaced')).toBe('Not in git');
+		expect(label('mismatch')).toBe('Sync held');
 		expect(label()).toBe('Out of sync');
 	});
 });

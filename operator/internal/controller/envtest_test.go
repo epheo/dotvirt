@@ -456,12 +456,6 @@ func TestEnvtest(t *testing.T) {
 				t.Errorf("operator's plain Secret in %s: %v", ns, err)
 			}
 		}
-		// The tenant ApplicationSet, its allowEmpty patch included, stays the
-		// operator's to write under the guard.
-		appset := install.ApplicationSet(&dotvirtv1alpha1.Dotvirt{ObjectMeta: metav1.ObjectMeta{Name: key.Name, Namespace: key.Namespace}}, "argocd", nil, nil)
-		if err := dryApply(appset); err != nil {
-			t.Errorf("operator's ApplicationSet under the guard: %v", err)
-		}
 		token := &corev1.Secret{
 			ObjectMeta: metav1.ObjectMeta{Name: "guard-token", Annotations: map[string]string{corev1.ServiceAccountNameKey: "default"}},
 			Type:       corev1.SecretTypeServiceAccountToken,

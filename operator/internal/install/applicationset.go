@@ -54,7 +54,8 @@ func ApplicationSet(dv *dotvirtv1alpha1.Dotvirt, argoNS string, platformNS, unco
 		"template":   template,
 		// A typed template cannot take a boolean from a parameter. hasKey keeps
 		// Argo's default while a console that sends no allowEmpty still answers
-		// the generator, as during an upgrade.
+		// the generator, as during an upgrade. Argo CD before 2.10 drops the
+		// field: a removal of a project's last objects then stays held there.
 		"templatePatch": tenantAllowEmptyPatch,
 	})
 }

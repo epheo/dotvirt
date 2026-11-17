@@ -269,9 +269,14 @@ const (
 	// repo was lost and re-created, or rewritten: git does not declare what
 	// runs, and adopting it is how it comes back.
 	HoldReplaced Hold = "replaced"
-	// HoldPending: dotvirt's mirror has not fetched the revision Argo holds,
-	// so neither can be told yet.
+	// HoldPending: neither can be told yet: dotvirt's mirror has not fetched
+	// the revision Argo holds, or the app has not caught up with the project.
 	HoldPending Hold = "pending"
+	// HoldMismatch: ArgoCD would delete everything it runs here though git did
+	// not empty: git did not move, the app reads another source than it last
+	// applied, or git declares what renders to nothing. Never lifted: an admin
+	// checks the project's Argo application.
+	HoldMismatch Hold = "mismatch"
 )
 
 // ObjectHealth is one object an Application reports as degraded or refused: its

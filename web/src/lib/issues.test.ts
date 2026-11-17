@@ -48,7 +48,7 @@ describe('deriveIssues', () => {
 
 	it('reads an emptied source ArgoCD holds by what it means, never as a repo problem', () => {
 		const wipe = 'Skipping sync attempt to 1a2b: auto-sync will wipe out all resources';
-		const held = (hold: 'deleting' | 'replaced' | 'pending') =>
+		const held = (hold: 'deleting' | 'replaced' | 'pending' | 'mismatch') =>
 			deriveIssues(
 				inv([
 					{
@@ -62,6 +62,7 @@ describe('deriveIssues', () => {
 		expect(held('deleting')).toEqual([]);
 		expect(held('pending')).toEqual([]);
 		expect(held('replaced')).toEqual(['Not in git']);
+		expect(held('mismatch')).toEqual(['Sync held']);
 	});
 
 	it("folds a VM's reasons into one row, highest severity first overall", () => {

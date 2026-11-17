@@ -24,3 +24,18 @@ export const repoError = (g?: ProjectSync | null): string =>
 // Git no longer declares what the project runs: its repo was re-created or
 // rewritten, and ArgoCD keeps the objects until they are adopted back.
 export const lostToGit = (g?: ProjectSync | null): boolean => g?.hold === 'replaced';
+
+// What ArgoCD holding a project's emptied source means, in one sentence.
+export function holdSentence(g?: ProjectSync | null): string {
+	switch (g?.hold) {
+		case 'deleting':
+			return "ArgoCD is removing this project's last objects, as git now declares none.";
+		case 'pending':
+			return "ArgoCD holds this project's emptied source while the console reads its git history.";
+		case 'replaced':
+			return "Git no longer declares this project's running objects: its repo was re-created or rewritten. ArgoCD keeps them until they are adopted into git.";
+		case 'mismatch':
+			return "ArgoCD would delete everything this project runs, though git did not remove it. An admin must check the project's Argo application.";
+	}
+	return '';
+}

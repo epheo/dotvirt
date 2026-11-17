@@ -52,8 +52,8 @@ type driftView struct {
 	resources map[resKey]Drift
 	vms       map[string]Drift
 	projects  map[string]model.ProjectSync
-	// holds keys each held app's EmptyHold by every source it reads
-	// (sourceKey): the generator and every frame ask per project.
+	// holds keys each held generated app's EmptyHold by its project: the
+	// generator and every frame ask per project.
 	holds map[string]EmptyHold
 	// objGens counts content changes to the non-VM entries, per scope (see
 	// resKey.scope): VM drift rides the frame itself, and objGens feeds each
@@ -203,7 +203,7 @@ func (s *Snapshot) deriveLoop(ctx context.Context) {
 func (s *Snapshot) derive() {
 	objs := reflect.List(s.apps)
 	sort.Slice(objs, func(i, j int) bool { return appKey(objs[i]) < appKey(objs[j]) })
-	next := &driftView{resources: resourceDriftFromApps(objs), projects: appSyncFromApps(objs), holds: holdsFromApps(objs)}
+	next := &driftView{resources: resourceDriftFromApps(objs), projects: appSyncFromApps(objs), holds: holdsFromApps(objs, s.writeNS)}
 	prev := s.view.Load()
 	var prevRes map[resKey]Drift
 	var gens map[string]uint64
@@ -290,9 +290,10 @@ func (s *Snapshot) ForeignApps(ownRepo string) map[string]bool {
 // could drift from it. Every app on the repo, whatever folder it reads: a merge
 // moves the revision each of them syncs. Never narrowed to what a caller sees:
 // what they may be told is the caller's to filter, and a narrowed answer reads
-// as a safe merge. settled are folders of repo whose app's prunes are on
-// their way whatever merges next: they are left out. known is false before the
-// initial LIST, when nothing can be said.
+// as a safe merge. settled are projects whose generated app's prunes are on
+// their way whatever merges next (EmptyHold): that app alone is left out, so
+// no other app on the repo hides its own. known is false before the initial
+// LIST, when nothing can be said.
 func (s *Snapshot) PrunePending(repo string, settled ...string) (refs []model.ObjectRef, known bool) {
 	own := forge.NormalizeRepoURL(repo)
 	if !s.synced.Done() {
@@ -301,13 +302,9 @@ func (s *Snapshot) PrunePending(repo string, settled ...string) (refs []model.Ob
 	if own == "" {
 		return nil, true
 	}
-	skip := make([]string, len(settled))
-	for i, dir := range settled {
-		skip[i] = sourceKey(own, dir)
-	}
 	var out []model.ObjectRef
 	for _, u := range reflect.List(s.apps) {
-		if !slices.Contains(appRepos(u.Object), own) || slices.ContainsFunc(sourceKeys(u.Object), func(k string) bool { return slices.Contains(skip, k) }) {
+		if !slices.Contains(appRepos(u.Object), own) || s.generatedFor(u, settled) {
 			continue
 		}
 		for _, raw := range nestedSlice(u.Object, "status", "resources") {
@@ -343,36 +340,51 @@ func (s *Snapshot) PrunePending(repo string, settled ...string) (refs []model.Ob
 	return out, true
 }
 
-// EmptyHold is an Application ArgoCD will not auto-sync because every object
-// it tracks would be pruned while automated.allowEmpty is off: the revision
-// it holds at and the last one it applied.
+// EmptyHold is a project's generated Application that ArgoCD will not
+// auto-sync because every object it tracks would be pruned while
+// automated.allowEmpty is off: the revision it holds at and the last one it
+// applied, the source it reads (normalized repo, folder), and whether the last
+// apply read that same source.
 type EmptyHold struct {
 	Compared, Applied string
+	Repo, Path        string
+	SameSource        bool
 }
 
-// EmptyHold reads that refusal for the app sourcing dir of repo. ok is false
-// when it holds nothing, before the initial LIST, and for an app that never
-// applied a revision.
-func (s *Snapshot) EmptyHold(repo, dir string) (EmptyHold, bool) {
+// EmptyHold reads that refusal for project's generated app (projectAppLabel,
+// in the ArgoCD namespace): only that app's allowEmpty the generator sets, so
+// no other app on the repo, the static platform app included, ever lends it a
+// hold. ok is false when it holds nothing, before the initial LIST, and for an
+// app that never applied a revision.
+func (s *Snapshot) EmptyHold(project string) (EmptyHold, bool) {
 	v := s.current()
 	if v == nil {
 		return EmptyHold{}, false
 	}
-	h, ok := v.holds[sourceKey(forge.NormalizeRepoURL(repo), dir)]
+	h, ok := v.holds[project]
 	return h, ok
 }
 
-func holdsFromApps(objs []*unstructured.Unstructured) map[string]EmptyHold {
+// generatedFor reports whether app is the generated app of one of projects.
+func (s *Snapshot) generatedFor(app *unstructured.Unstructured, projects []string) bool {
+	p := app.GetLabels()[projectAppLabel]
+	return p != "" && slices.Contains(projects, p) && (s.writeNS == "" || app.GetNamespace() == s.writeNS)
+}
+
+// Reads reports whether the app reads folder dir of repo.
+func (h EmptyHold) Reads(repo, dir string) bool {
+	return h.Repo == forge.NormalizeRepoURL(repo) && h.Path == cleanDir(dir)
+}
+
+func holdsFromApps(objs []*unstructured.Unstructured, argoNS string) map[string]EmptyHold {
 	out := map[string]EmptyHold{}
 	for _, app := range objs {
-		h, ok := emptyHold(app.Object)
-		if !ok {
+		project := app.GetLabels()[projectAppLabel]
+		if project == "" || argoNS != "" && app.GetNamespace() != argoNS {
 			continue
 		}
-		for _, k := range sourceKeys(app.Object) {
-			if _, seen := out[k]; !seen {
-				out[k] = h
-			}
+		if h, ok := emptyHold(app.Object); ok {
+			out[project] = h
 		}
 	}
 	return out
@@ -396,10 +408,16 @@ func emptyHold(app map[string]any) (EmptyHold, bool) {
 			return EmptyHold{}, false
 		}
 	}
-	h := EmptyHold{Compared: nestedString(app, "status", "sync", "revision")}
+	h := EmptyHold{
+		Compared: nestedString(app, "status", "sync", "revision"),
+		Repo:     forge.NormalizeRepoURL(nestedString(app, "spec", "source", "repoURL")),
+		Path:     cleanDir(nestedString(app, "spec", "source", "path")),
+	}
 	if history := nestedSlice(app, "status", "history"); len(history) > 0 {
 		if last, ok := history[len(history)-1].(map[string]any); ok {
 			h.Applied = asString(last, "revision")
+			src, _ := last["source"].(map[string]any)
+			h.SameSource = src != nil && forge.NormalizeRepoURL(asString(src, "repoURL")) == h.Repo && cleanDir(asString(src, "path")) == h.Path
 		}
 	}
 	return h, h.Compared != "" && h.Applied != ""

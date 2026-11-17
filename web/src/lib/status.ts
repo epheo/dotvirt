@@ -139,6 +139,7 @@ export function projectSyncView(
 	if (g.hold === 'deleting') return { tone: 'info', label: 'Deleting…', pulse: true };
 	if (g.hold === 'pending') return { tone: 'info', label: 'Applying…', pulse: true };
 	if (g.hold === 'replaced') return { tone: 'warn', label: 'Not in git', pulse: false };
+	if (g.hold === 'mismatch') return { tone: 'danger', label: 'Sync held', pulse: false };
 	if (g.sync === 'OutOfSync') return { tone: 'warn', label: 'Out of sync', pulse: false };
 	return null; // Synced + Healthy, or unknown - no badge
 }

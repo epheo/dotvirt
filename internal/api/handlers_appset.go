@@ -5,8 +5,11 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
+	"github.com/epheo/dotvirt/internal/argo"
+	"github.com/epheo/dotvirt/internal/git"
 	"github.com/epheo/dotvirt/internal/model"
 	"github.com/epheo/dotvirt/internal/project"
 	"github.com/epheo/dotvirt/pkg/tenancy"
@@ -86,37 +89,94 @@ func (s *Server) handleAppSetPlugin(w http.ResponseWriter, r *http.Request) {
 		if root == "" {
 			root = "."
 		}
-		params = append(params, param{Project: p.Name, Repo: p.Repo, Path: root, Namespace: dest, AllowEmpty: s.EmptyHold(p) == model.HoldDeleting})
+		params = append(params, param{Project: p.Name, Repo: p.Repo, Path: root, Namespace: dest, AllowEmpty: s.liftsAllowEmpty(p)})
 	}
 	writeJSON(w, map[string]any{"output": map[string]any{"parameters": params}})
 }
 
-// EmptyHold is what it means that ArgoCD holds p's app at an empty source
-// (argo.Snapshot.EmptyHold), "" while it does not; changeset.HoldReader. Deleting needs the revision
-// Argo holds on main in dotvirt's mirror, descending from the one Argo last
-// applied; until the mirror has it, pending. A held project's mirror is kept
-// open (RepoSet.Warm): the merge that emptied it may land long after anyone
-// last opened the repo.
+// EmptyHold is what it means that ArgoCD holds p's generated app at an empty
+// source (argo.Snapshot.EmptyHold), "" while it does not; changeset.HoldReader.
+// Deleting needs git itself to have emptied by moving on from what Argo
+// applied, read from the source Argo applied: the held revision descends from
+// the applied one in dotvirt's mirror, differs from it, and declares nothing
+// in the project's folder. An empty render alone (a re-pointed path, an Argo
+// that reads the source otherwise) is a mismatch and never lifts the guard.
+// A held project's mirror is kept open (RepoSet.Warm): the merge that emptied
+// it may land long after anyone last opened the repo.
 func (s *Server) EmptyHold(p project.ProjectInfo) model.Hold {
 	if s.drift == nil || p.Repo == "" {
 		return ""
 	}
-	h, ok := s.drift.EmptyHold(p.Repo, p.Path)
+	h, ok := s.drift.EmptyHold(p.Name)
 	if !ok {
 		return ""
+	}
+	if !h.Reads(p.Repo, p.Path) {
+		return model.HoldPending
 	}
 	read, ok := s.repos.Warm(p.Repo, p.Path)
 	if !ok {
 		return model.HoldPending
 	}
-	follows, known, err := read.Follows(s.cfg.BaseBranch, h.Compared, h.Applied)
+	f, ok := s.holdFacts.of(read, s.cfg.BaseBranch, h)
 	switch {
-	case err != nil || !known:
+	case !ok:
 		return model.HoldPending
-	case follows:
-		return model.HoldDeleting
+	case !f.descends:
+		return model.HoldReplaced
+	case h.Compared == h.Applied || !h.SameSource || f.declares:
+		return model.HoldMismatch
 	}
-	return model.HoldReplaced
+	return model.HoldDeleting
+}
+
+// liftsAllowEmpty is the generator's allowEmpty for p: a deliberate removal,
+// read off a live Application snapshot (a stale one may hold a hold that is
+// gone). Once lifted, only the next generator run closes it again: Argo
+// applies the removal within seconds, so that window is one requeue.
+func (s *Server) liftsAllowEmpty(p project.ProjectInfo) bool {
+	return s.drift != nil && s.drift.Healthy() && s.EmptyHold(p) == model.HoldDeleting
+}
+
+// holdMemo keeps what git says of a held app's two revisions, which never
+// changes once known: whether the held one descends from the applied one, and
+// whether it declares anything. Every frame and generator run asks per held
+// project; an unknown answer (a mirror behind) is asked again.
+type holdMemo struct {
+	mu sync.Mutex
+	m  map[string]holdFact
+}
+
+type holdFact struct{ descends, declares bool }
+
+// holdMemoMax bounds the memo; holds are rare and short-lived.
+const holdMemoMax = 256
+
+func (m *holdMemo) of(read *git.Repo, branch string, h argo.EmptyHold) (holdFact, bool) {
+	key := h.Repo + "\x00" + h.Path + "\x00" + h.Applied + "\x00" + h.Compared
+	m.mu.Lock()
+	f, ok := m.m[key]
+	m.mu.Unlock()
+	if ok {
+		return f, true
+	}
+	descends, known, err := read.Descends(branch, h.Compared, h.Applied)
+	if err != nil || !known {
+		return holdFact{}, false
+	}
+	f.descends = descends
+	if descends {
+		if f.declares, err = read.DeclaresAt(h.Compared); err != nil {
+			return holdFact{}, false
+		}
+	}
+	m.mu.Lock()
+	if m.m == nil || len(m.m) >= holdMemoMax {
+		m.m = map[string]holdFact{}
+	}
+	m.m[key] = f
+	m.mu.Unlock()
+	return f, true
 }
 
 // pluginRequest is the plugin generator's request: the ApplicationSet's

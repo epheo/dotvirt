@@ -48,8 +48,8 @@ type LiveSource interface {
 
 // PruneSource: what ArgoCD would prune for the apps sourcing repo, per Argo's
 // OWN comparison. The draft view relays it; re-deriving from git could
-// diverge. settled are folders of repo whose prunes are on their way whatever
-// merges next. known is false while it cannot say.
+// diverge. settled are projects whose generated app's prunes are on their way
+// whatever merges next. known is false while it cannot say.
 type PruneSource interface {
 	PrunePending(repo string, settled ...string) (refs []model.ObjectRef, known bool)
 }

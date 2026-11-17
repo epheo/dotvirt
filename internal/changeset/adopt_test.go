@@ -284,12 +284,12 @@ type held model.Hold
 
 func (h held) EmptyHold(project.ProjectInfo) model.Hold { return model.Hold(h) }
 
-// settledPrune is Argo about to prune refs from the root folder's app, which
-// a settled root leaves out.
+// settledPrune is Argo about to prune refs from project p's generated app,
+// which settling p leaves out.
 type settledPrune []model.ObjectRef
 
 func (f settledPrune) PrunePending(_ string, settled ...string) ([]model.ObjectRef, bool) {
-	if slices.Contains(settled, "") {
+	if slices.Contains(settled, "p") {
 		return nil, true
 	}
 	return f, true
