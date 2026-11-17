@@ -52,8 +52,21 @@ func ApplicationSet(dv *dotvirtv1alpha1.Dotvirt, argoNS string, platformNS, unco
 		"syncPolicy": map[string]any{"preserveResourcesOnDeletion": true},
 		"generators": []any{generator},
 		"template":   template,
+		// A typed template cannot take a boolean from a parameter. hasKey keeps
+		// Argo's default while a console that sends no allowEmpty still answers
+		// the generator, as during an upgrade.
+		"templatePatch": tenantAllowEmptyPatch,
 	})
 }
+
+// tenantAllowEmptyPatch sets a tenant app's automated.allowEmpty from the
+// generator (dotvirt's emptyHold): on only while Argo holds a deliberate
+// removal of the project's last objects.
+const tenantAllowEmptyPatch = `spec:
+  syncPolicy:
+    automated:
+      allowEmpty: {{ and (hasKey . "allowEmpty") .allowEmpty }}
+`
 
 func toAny(ss []string) []any {
 	out := make([]any, 0, len(ss))

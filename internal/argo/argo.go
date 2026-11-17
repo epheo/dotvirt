@@ -8,6 +8,7 @@ package argo
 import (
 	"context"
 	"fmt"
+	"path"
 	"regexp"
 	"sort"
 	"strings"
@@ -324,6 +325,29 @@ func appRepos(app map[string]any) []string {
 		}
 	}
 	return out
+}
+
+// sourceKeys keys each of app's sources by its normalized repo and folder.
+func sourceKeys(app map[string]any) []string {
+	var out []string
+	add := func(raw any) {
+		if src, ok := raw.(map[string]any); ok {
+			out = append(out, sourceKey(forge.NormalizeRepoURL(asString(src, "repoURL")), asString(src, "path")))
+		}
+	}
+	if src, ok, _ := unstructured.NestedFieldNoCopy(app, "spec", "source"); ok {
+		add(src)
+	}
+	for _, raw := range nestedSlice(app, "spec", "sources") {
+		add(raw)
+	}
+	return out
+}
+
+// sourceKey is a normalized repo and one folder of it. "" and "." are the
+// repo root, as the ApplicationSet renders a root project's path.
+func sourceKey(repo, dir string) string {
+	return repo + "\x00" + strings.TrimPrefix(path.Clean("/"+dir), "/")
 }
 
 // appRepo is the Application's canonical primary repoURL, the key tying an

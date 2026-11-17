@@ -189,7 +189,11 @@ func (c *Coordinator) pruning(id auth.Identity, proj project.ProjectInfo, covere
 	if c.prune == nil {
 		return pruning{known: true}
 	}
-	pending, known := c.prune.PrunePending(proj.Repo)
+	var settled []string
+	if c.holds != nil && c.holds.EmptyHold(proj) == model.HoldDeleting {
+		settled = append(settled, proj.Path)
+	}
+	pending, known := c.prune.PrunePending(proj.Repo, settled...)
 	if !known {
 		return pruning{}
 	}

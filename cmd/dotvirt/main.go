@@ -338,6 +338,7 @@ func run() error {
 
 	coordinator.UseAuthorizer(server)
 	coordinator.UseInstancetypes(server)
+	coordinator.UseHolds(server)
 
 	// Live inventory hub: each connection's frame is built under its identity (same
 	// path as GET /api/inventory). It wakes on every kind that can alter a frame and

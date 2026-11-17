@@ -663,3 +663,75 @@ func TestResyncWithoutTargetRevisionSyncsHEAD(t *testing.T) {
 		t.Errorf("revision = %q, patch = %s; want HEAD and %s", res.Revision, sent, want)
 	}
 }
+
+// EmptyHold reads Argo's own refusal to sync a source that would prune every
+// object it tracks, per repo folder, with the revisions the generator weighs;
+// anything short of that predicate is no hold.
+func TestEmptyHoldReadsArgosRefusal(t *testing.T) {
+	const repo = "https://forge.example/dotvirt/team-a.git"
+	res := func(name string, prune bool) map[string]any {
+		return map[string]any{"kind": "VirtualMachine", "namespace": "team-a", "name": name, "requiresPruning": prune}
+	}
+	held := func(name, dir string, edit func(map[string]any)) *unstructured.Unstructured {
+		a := appWithSource("argocd", name, repo, []any{res("web", true), res("db", true)})
+		_ = unstructured.SetNestedField(a.Object, dir, "spec", "source", "path")
+		_ = unstructured.SetNestedField(a.Object, true, "spec", "syncPolicy", "automated", "prune")
+		_ = unstructured.SetNestedField(a.Object, "OutOfSync", "status", "sync", "status")
+		_ = unstructured.SetNestedField(a.Object, "c2", "status", "sync", "revision")
+		_ = unstructured.SetNestedSlice(a.Object, []any{map[string]any{"revision": "c0"}, map[string]any{"revision": "c1"}}, "status", "history")
+		if edit != nil {
+			edit(a.Object)
+		}
+		return a
+	}
+	s := NewSnapshot(nil, nil)
+	_ = s.store().Replace([]any{
+		held("dotvirt-team-a", ".", nil),
+		held("dotvirt-declared", "declared", func(o map[string]any) {
+			_ = unstructured.SetNestedSlice(o, []any{res("web", true), res("db", false)}, "status", "resources")
+		}),
+		held("dotvirt-manual", "manual", func(o map[string]any) {
+			_ = unstructured.SetNestedField(o, false, "spec", "syncPolicy", "automated", "prune")
+		}),
+		held("dotvirt-synced", "synced", func(o map[string]any) {
+			_ = unstructured.SetNestedField(o, "Synced", "status", "sync", "status")
+		}),
+		held("dotvirt-never", "never", func(o map[string]any) {
+			unstructured.RemoveNestedField(o, "status", "history")
+		}),
+	}, "1")
+	settle(s)
+	if h, ok := s.EmptyHold(repo+"/", ""); !ok || h != (EmptyHold{Compared: "c2", Applied: "c1"}) {
+		t.Errorf("held app: %+v %v, want compared c2 applied c1", h, ok)
+	}
+	for _, dir := range []string{"declared", "manual", "synced", "never", "elsewhere"} {
+		if h, ok := s.EmptyHold(repo, dir); ok {
+			t.Errorf("%s: read as held: %+v", dir, h)
+		}
+	}
+}
+
+// A folder whose app's prunes are on their way whatever merges next (a
+// deliberate removal ArgoCD is letting through) is left out of what the next
+// merge would delete; the repo's other apps still count.
+func TestPrunePendingLeavesSettledFoldersOut(t *testing.T) {
+	const repo = "https://forge.example/dotvirt/team-a.git"
+	s := NewSnapshot(nil, nil)
+	s.synced.Mark()
+	res := func(ns, name string) map[string]any {
+		return map[string]any{"kind": "VirtualMachine", "namespace": ns, "name": name, "requiresPruning": true}
+	}
+	root := appWithSource("argocd", "dotvirt-team-a", repo, []any{res("team-a", "web")})
+	_ = unstructured.SetNestedField(root.Object, ".", "spec", "source", "path")
+	folder := appWithSource("argocd", "dotvirt-team-c", repo, []any{res("team-c", "db")})
+	_ = unstructured.SetNestedField(folder.Object, "team-c", "spec", "source", "path")
+	for _, a := range []*unstructured.Unstructured{root, folder} {
+		if err := s.apps.Add(a); err != nil {
+			t.Fatal(err)
+		}
+	}
+	want := []model.ObjectRef{{Kind: "VirtualMachine", Namespace: "team-c", Name: "db"}}
+	if got, known := s.PrunePending(repo, ""); !known || !slices.Equal(got, want) {
+		t.Fatalf("root settled: %v known=%v, want %v", got, known, want)
+	}
+}

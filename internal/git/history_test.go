@@ -489,3 +489,47 @@ func TestBranchDiffByCommittingAuthor(t *testing.T) {
 		}
 	}
 }
+
+// Follows tells git moving on by commits on main from a history that replaced
+// what was there, and says when the mirror cannot tell yet.
+func TestFollowsTellsMovingOnFromReplaced(t *testing.T) {
+	h := seedMerge(t)
+	r, err := Open(h.bare, "", nil)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	merge, addDB, seed := revParse(t, h.bare, "main"), revParse(t, h.bare, "main~1"), revParse(t, h.bare, "main~3")
+	inside := revParse(t, h.bare, "main^2")
+	for _, c := range []struct {
+		name           string
+		newer, older   string
+		follows, known bool
+	}{
+		{"moved on by a merge", merge, addDB, true, true},
+		{"moved on by commits", addDB, seed, true, true},
+		{"the same revision", merge, merge, true, true},
+		{"older is newer", addDB, merge, false, true},
+		{"older only inside a merged PR", merge, inside, false, true},
+		{"newer not fetched", strings.Repeat("a", 40), seed, false, false},
+	} {
+		follows, known, err := r.Follows("main", c.newer, c.older)
+		if err != nil || follows != c.follows || known != c.known {
+			t.Errorf("%s: follows=%v known=%v err=%v, want %v %v", c.name, follows, known, err, c.follows, c.known)
+		}
+	}
+
+	// The forge loses the repo and it comes back with a history of its own.
+	h.run("admin", h.work, "checkout", "-q", "--orphan", "fresh")
+	h.run("admin", h.work, "rm", "-rqf", ".")
+	h.write("README.md", "recovered\n")
+	h.run("admin", h.work, "add", "-A")
+	h.run("admin", h.work, "commit", "-qm", "re-created")
+	h.run("admin", h.work, "push", "-qf", "origin", "fresh:main")
+	if err := r.refresh(); err != nil {
+		t.Fatalf("refresh: %v", err)
+	}
+	follows, known, err := r.Follows("main", revParse(t, h.bare, "main"), merge)
+	if err != nil || follows || !known {
+		t.Errorf("replaced history: follows=%v known=%v err=%v, want false true", follows, known, err)
+	}
+}

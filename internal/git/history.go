@@ -97,6 +97,32 @@ func (r *Repo) OnBranch(branch, hash string) (bool, error) {
 	return false, nil
 }
 
+// Follows reports whether older is newer or one of newer's first-parent
+// ancestors, newer being a state branch held (OnBranch): git moved on from
+// older by commits on branch, not by a history that replaced it. known is
+// false while branch does not hold newer within historyScan, as when this
+// mirror has not fetched it yet: no answer either way.
+func (r *Repo) Follows(branch, newer, older string) (follows, known bool, err error) {
+	c, err := branchCommit(r.repo.Load(), branch)
+	if err != nil {
+		return false, false, err
+	}
+	from, want := plumbing.NewHash(newer), plumbing.NewHash(older)
+	for seen := 0; seen < historyScan; seen++ {
+		known = known || c.Hash == from
+		if known && c.Hash == want {
+			return true, true, nil
+		}
+		if c.NumParents() == 0 {
+			return false, known, nil
+		}
+		if c, err = c.Parent(0); err != nil {
+			return false, known, err
+		}
+	}
+	return false, known, nil
+}
+
 // historyScan bounds one walk: a file untouched for this many commits reads as
 // having no older history rather than costing a walk of the whole branch.
 const historyScan = 1000

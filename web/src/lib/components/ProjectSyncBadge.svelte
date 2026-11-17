@@ -11,8 +11,16 @@
 	// Null view = Synced+Healthy (or not-yet-known): the project needs no badge, so
 	// green stays implicit and the tree isn't cluttered - the same rule as SyncBadge.
 	const view = $derived(projectSyncView(gitOps));
-	// Only a project ArgoCD couldn't apply has an error worth expanding.
-	const clickable = $derived(!!gitOps?.syncError);
+	// Only a project ArgoCD couldn't apply has an error worth expanding; a hold
+	// on an emptied source is said in its own words, not Argo's.
+	const clickable = $derived(!!gitOps?.syncError && !gitOps.hold);
+	const held = $derived(
+		gitOps?.hold === 'replaced'
+			? "Git no longer declares this project's running objects: its repo was re-created or rewritten. ArgoCD keeps them until they are adopted into git."
+			: gitOps?.hold
+				? "ArgoCD is removing this project's last objects, as git now declares none."
+				: '',
+	);
 	let open = $state(false);
 
 	function show(e: MouseEvent) {
@@ -23,7 +31,7 @@
 	const tip = $derived.by(() => {
 		if (!gitOps) return '';
 		const rev = gitOps.revision ? ` @ ${gitOps.revision}` : '';
-		return (gitOps.syncError || `ArgoCD: ${view?.label ?? gitOps.sync}`) + rev;
+		return (held || gitOps.syncError || `ArgoCD: ${view?.label ?? gitOps.sync}`) + rev;
 	});
 </script>
 

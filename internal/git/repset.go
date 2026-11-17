@@ -203,6 +203,28 @@ func (s *RepoSet) Peek(repoURL string) (*Repo, bool) {
 	return p.read, true
 }
 
+// Warm returns repoURL's read mirror when it is open, counting as use, and
+// otherwise opens it in the background and reports false: for a caller that
+// must not wait on a clone yet needs the mirror on its next call, though no
+// one has asked for the repo within idleTimeout. Nil-safe.
+func (s *RepoSet) Warm(repoURL, root string) (*Repo, bool) {
+	if s == nil {
+		return nil, false
+	}
+	key := forge.NormalizeRepoURL(repoURL)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if p, ok := s.cache[key]; ok && p.read.root == root {
+		p.used = s.now()
+		return p.read, true
+	}
+	// Every frame asks while a clone runs: one open is enough.
+	if _, busy := s.opening[key]; !busy {
+		go func() { _, _, _ = s.Get(repoURL, root) }()
+	}
+	return nil, false
+}
+
 // Poke fetches repoURL's heads now instead of waiting for the next poll tick -
 // the webhook's instant-update path. Matched by canonical URL, so a webhook
 // payload's clone_url/html_url form finds the entry the project annotation opened.

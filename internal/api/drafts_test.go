@@ -79,7 +79,7 @@ func newDraftsRig(t *testing.T, platformMissing bool) *draftsRig {
 // stray is what ArgoCD is about to prune, per repo.
 type stray map[string][]model.ObjectRef
 
-func (s stray) PrunePending(repo string) ([]model.ObjectRef, bool) { return s[repo], true }
+func (s stray) PrunePending(repo string, _ ...string) ([]model.ObjectRef, bool) { return s[repo], true }
 
 // stage puts one removal into user's draft of project, as any route would.
 func (g *draftsRig) stage(t *testing.T, user, project string) {

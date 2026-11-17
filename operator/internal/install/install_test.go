@@ -5,6 +5,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"text/template"
 
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -549,6 +550,31 @@ func TestApplicationSetExcludesUnconfinedProjects(t *testing.T) {
 	want := []any{map[string]any{"key": "project", "operator": "NotIn", "values": []any{"taken"}}}
 	if !reflect.DeepEqual(exprs, want) {
 		t.Errorf("selector = %v, want %v", exprs, want)
+	}
+}
+
+// The tenant template takes automated.allowEmpty from the generator, rendered
+// as Argo renders a templatePatch (Go template, missingkey=error, sprig's
+// hasKey), and keeps Argo's default when a console sends none.
+func TestApplicationSetPatchesAllowEmptyFromTheGenerator(t *testing.T) {
+	patch, _, _ := unstructured.NestedString(ApplicationSet(testDotvirt(), "argocd", nil, nil).Object, "spec", "templatePatch")
+	hasKey := func(d map[string]any, k string) bool { _, ok := d[k]; return ok }
+	tpl := template.Must(template.New("patch").Option("missingkey=error").Funcs(template.FuncMap{"hasKey": hasKey}).Parse(patch))
+	for _, c := range []struct {
+		params map[string]any
+		want   string
+	}{
+		{map[string]any{"project": "a", "allowEmpty": true}, "allowEmpty: true\n"},
+		{map[string]any{"project": "a", "allowEmpty": false}, "allowEmpty: false\n"},
+		{map[string]any{"project": "a"}, "allowEmpty: false\n"},
+	} {
+		var b strings.Builder
+		if err := tpl.Execute(&b, c.params); err != nil {
+			t.Fatalf("%v: %v", c.params, err)
+		}
+		if want := "spec:\n  syncPolicy:\n    automated:\n      " + c.want; b.String() != want {
+			t.Errorf("%v: patch %q, want %q", c.params, b.String(), want)
+		}
 	}
 }
 

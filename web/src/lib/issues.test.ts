@@ -46,6 +46,24 @@ describe('deriveIssues', () => {
 		expect(deriveIssues(i)).toEqual([]);
 	});
 
+	it('reads an emptied source ArgoCD holds by what it means, never as a repo problem', () => {
+		const wipe = 'Skipping sync attempt to 1a2b: auto-sync will wipe out all resources';
+		const held = (hold: 'deleting' | 'replaced' | 'pending') =>
+			deriveIssues(
+				inv([
+					{
+						name: 'p1',
+						repo: 'https://forge/p1.git',
+						gitOps: { sync: 'OutOfSync', syncError: wipe, hold },
+						namespaces: [{ namespace: 'ns-a', vms: [vm({ sync: 'OutOfSync' })] }],
+					},
+				]),
+			).map((i) => i.label);
+		expect(held('deleting')).toEqual([]);
+		expect(held('pending')).toEqual([]);
+		expect(held('replaced')).toEqual(['Not in git']);
+	});
+
 	it("folds a VM's reasons into one row, highest severity first overall", () => {
 		const i = inv([
 			{

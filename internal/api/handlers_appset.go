@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/epheo/dotvirt/internal/model"
+	"github.com/epheo/dotvirt/internal/project"
 	"github.com/epheo/dotvirt/pkg/tenancy"
 )
 
@@ -52,6 +53,11 @@ func (s *Server) handleAppSetPlugin(w http.ResponseWriter, r *http.Request) {
 		Repo      string `json:"repo"`
 		Path      string `json:"path"`
 		Namespace string `json:"namespace"`
+		// AllowEmpty is the app's automated.allowEmpty (the operator's
+		// templatePatch): on only while a deliberate removal of the project's
+		// last objects is held, so Argo's guard against an emptied source
+		// still holds a repo that was lost and re-created.
+		AllowEmpty bool `json:"allowEmpty"`
 	}
 	all := s.state.Namespaces()
 	created := make(map[string]time.Time, len(all))
@@ -80,9 +86,37 @@ func (s *Server) handleAppSetPlugin(w http.ResponseWriter, r *http.Request) {
 		if root == "" {
 			root = "."
 		}
-		params = append(params, param{Project: p.Name, Repo: p.Repo, Path: root, Namespace: dest})
+		params = append(params, param{Project: p.Name, Repo: p.Repo, Path: root, Namespace: dest, AllowEmpty: s.EmptyHold(p) == model.HoldDeleting})
 	}
 	writeJSON(w, map[string]any{"output": map[string]any{"parameters": params}})
+}
+
+// EmptyHold is what it means that ArgoCD holds p's app at an empty source
+// (argo.Snapshot.EmptyHold), "" while it does not; changeset.HoldReader. Deleting needs the revision
+// Argo holds on main in dotvirt's mirror, descending from the one Argo last
+// applied; until the mirror has it, pending. A held project's mirror is kept
+// open (RepoSet.Warm): the merge that emptied it may land long after anyone
+// last opened the repo.
+func (s *Server) EmptyHold(p project.ProjectInfo) model.Hold {
+	if s.drift == nil || p.Repo == "" {
+		return ""
+	}
+	h, ok := s.drift.EmptyHold(p.Repo, p.Path)
+	if !ok {
+		return ""
+	}
+	read, ok := s.repos.Warm(p.Repo, p.Path)
+	if !ok {
+		return model.HoldPending
+	}
+	follows, known, err := read.Follows(s.cfg.BaseBranch, h.Compared, h.Applied)
+	switch {
+	case err != nil || !known:
+		return model.HoldPending
+	case follows:
+		return model.HoldDeleting
+	}
+	return model.HoldReplaced
 }
 
 // pluginRequest is the plugin generator's request: the ApplicationSet's
