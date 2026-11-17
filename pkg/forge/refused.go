@@ -32,25 +32,23 @@ func Refused(err error) bool { return RefusedStatus(err) != 0 }
 // status condition.
 const refusalTextMax = 160
 
-// RefusalText is the forge's own one-line reason for a refused call (its JSON
-// "message", e.g. "token does not have at least one of required scope(s)"),
-// bounded and stripped of anything but printable ASCII; "" when it gave none
-// or answered with a page instead (an HTML body from a proxy says nothing).
+// RefusalText is the forge's own one-line reason for a refused call: the
+// string "message" of a body that is exactly one JSON object (e.g. "token does
+// not have at least one of required scope(s)"), bounded and stripped of
+// anything but printable ASCII. Any other body gives "": plain text and pages
+// come from proxies, which echo internal hosts and request URLs.
 func RefusalText(err error) string {
 	var se *StatusError
 	if !errors.As(err, &se) || RefusedStatus(err) == 0 {
 		return ""
 	}
-	text := strings.TrimSpace(se.Message)
 	var body struct {
-		Message string `json:"message"`
+		Message *string `json:"message"`
 	}
-	if json.Unmarshal([]byte(text), &body) == nil {
-		text = body.Message
-	} else if strings.HasPrefix(text, "<") {
+	if json.Unmarshal([]byte(se.Message), &body) != nil || body.Message == nil {
 		return ""
 	}
-	text, _, _ = strings.Cut(strings.TrimSpace(text), "\n")
+	text, _, _ := strings.Cut(strings.TrimSpace(*body.Message), "\n")
 	text = strings.Map(func(r rune) rune {
 		if r < 0x20 || r > 0x7e {
 			return -1

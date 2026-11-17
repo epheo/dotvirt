@@ -59,8 +59,9 @@ func TestCredentialFingerprintFollowsTheToken(t *testing.T) {
 	}
 }
 
-// The forge's own reason travels, bounded and printable; a page or an outage
-// carries none.
+// The forge's own reason travels, bounded and printable, only from exactly
+// one JSON object with a string message: a proxy's plain text or page, which
+// can echo internal hosts and URLs, carries none.
 func TestRefusalTextIsTheForgesBoundedReason(t *testing.T) {
 	long := strings.Repeat("x", 400)
 	for _, tc := range []struct {
@@ -69,12 +70,16 @@ func TestRefusalTextIsTheForgesBoundedReason(t *testing.T) {
 	}{
 		{&StatusError{Status: http.StatusForbidden, Message: `{"message":"token does not have at least one of required scope(s): [write:organization]","url":"https://forge.example/api/swagger"}`},
 			"token does not have at least one of required scope(s): [write:organization]"},
-		{&StatusError{Status: http.StatusForbidden, Message: "Must be an organization owner\nsecond line"}, "Must be an organization owner"},
+		{&StatusError{Status: http.StatusForbidden, Message: `{"message":"Must be an organization owner\nsecond line"}`}, "Must be an organization owner"},
+		{&StatusError{Status: http.StatusForbidden, Message: "Forbidden: POST http://10.0.0.5:3000/api/v1/orgs/x/hooks?token=abc"}, ""},
 		{&StatusError{Status: http.StatusNotFound, Message: "<html><body>Not Found</body></html>"}, ""},
-		{&StatusError{Status: http.StatusForbidden, Message: "bad\x1b[31mcoloré"}, "bad[31mcolor"},
+		{&StatusError{Status: http.StatusForbidden, Message: `{"error":"denied"}`}, ""},
+		{&StatusError{Status: http.StatusForbidden, Message: `{"message":42}`}, ""},
+		{&StatusError{Status: http.StatusForbidden, Message: `{"message":"ok"} trailing http://10.0.0.5`}, ""},
+		{&StatusError{Status: http.StatusForbidden, Message: `{"message":"bad\u001b[31mcolor\u00e9"}`}, "bad[31mcolor"},
 		{&StatusError{Status: http.StatusBadGateway, Message: `{"message":"upstream"}`}, ""},
 		{errors.New("dial tcp"), ""},
-		{&StatusError{Status: http.StatusForbidden, Message: long}, long[:refusalTextMax] + "..."},
+		{&StatusError{Status: http.StatusForbidden, Message: `{"message":"` + long + `"}`}, long[:refusalTextMax] + "..."},
 	} {
 		if got := RefusalText(tc.err); got != tc.want {
 			t.Errorf("RefusalText(%v) = %q, want %q", tc.err, got, tc.want)
