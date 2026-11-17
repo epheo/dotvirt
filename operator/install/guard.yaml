@@ -41,7 +41,18 @@
 #   # https://thanos-querier.openshift-monitoring.svc:9091 the same URL on 9092;
 #   # the CA, /var/run/dotvirt/tls-metrics/ca.crt when spec.metrics.ca is set, else
 #   # /var/run/dotvirt/tls-service/service-ca.crt for an https .svc url. Empty when unset.
-#   export METRICS_URL="$(spec metrics.url)" METRICS_TENANCY_URL=... METRICS_CA=...
+#   METRICS_URL="$(spec metrics.url)" METRICS_TENANCY_URL= METRICS_CA=
+#   if [ -n "$METRICS_URL" ]; then
+#     METRICS_TENANCY_URL="$(spec metrics.tenancyURL)"
+#     [ -n "$METRICS_TENANCY_URL" ] || case "$METRICS_URL" in
+#       *://thanos-querier.openshift-monitoring.svc:9091|*://thanos-querier.openshift-monitoring.svc:9091/*|\
+#       *://thanos-querier.openshift-monitoring.svc.cluster.local:9091|*://thanos-querier.openshift-monitoring.svc.cluster.local:9091/*)
+#         METRICS_TENANCY_URL="$(printf '%s' "$METRICS_URL" | sed 's|:9091|:9092|')";;
+#     esac
+#     if [ -n "$(spec metrics.ca)" ]; then METRICS_CA=/var/run/dotvirt/tls-metrics/ca.crt
+#     else case "$METRICS_URL" in https://*.svc*) METRICS_CA=/var/run/dotvirt/tls-service/service-ca.crt;; esac; fi
+#   fi
+#   export METRICS_URL METRICS_TENANCY_URL METRICS_CA
 #   # spec.argocd, else the defaults: openshift-gitops where routes are served
 #   # (OpenShift, MicroShift), argocd elsewhere, and that instance's controller:
 #   ARGO_NAMESPACE="$(spec argocd.namespace)"
@@ -75,10 +86,13 @@
 #   # Not delegating, the guard pins none of them:
 #   [ "$FORGE_DELEGATED" = true ] || { FORGE_URL=; FORGE_CLIENT_ID=; FORGE_AUTHORIZE_URL=; FORGE_TOKEN_URL=; FORGE_CLIENT_SECRET=; FORGE_CLIENT_SECRET_KEY=; }
 #
-#   # Every value lands inside a quoted string; one that could end it is refused,
-#   # never escaped:
+#   # Every value lands inside a quoted string in a YAML document: one holding
+#   # any other character (a quote, a backslash, a line break, a space) is
+#   # refused, never escaped. The console's Install builds the guard in Go.
 #   for v in ARGO_CONTROLLER ARGO_NAMESPACE BRANDING_CONFIGMAP CONSOLE_HOST FORGE_AUTHORIZE_URL FORGE_CLIENT_ID FORGE_CLIENT_SECRET FORGE_CLIENT_SECRET_KEY FORGE_DELEGATED FORGE_INSECURE_TLS FORGE_MANAGED FORGE_SECRET FORGE_TOKEN_URL FORGE_URL INSTALL_NAMESPACE METRICS_CA METRICS_CA_CONFIGMAP METRICS_TENANCY_URL METRICS_URL OIDC_ISSUER OIDC_SECRET OIDC_SECRET_KEY OPERATOR_USERNAME RELATED_IMAGE_DOTVIRT RELATED_IMAGE_FORGEJO SPEC_IMAGE; do
-#     case "$(printenv "$v")" in *'"'*|*\\*) echo "$v holds a quote or a backslash" >&2; exit 1;; esac
+#     eval "x=\${$v-}"
+#     case "$x" in *[!]A-Za-z0-9._:/@%+=~,[-]*)
+#       echo "$v holds a character the template cannot carry: install the guard from the console" >&2; exit 1;; esac
 #   done
 #
 #   envsubst < guard.yaml | kubectl apply --server-side --field-manager=dotvirt -f -
