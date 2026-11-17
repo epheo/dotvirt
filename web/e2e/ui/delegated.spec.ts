@@ -45,6 +45,8 @@ test('an abandoned connect leaves the console usable and is not restarted', asyn
 	// The user walks away from the forge's page and back to the console.
 	await page.goto('/compute');
 	await signedIn(page);
+	// Even past the tab's repeat guard, the session already asked once.
+	await page.evaluate(() => sessionStorage.removeItem('dotvirt.forge-connect-at'));
 	await page.reload();
 	await signedIn(page);
 	expect(await connects(page)).toBe(1);
@@ -104,6 +106,23 @@ test('a second automatic connect within a minute in a tab is held', async ({ pag
 	await page.click('button[type="submit"]');
 	await signedIn(page);
 	expect(await connects(page)).toBe(1);
+});
+
+test('a tab that cannot record its connects starts none on its own', async ({ page }) => {
+	await page.addInitScript(() => {
+		Object.defineProperty(window, 'sessionStorage', {
+			get() {
+				throw new DOMException('blocked', 'SecurityError');
+			},
+		});
+	});
+	await setScenario(page, 'delegated');
+	await signInAt(page, '/compute');
+	await signedIn(page);
+	await page.waitForTimeout(1000);
+	expect(await connects(page)).toBe(0);
+	await userMenu(page).click();
+	await expect(page.getByRole('button', { name: 'Connect git account' })).toBeVisible();
 });
 
 test('without delegation the console shows no git account and starts no connect', async ({
