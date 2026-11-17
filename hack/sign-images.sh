@@ -67,8 +67,8 @@ verify() {
 	done
 }
 
-[ -s "$refs" ] || { echo "::error::$refs lists no image to sign"; exit 1; }
-n="$(grep -c . "$refs")"
+n="$(grep -c . "$refs" || true)"
+[ "$n" -gt 0 ] || { echo "::error::$refs lists no image to sign"; exit 1; }
 [ -z "$want" ] || [ "$n" = "$want" ] ||
 	{ echo "::error::$refs lists $n images but $want were pushed: record each pushed image (hack/lib.sh published)"; exit 1; }
 

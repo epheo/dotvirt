@@ -34,6 +34,7 @@ jobs:
     environment: QUAY
     outputs:
       refs: ${{ steps.refs.outputs.refs }}
+      catalogsource: ${{ steps.refs.outputs.catalogsource }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
@@ -62,18 +63,18 @@ jobs:
           OPM: opm # the verified binary from the tools action; the scripts' default compiles opm from source
           PUBLISHED_REFS: ${{ runner.temp }}/published-refs
         run: VERSION=${{ inputs.version }} CONTAINER_TOOL=docker ./hack/preview.sh
-      - name: Record the pushed images
+      # The CatalogSource is handed to the sign job, which publishes it only once every
+      # image verifies: a failed sign never leaves an rc to apply.
+      - name: Record the pushed images and the CatalogSource
         id: refs
         run: |
-          { echo "refs<<REFS"; cat "$RUNNER_TEMP/published-refs"; echo REFS; } >> "$GITHUB_OUTPUT"
-      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        with:
-          name: catalogsource-preview-${{ inputs.version }}
-          path: operator/install/catalogsource-preview.yaml
+          { echo "refs<<REFS"; cat "$RUNNER_TEMP/published-refs"; echo REFS
+            echo "catalogsource<<CATALOGSOURCE"; cat operator/install/catalogsource-preview.yaml; echo CATALOGSOURCE
+          } >> "$GITHUB_OUTPUT"
 
-  # Sign every image the preview job pushed, then verify each one. Its own runner: the
-  # signing key and the OIDC token never meet the build tools. A preview whose sign job
-  # failed is not to be applied.
+  # Sign every image the preview job pushed, verify each one, then publish the
+  # CatalogSource. Its own runner: the signing key and the OIDC token never meet the
+  # build tools.
   sign:
     needs: [preview]
     runs-on: ubuntu-latest
@@ -99,3 +100,11 @@ jobs:
         run: |
           printf '%s\n' "$REFS" > "$RUNNER_TEMP/published-refs"
           ./hack/sign-images.sh "$RUNNER_TEMP/published-refs" 4 # app, operator, bundle, catalog
+      - name: Write the CatalogSource
+        env:
+          CATALOGSOURCE: ${{ needs.preview.outputs.catalogsource }}
+        run: printf '%s\n' "$CATALOGSOURCE" > "$RUNNER_TEMP/catalogsource-preview.yaml"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: catalogsource-preview-${{ inputs.version }}
+          path: ${{ runner.temp }}/catalogsource-preview.yaml
