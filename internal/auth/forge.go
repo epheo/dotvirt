@@ -376,6 +376,15 @@ func (f *Forge) Disconnect(id Identity) {
 	}
 }
 
+// Rejected drops id's forge connection when it still holds token, which the
+// forge refused: the user's next write offers the connect, which the forge
+// answers at once while it holds their grant.
+func (f *Forge) Rejected(id Identity, token string) {
+	if key, ok := forgeKey(id); ok {
+		f.store.reject(key, token)
+	}
+}
+
 // Held is how many console sessions hold a forge entry, connected or asked.
 func (f *Forge) Held() int {
 	f.store.mu.Lock()

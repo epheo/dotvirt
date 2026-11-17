@@ -403,6 +403,37 @@ func TestForgeDisconnectAndSignOut(t *testing.T) {
 	}
 }
 
+// A token the forge refused drops the connection that holds it, and only it:
+// a connection made since is another token.
+func TestForgeRejectedDropsOnlyThatToken(t *testing.T) {
+	rig := newForgeRig(t)
+	session := rig.signIn(t, "tok-alice")
+	state, code, st := rig.connect(t, session, "/")
+	rig.callback(t, session, state, "code="+code+"&state="+st)
+	id := rig.identity(t, session)
+	cred, err := rig.f.Credential(context.Background(), id)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	rig.f.Rejected(id, "an-older-token")
+	if !rig.f.Status(context.Background(), id).Connected {
+		t.Fatal("a refusal of another token dropped the connection")
+	}
+	bob := rig.identity(t, rig.signIn(t, "tok-bob"))
+	rig.f.Rejected(bob, cred.Token)
+	if !rig.f.Status(context.Background(), id).Connected {
+		t.Fatal("another session's refusal dropped the connection")
+	}
+	rig.f.Rejected(id, cred.Token)
+	if s := rig.f.Status(context.Background(), id); s.Connected || !s.Asked {
+		t.Fatalf("after the forge refused its token: %+v, want asked and not connected", s)
+	}
+	if _, err := rig.f.Credential(context.Background(), id); !errors.Is(err, ErrForgeNotConnected) {
+		t.Fatalf("credential after the refusal: %v", err)
+	}
+}
+
 func TestForgeConnectionEndsWithItsConsoleSession(t *testing.T) {
 	f := newForgeSessions()
 	issued := time.Now().Add(-sessionMaxAge - time.Minute)

@@ -438,3 +438,54 @@ func TestBranchDiffBy(t *testing.T) {
 		t.Errorf("missing branch: %v, want ErrNoBranch", err)
 	}
 }
+
+// A user who commits their own changes reads their branch whether they or
+// dotvirt committed it; the committer must still be one of the two, and a
+// user who does not commit reads only dotvirt's commits.
+func TestBranchDiffByCommittingAuthor(t *testing.T) {
+	h := seedHistoryRepo(t)
+	alice := Author{Name: "alice", Email: "alice@dotvirt.noreply"}
+	aliceCommits := Author{Name: alice.Name, Email: alice.Email, Commits: true}
+	dotvirt := Author{Name: "dotvirt", Email: "dotvirt@localhost"}
+	bob := Author{Name: "bob", Email: "bob@x"}
+	commit := func(author, committer Author, branch string) {
+		t.Helper()
+		for _, args := range [][]string{{"checkout", "-qB", branch, "main"}, {"add", "-A"}, {"commit", "-qm", branch}, {"push", "-qf", "origin", branch}} {
+			if args[0] == "add" {
+				h.write("tenant-a/web.yaml", webYAML(16))
+			}
+			cmd := exec.Command("git", args...)
+			cmd.Dir = h.work
+			cmd.Env = append(os.Environ(),
+				"GIT_AUTHOR_NAME="+author.Name, "GIT_AUTHOR_EMAIL="+author.Email,
+				"GIT_COMMITTER_NAME="+committer.Name, "GIT_COMMITTER_EMAIL="+committer.Email)
+			if out, err := cmd.CombinedOutput(); err != nil {
+				t.Fatalf("git %v: %v\n%s", args, err, out)
+			}
+		}
+	}
+	commit(alice, alice, "self")
+	commit(alice, dotvirt, "bot")
+	commit(alice, bob, "other")
+
+	r, err := Open(h.bare, "", nil)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	for _, c := range []struct {
+		branch string
+		by     Author
+		reads  bool
+	}{
+		{"self", aliceCommits, true},
+		{"bot", aliceCommits, true},
+		{"other", aliceCommits, false},
+		{"self", alice, false},
+		{"bot", alice, true},
+	} {
+		_, _, err := r.BranchDiffBy("main", c.branch, c.by)
+		if got := err == nil; got != c.reads || err != nil && !errors.Is(err, ErrForeignCommit) {
+			t.Errorf("%s for %+v: %v, want reads=%v", c.branch, c.by, err, c.reads)
+		}
+	}
+}

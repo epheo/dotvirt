@@ -155,6 +155,18 @@ func (s *forgeSessions) disconnect(key string) {
 	}
 }
 
+// reject drops the session's tokens when access is still the one it serves:
+// the forge refused it. A connection made since stays.
+func (s *forgeSessions) reject(key, access string) {
+	if e := s.get(key); e != nil {
+		e.mu.Lock()
+		if e.tokens.access == access {
+			e.dropLocked()
+		}
+		e.mu.Unlock()
+	}
+}
+
 func (e *forgeSession) dropLocked() {
 	e.login, e.tokens = "", forgeTokens{}
 	e.gen++

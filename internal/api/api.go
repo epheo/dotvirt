@@ -466,6 +466,7 @@ func withCORS(origin string, next http.Handler) http.Handler {
 		w.Header().Set("Vary", "Origin")
 		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
 		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
+		w.Header().Set("Access-Control-Expose-Headers", nextHeader)
 		if r.Method == http.MethodOptions {
 			w.WriteHeader(http.StatusNoContent)
 			return
@@ -563,9 +564,29 @@ func respond(w http.ResponseWriter, v any, err error) {
 	writeJSON(w, v)
 }
 
-// fail writes err mapped to a status by statusFor, worded by publicMessage.
+// fail writes err mapped to a status by statusFor, worded by publicMessage,
+// naming in nextHeader the way forward the console offers as one click.
 func fail(w http.ResponseWriter, err error) {
+	if next := nextStep(err); next != "" {
+		w.Header().Set(nextHeader, next)
+	}
 	http.Error(w, publicMessage(err), statusFor(err))
+}
+
+// nextHeader names, on a refusal, the one-click way forward the console
+// offers beside the server's sentence.
+const nextHeader = "Dotvirt-Next"
+
+// nextStep is the way forward err names, "" for none: connect the caller's
+// git account, or ask for write on the repo in the forge.
+func nextStep(err error) string {
+	switch {
+	case errors.Is(err, model.ErrForgeConnect):
+		return "forge-connect"
+	case errors.Is(err, model.ErrForgeWrite):
+		return "forge-write"
+	}
+	return ""
 }
 
 // publicMessage is what the caller reads of err. A classified error (a

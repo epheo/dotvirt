@@ -41,8 +41,7 @@ func (c *Coordinator) Propose(id auth.Identity, proj project.ProjectInfo, req mo
 		return model.ProposeResult{}, err
 	}
 	run := &proposeRun{
-		c: c, id: id, proj: proj, req: req, read: read, write: write, entries: entries,
-		fc:     c.forgeFor(proj.Repo),
+		c: c, id: id, proj: proj, req: req, read: read, entries: entries,
 		branch: c.proposedBranch(id.Username, proj.Name),
 	}
 	// Staged earlier, perhaps by rights since withdrawn: every entry passes
@@ -53,6 +52,9 @@ func (c *Coordinator) Propose(id auth.Identity, proj project.ProjectInfo, req mo
 	}
 	if err := c.gate(id, proj, slices.Clone(entries)); err != nil {
 		return model.ProposeResult{}, run.commitFailed(err, entries, 0)
+	}
+	if run.h, err = c.hand(id, proj, write); err != nil {
+		return model.ProposeResult{}, err
 	}
 	// The semantic view becomes the PR description (best-effort: a body render
 	// failure must not block the propose).
@@ -65,7 +67,7 @@ func (c *Coordinator) Propose(id auth.Identity, proj project.ProjectInfo, req mo
 		return model.ProposeResult{}, err
 	}
 	hasRec = hasRec && rec.Repo == forge.NormalizeRepoURL(proj.Repo) && rec.Branch == run.branch
-	if hasRec && run.fc == nil {
+	if hasRec && run.h.fc == nil {
 		// No forge to ask about the PR: rebuild what the record carries under
 		// its lease all the same, never force over it.
 		return run.extend(forge.PR{Number: rec.PR}, rec, true)
@@ -91,8 +93,7 @@ type proposeRun struct {
 	proj     project.ProjectInfo
 	req      model.ProposeRequest
 	read     *git.Repo
-	write    *git.WriteRepo
-	fc       *forge.Client // nil: no forge serves the repo, so the branch is pushed alone
+	h        hand // who it writes as: set once the gate cleared the draft
 	branch   string
 	entries  []draft.Entry
 	draft    model.DraftView
@@ -106,12 +107,13 @@ type proposeRun struct {
 // force-pushes over that branch: a PR list read across pages can skip an
 // entry that moved meanwhile.
 func (r *proposeRun) lookup(rec draft.Proposal, hasRec bool) (forge.PR, bool, error) {
-	if r.fc == nil {
+	fc := r.h.fc
+	if fc == nil {
 		return forge.PR{}, false, nil
 	}
 	var recorded *forge.PR
 	if hasRec && rec.PR > 0 {
-		pr, err := r.fc.PR(rec.PR)
+		pr, err := fc.PR(rec.PR)
 		switch {
 		case err == nil && (!pr.From(r.branch) || pr.Base.Ref != r.c.baseBranch):
 		case err == nil && pr.State == "open":
@@ -122,20 +124,19 @@ func (r *proposeRun) lookup(rec draft.Proposal, hasRec bool) (forge.PR, bool, er
 			return forge.PR{}, false, r.forgeDown(err)
 		}
 	}
-	pr, found, err := r.fc.FindPR(r.branch, r.c.baseBranch)
+	pr, found, err := fc.FindPR(r.branch, r.c.baseBranch)
 	if err != nil {
 		return forge.PR{}, false, r.forgeDown(err)
 	}
 	if found {
 		return pr, true, nil
 	}
-	head, err := r.write.RemoteHead(r.branch)
+	head, err := r.remoteHead()
 	if err != nil {
-		log.Printf("changeset: %s: read remote head: %v", r.branch, err)
-		return forge.PR{}, false, fmt.Errorf("%w: the project repo did not answer; nothing was pushed and the draft is kept, so propose again in a moment", model.ErrUnavailable)
+		return forge.PR{}, false, err
 	}
 	if head != "" {
-		if pr, found, err = r.fc.FindPR(r.branch, r.c.baseBranch); err != nil || found {
+		if pr, found, err = fc.FindPR(r.branch, r.c.baseBranch); err != nil || found {
 			return pr, found, r.forgeDown(err)
 		}
 	}
@@ -152,7 +153,24 @@ func (r *proposeRun) forgeDown(err error) error {
 	if err == nil {
 		return nil
 	}
+	if refused := r.h.refusal(err); refused != nil {
+		return refused
+	}
 	return fmt.Errorf("%w; nothing was pushed and the draft is kept", forgeFailed("repo for project "+r.proj.Name, err))
+}
+
+// remoteHead is the branch's head on the remote, "" when it has none, read
+// before anything is pushed.
+func (r *proposeRun) remoteHead() (string, error) {
+	head, err := r.h.write.RemoteHead(r.branch)
+	if err == nil {
+		return head, nil
+	}
+	if refused := r.h.refusal(err); refused != nil {
+		return "", refused
+	}
+	log.Printf("changeset: %s: read remote head: %v", r.branch, err)
+	return "", fmt.Errorf("%w: the project repo did not answer; nothing was pushed and the draft is kept, so propose again in a moment", model.ErrUnavailable)
 }
 
 // extend rebuilds the open PR's branch from base with what it carries and the
@@ -166,10 +184,9 @@ func (r *proposeRun) extend(pr forge.PR, rec draft.Proposal, hasRec bool) (model
 	}
 	// A PR opened by hand on the branch dotvirt pushed is adopted.
 	rec.PR = pr.Number
-	head, err := r.write.RemoteHead(r.branch)
+	head, err := r.remoteHead()
 	if err != nil {
-		log.Printf("changeset: %s: read remote head: %v", r.branch, err)
-		return model.ProposeResult{}, fmt.Errorf("%w: the project repo did not answer; nothing was pushed and the draft is kept, so propose again in a moment", model.ErrUnavailable)
+		return model.ProposeResult{}, err
 	}
 	if !rec.Settle(head) {
 		return r.moved(pr, rec.Entries, git.ErrBranchMoved)
@@ -213,9 +230,9 @@ func (r *proposeRun) extend(pr forge.PR, rec draft.Proposal, hasRec bool) (model
 		return model.ProposeResult{}, fmt.Errorf("%w (carried by pull request #%d)", err, pr.Number)
 	}
 	if err == nil {
-		res, err = r.write.ProposeChangeset(c.baseBranch, r.branch, commitMessage(title, message), c.toChangesetItems(r.proj, all), r.author(), plan)
+		res, err = r.h.write.ProposeChangeset(c.baseBranch, r.branch, commitMessage(title, message), c.toChangesetItems(r.proj, all), r.h.by, plan)
 	}
-	if r.fc == nil && errors.As(err, &moved) && !r.staged(moved.Path) {
+	if r.h.fc == nil && errors.As(err, &moved) && !r.staged(moved.Path) {
 		return r.supersede(rec, moved.Path, all)
 	}
 	if errors.Is(err, git.ErrBranchMoved) || errors.As(err, &moved) {
@@ -229,14 +246,14 @@ func (r *proposeRun) extend(pr forge.PR, rec draft.Proposal, hasRec bool) (model
 	if err != nil {
 		return model.ProposeResult{}, r.commitFailed(err, all, pr.Number)
 	}
-	out := model.ProposeResult{Branch: res.Branch, PRURL: r.fc.PullURL(pr.Number), PRNumber: pr.Number, Existing: true}
+	out := model.ProposeResult{Branch: res.Branch, PRURL: r.h.fc.PullURL(pr.Number), PRNumber: pr.Number, Existing: true}
 	rec.Head, rec.Entries, rec.Pending = res.Hash, all, nil
-	if r.fc == nil {
+	if r.h.fc == nil {
 		return out, r.done(rec)
 	}
 
 	// The PR may have merged or closed while the branch was rebuilt.
-	now, err := r.fc.PR(pr.Number)
+	now, err := r.h.fc.PR(pr.Number)
 	switch {
 	case err != nil:
 		// Unknown: keep the draft staged and record what was pushed, so the
@@ -251,7 +268,7 @@ func (r *proposeRun) extend(pr forge.PR, rec draft.Proposal, hasRec bool) (model
 		return model.ProposeResult{}, fmt.Errorf("%w: pull request #%d was closed while this was proposed; the draft is kept, so propose again to reopen it with the draft alone", model.ErrConflict, pr.Number)
 	}
 	if !c.usersOpenPRs {
-		if _, err := r.fc.EditPR(pr.Number, forge.PREdit{Title: title, Body: body}); err != nil {
+		if _, err := r.h.fc.EditPR(pr.Number, forge.PREdit{Title: title, Body: body}); err != nil {
 			log.Printf("changeset: PR #%d: describe: %v", pr.Number, err)
 		}
 	}
@@ -263,8 +280,8 @@ func (r *proposeRun) extend(pr forge.PR, rec draft.Proposal, hasRec bool) (model
 // it: its record is stale and the draft goes out alone. Otherwise the PR is
 // in the way.
 func (r *proposeRun) moved(pr forge.PR, carried []draft.Entry, err error) (model.ProposeResult, error) {
-	if r.fc != nil {
-		if now, rerr := r.fc.PR(pr.Number); rerr == nil && now.State != "open" {
+	if r.h.fc != nil {
+		if now, rerr := r.h.fc.PR(pr.Number); rerr == nil && now.State != "open" {
 			_ = r.c.store.DropProposal(r.id.Username, r.proj.Name)
 			return r.fresh(now, true)
 		}
@@ -282,7 +299,7 @@ func (r *proposeRun) supersede(rec draft.Proposal, path string, carried []draft.
 	if err := r.c.deletesStillDeclared(r.read, r.entries); err != nil {
 		return model.ProposeResult{}, err
 	}
-	res, err := r.write.ProposeChangeset(r.c.baseBranch, r.branch, commitMessage(title, r.req.Message), r.c.toChangesetItems(r.proj, r.entries), r.author(), git.PushPlan{Lease: rec.Head})
+	res, err := r.h.write.ProposeChangeset(r.c.baseBranch, r.branch, commitMessage(title, r.req.Message), r.c.toChangesetItems(r.proj, r.entries), r.h.by, git.PushPlan{Lease: rec.Head})
 	if err != nil {
 		return model.ProposeResult{}, r.commitFailed(err, r.entries, 0)
 	}
@@ -354,12 +371,12 @@ func (r *proposeRun) afterMerge(pushed string) (model.ProposeResult, error) {
 	if err := r.c.deletesStillDeclared(r.read, r.entries); err != nil {
 		return model.ProposeResult{}, err
 	}
-	res, err := r.write.ProposeChangeset(r.c.baseBranch, r.branch, commitMessage(title, r.req.Message), r.c.toChangesetItems(r.proj, r.entries), r.author(), git.PushPlan{Lease: pushed})
+	res, err := r.h.write.ProposeChangeset(r.c.baseBranch, r.branch, commitMessage(title, r.req.Message), r.c.toChangesetItems(r.proj, r.entries), r.h.by, git.PushPlan{Lease: pushed})
 	if err != nil {
 		return model.ProposeResult{}, r.commitFailed(err, r.entries, 0)
 	}
 	out := model.ProposeResult{Branch: res.Branch}
-	if !r.c.createPR(r.fc, &out, r.branch, title, body) {
+	if !r.c.createPR(r.h.fc, &out, r.branch, title, body) {
 		return out, r.record(r.proposal(0, res.Hash, r.entries))
 	}
 	return out, r.done(r.proposal(out.PRNumber, res.Hash, r.entries))
@@ -372,7 +389,7 @@ func (r *proposeRun) afterMerge(pushed string) (model.ProposeResult, error) {
 func (r *proposeRun) fresh(prior forge.PR, found bool) (model.ProposeResult, error) {
 	title, body := r.draftText()
 	ahead := func(hash string) error {
-		if r.fc == nil {
+		if r.h.fc == nil {
 			return nil
 		}
 		rec := r.proposal(0, "", nil)
@@ -382,12 +399,12 @@ func (r *proposeRun) fresh(prior forge.PR, found bool) (model.ProposeResult, err
 	if err := r.c.deletesStillDeclared(r.read, r.entries); err != nil {
 		return model.ProposeResult{}, err
 	}
-	out, head, ok, err := r.c.publish(r.fc, r.write, r.branch, commitMessage(title, r.req.Message), title, body,
-		r.c.toChangesetItems(r.proj, r.entries), r.author(), prior, found, ahead)
+	out, head, ok, err := r.c.publish(r.h, r.branch, commitMessage(title, r.req.Message), title, body,
+		r.c.toChangesetItems(r.proj, r.entries), prior, found, ahead)
 	switch {
 	case err != nil:
 		return model.ProposeResult{}, r.commitFailed(err, r.entries, 0)
-	case r.fc == nil:
+	case r.h.fc == nil:
 		return out, r.c.store.Remove(r.id.Username, r.proj.Name, r.entries...)
 	case !ok:
 		// Kept staged until a PR carries them: one the user opens on this head
@@ -398,15 +415,16 @@ func (r *proposeRun) fresh(prior forge.PR, found bool) (model.ProposeResult, err
 }
 
 // publish builds items fresh from base onto branch, force-pushes it and gives
-// it a PR; found is the branch's PR as the forge last reported it. An open
-// one is reused; a closed, unmerged one is reopened just before the push,
-// since Forgejo syncs a PR's head only while it is open, and closed again
-// when the push then fails; otherwise one is created after it. Where users
-// open their own PRs, none is reopened or created. ok is false
-// when the branch has no PR in the end, and out then carries the compare
-// URL. fc nil pushes the branch alone. ahead, when set, runs with the built
+// it a PR, all as h; found is the branch's PR as the forge last reported it.
+// An open one is reused; a closed, unmerged one is reopened just before the
+// push, since Forgejo syncs a PR's head only while it is open, and closed
+// again when the push then fails; otherwise one is created after it. Where
+// users open their own PRs, none is reopened or created. ok is false when
+// the branch has no PR in the end, and out then carries the compare URL. No
+// forge client pushes the branch alone. ahead, when set, runs with the built
 // commit's hash before anything else touches the forge or the branch.
-func (c *Coordinator) publish(fc *forge.Client, write *git.WriteRepo, branch, message, title, body string, items []git.ChangesetItem, by git.Author, prior forge.PR, found bool, ahead func(string) error) (out model.ProposeResult, head string, ok bool, err error) {
+func (c *Coordinator) publish(h hand, branch, message, title, body string, items []git.ChangesetItem, prior forge.PR, found bool, ahead func(string) error) (out model.ProposeResult, head string, ok bool, err error) {
+	fc := h.fc
 	reopened := false
 	plan := git.PushPlan{BeforePush: func(hash string) error {
 		if ahead != nil {
@@ -424,7 +442,7 @@ func (c *Coordinator) publish(fc *forge.Client, write *git.WriteRepo, branch, me
 		reopened = true
 		return nil
 	}}
-	res, err := write.ProposeChangeset(c.baseBranch, branch, message, items, by, plan)
+	res, err := h.write.ProposeChangeset(c.baseBranch, branch, message, items, h.by, plan)
 	if err != nil {
 		if reopened {
 			if _, cerr := fc.EditPR(prior.Number, forge.PREdit{State: "closed"}); cerr != nil {
@@ -539,16 +557,12 @@ func (r *proposeRun) draftText() (title, body string) {
 	return title, body
 }
 
-// author attributes the commit to the k8s user (committer stays dotvirt, the
-// SA that pushes). K8s usernames aren't emails, so a stable noreply address
-// stands in.
-func (r *proposeRun) author() git.Author {
-	return git.Author{Name: r.id.Username, Email: authorEmail(r.id.Username)}
-}
-
 // commitFailed classifies a failed build or push of carried; pr is the open
 // PR it was rebuilding, 0 for a fresh build.
 func (r *proposeRun) commitFailed(err error, carried []draft.Entry, pr int) error {
+	if refused := r.h.refusal(err); refused != nil {
+		return refused
+	}
 	if errors.Is(err, git.ErrNoChanges) {
 		// Self-heal: the draft's whole intent is already true in git (typical
 		// after staging against a briefly-stale mirror), so keeping it would

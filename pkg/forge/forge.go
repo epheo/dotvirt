@@ -8,6 +8,7 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -88,6 +89,18 @@ func (f *Factory) WithWebURL(webURL string) *Factory {
 		f.webURL = u
 	}
 	return f
+}
+
+// As is a copy of f whose every call carries token instead of f's own: one
+// request's caller, for a write the forge must see as theirs. f is unchanged,
+// and the copy shares its base, its web base and its HTTP client.
+func (f *Factory) As(token string) *Factory {
+	if f == nil {
+		return nil
+	}
+	as := *f
+	as.tokenFn = StaticToken(token)
+	return &as
 }
 
 // RepoPage is the browser URL of the repo at repoURL: its page under the web
@@ -260,6 +273,36 @@ func (c *Client) PrivatizeOrgRepos() (changed int, failed map[string]error, err 
 
 // Owner is the organization or user the client's repo lives under.
 func (c *Client) Owner() string { return c.owner }
+
+// FullName is the client's repo as the forge names it: owner/repo.
+func (c *Client) FullName() string { return c.owner + "/" + c.repo }
+
+// CloneURL is the client's repo as git reaches it under the factory's base,
+// the one address the factory's token is sent to, whatever host the repo
+// URL it came from named.
+func (c *Client) CloneURL() string {
+	return fmt.Sprintf("%s/%s/%s.git", c.f.baseURL, c.owner, c.repo)
+}
+
+// CanPush reports whether the factory's token may push to the client's repo.
+// A repo the token cannot see is false: the forge answers 404 for a private
+// repo to anyone without access to it.
+func (c *Client) CanPush() (bool, error) {
+	var repo struct {
+		Permissions struct {
+			Push bool `json:"push"`
+		} `json:"permissions"`
+	}
+	err := c.do("GET", c.repoPath(""), nil, &repo)
+	var se *StatusError
+	if errors.As(err, &se) && se.Status == http.StatusNotFound {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	return repo.Permissions.Push, nil
+}
 
 // RepoExists reports whether the client's repo is present on the forge, so a caller
 // can tell a dotvirt.io/repo annotation that still resolves from one the forge has

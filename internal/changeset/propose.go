@@ -18,7 +18,8 @@ import (
 // RecentlyMerged lists PRs merged into proj's base branch since 'since' - the
 // task feed's merged lane (the poll backstop behind the forge webhook, and the
 // reseed after a restart). Attribution comes from the head branch, not the PR
-// poster: dotvirt's bot opens every proposal PR (see tasks.MergeAuthor).
+// poster, which may be dotvirt's account or a forge account named otherwise
+// (see tasks.MergeAuthor).
 func (r *Reader) RecentlyMerged(proj project.ProjectInfo, since time.Time) ([]tasks.Merge, error) {
 	if proj.Repo == "" {
 		return nil, nil
@@ -208,8 +209,8 @@ func (r *Reader) setReviewed(repo string, prs map[int]reviewed) {
 }
 
 // proposalRow is a PR's identity as the lane carries it. By comes from the
-// head branch the way the task feed attributes merges, since dotvirt's bot
-// posts every proposal. read is the project's mirror, nil when it is
+// head branch the way the task feed attributes merges, since the poster may
+// be dotvirt's account. read is the project's mirror, nil when it is
 // unavailable.
 func (r *Reader) proposalRow(proj project.ProjectInfo, pr forge.PR, read *git.Repo) model.Proposal {
 	branch, head := pr.HeadBranch(), ""
