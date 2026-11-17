@@ -361,10 +361,12 @@ project's last objects, so the ApplicationSet's `templatePatch` takes
 `allowEmpty` from the plugin generator. The generator turns it on for one
 project only while all of these hold: Argo holds that project's generated
 Application; git moved on from the revision Argo last applied, by commits on
-`main`, from the same repo and folder; that applied revision declared the
-objects, and git declares nothing there now; and dotvirt reads the
-Applications live. Anything else keeps the hold: a removal must remove
-something. The removal applies once Argo has seen the merge and dotvirt's
+`main` (not a history that replaced it, even one merged back), from the same
+repo and folder; that applied revision declared objects, and git declares
+none there now; and dotvirt reads the Applications live. A declared object is
+what Argo's source renders: a document with a kind and a name, in a `.yaml`
+file outside `templates/`. Anything else keeps the hold: a removal must
+remove something. The removal applies once Argo has seen the merge and dotvirt's
 mirror has fetched it (at once with the forge webhook, else within the git
 poll, 5 minutes by default), at the generator's next run (60s), one more for a
 mirror dotvirt opens on demand. The platform Application keeps `allowEmpty`
