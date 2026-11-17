@@ -102,6 +102,19 @@ rules:
   - get
   - patch
 - apiGroups:
+  - admissionregistration.k8s.io
+  resourceNames:
+  - dotvirt-operator-bindings
+  - dotvirt-operator-deployments
+  - dotvirt-operator-frontdoor
+  - dotvirt-operator-install
+  - dotvirt-operator-secrets
+  resources:
+  - validatingadmissionpolicies
+  - validatingadmissionpolicybindings
+  verbs:
+  - get
+- apiGroups:
   - apps
   resources:
   - deployments
@@ -175,13 +188,21 @@ rules:
   verbs:
   - create
 - apiGroups:
+  - config.openshift.io
+  resourceNames:
+  - cluster
+  resources:
+  - ingresses
+  verbs:
+  - get
+- apiGroups:
   - dotvirt.io
   resources:
   - dotvirts
   verbs:
   - get
   - list
-  - update
+  - patch
   - watch
 - apiGroups:
   - dotvirt.io

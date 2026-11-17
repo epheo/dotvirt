@@ -642,9 +642,9 @@
 					<li class="flex items-center gap-2.5 text-sm">
 						<span
 							class="flex size-5 items-center justify-center rounded-full text-[11px] {complete
-								? 'bg-ok text-white'
+								? 'bg-ok text-ok-on'
 								: active
-									? 'bg-accent text-white'
+									? 'bg-accent text-accent-on'
 									: 'bg-inset-strong text-ink-faint'}"
 							>{#if complete}<Check size={12} />{:else}{s.at + 1}{/if}</span
 						>

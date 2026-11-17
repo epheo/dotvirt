@@ -56,9 +56,10 @@ func (r *Reader) RecentlyMerged(proj project.ProjectInfo, since time.Time) ([]ta
 // segments are sanitized to valid git refs (refSegment is lossy), so a short hash
 // of the RAW (user, project) is appended to guarantee distinct identities never
 // share a branch - without it, two usernames that sanitize to the same string
-// would force-push over each other's PR.
+// would force-push over each other's PR. The user segment never takes a
+// reserved form (userSegment).
 func (r *Reader) proposedBranch(user, project string) string {
-	return r.proposed + "/" + refSegment(user) + "/" + refSegment(project) + "-" + shortHash(user, project)
+	return r.proposed + "/" + userSegment(user) + "/" + refSegment(project) + "-" + shortHash(user, project)
 }
 
 // toChangesetItems is the commit of entries, each read as the gate weighed it
@@ -220,6 +221,7 @@ func (r *Reader) proposalRow(proj project.ProjectInfo, pr forge.PR, read *git.Re
 		Branch: branch, Head: head,
 		By:     tasks.MergeAuthor(branch, r.proposed, pr.User.Login),
 		Revert: strings.HasPrefix(branch, r.proposed+"/"+tasks.RevertSegment+"/"),
+		Seed:   branch == r.seedBranch(),
 	}
 }
 

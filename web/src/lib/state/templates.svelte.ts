@@ -1,10 +1,12 @@
-import { api, Unauthorized, type Template } from '#lib/api.js';
+import { api, Unauthorized, type Template, type TemplateSeed } from '#lib/api.js';
 import { friendlyError } from '#lib/format.js';
 
 // The template library, shared by the Templates tab, the deploy sheet and
 // Storage's image usage so they list the same items.
 class Templates {
 	list = $state<Template[] | null>(null);
+	// The starter-library offers pending in those libraries.
+	seeds = $state<TemplateSeed[]>([]);
 	error = $state('');
 	#inflight: Promise<void> | null = null;
 	// Bumped by reset(), so a load started before a sign-out drops its late
@@ -20,6 +22,7 @@ class Templates {
 			.then((t) => {
 				if (gen !== this.#gen) return;
 				this.list = t.templates;
+				this.seeds = t.seeds ?? [];
 				this.error = '';
 			})
 			.catch((e) => {
@@ -37,6 +40,7 @@ class Templates {
 		this.#gen++;
 		this.#inflight = null;
 		this.list = null;
+		this.seeds = [];
 		this.error = '';
 	}
 }

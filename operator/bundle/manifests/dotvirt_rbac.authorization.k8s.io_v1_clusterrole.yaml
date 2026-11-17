@@ -22,6 +22,21 @@ rules:
   - list
   - watch
 - apiGroups:
+  - dotvirt.io
+  resources:
+  - dotvirts
+  verbs:
+  - get
+  - list
+- apiGroups:
+  - config.openshift.io
+  resourceNames:
+  - cluster
+  resources:
+  - ingresses
+  verbs:
+  - get
+- apiGroups:
   - gateway.networking.k8s.io
   resources:
   - gatewayclasses

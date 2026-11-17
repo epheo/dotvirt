@@ -1,6 +1,6 @@
 # dotvirt installer operator — Kubebuilder-style targets. Tools are pinned and run
 # via `go run` (no global installs). Build from this directory; the operator module
-# resolves the shared pkg/forge and pkg/tenancy modules via the replaces in go.mod
+# resolves the shared pkg/forge, pkg/tenancy and pkg/adminobjects modules via the replaces in go.mod
 # (and the root go.work).
 include ../hack/versions.env   # pinned tool versions — single source (OPM_VERSION, OPERATOR_MANIFEST_TOOLS_VERSION, …)
 VERSION ?= 0.0.0

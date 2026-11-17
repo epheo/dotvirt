@@ -311,6 +311,12 @@ func (s *Server) refreshProposals(all bool) bool {
 		for _, row := range rows {
 			s.settlePushed(repo, row.Branch, row.PRNumber, row.Head, false)
 		}
+		// A fresh lane is the moment to offer the starter library: an open
+		// offer is in the rows, the rest is read from the mirror. The shared
+		// platform library is the platform team's, never offered to.
+		if seeder, ok := s.draft.(TemplateSeeder); ok && name != platformProjectName {
+			seeder.SeedTemplates(p, rows)
+		}
 		if cached {
 			if !proposalsEqual(prev, rows) {
 				anyChanged = true

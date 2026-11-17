@@ -26,8 +26,8 @@ metadata:
       ]
     capabilities: Seamless Upgrades
     categories: Developer Tools, Modernization & Migration
-    containerImage: quay.io/epheo/dotvirt-operator@sha256:a74bc9f369824a09761aeb505e8210e44890c7e157e6bcbb277a1fe69774406e
-    createdAt: "2026-11-13T00:27:23Z"
+    containerImage: quay.io/epheo/dotvirt-operator@sha256:a881d0a3d502044bfe03706c4735b5e9f03e58df4a8728f3a0f8c0c39a04a92f
+    createdAt: "2026-11-17T08:03:43Z"
     description: Installs dotvirt, a GitOps web console for KubeVirt with a point-and-click workflow familiar to virtualization admins, plus its platform/tenant tier.
     features.operators.openshift.io/disconnected: "true"
     features.operators.openshift.io/fips-compliant: "false"
@@ -65,7 +65,7 @@ metadata:
     operatorframework.io/arch.amd64: supported
     operatorframework.io/arch.arm64: supported
     operatorframework.io/os.linux: supported
-  name: dotvirt-operator.v0.2.2
+  name: dotvirt-operator.v0.2.3
 spec:
   apiservicedefinitions: {}
   customresourcedefinitions:
@@ -187,8 +187,10 @@ spec:
 
     Status reports the rest: `consoleURL`, `forgeURL`, `forgeAdminHint` (the
     command that reveals the managed forge's admin password), `ssoOAuthClient`,
-    and one condition per install step, so `kubectl describe dotvirt` explains
-    a stuck install.
+    `adminObjects` (what a cluster admin installs from the console, such as
+    the admission policies bounding the operator's own account), and one
+    condition per install step, so
+    `kubectl describe dotvirt` explains a stuck install.
 
     ### Prerequisites
 
@@ -312,6 +314,19 @@ spec:
                 - get
                 - patch
             - apiGroups:
+                - admissionregistration.k8s.io
+              resourceNames:
+                - dotvirt-operator-bindings
+                - dotvirt-operator-deployments
+                - dotvirt-operator-frontdoor
+                - dotvirt-operator-install
+                - dotvirt-operator-secrets
+              resources:
+                - validatingadmissionpolicies
+                - validatingadmissionpolicybindings
+              verbs:
+                - get
+            - apiGroups:
                 - apps
               resources:
                 - deployments
@@ -385,13 +400,21 @@ spec:
               verbs:
                 - create
             - apiGroups:
+                - config.openshift.io
+              resourceNames:
+                - cluster
+              resources:
+                - ingresses
+              verbs:
+                - get
+            - apiGroups:
                 - dotvirt.io
               resources:
                 - dotvirts
               verbs:
                 - get
                 - list
-                - update
+                - patch
                 - watch
             - apiGroups:
                 - dotvirt.io
@@ -545,10 +568,10 @@ spec:
                       - --health-probe-bind-address=:8081
                     env:
                       - name: RELATED_IMAGE_DOTVIRT
-                        value: quay.io/epheo/dotvirt@sha256:3226b44e8c1a2060f3f672d82d4e1b5cdc7b8e4b54cb6c4ab3a6c0301743c032
+                        value: quay.io/epheo/dotvirt@sha256:fd7e06cf34704356c6346140d224b8451a25aa95c631af3b289248b72ba4977f
                       - name: RELATED_IMAGE_FORGEJO
                         value: codeberg.org/forgejo/forgejo:11-rootless@sha256:5135f11de848bea6d59c0a96688e90c361380ba102bdc08dbd5aa52cca2b179b
-                    image: quay.io/epheo/dotvirt-operator@sha256:a74bc9f369824a09761aeb505e8210e44890c7e157e6bcbb277a1fe69774406e
+                    image: quay.io/epheo/dotvirt-operator@sha256:a881d0a3d502044bfe03706c4735b5e9f03e58df4a8728f3a0f8c0c39a04a92f
                     livenessProbe:
                       httpGet:
                         path: /healthz
@@ -633,12 +656,12 @@ spec:
   provider:
     name: epheo
   relatedImages:
-    - image: quay.io/epheo/dotvirt@sha256:3226b44e8c1a2060f3f672d82d4e1b5cdc7b8e4b54cb6c4ab3a6c0301743c032
+    - image: quay.io/epheo/dotvirt@sha256:fd7e06cf34704356c6346140d224b8451a25aa95c631af3b289248b72ba4977f
       name: dotvirt
-    - image: quay.io/epheo/dotvirt-operator@sha256:a74bc9f369824a09761aeb505e8210e44890c7e157e6bcbb277a1fe69774406e
-      name: dotvirt-operator-a74bc9f369824a09761aeb505e8210e44890c7e157e6bcbb277a1fe69774406e-annotation
+    - image: quay.io/epheo/dotvirt-operator@sha256:a881d0a3d502044bfe03706c4735b5e9f03e58df4a8728f3a0f8c0c39a04a92f
+      name: dotvirt-operator-a881d0a3d502044bfe03706c4735b5e9f03e58df4a8728f3a0f8c0c39a04a92f-annotation
     - image: codeberg.org/forgejo/forgejo:11-rootless@sha256:5135f11de848bea6d59c0a96688e90c361380ba102bdc08dbd5aa52cca2b179b
       name: forgejo
-    - image: quay.io/epheo/dotvirt-operator@sha256:a74bc9f369824a09761aeb505e8210e44890c7e157e6bcbb277a1fe69774406e
+    - image: quay.io/epheo/dotvirt-operator@sha256:a881d0a3d502044bfe03706c4735b5e9f03e58df4a8728f3a0f8c0c39a04a92f
       name: manager
-  version: 0.2.2
+  version: 0.2.3

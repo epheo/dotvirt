@@ -248,6 +248,10 @@ func TestAdoptProjectRetriesRecreatedRepoAtOnce(t *testing.T) {
 				gitRun(t, filepath.Dir(repoURL), "clone", "-q", "--bare", seedBare(t), repoURL)
 				return http.StatusCreated, "{}", true
 			}
+			// The new repo's starter-library offer.
+			if m == "POST" && strings.HasSuffix(path, "/team-a/pulls") {
+				return http.StatusCreated, `{"number":1}`, true
+			}
 			return 0, "", false
 		})
 	repoURL = filepath.Join(filepath.Dir(f.proj.Repo), "team-a.git")

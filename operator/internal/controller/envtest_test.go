@@ -19,21 +19,27 @@ import (
 	appsv1 "k8s.io/api/apps/v1"
 	authzv1 "k8s.io/api/authorization/v1"
 	corev1 "k8s.io/api/core/v1"
+	networkingv1 "k8s.io/api/networking/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
 	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	apimeta "k8s.io/apimachinery/pkg/api/meta"
+	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/apimachinery/pkg/util/intstr"
 	utilyaml "k8s.io/apimachinery/pkg/util/yaml"
+	admissionregistrationv1ac "k8s.io/client-go/applyconfigurations/admissionregistration/v1"
 	rbacv1ac "k8s.io/client-go/applyconfigurations/rbac/v1"
+	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/cache"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/envtest"
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 
@@ -41,6 +47,7 @@ import (
 	"github.com/epheo/dotvirt/operator/internal/deps"
 	"github.com/epheo/dotvirt/operator/internal/install"
 	"github.com/epheo/dotvirt/operator/internal/platform"
+	"github.com/epheo/dotvirt/pkg/adminobjects"
 	"github.com/epheo/dotvirt/pkg/tenancy"
 )
 
@@ -61,7 +68,7 @@ func TestEnvtest(t *testing.T) {
 	}
 	env := &envtest.Environment{
 		CRDDirectoryPaths:     []string{filepath.Join("..", "..", "config", "crd", "bases")},
-		CRDs:                  argoStubCRDs(),
+		CRDs:                  append(argoStubCRDs(), exposureStubCRDs()...),
 		ErrorIfCRDPathMissing: true,
 	}
 	adminCfg, err := env.Start()
@@ -167,6 +174,24 @@ func TestEnvtest(t *testing.T) {
 			// Proved by this row alone: the operator also holds the role's one rule,
 			// so the escalation check would admit its binding without bind.
 			{authzv1.ResourceAttributes{Verb: "bind", Group: "rbac.authorization.k8s.io", Resource: "clusterroles", Name: install.SyncRequestName}, true},
+			// The operator guard: read by name to report it, never written.
+			{authzv1.ResourceAttributes{Verb: "get", Group: "admissionregistration.k8s.io", Resource: "validatingadmissionpolicies", Name: adminobjects.GuardSecretsName}, true},
+			{authzv1.ResourceAttributes{Verb: "get", Group: "admissionregistration.k8s.io", Resource: "validatingadmissionpolicybindings", Name: adminobjects.GuardDeploymentsName}, true},
+			{authzv1.ResourceAttributes{Verb: "get", Group: "admissionregistration.k8s.io", Resource: "validatingadmissionpolicies", Name: adminobjects.GuardBindingsName}, true},
+			{authzv1.ResourceAttributes{Verb: "get", Group: "admissionregistration.k8s.io", Resource: "validatingadmissionpolicies", Name: adminobjects.GuardInstallName}, true},
+			// Its install: the finalizer by patch, never a whole-object update.
+			{authzv1.ResourceAttributes{Verb: "patch", Group: "dotvirt.io", Resource: "dotvirts", Namespace: "dotvirt", Name: "x"}, true},
+			{authzv1.ResourceAttributes{Verb: "update", Group: "dotvirt.io", Resource: "dotvirts", Namespace: "dotvirt", Name: "x"}, false},
+			{authzv1.ResourceAttributes{Verb: "get", Group: "admissionregistration.k8s.io", Resource: "validatingadmissionpolicies", Name: "other"}, false},
+			{authzv1.ResourceAttributes{Verb: "list", Group: "admissionregistration.k8s.io", Resource: "validatingadmissionpolicies"}, false},
+			{authzv1.ResourceAttributes{Verb: "create", Group: "admissionregistration.k8s.io", Resource: "validatingadmissionpolicies"}, false},
+			{authzv1.ResourceAttributes{Verb: "create", Group: "admissionregistration.k8s.io", Resource: "validatingadmissionpolicybindings"}, false},
+			{authzv1.ResourceAttributes{Verb: "patch", Group: "admissionregistration.k8s.io", Resource: "validatingadmissionpolicies", Name: adminobjects.GuardSecretsName}, false},
+			{authzv1.ResourceAttributes{Verb: "patch", Group: "admissionregistration.k8s.io", Resource: "validatingadmissionpolicybindings", Name: adminobjects.GuardSecretsName}, false},
+			{authzv1.ResourceAttributes{Verb: "update", Group: "admissionregistration.k8s.io", Resource: "validatingadmissionpolicies", Name: adminobjects.GuardSecretsName}, false},
+			{authzv1.ResourceAttributes{Verb: "update", Group: "admissionregistration.k8s.io", Resource: "validatingadmissionpolicybindings", Name: adminobjects.GuardSecretsName}, false},
+			{authzv1.ResourceAttributes{Verb: "delete", Group: "admissionregistration.k8s.io", Resource: "validatingadmissionpolicies", Name: adminobjects.GuardSecretsName}, false},
+			{authzv1.ResourceAttributes{Verb: "delete", Group: "admissionregistration.k8s.io", Resource: "validatingadmissionpolicybindings", Name: adminobjects.GuardSecretsName}, false},
 			// Secrets are never listed or watched, and read or written by name.
 			{authzv1.ResourceAttributes{Verb: "list", Resource: "secrets"}, false},
 			{authzv1.ResourceAttributes{Verb: "watch", Resource: "secrets"}, false},
@@ -258,8 +283,9 @@ func TestEnvtest(t *testing.T) {
 			t.Fatal(err)
 		}
 		for _, c := range got.Status.Conditions {
-			// No forge in this install: ForgeReady says so, and nothing else may fail.
-			if c.Status == metav1.ConditionFalse && c.Type != dotvirtv1alpha1.ConditionForgeReady {
+			// No forge in this install: ForgeReady says so; no admin installed the
+			// operator guard yet: OperatorGuard says so. Nothing else may fail.
+			if c.Status == metav1.ConditionFalse && c.Type != dotvirtv1alpha1.ConditionForgeReady && c.Type != dotvirtv1alpha1.ConditionOperatorGuard {
 				t.Errorf("condition %s False: %s", c.Type, c.Message)
 			}
 		}
@@ -308,6 +334,944 @@ func TestEnvtest(t *testing.T) {
 		}
 		if err := admin.Get(ctx, types.NamespacedName{Namespace: "argocd", Name: "dotvirt-p-team-a"}, argoObj("AppProject", "", "", nil)); err != nil {
 			t.Errorf("tenant AppProject: %v", err)
+		}
+	})
+
+	t.Run("the operator guard bounds the operator once an admin installs it", func(t *testing.T) {
+		key := types.NamespacedName{Namespace: "dotvirt", Name: "x"}
+		guardCond := func(want string) bool {
+			got := &dotvirtv1alpha1.Dotvirt{}
+			if admin.Get(ctx, key, got) != nil {
+				return false
+			}
+			c := apimeta.FindStatusCondition(got.Status.Conditions, dotvirtv1alpha1.ConditionOperatorGuard)
+			return c != nil && c.Reason == want && len(got.Status.AdminObjects) == 2*len(adminobjects.GuardNames)
+		}
+		eventually(t, "OperatorGuard NotInstalled", func() bool { return guardCond(string(adminobjects.NotInstalled)) })
+
+		// The console's install, as a cluster admin: its own render, from the
+		// pins it is configured with, server-side applied.
+		pins := adminobjects.Params{Operator: operatorUser, Namespace: "dotvirt", ArgoNamespace: "argocd", ArgoController: "argocd-application-controller",
+			ForgeSecret: adminobjects.DefaultForgeSecret}
+		var objs []*unstructured.Unstructured
+		installGuard := func(p adminobjects.Params) {
+			objs = nil
+			for _, o := range adminobjects.Render(p) {
+				if _, ok := adminobjects.Allow(adminobjects.Allowed(p.Namespace), o.Object); !ok {
+					t.Fatalf("the console would refuse its own %s %s", o.Object.GetKind(), o.Object.GetName())
+				}
+				if err := admin.Apply(ctx, client.ApplyConfigurationFromUnstructured(o.Object.DeepCopy()), client.FieldOwner("dotvirt"), client.ForceOwnership); err != nil {
+					t.Fatalf("install %s: %v", o.Object.GetName(), err)
+				}
+				objs = append(objs, o.Object)
+			}
+		}
+		installGuard(pins)
+		// Later subtests write as the operator into other ArgoCD namespaces,
+		// which this guard rightly refuses: an admin removes it, as uninstall
+		// leaves them to, whatever this subtest found.
+		t.Cleanup(func() {
+			for _, o := range objs {
+				_ = admin.Delete(context.Background(), o)
+			}
+			eventually(t, "the guard lifted", func() bool {
+				m, _ := runtime.DefaultUnstructuredConverter.ToUnstructured(&corev1.Secret{
+					TypeMeta:   metav1.TypeMeta{APIVersion: "v1", Kind: "Secret"},
+					ObjectMeta: metav1.ObjectMeta{Name: install.OAuthSecretName, Namespace: "team-a"},
+				})
+				c, err := client.New(opCfg, client.Options{Scheme: scheme})
+				if err != nil {
+					return false
+				}
+				return c.Apply(context.Background(), client.ApplyConfigurationFromUnstructured(&unstructured.Unstructured{Object: m}),
+					client.FieldOwner(operatorFieldManager), client.ForceOwnership, client.DryRunAll) == nil
+			})
+		})
+		// Installing the guard changes nothing the operator watches, so a spec
+		// edit runs the next pass, as the drift timer would.
+		patchCR := func() {
+			got := &dotvirtv1alpha1.Dotvirt{}
+			if err := admin.Get(ctx, key, got); err != nil {
+				t.Fatal(err)
+			}
+			mp := client.MergeFrom(got.DeepCopy())
+			got.Spec.Branding.ProductName = fmt.Sprint("Guarded ", time.Now().UnixNano())
+			if err := admin.Patch(ctx, got, mp); err != nil {
+				t.Fatal(err)
+			}
+		}
+		patchCR()
+		eventually(t, "OperatorGuard Installed", func() bool { return guardCond(string(adminobjects.Installed)) })
+
+		op := kubernetes.NewForConfigOrDie(opCfg)
+		opClient, err := client.New(opCfg, client.Options{Scheme: scheme})
+		if err != nil {
+			t.Fatal(err)
+		}
+		refused := func(err error) bool {
+			return apierrors.IsForbidden(err) && strings.Contains(err.Error(), "dotvirt operator guard")
+		}
+		// What the operator writes, as it writes it: a server-side apply, which
+		// its role authorizes by name, run dry so the probes leave nothing.
+		dryApply := func(o client.Object) error {
+			m, err := runtime.DefaultUnstructuredConverter.ToUnstructured(o)
+			if err != nil {
+				t.Fatal(err)
+			}
+			return opClient.Apply(ctx, client.ApplyConfigurationFromUnstructured(&unstructured.Unstructured{Object: m}),
+				client.FieldOwner(operatorFieldManager), client.ForceOwnership, client.DryRunAll)
+		}
+		// Secrets under names the operator's role grants but this install never
+		// writes (no SSO, no managed forge), so only the guard stands in the way.
+		secret := func(ns, name string, edit func(*corev1.Secret)) *corev1.Secret {
+			s := &corev1.Secret{
+				TypeMeta:   metav1.TypeMeta{APIVersion: "v1", Kind: "Secret"},
+				ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: ns},
+				StringData: map[string]string{"k": "v"},
+			}
+			if edit != nil {
+				edit(s)
+			}
+			return s
+		}
+		asToken := func(s *corev1.Secret) {
+			s.Type = corev1.SecretTypeServiceAccountToken
+			s.Annotations = map[string]string{corev1.ServiceAccountNameKey: "default"}
+		}
+		// The apiserver enforces a new policy once its informer has it.
+		eventually(t, "the guard enforced", func() bool {
+			return refused(dryApply(secret("dotvirt", install.OAuthSecretName, asToken)))
+		})
+		annotated := secret("dotvirt", install.OAuthSecretName, func(s *corev1.Secret) {
+			s.Annotations = map[string]string{corev1.ServiceAccountNameKey: "default"}
+		})
+		if err := dryApply(annotated); !refused(err) {
+			t.Errorf("operator's annotated Secret: err=%v, want the guard's Forbidden", err)
+		}
+		if err := dryApply(secret("team-a", install.OAuthSecretName, nil)); !refused(err) {
+			t.Errorf("operator's Secret outside its namespaces: err=%v, want the guard's Forbidden", err)
+		}
+		for _, ns := range []string{"dotvirt", "argocd"} {
+			if err := dryApply(secret(ns, install.ForgejoAdminSecret, nil)); err != nil {
+				t.Errorf("operator's plain Secret in %s: %v", ns, err)
+			}
+		}
+		token := &corev1.Secret{
+			ObjectMeta: metav1.ObjectMeta{Name: "guard-token", Annotations: map[string]string{corev1.ServiceAccountNameKey: "default"}},
+			Type:       corev1.SecretTypeServiceAccountToken,
+		}
+		other, err := env.AddUser(envtest.User{Name: "system:serviceaccount:team-a:builder", Groups: []string{"system:masters"}}, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := kubernetes.NewForConfigOrDie(other.Config()).CoreV1().Secrets("team-a").Create(ctx, token, metav1.CreateOptions{}); err != nil {
+			t.Errorf("another ServiceAccount's token Secret: %v", err)
+		}
+
+		dv := &dotvirtv1alpha1.Dotvirt{}
+		if err := admin.Get(ctx, key, dv); err != nil {
+			t.Fatal(err)
+		}
+		app := func() *appsv1.Deployment { return install.Deployment(dv, "argocd", nil) }
+		forge := func() *appsv1.Deployment { return install.ForgejoDeployment(dv, false, "", "") }
+		newDigest := app()
+		newDigest.Spec.Template.Spec.Containers[0].Image = "quay.io/epheo/dotvirt@sha256:" + strings.Repeat("b", 64)
+		newTag := forge()
+		newTag.Spec.Template.Spec.Containers[0].Image = "codeberg.org/forgejo/forgejo:12-rootless"
+		// A release that adds a console flag, or changes the forge's
+		// bootstrap, upgrades without a new guard.
+		newFlag := app()
+		newFlag.Spec.Template.Spec.Containers[0].Args = append(newFlag.Spec.Template.Spec.Containers[0].Args, "-new-setting=1", "--git-poll-interval=10m")
+		newBootstrap := forge()
+		newBootstrap.Spec.Template.Spec.InitContainers[0].Command = []string{"sh", "-c", "forgejo migrate"}
+		routerCA := app()
+		rc := &routerCA.Spec.Template.Spec.Containers[0]
+		rc.Env = append(rc.Env, corev1.EnvVar{Name: "DOTVIRT_OAUTH_CA", Value: adminobjects.IngressCAPath})
+		for name, d := range map[string]*appsv1.Deployment{
+			"the console as rendered": app(), "the forge as rendered": forge(),
+			"the console trusting the router CA for SSO": routerCA,
+			"a new release by digest":                    newDigest, "a new forge release by tag": newTag,
+			"a release with a new console flag": newFlag, "a release with a new forge bootstrap": newBootstrap,
+		} {
+			if err := dryApply(d); err != nil {
+				t.Errorf("%s: %v", name, err)
+			}
+		}
+		sc := func(d *appsv1.Deployment) *corev1.SecurityContext {
+			return d.Spec.Template.Spec.Containers[0].SecurityContext
+		}
+		// withVolume gives the Deployment's first container v mounted by m, in
+		// place of any volume or mount of their names.
+		withVolume := func(v corev1.Volume, m corev1.VolumeMount) func(*appsv1.Deployment) {
+			return func(d *appsv1.Deployment) {
+				pod := &d.Spec.Template.Spec
+				pod.Volumes = append(slices.DeleteFunc(slices.Clone(pod.Volumes), func(x corev1.Volume) bool { return x.Name == v.Name }), v)
+				c := &pod.Containers[0]
+				c.VolumeMounts = append(slices.DeleteFunc(slices.Clone(c.VolumeMounts), func(x corev1.VolumeMount) bool { return x.Name == m.Name }), m)
+			}
+		}
+		configMapVol := func(name, cm string) corev1.Volume {
+			return corev1.Volume{Name: name, VolumeSource: corev1.VolumeSource{ConfigMap: &corev1.ConfigMapVolumeSource{LocalObjectReference: corev1.LocalObjectReference{Name: cm}}}}
+		}
+		secretVol := func(name, secret string) corev1.Volume {
+			return corev1.Volume{Name: name, VolumeSource: corev1.VolumeSource{Secret: &corev1.SecretVolumeSource{SecretName: secret}}}
+		}
+		claimVol := func(name, claim string) corev1.Volume {
+			return corev1.Volume{Name: name, VolumeSource: corev1.VolumeSource{PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{ClaimName: claim}}}
+		}
+		secretEnv := func(secret string) corev1.EnvVar {
+			return corev1.EnvVar{Name: "LEAK", ValueFrom: &corev1.EnvVarSource{SecretKeyRef: &corev1.SecretKeySelector{
+				LocalObjectReference: corev1.LocalObjectReference{Name: secret}, Key: "secret"}}}
+		}
+		fromSecret := func(env, secret, key string) corev1.EnvVar {
+			return corev1.EnvVar{Name: env, ValueFrom: &corev1.EnvVarSource{SecretKeyRef: &corev1.SecretKeySelector{
+				LocalObjectReference: corev1.LocalObjectReference{Name: secret}, Key: key}}}
+		}
+		// withEnv sets env on the first container, in place of any of its names.
+		withEnv := func(env ...corev1.EnvVar) func(*appsv1.Deployment) {
+			return func(d *appsv1.Deployment) {
+				c := &d.Spec.Template.Spec.Containers[0]
+				c.Env = append(slices.DeleteFunc(slices.Clone(c.Env), func(x corev1.EnvVar) bool {
+					return slices.ContainsFunc(env, func(e corev1.EnvVar) bool { return e.Name == x.Name })
+				}), env...)
+			}
+		}
+		for name, c := range map[string]struct {
+			d    func() *appsv1.Deployment
+			edit func(*appsv1.Deployment)
+		}{
+			"in another namespace": {app, func(d *appsv1.Deployment) { d.Namespace = "team-a" }},
+			"as another account":   {app, func(d *appsv1.Deployment) { d.Spec.Template.Spec.ServiceAccountName = "default" }},
+			"from another repository": {app, func(d *appsv1.Deployment) {
+				d.Spec.Template.Spec.Containers[0].Image = "docker.io/library/nginx:1"
+			}},
+			"from a lookalike repository": {app, func(d *appsv1.Deployment) {
+				d.Spec.Template.Spec.Containers[0].Image = "quay.io/epheo/dotvirt-evil:1"
+			}},
+			"with an init container from elsewhere": {forge, func(d *appsv1.Deployment) {
+				d.Spec.Template.Spec.InitContainers[0].Image = "docker.io/library/busybox:1"
+			}},
+			"with a privileged init container": {forge, func(d *appsv1.Deployment) {
+				s := d.Spec.Template.Spec.InitContainers[0].SecurityContext
+				s.Privileged, s.AllowPrivilegeEscalation = new(true), nil
+			}},
+			"the console from the forge's repository": {app, func(d *appsv1.Deployment) {
+				d.Spec.Template.Spec.Containers[0].Image = "codeberg.org/forgejo/forgejo:11-rootless"
+			}},
+			"the forge from the console's repository": {forge, func(d *appsv1.Deployment) {
+				d.Spec.Template.Spec.Containers[0].Image = "quay.io/epheo/dotvirt:latest"
+			}},
+			"the console with a command": {app, func(d *appsv1.Deployment) {
+				d.Spec.Template.Spec.Containers[0].Command = []string{"sh", "-c", "env"}
+			}},
+			"the console skipping TLS no admin chose": {app, func(d *appsv1.Deployment) {
+				d.Spec.Template.Spec.Containers[0].Args = append(d.Spec.Template.Spec.Containers[0].Args, "-insecure-tls")
+			}},
+			"the console skipping TLS by env": {app, func(d *appsv1.Deployment) {
+				c := &d.Spec.Template.Spec.Containers[0]
+				c.Env = append(c.Env, corev1.EnvVar{Name: "DOTVIRT_INSECURE_TLS", Value: "true"})
+			}},
+			"the console sending metrics queries elsewhere": {app, func(d *appsv1.Deployment) {
+				d.Spec.Template.Spec.Containers[0].Args = append(d.Spec.Template.Spec.Containers[0].Args, "-metrics-url=https://evil.example")
+			}},
+			"the console sending metrics queries elsewhere, bare flag": {app, func(d *appsv1.Deployment) {
+				d.Spec.Template.Spec.Containers[0].Args = append(d.Spec.Template.Spec.Containers[0].Args, "--metrics-tenancy-url", "https://evil.example")
+			}},
+			"the console sending metrics queries elsewhere by env": {app, func(d *appsv1.Deployment) {
+				c := &d.Spec.Template.Spec.Containers[0]
+				c.Env = append(c.Env, corev1.EnvVar{Name: "DOTVIRT_METRICS_URL", Value: "https://evil.example"})
+			}},
+			"the console with a kubeconfig flag": {app, func(d *appsv1.Deployment) {
+				d.Spec.Template.Spec.Containers[0].Args = append(d.Spec.Template.Spec.Containers[0].Args, "-kubeconfig=/evil/kubeconfig")
+			}},
+			"the console serving other pages": {app, func(d *appsv1.Deployment) {
+				d.Spec.Template.Spec.Containers[0].Args = append(d.Spec.Template.Spec.Containers[0].Args, "-static-dir=/evil")
+			}},
+			"the console through a proxy": {app, func(d *appsv1.Deployment) {
+				c := &d.Spec.Template.Spec.Containers[0]
+				c.Env = append(c.Env, corev1.EnvVar{Name: "HTTPS_PROXY", Value: "http://evil.example:3128"})
+			}},
+			"the console through a proxy, lowercase": {app, func(d *appsv1.Deployment) {
+				c := &d.Spec.Template.Spec.Containers[0]
+				c.Env = append(c.Env, corev1.EnvVar{Name: "https_proxy", Value: "http://evil.example:3128"})
+			}},
+			"the console trusting another store": {app, func(d *appsv1.Deployment) {
+				c := &d.Spec.Template.Spec.Containers[0]
+				c.Env = append(c.Env, corev1.EnvVar{Name: "SSL_CERT_FILE", Value: "/evil/ca.crt"})
+			}},
+			"the console trusting another OAuth CA": {app, func(d *appsv1.Deployment) {
+				c := &d.Spec.Template.Spec.Containers[0]
+				c.Env = append(c.Env, corev1.EnvVar{Name: "DOTVIRT_OAUTH_CA", Value: "/evil/ca.crt"})
+			}},
+			"the console trusting another OAuth CA by flag": {app, func(d *appsv1.Deployment) {
+				d.Spec.Template.Spec.Containers[0].Args = append(d.Spec.Template.Spec.Containers[0].Args, "-oauth-ca=/evil/ca.crt")
+			}},
+			"the console trusting another origin": {app, func(d *appsv1.Deployment) {
+				d.Spec.Template.Spec.Containers[0].Args = append(d.Spec.Template.Spec.Containers[0].Args, "-ui-origin=https://evil.example")
+			}},
+			"the console trusting another origin by env": {app, func(d *appsv1.Deployment) {
+				c := &d.Spec.Template.Spec.Containers[0]
+				c.Env = append(c.Env, corev1.EnvVar{Name: "DOTVIRT_UI_ORIGIN", Value: "https://evil.example"})
+			}},
+			// An env the console sends out, carrying a Secret it was never given.
+			"the console sending another Secret as its forge token": {app, withEnv(
+				fromSecret("DOTVIRT_FORGE_TOKEN", "admin-oidc-client", "clientSecret"),
+				corev1.EnvVar{Name: "DOTVIRT_FORGE_URL", Value: "https://evil.example"})},
+			"the console reading its own Secret under another env": {app, withEnv(fromSecret("DOTVIRT_GIT_USERNAME", adminobjects.OAuthSecret, "clientSecret"))},
+			"the console reading another key of its own Secret":    {app, withEnv(fromSecret("DOTVIRT_SESSION_SECRET", adminobjects.SessionSecret, "other"))},
+			// The admin brings the forge credential here (spec.forge.managed false).
+			"the console sending an admin's forge credential elsewhere by env": {app, withEnv(corev1.EnvVar{Name: "DOTVIRT_FORGE_URL", Value: "https://evil.example"})},
+			"the console sending an admin's forge credential elsewhere by flag": {app, func(d *appsv1.Deployment) {
+				c := &d.Spec.Template.Spec.Containers[0]
+				c.Args = append(slices.Clone(c.Args), "-forge-url=https://evil.example")
+			}},
+			// The console sends the admin's OIDC client secret to its issuer.
+			"the console signing in at an issuer no admin chose": {app, withEnv(corev1.EnvVar{Name: "DOTVIRT_OIDC_ISSUER", Value: "https://evil.example"})},
+			"the console signing in at an issuer no admin chose, by flag": {app, func(d *appsv1.Deployment) {
+				c := &d.Spec.Template.Spec.Containers[0]
+				c.Args = append(slices.Clone(c.Args), "-oidc-issuer=https://evil.example")
+			}},
+			// The forge runs its own commands: a network volume reaches any
+			// export the nodes can.
+			"the forge on an NFS export": {forge, withVolume(corev1.Volume{Name: "more", VolumeSource: corev1.VolumeSource{
+				NFS: &corev1.NFSVolumeSource{Server: "nfs.example", Path: "/exports"}}}, corev1.VolumeMount{Name: "more", MountPath: "/more"})},
+			"the forge on an iSCSI target": {forge, withVolume(corev1.Volume{Name: "more", VolumeSource: corev1.VolumeSource{
+				ISCSI: &corev1.ISCSIVolumeSource{TargetPortal: "203.0.113.7:3260", IQN: "iqn.2001-04.com.example:storage", Lun: 0}}}, corev1.VolumeMount{Name: "more", MountPath: "/more"})},
+			"the forge with another ConfigMap":  {forge, withVolume(configMapVol("more", "brand"), corev1.VolumeMount{Name: "more", MountPath: "/more"})},
+			"the forge on the console's drafts": {forge, withVolume(claimVol("data", adminobjects.DraftsClaim), corev1.VolumeMount{Name: "data", MountPath: "/var/lib/gitea"})},
+			"the forge with another claim":      {forge, withVolume(claimVol("more", "other"), corev1.VolumeMount{Name: "more", MountPath: "/more"})},
+			"the forge with an ephemeral claim": {forge, withVolume(corev1.Volume{Name: "more", VolumeSource: corev1.VolumeSource{Ephemeral: &corev1.EphemeralVolumeSource{
+				VolumeClaimTemplate: &corev1.PersistentVolumeClaimTemplate{Spec: corev1.PersistentVolumeClaimSpec{
+					AccessModes: []corev1.PersistentVolumeAccessMode{corev1.ReadWriteOnce},
+					DataSource:  &corev1.TypedLocalObjectReference{Kind: "PersistentVolumeClaim", Name: adminobjects.DraftsClaim},
+					Resources:   corev1.VolumeResourceRequirements{Requests: corev1.ResourceList{corev1.ResourceStorage: resource.MustParse("1Gi")}},
+				}}}}}, corev1.VolumeMount{Name: "more", MountPath: "/more"})},
+			"the console with a ConfigMap over its binary": {app, withVolume(configMapVol("evil", "evil"),
+				corev1.VolumeMount{Name: "evil", MountPath: "/dotvirt", SubPath: "dotvirt"})},
+			"the console trusting the operator's certificates": {app, withVolume(configMapVol("evil", "evil"),
+				corev1.VolumeMount{Name: "evil", MountPath: "/etc/ssl/certs"})},
+			"the console branded from a ConfigMap no admin chose": {app, withVolume(configMapVol("branding", "evil"),
+				corev1.VolumeMount{Name: "branding", MountPath: adminobjects.BrandingMountPath})},
+			"the console's drafts on another claim": {app, withVolume(claimVol("drafts", "dotvirt-forgejo-data"),
+				corev1.VolumeMount{Name: "drafts", MountPath: "/var/lib/dotvirt/drafts"})},
+			"the console's drafts mounted over its trust store": {app, withVolume(claimVol("drafts", adminobjects.DraftsClaim),
+				corev1.VolumeMount{Name: "drafts", MountPath: "/etc/ssl/certs"})},
+			"the console mounting part of a volume": {app, withVolume(claimVol("drafts", adminobjects.DraftsClaim),
+				corev1.VolumeMount{Name: "drafts", MountPath: "/var/lib/dotvirt/drafts", SubPath: "x"})},
+			"the console's forge token from another Secret": {app, withVolume(secretVol("forge-token", adminobjects.ForgeAdminSecret),
+				corev1.VolumeMount{Name: "forge-token", MountPath: adminobjects.ForgeMountPath})},
+			"the forge reading another Secret": {forge, func(d *appsv1.Deployment) {
+				c := &d.Spec.Template.Spec.Containers[0]
+				c.Env = append(c.Env, secretEnv(install.SessionSecretName))
+			}},
+			"the forge's bootstrap reading another Secret": {forge, func(d *appsv1.Deployment) {
+				c := &d.Spec.Template.Spec.InitContainers[0]
+				c.Env = append(c.Env, secretEnv(install.OAuthSecretName))
+			}},
+			"the forge taking a Secret as env": {forge, func(d *appsv1.Deployment) {
+				c := &d.Spec.Template.Spec.Containers[0]
+				c.EnvFrom = append(c.EnvFrom, corev1.EnvFromSource{SecretRef: &corev1.SecretEnvSource{LocalObjectReference: corev1.LocalObjectReference{Name: install.SessionSecretName}}})
+			}},
+			"the forge mounting a Secret": {forge, withVolume(secretVol("leak", install.SessionSecretName), corev1.VolumeMount{Name: "leak", MountPath: "/leak"})},
+			"the forge mounting a projected Secret": {forge, withVolume(corev1.Volume{Name: "leak", VolumeSource: corev1.VolumeSource{Projected: &corev1.ProjectedVolumeSource{
+				Sources: []corev1.VolumeProjection{{Secret: &corev1.SecretProjection{LocalObjectReference: corev1.LocalObjectReference{Name: install.SessionSecretName}}}}}}},
+				corev1.VolumeMount{Name: "leak", MountPath: "/leak"})},
+			"the console with an exec probe": {app, func(d *appsv1.Deployment) {
+				d.Spec.Template.Spec.Containers[0].LivenessProbe = &corev1.Probe{ProbeHandler: corev1.ProbeHandler{
+					Exec: &corev1.ExecAction{Command: []string{"/dotvirt", "-addr=:9090", "-kubeconfig=/evil"}}}}
+			}},
+			"the console with an exec startup probe": {app, func(d *appsv1.Deployment) {
+				d.Spec.Template.Spec.Containers[0].StartupProbe = &corev1.Probe{ProbeHandler: corev1.ProbeHandler{
+					Exec: &corev1.ExecAction{Command: []string{"/dotvirt", "-addr=:9090"}}}}
+			}},
+			"the console with a postStart exec": {app, func(d *appsv1.Deployment) {
+				d.Spec.Template.Spec.Containers[0].Lifecycle = &corev1.Lifecycle{PostStart: &corev1.LifecycleHandler{
+					Exec: &corev1.ExecAction{Command: []string{"/dotvirt", "-addr=:9090"}}}}
+			}},
+			"the console with a preStop exec": {app, func(d *appsv1.Deployment) {
+				d.Spec.Template.Spec.Containers[0].Lifecycle = &corev1.Lifecycle{PreStop: &corev1.LifecycleHandler{
+					Exec: &corev1.ExecAction{Command: []string{"/dotvirt", "-addr=:9090"}}}}
+			}},
+			"the console sharing its process namespace": {app, func(d *appsv1.Deployment) {
+				d.Spec.Template.Spec.ShareProcessNamespace = new(true)
+			}},
+			"the forge's pods labeled as the console's": {forge, func(d *appsv1.Deployment) {
+				// New maps: the render shares its selector map.
+				d.Spec.Selector = &metav1.LabelSelector{MatchLabels: map[string]string{"app": "dotvirt"}}
+				d.Spec.Template.Labels = map[string]string{"app": "dotvirt"}
+			}},
+			"the console resolving a host elsewhere": {app, func(d *appsv1.Deployment) {
+				d.Spec.Template.Spec.HostAliases = []corev1.HostAlias{{IP: "10.0.0.66", Hostnames: []string{"thanos-querier.openshift-monitoring.svc"}}}
+			}},
+			"the console with a resolver of its own": {app, func(d *appsv1.Deployment) {
+				d.Spec.Template.Spec.DNSPolicy = corev1.DNSNone
+				d.Spec.Template.Spec.DNSConfig = &corev1.PodDNSConfig{Nameservers: []string{"10.0.0.66"}}
+			}},
+			"the console serving other pages by env": {app, func(d *appsv1.Deployment) {
+				c := &d.Spec.Template.Spec.Containers[0]
+				c.Env = append(c.Env, corev1.EnvVar{Name: "DOTVIRT_STATIC_DIR", Value: "/evil"})
+			}},
+			"the console with an init container": {app, func(d *appsv1.Deployment) {
+				c := d.Spec.Template.Spec.Containers[0]
+				c.Name, c.LivenessProbe, c.ReadinessProbe, c.Ports = "init", nil, nil, nil
+				d.Spec.Template.Spec.InitContainers = []corev1.Container{c}
+			}},
+
+			"the console with a kubeconfig": {app, func(d *appsv1.Deployment) {
+				c := &d.Spec.Template.Spec.Containers[0]
+				c.Env = append(c.Env, corev1.EnvVar{Name: "KUBECONFIG", Value: "/evil/kubeconfig"})
+			}},
+			"the console with an apiserver address": {app, func(d *appsv1.Deployment) {
+				c := &d.Spec.Template.Spec.Containers[0]
+				c.Env = append(c.Env, corev1.EnvVar{Name: "KUBERNETES_SERVICE_HOST", Value: "10.0.0.66"})
+			}},
+			"the console with env from a ConfigMap": {app, func(d *appsv1.Deployment) {
+				d.Spec.Template.Spec.Containers[0].EnvFrom = []corev1.EnvFromSource{{ConfigMapRef: &corev1.ConfigMapEnvSource{
+					LocalObjectReference: corev1.LocalObjectReference{Name: "dotvirt-oauth"}}}}
+			}},
+			"the console without its token": {app, func(d *appsv1.Deployment) {
+				d.Spec.Template.Spec.AutomountServiceAccountToken = new(false)
+			}},
+			"a mount over the token directory": {app, func(d *appsv1.Deployment) {
+				c := &d.Spec.Template.Spec.Containers[0]
+				c.VolumeMounts = append(c.VolumeMounts, corev1.VolumeMount{Name: "drafts", MountPath: "/var/run/secrets/kubernetes.io/serviceaccount"})
+			}},
+			"a mount above the token directory": {app, func(d *appsv1.Deployment) {
+				c := &d.Spec.Template.Spec.Containers[0]
+				c.VolumeMounts = append(c.VolumeMounts, corev1.VolumeMount{Name: "drafts", MountPath: "/run"})
+			}},
+			"a mount over the token directory, doubled slash": {app, func(d *appsv1.Deployment) {
+				c := &d.Spec.Template.Spec.Containers[0]
+				c.VolumeMounts = append(c.VolumeMounts, corev1.VolumeMount{Name: "drafts", MountPath: "/var/run//secrets/kubernetes.io/serviceaccount"})
+			}},
+			"a mount inside the token directory": {forge, func(d *appsv1.Deployment) {
+				c := &d.Spec.Template.Spec.Containers[0]
+				c.VolumeMounts = append(c.VolumeMounts, corev1.VolumeMount{Name: "etc", MountPath: "/var/run/secrets/kubernetes.io/serviceaccount/ca.crt"})
+			}},
+			"a container allowed root": {app, func(d *appsv1.Deployment) { sc(d).RunAsNonRoot = new(false) }},
+			"a pod without seccomp":    {app, func(d *appsv1.Deployment) { d.Spec.Template.Spec.SecurityContext.SeccompProfile = nil }},
+			"mounting a host path": {app, func(d *appsv1.Deployment) {
+				d.Spec.Template.Spec.Volumes = append(d.Spec.Template.Spec.Volumes,
+					corev1.Volume{Name: "host", VolumeSource: corev1.VolumeSource{HostPath: &corev1.HostPathVolumeSource{Path: "/"}}})
+			}},
+			"in the host network": {app, func(d *appsv1.Deployment) { d.Spec.Template.Spec.HostNetwork = true }},
+			"in the host PID":     {app, func(d *appsv1.Deployment) { d.Spec.Template.Spec.HostPID = true }},
+			"in the host IPC":     {app, func(d *appsv1.Deployment) { d.Spec.Template.Spec.HostIPC = true }},
+			"privileged": {app, func(d *appsv1.Deployment) {
+				sc(d).Privileged, sc(d).AllowPrivilegeEscalation = new(true), nil
+			}},
+			"escalation left unset":            {app, func(d *appsv1.Deployment) { sc(d).AllowPrivilegeEscalation = nil }},
+			"escalation allowed, unprivileged": {app, func(d *appsv1.Deployment) { sc(d).AllowPrivilegeEscalation = new(true) }},
+			"adding a capability": {app, func(d *appsv1.Deployment) {
+				sc(d).Capabilities.Add = []corev1.Capability{"NET_ADMIN"}
+			}},
+			"keeping capabilities": {app, func(d *appsv1.Deployment) { sc(d).Capabilities.Drop = nil }},
+			"a container as root":  {app, func(d *appsv1.Deployment) { sc(d).RunAsUser = new(int64(0)) }},
+			"a pod as root":        {app, func(d *appsv1.Deployment) { d.Spec.Template.Spec.SecurityContext.RunAsUser = new(int64(0)) }},
+			"a container unconfined": {app, func(d *appsv1.Deployment) {
+				sc(d).SeccompProfile = &corev1.SeccompProfile{Type: corev1.SeccompProfileTypeUnconfined}
+			}},
+			"a pod unconfined": {app, func(d *appsv1.Deployment) {
+				d.Spec.Template.Spec.SecurityContext.SeccompProfile = &corev1.SeccompProfile{Type: corev1.SeccompProfileTypeUnconfined}
+			}},
+		} {
+			d := c.d()
+			c.edit(d)
+			if err := dryApply(d); !refused(err) {
+				t.Errorf("operator's Deployment %s: err=%v, want the guard's Forbidden", name, err)
+			}
+		}
+		// The forge credential an admin brings, read from its Secret as rendered;
+		// a managed forge's literal URL is not that.
+		byo := dv.DeepCopy()
+		byo.Spec.Forge.CredentialsSecret = adminobjects.DefaultForgeSecret
+		managed := dv.DeepCopy()
+		managed.Spec.Forge.Managed, managed.Spec.Forge.URL = true, "https://forge.example"
+		if err := dryApply(install.Deployment(byo, "argocd", nil)); err != nil {
+			t.Errorf("the console with an admin's forge credential: %v", err)
+		}
+		if err := dryApply(install.Deployment(managed, "argocd", nil)); !refused(err) {
+			t.Errorf("a managed forge's URL while an admin brings the credential: err=%v, want the guard's Forbidden", err)
+		}
+
+		// Claims: as rendered, and bound to nothing of the operator's choosing.
+		// Elsewhere they are new, so the apiserver's immutability does not
+		// answer first.
+		claim := func(namespace string, edit func(*corev1.PersistentVolumeClaimSpec)) *corev1.PersistentVolumeClaim {
+			c := install.DraftsPVC(dv)
+			c.Namespace = namespace
+			if edit != nil {
+				edit(&c.Spec)
+			}
+			return c
+		}
+		for name, o := range map[string]client.Object{
+			"the drafts claim": claim(dv.Namespace, nil), "a new drafts claim": claim("team-a", nil), "the forge's claim": install.ForgejoPVC(dv),
+		} {
+			if err := dryApply(o); err != nil {
+				t.Errorf("%s as rendered: %v", name, err)
+			}
+		}
+		for name, o := range map[string]client.Object{
+			"the drafts claim bound to a volume of its choosing": claim(dv.Namespace, func(c *corev1.PersistentVolumeClaimSpec) { c.VolumeName = "pv-evil" }),
+			"a new claim bound to a volume":                      claim("team-a", func(c *corev1.PersistentVolumeClaimSpec) { c.VolumeName = "pv-evil" }),
+			"a new claim selecting volumes": claim("team-a", func(c *corev1.PersistentVolumeClaimSpec) {
+				c.Selector = &metav1.LabelSelector{MatchLabels: map[string]string{"tenant": "b"}}
+			}),
+			"a new claim copying another": claim("team-a", func(c *corev1.PersistentVolumeClaimSpec) {
+				c.DataSource = &corev1.TypedLocalObjectReference{Kind: "PersistentVolumeClaim", Name: adminobjects.ForgeClaim}
+			}),
+			"a new claim populated from another": claim("team-a", func(c *corev1.PersistentVolumeClaimSpec) {
+				c.DataSourceRef = &corev1.TypedObjectReference{Kind: "PersistentVolumeClaim", Name: adminobjects.ForgeClaim}
+			}),
+		} {
+			if err := dryApply(o); !refused(err) {
+				t.Errorf("operator's %s: err=%v, want the guard's Forbidden", name, err)
+			}
+		}
+
+		// Bindings: every one the operator renders passes; its own account, an
+		// unrendered name or role, or another namespace is refused.
+		for _, b := range []client.Object{
+			install.DotvirtClusterRoleBinding(dv),
+			install.ArgocdApplyClusterRoleBinding(dv, "argocd", "argocd-application-controller", true, true),
+			install.ArgocdReadClusterRoleBinding(dv, "argocd", "argocd-application-controller"),
+			install.PlatformSyncClusterRoleBinding(dv, "argocd"),
+			install.PlatformNetworkAdminBinding(dv),
+			install.StorageCatalogBinding(dv),
+			install.SyncRequestRoleBinding(dv, "argocd"),
+		} {
+			if err := dryApply(b); err != nil {
+				t.Errorf("rendered %s: %v", b.GetName(), err)
+			}
+		}
+		self := rbacv1.Subject{Kind: "ServiceAccount", Name: "dotvirt-operator", Namespace: "dotvirt-operator"}
+		for name, b := range map[string]client.Object{
+			"dotvirt-argocd-apply to the operator": func() client.Object {
+				b := install.ArgocdApplyClusterRoleBinding(dv, "argocd", "argocd-application-controller", true, true)
+				b.Subjects = append(b.Subjects, self)
+				return b
+			}(),
+			"dotvirt-platform-sync to the operator": func() client.Object {
+				b := install.PlatformSyncClusterRoleBinding(dv, "argocd")
+				b.Subjects = []rbacv1.Subject{self}
+				return b
+			}(),
+			// Not created in this install (no platform repo), so its roleRef is free.
+			"another role under a rendered name": func() client.Object {
+				b := install.PlatformSyncClusterRoleBinding(dv, "argocd")
+				b.RoleRef.Name = "dotvirt-argocd-apply"
+				return b
+			}(),
+			"the sync-request binding elsewhere": install.SyncRequestRoleBinding(dv, "team-a"),
+			"the sync-request binding to the operator": func() client.Object {
+				b := install.SyncRequestRoleBinding(dv, "argocd")
+				b.Subjects = append(b.Subjects, self)
+				return b
+			}(),
+		} {
+			if err := dryApply(b); !refused(err) {
+				t.Errorf("operator's binding %s: err=%v, want the guard's Forbidden", name, err)
+			}
+		}
+
+		// The console's front door: its Service and exposure as rendered pass;
+		// re-pointed at anything else, refused.
+		svc := func(edit func(*corev1.Service)) *corev1.Service {
+			s := install.Service(dv)
+			if edit != nil {
+				edit(s)
+			}
+			return s
+		}
+		route := func(name, host string, edit func(map[string]any)) *unstructured.Unstructured {
+			r := install.Route(dv, name, host)
+			if edit != nil {
+				edit(r.Object["spec"].(map[string]any))
+			}
+			return r
+		}
+		generated := func(extra map[string]string) *unstructured.Unstructured {
+			r := route(install.AppName, "", nil)
+			a := map[string]string{"openshift.io/host.generated": "true"}
+			maps.Copy(a, extra)
+			r.SetAnnotations(a)
+			return r
+		}
+		forgeSvc := func(namespace string, edit func(*corev1.ServiceSpec)) *corev1.Service {
+			s := install.ForgejoService(dv)
+			s.Namespace = namespace
+			edit(&s.Spec)
+			return s
+		}
+		account := func(automount bool) *corev1.ServiceAccount {
+			sa := install.ServiceAccount(dv)
+			sa.AutomountServiceAccountToken = &automount
+			return sa
+		}
+		for name, o := range map[string]client.Object{
+			"the console's account":         install.ServiceAccount(dv),
+			"the console's account mounted": account(true),
+			"the forge's account":           install.ForgejoServiceAccount(dv),
+			// OpenShift's route API marks the host it generates, on create,
+			// before admission.
+			"the console's Route with OpenShift's generated-host mark": generated(nil),
+			"the console's Service": svc(nil),
+			"the console's Route":   route(install.AppName, "", nil),
+			// The host the router gives a hostless Route, while the guard
+			// knows none (no cluster ingress domain here).
+			"the console's Route with the router's host": route(install.AppName, "dotvirt-dotvirt.apps.example", nil),
+			"the forge's Service":                        install.ForgejoService(dv),
+			"the forge's Route":                          route(install.ForgejoServiceName, "", nil),
+		} {
+			if err := dryApply(o); err != nil {
+				t.Errorf("%s as rendered: %v", name, err)
+			}
+		}
+		for name, o := range map[string]client.Object{
+			"the console's Service selecting the forge": svc(func(s *corev1.Service) { s.Spec.Selector = map[string]string{"app": "dotvirt-forgejo"} }),
+			"the console's Service on another port": svc(func(s *corev1.Service) {
+				s.Spec.Ports[0].TargetPort = intstr.FromInt32(3000)
+			}),
+			"the console's Service exposed on nodes":        svc(func(s *corev1.Service) { s.Spec.Type = corev1.ServiceTypeNodePort }),
+			"the console's Service publishing unready pods": svc(func(s *corev1.Service) { s.Spec.PublishNotReadyAddresses = true }),
+			"the console's Route to the forge": route(install.AppName, "", func(spec map[string]any) {
+				spec["to"] = map[string]any{"kind": "Service", "name": install.ForgejoServiceName}
+			}),
+			"the console's Route splitting to the forge": route(install.AppName, "", func(spec map[string]any) {
+				spec["alternateBackends"] = []any{map[string]any{"kind": "Service", "name": install.ForgejoServiceName, "weight": int64(50)}}
+			}),
+			"the console's Route passed through": route(install.AppName, "", func(spec map[string]any) {
+				spec["tls"] = map[string]any{"termination": "passthrough"}
+			}),
+			"the console's account without its token":               account(false),
+			"the forge's Service on node ports":                     forgeSvc(dv.Namespace, func(s *corev1.ServiceSpec) { s.Type = corev1.ServiceTypeNodePort }),
+			"the forge's Service on an external IP":                 forgeSvc(dv.Namespace, func(s *corev1.ServiceSpec) { s.ExternalIPs = []string{"203.0.113.7"} }),
+			"a forge Service elsewhere as a load balancer":          forgeSvc("team-a", func(s *corev1.ServiceSpec) { s.Type = corev1.ServiceTypeLoadBalancer }),
+			"the console's Route with OpenShift's mark and another": generated(map[string]string{"haproxy.router.openshift.io/rewrite-target": "/evil"}),
+			"the console's Route annotated": func() client.Object {
+				r := route(install.AppName, "", nil)
+				r.SetAnnotations(map[string]string{"haproxy.router.openshift.io/rewrite-target": "/evil"})
+				return r
+			}(),
+		} {
+			if err := dryApply(o); !refused(err) {
+				t.Errorf("operator's %s: err=%v, want the guard's Forbidden", name, err)
+			}
+		}
+
+		// An unrendered name: the operator's role names its bindings, so grant
+		// it this one too, leaving the guard's name rule the only gate.
+		// The binding grants nothing and names no subject: only its name is wrong.
+		mustCreate(t, admin, &rbacv1.ClusterRole{ObjectMeta: metav1.ObjectMeta{Name: "dotvirt-evil"}})
+		mustCreate(t, admin, &rbacv1.ClusterRole{
+			ObjectMeta: metav1.ObjectMeta{Name: "guard-probe-evil"},
+			Rules: []rbacv1.PolicyRule{
+				{APIGroups: []string{rbacv1.GroupName}, Resources: []string{"clusterrolebindings"}, ResourceNames: []string{"dotvirt-evil"}, Verbs: []string{"create", "patch"}},
+				{APIGroups: []string{rbacv1.GroupName}, Resources: []string{"clusterroles"}, ResourceNames: []string{"dotvirt-evil"}, Verbs: []string{"bind"}},
+			},
+		})
+		mustCreate(t, admin, &rbacv1.ClusterRoleBinding{
+			ObjectMeta: metav1.ObjectMeta{Name: "guard-probe-evil"},
+			RoleRef:    rbacv1.RoleRef{APIGroup: rbacv1.GroupName, Kind: "ClusterRole", Name: "guard-probe-evil"},
+			Subjects:   []rbacv1.Subject{{Kind: rbacv1.UserKind, Name: operatorUser}},
+		})
+		evil := install.ArgocdApplyClusterRoleBinding(dv, "argocd", "argocd-application-controller", true, true)
+		evil.Name, evil.RoleRef.Name, evil.Subjects = "dotvirt-evil", "dotvirt-evil", nil
+		// Until RBAC sees the grant, only it answers; then the guard does.
+		eventually(t, "the probe grant", func() bool {
+			err := dryApply(evil)
+			return err == nil || (!strings.Contains(err.Error(), "cannot patch resource") && !strings.Contains(err.Error(), "cannot create resource"))
+		})
+		if err := dryApply(evil); !refused(err) {
+			t.Errorf("operator's binding under an unrendered name: err=%v, want the guard's Forbidden", err)
+		}
+		_ = admin.Delete(ctx, &rbacv1.ClusterRoleBinding{ObjectMeta: metav1.ObjectMeta{Name: "guard-probe-evil"}})
+		_ = admin.Delete(ctx, &rbacv1.ClusterRole{ObjectMeta: metav1.ObjectMeta{Name: "guard-probe-evil"}})
+		_ = admin.Delete(ctx, &rbacv1.ClusterRole{ObjectMeta: metav1.ObjectMeta{Name: "dotvirt-evil"}})
+
+		// Its install: the finalizers go on and off by the operator's own
+		// patch; the spec, labels and owners an admin wrote stay theirs.
+		// Status is another resource and passes.
+		opPatch := func(edit func(*dotvirtv1alpha1.Dotvirt)) error {
+			got := &dotvirtv1alpha1.Dotvirt{}
+			if err := opClient.Get(ctx, key, got); err != nil {
+				t.Fatal(err)
+			}
+			lock := client.MergeFromWithOptions(got.DeepCopy(), client.MergeFromWithOptimisticLock{})
+			edit(got)
+			return opClient.Patch(ctx, got, lock)
+		}
+		for name, edit := range map[string]func(*dotvirtv1alpha1.Dotvirt){
+			"spec.image": func(d *dotvirtv1alpha1.Dotvirt) { d.Spec.Image = "registry.example/evil/dotvirt:1" },
+			"spec.forge.credentialsSecret": func(d *dotvirtv1alpha1.Dotvirt) {
+				d.Spec.Forge.CredentialsSecret = "kube-admin-token"
+			},
+			"a label":       func(d *dotvirtv1alpha1.Dotvirt) { d.Labels = map[string]string{"evil": "1"} },
+			"an annotation": func(d *dotvirtv1alpha1.Dotvirt) { d.Annotations = map[string]string{"evil": "1"} },
+		} {
+			if err := opPatch(edit); !refused(err) {
+				t.Errorf("operator changing its install's %s: err=%v, want the guard's Forbidden", name, err)
+			}
+		}
+		statusPatch := func() error {
+			got := &dotvirtv1alpha1.Dotvirt{}
+			if err := opClient.Get(ctx, key, got); err != nil {
+				t.Fatal(err)
+			}
+			base := got.DeepCopy()
+			got.Status.ConsoleURL = "https://probe.example"
+			return opClient.Status().Patch(ctx, got, client.MergeFrom(base))
+		}
+		if err := statusPatch(); err != nil {
+			t.Errorf("operator's status write: %v", err)
+		}
+		// Off by the operator's patch, and back on by its own pass under the guard.
+		if err := opPatch(func(d *dotvirtv1alpha1.Dotvirt) { controllerutil.RemoveFinalizer(d, dotvirtFinalizer) }); err != nil {
+			t.Errorf("operator removing its finalizer: %v", err)
+		}
+		patchCR()
+		eventually(t, "the finalizer back by the operator's pass", func() bool {
+			got := &dotvirtv1alpha1.Dotvirt{}
+			return admin.Get(ctx, key, got) == nil && controllerutil.ContainsFinalizer(got, dotvirtFinalizer)
+		})
+
+		// An image an admin chose passes once the guard is installed for it.
+		custom := app()
+		custom.Spec.Template.Spec.Containers[0].Image = "registry.example/team/dotvirt:custom"
+		if err := dryApply(custom); !refused(err) {
+			t.Errorf("an image no admin chose: err=%v, want the guard's Forbidden", err)
+		}
+		chosen := pins
+		chosen.SpecImage = custom.Spec.Template.Spec.Containers[0].Image
+		// Where an admin sends metrics queries: as the operator renders it.
+		chosen.Metrics = adminobjects.MetricsFor("https://thanos-querier.openshift-monitoring.svc:9091", "", false)
+		// The console's host, which nothing else may claim.
+		chosen.ConsoleHost = "console.example"
+		ingress := func(name string, edit func(*networkingv1.Ingress)) *networkingv1.Ingress {
+			port := install.HTTPPort
+			if name == install.ForgejoServiceName {
+				port = 3000
+			}
+			i := install.Ingress(dv, name, port, chosen.ConsoleHost)
+			if edit != nil {
+				edit(i)
+			}
+			return i
+		}
+		httpRoute := func(name string, edit func(map[string]any)) *unstructured.Unstructured {
+			hd := dv.DeepCopy()
+			hd.Spec.Ingress.Gateway = &dotvirtv1alpha1.GatewayRef{Name: "public", Namespace: "gateways"}
+			r := install.HTTPRoute(hd, name, install.HTTPPort, chosen.ConsoleHost)
+			if edit != nil {
+				edit(r.Object["spec"].(map[string]any))
+			}
+			return r
+		}
+		metrics := app()
+		mc := &metrics.Spec.Template.Spec.Containers[0]
+		mc.Env = append(mc.Env,
+			corev1.EnvVar{Name: "DOTVIRT_METRICS_URL", Value: chosen.Metrics.URL},
+			corev1.EnvVar{Name: "DOTVIRT_METRICS_TENANCY_URL", Value: chosen.Metrics.TenancyURL},
+			corev1.EnvVar{Name: "DOTVIRT_METRICS_CA", Value: chosen.Metrics.CA})
+		elsewhere := metrics.DeepCopy()
+		elsewhere.Spec.Template.Spec.Containers[0].Args = append(elsewhere.Spec.Template.Spec.Containers[0].Args, "-metrics-url=https://evil.example")
+		// The branding ConfigMap and the OIDC client secret an admin chose: the
+		// secret reaches the console under its own env only.
+		chosen.BrandingConfigMap = "brand"
+		chosen.OIDCSecret, chosen.OIDCSecretKey, chosen.OIDCIssuer = "admin-oidc", "client-secret", "https://idp.example"
+		oidc := app()
+		withEnv(fromSecret("DOTVIRT_OIDC_CLIENT_SECRET", "admin-oidc", "client-secret"),
+			corev1.EnvVar{Name: "DOTVIRT_OIDC_ISSUER", Value: chosen.OIDCIssuer})(oidc)
+		oidcIssuerElsewhere := oidc.DeepCopy()
+		withEnv(corev1.EnvVar{Name: "DOTVIRT_OIDC_ISSUER", Value: "https://evil.example"})(oidcIssuerElsewhere)
+		oidcElsewhere := app()
+		withEnv(fromSecret("DOTVIRT_FORGE_TOKEN", "admin-oidc", "client-secret"),
+			fromSecret("DOTVIRT_FORGE_URL", adminobjects.DefaultForgeSecret, "url"))(oidcElsewhere)
+		branded := app()
+		withVolume(configMapVol("branding", "brand"), corev1.VolumeMount{Name: "branding", MountPath: adminobjects.BrandingMountPath})(branded)
+		forgeRoute := func(hostnames ...any) *unstructured.Unstructured {
+			return httpRoute(install.ForgejoServiceName, func(spec map[string]any) {
+				delete(spec, "hostnames")
+				if hostnames != nil {
+					spec["hostnames"] = hostnames
+				}
+				spec["rules"] = []any{map[string]any{"backendRefs": []any{map[string]any{"name": install.ForgejoServiceName, "port": int64(3000)}}}}
+			})
+		}
+		forgeIngress := func(host string, edit func(*networkingv1.Ingress)) *networkingv1.Ingress {
+			return ingress(install.ForgejoServiceName, func(i *networkingv1.Ingress) {
+				i.Spec.Rules[0].Host = host
+				if edit != nil {
+					edit(i)
+				}
+			})
+		}
+		installGuard(chosen)
+		eventually(t, "the admin's image admitted", func() bool { return dryApply(custom) == nil })
+		if err := dryApply(metrics); err != nil {
+			t.Errorf("the admin's metrics endpoints: %v", err)
+		}
+		if err := dryApply(elsewhere); !refused(err) {
+			t.Errorf("metrics queries beside the admin's choice: err=%v, want the guard's Forbidden", err)
+		}
+		for name, o := range map[string]client.Object{
+			"the console branded from the admin's ConfigMap":  branded,
+			"the console with the admin's OIDC client secret": oidc,
+			"the forge's Ingress on its own host":             forgeIngress("forge.example", nil),
+			"the forge's HTTPRoute on its own host":           forgeRoute("forge.example"),
+			"the console's Route on its host":                 route(install.AppName, chosen.ConsoleHost, nil),
+			"the console's Ingress on its host":               ingress(install.AppName, nil),
+			"the console's HTTPRoute on its host":             httpRoute(install.AppName, nil),
+		} {
+			if err := dryApply(o); err != nil {
+				t.Errorf("%s: %v", name, err)
+			}
+		}
+		for name, o := range map[string]client.Object{
+			"the console sending the admin's OIDC client secret to another issuer":  oidcIssuerElsewhere,
+			"the console sending the admin's OIDC client secret as its forge token": oidcElsewhere,
+			"the forge's Ingress for every host":                                    forgeIngress("", nil),
+			"the forge's Ingress on a wildcard over the console's host":             forgeIngress("*.example", nil),
+			"the forge's Ingress with a default backend": forgeIngress("forge.example", func(i *networkingv1.Ingress) {
+				i.Spec.DefaultBackend = i.Spec.Rules[0].HTTP.Paths[0].Backend.DeepCopy()
+			}),
+			"the forge's HTTPRoute for every host":                        forgeRoute(),
+			"the forge's HTTPRoute on a wildcard over the console's host": forgeRoute("*.example"),
+			"the forge's Route claiming the console's host":               route(install.ForgejoServiceName, chosen.ConsoleHost, nil),
+			"the forge's Ingress claiming the console's host":             ingress(install.ForgejoServiceName, nil),
+			"the forge's HTTPRoute claiming the console's host": func() client.Object {
+				r := httpRoute(install.ForgejoServiceName, nil)
+				r.Object["spec"].(map[string]any)["rules"] = []any{map[string]any{"backendRefs": []any{map[string]any{"name": install.ForgejoServiceName, "port": int64(3000)}}}}
+				return r
+			}(),
+			"the forge's Route on a wildcard":     route(install.ForgejoServiceName, "x.example", func(spec map[string]any) { spec["wildcardPolicy"] = "Subdomain" }),
+			"the console's Route on another host": route(install.AppName, "evil.example", nil),
+			"the console's Ingress to the forge": ingress(install.AppName, func(i *networkingv1.Ingress) {
+				i.Spec.Rules[0].HTTP.Paths[0].Backend.Service.Name = install.ForgejoServiceName
+			}),
+			"the console's Ingress on another host": ingress(install.AppName, func(i *networkingv1.Ingress) { i.Spec.Rules[0].Host = "evil.example" }),
+			"the console's Ingress mirrored": ingress(install.AppName, func(i *networkingv1.Ingress) {
+				i.Annotations = map[string]string{"nginx.ingress.kubernetes.io/mirror-target": "https://evil.example$request_uri"}
+			}),
+			"the console's HTTPRoute to the forge": httpRoute(install.AppName, func(spec map[string]any) {
+				spec["rules"] = []any{map[string]any{"backendRefs": []any{map[string]any{"name": install.ForgejoServiceName, "port": int64(3000)}}}}
+			}),
+			"the console's HTTPRoute mirrored": httpRoute(install.AppName, func(spec map[string]any) {
+				spec["rules"] = []any{map[string]any{
+					"filters":     []any{map[string]any{"type": "RequestMirror", "requestMirror": map[string]any{"backendRef": map[string]any{"name": install.ForgejoServiceName, "port": int64(3000)}}}},
+					"backendRefs": []any{map[string]any{"name": install.AppName, "port": int64(install.HTTPPort)}},
+				}}
+			}),
+		} {
+			if err := dryApply(o); !refused(err) {
+				t.Errorf("operator's %s: err=%v, want the guard's Forbidden", name, err)
+			}
+		}
+		installGuard(pins)
+
+		// The operator can neither re-apply nor remove its guard.
+		apply := admissionregistrationv1ac.ValidatingAdmissionPolicy(adminobjects.GuardSecretsName).
+			WithSpec(admissionregistrationv1ac.ValidatingAdmissionPolicySpec().WithValidations())
+		if _, err := op.AdmissionregistrationV1().ValidatingAdmissionPolicies().Apply(ctx, apply, metav1.ApplyOptions{FieldManager: operatorFieldManager, Force: true}); !apierrors.IsForbidden(err) {
+			t.Errorf("operator re-applying the guard: err=%v, want Forbidden", err)
+		}
+		if err := op.AdmissionregistrationV1().ValidatingAdmissionPolicyBindings().Delete(ctx, adminobjects.GuardDeploymentsName, metav1.DeleteOptions{}); !apierrors.IsForbidden(err) {
+			t.Errorf("operator deleting the guard's binding: err=%v, want Forbidden", err)
+		}
+		// With the guard in place, a pass still reconciles the install.
+		eventually(t, "the custom image refused again", func() bool { return refused(dryApply(custom)) })
+		patchCR()
+		eventually(t, "a pass under the guard", func() bool {
+			got := &dotvirtv1alpha1.Dotvirt{}
+			if admin.Get(ctx, key, got) != nil {
+				return false
+			}
+			w := apimeta.FindStatusCondition(got.Status.Conditions, dotvirtv1alpha1.ConditionWorkloadReady)
+			return got.Status.ObservedGeneration == got.Generation && w != nil && w.Status == metav1.ConditionTrue
+		})
+
+	})
+
+	// A release whose operand the previous release's guard refuses breaks every
+	// upgrade until an admin re-installs the guard, while the old console reads
+	// Installed. The baseline is the previous release's install/guard.yaml,
+	// refreshed from the released asset at each release; a release that cannot
+	// pass it ships with a re-install note.
+	t.Run("the operand passes the previous release's guard", func(t *testing.T) {
+		raw, err := os.ReadFile(filepath.Join("testdata", "guard-previous.yaml"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		filled := string(raw)
+		for k, v := range map[string]string{
+			"${OPERATOR_USERNAME}": operatorUser, "${INSTALL_NAMESPACE}": "dotvirt", "${ARGO_NAMESPACE}": "argocd",
+			"${ARGO_CONTROLLER}": "argocd-application-controller", "${SPEC_IMAGE}": "", "${FORGE_INSECURE_TLS}": "false",
+			"${RELATED_IMAGE_DOTVIRT}": "", "${RELATED_IMAGE_FORGEJO}": "", "${METRICS_URL}": "", "${METRICS_TENANCY_URL}": "", "${METRICS_CA}": "",
+			"${CONSOLE_HOST}": "", "${BRANDING_CONFIGMAP}": "", "${METRICS_CA_CONFIGMAP}": "", "${FORGE_SECRET}": adminobjects.DefaultForgeSecret,
+			"${FORGE_MANAGED}": "false", "${OIDC_SECRET}": "", "${OIDC_SECRET_KEY}": "", "${OIDC_ISSUER}": "",
+		} {
+			filled = strings.ReplaceAll(filled, k, v)
+		}
+		var objs []*unstructured.Unstructured
+		for _, doc := range strings.Split(filled, "\n---\n")[1:] {
+			o := &unstructured.Unstructured{}
+			if err := utilyaml.NewYAMLOrJSONDecoder(strings.NewReader(doc), 4096).Decode(&o.Object); err != nil {
+				t.Fatal(err)
+			}
+			if err := admin.Apply(ctx, client.ApplyConfigurationFromUnstructured(o.DeepCopy()), client.FieldOwner("dotvirt"), client.ForceOwnership); err != nil {
+				t.Fatalf("install the previous guard's %s: %v", o.GetName(), err)
+			}
+			objs = append(objs, o)
+		}
+		opClient, err := client.New(opCfg, client.Options{Scheme: scheme})
+		if err != nil {
+			t.Fatal(err)
+		}
+		dryApply := func(o client.Object) error {
+			m, err := runtime.DefaultUnstructuredConverter.ToUnstructured(o)
+			if err != nil {
+				t.Fatal(err)
+			}
+			return opClient.Apply(ctx, client.ApplyConfigurationFromUnstructured(&unstructured.Unstructured{Object: m}),
+				client.FieldOwner(operatorFieldManager), client.ForceOwnership, client.DryRunAll)
+		}
+		t.Cleanup(func() {
+			for _, o := range objs {
+				_ = admin.Delete(context.Background(), o)
+			}
+			probe := &corev1.Secret{TypeMeta: metav1.TypeMeta{APIVersion: "v1", Kind: "Secret"},
+				ObjectMeta: metav1.ObjectMeta{Name: install.OAuthSecretName, Namespace: "team-a"}}
+			eventually(t, "the previous guard lifted", func() bool { return dryApply(probe) == nil })
+		})
+		token := &corev1.Secret{
+			TypeMeta: metav1.TypeMeta{APIVersion: "v1", Kind: "Secret"},
+			ObjectMeta: metav1.ObjectMeta{Name: install.OAuthSecretName, Namespace: "dotvirt",
+				Annotations: map[string]string{corev1.ServiceAccountNameKey: "default"}},
+			Type: corev1.SecretTypeServiceAccountToken,
+		}
+		eventually(t, "the previous guard enforced", func() bool {
+			err := dryApply(token)
+			return apierrors.IsForbidden(err) && strings.Contains(err.Error(), "dotvirt operator guard")
+		})
+		dv := &dotvirtv1alpha1.Dotvirt{}
+		if err := admin.Get(ctx, types.NamespacedName{Namespace: "dotvirt", Name: "x"}, dv); err != nil {
+			t.Fatal(err)
+		}
+		for _, o := range []client.Object{
+			install.Deployment(dv, "argocd", nil),
+			install.ForgejoDeployment(dv, false, "", ""),
+			install.DotvirtClusterRoleBinding(dv),
+			install.ArgocdApplyClusterRoleBinding(dv, "argocd", "argocd-application-controller", true, true),
+			install.ArgocdReadClusterRoleBinding(dv, "argocd", "argocd-application-controller"),
+			install.PlatformSyncClusterRoleBinding(dv, "argocd"),
+			install.PlatformNetworkAdminBinding(dv),
+			install.StorageCatalogBinding(dv),
+			install.SyncRequestRoleBinding(dv, "argocd"),
+		} {
+			if err := dryApply(o); err != nil {
+				t.Errorf("the previous guard refuses this release's %s %s: %v", o.GetObjectKind().GroupVersionKind().Kind, o.GetName(), err)
+			}
 		}
 	})
 
@@ -805,7 +1769,10 @@ func TestEnvtest(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		for _, cmd := range install.ForgeCredentialReplaceCommands(dv, "dotvirt-operator") {
+		// The README's commands, each variable as an admin derives it.
+		vars := strings.NewReplacer(`"$INSTALL_NS"`, "cred-half", `"$VERBS"`, "get", `"$CREDENTIAL"`, "byo-creds",
+			`"$OPERATOR"`, "dotvirt-operator:"+install.OperatorServiceAccount)
+		for _, cmd := range strings.Split(vars.Replace(adminobjects.CredentialGrantCommands), "\n") {
 			stdout, stderr, err := kubectl.Run(strings.Fields(cmd)[1:]...)
 			if err != nil {
 				out, _ := io.ReadAll(stdout)
@@ -815,6 +1782,50 @@ func TestEnvtest(t *testing.T) {
 		}
 		if !review(account, groups, authzv1.ResourceAttributes{Verb: "get", Resource: "secrets", Namespace: "cred-half", Name: "byo-creds"}) {
 			t.Error("the replace commands left the operator without the grant")
+		}
+
+		// As the console installs it: its own render (adminobjects.Render for the
+		// pins it reads), server-side applied under the cluster admin's token
+		// with the console's field manager, forced. The operator's watch sees it
+		// land, and the operator's account reads exactly that Secret.
+		mustCreate(t, admin, &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "cred-console"}})
+		p := adminobjects.Params{
+			Operator: account, Namespace: "cred-console", ForgeSecret: "byo-creds", ForgeManaged: true,
+			InstallName: "cred", InstallUID: "0f7c1d2e-cred",
+		}
+		dyn := dynamic.NewForConfigOrDie(adminCfg)
+		allowed := adminobjects.Allowed(p.Namespace)
+		before = passes.Load()
+		var installed int
+		for _, o := range adminobjects.Render(p) {
+			ref, ok := adminobjects.Allow(allowed, o.Object)
+			if !ok || ref.Namespace == "" {
+				continue
+			}
+			if _, err := dyn.Resource(ref.GVR()).Namespace(ref.Namespace).Apply(ctx, ref.Name, o.Object, metav1.ApplyOptions{FieldManager: "dotvirt", Force: true}); err != nil {
+				t.Fatalf("install %s %s: %v", ref.Kind, ref.Name, err)
+			}
+			installed++
+		}
+		if installed != 2 {
+			t.Fatalf("the console's render held %d namespaced objects, want the grant's Role and RoleBinding", installed)
+		}
+		soon(t, "a pass after the console installs the grant", func() bool { return passes.Load() > before })
+		for _, r := range []struct {
+			verb, ns, name string
+			want           bool
+		}{
+			{"get", "cred-console", "byo-creds", true},
+			{"create", "cred-console", "byo-creds", true},
+			{"patch", "cred-console", "byo-creds", true},
+			{"delete", "cred-console", "byo-creds", false},
+			{"list", "cred-console", "", false},
+			{"get", "cred-console", install.SessionSecretName, false},
+			{"get", "kube-system", "byo-creds", false},
+		} {
+			if got := review(account, groups, authzv1.ResourceAttributes{Verb: r.verb, Resource: "secrets", Namespace: r.ns, Name: r.name}); got != r.want {
+				t.Errorf("console grant: %s secrets %s/%s: allowed=%v, want %v", r.verb, r.ns, r.name, got, r.want)
+			}
 		}
 	})
 
@@ -1156,7 +2167,46 @@ func TestEnvtest(t *testing.T) {
 	// The install is gone, so a namespace admin's Dotvirt is now the oldest in
 	// the cluster. The suite's install namespace is dotvirt, not the operator's
 	// own, which is the admin override at work; team-a is outside it.
+	// The install-namespace subtests run under the guard a cluster admin
+	// installs for the suite's install, in force before they start.
+	guarded := func(t *testing.T) {
+		t.Helper()
+		p := adminobjects.Params{Operator: operatorUser, Namespace: "dotvirt", ArgoNamespace: "argocd", ArgoController: "argocd-application-controller",
+			ForgeSecret: adminobjects.DefaultForgeSecret}
+		objs := adminobjects.Render(p)
+		for _, o := range objs {
+			if err := admin.Apply(ctx, client.ApplyConfigurationFromUnstructured(o.Object.DeepCopy()), client.FieldOwner("dotvirt"), client.ForceOwnership); err != nil {
+				t.Fatalf("install %s: %v", o.Object.GetName(), err)
+			}
+		}
+		opClient, err := client.New(opCfg, client.Options{Scheme: scheme})
+		if err != nil {
+			t.Fatal(err)
+		}
+		// A Secret the operator's role allows by name anywhere, which the
+		// guard refuses outside the install and ArgoCD namespaces.
+		probe := func() error {
+			m, _ := runtime.DefaultUnstructuredConverter.ToUnstructured(&corev1.Secret{
+				TypeMeta:   metav1.TypeMeta{APIVersion: "v1", Kind: "Secret"},
+				ObjectMeta: metav1.ObjectMeta{Name: install.OAuthSecretName, Namespace: "team-a"},
+			})
+			return opClient.Apply(context.Background(), client.ApplyConfigurationFromUnstructured(&unstructured.Unstructured{Object: m}),
+				client.FieldOwner(operatorFieldManager), client.ForceOwnership, client.DryRunAll)
+		}
+		eventually(t, "the guard in force", func() bool {
+			err := probe()
+			return apierrors.IsForbidden(err) && strings.Contains(err.Error(), "dotvirt operator guard")
+		})
+		t.Cleanup(func() {
+			for _, o := range objs {
+				_ = admin.Delete(context.Background(), o.Object)
+			}
+			eventually(t, "the guard lifted", func() bool { return probe() == nil })
+		})
+	}
+
 	t.Run("a Dotvirt outside the install namespace gets nothing even when oldest", func(t *testing.T) {
+		guarded(t)
 		dv := &dotvirtv1alpha1.Dotvirt{ObjectMeta: metav1.ObjectMeta{
 			Name: "x", Namespace: "team-a", Finalizers: []string{dotvirtFinalizer},
 		}}
@@ -1195,6 +2245,7 @@ func TestEnvtest(t *testing.T) {
 	// An upgrade with no override and no Dotvirt in the operator's namespace
 	// adopts the install ClusterRoleBinding dotvirt names, read as the operator.
 	t.Run("the operator adopts the install its binding names", func(t *testing.T) {
+		guarded(t)
 		// Outside the suite's install namespace, so its manager leaves it be.
 		mustCreate(t, admin, &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "adopted"}})
 		dv := &dotvirtv1alpha1.Dotvirt{ObjectMeta: metav1.ObjectMeta{Name: "x", Namespace: "adopted"}}
@@ -1288,11 +2339,12 @@ func runManager(t *testing.T, cfg *rest.Config, scheme *runtime.Scheme) (*atomic
 	passes := &atomic.Int64{}
 	ops := &opLog{}
 	r := &DotvirtReconciler{
-		Client:    loggingClient{mgr.GetClient(), ops},
-		Scheme:    mgr.GetScheme(),
-		Config:    mgr.GetConfig(),
-		Platform:  platform.Kubernetes,
-		APIReader: mgr.GetAPIReader(),
+		Client:           loggingClient{mgr.GetClient(), ops},
+		Scheme:           mgr.GetScheme(),
+		Config:           mgr.GetConfig(),
+		Platform:         platform.Kubernetes,
+		APIReader:        mgr.GetAPIReader(),
+		OperatorUsername: operatorUser,
 		// The suite's installs all live in dotvirt; the tenant subtest proves
 		// a Dotvirt elsewhere gets nothing.
 		InstallNamespace: "dotvirt",
@@ -1337,6 +2389,38 @@ func argoStubCRDs() []*apiextensionsv1.CustomResourceDefinition {
 				Scope: apiextensionsv1.NamespaceScoped,
 				Versions: []apiextensionsv1.CustomResourceDefinitionVersion{{
 					Name: gvk.version, Served: true, Storage: true,
+					Schema: &apiextensionsv1.CustomResourceValidation{OpenAPIV3Schema: &apiextensionsv1.JSONSchemaProps{
+						Type: "object", XPreserveUnknownFields: &preserve,
+					}},
+				}},
+			},
+		})
+	}
+	return out
+}
+
+// exposureStubCRDs serve the Route and HTTPRoute kinds the console may be
+// exposed by, schemaless, so the front-door rules have something to judge.
+func exposureStubCRDs() []*apiextensionsv1.CustomResourceDefinition {
+	preserve := true
+	var out []*apiextensionsv1.CustomResourceDefinition
+	for _, k := range []struct{ group, kind, plural string }{
+		{"route.openshift.io", "Route", "routes"},
+		{"gateway.networking.k8s.io", "HTTPRoute", "httproutes"},
+	} {
+		meta := metav1.ObjectMeta{Name: k.plural + "." + k.group}
+		if strings.HasSuffix(k.group, ".k8s.io") {
+			// The apiserver asks this of any CRD in a Kubernetes-owned group.
+			meta.Annotations = map[string]string{"api-approved.kubernetes.io": "unapproved, test stub"}
+		}
+		out = append(out, &apiextensionsv1.CustomResourceDefinition{
+			ObjectMeta: meta,
+			Spec: apiextensionsv1.CustomResourceDefinitionSpec{
+				Group: k.group,
+				Names: apiextensionsv1.CustomResourceDefinitionNames{Kind: k.kind, ListKind: k.kind + "List", Plural: k.plural, Singular: strings.ToLower(k.kind)},
+				Scope: apiextensionsv1.NamespaceScoped,
+				Versions: []apiextensionsv1.CustomResourceDefinitionVersion{{
+					Name: "v1", Served: true, Storage: true,
 					Schema: &apiextensionsv1.CustomResourceValidation{OpenAPIV3Schema: &apiextensionsv1.JSONSchemaProps{
 						Type: "object", XPreserveUnknownFields: &preserve,
 					}},

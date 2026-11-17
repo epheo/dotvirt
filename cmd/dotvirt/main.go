@@ -206,13 +206,20 @@ func run() error {
 	}
 	var oauthFlow *auth.OAuth
 	if cfg.OAuthClientID != "" && oidcFlow == nil {
-		if cfg.PublicURL == "" {
-			log.Printf("oauth: -oauth-client-id set but -public-url empty; OpenShift SSO disabled")
+		// The client and its redirect as the install declares them, the same
+		// ones Finish SSO registers; the env the operator writes only when
+		// they cannot be read (the console's role reads them).
+		clientID, redirect, derr := api.SSOClientConfig(ctx, saCluster, ownNamespace(), cfg.OAuthClientID, cfg.PublicURL)
+		if derr != nil {
+			log.Printf("oauth: derive the SSO client from the install: %v; falling back to -oauth-client-id and -public-url", derr)
+		}
+		if redirect == "" {
+			log.Printf("oauth: -oauth-client-id set but no redirect known (no install readable, -public-url empty); OpenShift SSO disabled")
 		} else {
 			oauthFlow, err = auth.NewOAuth(auth.OAuthConfig{
-				ClientID:     cfg.OAuthClientID,
+				ClientID:     clientID,
 				ClientSecret: cfg.OAuthClientSecret,
-				RedirectURL:  strings.TrimRight(cfg.PublicURL, "/") + "/api/auth/callback",
+				RedirectURL:  redirect,
 				CAFile:       cfg.OAuthCA,
 				InsecureTLS:  cfg.InsecureTLS,
 			}, saKube, authenticator)
@@ -272,6 +279,8 @@ func run() error {
 			WebhookSecret:     cfg.WebhookSecret,
 			UploadProxyURL:    uploadProxyURL(ctx, cfg.UploadProxyURL, saCluster),
 			ForgeAdmin:        cfg.ForgeAdmin,
+			Install:           cfg.Install,
+			OwnNamespace:      ownNamespace(),
 			PlatformRepo:      cfg.PlatformRepo,
 			ProjectLabel:      cfg.ProjectLabel,
 			RepoAnnotation:    cfg.RepoAnnotation,
@@ -571,4 +580,15 @@ func uploadProxyURL(ctx context.Context, flag string, sa *cluster.Client) string
 		log.Printf("upload: CDI's upload proxy is unknown, image upload stays off: %v", err)
 	}
 	return url
+}
+
+// ownNamespace is the namespace this pod runs in, "" out of cluster. It is
+// read from the ServiceAccount mount, which the operator guard keeps from the
+// operator: the env the operator writes cannot steer it.
+func ownNamespace() string {
+	b, err := os.ReadFile("/var/run/secrets/kubernetes.io/serviceaccount/namespace")
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(b))
 }

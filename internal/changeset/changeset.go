@@ -16,6 +16,7 @@ import (
 	"log"
 	"net/http"
 	"sync"
+	"time"
 
 	"github.com/epheo/dotvirt/internal/auth"
 	"github.com/epheo/dotvirt/internal/draft"
@@ -102,23 +103,32 @@ type Coordinator struct {
 	syncNS string
 	// tenantKinds is what a tenant repo may declare (WithTenantKinds).
 	tenantKinds tenancy.Policy
-	// usersOpenPRs: dotvirt writes no pull request (WithUsersOpeningPRs).
+	// usersOpenPRs: dotvirt writes no user's pull request (WithUsersOpeningPRs).
 	usersOpenPRs bool
 	// publishing is the platform's publishing settings (WithPublishing).
 	publishing publish.Settings
 	// product names the console in the forge (WithProductName).
 	product string
+
+	// seeds is what this process knows of each repo's starter-library offer
+	// (seed.go), keyed by normalized repo URL; seedQueue feeds its one
+	// worker, paced by seedPause.
+	seedMu    sync.Mutex
+	seeds     map[string]*seedState
+	seedQueue chan seedJob
+	seedPause time.Duration
 }
 
 // New builds a Coordinator. forge and resyncer may be nil (PR creation degrades
 // to a compare link; re-sync becomes unavailable).
 func New(store *draft.Store, repos *git.RepoSet, ff *forge.Factory, rs Resyncer, live LiveSource, prune PruneSource, baseBranch, proposedBranch string) *Coordinator {
 	return &Coordinator{
-		Reader:   NewReader(repos, ff, live, baseBranch, proposedBranch),
-		store:    store,
-		resyncer: rs,
-		renderer: vmtemplate.EngineRenderer{},
-		prune:    prune,
+		Reader:    NewReader(repos, ff, live, baseBranch, proposedBranch),
+		store:     store,
+		resyncer:  rs,
+		renderer:  vmtemplate.EngineRenderer{},
+		prune:     prune,
+		seedPause: seedSpacing,
 	}
 }
 
@@ -149,8 +159,9 @@ func (c *Coordinator) WithSyncNamespace(ns string) *Coordinator {
 }
 
 // WithUsersOpeningPRs makes dotvirt push branches only: it never opens,
-// reopens or edits a pull request, and answers with the compare URL the user
-// opens one from. A PR they open on the pushed head is adopted (SettlePushed,
+// reopens or edits a user's pull request, and answers with the compare URL
+// the user opens one from. The starter-template offer, which no user asked
+// for, stays dotvirt's own (seed.go). A PR they open on the pushed head is adopted (SettlePushed,
 // and any later propose). Set once, before serving.
 func (c *Coordinator) WithUsersOpeningPRs(on bool) *Coordinator {
 	c.usersOpenPRs = on

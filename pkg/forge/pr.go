@@ -87,6 +87,29 @@ func (c *Client) FindPR(head, base string) (pr PR, ok bool, err error) {
 	return pr, ok, err
 }
 
+// EverOpened reports whether any pull request from head into base exists, in
+// any state, its branch since deleted included (HeadBranch reads the label
+// then). The forge's base/head lookup answers in any state; the open and
+// closed lists follow, matched client-side and scanned as far as open ones,
+// since a forge ignoring the head filter lists every PR. A fork's PR never
+// matches.
+func (c *Client) EverOpened(head, base string) (bool, error) {
+	if direct, err := c.pairPR(head, base); err == nil && direct.Base.Ref == base && direct.HeadBranch() == head {
+		return true, nil
+	}
+	found := false
+	match := func(p PR) bool {
+		found = p.HeadBranch() == head
+		return found
+	}
+	for _, state := range []string{"open", "closed"} {
+		if err := c.eachPR(state, base, head, prPageLimit, match); err != nil || found {
+			return found, err
+		}
+	}
+	return false, nil
+}
+
 // pairPR is the forge's base/head lookup (Gitea 1.18 and later).
 func (c *Client) pairPR(head, base string) (PR, error) {
 	segs := strings.Split(head, "/")
