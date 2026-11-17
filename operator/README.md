@@ -1148,6 +1148,7 @@ No first segment starts with `_` or equals `revert`. A first segment that would,
 The escape applies to the first segment only: a revert's user segment (`revert/<user>/...`) is the plain ref-safe name, so never strip `u-` there.
 The segment is a readable form, not an identity: names are made ref-safe first, so `uw:alice` and `uw-alice` share a segment, and their branches stay distinct by the hash. Credit a change to the requester dotvirt records where it records one, not to the segment alone.
 
+Proposal branches created before the upgrade keep their old names: the escape is not applied to them retroactively.
 After the upgrade, a user whose ref-safe name starts with `_` or `u-`, or equals `revert`, proposes on a new branch.
 A pull request still open on the old branch is no longer updated by the console: merge it as it is, or close it and stage those changes again.
 
