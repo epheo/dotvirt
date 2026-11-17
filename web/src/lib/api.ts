@@ -104,6 +104,9 @@ export interface EditRequest extends Omit<gen.VMEdit, 'power' | 'sizing' | 'addG
 export interface User {
 	username: string;
 	groups: string[];
+	// Pull requests go through the user's own forge account: the console reads
+	// the connection. Absent on every other install.
+	forgeDelegated?: boolean;
 }
 
 // The sign-in paths besides a pasted token. oidc names the issuer its button
@@ -112,6 +115,17 @@ export interface AuthMethods {
 	sso: boolean;
 	ssoPending: boolean;
 	oidc?: string;
+}
+
+// The session's own forge account, for pull requests opened as the user.
+// asked: a connect already started this session, so the console starts no
+// other on its own. reachable: the forge answers, so a connect can complete.
+export interface ForgeSession {
+	delegated: boolean;
+	connected: boolean;
+	login?: string;
+	asked: boolean;
+	reachable?: boolean;
 }
 
 export interface CreateVMRequest {
@@ -434,6 +448,8 @@ export const api = {
 	trace: (req: gen.TraceRequest) => post<gen.TraceResult>('/api/networking/trace', req),
 	// Which sign-in paths exist (shown on the login screen before any session).
 	authMethods: () => get<AuthMethods>('/api/auth/methods'),
+	forgeSession: () => get<ForgeSession>('/api/forge/session'),
+	forgeDisconnect: () => post<void>('/api/forge/disconnect', {}),
 	// Applies the OAuthClient under the CALLER's token; RBAC is the gate.
 	finishSSO: () => req<void>('/api/auth/oauthclient', { method: 'POST' }),
 	// What the install asks a cluster admin to install, and the install,

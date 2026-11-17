@@ -1430,6 +1430,86 @@ func TestEnvtest(t *testing.T) {
 		}
 	})
 
+	t.Run("admission takes a delegated forge only with its OAuth2 application", func(t *testing.T) {
+		const authorize = "https://forge.example/login/oauth/authorize"
+		const forge = "http://forgejo.forge.svc:3000"
+		ok := func() *dotvirtv1alpha1.ForgeUserAuthSpec {
+			return &dotvirtv1alpha1.ForgeUserAuthSpec{
+				ClientID: "dotvirt", ClientSecret: dotvirtv1alpha1.SecretKeyRef{Name: "dotvirt-forge-app", Key: "secret"},
+				AuthorizeURL: authorize,
+			}
+		}
+		for name, mod := range map[string]func(*dotvirtv1alpha1.ForgeSpec){
+			"Delegated without userAuth": func(f *dotvirtv1alpha1.ForgeSpec) { f.PullRequests, f.URL = "Delegated", forge },
+			// The forge users' tokens go to must come from the spec, never
+			// from the credential Secret's url.
+			"Delegated without url": func(f *dotvirtv1alpha1.ForgeSpec) { f.PullRequests, f.UserAuth = "Delegated", ok() },
+			"an unknown mode":       func(f *dotvirtv1alpha1.ForgeSpec) { f.PullRequests = "Bots" },
+			"authorizeURL with a query": func(f *dotvirtv1alpha1.ForgeSpec) {
+				f.PullRequests, f.UserAuth, f.URL = "Delegated", ok(), forge
+				f.UserAuth.AuthorizeURL = authorize + "?x=1"
+			},
+			"authorizeURL with credentials": func(f *dotvirtv1alpha1.ForgeSpec) {
+				f.PullRequests, f.UserAuth, f.URL = "Delegated", ok(), forge
+				f.UserAuth.AuthorizeURL = "https://u:p@forge.example/login/oauth/authorize"
+			},
+			"authorizeURL not http": func(f *dotvirtv1alpha1.ForgeSpec) {
+				f.PullRequests, f.UserAuth, f.URL = "Delegated", ok(), forge
+				f.UserAuth.AuthorizeURL = "forge.example/login/oauth/authorize"
+			},
+			"tokenURL with a fragment": func(f *dotvirtv1alpha1.ForgeSpec) {
+				f.PullRequests, f.UserAuth, f.URL = "Delegated", ok(), forge
+				f.UserAuth.TokenURL = "https://forgejo.lan/login/oauth/access_token#f"
+			},
+			"no clientID": func(f *dotvirtv1alpha1.ForgeSpec) {
+				f.PullRequests, f.UserAuth, f.URL = "Delegated", ok(), forge
+				f.UserAuth.ClientID = ""
+			},
+			"no client secret key": func(f *dotvirtv1alpha1.ForgeSpec) {
+				f.PullRequests, f.UserAuth, f.URL = "Delegated", ok(), forge
+				f.UserAuth.ClientSecret.Key = ""
+			},
+		} {
+			dv := testCR()
+			mod(&dv.Spec.Forge)
+			if err := admin.Create(ctx, dv, client.DryRunAll); !apierrors.IsInvalid(err) {
+				t.Errorf("%s: got %v, want Invalid", name, err)
+			}
+		}
+		// No authorizeURL: the typed client sends the empty string, which the
+		// pattern refuses like a missing field.
+		noAuthorize := &unstructured.Unstructured{Object: map[string]any{
+			"apiVersion": "dotvirt.io/v1alpha1", "kind": "Dotvirt",
+			"metadata": map[string]any{"name": "no-authorize", "namespace": "dotvirt"},
+			"spec": map[string]any{"forge": map[string]any{"url": forge, "pullRequests": "Delegated", "userAuth": map[string]any{
+				"clientID": "dotvirt", "clientSecret": map[string]any{"name": "dotvirt-forge-app", "key": "secret"},
+			}}},
+		}}
+		if err := admin.Create(ctx, noAuthorize, client.DryRunAll); !apierrors.IsInvalid(err) {
+			t.Errorf("userAuth without authorizeURL: got %v, want Invalid", err)
+		}
+		for name, mod := range map[string]func(*dotvirtv1alpha1.ForgeSpec){
+			"Delegated with its application": func(f *dotvirtv1alpha1.ForgeSpec) {
+				f.PullRequests, f.UserAuth, f.URL = "Delegated", ok(), forge
+			},
+			"and a LAN token endpoint": func(f *dotvirtv1alpha1.ForgeSpec) {
+				f.PullRequests, f.UserAuth, f.URL = "Delegated", ok(), forge
+				f.UserAuth.TokenURL = "http://forgejo.forge.svc:3000/login/oauth/access_token"
+			},
+			// The stored values keep admitting: the mode list only grew.
+			"Users":   func(f *dotvirtv1alpha1.ForgeSpec) { f.PullRequests = "Users" },
+			"Dotvirt": func(f *dotvirtv1alpha1.ForgeSpec) { f.PullRequests = "Dotvirt" },
+			// userAuth set ahead of switching the mode is harmless.
+			"userAuth with the bot mode": func(f *dotvirtv1alpha1.ForgeSpec) { f.UserAuth = ok() },
+		} {
+			dv := testCR()
+			mod(&dv.Spec.Forge)
+			if err := admin.Create(ctx, dv, client.DryRunAll); client.IgnoreAlreadyExists(err) != nil {
+				t.Errorf("%s: %v", name, err)
+			}
+		}
+	})
+
 	t.Run("admission takes one sign-in flow", func(t *testing.T) {
 		oidc := &dotvirtv1alpha1.OIDCSpec{IssuerURL: "https://idm.example/oauth2/openid/dotvirt", ClientID: "dotvirt"}
 		dv := testCR()

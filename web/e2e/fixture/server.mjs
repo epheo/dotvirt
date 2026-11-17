@@ -16,6 +16,7 @@
 //   POST /__fixture/proxy-down/{0|1}   the upload proxy drops connections, as one the browser cannot reach or trust
 //   GET  /__fixture/scenario           current scenario name
 //   GET  /__fixture/provider-starts    sign-in provider starts since the scenario switch
+//   GET  /__fixture/forge-connects     forge connects started since the scenario switch
 
 import { createReadStream, existsSync, readFileSync, statSync } from 'node:fs';
 import { createServer } from 'node:http';
@@ -156,7 +157,14 @@ const state = {
 	uploads: new Map(), // "ns/name" -> DataVolume phase, or an import's phases, for the status poll
 	fail: new Map(), // plane -> reads left to fail, so a test sees the error and the retry
 	proxyDown: false, // the upload proxy drops every connection
+	forge: freshForge(0), // the session's delegated forge connection
 };
+
+// freshForge is a session with no forge connection, keeping the count of
+// connects the scenario has seen.
+function freshForge(connects) {
+	return { connected: false, login: '', asked: false, connects, pendingReturn: '/' };
+}
 
 // failing spends one injected failure of a plane, if any are left.
 function failing(plane) {
@@ -183,6 +191,16 @@ function sendJSON(res, status, body) {
 	const data = JSON.stringify(body);
 	res.writeHead(status, { 'Content-Type': 'application/json' });
 	res.end(data);
+}
+
+// userOf is the scenario's user as the sign-in answers carry it.
+function userOf(s) {
+	return s.forgeDelegated ? { ...s.user, forgeDelegated: true } : s.user;
+}
+
+function redirect(res, to) {
+	res.writeHead(302, { Location: to });
+	res.end();
 }
 
 function sendText(res, status, text) {
@@ -439,10 +457,34 @@ async function handleAPI(req, res, url) {
 			'Content-Type': 'application/json',
 			'Set-Cookie': `${COOKIE}; Path=/; HttpOnly`,
 		});
-		return res.end(JSON.stringify(s.user));
+		return res.end(JSON.stringify(userOf(s)));
 	}
 	if (path === '/api/auth/methods')
 		return sendJSON(res, 200, s.authMethods ?? { sso: false, ssoPending: false });
+	// A delegated forge connect, as the Go flow: page loads that land on a page
+	// whatever the session (the root without one), the return path carried
+	// across the forge round trip, the session marked asked on every start.
+	if (path === '/api/forge/connect' || path === '/api/forge/callback') {
+		if (!authed(req) || !s.forgeDelegated) return redirect(res, '/');
+		if (path === '/api/forge/connect') {
+			state.forge.asked = true;
+			state.forge.connects++;
+			const ret = url.searchParams.get('return') ?? '/';
+			state.forge.pendingReturn =
+				ret.startsWith('/') && !ret.startsWith('//') && !ret.startsWith('/api') ? ret : '/';
+			return redirect(
+				res,
+				s.forgeDelegated.mode === 'consent'
+					? '/api/forge/callback?code=fixture-code&state=fixture-state'
+					: '/__fixture/forge/authorize',
+			);
+		}
+		if (url.searchParams.get('code')) {
+			state.forge.connected = true;
+			state.forge.login = 'admin-forge';
+		}
+		return redirect(res, state.forge.pendingReturn ?? '/');
+	}
 	if (path === '/api/logout') {
 		if (failing('logout')) return sendText(res, 503, 'sign-out failed: fixture failure hook');
 		if (state.logoutStatus) {
@@ -450,13 +492,32 @@ async function handleAPI(req, res, url) {
 			state.logoutStatus = 0;
 			return sendText(res, st, 'no session');
 		}
+		// A sign-out forgets the session's forge connection.
+		state.forge = freshForge(state.forge.connects);
 		res.writeHead(204, { 'Set-Cookie': 'dv_fixture=; Path=/; Max-Age=0' });
 		return res.end();
 	}
 	if (path === '/api/me') {
-		return authed(req) ? sendJSON(res, 200, s.user) : sendText(res, 401, 'no session');
+		return authed(req) ? sendJSON(res, 200, userOf(s)) : sendText(res, 401, 'no session');
 	}
 	if (!authed(req)) return sendText(res, 401, 'no session');
+
+	if (path === '/api/forge/session') {
+		const { connected, login, asked } = state.forge;
+		return sendJSON(res, 200, {
+			delegated: !!s.forgeDelegated,
+			connected,
+			...(connected ? { login } : {}),
+			asked,
+			reachable: !s.forgeDelegated?.down,
+		});
+	}
+	if (path === '/api/forge/disconnect' && req.method === 'POST' && s.forgeDelegated) {
+		state.forge.connected = false;
+		state.forge.login = '';
+		res.writeHead(204);
+		return res.end();
+	}
 
 	// The create routes and their dry runs (create.mjs).
 	const createCtx = { state, sendJSON, sendText, readBody, projectOf, stageInto, draftFor };
@@ -1339,6 +1400,14 @@ function handleControl(req, res, url) {
 	if (path === '/__fixture/provider-starts' && req.method === 'GET') {
 		return sendJSON(res, 200, { starts: state.providerStarts ?? 0 });
 	}
+	if (path === '/__fixture/forge-connects' && req.method === 'GET') {
+		return sendJSON(res, 200, { connects: state.forge.connects });
+	}
+	// The forge's authorize page, which the user leaves unanswered.
+	if (path === '/__fixture/forge/authorize' && req.method === 'GET') {
+		res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+		return res.end('<!doctype html><title>Forge</title><h1>Authorize the console?</h1>');
+	}
 	let m = path.match(/^\/__fixture\/scenario\/([a-z]+)$/);
 	if (m && req.method === 'POST') {
 		const next = scenarios[m[1]];
@@ -1351,6 +1420,7 @@ function handleControl(req, res, url) {
 		state.uploads.clear();
 		state.proxyDown = false;
 		state.providerStarts = 0;
+		state.forge = freshForge(0);
 		broadcastInventory();
 		return sendJSON(res, 200, { scenario: next.name });
 	}

@@ -30,6 +30,8 @@
 	import { modules } from '#lib/state/modules.svelte.js';
 	import { lastSection } from '#lib/state/nav.svelte.js';
 	import { session } from '#lib/state/session.svelte.js';
+	import { forge } from '#lib/state/forge.svelte.js';
+	import { returnPath } from '#lib/signin.js';
 	import { tray } from '#lib/state/tray.svelte.js';
 	import { ui } from '#lib/state/ui.svelte.js';
 	import AppContextMenus from '#lib/components/AppContextMenus.svelte';
@@ -150,6 +152,18 @@
 		if (!session.user) return;
 		void `${inventory.networksVersion}|${inventory.tasksVersion}|${inventory.replicationVersion !== 0}|${inventory.routesVersion !== 0}`;
 		untrack(() => caps.invalidate());
+	});
+
+	// A delegated forge account connects once per console session, on its own:
+	// keyed on the user, so a sign-in starts it and a sign-out clears it. Only
+	// an install that delegates reads the connection at all.
+	$effect(() => {
+		const user = session.user?.username;
+		const delegated = session.user?.forgeDelegated ?? false;
+		untrack(() => {
+			if (!user) forge.reset();
+			else if (delegated) void forge.chainOnce(returnPath(page.url));
+		});
 	});
 
 	// The options catalog, once per session: the storage lens groups classless
