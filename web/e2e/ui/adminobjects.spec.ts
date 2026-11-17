@@ -94,3 +94,23 @@ test('the default credential asks for no grant, and a caller without the capabil
 	await expect(page.getByTestId('admin-objects')).toHaveCount(0);
 	await expect(page.getByText('forge credential')).toHaveCount(0);
 });
+
+test('a grant left from an earlier credential is listed stale, to remove, never in the manifest', async ({
+	page,
+}) => {
+	await setScenario(page, 'adminobjectsstale');
+	await login(page);
+	const list = page.getByTestId('admin-objects');
+	await expect(list.getByRole('listitem')).toHaveText([
+		'Left from an earlier forge credential: still grants the operator that Secret (stale, remove it: kubectl -n "$INSTALL_NS" delete role,rolebinding dotvirt-forge-credential)',
+		'Left from an earlier forge credential: still grants the operator that Secret (stale, remove it: kubectl -n "$INSTALL_NS" delete role,rolebinding dotvirt-forge-credential)',
+	]);
+	const [file] = await Promise.all([
+		page.waitForEvent('download'),
+		page.getByRole('button', { name: 'Download manifest' }).click(),
+	]);
+	const manifest = JSON.parse(
+		await (await file.createReadStream()).toArray().then((c) => Buffer.concat(c).toString()),
+	);
+	expect(manifest.items.map((o: { kind: string }) => o.kind)).not.toContain('Role');
+});

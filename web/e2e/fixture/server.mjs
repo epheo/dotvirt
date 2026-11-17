@@ -477,12 +477,11 @@ async function handleAPI(req, res, url) {
 				403,
 				'forbidden: installing what the install needs takes a cluster admin',
 			);
+		// Install applies the render; a stale object stays, to remove by hand.
 		if (req.method === 'POST')
-			s.adminObjects.objects = s.adminObjects.objects.map((o) => ({
-				...o,
-				state: 'Installed',
-				detail: '',
-			}));
+			s.adminObjects.objects = s.adminObjects.objects.map((o) =>
+				o.state === 'Stale' ? o : { ...o, state: 'Installed', detail: '' },
+			);
 		return sendJSON(res, 200, s.adminObjects);
 	}
 	if (path === '/api/inventory') return sendJSON(res, 200, s.inventory);

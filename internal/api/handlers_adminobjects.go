@@ -164,7 +164,19 @@ func (s *Server) adminObjects(ctx context.Context, id auth.Identity, c *cluster.
 			return model.AdminObjects{}, fmt.Errorf("the console renders %s %s, which no install may ask for", o.Object.GetKind(), o.Object.GetName())
 		}
 		if install {
-			if err := c.ApplyAdminObject(ctx, ref, o.Object); err != nil {
+			obj := o.Object
+			// Over a live object, keep its owner references as they are: adding
+			// one takes delete on the object (OwnerReferencesPermissionEnforcement),
+			// and a grant an admin made by hand stays theirs.
+			live, err := c.AdminObject(ctx, ref)
+			if err != nil {
+				return model.AdminObjects{}, unavailable(err)
+			}
+			if live != nil {
+				obj = obj.DeepCopy()
+				obj.SetOwnerReferences(live.GetOwnerReferences())
+			}
+			if err := c.ApplyAdminObject(ctx, ref, obj); err != nil {
 				if apierrors.IsForbidden(err) {
 					return model.AdminObjects{}, fmt.Errorf("%w: you may not apply %s %s", model.ErrForbidden, ref.Kind, ref.Name)
 				}
@@ -180,6 +192,20 @@ func (s *Server) adminObjects(ctx context.Context, id auth.Identity, c *cluster.
 			Purpose: o.Purpose, Kind: ref.Kind, Name: ref.Name, Namespace: ref.Namespace,
 			State: string(state), Detail: detail, Object: o.Object.Object,
 		})
+	}
+	// What the install no longer asks for but is still there: listed to remove,
+	// never applied.
+	for _, ref := range adminobjects.Leftovers(p) {
+		live, err := c.AdminObject(ctx, ref)
+		if err != nil {
+			return model.AdminObjects{}, unavailable(err)
+		}
+		if live != nil {
+			out.Objects = append(out.Objects, model.AdminObject{
+				Purpose: adminobjects.LeftoverPurpose, Kind: ref.Kind, Name: ref.Name, Namespace: ref.Namespace,
+				State: string(adminobjects.Stale), Detail: adminobjects.LeftoverDetail,
+			})
+		}
 	}
 	return out, nil
 }

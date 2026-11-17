@@ -1512,6 +1512,27 @@ const adminobjectscredential = {
 		],
 	},
 };
+// A grant left after the credential went back to the operator's own: listed
+// stale, to remove by hand, with nothing to apply.
+const adminobjectsstale = {
+	...adminobjects,
+	name: 'adminobjectsstale',
+	adminObjects: {
+		...adminobjects.adminObjects,
+		objects: [
+			...adminobjects.adminObjects.objects.map((o) => ({ ...o, state: 'Installed', detail: '' })),
+			...['Role', 'RoleBinding'].map((kind) => ({
+				purpose: 'Left from an earlier forge credential: still grants the operator that Secret',
+				kind,
+				name: 'dotvirt-forge-credential',
+				namespace: 'dotvirt',
+				state: 'Stale',
+				detail:
+					'remove it: kubectl -n "$INSTALL_NS" delete role,rolebinding dotvirt-forge-credential',
+			})),
+		],
+	},
+};
 // The same install, seen by a caller who may not install it.
 const adminobjectscredentialdenied = {
 	...adminobjectscredential,
@@ -2316,6 +2337,7 @@ export const scenarios = {
 	adminobjectsdenied,
 	adminobjectscredential,
 	adminobjectscredentialdenied,
+	adminobjectsstale,
 	base,
 	empty,
 	degraded,
