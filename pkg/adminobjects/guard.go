@@ -111,7 +111,7 @@ func guard(p Params, insecure, managed string, metrics Metrics) []Object {
 			deny(`object.metadata.name != `+quote(ForgeDeployment)+` || !has(object.spec.template.metadata.labels) || `+
 				`!(`+quote(ConsoleSelectorKey)+` in object.spec.template.metadata.labels && object.spec.template.metadata.labels[`+quote(ConsoleSelectorKey)+`] == `+quote(ConsoleSelectorValue)+`)`,
 				"the operator gives the forge's pods none of the console's labels"),
-			deny(`object.metadata.name != `+quote(ConsoleDeployment)+` || `+pod+`.containers.all(c, `+consoleSettings(metrics, insecure)+`)`,
+			deny(`object.metadata.name != `+quote(ConsoleDeployment)+` || `+pod+`.containers.all(c, `+consoleSettings(metrics, insecure, p.OIDCIssuer)+`)`,
 				"the operator sets none of the console's settings that send users' tokens or the console's pages elsewhere, but as an admin chose them"),
 			// The console's apiserver endpoint and credentials are the in-cluster
 			// ones: no kubeconfig, no service address of its own, its token and CA
@@ -137,12 +137,16 @@ func guard(p Params, insecure, managed string, metrics Metrics) []Object {
 			// the install namespace and serve it.
 			deny(`object.metadata.name != `+quote(ForgeDeployment)+` || (`+eachContainer(`(!has(c.envFrom) || c.envFrom.all(e, !has(e.secretRef))) && `+
 				`(!has(c.env) || c.env.all(e, !has(e.valueFrom) || !has(e.valueFrom.secretKeyRef) || `+
-				`(has(e.valueFrom.secretKeyRef.name) && e.valueFrom.secretKeyRef.name == `+quote(ForgeAdminSecret)+`)))`)+` && `+
-				`(!has(`+pod+`.volumes) || `+pod+`.volumes.all(v, !has(v.secret) && !has(v.projected) && !has(v.csi))))`,
+				`(has(e.valueFrom.secretKeyRef.name) && e.valueFrom.secretKeyRef.name == `+quote(ForgeAdminSecret)+`)))`)+`)`,
 				"the operator gives the forge no Secret but its own admin password"),
-			deny(`object.metadata.name != `+quote(ForgeDeployment)+` || !has(`+pod+`.volumes) || `+pod+`.volumes.all(v, !has(v.ephemeral) && `+
-				`(!has(v.persistentVolumeClaim) || v.persistentVolumeClaim.claimName == `+quote(ForgeClaim)+`))`,
-				"the operator gives the forge only its own claim"),
+			// The volume kinds the forge renders, and no other: it runs its own
+			// commands, so a network volume (nfs, iscsi, rbd, ...) would reach
+			// any export the nodes can, and a Secret, projected, CSI or
+			// ephemeral one data it was never given.
+			deny(`object.metadata.name != `+quote(ForgeDeployment)+` || !has(`+pod+`.volumes) || `+pod+`.volumes.all(v, `+
+				`(has(v.persistentVolumeClaim) && v.persistentVolumeClaim.claimName == `+quote(ForgeClaim)+`) || has(v.emptyDir) || `+
+				`(has(v.configMap) && has(v.configMap.name) && v.configMap.name == `+quote(IngressCAConfigMap)+`))`,
+				"the operator gives the forge only its own claim, a scratch directory and the router CA"),
 			// The kubelet resolves any Secret in the namespace a pod names,
 			// whatever the operator may read: an env the console sends out
 			// (the forge token, to the forge URL) could carry another Secret.
@@ -265,7 +269,7 @@ func flagForms(flag string) string {
 		` || a.startsWith(` + quote("-"+flag+"=") + `) || a.startsWith(` + quote("--"+flag+"=") + `))`
 }
 
-func consoleSettings(m Metrics, insecure string) string {
+func consoleSettings(m Metrics, insecure, oidcIssuer string) string {
 	forms := flagForms
 	never := func(flag, env string) string {
 		return `(!has(c.args) || c.args.all(a, !` + forms(flag) + `)) && (!has(c.env) || c.env.all(e, e.name != ` + quote(env) + `))`
@@ -285,6 +289,9 @@ func consoleSettings(m Metrics, insecure string) string {
 		pinned("metrics-ca", "DOTVIRT_METRICS_CA", m.CA),
 		pinned("oauth-ca", "DOTVIRT_OAUTH_CA", "", IngressCAPath),
 		pinned("ui-origin", "DOTVIRT_UI_ORIGIN", ""),
+		// The console sends the OIDC client secret an admin chose to the
+		// issuer's token endpoint at every sign-in.
+		pinned("oidc-issuer", "DOTVIRT_OIDC_ISSUER", oidcIssuer),
 		`(` + insecure + ` || (` + never("insecure-tls", "DOTVIRT_INSECURE_TLS") + `))`,
 		never("kubeconfig", "KUBECONFIG"),
 		never("static-dir", "DOTVIRT_STATIC_DIR"),

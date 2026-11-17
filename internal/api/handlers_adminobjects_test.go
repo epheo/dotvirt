@@ -36,7 +36,7 @@ var (
 		ConsoleHost: "console.example",
 
 		BrandingConfigMap: "brand", ForgeSecret: "creds",
-		OIDCSecret: "admin-oidc", OIDCSecretKey: "client-secret",
+		OIDCSecret: "admin-oidc", OIDCSecretKey: "client-secret", OIDCIssuer: "https://idp.example",
 	}
 )
 
@@ -84,7 +84,8 @@ func adminObjectsServer(t *testing.T) (*Server, *fakeCluster, func() map[string]
 			"apiVersion": "dotvirt.io/v1alpha1", "kind": "Dotvirt", "metadata": map[string]any{"name": "x", "namespace": "dotvirt"},
 			"spec": map[string]any{"image": adminWant.SpecImage, "ingress": map[string]any{"host": adminWant.ConsoleHost},
 				"branding": map[string]any{"configMap": adminWant.BrandingConfigMap}, "forge": map[string]any{"credentialsSecret": adminWant.ForgeSecret},
-				"auth": map[string]any{"oidc": map[string]any{"clientSecret": map[string]any{"name": adminWant.OIDCSecret, "key": adminWant.OIDCSecretKey}}}},
+				"auth": map[string]any{"oidc": map[string]any{"issuerURL": adminWant.OIDCIssuer,
+					"clientSecret": map[string]any{"name": adminWant.OIDCSecret, "key": adminWant.OIDCSecretKey}}}},
 			"status": map[string]any{"adminObjects": []any{
 				map[string]any{"purpose": "tampered", "state": "NotInstalled", "kind": "ValidatingAdmissionPolicy", "name": adminobjects.GuardSecretsName,
 					"object": map[string]any{"apiVersion": "admissionregistration.k8s.io/v1", "kind": "ValidatingAdmissionPolicy",

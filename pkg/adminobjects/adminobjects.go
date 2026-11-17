@@ -8,6 +8,7 @@ package adminobjects
 
 import (
 	"fmt"
+	"net/url"
 	"strings"
 
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -62,8 +63,9 @@ type Params struct {
 	// an admin chose for the console (spec.branding.configMap,
 	// spec.metrics.ca.name, ForgeSecret).
 	BrandingConfigMap, MetricsCAConfigMap, ForgeSecret string
-	// OIDCSecret and OIDCSecretKey are spec.auth.oidc.clientSecret.
-	OIDCSecret, OIDCSecretKey string
+	// OIDCSecret and OIDCSecretKey are spec.auth.oidc.clientSecret, and
+	// OIDCIssuer spec.auth.oidc.issuerURL.
+	OIDCSecret, OIDCSecretKey, OIDCIssuer string
 	// ForgeManaged is spec.forge.managed: a forge the operator runs, whose
 	// credential it mints. Otherwise the credential is an admin's, and the
 	// console sends it only to the URL its Secret names.
@@ -93,6 +95,7 @@ func (p Params) Malformed() string {
 		{"console host", optional(p.ConsoleHost)},
 		{"OIDC client Secret", optional(p.OIDCSecret)},
 		{"OIDC client Secret key", p.OIDCSecretKey == "" || len(validation.IsConfigMapKey(p.OIDCSecretKey)) == 0},
+		{"OIDC issuer", p.OIDCIssuer == "" || httpsURL(p.OIDCIssuer)},
 	} {
 		if !c.ok {
 			return c.pin
@@ -193,3 +196,10 @@ func Compare(want, live *unstructured.Unstructured) (state State, detail string)
 // --force-conflicts, kubectl names any field someone else changed instead of
 // taking it back; the admin decides.
 const ApplyCommand = "kubectl apply --server-side --field-manager=dotvirt -f"
+
+// httpsURL reports whether s is an absolute https URL, as the CRD admits an
+// issuer.
+func httpsURL(s string) bool {
+	u, err := url.Parse(s)
+	return err == nil && u.Scheme == "https" && u.Host != ""
+}
