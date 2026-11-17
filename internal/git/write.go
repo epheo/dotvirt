@@ -48,7 +48,8 @@ type CommitResult struct {
 	Hash      string
 }
 
-// dotvirtSig is the signature for dotvirt's own writes (template seeding) and
+// dotvirtSig is the signature for dotvirt's own commits (the starter-template
+// offer) and
 // the committer of user proposals (the SA that pushes). Built per call so the
 // time is real: git history shows when a change actually landed. A fixed epoch
 // would only make identical re-proposes a push no-op, not worth misdating
@@ -117,9 +118,9 @@ func isMissingRef(err error) bool {
 }
 
 // pushBranch pushes branch when pushes are enabled (no-op otherwise); an
-// already-up-to-date remote is not an error. A zero lease forces: the seed
-// lands on a repo dotvirt just created, and a branch rebuilt from base
-// replaces its old self. Otherwise the remote must still hold lease, the head
+// already-up-to-date remote is not an error. A zero lease forces: a branch
+// rebuilt from base, the starter-template offer's included, replaces its old
+// self. Otherwise the remote must still hold lease, the head
 // the commit was built on.
 func (w *WriteRepo) pushBranch(repo *git.Repository, branch string, lease plumbing.Hash) error {
 	if !w.push {
@@ -147,27 +148,6 @@ func (w *WriteRepo) pushBranch(repo *git.Repository, branch string, lease plumbi
 		return fmt.Errorf("push %s: %w", branch, err)
 	}
 	return nil
-}
-
-// Commit writes files onto branch as dotvirt itself, on top of the branch's
-// real remote state (created from the default branch when it doesn't exist yet).
-// Identical content commits nothing.
-func (w *WriteRepo) Commit(branch, message string, files []model.File) (CommitResult, error) {
-	w.mu.Lock()
-	defer w.mu.Unlock()
-
-	repo, wt, err := w.openWorktree(branch)
-	if err != nil {
-		return CommitResult{}, err
-	}
-	if err := checkoutBranch(repo, wt, branch); err != nil {
-		return CommitResult{}, err
-	}
-	items := make([]ChangesetItem, len(files))
-	for i, f := range files {
-		items[i] = ChangesetItem{Path: f.Path, NewContent: f.Content}
-	}
-	return w.commitItems(repo, wt, branch, message, items, Author{}, plumbing.ZeroHash, nil)
 }
 
 // checkoutBranch checks out branch as a local branch tracking the remote. A

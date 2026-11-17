@@ -131,6 +131,12 @@ export interface ClusterCaps {
    */
   oauthClient: boolean;
   /**
+   * AdminObjects installs the objects the install asks a cluster admin for
+   * (GET and POST /api/admin-objects): it reads the install, and may create
+   * and patch every object the install may ask for. False without an install.
+   */
+  adminObjects: boolean;
+  /**
    * ForgeAdmin reads a managed forge's admin password: the caller may get
    * its Secret. False without a managed forge.
    */
@@ -315,6 +321,44 @@ export interface ProjectCaps {
 export interface ForgeAdminCredential {
   username: string;
   password: string;
+}
+/**
+ * AdminObjects is GET and POST /api/admin-objects: the objects the install
+ * needs but its operator may not create, which a cluster admin installs. The
+ * console renders them from its own configuration and from reads under the
+ * caller's token, and shows the pins it rendered them with.
+ */
+export interface AdminObjects {
+  /**
+   * Operator, Namespace, ArgoNamespace and ArgoController are the guard's
+   * pins; Images the images an admin chose beside the official repositories.
+   */
+  operator: string;
+  namespace: string;
+  argoNamespace: string;
+  argoController: string;
+  images: string[];
+  objects: AdminObject[];
+}
+/**
+ * AdminObject is one of them, as read under the caller's token.
+ */
+export interface AdminObject {
+  purpose: string;
+  kind: string;
+  name: string;
+  namespace?: string;
+  /**
+   * State is NotInstalled, Outdated or Installed; Detail says what differs,
+   * so installing over another admin's change is a choice. Stale is an object
+   * the install no longer asks for, still there: Detail says how to remove it.
+   */
+  state: string;
+  detail?: string;
+  /**
+   * Object is the console's render, which an install applies; none for Stale.
+   */
+  object?: { [key: string]: any};
 }
 
 //////////
@@ -631,12 +675,14 @@ export interface Proposal {
   title?: string;
   /**
    * Branch is the head branch; By the proposing user, from the branch name
-   * (else the forge poster); Revert marks an undo PR. Mine is set per reader:
-   * the lane is project-wide, ownership is the caller's.
+   * (else the forge poster); Revert marks an undo PR, Seed the starter
+   * template library, which no user proposed. Mine is set per reader: the
+   * lane is project-wide, ownership is the caller's.
    */
   branch?: string;
   by?: string;
   revert?: boolean;
+  seed?: boolean;
   mine?: boolean;
   /**
    * Head is the head branch's commit as dotvirt's mirror holds it: the
@@ -1989,9 +2035,24 @@ export interface TemplateParameter {
 }
 /**
  * TemplateList is the content-library listing across the caller's libraries.
+ * Seeds reports the starter library's pull request, or why it could not be
+ * opened, per library that has one pending.
  */
 export interface TemplateList {
   templates: Template[];
+  seeds?: TemplateSeed[];
+}
+/**
+ * TemplateSeed is the starter template library proposed to a project's repo:
+ * its open pull request, or why it could not be opened. Retries is set while
+ * a failed offer will be attempted again; a withdrawn offer is final.
+ */
+export interface TemplateSeed {
+  library: string;
+  prNumber?: number /* int */;
+  prURL?: string;
+  error?: string;
+  retries?: boolean;
 }
 /**
  * DeployTemplateRequest renders a library template and stages the resulting VM

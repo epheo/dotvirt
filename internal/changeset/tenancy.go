@@ -552,8 +552,8 @@ func tenantRepoURL(platformRepo, name string) (string, error) {
 	return owner + "/" + name + ".git", nil
 }
 
-// ensureTenantRepo creates the tenant repo on the forge when absent and seeds
-// templates into a freshly created one. Shared by project creation and
+// ensureTenantRepo creates the tenant repo on the forge when absent and offers
+// the starter templates to a freshly created one. Shared by project creation and
 // adoption; created is false when the repo already existed, which the caller
 // uses to guard.
 func (c *Coordinator) ensureTenantRepo(repoURL string) (created bool, err error) {
@@ -568,7 +568,7 @@ func (c *Coordinator) ensureTenantRepo(repoURL string) (created bool, err error)
 	}
 	if created {
 		c.repos.Created(repoURL)
-		c.seedTemplates(repoURL)
+		c.seedCreated(repoURL)
 	}
 	return created, nil
 }

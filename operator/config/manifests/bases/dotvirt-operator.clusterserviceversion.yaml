@@ -4,7 +4,7 @@ metadata:
   annotations:
     capabilities: Seamless Upgrades
     categories: Developer Tools, Modernization & Migration
-    containerImage: quay.io/epheo/dotvirt-operator@sha256:a74bc9f369824a09761aeb505e8210e44890c7e157e6bcbb277a1fe69774406e
+    containerImage: quay.io/epheo/dotvirt-operator@sha256:a881d0a3d502044bfe03706c4735b5e9f03e58df4a8728f3a0f8c0c39a04a92f
     description: Installs dotvirt, a GitOps web console for KubeVirt with a point-and-click
       workflow familiar to virtualization admins, plus its platform/tenant tier.
     features.operators.openshift.io/disconnected: "true"
@@ -171,8 +171,10 @@ spec:
 
     Status reports the rest: `consoleURL`, `forgeURL`, `forgeAdminHint` (the
     command that reveals the managed forge's admin password), `ssoOAuthClient`,
-    and one condition per install step, so `kubectl describe dotvirt` explains
-    a stuck install.
+    `adminObjects` (what a cluster admin installs from the console, such as
+    the admission policies bounding the operator's own account), and one
+    condition per install step, so
+    `kubectl describe dotvirt` explains a stuck install.
 
     ### Prerequisites
 

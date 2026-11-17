@@ -2,7 +2,6 @@ package changeset
 
 import (
 	"fmt"
-	"log"
 	"maps"
 
 	"github.com/epheo/dotvirt/internal/auth"
@@ -191,19 +190,4 @@ func (c *Coordinator) StageUpdateTemplate(id auth.Identity, commitProj project.P
 		Manifest:   req.YAML,
 		BaseBlob:   git.BlobID(current),
 	})
-}
-
-// seedTemplates pushes the starter library onto a repo dotvirt just created.
-// A git-plane write by dotvirt's own credentials: templates sit outside the
-// ArgoCD-applied path, so the seed changes nothing on the cluster, and a
-// failure only leaves the new library empty - never fails project creation.
-func (c *Coordinator) seedTemplates(repoURL string) {
-	_, write, err := c.repos.Get(repoURL, "")
-	if err != nil {
-		log.Printf("seed templates %s: %v", repoURL, err)
-		return
-	}
-	if _, err := write.Commit(c.baseBranch, c.productName()+": seed starter templates", vmtemplate.SeedFiles()); err != nil {
-		log.Printf("seed templates %s: %v", repoURL, err)
-	}
 }

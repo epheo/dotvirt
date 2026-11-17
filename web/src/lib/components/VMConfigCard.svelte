@@ -313,7 +313,7 @@
 													aria-pressed={value === p}
 													onclick={() => (value = p)}
 													class="px-3 py-1 text-xs font-medium {value === p
-														? 'bg-accent text-white'
+														? 'bg-accent text-accent-on'
 														: 'bg-panel text-ink-soft hover:bg-inset'}">{p}</button
 												>
 											{/each}

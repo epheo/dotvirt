@@ -1,14 +1,15 @@
 package install
 
 import (
+	"reflect"
 	"slices"
-	"strings"
 	"testing"
 
 	rbacv1 "k8s.io/api/rbac/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	dotvirtv1alpha1 "github.com/epheo/dotvirt/operator/api/v1alpha1"
+	"github.com/epheo/dotvirt/pkg/adminobjects"
 )
 
 // The grant covers the one Secret spec.forge.credentialsSecret names, in the
@@ -74,24 +75,26 @@ func TestForgeCredentialGrantOnlyWhenNeeded(t *testing.T) {
 	}
 }
 
-// The commands an admin runs by hand grant what ForgeCredentialGrant renders.
-func TestForgeCredentialCommands(t *testing.T) {
-	dv := &dotvirtv1alpha1.Dotvirt{ObjectMeta: metav1.ObjectMeta{Name: "x", Namespace: "dotvirt"}}
-	dv.Spec.Forge.CredentialsSecret = "byo-creds"
-	want := []string{
-		"kubectl -n dotvirt create role dotvirt-forge-credential --verb=get --resource=secrets --resource-name=byo-creds",
-		"kubectl -n dotvirt create rolebinding dotvirt-forge-credential --role=dotvirt-forge-credential --serviceaccount=dotvirt-operator:dotvirt-operator-controller",
-	}
-	if got := ForgeCredentialCommands(dv, "dotvirt-operator"); !slices.Equal(got, want) {
-		t.Errorf("bring your own: %q, want %q", got, want)
-	}
-	// A half grant is replaced too: the delete tolerates the one that is absent.
-	if got := ForgeCredentialReplaceCommands(dv, "dotvirt-operator"); len(got) != 3 ||
-		got[0] != "kubectl -n dotvirt delete role,rolebinding dotvirt-forge-credential --ignore-not-found" || !slices.Equal(got[1:], want) {
-		t.Errorf("replace: %q", got)
-	}
-	dv.Spec.Forge.Managed = true
-	if got := ForgeCredentialCommands(dv, ""); !strings.Contains(got[0], "--verb=get,create,patch") || !strings.Contains(got[1], "<operator-namespace>:") {
-		t.Errorf("managed, operator namespace unknown: %q", got)
+// The operator's grant is the shared render for the pins both sides read from
+// the install (adminobjects.CredentialParams): the console's path to the same
+// render is tested where it lives (internal/api), from its real reads.
+func TestForgeCredentialGrantIsTheSharedRender(t *testing.T) {
+	for _, c := range []struct {
+		secret  string
+		managed bool
+	}{
+		{"", false}, {"dotvirt-forge", true}, {SessionSecretName, true}, {"creds", false}, {"creds", true},
+	} {
+		dv := &dotvirtv1alpha1.Dotvirt{ObjectMeta: metav1.ObjectMeta{Name: "x", Namespace: "dotvirt", UID: "uid-x"}}
+		dv.Spec.Forge.CredentialsSecret, dv.Spec.Forge.Managed = c.secret, c.managed
+		wantRole, wantBinding := adminobjects.CredentialGrant(adminobjects.CredentialParams(dv.Namespace, dv.Name, dv.UID,
+			dv.Spec.Forge.CredentialsSecret, dv.Spec.Forge.Managed, "system:serviceaccount:dotvirt-operator:"+OperatorServiceAccount))
+		role, binding := ForgeCredentialGrant(dv, "dotvirt-operator")
+		if !reflect.DeepEqual(role, wantRole) || !reflect.DeepEqual(binding, wantBinding) {
+			t.Errorf("credentialsSecret %q managed %v: the operator's grant is not the shared render", c.secret, c.managed)
+		}
+		if needs := ForgeCredentialNeedsGrant(dv); needs != (role != nil) {
+			t.Errorf("credentialsSecret %q: needs a grant %v, renders %v", c.secret, needs, role != nil)
+		}
 	}
 }
