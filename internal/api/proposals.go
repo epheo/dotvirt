@@ -398,12 +398,16 @@ func (s *Server) refreshMerged(reads mergedReads, settle bool) {
 	}
 }
 
+// proposalsEqual compares lanes as browsers receive them: ForgeHead is never
+// sent, so a change to it alone wakes no one.
 func proposalsEqual(a, b []model.Proposal) bool {
 	if len(a) != len(b) {
 		return false
 	}
 	for i := range a {
-		if a[i] != b[i] {
+		x, y := a[i], b[i]
+		x.ForgeHead, y.ForgeHead = "", ""
+		if x != y {
 			return false
 		}
 	}

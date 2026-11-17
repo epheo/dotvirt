@@ -294,6 +294,9 @@ type Proposal struct {
 	// it. Not the forge's head, which can lead the mirror until its fetch.
 	// Empty while the mirror lacks the branch or is not open yet.
 	Head string `json:"head,omitempty"`
+	// ForgeHead is the forge's head commit, which Head lags until the mirror
+	// fetches. Server-side only.
+	ForgeHead string `json:"-"`
 	// Review state, read best-effort from the forge each refresh; zero values
 	// mean unknown (an unreadable protection rule must not render as "none").
 	Approvals         int    `json:"approvals,omitempty"`

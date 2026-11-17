@@ -294,7 +294,8 @@ func TestCommitItemsUseTableLabels(t *testing.T) {
 // The open-PR lane is project-wide: every open PR into the base branch, named
 // by its proposer from the branch, reverts flagged, with one branch-rule read.
 // Which rows are the caller's is answered without the forge. A row's head is
-// the mirror's, which the review renders, whatever the forge reports.
+// the mirror's, which the review renders, whatever the forge reports; the
+// forge's rides beside it.
 func TestOpenProposalsListsEveryPR(t *testing.T) {
 	bare, work, hash := seedMerged(t)
 	revertHead := (&Reader{proposed: "dotvirt/proposed"}).revertBranch("alice", "p", hash)
@@ -358,6 +359,9 @@ func TestOpenProposalsListsEveryPR(t *testing.T) {
 	}
 	if prs[3].Head != "" {
 		t.Errorf("a branch the mirror lacks has head %q, want none", prs[3].Head)
+	}
+	if prs[0].ForgeHead != "aaa" || prs[3].ForgeHead != "ddd" {
+		t.Errorf("forge heads = %q, %q, want the forge's aaa, ddd", prs[0].ForgeHead, prs[3].ForgeHead)
 	}
 	alice := auth.Identity{Username: "alice"}
 	if !c.OwnsProposal(alice, proj, prs[0].Branch) || !c.OwnsProposal(alice, proj, prs[1].Branch) {
