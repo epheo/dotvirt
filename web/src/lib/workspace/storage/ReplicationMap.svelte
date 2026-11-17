@@ -316,10 +316,9 @@
 								>
 									{#if h === r.runsOn}
 										<span
-											class="inline-block rounded px-1.5 text-[11px] font-bold text-white {h ===
-											down
-												? 'bg-danger-deep'
-												: 'bg-accent'}"
+											class="inline-block rounded px-1.5 text-[11px] font-bold {h === down
+												? 'bg-danger-deep text-white'
+												: 'bg-accent text-accent-on'}"
 											title="{r.name} runs on {h}"
 										>
 											{r.vm ? 'VM' : 'In use'}
