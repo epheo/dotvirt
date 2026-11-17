@@ -478,8 +478,17 @@ export const api = {
 		),
 	commit: (project: string, hash: string) =>
 		get<CommitDetail>(`/api/projects/${enc(project)}/history/${hash}`),
-	revert: (project: string, hash: string) =>
-		post<gen.ProposeResult>(`/api/projects/${enc(project)}/revert`, { hash }),
+	// What merging a revert of hash prunes beyond its own restores, read live:
+	// the set Undo asks a yes for.
+	revertPrune: (project: string, hash: string) =>
+		get<gen.PruneSet>(`/api/projects/${enc(project)}/history/${hash}/prune`),
+	// acked as propose's: a revert's merge prunes like any other.
+	revert: (project: string, hash: string, acked?: Pick<DraftView, 'prune' | 'pruneHidden'>) =>
+		post<gen.ProposeResult>(`/api/projects/${enc(project)}/revert`, {
+			hash,
+			prune: acked?.prune,
+			pruneHidden: acked?.pruneHidden,
+		}),
 	// What merging one open PR would change, from its mirrored head branch.
 	proposal: (project: string, number: number) =>
 		get<ProposalDetail>(`/api/projects/${enc(project)}/proposals/${number}`),
@@ -571,8 +580,20 @@ export const api = {
 			'/api/drafts',
 		),
 	discardDraft: (project: string) => del(`/api/draft?project=${enc(project)}`),
-	propose: (project: string, title: string, message: string) =>
-		post<gen.ProposeResult>(`/api/draft/propose?project=${enc(project)}`, { title, message }),
+	// acked is the prune the review showed and the user said yes to; the server
+	// refuses a merge that would now delete beyond it.
+	propose: (
+		project: string,
+		title: string,
+		message: string,
+		acked?: Pick<DraftView, 'prune' | 'pruneHidden'>,
+	) =>
+		post<gen.ProposeResult>(`/api/draft/propose?project=${enc(project)}`, {
+			title,
+			message,
+			prune: acked?.prune,
+			pruneHidden: acked?.pruneHidden,
+		}),
 
 	// Drift + reconcile for one VM (project resolved from the namespace).
 	drift: (namespace: string, name: string) => get<DriftResult>(`${vmPath(namespace, name)}/drift`),

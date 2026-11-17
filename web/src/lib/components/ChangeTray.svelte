@@ -12,11 +12,12 @@
 		TriangleAlert,
 	} from '@lucide/svelte';
 	import { ACCESS_UNKNOWN } from '#lib/authoring.js';
+	import { plural } from '#lib/format.js';
 	import { changesHref, hrefForScope } from '#lib/nav.js';
 	import { approvalLine, checksPill, reviewURL } from '#lib/review.js';
 	import { TONE_PILL, TONE_TEXT } from '#lib/status.js';
 	import { CHECKING } from '#lib/state/caps.svelte.js';
-	import { drafts, PLATFORM_PROJECT } from '#lib/state/drafts.svelte.js';
+	import { drafts, PLATFORM_PROJECT, pruneTotal } from '#lib/state/drafts.svelte.js';
 	import { inventory } from '#lib/state/inventory.svelte.js';
 	import { reviewCache } from '#lib/state/reviewCache.svelte.js';
 	import { tray } from '#lib/state/tray.svelte.js';
@@ -255,12 +256,9 @@
 							{#if lane.draft.items.length > 4}
 								<p class="px-3 pb-1 text-ink-muted">and {lane.draft.items.length - 4} more</p>
 							{/if}
-							{#if lane.draft.prune?.length}
+							{#if pruneTotal(lane.draft)}
 								<p class="border-t border-line-soft px-3 py-1.5 {TONE_TEXT.danger}">
-									Merging also deletes {lane.draft.prune.length} object{lane.draft.prune.length ===
-									1
-										? ''
-										: 's'} git no longer declares.
+									Merging also deletes {plural(pruneTotal(lane.draft), 'object')} git does not declare.
 								</p>
 							{/if}
 							{#each lane.others as o (o.prNumber)}

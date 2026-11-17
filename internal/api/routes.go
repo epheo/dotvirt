@@ -157,6 +157,7 @@ func (s *Server) routes(mux *http.ServeMux) {
 	mux.HandleFunc("DELETE /api/images/{namespace}/{name}", s.handleDeleteBootImage)
 	mux.HandleFunc("GET /api/projects/{project}/history", s.handleHistory)
 	mux.HandleFunc("GET /api/projects/{project}/history/{hash}", s.handleCommit)
+	mux.HandleFunc("GET /api/projects/{project}/history/{hash}/prune", s.handleRevertPrune)
 	mux.HandleFunc("GET /api/projects/{project}/proposals/{number}", s.handleProposal)
 	mux.HandleFunc("POST /api/projects/{project}/revert", s.handleRevert)
 	mux.HandleFunc("POST /api/projects/{project}/adopt", s.handleAdoptProject)

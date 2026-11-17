@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen } from '@testing-library/svelte';
+import { tick } from 'svelte';
 import type { DraftView, Inventory } from '#lib/api.js';
 import { drafts } from '#lib/state/drafts.svelte.js';
 import { inventory } from '#lib/state/inventory.svelte.js';
@@ -75,6 +76,35 @@ describe('ProposeSheet', () => {
 		expect(screen.queryByText(/## Changes/)).toBeNull();
 		expect(screen.getByText(/PR #41 keeps its own text/)).toBeTruthy();
 		expect(screen.getByRole('button', { name: 'Add to PR #41' })).toBeTruthy();
+	});
+
+	it('counts what the caller cannot see, sends what was acknowledged, and asks again when it moved', async () => {
+		inventory.apply({ projects: [], proposals: [] } as unknown as Inventory);
+		const shown = { kind: 'VirtualMachine', namespace: 'db-prod', name: 'old-vm' };
+		drafts.drafts = [{ project: 'team-db', draft: { ...draft, prune: [shown], pruneHidden: 2 } }];
+		render(ProposeSheet, { project: 'team-db', onclose: vi.fn() });
+		expect(screen.getByText(/deletes 3 objects from the cluster/)).toBeTruthy();
+		expect(screen.getByText(/2 more outside your view/)).toBeTruthy();
+		const open = screen.getByRole('button', { name: 'Open pull request' }) as HTMLButtonElement;
+		expect(open.disabled).toBe(true);
+		const yes = screen.getByLabelText(/Delete these 3 when this merges/) as HTMLInputElement;
+		await fireEvent.click(yes);
+		refuse(
+			409,
+			'conflict: merging this now deletes objects the review did not list; review it again before proposing\n',
+		);
+		await fireEvent.click(open);
+		await screen.findByRole('alert');
+		const [, init] = fetchMock.mock.calls.find(([url]) =>
+			String(url).startsWith('/api/draft/propose'),
+		)!;
+		expect(JSON.parse(init.body)).toMatchObject({ prune: [shown], pruneHidden: 2 });
+		// A refusal alone keeps the yes; a set that moved asks for a new one.
+		expect(yes.checked).toBe(true);
+		drafts.drafts = [{ project: 'team-db', draft: { ...draft, prune: [shown], pruneHidden: 3 } }];
+		await tick();
+		const again = screen.getByLabelText(/Delete these 4 when this merges/) as HTMLInputElement;
+		expect(again.checked).toBe(false);
 	});
 
 	it('a conflict is said in place, with the PR it names one click away', async () => {

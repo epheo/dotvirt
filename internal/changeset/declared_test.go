@@ -286,6 +286,7 @@ func TestKindRuleWithAllowedKinds(t *testing.T) {
 // scopeOnly answers scope and nothing else.
 type scopeOnly func(group, kind string) bool
 
-func (scopeOnly) Authorize(auth.Identity, []Access) error { return nil }
-func (f scopeOnly) ClusterScoped(group, kind string) bool { return f(group, kind) }
-func (scopeOnly) ProjectNamespace(string) (bool, bool)    { return false, true }
+func (scopeOnly) Authorize(auth.Identity, []Access) error                     { return nil }
+func (f scopeOnly) ClusterScoped(group, kind string) bool                     { return f(group, kind) }
+func (scopeOnly) ProjectNamespace(string) (bool, bool)                        { return false, true }
+func (scopeOnly) Tellable(auth.Identity, []model.ObjectRef) []model.ObjectRef { return nil }

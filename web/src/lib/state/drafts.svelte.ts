@@ -1,9 +1,42 @@
-import { api, Unauthorized, vmKey, type DraftItem, type DraftView } from '#lib/api.js';
+import {
+	api,
+	Unauthorized,
+	vmKey,
+	type DraftItem,
+	type DraftView,
+	type PruneSet,
+} from '#lib/api.js';
 import { friendlyError } from '#lib/format.js';
 
 // The synthetic platform-tier project (matches the backend's platformProjectName);
 // holds the cluster-scoped network + namespace changeset, proposable by authors.
 export const PLATFORM_PROJECT = 'platform';
+
+// Everything a merge lets the sync delete: what the caller is shown, and what
+// lies where they cannot see, which goes all the same.
+export const pruneTotal = (d?: PruneSet | null) => (d?.prune?.length ?? 0) + (d?.pruneHidden ?? 0);
+
+// The prune a yes was given to, as a stable string.
+const pruneKey = (d?: PruneSet | null) =>
+	`${(d?.prune ?? [])
+		.map((r) => `${r.kind}/${r.namespace ?? ''}/${r.name}`)
+		.sort()
+		.join(',')}|${d?.pruneHidden ?? 0}`;
+
+// The yes a propose or a revert needs while its merge prunes, held to the set
+// it was given to: it drops the moment the shown set changes, keyed on a
+// stable string, never per frame. Built during a component's init, as it owns
+// an effect.
+export class PruneYes {
+	ack = $state(false);
+	constructor(set: () => PruneSet | null | undefined) {
+		const key = $derived(pruneKey(set()));
+		$effect(() => {
+			void key;
+			this.ack = false;
+		});
+	}
+}
 
 // Per-project drafts (the Changes panel + header badge). Refreshed when the set
 // of projects or PR lanes changes (the layout's keyed effect), when the Changes

@@ -281,18 +281,21 @@ func (s *Snapshot) ForeignApps(ownRepo string) map[string]bool {
 	return out
 }
 
-// PrunePending: what Argo itself would prune for the apps sourcing repo, within
-// namespaces (status.resources[].requiresPruning). Argo's comparison is the one
-// authority on what a sync deletes; re-deriving from git could drift from it.
-// nil before the initial LIST.
-func (s *Snapshot) PrunePending(repo string, namespaces []string) []model.ObjectRef {
-	want := make(map[string]bool, len(namespaces))
-	for _, ns := range namespaces {
-		want[ns] = true
-	}
+// PrunePending: what Argo itself would prune for the apps sourcing repo
+// (status.resources[].requiresPruning), cluster-scoped objects included. Argo's
+// comparison is the one authority on what a sync deletes; re-deriving from git
+// could drift from it. Every app on the repo, whatever folder it reads: a merge
+// moves the revision each of them syncs. Never narrowed to what a caller sees:
+// what they may be told is the caller's to filter, and a narrowed answer reads
+// as a safe merge. known is false before the initial LIST, when nothing can
+// be said.
+func (s *Snapshot) PrunePending(repo string) (refs []model.ObjectRef, known bool) {
 	own := forge.NormalizeRepoURL(repo)
-	if !s.synced.Done() || own == "" {
-		return nil
+	if !s.synced.Done() {
+		return nil, false
+	}
+	if own == "" {
+		return nil, true
 	}
 	var out []model.ObjectRef
 	for _, u := range reflect.List(s.apps) {
@@ -312,7 +315,7 @@ func (s *Snapshot) PrunePending(repo string, namespaces []string) []model.Object
 				Namespace: asString(res, "namespace"),
 				Name:      asString(res, "name"),
 			}
-			if ref.Kind == "" || ref.Name == "" || !want[ref.Namespace] {
+			if ref.Kind == "" || ref.Name == "" {
 				continue
 			}
 			out = append(out, ref)
@@ -329,7 +332,7 @@ func (s *Snapshot) PrunePending(repo string, namespaces []string) []model.Object
 		}
 		return a.Name < b.Name
 	})
-	return out
+	return out, true
 }
 
 // ResourceDrift returns one Argo-managed object's sync/health by identity; ok=false if

@@ -22,6 +22,7 @@ import (
 	"github.com/epheo/dotvirt/internal/cluster"
 	"github.com/epheo/dotvirt/internal/drs"
 	"github.com/epheo/dotvirt/internal/model"
+	"github.com/epheo/dotvirt/pkg/tenancy"
 )
 
 // The access family. Every route gate, every capability field and the
@@ -484,6 +485,56 @@ func (s *Server) Authorize(id auth.Identity, need []changeset.Access) error {
 			model.ErrForbidden, strings.Join(denied, ", or "))
 	}
 	return nil
+}
+
+// Tellable implements changeset.Authorizer: what id's token would read in
+// Kubernetes, the rule shownRows applies to a rollup's rows: a kind it may
+// list where the object lives (cluster-wide for a cluster-scoped one), a
+// Namespace also by its name. Per object, never per repo: what a merge prunes
+// is what git no longer declares, so a repo-wide read verdict (one answered
+// from what git declares) would name objects id cannot list. Only an Argo
+// app's objects get here, and an AppProject admits only dotvirt's kinds, one
+// group per kind name, so the kind table places them with no discovery read;
+// any other kind is never named. Asked only while a merge would prune
+// something, each kind's namespaces in one batch, off the cached reviews.
+func (s *Server) Tellable(id auth.Identity, refs []model.ObjectRef) []model.ObjectRef {
+	if s.clusterF == nil || len(refs) == 0 {
+		return nil
+	}
+	c, err := s.clusterF.For(id.Token)
+	if err != nil {
+		return nil
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), authorizeTimeout)
+	defer cancel()
+	v, err := s.viewFor(ctx, id, c)
+	if err != nil {
+		return nil
+	}
+	asked := map[ssarRef][]string{}
+	for _, ref := range refs {
+		if k, ok := tenancy.LookupKind(ref.Kind); ok {
+			r := ssarRef{k.Group, k.Resource}
+			if !slices.Contains(asked[r], ref.Namespace) {
+				asked[r] = append(asked[r], ref.Namespace)
+			}
+		}
+	}
+	lists := make(map[ssarRef][]string, len(asked))
+	for r, namespaces := range asked {
+		lists[r] = v.listsIn(r, namespaces)
+	}
+	var out []model.ObjectRef
+	for _, ref := range refs {
+		k, ok := tenancy.LookupKind(ref.Kind)
+		switch {
+		case !ok:
+		case k.Group == "" && k.Kind == model.KindNS.Kind && v.names[ref.Name],
+			slices.Contains(lists[ssarRef{k.Group, k.Resource}], ref.Namespace):
+			out = append(out, ref)
+		}
+	}
+	return out
 }
 
 // weighAll weighs every access of need, each distinct one once, at most

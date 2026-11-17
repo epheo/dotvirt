@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -140,7 +141,7 @@ func TestCommitRevertStateTracksMain(t *testing.T) {
 	if !d.Reverted || d.RevertWarning != "" {
 		t.Fatalf("main carries the pre-merge content, so the change reads as reverted: %+v", d)
 	}
-	if _, err := c.Revert(auth.Identity{Username: "alice"}, proj, hash); !errors.Is(err, model.ErrInvalid) {
+	if _, err := c.Revert(auth.Identity{Username: "alice"}, proj, hash, model.PruneSet{}); !errors.Is(err, model.ErrInvalid) {
 		t.Errorf("reverting an already-reverted change must be a classified refusal, got %v", err)
 	}
 }
@@ -175,8 +176,19 @@ func TestRevertMergeOpensPR(t *testing.T) {
 	c := newTestCoordinator(t, true)
 	c.forge = forge.NewFactory(srv.URL, forge.StaticToken("tok"), false, "")
 	proj := project.ProjectInfo{Name: "p", Repo: bare}
+	// Its merge prunes like any other: the review's yes is asked for first,
+	// before the forge hears of it, and the PR body says what goes.
+	// What it restores (web) is its own to speak for; only the rest needs the yes.
+	stray := model.ObjectRef{Kind: "VirtualMachine", Namespace: "alpha", Name: "stray"}
+	c.prune = fakePrune{stray, {Kind: "VirtualMachine", Namespace: "alpha", Name: "web"}}
+	if set, err := c.RevertPrune(auth.Identity{Username: "alice"}, proj, hash); err != nil || !slices.Equal(set.Prune, []model.ObjectRef{stray}) || set.PruneHidden != 0 {
+		t.Fatalf("RevertPrune = %+v, %v; want the stray alone", set, err)
+	}
+	if _, err := c.Revert(auth.Identity{Username: "alice"}, proj, hash, model.PruneSet{}); !errors.Is(err, model.ErrConflict) {
+		t.Fatalf("revert with the prune unacknowledged: %v, want ErrConflict", err)
+	}
 
-	out, err := c.Revert(auth.Identity{Username: "alice"}, proj, hash)
+	out, err := c.Revert(auth.Identity{Username: "alice"}, proj, hash, model.PruneSet{Prune: []model.ObjectRef{stray}})
 	if err != nil {
 		t.Fatalf("Revert: %v", err)
 	}
@@ -186,7 +198,7 @@ func TestRevertMergeOpensPR(t *testing.T) {
 	if got.Title != `Revert "Resize web" (#12)` || got.Base != "main" || got.Head != out.Branch {
 		t.Errorf("PR request: %+v", got)
 	}
-	for _, want := range []string{"Reverts commit " + hash[:8], "## Changes", "**edit alpha/web**", "CPU: 4 vCPU -> 2 vCPU", "**delete alpha/db**"} {
+	for _, want := range []string{"Reverts commit " + hash[:8], "## Changes", "**edit alpha/web**", "CPU: 4 vCPU -> 2 vCPU", "**delete alpha/db**", "VirtualMachine alpha/stray"} {
 		if !strings.Contains(got.Body, want) {
 			t.Errorf("PR body lacks %q:\n%s", want, got.Body)
 		}
@@ -237,7 +249,7 @@ func TestRevertReusesLegacyBranch(t *testing.T) {
 	c.forge = forge.NewFactory(srv.URL, forge.StaticToken("tok"), false, "")
 	proj := project.ProjectInfo{Name: "p", Repo: bare}
 
-	out, err := c.Revert(auth.Identity{Username: "alice"}, proj, hash)
+	out, err := c.Revert(auth.Identity{Username: "alice"}, proj, hash, model.PruneSet{})
 	if err != nil {
 		t.Fatalf("Revert: %v", err)
 	}
@@ -610,7 +622,7 @@ func TestCommitReadFailureNamesOnlyTheCommit(t *testing.T) {
 func TestRevertReadFailureNamesOnlyTheCommit(t *testing.T) {
 	repo, head, _ := shallowMirror(t)
 	c := newTestCoordinator(t, false)
-	_, err := c.Revert(auth.Identity{Username: "alice"}, project.ProjectInfo{Name: "p", Repo: repo}, head)
+	_, err := c.Revert(auth.Identity{Username: "alice"}, project.ProjectInfo{Name: "p", Repo: repo}, head, model.PruneSet{})
 	wantGitClass(t, err, model.ErrUnavailable, "commit "+head[:8]+": the project repo could not be read", repo)
 }
 

@@ -436,7 +436,7 @@ func TestPlatformReadsNeedAClusterWideSignal(t *testing.T) {
 			t.Errorf("with %v: platformRead = %v, platform = %v; want %v, %v", c.gs, cl.PlatformRead, cl.Platform, c.read, c.staging)
 		}
 		for _, path := range []string{"/api/projects/platform/history", "/api/projects/platform/history/" + hash40,
-			"/api/projects/platform/proposals/1"} {
+			"/api/projects/platform/history/" + hash40 + "/prune", "/api/projects/platform/proposals/1"} {
 			if got := passes(tok, path); got != c.read {
 				t.Errorf("with %v: %s passes = %v, want %v", c.gs, path, got, c.read)
 			}

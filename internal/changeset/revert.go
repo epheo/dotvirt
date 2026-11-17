@@ -21,8 +21,9 @@ import (
 // included, so the reviewer sees what merging it does today. Only a commit of
 // base reverts, and each file it restores passes the gate against what base
 // holds now: what the revert creates, changes or removes there is what the
-// caller must be allowed to.
-func (c *Coordinator) Revert(id auth.Identity, proj project.ProjectInfo, hash string) (model.ProposeResult, error) {
+// caller must be allowed to. Its merge prunes like any other: what Argo would
+// delete beyond the revert's own restores needs ack, and the PR body says it.
+func (c *Coordinator) Revert(id auth.Identity, proj project.ProjectInfo, hash string, ack model.PruneSet) (model.ProposeResult, error) {
 	read, write, err := c.write(proj)
 	if err != nil {
 		return model.ProposeResult{}, err
@@ -48,6 +49,10 @@ func (c *Coordinator) Revert(id auth.Identity, proj project.ProjectInfo, hash st
 	if err := c.authorize(id, need); err != nil {
 		return model.ProposeResult{}, err
 	}
+	p := c.pruning(id, proj, restoredBy(items))
+	if err := p.refuse(ack); err != nil {
+		return model.ProposeResult{}, err
+	}
 	h, err := c.hand(id, proj, write)
 	if err != nil {
 		return model.ProposeResult{}, err
@@ -62,6 +67,7 @@ func (c *Coordinator) Revert(id auth.Identity, proj project.ProjectInfo, hash st
 	title := fmt.Sprintf("Revert %q (%s)", d.Commit.Title, ref)
 	view := model.DraftView{Items: commitItems(c.revertFiles(read, items))}
 	view.Warning, _ = c.revertState(read, d.Files)
+	view.Warning = JoinWarning(view.Warning, pruneWarning(p.shown, p.hidden))
 	body := prBody(view, fmt.Sprintf("Reverts commit %s, %q.", short, d.Commit.Title), id.Username, c.productName())
 
 	fc := h.fc
@@ -95,6 +101,44 @@ func (c *Coordinator) Revert(id auth.Identity, proj project.ProjectInfo, hash st
 		return model.ProposeResult{}, err
 	}
 	return out, nil
+}
+
+// RevertPrune is what merging a revert of hash would let ArgoCD delete beyond
+// the revert's own restores, as id may be told it: the set its Undo asks a yes
+// for. The draft is no part of a revert PR, so it covers nothing here. Read
+// live on every call: Argo's view moves, a commit does not.
+func (c *Coordinator) RevertPrune(id auth.Identity, proj project.ProjectInfo, hash string) (model.PruneSet, error) {
+	read, err := c.read(proj)
+	if err != nil {
+		return model.PruneSet{}, err
+	}
+	if err := c.onBase(read, hash); err != nil {
+		return model.PruneSet{}, err
+	}
+	d, err := read.CommitDiff(hash)
+	if err != nil {
+		return model.PruneSet{}, gitFailed(hash, err)
+	}
+	items, err := d.RevertItems()
+	if err != nil {
+		return model.PruneSet{}, fmt.Errorf("%w: %v", model.ErrInvalid, err)
+	}
+	p := c.pruning(id, proj, restoredBy(items))
+	if !p.known {
+		return model.PruneSet{}, p.refuse(model.PruneSet{})
+	}
+	return model.PruneSet{Prune: p.shown, PruneHidden: p.hidden}, nil
+}
+
+// restoredBy is what a revert's items declare once merged: what it speaks for.
+func restoredBy(items []git.ChangesetItem) []model.ObjectRef {
+	var out []model.ObjectRef
+	for _, it := range items {
+		if !it.Delete {
+			out = append(out, declaredRefs(it.Path, it.NewContent)...)
+		}
+	}
+	return out
 }
 
 // revertAccess is what the revert's items do to the cluster, each file read

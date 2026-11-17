@@ -3,6 +3,7 @@ package changeset
 import (
 	"errors"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 
@@ -275,7 +276,87 @@ func TestAdoptAbsentFromRunningNotFound(t *testing.T) {
 // fakePrune stands in for the argo snapshot's requiresPruning relay.
 type fakePrune []model.ObjectRef
 
-func (f fakePrune) PrunePending(string, []string) []model.ObjectRef { return f }
+func (f fakePrune) PrunePending(string) ([]model.ObjectRef, bool) { return f, true }
+
+// unloaded is an Argo view that has not loaded yet.
+type unloaded struct{}
+
+func (unloaded) PrunePending(string) ([]model.ObjectRef, bool) { return nil, false }
+
+// tellsIn names only the objects in its namespaces: a caller who may list
+// there and nowhere else.
+type tellsIn struct {
+	allowAll
+	ns []string
+}
+
+func (t tellsIn) Tellable(_ auth.Identity, refs []model.ObjectRef) []model.ObjectRef {
+	var out []model.ObjectRef
+	for _, r := range refs {
+		if slices.Contains(t.ns, r.Namespace) {
+			out = append(out, r)
+		}
+	}
+	return out
+}
+
+// A tenant's warning covers the whole project, whatever part of it the caller
+// sees: the merge prunes the rest too. What they see is named; the rest is
+// only counted, so the warning never names what their RBAC hides.
+func TestPruneWarningCoversTheWholeProject(t *testing.T) {
+	c := newTestCoordinator(t, false)
+	c.UseAuthorizer(tellsIn{ns: []string{"alpha"}})
+	c.prune = fakePrune{
+		{Kind: "VirtualMachine", Namespace: "alpha", Name: "web"},
+		{Kind: "VirtualMachine", Namespace: "beta", Name: "secret"},
+	}
+	proj := project.ProjectInfo{Name: "p", Repo: seedBare(t), Namespaces: []string{"alpha"}}
+	view, err := c.Get(auth.Identity{Username: "alice"}, proj)
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if want := []model.ObjectRef{{Kind: "VirtualMachine", Namespace: "alpha", Name: "web"}}; !reflect.DeepEqual(view.Prune, want) || view.PruneHidden != 1 {
+		t.Fatalf("Prune = %v hidden %d, want %v hidden 1", view.Prune, view.PruneHidden, want)
+	}
+	if !strings.Contains(view.Warning, "VirtualMachine alpha/web, and 1 more not shown here") {
+		t.Errorf("warning must name the visible object and count the hidden one, got %q", view.Warning)
+	}
+	if strings.Contains(view.Warning, "beta") || strings.Contains(view.Warning, "secret") {
+		t.Errorf("warning names an object the caller cannot see: %q", view.Warning)
+	}
+}
+
+// The platform tier's warning holds every object its app would prune,
+// cluster-scoped ones included: named to a platform reader, only counted to a
+// caller who merely holds a draft there.
+func TestPlatformPruneWarningNamesOnlyToReaders(t *testing.T) {
+	pending := fakePrune{
+		{Kind: "Namespace", Name: "team-b"},
+		{Kind: "RoleBinding", Namespace: "team-b", Name: "admins"},
+	}
+	plat := project.ProjectInfo{Name: project.PlatformName, Repo: seedBare(t)}
+	for _, reads := range []bool{true, false} {
+		c := newTestCoordinator(t, false)
+		c.prune = pending
+		if !reads {
+			c.UseAuthorizer(&rbac{})
+		}
+		view, err := c.Get(auth.Identity{Username: "alice"}, plat)
+		if err != nil {
+			t.Fatalf("reads=%v: Get: %v", reads, err)
+		}
+		switch {
+		case reads && (!reflect.DeepEqual(view.Prune, []model.ObjectRef(pending)) || view.PruneHidden != 0):
+			t.Errorf("reader: Prune = %v hidden %d, want every object named", view.Prune, view.PruneHidden)
+		case reads && !strings.Contains(view.Warning, "Namespace team-b, RoleBinding team-b/admins."):
+			t.Errorf("reader: warning %q, want both objects named", view.Warning)
+		case !reads && (len(view.Prune) != 0 || view.PruneHidden != 2):
+			t.Errorf("holder: Prune = %v hidden %d, want 2 counted, none named", view.Prune, view.PruneHidden)
+		case !reads && (strings.Contains(view.Warning, "team-b") || !strings.Contains(view.Warning, "2 objects not shown here")):
+			t.Errorf("holder: warning %q, want a count and no name", view.Warning)
+		}
+	}
+}
 
 // The warning derives every view: shows on an EMPTY draft, shrinks as adoption
 // stages. Nothing stored, so reopening never shows partial as complete.

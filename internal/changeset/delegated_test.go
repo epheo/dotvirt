@@ -589,7 +589,7 @@ func (f *delegatedFixture) requireDropped(t *testing.T) {
 func TestDelegatedRevertWritesAsTheUser(t *testing.T) {
 	bare, _, hash := seedMerged(t)
 	f := newDelegatedFixture(t, bare)
-	out, err := f.c.Revert(f.alice, f.proj, hash)
+	out, err := f.c.Revert(f.alice, f.proj, hash, model.PruneSet{})
 	if err != nil {
 		t.Fatalf("Revert: %v", err)
 	}
@@ -601,11 +601,11 @@ func TestDelegatedRevertWritesAsTheUser(t *testing.T) {
 
 	f.forge.forget()
 	delete(f.accounts.creds, "alice")
-	if _, err := f.c.Revert(f.alice, f.proj, hash); !errors.Is(err, model.ErrForgeConnect) {
+	if _, err := f.c.Revert(f.alice, f.proj, hash, model.PruneSet{}); !errors.Is(err, model.ErrForgeConnect) {
 		t.Fatalf("Revert without a connection: %v, want the connect offer", err)
 	}
 	f.forge.pushRefuse["bob-tok"] = http.StatusForbidden
-	if _, err := f.c.Revert(auth.Identity{Username: "bob"}, f.proj, hash); !errors.Is(err, model.ErrForgeWrite) {
+	if _, err := f.c.Revert(auth.Identity{Username: "bob"}, f.proj, hash, model.PruneSet{}); !errors.Is(err, model.ErrForgeWrite) {
 		t.Fatalf("Revert refused at the push: %v, want the write guidance", err)
 	}
 	f.requireNoWrites(t)

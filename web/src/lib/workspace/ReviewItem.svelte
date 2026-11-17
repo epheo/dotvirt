@@ -10,7 +10,7 @@
 	} from '#lib/api.js';
 	import { bytes, plural, quantityBytes } from '#lib/format.js';
 	import { action } from '#lib/resource.svelte.js';
-	import { drafts } from '#lib/state/drafts.svelte.js';
+	import { drafts, PruneYes, pruneTotal } from '#lib/state/drafts.svelte.js';
 	import Button from '#lib/components/Button.svelte';
 	import Card from '#lib/components/Card.svelte';
 	import ChangeList from '#lib/components/ChangeList.svelte';
@@ -84,21 +84,28 @@
 	let message = $state('');
 	// Merging this draft may let the sync delete live objects: the same
 	// explicit yes the review sheet asks for, reset with the project.
-	let ack = $state(false);
+	const yes = new PruneYes(() => lane);
 	const prune = $derived(lane?.prune ?? []);
-	const blocked = $derived(prune.length > 0 && !ack);
+	const pruneHidden = $derived(lane?.pruneHidden ?? 0);
+	const pruning = $derived(pruneTotal(lane) > 0);
+	const blocked = $derived(pruning && !yes.ack);
 	$effect(() => {
 		project;
 		title = '';
 		message = '';
-		ack = false;
+		yes.ack = false;
 	});
 	const proposeOp = action();
 	async function propose() {
 		if (proposeOp.busy || blocked) return;
 		unstageOp.clear();
 		await proposeOp.run(async () => {
-			const r = await api.propose(project, title, message);
+			const r = await api.propose(
+				project,
+				title,
+				message,
+				pruning ? { prune, pruneHidden } : undefined,
+			);
 			onproposed({ ...r, title: title || lane?.defaultTitle });
 			title = '';
 			message = '';
@@ -180,7 +187,9 @@
 <Card title="Propose {project}" meta={plural(count, 'staged change')}>
 	<div class="flex flex-col gap-3">
 		<GitOpsStepper stage="staged" />
-		{#if prune.length}<div class="text-[13px]"><PruneAck {prune} bind:ack /></div>{/if}
+		{#if pruning}<div class="text-[13px]">
+				<PruneAck {prune} hidden={pruneHidden} bind:ack={yes.ack} />
+			</div>{/if}
 		<TextInput
 			bind:value={title}
 			suggest={lane?.defaultTitle}

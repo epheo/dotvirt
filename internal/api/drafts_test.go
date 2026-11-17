@@ -34,6 +34,7 @@ type draftsRig struct {
 	fc    *fakeCluster
 	store *draft.Store
 	repo  map[string]string // project -> repo
+	stray stray
 }
 
 func newDraftsRig(t *testing.T, platformMissing bool) *draftsRig {
@@ -68,25 +69,17 @@ func newDraftsRig(t *testing.T, platformMissing bool) *draftsRig {
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
 	repos := git.NewRepoSet(ctx, "", "", nil, false, nil, time.Hour)
-	c := changeset.New(g.store, repos, nil, nil, nil, strayIn(g.repo["team-a"]), "main", "dotvirt/proposed")
+	g.stray = stray{g.repo["team-a"]: {{Kind: "VirtualMachine", Namespace: "team-a-dev", Name: "stray"}}}
+	c := changeset.New(g.store, repos, nil, nil, nil, g.stray, "main", "dotvirt/proposed")
 	g.s = fc.server(c, Config{PlatformRepo: g.repo[platformProjectName], BaseBranch: "main"})
 	c.UseAuthorizer(g.s)
 	return g
 }
 
-// strayIn is ArgoCD about to prune one VM in each namespace of repo.
-type strayIn string
+// stray is what ArgoCD is about to prune, per repo.
+type stray map[string][]model.ObjectRef
 
-func (r strayIn) PrunePending(repo string, namespaces []string) []model.ObjectRef {
-	if repo != string(r) {
-		return nil
-	}
-	var out []model.ObjectRef
-	for _, ns := range namespaces {
-		out = append(out, model.ObjectRef{Kind: "VirtualMachine", Namespace: ns, Name: "stray"})
-	}
-	return out
-}
+func (s stray) PrunePending(repo string) ([]model.ObjectRef, bool) { return s[repo], true }
 
 // stage puts one removal into user's draft of project, as any route would.
 func (g *draftsRig) stage(t *testing.T, user, project string) {
@@ -177,6 +170,56 @@ func TestDraftsAnswerEveryDraftOfTheCaller(t *testing.T) {
 	if calls := g.fc.seen(); len(calls) > 0 {
 		t.Errorf("drafts read the cluster beyond its reviews: %q", calls)
 	}
+}
+
+// After a platform-repo loss, the platform app holds every object it tracks
+// and any platform merge prunes them all. Every caller reaching the platform
+// lane is warned of all of them, each named only to a caller who may list it
+// where it lives: the reader lists namespaces, not RoleBindings, and the
+// holder lists neither. A repo-wide read verdict would answer from what git
+// declares, which is exactly what these objects no longer are.
+func TestPlatformPruneWarnsEveryCallerOfTheWholeRepo(t *testing.T) {
+	g := newDraftsRig(t, false)
+	g.stray[g.repo[platformProjectName]] = []model.ObjectRef{
+		{Kind: "Namespace", Name: "team-b-dev"},
+		{Kind: "RoleBinding", Namespace: "team-b-dev", Name: "admins"},
+	}
+	g.stage(t, "holder", platformProjectName)
+	lane := func(user string) model.DraftView {
+		t.Helper()
+		for _, d := range g.drafts(t, user).Drafts {
+			if d.Project == platformProjectName {
+				return d.Draft
+			}
+		}
+		t.Fatalf("%s: no platform lane", user)
+		return model.DraftView{}
+	}
+	if v := lane("reader"); len(v.Prune) != 1 || v.Prune[0].Kind != "Namespace" || v.PruneHidden != 1 || strings.Contains(v.Warning, "admins") {
+		t.Errorf("reader: %+v, want the Namespace named and the RoleBinding counted", v)
+	}
+	if v := lane("holder"); len(v.Prune) != 0 || v.PruneHidden != 2 || strings.Contains(v.Warning, "team-b") {
+		t.Errorf("holder: %+v, want 2 counted and none named", v)
+	}
+}
+
+// A tenant caller is told a pending object by name only if they may list its
+// kind where it lives: seeing the namespace is not enough. idle lists VMs in
+// team-a-dev, not DataVolumes.
+func TestTenantPruneNamesOnlyKindsTheCallerLists(t *testing.T) {
+	g := newDraftsRig(t, false)
+	vm := model.ObjectRef{Kind: "VirtualMachine", Namespace: "team-a-dev", Name: "stray"}
+	g.stray[g.repo["team-a"]] = []model.ObjectRef{vm, {Kind: "DataVolume", Namespace: "team-a-dev", Name: "stray-disk"}}
+	for _, d := range g.drafts(t, "idle").Drafts {
+		if d.Project != "team-a" {
+			continue
+		}
+		if !slices.Equal(d.Draft.Prune, []model.ObjectRef{vm}) || d.Draft.PruneHidden != 1 || strings.Contains(d.Draft.Warning, "stray-disk") {
+			t.Errorf("idle team-a = %+v, want the VM named and the DataVolume counted", d.Draft)
+		}
+		return
+	}
+	t.Fatal("idle: no team-a lane")
 }
 
 // The forge's word on a PR the user opened on the head dotvirt pushed takes
