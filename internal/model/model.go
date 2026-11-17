@@ -13,6 +13,16 @@ var (
 	ErrUnavailable = errors.New("temporarily unavailable") // -> 503: a capability isn't wired/reachable
 )
 
+// Refusals whose way forward the console offers as one click. Wrapped beside
+// a kind, never alone: fmt.Errorf("%w: %w: ...", ErrForbidden, ErrForgeConnect).
+var (
+	// ErrForgeConnect: the write goes to the forge as the caller, whose git
+	// account is not connected to the console session (or no longer works).
+	ErrForgeConnect = errors.New("your git account is not connected to this console session")
+	// ErrForgeWrite: the caller's git account may not push to the repo.
+	ErrForgeWrite = errors.New("your git account cannot write to this project's repo in the forge")
+)
+
 // Power is the desired run state derived from a VM manifest's runStrategy.
 type Power string
 

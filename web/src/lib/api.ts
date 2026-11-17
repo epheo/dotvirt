@@ -273,6 +273,11 @@ export class Unauthorized extends Error {
 	}
 }
 
+// The one-click way forward a refusal names beside its sentence: connect the
+// git account the write goes to the forge as, or ask for write on the repo.
+export type NextStep = '' | 'forge-connect' | 'forge-write';
+const NEXT_STEPS: readonly NextStep[] = ['forge-connect', 'forge-write'];
+
 // HttpError carries the status of a non-2xx answer, for callers that treat
 // one status as an answer rather than a failure (a 403 that means "not yours").
 export class HttpError extends Error {
@@ -282,6 +287,7 @@ export class HttpError extends Error {
 		// The request that failed: in detail, for logs and tests, never in the
 		// message people read.
 		readonly path = '',
+		readonly next: NextStep = '',
 	) {
 		super(message);
 		this.name = 'HttpError';
@@ -298,7 +304,9 @@ export class HttpError extends Error {
 async function failure(path: string, res: Response): Promise<HttpError> {
 	const html = (res.headers.get('Content-Type') ?? '').includes('text/html');
 	const text = html ? '' : serverReason(await res.text());
-	return new HttpError(text || `${res.status} ${res.statusText}`.trim(), res.status, path);
+	const named = res.headers.get('Dotvirt-Next') as NextStep | null;
+	const next = named && NEXT_STEPS.includes(named) ? named : '';
+	return new HttpError(text || `${res.status} ${res.statusText}`.trim(), res.status, path, next);
 }
 
 // The one signed-out sink: every 401 funnels through req(), so the page

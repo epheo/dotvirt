@@ -6,6 +6,7 @@
 package main
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"log"
@@ -230,17 +231,20 @@ func run() error {
 	}
 
 	// Delegated pull requests: each user's own forge account, connected once
-	// through the forge's OAuth2 provider. Anything missing keeps every forge
-	// action dotvirt's, said once here rather than on every user's connect.
+	// through the forge's OAuth2 provider, writes their changes. A setting
+	// missing leaves no user a way to connect: their writes to project repos
+	// are then refused, never made with dotvirt's account, which is said once
+	// here and in every refusal.
 	var delegated *auth.Forge
+	var delegation changeset.Delegation
 	if cfg.ForgeDelegated {
 		switch {
 		case cfg.PublicURL == "":
-			log.Printf("forge: -forge-delegated set but -public-url empty; delegation off")
+			delegation.Off = "the console has no public URL for the forge to send users back to: set spec.ingress.host, or wait for the router to assign the Route's host (-public-url)"
 		case cfg.ForgeDelegatedURL == "":
-			log.Printf("forge: -forge-delegated set but -forge-delegated-url empty; delegation off")
+			delegation.Off = "no forge URL to send users' tokens to: set spec.forge.url (-forge-delegated-url)"
 		case cfg.ForgeClientID == "" || cfg.ForgeClientSecret == "" || cfg.ForgeAuthorizeURL == "":
-			log.Printf("forge: -forge-delegated needs -forge-client-id, -forge-client-secret and -forge-authorize-url; delegation off")
+			delegation.Off = "spec.forge.userAuth is incomplete (-forge-client-id, -forge-client-secret, -forge-authorize-url)"
 		default:
 			tokenURL := cfg.ForgeTokenURL
 			if tokenURL == "" {
@@ -256,6 +260,14 @@ func run() error {
 				CAFile:       cfg.ForgeCA,
 				InsecureTLS:  cfg.InsecureTLS,
 			}, authenticator)
+			delegation.Accounts = delegated
+			// Pages link where dotvirt's own links do.
+			delegation.Forge = forge.NewFactory(cfg.ForgeDelegatedURL, forge.StaticToken(""), cfg.InsecureTLS, cfg.ForgeCA).
+				WithWebURL(cmp.Or(cfg.ForgeWebURL, cfg.ForgeURL))
+		}
+		delegation.PlatformRepo = cfg.PlatformRepo
+		if delegation.Off != "" {
+			log.Printf("forge: -forge-delegated: %s; no user can connect a forge account, and their writes to project repos are refused", delegation.Off)
 		}
 	}
 
@@ -269,6 +281,9 @@ func run() error {
 		liveVMs{clusterSnapshot}, pruneSource, cfg.BaseBranch, cfg.ProposedBranch).WithSyncNamespace(cfg.ArgoNamespace).
 		WithTenantKinds(cfg.TenantKinds).WithUsersOpeningPRs(cfg.UsersOpenPRs).WithPublishing(publishing).
 		WithProductName(cfg.ProductName)
+	if cfg.ForgeDelegated {
+		coordinator.WithDelegation(delegation)
+	}
 
 	metricsClient, err := metrics.New(cfg.MetricsURL, cfg.MetricsTenancyURL, cfg.MetricsCA, cfg.InsecureTLS)
 	if err != nil {

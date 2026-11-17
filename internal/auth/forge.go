@@ -21,6 +21,8 @@ import (
 	"time"
 
 	"golang.org/x/oauth2"
+
+	"github.com/epheo/dotvirt/pkg/forge"
 )
 
 // ForgeConfig is the OAuth2 application dotvirt is registered as at the forge.
@@ -75,6 +77,7 @@ const reachTTL = 30 * time.Second
 // a's sign-in answers say that pull requests are delegated.
 func NewForge(cfg ForgeConfig, a *Authenticator) *Forge {
 	f := &Forge{cfg: cfg, sealer: a.sealer, client: tlsClient("forge", cfg.CAFile, cfg.InsecureTLS), store: newForgeSessions()}
+	f.client.CheckRedirect = forge.SameOrigin
 	f.store.renew = f.renew
 	a.forgeDelegated = true
 	return f
@@ -373,6 +376,15 @@ func (f *Forge) Status(ctx context.Context, id Identity) ForgeStatus {
 func (f *Forge) Disconnect(id Identity) {
 	if key, ok := forgeKey(id); ok {
 		f.store.disconnect(key)
+	}
+}
+
+// Rejected drops id's forge connection when it still holds token, which the
+// forge refused: the user's next write offers the connect, which the forge
+// answers at once while it holds their grant.
+func (f *Forge) Rejected(id Identity, token string) {
+	if key, ok := forgeKey(id); ok {
+		f.store.reject(key, token)
 	}
 }
 

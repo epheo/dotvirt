@@ -1154,11 +1154,19 @@ A pull request still open on the old branch is no longer updated by the console:
 
 `spec.forge.pullRequests: Delegated` acts with the requester's own forge account.
 It suits a forge whose users sign in through the same identity provider as the console.
-This build sets up the connection only: dotvirt still pushes and opens pull requests with its own account until the write path ships.
+
+- Each user's proposals and reverts on project repos run as their forge account: it clones, pushes the branch, and opens, edits, reopens or closes the pull request. The user authors and commits each commit.
+- Users need write on their project's repo in the forge, beside their Kubernetes rights. Without it the console refuses the write, names the repo and the account to grant, and links the repo; nothing is pushed.
+- Without a connection, or with a token the forge no longer takes, the console refuses the write and offers "Connect git account": one click, answered at once while the user's grant stands, back on the same page. The draft is kept.
+- No write to a project repo falls back to dotvirt's account. Without `userAuth`, `url` or a console host (`spec.ingress.host`, or on OpenShift the host the router assigns), no one can connect, and every such write is refused with what is missing.
+- The platform repo stays dotvirt's account's: it opens a customer's platform pull request once their Kubernetes rights allow the change, naming them in the branch, the commit author and the PR body. Staff review and merge it.
+- dotvirt's account keeps the work no user asked for: creating repos, reading and polling them, webhooks, ArgoCD's credentials and the starter-template offer.
+- Each write asks the forge once more than the default mode: whether the account may push to the repo.
 
 - Register dotvirt at the forge as an OAuth2 application: a confidential client, with the redirect URI `https://<console host>/api/forge/callback`.
 - Put its client secret in a Secret in dotvirt's namespace, and set `spec.forge.userAuth`: `clientID`, `clientSecret` (that Secret and key), and `authorizeURL`, the forge's `/login/oauth/authorize` as users' browsers reach it.
 - Set `spec.forge.url`: users' tokens go only to the forge the spec names, never to the url of the forge credential Secret. With a managed forge this also pins the managed forge's host.
+- dotvirt follows no forge API redirect to another scheme, host or port, in any mode, but one: `http://` on port 80 upgraded to `https://` on 443 of the same host. Give the forge's final address otherwise.
 - `tokenURL` defaults to `spec.forge.url` plus `/login/oauth/access_token`; set it when dotvirt reaches the token endpoint at another address.
 - The kubelet reads the client secret for the console's pod: the operator never does, so the Secret needs no grant. Restart the console after a rotation.
 - Users must be able to sign in to the forge at `authorizeURL`; the rest of the forge may stay private.

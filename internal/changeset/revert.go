@@ -48,6 +48,10 @@ func (c *Coordinator) Revert(id auth.Identity, proj project.ProjectInfo, hash st
 	if err := c.authorize(id, need); err != nil {
 		return model.ProposeResult{}, err
 	}
+	h, err := c.hand(id, proj, write)
+	if err != nil {
+		return model.ProposeResult{}, err
+	}
 	c.nameByPR(&d.Commit, proj)
 
 	short := shortCommit(hash)
@@ -60,7 +64,7 @@ func (c *Coordinator) Revert(id auth.Identity, proj project.ProjectInfo, hash st
 	view.Warning, _ = c.revertState(read, d.Files)
 	body := prBody(view, fmt.Sprintf("Reverts commit %s, %q.", short, d.Commit.Title), id.Username, c.productName())
 
-	fc := c.forgeFor(proj.Repo)
+	fc := h.fc
 	branch := c.revertBranch(id.Username, proj.Name, hash)
 	var prior forge.PR
 	var found bool
@@ -76,8 +80,10 @@ func (c *Coordinator) Revert(id auth.Identity, proj project.ProjectInfo, hash st
 			prior, found = pr, ok
 		}
 	}
-	by := git.Author{Name: id.Username, Email: authorEmail(id.Username)}
-	out, _, _, err := c.publish(fc, write, branch, title, title, body, items, by, prior, found, nil)
+	out, _, _, err := c.publish(h, branch, title, title, body, items, prior, found, nil)
+	if refused := h.refusal(err); refused != nil {
+		return model.ProposeResult{}, refused
+	}
 	if errors.Is(err, git.ErrNoChanges) {
 		return model.ProposeResult{}, fmt.Errorf("%w: %s already matches the state before this change", model.ErrInvalid, c.baseBranch)
 	}

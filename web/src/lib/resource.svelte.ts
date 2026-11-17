@@ -1,5 +1,5 @@
 import { untrack } from 'svelte';
-import { Unauthorized } from './api';
+import { HttpError, Unauthorized, type NextStep } from './api';
 import { friendlyError } from './format';
 import { pollWhileVisible } from './poll';
 
@@ -99,6 +99,8 @@ export function resource<T>(
 export interface Action {
 	readonly busy: boolean;
 	readonly error: string;
+	// The one-click way forward the last failure named, '' for none.
+	readonly next: NextStep;
 	clear(): void;
 	run(fn: () => Promise<unknown>): Promise<boolean>;
 }
@@ -106,6 +108,7 @@ export interface Action {
 export function action(opts: { toast?: (message: string) => void } = {}): Action {
 	let busy = $state(false);
 	let error = $state('');
+	let next = $state<NextStep>('');
 	return {
 		get busy() {
 			return busy;
@@ -113,12 +116,17 @@ export function action(opts: { toast?: (message: string) => void } = {}): Action
 		get error() {
 			return error;
 		},
+		get next() {
+			return next;
+		},
 		clear() {
 			error = '';
+			next = '';
 		},
 		async run(fn) {
 			busy = true;
 			error = '';
+			next = '';
 			try {
 				await fn();
 				return true;
@@ -126,6 +134,7 @@ export function action(opts: { toast?: (message: string) => void } = {}): Action
 				if (e instanceof Unauthorized) return false;
 				if (opts.toast) opts.toast(friendlyError(e));
 				else error = friendlyError(e);
+				next = e instanceof HttpError ? e.next : '';
 				return false;
 			} finally {
 				busy = false;

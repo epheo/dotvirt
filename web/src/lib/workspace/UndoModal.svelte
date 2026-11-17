@@ -6,6 +6,7 @@
 	import Button from '#lib/components/Button.svelte';
 	import ErrorNote from '#lib/components/ErrorNote.svelte';
 	import Modal from '#lib/components/Modal.svelte';
+	import NextStepButton from '#lib/components/NextStepButton.svelte';
 	import Note from '#lib/components/Note.svelte';
 
 	// Undo asks once, in the app's confirm dialog, then opens the forward-commit
@@ -55,6 +56,7 @@
 			</Note>
 		{/if}
 		<ErrorNote error={op.error} />
+		<NextStepButton next={op.next} {project} />
 	</div>
 	{#snippet footer()}
 		<Button variant="secondary" class="ml-auto" onclick={onclose}>Cancel</Button>

@@ -1,10 +1,11 @@
 import type { Page } from '@playwright/test';
-import { expect, login, setScenario, test } from './fx';
+import { expect, login, openTray, openVM, setScenario, stageChange, test } from './fx';
 
 // Pull requests through each user's own forge account: the first sign-in of a
 // console session connects it on its own, once; an abandoned connect leaves
 // the console usable and is not restarted that session; the user menu
-// connects and disconnects it.
+// connects and disconnects it. A write refused for want of a connection, or
+// of write on the repo, says why and offers the one click forward.
 
 const signedIn = (page: Page) =>
 	expect(page.locator('aside').getByRole('link', { name: 'Compute' })).toBeVisible();
@@ -151,4 +152,90 @@ test('without delegation the console shows no git account and starts no connect'
 	expect(await connects(page)).toBe(0);
 	// A default install reads nothing of the forge connection.
 	expect(reads).toEqual([]);
+});
+
+// stageMemory stages a memory change on web-1 (team-web).
+async function stageMemory(page: Page) {
+	await openVM(page, 'web-1');
+	await page.getByRole('button', { name: /Edit Settings/ }).click();
+	await page.getByRole('dialog').getByLabel('Memory').fill('8Gi');
+	await stageChange(page);
+}
+
+// disconnected signs in on a delegated install, lets the first connect
+// complete, then drops it from the user menu: no connect restarts on its own.
+async function disconnected(page: Page) {
+	await setScenario(page, 'delegated');
+	await signInAt(page, '/compute');
+	await expect.poll(() => connects(page)).toBe(1);
+	await signedIn(page);
+	await userMenu(page).click();
+	await page.getByRole('button', { name: 'Disconnect git account' }).click();
+}
+
+test('proposing without a connection says why and connects in one click, back on the page', async ({
+	page,
+}) => {
+	await disconnected(page);
+	await stageMemory(page);
+	const at = new URL(page.url()).pathname;
+
+	await (await openTray(page)).getByRole('button', { name: 'Review and propose' }).click();
+	const sheet = page.getByRole('dialog');
+	await sheet.getByRole('button', { name: 'Open pull request' }).click();
+	const refused = sheet.getByRole('alert');
+	await expect(refused).toContainText('Not proposed yet.');
+	await expect(refused).toContainText('your git account is not connected to this console session');
+	// Said once, where the button is: the refusal starts no connect itself.
+	await page.waitForTimeout(500);
+	expect(await connects(page)).toBe(1);
+
+	await refused.getByRole('button', { name: 'Connect git account' }).click();
+	await expect.poll(() => connects(page)).toBe(2);
+	await expect(page).toHaveURL(new RegExp(`${at}$`));
+	await signedIn(page);
+	// The draft waited; now it goes to the forge as the user.
+	await (await openTray(page)).getByRole('button', { name: 'Review and propose' }).click();
+	await page.getByRole('dialog').getByRole('button', { name: 'Open pull request' }).click();
+	await expect(page.getByText(/PR #77 opened in team-web/)).toBeVisible();
+});
+
+test('an undo without a connection offers the connect in its dialog', async ({ page }) => {
+	await disconnected(page);
+	await page.goto('/changes');
+	const main = page.locator('main');
+	await main.getByRole('link', { name: /^History/ }).click();
+	await main.getByRole('button', { name: /^team-web$/ }).click();
+	await main.getByRole('button', { name: /web-2: add data disk/ }).click();
+	await main.getByRole('button', { name: 'Undo this change' }).click();
+	const dialog = page.getByRole('dialog', { name: /Undo this change/ });
+	await dialog.getByRole('button', { name: 'Open pull request' }).click();
+	await expect(dialog.getByText(/your git account is not connected/)).toBeVisible();
+	await dialog.getByRole('button', { name: 'Connect git account' }).click();
+	await expect.poll(() => connects(page)).toBe(2);
+	await signedIn(page);
+});
+
+test('a user without write on the repo is told what to ask for, and where', async ({ page }) => {
+	await setScenario(page, 'delegatednowrite');
+	await signInAt(page, '/compute');
+	await expect.poll(() => connects(page)).toBe(1);
+	await signedIn(page);
+	await stageMemory(page);
+
+	await (await openTray(page)).getByRole('link', { name: 'Open in Changes' }).click();
+	const main = page.locator('main');
+	await main.getByRole('button', { name: 'Propose pull request' }).click();
+	await expect(
+		main.getByText(
+			/ask the owners of dotvirt\/team-web in the forge to give admin-forge write access/,
+		),
+	).toBeVisible();
+	await expect(main.getByRole('link', { name: 'Open the repo in the forge' })).toHaveAttribute(
+		'href',
+		'https://forge.example/dotvirt/team-web.git',
+	);
+	// Connecting again would change nothing: no connect is offered.
+	await expect(main.getByRole('button', { name: 'Connect git account' })).toHaveCount(0);
+	expect(await connects(page)).toBe(1);
 });

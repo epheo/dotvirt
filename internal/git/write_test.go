@@ -1,15 +1,19 @@
 package git
 
 import (
-	"net/http/cgi"
+	"net/http"
 	"net/http/httptest"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
+	"sync"
 	"testing"
 
+	"github.com/epheo/dotvirt/internal/git/gittest"
 	"github.com/epheo/dotvirt/internal/model"
+	"github.com/epheo/dotvirt/pkg/forge"
 )
 
 // seedMultiRepo creates a bare repo with a README + two VM manifests under
@@ -121,21 +125,9 @@ func TestShallowWritesKeepRemoteConnected(t *testing.T) {
 // serveHTTP serves bare through git http-backend with pushes enabled.
 func serveHTTP(t *testing.T, bare string) string {
 	t.Helper()
-	execPath, err := exec.Command("git", "--exec-path").Output()
+	h, err := gittest.Handler(filepath.Dir(bare))
 	if err != nil {
-		t.Skipf("git --exec-path: %v", err)
-	}
-	backend := filepath.Join(strings.TrimSpace(string(execPath)), "git-http-backend")
-	if _, err := os.Stat(backend); err != nil {
-		t.Skipf("no git-http-backend: %v", err)
-	}
-	h := &cgi.Handler{
-		Path: backend,
-		Env: []string{
-			"GIT_PROJECT_ROOT=" + filepath.Dir(bare),
-			"GIT_HTTP_EXPORT_ALL=1",
-			"GIT_CONFIG_COUNT=1", "GIT_CONFIG_KEY_0=http.receivepack", "GIT_CONFIG_VALUE_0=true",
-		},
+		t.Skip(err)
 	}
 	srv := httptest.NewServer(h)
 	t.Cleanup(srv.Close)
@@ -173,5 +165,67 @@ func testShallowWrites(t *testing.T, bare, url string) {
 	}
 	if n := git("rev-list", "--count", "fresh"); n != "2" {
 		t.Errorf("fresh history = %s commits, want 2 (forked from main)", n)
+	}
+}
+
+// A user's view clones, lists and pushes at its own address with its own
+// credentials alone, and commits as the user; the view it came from still
+// writes as dotvirt's account, committed by dotvirt.
+func TestAsWritesAsTheUser(t *testing.T) {
+	bare := seedMultiRepo(t)
+	h, err := gittest.Handler(filepath.Dir(bare))
+	if err != nil {
+		t.Skip(err)
+	}
+	var mu sync.Mutex
+	sent := map[string][]string{} // credentials -> requests
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		user, pass, _ := r.BasicAuth()
+		mu.Lock()
+		sent[user+":"+pass] = append(sent[user+":"+pass], r.Method+" "+r.URL.RequestURI())
+		mu.Unlock()
+		h.ServeHTTP(w, r)
+	}))
+	defer srv.Close()
+	url := srv.URL + "/" + filepath.Base(bare)
+	bot := OpenWrite(url, "bot", forge.StaticToken("bot-token"), true)
+	alice := bot.As(url, "alice-forge", "alice-token")
+
+	items := []ChangesetItem{{Path: "tenant-a/d.yaml", NewContent: []byte("kind: ConfigMap\n")}}
+	by := Author{Name: "alice", Email: "alice@dotvirt.noreply", Commits: true}
+	res, err := alice.ProposeChangeset("main", "proposed", "add d", items, by, PushPlan{})
+	if err != nil {
+		t.Fatalf("ProposeChangeset as alice: %v", err)
+	}
+	if head, err := alice.RemoteHead("proposed"); err != nil || head != res.Hash {
+		t.Fatalf("RemoteHead as alice = %q, %v; want %q", head, err, res.Hash)
+	}
+	mu.Lock()
+	if len(sent) != 1 || !slices.ContainsFunc(sent["alice-forge:alice-token"], func(s string) bool { return strings.Contains(s, "git-receive-pack") }) {
+		t.Fatalf("alice's write sent %v, want her credentials alone, her push included", sent)
+	}
+	clear(sent)
+	mu.Unlock()
+	log := func(branch string) string {
+		out, err := exec.Command("git", "-C", bare, "log", "-1", "--format=%an <%ae> / %cn <%ce>", branch).CombinedOutput()
+		if err != nil {
+			t.Fatalf("git log: %v\n%s", err, out)
+		}
+		return strings.TrimSpace(string(out))
+	}
+	if got, want := log("proposed"), "alice <alice@dotvirt.noreply> / alice <alice@dotvirt.noreply>"; got != want {
+		t.Errorf("alice's commit = %q, want %q", got, want)
+	}
+
+	if _, err := bot.CommitChangeset("main", "bot", "add d", items, Author{Name: "alice", Email: "alice@dotvirt.noreply"}); err != nil {
+		t.Fatalf("CommitChangeset as dotvirt: %v", err)
+	}
+	mu.Lock()
+	if len(sent) != 1 || len(sent["bot:bot-token"]) == 0 {
+		t.Errorf("dotvirt's write sent %v, want its own credentials alone", sent)
+	}
+	mu.Unlock()
+	if got, want := log("bot"), "alice <alice@dotvirt.noreply> / dotvirt <dotvirt@localhost>"; got != want {
+		t.Errorf("dotvirt's commit = %q, want %q", got, want)
 	}
 }

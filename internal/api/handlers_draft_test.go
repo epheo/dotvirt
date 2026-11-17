@@ -32,9 +32,13 @@ type stagingDraft struct {
 	Draft
 	proposed []model.ProposeRequest
 	unstaged []string
+	refuse   error // answers every propose
 }
 
 func (d *stagingDraft) Propose(id auth.Identity, proj project.ProjectInfo, req model.ProposeRequest) (model.ProposeResult, error) {
+	if d.refuse != nil {
+		return model.ProposeResult{}, d.refuse
+	}
 	if req.Title == "" {
 		return model.ProposeResult{}, fmt.Errorf("%w: title is required", model.ErrInvalid)
 	}
