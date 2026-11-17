@@ -830,6 +830,7 @@ The series read: KubeVirt's `kubevirt_vmi_*` (labels `namespace`, `name`, `node`
   A link whose URL has the console's own origin is shown as the current item, marked and not a link.
 - `configMap`: a ConfigMap in dotvirt's namespace holding:
   - `theme.css`, loaded after the console's own stylesheet, so it may override its tokens (`--color-accent` with its hover fill `--color-accent-deep` and their ink `--color-accent-on`; the status fills `--color-ok`, `--color-warn`, `--color-danger` with their ink `--color-ok-on`, `--color-warn-on`, `--color-danger-on`; surfaces, ink, `--font-sans`); dark-theme values go under `:root[data-theme='dark']`, where the console declares its own;
+    The console pairs each of these fills with its own ink (white, or dark on amber and on the dark theme's status fills) unless a theme says otherwise; a theme that changes a fill sets its ink with it (and, for the accent, `--color-accent-deep` too), each pair at 4.5:1 or more.
   - `logo.svg` or `logo.png`, shown beside the product name;
   - the links' icons.
 
