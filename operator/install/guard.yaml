@@ -67,10 +67,15 @@
 #   # The OIDC issuer and client secret an admin chose, if any:
 #   export OIDC_SECRET="$(spec auth.oidc.clientSecret.name)" OIDC_SECRET_KEY="$(spec auth.oidc.clientSecret.key)"
 #   export OIDC_ISSUER="$(spec auth.oidc.issuerURL)"
+#   # Delegated pull requests: the forge application an admin registered.
+#   export FORGE_DELEGATED="$( [ "$(spec forge.pullRequests)" = Delegated ] && echo true || echo false )"
+#   export FORGE_URL="$(spec forge.url)" FORGE_CLIENT_ID="$(spec forge.userAuth.clientID)"
+#   export FORGE_AUTHORIZE_URL="$(spec forge.userAuth.authorizeURL)" FORGE_TOKEN_URL="$(spec forge.userAuth.tokenURL)"
+#   export FORGE_CLIENT_SECRET="$(spec forge.userAuth.clientSecret.name)" FORGE_CLIENT_SECRET_KEY="$(spec forge.userAuth.clientSecret.key)"
 #
 #   # Every value lands inside a quoted string; one that could end it is refused,
 #   # never escaped:
-#   for v in ARGO_CONTROLLER ARGO_NAMESPACE BRANDING_CONFIGMAP CONSOLE_HOST FORGE_INSECURE_TLS FORGE_MANAGED FORGE_SECRET INSTALL_NAMESPACE METRICS_CA METRICS_CA_CONFIGMAP METRICS_TENANCY_URL METRICS_URL OIDC_ISSUER OIDC_SECRET OIDC_SECRET_KEY OPERATOR_USERNAME RELATED_IMAGE_DOTVIRT RELATED_IMAGE_FORGEJO SPEC_IMAGE; do
+#   for v in ARGO_CONTROLLER ARGO_NAMESPACE BRANDING_CONFIGMAP CONSOLE_HOST FORGE_AUTHORIZE_URL FORGE_CLIENT_ID FORGE_CLIENT_SECRET FORGE_CLIENT_SECRET_KEY FORGE_DELEGATED FORGE_INSECURE_TLS FORGE_MANAGED FORGE_SECRET FORGE_TOKEN_URL FORGE_URL INSTALL_NAMESPACE METRICS_CA METRICS_CA_CONFIGMAP METRICS_TENANCY_URL METRICS_URL OIDC_ISSUER OIDC_SECRET OIDC_SECRET_KEY OPERATOR_USERNAME RELATED_IMAGE_DOTVIRT RELATED_IMAGE_FORGEJO SPEC_IMAGE; do
 #     case "$(printenv "$v")" in *'"'*|*\\*) echo "$v holds a quote or a backslash" >&2; exit 1;; esac
 #   done
 #
@@ -86,7 +91,10 @@
 #     -e "s|\${BRANDING_CONFIGMAP}|$BRANDING_CONFIGMAP|g" -e "s|\${METRICS_CA_CONFIGMAP}|$METRICS_CA_CONFIGMAP|g" \
 #     -e "s|\${FORGE_SECRET}|$FORGE_SECRET|g" -e "s|\${FORGE_MANAGED}|$FORGE_MANAGED|g" \
 #     -e "s|\${OIDC_SECRET}|$OIDC_SECRET|g" -e "s|\${OIDC_SECRET_KEY}|$OIDC_SECRET_KEY|g" \
-#     -e "s|\${OIDC_ISSUER}|$OIDC_ISSUER|g" guard.yaml | kubectl apply --server-side --field-manager=dotvirt -f -
+#     -e "s|\${OIDC_ISSUER}|$OIDC_ISSUER|g" -e "s|\${FORGE_DELEGATED}|$FORGE_DELEGATED|g" \
+#     -e "s|\${FORGE_URL}|$FORGE_URL|g" -e "s|\${FORGE_CLIENT_ID}|$FORGE_CLIENT_ID|g" \
+#     -e "s|\${FORGE_AUTHORIZE_URL}|$FORGE_AUTHORIZE_URL|g" -e "s|\${FORGE_TOKEN_URL}|$FORGE_TOKEN_URL|g" \
+#     -e "s|\${FORGE_CLIENT_SECRET}|$FORGE_CLIENT_SECRET|g" -e "s|\${FORGE_CLIENT_SECRET_KEY}|$FORGE_CLIENT_SECRET_KEY|g" guard.yaml | kubectl apply --server-side --field-manager=dotvirt -f -
 #
 # Every object carries the label app.kubernetes.io/part-of=dotvirt-operator-guard.
 #
@@ -255,17 +263,49 @@ spec:
       || c.args.all(a, !(a == "-oidc-issuer" || a == "--oidc-issuer" || a.startsWith("-oidc-issuer=")
       || a.startsWith("--oidc-issuer=")) || a in ["-oidc-issuer=${OIDC_ISSUER}", "--oidc-issuer=${OIDC_ISSUER}"]))
       && (!has(c.env) || c.env.all(e, e.name != "DOTVIRT_OIDC_ISSUER" || (!has(e.valueFrom)
-      && (has(e.value) ? e.value : "") in ["${OIDC_ISSUER}"]))) && (${FORGE_INSECURE_TLS}
-      || ((!has(c.args) || c.args.all(a, !(a == "-insecure-tls" || a == "--insecure-tls"
-      || a.startsWith("-insecure-tls=") || a.startsWith("--insecure-tls=")))) && (!has(c.env)
-      || c.env.all(e, e.name != "DOTVIRT_INSECURE_TLS")))) && (!has(c.args) || c.args.all(a,
-      !(a == "-kubeconfig" || a == "--kubeconfig" || a.startsWith("-kubeconfig=")
-      || a.startsWith("--kubeconfig=")))) && (!has(c.env) || c.env.all(e, e.name !=
-      "KUBECONFIG")) && (!has(c.args) || c.args.all(a, !(a == "-static-dir" || a ==
-      "--static-dir" || a.startsWith("-static-dir=") || a.startsWith("--static-dir="))))
-      && (!has(c.env) || c.env.all(e, e.name != "DOTVIRT_STATIC_DIR")) && (!has(c.env)
-      || c.env.all(e, !(e.name in ["HTTPS_PROXY", "https_proxy", "HTTP_PROXY", "http_proxy",
-      "NO_PROXY", "no_proxy", "ALL_PROXY", "all_proxy", "SSL_CERT_FILE", "SSL_CERT_DIR"]))))'
+      && (has(e.value) ? e.value : "") in ["${OIDC_ISSUER}"]))) && (${FORGE_DELEGATED}
+      || ((!has(c.args) || c.args.all(a, !(a == "-forge-delegated" || a == "--forge-delegated"
+      || a.startsWith("-forge-delegated=") || a.startsWith("--forge-delegated="))))
+      && (!has(c.env) || c.env.all(e, e.name != "DOTVIRT_FORGE_DELEGATED")))) && (!has(c.args)
+      || c.args.all(a, !(a == "-forge-delegated-url" || a == "--forge-delegated-url"
+      || a.startsWith("-forge-delegated-url=") || a.startsWith("--forge-delegated-url="))
+      || a in ["-forge-delegated-url=${FORGE_URL}", "--forge-delegated-url=${FORGE_URL}"]))
+      && (!has(c.env) || c.env.all(e, e.name != "DOTVIRT_FORGE_DELEGATED_URL" || (!has(e.valueFrom)
+      && (has(e.value) ? e.value : "") in ["${FORGE_URL}"]))) && (!has(c.args) ||
+      c.args.all(a, !(a == "-forge-client-id" || a == "--forge-client-id" || a.startsWith("-forge-client-id=")
+      || a.startsWith("--forge-client-id=")) || a in ["-forge-client-id=${FORGE_CLIENT_ID}",
+      "--forge-client-id=${FORGE_CLIENT_ID}"])) && (!has(c.env) || c.env.all(e, e.name
+      != "DOTVIRT_FORGE_CLIENT_ID" || (!has(e.valueFrom) && (has(e.value) ? e.value
+      : "") in ["${FORGE_CLIENT_ID}"]))) && (!has(c.args) || c.args.all(a, !(a ==
+      "-forge-authorize-url" || a == "--forge-authorize-url" || a.startsWith("-forge-authorize-url=")
+      || a.startsWith("--forge-authorize-url=")) || a in ["-forge-authorize-url=${FORGE_AUTHORIZE_URL}",
+      "--forge-authorize-url=${FORGE_AUTHORIZE_URL}"])) && (!has(c.env) || c.env.all(e,
+      e.name != "DOTVIRT_FORGE_AUTHORIZE_URL" || (!has(e.valueFrom) && (has(e.value)
+      ? e.value : "") in ["${FORGE_AUTHORIZE_URL}"]))) && (!has(c.args) || c.args.all(a,
+      !(a == "-forge-token-url" || a == "--forge-token-url" || a.startsWith("-forge-token-url=")
+      || a.startsWith("--forge-token-url=")) || a in ["-forge-token-url=${FORGE_TOKEN_URL}",
+      "--forge-token-url=${FORGE_TOKEN_URL}"])) && (!has(c.env) || c.env.all(e, e.name
+      != "DOTVIRT_FORGE_TOKEN_URL" || (!has(e.valueFrom) && (has(e.value) ? e.value
+      : "") in ["${FORGE_TOKEN_URL}"]))) && (!has(c.args) || c.args.all(a, !(a ==
+      "-forge-ca" || a == "--forge-ca" || a.startsWith("-forge-ca=") || a.startsWith("--forge-ca="))
+      || a in ["-forge-ca=", "--forge-ca=", "-forge-ca=/var/run/dotvirt/tls-ingress/ca-bundle.crt",
+      "--forge-ca=/var/run/dotvirt/tls-ingress/ca-bundle.crt"])) && (!has(c.env) ||
+      c.env.all(e, e.name != "DOTVIRT_FORGE_CA" || (!has(e.valueFrom) && (has(e.value)
+      ? e.value : "") in ["", "/var/run/dotvirt/tls-ingress/ca-bundle.crt"]))) &&
+      (!has(c.args) || c.args.all(a, !(a == "-forge-client-secret" || a == "--forge-client-secret"
+      || a.startsWith("-forge-client-secret=") || a.startsWith("--forge-client-secret="))))
+      && (!has(c.env) || c.env.all(e, e.name != "DOTVIRT_FORGE_CLIENT_SECRET" || (has(e.valueFrom)
+      && has(e.valueFrom.secretKeyRef)))) && (${FORGE_INSECURE_TLS} || ((!has(c.args)
+      || c.args.all(a, !(a == "-insecure-tls" || a == "--insecure-tls" || a.startsWith("-insecure-tls=")
+      || a.startsWith("--insecure-tls=")))) && (!has(c.env) || c.env.all(e, e.name
+      != "DOTVIRT_INSECURE_TLS")))) && (!has(c.args) || c.args.all(a, !(a == "-kubeconfig"
+      || a == "--kubeconfig" || a.startsWith("-kubeconfig=") || a.startsWith("--kubeconfig="))))
+      && (!has(c.env) || c.env.all(e, e.name != "KUBECONFIG")) && (!has(c.args) ||
+      c.args.all(a, !(a == "-static-dir" || a == "--static-dir" || a.startsWith("-static-dir=")
+      || a.startsWith("--static-dir=")))) && (!has(c.env) || c.env.all(e, e.name !=
+      "DOTVIRT_STATIC_DIR")) && (!has(c.env) || c.env.all(e, !(e.name in ["HTTPS_PROXY",
+      "https_proxy", "HTTP_PROXY", "http_proxy", "NO_PROXY", "no_proxy", "ALL_PROXY",
+      "all_proxy", "SSL_CERT_FILE", "SSL_CERT_DIR"]))))'
     message: the operator sets none of the console's settings that send users' tokens
       or the console's pages elsewhere, but as an admin chose them (dotvirt operator
       guard)
@@ -342,7 +382,8 @@ spec:
       + "/" + e.valueFrom.secretKeyRef.key) in ["DOTVIRT_SESSION_SECRET/dotvirt-session/secret",
       "DOTVIRT_OAUTH_CLIENT_SECRET/dotvirt-oauth/clientSecret", "DOTVIRT_APPSET_PLUGIN_TOKEN/dotvirt-appset-plugin/token",
       "DOTVIRT_WEBHOOK_SECRET/dotvirt-webhook/secret", "DOTVIRT_GIT_USERNAME/${FORGE_SECRET}/username",
-      "DOTVIRT_FORGE_URL/${FORGE_SECRET}/url", "DOTVIRT_OIDC_CLIENT_SECRET/${OIDC_SECRET}/${OIDC_SECRET_KEY}"])))
+      "DOTVIRT_FORGE_URL/${FORGE_SECRET}/url", "DOTVIRT_OIDC_CLIENT_SECRET/${OIDC_SECRET}/${OIDC_SECRET_KEY}",
+      "DOTVIRT_FORGE_CLIENT_SECRET/${FORGE_CLIENT_SECRET}/${FORGE_CLIENT_SECRET_KEY}"])))
     message: the operator gives the console only its own Secrets and the ones an admin
       chose, each under its rendered env name and key (dotvirt operator guard)
     reason: Forbidden

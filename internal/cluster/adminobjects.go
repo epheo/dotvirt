@@ -38,6 +38,11 @@ type InstallSpec struct {
 	// OIDCSecret and OIDCSecretKey are the OIDC client secret an admin chose,
 	// OIDCIssuer the issuer it is sent to.
 	OIDCSecret, OIDCSecretKey, OIDCIssuer string
+	// The forge application users connect their own forge accounts through
+	// (spec.forge.userAuth), when pull requests are Delegated.
+	ForgeDelegated                                            bool
+	ForgeURL, ForgeClientID, ForgeAuthorizeURL, ForgeTokenURL string
+	ForgeClientSecret, ForgeClientSecretKey                   string
 }
 
 // InstallIn reads, under THIS client's identity, the one install in
@@ -67,6 +72,14 @@ func (c *Client) InstallIn(ctx context.Context, namespace string) (InstallSpec, 
 	out.OIDCSecret, _, _ = unstructured.NestedString(o, "spec", "auth", "oidc", "clientSecret", "name")
 	out.OIDCSecretKey, _, _ = unstructured.NestedString(o, "spec", "auth", "oidc", "clientSecret", "key")
 	out.OIDCIssuer, _, _ = unstructured.NestedString(o, "spec", "auth", "oidc", "issuerURL")
+	pullRequests, _, _ := unstructured.NestedString(o, "spec", "forge", "pullRequests")
+	out.ForgeDelegated = pullRequests == "Delegated"
+	out.ForgeURL, _, _ = unstructured.NestedString(o, "spec", "forge", "url")
+	out.ForgeClientID, _, _ = unstructured.NestedString(o, "spec", "forge", "userAuth", "clientID")
+	out.ForgeAuthorizeURL, _, _ = unstructured.NestedString(o, "spec", "forge", "userAuth", "authorizeURL")
+	out.ForgeTokenURL, _, _ = unstructured.NestedString(o, "spec", "forge", "userAuth", "tokenURL")
+	out.ForgeClientSecret, _, _ = unstructured.NestedString(o, "spec", "forge", "userAuth", "clientSecret", "name")
+	out.ForgeClientSecretKey, _, _ = unstructured.NestedString(o, "spec", "forge", "userAuth", "clientSecret", "key")
 	return out, nil
 }
 

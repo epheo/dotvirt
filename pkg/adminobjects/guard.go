@@ -63,14 +63,14 @@ const PlatformSyncAccount = "dotvirt-platform-sync"
 // username condition runs first, so every other caller's write costs one
 // string comparison.
 func Guard(p Params) []Object {
-	return guard(p, strconv.FormatBool(p.InsecureTLS), strconv.FormatBool(p.ForgeManaged), p.Metrics)
+	return guard(p, strconv.FormatBool(p.InsecureTLS), strconv.FormatBool(p.ForgeManaged), strconv.FormatBool(p.ForgeDelegated), p.Metrics)
 }
 
 // guard renders with insecure, the CEL literal for p.InsecureTLS, which the
 // release template leaves a placeholder.
-func guard(p Params, insecure, managed string, metrics Metrics) []Object {
+func guard(p Params, insecure, managed, delegated string, metrics Metrics) []Object {
 	var secretEnv []string
-	for _, e := range ConsoleSecretEnv(p.ForgeSecret, p.OIDCSecret, p.OIDCSecretKey) {
+	for _, e := range ConsoleSecretEnv(p) {
 		secretEnv = append(secretEnv, e[0]+"/"+e[1]+"/"+e[2])
 	}
 	volumes, mounts := consoleVolumes(p)
@@ -123,7 +123,7 @@ func guard(p Params, insecure, managed string, metrics Metrics) []Object {
 			deny(`object.metadata.name != `+quote(ForgeDeployment)+` || !has(object.spec.template.metadata.labels) || `+
 				`!(`+quote(ConsoleSelectorKey)+` in object.spec.template.metadata.labels && object.spec.template.metadata.labels[`+quote(ConsoleSelectorKey)+`] == `+quote(ConsoleSelectorValue)+`)`,
 				"the operator gives the forge's pods none of the console's labels"),
-			deny(`object.metadata.name != `+quote(ConsoleDeployment)+` || `+pod+`.containers.all(c, `+consoleSettings(metrics, insecure, p.OIDCIssuer)+`)`,
+			deny(`object.metadata.name != `+quote(ConsoleDeployment)+` || `+pod+`.containers.all(c, `+consoleSettings(p, metrics, insecure, delegated)+`)`,
 				"the operator sets none of the console's settings that send users' tokens or the console's pages elsewhere, but as an admin chose them"),
 			// The console's apiserver endpoint and credentials are the in-cluster
 			// ones: no kubeconfig, no service address of its own, its token and CA
@@ -288,7 +288,7 @@ func flagForms(flag string) string {
 		` || a.startsWith(` + quote("-"+flag+"=") + `) || a.startsWith(` + quote("--"+flag+"=") + `))`
 }
 
-func consoleSettings(m Metrics, insecure, oidcIssuer string) string {
+func consoleSettings(p Params, m Metrics, insecure, delegated string) string {
 	forms := flagForms
 	never := func(flag, env string) string {
 		return `(!has(c.args) || c.args.all(a, !` + forms(flag) + `)) && (!has(c.env) || c.env.all(e, e.name != ` + quote(env) + `))`
@@ -310,7 +310,18 @@ func consoleSettings(m Metrics, insecure, oidcIssuer string) string {
 		pinned("ui-origin", "DOTVIRT_UI_ORIGIN", ""),
 		// The console sends the OIDC client secret an admin chose to the
 		// issuer's token endpoint at every sign-in.
-		pinned("oidc-issuer", "DOTVIRT_OIDC_ISSUER", oidcIssuer),
+		pinned("oidc-issuer", "DOTVIRT_OIDC_ISSUER", p.OIDCIssuer),
+		// Delegated: each user's forge token goes to the delegated URL (the
+		// API) and the token URL; the forge application's client secret to
+		// the token URL, and only from the admin's Secret (ConsoleSecretEnv).
+		`(` + delegated + ` || (` + never("forge-delegated", "DOTVIRT_FORGE_DELEGATED") + `))`,
+		pinned("forge-delegated-url", "DOTVIRT_FORGE_DELEGATED_URL", p.ForgeURL),
+		pinned("forge-client-id", "DOTVIRT_FORGE_CLIENT_ID", p.ForgeClientID),
+		pinned("forge-authorize-url", "DOTVIRT_FORGE_AUTHORIZE_URL", p.ForgeAuthorizeURL),
+		pinned("forge-token-url", "DOTVIRT_FORGE_TOKEN_URL", p.ForgeTokenURL),
+		pinned("forge-ca", "DOTVIRT_FORGE_CA", "", IngressCAPath),
+		`(!has(c.args) || c.args.all(a, !` + forms("forge-client-secret") + `)) && ` +
+			`(!has(c.env) || c.env.all(e, e.name != "DOTVIRT_FORGE_CLIENT_SECRET" || (has(e.valueFrom) && has(e.valueFrom.secretKeyRef))))`,
 		`(` + insecure + ` || (` + never("insecure-tls", "DOTVIRT_INSECURE_TLS") + `))`,
 		never("kubeconfig", "KUBECONFIG"),
 		never("static-dir", "DOTVIRT_STATIC_DIR"),

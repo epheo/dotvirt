@@ -26,6 +26,13 @@ var TemplateParams = Params{
 	OIDCSecret:         "${OIDC_SECRET}",
 	OIDCSecretKey:      "${OIDC_SECRET_KEY}",
 	OIDCIssuer:         "${OIDC_ISSUER}",
+
+	ForgeURL:             "${FORGE_URL}",
+	ForgeClientID:        "${FORGE_CLIENT_ID}",
+	ForgeAuthorizeURL:    "${FORGE_AUTHORIZE_URL}",
+	ForgeTokenURL:        "${FORGE_TOKEN_URL}",
+	ForgeClientSecret:    "${FORGE_CLIENT_SECRET}",
+	ForgeClientSecretKey: "${FORGE_CLIENT_SECRET_KEY}",
 }
 
 // templateHeader says how to fill and apply the template, each value derived
@@ -99,6 +106,11 @@ var templateHeader = `# The dotvirt operator guard: admission policies bounding 
 #   # The OIDC issuer and client secret an admin chose, if any:
 #   export OIDC_SECRET="$(spec auth.oidc.clientSecret.name)" OIDC_SECRET_KEY="$(spec auth.oidc.clientSecret.key)"
 #   export OIDC_ISSUER="$(spec auth.oidc.issuerURL)"
+#   # Delegated pull requests: the forge application an admin registered.
+#   export FORGE_DELEGATED="$( [ "$(spec forge.pullRequests)" = Delegated ] && echo true || echo false )"
+#   export FORGE_URL="$(spec forge.url)" FORGE_CLIENT_ID="$(spec forge.userAuth.clientID)"
+#   export FORGE_AUTHORIZE_URL="$(spec forge.userAuth.authorizeURL)" FORGE_TOKEN_URL="$(spec forge.userAuth.tokenURL)"
+#   export FORGE_CLIENT_SECRET="$(spec forge.userAuth.clientSecret.name)" FORGE_CLIENT_SECRET_KEY="$(spec forge.userAuth.clientSecret.key)"
 #
 #   # Every value lands inside a quoted string; one that could end it is refused,
 #   # never escaped:
@@ -118,7 +130,10 @@ var templateHeader = `# The dotvirt operator guard: admission policies bounding 
 #     -e "s|\${BRANDING_CONFIGMAP}|$BRANDING_CONFIGMAP|g" -e "s|\${METRICS_CA_CONFIGMAP}|$METRICS_CA_CONFIGMAP|g" \
 #     -e "s|\${FORGE_SECRET}|$FORGE_SECRET|g" -e "s|\${FORGE_MANAGED}|$FORGE_MANAGED|g" \
 #     -e "s|\${OIDC_SECRET}|$OIDC_SECRET|g" -e "s|\${OIDC_SECRET_KEY}|$OIDC_SECRET_KEY|g" \
-#     -e "s|\${OIDC_ISSUER}|$OIDC_ISSUER|g" guard.yaml | ` + ApplyCommand + ` -
+#     -e "s|\${OIDC_ISSUER}|$OIDC_ISSUER|g" -e "s|\${FORGE_DELEGATED}|$FORGE_DELEGATED|g" \
+#     -e "s|\${FORGE_URL}|$FORGE_URL|g" -e "s|\${FORGE_CLIENT_ID}|$FORGE_CLIENT_ID|g" \
+#     -e "s|\${FORGE_AUTHORIZE_URL}|$FORGE_AUTHORIZE_URL|g" -e "s|\${FORGE_TOKEN_URL}|$FORGE_TOKEN_URL|g" \
+#     -e "s|\${FORGE_CLIENT_SECRET}|$FORGE_CLIENT_SECRET|g" -e "s|\${FORGE_CLIENT_SECRET_KEY}|$FORGE_CLIENT_SECRET_KEY|g" guard.yaml | ` + ApplyCommand + ` -
 #
 # Every object carries the label app.kubernetes.io/part-of=dotvirt-operator-guard.
 #
@@ -129,7 +144,7 @@ var templateHeader = `# The dotvirt operator guard: admission policies bounding 
 // each release for an admin without the console.
 func Template() ([]byte, error) {
 	var body bytes.Buffer
-	for _, o := range guard(TemplateParams, "${FORGE_INSECURE_TLS}", "${FORGE_MANAGED}", Metrics{URL: "${METRICS_URL}", TenancyURL: "${METRICS_TENANCY_URL}", CA: "${METRICS_CA}"}) {
+	for _, o := range guard(TemplateParams, "${FORGE_INSECURE_TLS}", "${FORGE_MANAGED}", "${FORGE_DELEGATED}", Metrics{URL: "${METRICS_URL}", TenancyURL: "${METRICS_TENANCY_URL}", CA: "${METRICS_CA}"}) {
 		y, err := yaml.Marshal(o.Object.Object)
 		if err != nil {
 			return nil, err

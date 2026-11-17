@@ -274,7 +274,9 @@ func filledTemplate(t *testing.T, template []byte, p Params) []*unstructured.Uns
 		"${CONSOLE_HOST}": p.ConsoleHost, "${BRANDING_CONFIGMAP}": p.BrandingConfigMap,
 		"${METRICS_CA_CONFIGMAP}": p.MetricsCAConfigMap, "${FORGE_SECRET}": p.ForgeSecret,
 		"${FORGE_MANAGED}": strconv.FormatBool(p.ForgeManaged), "${OIDC_SECRET}": p.OIDCSecret, "${OIDC_SECRET_KEY}": p.OIDCSecretKey,
-		"${OIDC_ISSUER}": p.OIDCIssuer,
+		"${OIDC_ISSUER}": p.OIDCIssuer, "${FORGE_DELEGATED}": strconv.FormatBool(p.ForgeDelegated),
+		"${FORGE_URL}": p.ForgeURL, "${FORGE_CLIENT_ID}": p.ForgeClientID, "${FORGE_AUTHORIZE_URL}": p.ForgeAuthorizeURL,
+		"${FORGE_TOKEN_URL}": p.ForgeTokenURL, "${FORGE_CLIENT_SECRET}": p.ForgeClientSecret, "${FORGE_CLIENT_SECRET_KEY}": p.ForgeClientSecretKey,
 	} {
 		filled = strings.ReplaceAll(filled, k, v)
 	}
@@ -390,5 +392,25 @@ func TestMetricsFor(t *testing.T) {
 		if got := MetricsFor(c.url, c.tenancy, c.ca); got != c.want {
 			t.Errorf("MetricsFor(%q, %q, %v) = %+v, want %+v", c.url, c.tenancy, c.ca, got, c.want)
 		}
+	}
+}
+
+// Turning Delegated on changes what the console may be given (its forge
+// application and the URLs users' tokens go to), so a guard installed before
+// reads Outdated until an admin re-installs it.
+func TestDelegatedReadsOutdated(t *testing.T) {
+	delegated := params
+	delegated.ForgeDelegated, delegated.ForgeURL = true, "https://forge.example"
+	delegated.ForgeClientID, delegated.ForgeAuthorizeURL = "dotvirt", "https://forge.example/login/oauth/authorize"
+	delegated.ForgeClientSecret, delegated.ForgeClientSecretKey = "forge-app", "client-secret"
+	installed := Render(params)
+	outdated := false
+	for i, want := range Render(delegated) {
+		if state, _ := Compare(want.Object, installed[i].Object); state == Outdated {
+			outdated = true
+		}
+	}
+	if !outdated {
+		t.Error("Delegated turned on, and the guard installed before reads Installed")
 	}
 }

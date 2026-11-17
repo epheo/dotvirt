@@ -73,6 +73,12 @@ type Params struct {
 	// credential it mints. Otherwise the credential is an admin's, and the
 	// console sends it only to the URL its Secret names.
 	ForgeManaged bool
+	// ForgeDelegated is spec.forge.pullRequests Delegated: the console acts
+	// with each user's own forge token, sent to ForgeURL (spec.forge.url) and
+	// obtained through the forge application spec.forge.userAuth names.
+	ForgeDelegated                                            bool
+	ForgeURL, ForgeClientID, ForgeAuthorizeURL, ForgeTokenURL string
+	ForgeClientSecret, ForgeClientSecretKey                   string
 	// InstallName and InstallUID are the install resource's, which owns what
 	// is rendered for it alone (CredentialGrant).
 	InstallName string
@@ -103,6 +109,11 @@ func (p Params) Malformed() string {
 		{"OIDC client Secret", optional(p.OIDCSecret)},
 		{"OIDC client Secret key", p.OIDCSecretKey == "" || len(validation.IsConfigMapKey(p.OIDCSecretKey)) == 0},
 		{"OIDC issuer", p.OIDCIssuer == "" || httpsURL(p.OIDCIssuer)},
+		{"forge URL", p.ForgeURL == "" || webURL(p.ForgeURL)},
+		{"forge authorize URL", p.ForgeAuthorizeURL == "" || webURL(p.ForgeAuthorizeURL)},
+		{"forge token URL", p.ForgeTokenURL == "" || webURL(p.ForgeTokenURL)},
+		{"forge client Secret", optional(p.ForgeClientSecret)},
+		{"forge client Secret key", p.ForgeClientSecretKey == "" || len(validation.IsConfigMapKey(p.ForgeClientSecretKey)) == 0},
 	} {
 		if !c.ok {
 			return c.pin
@@ -215,4 +226,11 @@ const ApplyCommand = "kubectl apply --server-side --field-manager=dotvirt -f"
 func httpsURL(s string) bool {
 	u, err := url.Parse(s)
 	return err == nil && u.Scheme == "https" && u.Host != ""
+}
+
+// webURL reports whether s is an absolute http or https URL, as the CRD
+// admits the forge's.
+func webURL(s string) bool {
+	u, err := url.Parse(s)
+	return err == nil && (u.Scheme == "https" || u.Scheme == "http") && u.Host != ""
 }

@@ -68,7 +68,7 @@ func TestRenderMatchesTheGuardsVolumes(t *testing.T) {
 	dv.Spec.Auth.OIDC = &dotvirtv1alpha1.OIDCSpec{IssuerURL: "https://idp.example", ClientID: "dotvirt",
 		ClientSecret: &dotvirtv1alpha1.SecretKeyRef{Name: "oidc", Key: "client-secret"}}
 	pod := Deployment(dv, "argocd", nil).Spec.Template.Spec
-	secretEnv := adminobjects.ConsoleSecretEnv("creds", "oidc", "client-secret")
+	secretEnv := adminobjects.ConsoleSecretEnv(adminobjects.Params{ForgeSecret: "creds", OIDCSecret: "oidc", OIDCSecretKey: "client-secret"})
 	// The guard pins the issuer to spec.auth.oidc.issuerURL.
 	if i := slices.IndexFunc(pod.Containers[0].Env, func(e corev1.EnvVar) bool { return e.Name == "DOTVIRT_OIDC_ISSUER" }); i < 0 ||
 		pod.Containers[0].Env[i].Value != dv.Spec.Auth.OIDC.IssuerURL {

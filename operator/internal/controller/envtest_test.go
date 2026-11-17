@@ -659,6 +659,13 @@ func TestEnvtest(t *testing.T) {
 				c := &d.Spec.Template.Spec.Containers[0]
 				c.Args = append(slices.Clone(c.Args), "-forge-url=https://evil.example")
 			}},
+			// Not Delegated here: users' forge tokens are not the console's to take.
+			"the console delegating to users' forge accounts no admin asked for": {app, withEnv(corev1.EnvVar{Name: "DOTVIRT_FORGE_DELEGATED", Value: "true"})},
+			"the console delegating by flag": {app, func(d *appsv1.Deployment) {
+				c := &d.Spec.Template.Spec.Containers[0]
+				c.Args = append(slices.Clone(c.Args), "-forge-delegated")
+			}},
+			"the console trusting another CA for its forge": {app, withEnv(corev1.EnvVar{Name: "DOTVIRT_FORGE_CA", Value: adminobjects.BrandingMountPath + "/ca.crt"})},
 			// The console sends the admin's OIDC client secret to its issuer.
 			"the console signing in at an issuer no admin chose": {app, withEnv(corev1.EnvVar{Name: "DOTVIRT_OIDC_ISSUER", Value: "https://evil.example"})},
 			"the console signing in at an issuer no admin chose, by flag": {app, func(d *appsv1.Deployment) {
@@ -1114,6 +1121,22 @@ func TestEnvtest(t *testing.T) {
 		// secret reaches the console under its own env only.
 		chosen.BrandingConfigMap = "brand"
 		chosen.OIDCSecret, chosen.OIDCSecretKey, chosen.OIDCIssuer = "admin-oidc", "client-secret", "https://idp.example"
+		// Delegated pull requests through the forge application an admin
+		// registered: users' tokens and its client secret go only where the
+		// spec says.
+		chosen.ForgeDelegated, chosen.ForgeURL, chosen.ForgeClientID = true, "https://forge.example", "dotvirt"
+		chosen.ForgeAuthorizeURL, chosen.ForgeClientSecret, chosen.ForgeClientSecretKey = "https://forge.example/login/oauth/authorize", "forge-app", "client-secret"
+		delegated := app()
+		withEnv(corev1.EnvVar{Name: "DOTVIRT_FORGE_DELEGATED", Value: "true"},
+			corev1.EnvVar{Name: "DOTVIRT_FORGE_DELEGATED_URL", Value: chosen.ForgeURL},
+			corev1.EnvVar{Name: "DOTVIRT_FORGE_CLIENT_ID", Value: chosen.ForgeClientID},
+			fromSecret("DOTVIRT_FORGE_CLIENT_SECRET", chosen.ForgeClientSecret, chosen.ForgeClientSecretKey),
+			corev1.EnvVar{Name: "DOTVIRT_FORGE_AUTHORIZE_URL", Value: chosen.ForgeAuthorizeURL})(delegated)
+		delegatedWith := func(env ...corev1.EnvVar) *appsv1.Deployment {
+			d := delegated.DeepCopy()
+			withEnv(env...)(d)
+			return d
+		}
 		oidc := app()
 		withEnv(fromSecret("DOTVIRT_OIDC_CLIENT_SECRET", "admin-oidc", "client-secret"),
 			corev1.EnvVar{Name: "DOTVIRT_OIDC_ISSUER", Value: chosen.OIDCIssuer})(oidc)
@@ -1150,19 +1173,31 @@ func TestEnvtest(t *testing.T) {
 			t.Errorf("metrics queries beside the admin's choice: err=%v, want the guard's Forbidden", err)
 		}
 		for name, o := range map[string]client.Object{
-			"the console branded from the admin's ConfigMap":  branded,
-			"the console with the admin's OIDC client secret": oidc,
-			"the forge's Ingress on its own host":             forgeIngress("forge.example", nil),
-			"the forge's HTTPRoute on its own host":           forgeRoute("forge.example"),
-			"the console's Route on its host":                 route(install.AppName, chosen.ConsoleHost, nil),
-			"the console's Ingress on its host":               ingress(install.AppName, nil),
-			"the console's HTTPRoute on its host":             httpRoute(install.AppName, nil),
+			"the console branded from the admin's ConfigMap":               branded,
+			"the console with the admin's OIDC client secret":              oidc,
+			"the console delegating through the admin's forge application": delegated,
+			"the forge's Ingress on its own host":                          forgeIngress("forge.example", nil),
+			"the forge's HTTPRoute on its own host":                        forgeRoute("forge.example"),
+			"the console's Route on its host":                              route(install.AppName, chosen.ConsoleHost, nil),
+			"the console's Ingress on its host":                            ingress(install.AppName, nil),
+			"the console's HTTPRoute on its host":                          httpRoute(install.AppName, nil),
 		} {
 			if err := dryApply(o); err != nil {
 				t.Errorf("%s: %v", name, err)
 			}
 		}
 		for name, o := range map[string]client.Object{
+			"the console sending users' forge tokens to another forge":                     delegatedWith(corev1.EnvVar{Name: "DOTVIRT_FORGE_DELEGATED_URL", Value: "https://evil.example"}),
+			"the console sending the forge application's secret to another token endpoint": delegatedWith(corev1.EnvVar{Name: "DOTVIRT_FORGE_TOKEN_URL", Value: "https://evil.example/token"}),
+			"the console sending users to another authorize page":                          delegatedWith(corev1.EnvVar{Name: "DOTVIRT_FORGE_AUTHORIZE_URL", Value: "https://evil.example/authorize"}),
+			"the console acting as another forge application":                              delegatedWith(corev1.EnvVar{Name: "DOTVIRT_FORGE_CLIENT_ID", Value: "other"}),
+			"the console with a literal forge client secret":                               delegatedWith(corev1.EnvVar{Name: "DOTVIRT_FORGE_CLIENT_SECRET", Value: "chosen-by-the-operator"}),
+			"the console with the forge client secret from another Secret":                 delegatedWith(fromSecret("DOTVIRT_FORGE_CLIENT_SECRET", adminobjects.SessionSecret, "secret")),
+			"the console with a forge client secret by flag": func() client.Object {
+				d := delegated.DeepCopy()
+				d.Spec.Template.Spec.Containers[0].Args = append(slices.Clone(d.Spec.Template.Spec.Containers[0].Args), "-forge-client-secret=x")
+				return d
+			}(),
 			"the console sending the admin's OIDC client secret to another issuer":  oidcIssuerElsewhere,
 			"the console sending the admin's OIDC client secret as its forge token": oidcElsewhere,
 			"the forge's Ingress for every host":                                    forgeIngress("", nil),
@@ -1244,6 +1279,8 @@ func TestEnvtest(t *testing.T) {
 			"${RELATED_IMAGE_DOTVIRT}": "", "${RELATED_IMAGE_FORGEJO}": "", "${METRICS_URL}": "", "${METRICS_TENANCY_URL}": "", "${METRICS_CA}": "",
 			"${CONSOLE_HOST}": "", "${BRANDING_CONFIGMAP}": "", "${METRICS_CA_CONFIGMAP}": "", "${FORGE_SECRET}": adminobjects.DefaultForgeSecret,
 			"${FORGE_MANAGED}": "false", "${OIDC_SECRET}": "", "${OIDC_SECRET_KEY}": "", "${OIDC_ISSUER}": "",
+			"${FORGE_DELEGATED}": "false", "${FORGE_URL}": "", "${FORGE_CLIENT_ID}": "", "${FORGE_AUTHORIZE_URL}": "", "${FORGE_TOKEN_URL}": "",
+			"${FORGE_CLIENT_SECRET}": "", "${FORGE_CLIENT_SECRET_KEY}": "",
 		} {
 			filled = strings.ReplaceAll(filled, k, v)
 		}
