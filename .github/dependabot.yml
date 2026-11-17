@@ -4,7 +4,7 @@
 version: 2
 updates:
   - package-ecosystem: gomod
-    directories: ['/', '/operator']
+    directories: ['/', '/operator', '/operator/test/typecheck']
     schedule: { interval: weekly, day: monday }
     groups:
       go-minor:

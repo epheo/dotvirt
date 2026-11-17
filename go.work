@@ -15,9 +15,3 @@ use (
 	./pkg/forge
 	./pkg/tenancy
 )
-
-// cel-go, which the operator's envtest type-checks the guard with, takes
-// genproto's expr API from genproto/googleapis/api; the app's older gnostic
-// still requires the monolithic genproto that once carried it too, which a
-// workspace build would then find twice. Images build without the workspace.
-replace google.golang.org/genproto => google.golang.org/genproto v0.0.0-20261116203732-fd2c7689a808
