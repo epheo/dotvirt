@@ -9,6 +9,10 @@
 # Any re-run reuses the :vVERSION images already pushed, so the digests an earlier run
 # pinned survive; it then updates that run's pin branch and draft Release in place.
 # Runs in the `QUAY` environment (QUAY_USERNAME / QUAY_PASSWORD push secrets).
+#
+# Every pushed image is signed (hack/sign-images.sh) under this workflow's identity at
+# refs/tags/vX.Y.Z, the one users verify against, so a dispatch must run on the version's
+# tag: `gh workflow run release.yaml --ref vX.Y.Z -f version=X.Y.Z -f prev=...`.
 name: release
 
 on:
@@ -40,6 +44,7 @@ jobs:
     permissions:
       contents: write
       pull-requests: write
+      id-token: write # keyless image signing: the workflow's OIDC identity is the signer
     outputs:
       catalog-image: ${{ steps.pins.outputs.catalog-image }}
       version: ${{ steps.pins.outputs.version }}
@@ -58,7 +63,9 @@ jobs:
             ver="${{ inputs.version }}"; prev="${{ inputs.prev }}"
           fi
           [ -n "$ver" ] && [ -n "$prev" ] || { echo "::error::could not resolve version/prev (ref=$GITHUB_REF_NAME)"; exit 1; }
-          { echo "REL_VERSION=$ver"; echo "REL_PREV=$prev"; } >> "$GITHUB_ENV"
+          [ "$GITHUB_REF" = "refs/tags/v$ver" ] ||
+            { echo "::error::run release v$ver on its tag (gh workflow run release.yaml --ref v$ver ...): its images are signed as release.yaml@refs/tags/v$ver"; exit 1; }
+          { echo "REL_VERSION=$ver"; echo "REL_PREV=$prev"; echo "PUBLISHED_REFS=$RUNNER_TEMP/published-refs"; } >> "$GITHUB_ENV"
           # A tag whose commit already records this version's pins is a locally-cut
           # release (hack/release.sh ran outside CI). Rebuilding would race the same
           # quay tags onto different digests — the moved-tag/pruned-digest failure
@@ -71,7 +78,7 @@ jobs:
       - uses: ./.github/actions/tools # skopeo ships on the runner image
         if: env.REL_SKIP != 'true'
         with:
-          tools: operator-sdk opm
+          tools: operator-sdk opm cosign
       - name: Registry login (docker + skopeo)
         if: env.REL_SKIP != 'true'
         env:
@@ -95,6 +102,13 @@ jobs:
           FORCE: ${{ inputs.force && '1' || '' }}
           OPM: opm # the verified binary from the tools action; the scripts' default compiles opm from source
         run: VERSION="$REL_VERSION" PREV="$REL_PREV" CONTAINER_TOOL=docker ./hack/release.sh
+      # Before the pins are recorded: an image that does not verify stops the release here.
+      - name: Sign the pushed images
+        if: env.REL_SKIP != 'true'
+        env:
+          COSIGN_PRIVATE_KEY: ${{ secrets.COSIGN_PRIVATE_KEY }}
+          COSIGN_PASSWORD: ${{ secrets.COSIGN_PASSWORD }}
+        run: ./hack/sign-images.sh "$PUBLISHED_REFS"
       - name: Record the pinned catalog image
         id: pins
         run: |

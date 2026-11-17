@@ -3,6 +3,10 @@
 # `candidate-v0` channel only; `stable-v0` is untouched, so it's never a published release).
 # Uploads the preview CatalogSource as an artifact to apply on a candidate-v0
 # cluster (hetznet). Runs in the `QUAY` environment.
+#
+# Every pushed image is signed (hack/sign-images.sh) under this workflow's identity at the
+# ref it ran from; users verify an rc against preview.yaml@refs/heads/main, so cut rcs from
+# main (`gh workflow run preview.yaml --ref main -f version=...`).
 name: preview
 
 on:
@@ -26,6 +30,9 @@ jobs:
   preview:
     runs-on: ubuntu-latest
     environment: QUAY
+    permissions:
+      contents: read
+      id-token: write # keyless image signing: the workflow's OIDC identity is the signer
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
@@ -33,7 +40,7 @@ jobs:
           go-version-file: go.mod
       - uses: ./.github/actions/tools # skopeo ships on the runner image
         with:
-          tools: operator-sdk opm
+          tools: operator-sdk opm cosign
       - name: Registry login (docker + skopeo)
         env:
           U: ${{ secrets.QUAY_USERNAME }}
@@ -52,7 +59,13 @@ jobs:
         env:
           FORCE: ${{ inputs.force && '1' || '' }}
           OPM: opm # the verified binary from the tools action; the scripts' default compiles opm from source
+          PUBLISHED_REFS: ${{ runner.temp }}/published-refs
         run: VERSION=${{ inputs.version }} CONTAINER_TOOL=docker ./hack/preview.sh
+      - name: Sign the pushed images
+        env:
+          COSIGN_PRIVATE_KEY: ${{ secrets.COSIGN_PRIVATE_KEY }}
+          COSIGN_PASSWORD: ${{ secrets.COSIGN_PASSWORD }}
+        run: ./hack/sign-images.sh "$RUNNER_TEMP/published-refs"
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: catalogsource-preview-${{ inputs.version }}
