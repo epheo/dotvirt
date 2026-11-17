@@ -1769,7 +1769,10 @@ func TestEnvtest(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		for _, cmd := range install.ForgeCredentialReplaceCommands(dv, "dotvirt-operator") {
+		// The README's commands, each variable as an admin derives it.
+		vars := strings.NewReplacer(`"$INSTALL_NS"`, "cred-half", `"$VERBS"`, "get", `"$CREDENTIAL"`, "byo-creds",
+			`"$OPERATOR"`, "dotvirt-operator:"+install.OperatorServiceAccount)
+		for _, cmd := range strings.Split(vars.Replace(adminobjects.CredentialGrantCommands), "\n") {
 			stdout, stderr, err := kubectl.Run(strings.Fields(cmd)[1:]...)
 			if err != nil {
 				out, _ := io.ReadAll(stdout)

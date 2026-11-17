@@ -9,6 +9,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/types"
 )
 
 // The operator's own Secrets beside the console's: the Argo webhook secret and,
@@ -103,35 +104,45 @@ func credentialObjects(p Params) []Object {
 	}
 }
 
-// CredentialCommands are the kubectl commands a cluster admin runs to grant
-// the credential without the console: CredentialGrant without its owner, so
-// it outlives the install. An unknown operator leaves a placeholder namespace.
-func CredentialCommands(p Params) []string {
-	return []string{
-		fmt.Sprintf("kubectl -n %s create role %s --verb=%s --resource=secrets --resource-name=%s",
-			p.Namespace, CredentialGrantName, strings.Join(CredentialVerbs(p.ForgeManaged), ","), p.ForgeSecret),
-		fmt.Sprintf("kubectl -n %s create rolebinding %s --role=%s --serviceaccount=%s",
-			p.Namespace, CredentialGrantName, CredentialGrantName, OperatorAccount(p)),
+// CredentialParams are the pins the grant is rendered from, as both sides read
+// them from the install: its namespace, name and uid, spec.forge's
+// credentialsSecret and managed, and the operator's username ("" unknown).
+func CredentialParams(namespace, installName string, installUID types.UID, credentialsSecret string, managed bool, operator string) Params {
+	return Params{
+		Operator: operator, Namespace: namespace, ForgeSecret: ForgeSecret(credentialsSecret), ForgeManaged: managed,
+		InstallName: installName, InstallUID: installUID,
 	}
 }
 
-// CredentialReplaceCommands replace a Role and RoleBinding that do not grant
-// what the credential needs: delete both (a half grant included), then
-// CredentialCommands.
-func CredentialReplaceCommands(p Params) []string {
-	return append([]string{fmt.Sprintf("kubectl -n %s delete role,rolebinding %s --ignore-not-found", p.Namespace, CredentialGrantName)},
-		CredentialCommands(p)...)
+// CredentialGrantCommands are the README's "Forge credential grant": what a
+// cluster admin runs without the console, a template whose variables the admin
+// derives from the cluster (the README shows how), never from anything the
+// operator writes. The delete makes it replace a wrong or half grant too.
+const CredentialGrantCommands = `kubectl -n "$INSTALL_NS" delete role,rolebinding ` + CredentialGrantName + ` --ignore-not-found
+kubectl -n "$INSTALL_NS" create role ` + CredentialGrantName + ` --verb="$VERBS" --resource=secrets --resource-name="$CREDENTIAL"
+kubectl -n "$INSTALL_NS" create rolebinding ` + CredentialGrantName + ` --role=` + CredentialGrantName + ` --serviceaccount="$OPERATOR"`
+
+// CredentialStaleCommand removes a grant no credential needs any more.
+const CredentialStaleCommand = `kubectl -n "$INSTALL_NS" delete role,rolebinding ` + CredentialGrantName
+
+// Leftovers are the admin objects an install no longer asks for that may
+// still be there: the forge credential's grant once the credential is the
+// operator's own again, which keeps reaching the old Secret until removed.
+func Leftovers(p Params) []Ref {
+	if CredentialNeedsGrant(p.ForgeSecret) {
+		return nil
+	}
+	return []Ref{
+		{"rbac.authorization.k8s.io", "v1", "Role", "roles", p.Namespace, CredentialGrantName},
+		{"rbac.authorization.k8s.io", "v1", "RoleBinding", "rolebindings", p.Namespace, CredentialGrantName},
+	}
 }
 
-// OperatorAccount is p.Operator as namespace:name, a placeholder namespace
-// when it is unknown.
-func OperatorAccount(p Params) string {
-	ns := p.OperatorNamespace()
-	if ns == "" {
-		return "<operator-namespace>:" + operatorAccountName(p.Operator)
-	}
-	return ns + ":" + operatorAccountName(p.Operator)
-}
+// LeftoverPurpose and LeftoverDetail say what a leftover is and how to remove it.
+const (
+	LeftoverPurpose = "Left from an earlier forge credential: still grants the operator that Secret"
+	LeftoverDetail  = "remove it: " + CredentialStaleCommand
+)
 
 // operatorAccountName is the ServiceAccount name in a username, the operator's
 // default one when it does not parse.

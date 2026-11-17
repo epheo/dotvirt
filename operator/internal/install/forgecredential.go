@@ -24,16 +24,11 @@ const ForgeCredentialGrantName = adminobjects.CredentialGrantName
 // as the console takes them: the install, its credential, and the operator's
 // account in operatorNS ("" unknown).
 func credentialParams(dv *dotvirtv1alpha1.Dotvirt, operatorNS string) adminobjects.Params {
-	p := adminobjects.Params{
-		Namespace:    dv.Namespace,
-		ForgeSecret:  adminobjects.ForgeSecret(dv.Spec.Forge.CredentialsSecret),
-		ForgeManaged: dv.Spec.Forge.Managed,
-		InstallName:  dv.Name, InstallUID: dv.UID,
-	}
+	operator := ""
 	if operatorNS != "" {
-		p.Operator = "system:serviceaccount:" + operatorNS + ":" + OperatorServiceAccount
+		operator = "system:serviceaccount:" + operatorNS + ":" + OperatorServiceAccount
 	}
-	return p
+	return adminobjects.CredentialParams(dv.Namespace, dv.Name, dv.UID, dv.Spec.Forge.CredentialsSecret, dv.Spec.Forge.Managed, operator)
 }
 
 // ForgeCredentialNeedsGrant reports whether spec.forge.credentialsSecret names a
@@ -62,22 +57,4 @@ func ForgeCredentialVerbs(dv *dotvirtv1alpha1.Dotvirt) []string {
 // no grant is needed or the operator's namespace is unknown.
 func ForgeCredentialGrant(dv *dotvirtv1alpha1.Dotvirt, operatorNS string) (*rbacv1.Role, *rbacv1.RoleBinding) {
 	return adminobjects.CredentialGrant(credentialParams(dv, operatorNS))
-}
-
-// ForgeCredentialCommands are the kubectl commands a cluster admin runs to
-// grant the credential by hand (adminobjects.CredentialCommands).
-func ForgeCredentialCommands(dv *dotvirtv1alpha1.Dotvirt, operatorNS string) []string {
-	return adminobjects.CredentialCommands(credentialParams(dv, operatorNS))
-}
-
-// ForgeCredentialReplaceCommands replace a Role and RoleBinding that do not
-// grant what the credential needs (adminobjects.CredentialReplaceCommands).
-func ForgeCredentialReplaceCommands(dv *dotvirtv1alpha1.Dotvirt, operatorNS string) []string {
-	return adminobjects.CredentialReplaceCommands(credentialParams(dv, operatorNS))
-}
-
-// OperatorAccount is the operator's ServiceAccount as namespace:name, a
-// placeholder namespace when it is unknown.
-func OperatorAccount(operatorNS string) string {
-	return adminobjects.OperatorAccount(adminobjects.Params{Operator: credentialParams(&dotvirtv1alpha1.Dotvirt{}, operatorNS).Operator})
 }

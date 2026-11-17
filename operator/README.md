@@ -201,26 +201,18 @@ owns one status condition; a phase that fails or waits records why there, so
    A credential under any name but `dotvirt-forge` is a cluster admin's to grant:
    the operator's own role names only its own Secrets. `ForgeCredentialReady` is
    False (`NotGranted`) until the Role and RoleBinding `dotvirt-forge-credential`
-   are in the install namespace. A cluster admin installs them from the console
-   (the [Admin objects](#admin-objects) banner's **Install**, owned by the CR so
-   they go with it), or with the commands the message carries, with the real
-   names:
-
-   ```sh
-   kubectl -n <install-ns> create role dotvirt-forge-credential --verb=get --resource=secrets --resource-name=<credential>
-   kubectl -n <install-ns> create rolebinding dotvirt-forge-credential --role=dotvirt-forge-credential --serviceaccount=<operator-ns>:dotvirt-operator-controller
-   ```
-
-   A managed forge, which writes its minted token there, needs
-   `--verb=get,create,patch`. Created by hand, the grant outlives the install:
-   delete both with the CR. The operator watches that Role and RoleBinding by
-   name, so a grant (or its removal), in either order, takes effect at once. A
-   grant changed under 5 minutes ago but still refused is rechecked every minute
-   (the apiserver's RBAC caches catching up); past that it is wrong (a verb, the
-   Secret's name or the account), and `ForgeCredentialReady` says `GrantIncomplete`
-   with the commands to replace it: `kubectl -n <install-ns> delete
-   role,rolebinding dotvirt-forge-credential --ignore-not-found` (a half grant
-   included), then the two above. Until the grant works, conditions wait with
+   are in the install namespace, granting the operator's account get on that
+   Secret (plus create and patch for a managed forge, which writes its minted token
+   there). A cluster admin installs them from the console (the
+   [Admin objects](#admin-objects) banner's **Install**, owned by the CR so they go
+   with it), or with the [Forge credential grant](#forge-credential-grant) commands,
+   every value derived from the cluster: the condition names none, since the
+   operator writes it. The operator watches that Role and RoleBinding by name, so a
+   grant (or its removal), in either order, takes effect at once. A grant changed
+   under 5 minutes ago but still refused is rechecked every minute (the apiserver's
+   RBAC caches catching up); past that it is wrong (a verb, the Secret's name or the
+   account), and `ForgeCredentialReady` says `GrantIncomplete`: the same commands
+   replace it, a half grant included. Until the grant works, conditions wait with
    `WaitingForCredential`, the steps needing the credential do not read it, and
    the rest of the install runs:
    - a bring-your-own forge: the ArgoCD tier waits before writing anything, since
@@ -381,8 +373,8 @@ same render to download. Install applies the render under the admin's own token:
   exists to restore the render, which is why the banner says what differs first.
 
 Without the console, use the release's `install/guard.yaml` for the guard (the forge
-credential's grant is the two kubectl commands `ForgeCredentialReady` carries; the
-template, which renders the guard for any install, leaves it out): derive each value from
+credential's grant is [below](#forge-credential-grant); the template, which renders
+the guard for any install, leaves it out): derive each value from
 the cluster as its header shows (never copy one from the operator's status or
 conditions, which the operator writes), fill its placeholders and apply it with
 `kubectl apply --server-side --field-manager=dotvirt`. kubectl reports a
@@ -405,6 +397,33 @@ still reads `Installed`. envtest checks this against
 whose operand fails it ships with a re-install note. They stay after uninstall
 (nothing that ran can delete them); they match only the operator's username, and an
 admin may delete them.
+
+### Forge credential grant
+
+Without the console, a cluster admin grants the forge credential this way, every
+value derived from the cluster, never from the operator's status or conditions,
+which the operator writes. Derive `OP` (the operator's namespace/account) and
+`INSTALL_NAMESPACE` as `install/guard.yaml`'s header shows, then:
+
+```sh
+INSTALL_NS="$INSTALL_NAMESPACE"
+OPERATOR="${OP%/*}:${OP#*/}"
+CREDENTIAL="$(kubectl -n "$INSTALL_NS" get dotvirt -o jsonpath='{.items[0].spec.forge.credentialsSecret}')"
+VERBS=get
+[ "$(kubectl -n "$INSTALL_NS" get dotvirt -o jsonpath='{.items[0].spec.forge.managed}')" = true ] && VERBS=get,create,patch
+kubectl -n "$INSTALL_NS" delete role,rolebinding dotvirt-forge-credential --ignore-not-found
+kubectl -n "$INSTALL_NS" create role dotvirt-forge-credential --verb="$VERBS" --resource=secrets --resource-name="$CREDENTIAL"
+kubectl -n "$INSTALL_NS" create rolebinding dotvirt-forge-credential --role=dotvirt-forge-credential --serviceaccount="$OPERATOR"
+```
+
+The delete makes it replace a wrong or half grant too. Created this way, the grant
+outlives the install: remove it with the CR. Once `spec.forge.credentialsSecret` is
+unset or `dotvirt-forge` again, a grant left behind still lets the operator reach the
+old Secret: status and the console's banner list it as `Stale`, to remove with
+
+```sh
+kubectl -n "$INSTALL_NS" delete role,rolebinding dotvirt-forge-credential
+```
 
 ## Serving through a Gateway
 

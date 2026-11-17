@@ -1,6 +1,8 @@
 package adminobjects
 
 import (
+	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
@@ -95,16 +97,21 @@ func TestAllowedNamesTheCredentialGrant(t *testing.T) {
 }
 
 // A grant made with the kubectl commands reads as installed; one granting
-// more, another Secret or another account reads as outdated, saying how.
+// more, less, another Secret or another account reads as outdated, saying how.
 func TestCompareTheCredentialGrant(t *testing.T) {
-	p := credentialParams("creds", false)
+	p := credentialParams("creds", true)
 	role, binding := CredentialGrant(p)
 	want := map[string]*unstructured.Unstructured{"Role": toUnstructured(role), "RoleBinding": toUnstructured(binding)}
-	// As kubectl create writes them: no owner, no labels, lists reordered.
+	// As kubectl create writes them: no owner, no labels, the verbs in the
+	// order the admin typed them.
 	byHand := func(kind string) *unstructured.Unstructured {
 		o := want[kind].DeepCopy()
 		o.SetOwnerReferences(nil)
 		o.SetLabels(nil)
+		if kind == "Role" {
+			_ = unstructured.SetNestedSlice(o.Object, []any{map[string]any{"apiGroups": []any{""}, "resources": []any{"secrets"},
+				"resourceNames": []any{"creds"}, "verbs": []any{"patch", "get", "create"}}}, "rules")
+		}
 		return o
 	}
 	for _, kind := range []string{"Role", "RoleBinding"} {
@@ -117,7 +124,11 @@ func TestCompareTheCredentialGrant(t *testing.T) {
 			_ = unstructured.SetNestedSlice(o.Object, []any{map[string]any{"apiGroups": []any{""}, "resources": []any{"secrets"}, "verbs": []any{"get"}}}, "rules")
 		},
 		"Role granting more verbs": func(o *unstructured.Unstructured) {
-			_ = unstructured.SetNestedSlice(o.Object, []any{map[string]any{"apiGroups": []any{""}, "resources": []any{"secrets"}, "resourceNames": []any{"creds"}, "verbs": []any{"get", "list"}}}, "rules")
+			_ = unstructured.SetNestedSlice(o.Object, []any{map[string]any{"apiGroups": []any{""}, "resources": []any{"secrets"}, "resourceNames": []any{"creds"}, "verbs": []any{"get", "create", "patch", "list"}}}, "rules")
+		},
+		// A managed forge's grant that reads but cannot store the minted token.
+		"Role granting read alone": func(o *unstructured.Unstructured) {
+			_ = unstructured.SetNestedSlice(o.Object, []any{map[string]any{"apiGroups": []any{""}, "resources": []any{"secrets"}, "resourceNames": []any{"creds"}, "verbs": []any{"get"}}}, "rules")
 		},
 		"RoleBinding to another account": func(o *unstructured.Unstructured) {
 			_ = unstructured.SetNestedSlice(o.Object, []any{map[string]any{"kind": "ServiceAccount", "name": "default", "namespace": "dotvirt-operator"}}, "subjects")
@@ -135,19 +146,34 @@ func TestCompareTheCredentialGrant(t *testing.T) {
 	}
 }
 
-// The kubectl commands grant what the render does, and the replace commands
-// tolerate a half grant.
-func TestCredentialCommands(t *testing.T) {
-	p := credentialParams("creds", true)
-	want := []string{
-		"kubectl -n dotvirt delete role,rolebinding dotvirt-forge-credential --ignore-not-found",
-		"kubectl -n dotvirt create role dotvirt-forge-credential --verb=get,create,patch --resource=secrets --resource-name=creds",
-		"kubectl -n dotvirt create rolebinding dotvirt-forge-credential --role=dotvirt-forge-credential --serviceaccount=dotvirt-operator:dotvirt-operator-controller",
+// The commands an admin runs without the console are a static template: no
+// value in them, each variable derived from the cluster as the operator's
+// README shows, which carries them verbatim.
+func TestCredentialCommandsAreATemplate(t *testing.T) {
+	readme, err := os.ReadFile(filepath.Join("..", "..", "operator", "README.md"))
+	if err != nil {
+		t.Fatal(err)
 	}
-	if got := CredentialReplaceCommands(p); !slices.Equal(got, want) {
-		t.Errorf("replace commands %q, want %q", got, want)
+	for _, cmd := range []string{CredentialGrantCommands, CredentialStaleCommand} {
+		if !strings.Contains(string(readme), cmd) {
+			t.Errorf("the operator README does not carry\n%s", cmd)
+		}
 	}
-	if got := CredentialCommands(p); !slices.Equal(got, want[1:]) {
-		t.Errorf("commands %q, want %q", got, want[1:])
+	for _, v := range []string{"$INSTALL_NS", "$VERBS", "$CREDENTIAL", "$OPERATOR"} {
+		if !strings.Contains(CredentialGrantCommands, v) {
+			t.Errorf("the grant commands do not take %s", v)
+		}
+	}
+}
+
+// A grant left after the credential went back to the operator's own is a
+// leftover, to report and remove; none while a grant is needed.
+func TestLeftovers(t *testing.T) {
+	if got := Leftovers(credentialParams("creds", false)); len(got) != 0 {
+		t.Errorf("leftovers while the grant is needed: %v", got)
+	}
+	got := Leftovers(credentialParams("", false))
+	if len(got) != 2 || got[0].Kind != "Role" || got[1].Kind != "RoleBinding" || got[0].Namespace != "dotvirt" || got[1].Name != CredentialGrantName {
+		t.Errorf("leftovers for the default credential: %v", got)
 	}
 }

@@ -86,10 +86,9 @@ func (r *DotvirtReconciler) observeGrant(ctx context.Context, dv *dotvirtv1alpha
 		recheck = " (changed under " + grantLagWindow.String() + " ago: rechecked every minute while the apiserver applies it)"
 	}
 	r.setCondition(dv, dotvirtv1alpha1.ConditionForgeCredentialReady, metav1.ConditionFalse, "GrantIncomplete", fmt.Sprintf(
-		"%s %s in %s %s not grant %s on Secret %s to %s%s. A cluster admin replaces them from the console (Install), or with: %s; %s",
-		strings.Join(present, " and "), install.ForgeCredentialGrantName, dv.Namespace, exist,
-		strings.Join(install.ForgeCredentialVerbs(dv), ", "), dv.Spec.Forge.CredentialsSecret, install.OperatorAccount(r.OperatorNamespace),
-		recheck, strings.Join(install.ForgeCredentialReplaceCommands(dv, r.OperatorNamespace), " && "), credentialWaitEffects(dv)))
+		"%s %s in the install namespace %s not grant the operator's account %s on the Secret spec.forge.credentialsSecret names%s. %s; %s",
+		strings.Join(present, " and "), install.ForgeCredentialGrantName, exist,
+		strings.Join(install.ForgeCredentialVerbs(dv), ", "), recheck, credentialNextAction("replaces them"), credentialWaitEffects(dv)))
 	return landing
 }
 
@@ -169,24 +168,29 @@ func (r *DotvirtReconciler) recordCredential(dv *dotvirtv1alpha1.Dotvirt, err er
 		meta.RemoveStatusCondition(&dv.Status.Conditions, dotvirtv1alpha1.ConditionForgeCredentialReady)
 		return
 	}
-	name := dv.Namespace + "/" + dv.Spec.Forge.CredentialsSecret
 	switch {
 	case errors.Is(err, errCredentialNameTaken):
-		r.setCondition(dv, dotvirtv1alpha1.ConditionForgeCredentialReady, metav1.ConditionFalse, "NameTaken", fmt.Sprintf(
-			"spec.forge.credentialsSecret names %s, a Secret the operator generates for itself: name another Secret; %s",
-			name, credentialWaitEffects(dv)))
+		r.setCondition(dv, dotvirtv1alpha1.ConditionForgeCredentialReady, metav1.ConditionFalse, "NameTaken",
+			"spec.forge.credentialsSecret names a Secret the operator generates for itself: name another Secret; "+credentialWaitEffects(dv))
 	case errors.Is(err, errCredentialNotGranted):
 		use := "read"
 		if dv.Spec.Forge.Managed {
 			use = "read and write"
 		}
 		r.setCondition(dv, dotvirtv1alpha1.ConditionForgeCredentialReady, metav1.ConditionFalse, "NotGranted", fmt.Sprintf(
-			"the operator may not %s Secret %s, which spec.forge.credentialsSecret names. A cluster admin grants it from the console (Install), or with: %s; %s",
-			use, name, strings.Join(install.ForgeCredentialCommands(dv, r.OperatorNamespace), " && "), credentialWaitEffects(dv)))
+			"the operator may not %s the Secret spec.forge.credentialsSecret names. %s the operator's account %s on it; %s",
+			use, credentialNextAction("grants"), strings.Join(install.ForgeCredentialVerbs(dv), ", "), credentialWaitEffects(dv)))
 	case err == nil || apierrors.IsNotFound(err):
 		r.setCondition(dv, dotvirtv1alpha1.ConditionForgeCredentialReady, metav1.ConditionTrue, "Granted",
-			"the operator may use Secret "+name)
+			"the operator may use the Secret spec.forge.credentialsSecret names")
 	}
+}
+
+// credentialNextAction is what a cluster admin does about the grant. It names
+// no value and gives no command: the operator writes this message, so an admin
+// derives each value from the cluster, as the README's commands show.
+func credentialNextAction(does string) string {
+	return "A cluster admin " + does + " from the console (Install), or with the operator README's \"Forge credential grant\" commands, each value derived from the install's spec and the operator's Deployment"
 }
 
 // credentialWaitEffects says what waits on the credential meanwhile.

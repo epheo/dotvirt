@@ -26,6 +26,8 @@ const (
 	// changed after it was installed.
 	Outdated  State = "Outdated"
 	Installed State = "Installed"
+	// Stale: an object the install no longer asks for, still there (Leftovers).
+	Stale State = "Stale"
 )
 
 // Object is one rendered object and what it is for.

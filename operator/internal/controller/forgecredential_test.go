@@ -126,14 +126,10 @@ func TestUngrantedCredentialWaitsOnlyWhatNeedsIt(t *testing.T) {
 	}
 	got := getCR(t, c, dv)
 	ready := cond(got, dotvirtv1alpha1.ConditionForgeCredentialReady)
-	for _, want := range install.ForgeCredentialCommands(dv, "dotvirt-operator") {
-		if ready == nil || ready.Status != metav1.ConditionFalse || ready.Reason != "NotGranted" || !strings.Contains(ready.Message, want) {
-			t.Errorf("ForgeCredentialReady = %+v, want False/NotGranted carrying %q", ready, want)
-		}
+	if ready == nil || ready.Status != metav1.ConditionFalse || ready.Reason != "NotGranted" {
+		t.Fatalf("ForgeCredentialReady = %+v, want False/NotGranted", ready)
 	}
-	if !strings.Contains(ready.Message, "new projects") {
-		t.Errorf("ForgeCredentialReady message %q does not say what waits", ready.Message)
-	}
+	credentialMessageNamesNothing(t, ready.Message, "get", "new projects")
 	for _, ct := range []string{
 		dotvirtv1alpha1.ConditionArgoReady, dotvirtv1alpha1.ConditionSyncImpersonationReady, dotvirtv1alpha1.ConditionForgeRepoReady,
 		dotvirtv1alpha1.ConditionArgoWebhook, dotvirtv1alpha1.ConditionDotvirtWebhook,
@@ -186,7 +182,7 @@ func TestManagedForgeTierGoesOnWithoutTheCredential(t *testing.T) {
 	reconcileOnce(t, r, dv)
 	got := getCR(t, c, dv)
 	if ready := cond(got, dotvirtv1alpha1.ConditionForgeCredentialReady); ready == nil || ready.Status != metav1.ConditionFalse ||
-		!strings.Contains(ready.Message, "--verb=get,create,patch") {
+		!strings.Contains(ready.Message, "get, create, patch") {
 		t.Errorf("ForgeCredentialReady = %+v, want False granting read and write", ready)
 	}
 	if c := cond(got, dotvirtv1alpha1.ConditionArgoReady); c == nil || c.Reason == reasonCredentialWait {
@@ -376,10 +372,24 @@ func TestWrongGrantRechecksBrieflyThenSaysReplace(t *testing.T) {
 	if ready == nil || ready.Reason != "GrantIncomplete" || strings.Contains(ready.Message, "rechecked") {
 		t.Fatalf("ForgeCredentialReady = %+v, want GrantIncomplete without the recheck", ready)
 	}
-	for _, want := range append([]string{"Role and RoleBinding " + install.ForgeCredentialGrantName + " in dotvirt exist but do not grant get on Secret byo-creds to dotvirt-operator:dotvirt-operator-controller"},
-		install.ForgeCredentialReplaceCommands(dv, "dotvirt-operator")...) {
-		if !strings.Contains(ready.Message, want) {
-			t.Errorf("ForgeCredentialReady message lacks %q:\n%s", want, ready.Message)
+	credentialMessageNamesNothing(t, ready.Message,
+		"Role and RoleBinding "+install.ForgeCredentialGrantName+" in the install namespace exist but do not grant the operator's account get", "replaces them")
+}
+
+// credentialMessageNamesNothing checks a ForgeCredentialReady message says
+// each of want, and carries no command and no value an admin could copy: the
+// operator writes it, so an admin derives each value from the cluster, as the
+// README's commands show.
+func credentialMessageNamesNothing(t *testing.T, msg string, want ...string) {
+	t.Helper()
+	for _, w := range append(want, "from the console (Install)", `"Forge credential grant"`) {
+		if !strings.Contains(msg, w) {
+			t.Errorf("ForgeCredentialReady message lacks %q:\n%s", w, msg)
+		}
+	}
+	for _, leak := range []string{"kubectl", "byo-creds", "custom-forge", "dotvirt-operator:", "--verb", "--serviceaccount"} {
+		if strings.Contains(msg, leak) {
+			t.Errorf("ForgeCredentialReady message carries %q:\n%s", leak, msg)
 		}
 	}
 }

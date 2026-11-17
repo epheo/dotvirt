@@ -3,13 +3,10 @@ package install
 import (
 	"reflect"
 	"slices"
-	"strings"
 	"testing"
 
 	rbacv1 "k8s.io/api/rbac/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
-	"k8s.io/apimachinery/pkg/runtime"
 
 	dotvirtv1alpha1 "github.com/epheo/dotvirt/operator/api/v1alpha1"
 	"github.com/epheo/dotvirt/pkg/adminobjects"
@@ -78,33 +75,10 @@ func TestForgeCredentialGrantOnlyWhenNeeded(t *testing.T) {
 	}
 }
 
-// The commands an admin runs by hand grant what ForgeCredentialGrant renders.
-func TestForgeCredentialCommands(t *testing.T) {
-	dv := &dotvirtv1alpha1.Dotvirt{ObjectMeta: metav1.ObjectMeta{Name: "x", Namespace: "dotvirt"}}
-	dv.Spec.Forge.CredentialsSecret = "byo-creds"
-	want := []string{
-		"kubectl -n dotvirt create role dotvirt-forge-credential --verb=get --resource=secrets --resource-name=byo-creds",
-		"kubectl -n dotvirt create rolebinding dotvirt-forge-credential --role=dotvirt-forge-credential --serviceaccount=dotvirt-operator:dotvirt-operator-controller",
-	}
-	if got := ForgeCredentialCommands(dv, "dotvirt-operator"); !slices.Equal(got, want) {
-		t.Errorf("bring your own: %q, want %q", got, want)
-	}
-	// A half grant is replaced too: the delete tolerates the one that is absent.
-	if got := ForgeCredentialReplaceCommands(dv, "dotvirt-operator"); len(got) != 3 ||
-		got[0] != "kubectl -n dotvirt delete role,rolebinding dotvirt-forge-credential --ignore-not-found" || !slices.Equal(got[1:], want) {
-		t.Errorf("replace: %q", got)
-	}
-	dv.Spec.Forge.Managed = true
-	if got := ForgeCredentialCommands(dv, ""); !strings.Contains(got[0], "--verb=get,create,patch") || !strings.Contains(got[1], "<operator-namespace>:") {
-		t.Errorf("managed, operator namespace unknown: %q", got)
-	}
-}
-
-// The operator's grant is the console's render of it, one source: the Role and
-// RoleBinding in adminobjects.Render for the pins the console reads from the
-// same install (its spec, its name and uid, the operator's account) are the
-// operator's, object for object, and absent exactly where it renders none.
-func TestForgeCredentialGrantIsTheConsoles(t *testing.T) {
+// The operator's grant is the shared render for the pins both sides read from
+// the install (adminobjects.CredentialParams): the console's path to the same
+// render is tested where it lives (internal/api), from its real reads.
+func TestForgeCredentialGrantIsTheSharedRender(t *testing.T) {
 	for _, c := range []struct {
 		secret  string
 		managed bool
@@ -113,34 +87,14 @@ func TestForgeCredentialGrantIsTheConsoles(t *testing.T) {
 	} {
 		dv := &dotvirtv1alpha1.Dotvirt{ObjectMeta: metav1.ObjectMeta{Name: "x", Namespace: "dotvirt", UID: "uid-x"}}
 		dv.Spec.Forge.CredentialsSecret, dv.Spec.Forge.Managed = c.secret, c.managed
-		// As the console's adminParams read them.
-		console := adminobjects.Params{
-			Operator: "system:serviceaccount:dotvirt-operator:" + OperatorServiceAccount, Namespace: dv.Namespace,
-			ForgeSecret: adminobjects.ForgeSecret(dv.Spec.Forge.CredentialsSecret), ForgeManaged: dv.Spec.Forge.Managed,
-			InstallName: dv.Name, InstallUID: dv.UID,
+		wantRole, wantBinding := adminobjects.CredentialGrant(adminobjects.CredentialParams(dv.Namespace, dv.Name, dv.UID,
+			dv.Spec.Forge.CredentialsSecret, dv.Spec.Forge.Managed, "system:serviceaccount:dotvirt-operator:"+OperatorServiceAccount))
+		role, binding := ForgeCredentialGrant(dv, "dotvirt-operator")
+		if !reflect.DeepEqual(role, wantRole) || !reflect.DeepEqual(binding, wantBinding) {
+			t.Errorf("credentialsSecret %q managed %v: the operator's grant is not the shared render", c.secret, c.managed)
 		}
-		var rendered []any
-		for _, o := range adminobjects.Render(console) {
-			if o.Object.GetName() == ForgeCredentialGrantName {
-				rendered = append(rendered, o.Object.Object)
-			}
-		}
-		var operator []any
-		if role, binding := ForgeCredentialGrant(dv, "dotvirt-operator"); role != nil {
-			for _, obj := range []runtime.Object{role, binding} {
-				m, err := runtime.DefaultUnstructuredConverter.ToUnstructured(obj)
-				if err != nil {
-					t.Fatal(err)
-				}
-				unstructured.RemoveNestedField(m, "metadata", "creationTimestamp")
-				operator = append(operator, m)
-			}
-		}
-		if !reflect.DeepEqual(rendered, operator) {
-			t.Errorf("credentialsSecret %q managed %v:\nconsole  %v\noperator %v", c.secret, c.managed, rendered, operator)
-		}
-		if needs := ForgeCredentialNeedsGrant(dv); needs != (len(operator) > 0) {
-			t.Errorf("credentialsSecret %q: needs a grant %v, renders %d objects", c.secret, needs, len(operator))
+		if needs := ForgeCredentialNeedsGrant(dv); needs != (role != nil) {
+			t.Errorf("credentialsSecret %q: needs a grant %v, renders %v", c.secret, needs, role != nil)
 		}
 	}
 }
