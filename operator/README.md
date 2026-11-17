@@ -300,6 +300,30 @@ owns one status condition; a phase that fails or waits records why there, so
 10. **dotvirt webhook** (`DotvirtWebhook`): the forge-to-dotvirt hook is registered by
    the app itself; the operator only observes it.
 
+When the forge refuses dotvirt's forge account the owner's webhooks (it owns no
+org, or staff manage the hooks, e.g. as a system hook), both conditions read
+`Unknown` with reason `RegistrationRefused`, carrying the forge's own reason.
+The message says to make the account an owner of the org, or gives the hook to
+create by hand as a Forgejo (Gitea) webhook (an org hook, a system hook, or one
+on each project repo, repos created later included): its URL,
+`application/json`, its events (push and pull_request for dotvirt, push only for
+ArgoCD) and the Secret and key holding its shared secret, with the `oc extract`
+command that prints it. Other reasons:
+
+- `CredentialRejected`: the forge rejects the token itself (401); replace the
+  token in the forge credential Secret's `token` key.
+- `PerRepoHooks`: the owner is a user account, which has no org hooks; the app
+  registers a hook on each project repo (not observed by the operator), and the
+  ArgoCD hook is made by hand per repo or as a system hook.
+- `OwnerNotFound`: no org or user of the platform repo's owner exists; check
+  spec.forge.platformRepo and spec.forge.url.
+
+Neither the operator nor the app asks the forge again for an hour, or until
+spec.forge, the forge credential, the hook's secret or the ArgoCD URL changes,
+or they restart, so a refusal costs about one forge call per hour. The operator
+cannot observe deliveries, so check a hand-made hook in the forge's delivery
+log.
+
 `Available` is `True` only after a completed pass with the dotvirt pod ready. A
 phase that fails or blocks sets it `False` with that phase's reason; the
 best-effort phases (operator guard, sync impersonation, platform repo, both
@@ -900,6 +924,107 @@ Each sign-in keeps its own state cookie, so tabs signing in at once do not undo 
   on PATH; merges the CSV base in `config/manifests/bases/` with the generated CRD +
   RBAC + Deployment). Building/pushing the bundle image to a catalog is a release step.
 
+## Image signatures
+
+Every image CI pushes to quay.io/epheo is signed with sigstore (`hack/sign-images.sh`).
+Enforcing them is opt-in for admins and adds no load to dotvirt: the container runtime
+checks a signature when it pulls.
+
+- **What is signed:** `dotvirt`, `dotvirt-operator`, `dotvirt-operator-bundle` and
+  `dotvirt-operator-catalog`, by digest, the multi-arch index and each platform
+  manifest. The signature sits beside the image as a `sha256-<hex>.sig` tag, the layout
+  container runtimes read.
+- **Keyless, always:** each signature is certified for the workflow that pushed the
+  image, with no key to leak. The identities, all with OIDC issuer
+  `https://token.actions.githubusercontent.com`:
+  - a release: `https://github.com/epheo/dotvirt/.github/workflows/release.yaml@refs/tags/vX.Y.Z`;
+  - a release candidate: `https://github.com/epheo/dotvirt/.github/workflows/preview.yaml@refs/heads/main`;
+  - a per-commit app image from main: `https://github.com/epheo/dotvirt/.github/workflows/ci.yaml@refs/heads/main`.
+- **By a key:** every image also carries a signature by the key whose public half is
+  `operator/install/cosign.pub`. OpenShift can enforce only that one (below).
+- **What the key accepts:** the same key signs releases, release candidates and the
+  per-commit app images from main. A policy on this key therefore admits all three, not
+  releases only. A stricter, release-only policy needs a second key that only
+  release.yaml holds; the keyless identities already tell the three apart.
+- **Before v0.2.4:** releases are unsigned. Enforce only once the cluster runs a signed
+  release, or a rollback to an older one is refused.
+
+Verify a release by hand (cosign 3 needs `--new-bundle-format=false` for this layout):
+
+```sh
+cosign verify --new-bundle-format=false \
+  --certificate-identity-regexp '^https://github\.com/epheo/dotvirt/\.github/workflows/release\.yaml@refs/tags/v[0-9]+\.[0-9]+\.[0-9]+$' \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+  quay.io/epheo/dotvirt@sha256:<digest>
+```
+
+With the key: `cosign verify --new-bundle-format=false --key operator/install/cosign.pub quay.io/epheo/dotvirt@sha256:<digest>`.
+
+### Enforcing on OpenShift
+
+OpenShift matches a keyless certificate by email only, and a workflow certificate
+carries none, so a ClusterImagePolicy enforces the key signature:
+
+```yaml
+apiVersion: config.openshift.io/v1
+kind: ClusterImagePolicy
+metadata:
+  name: dotvirt
+spec:
+  scopes:
+  - quay.io/epheo/dotvirt
+  - quay.io/epheo/dotvirt-operator
+  - quay.io/epheo/dotvirt-operator-bundle
+  - quay.io/epheo/dotvirt-operator-catalog
+  policy:
+    rootOfTrust:
+      policyType: PublicKey
+      publicKey:
+        keyData: <base64 -w0 operator/install/cosign.pub>
+        rekorKeyData: <curl -fsSL https://rekor.sigstore.dev/api/v1/log/publicKey | base64 -w0>
+    signedIdentity:
+      matchPolicy: MatchRepository
+```
+
+- `MatchRepository` is required: a cosign signature names the repository without a
+  tag or digest, which the default `MatchRepoDigestOrExact` refuses.
+- The scopes cover the operand, the operator, and the bundle and catalog OLM pulls.
+  Images dotvirt runs but does not build (the managed Forgejo, ArgoCD) are outside them.
+- The API is `config.openshift.io/v1` from OpenShift 4.20. OpenShift 4.19 serves it as
+  `v1alpha1`, only behind the `TechPreviewNoUpgrade` feature set. Check with
+  `oc api-resources | grep -i imagepolicies`.
+- After a key rotation, update `keyData` (SECURITY.md, Image signing key).
+- The Machine Config Operator rolls the policy out to every node; see your version's
+  documentation for how it updates them.
+- Mirrored (disconnected) installs must mirror the `.sig` tags too, or every dotvirt
+  image is refused.
+
+### Enforcing on other Kubernetes
+
+The sigstore policy-controller matches workflow identities, so it enforces the
+keyless signatures with no key:
+
+```yaml
+apiVersion: policy.sigstore.dev/v1beta1
+kind: ClusterImagePolicy
+metadata:
+  name: dotvirt
+spec:
+  images:
+  - glob: "quay.io/epheo/dotvirt*"
+  authorities:
+  - keyless:
+      url: https://fulcio.sigstore.dev
+      identities:
+      - issuer: https://token.actions.githubusercontent.com
+        subjectRegExp: '^https://github\.com/epheo/dotvirt/\.github/workflows/release\.yaml@refs/tags/v[0-9]+\.[0-9]+\.[0-9]+$'
+    ctlog:
+      url: https://rekor.sigstore.dev
+```
+
+Add the preview identity to accept release candidates too. The policy-controller
+enforces only in namespaces labelled `policy.sigstore.dev/include=true`.
+
 ## Upgrading
 
 - The operator acts only on the Dotvirt in its install namespace (see Install
@@ -1038,6 +1163,22 @@ The segment is a readable form, not an identity: names are made ref-safe first, 
 
 After the upgrade, a user whose ref-safe name starts with `_` or `u-`, or equals `revert`, proposes on a new branch.
 A pull request still open on the old branch is no longer updated by the console: merge it as it is, or close it and stage those changes again.
+
+`spec.forge.pullRequests: Delegated` acts with the requester's own forge account.
+It suits a forge whose users sign in through the same identity provider as the console.
+This build sets up the connection only: dotvirt still pushes and opens pull requests with its own account until the write path ships.
+
+- Register dotvirt at the forge as an OAuth2 application: a confidential client, with the redirect URI `https://<console host>/api/forge/callback`.
+- Put its client secret in a Secret in dotvirt's namespace, and set `spec.forge.userAuth`: `clientID`, `clientSecret` (that Secret and key), and `authorizeURL`, the forge's `/login/oauth/authorize` as users' browsers reach it.
+- Set `spec.forge.url`: users' tokens go only to the forge the spec names, never to the url of the forge credential Secret. With a managed forge this also pins the managed forge's host.
+- `tokenURL` defaults to `spec.forge.url` plus `/login/oauth/access_token`; set it when dotvirt reaches the token endpoint at another address.
+- The kubelet reads the client secret for the console's pod: the operator never does, so the Secret needs no grant. Restart the console after a rotation.
+- Users must be able to sign in to the forge at `authorizeURL`; the rest of the forge may stay private.
+- The first sign-in of each console session sends the user to that page once per session and console process. The forge asks for consent the first time only, then answers at once. Leaving the page unanswered leaves the console usable; the next sign-in, or the user menu's "Connect git account", asks again.
+- No user is sent there while dotvirt cannot reach the forge (its API probed at most every 30 seconds, or a forge call of the flow failing): the user menu still offers the connect. The browser reaches the authorize page through `authorizeURL`, which this check only approximates.
+- The token rides the console session only: kept in memory, never written to disk, dropped at sign-out, at session expiry, and by the user menu's "Disconnect git account". A restart drops every connection; the next connect is the forge's silent answer.
+- Disconnecting forgets the token; the grant itself stays at the forge until the user, the forge's admin, or deleting the forge account revokes it.
+- dotvirt asks the scopes `write:repository read:user`, fixed for good: the forge refuses a grant asked with other scopes than it holds.
 
 Leave `dotvirt/proposed/**` unprotected in the forge.
 dotvirt rebuilds a proposal's branch on every propose and force-pushes it.

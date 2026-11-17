@@ -21,6 +21,10 @@ TMPL=operator/catalog-template.yaml
 # list, once multi-arch — which is exactly what we want to pin).
 digest() { skopeo inspect --format '{{.Digest}}' "docker://$1"; }
 
+# published <image-name-without-tag> <sha256:digest>   record a pushed image for signing:
+# one <name>@<digest> line in $PUBLISHED_REFS, which the workflows hand to hack/sign-images.sh.
+published() { [ -z "${PUBLISHED_REFS:-}" ] || echo "$1@$2" >>"$PUBLISHED_REFS"; }
+
 # repin <image-name-without-tag> <sha256:digest> <file>...   swap a pinned digest in place.
 # Anchored on '@' so .../dotvirt never matches .../dotvirt-operator.
 repin() { local ref="$1" d="$2"; shift 2; sed -i -E "s#${ref}@sha256:[0-9a-f]{64}#${ref}@${d}#g" "$@"; }

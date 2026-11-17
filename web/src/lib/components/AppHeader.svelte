@@ -18,6 +18,8 @@
 	import { TONE_PILL } from '#lib/status.js';
 	import IssueRow from './IssueRow.svelte';
 	import { inventory } from '#lib/state/inventory.svelte.js';
+	import { forge } from '#lib/state/forge.svelte.js';
+	import { returnPath } from '#lib/signin.js';
 	import { session } from '#lib/state/session.svelte.js';
 	import { theme } from '#lib/state/theme.svelte.js';
 	import GlobalSearch, { type SearchHit } from './GlobalSearch.svelte';
@@ -241,6 +243,35 @@
 				{/if}
 			</div>
 			<div class="px-3 py-1.5 text-ink-muted">{inventory.vmCount} VMs in view</div>
+			{#if forge.status?.delegated}
+				<div class="border-t border-line-soft"></div>
+				<div class="px-3 pt-1.5 pb-0.5 text-[10px] tracking-wide text-ink-faint uppercase">
+					Git account
+				</div>
+				{#if forge.status.connected}
+					<div class="px-3 py-1 text-ink-muted">Connected as {forge.status.login}</div>
+					<MenuItem
+						onclick={() => {
+							close();
+							forge.disconnect();
+						}}
+					>
+						Disconnect git account
+					</MenuItem>
+				{:else}
+					<MenuItem
+						onclick={() => {
+							close();
+							forge.connect(returnPath(page.url));
+						}}
+					>
+						Connect git account
+					</MenuItem>
+				{/if}
+				{#if forge.error}
+					<div class="px-3 py-1 text-[11px] text-danger">{forge.error}</div>
+				{/if}
+			{/if}
 			<div class="border-t border-line-soft"></div>
 			<div class="px-3 pt-1.5 pb-0.5 text-[10px] tracking-wide text-ink-faint uppercase">Theme</div>
 			{#each [{ id: 'light', label: 'Light' }, { id: 'dark', label: 'Dark' }, { id: 'system', label: 'System' }] as const as opt (opt.id)}
