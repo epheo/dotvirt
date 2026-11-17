@@ -4,7 +4,7 @@
 	import { adoptNamespaces, dispatchVMAction, type VMAction } from '#lib/actions.js';
 	import { ACCESS_UNKNOWN, READ_ONLY } from '#lib/authoring.js';
 	import { objectAdoptGate, objectGate, projectGate, repoGate, vmGate } from '#lib/gates.js';
-	import { repoError } from '#lib/gitops.js';
+	import { lostToGit, repoError } from '#lib/gitops.js';
 	import { inventory } from '#lib/state/inventory.svelte.js';
 	import { vmsOff } from '#lib/state/modules.svelte.js';
 	import { ui } from '#lib/state/ui.svelte.js';
@@ -29,6 +29,12 @@
 	// recovery flow must not offer on.
 	function projectSyncError(project: string): string {
 		return repoError(inventory.projects.find((p) => p.name === project)?.gitOps);
+	}
+
+	// Git lost what the project runs: its objects read tracked, not NotTracked,
+	// so the adopt offer cannot wait on untracked VMs.
+	function projectLost(project: string): boolean {
+		return lostToGit(inventory.projects.find((p) => p.name === project)?.gitOps);
 	}
 
 	// Untracked VMs are what the inventory can see git not describing, so they decide
@@ -133,7 +139,7 @@
 					>
 					<div class="my-1 border-t border-line-soft"></div>
 				{/if}
-				{#if ctx.repo && ctx.namespaces.some( (ns) => inventory.canAuthorVMs(ns) ) && (untracked.length || projectSyncError(ctx.project))}
+				{#if ctx.repo && ctx.namespaces.some( (ns) => inventory.canAuthorVMs(ns) ) && (untracked.length || projectSyncError(ctx.project) || projectLost(ctx.project))}
 					<MenuItem
 						onclick={() => {
 							const ns = ctx.kind === 'container' ? ctx.namespaces : [];

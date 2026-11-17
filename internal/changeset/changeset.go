@@ -48,10 +48,22 @@ type LiveSource interface {
 
 // PruneSource: what ArgoCD would prune for the apps sourcing repo, per Argo's
 // OWN comparison. The draft view relays it; re-deriving from git could
-// diverge. known is false while it cannot say.
+// diverge. settled are projects whose generated app's prunes are on their way
+// whatever merges next. known is false while it cannot say.
 type PruneSource interface {
-	PrunePending(repo string) (refs []model.ObjectRef, known bool)
+	PrunePending(repo string, settled ...string) (refs []model.ObjectRef, known bool)
 }
+
+// HoldReader is what ArgoCD holding a project's emptied source means
+// (model.Hold). The API implements it, from Argo's view and the repo's history.
+type HoldReader interface {
+	EmptyHold(proj project.ProjectInfo) model.Hold
+}
+
+// UseHolds attaches the hold verdict: a deliberate removal of a project's last
+// objects then neither warns nor asks for a yes, as it applies whatever merges
+// next. Set after construction, beside UseAuthorizer.
+func (c *Coordinator) UseHolds(h HoldReader) { c.holds = h }
 
 // InstancetypeReader reads one instancetype object under id's own token: the
 // one a VM edit switches to, as the VM names it (kind, empty for the
@@ -96,6 +108,7 @@ type Coordinator struct {
 	resyncer Resyncer            // may be nil -> re-sync unavailable
 	renderer vmtemplate.Renderer // processes library templates into VM manifests
 	prune    PruneSource         // may be nil -> the draft view carries no prune warning
+	holds    HoldReader          // may be nil -> every pending prune warns
 	authz    Authorizer          // nil refuses every write (see UseAuthorizer)
 	// instancetypes may be nil: an instancetype switch then strips every
 	// sizing field an instancetype may take over, and the view says so.

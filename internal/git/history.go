@@ -11,6 +11,7 @@ import (
 	"github.com/go-git/go-git/v5/plumbing/filemode"
 	"github.com/go-git/go-git/v5/plumbing/object"
 
+	"github.com/epheo/dotvirt/internal/manifest"
 	"github.com/epheo/dotvirt/internal/model"
 )
 
@@ -95,6 +96,102 @@ func (r *Repo) OnBranch(branch, hash string) (bool, error) {
 		}
 	}
 	return false, nil
+}
+
+// Descends reports whether older is newer or one of its ancestors, newer being
+// a state branch held (OnBranch): git moved on from older by commits, not by a
+// history that replaced it. Any parent counts, so a merge that took the PR's
+// side as its first parent still moved on; a root older's history lacks does
+// not: a replaced history joined back to the old one (a merge of unrelated
+// histories) keeps older as an ancestor through that merge alone. known is
+// false while branch does not hold newer within historyScan, as when this
+// mirror has not fetched it yet: no answer either way.
+func (r *Repo) Descends(branch, newer, older string) (follows, known bool, err error) {
+	if on, err := r.OnBranch(branch, newer); err != nil || !on {
+		return false, false, err
+	}
+	if newer == older {
+		return true, true, nil
+	}
+	repo := r.repo.Load()
+	nc, err := repo.CommitObject(plumbing.NewHash(newer))
+	if err != nil {
+		return false, false, err
+	}
+	oc, err := repo.CommitObject(plumbing.NewHash(older))
+	if errors.Is(err, plumbing.ErrObjectNotFound) {
+		return false, true, nil
+	}
+	if err != nil {
+		return false, false, err
+	}
+	if follows, err = oc.IsAncestor(nc); err != nil || !follows {
+		return false, err == nil, err
+	}
+	newRoots, err := roots(nc)
+	if err != nil {
+		return false, false, err
+	}
+	oldRoots, err := roots(oc)
+	if err != nil {
+		return false, false, err
+	}
+	for h := range newRoots {
+		if !oldRoots[h] {
+			return false, true, nil
+		}
+	}
+	return true, true, nil
+}
+
+// roots is every commit without a parent in c's history.
+func roots(c *object.Commit) (map[plumbing.Hash]bool, error) {
+	out := map[plumbing.Hash]bool{}
+	err := object.NewCommitPreorderIter(c, nil, nil).ForEach(func(c *object.Commit) error {
+		if c.NumParents() == 0 {
+			out[c.Hash] = true
+		}
+		return nil
+	})
+	return out, err
+}
+
+// DeclaresAt reports whether commit hash declares, in this mirror's folder,
+// an object Argo's source renders: a document with a kind and a name, in a
+// .yaml file outside a leading templates/ (the ApplicationSet's include and
+// exclude). Read as Argo reads git, no wider: a file it never renders (a .yml
+// CI workflow, a comment-only .yaml) declares nothing, for the revision Argo
+// holds as for the one it applied.
+func (r *Repo) DeclaresAt(hash string) (bool, error) {
+	c, err := r.repo.Load().CommitObject(plumbing.NewHash(hash))
+	if err != nil {
+		return false, err
+	}
+	tree, err := c.Tree()
+	if err != nil {
+		return false, err
+	}
+	if tree, err = scopeTree(tree, r.root); err != nil || tree == nil {
+		return false, err
+	}
+	errFound := errors.New("found")
+	err = tree.Files().ForEach(func(f *object.File) error {
+		if !strings.HasSuffix(f.Name, ".yaml") || InTemplatesDir(f.Name) {
+			return nil
+		}
+		content, err := readFile(f)
+		if err != nil {
+			return err
+		}
+		if objs, _ := manifest.Docs(content); len(objs) > 0 {
+			return errFound
+		}
+		return nil
+	})
+	if errors.Is(err, errFound) {
+		return true, nil
+	}
+	return false, err
 }
 
 // historyScan bounds one walk: a file untouched for this many commits reads as

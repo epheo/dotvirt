@@ -1,10 +1,15 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
+	"fmt"
 	"maps"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"os/exec"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
@@ -12,11 +17,15 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/client-go/kubernetes/fake"
 
+	"github.com/epheo/dotvirt/internal/argo"
 	"github.com/epheo/dotvirt/internal/cluster"
 	"github.com/epheo/dotvirt/internal/clusterstate"
 	"github.com/epheo/dotvirt/internal/eventbus"
+	"github.com/epheo/dotvirt/internal/git"
+	"github.com/epheo/dotvirt/internal/model"
 	"github.com/epheo/dotvirt/internal/project"
 )
 
@@ -68,7 +77,7 @@ func TestAppSetPluginAuth(t *testing.T) {
 		}
 		var out struct {
 			Output struct {
-				Parameters []map[string]string `json:"parameters"`
+				Parameters []map[string]any `json:"parameters"`
 			} `json:"output"`
 		}
 		if err := json.NewDecoder(rec.Body).Decode(&out); err != nil {
@@ -110,7 +119,7 @@ func TestAppSetPluginParams(t *testing.T) {
 		s.handleAppSetPlugin(rec, r)
 		var out struct {
 			Output struct {
-				Parameters []map[string]string `json:"parameters"`
+				Parameters []map[string]any `json:"parameters"`
 			} `json:"output"`
 		}
 		if err := json.NewDecoder(rec.Body).Decode(&out); err != nil {
@@ -118,7 +127,7 @@ func TestAppSetPluginParams(t *testing.T) {
 		}
 		got := map[string]string{}
 		for _, p := range out.Output.Parameters {
-			got[p["project"]] = p["namespace"]
+			got[p["project"].(string)] = p["namespace"].(string)
 		}
 		return got
 	}
@@ -145,7 +154,7 @@ func TestAppSetPluginPath(t *testing.T) {
 	s.handleAppSetPlugin(rec, r)
 	var out struct {
 		Output struct {
-			Parameters []map[string]string `json:"parameters"`
+			Parameters []map[string]any `json:"parameters"`
 		} `json:"output"`
 	}
 	if err := json.NewDecoder(rec.Body).Decode(&out); err != nil {
@@ -153,9 +162,336 @@ func TestAppSetPluginPath(t *testing.T) {
 	}
 	got := map[string]string{}
 	for _, p := range out.Output.Parameters {
-		got[p["project"]] = p["path"]
+		got[p["project"].(string)] = p["path"].(string)
 	}
 	if got["folded"] != "clusters/a" || got["team-a"] != "." {
 		t.Errorf("paths = %v", got)
 	}
+}
+
+// The generator lifts allowEmpty only while Argo holds an empty source that
+// git itself reached by moving on from what Argo applied, read from the same
+// source: a deliberate removal of a project's last objects. Every other hold
+// keeps Argo's guard: a repo lost and re-created (another history), a mirror
+// that cannot tell yet, git that did not move, a re-pointed source, git that
+// still declares what renders to nothing. The platform's static app never
+// holds. The inventory says the same of each.
+func TestAppSetPluginLiftsAllowEmptyOnlyForADeliberateRemoval(t *testing.T) {
+	removed := newRemovalRepo(t)
+	removed.remove(t)
+	same := newRemovalRepo(t)
+	moved := newRemovalRepo(t)
+	moved.remove(t)
+	recreated := "file://" + seedPlatformRepo(t, map[string]string{"README.md": "recovered\n"})
+	unopened := newRemovalRepo(t)
+	unopened.remove(t)
+	stale := newRemovalRepo(t)
+	declared := newRemovalRepo(t)
+	declared.edit(t)
+	old := newRemovalRepo(t)
+	old.remove(t)
+	nosrc := newRemovalRepo(t)
+	nosrc.remove(t)
+	lifting := newRemovalRepo(t)
+	lifting.remove(t)
+	// The forge lost the repo; it came back empty (R0), and an admin synced it
+	// in Argo without prune, so R0 reads as applied while the objects run.
+	// Then a commit adding no manifest (the starter-library seed) lands (R1).
+	chain := newRepoWith(t, map[string]string{"README.md": "recovered\n"})
+	chainR0 := chain.head(t)
+	chain.add(t, "templates/web.yaml", "kind: VirtualMachineTemplate\n")
+	hand := newRepoWith(t, map[string]string{"README.md": "recovered\n"})
+	relift := newRepoWith(t, map[string]string{"README.md": "recovered\n"})
+	liftfull := newRemovalRepo(t)
+	liftfull.edit(t)
+	// A re-created repo given a file Argo never renders (a .yml workflow, a
+	// comment-only .yaml), synced by hand without prune, then that file dropped.
+	yml := newRepoWith(t, map[string]string{"README.md": "recovered\n"})
+	yml.add(t, ".forgejo/workflows/ci.yml", "on: push\n")
+	ymlApplied := yml.head(t)
+	yml.drop(t, ".forgejo/workflows/ci.yml")
+	comment := newRepoWith(t, map[string]string{"README.md": "recovered\n"})
+	comment.add(t, "notes.yaml", "# nothing yet\n")
+	commentApplied := comment.head(t)
+	comment.drop(t, "notes.yaml")
+	// A deliberate removal in a repo keeping its CI workflow.
+	ci := newRepoWith(t, map[string]string{
+		"team/web.yaml":             "kind: VirtualMachine\nmetadata: {name: web, namespace: team}\n",
+		".forgejo/workflows/ci.yml": "on: push\n",
+	})
+	ci.remove(t)
+	// A history replaced, then joined back to the old one keeping its tree.
+	rejoin := newRemovalRepo(t)
+	rejoin.rejoin(t)
+	platform := "file://" + seedPlatformRepo(t, map[string]string{"README.md": "lost\n"})
+
+	fc := newFakeCluster(t)
+	var apps []map[string]any
+	for _, p := range []struct {
+		name, repo, compared, applied, appliedPath string
+	}{
+		{"team-del", removed.url, removed.head(t), removed.applied, "."},
+		{"team-rec", recreated, gitHead(t, strings.TrimPrefix(recreated, "file://")), removed.applied, "."},
+		{"team-new", unopened.url, unopened.head(t), unopened.applied, "."},
+		{"team-same", same.url, same.applied, same.applied, "."},
+		{"team-full", declared.url, declared.head(t), declared.applied, "."},
+		{"team-moved", moved.url, moved.head(t), moved.applied, "elsewhere"},
+		{"team-stale", stale.url, "", stale.applied, "."},
+		{"team-old", old.url, old.head(t), old.applied, "."},
+		{"team-nosrc", nosrc.url, nosrc.head(t), nosrc.applied, "."},
+		{"team-lifting", lifting.url, lifting.head(t), lifting.head(t), "."},
+		{"team-chain", chain.url, chain.head(t), chainR0, "."},
+		{"team-hand", hand.url, hand.head(t), hand.head(t), "."},
+		{"team-relift", relift.url, relift.head(t), removed.applied, "."},
+		{"team-liftfull", liftfull.url, liftfull.head(t), liftfull.applied, "."},
+		{"team-yml", yml.url, yml.head(t), ymlApplied, "."},
+		{"team-comment", comment.url, comment.head(t), commentApplied, "."},
+		{"team-ci", ci.url, ci.head(t), ci.applied, "."},
+		{"team-rejoin", rejoin.url, rejoin.head(t), rejoin.applied, "."},
+	} {
+		fc.namespaces = append(fc.namespaces, corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: p.name,
+			Labels: map[string]string{"dotvirt.io/project": p.name}, Annotations: map[string]string{"dotvirt.io/repo": p.repo}}})
+		if p.name == "team-stale" {
+			continue // its app is added once the mirror is open, below
+		}
+		app := heldApp(p.name, p.repo, p.compared, p.applied, p.appliedPath)
+		switch p.name {
+		case "team-old": // the generator has not caught up with the project's repo
+			_ = unstructured.SetNestedField(app, recreated, "spec", "source", "repoURL")
+		case "team-nosrc":
+			_ = unstructured.SetNestedSlice(app, []any{map[string]any{"revision": p.applied}}, "status", "history")
+		case "team-lifting", "team-relift", "team-liftfull": // allowEmpty already on
+			_ = unstructured.SetNestedField(app, true, "spec", "syncPolicy", "automated", "allowEmpty")
+		}
+		apps = append(apps, app)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	repos := git.NewRepoSet(ctx, "", "", nil, false, nil, time.Hour)
+	for _, repo := range []string{removed.url, same.url, moved.url, recreated, stale.url, declared.url, old.url, nosrc.url, lifting.url,
+		chain.url, hand.url, relift.url, liftfull.url, yml.url, comment.url, ci.url, rejoin.url} {
+		if _, _, err := repos.Get(repo, ""); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// Opened before the removal landed: the mirror has not fetched it.
+	stale.remove(t)
+	apps = append(apps, heldApp("team-stale", stale.url, stale.head(t), stale.applied, "."))
+	platformApp := heldApp("platform", platform, gitHead(t, strings.TrimPrefix(platform, "file://")), removed.applied, ".")
+	platformApp["metadata"] = map[string]any{"namespace": "argocd", "name": "dotvirt-platform"}
+	apps = append(apps, platformApp)
+	fc.on(http.MethodGet, "/apis/argoproj.io/v1alpha1/applications", unstructuredList("argoproj.io/v1alpha1", "Application", apps...))
+	s := fc.server(nil, Config{AppSetPluginToken: "tok", BaseBranch: "main", PlatformRepo: platform})
+	s.drift = syncedSnapshot(t, fc)
+	s.repos = repos
+
+	want := map[string]model.Hold{
+		"team-del": model.HoldDeleting, "team-rec": model.HoldReplaced, "team-new": model.HoldPending,
+		"team-same": model.HoldMismatch, "team-full": model.HoldMismatch, "team-moved": model.HoldMismatch,
+		"team-stale": model.HoldPending, "team-old": model.HoldPending, "team-nosrc": model.HoldMismatch,
+		"team-lifting": model.HoldDeleting, "team-chain": model.HoldMismatch, "team-hand": model.HoldMismatch,
+		"team-relift": model.HoldReplaced, "team-liftfull": model.HoldMismatch,
+		"team-yml": model.HoldMismatch, "team-comment": model.HoldMismatch, "team-ci": model.HoldDeleting,
+		"team-rejoin": model.HoldReplaced, "team-a": "",
+	}
+	got := map[string]model.Hold{}
+	for _, p := range s.AllProjects() {
+		if _, ok := want[p.Name]; ok {
+			got[p.Name] = s.EmptyHold(p)
+		}
+	}
+	if !maps.Equal(got, want) {
+		t.Errorf("holds = %v, want %v", got, want)
+	}
+	if h := s.EmptyHold(s.platformProject()); h != "" {
+		t.Errorf("platform hold = %q: its static app is never lifted, so never held here", h)
+	}
+	lifted := generated(t, s, want)
+	if want := map[string]any{"team-del": true, "team-rec": false, "team-new": false, "team-same": false,
+		"team-full": false, "team-moved": false, "team-stale": false, "team-old": false, "team-nosrc": false,
+		"team-lifting": true, "team-chain": false, "team-hand": false, "team-relift": false, "team-liftfull": false,
+		"team-yml": false, "team-comment": false, "team-ci": true, "team-rejoin": false,
+		"team-a": false}; !maps.Equal(lifted, want) {
+		t.Errorf("allowEmpty = %v, want %v", lifted, want)
+	}
+
+	// A snapshot whose watch fails may hold a hold that is gone: nothing lifts.
+	_ = fc.srv.Listener.Close()
+	fc.srv.CloseClientConnections()
+	for deadline := time.Now().Add(10 * time.Second); s.drift.Healthy(); time.Sleep(20 * time.Millisecond) {
+		if time.Now().After(deadline) {
+			t.Fatal("the Application snapshot never noticed its watch failing")
+		}
+	}
+	if lifted := generated(t, s, want); lifted["team-del"] != false {
+		t.Errorf("with the snapshot unhealthy: allowEmpty = %v, want false", lifted["team-del"])
+	}
+
+	// The removal lands: Argo syncs and holds nothing. The next run closes it.
+	fc2 := newFakeCluster(t)
+	synced := heldApp("team-del", removed.url, removed.head(t), removed.head(t), ".")
+	_ = unstructured.SetNestedField(synced, "Synced", "status", "sync", "status")
+	_ = unstructured.SetNestedSlice(synced, []any{}, "status", "resources")
+	fc2.on(http.MethodGet, "/apis/argoproj.io/v1alpha1/applications", unstructuredList("argoproj.io/v1alpha1", "Application", synced))
+	_ = fc2.server(nil, Config{})
+	s.drift = syncedSnapshot(t, fc2)
+	if lifted := generated(t, s, want); lifted["team-del"] != false {
+		t.Errorf("after the removal synced: allowEmpty = %v, want false", lifted["team-del"])
+	}
+}
+
+// generated runs the generator once, as Argo calls it: each wanted project's
+// allowEmpty.
+func generated(t *testing.T, s *Server, want map[string]model.Hold) map[string]any {
+	t.Helper()
+	r := httptest.NewRequest(http.MethodPost, "/api/v1/getparams.execute", strings.NewReader(`{"input":{"parameters":{"reservedNamespaces":[]}}}`))
+	r.Header.Set("Authorization", "Bearer tok")
+	rec := httptest.NewRecorder()
+	s.handleAppSetPlugin(rec, r)
+	var out struct {
+		Output struct {
+			Parameters []map[string]any `json:"parameters"`
+		} `json:"output"`
+	}
+	if err := json.NewDecoder(rec.Body).Decode(&out); err != nil {
+		t.Fatal(err)
+	}
+	lifted := map[string]any{}
+	for _, p := range out.Output.Parameters {
+		if _, ok := want[p["project"].(string)]; ok {
+			lifted[p["project"].(string)] = p["allowEmpty"]
+		}
+	}
+	return lifted
+}
+
+// removalRepo is a repo whose main declares a VM, what Argo last applied;
+// remove then deletes it, and edit changes it, each as a new commit on main.
+type removalRepo struct {
+	url, bare, work, applied string
+}
+
+func newRemovalRepo(t *testing.T) *removalRepo {
+	t.Helper()
+	return newRepoWith(t, map[string]string{"team/web.yaml": "kind: VirtualMachine\nmetadata: {name: web, namespace: team}\n"})
+}
+
+// newRepoWith is a repo whose main holds files, what Argo last applied.
+func newRepoWith(t *testing.T, files map[string]string) *removalRepo {
+	t.Helper()
+	bare := seedPlatformRepo(t, files)
+	r := &removalRepo{url: "file://" + bare, bare: bare, work: filepath.Join(t.TempDir(), "work"), applied: gitHead(t, bare)}
+	r.git(t, "clone", "-q", bare, r.work)
+	return r
+}
+
+func (r *removalRepo) add(t *testing.T, path, content string) {
+	full := filepath.Join(r.work, path)
+	if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(full, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	r.git(t, "-C", r.work, "add", "-A")
+	r.git(t, "-C", r.work, "commit", "-qm", "add "+path)
+	r.git(t, "-C", r.work, "push", "-q", "origin", "main")
+}
+
+func (r *removalRepo) git(t *testing.T, args ...string) {
+	t.Helper()
+	cmd := exec.Command("git", args...)
+	cmd.Env = append(os.Environ(), "GIT_AUTHOR_NAME=t", "GIT_AUTHOR_EMAIL=t@x", "GIT_COMMITTER_NAME=t", "GIT_COMMITTER_EMAIL=t@x")
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git %v: %v\n%s", args, err, out)
+	}
+}
+
+func (r *removalRepo) drop(t *testing.T, path string) {
+	r.git(t, "-C", r.work, "rm", "-q", path)
+	r.git(t, "-C", r.work, "commit", "-qm", "drop "+path)
+	r.git(t, "-C", r.work, "push", "-q", "origin", "main")
+}
+
+// rejoin re-creates main with a history of its own (a README), then merges
+// the old main into it keeping the new tree, as `git merge -s ours
+// --allow-unrelated-histories` does.
+func (r *removalRepo) rejoin(t *testing.T) {
+	r.git(t, "-C", r.work, "checkout", "-q", "--orphan", "fresh")
+	r.git(t, "-C", r.work, "rm", "-rqf", ".")
+	if err := os.WriteFile(filepath.Join(r.work, "README.md"), []byte("recovered\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	r.git(t, "-C", r.work, "add", "-A")
+	r.git(t, "-C", r.work, "commit", "-qm", "re-created")
+	r.git(t, "-C", r.work, "merge", "-q", "-s", "ours", "--allow-unrelated-histories", "-m", "rejoin", "main")
+	r.git(t, "-C", r.work, "push", "-qf", "origin", "fresh:main")
+}
+
+func (r *removalRepo) remove(t *testing.T) {
+	r.git(t, "-C", r.work, "rm", "-q", "team/web.yaml")
+	r.git(t, "-C", r.work, "commit", "-qm", "delete web")
+	r.git(t, "-C", r.work, "push", "-q", "origin", "main")
+}
+
+func (r *removalRepo) edit(t *testing.T) {
+	if err := os.WriteFile(filepath.Join(r.work, "team/web.yaml"), []byte("kind: VirtualMachine\nmetadata: {name: web, namespace: team, labels: {a: b}}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	r.git(t, "-C", r.work, "commit", "-qam", "edit web")
+	r.git(t, "-C", r.work, "push", "-q", "origin", "main")
+}
+
+func (r *removalRepo) head(t *testing.T) string { return gitHead(t, r.bare) }
+
+func gitHead(t *testing.T, bare string) string {
+	t.Helper()
+	out, err := exec.Command("git", "--git-dir", bare, "rev-parse", "main").Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return strings.TrimSpace(string(out))
+}
+
+// heldApp is a project's generated Application as Argo holds it at compared,
+// after it applied applied from appliedPath of repo: every object it tracks
+// would be pruned.
+func heldApp(project, repo, compared, applied, appliedPath string) map[string]any {
+	return map[string]any{
+		"apiVersion": "argoproj.io/v1alpha1", "kind": "Application",
+		"metadata": map[string]any{"namespace": "argocd", "name": "dotvirt-" + project, "labels": map[string]any{"dotvirt.io/project": project}},
+		"spec": map[string]any{
+			"source":     map[string]any{"repoURL": repo, "path": ".", "targetRevision": "main"},
+			"syncPolicy": map[string]any{"automated": map[string]any{"prune": true, "selfHeal": true}},
+		},
+		"status": map[string]any{
+			"sync":      map[string]any{"status": "OutOfSync", "revision": compared},
+			"history":   []any{map[string]any{"revision": applied, "source": map[string]any{"repoURL": repo, "path": appliedPath}}},
+			"resources": []any{map[string]any{"kind": "VirtualMachine", "namespace": project, "name": "web", "requiresPruning": true}},
+		},
+	}
+}
+
+// syncedSnapshot is the Application snapshot over fc, once its LIST landed.
+func syncedSnapshot(t *testing.T, fc *fakeCluster) *argo.Snapshot {
+	t.Helper()
+	kubeconfig := filepath.Join(t.TempDir(), "kubeconfig")
+	kc := fmt.Sprintf("apiVersion: v1\nkind: Config\nclusters:\n- name: t\n  cluster: {server: %s, insecure-skip-tls-verify: true}\ncontexts:\n- name: t\n  context: {cluster: t, user: t}\ncurrent-context: t\nusers:\n- name: t\n  user: {token: sa-token}\n", fc.srv.URL)
+	if err := os.WriteFile(kubeconfig, []byte(kc), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	ac, err := argo.NewSAClient(kubeconfig)
+	if err != nil {
+		t.Fatal(err)
+	}
+	snap := argo.NewSnapshot(ac, nil)
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	snap.Run(ctx)
+	syncCtx, done := context.WithTimeout(ctx, 10*time.Second)
+	defer done()
+	if err := snap.WaitForSync(syncCtx); err != nil {
+		t.Fatalf("Applications never synced: %v", err)
+	}
+	return snap
 }

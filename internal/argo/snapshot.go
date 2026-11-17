@@ -52,6 +52,9 @@ type driftView struct {
 	resources map[resKey]Drift
 	vms       map[string]Drift
 	projects  map[string]model.ProjectSync
+	// holds keys each held generated app's EmptyHold by its project: the
+	// generator and every frame ask per project.
+	holds map[string]EmptyHold
 	// objGens counts content changes to the non-VM entries, per scope (see
 	// resKey.scope): VM drift rides the frame itself, and objGens feeds each
 	// caller's catalog watermark, which must not move (and refetch the catalog)
@@ -200,12 +203,12 @@ func (s *Snapshot) deriveLoop(ctx context.Context) {
 func (s *Snapshot) derive() {
 	objs := reflect.List(s.apps)
 	sort.Slice(objs, func(i, j int) bool { return appKey(objs[i]) < appKey(objs[j]) })
-	next := &driftView{resources: resourceDriftFromApps(objs), projects: appSyncFromApps(objs)}
+	next := &driftView{resources: resourceDriftFromApps(objs), projects: appSyncFromApps(objs), holds: holdsFromApps(objs, s.writeNS)}
 	prev := s.view.Load()
 	var prevRes map[resKey]Drift
 	var gens map[string]uint64
 	if prev != nil {
-		if maps.Equal(prev.resources, next.resources) && equality.Semantic.DeepEqual(prev.projects, next.projects) {
+		if maps.Equal(prev.resources, next.resources) && equality.Semantic.DeepEqual(prev.projects, next.projects) && maps.Equal(prev.holds, next.holds) {
 			return
 		}
 		prevRes, gens = prev.resources, prev.objGens
@@ -287,9 +290,11 @@ func (s *Snapshot) ForeignApps(ownRepo string) map[string]bool {
 // could drift from it. Every app on the repo, whatever folder it reads: a merge
 // moves the revision each of them syncs. Never narrowed to what a caller sees:
 // what they may be told is the caller's to filter, and a narrowed answer reads
-// as a safe merge. known is false before the initial LIST, when nothing can
-// be said.
-func (s *Snapshot) PrunePending(repo string) (refs []model.ObjectRef, known bool) {
+// as a safe merge. settled are projects whose generated app's prunes are on
+// their way whatever merges next (EmptyHold): that app alone is left out, so
+// no other app on the repo hides its own. known is false before the initial
+// LIST, when nothing can be said.
+func (s *Snapshot) PrunePending(repo string, settled ...string) (refs []model.ObjectRef, known bool) {
 	own := forge.NormalizeRepoURL(repo)
 	if !s.synced.Done() {
 		return nil, false
@@ -299,7 +304,7 @@ func (s *Snapshot) PrunePending(repo string) (refs []model.ObjectRef, known bool
 	}
 	var out []model.ObjectRef
 	for _, u := range reflect.List(s.apps) {
-		if !slices.Contains(appRepos(u.Object), own) {
+		if !slices.Contains(appRepos(u.Object), own) || s.generatedFor(u, settled) {
 			continue
 		}
 		for _, raw := range nestedSlice(u.Object, "status", "resources") {
@@ -333,6 +338,104 @@ func (s *Snapshot) PrunePending(repo string) (refs []model.ObjectRef, known bool
 		return a.Name < b.Name
 	})
 	return out, true
+}
+
+// EmptyHold is a project's generated Application that ArgoCD will not
+// auto-sync because every object it tracks would be pruned while
+// automated.allowEmpty is off: the revision it holds at and the last one it
+// applied, the source it reads (normalized repo, folder), whether the last
+// apply read that same source, and whether allowEmpty is on already (the
+// generator's lift, being applied).
+type EmptyHold struct {
+	Compared, Applied string
+	Repo, Path        string
+	SameSource        bool
+	Lifted            bool
+}
+
+// EmptyHold reads that refusal for project's generated app (generatedProject):
+// only that app's allowEmpty the generator sets, so
+// no other app on the repo, the static platform app included, ever lends it a
+// hold. ok is false when it holds nothing, before the initial LIST, and for an
+// app that never applied a revision.
+func (s *Snapshot) EmptyHold(project string) (EmptyHold, bool) {
+	v := s.current()
+	if v == nil {
+		return EmptyHold{}, false
+	}
+	h, ok := v.holds[project]
+	return h, ok
+}
+
+// generatedFor reports whether app is the generated app of one of projects.
+func (s *Snapshot) generatedFor(app *unstructured.Unstructured, projects []string) bool {
+	p := generatedProject(app, s.writeNS)
+	return p != "" && slices.Contains(projects, p)
+}
+
+// generatedProject is the project whose ApplicationSet app this is, as the
+// template names and labels it ("dotvirt-<project>", projectAppLabel) in the
+// ArgoCD namespace; "" for any other app, a copy carrying the label included.
+func generatedProject(app *unstructured.Unstructured, argoNS string) string {
+	p := app.GetLabels()[projectAppLabel]
+	if p == "" || app.GetName() != "dotvirt-"+p || argoNS != "" && app.GetNamespace() != argoNS {
+		return ""
+	}
+	return p
+}
+
+// Reads reports whether the app reads folder dir of repo.
+func (h EmptyHold) Reads(repo, dir string) bool {
+	return h.Repo == forge.NormalizeRepoURL(repo) && h.Path == cleanDir(dir)
+}
+
+func holdsFromApps(objs []*unstructured.Unstructured, argoNS string) map[string]EmptyHold {
+	out := map[string]EmptyHold{}
+	for _, app := range objs {
+		project := generatedProject(app, argoNS)
+		if project == "" {
+			continue
+		}
+		if h, ok := emptyHold(app.Object); ok {
+			out[project] = h
+		}
+	}
+	return out
+}
+
+// emptyHold is the predicate Argo's auto-sync checks before it skips:
+// OutOfSync under automated prune, every tracked object requiring pruning. It
+// does not read allowEmpty, so a hold being let through still reads as one
+// until the sync lands and the generator keeps letting it through.
+func emptyHold(app map[string]any) (EmptyHold, bool) {
+	prune, _, _ := unstructured.NestedBool(app, "spec", "syncPolicy", "automated", "prune")
+	if !prune || nestedString(app, "status", "sync", "status") != string(model.SyncOutOfSync) {
+		return EmptyHold{}, false
+	}
+	resources := nestedSlice(app, "status", "resources")
+	if len(resources) == 0 {
+		return EmptyHold{}, false
+	}
+	for _, raw := range resources {
+		if res, ok := raw.(map[string]any); !ok || res["requiresPruning"] != true {
+			return EmptyHold{}, false
+		}
+	}
+	lifted, _, _ := unstructured.NestedBool(app, "spec", "syncPolicy", "automated", "allowEmpty")
+	h := EmptyHold{
+		Lifted:   lifted,
+		Compared: nestedString(app, "status", "sync", "revision"),
+		Repo:     forge.NormalizeRepoURL(nestedString(app, "spec", "source", "repoURL")),
+		Path:     cleanDir(nestedString(app, "spec", "source", "path")),
+	}
+	if history := nestedSlice(app, "status", "history"); len(history) > 0 {
+		if last, ok := history[len(history)-1].(map[string]any); ok {
+			h.Applied = asString(last, "revision")
+			src, _ := last["source"].(map[string]any)
+			h.SameSource = src != nil && forge.NormalizeRepoURL(asString(src, "repoURL")) == h.Repo && cleanDir(asString(src, "path")) == h.Path
+		}
+	}
+	return h, h.Compared != "" && h.Applied != ""
 }
 
 // ResourceDrift returns one Argo-managed object's sync/health by identity; ok=false if

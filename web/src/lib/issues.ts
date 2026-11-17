@@ -7,7 +7,7 @@ import {
 	type Project,
 	type VM,
 } from '#lib/api.js';
-import { opStands, repoError } from '#lib/gitops.js';
+import { holdSentence, lostToGit, opStands, repoError } from '#lib/gitops.js';
 import type { NetProblem } from '#lib/netmap.js';
 import { changesHref, hrefForScope, networkHref, vmHref } from '#lib/nav.js';
 import type { ObjectRef } from '#lib/objects.js';
@@ -86,6 +86,16 @@ export function deriveIssues(
 							},
 						}
 					: open(phref),
+			});
+		if (lostToGit(p.gitOps) || p.gitOps?.hold === 'mismatch')
+			out.push({
+				severity: lostToGit(p.gitOps) ? 'warn' : 'danger',
+				scope: p.name,
+				label: lostToGit(p.gitOps) ? 'Not in git' : 'Sync held',
+				detail: holdSentence(p.gitOps),
+				href: phref,
+				project: p.name,
+				action: open(phref),
 			});
 		if (opStands(p.gitOps))
 			out.push({

@@ -8,6 +8,7 @@ package argo
 import (
 	"context"
 	"fmt"
+	"path"
 	"regexp"
 	"sort"
 	"strings"
@@ -324,6 +325,12 @@ func appRepos(app map[string]any) []string {
 		}
 	}
 	return out
+}
+
+// cleanDir is a source path as a folder of its repo: "" and "." are the
+// root, as the ApplicationSet renders a root project.
+func cleanDir(dir string) string {
+	return strings.TrimPrefix(path.Clean("/"+dir), "/")
 }
 
 // appRepo is the Application's canonical primary repoURL, the key tying an

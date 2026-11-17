@@ -248,6 +248,7 @@ type Server struct {
 	clusterF      *cluster.Factory
 	state         *clusterstate.State // SA-owned live+topology snapshot; the read path's source
 	drift         *argo.Snapshot      // nil when Argo disabled; SA-owned, watch-fed Application snapshot
+	holdFacts     holdMemo            // what git says of each held app's revisions (EmptyHold)
 	drs           *drs.Snapshot       // nil disables the DRS live plane; SA-owned KubeDescheduler snapshot
 	netstate      *netstate.Snapshot  // SA-owned, watch-fed networking catalog (networks + fabric)
 	modules       *modules.Snapshot   // what the cluster serves; nil leaves GET /api/modules unmounted

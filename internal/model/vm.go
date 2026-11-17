@@ -252,7 +252,32 @@ type ProjectSync struct {
 	// Unhealthy names what the Application holds that is degraded or was refused,
 	// with Argo's own reason: the rollup alone says only "Degraded".
 	Unhealthy []ObjectHealth `json:"unhealthy,omitempty"`
+	// Hold is set while ArgoCD will not auto-sync because every object it
+	// tracks would be pruned. Its SyncError then says so, and is no repo fault.
+	Hold Hold `json:"hold,omitempty"`
 }
+
+// Hold is what an empty source ArgoCD holds means for a project.
+type Hold string
+
+const (
+	// HoldDeleting: git moved on from what Argo last applied, by commits on
+	// main. A deliberate removal of the last objects: the ApplicationSet lets
+	// Argo apply it within its next generator run.
+	HoldDeleting Hold = "deleting"
+	// HoldReplaced: git's history no longer holds what Argo last applied. The
+	// repo was lost and re-created, or rewritten: git does not declare what
+	// runs, and adopting it is how it comes back.
+	HoldReplaced Hold = "replaced"
+	// HoldPending: neither can be told yet: dotvirt's mirror has not fetched
+	// the revision Argo holds, or the app has not caught up with the project.
+	HoldPending Hold = "pending"
+	// HoldMismatch: ArgoCD would delete everything it runs here though git did
+	// not empty: git did not move, the app reads another source than it last
+	// applied, or git declares what renders to nothing. Never lifted: an admin
+	// checks the project's Argo application.
+	HoldMismatch Hold = "mismatch"
+)
 
 // ObjectHealth is one object an Application reports as degraded or refused: its
 // identity, the health Argo computed, and the health or apply message.

@@ -260,6 +260,7 @@ const projectErrorForPartialViewers = "this project's repo failed to apply; some
 func (s *Server) projectSyncView(ctx context.Context, v callerView, p project.ProjectInfo, ps model.ProjectSync) *model.ProjectSync {
 	out := ps
 	out.Unhealthy = s.shownRows(ctx, v, ps.Unhealthy)
+	out.Hold = s.EmptyHold(p)
 	if out.SyncError != "" && (len(out.Unhealthy) < len(ps.Unhealthy) || s.seesPartOf(p)) {
 		out.SyncError = projectErrorForPartialViewers
 	}

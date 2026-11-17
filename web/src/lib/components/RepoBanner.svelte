@@ -1,7 +1,9 @@
 <script lang="ts">
 	import { TriangleAlert } from '@lucide/svelte';
+	import { adoptNamespaces } from '#lib/actions.js';
 	import { repoGate } from '#lib/gates.js';
-	import { opFailed, repoError } from '#lib/gitops.js';
+	import { lostToGit, opFailed, repoError } from '#lib/gitops.js';
+	import { action } from '#lib/resource.svelte.js';
 	import { inventory } from '#lib/state/inventory.svelte.js';
 	import { ui } from '#lib/state/ui.svelte.js';
 	import Banner from './Banner.svelte';
@@ -21,6 +23,13 @@
 	const recover = $derived(!!p && !!p.repo && (!!p.error || !!repoError(p?.gitOps)));
 	const note = $derived(p?.error || p?.gitOps?.syncError || '');
 	const may = $derived(!!p && repoGate(p).ok);
+	// Git lost what runs (a re-created or rewritten repo): ArgoCD holds it, and
+	// adopting the namespaces back is the way out, where the caller may stage.
+	const lost = $derived(lostToGit(p?.gitOps));
+	const adoptable = $derived(
+		(p?.namespaces ?? []).map((n) => n.namespace).filter((ns) => inventory.canAuthorVMs(ns)),
+	);
+	const adoptOp = action({ toast: ui.toastError });
 
 	function open(rec: boolean) {
 		if (!p) return;
@@ -49,6 +58,23 @@
 		>
 			{attach ? 'Attach repo' : 'Recover repo'}
 		</button>
+	</Banner>
+{:else if lost}
+	<Banner tone="warn">
+		<TriangleAlert size={14} class="shrink-0" />
+		<span class="truncate"
+			>Git no longer declares what this project runs: its repo was re-created or rewritten. ArgoCD
+			keeps it running until it is adopted into git.</span
+		>
+		{#if adoptable.length}
+			<button
+				onclick={() => adoptOp.run(() => adoptNamespaces(adoptable))}
+				disabled={adoptOp.busy}
+				class="ml-auto shrink-0 font-medium text-warn-ink hover:underline"
+			>
+				{adoptOp.busy ? 'Capturing…' : 'Adopt into git'}
+			</button>
+		{/if}
 	</Banner>
 {:else if syncFailed}
 	<Banner tone="danger">

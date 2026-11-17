@@ -301,6 +301,8 @@ func PlatformAppProject(dv *dotvirtv1alpha1.Dotvirt, argoNS, platformRepo string
 // prune+selfHeal is safe against a repo that lost its content because ArgoCD's
 // automated.allowEmpty defaults to false: a source that yields zero resources is
 // refused rather than applied, so an emptied or unclonable repo cannot wipe a tier.
+// The ApplicationSet lifts it per tenant app only while git moved on from what
+// Argo applied (tenantAllowEmptyPatch); the platform repo is never empty on purpose.
 func argoAppSpec(project, repoURL, path, namespace string) map[string]any {
 	return map[string]any{
 		"project": project,

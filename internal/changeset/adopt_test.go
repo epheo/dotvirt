@@ -276,12 +276,52 @@ func TestAdoptAbsentFromRunningNotFound(t *testing.T) {
 // fakePrune stands in for the argo snapshot's requiresPruning relay.
 type fakePrune []model.ObjectRef
 
-func (f fakePrune) PrunePending(string) ([]model.ObjectRef, bool) { return f, true }
+func (f fakePrune) PrunePending(string, ...string) ([]model.ObjectRef, bool) { return f, true }
+
+// held is a project whose app ArgoCD holds at an emptied source, and what
+// that means.
+type held model.Hold
+
+func (h held) EmptyHold(project.ProjectInfo) model.Hold { return model.Hold(h) }
+
+// settledPrune is Argo about to prune refs from project p's generated app,
+// which settling p leaves out.
+type settledPrune []model.ObjectRef
+
+func (f settledPrune) PrunePending(_ string, settled ...string) ([]model.ObjectRef, bool) {
+	if slices.Contains(settled, "p") {
+		return nil, true
+	}
+	return f, true
+}
+
+// A deliberate removal of a project's last objects applies whatever merges
+// next: it neither warns nor asks for a yes. Git that lost what runs still
+// does both.
+func TestHeldDeletionNeitherWarnsNorAsks(t *testing.T) {
+	stray := model.ObjectRef{Kind: "VirtualMachine", Namespace: "alpha", Name: "web"}
+	proj := project.ProjectInfo{Name: "p", Repo: seedBare(t), Namespaces: []string{"alpha"}}
+	for _, c := range []struct {
+		hold model.Hold
+		warn bool
+	}{{model.HoldDeleting, false}, {model.HoldReplaced, true}, {model.HoldPending, true}} {
+		co := newTestCoordinator(t, false)
+		co.prune = settledPrune{stray}
+		co.UseHolds(held(c.hold))
+		view, err := co.Get(auth.Identity{Username: "alice"}, proj)
+		if err != nil {
+			t.Fatalf("%s: Get: %v", c.hold, err)
+		}
+		if got := view.Warning != "" && len(view.Prune) == 1; got != c.warn {
+			t.Errorf("%s: warning %q prune %v, want warned=%v", c.hold, view.Warning, view.Prune, c.warn)
+		}
+	}
+}
 
 // unloaded is an Argo view that has not loaded yet.
 type unloaded struct{}
 
-func (unloaded) PrunePending(string) ([]model.ObjectRef, bool) { return nil, false }
+func (unloaded) PrunePending(string, ...string) ([]model.ObjectRef, bool) { return nil, false }
 
 // tellsIn names only the objects in its namespaces: a caller who may list
 // there and nowhere else.
