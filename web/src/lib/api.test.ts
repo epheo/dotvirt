@@ -116,6 +116,28 @@ describe('HttpError', () => {
 		}
 	});
 
+	it('carries the way forward a refusal names, and only one the console knows', async () => {
+		const refused = (next: string) =>
+			new Response('forbidden: your git account is not connected to this console session\n', {
+				status: 403,
+				headers: { 'Dotvirt-Next': next },
+			});
+		try {
+			answer(refused('forge-connect'));
+			const e = await caught(api.propose('team-web', 't', ''));
+			expect(e!.next).toBe('forge-connect');
+			expect(e!.message).toBe('your git account is not connected to this console session');
+			answer(refused('forge-write'));
+			expect((await caught(api.revert('team-web', 'h')))!.next).toBe('forge-write');
+			answer(refused('javascript:alert(1)'));
+			expect((await caught(api.tasks()))!.next).toBe('');
+			answer(new Response('nope', { status: 403 }));
+			expect((await caught(api.tasks()))!.next).toBe('');
+		} finally {
+			vi.unstubAllGlobals();
+		}
+	});
+
 	it('drops the kind the server prefixes its sentence with', async () => {
 		answer(
 			new Response('temporarily unavailable: image upload is not configured on this cluster\n', {

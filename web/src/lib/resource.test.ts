@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { Unauthorized } from './api';
+import { HttpError, Unauthorized } from './api';
 import { action, resource, type Resource } from './resource.svelte';
 import { box, effectRoot, flushSync } from '../test/runes.svelte';
 
@@ -204,6 +204,22 @@ describe('action', () => {
 		expect(op.error).toContain('denied');
 		op.clear();
 		expect(op.error).toBe('');
+		stop();
+	});
+
+	it('keeps the way forward the last refusal named, until the next run or clear()', async () => {
+		let op!: ReturnType<typeof action>;
+		const stop = effectRoot(() => {
+			op = action();
+		});
+		const refusal = new HttpError('not connected', 403, '/api/draft/propose', 'forge-connect');
+		expect(await op.run(() => Promise.reject(refusal))).toBe(false);
+		expect(op.next).toBe('forge-connect');
+		expect(await op.run(() => Promise.reject(new Error('down')))).toBe(false);
+		expect(op.next).toBe('');
+		expect(await op.run(() => Promise.reject(refusal))).toBe(false);
+		op.clear();
+		expect(op.next).toBe('');
 		stop();
 	});
 
