@@ -136,7 +136,7 @@ func TestParamsValid(t *testing.T) {
 	} {
 		p := params
 		edit(&p)
-		if p.Valid() {
+		if p.Valid() || p.Malformed() == "" {
 			t.Errorf("%s: valid", name)
 		}
 	}

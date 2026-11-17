@@ -130,8 +130,8 @@ func (s *Server) adminParams(ctx context.Context, c *cluster.Client) (adminobjec
 		}
 	}
 	p.ConsoleHost = adminobjects.ConsoleHost(spec.IngressHost, ns, domain, router)
-	if !p.Valid() {
-		return adminobjects.Params{}, unavailable(fmt.Errorf("the install's pins are not well formed: %+v", p))
+	if bad := p.Malformed(); bad != "" {
+		return adminobjects.Params{}, unavailable(fmt.Errorf("the install's %s is not well formed", bad))
 	}
 	return p, nil
 }

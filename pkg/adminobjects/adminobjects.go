@@ -72,12 +72,33 @@ type Params struct {
 
 // Valid reports whether every pin is known and well formed: a render missing
 // one would pin nothing.
-func (p Params) Valid() bool {
-	optional := func(name string) bool { return name == "" || len(validation.IsDNS1123Subdomain(name)) == 0 }
-	return ValidUsername(p.Operator) && len(validation.IsDNS1123Label(p.Namespace)) == 0 &&
-		len(validation.IsDNS1123Label(p.ArgoNamespace)) == 0 && len(validation.IsDNS1123Subdomain(p.ArgoController)) == 0 &&
-		len(validation.IsDNS1123Subdomain(p.ForgeSecret)) == 0 && optional(p.BrandingConfigMap) && optional(p.MetricsCAConfigMap) &&
-		optional(p.ConsoleHost) && optional(p.OIDCSecret) && (p.OIDCSecretKey == "" || len(validation.IsConfigMapKey(p.OIDCSecretKey)) == 0)
+func (p Params) Valid() bool { return p.Malformed() == "" }
+
+// Malformed names the first pin that is not well formed, "" when none is;
+// never its value, which may name an admin's Secret.
+func (p Params) Malformed() string {
+	name := func(s string) bool { return len(validation.IsDNS1123Subdomain(s)) == 0 }
+	optional := func(s string) bool { return s == "" || name(s) }
+	for _, c := range []struct {
+		pin string
+		ok  bool
+	}{
+		{"operator", ValidUsername(p.Operator)},
+		{"install namespace", len(validation.IsDNS1123Label(p.Namespace)) == 0},
+		{"ArgoCD namespace", len(validation.IsDNS1123Label(p.ArgoNamespace)) == 0},
+		{"ArgoCD controller", name(p.ArgoController)},
+		{"forge Secret", name(p.ForgeSecret)},
+		{"branding ConfigMap", optional(p.BrandingConfigMap)},
+		{"metrics CA ConfigMap", optional(p.MetricsCAConfigMap)},
+		{"console host", optional(p.ConsoleHost)},
+		{"OIDC client Secret", optional(p.OIDCSecret)},
+		{"OIDC client Secret key", p.OIDCSecretKey == "" || len(validation.IsConfigMapKey(p.OIDCSecretKey)) == 0},
+	} {
+		if !c.ok {
+			return c.pin
+		}
+	}
+	return ""
 }
 
 // OperatorNamespace is the namespace of p.Operator's ServiceAccount.
