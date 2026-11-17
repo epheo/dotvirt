@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 )
 
@@ -55,5 +56,47 @@ func TestCredentialFingerprintFollowsTheToken(t *testing.T) {
 	b := f.CredentialFingerprint()
 	if a == b || a == "" {
 		t.Errorf("fingerprints %q and %q, want distinct and set", a, b)
+	}
+}
+
+// The forge's own reason travels, bounded and printable; a page or an outage
+// carries none.
+func TestRefusalTextIsTheForgesBoundedReason(t *testing.T) {
+	long := strings.Repeat("x", 400)
+	for _, tc := range []struct {
+		err  error
+		want string
+	}{
+		{&StatusError{Status: http.StatusForbidden, Message: `{"message":"token does not have at least one of required scope(s): [write:organization]","url":"https://forge.example/api/swagger"}`},
+			"token does not have at least one of required scope(s): [write:organization]"},
+		{&StatusError{Status: http.StatusForbidden, Message: "Must be an organization owner\nsecond line"}, "Must be an organization owner"},
+		{&StatusError{Status: http.StatusNotFound, Message: "<html><body>Not Found</body></html>"}, ""},
+		{&StatusError{Status: http.StatusForbidden, Message: "bad\x1b[31mcoloré"}, "bad[31mcolor"},
+		{&StatusError{Status: http.StatusBadGateway, Message: `{"message":"upstream"}`}, ""},
+		{errors.New("dial tcp"), ""},
+		{&StatusError{Status: http.StatusForbidden, Message: long}, long[:refusalTextMax] + "..."},
+	} {
+		if got := RefusalText(tc.err); got != tc.want {
+			t.Errorf("RefusalText(%v) = %q, want %q", tc.err, got, tc.want)
+		}
+	}
+}
+
+// A user account is told apart from no account at all.
+func TestOwnerIsUser(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/v1/users/alice" {
+			_, _ = w.Write([]byte(`{}`))
+			return
+		}
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	defer srv.Close()
+	f := NewFactory(srv.URL, StaticToken("tok"), false, "")
+	if ok, err := f.For("https://forge.example/alice/r.git").OwnerIsUser(); !ok || err != nil {
+		t.Errorf("alice: %v %v, want a user", ok, err)
+	}
+	if ok, err := f.For("https://forge.example/ghost/r.git").OwnerIsUser(); ok || err != nil {
+		t.Errorf("ghost: %v %v, want no account", ok, err)
 	}
 }

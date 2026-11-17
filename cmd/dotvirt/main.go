@@ -400,7 +400,7 @@ func ensureWebhooks(ctx context.Context, state *clusterstate.State, projects fun
 		_ = state.WaitForSync(syncCtx)
 		cancel()
 	}
-	hooks := &hookSweep{ff: ff, target: target, secret: secret, refused: map[string]string{}, logf: log.Printf}
+	hooks := newHookSweep(ff, target, secret, log.Printf)
 	sweep := func() {
 		repos := []string{}
 		if platformRepo != "" {
@@ -426,19 +426,38 @@ func ensureWebhooks(ctx context.Context, state *clusterstate.State, projects fun
 	}
 }
 
+// refusalRecheck is how long a refused hook registration is held: a fix made
+// in the forge itself (the account made an owner, webhooks re-enabled) shows
+// no change dotvirt can see, so the forge is asked again at this pace.
+const refusalRecheck = time.Hour
+
 // hookSweep is one process's registration of dotvirt's forge webhook. A forge
 // that refuses dotvirt's account the owner's or a repo's webhooks (staff made
 // the hooks, or the account owns no org) refuses again on every tick, so a
-// refused scope is asked again only once the forge credential changes; a
-// restart, which any change of the forge, the target or the secret is, starts
-// over. An outage keeps the tick's retry.
+// refused scope is asked again only after refusalRecheck, or at once when the
+// forge credential changes; a restart, which any change of the forge, the
+// target or the secret is, starts over. An outage keeps the tick's retry.
 type hookSweep struct {
 	ff             *forge.Factory
 	target, secret string
-	// refused maps a scope ("org:<owner>" or "repo:<url>") to the credential
-	// fingerprint its refusal was met with.
-	refused map[string]string
-	logf    func(string, ...any)
+	// refused maps a scope ("org:<owner>" or "repo:<url>") to the refusal held.
+	refused map[string]held
+	// owners remembers each owner's kind as long as a refusal, so a
+	// user-owned forge whose repo hooks are all held asks the forge nothing.
+	owners map[string]held
+	now    func() time.Time
+	logf   func(string, ...any)
+}
+
+// held is what an answer was met with: the credential and the time.
+type held struct {
+	cred  string
+	at    time.Time
+	isOrg bool
+}
+
+func newHookSweep(ff *forge.Factory, target, secret string, logf func(string, ...any)) *hookSweep {
+	return &hookSweep{ff: ff, target: target, secret: secret, refused: map[string]held{}, owners: map[string]held{}, now: time.Now, logf: logf}
 }
 
 func (h *hookSweep) run(repos []string) {
@@ -452,10 +471,10 @@ func (h *hookSweep) run(repos []string) {
 		return
 	}
 	scope := "org:" + fc.Owner()
-	if h.held(scope) {
+	if h.holds(h.refused, scope) {
 		return
 	}
-	isOrg, err := fc.OwnerIsOrg()
+	isOrg, err := h.ownerIsOrg(fc)
 	if err != nil {
 		h.failed(scope, "resolve owner kind (anchor "+repos[0]+")", err)
 		return
@@ -474,7 +493,7 @@ func (h *hookSweep) run(repos []string) {
 	for _, repo := range repos {
 		c := h.ff.For(repo)
 		scope := "repo:" + repo
-		if c == nil || h.held(scope) {
+		if c == nil || h.holds(h.refused, scope) {
 			continue
 		}
 		if err := c.EnsureWebhook(h.target, h.secret); err != nil {
@@ -485,24 +504,49 @@ func (h *hookSweep) run(repos []string) {
 	}
 }
 
-// held reports whether scope was refused under the current credential.
-func (h *hookSweep) held(scope string) bool {
-	cred, ok := h.refused[scope]
-	return ok && cred == h.ff.CredentialFingerprint()
+// ownerIsOrg is fc's owner kind, asked once per refusalRecheck and credential.
+func (h *hookSweep) ownerIsOrg(fc *forge.Client) (bool, error) {
+	if h.holds(h.owners, fc.Owner()) {
+		return h.owners[fc.Owner()].isOrg, nil
+	}
+	isOrg, err := fc.OwnerIsOrg()
+	if err == nil {
+		h.owners[fc.Owner()] = held{cred: h.ff.CredentialFingerprint(), at: h.now(), isOrg: isOrg}
+	}
+	return isOrg, err
 }
 
-// failed logs err; a refusal also holds scope until the credential changes and
-// says how to create the hook by hand, once.
+// holds reports whether m holds key under the current credential and within
+// refusalRecheck.
+func (h *hookSweep) holds(m map[string]held, key string) bool {
+	e, ok := m[key]
+	return ok && e.cred == h.ff.CredentialFingerprint() && h.now().Sub(e.at) < refusalRecheck
+}
+
+// failed logs err; a refusal is also held, and logged once with the forge's
+// own reason and what to do.
 func (h *hookSweep) failed(scope, what string, err error) {
-	if !forge.Refused(err) {
+	status := forge.RefusedStatus(err)
+	if status == 0 {
 		h.logf("webhook: %s: %v", what, err)
 		return
 	}
-	h.refused[scope] = h.ff.CredentialFingerprint()
-	h.logf("webhook: %s: the forge refused (%v); not asking again until the forge credential changes or dotvirt restarts. "+
-		"Create the hook by hand (an org hook, a hook on each project repo, or a system hook): URL %s, content type application/json, "+
-		"events push and pull_request, secret the value dotvirt is configured with (the operator's dotvirt-webhook Secret, key secret)",
-		what, err, h.target)
+	h.refused[scope] = held{cred: h.ff.CredentialFingerprint(), at: h.now()}
+	reason := forge.RefusalText(err)
+	if reason == "" {
+		reason = http.StatusText(status)
+	}
+	if status == http.StatusUnauthorized {
+		h.logf("webhook: %s: the forge rejected dotvirt's forge token (HTTP 401: %s): replace the forge token; "+
+			"rechecked hourly, and at once when the token changes", what, reason)
+		return
+	}
+	h.logf("webhook: %s: the forge refused (HTTP %d: %s); rechecked hourly, and at once when the forge token changes. "+
+		"Make dotvirt's forge account an owner of the org, or create the hook by hand as a Forgejo (Gitea) webhook: "+
+		"an org hook, a system hook, or a hook on each project repo (repos created later need their own): URL %s, "+
+		"content type application/json, events push and pull_request, secret the operator's dotvirt-webhook Secret, key secret "+
+		"(oc extract secret/dotvirt-webhook -n <dotvirt namespace> --keys=secret --to=-)",
+		what, status, reason, h.target)
 }
 
 // uploadProxyURL is the flag's value, else the proxy CDI publishes. A cluster
