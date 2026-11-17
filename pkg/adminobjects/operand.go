@@ -232,3 +232,8 @@ func ConsoleSecretEnv(p Params) [][3]string {
 		{"DOTVIRT_FORGE_CLIENT_SECRET", p.ForgeClientSecret, p.ForgeClientSecretKey},
 	}
 }
+
+// KubeletLiteral is s as a container's env value or argument that the kubelet
+// hands the process unchanged: it expands $(NAME) there and turns $$ into $,
+// so every $ is doubled.
+func KubeletLiteral(s string) string { return strings.ReplaceAll(s, "$", "$$") }

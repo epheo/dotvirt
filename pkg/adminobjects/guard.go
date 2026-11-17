@@ -66,12 +66,13 @@ const PlatformSyncAccount = "dotvirt-platform-sync"
 // username condition runs first, so every other caller's write costs one
 // string comparison.
 func Guard(p Params) []Object {
-	if !p.ForgeDelegated {
-		// Not delegating, the console takes none of these: an admin's
-		// userAuth set ahead of time pins nothing and admits nothing.
-		p.ForgeURL, p.ForgeClientID, p.ForgeAuthorizeURL, p.ForgeTokenURL = "", "", "", ""
-		p.ForgeClientSecret, p.ForgeClientSecretKey = "", ""
-	}
+	p = p.delegatedOnly()
+	// The console's settings pinned to spec values hold them as the operator
+	// renders them, escaped for the kubelet.
+	p.OIDCIssuer = KubeletLiteral(p.OIDCIssuer)
+	p.Metrics = Metrics{URL: KubeletLiteral(p.Metrics.URL), TenancyURL: KubeletLiteral(p.Metrics.TenancyURL), CA: KubeletLiteral(p.Metrics.CA)}
+	p.ForgeURL, p.ForgeClientID = KubeletLiteral(p.ForgeURL), KubeletLiteral(p.ForgeClientID)
+	p.ForgeAuthorizeURL, p.ForgeTokenURL = KubeletLiteral(p.ForgeAuthorizeURL), KubeletLiteral(p.ForgeTokenURL)
 	return guard(p, strconv.FormatBool(p.InsecureTLS), strconv.FormatBool(p.ForgeManaged), strconv.FormatBool(p.ForgeDelegated), p.Metrics)
 }
 
@@ -343,9 +344,11 @@ func consoleSettings(p Params, m Metrics, insecure, delegated string) string {
 		// The kubelet expands $(NAME) in a container's command, args and env
 		// values, Secret-backed env included: a setting the console sends out
 		// (a webhook URL, a URL every browser loads) would carry a Secret's
-		// value. The render never uses it.
-		`(!has(c.command) || c.command.all(x, !x.contains("$("))) && (!has(c.args) || c.args.all(a, !a.contains("$("))) && ` +
-			`(!has(c.env) || c.env.all(e, !has(e.value) || !e.value.contains("$(")))`,
+		// value. The render escapes every $ (KubeletLiteral); $$ pairs left to
+		// right as the kubelet reads it, so $$( is a literal and $$$( is not.
+		`(!has(c.command) || c.command.all(x, !x.replace("$$", "").contains("$("))) && ` +
+			`(!has(c.args) || c.args.all(a, !a.replace("$$", "").contains("$("))) && ` +
+			`(!has(c.env) || c.env.all(e, !has(e.value) || !e.value.replace("$$", "").contains("$(")))`,
 		`(!has(c.args) || c.args.all(a, !` + forms("forge-client-secret") + `)) && ` +
 			`(!has(c.env) || c.env.all(e, e.name != "DOTVIRT_FORGE_CLIENT_SECRET" || (has(e.valueFrom) && has(e.valueFrom.secretKeyRef))))`,
 		`(` + insecure + ` || (` + never("insecure-tls", "DOTVIRT_INSECURE_TLS") + `))`,

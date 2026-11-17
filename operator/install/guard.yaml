@@ -582,22 +582,23 @@ spec:
       "--forge-ca=/var/run/dotvirt/tls-ingress/ca-bundle.crt"])) && (!has(c.env) ||
       c.env.all(e, e.name != "DOTVIRT_FORGE_CA" || (!has(e.valueFrom) && (has(e.value)
       ? e.value : "") in ["", "/var/run/dotvirt/tls-ingress/ca-bundle.crt"]))) &&
-      (!has(c.command) || c.command.all(x, !x.contains("$("))) && (!has(c.args) ||
-      c.args.all(a, !a.contains("$("))) && (!has(c.env) || c.env.all(e, !has(e.value)
-      || !e.value.contains("$("))) && (!has(c.args) || c.args.all(a, !(a == "-forge-client-secret"
-      || a == "--forge-client-secret" || a.startsWith("-forge-client-secret=") ||
-      a.startsWith("--forge-client-secret=")))) && (!has(c.env) || c.env.all(e, e.name
-      != "DOTVIRT_FORGE_CLIENT_SECRET" || (has(e.valueFrom) && has(e.valueFrom.secretKeyRef))))
-      && (${FORGE_INSECURE_TLS} || ((!has(c.args) || c.args.all(a, !(a == "-insecure-tls"
-      || a == "--insecure-tls" || a.startsWith("-insecure-tls=") || a.startsWith("--insecure-tls="))))
-      && (!has(c.env) || c.env.all(e, e.name != "DOTVIRT_INSECURE_TLS")))) && (!has(c.args)
-      || c.args.all(a, !(a == "-kubeconfig" || a == "--kubeconfig" || a.startsWith("-kubeconfig=")
-      || a.startsWith("--kubeconfig=")))) && (!has(c.env) || c.env.all(e, e.name !=
-      "KUBECONFIG")) && (!has(c.args) || c.args.all(a, !(a == "-static-dir" || a ==
-      "--static-dir" || a.startsWith("-static-dir=") || a.startsWith("--static-dir="))))
-      && (!has(c.env) || c.env.all(e, e.name != "DOTVIRT_STATIC_DIR")) && (!has(c.env)
-      || c.env.all(e, !(e.name in ["HTTPS_PROXY", "https_proxy", "HTTP_PROXY", "http_proxy",
-      "NO_PROXY", "no_proxy", "ALL_PROXY", "all_proxy", "SSL_CERT_FILE", "SSL_CERT_DIR"]))))'
+      (!has(c.command) || c.command.all(x, !x.replace("$$", "").contains("$("))) &&
+      (!has(c.args) || c.args.all(a, !a.replace("$$", "").contains("$("))) && (!has(c.env)
+      || c.env.all(e, !has(e.value) || !e.value.replace("$$", "").contains("$(")))
+      && (!has(c.args) || c.args.all(a, !(a == "-forge-client-secret" || a == "--forge-client-secret"
+      || a.startsWith("-forge-client-secret=") || a.startsWith("--forge-client-secret="))))
+      && (!has(c.env) || c.env.all(e, e.name != "DOTVIRT_FORGE_CLIENT_SECRET" || (has(e.valueFrom)
+      && has(e.valueFrom.secretKeyRef)))) && (${FORGE_INSECURE_TLS} || ((!has(c.args)
+      || c.args.all(a, !(a == "-insecure-tls" || a == "--insecure-tls" || a.startsWith("-insecure-tls=")
+      || a.startsWith("--insecure-tls=")))) && (!has(c.env) || c.env.all(e, e.name
+      != "DOTVIRT_INSECURE_TLS")))) && (!has(c.args) || c.args.all(a, !(a == "-kubeconfig"
+      || a == "--kubeconfig" || a.startsWith("-kubeconfig=") || a.startsWith("--kubeconfig="))))
+      && (!has(c.env) || c.env.all(e, e.name != "KUBECONFIG")) && (!has(c.args) ||
+      c.args.all(a, !(a == "-static-dir" || a == "--static-dir" || a.startsWith("-static-dir=")
+      || a.startsWith("--static-dir=")))) && (!has(c.env) || c.env.all(e, e.name !=
+      "DOTVIRT_STATIC_DIR")) && (!has(c.env) || c.env.all(e, !(e.name in ["HTTPS_PROXY",
+      "https_proxy", "HTTP_PROXY", "http_proxy", "NO_PROXY", "no_proxy", "ALL_PROXY",
+      "all_proxy", "SSL_CERT_FILE", "SSL_CERT_DIR"]))))'
     message: the operator sets none of the console's settings that send users' tokens
       or the console's pages elsewhere, but as an admin chose them (dotvirt operator
       guard)

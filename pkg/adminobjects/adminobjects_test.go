@@ -521,3 +521,63 @@ func TestLookalikeImagesStayPinned(t *testing.T) {
 		}
 	}
 }
+
+// expand is the kubelet's reading of a container's env value or argument:
+// $$ is a $, $(NAME) is NAME's value when env holds it.
+func expand(s string, env map[string]string) string {
+	var b strings.Builder
+	for i := 0; i < len(s); i++ {
+		if s[i] != '$' || i+1 == len(s) {
+			b.WriteByte(s[i])
+			continue
+		}
+		switch s[i+1] {
+		case '$':
+			b.WriteByte('$')
+			i++
+		case '(':
+			end := strings.IndexByte(s[i+2:], ')')
+			if end < 0 {
+				b.WriteString(s[i:])
+				return b.String()
+			}
+			if v, ok := env[s[i+2:i+2+end]]; ok {
+				b.WriteString(v)
+			} else {
+				b.WriteString(s[i : i+3+end])
+			}
+			i += 2 + end
+		default:
+			b.WriteByte('$')
+		}
+	}
+	return b.String()
+}
+
+// What the operator renders through KubeletLiteral reaches the console as an
+// admin wrote it, $(NAME) of a defined env included.
+func TestKubeletLiteralReachesTheConsoleAsWritten(t *testing.T) {
+	env := map[string]string{"beta": "B", "DOTVIRT_FORGE_CLIENT_SECRET": "secret"}
+	for _, s := range []string{"Acme $(beta)", "a$$b", "$$$(DOTVIRT_FORGE_CLIENT_SECRET)", "costs $5", "$", "$(", "plain"} {
+		if got := expand(KubeletLiteral(s), env); got != s {
+			t.Errorf("%q reaches the console as %q", s, got)
+		}
+	}
+	if expand("$(DOTVIRT_FORGE_CLIENT_SECRET)", env) != "secret" {
+		t.Error("the expander does not expand; the check above proves nothing")
+	}
+}
+
+// A userAuth half written while pull requests are not Delegated blocks no
+// Install: the console takes none of it then.
+func TestUserAuthWithoutDelegatedIsNeverMalformed(t *testing.T) {
+	p := params
+	p.ForgeClientSecret, p.ForgeURL = "Forge_App", "not a url"
+	if bad := p.Malformed(); bad != "" {
+		t.Errorf("not Delegated: %s malformed", bad)
+	}
+	p.ForgeDelegated = true
+	if bad := p.Malformed(); bad == "" {
+		t.Error("Delegated with a malformed userAuth: well formed")
+	}
+}

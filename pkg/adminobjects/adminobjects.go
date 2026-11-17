@@ -92,6 +92,7 @@ func (p Params) Valid() bool { return p.Malformed() == "" }
 // Malformed names the first pin that is not well formed, "" when none is;
 // never its value, which may name an admin's Secret.
 func (p Params) Malformed() string {
+	p = p.delegatedOnly()
 	name := func(s string) bool { return len(validation.IsDNS1123Subdomain(s)) == 0 }
 	optional := func(s string) bool { return s == "" || name(s) }
 	for _, c := range []struct {
@@ -233,4 +234,15 @@ func httpsURL(s string) bool {
 func webURL(s string) bool {
 	u, err := url.Parse(s)
 	return err == nil && (u.Scheme == "https" || u.Scheme == "http") && u.Host != ""
+}
+
+// delegatedOnly is p without the forge application's pins while pull requests
+// are not Delegated: the console takes none of them then, so an admin's
+// userAuth set ahead of time, even half written, pins and blocks nothing.
+func (p Params) delegatedOnly() Params {
+	if !p.ForgeDelegated {
+		p.ForgeURL, p.ForgeClientID, p.ForgeAuthorizeURL, p.ForgeTokenURL = "", "", "", ""
+		p.ForgeClientSecret, p.ForgeClientSecretKey = "", ""
+	}
+	return p
 }

@@ -161,3 +161,22 @@ func TestDelegatedRenderMatchesTheGuardsPins(t *testing.T) {
 		}
 	}
 }
+
+// An admin's text reaches the console as written: the kubelet would expand
+// $(NAME) in it, and the operator guard refuses an unescaped one.
+func TestRenderEscapesAnAdminsText(t *testing.T) {
+	dv := &dotvirtv1alpha1.Dotvirt{}
+	dv.Name, dv.Namespace = "x", "dotvirt"
+	dv.Spec.Branding.ProductName = "Acme $(beta)"
+	dv.Spec.Branding.Links = []dotvirtv1alpha1.BrandingLink{{Label: "Docs $(beta)", URL: "https://docs.example/$(beta)"}}
+	got := map[string]string{}
+	for _, e := range Deployment(dv, "argocd", nil).Spec.Template.Spec.Containers[0].Env {
+		got[e.Name] = e.Value
+	}
+	if got["DOTVIRT_PRODUCT_NAME"] != "Acme $$(beta)" {
+		t.Errorf("product name %q, want it escaped", got["DOTVIRT_PRODUCT_NAME"])
+	}
+	if !strings.Contains(got["DOTVIRT_MASTHEAD_LINKS"], "Docs $$(beta)") || strings.Contains(strings.ReplaceAll(got["DOTVIRT_MASTHEAD_LINKS"], "$$", ""), "$(") {
+		t.Errorf("masthead links %q, want them escaped", got["DOTVIRT_MASTHEAD_LINKS"])
+	}
+}
