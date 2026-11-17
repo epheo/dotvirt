@@ -3,9 +3,7 @@ package changeset
 import (
 	"encoding/json"
 	"net/http"
-	"os"
 	"os/exec"
-	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
@@ -405,16 +403,14 @@ func TestAnOfferIsShownOnlyOnItsPushedHead(t *testing.T) {
 	}
 }
 
-// A write that fails without a classified cause (here the repo's objects are
-// read-only, so the push fails) shows one fixed line, never the raw error,
-// and is retried.
+// A write that fails without a classified cause (here the remote refuses
+// every pack, so the push fails while reads still work) shows one fixed line,
+// never the raw error, and is retried.
 func TestAFailedWriteShowsTheFixedLine(t *testing.T) {
 	f, prs := newSeedFixture(t)
 	openMirror(t, f)
-	if err := os.Chmod(filepath.Join(f.proj.Repo, "objects"), 0o555); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = os.Chmod(filepath.Join(f.proj.Repo, "objects"), 0o755) })
+	// A server-side limit, not file modes: root ignores those.
+	gitRun(t, f.proj.Repo, "config", "receive.maxInputSize", "1")
 	f.c.seedCreated(f.proj.Repo)
 	seed, ok := f.c.TemplateSeed(f.proj)
 	if !ok || seed.Error != "the starter templates could not be written to the repository" || !seed.Retries {
