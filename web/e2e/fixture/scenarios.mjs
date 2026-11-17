@@ -1476,6 +1476,48 @@ const adminobjects = {
 		})),
 	},
 };
+// An install whose forge credential is an admin's Secret: beside the guard,
+// already in, the console offers the grant that lets the operator use it.
+const credentialObject = (kind) => ({
+	apiVersion: 'rbac.authorization.k8s.io/v1',
+	kind,
+	metadata: { name: 'dotvirt-forge-credential', namespace: 'dotvirt' },
+});
+const adminobjectscredential = {
+	...adminobjects,
+	name: 'adminobjectscredential',
+	adminObjects: {
+		...adminobjects.adminObjects,
+		objects: [
+			...adminobjects.adminObjects.objects.map((o) => ({ ...o, state: 'Installed', detail: '' })),
+			{
+				purpose: 'Lets the operator use the forge credential creds',
+				kind: 'Role',
+				name: 'dotvirt-forge-credential',
+				namespace: 'dotvirt',
+				state: 'NotInstalled',
+				detail: 'Role dotvirt-forge-credential is missing',
+				object: credentialObject('Role'),
+			},
+			{
+				purpose: "Grants it to the operator's account",
+				kind: 'RoleBinding',
+				name: 'dotvirt-forge-credential',
+				namespace: 'dotvirt',
+				state: 'Outdated',
+				detail:
+					'RoleBinding dotvirt-forge-credential binds other accounts than dotvirt-operator:dotvirt-operator-controller',
+				object: credentialObject('RoleBinding'),
+			},
+		],
+	},
+};
+// The same install, seen by a caller who may not install it.
+const adminobjectscredentialdenied = {
+	...adminobjectscredential,
+	name: 'adminobjectscredentialdenied',
+	capabilities: base.capabilities,
+};
 // The same install, seen by a caller who may not install it.
 const adminobjectsdenied = {
 	...adminobjects,
@@ -2272,6 +2314,8 @@ export const scenarios = {
 	forgeadmin,
 	adminobjects,
 	adminobjectsdenied,
+	adminobjectscredential,
+	adminobjectscredentialdenied,
 	base,
 	empty,
 	degraded,
