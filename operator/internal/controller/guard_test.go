@@ -96,7 +96,9 @@ func TestOperatorGuardStates(t *testing.T) {
 	elsewhere := guardHere
 	elsewhere.ArgoNamespace = "openshift-gitops"
 	edited := adminobjects.Render(guardHere)
-	deployments := edited[slices.Index(adminobjects.GuardNames, adminobjects.GuardDeploymentsName)].Object.Object
+	deployments := edited[slices.IndexFunc(edited, func(o adminobjects.Object) bool {
+		return o.Object.GetKind() == "ValidatingAdmissionPolicy" && o.Object.GetName() == adminobjects.GuardDeploymentsName
+	})].Object.Object
 	v, _, _ := unstructured.NestedSlice(deployments, "spec", "validations")
 	_ = unstructured.SetNestedSlice(deployments, v[:1], "spec", "validations")
 	for name, c := range map[string]struct {
@@ -202,6 +204,16 @@ func TestOperatorGuardNeedsItsAccount(t *testing.T) {
 	cond, dv := guardPass(t, "", nil)
 	if cond.Status != metav1.ConditionUnknown || cond.Reason != "AccountUnknown" || len(dv.Status.AdminObjects) != 0 {
 		t.Errorf("%s %s, status %+v", cond.Status, cond.Reason, dv.Status.AdminObjects)
+	}
+}
+
+// A pin the spec gets wrong is named, never its value, with where to fix it.
+func TestOperatorGuardNamesAMalformedPin(t *testing.T) {
+	dv := &dotvirtv1alpha1.Dotvirt{ObjectMeta: metav1.ObjectMeta{Name: "x", Namespace: "dotvirt"}}
+	dv.Spec.Branding.ConfigMap = "Not_A_Name"
+	cond, _ := guardPassOn(t, guardOperator, dv)
+	if cond.Reason != "PinMalformed" || !strings.Contains(cond.Message, "branding ConfigMap") || strings.Contains(cond.Message, "Not_A_Name") {
+		t.Errorf("%s: %s", cond.Reason, cond.Message)
 	}
 }
 

@@ -66,6 +66,12 @@ const PlatformSyncAccount = "dotvirt-platform-sync"
 // username condition runs first, so every other caller's write costs one
 // string comparison.
 func Guard(p Params) []Object {
+	if !p.ForgeDelegated {
+		// Not delegating, the console takes none of these: an admin's
+		// userAuth set ahead of time pins nothing and admits nothing.
+		p.ForgeURL, p.ForgeClientID, p.ForgeAuthorizeURL, p.ForgeTokenURL = "", "", "", ""
+		p.ForgeClientSecret, p.ForgeClientSecretKey = "", ""
+	}
 	return guard(p, strconv.FormatBool(p.InsecureTLS), strconv.FormatBool(p.ForgeManaged), strconv.FormatBool(p.ForgeDelegated), p.Metrics)
 }
 
@@ -319,12 +325,27 @@ func consoleSettings(p Params, m Metrics, insecure, delegated string) string {
 		// Delegated: each user's forge token goes to the delegated URL (the
 		// API) and the token URL; the forge application's client secret to
 		// the token URL, and only from the admin's Secret (ConsoleSecretEnv).
-		`(` + delegated + ` || (` + never("forge-delegated", "DOTVIRT_FORGE_DELEGATED") + `))`,
-		pinned("forge-delegated-url", "DOTVIRT_FORGE_DELEGATED_URL", p.ForgeURL),
-		pinned("forge-client-id", "DOTVIRT_FORGE_CLIENT_ID", p.ForgeClientID),
-		pinned("forge-authorize-url", "DOTVIRT_FORGE_AUTHORIZE_URL", p.ForgeAuthorizeURL),
-		pinned("forge-token-url", "DOTVIRT_FORGE_TOKEN_URL", p.ForgeTokenURL),
+		// Not delegating, none of them is set.
+		`(` + delegated + ` ? (` + strings.Join([]string{
+			pinned("forge-delegated-url", "DOTVIRT_FORGE_DELEGATED_URL", p.ForgeURL),
+			pinned("forge-client-id", "DOTVIRT_FORGE_CLIENT_ID", p.ForgeClientID),
+			pinned("forge-authorize-url", "DOTVIRT_FORGE_AUTHORIZE_URL", p.ForgeAuthorizeURL),
+			pinned("forge-token-url", "DOTVIRT_FORGE_TOKEN_URL", p.ForgeTokenURL),
+		}, " && ") + `) : (` + strings.Join([]string{
+			never("forge-delegated", "DOTVIRT_FORGE_DELEGATED"),
+			never("forge-delegated-url", "DOTVIRT_FORGE_DELEGATED_URL"),
+			never("forge-client-id", "DOTVIRT_FORGE_CLIENT_ID"),
+			never("forge-authorize-url", "DOTVIRT_FORGE_AUTHORIZE_URL"),
+			never("forge-token-url", "DOTVIRT_FORGE_TOKEN_URL"),
+			never("forge-client-secret", "DOTVIRT_FORGE_CLIENT_SECRET"),
+		}, " && ") + `))`,
 		pinned("forge-ca", "DOTVIRT_FORGE_CA", "", IngressCAPath),
+		// The kubelet expands $(NAME) in a container's command, args and env
+		// values, Secret-backed env included: a setting the console sends out
+		// (a webhook URL, a URL every browser loads) would carry a Secret's
+		// value. The render never uses it.
+		`(!has(c.command) || c.command.all(x, !x.contains("$("))) && (!has(c.args) || c.args.all(a, !a.contains("$("))) && ` +
+			`(!has(c.env) || c.env.all(e, !has(e.value) || !e.value.contains("$(")))`,
 		`(!has(c.args) || c.args.all(a, !` + forms("forge-client-secret") + `)) && ` +
 			`(!has(c.env) || c.env.all(e, e.name != "DOTVIRT_FORGE_CLIENT_SECRET" || (has(e.valueFrom) && has(e.valueFrom.secretKeyRef))))`,
 		`(` + insecure + ` || (` + never("insecure-tls", "DOTVIRT_INSECURE_TLS") + `))`,

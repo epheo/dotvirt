@@ -111,6 +111,8 @@ var templateHeader = `# The dotvirt operator guard: admission policies bounding 
 #   export FORGE_URL="$(spec forge.url)" FORGE_CLIENT_ID="$(spec forge.userAuth.clientID)"
 #   export FORGE_AUTHORIZE_URL="$(spec forge.userAuth.authorizeURL)" FORGE_TOKEN_URL="$(spec forge.userAuth.tokenURL)"
 #   export FORGE_CLIENT_SECRET="$(spec forge.userAuth.clientSecret.name)" FORGE_CLIENT_SECRET_KEY="$(spec forge.userAuth.clientSecret.key)"
+#   # Not delegating, the guard pins none of them:
+#   [ "$FORGE_DELEGATED" = true ] || { FORGE_URL=; FORGE_CLIENT_ID=; FORGE_AUTHORIZE_URL=; FORGE_TOKEN_URL=; FORGE_CLIENT_SECRET=; FORGE_CLIENT_SECRET_KEY=; }
 #
 #   # Every value lands inside a quoted string; one that could end it is refused,
 #   # never escaped:

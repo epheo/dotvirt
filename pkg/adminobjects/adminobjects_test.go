@@ -277,6 +277,9 @@ func filledTemplate(t *testing.T, template []byte, p Params) []*unstructured.Uns
 		}
 		return img
 	}
+	if !p.ForgeDelegated {
+		p.ForgeURL, p.ForgeClientID, p.ForgeAuthorizeURL, p.ForgeTokenURL, p.ForgeClientSecret, p.ForgeClientSecretKey = "", "", "", "", "", ""
+	}
 	filled := string(template)
 	for k, v := range map[string]string{
 		"${OPERATOR_USERNAME}": p.Operator, "${INSTALL_NAMESPACE}": p.Namespace, "${ARGO_NAMESPACE}": p.ArgoNamespace,
@@ -483,5 +486,18 @@ func TestInstallKeepsEveryKindGuarded(t *testing.T) {
 				t.Errorf("after %d objects (up to %s), %s is unguarded", i+1, key(o.Object), kind)
 			}
 		}
+	}
+}
+
+// An admin's userAuth set while pull requests are not Delegated renders the
+// same guard as none: it pins nothing, so it admits nothing extra.
+func TestUserAuthWithoutDelegatedPinsNothing(t *testing.T) {
+	ahead := params
+	ahead.ForgeURL, ahead.ForgeClientID, ahead.ForgeAuthorizeURL = "https://forge.example", "dotvirt", "https://forge.example/login/oauth/authorize"
+	ahead.ForgeClientSecret, ahead.ForgeClientSecretKey = "forge-app", "client-secret"
+	a, _ := json.Marshal(objects(Render(ahead)))
+	b, _ := json.Marshal(objects(Render(params)))
+	if string(a) != string(b) {
+		t.Error("userAuth without Delegated changes the guard")
 	}
 }
