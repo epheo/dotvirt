@@ -411,7 +411,8 @@ func TestAdminObjectsGrantTheCredentialFromTheSpec(t *testing.T) {
 func TestAdminObjectsCapabilityCoversTheCredentialGrant(t *testing.T) {
 	s, fc, seen := adminObjectsServer(t)
 	fc.ssar = func(token string, a *authzv1.ResourceAttributes) bool {
-		return token == adminToken && !(a.Group == "rbac.authorization.k8s.io" && (a.Resource == "roles" || a.Resource == "rolebindings"))
+		grant := a.Group == "rbac.authorization.k8s.io" && slices.Contains([]string{"roles", "rolebindings"}, a.Resource)
+		return token == adminToken && !grant
 	}
 	c := decodeBody[model.Capabilities](t, do(s, adminToken, http.MethodGet, "/api/capabilities", "")).Cluster
 	if c != nil && c.AdminObjects {
