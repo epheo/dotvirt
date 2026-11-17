@@ -365,8 +365,11 @@ Application; git moved on from the revision Argo last applied, by commits on
 repo and folder; that applied revision declared objects, and git declares
 none there now; and dotvirt reads the Applications live. A declared object is
 what Argo's source renders: a document with a kind and a name, in a `.yaml`
-file outside `templates/`. Anything else keeps the hold: a removal must
-remove something. The removal applies once Argo has seen the merge and dotvirt's
+file outside `templates/`. The revision Argo last applied is the last one
+dotvirt saw the Application Synced at from that source, else the last entry
+of Argo's history: a change that leaves live as it was (adopting what runs)
+runs no sync, so Argo records none. Anything else keeps the hold: a removal
+must remove something. The removal applies once Argo has seen the merge and dotvirt's
 mirror has fetched it (at once with the forge webhook, else within the git
 poll, 5 minutes by default), at the generator's next run (60s), one more for a
 mirror dotvirt opens on demand. The platform Application keeps `allowEmpty`
@@ -384,6 +387,11 @@ Limits:
 - Once on, `allowEmpty` goes off at the generator's next answer. If dotvirt is
   down right then, it stays on until dotvirt returns, and a repo lost and
   re-created empty meanwhile would let Argo prune that project.
+- dotvirt remembers the last Synced revision in memory. After a repo is
+  recovered and its objects adopted back, a restart of dotvirt before the
+  project's last objects are removed leaves only Argo's history to read, which
+  still names the re-created revision: the removal stays held ("Sync held")
+  until the project's next sync.
 
 ### Prune
 
