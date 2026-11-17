@@ -55,6 +55,11 @@ type driftView struct {
 	// holds keys each held generated app's EmptyHold by its project: the
 	// generator and every frame ask per project.
 	holds map[string]EmptyHold
+	// syncedAt is, per project, the last revision its generated app was seen
+	// Synced at and the source it read then. Carried from view to view, lost
+	// on restart: Argo records no history entry for a change that left live
+	// as it was (an adoption), so its own history can lag behind it.
+	syncedAt map[string]syncedRev
 	// objGens counts content changes to the non-VM entries, per scope (see
 	// resKey.scope): VM drift rides the frame itself, and objGens feeds each
 	// caller's catalog watermark, which must not move (and refetch the catalog)
@@ -203,12 +208,18 @@ func (s *Snapshot) deriveLoop(ctx context.Context) {
 func (s *Snapshot) derive() {
 	objs := reflect.List(s.apps)
 	sort.Slice(objs, func(i, j int) bool { return appKey(objs[i]) < appKey(objs[j]) })
-	next := &driftView{resources: resourceDriftFromApps(objs), projects: appSyncFromApps(objs), holds: holdsFromApps(objs, s.writeNS)}
 	prev := s.view.Load()
+	var seen map[string]syncedRev
+	if prev != nil {
+		seen = prev.syncedAt
+	}
+	syncedAt := syncedFromApps(objs, s.writeNS, seen)
+	next := &driftView{resources: resourceDriftFromApps(objs), projects: appSyncFromApps(objs), holds: holdsFromApps(objs, s.writeNS, syncedAt), syncedAt: syncedAt}
 	var prevRes map[resKey]Drift
 	var gens map[string]uint64
 	if prev != nil {
-		if maps.Equal(prev.resources, next.resources) && equality.Semantic.DeepEqual(prev.projects, next.projects) && maps.Equal(prev.holds, next.holds) {
+		if maps.Equal(prev.resources, next.resources) && equality.Semantic.DeepEqual(prev.projects, next.projects) &&
+			maps.Equal(prev.holds, next.holds) && maps.Equal(prev.syncedAt, next.syncedAt) {
 			return
 		}
 		prevRes, gens = prev.resources, prev.objGens
@@ -343,9 +354,13 @@ func (s *Snapshot) PrunePending(repo string, settled ...string) (refs []model.Ob
 // EmptyHold is a project's generated Application that ArgoCD will not
 // auto-sync because every object it tracks would be pruned while
 // automated.allowEmpty is off: the revision it holds at and the last one it
-// applied, the source it reads (normalized repo, folder), whether the last
-// apply read that same source, and whether allowEmpty is on already (the
-// generator's lift, being applied).
+// applied, the source that hold was compared from (normalized repo, folder:
+// status.sync.comparedTo, written with the revision and the resources, never
+// the spec, which a re-point rewrites before Argo compares again), whether
+// the last apply read that same source, and whether allowEmpty is on already (the
+// generator's lift, being applied). Applied is the last revision dotvirt saw
+// the app Synced at from the same source, where git declared exactly what
+// runs; else the last entry of Argo's history.
 type EmptyHold struct {
 	Compared, Applied string
 	Repo, Path        string
@@ -389,15 +404,51 @@ func (h EmptyHold) Reads(repo, dir string) bool {
 	return h.Repo == forge.NormalizeRepoURL(repo) && h.Path == cleanDir(dir)
 }
 
-func holdsFromApps(objs []*unstructured.Unstructured, argoNS string) map[string]EmptyHold {
+func holdsFromApps(objs []*unstructured.Unstructured, argoNS string, syncedAt map[string]syncedRev) map[string]EmptyHold {
 	out := map[string]EmptyHold{}
 	for _, app := range objs {
 		project := generatedProject(app, argoNS)
 		if project == "" {
 			continue
 		}
-		if h, ok := emptyHold(app.Object); ok {
+		if h, ok := emptyHold(app.Object, syncedAt[project]); ok {
 			out[project] = h
+		}
+	}
+	return out
+}
+
+// comparedSource is the repo (normalized) and folder of the app's last
+// comparison; ok is false while Argo has recorded none.
+func comparedSource(app map[string]any) (repo, path string, ok bool) {
+	src, ok, _ := unstructured.NestedMap(app, "status", "sync", "comparedTo", "source")
+	if !ok {
+		return "", "", false
+	}
+	repo = forge.NormalizeRepoURL(asString(src, "repoURL"))
+	return repo, cleanDir(asString(src, "path")), repo != ""
+}
+
+// syncedRev is a revision a generated app was seen Synced at, and the
+// normalized repo and folder that comparison read.
+type syncedRev struct{ revision, repo, path string }
+
+// syncedFromApps is seen moved on by objs: a generated app Synced now records
+// its revision and source; one not Synced keeps what was seen; a project whose
+// app is gone drops out.
+func syncedFromApps(objs []*unstructured.Unstructured, argoNS string, seen map[string]syncedRev) map[string]syncedRev {
+	out := map[string]syncedRev{}
+	for _, app := range objs {
+		project := generatedProject(app, argoNS)
+		if project == "" {
+			continue
+		}
+		rev := nestedString(app.Object, "status", "sync", "revision")
+		repo, path, compared := comparedSource(app.Object)
+		if nestedString(app.Object, "status", "sync", "status") == string(model.SyncSynced) && rev != "" && compared {
+			out[project] = syncedRev{revision: rev, repo: repo, path: path}
+		} else if r, ok := seen[project]; ok {
+			out[project] = r
 		}
 	}
 	return out
@@ -407,7 +458,7 @@ func holdsFromApps(objs []*unstructured.Unstructured, argoNS string) map[string]
 // OutOfSync under automated prune, every tracked object requiring pruning. It
 // does not read allowEmpty, so a hold being let through still reads as one
 // until the sync lands and the generator keeps letting it through.
-func emptyHold(app map[string]any) (EmptyHold, bool) {
+func emptyHold(app map[string]any, seen syncedRev) (EmptyHold, bool) {
 	prune, _, _ := unstructured.NestedBool(app, "spec", "syncPolicy", "automated", "prune")
 	if !prune || nestedString(app, "status", "sync", "status") != string(model.SyncOutOfSync) {
 		return EmptyHold{}, false
@@ -422,13 +473,16 @@ func emptyHold(app map[string]any) (EmptyHold, bool) {
 		}
 	}
 	lifted, _, _ := unstructured.NestedBool(app, "spec", "syncPolicy", "automated", "allowEmpty")
+	repo, path, _ := comparedSource(app)
 	h := EmptyHold{
 		Lifted:   lifted,
 		Compared: nestedString(app, "status", "sync", "revision"),
-		Repo:     forge.NormalizeRepoURL(nestedString(app, "spec", "source", "repoURL")),
-		Path:     cleanDir(nestedString(app, "spec", "source", "path")),
+		Repo:     repo,
+		Path:     path,
 	}
-	if history := nestedSlice(app, "status", "history"); len(history) > 0 {
+	if seen.revision != "" && seen.repo == h.Repo && seen.path == h.Path {
+		h.Applied, h.SameSource = seen.revision, true
+	} else if history := nestedSlice(app, "status", "history"); len(history) > 0 {
 		if last, ok := history[len(history)-1].(map[string]any); ok {
 			h.Applied = asString(last, "revision")
 			src, _ := last["source"].(map[string]any)
