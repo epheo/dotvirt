@@ -423,10 +423,13 @@ func TestAdminObjectsGrantTheCredentialFromTheSpec(t *testing.T) {
 // namespace is not offered the install, and the handler reads nothing.
 func TestAdminObjectsCapabilityCoversTheCredentialGrant(t *testing.T) {
 	s, fc, seen := adminObjectsServer(t)
+	// The SA's startup reviews may still be in flight: swap the fake's verdicts under its lock.
+	fc.mu.Lock()
 	fc.ssar = func(token string, a *authzv1.ResourceAttributes) bool {
 		grant := a.Group == "rbac.authorization.k8s.io" && slices.Contains([]string{"roles", "rolebindings"}, a.Resource)
 		return token == adminToken && !grant
 	}
+	fc.mu.Unlock()
 	c := decodeBody[model.Capabilities](t, do(s, adminToken, http.MethodGet, "/api/capabilities", "")).Cluster
 	if c != nil && c.AdminObjects {
 		t.Error("offered without the right to install the forge credential's grant")
