@@ -153,18 +153,40 @@ func (r *Resolver) Resolve(namespaces []Namespace, visible map[string]bool) []Pr
 		out = append(out, info)
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
+	dropSharedTitles(out)
 	return out
+}
+
+// dropSharedTitles names by their own name the projects whose title another
+// project in out also goes by, as its name or its title: anyone who may edit
+// a namespace writes its title, so a title never makes two projects look
+// alike. out is the caller's projects only, so the drop tells nothing of
+// projects outside them.
+func dropSharedTitles(out []ProjectInfo) {
+	uses := map[string]int{}
+	for _, p := range out {
+		uses[strings.ToLower(p.Name)]++
+		if p.Title != "" {
+			uses[strings.ToLower(p.Title)]++
+		}
+	}
+	for i := range out {
+		if t := out[i].Title; t != "" && uses[strings.ToLower(t)] > 1 {
+			out[i].Title = ""
+		}
+	}
 }
 
 // maxTitle bounds a display name in runes: anyone who may edit the namespace
 // writes it, and the tree and headers show it on one line.
 const maxTitle = 100
 
-// title is a display name as the console shows it: one trimmed line, "" when
-// blank, multi-line, or the project's own name.
+// title is a display name as the console shows it: one trimmed line of
+// visible text, "" when blank, the project's own name, or carrying anything
+// unseen (zero-width, bidi, line breaks) that could make it pass for another.
 func title(s, name string) string {
 	s = strings.TrimSpace(s)
-	if s == name || strings.ContainsFunc(s, unicode.IsControl) {
+	if strings.EqualFold(s, name) || strings.ContainsFunc(s, func(r rune) bool { return !unicode.IsGraphic(r) }) {
 		return ""
 	}
 	if r := []rune(s); len(r) > maxTitle {

@@ -323,7 +323,7 @@
 			{/if}
 			{#each failedLanes as f (f.project)}
 				<div class="flex flex-col gap-2 border-t border-line-soft px-card py-3">
-					<span class="font-medium text-ink">{f.project}</span>
+					<span class="font-medium text-ink">{inventory.title(f.project)}</span>
 					<Note tone="danger" class="flex items-center gap-2">
 						<span class="min-w-0 flex-1">Could not read the draft: {f.error}</span>
 						{@render retryDrafts()}
@@ -333,7 +333,7 @@
 			{#each lanesOnPage as { project, draft } (project)}
 				<div class="flex flex-col gap-2 border-t border-line-soft px-card py-2.5">
 					<div class="flex flex-wrap items-center gap-x-2 gap-y-1">
-						<span class="font-medium text-ink">{project}</span>
+						<span class="font-medium text-ink">{inventory.title(project)}</span>
 						<span class="text-[13px] text-ink-faint">{plural(draft.count, 'change')}</span>
 						{#if draft.count > 0 && !discarding[project]}
 							<Button
@@ -465,7 +465,7 @@
 								>PR #{p.prNumber} <ExternalLink size={12} /></a
 							>
 						{/if}
-						<span class="text-[13px] text-ink-muted">{p.project}</span>
+						<span class="text-[13px] text-ink-muted">{inventory.title(p.project)}</span>
 						{#if p.by && !p.mine}<span class="text-[13px] text-ink-faint">by {p.by}</span>{/if}
 						{#if chk}<span class="ml-auto"><StatusPill tone={chk.tone} label={chk.text} /></span
 							>{/if}
@@ -495,7 +495,7 @@
 			<!-- Pushed branches with no PR yet: keep the compare link visible. -->
 			{#each pushed as r (r.project)}
 				<div class="border-t border-line-soft px-card py-2.5 text-[13px] text-ink-soft">
-					<span class="font-medium text-ink">{r.project}</span>: branch
+					<span class="font-medium text-ink">{inventory.title(r.project)}</span>: branch
 					<code class="font-mono text-xs">{r.branch}</code> pushed.
 					{#if r.compareURL}
 						<a

@@ -31,15 +31,20 @@
 			.sort(
 				(a, b) =>
 					Number(b.project === first) - Number(a.project === first) ||
-					a.project.localeCompare(b.project) ||
+					inventory.title(a.project).localeCompare(inventory.title(b.project)) ||
 					a.ns.localeCompare(b.ns),
 			),
 	);
 	const sole = (project: string) => places.filter((p) => p.project === project).length === 1;
-	const label = (p: { ns: string; project: string }) =>
-		short && sole(p.project) ? p.project : `${p.project} / ${p.ns}`;
+	const label = (p: { ns: string; project: string }) => {
+		const t = inventory.title(p.project);
+		return short && sole(p.project) ? t : `${t} / ${p.ns}`;
+	};
 	const shown = $derived(
-		places.filter((p) => !query || label(p).toLowerCase().includes(query.trim().toLowerCase())),
+		places.filter((p) => {
+			const q = query.trim().toLowerCase();
+			return !q || `${label(p)} ${p.project}`.toLowerCase().includes(q);
+		}),
 	);
 	const current = $derived(places.find((p) => p.ns === value));
 

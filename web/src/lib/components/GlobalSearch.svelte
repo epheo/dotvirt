@@ -241,6 +241,8 @@
 				return h.hint;
 			case 'namespace':
 				return inventory.title(h.project);
+			case 'project':
+				return inventory.title(h.project) === h.project ? '' : h.project;
 			default:
 				return '';
 		}

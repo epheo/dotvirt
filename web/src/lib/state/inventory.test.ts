@@ -92,3 +92,19 @@ describe('inventory authoring signal', () => {
 		expect(inventory.canRevert('p')).toBe(false);
 	});
 });
+
+describe('inventory.title', () => {
+	it('names a project by its title, its name when it has none', () => {
+		inventory.apply({
+			projects: [
+				{ name: 'u-acme-web', title: 'acme/web', namespaces: [] },
+				{ name: 'plain', namespaces: [] },
+			],
+		} as unknown as Inventory);
+		expect(inventory.title('u-acme-web')).toBe('acme/web');
+		expect(inventory.titled('u-acme-web')).toBe('acme/web (u-acme-web)');
+		expect(inventory.title('plain')).toBe('plain');
+		expect(inventory.titled('plain')).toBe('plain');
+		expect(inventory.title('platform')).toBe('platform');
+	});
+});

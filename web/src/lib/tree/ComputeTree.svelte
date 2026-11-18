@@ -68,7 +68,7 @@
 		bySize(
 			projects.filter((p) => !p.error && projectMatches(p)),
 			vmCount,
-			(p) => p.name,
+			(p) => p.title || p.name,
 		),
 	);
 	const folding = $derived(

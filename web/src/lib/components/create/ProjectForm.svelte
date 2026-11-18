@@ -132,7 +132,7 @@
 				<label class={LABEL} for="pj-join">Bring {adopt} into</label>
 				<select id="pj-join" class={FIELD} bind:value={joinProject}>
 					<option value="">A new project</option>
-					{#each joinable as p (p)}<option value={p}>{inventory.title(p)}</option>{/each}
+					{#each joinable as p (p)}<option value={p}>{inventory.titled(p)}</option>{/each}
 				</select>
 			</div>
 		{/if}

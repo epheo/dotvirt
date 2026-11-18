@@ -395,11 +395,14 @@
 	);
 	const historyHref = (project: string) => `${changesHref(project)}?tab=history`;
 
-	const title = $derived(scopeNS || scopeProject || 'Changes');
+	const title = $derived(scopeNS || (scopeProject && inventory.title(scopeProject)) || 'Changes');
 	const trail = $derived.by(() => {
 		const t: { label: string; href?: string }[] = [{ label: 'Changes', href: '/changes' }];
 		if (scopeProject)
-			t.push({ label: scopeProject, href: scopeNS ? changesHref(scopeProject) : undefined });
+			t.push({
+				label: inventory.title(scopeProject),
+				href: scopeNS ? changesHref(scopeProject) : undefined,
+			});
 		if (scopeNS) t.push({ label: scopeNS });
 		if (!scopeProject) t.push({ label: tabLabel });
 		return t;

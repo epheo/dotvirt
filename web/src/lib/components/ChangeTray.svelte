@@ -156,7 +156,7 @@
 	function pillText(l: TrayLane): string {
 		switch (l.kind) {
 			case 'staged':
-				return `${l.draft.count} staged in ${l.project}`;
+				return `${l.draft.count} staged in ${inventory.title(l.project)}`;
 			case 'review':
 				return `PR #${l.pr.prNumber} in review`;
 			case 'applying':
@@ -234,7 +234,7 @@
 								<GitPullRequest size={14} class="text-ok" />
 								<strong class="text-sm text-ink">PR #{lane.pr.prNumber} merged</strong>
 							{/if}
-							<span class="truncate text-ink-muted">in {lane.project}</span>
+							<span class="truncate text-ink-muted">in {inventory.title(lane.project)}</span>
 						</header>
 
 						{#if lane.kind === 'staged'}
@@ -263,7 +263,7 @@
 							{/if}
 							{#each lane.others as o (o.prNumber)}
 								<p class="border-t border-line-soft bg-inset px-3 py-1.5 text-ink-soft">
-									Also open in {lane.project}:
+									Also open in {inventory.title(lane.project)}:
 									<a class="text-accent-ink hover:underline" href={o.prURL} target="_blank"
 										>PR #{o.prNumber}</a
 									>{o.by ? ` by ${o.by}` : ''}
