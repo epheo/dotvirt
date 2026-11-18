@@ -80,6 +80,10 @@ func PublishNamespace(project string) string { return project + PublishSuffix }
 // declares carries it.
 const RequesterAnnotation = "openshift.io/requester"
 
+// DisplayNameAnnotation is OpenShift's project display name: the console titles
+// a project with it, read from the project's namespace named like it.
+const DisplayNameAnnotation = "openshift.io/display-name"
+
 // PublishProject is the project whose publish namespace ns is, read from its
 // metadata: named for that project, labeled for it, in no project
 // (inProject), and not a user's own project, which a self-provisioner could

@@ -37,6 +37,33 @@ class InventoryStore {
 	// The live stream's health; the snapshot above is stale unless 'live'.
 	stream = $state<StreamStatus>('connecting');
 	readonly projects = $derived(this.inventory?.projects ?? []);
+	// Keyed on a string so a frame that changes no title changes nothing that
+	// reads one: every frame brings new project objects.
+	readonly #titleKey = $derived(
+		this.projects
+			.filter((p) => p.title)
+			.map((p) => `${p.name}\0${p.title}`)
+			.join('\n'),
+	);
+	readonly #titles = $derived(
+		new Map(
+			this.#titleKey
+				.split('\n')
+				.filter(Boolean)
+				.map((l) => l.split('\0') as [string, string]),
+		),
+	);
+	// How the console names a project: its display name, else its name. URLs,
+	// keys and API calls keep the name.
+	title(project: string): string {
+		return this.#titles.get(project) ?? project;
+	}
+	// A project as a choice in a list: its title says what it is, its name
+	// which one.
+	titled(project: string): string {
+		const t = this.title(project);
+		return t === project ? project : `${t} (${project})`;
+	}
 	// The networking read layer: the network catalog (so raw OVN-K refs render
 	// as catalog networks) plus the physical fabric (uplinks + node NICs).
 	// Changes rarely; backend caches 60s.

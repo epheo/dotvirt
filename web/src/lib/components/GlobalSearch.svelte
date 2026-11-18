@@ -130,7 +130,8 @@
 
 		if (labelQ === null) {
 			for (const p of inventory.projects) {
-				if (p.name.toLowerCase().includes(q)) out.push({ kind: 'project', project: p.name });
+				if (p.name.toLowerCase().includes(q) || p.title?.toLowerCase().includes(q))
+					out.push({ kind: 'project', project: p.name });
 				for (const n of p.namespaces) {
 					if (n.namespace.toLowerCase().includes(q))
 						out.push({ kind: 'namespace', project: p.name, namespace: n.namespace });
@@ -221,7 +222,7 @@
 			case 'vm':
 				return h.vm.name;
 			case 'project':
-				return h.project;
+				return inventory.title(h.project);
 			case 'namespace':
 				return h.namespace;
 			case 'node':
@@ -239,7 +240,9 @@
 			case 'network':
 				return h.hint;
 			case 'namespace':
-				return h.project;
+				return inventory.title(h.project);
+			case 'project':
+				return inventory.title(h.project) === h.project ? '' : h.project;
 			default:
 				return '';
 		}

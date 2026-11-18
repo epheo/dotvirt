@@ -60,6 +60,20 @@ describe('storage routes', () => {
 			{ label: 'host-07' },
 		]);
 	});
+	it('names a project by its title and links it by its name', () => {
+		const title = (p: string) => (p === 'u-acme-web' ? 'acme/web' : p);
+		expect(
+			trailForScope(
+				{ kind: 'namespace', project: 'u-acme-web', namespace: 'u-acme-web-prod' },
+				'All VMs',
+				title,
+			),
+		).toEqual([
+			{ label: 'All VMs', href: '/compute' },
+			{ label: 'acme/web', href: '/compute/u-acme-web' },
+			{ label: 'u-acme-web-prod' },
+		]);
+	});
 	it('trails a class under Storage and Classes', () => {
 		expect(trailForScope({ kind: 'storage', storageClass: 'bulk-hdd' })).toEqual([
 			{ label: 'Storage', href: '/storage?tab=library' },

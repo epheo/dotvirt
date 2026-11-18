@@ -196,12 +196,19 @@
 			return {
 				title: sc.namespace,
 				status,
-				context: vms ? `${vms} in ${sc.project}` : `In project ${sc.project}`,
+				context: vms
+					? `${vms} in ${inventory.title(sc.project)}`
+					: `In project ${inventory.title(sc.project)}`,
 			};
 		if (sc.kind === 'project') {
 			const p = inventory.projects.find((x) => x.name === sc.project);
 			const nss = plural(p?.namespaces.length ?? 0, 'namespace');
-			return { title: sc.project, status, context: vms ? `${vms} in ${nss}` : nss };
+			const size = vms ? `${vms} in ${nss}` : nss;
+			// Whoever may edit the namespace writes its display name: the name
+			// beside it says which project this is.
+			return p?.title
+				? { title: p.title, status, context: `${sc.project}, ${size}` }
+				: { title: sc.project, status, context: size };
 		}
 		const projects = plural(inventory.projects.length, 'project');
 		return {

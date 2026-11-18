@@ -91,7 +91,7 @@ func logRepoErr(project string, err error) {
 }
 
 func buildProject(in Inputs, p project.ProjectInfo) model.Project {
-	out := model.Project{Name: p.Name, Repo: p.Repo, Error: p.Error, Namespaces: []model.ProjectNamespace{}}
+	out := model.Project{Name: p.Name, Title: p.Title, Repo: p.Repo, Error: p.Error, Namespaces: []model.ProjectNamespace{}}
 	if in.RepoPage != nil && p.Repo != "" {
 		out.RepoPage = in.RepoPage(p.Repo)
 	}

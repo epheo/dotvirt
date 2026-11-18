@@ -2299,6 +2299,11 @@ export interface ProjectNamespace {
  */
 export interface Project {
   name: string;
+  /**
+   * Title is how the console names the project, its namespace's
+   * openshift.io/display-name; the console falls back to Name.
+   */
+  title?: string;
   repo?: string;
   /**
    * RepoPage is where a browser opens Repo: its page under the forge's web

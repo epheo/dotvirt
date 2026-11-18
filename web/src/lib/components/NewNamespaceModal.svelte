@@ -96,13 +96,13 @@
 	</FormField>
 	<FormField label="Project">
 		<SelectInput bind:value={project}>
-			{#each projects as p (p)}<option value={p}>{p}</option>{/each}
+			{#each projects as p (p)}<option value={p}>{inventory.titled(p)}</option>{/each}
 		</SelectInput>
 	</FormField>
 
 	<FormField label="VM Network">
 		<SelectInput bind:value={mode}>
-			{#if shared}<option value="project">{project}'s VM Network</option>{/if}
+			{#if shared}<option value="project">{inventory.title(project)}'s VM Network</option>{/if}
 			<option value="own">A VM Network of its own</option>
 			<option value="none">None: the cluster's own network</option>
 		</SelectInput>

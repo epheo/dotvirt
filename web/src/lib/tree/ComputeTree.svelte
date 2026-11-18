@@ -57,10 +57,10 @@
 	const filtering = $derived(query.trim() !== '');
 	const vmCount = (p: Project) => p.namespaces.reduce((n, ns) => n + ns.vms.length, 0);
 	const projectMatches = (p: Project) =>
-		matches(query, p.name, ...p.namespaces.map((n) => n.namespace));
+		matches(query, p.name, p.title ?? '', ...p.namespaces.map((n) => n.namespace));
 	// A query that names a namespace, not its project, narrows the project to
 	// the matching namespaces and opens it.
-	const byNamespace = (p: Project) => filtering && !matches(query, p.name);
+	const byNamespace = (p: Project) => filtering && !matches(query, p.name, p.title ?? '');
 	const nsShown = (p: Project) =>
 		byNamespace(p) ? p.namespaces.filter((n) => matches(query, n.namespace)) : p.namespaces;
 
@@ -68,7 +68,7 @@
 		bySize(
 			projects.filter((p) => !p.error && projectMatches(p)),
 			vmCount,
-			(p) => p.name,
+			(p) => p.title || p.name,
 		),
 	);
 	const folding = $derived(
@@ -191,7 +191,10 @@
 			{#snippet icon()}
 				<Folder size={14} class="shrink-0 text-side-dim" />
 			{/snippet}
-			<span class="truncate {open ? 'text-side-ink' : ''}">{project.name}</span>
+			<span
+				class="truncate {open ? 'text-side-ink' : ''}"
+				title={project.title ? project.name : undefined}>{project.title || project.name}</span
+			>
 			<!-- The tree only marks state, one dot per row at the right: the worst
 			     issue when the project has any, else the Application rollup (or the
 			     VM-only drift dot when Argo isn't wired). -->

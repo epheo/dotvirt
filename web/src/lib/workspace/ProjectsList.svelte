@@ -36,7 +36,8 @@
 						<td class="{TD} pl-card">
 							<a
 								class="text-accent-ink hover:underline"
-								href={hrefForScope({ kind: 'project', project: p.name })}>{p.name}</a
+								href={hrefForScope({ kind: 'project', project: p.name })}
+								title={p.title ? p.name : undefined}>{p.title || p.name}</a
 							>
 						</td>
 						<td class="{TD} text-right tabular-nums">{p.namespaces.length}</td>

@@ -199,7 +199,10 @@ type ProjectNamespace struct {
 // surfaced as a warning in the UI rather than failing the whole inventory.
 type Project struct {
 	Name string `json:"name"`
-	Repo string `json:"repo,omitempty"`
+	// Title is how the console names the project, its namespace's
+	// openshift.io/display-name; the console falls back to Name.
+	Title string `json:"title,omitempty"`
+	Repo  string `json:"repo,omitempty"`
 	// RepoPage is where a browser opens Repo: its page under the forge's web
 	// base, which may differ from the base git and the API reach it at.
 	RepoPage   string             `json:"repoPage,omitempty"`
