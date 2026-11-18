@@ -411,9 +411,12 @@
 		[
 			`${stagedTotal.toLocaleString('en-US')} staged, ${proposedLane.length.toLocaleString('en-US')} in review`,
 			scopeNS
-				? `in ${scopeProject}`
+				? `in ${inventory.title(scopeProject)}`
 				: scopeProject
-					? ''
+					? // Anyone who may edit the namespace writes the title: the name says which project this is.
+						inventory.title(scopeProject) === scopeProject
+						? ''
+						: scopeProject
 					: plural(inventory.projects.length, 'project'),
 		]
 			.filter(Boolean)
