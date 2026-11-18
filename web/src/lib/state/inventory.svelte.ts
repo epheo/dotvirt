@@ -37,6 +37,12 @@ class InventoryStore {
 	// The live stream's health; the snapshot above is stale unless 'live'.
 	stream = $state<StreamStatus>('connecting');
 	readonly projects = $derived(this.inventory?.projects ?? []);
+	readonly #titles = $derived(new Map(this.projects.map((p) => [p.name, p.title || p.name])));
+	// How the console names a project: its display name, else its name. URLs,
+	// keys and API calls keep the name.
+	title(project: string): string {
+		return this.#titles.get(project) ?? project;
+	}
 	// The networking read layer: the network catalog (so raw OVN-K refs render
 	// as catalog networks) plus the physical fabric (uplinks + node NICs).
 	// Changes rarely; backend caches 60s.

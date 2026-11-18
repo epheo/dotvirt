@@ -1,6 +1,7 @@
 package project
 
 import (
+	"strings"
 	"testing"
 )
 
@@ -196,5 +197,43 @@ func TestOneProjectMayHoldManyNamespaces(t *testing.T) {
 	infos := resolver().Resolve([]Namespace{nsInfo("a", "team-a", repo), nsInfo("b", "team-a", repo)}, nil)
 	if len(infos) != 1 || infos[0].Repo != repo || infos[0].Error != "" {
 		t.Errorf("infos = %+v", infos)
+	}
+}
+
+// A project takes the display name of its namespace named like it, and only
+// when the caller may see that namespace.
+func TestResolveTitle(t *testing.T) {
+	titled := func(name, project, display string) Namespace {
+		n := nsInfo(name, project, "https://forge/"+project+".git")
+		n.Annotations["openshift.io/display-name"] = display
+		return n
+	}
+	nss := []Namespace{
+		titled("u-acme-web", "u-acme-web", "  acme/web "),
+		titled("u-acme-web-prod", "u-acme-web", "Production"),
+		titled("team-b-dev", "team-b", "Team B"),
+		titled("team-c", "team-c", "line\nbreak"),
+		titled("team-d", "team-d", "team-d"),
+	}
+	byName := func(infos []ProjectInfo) map[string]string {
+		out := map[string]string{}
+		for _, p := range infos {
+			out[p.Name] = p.Title
+		}
+		return out
+	}
+	got := byName(resolver().Resolve(nss, nil))
+	want := map[string]string{"u-acme-web": "acme/web", "team-b": "", "team-c": "", "team-d": ""}
+	for name, w := range want {
+		if got[name] != w {
+			t.Errorf("%s titled %q, want %q", name, got[name], w)
+		}
+	}
+	if got := byName(resolver().Resolve(nss, map[string]bool{"u-acme-web-prod": true})); got["u-acme-web"] != "" {
+		t.Errorf("title read through a namespace the caller cannot see: %q", got["u-acme-web"])
+	}
+	long := strings.Repeat("é", maxTitle+5)
+	if got := byName(resolver().Resolve([]Namespace{titled("x", "x", long)}, nil)); len([]rune(got["x"])) != maxTitle {
+		t.Errorf("long title kept %d runes, want %d", len([]rune(got["x"])), maxTitle)
 	}
 }

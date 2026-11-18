@@ -201,16 +201,20 @@ export function keepTab(href: string, tab: string | null): string {
 
 // The workspace breadcrumb for a scope: ancestors link, the focus is plain.
 // Roots name the section, not "All VMs" everywhere.
-export function trailForScope(s: Scope, root = 'All VMs'): { label: string; href?: string }[] {
+export function trailForScope(
+	s: Scope,
+	root = 'All VMs',
+	title: (project: string) => string = (p) => p,
+): { label: string; href?: string }[] {
 	switch (s.kind) {
 		case 'all':
 			return [{ label: root }];
 		case 'project':
-			return [{ label: root, href: '/compute' }, { label: s.project }];
+			return [{ label: root, href: '/compute' }, { label: title(s.project) }];
 		case 'namespace':
 			return [
 				{ label: root, href: '/compute' },
-				{ label: s.project, href: hrefForScope({ kind: 'project', project: s.project }) },
+				{ label: title(s.project), href: hrefForScope({ kind: 'project', project: s.project }) },
 				{ label: s.namespace },
 			];
 		case 'node':

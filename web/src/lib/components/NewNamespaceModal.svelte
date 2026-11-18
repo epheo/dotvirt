@@ -96,7 +96,7 @@
 	</FormField>
 	<FormField label="Project">
 		<SelectInput bind:value={project}>
-			{#each projects as p (p)}<option value={p}>{p}</option>{/each}
+			{#each projects as p (p)}<option value={p}>{inventory.title(p)}</option>{/each}
 		</SelectInput>
 	</FormField>
 

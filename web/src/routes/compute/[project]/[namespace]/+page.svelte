@@ -2,6 +2,7 @@
 	import { page } from '$app/state';
 	import type { Scope } from '#lib/lenses.js';
 	import { trailForScope } from '#lib/nav.js';
+	import { inventory } from '#lib/state/inventory.svelte.js';
 	import { computeRoot } from '#lib/state/modules.svelte.js';
 	import ContainerWorkspace from '#lib/workspace/ContainerWorkspace.svelte';
 
@@ -12,4 +13,8 @@
 	});
 </script>
 
-<ContainerWorkspace {scope} section="compute" trail={trailForScope(scope, computeRoot())} />
+<ContainerWorkspace
+	{scope}
+	section="compute"
+	trail={trailForScope(scope, computeRoot(), (p) => inventory.title(p))}
+/>

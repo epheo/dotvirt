@@ -12,6 +12,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode"
 
 	"github.com/epheo/dotvirt/pkg/forge"
 	"github.com/epheo/dotvirt/pkg/tenancy"
@@ -21,7 +22,10 @@ import (
 // namespaces that make it up, and an Error when those namespaces don't agree on a
 // usable repo (project still listed, but not editable).
 type ProjectInfo struct {
-	Name       string
+	Name string
+	// Title is the display name of the project's namespace named like it, ""
+	// when that namespace has none or the caller may not see it.
+	Title      string
 	Repo       string
 	Path       string // folder of Repo the project lives in; "" is all of it
 	Namespaces []string
@@ -70,6 +74,7 @@ func NewResolver(projectLabel, repoAnno, forgeBase string) *Resolver {
 type accum struct {
 	namespaces []string
 	repos      map[string]struct{}
+	title      string
 }
 
 // Resolve groups the project-labeled namespaces into projects, keeping only those
@@ -108,6 +113,9 @@ func (r *Resolver) Resolve(namespaces []Namespace, visible map[string]bool) []Pr
 			byProject[name] = a
 		}
 		a.namespaces = append(a.namespaces, ns.Name)
+		if ns.Name == name {
+			a.title = title(ns.Annotations[tenancy.DisplayNameAnnotation], name)
+		}
 		// Resolve BEFORE deduping, so a relative ref and its absolute form count as
 		// one repo rather than a conflict.
 		if repo := ns.Annotations[r.repoAnno]; repo != "" {
@@ -118,7 +126,7 @@ func (r *Resolver) Resolve(namespaces []Namespace, visible map[string]bool) []Pr
 	out := make([]ProjectInfo, 0, len(byProject))
 	for name, a := range byProject {
 		sort.Strings(a.namespaces)
-		info := ProjectInfo{Name: name, Namespaces: a.namespaces}
+		info := ProjectInfo{Name: name, Title: a.title, Namespaces: a.namespaces}
 		switch len(a.repos) {
 		case 0:
 			info.Error = "no repo configured (set the dotvirt.io/repo annotation)"
@@ -146,6 +154,23 @@ func (r *Resolver) Resolve(namespaces []Namespace, visible map[string]bool) []Pr
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
 	return out
+}
+
+// maxTitle bounds a display name in runes: anyone who may edit the namespace
+// writes it, and the tree and headers show it on one line.
+const maxTitle = 100
+
+// title is a display name as the console shows it: one trimmed line, "" when
+// blank, multi-line, or the project's own name.
+func title(s, name string) string {
+	s = strings.TrimSpace(s)
+	if s == name || strings.ContainsFunc(s, unicode.IsControl) {
+		return ""
+	}
+	if r := []rune(s); len(r) > maxTitle {
+		s = strings.TrimSpace(string(r[:maxTitle]))
+	}
+	return s
 }
 
 // folders are the path annotations of each project, across every namespace,
