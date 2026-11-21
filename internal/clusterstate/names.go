@@ -272,11 +272,13 @@ func (n *namespaceSink) forgetAll(names []string) {
 	}
 }
 
-func (n *namespaceSink) List() []any                        { return nil }
-func (n *namespaceSink) ListKeys() []string                 { return nil }
-func (n *namespaceSink) Get(any) (any, bool, error)         { return nil, false, nil }
-func (n *namespaceSink) GetByKey(string) (any, bool, error) { return nil, false, nil }
-func (n *namespaceSink) Resync() error                      { return nil }
+func (n *namespaceSink) List() []any                          { return nil }
+func (n *namespaceSink) ListKeys() []string                   { return nil }
+func (n *namespaceSink) Get(any) (any, bool, error)           { return nil, false, nil }
+func (n *namespaceSink) GetByKey(string) (any, bool, error)   { return nil, false, nil }
+func (n *namespaceSink) Resync() error                        { return nil }
+func (n *namespaceSink) LastStoreSyncResourceVersion() string { return "" }
+func (n *namespaceSink) Bookmark(string)                      {}
 
 func (n *namespaceSink) generation() uint64 {
 	n.mu.Lock()

@@ -150,11 +150,13 @@ func (t *Table[V]) Clear() {
 	t.synced.Store(false)
 }
 
-func (t *Table[V]) Resync() error                      { return nil }
-func (t *Table[V]) List() []any                        { return nil }
-func (t *Table[V]) ListKeys() []string                 { return nil }
-func (t *Table[V]) Get(any) (any, bool, error)         { return nil, false, nil }
-func (t *Table[V]) GetByKey(string) (any, bool, error) { return nil, false, nil }
+func (t *Table[V]) Resync() error                        { return nil }
+func (t *Table[V]) List() []any                          { return nil }
+func (t *Table[V]) ListKeys() []string                   { return nil }
+func (t *Table[V]) Get(any) (any, bool, error)           { return nil, false, nil }
+func (t *Table[V]) GetByKey(string) (any, bool, error)   { return nil, false, nil }
+func (t *Table[V]) LastStoreSyncResourceVersion() string { return "" }
+func (t *Table[V]) Bookmark(string)                      {}
 
 // RunWhile keeps a module's watches running while on holds, and returns at
 // once. ready gates the start; off stops them, so an uninstalled module leaves

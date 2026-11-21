@@ -106,7 +106,7 @@ func HoldsArgoWebhookKey(s *corev1.Secret) bool {
 			continue
 		}
 		var fields map[string]any
-		if json.Unmarshal(mf.FieldsV1.Raw, &fields) != nil {
+		if json.Unmarshal(mf.FieldsV1.GetRawBytes(), &fields) != nil {
 			continue
 		}
 		data, _ := fields["f:data"].(map[string]any)
@@ -370,7 +370,7 @@ func SyncImpersonationManagers(inst *unstructured.Unstructured) []string {
 			continue
 		}
 		var fields map[string]any
-		if json.Unmarshal(mf.FieldsV1.Raw, &fields) != nil {
+		if json.Unmarshal(mf.FieldsV1.GetRawBytes(), &fields) != nil {
 			continue
 		}
 		spec, _ := fields["f:spec"].(map[string]any)
