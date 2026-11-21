@@ -127,13 +127,13 @@
 	{#if v === null}
 		<span class="text-ink-faint">Unknown</span>
 	{:else if v}
-		<span class="inline-flex items-center gap-1.5 text-ok-ink"
-			><Check size={14} strokeWidth={2.2} class="text-ok" />{yes}</span
-		>
+		<span class="inline-flex items-center gap-1.5 text-ok-ink">
+			<Check size={14} strokeWidth={2.2} class="text-ok" />{yes}
+		</span>
 	{:else}
-		<span class="inline-flex items-center gap-1.5 text-danger-ink"
-			><X size={14} strokeWidth={2.2} class="text-danger" />{no}</span
-		>
+		<span class="inline-flex items-center gap-1.5 text-danger-ink">
+			<X size={14} strokeWidth={2.2} class="text-danger" />{no}
+		</span>
 	{/if}
 {/snippet}
 
@@ -154,8 +154,10 @@
 		<button
 			class="flex size-[30px] shrink-0 items-center justify-center rounded-md text-ink-muted hover:bg-inset-strong"
 			aria-label="Close {vm.name} {row.disk.name}"
-			onclick={onclose}><X size={16} /></button
+			onclick={onclose}
 		>
+			<X size={16} />
+		</button>
 	</div>
 
 	<div class="flex flex-col gap-2 px-card py-3.5">
@@ -164,32 +166,38 @@
 				<a
 					href={storageHref('images', { image: row.image })}
 					class="inline-flex h-7 items-center rounded-md border border-line bg-panel px-2.5 font-mono text-[13px] font-medium text-accent-ink hover:border-accent"
-					>{shortName(row.image)}</a
 				>
+					{shortName(row.image)}
+				</a>
 			{:else if row.disk.import}
 				<a
 					href={storageHref('disks', { source: row.source })}
 					class="inline-flex h-7 items-center rounded-md border border-line bg-panel px-2.5 text-[13px] text-accent-ink hover:border-accent"
-					>From a {SOURCE_WORD[row.disk.import.kind] ?? row.disk.import.kind}</a
 				>
+					From a {SOURCE_WORD[row.disk.import.kind] ?? row.disk.import.kind}
+				</a>
 			{:else}
 				<span
 					class="inline-flex h-7 items-center rounded-md border border-line bg-panel px-2.5 text-[13px] text-ink-faint"
-					>No image</span
 				>
+					No image
+				</span>
 			{/if}
 			<ChevronRight size={14} class="text-ink-faint" />
 			<span
 				aria-current="true"
 				class="inline-flex h-7 items-center rounded-md border border-accent bg-select px-2.5 font-mono text-[13px] font-medium"
-				>{row.disk.name}</span
 			>
+				{row.disk.name}
+			</span>
 			<ChevronRight size={14} class="text-ink-faint" />
 			<a
 				href={storageHref('snapshots', { vm: row.vmKey })}
 				class="inline-flex h-7 items-center rounded-md border border-line bg-panel px-2.5 text-[13px] text-accent-ink hover:border-accent"
-				>{num(row.snapshots.length)} {row.snapshots.length === 1 ? 'snapshot' : 'snapshots'}</a
 			>
+				{num(row.snapshots.length)}
+				{row.snapshots.length === 1 ? 'snapshot' : 'snapshots'}
+			</a>
 		</div>
 		{#if row.disk.import}
 			{@const imp = row.disk.import}
@@ -210,15 +218,15 @@
 			<thead>
 				<tr class="text-left text-xs font-bold text-ink-muted">
 					<th scope="col" class="w-[38%] pb-1.5"><span class="sr-only">Property</span></th>
-					<th scope="col" class="pb-1.5 font-mono font-medium text-ink"
-						>{row.storageClass || 'Unknown'}</th
-					>
+					<th scope="col" class="pb-1.5 font-mono font-medium text-ink">
+						{row.storageClass || 'Unknown'}
+					</th>
 					{#if there}
-						<th scope="col" class="pb-1.5"
-							><span class="font-mono font-medium text-ink">{target}</span>{stagedTo
+						<th scope="col" class="pb-1.5">
+							<span class="font-mono font-medium text-ink">{target}</span>{stagedTo
 								? ', staged'
-								: ''}</th
-						>
+								: ''}
+						</th>
 					{/if}
 				</tr>
 			</thead>
@@ -228,8 +236,9 @@
 				<tr>
 					<th scope="row">Live migration</th>
 					<td>{@render verdict(row.shared, 'Possible', 'Not possible')}</td>
-					{#if there}<td>{@render verdict(there.liveMigration, 'Possible', 'Not possible')}</td
-						>{/if}
+					{#if there}<td>
+							{@render verdict(there.liveMigration, 'Possible', 'Not possible')}
+						</td>{/if}
 				</tr>
 				<tr>
 					<th scope="row">Shared across hosts</th>
@@ -263,8 +272,10 @@
 					{#if clusterGate.hosts().ok}
 						<a
 							href={hrefForScope({ kind: 'node', node: row.host })}
-							class="text-accent-ink hover:underline">Open {row.host}</a
+							class="text-accent-ink hover:underline"
 						>
+							Open {row.host}
+						</a>
 					{/if}
 				</div>
 			</div>
@@ -280,8 +291,9 @@
 				<a
 					href={storageHref('snapshots', { vm: row.vmKey })}
 					class="text-[13px] text-accent-ink hover:underline"
-					>All {num(row.snapshots.length)} on the Snapshots tab</a
 				>
+					All {num(row.snapshots.length)} on the Snapshots tab
+				</a>
 			{/if}
 		</div>
 		{#if last.length}
@@ -319,8 +331,10 @@
 					size="sm"
 					disabled={op.busy || !plan?.edits.length || !move.ok}
 					title={move.why || (plan?.blocked[0]?.reason ?? '')}
-					onclick={stageMove}><ArrowLeftRight size={14} />Move disk</Button
+					onclick={stageMove}
 				>
+					<ArrowLeftRight size={14} />Move disk
+				</Button>
 				<StageChip kind="pr" />
 			</div>
 			{#if !move.ok}
@@ -335,8 +349,10 @@
 								kind: 'item',
 								project: row.project,
 								key: itemKey({ namespace: vm.namespace, name: vm.name }),
-							})}>Review</button
+							})}
 					>
+						Review
+					</button>
 				</p>
 				<p class="text-xs leading-4 text-ink-faint">
 					Copies live while {vm.name} runs. Once merged, {vm.name} can live-migrate.
@@ -348,13 +364,14 @@
 						: 'No shared class to move it to.'}
 				</p>
 			{:else if plan?.stopped.length}
-				<Consequence tone="danger" size="sm"
-					>{vm.name} is stopped, and a disk copies only while its VM runs. Start it first.</Consequence
-				>
+				<Consequence tone="danger" size="sm">
+					{vm.name} is stopped, and a disk copies only while its VM runs. Start it first.
+				</Consequence>
 			{:else if plan?.blocked.length}
-				<Consequence tone="warn" size="sm"
-					>Cannot move it: {vm.name} {row.disk.name} is {plan.blocked[0].reason}.</Consequence
-				>
+				<Consequence tone="warn" size="sm">
+					Cannot move it: {vm.name}
+					{row.disk.name} is {plan.blocked[0].reason}.
+				</Consequence>
 			{:else}
 				<p class="text-xs leading-4 text-ink-faint">
 					Stages a move to {target} in the {row.project} draft. Copies live while {vm.name} runs{plan?.liveMigrateAfter
@@ -370,8 +387,10 @@
 					variant="secondary"
 					size="sm"
 					disabled={op.busy || !snapshotsAllowed || !take.ok}
-					onclick={snapshotNow}><Camera size={14} />Snapshot now</Button
+					onclick={snapshotNow}
 				>
+					<Camera size={14} />Snapshot now
+				</Button>
 				<StageChip kind="now" />
 			</div>
 			<p class="text-xs leading-4 text-ink-faint">
@@ -394,16 +413,17 @@
 						disabled={op.busy || row.running || !back.ok}
 						title={back.why}
 						aria-label="Restore to {point.name}"
-						onclick={restore}><RotateCcw size={14} />{armed ? 'Confirm restore' : 'Restore'}</Button
+						onclick={restore}
 					>
+						<RotateCcw size={14} />{armed ? 'Confirm restore' : 'Restore'}
+					</Button>
 					<StageChip kind="now" />
 				</div>
 				<div class="flex flex-col gap-1">
 					{#if !back.ok}<p class="text-xs leading-4 text-ink-faint">{back.why}</p>{/if}
-					<Consequence tone="danger" size="sm"
-						>Puts {vm.name} back to {point.name}, every disk it captured. Writes since then are
-						lost.</Consequence
-					>
+					<Consequence tone="danger" size="sm">
+						Puts {vm.name} back to {point.name}, every disk it captured. Writes since then are lost.
+					</Consequence>
 					{#if row.running}
 						<Consequence tone="warn" size="sm">
 							{vm.name} must stop first. Power off stages a pull request; restore once it merges.
@@ -411,8 +431,10 @@
 								<button
 									class="text-accent-ink hover:underline"
 									disabled={op.busy}
-									onclick={stagePowerOff}>Stage power off</button
+									onclick={stagePowerOff}
 								>
+									Stage power off
+								</button>
 							{:else if stagedItem?.edit?.power === 'Off'}
 								Power off is staged.
 							{/if}

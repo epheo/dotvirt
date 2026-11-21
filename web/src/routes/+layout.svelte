@@ -270,8 +270,10 @@
 					size="sm"
 					disabled={session.signingOut}
 					aria-label="Retry sign-out"
-					onclick={() => session.logout()}>{session.signingOut ? 'Signing out...' : 'Retry'}</Button
+					onclick={() => session.logout()}
 				>
+					{session.signingOut ? 'Signing out...' : 'Retry'}
+				</Button>
 			</Banner>
 		{/if}
 
@@ -286,16 +288,17 @@
 		{#if inventory.netError}
 			<Banner tone="warn" size="md">
 				<TriangleAlert size={16} class="shrink-0" />
-				<span class="min-w-0"
-					>Networking and security views may be out of date: {inventory.netError}</span
-				>
+				<span class="min-w-0">
+					Networking and security views may be out of date: {inventory.netError}
+				</span>
 				<Button
 					variant="link"
 					size="sm"
 					disabled={inventory.netBusy}
 					onclick={() => inventory.loadNet({ retries: 0 })}
-					>{inventory.netBusy ? 'Retrying...' : 'Retry'}</Button
 				>
+					{inventory.netBusy ? 'Retrying...' : 'Retry'}
+				</Button>
 			</Banner>
 		{/if}
 

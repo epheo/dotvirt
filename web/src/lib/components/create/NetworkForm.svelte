@@ -323,9 +323,9 @@
 													: `on ${plural(u.nodeCount, 'host')}`}
 										</span>
 									{/each}
-									{#if carriers.length > 2}<span class="text-ink-faint"
-											>and {carriers.length - 2} more</span
-										>{/if}
+									{#if carriers.length > 2}<span class="text-ink-faint">
+											and {carriers.length - 2} more
+										</span>{/if}
 								</span>
 							{/if}
 						</label>
@@ -368,12 +368,12 @@
 							first={project}
 							short
 						/>
-						<span class={HELP}
-							>{likeNet ? `Owner of ${likeNet.name}. ` : ''}Search {plural(
+						<span class={HELP}>
+							{likeNet ? `Owner of ${likeNet.name}. ` : ''}Search {plural(
 								new Set(places.map((n) => inventory.projectOf(n))).size,
 								'project',
-							)}.</span
-						>
+							)}.
+						</span>
 					</div>
 				{:else if who === 'vlan'}
 					<div class="flex min-w-0 flex-col gap-1.5">
@@ -413,13 +413,14 @@
 									/>
 									<span class="min-w-0">
 										<span class="font-mono text-sm font-medium text-ink">{u.name}</span>
-										<span class="block text-xs text-ink-muted"
-											>Bridge <span class="font-mono">{u.bridge}</span>, {u.nodeCount}
+										<span class="block text-xs text-ink-muted">
+											Bridge <span class="font-mono">{u.bridge}</span>, {u.nodeCount}
 											host{u.nodeCount === 1 ? '' : 's'}{#if failing(u)}<span
 													class="text-danger-ink"
-													>, failing{failure(u) ? `: ${failure(u)}` : ''}</span
-												>{/if}</span
-										>
+												>
+													, failing{failure(u) ? `: ${failure(u)}` : ''}
+												</span>{/if}
+										</span>
 									</span>
 								</label>
 							{/each}
@@ -430,8 +431,10 @@
 							<button
 								type="button"
 								class="text-accent-ink hover:underline"
-								onclick={() => (ui.modal = { kind: 'uplink' })}>Add an uplink</button
+								onclick={() => (ui.modal = { kind: 'uplink' })}
 							>
+								Add an uplink
+							</button>
 						</p>
 					{/if}
 				</fieldset>
@@ -474,10 +477,11 @@
 					aria-describedby="net-subnet-help net-subnet-warn net-subnet-reuse"
 				/>
 				<span id="net-subnet-help" class={HELP}>
-					{#if !subnetValid}<span class="text-warn-ink">Use CIDR form, like 10.40.0.0/16.</span
-						>{:else if suggestion}<span
-							>Suggested <span class="font-mono text-ink-soft">{suggestion.cidr}</span>. Why: {suggestion.reason}.</span
-						>{/if}
+					{#if !subnetValid}<span class="text-warn-ink">
+							Use CIDR form, like 10.40.0.0/16.
+						</span>{:else if suggestion}<span>
+							Suggested <span class="font-mono text-ink-soft">{suggestion.cidr}</span>. Why: {suggestion.reason}.
+						</span>{/if}
 				</span>
 
 				{#if clash.length}
@@ -487,16 +491,16 @@
 					>
 						<TriangleAlert size={16} class="mt-0.5 shrink-0 text-warn-ink" />
 						<div class="flex min-w-0 flex-1 flex-col gap-0.5">
-							<span class="font-bold text-warn-ink"
-								>Already used by {#each clash as n, i (attachRef(n))}{i
+							<span class="font-bold text-warn-ink">
+								Already used by {#each clash as n, i (attachRef(n))}{i
 										? i === clash.length - 1
 											? ' and '
 											: ', '
-										: ''}<span class="font-mono font-medium">{n.name}</span>{/each}.</span
-							>
-							<span class="text-[13px] text-ink-soft"
-								>Addresses would repeat on any {vmsOff() ? 'workload' : 'VM'} or route that joins them.</span
-							>
+										: ''}<span class="font-mono font-medium">{n.name}</span>{/each}.
+							</span>
+							<span class="text-[13px] text-ink-soft">
+								Addresses would repeat on any {vmsOff() ? 'workload' : 'VM'} or route that joins them.
+							</span>
 							{#if fixes.length}
 								<div class="mt-2 flex flex-wrap items-center gap-2">
 									{#each fixes as c, i (c)}
@@ -507,8 +511,9 @@
 											0
 												? 'border-accent bg-panel text-accent-ink hover:bg-select-soft'
 												: 'border-line bg-panel text-ink hover:border-ink-faint'}"
-											>Use <span class="font-mono">{c}</span></button
 										>
+											Use <span class="font-mono">{c}</span>
+										</button>
 									{/each}
 									<span class="text-xs text-ink-faint">nearest free</span>
 								</div>
@@ -524,9 +529,9 @@
 
 		{#if !editing}
 			<Card title="Set up for you" flush>
-				{#snippet actions()}<span class="text-ink-faint"
-						>{likeNet ? `Same as ${likeNet.name}` : 'The usual for a new network'}</span
-					>{/snippet}
+				{#snippet actions()}<span class="text-ink-faint">
+						{likeNet ? `Same as ${likeNet.name}` : 'The usual for a new network'}
+					</span>{/snippet}
 				<div class="flex flex-col">
 					<SetupRow
 						label="Addresses"
@@ -555,11 +560,11 @@
 											}}
 											class="mt-0.5 size-4 accent-accent"
 										/>
-										<span
-											><span class="text-ink">{o.t}</span><span class="block text-xs text-ink-muted"
-												>{o.s}</span
-											></span
-										>
+										<span>
+											<span class="text-ink">{o.t}</span><span class="block text-xs text-ink-muted">
+												{o.s}
+											</span>
+										</span>
 									</label>
 								{/each}
 								<div>
@@ -567,8 +572,9 @@
 										type="button"
 										onclick={done}
 										class="h-[30px] rounded-md border border-line bg-panel px-3 text-[13px] text-ink hover:border-ink-faint"
-										>Done</button
 									>
+										Done
+									</button>
 								</div>
 							</div>
 						{/snippet}
@@ -602,37 +608,37 @@
 					<Consequence tone="warn">Overlaps {clash.map((n) => n.name).join(' and ')}.</Consequence>
 				{/if}
 				{#if who === 'vlan' && chosenUplink && failing(chosenUplink)}
-					<Consequence tone="danger"
-						>{chosenUplink.name} is failing: {joiners} on its broken hosts cannot reach the VLAN.</Consequence
-					>
+					<Consequence tone="danger">
+						{chosenUplink.name} is failing: {joiners} on its broken hosts cannot reach the VLAN.
+					</Consequence>
 				{/if}
 				{#if vmsOff()}
 					<!-- No VM picker without KubeVirt: a workload attaches the network by name. -->
-					<Consequence tone="ok"
-						>Nothing restarts. Nothing joins until a workload attaches it.</Consequence
-					>
+					<Consequence tone="ok">
+						Nothing restarts. Nothing joins until a workload attaches it.
+					</Consequence>
 					{#if who === 'project'}
-						<Consequence tone="info"
-							>{project} workloads{owner.includes('/') ? ` in ${namespace}` : ''} can attach it.</Consequence
-						>
+						<Consequence tone="info">
+							{project} workloads{owner.includes('/') ? ` in ${namespace}` : ''} can attach it.
+						</Consequence>
 					{:else if selectedNs.length}
-						<Consequence tone="info"
-							>Workloads in the {projectsPicked} project{projectsPicked === 1 ? '' : 's'} you picked can
-							attach it.</Consequence
-						>
+						<Consequence tone="info">
+							Workloads in the {projectsPicked} project{projectsPicked === 1 ? '' : 's'} you picked can
+							attach it.
+						</Consequence>
 					{/if}
 				{:else}
 					<Consequence tone="ok">Nothing restarts. No VM joins until you attach one.</Consequence>
 					{#if who === 'project'}
-						<Consequence tone="info"
-							>Shows up in the network picker of every {project} VM{owner.includes('/')
+						<Consequence tone="info">
+							Shows up in the network picker of every {project} VM{owner.includes('/')
 								? ` in ${namespace}`
-								: ''}.</Consequence
-						>
+								: ''}.
+						</Consequence>
 					{:else if selectedNs.length}
-						<Consequence tone="info"
-							>Shows up for VMs in the {projectsPicked} project{projectsPicked === 1 ? '' : 's'} you picked.</Consequence
-						>
+						<Consequence tone="info">
+							Shows up for VMs in the {projectsPicked} project{projectsPicked === 1 ? '' : 's'} you picked.
+						</Consequence>
 					{/if}
 				{/if}
 			{/snippet}

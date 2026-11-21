@@ -217,9 +217,9 @@
 							{/each}
 						{/if}
 						{#each labels as l (l.i)}
-							<text x={l.x} y={l.y} text-anchor="middle" class="fill-ink-soft" font-size="9"
-								>{l.text}</text
-							>
+							<text x={l.x} y={l.y} text-anchor="middle" class="fill-ink-soft" font-size="9">
+								{l.text}
+							</text>
 						{/each}
 					</g>
 					<line
@@ -235,8 +235,10 @@
 						y="10"
 						text-anchor="middle"
 						class="fill-ink-soft"
-						font-size="9">mean {Math.round(data.mean)}%</text
+						font-size="9"
 					>
+						mean {Math.round(data.mean)}%
+					</text>
 					<line
 						x1="0"
 						y1={CPU_TOP + CPU_H}
@@ -290,8 +292,10 @@
 							y={axisY}
 							text-anchor={t === 0 ? 'start' : t === 100 ? 'end' : 'middle'}
 							class="fill-ink-faint"
-							font-size="8">{t}%</text
+							font-size="8"
 						>
+							{t}%
+						</text>
 					{/each}
 				</svg>
 			{/if}
@@ -305,14 +309,18 @@
 						{#if band.above > 0}
 							<span
 								class="rounded bg-warn-soft px-1.5 py-0.5 font-medium text-warn-ink"
-								title="above the rescheduling band - migration sources">{band.above} hot</span
+								title="above the rescheduling band - migration sources"
 							>
+								{band.above} hot
+							</span>
 						{/if}
 						{#if band.below > 0}
 							<span
 								class="rounded bg-cold-soft px-1.5 py-0.5 font-medium text-cold-ink"
-								title="below the rescheduling band - migration targets">{band.below} cold</span
+								title="below the rescheduling band - migration targets"
 							>
+								{band.below} cold
+							</span>
 						{/if}
 					{/if}
 					<span
@@ -331,8 +339,10 @@
 				{#if memPressure > 0}
 					<span
 						class="rounded bg-warn-soft px-1.5 py-0.5 font-medium text-warn-ink"
-						title="workers above 90% memory">{memPressure} high mem</span
+						title="workers above 90% memory"
 					>
+						{memPressure} high mem
+					</span>
 				{/if}
 			</div>
 
@@ -370,8 +380,9 @@
 								href="/hosts/{n.node}"
 								title={n.node}
 								class="w-40 min-w-0 truncate text-ink-soft hover:text-accent-ink hover:underline"
-								>{n.node}</a
 							>
+								{n.node}
+							</a>
 							{#if n.unschedulable}
 								<Ban size={12} class="shrink-0 text-ink-muted" aria-label="cordoned" />
 							{/if}
@@ -387,9 +398,9 @@
 									></span>
 								{/if}
 							</span>
-							<span class="w-9 shrink-0 text-right font-medium {pctClass(n)}"
-								>{Math.round(n.pct)}%</span
-							>
+							<span class="w-9 shrink-0 text-right font-medium {pctClass(n)}">
+								{Math.round(n.pct)}%
+							</span>
 							{#if memKnown}
 								<span class="hidden h-1.5 w-24 overflow-hidden rounded bg-inset-strong sm:block">
 									<span
@@ -397,9 +408,9 @@
 										style="width: {Math.min(100, n.mem ?? 0)}%; background: {memColor(n)}"
 									></span>
 								</span>
-								<span class="hidden w-9 shrink-0 text-right text-ink-muted sm:block"
-									>{Math.round(n.mem ?? 0)}%</span
-								>
+								<span class="hidden w-9 shrink-0 text-right text-ink-muted sm:block">
+									{Math.round(n.mem ?? 0)}%
+								</span>
 							{/if}
 						</li>
 					{/each}

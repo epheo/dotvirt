@@ -29,13 +29,16 @@
 						? 'bg-warn-soft text-warn-ink'
 						: 'bg-ok-soft text-ok-ink'}"
 					title={c.restart ? "Applies at the VM's next power cycle" : 'Applies to the running VM'}
-					>{c.restart ? 'Restart' : 'Live'}</span
 				>
+					{c.restart ? 'Restart' : 'Live'}
+				</span>
 			{:else if c.restart}
 				<span
 					class="rounded bg-warn-soft px-1 text-[10px] text-warn-ink"
-					title="Applies at the VM's next power cycle">restart</span
+					title="Applies at the VM's next power cycle"
 				>
+					restart
+				</span>
 			{:else if marks}
 				<span class="text-[10px] text-ink-muted">no restart</span>
 			{/if}

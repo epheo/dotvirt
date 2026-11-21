@@ -129,14 +129,14 @@
 			{#if item.kind === 'delete'}
 				<Consequence tone="danger">
 					Merging removes this {noun} from git, then ArgoCD deletes it from the cluster.
-					{#if vm?.power === 'On'}<b class="font-medium text-ink"
-							>It is running now{vm.nodeName ? ` on ${vm.nodeName}` : ''}.</b
-						>{/if}
+					{#if vm?.power === 'On'}<b class="font-medium text-ink">
+							It is running now{vm.nodeName ? ` on ${vm.nodeName}` : ''}.
+						</b>{/if}
 				</Consequence>
 			{:else if item.kind === 'create'}
-				<Consequence tone="info"
-					>ArgoCD creates this object after the pull request merges.</Consequence
-				>
+				<Consequence tone="info">
+					ArgoCD creates this object after the pull request merges.
+				</Consequence>
 			{:else if restart.length > 0}
 				<Consequence tone="warn">
 					<b class="font-medium text-ink">Restart required:</b>
@@ -158,9 +158,9 @@
 
 	{#if item.yaml}
 		<details class="group px-card py-3">
-			<summary class="cursor-pointer text-[13px] font-bold text-ink"
-				>{item.baseYAML ? 'Manifest diff' : 'Manifest'}</summary
-			>
+			<summary class="cursor-pointer text-[13px] font-bold text-ink">
+				{item.baseYAML ? 'Manifest diff' : 'Manifest'}
+			</summary>
 			<div class="mt-2 overflow-hidden rounded-md border border-line-soft">
 				<ManifestDiff before={item.baseYAML} after={item.yaml} />
 			</div>

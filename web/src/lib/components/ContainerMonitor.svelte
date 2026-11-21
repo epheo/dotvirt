@@ -52,8 +52,10 @@
 				onclick={() => (view = v.id)}
 				class="px-2.5 py-1 {i ? 'border-l border-line' : ''} {view === v.id
 					? 'bg-select text-accent-ink'
-					: 'bg-panel text-ink-soft hover:bg-inset'}">{v.label}</button
+					: 'bg-panel text-ink-soft hover:bg-inset'}"
 			>
+				{v.label}
+			</button>
 		{/each}
 	</div>
 {/snippet}

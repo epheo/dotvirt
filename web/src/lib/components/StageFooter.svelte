@@ -31,9 +31,9 @@
 </script>
 
 {#if disabled && missing.length}
-	<span class="min-w-0 truncate text-xs text-warn-ink" title={missing.join(' · ')}
-		>{missing[0]}{missing.length > 1 ? ` (+${missing.length - 1} more)` : ''}</span
-	>
+	<span class="min-w-0 truncate text-xs text-warn-ink" title={missing.join(' · ')}>
+		{missing[0]}{missing.length > 1 ? ` (+${missing.length - 1} more)` : ''}
+	</span>
 {:else if summary}
 	<span class="min-w-0 truncate text-xs text-ink-muted" title={summary}>{summary}</span>
 {:else}

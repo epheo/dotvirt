@@ -73,9 +73,9 @@
 	</div>
 	<FormField label="Owners (optional)">
 		<TextInput bind:value={owners} placeholder="alice bob" data-autofocus />
-		<span class="mt-1 block text-[11px] text-ink-faint"
-			>Usernames granted admin on the project's namespaces (space/comma separated).</span
-		>
+		<span class="mt-1 block text-[11px] text-ink-faint">
+			Usernames granted admin on the project's namespaces (space/comma separated).
+		</span>
 	</FormField>
 	<p class="rounded bg-inset px-3 py-2 text-xs text-ink-muted">
 		Creates the tenant repo now, and stages each namespace (with the <code>dotvirt.io/repo</code>

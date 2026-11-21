@@ -68,9 +68,10 @@
 			<PageHeader title={name} {status} {context}>
 				{#snippet actions()}
 					{#if disks.length}
-						<Button variant="secondary" href={storageHref('disks', { class: name })}
-							>Show the {num(disks.length)} {disks.length === 1 ? 'disk' : 'disks'}</Button
-						>
+						<Button variant="secondary" href={storageHref('disks', { class: name })}>
+							Show the {num(disks.length)}
+							{disks.length === 1 ? 'disk' : 'disks'}
+						</Button>
 					{/if}
 				{/snippet}
 			</PageHeader>
@@ -170,8 +171,11 @@
 										{:else}
 											<a
 												class="text-accent-ink hover:underline"
-												href={storageHref('disks', { class: name, f: c.f })}>{num(c.n)} {c.label}</a
+												href={storageHref('disks', { class: name, f: c.f })}
 											>
+												{num(c.n)}
+												{c.label}
+											</a>
 										{/if}
 									</li>
 								{/each}
@@ -190,13 +194,13 @@
 									class="flex justify-between gap-3 border-t border-line-soft py-1.5 first:border-t-0"
 								>
 									{#if seg.topology}
-										<span
-											><HostLink
+										<span>
+											<HostLink
 												node={seg.topology}
 												label="Free on {seg.topology}"
 												class="text-accent-ink hover:underline"
-											/></span
-										>
+											/>
+										</span>
 									{:else}<span>Free cluster-wide</span>{/if}
 									<span>{size(seg.free)}</span>
 								</li>
@@ -206,10 +210,9 @@
 							<button
 								class="mt-2 text-[13px] text-accent-ink hover:underline"
 								onclick={() => (allSegments = !allSegments)}
-								>{allSegments
-									? 'Fewer hosts'
-									: `${num(segments.length - SEGMENTS)} more hosts`}</button
 							>
+								{allSegments ? 'Fewer hosts' : `${num(segments.length - SEGMENTS)} more hosts`}
+							</button>
 						{/if}
 					{:else if info?.free == null}
 						<p class="text-[13px] text-ink-faint">

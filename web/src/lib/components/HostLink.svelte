@@ -11,5 +11,6 @@
 	}: { node: string; label?: string; class?: string } = $props();
 </script>
 
-{#if clusterGate.hosts().ok}<a href={hrefForScope({ kind: 'node', node })} class={cls}>{label}</a
-	>{:else}{label}{/if}
+{#if clusterGate.hosts().ok}<a href={hrefForScope({ kind: 'node', node })} class={cls}>
+		{label}
+	</a>{:else}{label}{/if}

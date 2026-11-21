@@ -120,8 +120,9 @@
 							variant="link"
 							size="sm"
 							onclick={() => ui.openChanges({ kind: 'item', project, key: itemKey(stagedItem) })}
-							>Review changes</Button
 						>
+							Review changes
+						</Button>
 					{/if}
 				{/snippet}
 				<div class="px-card pt-2 pb-1">
@@ -150,17 +151,19 @@
 						{:else if !latest}
 							<span class="text-ink-faint">No merged changes yet.</span>
 						{:else}
-							<span class="min-w-0 truncate text-ink-soft" title={latest.title}
-								>Last change: {latest.title}</span
-							>
+							<span class="min-w-0 truncate text-ink-soft" title={latest.title}>
+								Last change: {latest.title}
+							</span>
 							<span class="shrink-0 text-ink-faint">{relativeAge(latest.when)}</span>
 						{/if}
 						<Button
 							variant="link"
 							class="ml-auto shrink-0"
 							href="?tab=changes"
-							data-sveltekit-replacestate>All changes</Button
+							data-sveltekit-replacestate
 						>
+							All changes
+						</Button>
 					</div>
 				{/if}
 			</InfoCard>
@@ -268,9 +271,9 @@
 		>
 			<StatusDot tone="warn" size="xs" />
 			Drift — cluster differs from git ({driftChanges.length})
-			<span class="ml-auto text-warn-ink"
-				>{#if showDrift}<ChevronDown size={14} />{:else}<ChevronRight size={14} />{/if}</span
-			>
+			<span class="ml-auto text-warn-ink">
+				{#if showDrift}<ChevronDown size={14} />{:else}<ChevronRight size={14} />{/if}
+			</span>
 		</button>
 		{#if showDrift}
 			<div class="border-t border-warn-soft px-3 py-2">

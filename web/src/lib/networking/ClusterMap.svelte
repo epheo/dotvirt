@@ -215,8 +215,10 @@
 		onclick={() => onselect(id)}
 		class="min-w-0 text-left text-[13px] leading-4 text-ink hover:text-accent-ink {mono
 			? 'truncate font-mono font-medium'
-			: 'font-bold'}">{label}</button
+			: 'font-bold'}"
 	>
+		{label}
+	</button>
 {/snippet}
 
 {#snippet problemFix(p: NetProblem)}
@@ -225,8 +227,10 @@
 	{#if p.networks?.length}
 		<a
 			href={networkHref(p.networks[0])}
-			class="text-xs leading-4 font-medium text-accent-ink hover:underline">Fix the overlap</a
+			class="text-xs leading-4 font-medium text-accent-ink hover:underline"
 		>
+			Fix the overlap
+		</a>
 	{/if}
 {/snippet}
 
@@ -243,33 +247,35 @@
 		</span>
 		<span class="text-xs leading-4 text-ink-muted">
 			{#if r.uplink.bridge}<span class="font-mono text-xs">{r.uplink.bridge}</span>,{/if}<span
-				class={r.uplink.bridge ? 'ml-1' : ''}>{hostsText(r)}</span
+				class={r.uplink.bridge ? 'ml-1' : ''}
 			>
+				{hostsText(r)}
+			</span>
 		</span>
 		{#if r.uplink.builtin}
-			<span class="text-xs leading-4 text-ink-muted"
-				>Pod, Shared and project networks leave here.</span
-			>
+			<span class="text-xs leading-4 text-ink-muted">
+				Pod, Shared and project networks leave here.
+			</span>
 		{/if}
 		{#if r.problem}
 			{@render badge('danger', r.problem.title)}
 			<span class="font-mono text-[11px] leading-4 text-danger-ink">{r.problem.reason}</span>
 			{#if canEditUplink(r.uplink)}
 				<div class="mt-1.5 flex flex-wrap items-center gap-1.5">
-					<Button variant="outline" size="sm" onclick={() => openEdit(uplinkRef(r.uplink))}
-						>Edit {r.label}</Button
-					>
+					<Button variant="outline" size="sm" onclick={() => openEdit(uplinkRef(r.uplink))}>
+						Edit {r.label}
+					</Button>
 					<StageChip kind="pr" />
 				</div>
-				<span class="text-xs leading-4 text-ink-faint"
-					>Merging a fix retries it on {r.problem.hosts?.length === 1
+				<span class="text-xs leading-4 text-ink-faint">
+					Merging a fix retries it on {r.problem.hosts?.length === 1
 						? r.problem.hosts[0]
-						: 'those hosts'}.</span
-				>
+						: 'those hosts'}.
+				</span>
 			{:else}
-				<a href="/networking?tab=uplinks" class="text-xs leading-4 text-accent-ink hover:underline"
-					>Open on the Uplinks tab</a
-				>
+				<a href="/networking?tab=uplinks" class="text-xs leading-4 text-accent-ink hover:underline">
+					Open on the Uplinks tab
+				</a>
 			{/if}
 		{/if}
 		{#if hostHere}
@@ -287,8 +293,9 @@
 	<div data-node={id} class={nodeClass(id, n.cutOff.length ? 'bad' : '')}>
 		<div class="flex min-w-0 items-center gap-1.5">
 			{@render name(id, n.net.name)}
-			{#if counts}<span class="ml-auto text-xs leading-4 font-bold text-ink">{fmt(n.vms)}</span
-				>{/if}
+			{#if counts}<span class="ml-auto text-xs leading-4 font-bold text-ink">
+					{fmt(n.vms)}
+				</span>{/if}
 		</div>
 		<span class="truncate text-xs leading-4 text-ink-muted">
 			{netSub(n)}{#if n.net.kind !== 'vlan' && n.net.subnets?.length},
@@ -336,9 +343,9 @@
 				<!-- the builtin uplink's row: internet and the cluster edge -->
 				<div class="flex flex-col gap-4">
 					<div data-node="internet" class={nodeClass('internet')}>
-						<span class="flex items-center gap-1.5 text-[13px] leading-4 font-bold text-ink"
-							><Globe size={14} />Internet</span
-						>
+						<span class="flex items-center gap-1.5 text-[13px] leading-4 font-bold text-ink">
+							<Globe size={14} />Internet
+						</span>
 					</div>
 					<div data-node="edge" class={nodeClass('edge')}>
 						{@render name('edge', 'Cluster edge', false)}
@@ -347,15 +354,17 @@
 							<a
 								href="/networking?tab=firewall"
 								class="text-xs leading-4 text-accent-ink hover:underline"
-								>{model.edge.fixedIPs} fixed outbound IP{model.edge.fixedIPs === 1 ? '' : 's'}</a
 							>
+								{model.edge.fixedIPs} fixed outbound IP{model.edge.fixedIPs === 1 ? '' : 's'}
+							</a>
 						{/if}
 						{#if model.edge.routes}
 							<a
 								href="/networking?tab=firewall"
 								class="text-xs leading-4 text-accent-ink hover:underline"
-								>{model.edge.routes} external route{model.edge.routes === 1 ? '' : 's'}</a
 							>
+								{model.edge.routes} external route{model.edge.routes === 1 ? '' : 's'}
+							</a>
 						{/if}
 					</div>
 				</div>
@@ -365,10 +374,10 @@
 						{@render name('pod', 'Pod network', false)}
 						<span class="text-xs leading-4 text-ink-muted">Built in, every project.</span>
 						{#if counts}
-							<span class="text-xs leading-4 text-ink-muted"
-								>{plural(model.podOnly, 'VM')}
-								{model.podOnly === 1 ? 'uses' : 'use'} only this.</span
-							>
+							<span class="text-xs leading-4 text-ink-muted">
+								{plural(model.podOnly, 'VM')}
+								{model.podOnly === 1 ? 'uses' : 'use'} only this.
+							</span>
 						{/if}
 					</div>
 					{#each builtin.nets as n (n.key)}{@render netNode(n)}{/each}
@@ -384,9 +393,9 @@
 						>
 							{@render name('fabric', 'Datacenter fabric', false)}
 							<span class="text-xs leading-4 text-ink-muted">Physical switches and VLANs.</span>
-							<span class="mt-auto text-xs leading-4 text-ink-muted"
-								>VLAN networks skip the cluster edge.{counts ? ' VMs keep their own IP.' : ''}</span
-							>
+							<span class="mt-auto text-xs leading-4 text-ink-muted">
+								VLAN networks skip the cluster edge.{counts ? ' VMs keep their own IP.' : ''}
+							</span>
 						</div>
 					{/if}
 					<div class={i === 0 ? 'mt-3' : ''}>{@render uplinkNode(r)}</div>
@@ -403,18 +412,19 @@
 								onclick={onmorenets}
 								aria-expanded="false"
 								class="flex items-center gap-1 self-start text-[13px] leading-4 font-bold text-accent-ink hover:underline"
-								>{fmt(model.moreNetworks.count)} more network{model.moreNetworks.count === 1
-									? ''
-									: 's'}<ChevronDown size={14} /></button
 							>
-							<span class="text-xs leading-4 text-ink-muted"
-								>{[
+								{fmt(model.moreNetworks.count)} more network{model.moreNetworks.count === 1
+									? ''
+									: 's'}<ChevronDown size={14} />
+							</button>
+							<span class="text-xs leading-4 text-ink-muted">
+								{[
 									model.moreNetworks.shared ? `${model.moreNetworks.shared} Shared` : '',
 									model.moreNetworks.vlan ? `${model.moreNetworks.vlan} VLAN` : '',
 								]
 									.filter(Boolean)
-									.join(', ')}</span
-							>
+									.join(', ')}
+							</span>
 						</div>
 					</div>
 				{/if}
@@ -433,13 +443,13 @@
 					<div data-node={id} class={nodeClass(id)}>
 						<div class="flex min-w-0 items-center gap-1.5">
 							{@render name(id, p.name)}
-							{#if counts}<span class="ml-auto text-xs leading-4 font-bold text-ink"
-									>{fmt(p.vms)}</span
-								>{/if}
+							{#if counts}<span class="ml-auto text-xs leading-4 font-bold text-ink">
+									{fmt(p.vms)}
+								</span>{/if}
 						</div>
-						<span class="text-xs leading-4 text-ink-muted"
-							>{p.networks} network{p.networks === 1 ? '' : 's'}</span
-						>
+						<span class="text-xs leading-4 text-ink-muted">
+							{p.networks} network{p.networks === 1 ? '' : 's'}
+						</span>
 						{#each p.problems as pr (pr.id)}{@render problemFix(pr)}{/each}
 						{#if hit && hit.project === p.name}{@render hitChip()}{/if}
 					</div>
@@ -453,17 +463,16 @@
 								onclick={onmoreprojects}
 								aria-expanded="false"
 								class="flex items-center gap-1 text-[13px] leading-4 font-bold text-accent-ink hover:underline"
-								>{fmt(m.count)} more project{m.count === 1 ? '' : 's'}<ChevronDown
-									size={12}
-								/></button
 							>
-							{#if counts}<span class="ml-auto text-xs leading-4 font-bold text-ink"
-									>{fmt(m.vms)}</span
-								>{/if}
+								{fmt(m.count)} more project{m.count === 1 ? '' : 's'}<ChevronDown size={12} />
+							</button>
+							{#if counts}<span class="ml-auto text-xs leading-4 font-bold text-ink">
+									{fmt(m.vms)}
+								</span>{/if}
 						</div>
-						<span class="text-xs leading-4 text-ink-muted"
-							>{fmt(m.networks)} network{m.networks === 1 ? '' : 's'}</span
-						>
+						<span class="text-xs leading-4 text-ink-muted">
+							{fmt(m.networks)} network{m.networks === 1 ? '' : 's'}
+						</span>
 						{#each m.problems as pr (pr.id)}<div class="mt-1 flex flex-col gap-0.5">
 								{@render problemFix(pr)}
 							</div>{/each}
@@ -479,8 +488,9 @@
 	<div class="flex h-8 flex-col">
 		<span
 			class="text-[11px] leading-4 font-bold tracking-[.05em] whitespace-nowrap text-ink-muted uppercase"
-			>{title}</span
 		>
+			{title}
+		</span>
 		<span class="text-xs leading-4 whitespace-nowrap text-ink-faint">{sub}</span>
 	</div>
 {/snippet}
@@ -489,8 +499,8 @@
 	<span
 		class="mt-1 flex items-center gap-1.5 rounded bg-accent px-1.5 py-0.5 text-xs leading-4 text-accent-on"
 	>
-		<Search size={12} /><span class="font-mono">{hit!.vm.name}</span><span
-			>in {hit!.vm.namespace}</span
-		>
+		<Search size={12} /><span class="font-mono">{hit!.vm.name}</span><span>
+			in {hit!.vm.namespace}
+		</span>
 	</span>
 {/snippet}

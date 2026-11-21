@@ -68,8 +68,9 @@
 						variant="link"
 						size="sm"
 						href={reviewURL({ kind: 'item', project, key: itemKey(stagedItem) })}
-						>Review and propose</Button
 					>
+						Review and propose
+					</Button>
 				{/if}
 			{/snippet}
 			{#if stagedItem}
@@ -78,9 +79,9 @@
 				>
 					<Pencil size={12} class="text-accent-ink" />
 					<span class="capitalize">{stagedItem.kind}</span>
-					<span class="ml-auto"
-						>part of your {project} draft ({draftCount} item{draftCount === 1 ? '' : 's'})</span
-					>
+					<span class="ml-auto">
+						part of your {project} draft ({draftCount} item{draftCount === 1 ? '' : 's'})
+					</span>
 				</div>
 				<div class="px-card py-2">
 					<ChangeList changes={stagedItem.changes} />
@@ -111,8 +112,9 @@
 						<li class="flex items-center gap-2 px-card py-1.5">
 							<GitPullRequest size={13} class="shrink-0 text-accent-ink" />
 							<span class="font-medium text-ink">PR #{p.prNumber}</span>
-							{#if p.by}<span class="text-xs text-ink-faint">{p.mine ? 'yours' : `by ${p.by}`}</span
-								>{/if}
+							{#if p.by}<span class="text-xs text-ink-faint">
+									{p.mine ? 'yours' : `by ${p.by}`}
+								</span>{/if}
 							<span class="min-w-0 truncate text-ink-soft">{p.title}</span>
 							<span class="ml-auto flex shrink-0 items-center gap-1.5">
 								{#if chk}<StatusPill tone={chk.tone} label={chk.text} />{/if}
@@ -121,8 +123,9 @@
 									variant="link"
 									size="sm"
 									href={reviewURL({ kind: 'proposal', project, prNumber: p.prNumber })}
-									>Review</Button
 								>
+									Review
+								</Button>
 							</span>
 						</li>
 					{/each}

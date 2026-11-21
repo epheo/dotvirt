@@ -33,11 +33,11 @@
 <li class="flex items-center gap-3 px-card py-2.5">
 	<StatusDot tone={issue.severity} size="sm" />
 	<button onclick={view} title={issue.detail ?? ''} class="min-w-0 flex-1 text-left">
-		<span class="block truncate"
-			><span class="font-semibold text-ink">{name}</span>{#if ns}<span class="text-ink-muted"
-					>{` ${ns}`}</span
-				>{/if}</span
-		>
+		<span class="block truncate">
+			<span class="font-semibold text-ink">{name}</span>{#if ns}<span class="text-ink-muted">
+					{` ${ns}`}
+				</span>{/if}
+		</span>
 		<span class="block text-ink-soft first-letter:uppercase">{issue.label}</span>
 		{#if issue.detail}
 			<span class="block truncate font-mono text-[11px] text-ink-faint">{issue.detail}</span>

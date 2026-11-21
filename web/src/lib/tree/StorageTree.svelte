@@ -60,8 +60,9 @@
 		<div class={HEAD}>Projects</div>
 		<TreeRow href={projectHref(null)} active={onRoot && !current}>
 			<span class="truncate">All projects</span>
-			{#snippet trailing()}<span class="text-xs text-side-dim">{num(projects.length)}</span
-				>{/snippet}
+			{#snippet trailing()}<span class="text-xs text-side-dim">
+					{num(projects.length)}
+				</span>{/snippet}
 		</TreeRow>
 		{#if expanded && projects.length > 20}
 			<RailFilter

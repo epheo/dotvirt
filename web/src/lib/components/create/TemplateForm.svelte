@@ -173,9 +173,9 @@
 						<span class="font-mono text-sm font-medium text-ink">{t.name}</span>
 						<span class="text-xs whitespace-nowrap text-ink-muted">{libraryLabel(t.library)}</span>
 					</span>
-					{#if t.description}<span class="block text-xs leading-4 text-ink-muted"
-							>{t.description}</span
-						>{/if}
+					{#if t.description}<span class="block text-xs leading-4 text-ink-muted">
+							{t.description}
+						</span>{/if}
 				{/snippet}
 			</PickList>
 		{/if}
@@ -208,12 +208,12 @@
 			<div class="flex min-w-0 flex-col gap-1.5">
 				<label class={LABEL} for="tpl-where">Project and namespace</label>
 				<PlacePicker id="tpl-where" bind:value={namespace} namespaces={places} first={opener} />
-				<span class={HELP}
-					>{project === opener && opener ? 'Where you were. ' : ''}Search {plural(
+				<span class={HELP}>
+					{project === opener && opener ? 'Where you were. ' : ''}Search {plural(
 						new Set(places.map((n) => inventory.projectOf(n))).size,
 						'project',
-					)}.</span
-				>
+					)}.
+				</span>
 			</div>
 		</div>
 
@@ -223,9 +223,9 @@
 					{#each formParams as p (p.name)}
 						{@const need = p.required && !p.value && !p.generate}
 						<div class="flex flex-col gap-1.5">
-							<label class={LABEL} for="tpl-{p.name}"
-								>{p.displayName || p.name}{need ? ', required' : ''}</label
-							>
+							<label class={LABEL} for="tpl-{p.name}">
+								{p.displayName || p.name}{need ? ', required' : ''}
+							</label>
 							{#if long(p.name)}
 								<textarea
 									id="tpl-{p.name}"
@@ -258,11 +258,9 @@
 		>
 			{#snippet consequences()}
 				{#if tpl}
-					<Consequence tone="info"
-						>Made from {tpl.name}{tpl.instancetype
-							? `, size ${tpl.instancetype}`
-							: ''}.</Consequence
-					>
+					<Consequence tone="info">
+						Made from {tpl.name}{tpl.instancetype ? `, size ${tpl.instancetype}` : ''}.
+					</Consequence>
 				{/if}
 				{#if powerOn}
 					<Consequence tone="ok">Starts as soon as it is created.</Consequence>

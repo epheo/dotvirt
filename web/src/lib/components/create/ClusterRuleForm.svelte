@@ -202,14 +202,16 @@
 						oninput={() => (prioTouched = true)}
 					/>
 					{#if holder}
-						<span class="{HELP} text-warn-ink!"
-							>Taken by {holder.name}.{#if freePriority != null}
+						<span class="{HELP} text-warn-ink!">
+							Taken by {holder.name}.{#if freePriority != null}
 								<button
 									type="button"
 									class="text-accent-ink hover:underline"
-									onclick={() => (priority = freePriority)}>Use {freePriority}</button
-								>{/if}</span
-						>
+									onclick={() => (priority = freePriority)}
+								>
+									Use {freePriority}
+								</button>{/if}
+						</span>
 					{:else}
 						<span class={HELP}>0 to 99. Lower runs first.</span>
 					{/if}
@@ -294,8 +296,9 @@
 						disabled={rules.rows.length === 1}
 						aria-label="Remove rule {i + 1}"
 						class="ml-auto flex size-8 items-center justify-center rounded-md text-ink-muted hover:bg-inset-strong hover:text-danger disabled:opacity-40"
-						><X size={15} /></button
 					>
+						<X size={15} />
+					</button>
 				</div>
 			{/each}
 			<div><Button variant="link" onclick={rules.add}><Plus size={14} /> Add a rule</Button></div>
@@ -312,23 +315,23 @@
 			backing={baseline ? 'BaselineAdminNetworkPolicy' : 'AdminNetworkPolicy'}
 		>
 			{#snippet consequences()}
-				<Consequence tone="info"
-					>Applies to {subjKey.trim()
+				<Consequence tone="info">
+					Applies to {subjKey.trim()
 						? `projects labeled ${subjKey.trim()}=${subjValue.trim()}`
-						: 'every project'}.</Consequence
-				>
+						: 'every project'}.
+				</Consequence>
 				{#if baseline}
 					<Consequence>Decides only what no project rule decides.</Consequence>
 				{:else}
-					<Consequence tone="warn"
-						>Project rules cannot override it; Pass hands a match back to them.</Consequence
-					>
+					<Consequence tone="warn">
+						Project rules cannot override it; Pass hands a match back to them.
+					</Consequence>
 					{#if above.length}
-						<Consequence
-							>{above.length === 1
+						<Consequence>
+							{above.length === 1
 								? `${above[0].name} (priority ${above[0].priority}) runs before it.`
-								: `${above.length} cluster rules run before it.`}</Consequence
-						>
+								: `${above.length} cluster rules run before it.`}
+						</Consequence>
 					{/if}
 				{/if}
 				<Consequence tone="ok">Nothing restarts.</Consequence>

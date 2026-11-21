@@ -45,7 +45,8 @@
 	{#if suggest}
 		<kbd
 			class="pointer-events-none absolute top-1.5 right-1.5 rounded border border-line-strong bg-inset px-1 font-sans text-[10px] leading-4 text-ink-muted opacity-0 peer-focus:peer-placeholder-shown:opacity-100"
-			>Tab</kbd
 		>
+			Tab
+		</kbd>
 	{/if}
 </span>

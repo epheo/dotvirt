@@ -338,8 +338,10 @@
 						class="rounded-full px-1.5 text-[11px] tabular-nums {f.id === 'issues' &&
 						counts.issues > 0
 							? TONE_PILL.danger
-							: 'text-ink-muted'}">{counts[f.id]}</span
+							: 'text-ink-muted'}"
 					>
+						{counts[f.id]}
+					</span>
 				</button>
 			{/each}
 		</div>
@@ -363,13 +365,15 @@
 				<button
 					type="button"
 					class="text-accent-ink hover:underline"
-					onclick={() => (selected = new Set())}>Clear selection</button
+					onclick={() => (selected = new Set())}
 				>
+					Clear selection
+				</button>
 			{:else}
 				<span>All {pageRows.length} VMs on this page are selected.</span>
-				<button type="button" class="text-accent-ink hover:underline" onclick={selectEvery}
-					>Select all {rows.length.toLocaleString('en-US')}</button
-				>
+				<button type="button" class="text-accent-ink hover:underline" onclick={selectEvery}>
+					Select all {rows.length.toLocaleString('en-US')}
+				</button>
 			{/if}
 		</div>
 	{/if}
@@ -470,8 +474,10 @@
 							<a
 								href={vmHref(vm.namespace, vm.name)}
 								onclick={(e) => e.stopPropagation()}
-								class="hover:underline focus-visible:underline">{vm.name}</a
+								class="hover:underline focus-visible:underline"
 							>
+								{vm.name}
+							</a>
 						</td>
 						<td class="px-3 py-1.5 text-ink-muted">{vm.namespace}</td>
 						<td class="px-3 py-1.5" title={SYNC_TITLE[vm.sync] ?? SYNC_TITLE.Unknown}>
@@ -492,22 +498,22 @@
 										title={st.exception.detail ?? st.exception.hint}
 									/>
 									{#if st.exception.detail}
-										<span class="max-w-56 truncate font-mono text-[11px] text-ink-muted"
-											>{st.exception.detail}</span
-										>
+										<span class="max-w-56 truncate font-mono text-[11px] text-ink-muted">
+											{st.exception.detail}
+										</span>
 									{/if}
 								{/if}
 							</span>
 						</td>
-						<td class="px-3 py-1.5 {vm.nodeName ? 'text-ink-soft' : 'text-ink-muted'}"
-							>{vm.nodeName ?? '-'}</td
-						>
-						<td class="px-3 py-1.5 text-right text-ink-soft" title={vm.instancetype}
-							>{size.cpu ?? '-'}</td
-						>
-						<td class="px-3 py-1.5 text-right text-ink-soft" title={vm.instancetype}
-							>{size.memory ? quantity(size.memory) : '-'}</td
-						>
+						<td class="px-3 py-1.5 {vm.nodeName ? 'text-ink-soft' : 'text-ink-muted'}">
+							{vm.nodeName ?? '-'}
+						</td>
+						<td class="px-3 py-1.5 text-right text-ink-soft" title={vm.instancetype}>
+							{size.cpu ?? '-'}
+						</td>
+						<td class="px-3 py-1.5 text-right text-ink-soft" title={vm.instancetype}>
+							{size.memory ? quantity(size.memory) : '-'}
+						</td>
 						<td class="px-3 py-1.5 font-mono text-xs text-ink-soft">{vm.guestIP ?? '-'}</td>
 						<td class="px-3 py-1.5">
 							<span class="flex items-center gap-2">
@@ -519,10 +525,11 @@
 										title={pr.title}
 										onclick={(e) => e.stopPropagation()}
 										class="text-xs text-ink-soft hover:underline"
-										>PR #{pr.prNumber}{pr.mine ? '' : pr.by ? ` by ${pr.by}` : ''}{line
-											? `: ${line}`
-											: ''}</a
 									>
+										PR #{pr.prNumber}{pr.mine ? '' : pr.by ? ` by ${pr.by}` : ''}{line
+											? `: ${line}`
+											: ''}
+									</a>
 								{/each}
 							</span>
 						</td>
@@ -534,8 +541,10 @@
 										e.stopPropagation();
 										next.run();
 									}}
-									class="text-xs text-accent-ink hover:underline">{next.label}</button
+									class="text-xs text-accent-ink hover:underline"
 								>
+									{next.label}
+								</button>
 							{/if}
 						</td>
 					</tr>

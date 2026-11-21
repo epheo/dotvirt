@@ -37,8 +37,9 @@
 	role="navigation"
 	aria-label="Pages"
 >
-	<span>Showing <strong class="font-bold text-ink">{rangeLabel(s)}</strong> of {totalLabel(s)}</span
-	>
+	<span>
+		Showing <strong class="font-bold text-ink">{rangeLabel(s)}</strong> of {totalLabel(s)}
+	</span>
 	{#if paged}
 		<span class={spread ? 'flex-1' : 'w-3'}></span>
 		<label for={id} class="text-ink-faint">Rows per page</label>
@@ -58,15 +59,19 @@
 			class={NAV}
 			disabled={s.page <= 1}
 			onclick={() => (page = s.page - 1)}
-			aria-label="Previous page"><ChevronLeft size={16} /></button
+			aria-label="Previous page"
 		>
+			<ChevronLeft size={16} />
+		</button>
 		<span>Page {s.page} of {s.pages}</span>
 		<button
 			type="button"
 			class={NAV}
 			disabled={s.page >= s.pages}
 			onclick={() => (page = s.page + 1)}
-			aria-label="Next page"><ChevronRight size={16} /></button
+			aria-label="Next page"
 		>
+			<ChevronRight size={16} />
+		</button>
 	{/if}
 </div>

@@ -124,8 +124,9 @@
 							disabled={!enable.ok}
 							title={enable.why}
 							onclick={() => (configuring = true)}
-							>{view.configured ? 'Configure' : 'Enable Dynamic Rescheduling'}</Button
 						>
+							{view.configured ? 'Configure' : 'Enable Dynamic Rescheduling'}
+						</Button>
 					{/if}
 					{#if view.configured}
 						<Button
@@ -133,8 +134,10 @@
 							size="sm"
 							onclick={disable}
 							disabled={disableOp.busy || !off.ok}
-							title={off.why}>Disable...</Button
+							title={off.why}
 						>
+							Disable...
+						</Button>
 					{/if}
 					<StageChip kind="pr" />
 				</div>
@@ -151,14 +154,14 @@
 					operator catalog (OLM), so rebalancing cannot be installed here.
 				</p>
 			{:else if view.configured}
-				<Consequence size="sm"
-					>Changes stage into the platform repository and apply when the PR merges.</Consequence
-				>
+				<Consequence size="sm">
+					Changes stage into the platform repository and apply when the PR merges.
+				</Consequence>
 			{:else if enable.ok}
-				<Consequence size="sm" tone="info"
-					>VMs are placed once at start and stay put. Enabling stages the descheduler operator and
-					its configuration into the platform repository; it applies when the PR merges.</Consequence
-				>
+				<Consequence size="sm" tone="info">
+					VMs are placed once at start and stay put. Enabling stages the descheduler operator and
+					its configuration into the platform repository; it applies when the PR merges.
+				</Consequence>
 			{:else}
 				<p class="text-xs leading-4 text-ink-muted">
 					VMs are placed once at start and stay put. {enable.why}

@@ -14,9 +14,9 @@
 
 <Card title="Capacity &amp; usage" flush>
 	{#snippet actions()}
-		{#if usage && !metricsGap(usage.unavailable)}<span class="text-ink-faint"
-				>updated {relativeAge(usage.updated)}</span
-			>{/if}
+		{#if usage && !metricsGap(usage.unavailable)}<span class="text-ink-faint">
+				updated {relativeAge(usage.updated)}
+			</span>{/if}
 	{/snippet}
 	<div class="space-y-3 px-card py-3">
 		{#if usage && metricsGap(usage.unavailable)}

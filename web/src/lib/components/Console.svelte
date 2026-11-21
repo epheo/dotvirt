@@ -117,14 +117,16 @@
 						<button
 							onclick={signIn}
 							class="rounded border border-side-active px-2 py-0.5 text-xs text-side-dim hover:bg-[#333638]"
-							>Sign in again</button
 						>
+							Sign in again
+						</button>
 					{:else}
 						<button
 							onclick={() => reconnectKey++}
 							class="rounded border border-side-active px-2 py-0.5 text-xs text-side-dim hover:bg-[#333638]"
-							>Reconnect</button
 						>
+							Reconnect
+						</button>
 					{/if}
 				</div>
 			{/if}

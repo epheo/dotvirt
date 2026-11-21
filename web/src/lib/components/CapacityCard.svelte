@@ -137,20 +137,20 @@
 				{/each}
 			</div>
 			<p class="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-ink-muted">
-				<span class="flex items-center gap-1.5"
-					><span class="size-2.5 rounded-sm bg-[var(--chart-1)]"></span>In use now</span
-				>
+				<span class="flex items-center gap-1.5">
+					<span class="size-2.5 rounded-sm bg-[var(--chart-1)]"></span>In use now
+				</span>
 				{#if requested}
-					<span class="flex items-center gap-1.5"
-						><span class="size-2.5 rounded-sm bg-[var(--chart-1)] opacity-35"></span>Requested by
-						VMs ({requested})</span
-					>
+					<span class="flex items-center gap-1.5">
+						<span class="size-2.5 rounded-sm bg-[var(--chart-1)] opacity-35"></span>Requested by VMs
+						({requested})
+					</span>
 				{/if}
 				{#each room?.excluded ?? [] as x (x.node)}
-					<span class="flex items-center gap-1.5"
-						><span class="size-2.5 rounded-sm border border-line-strong" style:background={HATCH}
-						></span>{x.node}, {x.reason}</span
-					>
+					<span class="flex items-center gap-1.5">
+						<span class="size-2.5 rounded-sm border border-line-strong" style:background={HATCH}
+						></span>{x.node}, {x.reason}
+					</span>
 				{/each}
 			</p>
 		{:else if loading}

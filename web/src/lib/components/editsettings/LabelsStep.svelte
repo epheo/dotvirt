@@ -13,8 +13,9 @@
 		variant="link"
 		size="sm"
 		onclick={() => (form.labelRows = [...form.labelRows, { key: '', value: '' }])}
-		>+ Add label</Button
 	>
+		+ Add label
+	</Button>
 </div>
 {#each form.labelRows as row, i (i)}
 	<div class="mb-1 flex gap-2">
@@ -23,8 +24,10 @@
 		<button
 			onclick={() => (form.labelRows = form.labelRows.filter((_, idx) => idx !== i))}
 			aria-label="Remove label"
-			class="text-danger"><X size={14} /></button
+			class="text-danger"
 		>
+			<X size={14} />
+		</button>
 	</div>
 {/each}
 {#if form.labelRows.length === 0}<p class="text-xs text-ink-faint">No labels.</p>{/if}

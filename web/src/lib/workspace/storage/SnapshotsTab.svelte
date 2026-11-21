@@ -85,14 +85,15 @@
 		<div class="flex flex-wrap items-center gap-2">
 			<Funnel size={16} class="text-ink-muted" />
 			{#if vmFilter}
-				<span class={CHIP}
-					><span class="text-ink-muted">VM</span>{vmFilter.split('/')[1]}<button
+				<span class={CHIP}>
+					<span class="text-ink-muted">VM</span>{vmFilter.split('/')[1]}<button
 						class="flex size-[22px] items-center justify-center rounded text-ink-muted hover:bg-inset"
 						aria-label="Remove filter: VM {vmFilter}"
 						onclick={() => go({ vm: undefined, page: undefined }, { replace: true })}
-						><X size={14} /></button
-					></span
-				>
+					>
+						<X size={14} />
+					</button>
+				</span>
 			{/if}
 			<Button
 				variant={failedOnly ? 'outline' : 'secondary'}
@@ -101,12 +102,13 @@
 				disabled={!failures && !failedOnly}
 				onclick={() =>
 					go({ state: failedOnly ? undefined : 'failed', page: undefined }, { replace: true })}
-				>Failed {num(failures)}</Button
 			>
+				Failed {num(failures)}
+			</Button>
 		</div>
-		<span class="text-[13px] text-ink-soft"
-			><strong>{num(shown.length)}</strong> of {num(snapshots.length)} snapshots</span
-		>
+		<span class="text-[13px] text-ink-soft">
+			<strong>{num(shown.length)}</strong> of {num(snapshots.length)} snapshots
+		</span>
 	</div>
 
 	<div class="overflow-x-auto">
@@ -130,10 +132,12 @@
 						<td class="{TD} pl-card">
 							<a
 								href={vmHref(s.namespace ?? '', s.vm ?? '')}
-								class="font-mono text-xs font-medium text-ink hover:text-accent-ink">{s.vm}</a
-							>{#if repeated.has(s.vm ?? '')}<span class="ml-1.5 text-xs text-ink-faint"
-									>{s.namespace}</span
-								>{/if}
+								class="font-mono text-xs font-medium text-ink hover:text-accent-ink"
+							>
+								{s.vm}
+							</a>{#if repeated.has(s.vm ?? '')}<span class="ml-1.5 text-xs text-ink-faint">
+									{s.namespace}
+								</span>{/if}
 						</td>
 						<td class="{TD} font-mono text-xs">{s.name}</td>
 						<td class={TD} title={s.created}>{ago(s.created)}</td>
@@ -155,8 +159,10 @@
 								disabled={op.busy || !del.ok}
 								title={del.why}
 								aria-label="Delete snapshot {s.name}"
-								onclick={() => remove(s)}>{armed === key ? 'Confirm delete' : 'Delete'}</Button
+								onclick={() => remove(s)}
 							>
+								{armed === key ? 'Confirm delete' : 'Delete'}
+							</Button>
 						</td>
 					</tr>
 				{:else}
@@ -167,8 +173,10 @@
 								{#if storage.snapshotsError}
 									<button
 										class="ml-1 text-accent-ink hover:underline"
-										onclick={() => storage.refreshSnapshots()}>Try again</button
+										onclick={() => storage.refreshSnapshots()}
 									>
+										Try again
+									</button>
 								{/if}
 							{:else if snapshots.length}
 								No snapshot matches these filters.

@@ -484,8 +484,9 @@
 	{#if !ranges.length}{text}{:else}{#each ranges as r, i (r.start)}{text.slice(
 				i ? ranges[i - 1].end : 0,
 				r.start,
-			)}<mark class="rounded-sm bg-select text-inherit">{text.slice(r.start, r.end)}</mark
-			>{/each}{text.slice(ranges[ranges.length - 1].end)}{/if}
+			)}<mark class="rounded-sm bg-select text-inherit">
+				{text.slice(r.start, r.end)}
+			</mark>{/each}{text.slice(ranges[ranges.length - 1].end)}{/if}
 {/snippet}
 
 {#if revealed}
@@ -507,8 +508,9 @@
 								onclick={() => copy(row.k, row.v)}
 								aria-label="Copy {row.k.toLowerCase()}"
 								class="text-ink-faint hover:text-ink-soft"
-								>{#if copied === row.k}<Check size={14} />{:else}<Copy size={14} />{/if}</button
 							>
+								{#if copied === row.k}<Check size={14} />{:else}<Copy size={14} />{/if}
+							</button>
 						</dd>
 					</div>
 				{/each}
@@ -565,8 +567,9 @@
 				</p>
 			{:else}
 				<Card title="Set up for you" flush>
-					{#snippet actions()}<span class="text-ink-faint">From {project}'s usual choices</span
-						>{/snippet}
+					{#snippet actions()}<span class="text-ink-faint">
+							From {project}'s usual choices
+						</span>{/snippet}
 					<div class="flex flex-col">
 						<SetupRow
 							label="Size"
@@ -596,9 +599,9 @@
 									{#snippet row(i)}
 										<span class="flex items-baseline justify-between gap-3">
 											<span class="text-sm text-ink">{sizeLabel(i)}</span>
-											{#if tally.get(i.name)}<span class="text-[13px] text-ink-soft tabular-nums"
-													>{tally.get(i.name)} VMs</span
-												>{/if}
+											{#if tally.get(i.name)}<span class="text-[13px] text-ink-soft tabular-nums">
+													{tally.get(i.name)} VMs
+												</span>{/if}
 										</span>
 										<span class="font-mono text-xs text-ink-muted">{i.name}</span>
 									{/snippet}
@@ -612,9 +615,9 @@
 							onopen={() => (open = 'image')}
 							onclose={close}
 						>
-							{#snippet value()}<span class="font-mono font-medium"
-									>{imageName || 'Pick an image'}</span
-								>{/snippet}
+							{#snippet value()}<span class="font-mono font-medium">
+									{imageName || 'Pick an image'}
+								</span>{/snippet}
 							{#snippet sub()}{imageWhy}{/snippet}
 							{#snippet editor(done)}
 								<PickList
@@ -635,14 +638,16 @@
 								>
 									{#snippet row(i)}
 										<span class="flex items-baseline justify-between gap-3">
-											<span class="font-mono text-sm font-medium text-ink"
-												>{@render marked(i.name, imageQuery)}</span
-											>
-											{#if !i.ready}<span class="text-xs text-ink-faint">not ready</span
-												>{:else if usedBy(i)}<span
+											<span class="font-mono text-sm font-medium text-ink">
+												{@render marked(i.name, imageQuery)}
+											</span>
+											{#if !i.ready}<span class="text-xs text-ink-faint">
+													not ready
+												</span>{:else if usedBy(i)}<span
 													class="text-[13px] whitespace-nowrap text-ink-soft tabular-nums"
-													>{plural(usedBy(i), 'disk')}</span
-												>{/if}
+												>
+													{plural(usedBy(i), 'disk')}
+												</span>{/if}
 										</span>
 										<span class="text-xs text-ink-muted">in {i.namespace}</span>
 									{/snippet}
@@ -700,8 +705,10 @@
 						>
 							{#snippet value()}
 								{#if named.length && (selectedNets.length || primaryNet)}<span
-										class="font-mono font-medium">{named.join(', ')}</span
-									>{:else}{named[0] ?? 'None'}{/if}
+										class="font-mono font-medium"
+									>
+										{named.join(', ')}
+									</span>{:else}{named[0] ?? 'None'}{/if}
 							{/snippet}
 							{#snippet sub()}
 								{#if !hasNetwork}<TriangleAlert size={13} class="text-warn-ink" />A VM needs a
@@ -725,21 +732,21 @@
 								>
 									{#snippet row(h)}
 										<span class="flex items-baseline justify-between gap-3">
-											<span class="font-mono text-sm font-medium text-ink"
-												>{@render marked(h.net.name, netQuery)}</span
-											>
-											<span class="text-[13px] whitespace-nowrap text-ink-soft tabular-nums"
-												>{h.vms.toLocaleString()} VMs</span
-											>
+											<span class="font-mono text-sm font-medium text-ink">
+												{@render marked(h.net.name, netQuery)}
+											</span>
+											<span class="text-[13px] whitespace-nowrap text-ink-soft tabular-nums">
+												{h.vms.toLocaleString()} VMs
+											</span>
 										</span>
-										<span class="block text-xs leading-4 text-ink-muted"
-											>{@render marked(
+										<span class="block text-xs leading-4 text-ink-muted">
+											{@render marked(
 												networkLine(h.net, (ns) => inventory.projectOf(ns)),
 												netQuery,
-											)}{#if h.net.subnets?.length}, <span class="font-mono"
-													>{h.net.subnets[0]}</span
-												>{/if}</span
-										>
+											)}{#if h.net.subnets?.length}, <span class="font-mono">
+													{h.net.subnets[0]}
+												</span>{/if}
+										</span>
 									{/snippet}
 									{#snippet after()}
 										<label class="flex items-center gap-2 text-xs text-ink-soft">
@@ -767,8 +774,11 @@
 							onclose={close}
 						>
 							{#snippet value()}
-								{#if sshKey.trim()}Your SSH key, <span class="font-mono font-medium">{user}</span
-									>{:else}Console password, <span class="font-mono font-medium">{user}</span>{/if}
+								{#if sshKey.trim()}Your SSH key, <span class="font-mono font-medium">
+										{user}
+									</span>{:else}Console password, <span class="font-mono font-medium">
+										{user}
+									</span>{/if}
 							{/snippet}
 							{#snippet sub()}
 								{#if sshKey.trim()}{sshKey.trim() === lastKey.value
@@ -798,14 +808,16 @@
 						<Consequence tone={fitLine.tone}>{fitLine.text}</Consequence>
 					{/if}
 					{#if pinned}
-						<Consequence tone="warn"
-							>{name || 'The VM'} cannot live-migrate.{#if keep}
+						<Consequence tone="warn">
+							{name || 'The VM'} cannot live-migrate.{#if keep}
 								<button
 									type="button"
 									class="text-accent-ink hover:underline"
-									onclick={keepMigration}>Use {keep.name} to keep it</button
-								>{/if}</Consequence
-						>
+									onclick={keepMigration}
+								>
+									Use {keep.name} to keep it
+								</button>{/if}
+						</Consequence>
 					{:else if rootClass}
 						<Consequence tone="ok">{name || 'The VM'} can live-migrate.</Consequence>
 					{/if}
@@ -814,9 +826,9 @@
 						<Consequence tone={promise.ok ? 'ok' : 'warn'}>Root disk: {promise.text}</Consequence>
 					{/if}
 					{#if addressed.length}
-						<Consequence tone="info"
-							>Starts with an address on {addressed.join(' and ')}.</Consequence
-						>
+						<Consequence tone="info">
+							Starts with an address on {addressed.join(' and ')}.
+						</Consequence>
 					{:else if hasNetwork}
 						<Consequence tone="info">Starts on {attached.join(' and ')}.</Consequence>
 					{/if}
@@ -852,8 +864,9 @@
 				type="button"
 				onclick={done}
 				class="h-9 rounded-md border border-line bg-panel px-3 text-sm text-ink hover:border-ink-faint"
-				>Done</button
 			>
+				Done
+			</button>
 		</div>
 		<ProtectionPick
 			disk="Root disk"
@@ -882,8 +895,9 @@
 						onclick={() => disks.remove(i)}
 						aria-label="Remove disk {d.name}"
 						class="flex size-9 shrink-0 items-center justify-center rounded-md text-ink-muted hover:bg-inset-strong hover:text-danger"
-						><X size={16} /></button
 					>
+						<X size={16} />
+					</button>
 				</div>
 				{#if diskError(i)}<p class="text-xs text-danger-ink">{diskError(i)}</p>{/if}
 				<ProtectionPick
@@ -911,8 +925,9 @@
 				type="button"
 				onclick={done}
 				class="h-9 rounded-md border border-line bg-panel px-3 text-sm text-ink hover:border-ink-faint"
-				>Done</button
 			>
+				Done
+			</button>
 		</div>
 		<div class="flex flex-col gap-1.5">
 			<label class={LABEL} for="vm-key">SSH public key</label>
@@ -937,13 +952,14 @@
 					type="button"
 					onclick={() => (password = generatePassword())}
 					class="h-9 rounded-md border border-line bg-panel px-3 text-[13px] text-ink hover:border-ink-faint"
-					>Regenerate</button
 				>
+					Regenerate
+				</button>
 			</div>
-			<span class={HELP}
-				>{#if password}<CircleCheck size={13} />Shown once after staging. Git keeps only a hash.{:else}Empty:
-					no password login.{/if}</span
-			>
+			<span class={HELP}>
+				{#if password}<CircleCheck size={13} />Shown once after staging. Git keeps only a hash.{:else}Empty:
+					no password login.{/if}
+			</span>
 		</div>
 	</div>
 {/snippet}

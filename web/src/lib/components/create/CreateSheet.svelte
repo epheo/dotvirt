@@ -201,8 +201,9 @@
 					disabled={ctl.pinned}
 					aria-label="Close"
 					class="flex size-8 items-center justify-center rounded-md text-ink-muted hover:bg-inset-strong disabled:opacity-40"
-					><X size={18} /></button
 				>
+					<X size={18} />
+				</button>
 			</div>
 			{#if !editing && !(modal.kind === 'newProject' && modal.adopt)}
 				<div

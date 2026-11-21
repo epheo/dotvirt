@@ -29,9 +29,9 @@
 	{#if nic.isNew}
 		<SelectInput bind:value={nic.network} size="sm" width="w-60">
 			{#each available as net (net.scope + (net.namespace ?? '') + net.name)}
-				<option value={attachRef(net)}
-					>{net.name} — {kindLabel(net.kind)}{net.scope === 'shared' ? ' · shared' : ''}</option
-				>
+				<option value={attachRef(net)}>
+					{net.name} — {kindLabel(net.kind)}{net.scope === 'shared' ? ' · shared' : ''}
+				</option>
 			{/each}
 		</SelectInput>
 	{:else}

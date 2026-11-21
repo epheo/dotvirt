@@ -27,8 +27,10 @@
 			<small class="col-start-2 text-xs leading-4 text-ink-faint">
 				{l.tier}{#if l.policy && !l.policy.withheld}<a
 						href={firewallHref(l.policy.name)}
-						class="ml-1 text-accent-ink underline underline-offset-2">{l.policy.name}</a
-					>{/if}{#if l.note}, {l.note}{/if}{#if owner && l.policy?.namespace}, {inventory.projectOf(
+						class="ml-1 text-accent-ink underline underline-offset-2"
+					>
+						{l.policy.name}
+					</a>{/if}{#if l.note}, {l.note}{/if}{#if owner && l.policy?.namespace}, {inventory.projectOf(
 						l.policy.namespace,
 					) || l.policy.namespace}{/if}
 			</small>

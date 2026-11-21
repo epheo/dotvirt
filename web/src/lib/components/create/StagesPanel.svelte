@@ -66,9 +66,9 @@
 {#if mode === 'pr'}
 	<div class="flex min-w-0 items-start gap-2">
 		<FileText size={16} class="mt-0.5 shrink-0 text-accent-ink" />
-		<span class="min-w-0 font-mono text-sm font-medium text-ink"
-			>{#each shownPath.split('/') as part, i (i)}{#if i}/<wbr />{/if}{part}{/each}</span
-		>
+		<span class="min-w-0 font-mono text-sm font-medium text-ink">
+			{#each shownPath.split('/') as part, i (i)}{#if i}/<wbr />{/if}{part}{/each}
+		</span>
 	</div>
 	<p class="-mt-1.5 text-[13px] text-ink-soft">
 		{isEdit ? 'Changes this file in the' : 'New file in the'}

@@ -104,9 +104,9 @@
 								: 'bg-panel'}"
 						></span>
 						{#snippet label()}
-							{c.title}{#if c.prNumber}<span class="ml-1 font-normal text-ink-faint"
-									>#{c.prNumber}</span
-								>{/if}
+							{c.title}{#if c.prNumber}<span class="ml-1 font-normal text-ink-faint">
+									#{c.prNumber}
+								</span>{/if}
 						{/snippet}
 						{#if reads.ok}
 							<a
@@ -120,18 +120,18 @@
 							<span class="min-w-0 truncate font-medium text-ink">{@render label()}</span>
 						{/if}
 						{#if current}<span class="shrink-0 text-xs text-ink-faint">· current</span>{/if}
-						<span class="ml-auto shrink-0 text-xs text-ink-faint"
-							>{relativeAge(c.when)} · {c.author}</span
-						>
+						<span class="ml-auto shrink-0 text-xs text-ink-faint">
+							{relativeAge(c.when)} · {c.author}
+						</span>
 						{#if reads.ok}
-							<Button variant="link" size="sm" class="shrink-0" onclick={() => toggle(c.hash)}
-								>{shown ? 'Hide diff' : 'Diff'}</Button
-							>
+							<Button variant="link" size="sm" class="shrink-0" onclick={() => toggle(c.hash)}>
+								{shown ? 'Hide diff' : 'Diff'}
+							</Button>
 						{/if}
 						{#if current}
-							<span class="shrink-0 rounded border border-line px-2 py-0.5 text-xs text-ink-faint"
-								>Current version</span
-							>
+							<span class="shrink-0 rounded border border-line px-2 py-0.5 text-xs text-ink-faint">
+								Current version
+							</span>
 						{:else if restoreVersion}
 							<Button
 								variant="secondary"

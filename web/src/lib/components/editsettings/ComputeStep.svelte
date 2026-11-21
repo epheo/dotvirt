@@ -100,9 +100,9 @@
 				     list (orphaned ref, or options still loading) so the binding can't
 				     silently desync to the first option. -->
 				{#if form.instancetype && !selectedIT}
-					<option value={form.instancetype}
-						>{form.instancetype} (current — not in cluster list)</option
-					>
+					<option value={form.instancetype}>
+						{form.instancetype} (current — not in cluster list)
+					</option>
 				{/if}
 				{#each options?.instancetypes ?? [] as it (it.name)}
 					<option value={it.name}>{it.name} ({it.cpu} CPU / {it.memory})</option>

@@ -141,12 +141,14 @@
 										onclick={(e) => {
 											e.stopPropagation();
 											toggle(key);
-										}}>{t.name}</button
+										}}
 									>
+										{t.name}
+									</button>
 									{#if t.error}
-										<span class="ml-1.5"
-											><StatusPill tone="warn" label="Does not parse" title={t.error} /></span
-										>
+										<span class="ml-1.5">
+											<StatusPill tone="warn" label="Does not parse" title={t.error} />
+										</span>
 									{/if}
 									{#if t.description}
 										<span class="block text-xs leading-4 text-ink-faint">{t.description}</span>
@@ -154,9 +156,9 @@
 								</td>
 								<td class="{TD} text-ink-muted">{libraryLabel(t.library)}</td>
 								<td class="{TD} font-mono text-[13px] text-ink-muted">{t.instancetype || '-'}</td>
-								<td class="{TD} font-mono text-[13px] text-ink-muted"
-									>{t.image ? shortName(t.image) : '-'}</td
-								>
+								<td class="{TD} font-mono text-[13px] text-ink-muted">
+									{t.image ? shortName(t.image) : '-'}
+								</td>
 								{#if canCreate}
 									<td class="{TD} pr-card">
 										<div class="flex justify-end gap-1.5">
@@ -169,8 +171,10 @@
 												onclick={(e) => {
 													e.stopPropagation();
 													deploy(t);
-												}}>Create VM</Button
+												}}
 											>
+												Create VM
+											</Button>
 										</div>
 									</td>
 								{/if}
@@ -197,22 +201,24 @@
 				>
 					{#if seed.error}
 						<StatusPill tone="warn" label="Not offered" />
-						<span class="min-w-0 text-ink-muted"
-							>Starter templates for {libraryLabel(seed.library)} could not be proposed: {seed.error}.{seed.retries
+						<span class="min-w-0 text-ink-muted">
+							Starter templates for {libraryLabel(seed.library)} could not be proposed: {seed.error}.{seed.retries
 								? ' The console tries again within the hour.'
-								: ''}</span
-						>
+								: ''}
+						</span>
 					{:else}
 						<StageChip kind="pr" />
-						<span class="min-w-0 text-ink-muted"
-							>Starter templates for {libraryLabel(seed.library)} are proposed in
+						<span class="min-w-0 text-ink-muted">
+							Starter templates for {libraryLabel(seed.library)} are proposed in
 							<a
 								class="text-accent-ink hover:underline"
 								href={seed.prURL}
 								target="_blank"
-								rel="noopener noreferrer">pull request #{seed.prNumber}</a
-							>. Merge it to add them, or close it to decline.</span
-						>
+								rel="noopener noreferrer"
+							>
+								pull request #{seed.prNumber}
+							</a>. Merge it to add them, or close it to decline.
+						</span>
 					{/if}
 				</div>
 			{/each}
@@ -227,10 +233,10 @@
 					class="flex items-start gap-2 border-t border-line-soft px-card py-3.5 text-xs leading-5 text-ink-faint"
 				>
 					<StageChip kind="pr" />
-					<span class="min-w-0"
-						>Create VM opens the create sheet with the template picked. Staging it opens a pull
-						request in the chosen project.</span
-					>
+					<span class="min-w-0">
+						Create VM opens the create sheet with the template picked. Staging it opens a pull
+						request in the chosen project.
+					</span>
 				</div>
 			{/if}
 		</Card>

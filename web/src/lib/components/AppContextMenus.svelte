@@ -104,8 +104,9 @@
 						}}
 						disabled={!repo.ok}
 						title={repo.why || 'Create a repo for this project and bring it under GitOps'}
-						>Attach repo…</MenuItem
 					>
+						Attach repo…
+					</MenuItem>
 					<MenuItem
 						onclick={() => {
 							ui.modal =
@@ -117,8 +118,9 @@
 						disabled={!release.ok}
 						title={release.why ||
 							'Dissolve this project: remove the project label so its namespaces go back to plain (or adoptable) namespaces'}
-						>Release project…</MenuItem
 					>
+						Release project…
+					</MenuItem>
 					<div class="my-1 border-t border-line-soft"></div>
 				{/if}
 				<!-- A dead repo annotation is a different dead end from repoless. Gated on
@@ -135,8 +137,9 @@
 							ui.ctx = null;
 						}}
 						title="Re-create this project's lost repo and re-adopt what is running"
-						>Recover repo…</MenuItem
 					>
+						Recover repo…
+					</MenuItem>
 					<div class="my-1 border-t border-line-soft"></div>
 				{/if}
 				{#if ctx.repo && ctx.namespaces.some( (ns) => inventory.canAuthorVMs(ns) ) && (untracked.length || projectSyncError(ctx.project) || projectLost(ctx.project))}
@@ -147,8 +150,9 @@
 							bulkAdoptUntracked(ns);
 						}}
 						title="Capture the live manifests of everything running here that git does not describe (VMs, networks, policies) into one PR"
-						>Adopt into git</MenuItem
 					>
+						Adopt into git
+					</MenuItem>
 				{/if}
 				{#if !vmsOff()}
 					<MenuItem
@@ -158,8 +162,10 @@
 							ui.modal = { kind: 'newVM', namespaces: ns };
 						}}
 						disabled={!!vmOff}
-						title={vmOff}>New VM here…</MenuItem
+						title={vmOff}
 					>
+						New VM here…
+					</MenuItem>
 				{/if}
 				<MenuItem
 					onclick={() => {
@@ -169,8 +175,9 @@
 					}}
 					disabled={!!fwOff}
 					title={fwOff || 'Limit where VMs in this namespace may connect out'}
-					>New Egress Firewall…</MenuItem
 				>
+					New Egress Firewall…
+				</MenuItem>
 				<MenuItem
 					onclick={() => {
 						const c = ctx.kind === 'container' ? ctx : null;
@@ -181,8 +188,9 @@
 					}}
 					disabled={!!ruleOff}
 					title={ruleOff || 'Limit which traffic reaches VMs here (NetworkPolicy)'}
-					>New Security Policy…</MenuItem
 				>
+					New Security Policy…
+				</MenuItem>
 				<MenuItem
 					onclick={() => {
 						const project = ctx.kind === 'container' ? ctx.project : null;
@@ -190,8 +198,10 @@
 						ui.modal = { kind: 'namespace', project };
 					}}
 					disabled={!ctx.repo || !newNS.ok}
-					title={ctx.repo ? newNS.why : 'Project has no backing repo'}>New Namespace here…</MenuItem
+					title={ctx.repo ? newNS.why : 'Project has no backing repo'}
 				>
+					New Namespace here…
+				</MenuItem>
 				{#if ctx.repo}
 					<MenuItem
 						onclick={() => {
@@ -201,8 +211,9 @@
 						}}
 						disabled={!sync.ok}
 						title={sync.why || "Let ArgoCD sync this project as the project's own account"}
-						>Grant sync access...</MenuItem
 					>
+						Grant sync access...
+					</MenuItem>
 				{/if}
 				<div class="my-1 border-t border-line-soft"></div>
 				<MenuItem
@@ -213,22 +224,28 @@
 							`/networking?tab=security${project ? `&tenant=${encodeURIComponent(project)}` : ''}`,
 						);
 					}}
-					title="Security policies scoped to this tenant">Security view</MenuItem
+					title="Security policies scoped to this tenant"
 				>
+					Security view
+				</MenuItem>
 				<MenuItem
 					onclick={() => {
 						if (ctx.kind === 'container' && ctx.repo)
 							window.open(ctx.repoPage || ctx.repo, '_blank', 'noopener');
 						ui.ctx = null;
 					}}
-					disabled={!ctx.repo}>Open repository ↗</MenuItem
+					disabled={!ctx.repo}
 				>
+					Open repository ↗
+				</MenuItem>
 				<MenuItem
 					onclick={() => {
 						ui.ctx = null;
 						ui.openChanges();
-					}}>Changes &amp; history</MenuItem
+					}}
 				>
+					Changes &amp; history
+				</MenuItem>
 			</div>
 		{/if}
 	</ContextMenu>

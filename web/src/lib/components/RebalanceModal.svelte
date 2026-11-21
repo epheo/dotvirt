@@ -110,9 +110,9 @@
 
 	<FormField label="Migration aggressiveness">
 		<SelectInput bind:value={threshold}>
-			{#each REBALANCE_THRESHOLDS as t (t.value)}<option value={t.value}
-					>{t.label}: {t.detail}</option
-				>{/each}
+			{#each REBALANCE_THRESHOLDS as t (t.value)}<option value={t.value}>
+					{t.label}: {t.detail}
+				</option>{/each}
 		</SelectInput>
 	</FormField>
 

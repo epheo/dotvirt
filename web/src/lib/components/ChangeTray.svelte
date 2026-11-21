@@ -213,9 +213,9 @@
 						>
 							{#if lane.kind === 'staged'}
 								<GitBranch size={14} class="text-accent-ink" />
-								<strong class="text-sm text-ink"
-									>{lane.draft.count} staged change{lane.draft.count === 1 ? '' : 's'}</strong
-								>
+								<strong class="text-sm text-ink">
+									{lane.draft.count} staged change{lane.draft.count === 1 ? '' : 's'}
+								</strong>
 							{:else if lane.kind === 'review'}
 								<GitPullRequest size={14} class="text-accent-ink" />
 								<strong class="text-sm text-ink">PR #{lane.pr.prNumber} open</strong>
@@ -227,9 +227,9 @@
 								<strong class="text-sm text-ok-ink">Live on the cluster</strong>
 							{:else if lane.kind === 'refused'}
 								<TriangleAlert size={14} class="text-danger-ink" />
-								<strong class="text-sm text-danger-ink"
-									>The cluster refused PR #{lane.pr.prNumber}</strong
-								>
+								<strong class="text-sm text-danger-ink">
+									The cluster refused PR #{lane.pr.prNumber}
+								</strong>
 							{:else}
 								<GitPullRequest size={14} class="text-ok" />
 								<strong class="text-sm text-ink">PR #{lane.pr.prNumber} merged</strong>
@@ -241,10 +241,10 @@
 							<ul class="divide-y divide-line-soft">
 								{#each lane.draft.items.slice(0, 4) as it (it.kind + it.namespace + it.name)}
 									<li class="flex items-center gap-2 px-3 py-1.5">
-										<span class="min-w-0 flex-1 truncate"
-											><strong class="font-medium text-ink">{it.name}</strong>
-											<span class="text-ink-soft">{itemLine(it)}</span></span
-										>
+										<span class="min-w-0 flex-1 truncate">
+											<strong class="font-medium text-ink">{it.name}</strong>
+											<span class="text-ink-soft">{itemLine(it)}</span>
+										</span>
 										{#if it.changes.some((c) => c.restart)}
 											<span class="shrink-0 rounded-full px-1.5 {TONE_PILL.warn}">Restart</span>
 										{:else if it.kind === 'edit'}
@@ -264,9 +264,9 @@
 							{#each lane.others as o (o.prNumber)}
 								<p class="border-t border-line-soft bg-inset px-3 py-1.5 text-ink-soft">
 									Also open in {inventory.title(lane.project)}:
-									<a class="text-accent-ink hover:underline" href={o.prURL} target="_blank"
-										>PR #{o.prNumber}</a
-									>{o.by ? ` by ${o.by}` : ''}
+									<a class="text-accent-ink hover:underline" href={o.prURL} target="_blank">
+										PR #{o.prNumber}
+									</a>{o.by ? ` by ${o.by}` : ''}
 								</p>
 							{/each}
 							<footer class="flex items-center gap-3 border-t border-line-soft px-3 py-2">
@@ -280,15 +280,18 @@
 									<Button
 										size="sm"
 										onclick={() => (ui.modal = { kind: 'propose', project: lane.project })}
-										>Review and propose</Button
 									>
+										Review and propose
+									</Button>
 									<button
 										class="text-ink-soft hover:underline"
-										onclick={() => (discarding[lane.project] = true)}>Discard</button
+										onclick={() => (discarding[lane.project] = true)}
 									>
-									<a class="ml-auto text-ink-soft hover:underline" href={changesHref(lane.project)}
-										>Open in Changes</a
-									>
+										Discard
+									</button>
+									<a class="ml-auto text-ink-soft hover:underline" href={changesHref(lane.project)}>
+										Open in Changes
+									</a>
 								{/if}
 							</footer>
 						{:else if lane.kind === 'review'}
@@ -298,12 +301,12 @@
 								{#if lane.pr.title}<p class="truncate text-ink">{lane.pr.title}</p>{/if}
 								{#if checks || approvals}
 									<p class="flex flex-wrap gap-1.5">
-										{#if checks}<span class="rounded-full px-1.5 {TONE_PILL[checks.tone]}"
-												>{checks.text}</span
-											>{/if}
-										{#if approvals}<span class="rounded-full px-1.5 {TONE_PILL[approvals.tone]}"
-												>{approvals.text}</span
-											>{/if}
+										{#if checks}<span class="rounded-full px-1.5 {TONE_PILL[checks.tone]}">
+												{checks.text}
+											</span>{/if}
+										{#if approvals}<span class="rounded-full px-1.5 {TONE_PILL[approvals.tone]}">
+												{approvals.text}
+											</span>{/if}
 									</p>
 								{/if}
 								<p class="text-ink-soft">
@@ -312,20 +315,22 @@
 								</p>
 							</div>
 							<footer class="flex items-center gap-3 border-t border-line-soft px-3 py-2">
-								<Button size="sm" variant="secondary" href={lane.pr.prURL} target="_blank"
-									>Open PR #{lane.pr.prNumber}</Button
-								>
-								<button class="text-ink-soft hover:underline" onclick={() => copyLink(lane.pr)}
-									>Copy link for a reviewer</button
-								>
+								<Button size="sm" variant="secondary" href={lane.pr.prURL} target="_blank">
+									Open PR #{lane.pr.prNumber}
+								</Button>
+								<button class="text-ink-soft hover:underline" onclick={() => copyLink(lane.pr)}>
+									Copy link for a reviewer
+								</button>
 								<a
 									class="ml-auto text-ink-soft hover:underline"
 									href={reviewURL({
 										kind: 'proposal',
 										project: lane.project,
 										prNumber: lane.pr.prNumber,
-									})}>Review in Changes</a
+									})}
 								>
+									Review in Changes
+								</a>
 							</footer>
 						{:else if lane.kind === 'applying'}
 							<div class="space-y-1.5 px-3 py-2">
@@ -369,17 +374,20 @@
 									<Button
 										size="sm"
 										variant="secondary"
-										onclick={() => undo(lane.project, lane.pr.hash ?? '')}>Undo this change</Button
+										onclick={() => undo(lane.project, lane.pr.hash ?? '')}
 									>
+										Undo this change
+									</Button>
 								{/if}
-								<button class="text-ink-soft hover:underline" onclick={() => tray.dismiss(lane.key)}
-									>Dismiss</button
+								<button
+									class="text-ink-soft hover:underline"
+									onclick={() => tray.dismiss(lane.key)}
 								>
-								<span class="ml-auto text-ink-muted tabular-nums"
-									>{held === lane.key
-										? 'Stays while you look'
-										: `Closes in ${closesIn(lane.key)} s`}</span
-								>
+									Dismiss
+								</button>
+								<span class="ml-auto text-ink-muted tabular-nums">
+									{held === lane.key ? 'Stays while you look' : `Closes in ${closesIn(lane.key)} s`}
+								</span>
 							</footer>
 						{:else if lane.kind === 'refused'}
 							<div class="space-y-1 px-3 py-2">
@@ -398,22 +406,27 @@
 									href={lane.project === PLATFORM_PROJECT
 										? '/changes'
 										: hrefForScope({ kind: 'project', project: lane.project })}
-									>Fix and propose again</Button
 								>
+									Fix and propose again
+								</Button>
 								{#if lane.pr.hash && inventory.canRevert(lane.project)}
 									<button
 										class="text-ink-soft hover:underline"
-										onclick={() => undo(lane.project, lane.pr.hash ?? '')}>Undo the merge</button
+										onclick={() => undo(lane.project, lane.pr.hash ?? '')}
 									>
+										Undo the merge
+									</button>
 								{:else if !lane.pr.hash && inventory.repoRead(lane.project).ok}
-									<a class="text-ink-soft hover:underline" href={changesHref(lane.project)}
-										>Undo in Changes</a
-									>
+									<a class="text-ink-soft hover:underline" href={changesHref(lane.project)}>
+										Undo in Changes
+									</a>
 								{/if}
 								<button
 									class="ml-auto text-ink-soft hover:underline"
-									onclick={() => tray.dismiss(lane.key)}>Dismiss</button
+									onclick={() => tray.dismiss(lane.key)}
 								>
+									Dismiss
+								</button>
 							</footer>
 						{:else}
 							<div class="flex items-center gap-3 px-3 py-2">
@@ -424,9 +437,12 @@
 											? `You cannot read the platform's history, so ${branding.name} cannot follow it to the cluster.`
 											: `You cannot read all of ${lane.project}, so ${branding.name} cannot follow it to the cluster.`}
 								</p>
-								<button class="text-ink-soft hover:underline" onclick={() => tray.dismiss(lane.key)}
-									>Dismiss</button
+								<button
+									class="text-ink-soft hover:underline"
+									onclick={() => tray.dismiss(lane.key)}
 								>
+									Dismiss
+								</button>
 							</div>
 						{/if}
 					</section>
@@ -459,13 +475,17 @@
 					{@const project = worst.project}
 					<button
 						class="inline-flex h-5 items-center rounded-full bg-accent px-2.5 font-bold text-accent-on"
-						onclick={() => (ui.modal = { kind: 'propose', project })}>Review</button
+						onclick={() => (ui.modal = { kind: 'propose', project })}
 					>
+						Review
+					</button>
 				{:else}
 					<button
 						class="inline-flex h-5 items-center rounded-full bg-accent px-2.5 font-bold text-accent-on"
-						onclick={unfold}>Show</button
+						onclick={unfold}
 					>
+						Show
+					</button>
 				{/if}
 			</div>
 		{/if}

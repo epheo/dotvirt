@@ -28,11 +28,11 @@
 </script>
 
 {#if next === 'forge-connect'}
-	<Button size="sm" class={cls} onclick={() => forge.connect(returnPath(new URL(location.href)))}
-		>Connect git account</Button
-	>
+	<Button size="sm" class={cls} onclick={() => forge.connect(returnPath(new URL(location.href)))}>
+		Connect git account
+	</Button>
 {:else if next === 'forge-write' && repo}
-	<Button size="sm" variant="secondary" class={cls} href={repo} target="_blank" rel="noopener"
-		>Open the repo in the forge</Button
-	>
+	<Button size="sm" variant="secondary" class={cls} href={repo} target="_blank" rel="noopener">
+		Open the repo in the forge
+	</Button>
 {/if}
