@@ -74,11 +74,11 @@
 			/>
 		{/if}
 	{:else}
-		<span class="text-xs text-ink-muted"
-			>{disk.name} ({disk.type}{disk.size ? ` · ${disk.size}` : ''}{disk.storageClass
+		<span class="text-xs text-ink-muted">
+			{disk.name} ({disk.type}{disk.size ? ` · ${disk.size}` : ''}{disk.storageClass
 				? ` · ${disk.storageClass}`
-				: ''})</span
-		>
+				: ''})
+		</span>
 	{/if}
 {/snippet}
 <RowListEditor

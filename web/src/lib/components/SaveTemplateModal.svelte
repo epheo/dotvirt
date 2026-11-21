@@ -70,9 +70,9 @@
 	</FormField>
 	<FormField label="Library">
 		<SelectInput bind:value={library}>
-			<option value="" disabled={!own.ok}
-				>{project ? `Project library (${project})` : 'Project library'}</option
-			>
+			<option value="" disabled={!own.ok}>
+				{project ? `Project library (${project})` : 'Project library'}
+			</option>
 			<option value="platform" disabled={!shared.ok}>Shared library</option>
 		</SelectInput>
 	</FormField>

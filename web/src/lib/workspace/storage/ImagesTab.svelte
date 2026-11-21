@@ -125,8 +125,10 @@
 			<span class="ml-auto text-[13px]">
 				<button
 					class="text-accent-ink hover:underline"
-					onclick={() => (ui.modal = { kind: 'upload', bootImage: true })}>Add a boot image</button
+					onclick={() => (ui.modal = { kind: 'upload', bootImage: true })}
 				>
+					Add a boot image
+				</button>
 			</span>
 		</div>
 		<div class="overflow-x-auto">
@@ -166,27 +168,31 @@
 											onclick={(e) => {
 												e.stopPropagation();
 												go({ image: current ? undefined : u.image }, { replace: true });
-											}}>{shortName(u.image)}</button
+											}}
 										>
-										<span class="block truncate text-xs leading-4 text-ink-faint" title={origin}
-											>{origin}</span
-										>
+											{shortName(u.image)}
+										</button>
+										<span class="block truncate text-xs leading-4 text-ink-faint" title={origin}>
+											{origin}
+										</span>
 									</div>
 								</div>
 							</td>
 							<td class={TD}>
 								<span
 									class="block truncate {u.catalog?.ready ? 'text-ink-soft' : 'text-warn-ink'}"
-									title={imageState(u)}>{imageState(u)}</span
+									title={imageState(u)}
 								>
+									{imageState(u)}
+								</span>
 							</td>
 							<td class="{TD} text-right font-bold">{num(u.disks)}</td>
 							<td class={TD}>
 								{#if u.disks}
 									<LocalSharedBar local={u.local} shared={u.shared} total={u.disks} />
-									<span class="mt-1 block text-xs text-ink-muted"
-										>{num(u.local)} local, {num(u.shared)} shared</span
-									>
+									<span class="mt-1 block text-xs text-ink-muted">
+										{num(u.local)} local, {num(u.shared)} shared
+									</span>
 								{:else}<span class="text-ink-faint">No disks yet</span>{/if}
 							</td>
 							<td class={TD}>
@@ -204,8 +210,10 @@
 										onclick={(e) => {
 											e.stopPropagation();
 											createVM(u);
-										}}>Create VM</Button
+										}}
 									>
+										Create VM
+									</Button>
 								</div>
 							</td>
 						</tr>
@@ -244,36 +252,42 @@
 					<h2 id="image-panel-h" class="font-mono text-base leading-6 font-medium">
 						{shortName(open.image)}
 					</h2>
-					<span class="block text-[13px] text-ink-muted"
-						>Boot image in {open.image.split('/')[0]}. {imageState(open)}.</span
-					>
+					<span class="block text-[13px] text-ink-muted">
+						Boot image in {open.image.split('/')[0]}. {imageState(open)}.
+					</span>
 				</div>
 				<button
 					class="flex size-[30px] shrink-0 items-center justify-center rounded-md text-ink-muted hover:bg-inset-strong"
 					aria-label="Close {shortName(open.image)}"
-					onclick={() => go({ image: undefined }, { replace: true })}><X size={16} /></button
+					onclick={() => go({ image: undefined }, { replace: true })}
 				>
+					<X size={16} />
+				</button>
 			</div>
 			{#if pending && open.catalog}
 				{@const gate = imageGate.delete(nsOf(open.image))}
 				{@const moving = progress?.tone === 'info'}
 				<div class="flex flex-col gap-2.5 border-b border-line-soft px-card py-3.5">
 					{#if progress}
-						<Consequence tone={progress.tone}
-							>{sentence(progress.text)}
+						<Consequence tone={progress.tone}>
+							{sentence(progress.text)}
 							<button
 								class="text-accent-ink underline underline-offset-2"
-								onclick={() => status.refresh()}>Check again</button
-							></Consequence
-						>
+								onclick={() => status.refresh()}
+							>
+								Check again
+							</button>
+						</Consequence>
 					{:else if status.error}
-						<Consequence tone="warn"
-							>{sentence(`Cannot read where it stands: ${status.error}`)}
+						<Consequence tone="warn">
+							{sentence(`Cannot read where it stands: ${status.error}`)}
 							<button
 								class="text-accent-ink underline underline-offset-2"
-								onclick={() => status.refresh()}>Try again</button
-							></Consequence
-						>
+								onclick={() => status.refresh()}
+							>
+								Try again
+							</button>
+						</Consequence>
 					{:else}
 						<p class="text-[13px] text-ink-faint">Reading where it stands.</p>
 					{/if}
@@ -285,18 +299,19 @@
 								disabled={removal.busy || !gate.ok}
 								title={gate.why || undefined}
 								onclick={() => open && remove(open)}
-								>{armed === open.image ? 'Confirm delete' : 'Delete'}</Button
 							>
+								{armed === open.image ? 'Confirm delete' : 'Delete'}
+							</Button>
 							<StageChip kind="now" />
 						</div>
 						{#if !gate.ok}<p class="text-xs leading-4 text-ink-faint">{gate.why}</p>{/if}
-						<Consequence tone="danger" size="sm"
-							>{imageDeleteConsequence(
+						<Consequence tone="danger" size="sm">
+							{imageDeleteConsequence(
 								shortName(open.image),
 								waiting,
 								moving ? (open.catalog.import ? 'download' : 'import') : '',
-							)}</Consequence
-						>
+							)}
+						</Consequence>
 						<ErrorNote error={removal.error} />
 					</div>
 				</div>
@@ -320,15 +335,19 @@
 					variant="outline"
 					size="sm"
 					disabled={!open.catalog?.ready}
-					onclick={() => createVM(open)}>Create VM</Button
+					onclick={() => createVM(open)}
 				>
+					Create VM
+				</Button>
 				{#if open.disks}
 					<Button
 						variant="secondary"
 						size="sm"
 						href={storageHref('disks', { image: open.image, project: p })}
-						>Show the {num(open.disks)} {open.disks === 1 ? 'disk' : 'disks'}</Button
 					>
+						Show the {num(open.disks)}
+						{open.disks === 1 ? 'disk' : 'disks'}
+					</Button>
 				{/if}
 			</div>
 		</aside>

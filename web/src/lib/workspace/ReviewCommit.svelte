@@ -59,8 +59,10 @@
 				target="_blank"
 				rel="noopener"
 				class="inline-flex items-center gap-1 text-[13px] text-accent-ink hover:underline"
-				>PR #{commit.prNumber} <ExternalLink size={12} /></a
 			>
+				PR #{commit.prNumber}
+				<ExternalLink size={12} />
+			</a>
 		{:else if commit?.prNumber}
 			<span class="text-[13px] text-ink-muted">PR #{commit.prNumber}</span>
 		{/if}
@@ -85,8 +87,10 @@
 					href={done.prURL}
 					target="_blank"
 					rel="noopener"
-					class="text-accent-ink underline underline-offset-2">PR #{done.prNumber}</a
-				>. Approve and merge it in the forge; nothing changes until then.
+					class="text-accent-ink underline underline-offset-2"
+				>
+					PR #{done.prNumber}
+				</a>. Approve and merge it in the forge; nothing changes until then.
 			</p>
 		{:else if done}
 			<p class="text-[13px] text-ink-soft">
@@ -96,8 +100,10 @@
 						href={done.compareURL}
 						target="_blank"
 						rel="noopener"
-						class="text-accent-ink underline underline-offset-2">Open the pull request</a
+						class="text-accent-ink underline underline-offset-2"
 					>
+						Open the pull request
+					</a>
 				{:else}
 					No forge is configured to open the pull request.
 				{/if}

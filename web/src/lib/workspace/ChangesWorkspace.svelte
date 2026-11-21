@@ -460,15 +460,17 @@
 		The cluster refused {r.prNumber ? `PR #${r.prNumber}` : 'the last merge'}{scopeProject
 			? ''
 			: ` in ${r.project}`}.
-		<a href={historyHref(r.project)} class="text-accent-ink underline underline-offset-2"
-			>Open history</a
-		>
+		<a href={historyHref(r.project)} class="text-accent-ink underline underline-offset-2">
+			Open history
+		</a>
 	{:else}
 		The cluster refused merges in {plural(refused.length, 'project')}:
 		{#each refused as r, i (r.project)}{i ? ', ' : ''}<a
 				href={historyHref(r.project)}
-				class="text-accent-ink underline underline-offset-2">{r.project}</a
-			>{/each}
+				class="text-accent-ink underline underline-offset-2"
+			>
+				{r.project}
+			</a>{/each}
 	{/if}
 {/snippet}
 
@@ -487,14 +489,14 @@
 		<a href="/compute" class="text-accent-ink hover:underline">Change a VM in Compute</a>
 	{/if}
 	{#if tab !== 'staged' && stagedTotal > 0}
-		<a href={tabHref('staged')} class="text-accent-ink hover:underline"
-			>{plural(stagedTotal, 'staged change')} to propose</a
-		>
+		<a href={tabHref('staged')} class="text-accent-ink hover:underline">
+			{plural(stagedTotal, 'staged change')} to propose
+		</a>
 	{/if}
 	{#if tab !== 'review' && proposedLane.length > 0}
-		<a href={tabHref('review')} class="text-accent-ink hover:underline"
-			>{plural(proposedLane.length, 'pull request')} in review</a
-		>
+		<a href={tabHref('review')} class="text-accent-ink hover:underline">
+			{plural(proposedLane.length, 'pull request')} in review
+		</a>
 	{/if}
 	{#if tab !== 'history' && repoProjects.length > 0}
 		<a href={tabHref('history')} class="text-accent-ink hover:underline">Past changes</a>
@@ -612,8 +614,9 @@
 											target="_blank"
 											rel="noopener"
 											class="text-[13px] text-accent-ink hover:underline"
-											>Open PR #{pr.prNumber} in the forge</a
 										>
+											Open PR #{pr.prNumber} in the forge
+										</a>
 									</div>
 								{/if}
 							</Card>

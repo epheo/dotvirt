@@ -103,8 +103,9 @@
 				>
 					<span
 						class="flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[11px] {b.cls}"
-						>{#if b.done}<Check size={12} />{:else}{b.text}{/if}</span
 					>
+						{#if b.done}<Check size={12} />{:else}{b.text}{/if}
+					</span>
 					<span class="truncate">{step.title}</span>
 				</button>
 			{/each}
@@ -122,9 +123,9 @@
 		<Button variant="ghost" class="ml-auto" onclick={onclose}>Cancel</Button>
 		<Button variant="ghost" onclick={back} disabled={current === 0}>Back</Button>
 		{#if last}
-			<Button onclick={submit} disabled={!canFinish || op.busy}
-				>{op.busy ? 'Staging…' : finishLabel}</Button
-			>
+			<Button onclick={submit} disabled={!canFinish || op.busy}>
+				{op.busy ? 'Staging…' : finishLabel}
+			</Button>
 		{:else}
 			<Button onclick={next}>Next</Button>
 		{/if}

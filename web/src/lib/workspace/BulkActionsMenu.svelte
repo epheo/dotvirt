@@ -40,16 +40,20 @@
 			onclick={() => {
 				onclose();
 				onpower('On');
-			}}>Power On (staged)</MenuItem
+			}}
 		>
+			Power On (staged)
+		</MenuItem>
 		<MenuItem
 			disabled={!!powerWhy}
 			title={powerWhy}
 			onclick={() => {
 				onclose();
 				onpower('Off');
-			}}>Power Off (staged)</MenuItem
+			}}
 		>
+			Power Off (staged)
+		</MenuItem>
 		<div class="my-1 border-t border-line-soft"></div>
 		<MenuItem
 			danger
@@ -58,14 +62,18 @@
 			onclick={() => {
 				onclose();
 				ondelete();
-			}}>Delete {count} VMs…</MenuItem
+			}}
 		>
+			Delete {count} VMs…
+		</MenuItem>
 		<div class="my-1 border-t border-line-soft"></div>
 		<MenuItem
 			onclick={() => {
 				onclose();
 				onclear();
-			}}>Clear selection</MenuItem
+			}}
 		>
+			Clear selection
+		</MenuItem>
 	</div>
 </ContextMenu>

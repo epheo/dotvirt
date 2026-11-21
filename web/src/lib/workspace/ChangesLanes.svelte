@@ -188,9 +188,9 @@
 </script>
 
 {#snippet retryDrafts()}
-	<Button variant="link" size="sm" disabled={drafts.refreshing} onclick={() => drafts.refresh()}
-		>Retry</Button
-	>
+	<Button variant="link" size="sm" disabled={drafts.refreshing} onclick={() => drafts.refresh()}>
+		Retry
+	</Button>
 {/snippet}
 
 {#snippet pager(total: number, page: number, setPage: (n: number) => void)}
@@ -249,8 +249,10 @@
 					<li>
 						<a
 							href="{changesHref(project, n.namespace)}?tab=history"
-							class="text-accent-ink hover:underline">{n.namespace}</a
+							class="text-accent-ink hover:underline"
 						>
+							{n.namespace}
+						</a>
 					</li>
 				{/each}
 			</ul>
@@ -287,8 +289,9 @@
 			<a
 				href="{changesHref(project)}?tab=history"
 				class="block border-t border-line-soft py-2 text-[13px] text-accent-ink hover:underline {INDENT}"
-				>All {lane.commits.length} recent changes in {project}</a
 			>
+				All {lane.commits.length} recent changes in {project}
+			</a>
 		{/if}
 	{:else}
 		{#each lane.commits as c (c.hash)}
@@ -340,8 +343,10 @@
 								variant="danger-secondary"
 								size="sm"
 								class="ml-auto"
-								onclick={() => (discarding[project] = true)}>Discard all</Button
+								onclick={() => (discarding[project] = true)}
 							>
+								Discard all
+							</Button>
 						{/if}
 					</div>
 					{#if discarding[project]}
@@ -364,8 +369,10 @@
 								href={draft.compareURL}
 								target="_blank"
 								rel="noopener"
-								class="text-accent-ink underline underline-offset-2">Open the pull request</a
-							> to send it for review.
+								class="text-accent-ink underline underline-offset-2"
+							>
+								Open the pull request
+							</a> to send it for review.
 						</p>
 					{/if}
 					{#if draft.warning}
@@ -427,8 +434,10 @@
 							class="h-6 px-2.5 text-[13px] not-first:border-l not-first:border-line {mineOnly.value ===
 							mine
 								? 'bg-select font-medium text-accent-ink'
-								: 'bg-panel text-ink-soft hover:text-ink'}">{mine ? 'Mine' : 'All'}</button
+								: 'bg-panel text-ink-soft hover:text-ink'}"
 						>
+							{mine ? 'Mine' : 'All'}
+						</button>
 					{/each}
 				</span>
 			{/if}
@@ -439,8 +448,10 @@
 					None of the open pull requests are yours.
 					<button
 						class="text-accent-ink underline underline-offset-2"
-						onclick={() => (mineOnly.value = false)}>Show all {proposedLane.length}</button
+						onclick={() => (mineOnly.value = false)}
 					>
+						Show all {proposedLane.length}
+					</button>
 				</p>
 			{/if}
 			{#each reviewRows as p (prKey(p.project, p.prNumber))}
@@ -462,13 +473,16 @@
 								target="_blank"
 								rel="noopener"
 								class="inline-flex items-center gap-1 text-[13px] font-medium text-accent-ink hover:underline"
-								>PR #{p.prNumber} <ExternalLink size={12} /></a
 							>
+								PR #{p.prNumber}
+								<ExternalLink size={12} />
+							</a>
 						{/if}
 						<span class="text-[13px] text-ink-muted">{inventory.title(p.project)}</span>
 						{#if p.by && !p.mine}<span class="text-[13px] text-ink-faint">by {p.by}</span>{/if}
-						{#if chk}<span class="ml-auto"><StatusPill tone={chk.tone} label={chk.text} /></span
-							>{/if}
+						{#if chk}<span class="ml-auto">
+								<StatusPill tone={chk.tone} label={chk.text} />
+							</span>{/if}
 					</span>
 					{#if p.title || appr}
 						<span class="flex items-center gap-2 pl-[22px]">
@@ -502,16 +516,20 @@
 							href={r.compareURL}
 							target="_blank"
 							rel="noopener"
-							class="text-accent-ink underline underline-offset-2">Open the pull request</a
+							class="text-accent-ink underline underline-offset-2"
 						>
+							Open the pull request
+						</a>
 					{:else}
 						No forge is configured to open it.
 					{/if}
 					{#if r.dismissable}
 						<button
 							onclick={() => ondismiss(r.project)}
-							class="ml-1 text-ink-faint hover:text-ink-soft">Dismiss</button
+							class="ml-1 text-ink-faint hover:text-ink-soft"
 						>
+							Dismiss
+						</button>
 					{/if}
 				</div>
 			{/each}

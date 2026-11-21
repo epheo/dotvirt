@@ -280,8 +280,9 @@
 		/>
 		<kbd
 			class="shrink-0 rounded border border-side-active px-1.5 font-mono text-[11px] leading-4 text-side-dim"
-			>Ctrl K</kbd
 		>
+			Ctrl K
+		</kbd>
 	</div>
 
 	{#if showing}
@@ -303,8 +304,9 @@
 							>
 								<span
 									class="w-20 shrink-0 rounded bg-inset-strong px-1 py-0.5 text-center text-[10px] tracking-wide text-ink-muted uppercase"
-									>{kindBadge[h.kind]}</span
 								>
+									{kindBadge[h.kind]}
+								</span>
 								<span class="truncate font-medium text-ink">{hitLabel(h)}</span>
 								{#if hitHint(h)}
 									<span class="ml-auto truncate text-ink-faint">{hitHint(h)}</span>

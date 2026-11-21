@@ -36,8 +36,10 @@
 		<span
 			class="ml-0.5 text-[13px] font-normal {t.countTone === 'warn'
 				? 'text-warn-ink'
-				: 'text-ink-faint'}">{t.count.toLocaleString('en-US')}</span
+				: 'text-ink-faint'}"
 		>
+			{t.count.toLocaleString('en-US')}
+		</span>
 	{/if}
 {/snippet}
 

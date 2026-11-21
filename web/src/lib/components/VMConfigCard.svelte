@@ -261,13 +261,14 @@
 <InfoCard title="Configuration">
 	{#snippet action()}
 		<span class="flex min-w-0 items-center gap-3">
-			<span class="ml-4 hidden truncate text-xs text-ink-muted md:inline"
-				>{canAuthor && vm.sourceFile ? 'Click a value in git to change it. ' : ''}Nothing reaches
-				the cluster until its PR merges.</span
-			>
+			<span class="ml-4 hidden truncate text-xs text-ink-muted md:inline">
+				{canAuthor && vm.sourceFile ? 'Click a value in git to change it. ' : ''}Nothing reaches the
+				cluster until its PR merges.
+			</span>
 			{#if onedit && vm.sourceFile && canAuthor}
-				<Button variant="link" size="sm" class="shrink-0" onclick={onedit}>Edit all settings</Button
-				>
+				<Button variant="link" size="sm" class="shrink-0" onclick={onedit}>
+					Edit all settings
+				</Button>
 			{/if}
 		</span>
 	{/snippet}
@@ -314,8 +315,10 @@
 													onclick={() => (value = p)}
 													class="px-3 py-1 text-xs font-medium {value === p
 														? 'bg-accent text-accent-on'
-														: 'bg-panel text-ink-soft hover:bg-inset'}">{p}</button
+														: 'bg-panel text-ink-soft hover:bg-inset'}"
 												>
+													{p}
+												</button>
 											{/each}
 										</span>
 									{:else}
@@ -327,8 +330,9 @@
 													disabled={Number(value) <= 1}
 													onclick={() => (value = Math.max(1, Number(value) - 1))}
 													class="rounded-l border border-r-0 border-line-strong bg-panel px-2 py-1.5 text-ink-soft hover:bg-inset disabled:opacity-40"
-													><Minus size={12} /></button
 												>
+													<Minus size={12} />
+												</button>
 												<input
 													aria-label={r.label}
 													type="number"
@@ -342,8 +346,9 @@
 													aria-label="One vCPU more"
 													onclick={() => (value = Number(value) + 1)}
 													class="rounded-r border border-l-0 border-line-strong bg-panel px-2 py-1.5 text-ink-soft hover:bg-inset"
-													><Plus size={12} /></button
 												>
+													<Plus size={12} />
+												</button>
 											</span>
 										{:else}
 											<input
@@ -358,11 +363,13 @@
 									<Button
 										size="sm"
 										type="submit"
-										disabled={!!err || stageOp.busy || preview.loading}>Stage</Button
+										disabled={!!err || stageOp.busy || preview.loading}
 									>
-									<Button size="sm" variant="ghost" type="button" onclick={() => (editing = null)}
-										>Cancel</Button
-									>
+										Stage
+									</Button>
+									<Button size="sm" variant="ghost" type="button" onclick={() => (editing = null)}>
+										Cancel
+									</Button>
 								</form>
 								{#if err}
 									<p class="mt-1 text-xs text-danger-ink">{err}</p>
@@ -382,30 +389,33 @@
 							{:else if staged.length}
 								<div class="flex flex-wrap items-center gap-x-2 gap-y-1">
 									{#each staged as c (c.field)}
-										{#if c.action !== 'add'}<span class="text-ink-muted line-through">{c.from}</span
-											><ArrowRight size={12} class="text-ink-faint" />{/if}
+										{#if c.action !== 'add'}<span class="text-ink-muted line-through">
+												{c.from}
+											</span><ArrowRight size={12} class="text-ink-faint" />{/if}
 										{#if r.inline && !block}
 											<button
 												onclick={() => start(r)}
 												title={`Change ${r.label.toLowerCase()}; it stages into a PR`}
 												class="-mx-1 rounded px-1 font-semibold text-accent-ink hover:bg-inset"
-												><span class="sr-only">Change {r.label}:</span>{c.to}</button
 											>
+												<span class="sr-only">Change {r.label}:</span>{c.to}
+											</button>
 										{:else}
-											<span class="font-semibold text-accent-ink"
-												>{c.action === 'remove' ? 'removed' : c.to}</span
-											>
+											<span class="font-semibold text-accent-ink">
+												{c.action === 'remove' ? 'removed' : c.to}
+											</span>
 										{/if}
 									{/each}
 									<span
 										class="inline-flex items-center gap-1 rounded-full px-1.5 text-xs {TONE_PILL.info}"
-										><GitBranch size={11} />Staged</span
 									>
-									<span class="text-xs text-ink-muted"
-										>{staged.some((c) => c.restart)
+										<GitBranch size={11} />Staged
+									</span>
+									<span class="text-xs text-ink-muted">
+										{staged.some((c) => c.restart)
 											? 'restarts when it merges'
-											: 'applies without restart'}</span
-									>
+											: 'applies without restart'}
+									</span>
 								</div>
 							{:else}
 								{#if r.inline && !block}
@@ -414,25 +424,26 @@
 										onclick={() => start(r)}
 										title={`Change ${r.label.toLowerCase()}; it stages into a PR`}
 										class="group -mx-1 flex items-center gap-2 rounded px-1 text-ink hover:bg-inset"
-										><span class="sr-only">Change {r.label}:</span>{r.git}<Pencil
+									>
+										<span class="sr-only">Change {r.label}:</span>{r.git}<Pencil
 											size={12}
 											class="text-ink-muted group-hover:text-accent-ink"
-										/></button
-									>
+										/>
+									</button>
 								{:else}
 									<span class="flex items-center gap-2">
-										<span class={r.gitOnly ? 'font-mono text-xs text-ink-soft' : 'text-ink'}
-											>{r.git}</span
-										>
+										<span class={r.gitOnly ? 'font-mono text-xs text-ink-soft' : 'text-ink'}>
+											{r.git}
+										</span>
 										{#if r.inline}
-											<span title={block}
-												><Pencil size={12} class="text-ink-muted opacity-40" /></span
-											>
+											<span title={block}>
+												<Pencil size={12} class="text-ink-muted opacity-40" />
+											</span>
 										{/if}
 										{#if r.link}
-											<a class="text-xs text-accent-ink hover:underline" href={r.link.href}
-												>{r.link.label}</a
-											>
+											<a class="text-xs text-accent-ink hover:underline" href={r.link.href}>
+												{r.link.label}
+											</a>
 										{/if}
 									</span>
 								{/if}
@@ -452,20 +463,23 @@
 								<span class="text-ink-muted" title="Live state not read yet">-</span>
 							{:else}
 								<!-- Read and matching: the value it runs with, the match secondary. -->
-								<span class="text-ink-soft"
-									>{r.git}<span
+								<span class="text-ink-soft">
+									{r.git}<span
 										class="ml-2 inline-flex items-center gap-1 text-xs whitespace-nowrap text-ink-muted"
-										><Check size={12} /> Same</span
-									></span
-								>
+									>
+										<Check size={12} /> Same
+									</span>
+								</span>
 							{/if}
 						</td>
 						<td class="py-2 pr-card pl-3 text-right whitespace-nowrap">
 							{#if staged.length && r.inline && !block}
 								<button
 									class="inline-flex items-center gap-1 text-xs text-accent-ink hover:underline"
-									onclick={() => unstageField(r)}><Undo2 size={12} />Unstage</button
+									onclick={() => unstageField(r)}
 								>
+									<Undo2 size={12} />Unstage
+								</button>
 							{/if}
 						</td>
 					</tr>

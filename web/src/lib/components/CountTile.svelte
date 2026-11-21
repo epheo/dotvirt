@@ -55,9 +55,9 @@
 	{#if link}
 		<div class="mt-auto pt-2 text-[13px] font-medium">
 			{#if link.href}
-				<a href={link.href} onclick={link.onclick} class="text-accent-ink hover:underline"
-					>{link.label}</a
-				>
+				<a href={link.href} onclick={link.onclick} class="text-accent-ink hover:underline">
+					{link.label}
+				</a>
 			{:else}
 				<button onclick={link.onclick} class="text-accent-ink hover:underline">{link.label}</button>
 			{/if}

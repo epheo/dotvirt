@@ -140,8 +140,9 @@
 									<button
 										onclick={() => e.namespace && e.name && onselect?.(e.namespace, e.name)}
 										class="font-medium text-ink-soft hover:text-accent-ink hover:underline"
-										>{e.name}</button
 									>
+										{e.name}
+									</button>
 									{#if e.namespace}<span class="text-ink-faint">· {e.namespace}</span>{/if}
 								{:else}—{/if}
 							</td>
@@ -155,8 +156,8 @@
 						{/if}
 						<td class="py-1.5 whitespace-nowrap text-ink-muted">
 							{duration(e.lastSeen)}{#if (e.count ?? 0) > 1}<span class="text-ink-faint">
-									×{e.count}</span
-								>{/if}
+									×{e.count}
+								</span>{/if}
 						</td>
 					</tr>
 				{/each}

@@ -166,8 +166,10 @@
 				<span
 					class="rounded px-2 py-0.5 text-xs font-semibold {TONE_PILL[
 						VERDICT_TONE[result.verdict] ?? 'neutral'
-					]}">{result.verdict}</span
+					]}"
 				>
+					{result.verdict}
+				</span>
 				<span class="text-xs text-ink-muted">{verdictText(result)}</span>
 			</div>
 			{#if !result.steps.length}
@@ -190,12 +192,14 @@
 										class="min-w-0 truncate {s.policy.withheld
 											? 'text-ink-muted'
 											: 'font-medium text-ink'}"
-										title={s.policy.withheld ? WITHHELD : undefined}>{s.policy.name}</span
+										title={s.policy.withheld ? WITHHELD : undefined}
 									>
+										{s.policy.name}
+									</span>
 									{#if s.policy.namespace}
-										<span class="rounded bg-inset px-1.5 py-0.5 text-ink-muted"
-											>{s.policy.namespace}</span
-										>
+										<span class="rounded bg-inset px-1.5 py-0.5 text-ink-muted">
+											{s.policy.namespace}
+										</span>
 									{/if}
 									{#if s.policy.sync}
 										<SyncBadge sync={s.policy.sync} error={s.policy.syncError ?? ''} compact />
@@ -204,8 +208,10 @@
 								{#if s.conditional}
 									<span
 										class="rounded bg-warn-soft px-1.5 py-0.5 whitespace-nowrap text-warn-ink"
-										title="This rule may match; the trace can't resolve it">may apply</span
+										title="This rule may match; the trace can't resolve it"
 									>
+										may apply
+									</span>
 								{/if}
 							</div>
 							{#if s.rule}

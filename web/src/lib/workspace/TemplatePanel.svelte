@@ -51,15 +51,17 @@
 	>
 		<div class="min-w-0 flex-1">
 			<h2 {id} class="font-mono text-base leading-6 font-medium break-all">{t.name}</h2>
-			<span class="block text-[13px] text-ink-muted"
-				>VM template in {libraryLabel(t.library)}{t.error ? '. It does not parse' : ''}.</span
-			>
+			<span class="block text-[13px] text-ink-muted">
+				VM template in {libraryLabel(t.library)}{t.error ? '. It does not parse' : ''}.
+			</span>
 		</div>
 		<button
 			class="flex size-[30px] shrink-0 items-center justify-center rounded-md text-ink-muted hover:bg-inset-strong"
 			aria-label="Close {t.name}"
-			onclick={onclose}><X size={16} /></button
+			onclick={onclose}
 		>
+			<X size={16} />
+		</button>
 	</div>
 
 	<dl class="grid grid-cols-[auto_1fr] gap-x-4 gap-y-2 px-card py-3.5 text-[13px]">
@@ -111,8 +113,10 @@
 						size="sm"
 						disabled={!!createOff}
 						title={createOff}
-						onclick={oncreate}>Create VM</Button
+						onclick={oncreate}
 					>
+						Create VM
+					</Button>
 					<StageChip kind="pr" />
 				</div>
 				<Consequence size="sm">
@@ -128,8 +132,10 @@
 					size="sm"
 					disabled={!edit.ok}
 					title={edit.why}
-					onclick={() => (ui.modal = { kind: 'editTemplate', template: t })}>Edit template</Button
+					onclick={() => (ui.modal = { kind: 'editTemplate', template: t })}
 				>
+					Edit template
+				</Button>
 				<StageChip kind="pr" />
 			</div>
 			<Consequence size="sm">

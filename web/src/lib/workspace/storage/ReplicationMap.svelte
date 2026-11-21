@@ -250,9 +250,9 @@
 			<table class="w-full border-separate border-spacing-0 text-[13px]">
 				<thead>
 					<tr>
-						<th scope="col" class="{TH} {STICKY}"
-							>{mapped.some((r) => r.vm) ? 'VM' : 'Claim'} and disk</th
-						>
+						<th scope="col" class="{TH} {STICKY}">
+							{mapped.some((r) => r.vm) ? 'VM' : 'Claim'} and disk
+						</th>
 						{#each hosts as h (h)}
 							<th scope="col" class="border-b border-line p-0" class:down={h === down}>
 								<button
@@ -339,9 +339,9 @@
 							<tr>
 								<th scope="row" class="{CELL} {STICKY} pl-7 font-normal">
 									<span class="font-mono text-xs">{d.label}</span>
-									<span class="ml-1.5 text-xs text-ink-faint"
-										>{size(d.volume.sizeBytes)}, {d.volume.tier}</span
-									>
+									<span class="ml-1.5 text-xs text-ink-faint">
+										{size(d.volume.sizeBytes)}, {d.volume.tier}
+									</span>
 								</th>
 								{#each hosts as h (h)}
 									{@const c = cellFor(d.volume, h, r.runsOn)}
@@ -385,15 +385,15 @@
 			class="flex flex-wrap items-center gap-x-5 gap-y-1.5 border-t border-line-soft px-card py-2.5 text-xs text-ink-muted"
 		>
 			<span class="inline-flex items-center gap-1.5"><CopyGlyph kind="copy" />Copy</span>
-			<span class="inline-flex items-center gap-1.5"
-				><CopyGlyph kind="catching" percent={60} />Catching up</span
-			>
-			<span class="inline-flex items-center gap-1.5"
-				><CopyGlyph kind="remote" />No copy, reads over the network</span
-			>
-			<span class="inline-flex items-center gap-1.5"
-				><CopyGlyph kind="witness" />Witness, holds no data</span
-			>
+			<span class="inline-flex items-center gap-1.5">
+				<CopyGlyph kind="catching" percent={60} />Catching up
+			</span>
+			<span class="inline-flex items-center gap-1.5">
+				<CopyGlyph kind="remote" />No copy, reads over the network
+			</span>
+			<span class="inline-flex items-center gap-1.5">
+				<CopyGlyph kind="witness" />Witness, holds no data
+			</span>
 			<span class="inline-flex items-center gap-1.5"><CopyGlyph kind="lost" />Out of reach</span>
 		</div>
 	</Card>

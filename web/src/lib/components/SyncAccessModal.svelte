@@ -31,10 +31,10 @@
 		<StageChip kind="pr" />
 	</div>
 	<div class="flex flex-col gap-1.5">
-		<Consequence tone="info"
-			>Each of {project}'s namespaces grants its sync account admin, so ArgoCD syncs it as that
-			account.</Consequence
-		>
+		<Consequence tone="info">
+			Each of {project}'s namespaces grants its sync account admin, so ArgoCD syncs it as that
+			account.
+		</Consequence>
 		<Consequence>Nothing changes until the platform pull request merges.</Consequence>
 	</div>
 </StageModal>

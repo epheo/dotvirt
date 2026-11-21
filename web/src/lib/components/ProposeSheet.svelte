@@ -220,15 +220,17 @@
 		{#if lane && openPR}
 			<p class="flex items-start gap-2 rounded border border-line bg-inset px-3 py-2 text-ink-soft">
 				<GitPullRequest size={14} class="mt-0.5 shrink-0 text-accent-ink" />
-				<span
-					>This adds to <a
+				<span>
+					This adds to <a
 						class="text-accent-ink hover:underline"
 						href={openPR.prURL}
 						target="_blank"
-						rel="noopener">PR #{openPR.prNumber}</a
-					>{openPR.title ? `, ${openPR.title}` : ''}. The PR is rebuilt on {lane.base} with what it already
-					carries and these changes.</span
-				>
+						rel="noopener"
+					>
+						PR #{openPR.prNumber}
+					</a>{openPR.title ? `, ${openPR.title}` : ''}. The PR is rebuilt on {lane.base} with what it
+					already carries and these changes.
+				</span>
 			</p>
 		{/if}
 
@@ -236,20 +238,20 @@
 			<p class="text-ink-muted">Nothing staged in {project}.</p>
 		{:else}
 			<label class="block space-y-1.5">
-				<span class="text-xs font-semibold tracking-wide text-ink-muted uppercase"
-					>Pull request title</span
-				>
+				<span class="text-xs font-semibold tracking-wide text-ink-muted uppercase">
+					Pull request title
+				</span>
 				<TextInput
 					bind:value={title}
 					suggest={openPR ? undefined : lane.defaultTitle}
 					placeholder={openPR ? 'Leave empty to title it for everything it carries' : undefined}
 					data-autofocus
 				/>
-				<span class="block text-xs text-ink-muted"
-					>{openPR
+				<span class="block text-xs text-ink-muted">
+					{openPR
 						? `Leave empty and PR #${openPR.prNumber} is retitled for everything it carries.`
-						: 'Written from the changes. Edit freely.'}</span
-				>
+						: 'Written from the changes. Edit freely.'}
+				</span>
 			</label>
 
 			<section class="space-y-2">
@@ -261,17 +263,19 @@
 							<strong class="text-ink">{it.name}</strong>
 							<span class="truncate text-ink-muted">{it.namespace}, {kindName(it)}</span>
 							{#if it.kind !== 'edit'}
-								<span class="rounded-full px-1.5 text-xs {TONE_PILL[draftKindTone(it.kind)]}"
-									>{it.kind}</span
-								>
+								<span class="rounded-full px-1.5 text-xs {TONE_PILL[draftKindTone(it.kind)]}">
+									{it.kind}
+								</span>
 							{/if}
 							<Button
 								class="ml-auto shrink-0"
 								variant="link"
 								size="sm"
 								disabled={unstageOp.busy}
-								onclick={() => unstage(it)}>Unstage all</Button
+								onclick={() => unstage(it)}
 							>
+								Unstage all
+							</Button>
 						</div>
 						<div class="px-3 py-2">
 							<ChangeList changes={it.changes} pills={it.kind === 'edit' && isVM(it)} />
@@ -297,9 +301,9 @@
 									class="mt-0.5 shrink-0 text-warn-ink"
 								/>
 							{:else}<Check size={14} class="mt-0.5 shrink-0 text-ok-ink" />{/if}
-							<span class="text-ink-soft"
-								>{#if e.lead}<strong class="text-ink">{`${e.lead} `}</strong>{/if}{e.text}</span
-							>
+							<span class="text-ink-soft">
+								{#if e.lead}<strong class="text-ink">{`${e.lead} `}</strong>{/if}{e.text}
+							</span>
 						</li>
 					{/each}
 				</ul>
@@ -328,8 +332,10 @@
 							onclick={() => {
 								message = openPR ? '' : (lane.defaultBody ?? '');
 								editingText = true;
-							}}>{openPR ? 'Write new text' : 'Edit text'}</Button
+							}}
 						>
+							{openPR ? 'Write new text' : 'Edit text'}
+						</Button>
 					{/if}
 				</div>
 				{#if editingText}
@@ -352,16 +358,16 @@
 				>
 					<p class="flex items-start gap-2 text-danger-ink">
 						<TriangleAlert size={14} class="mt-0.5 shrink-0" />
-						<span
-							><strong
-								>{refused.status === 503 || refused.next === 'forge-connect'
+						<span>
+							<strong>
+								{refused.status === 503 || refused.next === 'forge-connect'
 									? 'Not proposed yet.'
 									: refused.status === 409
 										? 'Not proposed: this needs a decision first.'
-										: 'Not proposed.'}</strong
-							>
-							{refused.text}</span
-						>
+										: 'Not proposed.'}
+							</strong>
+							{refused.text}
+						</span>
 					</p>
 					{#if refused.pr || refused.status === 503 || refused.next}
 						<div class="flex gap-2 pl-6">
@@ -372,13 +378,15 @@
 									variant="secondary"
 									href={refused.pr.prURL}
 									target="_blank"
-									rel="noopener">Open PR #{refused.pr.prNumber}</Button
+									rel="noopener"
 								>
+									Open PR #{refused.pr.prNumber}
+								</Button>
 							{/if}
 							{#if refused.status === 503}
-								<Button size="sm" variant="secondary" disabled={op.busy} onclick={propose}
-									>Try again</Button
-								>
+								<Button size="sm" variant="secondary" disabled={op.busy} onclick={propose}>
+									Try again
+								</Button>
 							{/if}
 						</div>
 					{/if}
@@ -388,17 +396,18 @@
 	</div>
 
 	{#snippet footer()}
-		<span class="mr-auto max-w-72 text-xs text-ink-muted"
-			>Approval and merge happen in the forge. The tray follows it until it is live.</span
-		>
+		<span class="mr-auto max-w-72 text-xs text-ink-muted">
+			Approval and merge happen in the forge. The tray follows it until it is live.
+		</span>
 		<Button variant="ghost" onclick={onclose}>Keep editing</Button>
 		<div class="flex flex-col items-end gap-1">
 			<Button onclick={propose} disabled={!lane || op.busy || blocked}>
 				{#if openPR}{op.busy ? 'Updating...' : `Add to PR #${openPR.prNumber}`}
 				{:else}{op.busy ? 'Opening...' : 'Open pull request'}{/if}
 			</Button>
-			{#if blocked}<span class="text-xs text-danger-ink">Tick the deletion box to continue</span
-				>{/if}
+			{#if blocked}<span class="text-xs text-danger-ink">
+					Tick the deletion box to continue
+				</span>{/if}
 		</div>
 	{/snippet}
 </Modal>

@@ -66,9 +66,9 @@
 		<span class="flex min-w-0 flex-col text-sm text-ink">
 			<span class="min-w-0 truncate">{@render value()}</span>
 			{#if sub}
-				<span class="flex min-w-0 items-center gap-1.5 text-[13px] leading-[18px] text-ink-faint"
-					>{@render sub()}</span
-				>
+				<span class="flex min-w-0 items-center gap-1.5 text-[13px] leading-[18px] text-ink-faint">
+					{@render sub()}
+				</span>
 			{/if}
 		</span>
 		{#if editor}
@@ -78,8 +78,9 @@
 				onclick={onopen}
 				aria-label="Change {label.toLowerCase()}"
 				class="h-[30px] rounded-md border border-line bg-panel px-3 text-[13px] text-ink hover:border-ink-faint"
-				>Change</button
 			>
+				Change
+			</button>
 		{/if}
 	</div>
 {/if}

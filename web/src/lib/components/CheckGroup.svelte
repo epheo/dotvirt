@@ -31,9 +31,9 @@
 				/>
 				<span class="text-ink-soft">{item.value}</span>
 				{#if item.hint}
-					<span class="rounded bg-inset-strong px-1.5 py-0.5 text-[11px] text-ink-muted"
-						>{item.hint}</span
-					>
+					<span class="rounded bg-inset-strong px-1.5 py-0.5 text-[11px] text-ink-muted">
+						{item.hint}
+					</span>
 				{/if}
 			</label>
 		{:else}

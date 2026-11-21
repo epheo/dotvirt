@@ -132,8 +132,10 @@
 					<Button
 						size="sm"
 						variant="outline"
-						onclick={() => (ui.modal = { kind: 'propose', project: d.project })}>Review</Button
+						onclick={() => (ui.modal = { kind: 'propose', project: d.project })}
 					>
+						Review
+					</Button>
 				</li>
 			{/each}
 			{#each open as p (p.project + p.prNumber)}
@@ -149,9 +151,9 @@
 							{p.title ?? ''}{appr ? `${p.title ? '. ' : ''}${appr.text}.` : ''}
 						</p>
 					</div>
-					<Button size="sm" variant="outline" href={p.prURL} target="_blank" class="gap-1"
-						>Open in forge <ExternalLink size={12} class="inline" /></Button
-					>
+					<Button size="sm" variant="outline" href={p.prURL} target="_blank" class="gap-1">
+						Open in forge <ExternalLink size={12} class="inline" />
+					</Button>
 				</li>
 			{/each}
 			{#each merged as { t, state, busy } (`${t.project}#${t.prNumber}@${t.at}`)}
@@ -166,9 +168,9 @@
 					<div class="min-w-0 flex-1">
 						<p class="truncate text-ink"><strong>PR #{t.prNumber}</strong> {t.title ?? ''}</p>
 						<p class="text-ink-soft">
-							Merged {relativeAge(t.at)}.{#if state}<span class={TONE_TEXT[state.tone]}
-									>{` ${state.text}.`}</span
-								>{/if}
+							Merged {relativeAge(t.at)}.{#if state}<span class={TONE_TEXT[state.tone]}>
+									{` ${state.text}.`}
+								</span>{/if}
 						</p>
 					</div>
 				</li>

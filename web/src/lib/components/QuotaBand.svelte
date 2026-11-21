@@ -50,10 +50,10 @@
 						<div>
 							<div class="flex items-baseline justify-between gap-3 text-xs">
 								<span class="font-mono text-[11px] text-ink-muted">{it.resource}</span>
-								<span class="text-ink-soft"
-									>{fmt(it.unit, it.used)}
-									<span class="text-ink-muted">of {fmt(it.unit, it.hard)}</span></span
-								>
+								<span class="text-ink-soft">
+									{fmt(it.unit, it.used)}
+									<span class="text-ink-muted">of {fmt(it.unit, it.hard)}</span>
+								</span>
 							</div>
 							<div class="mt-0.5 h-1.5 overflow-hidden rounded-full bg-inset-strong">
 								<div

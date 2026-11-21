@@ -65,9 +65,10 @@
 {#if healthy && untracked > 0}
 	<Banner tone="accent">
 		<GitPullRequest size={14} class="shrink-0" />
-		<span class="min-w-0 truncate"
-			><strong>{untracked} {untracked === 1 ? 'object runs' : 'objects run'}</strong> {copy}</span
-		>
+		<span class="min-w-0 truncate">
+			<strong>{untracked} {untracked === 1 ? 'object runs' : 'objects run'}</strong>
+			{copy}
+		</span>
 		<Button variant="link" class="ml-auto shrink-0 font-medium" onclick={adopt} disabled={op.busy}>
 			{op.busy ? 'Capturing…' : 'Adopt into git'}
 		</Button>

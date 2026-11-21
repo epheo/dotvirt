@@ -112,13 +112,12 @@
 				onclick={retryEvacuation}
 				{disabled}
 				title={gate.why || 'Live-migrate the VMs still on this host'}
-				><MoveRight size={16} />Retry evacuation{pending.length
-					? ` (${pending.length})`
-					: ''}</Button
 			>
-			<Button variant="outline" onclick={exitMaintenance} {disabled} title={gate.why}
-				><LogOut size={16} />Exit maintenance</Button
-			>
+				<MoveRight size={16} />Retry evacuation{pending.length ? ` (${pending.length})` : ''}
+			</Button>
+			<Button variant="outline" onclick={exitMaintenance} {disabled} title={gate.why}>
+				<LogOut size={16} />Exit maintenance
+			</Button>
 		{:else if armed}
 			<Button variant="ghost" onclick={() => (armed = false)} disabled={op.busy}>Cancel</Button>
 			<Button onclick={enterMaintenance} {disabled}><Wrench size={16} />Confirm maintenance</Button>
@@ -133,8 +132,9 @@
 				onclick={enterMaintenance}
 				{disabled}
 				title={gate.why || 'Cordon this host and live-migrate every running VM away'}
-				><Wrench size={16} />Enter maintenance</Button
 			>
+				<Wrench size={16} />Enter maintenance
+			</Button>
 		{/if}
 		<StageChip kind="now" />
 	</div>
@@ -160,11 +160,11 @@
 			Holds until you exit it, even if something else uncordons {node}.
 		</Consequence>
 	{:else if info.unschedulable}
-		<Consequence size="sm"
-			>{vmsOff()
+		<Consequence size="sm">
+			{vmsOff()
 				? 'Takes no new workloads; those running here stay.'
-				: 'Takes no new VMs; the VMs running here stay.'}</Consequence
-		>
+				: 'Takes no new VMs; the VMs running here stay.'}
+		</Consequence>
 	{:else}
 		<Consequence size="sm">
 			{vmsOff()

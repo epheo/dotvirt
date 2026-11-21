@@ -246,17 +246,19 @@
 				<div class="relative h-[208px] w-[680px]">
 					<span
 						class="absolute top-0 left-0 text-[11px] font-bold tracking-[.05em] text-ink-muted uppercase"
-						>Way out</span
 					>
+						Way out
+					</span>
 					{#if throughMain}
-						<span class="absolute top-0 left-[64px] text-xs leading-4 text-ink-faint"
-							>through its VMs' main network</span
-						>
+						<span class="absolute top-0 left-[64px] text-xs leading-4 text-ink-faint">
+							through its VMs' main network
+						</span>
 					{/if}
 					<span
 						class="absolute top-0 left-[496px] text-[11px] font-bold tracking-[.05em] text-ink-muted uppercase"
-						>Reaches</span
 					>
+						Reaches
+					</span>
 					<svg
 						class="pointer-events-none absolute inset-0 z-0"
 						width="680"
@@ -295,9 +297,9 @@
 
 					{#if via === 'edge'}
 						{#snippet internet()}
-							<span class="flex items-center gap-1.5 text-[13px] leading-4 font-bold"
-								><Globe size={14} />Internet</span
-							>
+							<span class="flex items-center gap-1.5 text-[13px] leading-4 font-bold">
+								<Globe size={14} />Internet
+							</span>
 						{/snippet}
 						{@render node(
 							'top-[30px] left-0 h-9 w-28 border-2 border-accent bg-select-soft px-[9px] py-[3px]',
@@ -312,14 +314,14 @@
 							edge,
 						)}
 						{#snippet up()}
-							<span class="flex items-center gap-1.5 font-mono text-[13px] leading-4 font-medium"
-								><Plug size={14} />{builtin ? uplinkLabel(builtin) : 'default'}</span
-							>
-							<span class="text-xs leading-4 text-ink-muted"
-								><span class="font-mono">{builtin?.bridge || 'br-ex'}</span>{builtin?.nodeCount
+							<span class="flex items-center gap-1.5 font-mono text-[13px] leading-4 font-medium">
+								<Plug size={14} />{builtin ? uplinkLabel(builtin) : 'default'}
+							</span>
+							<span class="text-xs leading-4 text-ink-muted">
+								<span class="font-mono">{builtin?.bridge || 'br-ex'}</span>{builtin?.nodeCount
 									? `, ${plural(builtin.nodeCount, 'host')}`
-									: ''}</span
-							>
+									: ''}
+							</span>
 						{/snippet}
 						{@render node(
 							'top-[86px] left-[136px] h-16 w-32 border-2 border-accent bg-select-soft px-[9px] py-[3px]',
@@ -335,19 +337,20 @@
 							fabric,
 						)}
 						{#snippet vup()}
-							<span class="flex items-center gap-1.5 font-mono text-[13px] leading-4 font-medium"
-								><Plug size={14} />{net?.uplink}</span
-							>
+							<span class="flex items-center gap-1.5 font-mono text-[13px] leading-4 font-medium">
+								<Plug size={14} />{net?.uplink}
+							</span>
 							<span
 								class="text-xs leading-4 {vlanUplink?.failures?.length
 									? 'text-danger-ink'
 									: 'text-ink-muted'}"
-								>{vlanUplink?.failures?.length
+							>
+								{vlanUplink?.failures?.length
 									? `Fails on ${vlanUplink.failures.map((f) => f.node).join(', ')}`
 									: vlanUplink
 										? `${vlanUplink.bridge}, ${plural(vlanUplink.nodeCount, 'host')}`
-										: ''}</span
-							>
+										: ''}
+							</span>
 						{/snippet}
 						{@render node(
 							`top-[86px] left-[136px] h-16 w-32 border-2 ${vlanUplink?.failures?.length ? 'border-danger/60' : 'border-accent bg-select-soft'} px-[9px] py-[3px]`,
@@ -356,13 +359,12 @@
 					{/if}
 					{#snippet self()}
 						<span class="font-mono text-sm leading-5 font-medium">{name}</span>
-						{#if subnet}<span class="font-mono text-xs leading-4 text-ink-muted">{subnet}</span
-							>{/if}
-						<span class="text-xs leading-4 text-ink-muted"
-							>{fmt(vms.length)} VMs{project && project !== 'platform'
-								? ` in ${project}`
-								: ''}</span
-						>
+						{#if subnet}<span class="font-mono text-xs leading-4 text-ink-muted">
+								{subnet}
+							</span>{/if}
+						<span class="text-xs leading-4 text-ink-muted">
+							{fmt(vms.length)} VMs{project && project !== 'platform' ? ` in ${project}` : ''}
+						</span>
 					{/snippet}
 					{@render node(
 						'top-[74px] left-[288px] h-[88px] w-[156px] border-2 border-accent bg-select px-[9px] py-[3px]',
@@ -386,14 +388,17 @@
 									<a
 										href={r.href}
 										class="truncate font-mono text-[13px] leading-4 font-medium hover:text-accent-ink"
-										>{r.title}</a
 									>
+										{r.title}
+									</a>
 								{:else}
 									<span
 										class="truncate text-[13px] leading-4 {r.tone === 'blocked'
 											? 'font-bold'
-											: 'font-mono font-medium'}">{r.title}</span
+											: 'font-mono font-medium'}"
 									>
+										{r.title}
+									</span>
 								{/if}
 							</div>
 							<span class="line-clamp-2 text-xs leading-4 text-ink-muted">{r.sub}</span>
@@ -409,20 +414,20 @@
 			<div
 				class="-mx-card -mb-4 mt-3 flex flex-wrap gap-x-5 gap-y-1.5 border-t border-line-soft px-card py-2.5 text-xs text-ink-soft"
 			>
-				<span class="inline-flex items-center gap-1.5"
-					><span class="inline-block w-[22px] border-t-[3px] border-accent"></span>Way out</span
-				>
-				<span class="inline-flex items-center gap-1.5"
-					><span class="inline-block w-[22px] border-t-2 border-ok"></span>Allowed by a rule</span
-				>
-				<span class="inline-flex items-center gap-1.5"
-					><span class="inline-block w-[22px] border-t-2 border-dashed border-ink-faint"></span>Some
-					VMs on both</span
-				>
-				<span class="inline-flex items-center gap-1.5"
-					><span class="inline-block w-[22px] border-t-2 border-dotted border-wire"></span>Blocked
-					by a rule</span
-				>
+				<span class="inline-flex items-center gap-1.5">
+					<span class="inline-block w-[22px] border-t-[3px] border-accent"></span>Way out
+				</span>
+				<span class="inline-flex items-center gap-1.5">
+					<span class="inline-block w-[22px] border-t-2 border-ok"></span>Allowed by a rule
+				</span>
+				<span class="inline-flex items-center gap-1.5">
+					<span class="inline-block w-[22px] border-t-2 border-dashed border-ink-faint"></span>Some
+					VMs on both
+				</span>
+				<span class="inline-flex items-center gap-1.5">
+					<span class="inline-block w-[22px] border-t-2 border-dotted border-wire"></span>Blocked by
+					a rule
+				</span>
 			</div>
 		</Card>
 
@@ -448,9 +453,9 @@
 					{#if folded}
 						<p class="text-xs text-ink-faint">
 							{folded}
-							<a href="?tab=rules" class="text-accent-ink underline underline-offset-2"
-								>All on the Rules tab</a
-							>
+							<a href="?tab=rules" class="text-accent-ink underline underline-offset-2">
+								All on the Rules tab
+							</a>
 						</p>
 					{/if}
 				</div>
@@ -482,14 +487,16 @@
 									target="_blank"
 									rel="noreferrer"
 									class="text-accent-ink hover:underline"
-									><span class="font-mono">#{c.prNumber}</span> {c.title}</a
 								>
+									<span class="font-mono">#{c.prNumber}</span>
+									{c.title}
+								</a>
 							{:else}
 								<span>{c.title}</span>
 							{/if}
-							<span class="col-start-2 text-xs leading-4 text-ink-faint"
-								>Merged {mergedWhen(c.when)} by {c.author}</span
-							>
+							<span class="col-start-2 text-xs leading-4 text-ink-faint">
+								Merged {mergedWhen(c.when)} by {c.author}
+							</span>
 						</li>
 					{/each}
 				</ul>
@@ -534,8 +541,10 @@
 							{#each clash.slice(0, 2) as o (networkKey(o))}
 								<a
 									href={networkHref(networkKey(o))}
-									class="ml-1 font-mono text-accent-ink underline underline-offset-2">{o.name}</a
+									class="ml-1 font-mono text-accent-ink underline underline-offset-2"
 								>
+									{o.name}
+								</a>
 							{/each}
 						</div>
 					{:else if clash.length}
@@ -574,18 +583,20 @@
 									size="sm"
 									disabled={!attach.ok}
 									title={attach.why}
-									onclick={() => (attaching = true)}><Plus size={14} />Attach VMs</Button
+									onclick={() => (attaching = true)}
 								>
+									<Plus size={14} />Attach VMs
+								</Button>
 								<StageChip kind="pr" />
 							</div>
-							<Consequence size="sm" tone="info"
-								>Each VM gets a {net.name} NIC at its next restart.</Consequence
-							>
+							<Consequence size="sm" tone="info">
+								Each VM gets a {net.name} NIC at its next restart.
+							</Consequence>
 							{#if !vmsOff()}
 								<p class="pl-[15px] text-xs leading-4 text-ink-muted">
-									Attach as <code class="font-mono break-all text-ink select-all"
-										>{attachRef(net)}</code
-									> in a VM manifest.
+									Attach as <code class="font-mono break-all text-ink select-all">
+										{attachRef(net)}
+									</code> in a VM manifest.
 								</p>
 							{/if}
 						</div>
@@ -595,22 +606,22 @@
 							<div class="flex flex-wrap items-center gap-2">
 								<Button variant="outline" size="sm" disabled>Change subnet</Button>
 							</div>
-							<Consequence size="sm"
-								>A subnet is fixed once created: a new range means a new network.</Consequence
-							>
+							<Consequence size="sm">
+								A subnet is fixed once created: a new range means a new network.
+							</Consequence>
 						</div>
 					{/if}
 					{#if canEditNetwork(net)}
 						<div class="flex flex-col gap-1.5 border-b border-line-soft py-3">
 							<div class="flex flex-wrap items-center gap-2">
-								<Button variant="outline" size="sm" onclick={() => openEdit(networkRef(net))}
-									>Change who can attach</Button
-								>
+								<Button variant="outline" size="sm" onclick={() => openEdit(networkRef(net))}>
+									Change who can attach
+								</Button>
 								<StageChip kind="pr" />
 							</div>
-							<Consequence size="sm" tone="warn"
-								>Projects taken off lose it; their VMs on it fail to start until detached.</Consequence
-							>
+							<Consequence size="sm" tone="warn">
+								Projects taken off lose it; their VMs on it fail to start until detached.
+							</Consequence>
 						</div>
 					{/if}
 					{#if canDeleteNetwork(net)}
@@ -622,8 +633,9 @@
 									disabled={!secondary && vms.length > 0}
 									onclick={() =>
 										secondary ? (deleting = true) : openDelete(networkRef(net), net.sourceFile!)}
-									>Delete</Button
 								>
+									Delete
+								</Button>
 								<StageChip kind="pr" />
 							</div>
 							<Consequence size="sm" tone="danger">
@@ -644,8 +656,10 @@
 										kind: 'newNetwork',
 										like: attachRef(net),
 										from: `${net.name}, where you were`,
-									})}><Plus size={14} />New network like this</Button
+									})}
 							>
+								<Plus size={14} />New network like this
+							</Button>
 							<StageChip kind="pr" />
 						</div>
 						<Consequence size="sm">Same project and size, on the next free range.</Consequence>
@@ -658,26 +672,30 @@
 					{#if canAdoptNetwork(net)}
 						<div class="flex flex-col gap-1.5 py-3">
 							<div class="flex flex-wrap items-center gap-2">
-								<Button variant="outline" size="sm" onclick={() => openAdopt(networkRef(net))}
-									>Adopt into git</Button
-								>
+								<Button variant="outline" size="sm" onclick={() => openAdopt(networkRef(net))}>
+									Adopt into git
+								</Button>
 								<StageChip kind="pr" />
 							</div>
-							<Consequence size="sm" tone="info"
-								>Stages its running manifest in {project}; then it changes here like any other.</Consequence
-							>
+							<Consequence size="sm" tone="info">
+								Stages its running manifest in {project}; then it changes here like any other.
+							</Consequence>
 						</div>
 					{:else if net.sync === 'OutOfSync' && canAuthorNetwork(net)}
 						<div class="flex flex-col gap-1.5 py-3">
 							<div class="flex flex-wrap items-center gap-2">
-								<Button variant="outline" size="sm" onclick={() => openAdopt(networkRef(net), true)}
-									>Adopt live changes</Button
+								<Button
+									variant="outline"
+									size="sm"
+									onclick={() => openAdopt(networkRef(net), true)}
 								>
+									Adopt live changes
+								</Button>
 								<StageChip kind="pr" />
 							</div>
-							<Consequence size="sm" tone="warn"
-								>The cluster differs from git; this brings git up to what runs.</Consequence
-							>
+							<Consequence size="sm" tone="warn">
+								The cluster differs from git; this brings git up to what runs.
+							</Consequence>
 						</div>
 					{/if}
 					{#if !secondary && net.sourceFile && !canEditNetwork(net) && !canDeleteNetwork(net)}
@@ -711,16 +729,20 @@
 						onclick={() => (rank = 'traffic')}
 						class="px-2.5 py-1 {rank === 'traffic'
 							? 'bg-select text-accent-ink'
-							: 'bg-panel text-ink-soft hover:bg-inset'}">Traffic, last hour</button
+							: 'bg-panel text-ink-soft hover:bg-inset'}"
 					>
+						Traffic, last hour
+					</button>
 					<button
 						type="button"
 						aria-pressed={rank === 'started'}
 						onclick={() => (rank = 'started')}
 						class="border-l border-line px-2.5 py-1 {rank === 'started'
 							? 'bg-select text-accent-ink'
-							: 'bg-panel text-ink-soft hover:bg-inset'}">Recently started</button
+							: 'bg-panel text-ink-soft hover:bg-inset'}"
 					>
+						Recently started
+					</button>
 				</div>
 			</div>
 			{#if rank === 'traffic' && trafficRes.failed}
@@ -742,47 +764,51 @@
 						<tr class="border-y border-line-soft text-left text-xs text-ink-faint">
 							<th class="py-2 pl-card font-bold text-ink">VM</th>
 							<th class="py-2 font-bold text-ink">Host</th>
-							<th class="py-2 pr-card text-right font-bold text-ink"
-								>{rank === 'traffic' ? 'Traffic' : 'Started'}</th
-							>
+							<th class="py-2 pr-card text-right font-bold text-ink">
+								{rank === 'traffic' ? 'Traffic' : 'Started'}
+							</th>
 						</tr>
 					</thead>
 					<tbody>
 						{#if rank === 'traffic'}
 							{#each topTraffic as { t, vm } (`${t.namespace}/${t.name}`)}
 								<tr class="border-b border-line-soft last:border-b-0">
-									<td class="py-2 pl-card"
-										><a
+									<td class="py-2 pl-card">
+										<a
 											href={vmHref(t.namespace, t.name)}
-											class="font-mono text-accent-ink hover:underline">{t.name}</a
-										></td
-									>
+											class="font-mono text-accent-ink hover:underline"
+										>
+											{t.name}
+										</a>
+									</td>
 									<td class="py-2 text-ink-soft">{vm?.nodeName ?? '-'}</td>
 									<td class="py-2 pr-card text-right whitespace-nowrap">
-										<span class="mr-2 inline-block h-1.5 w-14 rounded bg-inset-strong align-middle"
-											><span
+										<span class="mr-2 inline-block h-1.5 w-14 rounded bg-inset-strong align-middle">
+											<span
 												class="block h-1.5 rounded bg-glyph"
 												style="width: {(t.bitsPerSecond / maxBits) * 100}%"
-											></span></span
-										>{mbit(t.bitsPerSecond)}
+											></span>
+										</span>{mbit(t.bitsPerSecond)}
 									</td>
 								</tr>
 							{:else}
-								<tr
-									><td colspan="3" class="px-card py-3 text-ink-faint"
-										>No traffic in the last hour.</td
-									></tr
-								>
+								<tr>
+									<td colspan="3" class="px-card py-3 text-ink-faint">
+										No traffic in the last hour.
+									</td>
+								</tr>
 							{/each}
 						{:else}
 							{#each recent as v (`${v.namespace}/${v.name}`)}
 								<tr class="border-b border-line-soft last:border-b-0">
-									<td class="py-2 pl-card"
-										><a
+									<td class="py-2 pl-card">
+										<a
 											href={vmHref(v.namespace, v.name)}
-											class="font-mono text-accent-ink hover:underline">{v.name}</a
-										></td
-									>
+											class="font-mono text-accent-ink hover:underline"
+										>
+											{v.name}
+										</a>
+									</td>
 									<td class="py-2 text-ink-soft">{v.nodeName ?? '-'}</td>
 									<td class="py-2 pr-card text-right text-ink-soft">{relativeAge(v.startedAt)}</td>
 								</tr>

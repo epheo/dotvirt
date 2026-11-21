@@ -111,8 +111,10 @@
 	{lead}
 	{#each list.slice(0, 3) as r, i (r.name)}{i ? ', ' : ' '}<a
 			href={hrefForScope({ kind: 'node', node: r.name })}
-			class="font-mono text-accent-ink underline underline-offset-2">{r.name}</a
-		>{/each}{list.length > 3 ? ` and ${list.length - 3} more` : ''}.
+			class="font-mono text-accent-ink underline underline-offset-2"
+		>
+			{r.name}
+		</a>{/each}{list.length > 3 ? ` and ${list.length - 3} more` : ''}.
 {/snippet}
 
 <div class="flex flex-col gap-4">
@@ -167,9 +169,9 @@
 						<th scope="col" class="{TH} w-0 pl-card">Host</th>
 						<th scope="col" class="{TH} w-0 {vmCols || hasLoad ? '' : 'pr-card'}">State</th>
 						{#if vmCols}
-							<th scope="col" class="{TH} w-0 pr-6 text-right {hasLoad || hasCap ? '' : 'pr-card'}"
-								>VMs</th
-							>
+							<th scope="col" class="{TH} w-0 pr-6 text-right {hasLoad || hasCap ? '' : 'pr-card'}">
+								VMs
+							</th>
 						{/if}
 						{#if hasLoad}
 							<th scope="col" class={TH}>CPU</th>
@@ -179,9 +181,13 @@
 							<th scope="col" class={TH} title="vCPUs committed to VMs vs allocatable">
 								vCPU committed
 							</th>
-							<th scope="col" class="{TH} pr-card" title="Memory committed to guests vs allocatable"
-								>Memory committed</th
+							<th
+								scope="col"
+								class="{TH} pr-card"
+								title="Memory committed to guests vs allocatable"
 							>
+								Memory committed
+							</th>
 						{/if}
 					</tr>
 				</thead>
@@ -191,8 +197,10 @@
 							<td class="{TD} pl-card whitespace-nowrap">
 								<a
 									href={hrefForScope({ kind: 'node', node: r.name })}
-									class="font-mono font-medium text-ink hover:text-accent-ink">{r.name}</a
+									class="font-mono font-medium text-ink hover:text-accent-ink"
 								>
+									{r.name}
+								</a>
 							</td>
 							<td class="{TD} whitespace-nowrap {vmCols || hasLoad ? '' : 'pr-card'}">
 								{#if r.state}
@@ -208,8 +216,10 @@
 								<td
 									class="{TD} pr-6 text-right whitespace-nowrap text-ink-soft {hasLoad || hasCap
 										? ''
-										: 'pr-card'}">{r.vms.toLocaleString('en-US')}</td
+										: 'pr-card'}"
 								>
+									{r.vms.toLocaleString('en-US')}
+								</td>
 							{/if}
 							{#if hasLoad}
 								<td class={TD}>
@@ -223,8 +233,10 @@
 										<span
 											class="text-xs {r.memPct > 90
 												? 'font-medium text-warn-ink'
-												: 'text-ink-muted'}">{Math.round(r.memPct)}%</span
+												: 'text-ink-muted'}"
 										>
+											{Math.round(r.memPct)}%
+										</span>
 										{@render bar(
 											r.memPct / 100,
 											r.memPct > 90 ? 'var(--color-warn)' : 'var(--chart-2)',
@@ -237,9 +249,9 @@
 									{#if r.vcpu}
 										{@const rc = ratio(r.vcpu)}
 										<div class="flex max-w-56 items-baseline justify-between text-xs">
-											<span class="text-ink-muted"
-												>{cores(r.vcpu.used)} of {cores(r.vcpu.total)}</span
-											>
+											<span class="text-ink-muted">
+												{cores(r.vcpu.used)} of {cores(r.vcpu.total)}
+											</span>
 											<span class="text-ink-muted">{rc.toFixed(1)}:1</span>
 										</div>
 										{@render bar(rc, 'var(--chart-1)')}
@@ -249,11 +261,12 @@
 									{#if r.mem}
 										{@const rm = ratio(r.mem)}
 										<div class="flex max-w-56 items-baseline justify-between text-xs">
-											<span class="text-ink-muted">{bytes(r.mem.used)} of {bytes(r.mem.total)}</span
-											>
-											<span class={rm > 1 ? 'font-medium text-warn-ink' : 'text-ink-muted'}
-												>{rm.toFixed(1)}:1</span
-											>
+											<span class="text-ink-muted">
+												{bytes(r.mem.used)} of {bytes(r.mem.total)}
+											</span>
+											<span class={rm > 1 ? 'font-medium text-warn-ink' : 'text-ink-muted'}>
+												{rm.toFixed(1)}:1
+											</span>
 										</div>
 										{@render bar(rm, rm > 1 ? 'var(--color-warn)' : 'var(--chart-2)')}
 									{/if}

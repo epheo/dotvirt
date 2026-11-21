@@ -96,12 +96,14 @@
 					<th
 						scope="col"
 						class="{TH} text-right"
-						title="Unallocated capacity the storage driver reports">Free</th
+						title="Unallocated capacity the storage driver reports"
 					>
+						Free
+					</th>
 					{#if vmTerms}
-						<th scope="col" class="{TH} text-right" title="Capacity VM disks request on this class"
-							>VM disks hold</th
-						>
+						<th scope="col" class="{TH} text-right" title="Capacity VM disks request on this class">
+							VM disks hold
+						</th>
 						<th scope="col" class="{TH} text-right">Disks</th>
 						<th scope="col" class="{TH} text-right">VMs</th>
 						<th scope="col" class={TH}>Live migration</th>
@@ -109,8 +111,10 @@
 						<th
 							scope="col"
 							class={TH}
-							title="Whether a volume here can attach to many hosts at once">Access</th
+							title="Whether a volume here can attach to many hosts at once"
 						>
+							Access
+						</th>
 					{/if}
 					<th scope="col" class={TH}>Snapshots</th>
 					<th scope="col" class="{TH} pr-card">Provisioner</th>
@@ -122,22 +126,20 @@
 						<td class="{TD} pl-card">
 							<a
 								href={hrefForScope({ kind: 'storage', storageClass: c.name })}
-								class="font-mono text-xs font-medium text-accent-ink hover:underline">{c.name}</a
+								class="font-mono text-xs font-medium text-accent-ink hover:underline"
 							>
+								{c.name}
+							</a>
 							{#if c.state}
-								<span class="ml-1.5"
-									><StatusPill
-										tone={c.state.tone}
-										label={c.state.label}
-										title={c.state.title}
-									/></span
-								>
+								<span class="ml-1.5">
+									<StatusPill tone={c.state.tone} label={c.state.label} title={c.state.title} />
+								</span>
 							{/if}
 						</td>
 						<td class={TD}>{c.info ? classTag(c.info) || '-' : '-'}</td>
-						<td class="{TD} text-right"
-							>{c.info?.free != null ? size(c.info.free) : 'Not reported'}</td
-						>
+						<td class="{TD} text-right">
+							{c.info?.free != null ? size(c.info.free) : 'Not reported'}
+						</td>
 						{#if vmTerms}
 							<td class="{TD} text-right">{c.disks ? size(c.held) : '-'}</td>
 							<td class="{TD} text-right">{num(c.disks)}</td>
@@ -152,8 +154,9 @@
 								<span
 									class="text-warn-ink"
 									title="Disks here attach to one host: their VMs cannot live-migrate"
-									>Not possible</span
 								>
+									Not possible
+								</span>
 							{:else}
 								<span class="text-ink-soft">One host at a time</span>
 							{/if}
@@ -163,12 +166,14 @@
 							{:else if c.info.snapshotClass}Yes
 							{:else}<span
 									class="text-ink-faint"
-									title="No VolumeSnapshotClass for this provisioner">No</span
-								>{/if}
+									title="No VolumeSnapshotClass for this provisioner"
+								>
+									No
+								</span>{/if}
 						</td>
-						<td class="{TD} pr-card font-mono text-xs text-ink-muted"
-							>{c.info?.provisioner ?? '-'}</td
-						>
+						<td class="{TD} pr-card font-mono text-xs text-ink-muted">
+							{c.info?.provisioner ?? '-'}
+						</td>
 					</tr>
 				{:else}
 					<tr>

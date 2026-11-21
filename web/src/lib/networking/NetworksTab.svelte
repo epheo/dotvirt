@@ -93,11 +93,13 @@
 				k.id
 					? 'border-accent bg-select-soft font-medium text-accent-ink'
 					: 'border-line bg-panel text-ink hover:border-ink-faint'}"
-				>{k.label}<span
-					class={k.id === 'problems' && n ? 'font-bold text-danger-ink' : 'text-ink-faint'}
-					>{n}</span
-				></button
 			>
+				{k.label}<span
+					class={k.id === 'problems' && n ? 'font-bold text-danger-ink' : 'text-ink-faint'}
+				>
+					{n}
+				</span>
+			</button>
 		{/each}
 		{#if project}
 			<span class="text-[13px] text-ink-faint">in {project}</span>
@@ -134,21 +136,23 @@
 				<tbody>
 					{#each pageRows as r (r.key)}
 						<tr class="border-b border-line-soft last:border-b-0 hover:bg-select-soft">
-							<td class="py-2 pl-card"
-								><a
+							<td class="py-2 pl-card">
+								<a
 									href={networkHref(r.key)}
-									class="font-mono font-medium text-accent-ink hover:underline">{r.n.name}</a
-								></td
-							>
+									class="font-mono font-medium text-accent-ink hover:underline"
+								>
+									{r.n.name}
+								</a>
+							</td>
 							<td class="py-2 text-ink-soft">{networkKind(r.n)}</td>
 							<td class="py-2 text-ink-soft">{ownerText(r)}</td>
 							<td class="py-2 font-mono text-xs text-ink-soft">{r.n.subnets?.join(', ') || '-'}</td>
 							<td class="py-2 text-right tabular-nums">{r.vms.toLocaleString('en-US')}</td>
-							<td class="py-2 pl-6 text-ink-soft"
-								>{r.n.kind === 'vlan'
+							<td class="py-2 pl-6 text-ink-soft">
+								{r.n.kind === 'vlan'
 									? `${r.n.uplink ?? '-'}${r.n.vlan ? `, VLAN ${r.n.vlan}` : ''}`
-									: 'default'}</td
-							>
+									: 'default'}
+							</td>
 							<td class="py-2 pr-card">
 								{#if r.cut.length}
 									<span class="text-danger-ink">Cut off on {r.cut.join(', ')}</span>

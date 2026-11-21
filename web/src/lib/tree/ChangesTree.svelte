@@ -115,14 +115,20 @@
 	{#if staged > 0}
 		<span
 			class="inline-flex items-center gap-0.5 rounded bg-accent-soft px-1 text-[10px] font-medium text-accent-ink"
-			title="{staged} staged"><Pencil size={10} /> {staged}</span
+			title="{staged} staged"
 		>
+			<Pencil size={10} />
+			{staged}
+		</span>
 	{/if}
 	{#if prs > 0}
 		<span
 			class="inline-flex items-center gap-0.5 rounded bg-side-active px-1 text-[10px] font-medium text-side-ink"
-			title="{prs} open pull request{prs === 1 ? '' : 's'}"><GitPullRequest size={10} /> {prs}</span
+			title="{prs} open pull request{prs === 1 ? '' : 's'}"
 		>
+			<GitPullRequest size={10} />
+			{prs}
+		</span>
 	{/if}
 {/snippet}
 
@@ -170,8 +176,10 @@
 							project: p.name,
 							namespace: ns.namespace,
 						})}?tab=vms"
-						indent={3}>{fmt(leaves.more)} more VMs</RailMore
+						indent={3}
 					>
+						{fmt(leaves.more)} more VMs
+					</RailMore>
 				{/if}
 			{/if}
 		{/each}

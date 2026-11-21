@@ -233,31 +233,32 @@
 			<span class="flex items-center gap-1.5 text-[13px] text-ink-soft">
 				<span class="size-2 shrink-0 rounded-full {TONE_DOT[phaseTone(vm.phase, vm.paused)]}"
 				></span>
-				<span
-					>{`${runState}${vm.nodeName ? ' on ' : ''}`}{#if vm.nodeName}<HostLink
+				<span>
+					{`${runState}${vm.nodeName ? ' on ' : ''}`}{#if vm.nodeName}<HostLink
 							node={vm.nodeName}
 							class="text-accent-ink underline decoration-line-strong underline-offset-2 hover:decoration-current"
-						/>{/if}{uptime ? `, up ${uptime}` : ''}</span
-				>
+						/>{/if}{uptime ? `, up ${uptime}` : ''}
+				</span>
 			</span>
 			<span class="ml-auto flex flex-wrap items-center gap-2">
 				{#if vm.sync !== 'Synced' && !driftChanges?.length}
 					<SyncBadge sync={vm.sync} error={vm.syncError} />
 				{/if}
 				{#if driftChanges?.length}
-					<span class="rounded-full px-2 py-0.5 text-xs {TONE_PILL.warn}"
-						>Live differs from git in {driftChanges.length} field{driftChanges.length === 1
+					<span class="rounded-full px-2 py-0.5 text-xs {TONE_PILL.warn}">
+						Live differs from git in {driftChanges.length} field{driftChanges.length === 1
 							? ''
-							: 's'}</span
-					>
+							: 's'}
+					</span>
 				{/if}
 				{#if stagedItem}
 					<button
 						class="flex items-center gap-1 rounded-full px-2 py-0.5 text-xs hover:underline {TONE_PILL.info}"
 						onclick={() =>
 							(ui.modal = { kind: 'propose', project: inventory.projectOf(vm.namespace) })}
-						><Pencil size={11} />{stagedItem.changes.length || 1} staged, not proposed</button
 					>
+						<Pencil size={11} />{stagedItem.changes.length || 1} staged, not proposed
+					</button>
 				{/if}
 			</span>
 		</div>
@@ -283,9 +284,9 @@
 			</div>
 			<span class="mb-1 h-6 w-px bg-line"></span>
 			<div role="group" aria-label="Goes through a pull request" class="flex flex-col gap-1">
-				<span class="px-1 text-[11px] tracking-wide text-ink-muted uppercase"
-					>Goes through a pull request</span
-				>
+				<span class="px-1 text-[11px] tracking-wide text-ink-muted uppercase">
+					Goes through a pull request
+				</span>
 				<div class="flex flex-wrap items-center gap-1.5">
 					<button
 						onclick={stagePower}

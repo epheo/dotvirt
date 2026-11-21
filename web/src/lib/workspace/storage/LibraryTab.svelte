@@ -153,24 +153,26 @@
 				<a
 					class="text-accent-ink hover:underline"
 					href={storageHref('disks', { f: 'nosnap', ...filter, project: p })}
-					>{num(without)} without, {Math.round(staleShare(u) * 100)}% of them</a
 				>
+					{num(without)} without, {Math.round(staleShare(u) * 100)}% of them
+				</a>
 			</span>
 		{:else}
 			<a
 				class="mt-1.5 block text-xs leading-4 text-accent-ink hover:underline"
 				href={storageHref('disks', { f: 'nosnap', ...filter, project: p })}
-				>{num(without)} without</a
 			>
+				{num(without)} without
+			</a>
 		{/if}
 	{/if}
 {/snippet}
 
 {#snippet where(u: DiskCounts)}
 	<LocalSharedBar local={u.local} shared={u.shared} total={u.disks} />
-	<span class="mt-1.5 block text-xs leading-4 text-ink-muted"
-		>{num(u.local)} local, {num(u.shared)} shared</span
-	>
+	<span class="mt-1.5 block text-xs leading-4 text-ink-muted">
+		{num(u.local)} local, {num(u.shared)} shared
+	</span>
 {/snippet}
 
 <section
@@ -343,14 +345,18 @@
 										: u.catalog.ready
 											? ''
 											: 'The image is not ready yet'}
-									onclick={() => createVM(u.image)}>Create VM</Button
+									onclick={() => createVM(u.image)}
 								>
+									Create VM
+								</Button>
 								<Button
 									variant="secondary"
 									size="sm"
 									aria-label="Open {name}"
-									href={storageHref('images', { image: u.image, project: p })}>Open</Button
+									href={storageHref('images', { image: u.image, project: p })}
 								>
+									Open
+								</Button>
 							</div>
 						</td>
 					</tr>
@@ -374,9 +380,9 @@
 									<Layers size={16} class="shrink-0 text-ink-faint" />
 									<div>
 										<span>{label}</span>
-										<span class="block text-xs leading-4 text-ink-faint"
-											>Sorted by use on the Images tab</span
-										>
+										<span class="block text-xs leading-4 text-ink-faint">
+											Sorted by use on the Images tab
+										</span>
 									</div>
 								</div>
 							</td>
@@ -388,9 +394,9 @@
 						{/if}
 						<td class="border-b border-line-soft p-3">
 							<div class="flex justify-end">
-								<Button variant="secondary" size="sm" href={storageHref('images', { project: p })}
-									>Show all {num(more.count)}</Button
-								>
+								<Button variant="secondary" size="sm" href={storageHref('images', { project: p })}>
+									Show all {num(more.count)}
+								</Button>
 							</div>
 						</td>
 					</tr>
@@ -426,8 +432,10 @@
 									variant="secondary"
 									size="sm"
 									aria-label="Show disks imported from a registry or URL"
-									href={storageHref('disks', { source: ANY_SOURCE, project: p })}>Show disks</Button
+									href={storageHref('disks', { source: ANY_SOURCE, project: p })}
 								>
+									Show disks
+								</Button>
 							</div>
 						</td>
 					</tr>
@@ -442,9 +450,9 @@
 							</td>
 							<td class="border-b border-line-soft px-3 pb-3">
 								<div class="flex justify-end">
-									<Button variant="outline" size="sm" onclick={() => makeBootImage(offer)}
-										>Make it a boot image</Button
-									>
+									<Button variant="outline" size="sm" onclick={() => makeBootImage(offer)}>
+										Make it a boot image
+									</Button>
 								</div>
 							</td>
 						</tr>
@@ -533,18 +541,20 @@
 			<div class="min-w-0 flex-[1_1_240px] text-sm">
 				{#if asImage || !ability}
 					<strong>Add a boot image.</strong>
-					<span class="text-ink-faint"
-						>Drop a qcow2, raw or iso file here{#if ability?.import}, or <button
+					<span class="text-ink-faint">
+						Drop a qcow2, raw or iso file here{#if ability?.import}, or <button
 								class="text-accent-ink underline underline-offset-2 hover:text-accent-deep"
-								onclick={fromSource}>add one from a URL or registry</button
-							>{/if}.</span
-					>
+								onclick={fromSource}
+							>
+								add one from a URL or registry
+							</button>{/if}.
+					</span>
 				{:else}
 					<strong>Upload a disk image.</strong>
-					<span class="text-ink-faint"
-						>Drop a qcow2, raw or iso file here. It lands as a disk: your account cannot add boot
-						images.</span
-					>
+					<span class="text-ink-faint">
+						Drop a qcow2, raw or iso file here. It lands as a disk: your account cannot add boot
+						images.
+					</span>
 				{/if}
 			</div>
 			<Button
@@ -552,8 +562,10 @@
 				size="sm"
 				disabled={!ability}
 				title={ability ? '' : 'Checking where you may upload'}
-				onclick={() => upload()}>Choose file</Button
+				onclick={() => upload()}
 			>
+				Choose file
+			</Button>
 			<StageChip kind="now" />
 			<span class="text-xs text-ink-faint">Streams to the cluster. No pull request.</span>
 		</div>
@@ -561,9 +573,9 @@
 
 	<div class="flex flex-wrap items-center gap-2 px-card py-3.5 text-xs leading-4 text-ink-faint">
 		<StageChip kind="pr" />
-		<span
-			>Create VM opens the create sheet with the image picked. Staging it opens a pull request in
-			the chosen project.</span
-		>
+		<span>
+			Create VM opens the create sheet with the image picked. Staging it opens a pull request in the
+			chosen project.
+		</span>
 	</div>
 </Card>

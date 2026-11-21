@@ -116,8 +116,10 @@
 				onclick={dismiss}
 				aria-label="Close"
 				disabled={!dismissable}
-				class="text-ink-faint hover:text-ink-soft disabled:opacity-40"><X size={18} /></button
+				class="text-ink-faint hover:text-ink-soft disabled:opacity-40"
 			>
+				<X size={18} />
+			</button>
 		</header>
 		{@render children()}
 		{#if footer}

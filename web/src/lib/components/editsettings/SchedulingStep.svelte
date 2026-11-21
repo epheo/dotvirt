@@ -155,9 +155,9 @@
 			<SelectInput bind:value={form.evictionStrategy}>
 				<option value="">Cluster default</option>
 				<option value="LiveMigrate">LiveMigrate — evictions live-migrate the VM</option>
-				<option value="LiveMigrateIfPossible"
-					>LiveMigrateIfPossible — migrate when possible, else restart</option
-				>
+				<option value="LiveMigrateIfPossible">
+					LiveMigrateIfPossible — migrate when possible, else restart
+				</option>
 				<option value="None">None — pinned (blocks node drains)</option>
 			</SelectInput>
 		</FormField>

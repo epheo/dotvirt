@@ -35,9 +35,9 @@
 	{#snippet icon()}
 		<PowerDot power={vm.power} paused={vm.paused} />
 	{/snippet}
-	<span class="truncate {sc?.kind === 'delete' ? 'text-side-dim line-through' : 'text-side-ink'}"
-		>{vm.name}</span
-	>
+	<span class="truncate {sc?.kind === 'delete' ? 'text-side-dim line-through' : 'text-side-ink'}">
+		{vm.name}
+	</span>
 	{#snippet trailing()}
 		{#if sc}
 			<!-- Not draftKindTone: a staged create (adoption) reads info here, not ok. -->

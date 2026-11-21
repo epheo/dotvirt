@@ -119,9 +119,9 @@
 						<td class="py-2 pr-3 font-medium text-ink">
 							{s.name}
 							{#if s.indications?.includes('Online')}
-								<span class="ml-1 rounded bg-inset-strong px-1 text-[10px] text-ink-muted"
-									>online</span
-								>
+								<span class="ml-1 rounded bg-inset-strong px-1 text-[10px] text-ink-muted">
+									online
+								</span>
 							{/if}
 						</td>
 						<td class="py-2 pr-3 whitespace-nowrap text-ink-muted">{relativeAge(s.created)}</td>
@@ -158,8 +158,9 @@
 									<button
 										onclick={() => restore(s.name)}
 										class="mr-2 rounded bg-warn px-1.5 py-0.5 text-[11px] font-medium text-warn-on"
-										>Yes, restore</button
 									>
+										Yes, restore
+									</button>
 								{/if}
 								<button
 									onclick={() => (armedDelete = armedDelete === s.name ? null : s.name)}
@@ -174,8 +175,9 @@
 									<button
 										onclick={() => remove(s.name)}
 										class="ml-2 rounded bg-danger px-1.5 py-0.5 text-[11px] font-medium text-danger-on"
-										>Yes, delete</button
 									>
+										Yes, delete
+									</button>
 								{/if}
 							{/if}
 						</td>

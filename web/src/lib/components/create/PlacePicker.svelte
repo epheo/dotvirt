@@ -93,9 +93,9 @@
 		class="{FIELD} flex items-center justify-between gap-2 text-left"
 	>
 		<span class="min-w-0 truncate font-mono font-medium">
-			{#if current}{label(current)}{:else}<span class="font-sans font-normal text-ink-faint"
-					>Pick a place</span
-				>{/if}
+			{#if current}{label(current)}{:else}<span class="font-sans font-normal text-ink-faint">
+					Pick a place
+				</span>{/if}
 		</span>
 		<ChevronDown size={16} class="shrink-0 text-ink-muted" />
 	</button>
@@ -134,8 +134,9 @@
 						onpointerenter={() => (active = i)}
 					>
 						{label(p)}
-						{#if p.project === first}<span class="font-sans text-xs text-ink-faint">yours</span
-							>{/if}
+						{#if p.project === first}<span class="font-sans text-xs text-ink-faint">
+								yours
+							</span>{/if}
 					</li>
 				{:else}
 					<li class="px-3 py-1.5 text-[13px] text-ink-faint">Nothing matches.</li>

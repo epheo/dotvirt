@@ -107,29 +107,36 @@
 						<button
 							type="button"
 							class="text-accent-ink hover:underline"
-							onclick={() => openEdit(policyRef(p))}>Edit</button
+							onclick={() => openEdit(policyRef(p))}
 						>
+							Edit
+						</button>
 					{/if}
 					<button
 						type="button"
 						class="text-accent-ink hover:underline"
 						onclick={() => (history[k] = !history[k])}
-						>{history[k] ? 'Hide history' : 'History'}</button
 					>
+						{history[k] ? 'Hide history' : 'History'}
+					</button>
 					{#if canDeletePolicy(p)}
 						<button
 							type="button"
 							class="text-danger-ink hover:underline"
-							onclick={() => openDelete(policyRef(p), p.sourceFile!)}>Delete</button
+							onclick={() => openDelete(policyRef(p), p.sourceFile!)}
 						>
+							Delete
+						</button>
 					{/if}
 				{:else if canAdoptPolicy(p)}
 					<span class="text-ink-faint">Not in git.</span>
 					<button
 						type="button"
 						class="text-accent-ink hover:underline"
-						onclick={() => openAdopt(policyRef(p))}>Adopt into git</button
+						onclick={() => openAdopt(policyRef(p))}
 					>
+						Adopt into git
+					</button>
 				{:else}
 					<span class="text-ink-faint">Not in git</span>
 				{/if}
@@ -150,10 +157,9 @@
 							/>
 						{:else}<ArrowUpRight size={16} class="text-ink-faint" />{/if}
 					</span>
-					<span
-						>{r.text ??
-							`${r.action} ${r.direction.toLowerCase()} ${r.peer ?? ''} ${r.ports ?? ''}`}</span
-					>
+					<span>
+						{r.text ?? `${r.action} ${r.direction.toLowerCase()} ${r.peer ?? ''} ${r.ports ?? ''}`}
+					</span>
 				</li>
 			{/each}
 			{#if p.isolation}
@@ -211,18 +217,18 @@
 			/>
 		</label>
 		<span class="ml-auto flex flex-wrap gap-2">
-			<Button variant="outline" onclick={() => (ui.modal = { kind: 'trace' })}
-				><Activity size={16} />Check connectivity</Button
-			>
+			<Button variant="outline" onclick={() => (ui.modal = { kind: 'trace' })}>
+				<Activity size={16} />Check connectivity
+			</Button>
 		</span>
 	</div>
 
 	<Card title="Cluster rules" meta="Met first, lowest priority first" flush>
 		{#snippet actions()}
 			{#if canClusterRules}
-				<Button variant="secondary" size="sm" onclick={() => (ui.modal = { kind: 'adminFw' })}
-					><Plus size={14} />New cluster rule</Button
-				>
+				<Button variant="secondary" size="sm" onclick={() => (ui.modal = { kind: 'adminFw' })}>
+					<Plus size={14} />New cluster rule
+				</Button>
 			{/if}
 		{/snippet}
 		{#if cluster.length}
@@ -241,14 +247,16 @@
 					variant="secondary"
 					size="sm"
 					onclick={() => (ui.modal = { kind: 'projectRule', namespaces: inventory.namespaces })}
-					><Plus size={14} />New project rule</Button
 				>
+					<Plus size={14} />New project rule
+				</Button>
 				<Button
 					variant="secondary"
 					size="sm"
 					onclick={() => (ui.modal = { kind: 'egressFw', namespaces: inventory.namespaces })}
-					><Plus size={14} />New outbound rule</Button
 				>
+					<Plus size={14} />New outbound rule
+				</Button>
 			{/if}
 		{/snippet}
 		{#if project.length}
@@ -269,9 +277,9 @@
 	<Card title="Leaving the cluster" meta="Fixed outbound IPs and external routes" flush>
 		{#snippet actions()}
 			{#if canEdge}
-				<Button variant="secondary" size="sm" onclick={() => (ui.modal = { kind: 'clusterEdge' })}
-					><Plus size={14} />New fixed outbound IP or route</Button
-				>
+				<Button variant="secondary" size="sm" onclick={() => (ui.modal = { kind: 'clusterEdge' })}>
+					<Plus size={14} />New fixed outbound IP or route
+				</Button>
 			{/if}
 		{/snippet}
 		{#if egress.length}

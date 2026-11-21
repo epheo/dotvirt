@@ -430,8 +430,10 @@
 				size="sm"
 				disabled={removal.busy || !delGate.ok}
 				title={delGate.why || undefined}
-				onclick={remove}>{armed ? 'Confirm delete' : 'Delete it'}</Button
+				onclick={remove}
 			>
+				{armed ? 'Confirm delete' : 'Delete it'}
+			</Button>
 			<StageChip kind="now" />
 		</div>
 		{#if !delGate.ok}<p class="text-xs leading-4 text-ink-faint">{delGate.why}</p>{/if}
@@ -507,9 +509,9 @@
 
 			{#if downloads}
 				<div class="flex flex-col gap-1.5">
-					<label class={LABEL} for="img-address"
-						>{source === 'url' ? 'URL' : 'Image reference'}</label
-					>
+					<label class={LABEL} for="img-address">
+						{source === 'url' ? 'URL' : 'Image reference'}
+					</label>
 					<input
 						id="img-address"
 						class="{FIELD} font-mono"
@@ -522,15 +524,15 @@
 						spellcheck="false"
 						data-autofocus
 					/>
-					<span class={HELP}
-						>The cluster pulls it itself, so it must be reachable from the cluster without
-						credentials.{source === 'registry' ? ' docker:// is optional.' : ''}</span
-					>
+					<span class={HELP}>
+						The cluster pulls it itself, so it must be reachable from the cluster without
+						credentials.{source === 'registry' ? ' docker:// is optional.' : ''}
+					</span>
 					{#if given?.redacted && address.trim() === given.source}
-						<span class="{HELP} text-warn-ink!"
-							>The disks' address carried a query string or credentials, left out here. Paste the
-							full address if the server needs it.</span
-						>
+						<span class="{HELP} text-warn-ink!">
+							The disks' address carried a query string or credentials, left out here. Paste the
+							full address if the server needs it.
+						</span>
 					{/if}
 				</div>
 			{:else}
@@ -552,9 +554,9 @@
 					<Upload size={20} class="text-accent-ink" />
 					{#if file}
 						<span class="font-mono text-sm font-medium text-ink">{file.name}</span>
-						<span class="text-xs text-ink-muted"
-							>{(file.size / 1024 ** 2).toFixed(1)} MiB. Drop another to replace it.</span
-						>
+						<span class="text-xs text-ink-muted">
+							{(file.size / 1024 ** 2).toFixed(1)} MiB. Drop another to replace it.
+						</span>
 					{:else}
 						<span class="text-sm font-medium text-ink">Drop a disk image here, or pick a file</span>
 						<span class="text-xs text-ink-muted">qcow2, raw, iso, or compressed</span>
@@ -578,8 +580,10 @@
 							href="{proxyBlocked}/healthz"
 							target="_blank"
 							rel="noopener noreferrer"
-							class="font-mono break-all underline">{proxyBlocked}/healthz</a
+							class="font-mono break-all underline"
 						>
+							{proxyBlocked}/healthz
+						</a>
 						in a new tab and accept its certificate. Once it reads OK, come back and upload.
 					</p>
 				{/if}
@@ -605,22 +609,22 @@
 				<div class="flex min-w-0 flex-col gap-1.5">
 					<label class={LABEL} for="img-where">Project and namespace</label>
 					<PlacePicker id="img-where" bind:value={namespace} namespaces={places} first={opener} />
-					<span class={HELP}
-						>Where the disk lives. Search {plural(
+					<span class={HELP}>
+						Where the disk lives. Search {plural(
 							new Set(places.map((n) => inventory.projectOf(n))).size,
 							'project',
-						)}.</span
-					>
+						)}.
+					</span>
 				</div>
 			</div>
 			<div class="flex flex-col gap-1.5">
 				<label class={LABEL} for="img-size">Disk size</label>
 				<input id="img-size" class="{FIELD} w-32! font-mono" bind:value={size} />
-				<span class={HELP}
-					>At least the image's virtual size.{given?.size && size === given.size
+				<span class={HELP}>
+					At least the image's virtual size.{given?.size && size === given.size
 						? ' What its disks asked for.'
-						: ''}</span
-				>
+						: ''}
+				</span>
 			</div>
 			<ClassPick
 				label="Storage class"
@@ -646,8 +650,9 @@
 								: active
 									? 'bg-accent text-accent-on'
 									: 'bg-inset-strong text-ink-faint'}"
-							>{#if complete}<Check size={12} />{:else}{s.at + 1}{/if}</span
 						>
+							{#if complete}<Check size={12} />{:else}{s.at + 1}{/if}
+						</span>
 						<span class={active || complete ? 'text-ink' : 'text-ink-faint'}>{s.label()}</span>
 					</li>
 					{#if active && phase === 'uploading'}
@@ -657,14 +662,14 @@
 					{/if}
 					{#if active && importError}
 						<div class="ml-7 flex flex-col gap-1.5">
-							<Consequence tone="danger"
-								>The cluster cannot {downloads ? 'download' : 'import'} it: {importError}</Consequence
-							>
-							<Consequence tone="info"
-								>It retries on its own.{downloads
+							<Consequence tone="danger">
+								The cluster cannot {downloads ? 'download' : 'import'} it: {importError}
+							</Consequence>
+							<Consequence tone="info">
+								It retries on its own.{downloads
 									? ' If the address is wrong, delete it and add it again.'
-									: ''}</Consequence
-							>
+									: ''}
+							</Consequence>
 							{#if leftover}
 								<div class="mt-1.5">{@render deleteIt()}</div>
 							{/if}
@@ -701,17 +706,17 @@
 				: 'Uploads now, straight from your browser to the cluster. No pull request: an image is a disk, not config.'}
 		>
 			{#snippet consequences()}
-				<Consequence tone="info"
-					>A disk named {name || (downloads ? 'after the source' : 'after the file')} in {namespace ||
-						'that namespace'}, ready once {downloads ? 'downloaded' : 'imported'}.</Consequence
-				>
+				<Consequence tone="info">
+					A disk named {name || (downloads ? 'after the source' : 'after the file')} in {namespace ||
+						'that namespace'}, ready once {downloads ? 'downloaded' : 'imported'}.
+				</Consequence>
 				{#if asBoot}
 					<Consequence tone="ok">New VM lists it as a boot image.</Consequence>
 				{/if}
 				{#if info}
-					<Consequence tone={liveMigrates(info) ? 'ok' : 'warn'}
-						>{liveMigrates(info) ? 'Any host can read it.' : 'It stays on one host.'}</Consequence
-					>
+					<Consequence tone={liveMigrates(info) ? 'ok' : 'warn'}>
+						{liveMigrates(info) ? 'Any host can read it.' : 'It stays on one host.'}
+					</Consequence>
 				{/if}
 				{#if downloads}
 					<Consequence>No pull request: an image is a disk, not config.</Consequence>
@@ -725,29 +730,30 @@
 
 	{#snippet footer()}
 		{#if phase === 'done'}
-			<span class="flex-1 text-ink-muted"
-				>{still
+			<span class="flex-1 text-ink-muted">
+				{still
 					? 'Downloading in the cluster.'
 					: downloads
 						? 'Downloaded.'
-						: 'Uploaded and imported.'}</span
-			>
+						: 'Uploaded and imported.'}
+			</span>
 			{#if image && !still}
 				<Button variant="secondary" class="h-9! px-3!" onclick={onclose}>Done</Button>
 				<Button
 					class="h-9! px-4!"
 					onclick={() => (ui.modal = { kind: 'newVM', namespaces: null, namespace, image })}
-					>New VM from it</Button
 				>
+					New VM from it
+				</Button>
 			{:else}
 				<Button class="h-9! px-4!" onclick={onclose}>Done</Button>
 			{/if}
 		{:else if running && downloads}
-			<span class="flex-1 text-ink-muted"
-				>{importError
+			<span class="flex-1 text-ink-muted">
+				{importError
 					? 'The cluster retries it on its own. You can close this.'
-					: 'The cluster is downloading it. You can close this.'}</span
-			>
+					: 'The cluster is downloading it. You can close this.'}
+			</span>
 			<Button variant="secondary" class="h-9! px-3!" onclick={onclose}>Close</Button>
 		{:else if running}
 			<span class="flex-1 text-ink-muted">Working. Keep this tab open.</span>

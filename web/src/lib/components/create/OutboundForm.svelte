@@ -137,11 +137,11 @@
 					placeholder={kind === 'snat' ? '192.0.2.10 192.0.2.11' : '10.0.0.1'}
 					autocomplete="off"
 				/>
-				<span class="{HELP} {bad.length ? 'text-warn-ink!' : ''}"
-					>{bad.length
+				<span class="{HELP} {bad.length ? 'text-warn-ink!' : ''}">
+					{bad.length
 						? `${bad[0]} is not an IP address.`
-						: 'Separate several with spaces or commas.'}</span
-				>
+						: 'Separate several with spaces or commas.'}
+				</span>
 			</div>
 		</div>
 		<PickList
@@ -182,11 +182,11 @@
 		>
 			{#snippet consequences()}
 				{#if list.length && selectedNs.length}
-					<Consequence tone="info"
-						>{kind === 'snat'
+					<Consequence tone="info">
+						{kind === 'snat'
 							? `VMs in ${plural(projects, 'project')} leave the cluster from ${list[0]}${list.length > 1 ? ` and ${list.length - 1} more` : ''}.`
-							: `Traffic from ${plural(projects, 'project')} goes out through ${list[0]}${list.length > 1 ? ` and ${list.length - 1} more` : ''}.`}</Consequence
-					>
+							: `Traffic from ${plural(projects, 'project')} goes out through ${list[0]}${list.length > 1 ? ` and ${list.length - 1} more` : ''}.`}
+					</Consequence>
 				{/if}
 				{#if kind === 'snat'}
 					<Consequence>The addresses must be free on the hosts' network.</Consequence>

@@ -65,8 +65,9 @@
 					type="button"
 					onclick={done}
 					class="h-9 rounded-md border border-line bg-panel px-3 text-sm text-ink hover:border-ink-faint"
-					>Done</button
 				>
+					Done
+				</button>
 			{/if}
 		</div>
 	{/if}

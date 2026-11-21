@@ -155,17 +155,17 @@
 			/>
 		{/if}
 		{#if stagedItem}
-			<Button variant="link" size="sm" class="ml-auto" onclick={() => ui.openChanges()}
-				>Review</Button
-			>
+			<Button variant="link" size="sm" class="ml-auto" onclick={() => ui.openChanges()}>
+				Review
+			</Button>
 		{/if}
 	</div>
 	{#if vm.sourceFile}
 		<dl class="divide-y divide-line-soft border-b border-line-soft text-[13px]">
 			<Row label="Source">
-				<span class="block truncate font-mono text-xs text-ink" title={vm.sourceFile}
-					>{vm.sourceFile}</span
-				>
+				<span class="block truncate font-mono text-xs text-ink" title={vm.sourceFile}>
+					{vm.sourceFile}
+				</span>
 			</Row>
 		</dl>
 	{/if}
@@ -181,12 +181,12 @@
 		<Row label="Disks">
 			{vm.disks?.length ?? 0}
 			{#if vm.disks?.some((d) => d.size)}
-				<span class="text-ink-faint"
-					>({vm.disks
+				<span class="text-ink-faint">
+					({vm.disks
 						.filter((d) => d.size)
 						.map((d) => d.size)
-						.join(', ')})</span
-				>
+						.join(', ')})
+				</span>
 			{/if}
 		</Row>
 		<Row

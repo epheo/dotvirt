@@ -95,13 +95,13 @@
 	</p>
 	{#if moved && onreload}
 		<Note tone="warn" class="flex items-center gap-3">
-			<span class="min-w-0 flex-1"
-				>{sourceFile} changed in git after you opened it. Reload the current version, then make your edit
-				again on it.</span
-			>
-			<Button size="sm" variant="secondary" disabled={reloadOp.busy} onclick={reload}
-				>Reload and re-apply</Button
-			>
+			<span class="min-w-0 flex-1">
+				{sourceFile} changed in git after you opened it. Reload the current version, then make your edit
+				again on it.
+			</span>
+			<Button size="sm" variant="secondary" disabled={reloadOp.busy} onclick={reload}>
+				Reload and re-apply
+			</Button>
 		</Note>
 		<ErrorNote error={reloadOp.error} />
 	{/if}
@@ -114,9 +114,9 @@
 	></textarea>
 	{#if earlier}
 		<details open class="rounded border border-line">
-			<summary class="cursor-pointer px-3 py-2 text-xs text-ink-muted"
-				>Your edit on the version you opened, to make again above</summary
-			>
+			<summary class="cursor-pointer px-3 py-2 text-xs text-ink-muted">
+				Your edit on the version you opened, to make again above
+			</summary>
 			<ManifestDiff before={earlier.before} after={earlier.after} />
 		</details>
 	{/if}

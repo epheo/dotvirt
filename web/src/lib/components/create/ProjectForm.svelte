@@ -149,13 +149,13 @@
 						spellcheck="false"
 						data-autofocus
 					/>
-					<span class="{HELP} {name && (!validName(name) || exists) ? 'text-warn-ink!' : ''}"
-						>{name && !validName(name)
+					<span class="{HELP} {name && (!validName(name) || exists) ? 'text-warn-ink!' : ''}">
+						{name && !validName(name)
 							? NAME_HINT
 							: exists
 								? 'That project exists.'
-								: 'Its repo takes the same name.'}</span
-					>
+								: 'Its repo takes the same name.'}
+					</span>
 				</div>
 			{/if}
 			<div class="flex min-w-0 flex-col gap-1.5">
@@ -169,9 +169,9 @@
 					autocomplete="off"
 					spellcheck="false"
 				/>
-				<span class={HELP}
-					>{adopt ? 'It exists already.' : 'Follows the name until you change it.'}</span
-				>
+				<span class={HELP}>
+					{adopt ? 'It exists already.' : 'Follows the name until you change it.'}
+				</span>
 			</div>
 		</div>
 		{#if !joining}
@@ -205,11 +205,11 @@
 							bind:value={subnet}
 							oninput={() => (subnetTouched = true)}
 						/>
-						{#if suggestion}<span class={HELP}
-								><span
-									>Suggested <span class="font-mono text-ink-soft">{suggestion.cidr}</span>. Why: {suggestion.reason}.</span
-								></span
-							>{/if}
+						{#if suggestion}<span class={HELP}>
+								<span>
+									Suggested <span class="font-mono text-ink-soft">{suggestion.cidr}</span>. Why: {suggestion.reason}.
+								</span>
+							</span>{/if}
 					</div>
 				</div>
 				{#if clash.length}
@@ -218,9 +218,9 @@
 					>
 						<TriangleAlert size={16} class="mt-0.5 shrink-0 text-warn-ink" />
 						<div class="flex min-w-0 flex-1 flex-col gap-2">
-							<span class="font-bold text-warn-ink"
-								>Already used by {clash.map((n) => n.name).join(' and ')}.</span
-							>
+							<span class="font-bold text-warn-ink">
+								Already used by {clash.map((n) => n.name).join(' and ')}.
+							</span>
 							<div class="flex flex-wrap items-center gap-2">
 								{#each fixes as c, i (c)}
 									<button
@@ -232,8 +232,9 @@
 										class="h-[30px] rounded-md border px-3 text-[13px] {i === 0
 											? 'border-accent bg-panel text-accent-ink'
 											: 'border-line bg-panel text-ink'}"
-										>Use <span class="font-mono">{c}</span></button
 									>
+										Use <span class="font-mono">{c}</span>
+									</button>
 								{/each}
 								<span class="text-xs text-ink-faint">nearest free</span>
 							</div>
@@ -254,31 +255,31 @@
 				{#if !joining && !adopt}
 					<div class="flex flex-col items-start gap-1">
 						<StageChip kind="now" />
-						<span class="text-xs leading-4 text-ink-faint"
-							>The <span class="font-mono">{name || 'project'}</span> repo is made when you stage.</span
-						>
+						<span class="text-xs leading-4 text-ink-faint">
+							The <span class="font-mono">{name || 'project'}</span> repo is made when you stage.
+						</span>
 					</div>
 				{/if}
 			{/snippet}
 			{#snippet consequences()}
-				<Consequence tone="info"
-					>{joining
+				<Consequence tone="info">
+					{joining
 						? `${namespace} joins ${joinProject}; its ${brings} show up there, ready to bring into git.`
 						: adopt
 							? `${namespace} becomes a project; its ${brings} show up there, ready to bring into git.`
 							: namespace
 								? `The namespace ${namespace} is created and joins ${name || 'the project'}.`
-								: 'Its first namespace is created with it.'}</Consequence
-				>
+								: 'Its first namespace is created with it.'}
+				</Consequence>
 				{#if splitList(owners).length && !joining}
 					<Consequence>{splitList(owners).join(', ')} can change anything in it.</Consequence>
 				{/if}
 				{#if network}
-					<Consequence tone={clash.length ? 'warn' : 'ok'}
-						>{clash.length
+					<Consequence tone={clash.length ? 'warn' : 'ok'}>
+						{clash.length
 							? `Its network overlaps ${clash.map((n) => n.name).join(' and ')}.`
-							: `Its ${runs} start on ${netName || 'its network'}, ${subnet || 'no range yet'}, which its namespaces share.`}</Consequence
-					>
+							: `Its ${runs} start on ${netName || 'its network'}, ${subnet || 'no range yet'}, which its namespaces share.`}
+					</Consequence>
 				{/if}
 			{/snippet}
 		</StagesPanel>

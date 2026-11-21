@@ -41,8 +41,10 @@
 							href={p.repoPage || p.repo}
 							target="_blank"
 							rel="noopener"
-							class="font-mono text-xs text-accent-ink hover:underline">{p.repo}</a
+							class="font-mono text-xs text-accent-ink hover:underline"
 						>
+							{p.repo}
+						</a>
 					{:else}
 						<span class="text-ink-muted">Not configured</span>
 					{/if}
@@ -51,8 +53,9 @@
 					{#each p.namespaces as n (n.namespace)}
 						<span
 							class="ml-1 inline-block rounded bg-inset-strong px-1.5 py-0.5 text-xs text-ink-soft"
-							><span class="font-mono">{n.namespace}</span>, {plural(n.vms.length, 'VM')}</span
 						>
+							<span class="font-mono">{n.namespace}</span>, {plural(n.vms.length, 'VM')}
+						</span>
 					{/each}
 				</Row>
 			</dl>
@@ -71,13 +74,14 @@
 							disabled={!sync.ok}
 							title={sync.why}
 							onclick={() => (ui.modal = { kind: 'syncAccess', project: p.name })}
-							>Grant sync access</Button
 						>
+							Grant sync access
+						</Button>
 						<StageChip kind="pr" />
 					</div>
-					<Consequence size="sm"
-						>ArgoCD syncs {p.name} as its own account once the platform PR merges.</Consequence
-					>
+					<Consequence size="sm">
+						ArgoCD syncs {p.name} as its own account once the platform PR merges.
+					</Consequence>
 				</div>
 			{/if}
 			{#if domain && p.namespaces.length}
@@ -90,36 +94,38 @@
 				<div class="flex flex-col gap-1.5 border-t border-line-soft px-card py-3 text-[13px]">
 					<span class="text-xs font-semibold text-ink-soft">Publishing</span>
 					{#if c?.publishingOn}
-						<span class="text-ink-soft"
-							>On, at <span class="font-mono">*.{p.name}.{domain}</span></span
-						>
+						<span class="text-ink-soft">
+							On, at <span class="font-mono">*.{p.name}.{domain}</span>
+						</span>
 					{:else if c?.publishingWaits}
-						<span class="text-ink-muted"
-							>Not yet: a project on a VM Network waits on a portail update.</span
-						>
+						<span class="text-ink-muted">
+							Not yet: a project on a VM Network waits on a portail update.
+						</span>
 					{:else if c?.publishingApart}
-						<span class="text-ink-muted"
-							>Not offered: each namespace has a VM Network of its own, where it runs its own
-							Gateway.</span
-						>
+						<span class="text-ink-muted">
+							Not offered: each namespace has a VM Network of its own, where it runs its own
+							Gateway.
+						</span>
 					{:else if c?.publishingUnhoused}
 						{@const create = publishGate.namespace(projectNS(p))}
-						<span class="text-ink-muted"
-							>Not yet: publishing needs the namespace <span class="font-mono"
-								>{c.publishNamespace}</span
-							>, which holds the project's Gateway.</span
-						>
+						<span class="text-ink-muted">
+							Not yet: publishing needs the namespace <span class="font-mono">
+								{c.publishNamespace}
+							</span>, which holds the project's Gateway.
+						</span>
 						{#if c.publishNameRequested}
-							<span class="text-ink-muted"
-								>A user's own project holds that name, requested before the platform's: delete it,
-								then create <span class="font-mono">{c.publishNamespace}</span> here.</span
-							>
+							<span class="text-ink-muted">
+								A user's own project holds that name, requested before the platform's: delete it,
+								then create <span class="font-mono">{c.publishNamespace}</span> here.
+							</span>
 						{:else if c.publishNameHeld}
-							<span class="text-ink-muted"
-								>Another namespace holds that name: free it, moving what it holds first, then create <span
-									class="font-mono">{c.publishNamespace}</span
-								> here.</span
-							>
+							<span class="text-ink-muted">
+								Another namespace holds that name: free it, moving what it holds first, then create <span
+									class="font-mono"
+								>
+									{c.publishNamespace}
+								</span> here.
+							</span>
 						{:else}
 							<div class="flex flex-wrap items-center gap-2">
 								<Button
@@ -128,8 +134,9 @@
 									disabled={!create.ok}
 									title={create.why}
 									onclick={() => (ui.modal = { kind: 'publishNamespace', project: p.name })}
-									>Create {c.publishNamespace}</Button
 								>
+									Create {c.publishNamespace}
+								</Button>
 								<StageChip kind="pr" />
 							</div>
 						{/if}
@@ -142,17 +149,18 @@
 								disabled={!gate.ok}
 								title={gate.why}
 								onclick={() => (ui.modal = { kind: 'publishing', project: p.name })}
-								>{c?.publishingOn ? 'Update publishing' : 'Turn publishing on'}</Button
 							>
+								{c?.publishingOn ? 'Update publishing' : 'Turn publishing on'}
+							</Button>
 							<StageChip kind="pr" />
 						</div>
 					{/if}
 					{#if apart.length}
-						<span class="text-ink-muted"
-							>Not reached: {apart.join(', ')}, on a VM Network of {apart.length === 1
+						<span class="text-ink-muted">
+							Not reached: {apart.join(', ')}, on a VM Network of {apart.length === 1
 								? 'its'
-								: 'their'} own.</span
-						>
+								: 'their'} own.
+						</span>
 					{/if}
 				</div>
 			{/if}

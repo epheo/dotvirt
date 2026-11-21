@@ -149,8 +149,9 @@
 				{#if b.count}
 					<span
 						class="inline-flex h-[18px] min-w-[18px] items-center justify-center rounded-full bg-inset-strong px-[5px] text-[11px] leading-[18px] font-bold text-ink"
-						>{b.count}</span
 					>
+						{b.count}
+					</span>
 				{/if}
 			</button>
 		{/each}
@@ -218,8 +219,10 @@
 												e.stopPropagation();
 												activate(t);
 											}}
-											class="hover:underline focus-visible:underline">{t.verb}</button
+											class="hover:underline focus-visible:underline"
 										>
+											{t.verb}
+										</button>
 									</td>
 									<td class="px-3 py-1.5 font-medium text-ink">
 										{#if t.kind === 'pr' || t.kind === 'sync'}

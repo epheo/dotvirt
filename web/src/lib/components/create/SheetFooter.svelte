@@ -33,6 +33,6 @@
 	<span class="text-xs text-warn-ink" role="status">{missing[0]}</span>
 {/if}
 <Button variant="secondary" class="h-9! px-3!" onclick={oncancel}>Cancel</Button>
-<Button class="h-9! px-4!" onclick={onsubmit} disabled={busy || missing.length > 0}
-	>{busy ? busyLabel : label}</Button
->
+<Button class="h-9! px-4!" onclick={onsubmit} disabled={busy || missing.length > 0}>
+	{busy ? busyLabel : label}
+</Button>

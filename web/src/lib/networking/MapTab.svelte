@@ -129,8 +129,9 @@
 							setParams({ sel: null, find: null });
 						}}
 						class="inline-flex size-7 items-center justify-center rounded-md text-ink-soft hover:bg-inset-strong"
-						><X size={16} /></button
 					>
+						<X size={16} />
+					</button>
 				{/if}
 			</div>
 			{#if showList && search}
@@ -143,12 +144,13 @@
 								type="button"
 								onclick={() => select(`vm:${vmKey(v)}`)}
 								class="flex w-full items-center gap-2 px-3 py-1.5 text-left hover:bg-select-soft"
-								><span class="font-mono font-medium">{v.name}</span><span class="text-ink-faint"
-									>VM in {v.namespace}</span
-								>{#if v.guestIP}<span class="ml-auto font-mono text-xs text-ink-faint"
-										>{v.guestIP}</span
-									>{/if}</button
 							>
+								<span class="font-mono font-medium">{v.name}</span><span class="text-ink-faint">
+									VM in {v.namespace}
+								</span>{#if v.guestIP}<span class="ml-auto font-mono text-xs text-ink-faint">
+										{v.guestIP}
+									</span>{/if}
+							</button>
 						</li>
 					{/each}
 					{#each search.networks as n (networkKey(n))}
@@ -157,12 +159,15 @@
 								type="button"
 								onclick={() => select(`net:${networkKey(n)}`)}
 								class="flex w-full items-center gap-2 px-3 py-1.5 text-left hover:bg-select-soft"
-								><span class="font-mono font-medium">{n.name}</span><span class="text-ink-faint"
-									>network</span
-								>{#if n.subnets?.length}<span class="ml-auto font-mono text-xs text-ink-faint"
-										>{n.subnets[0]}</span
-									>{/if}</button
 							>
+								<span class="font-mono font-medium">{n.name}</span><span class="text-ink-faint">
+									network
+								</span>{#if n.subnets?.length}<span
+										class="ml-auto font-mono text-xs text-ink-faint"
+									>
+										{n.subnets[0]}
+									</span>{/if}
+							</button>
 						</li>
 					{/each}
 					{#if search.total > search.vms.length + search.networks.length}
@@ -187,8 +192,10 @@
 				class="inline-flex h-[18px] min-w-[18px] items-center justify-center rounded-full px-[5px] text-[11px] font-bold {networking
 					.problems.length
 					? 'bg-danger-soft text-danger-ink'
-					: 'bg-inset-strong text-ink'}">{networking.problems.length}</span
+					: 'bg-inset-strong text-ink'}"
 			>
+				{networking.problems.length}
+			</span>
 		</button>
 		<span class="ml-auto text-[13px] text-ink-faint">
 			Showing {model.shown.networks} of {fmt(model.shown.networksTotal)} networks and {model.shown
@@ -210,22 +217,25 @@
 						aria-label="Zoom in"
 						onclick={() => (zoom = Math.min(1.4, +(zoom + 0.1).toFixed(1)))}
 						class="inline-flex size-7 items-center justify-center rounded-md text-ink-soft hover:bg-inset-strong"
-						><ZoomIn size={16} /></button
 					>
+						<ZoomIn size={16} />
+					</button>
 					<button
 						type="button"
 						aria-label="Zoom out"
 						onclick={() => (zoom = Math.max(0.5, +(zoom - 0.1).toFixed(1)))}
 						class="inline-flex size-7 items-center justify-center rounded-md text-ink-soft hover:bg-inset-strong"
-						><ZoomOut size={16} /></button
 					>
+						<ZoomOut size={16} />
+					</button>
 					<button
 						type="button"
 						aria-label="Fit to view"
 						onclick={fit}
 						class="inline-flex size-7 items-center justify-center rounded-md text-ink-soft hover:bg-inset-strong"
-						><Maximize size={16} /></button
 					>
+						<Maximize size={16} />
+					</button>
 				</span>
 			{/snippet}
 			<div class="overflow-x-auto p-4" bind:clientWidth={boxWidth}>
@@ -243,32 +253,32 @@
 			<div
 				class="flex flex-wrap items-center gap-x-3 gap-y-1.5 border-t border-line-soft px-card py-2.5 text-xs leading-4 text-ink-soft"
 			>
-				<span class="inline-flex items-center gap-1.5"
-					><span class="inline-block w-[22px] border-t-[3px] border-accent"></span>{selVM
+				<span class="inline-flex items-center gap-1.5">
+					<span class="inline-block w-[22px] border-t-[3px] border-accent"></span>{selVM
 						? `${selVM.name}'s way out`
-						: 'Way out'}</span
-				>
-				<span class="inline-flex items-center gap-1.5"
-					><span class="inline-block w-[22px] border-t-2 border-wire"></span>Attached</span
-				>
-				<span class="inline-flex items-center gap-1.5"
-					><span class="inline-block w-[22px] border-t-2 border-dashed border-danger"
-					></span>Failing</span
-				>
-				<span class="inline-flex items-center gap-1.5"
-					><span
+						: 'Way out'}
+				</span>
+				<span class="inline-flex items-center gap-1.5">
+					<span class="inline-block w-[22px] border-t-2 border-wire"></span>Attached
+				</span>
+				<span class="inline-flex items-center gap-1.5">
+					<span class="inline-block w-[22px] border-t-2 border-dashed border-danger"></span>Failing
+				</span>
+				<span class="inline-flex items-center gap-1.5">
+					<span
 						class="inline-flex h-4 items-center rounded-full border border-danger/40 bg-danger-soft px-1.5 text-[11px] font-medium text-danger-ink"
-						>!</span
-					>Problem, with its fix</span
-				>
-				<span class="inline-flex items-center gap-1.5"
-					><span class="inline-block h-3 w-4 rounded-[3px] border border-dashed border-ink-faint/60"
-					></span>Group, expand for more</span
-				>
-				{#if !vmsOff()}
-					<span class="inline-flex items-center gap-1.5"
-						><b>{fmt(model.projects[0]?.vms ?? 0)}</b>Numbers are VMs</span
 					>
+						!
+					</span>Problem, with its fix
+				</span>
+				<span class="inline-flex items-center gap-1.5">
+					<span class="inline-block h-3 w-4 rounded-[3px] border border-dashed border-ink-faint/60"
+					></span>Group, expand for more
+				</span>
+				{#if !vmsOff()}
+					<span class="inline-flex items-center gap-1.5">
+						<b>{fmt(model.projects[0]?.vms ?? 0)}</b>Numbers are VMs
+					</span>
 				{/if}
 			</div>
 		</Card>

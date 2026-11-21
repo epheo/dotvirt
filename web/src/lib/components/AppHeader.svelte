@@ -117,9 +117,9 @@
 						class="size-[22px] object-contain"
 					/>
 					<span class="sr-only">{l.label}</span>
-					<span aria-hidden="true" class="{TIP} {tipsOff ? '' : 'group-hover:block'}"
-						>{l.label}</span
-					>
+					<span aria-hidden="true" class="{TIP} {tipsOff ? '' : 'group-hover:block'}">
+						{l.label}
+					</span>
 				{:else}{l.label}{/if}
 			</span>
 		{:else if l.icon}
@@ -139,13 +139,14 @@
 				<span
 					aria-hidden="true"
 					class="{TIP} {tipsOff ? '' : 'group-hover:block group-focus-visible:block'}"
-					>{l.label}</span
 				>
+					{l.label}
+				</span>
 			</a>
 		{:else}
-			<a href={l.url} rel="noreferrer" class="text-[13px] text-side-dim hover:text-white"
-				>{l.label}</a
-			>
+			<a href={l.url} rel="noreferrer" class="text-[13px] text-side-dim hover:text-white">
+				{l.label}
+			</a>
 		{/if}
 	{/each}
 
@@ -172,14 +173,16 @@
 		{#snippet children({ close })}
 			<div class="w-[30rem] max-w-[90vw] text-xs">
 				<div class="flex items-center justify-between gap-3 border-b border-line px-3 py-2.5">
-					<span class="flex items-center gap-1.5 text-sm font-semibold text-ink"
-						>Issues{#if issues.length}<span
+					<span class="flex items-center gap-1.5 text-sm font-semibold text-ink">
+						Issues{#if issues.length}<span
 								class="rounded-full px-1.5 text-[11px] leading-4 font-semibold {worstTone ===
 								'danger'
 									? 'bg-danger text-danger-on'
-									: 'bg-warn text-warn-on'}">{issues.length}</span
-							>{/if}</span
-					>
+									: 'bg-warn text-warn-on'}"
+							>
+								{issues.length}
+							</span>{/if}
+					</span>
 					<span class="text-ink-faint">GitOps state and cluster alerts, one list</span>
 				</div>
 				{#if !issues.length}
