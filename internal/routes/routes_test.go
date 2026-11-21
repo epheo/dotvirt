@@ -321,6 +321,8 @@ func TestAKindIsWatchedAtTheVersionServedAndStopsWithTheModule(t *testing.T) {
 
 	eventually(t, "tlsroutes at its served version", func() bool { return src.has(src.watched, "tlsroutes/v1alpha3") })
 	eventually(t, "synced", func() bool { return s.Overview(all).Synced })
+	// Synced means listed; a watch starts just after, and only a started watch can end.
+	eventually(t, "the gateway watch", func() bool { return src.has(src.watched, "gateways/v1") })
 	if src.has(src.watched, "tlsroutes/v1") || src.has(src.watched, "tcproutes/v1alpha2") {
 		t.Fatal("watched a version that is not served")
 	}
