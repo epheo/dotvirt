@@ -530,7 +530,3 @@ type DotvirtList struct {
 	metav1.ListMeta `json:"metadata,omitempty"`
 	Items           []Dotvirt `json:"items"`
 }
-
-func init() {
-	SchemeBuilder.Register(&Dotvirt{}, &DotvirtList{})
-}
