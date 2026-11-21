@@ -10,7 +10,7 @@ updates:
       go-minor:
         update-types: [minor, patch]
     ignore:
-      # Held to the OpenShift Kubernetes minor (4.22 = 1.35) and the KubeVirt line
+      # Held to the OpenShift Kubernetes minor (5.0 = 1.36) and the KubeVirt line
       # OpenShift Virtualization ships (virt-template is pre-1.0, where minors
       # break); raise these by hand.
       - dependency-name: 'k8s.io/*'
