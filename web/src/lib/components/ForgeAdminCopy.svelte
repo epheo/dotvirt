@@ -37,7 +37,7 @@
 </script>
 
 {#if clusterGate.forgeAdmin().ok}
-	<button class="text-ink-soft hover:underline {cls}" onclick={copy} disabled={op.busy}
-		>{op.busy ? 'Copying...' : 'Copy the forge admin password'}</button
-	>
+	<button class="text-ink-soft hover:underline {cls}" onclick={copy} disabled={op.busy}>
+		{op.busy ? 'Copying...' : 'Copy the forge admin password'}
+	</button>
 {/if}

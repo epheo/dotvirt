@@ -18,10 +18,10 @@
 <div class="space-y-2 rounded border border-danger/40 bg-danger-soft px-3 py-2.5">
 	<p class="flex items-start gap-2 text-danger-ink">
 		<TriangleAlert size={14} class="mt-0.5 shrink-0" />
-		<span
-			><strong>The sync deletes {total} object{total === 1 ? '' : 's'} from the cluster.</strong>
-			Git main does not declare {total === 1 ? 'it' : 'them'}.</span
-		>
+		<span>
+			<strong>The sync deletes {total} object{total === 1 ? '' : 's'} from the cluster.</strong>
+			Git main does not declare {total === 1 ? 'it' : 'them'}.
+		</span>
 	</p>
 	<ul class="space-y-0.5 pl-6 font-mono text-xs text-ink">
 		{#each prune as r (r.kind + r.namespace + r.name)}
@@ -42,10 +42,10 @@
 			<input type="checkbox" bind:checked={ack} />
 			Delete {total === 1 ? 'it' : `these ${total}`} when this merges
 		</label>
-		<span class="text-xs text-ink-soft"
-			>Not meant to go? Adopt {total === 1 ? 'it' : 'them'} into git before proposing{hidden
+		<span class="text-xs text-ink-soft">
+			Not meant to go? Adopt {total === 1 ? 'it' : 'them'} into git before proposing{hidden
 				? '; the ones outside your view need a project member who can see them'
-				: ''}.</span
-		>
+				: ''}.
+		</span>
 	</div>
 </div>

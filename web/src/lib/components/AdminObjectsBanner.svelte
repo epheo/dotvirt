@@ -55,13 +55,13 @@
 				{#each pending as o (o.kind + '/' + o.name)}
 					<li>
 						{o.purpose}
-						<span class="text-xs"
-							>({o.state === 'Outdated'
+						<span class="text-xs">
+							({o.state === 'Outdated'
 								? `differs: ${o.detail}`
 								: o.state === 'Stale'
 									? `stale, ${o.detail}`
-									: 'missing'})</span
-						>
+									: 'missing'})
+						</span>
 					</li>
 				{/each}
 			</ul>

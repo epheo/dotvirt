@@ -55,13 +55,16 @@
 					/>
 					<span class="min-w-0">
 						<span class="flex items-baseline justify-between gap-3">
-							<span class="font-mono text-sm font-medium text-ink"
-								>{c.name}{#if c.default}<span
-										class="ml-1.5 font-sans text-xs font-normal text-ink-faint">default</span
-									>{/if}</span
-							>
-							{#if info?.free}<span class="text-[13px] text-ink-soft">{bytes(info.free)} free</span
-								>{/if}
+							<span class="font-mono text-sm font-medium text-ink">
+								{c.name}{#if c.default}<span
+										class="ml-1.5 font-sans text-xs font-normal text-ink-faint"
+									>
+										default
+									</span>{/if}
+							</span>
+							{#if info?.free}<span class="text-[13px] text-ink-soft">
+									{bytes(info.free)} free
+								</span>{/if}
 						</span>
 						{#if info?.replication}
 							{@const promise = classPromise(info.replication)}

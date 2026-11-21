@@ -145,9 +145,9 @@
 					data-autofocus
 				/>
 				{#if name && (!validName(name) || nameTaken)}
-					<span class="{HELP} text-warn-ink!"
-						>{nameTaken ? `Taken in ${namespace}.` : NAME_HINT}</span
-					>
+					<span class="{HELP} text-warn-ink!">
+						{nameTaken ? `Taken in ${namespace}.` : NAME_HINT}
+					</span>
 				{/if}
 			</div>
 			<div class="flex min-w-0 flex-col gap-1.5">
@@ -156,12 +156,12 @@
 					<input id="pr-where" class="{FIELD} font-mono" value="{project} / {namespace}" disabled />
 				{:else}
 					<PlacePicker id="pr-where" bind:value={namespace} namespaces={places} first={opener} />
-					<span class={HELP}
-						>{project === opener && opener ? 'Where you were. ' : ''}Search {plural(
+					<span class={HELP}>
+						{project === opener && opener ? 'Where you were. ' : ''}Search {plural(
 							new Set(places.map((n) => inventory.projectOf(n))).size,
 							'project',
-						)}.</span
-					>
+						)}.
+					</span>
 				{/if}
 			</div>
 		</div>
@@ -187,18 +187,18 @@
 					placeholder="db"
 					aria-label="Label value"
 				/>
-				<span class="text-ink-faint"
-					>Leave empty for every VM in {namespace || 'the namespace'}.</span
-				>
+				<span class="text-ink-faint">
+					Leave empty for every VM in {namespace || 'the namespace'}.
+				</span>
 			</div>
-			<span class={HELP}
-				>{plural(members.length, 'VM')} match{members.length === 1 ? 'es' : ''}{members.length
+			<span class={HELP}>
+				{plural(members.length, 'VM')} match{members.length === 1 ? 'es' : ''}{members.length
 					? `: ${members
 							.slice(0, 4)
 							.map((v) => v.name)
 							.join(', ')}${members.length > 4 ? `, and ${members.length - 4} more` : ''}`
-					: ''}.</span
-			>
+					: ''}.
+			</span>
 		</div>
 
 		<div class="flex flex-col gap-2">
@@ -241,8 +241,9 @@
 						disabled={rules.rows.length === 1}
 						aria-label="Remove source {i + 1}"
 						class="ml-auto flex size-8 items-center justify-center rounded-md text-ink-muted hover:bg-inset-strong hover:text-danger disabled:opacity-40"
-						><X size={15} /></button
 					>
+						<X size={15} />
+					</button>
 				</div>
 			{/each}
 			<div>
@@ -261,14 +262,14 @@
 			backing="NetworkPolicy"
 		>
 			{#snippet consequences()}
-				<Consequence tone="info"
-					>Applies to {plural(members.length, 'VM')} in {namespace || 'the namespace'}.</Consequence
-				>
-				<Consequence tone="warn"
-					>{sources
+				<Consequence tone="info">
+					Applies to {plural(members.length, 'VM')} in {namespace || 'the namespace'}.
+				</Consequence>
+				<Consequence tone="warn">
+					{sources
 						? `Only the ${plural(sources, 'source')} above may reach them; every other inbound connection is refused.`
-						: 'No source listed: every inbound connection to them is refused.'}</Consequence
-				>
+						: 'No source listed: every inbound connection to them is refused.'}
+				</Consequence>
 				<Consequence tone="ok">Nothing restarts.</Consequence>
 			{/snippet}
 		</StagesPanel>

@@ -77,8 +77,9 @@
 					<div class="flex flex-col gap-1.5">
 						<div class="flex items-baseline justify-between gap-2">
 							<span class="font-mono text-[13px] font-medium text-ink">{d.label}</span>
-							<span class="text-xs text-ink-faint">{size(d.volume.sizeBytes)}, {d.volume.tier}</span
-							>
+							<span class="text-xs text-ink-faint">
+								{size(d.volume.sizeBytes)}, {d.volume.tier}
+							</span>
 						</div>
 						<div class="flex flex-wrap gap-x-3 gap-y-1">
 							{#each hosts as h (h)}

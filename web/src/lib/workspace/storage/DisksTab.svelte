@@ -259,20 +259,23 @@
 				{#each filters.flags as f (f)}
 					<span
 						class="inline-flex h-7 items-center gap-1.5 rounded-md border border-accent bg-panel pr-1 pl-2.5 text-[13px] text-ink"
-						>{FLAG_LABEL[f]}<button
+					>
+						{FLAG_LABEL[f]}<button
 							class="flex size-[22px] items-center justify-center rounded text-ink-muted hover:bg-inset"
 							aria-label="Remove filter: {FLAG_LABEL[f]}"
-							onclick={() => dropFlag(f)}><X size={14} /></button
-						></span
-					>
+							onclick={() => dropFlag(f)}
+						>
+							<X size={14} />
+						</button>
+					</span>
 				{/each}
 				{#each [...VALUE_FILTERS, 'q' as const] as k (k)}
 					{@const v = filters[k]}
 					{#if v}
 						<span
 							class="inline-flex h-7 items-center gap-1.5 rounded-md border border-accent bg-panel pr-1 pl-2.5 text-[13px] text-ink"
-							><span class="text-ink-muted">{k === 'q' ? 'Matches' : VALUE_LABEL[k]}</span>{k ===
-							'q'
+						>
+							<span class="text-ink-muted">{k === 'q' ? 'Matches' : VALUE_LABEL[k]}</span>{k === 'q'
 								? v
 								: valueText(k, v)}<button
 								class="flex size-[22px] items-center justify-center rounded text-ink-muted hover:bg-inset"
@@ -281,9 +284,10 @@
 									: VALUE_LABEL[k].toLowerCase()} {v}"
 								onclick={() =>
 									k === 'q' ? setFilters({ ...filters, q: undefined }) : dropValue(k)}
-								><X size={14} /></button
-							></span
-						>
+							>
+								<X size={14} />
+							</button>
+						</span>
 					{/if}
 				{/each}
 				<span class="relative">
@@ -291,8 +295,10 @@
 						variant="secondary"
 						size="sm"
 						aria-expanded={adding}
-						onclick={() => (adding = !adding)}><Plus size={14} />Add filter</Button
+						onclick={() => (adding = !adding)}
 					>
+						<Plus size={14} />Add filter
+					</Button>
 					{#if adding}
 						<!-- svelte-ignore a11y_no_static_element_interactions -->
 						<div
@@ -326,50 +332,55 @@
 									</select>
 								</label>
 							{/each}
-							<Button variant="ghost" size="sm" class="self-end" onclick={() => (adding = false)}
-								>Done</Button
-							>
+							<Button variant="ghost" size="sm" class="self-end" onclick={() => (adding = false)}>
+								Done
+							</Button>
 						</div>
 					{/if}
 				</span>
 				{#if hasFilters(filters)}
 					<button
 						class="text-[13px] text-accent-ink hover:underline"
-						onclick={() => setFilters({ flags: [] })}>Clear filters</button
+						onclick={() => setFilters({ flags: [] })}
 					>
+						Clear filters
+					</button>
 				{/if}
 			</div>
-			<span class="text-[13px] text-ink-soft"
-				><strong>{num(shown.length)}</strong> of {num(total)}
+			<span class="text-[13px] text-ink-soft">
+				<strong>{num(shown.length)}</strong> of {num(total)}
 				{filters.flags.includes('nodata')
 					? total === 1
 						? 'VM'
 						: 'VMs'
 					: total === 1
 						? 'disk'
-						: 'disks'}</span
-			>
+						: 'disks'}
+			</span>
 		</div>
 
 		{#if selected.size > 0}
 			<div class="flex flex-col gap-3 border-b border-line bg-select-soft px-card py-3.5">
 				<div class="flex flex-wrap items-start gap-x-4 gap-y-2 text-[13px]">
-					<span class="leading-8"
-						>{#if selected.size === onPage}<strong>{num(onPage)} selected</strong> on this page{:else}<strong
-								>{num(selected.size)} selected</strong
-							>{/if}</span
-					>
+					<span class="leading-8">
+						{#if selected.size === onPage}<strong>{num(onPage)} selected</strong> on this page{:else}<strong>
+								{num(selected.size)} selected
+							</strong>{/if}
+					</span>
 					{#if selected.size < shown.length}
 						<button
 							class="leading-8 text-accent-ink hover:underline"
 							onclick={() => (selected = new Set(shown.map((r) => r.key)))}
-							>Select all {num(shown.length)}</button
 						>
+							Select all {num(shown.length)}
+						</button>
 					{/if}
 					<button
 						class="leading-8 text-accent-ink hover:underline"
-						onclick={() => (selected = new Set())}>Clear selection</button
+						onclick={() => (selected = new Set())}
 					>
+						Clear selection
+					</button>
 					<div class="ml-auto flex flex-col items-end gap-1">
 						<div class="flex items-center gap-2">
 							{#if mode === 'move'}
@@ -411,16 +422,16 @@
 							<Consequence tone={c.tone}>{c.text}</Consequence>
 						{/each}
 					{:else}
-						<Consequence tone="info"
-							>Running VMs keep running while the snapshot is taken.</Consequence
-						>
+						<Consequence tone="info">
+							Running VMs keep running while the snapshot is taken.
+						</Consequence>
 						{#if snap.unsupported.length}
-							<Consequence tone="warn"
-								>{num(snap.unsupported.length)}
+							<Consequence tone="warn">
+								{num(snap.unsupported.length)}
 								{snap.unsupported.length === 1 ? 'disk is' : 'disks are'} on a class without snapshots
 								and
-								{snap.unsupported.length === 1 ? 'is' : 'are'} left out.</Consequence
-							>
+								{snap.unsupported.length === 1 ? 'is' : 'are'} left out.
+							</Consequence>
 						{/if}
 					{/if}
 				</div>
@@ -447,8 +458,9 @@
 							<button
 								class="inline-flex items-center gap-0.5 font-bold"
 								onclick={() => go({ sort: desc ? undefined : 'vm-desc' }, { replace: true })}
-								>VM{#if desc}<ChevronDown size={12} />{:else}<ChevronUp size={12} />{/if}</button
 							>
+								VM{#if desc}<ChevronDown size={12} />{:else}<ChevronUp size={12} />{/if}
+							</button>
 						</th>
 						<th scope="col" class={TH}>Disk</th>
 						<th scope="col" class="{TH} text-right">Size</th>
@@ -488,11 +500,14 @@
 								<a
 									href={vmHref(r.vm.namespace, r.vm.name)}
 									class="font-mono text-xs font-medium text-ink hover:text-accent-ink"
-									onclick={(e) => e.stopPropagation()}>{r.vm.name}</a
-								>{#if repeated.has(r.vm.name)}<span class="ml-1.5 text-xs text-ink-faint"
-										>{r.vm.namespace}</span
-									>{/if}{#if !r.running}<span class="ml-1.5 text-xs text-ink-faint">stopped</span
-									>{/if}
+									onclick={(e) => e.stopPropagation()}
+								>
+									{r.vm.name}
+								</a>{#if repeated.has(r.vm.name)}<span class="ml-1.5 text-xs text-ink-faint">
+										{r.vm.namespace}
+									</span>{/if}{#if !r.running}<span class="ml-1.5 text-xs text-ink-faint">
+										stopped
+									</span>{/if}
 							</td>
 							<td class="h-10 border-b border-line-soft px-2 whitespace-nowrap">
 								<!-- The row opens the disk on click; this is the keyboard way in. -->
@@ -503,8 +518,10 @@
 									onclick={(e) => {
 										e.stopPropagation();
 										go({ disk: current ? undefined : r.key }, { replace: true });
-									}}>{r.disk.name || r.disk.type}</button
+									}}
 								>
+									{r.disk.name || r.disk.type}
+								</button>
 								{#if staged}<span class="ml-1.5 align-[1px]"><StageChip kind="staged" /></span>{/if}
 							</td>
 							<td class="h-10 border-b border-line-soft px-2 text-right whitespace-nowrap">
@@ -512,11 +529,11 @@
 							</td>
 							<td class="h-10 border-b border-line-soft px-2 whitespace-nowrap">
 								{#if r.ephemeral}
-									<span class="text-ink-faint"
-										>None, {r.disk.type === 'containerDisk'
+									<span class="text-ink-faint">
+										None, {r.disk.type === 'containerDisk'
 											? 'container image'
-											: (r.disk.type ?? 'ephemeral')}</span
-									>
+											: (r.disk.type ?? 'ephemeral')}
+									</span>
 								{:else}
 									<span class="font-mono text-xs font-medium">{r.storageClass || '-'}</span>
 								{/if}
@@ -524,9 +541,9 @@
 							<td class="h-10 border-b border-line-soft px-2 whitespace-nowrap">
 								{#if r.host}
 									<span class="font-mono text-xs font-medium">{r.host}</span>
-									{#if r.maintenance}<span class="block text-[11px] leading-[14px] text-warn-ink"
-											>in maintenance</span
-										>{/if}
+									{#if r.maintenance}<span class="block text-[11px] leading-[14px] text-warn-ink">
+											in maintenance
+										</span>{/if}
 								{:else}
 									<span class="text-ink-faint">-</span>
 								{/if}
@@ -538,8 +555,10 @@
 									<span class="text-xs text-ink-faint">{SOURCE_WORD[imp.kind] ?? imp.kind}</span>
 									<span
 										class="inline-block max-w-[180px] truncate align-bottom font-mono text-xs font-medium"
-										title={imp.source}>{sourceTail(imp)}</span
+										title={imp.source}
 									>
+										{sourceTail(imp)}
+									</span>
 								{:else}<span class="text-ink-faint">-</span>{/if}
 							</td>
 							<td class="h-10 border-b border-line-soft px-2 whitespace-nowrap">
@@ -550,9 +569,9 @@
 								{:else if !lastSnap(r)}
 									<span class="text-warn-ink">None</span>
 								{:else if !r.fresh}
-									<span class="text-warn-ink"
-										>{ago(lastSnap(r))}<span class="sr-only">, older than 7 days</span></span
-									>
+									<span class="text-warn-ink">
+										{ago(lastSnap(r))}<span class="sr-only">, older than 7 days</span>
+									</span>
 								{:else}
 									{ago(lastSnap(r))}
 								{/if}
@@ -565,8 +584,10 @@
 								{#if hasFilters(filters)}
 									<button
 										class="ml-1 text-accent-ink hover:underline"
-										onclick={() => setFilters({ flags: [] })}>Clear filters</button
+										onclick={() => setFilters({ flags: [] })}
 									>
+										Clear filters
+									</button>
 								{/if}
 							</td>
 						</tr>

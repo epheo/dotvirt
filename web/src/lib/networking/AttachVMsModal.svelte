@@ -94,8 +94,10 @@
 				<button
 					type="button"
 					class="text-accent-ink hover:underline"
-					onclick={() => (picked = new Set(shown.map(vmKey)))}>Select all {shown.length}</button
+					onclick={() => (picked = new Set(shown.map(vmKey)))}
 				>
+					Select all {shown.length}
+				</button>
 			{/if}
 		</div>
 		<ul class="max-h-72 overflow-y-auto rounded-md border border-line">
@@ -119,8 +121,8 @@
 	{#snippet footer()}
 		<span class="mr-auto"><StageChip kind="pr" /></span>
 		<Button variant="ghost" onclick={onclose}>Cancel</Button>
-		<Button disabled={!picked.size || op.busy} onclick={stage}
-			>Stage {picked.size} attachment{picked.size === 1 ? '' : 's'}</Button
-		>
+		<Button disabled={!picked.size || op.busy} onclick={stage}>
+			Stage {picked.size} attachment{picked.size === 1 ? '' : 's'}
+		</Button>
 	{/snippet}
 </Modal>

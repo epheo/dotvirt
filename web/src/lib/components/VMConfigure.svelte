@@ -110,11 +110,11 @@
 						{#each vm.disks as d (d.name)}
 							<li class="flex justify-between gap-3 py-1.5">
 								<span class="text-ink">{d.name}</span>
-								<span class="text-ink-faint"
-									>{d.type}{d.size ? ` · ${d.size}` : ''}{d.storageClass
+								<span class="text-ink-faint">
+									{d.type}{d.size ? ` · ${d.size}` : ''}{d.storageClass
 										? ` · ${d.storageClass}`
-										: ''}</span
-								>
+										: ''}
+								</span>
 							</li>
 						{/each}
 					</ul>
@@ -143,18 +143,15 @@
 								<div class="flex items-baseline justify-between gap-3">
 									<span class="text-ink">{n.name}</span>
 									<span class="flex items-center gap-2 text-right">
-										<span class="text-ink-soft"
-											>{pg
-												? pg.name
-												: n.network && n.network !== 'pod'
-													? n.network
-													: 'Pod network'}</span
-										>
+										<span class="text-ink-soft">
+											{pg ? pg.name : n.network && n.network !== 'pod' ? n.network : 'Pod network'}
+										</span>
 										{#if pg}
 											<span
 												class="shrink-0 rounded bg-inset-strong px-1.5 py-0.5 text-[11px] text-ink-muted"
-												>{kindLabel(pg.kind)}{pg.vlan ? ` ${pg.vlan}` : ''}</span
 											>
+												{kindLabel(pg.kind)}{pg.vlan ? ` ${pg.vlan}` : ''}
+											</span>
 										{/if}
 									</span>
 								</div>
@@ -178,8 +175,9 @@
 								onclick={() => (ui.search = `label:${k}=${v}`)}
 								title="Find everything labeled {k}={v}"
 								class="mr-1 mb-1 inline-block rounded bg-inset-strong px-1.5 py-0.5 text-xs text-ink-soft hover:bg-select-soft hover:text-accent-ink"
-								>{k}={v}</button
 							>
+								{k}={v}
+							</button>
 						{/each}
 					{:else}
 						<p class="py-1 text-xs text-ink-faint">No labels.</p>
@@ -194,9 +192,9 @@
 					<Row label="Sync" value={vm.sync} />
 				</dl>
 				<div class="border-t border-line-soft px-card py-2">
-					<a href={manifestURL(vm)} target="_blank" class="text-xs text-accent-ink hover:underline"
-						>Download manifest ↗</a
-					>
+					<a href={manifestURL(vm)} target="_blank" class="text-xs text-accent-ink hover:underline">
+						Download manifest ↗
+					</a>
 					<p class="mt-1 text-xs text-ink-faint">
 						This VM's configuration lives in git; edits become a pull request.
 					</p>

@@ -62,10 +62,10 @@
 {:else if lost}
 	<Banner tone="warn">
 		<TriangleAlert size={14} class="shrink-0" />
-		<span class="truncate"
-			>Git no longer declares what this project runs: its repo was re-created or rewritten. ArgoCD
-			keeps it running until it is adopted into git.</span
-		>
+		<span class="truncate">
+			Git no longer declares what this project runs: its repo was re-created or rewritten. ArgoCD
+			keeps it running until it is adopted into git.
+		</span>
 		{#if adoptable.length}
 			<button
 				onclick={() => adoptOp.run(() => adoptNamespaces(adoptable))}

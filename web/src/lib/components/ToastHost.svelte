@@ -32,8 +32,10 @@
 				<button
 					onclick={() => ui.dismissToast(t.id)}
 					aria-label="Dismiss"
-					class="shrink-0 text-side-dim hover:text-white"><X size={14} /></button
+					class="shrink-0 text-side-dim hover:text-white"
 				>
+					<X size={14} />
+				</button>
 			</div>
 		{/each}
 	</div>

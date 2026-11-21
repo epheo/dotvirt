@@ -147,9 +147,9 @@
 	{#if vmsOff()}
 		<TreeRow active={scope.kind === 'all'} href="/compute">
 			<span class="truncate text-side-ink">All projects</span>
-			{#snippet trailing()}<span class="text-xs text-side-dim"
-					>{fmt(inventory.projects.length)}</span
-				>{/snippet}
+			{#snippet trailing()}<span class="text-xs text-side-dim">
+					{fmt(inventory.projects.length)}
+				</span>{/snippet}
 		</TreeRow>
 	{:else}
 		<!-- A row keeps the tab in view (keepTab), so All VMs names its tab to leave Templates. -->
@@ -158,8 +158,9 @@
 			href={onTemplates ? '/compute?tab=summary' : '/compute'}
 		>
 			<span class="truncate text-side-ink">All VMs</span>
-			{#snippet trailing()}<span class="text-xs text-side-dim">{fmt(inventory.vmCount)}</span
-				>{/snippet}
+			{#snippet trailing()}<span class="text-xs text-side-dim">
+					{fmt(inventory.vmCount)}
+				</span>{/snippet}
 		</TreeRow>
 		<TreeRow active={onTemplates} href={templatesHref()}>
 			<span class="truncate text-side-ink">VM templates</span>
@@ -193,8 +194,10 @@
 			{/snippet}
 			<span
 				class="truncate {open ? 'text-side-ink' : ''}"
-				title={project.title ? project.name : undefined}>{project.title || project.name}</span
+				title={project.title ? project.name : undefined}
 			>
+				{project.title || project.name}
+			</span>
 			<!-- The tree only marks state, one dot per row at the right: the worst
 			     issue when the project has any, else the Application rollup (or the
 			     VM-only drift dot when Argo isn't wired). -->
@@ -317,9 +320,9 @@
 				<Layers size={13} class="shrink-0 text-side-dim" />
 				<span class="min-w-0 flex-1 truncate text-side-ink">{cand.namespace}</span>
 				<span class="text-xs text-side-dim">{cand.vms}</span>
-				<span class="text-xs text-side-dim group-hover:text-side-ink group-hover:underline"
-					>Adopt</span
-				>
+				<span class="text-xs text-side-dim group-hover:text-side-ink group-hover:underline">
+					Adopt
+				</span>
 			</button>
 		{/each}
 	{/if}

@@ -119,12 +119,12 @@
 				<input id="or-where" class="{FIELD} font-mono" value="{project} / {namespace}" disabled />
 			{:else}
 				<PlacePicker id="or-where" bind:value={namespace} namespaces={places} first={opener} />
-				<span class={HELP}
-					>{project === opener && opener ? 'Where you were. ' : ''}Search {plural(
+				<span class={HELP}>
+					{project === opener && opener ? 'Where you were. ' : ''}Search {plural(
 						new Set(places.map((n) => inventory.projectOf(n))).size,
 						'project',
-					)}.</span
-				>
+					)}.
+				</span>
 			{/if}
 		</div>
 
@@ -173,8 +173,9 @@
 						disabled={rules.rows.length === 1}
 						aria-label="Remove rule {i + 1}"
 						class="ml-auto flex size-8 items-center justify-center rounded-md text-ink-muted hover:bg-inset-strong hover:text-danger disabled:opacity-40"
-						><X size={15} /></button
 					>
+						<X size={15} />
+					</button>
 				</div>
 			{/each}
 			<div><Button variant="link" onclick={rules.add}><Plus size={14} /> Add a rule</Button></div>
@@ -192,14 +193,14 @@
 		>
 			{#snippet consequences()}
 				{#if existing && !editing}
-					<Consequence tone="warn"
-						>Replaces the outbound rules {namespace} has now: a namespace keeps one set.</Consequence
-					>
+					<Consequence tone="warn">
+						Replaces the outbound rules {namespace} has now: a namespace keeps one set.
+					</Consequence>
 				{/if}
-				<Consequence tone="info"
-					>Checked in order for VMs in {namespace || 'the namespace'}; anything no rule matches
-					still goes out.</Consequence
-				>
+				<Consequence tone="info">
+					Checked in order for VMs in {namespace || 'the namespace'}; anything no rule matches still
+					goes out.
+				</Consequence>
 				<Consequence tone="ok">Nothing restarts.</Consequence>
 			{/snippet}
 		</StagesPanel>

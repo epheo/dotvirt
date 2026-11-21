@@ -63,8 +63,10 @@
 			{elsewhere.length} more outside this scope:
 			{#each elsewhere.slice(0, 2) as i, n (i.scope + i.label)}{n ? ', ' : ' '}<a
 					href={i.href}
-					class="text-accent-ink hover:underline">{i.scope}</a
-				>{/each}{elsewhere.length > 2 ? `, and ${elsewhere.length - 2} more` : ''}.
+					class="text-accent-ink hover:underline"
+				>
+					{i.scope}
+				</a>{/each}{elsewhere.length > 2 ? `, and ${elsewhere.length - 2} more` : ''}.
 		</p>
 	{/if}
 </Card>

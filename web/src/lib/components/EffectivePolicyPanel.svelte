@@ -49,24 +49,31 @@
 			{#if tier}
 				<span
 					class="rounded-full bg-accent-soft px-1.5 py-0.5 text-xs whitespace-nowrap text-accent-ink"
-					>{tier}</span
 				>
+					{tier}
+				</span>
 			{/if}
 			<span
 				class="min-w-0 flex-1 truncate text-[13px] {b.policy.withheld
 					? 'text-ink-muted'
 					: 'font-medium text-ink'}"
-				title={b.policy.withheld ? WITHHELD : undefined}>{b.policy.name}</span
+				title={b.policy.withheld ? WITHHELD : undefined}
 			>
+				{b.policy.name}
+			</span>
 			<span
 				class="hidden max-w-56 truncate text-xs text-ink-muted sm:inline"
-				title={b.policy.applies ?? b.policy.target}>{b.policy.applies ?? b.policy.target}</span
+				title={b.policy.applies ?? b.policy.target}
 			>
+				{b.policy.applies ?? b.policy.target}
+			</span>
 			{#if b.conditional}
 				<span
 					class="rounded bg-warn-soft px-1.5 py-0.5 text-xs whitespace-nowrap text-warn-ink"
-					title="Targets specific pods; this view can't resolve which">matching pods only</span
+					title="Targets specific pods; this view can't resolve which"
 				>
+					matching pods only
+				</span>
 			{/if}
 			{#if b.policy.sync}
 				<SyncBadge sync={b.policy.sync} error={b.policy.syncError ?? ''} compact />
@@ -121,9 +128,9 @@
 						<span class="rounded bg-inset px-1.5 py-0.5 text-ink-muted">{k}={v}</span>
 					{/each}
 				{:else}
-					<span class="text-ink-faint"
-						>none, so only rules without a label selector can pick it</span
-					>
+					<span class="text-ink-faint">
+						none, so only rules without a label selector can pick it
+					</span>
 				{/if}
 			{:else}
 				<span>
@@ -135,9 +142,9 @@
 		<section class="rounded border border-line bg-panel">
 			<header class="flex items-center gap-2 border-b border-line px-3 py-2">
 				<h2 class="text-sm font-semibold text-ink">Between VMs</h2>
-				<span class="min-w-0 flex-1 truncate text-xs text-ink-faint"
-					>Met top to bottom: cluster rules first, the cluster default rule last</span
-				>
+				<span class="min-w-0 flex-1 truncate text-xs text-ink-faint">
+					Met top to bottom: cluster rules first, the cluster default rule last
+				</span>
 			</header>
 			{#if denyText}
 				<p class="border-b border-line-soft bg-warn-soft/40 px-3 py-2 text-xs text-ink-soft">

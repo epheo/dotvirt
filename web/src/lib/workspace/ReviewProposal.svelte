@@ -34,8 +34,10 @@
 			target="_blank"
 			rel="noopener"
 			class="inline-flex items-center gap-1 text-accent-ink hover:underline"
-			>PR #{p.prNumber} <ExternalLink size={12} /></a
 		>
+			PR #{p.prNumber}
+			<ExternalLink size={12} />
+		</a>
 		in {p.project}{#if p.by},
 			{p.mine ? 'yours' : `by ${p.by}`}{/if}{#if p.revert}, undoes a past change{/if}.
 	{/snippet}
@@ -60,8 +62,10 @@
 				<Button
 					variant="secondary"
 					size="sm"
-					onclick={() => reviewCache.loadProposal(p.project, p.prNumber, true)}>Retry</Button
+					onclick={() => reviewCache.loadProposal(p.project, p.prNumber, true)}
 				>
+					Retry
+				</Button>
 			</div>
 		{:else if !review?.data}
 			<Skeleton rows={2} class="h-12" />

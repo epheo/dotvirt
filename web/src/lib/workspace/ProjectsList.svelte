@@ -37,8 +37,10 @@
 							<a
 								class="text-accent-ink hover:underline"
 								href={hrefForScope({ kind: 'project', project: p.name })}
-								title={p.title ? p.name : undefined}>{p.title || p.name}</a
+								title={p.title ? p.name : undefined}
 							>
+								{p.title || p.name}
+							</a>
 						</td>
 						<td class="{TD} text-right tabular-nums">{p.namespaces.length}</td>
 						<td class={TD}><ProjectSyncBadge gitOps={p.gitOps} compact /></td>

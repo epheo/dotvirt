@@ -45,8 +45,10 @@
 				onclick={() => (range = r.key)}
 				class="rounded border px-2 py-0.5 text-xs {range === r.key
 					? 'border-accent bg-select-soft text-accent-ink'
-					: 'border-line-strong text-ink-soft hover:bg-inset'}">{r.label}</button
+					: 'border-line-strong text-ink-soft hover:bg-inset'}"
 			>
+				{r.label}
+			</button>
 		{/each}
 	</div>
 

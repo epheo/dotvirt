@@ -118,8 +118,9 @@
 		onclick={onclose}
 		aria-label="Close inspector"
 		class="inline-flex size-7 items-center justify-center rounded-md text-ink-soft hover:bg-inset-strong"
-		><X size={16} /></button
 	>
+		<X size={16} />
+	</button>
 {/snippet}
 
 {#snippet kv(rows: [string, string, boolean?][])}
@@ -135,9 +136,9 @@
 	<h3 class="mb-2 flex items-baseline gap-2 text-[13px] leading-5 font-bold">
 		{text}
 		{#if aside}<span class="text-[13px] font-normal text-ink-faint">{aside}</span>{/if}
-		{#if link}<a href={link.href} class="ml-auto font-normal text-accent-ink hover:underline"
-				>{link.label}</a
-			>{/if}
+		{#if link}<a href={link.href} class="ml-auto font-normal text-accent-ink hover:underline">
+				{link.label}
+			</a>{/if}
 	</h3>
 {/snippet}
 
@@ -175,8 +176,9 @@
 								<li class="flex items-start gap-2">
 									<span
 										class="mt-px size-[18px] shrink-0 rounded-full bg-accent text-center text-[11px] leading-[18px] font-bold text-accent-on"
-										>{i + 1}</span
 									>
+										{i + 1}
+									</span>
 									<span>{s.text}</span>
 								</li>
 							{/each}
@@ -218,15 +220,17 @@
 									(ui.modal = {
 										kind: 'trace',
 										source: { namespace: vm.namespace, name: vm.name },
-									})}><Activity size={16} />Check connectivity</Button
+									})}
 							>
-							<Button variant="secondary" class="px-3!" href={vmHref(vm.namespace, vm.name)}
-								>Open {vm.name}</Button
-							>
+								<Activity size={16} />Check connectivity
+							</Button>
+							<Button variant="secondary" class="px-3!" href={vmHref(vm.namespace, vm.name)}>
+								Open {vm.name}
+							</Button>
 						</div>
-						<span class="text-xs leading-4 text-ink-faint"
-							>Check connectivity simulates the rules. It sends no packet.</span
-						>
+						<span class="text-xs leading-4 text-ink-faint">
+							Check connectivity simulates the rules. It sends no packet.
+						</span>
 					</div>
 				{:else if target.kind === 'network'}
 					{@const n = target.net}
@@ -267,9 +271,9 @@
 							{/each}
 							{#if canEditUplink(u)}
 								<div class="mt-1 flex flex-wrap items-center gap-1.5">
-									<Button variant="outline" size="sm" onclick={() => openEdit(uplinkRef(u))}
-										>Edit {uplinkLabel(u)}</Button
-									>
+									<Button variant="outline" size="sm" onclick={() => openEdit(uplinkRef(u))}>
+										Edit {uplinkLabel(u)}
+									</Button>
 									<StageChip kind="pr" />
 								</div>
 							{/if}
@@ -291,8 +295,10 @@
 								<li>
 									<a
 										href={networkHref(networkKey(n))}
-										class="font-mono text-accent-ink underline underline-offset-2">{n.name}</a
+										class="font-mono text-accent-ink underline underline-offset-2"
 									>
+										{n.name}
+									</a>
 									<span class="text-ink-faint">{n.subnets?.[0] ?? ''}</span>
 								</li>
 							{/each}
@@ -302,8 +308,9 @@
 						<Button
 							variant="secondary"
 							href="/networking?tab=networks&project={encodeURIComponent(target.name)}"
-							>Its networks</Button
 						>
+							Its networks
+						</Button>
 					</div>
 				{:else if target.kind === 'edge'}
 					<p class="text-[13px] text-ink-soft">
@@ -315,9 +322,9 @@
 						['Routes', fmt(networking.egress.filter((p) => p.kind === 'route').length)],
 					])}
 					<div class="border-t border-line-soft pt-4">
-						<Button variant="secondary" href="/networking?tab=firewall"
-							>Open the Firewall tab</Button
-						>
+						<Button variant="secondary" href="/networking?tab=firewall">
+							Open the Firewall tab
+						</Button>
 					</div>
 				{:else if target.kind === 'fabric'}
 					<p class="text-[13px] text-ink-soft">

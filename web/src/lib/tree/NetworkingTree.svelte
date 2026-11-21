@@ -85,8 +85,9 @@
 				aria-label="{opts.expanded ? 'Collapse' : 'Expand'} {opts.label}"
 				onclick={opts.ontoggle}
 				class="flex shrink-0 items-center"
-				>{#if opts.expanded}<ChevronDown size={14} />{:else}<ChevronRight size={14} />{/if}</button
 			>
+				{#if opts.expanded}<ChevronDown size={14} />{:else}<ChevronRight size={14} />{/if}
+			</button>
 		{:else if opts.spacer}
 			<span class="w-3.5 shrink-0"></span>
 		{/if}
@@ -102,8 +103,9 @@
 							? 'bg-danger'
 							: 'bg-warn'}"
 					></span><span class="sr-only">, has a problem</span>{/if}
-				{#if opts.count}<span class="ml-auto shrink-0 text-xs text-side-dim">{opts.count}</span
-					>{/if}
+				{#if opts.count}<span class="ml-auto shrink-0 text-xs text-side-dim">
+						{opts.count}
+					</span>{/if}
 			</a>
 		{:else}
 			<button
@@ -117,8 +119,9 @@
 							? 'bg-danger'
 							: 'bg-warn'}"
 					></span><span class="sr-only">, has a problem</span>{/if}
-				{#if opts.count}<span class="ml-auto shrink-0 text-xs text-side-dim">{opts.count}</span
-					>{/if}
+				{#if opts.count}<span class="ml-auto shrink-0 text-xs text-side-dim">
+						{opts.count}
+					</span>{/if}
 			</button>
 		{/if}
 	</div>
@@ -177,8 +180,10 @@
 		class="flex items-center gap-1.5 rounded px-2 py-1.5 text-[13px] leading-5 {onRoot &&
 		rootTab === 'map'
 			? 'bg-side-hover text-side-ink'
-			: 'text-side-dim hover:bg-side-hover/60 hover:text-side-ink'}"><MapIcon size={14} />Map</a
+			: 'text-side-dim hover:bg-side-hover/60 hover:text-side-ink'}"
 	>
+		<MapIcon size={14} />Map
+	</a>
 
 	{@render label('Networks', fmt(inventory.networks.length))}
 	{@render row({

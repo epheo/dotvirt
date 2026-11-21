@@ -115,21 +115,21 @@
 							onchange={() => pick(ch.classes[0])}
 							class="size-4 accent-accent"
 						/>
-						<span class="text-sm font-medium {none ? 'text-ink-muted' : 'text-ink'}"
-							>{ch.title}</span
-						>
-						<span class="ml-auto flex gap-0.5" aria-hidden="true"
-							>{#each GLYPHS[ch.copies] as kind, i (i)}<CopyGlyph {kind} />{/each}</span
-						>
+						<span class="text-sm font-medium {none ? 'text-ink-muted' : 'text-ink'}">
+							{ch.title}
+						</span>
+						<span class="ml-auto flex gap-0.5" aria-hidden="true">
+							{#each GLYPHS[ch.copies] as kind, i (i)}<CopyGlyph {kind} />{/each}
+						</span>
 					</span>
 					{#each ch.lines as line (line)}
 						<span class="text-xs leading-4 text-ink-muted">{line}</span>
 					{/each}
 					{#if none}
-						<span class="text-xs leading-4 font-medium text-ink-soft"
-							>No class you can use keeps {ch.copies === 1 ? 'one copy' : `${ch.copies} copies`}.
-							Ask your platform team to add one.</span
-						>
+						<span class="text-xs leading-4 font-medium text-ink-soft">
+							No class you can use keeps {ch.copies === 1 ? 'one copy' : `${ch.copies} copies`}. Ask
+							your platform team to add one.
+						</span>
 					{/if}
 				</label>
 			{/each}
@@ -161,9 +161,9 @@
 		{#if pickedClass && picked}
 			{@const room = roomText(pickedClass, picked.copies, bytes, local)}
 			<div class="flex flex-col gap-1">
-				<span class="text-xs text-ink-muted"
-					>Class <span class="font-mono">{pickedClass.info.name}</span>, tier {pickedClass.tier}.</span
-				>
+				<span class="text-xs text-ink-muted">
+					Class <span class="font-mono">{pickedClass.info.name}</span>, tier {pickedClass.tier}.
+				</span>
 				{#if picked.copies > 1}
 					<span class="flex items-center gap-1.5 text-xs text-ink-muted">
 						<span
@@ -180,10 +180,10 @@
 						{room.text}
 					</span>
 				{/if}
-				<span class="text-xs text-ink-faint"
-					>Each copy lands on its own host when the disk is created. r-drbd never moves a copy on
-					its own.</span
-				>
+				<span class="text-xs text-ink-faint">
+					Each copy lands on its own host when the disk is created. r-drbd never moves a copy on its
+					own.
+				</span>
 			</div>
 		{/if}
 

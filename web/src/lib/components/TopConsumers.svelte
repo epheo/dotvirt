@@ -56,14 +56,16 @@
 					<td class="max-w-0 truncate py-2 pr-3 pl-card">
 						<button
 							onclick={() => onselect?.(c.namespace, c.name)}
-							class="font-mono text-ink hover:text-accent-ink hover:underline">{c.name}</button
+							class="font-mono text-ink hover:text-accent-ink hover:underline"
 						>
+							{c.name}
+						</button>
 						<span class="ml-1 text-ink-muted">{c.namespace}</span>
 					</td>
 					<td class="px-3 py-2 whitespace-nowrap text-ink-soft tabular-nums">{cpuText(c)}</td>
-					<td class="py-2 pr-card pl-3 whitespace-nowrap text-ink-soft tabular-nums"
-						>{memText(c)}</td
-					>
+					<td class="py-2 pr-card pl-3 whitespace-nowrap text-ink-soft tabular-nums">
+						{memText(c)}
+					</td>
 				</tr>
 			{:else}
 				<tr><td colspan="3" class="px-card py-2 text-xs text-ink-faint">No usage data.</td></tr>

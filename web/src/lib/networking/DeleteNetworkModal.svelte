@@ -77,32 +77,32 @@
 	<div class="flex flex-col gap-2 p-4">
 		<Consequence tone="danger">Removes {net.name} when the pull request merges.</Consequence>
 		{#if nics.length}
-			<Consequence tone="warn"
-				>Detaches {nics.length} VM{nics.length === 1 ? '' : 's'}: each loses its {net.name} NIC at its
-				next restart.</Consequence
-			>
+			<Consequence tone="warn">
+				Detaches {nics.length} VM{nics.length === 1 ? '' : 's'}: each loses its {net.name} NIC at its
+				next restart.
+			</Consequence>
 		{/if}
 		{#if projects.size > 1 || (net.scope === 'shared' && nics.length)}
-			<Consequence
-				>The detaches stage in {projects.size} project{projects.size === 1 ? '' : 's'}; {net.name} itself
-				in the platform repository.</Consequence
-			>
+			<Consequence>
+				The detaches stage in {projects.size} project{projects.size === 1 ? '' : 's'}; {net.name} itself
+				in the platform repository.
+			</Consequence>
 		{/if}
 		{#if blocked}
 			<p class="text-[13px] text-warn-ink">{blocked}</p>
 		{/if}
 		{#if nics.length < vms.length}
-			<Consequence tone="warn"
-				>{vms.length - nics.length} VM{vms.length - nics.length === 1 ? '' : 's'} on it are not in git:
-				detach them by hand.</Consequence
-			>
+			<Consequence tone="warn">
+				{vms.length - nics.length} VM{vms.length - nics.length === 1 ? '' : 's'} on it are not in git:
+				detach them by hand.
+			</Consequence>
 		{/if}
 	</div>
 	{#snippet footer()}
 		<span class="mr-auto"><StageChip kind="pr" /></span>
 		<Button variant="ghost" onclick={onclose}>Cancel</Button>
-		<Button variant="danger" disabled={op.busy || !!blocked} title={blocked} onclick={stage}
-			>Stage the delete</Button
-		>
+		<Button variant="danger" disabled={op.busy || !!blocked} title={blocked} onclick={stage}>
+			Stage the delete
+		</Button>
 	{/snippet}
 </Modal>

@@ -102,8 +102,10 @@
 	{:else if net}
 		Project network of <a
 			href="/networking?tab=networks&project={encodeURIComponent(owner)}"
-			class="text-accent-ink underline underline-offset-2">{owner || net.namespace}</a
+			class="text-accent-ink underline underline-offset-2"
 		>
+			{owner || net.namespace}
+		</a>
 	{/if}
 {/snippet}
 
@@ -130,21 +132,21 @@
 					: 'use'} only this"
 			>
 				{#snippet actions()}
-					<Button variant="secondary" href="/networking?sel=pod"
-						><MapIcon size={16} />Show on map</Button
-					>
-					<Button variant="outline" onclick={() => (ui.modal = { kind: 'trace' })}
-						><Activity size={16} />Check connectivity</Button
-					>
+					<Button variant="secondary" href="/networking?sel=pod">
+						<MapIcon size={16} />Show on map
+					</Button>
+					<Button variant="outline" onclick={() => (ui.modal = { kind: 'trace' })}>
+						<Activity size={16} />Check connectivity
+					</Button>
 				{/snippet}
 			</PageHeader>
 		{:else if net}
 			<PageHeader title={net.name} status={{ tone, text: status }} {context}>
 				{#snippet actions()}
 					<Button variant="secondary" href={mapHref}><MapIcon size={16} />Show on map</Button>
-					<Button variant="outline" onclick={() => (ui.modal = { kind: 'trace' })}
-						><Activity size={16} />Check connectivity</Button
-					>
+					<Button variant="outline" onclick={() => (ui.modal = { kind: 'trace' })}>
+						<Activity size={16} />Check connectivity
+					</Button>
 				{/snippet}
 			</PageHeader>
 		{:else}

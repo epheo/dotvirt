@@ -24,9 +24,9 @@
 		{:else if c.onclick}
 			<button onclick={c.onclick} class="text-accent-ink hover:underline">{c.label}</button>
 		{:else}
-			<span class="truncate" aria-current={i === trail.length - 1 ? 'page' : undefined}
-				>{c.label}</span
-			>
+			<span class="truncate" aria-current={i === trail.length - 1 ? 'page' : undefined}>
+				{c.label}
+			</span>
 		{/if}
 	{/each}
 </nav>

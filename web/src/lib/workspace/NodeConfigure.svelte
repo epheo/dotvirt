@@ -72,9 +72,9 @@
 							<span class="font-mono text-ink">{u.name}</span>
 							{#if u.builtin}<span class="text-xs text-ink-muted">default</span>{/if}
 						</span>
-						<span class="text-ink-muted"
-							><span class="font-mono">{u.bridge}</span>, on {plural(u.nodeCount, 'host')}</span
-						>
+						<span class="text-ink-muted">
+							<span class="font-mono">{u.bridge}</span>, on {plural(u.nodeCount, 'host')}
+						</span>
 					</li>
 				{/each}
 			</ul>

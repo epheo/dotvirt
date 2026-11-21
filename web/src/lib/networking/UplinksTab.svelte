@@ -34,9 +34,9 @@
 <div class="flex flex-col gap-4">
 	{#if clusterObjectGate('uplink', 'create').ok}
 		<div class="flex">
-			<Button variant="outline" class="ml-auto" onclick={() => (ui.modal = { kind: 'uplink' })}
-				><Plus size={16} />New uplink</Button
-			>
+			<Button variant="outline" class="ml-auto" onclick={() => (ui.modal = { kind: 'uplink' })}>
+				<Plus size={16} />New uplink
+			</Button>
 		</div>
 	{/if}
 	{#if !inventory.uplinks.length}
@@ -62,22 +62,28 @@
 					<button
 						type="button"
 						class="text-accent-ink hover:underline"
-						onclick={() => openAdopt(uplinkRef(u))}>Adopt into git</button
+						onclick={() => openAdopt(uplinkRef(u))}
 					>
+						Adopt into git
+					</button>
 				{:else}
 					{#if canEditUplink(u)}
 						<button
 							type="button"
 							class="text-accent-ink hover:underline"
-							onclick={() => openEdit(uplinkRef(u))}>Edit</button
+							onclick={() => openEdit(uplinkRef(u))}
 						>
+							Edit
+						</button>
 					{/if}
 					{#if canDeleteUplink(u)}
 						<button
 							type="button"
 							class="text-danger-ink hover:underline"
-							onclick={() => openDelete(uplinkRef(u), u.sourceFile!)}>Delete</button
+							onclick={() => openDelete(uplinkRef(u), u.sourceFile!)}
 						>
+							Delete
+						</button>
 					{/if}
 				{/if}
 			{/snippet}
@@ -87,11 +93,11 @@
 							size={16}
 							class="text-ink-faint"
 						/>{/if}
-					<span
-						>On {fmt(u.nodeCount)}{hostTotal ? ` of ${fmt(hostTotal)}` : ''} host{u.nodeCount === 1
+					<span>
+						On {fmt(u.nodeCount)}{hostTotal ? ` of ${fmt(hostTotal)}` : ''} host{u.nodeCount === 1
 							? ''
-							: 's'}{u.builtin ? '. Pod, Shared and project networks leave here.' : '.'}</span
-					>
+							: 's'}{u.builtin ? '. Pod, Shared and project networks leave here.' : '.'}
+					</span>
 					{#if u.policy}<span class="font-mono text-xs text-ink-faint">{u.policy}</span>{/if}
 				</div>
 				{#if u.nodes?.length && !u.builtin}
@@ -100,12 +106,14 @@
 							<span
 								class="rounded px-1.5 py-0.5 font-mono text-xs {failing.some((f) => f.node === h)
 									? 'bg-danger-soft text-danger-ink'
-									: 'bg-inset text-ink-soft'}">{h}</span
+									: 'bg-inset text-ink-soft'}"
 							>
+								{h}
+							</span>
 						{/each}
-						{#if u.nodes.length > 16}<span class="px-1 text-xs text-ink-faint"
-								>{u.nodes.length - 16} more</span
-							>{/if}
+						{#if u.nodes.length > 16}<span class="px-1 text-xs text-ink-faint">
+								{u.nodes.length - 16} more
+							</span>{/if}
 					</div>
 				{/if}
 				{#if vlans.length}
@@ -113,8 +121,10 @@
 						Carries
 						{#each vlans.slice(0, 6) as n, i (networkKey(n))}{i ? ', ' : ''}<a
 								href={networkHref(networkKey(n))}
-								class="font-mono text-accent-ink underline underline-offset-2">{n.name}</a
-							>{/each}{vlans.length > 6 ? ` and ${vlans.length - 6} more` : ''}.
+								class="font-mono text-accent-ink underline underline-offset-2"
+							>
+								{n.name}
+							</a>{/each}{vlans.length > 6 ? ` and ${vlans.length - 6} more` : ''}.
 					</p>
 				{/if}
 				{#each failing as f (f.node)}
@@ -130,19 +140,19 @@
 							</p>{/if}
 						{#if canEditUplink(u)}
 							<div class="flex flex-wrap items-center gap-2">
-								<Button variant="outline" size="sm" onclick={() => openEdit(uplinkRef(u))}
-									>Edit {uplinkLabel(u)}</Button
-								>
+								<Button variant="outline" size="sm" onclick={() => openEdit(uplinkRef(u))}>
+									Edit {uplinkLabel(u)}
+								</Button>
 								<StageChip kind="pr" />
 							</div>
-							<Consequence size="sm" tone="info"
-								>Merging a fix makes nmstate retry it on {f.node}.</Consequence
-							>
+							<Consequence size="sm" tone="info">
+								Merging a fix makes nmstate retry it on {f.node}.
+							</Consequence>
 						{/if}
 						{#if vlans.length}
-							<Consequence size="sm" tone="danger"
-								>VMs on {vlans.map((n) => n.name).join(', ')} that run on {f.node} have no network there.</Consequence
-							>
+							<Consequence size="sm" tone="danger">
+								VMs on {vlans.map((n) => n.name).join(', ')} that run on {f.node} have no network there.
+							</Consequence>
 						{/if}
 					</div>
 				{/each}

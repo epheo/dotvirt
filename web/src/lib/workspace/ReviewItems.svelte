@@ -18,17 +18,17 @@
 				{#if it.kind === 'delete'}<Trash2 size={14} class="shrink-0 text-danger-ink" />
 				{:else if it.kind === 'create'}<Plus size={14} class="shrink-0 text-ok-ink" />
 				{:else}<Pencil size={14} class="shrink-0 text-accent-ink" />{/if}
-				<span class="min-w-0 truncate font-mono text-[13px] font-medium text-ink"
-					>{it.namespace ? vmKey(it) : it.name}</span
-				>
+				<span class="min-w-0 truncate font-mono text-[13px] font-medium text-ink">
+					{it.namespace ? vmKey(it) : it.name}
+				</span>
 				<StatusPill tone={draftKindTone(it.kind)} label={it.kind} dot={false} />
 			</div>
 			<div class="pl-[22px]"><ChangeList changes={it.changes} /></div>
 			{#if it.yaml}
 				<details class="ml-[22px] overflow-hidden rounded-md border border-line-soft">
-					<summary class="cursor-pointer px-3 py-1.5 text-[13px] text-accent-ink hover:underline"
-						>{it.baseYAML ? 'Manifest diff' : 'Manifest'}</summary
-					>
+					<summary class="cursor-pointer px-3 py-1.5 text-[13px] text-accent-ink hover:underline">
+						{it.baseYAML ? 'Manifest diff' : 'Manifest'}
+					</summary>
 					<ManifestDiff before={it.baseYAML} after={it.yaml} />
 				</details>
 			{/if}

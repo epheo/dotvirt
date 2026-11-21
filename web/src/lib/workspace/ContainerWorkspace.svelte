@@ -323,14 +323,14 @@
 	<span class="flex flex-wrap items-center gap-x-4 gap-y-1 text-[13px]">
 		<span class="text-ink-faint">{head.context}</span>
 		{#if scope.kind === 'node' && stats?.issues}
-			<a href="?tab=vms" class="inline-flex items-center gap-1.5 text-danger-ink hover:underline"
-				><CircleAlert size={14} />{plural(stats.issues, 'VM')} with issues</a
-			>
+			<a href="?tab=vms" class="inline-flex items-center gap-1.5 text-danger-ink hover:underline">
+				<CircleAlert size={14} />{plural(stats.issues, 'VM')} with issues
+			</a>
 		{/if}
 		{#if stats?.inChange}
-			<a href="?tab=vms" class="inline-flex items-center gap-1.5 text-accent-ink hover:underline"
-				><GitPullRequest size={14} />{stats.inChange.toLocaleString('en-US')} in a change</a
-			>
+			<a href="?tab=vms" class="inline-flex items-center gap-1.5 text-accent-ink hover:underline">
+				<GitPullRequest size={14} />{stats.inChange.toLocaleString('en-US')} in a change
+			</a>
 		{/if}
 	</span>
 {/snippet}

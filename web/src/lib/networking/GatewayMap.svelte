@@ -307,9 +307,9 @@
 										{r.hostnames?.join(', ') || r.name}
 									</button>
 								</td>
-								<td class="{TD} text-ink-muted"
-									>{inventory.projectOf(r.namespace) || r.namespace}</td
-								>
+								<td class="{TD} text-ink-muted">
+									{inventory.projectOf(r.namespace) || r.namespace}
+								</td>
 								<td class="{TD} font-mono text-xs text-ink-muted">
 									{(r.backends ?? []).map(backendLabel).join(', ')}
 								</td>
