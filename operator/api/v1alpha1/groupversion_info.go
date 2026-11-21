@@ -8,8 +8,9 @@
 package v1alpha1
 
 import (
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
-	"sigs.k8s.io/controller-runtime/pkg/scheme"
 )
 
 // GroupVersion is the group/version for this API (reuses the dotvirt.io domain the
@@ -18,6 +19,12 @@ var GroupVersion = schema.GroupVersion{Group: "dotvirt.io", Version: "v1alpha1"}
 
 // SchemeBuilder registers the API types; AddToScheme wires them into a scheme.
 var (
-	SchemeBuilder = &scheme.Builder{GroupVersion: GroupVersion}
+	SchemeBuilder = runtime.NewSchemeBuilder(addKnownTypes)
 	AddToScheme   = SchemeBuilder.AddToScheme
 )
+
+func addKnownTypes(s *runtime.Scheme) error {
+	s.AddKnownTypes(GroupVersion, &Dotvirt{}, &DotvirtList{})
+	metav1.AddToGroupVersion(s, GroupVersion)
+	return nil
+}

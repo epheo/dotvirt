@@ -148,11 +148,13 @@ func keyNamespace(key string) string {
 	return ns
 }
 
-func (s *rbacSignal) List() []any                        { return nil }
-func (s *rbacSignal) ListKeys() []string                 { return nil }
-func (s *rbacSignal) Get(any) (any, bool, error)         { return nil, false, nil }
-func (s *rbacSignal) GetByKey(string) (any, bool, error) { return nil, false, nil }
-func (s *rbacSignal) Resync() error                      { return nil }
+func (s *rbacSignal) List() []any                          { return nil }
+func (s *rbacSignal) ListKeys() []string                   { return nil }
+func (s *rbacSignal) Get(any) (any, bool, error)           { return nil, false, nil }
+func (s *rbacSignal) GetByKey(string) (any, bool, error)   { return nil, false, nil }
+func (s *rbacSignal) Resync() error                        { return nil }
+func (s *rbacSignal) LastStoreSyncResourceVersion() string { return "" }
+func (s *rbacSignal) Bookmark(string)                      {}
 
 // roleRefs counts the tracked bindings that bind each role: a ClusterRole by
 // its name, a Role as "namespace/name" (roleKey), which no ClusterRole name
