@@ -116,6 +116,7 @@ fbc:
         - v4.20
         - v4.21
         - v4.22
+        - v5.0
 EOF
 	# The canonical per-operator Makefile their FBC tooling expects. Pinned to the upstream
 	# commit that last changed it; re-pin to their latest when submitting.
