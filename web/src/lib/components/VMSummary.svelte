@@ -223,7 +223,7 @@
 		<VMReplicationCard {vm} />
 		<InfoCard title="Placement">
 			{#snippet action()}
-				{#if onmigrate && vm.phase === 'Running'}
+				{#if onmigrate && vm.phase === 'Running' && !vm.migrateBlock}
 					<Button variant="link" size="sm" onclick={onmigrate}>Migrate</Button>
 				{/if}
 			{/snippet}
