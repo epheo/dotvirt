@@ -17,10 +17,15 @@ type namedSeries struct {
 	samples []sample
 }
 
-// buildChart aligns one chart's series onto a shared time axis (the union of
-// all series' timestamps), with nil gaps where a series has no sample.
-func buildChart(cs chartSpec, series []namedSeries) model.MetricChart {
+// buildChart aligns one chart's series onto a shared time axis: every step of
+// the window w, with nil gaps where a series has no sample. A sparse series
+// (disk latency exists only while the disk is busy) still spans the window,
+// and its gaps stay gaps instead of a line across them.
+func buildChart(cs chartSpec, w span, series []namedSeries) model.MetricChart {
 	set := map[int64]struct{}{}
+	for t := w.start; w.step > 0 && t <= w.end; t += int64(w.step) {
+		set[t] = struct{}{}
+	}
 	for _, s := range series {
 		for _, smp := range s.samples {
 			set[smp.t] = struct{}{}
