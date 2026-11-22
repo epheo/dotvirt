@@ -41,6 +41,15 @@ type VM struct {
 	VCPUs        int      `json:"vcpus,omitempty"`        // rendered vCPU topology; the summary's value when the manifest delegates sizing to an instancetype
 	StartedAt    string   `json:"startedAt,omitempty"`    // RFC3339; VMI entered Running (for uptime)
 
+	// Failure is KubeVirt's reason the VM's instance cannot start: its pod
+	// refused or unschedulable, or the instance not created at all.
+	Failure string `json:"failure,omitempty"`
+	// RestartPending: a merged change takes effect only at the next restart
+	// (KubeVirt's RestartRequired); the VM runs the old spec until then.
+	RestartPending bool `json:"restartPending,omitempty"`
+	// MigrateBlock is KubeVirt's reason the running VM cannot live-migrate.
+	MigrateBlock string `json:"migrateBlock,omitempty"`
+
 	// Migration is the live (or last) node-to-node move and its
 	// progress, read from the VMI's migration state. Nil when never migrated.
 	Migration *Migration `json:"migration,omitempty"`

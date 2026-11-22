@@ -51,7 +51,7 @@ test('a merge on its way names the steps and who restarts', async ({ page }) => 
 	const lane = tray.locator('section', { hasText: 'PR #40 merged' });
 	await expect(lane.getByText('Git main updated')).toBeVisible();
 	await expect(lane.getByText('Argo CD picked up the merge')).toBeVisible();
-	await expect(lane.getByText('Applying; web-2 restarts once')).toBeVisible();
+	await expect(lane.getByText('Applying; web-2 needs a restart')).toBeVisible();
 });
 
 test('a refused merge offers the fix and the undo', async ({ page }) => {

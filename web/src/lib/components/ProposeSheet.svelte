@@ -107,11 +107,11 @@
 			return {
 				tone: 'warn',
 				icon: 'restart',
-				lead: `${it.name} restarts once.`,
+				lead: `${it.name} needs a restart.`,
 				text:
-					`The ${list(restart)} change${restart.length === 1 ? ' needs' : 's need'} it.` +
+					`The ${list(restart)} change${restart.length === 1 ? ' applies' : 's apply'} at its next restart; it keeps running until then.` +
 					(quiet.length
-						? ` The ${list(quiet)} change${quiet.length === 1 ? '' : 's'} alone would not.`
+						? ` The ${list(quiet)} change${quiet.length === 1 ? ' applies' : 's apply'} right away.`
 						: ''),
 			};
 		if (power)
