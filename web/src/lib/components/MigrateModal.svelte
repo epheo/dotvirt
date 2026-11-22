@@ -36,6 +36,17 @@
 		return '';
 	}
 
+	// Why nothing can move: KubeVirt's verdict on the VM, or no host it may go
+	// to, where even an automatic migration would wait unscheduled until it
+	// times out.
+	const held = $derived(
+		vm.migrateBlock
+			? `Cannot live-migrate: ${vm.migrateBlock}`
+			: hosts.data?.every((n) => blocked(n))
+				? `No other host can take ${vm.name}.`
+				: '',
+	);
+
 	async function migrate() {
 		if (await op.run(() => api.migrate(vm.namespace, vm.name, target || undefined))) {
 			ondone?.(true);
@@ -98,6 +109,8 @@
 			busyLabel="Migrating…"
 			hint="Runs now — a live migration, not a git change."
 			summary={target ? `Migrates ${vm.name}: ${vm.nodeName || 'unknown host'} → ${target}` : ''}
+			missing={held ? [held] : []}
+			disabled={!!held}
 			submitting={op.busy}
 			onsubmit={migrate}
 			oncancel={onclose}
