@@ -49,7 +49,8 @@ export interface VMAction {
 	title?: string;
 	// Offered now: the VM's state allows it and so does the caller's right.
 	enabled: (vm: VM) => boolean;
-	// Why the caller may not, when that is what holds it back; '' otherwise.
+	// What holds it back: KubeVirt's reason the VM cannot, or the caller's
+	// missing right; '' otherwise.
 	why?: (vm: VM) => string;
 	run?: (vm: VM) => Promise<void>;
 	/** The modal a dialog-backed host action opens. */
@@ -191,10 +192,11 @@ type Entry = VMAction & { gate?: (namespace: string) => Gate };
 function gated({ gate, ...a }: Entry): VMAction {
 	if (!gate) return a;
 	const state = a.enabled;
+	const held = a.why;
 	return {
 		...a,
 		enabled: (vm) => state(vm) && gate(vm.namespace).ok,
-		why: (vm) => (state(vm) ? gate(vm.namespace).why : ''),
+		why: (vm) => held?.(vm) || (state(vm) ? gate(vm.namespace).why : ''),
 	};
 }
 
@@ -231,7 +233,8 @@ const entries: Entry[] = [
 		label: 'Live-migrate…',
 		kind: 'host',
 		title: 'Move the running VM to another host — pick a target or let the scheduler choose',
-		enabled: running,
+		enabled: (vm) => running(vm) && !vm.migrateBlock,
+		why: (vm) => (running(vm) && vm.migrateBlock ? `Cannot live-migrate: ${vm.migrateBlock}` : ''),
 		gate: vmGate.migrate,
 		open: (vm) => ({ kind: 'migrateVM', vm: vmRef(vm) }),
 	},

@@ -132,6 +132,14 @@ describe('vmActions gates', () => {
 		);
 	});
 
+	it('a VM KubeVirt will not live-migrate says why', () => {
+		const pinned = vm({ migrateBlock: 'PVC web-rootdisk is not shared' });
+		expect(action('migrate').enabled(pinned)).toBe(false);
+		expect(action('migrate').why?.(pinned)).toBe(
+			'Cannot live-migrate: PVC web-rootdisk is not shared',
+		);
+	});
+
 	it('a paused VM can be unpaused, not paused again', () => {
 		const ids = enabledIds(vm({ paused: true }));
 		expect(ids).toContain('unpause');

@@ -2,9 +2,11 @@ package api
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 
 	"github.com/epheo/dotvirt/internal/cluster"
+	"github.com/epheo/dotvirt/internal/model"
 )
 
 type runtimeOp func(ctx context.Context, c *cluster.Client, namespace, name string) error
@@ -41,6 +43,13 @@ func (s *Server) handleMigrate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.handleRuntimeOp(w, r, "Live-migration", func(ctx context.Context, c *cluster.Client, ns, name string) error {
+		// KubeVirt's admission refuses a VM it marks not live-migratable with a
+		// 500, which reaches the caller as an internal error; its reason is the answer.
+		if s.state != nil {
+			if why := s.state.Live()[ns][name].MigrateBlock; why != "" {
+				return fmt.Errorf("%w: %s cannot live-migrate: %s", model.ErrConflict, name, why)
+			}
+		}
 		return c.Migrate(ctx, ns, name, req.Node)
 	})
 }

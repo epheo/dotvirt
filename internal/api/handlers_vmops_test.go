@@ -9,6 +9,7 @@ import (
 	authzv1 "k8s.io/api/authorization/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	kubevirtcorev1 "kubevirt.io/api/core/v1"
 
 	"github.com/epheo/dotvirt/internal/model"
 )
@@ -190,6 +191,35 @@ func TestMigrateTargetAndConflict(t *testing.T) {
 	}
 	wantStatus(t, do(s, adminToken, http.MethodPost, vmPath+"/migrate", `{"node":`), http.StatusBadRequest)
 	wantStatus(t, do(s, adminToken, http.MethodPost, vmPath+"/pause", ""), http.StatusConflict)
+}
+
+// A VM KubeVirt will not live-migrate is refused with KubeVirt's reason:
+// its admission would answer a 500, read as an internal error.
+func TestMigrateRefusesWhatKubeVirtWillNot(t *testing.T) {
+	fc := newFakeCluster(t)
+	path := "/apis/subresources.kubevirt.io/v1/namespaces/team-a-dev/virtualmachines/web/migrate"
+	fc.on(http.MethodPut, path, func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusAccepted) })
+	pinned := kubevirtcorev1.VirtualMachineInstance{
+		ObjectMeta: metav1.ObjectMeta{Namespace: "team-a-dev", Name: "web"},
+		Status: kubevirtcorev1.VirtualMachineInstanceStatus{
+			Phase: kubevirtcorev1.Running,
+			Conditions: []kubevirtcorev1.VirtualMachineInstanceCondition{{
+				Type: kubevirtcorev1.VirtualMachineInstanceIsMigratable, Status: corev1.ConditionFalse,
+				Reason: kubevirtcorev1.VirtualMachineInstanceReasonDisksNotMigratable, Message: "PVC web-rootdisk is not shared",
+			}},
+		},
+	}
+	fc.vmis = []kubevirtcorev1.VirtualMachineInstance{pinned}
+	s := fc.server(nil, Config{})
+
+	rec := do(s, adminToken, http.MethodPost, vmPath+"/migrate", "")
+	wantStatus(t, rec, http.StatusConflict)
+	if !strings.Contains(rec.Body.String(), "PVC web-rootdisk is not shared") {
+		t.Errorf("body = %q, want KubeVirt's reason", rec.Body.String())
+	}
+	if fc.called(http.MethodPut, path) {
+		t.Error("the migrate subresource was called for a VM KubeVirt will not move")
+	}
 }
 
 func TestSnapshots(t *testing.T) {
