@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { api, type VM } from '#lib/api.js';
+	import { lostWithVM } from '#lib/devices.js';
 	import { action } from '#lib/resource.svelte.js';
 	import { ui } from '#lib/state/ui.svelte.js';
 	import ConfirmDelete from './ConfirmDelete.svelte';
@@ -8,6 +9,7 @@
 	// that requires typing the VM name.
 	let { vm, onclose }: { vm: VM; onclose: () => void } = $props();
 
+	const lost = $derived(lostWithVM(vm));
 	const op = action();
 	async function confirm() {
 		if (await op.run(() => api.stageDelete(vm.namespace, vm.name))) {
@@ -30,4 +32,7 @@
 		change into <strong>Changes</strong>. The VM is deleted from the cluster only when the pull
 		request is merged.
 	</p>
+	{#if lost}
+		<p class="mt-2 font-medium text-danger-ink">{lost}</p>
+	{/if}
 </ConfirmDelete>

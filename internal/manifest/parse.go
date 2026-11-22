@@ -237,7 +237,7 @@ func disksFromDoc(d vmDoc, namespace string) []model.Disk {
 			disk.Claim = v.DataVolume.Name
 			if info, ok := dvs[v.DataVolume.Name]; ok {
 				disk.Size, disk.StorageClass, disk.AccessModes, disk.Image = info.size, info.class, info.modes, info.image
-				disk.Import = info.imp
+				disk.Import, disk.OwnedByVM = info.imp, true
 			}
 		case v.PVC != nil:
 			disk.Type = "pvc"

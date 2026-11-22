@@ -1,4 +1,5 @@
-import type { NetworkAdd } from '#lib/api.js';
+import type { NetworkAdd, VM } from '#lib/api.js';
+import { quantity } from '#lib/format.js';
 import { validName } from '#lib/validate.js';
 
 // Names for the devices the client adds to a VM. The server refuses a disk or
@@ -38,4 +39,16 @@ export function networkAdds(refs: string[], taken: Iterable<string>): NetworkAdd
 		used.add(iface);
 		return iface === base ? { name } : { name, interface: iface };
 	});
+}
+
+// lostWithVM names the disks a VM's deletion destroys: the ones its own
+// DataVolume templates provisioned. A claim the VM only references stays.
+export function lostWithVM(vm: Pick<VM, 'disks'>): string {
+	const names = (vm.disks ?? [])
+		.filter((d) => d.ownedByVM)
+		.map((d) => (d.size ? `${d.name} (${quantity(d.size)})` : d.name));
+	if (!names.length) return '';
+	if (names.length === 1) return `Its disk ${names[0]} is deleted with it, and the data on it.`;
+	const all = `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}`;
+	return `Its disks ${all} are deleted with it, and the data on them.`;
 }
