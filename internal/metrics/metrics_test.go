@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -48,18 +49,40 @@ func TestRateWindow(t *testing.T) {
 	}
 }
 
+// step is the i-th evaluation time of the query_range r asks for: where a
+// real Prometheus puts its samples.
+func step(r *http.Request, i int) int64 {
+	start, _ := strconv.ParseInt(r.URL.Query().Get("start"), 10, 64)
+	s, _ := strconv.Atoi(r.URL.Query().Get("step"))
+	return start + int64(i*s)
+}
+
+// requireWindowAxis fails unless times is every step of the 1h range: a
+// sparse series must not shrink the axis to where its samples are.
+func requireWindowAxis(t *testing.T, times []int64) {
+	t.Helper()
+	if len(times) != 121 {
+		t.Fatalf("times has %d points, want 121 (1h at 30s)", len(times))
+	}
+	for i := 1; i < len(times); i++ {
+		if times[i]-times[i-1] != 30 {
+			t.Fatalf("times[%d]-times[%d] = %d, want 30", i, i-1, times[i]-times[i-1])
+		}
+	}
+}
+
 // TestVMMetricsAlignsSeries verifies the parsing + shared-axis assembly: two series
-// in one chart whose samples land on different timestamps must align onto the union
-// axis, with nil gaps where a series has no sample at a given time.
+// in one chart whose samples land on different timestamps must align onto the
+// window's axis, with nil gaps where a series has no sample at a given time.
 func TestVMMetricsAlignsSeries(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		q := r.URL.Query().Get("query")
-		values := `[[100,"5"]]`
+		values := fmt.Sprintf(`[[%d,"5"]]`, step(r, 0))
 		switch {
 		case strings.Contains(q, "cpu_usage_seconds_total"):
-			values = `[[100,"10"],[130,"20"]]`
+			values = fmt.Sprintf(`[[%d,"10"],[%d,"20"]]`, step(r, 0), step(r, 1))
 		case strings.Contains(q, "vcpu_wait_seconds_total"):
-			values = `[[130,"1"],[160,"2"]]`
+			values = fmt.Sprintf(`[[%d,"1"],[%d,"2"]]`, step(r, 1), step(r, 2))
 		}
 		w.Header().Set("Content-Type", "application/json")
 		fmt.Fprintf(w, `{"status":"success","data":{"resultType":"matrix","result":[{"metric":{},"values":%s}]}}`, values)
@@ -83,16 +106,13 @@ func TestVMMetricsAlignsSeries(t *testing.T) {
 	if len(cpu.Series) < 2 || cpu.Series[0].Name != "Usage" || cpu.Series[1].Name != "Wait" {
 		t.Fatalf("series = %+v, want [Usage Wait ...]", cpu.Series)
 	}
-	// Union of {100,130} (Usage) and {130,160} (Wait).
-	if len(cpu.Times) != 3 || cpu.Times[0] != 100 || cpu.Times[1] != 130 || cpu.Times[2] != 160 {
-		t.Fatalf("times = %v, want [100 130 160]", cpu.Times)
-	}
+	requireWindowAxis(t, cpu.Times)
 	usage, wait := cpu.Series[0].Values, cpu.Series[1].Values
 	if usage[0] == nil || *usage[0] != 10 || usage[1] == nil || *usage[1] != 20 || usage[2] != nil {
 		t.Errorf("usage not aligned: [%s %s %s], want [10 20 nil]", p(usage[0]), p(usage[1]), p(usage[2]))
 	}
-	if wait[0] != nil || wait[1] == nil || *wait[1] != 1 || wait[2] == nil || *wait[2] != 2 {
-		t.Errorf("wait not aligned: [%s %s %s], want [nil 1 2]", p(wait[0]), p(wait[1]), p(wait[2]))
+	if wait[0] != nil || wait[1] == nil || *wait[1] != 1 || wait[2] == nil || *wait[2] != 2 || wait[3] != nil {
+		t.Errorf("wait not aligned: [%s %s %s %s], want [nil 1 2 nil]", p(wait[0]), p(wait[1]), p(wait[2]), p(wait[3]))
 	}
 }
 
@@ -150,7 +170,7 @@ func TestVMMetricsFansOutPerLabel(t *testing.T) {
 
 // TestScopeMetricsNamesAndAlignsSeries verifies the multi-series read behind the
 // scope charts: a topk result with two labeled series must come back as two
-// chart series named namespace/name (sorted), aligned on the union time axis,
+// chart series named namespace/name (sorted), aligned on the window's time axis,
 // and the query must carry the namespace scope.
 func TestScopeMetricsNamesAndAlignsSeries(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -160,9 +180,9 @@ func TestScopeMetricsNamesAndAlignsSeries(t *testing.T) {
 		}
 		w.Header().Set("Content-Type", "application/json")
 		if strings.Contains(q, "cpu_usage_seconds_total") {
-			fmt.Fprint(w, `{"status":"success","data":{"resultType":"matrix","result":[
-				{"metric":{"namespace":"b","name":"vm2"},"values":[[130,"3"]]},
-				{"metric":{"namespace":"a","name":"vm1"},"values":[[100,"1"],[130,"2"]]}]}}`)
+			fmt.Fprintf(w, `{"status":"success","data":{"resultType":"matrix","result":[
+				{"metric":{"namespace":"b","name":"vm2"},"values":[[%[2]d,"3"]]},
+				{"metric":{"namespace":"a","name":"vm1"},"values":[[%[1]d,"1"],[%[2]d,"2"]]}]}}`, step(r, 0), step(r, 1))
 			return
 		}
 		fmt.Fprint(w, `{"status":"success","data":{"resultType":"matrix","result":[
@@ -187,9 +207,7 @@ func TestScopeMetricsNamesAndAlignsSeries(t *testing.T) {
 	if len(cpu.Series) != 2 || cpu.Series[0].Name != "a/vm1" || cpu.Series[1].Name != "b/vm2" {
 		t.Fatalf("series = %+v, want [a/vm1 b/vm2] sorted by name", cpu.Series)
 	}
-	if len(cpu.Times) != 2 || cpu.Times[0] != 100 || cpu.Times[1] != 130 {
-		t.Fatalf("times = %v, want [100 130]", cpu.Times)
-	}
+	requireWindowAxis(t, cpu.Times)
 	vm1, vm2 := cpu.Series[0].Values, cpu.Series[1].Values
 	if vm1[0] == nil || *vm1[0] != 1 || vm1[1] == nil || *vm1[1] != 2 {
 		t.Errorf("vm1 not aligned: [%s %s], want [1 2]", p(vm1[0]), p(vm1[1]))

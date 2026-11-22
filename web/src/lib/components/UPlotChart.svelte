@@ -30,8 +30,11 @@
 		if (!c.stacked) {
 			return [c.times, ...c.series.map((s) => s.values)] as unknown as uPlot.AlignedData;
 		}
+		// A missing sample stays a gap: a 0 would draw a drop to zero.
 		const accum = Array(c.times.length).fill(0);
-		const stacked = c.series.map((s) => s.values.map((v, i) => (accum[i] += v ?? 0)));
+		const stacked = c.series.map((s) =>
+			s.values.map((v, i) => (v == null ? null : (accum[i] += v))),
+		);
 		return [c.times, ...stacked] as unknown as uPlot.AlignedData;
 	}
 
