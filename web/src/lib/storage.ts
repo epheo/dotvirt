@@ -22,6 +22,7 @@ import type {
 import { vmKey } from '#lib/api.js';
 import { bytes, quantityBytes } from '#lib/format.js';
 import { bySize } from '#lib/rail.js';
+import { now } from '#lib/state/clock.svelte.js';
 
 // A disk counts as protected by a snapshot this recent.
 export const FRESH_DAYS = 7;
@@ -97,10 +98,10 @@ const captured = (s: Snapshot, disk: string) => !s.volumes?.length || s.volumes.
 
 // How long ago a snapshot was taken, in the words the tables use: "2 h ago",
 // "1 day ago", "9 days ago".
-export function ago(iso: string | undefined, now = Date.now()): string {
+export function ago(iso: string | undefined, at = now()): string {
 	const t = iso ? new Date(iso).getTime() : NaN;
 	if (Number.isNaN(t)) return '';
-	const mins = Math.max(0, Math.floor((now - t) / 60_000));
+	const mins = Math.max(0, Math.floor((at - t) / 60_000));
 	if (mins < 60) return mins < 1 ? 'just now' : `${mins} min ago`;
 	const hours = Math.floor(mins / 60);
 	if (hours < 24) return `${hours} h ago`;

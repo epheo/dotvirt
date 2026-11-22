@@ -1,5 +1,7 @@
 // Humanizers shared by the capacity/usage widgets.
 
+import { now } from '#lib/state/clock.svelte.js';
+
 export function bytes(v: number): string {
 	const u = ['B', 'KiB', 'MiB', 'GiB', 'TiB'];
 	let i = 0;
@@ -57,7 +59,7 @@ export function duration(iso: string | undefined): string {
 	if (!iso) return '';
 	const start = new Date(iso).getTime();
 	if (Number.isNaN(start)) return '';
-	return compactSpan(Math.max(0, Math.floor((Date.now() - start) / 1000)));
+	return compactSpan(Math.max(0, Math.floor((now() - start) / 1000)));
 }
 
 // relativeAge renders a compact "X ago" from an ISO timestamp or unix seconds.
@@ -65,7 +67,7 @@ export function relativeAge(t: string | number | undefined): string {
 	if (t == null || t === '') return '';
 	const ms = typeof t === 'number' ? t * 1000 : new Date(t).getTime();
 	if (Number.isNaN(ms)) return '';
-	return compactSpan(Math.max(0, Math.floor((Date.now() - ms) / 1000))) + ' ago';
+	return compactSpan(Math.max(0, Math.floor((now() - ms) / 1000))) + ' ago';
 }
 
 // shortDate renders a calendar date for history rows; a zero or unreadable
