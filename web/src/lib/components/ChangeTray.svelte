@@ -141,7 +141,7 @@
 		{ text: 'Argo CD picked up the merge', state: picked ? 'done' : 'now' },
 		{
 			text: restarts.length
-				? `Applying; ${restarts.join(', ')} restart${restarts.length === 1 ? 's' : ''} once`
+				? `Applying; ${restarts.join(', ')} need${restarts.length === 1 ? 's' : ''} a restart`
 				: 'Applying to the cluster',
 			state: picked ? 'now' : 'todo',
 		},

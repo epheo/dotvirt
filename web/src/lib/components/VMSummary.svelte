@@ -10,6 +10,7 @@
 		type VM,
 		type VMUsage,
 	} from '#lib/api.js';
+	import { runIssueAction } from '#lib/actions.js';
 	import { duration, relativeAge } from '#lib/format.js';
 	import { resource } from '#lib/resource.svelte.js';
 	import { itemKey } from '#lib/review.js';
@@ -177,7 +178,20 @@
 						{#each vmIssues as i (i.label)}
 							<li class="flex items-start gap-2 px-card py-2 text-xs">
 								<span class="mt-0.5"><StatusDot tone={i.severity} size="xs" /></span>
-								<span class="text-ink-soft">{i.label}{i.detail ? ` — ${i.detail}` : ''}</span>
+								<span class="min-w-0 flex-1 text-ink-soft">
+									{i.label}{i.detail ? ` — ${i.detail}` : ''}
+								</span>
+								<!-- The fix, unless it is only this page. -->
+								{#if !('href' in i.action && i.action.href === i.href)}
+									<Button
+										variant="outline"
+										size="sm"
+										class="shrink-0"
+										onclick={() => runIssueAction(i.action)}
+									>
+										{i.action.label}
+									</Button>
+								{/if}
 							</li>
 						{/each}
 					</ul>

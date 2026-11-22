@@ -77,6 +77,15 @@ type LiveVM struct {
 	Paused bool // VMI Paused condition is true (phase stays Running while paused)
 	Ready  bool
 
+	// Failure is KubeVirt's reason an instance that should start cannot: its
+	// pod refused or unschedulable, or the instance not created at all.
+	Failure string
+	// RestartPending: a change applied to the VM takes effect only at its next
+	// restart (KubeVirt's RestartRequired); the instance runs the old spec.
+	RestartPending bool
+	// MigrateBlock is KubeVirt's reason the running instance cannot live-migrate.
+	MigrateBlock string
+
 	// Interfaces is each VMI interface's runtime address info, merged onto the
 	// VM's manifest-declared NIC of the same name for the detail view's per-NIC
 	// IP/MAC columns.
@@ -749,12 +758,27 @@ func liveFromVMI(vmi *kubevirtcorev1.VirtualMachineInstance) LiveVM {
 			live.StartedAt = t.PhaseTransitionTimestamp.Time
 		}
 	}
+	// A pod not yet running can fail to exist: KubeVirt retries it forever,
+	// so the condition is the only sign the start is stuck.
+	starting := s.Phase == kubevirtcorev1.Pending || s.Phase == kubevirtcorev1.Scheduling
 	for _, cond := range s.Conditions {
 		switch cond.Type {
 		case kubevirtcorev1.VirtualMachineInstanceReady:
 			live.Ready = cond.Status == corev1.ConditionTrue
 		case kubevirtcorev1.VirtualMachineInstancePaused:
 			live.Paused = cond.Status == corev1.ConditionTrue
+		case kubevirtcorev1.VirtualMachineInstanceIsMigratable:
+			if cond.Status == corev1.ConditionFalse {
+				live.MigrateBlock = conditionText(cond.Message, cond.Reason)
+			}
+		case kubevirtcorev1.VirtualMachineInstanceSynchronized:
+			if starting && cond.Status == corev1.ConditionFalse && live.Failure == "" {
+				live.Failure = conditionText(cond.Message, cond.Reason)
+			}
+		case kubevirtcorev1.VirtualMachineInstanceConditionType(corev1.PodScheduled):
+			if starting && cond.Status == corev1.ConditionFalse && cond.Reason == corev1.PodReasonUnschedulable && live.Failure == "" {
+				live.Failure = conditionText(cond.Message, cond.Reason)
+			}
 		}
 	}
 	if ms := s.MigrationState; ms != nil {
@@ -773,4 +797,28 @@ func liveFromVMI(vmi *kubevirtcorev1.VirtualMachineInstance) LiveVM {
 		live.Migration = m
 	}
 	return live
+}
+
+// addVMStatus adds the VM object's own verdicts to live: a change waiting for
+// the next restart, and KubeVirt failing to create the instance at all.
+func addVMStatus(live *LiveVM, vm *kubevirtcorev1.VirtualMachine) {
+	for _, cond := range vm.Status.Conditions {
+		switch cond.Type {
+		case kubevirtcorev1.VirtualMachineRestartRequired:
+			// Only an instance can be restarted into the new spec.
+			live.RestartPending = cond.Status == corev1.ConditionTrue && live.Phase != ""
+		case kubevirtcorev1.VirtualMachineFailure:
+			if cond.Status == corev1.ConditionTrue && live.Failure == "" {
+				live.Failure = conditionText(cond.Message, cond.Reason)
+			}
+		}
+	}
+}
+
+// conditionText is a condition's message, or its reason when it has none.
+func conditionText(message, reason string) string {
+	if message != "" {
+		return message
+	}
+	return reason
 }

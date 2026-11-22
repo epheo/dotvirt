@@ -1,9 +1,7 @@
 <script lang="ts">
 	import { goto } from '$app/navigation';
-	import { adoptVM } from '#lib/actions.js';
-	import { openEdit } from '#lib/objects.js';
+	import { runIssueAction } from '#lib/actions.js';
 	import type { Issue } from '#lib/issues.js';
-	import { ui } from '#lib/state/ui.svelte.js';
 	import Button from './Button.svelte';
 	import StatusDot from './StatusDot.svelte';
 
@@ -21,12 +19,8 @@
 	}
 
 	function fix() {
-		const a = issue.action;
 		onleave?.();
-		if ('href' in a) goto(a.href);
-		else if ('modal' in a) ui.modal = a.modal;
-		else if ('edit' in a) void openEdit(a.edit);
-		else void adoptVM(a.adopt);
+		runIssueAction(issue.action);
 	}
 </script>
 

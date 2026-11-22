@@ -3,6 +3,7 @@ package clusterstate
 import (
 	"maps"
 	stdreflect "reflect"
+	"slices"
 	"sync"
 	"sync/atomic"
 
@@ -50,13 +51,20 @@ func (x *liveIndex) store(idx cache.Indexer, onSynced func()) cache.Store {
 // rather than applying the one event, lets the two reflectors interleave freely:
 // each mutates its indexer before taking mu, so the later update sees both.
 func (x *liveIndex) derive(key string) (LiveVM, bool) {
+	var live LiveVM
+	present := false
 	if obj, ok, _ := x.vmis.GetByKey(key); ok {
 		if vmi, ok := obj.(*kubevirtcorev1.VirtualMachineInstance); ok {
-			return liveFromVMI(vmi), true
+			live, present = liveFromVMI(vmi), true
 		}
 	}
-	_, ok, _ := x.vms.GetByKey(key)
-	return LiveVM{}, ok
+	if obj, ok, _ := x.vms.GetByKey(key); ok {
+		present = true
+		if vm, ok := obj.(*kubevirtcorev1.VirtualMachine); ok {
+			addVMStatus(&live, vm)
+		}
+	}
+	return live, present
 }
 
 func (x *liveIndex) touch(obj any) {
@@ -116,14 +124,13 @@ func (x *liveIndex) rebuild() {
 		next[ns][name] = live
 	}
 	x.mu.Lock()
-	for _, obj := range x.vms.List() {
-		if vm, ok := obj.(*kubevirtcorev1.VirtualMachine); ok {
-			put(vm.Namespace, vm.Name, LiveVM{})
+	for _, key := range slices.Concat(x.vms.ListKeys(), x.vmis.ListKeys()) {
+		ns, name, err := cache.SplitMetaNamespaceKey(key)
+		if err != nil {
+			continue
 		}
-	}
-	for _, obj := range x.vmis.List() {
-		if vmi, ok := obj.(*kubevirtcorev1.VirtualMachineInstance); ok {
-			put(vmi.Namespace, vmi.Name, liveFromVMI(vmi))
+		if live, ok := x.derive(key); ok {
+			put(ns, name, live)
 		}
 	}
 	changed := !stdreflect.DeepEqual(x.load(), next)

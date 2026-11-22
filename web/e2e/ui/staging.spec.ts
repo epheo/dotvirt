@@ -55,7 +55,11 @@ test('the tray reviews and proposes in a sheet; merge stays in the forge', async
 	// Each change says whether it restarts the VM or applies live.
 	await expect(sheet.getByText('Restart', { exact: true })).toBeVisible();
 	await expect(sheet.getByRole('button', { name: 'Unstage all' })).toBeVisible();
-	await expect(sheet.getByText(/web-1 restarts once\. The memory change needs it\./)).toBeVisible();
+	await expect(
+		sheet.getByText(
+			/web-1 needs a restart\. The memory change applies at its next restart; it keeps running until then\./,
+		),
+	).toBeVisible();
 	await expect(sheet.getByText(/web-1 at 8 GiB fits on 2 of 2 hosts/)).toBeVisible();
 	await expect(sheet.getByText('Nothing else in team-web changes.')).toBeVisible();
 	await sheet.getByRole('button', { name: 'Open pull request' }).click();
@@ -127,7 +131,9 @@ test('a setting edits in place: consequence first, fields add up, one unstages a
 	await page.getByRole('button', { name: 'Change vCPU' }).click();
 	await page.getByRole('spinbutton', { name: 'vCPU' }).fill('4');
 	// The backend says what merging does before anything stages.
-	await expect(page.getByText('web-1 restarts once when the PR merges.')).toBeVisible();
+	await expect(
+		page.getByText("Applies at web-1's next restart; it keeps running until then."),
+	).toBeVisible();
 	await page.getByRole('button', { name: 'Stage', exact: true }).click();
 	await expect(page.getByText(/vCPU staged for web-1/)).toBeVisible();
 

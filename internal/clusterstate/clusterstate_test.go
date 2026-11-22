@@ -75,6 +75,76 @@ func TestLiveMergesVMIOntoVM(t *testing.T) {
 	}
 }
 
+// KubeVirt's verdicts ride the live view: a start it keeps retrying and
+// failing, a merged change waiting for a restart, a VM it will not migrate.
+func TestLiveReadsKubeVirtVerdicts(t *testing.T) {
+	s := stateWithIndexers()
+	cond := func(typ kubevirtcorev1.VirtualMachineInstanceConditionType, st corev1.ConditionStatus, reason, msg string) kubevirtcorev1.VirtualMachineInstanceCondition {
+		return kubevirtcorev1.VirtualMachineInstanceCondition{Type: typ, Status: st, Reason: reason, Message: msg}
+	}
+
+	stuck := testVM("ns", "stuck")
+	stuck.Status.Conditions = []kubevirtcorev1.VirtualMachineCondition{{Type: kubevirtcorev1.VirtualMachineRestartRequired, Status: corev1.ConditionTrue}}
+	_ = s.vmStore().Add(stuck)
+	pending := &kubevirtcorev1.VirtualMachineInstance{
+		ObjectMeta: metav1.ObjectMeta{Namespace: "ns", Name: "stuck"},
+		Status: kubevirtcorev1.VirtualMachineInstanceStatus{
+			Phase:      kubevirtcorev1.Pending,
+			Conditions: []kubevirtcorev1.VirtualMachineInstanceCondition{cond(kubevirtcorev1.VirtualMachineInstanceSynchronized, corev1.ConditionFalse, "FailedCreate", "failed to locate network attachment definition ns/gone")},
+		},
+	}
+	_ = s.vmiStore().Add(pending)
+
+	pinned := runningVMI("ns", "pinned", "node-1")
+	pinned.Status.Conditions = append(pinned.Status.Conditions, cond(kubevirtcorev1.VirtualMachineInstanceIsMigratable, corev1.ConditionFalse, "DisksNotLiveMigratable", "PVC disk is not shared"))
+	_ = s.vmStore().Add(testVM("ns", "pinned"))
+	_ = s.vmiStore().Add(pinned)
+
+	noRoom := &kubevirtcorev1.VirtualMachineInstance{
+		ObjectMeta: metav1.ObjectMeta{Namespace: "ns", Name: "noroom"},
+		Status: kubevirtcorev1.VirtualMachineInstanceStatus{
+			Phase:      kubevirtcorev1.Scheduling,
+			Conditions: []kubevirtcorev1.VirtualMachineInstanceCondition{cond(kubevirtcorev1.VirtualMachineInstanceConditionType(corev1.PodScheduled), corev1.ConditionFalse, corev1.PodReasonUnschedulable, "0/1 nodes are available: insufficient memory")},
+		},
+	}
+	_ = s.vmStore().Add(testVM("ns", "noroom"))
+	_ = s.vmiStore().Add(noRoom)
+
+	quota := testVM("ns", "quota")
+	quota.Status.Conditions = []kubevirtcorev1.VirtualMachineCondition{{Type: kubevirtcorev1.VirtualMachineFailure, Status: corev1.ConditionTrue, Message: "exceeded quota"}}
+	_ = s.vmStore().Add(quota)
+
+	// A stopped VM keeps no stale restart flag: there is no instance to restart.
+	stale := testVM("ns", "stale")
+	stale.Status.Conditions = []kubevirtcorev1.VirtualMachineCondition{{Type: kubevirtcorev1.VirtualMachineRestartRequired, Status: corev1.ConditionTrue}}
+	_ = s.vmStore().Add(stale)
+
+	live := s.Live()["ns"]
+	if got := live["stuck"]; got.Failure != "failed to locate network attachment definition ns/gone" || !got.RestartPending {
+		t.Errorf("stuck = %+v, want its pod failure and a pending restart", got)
+	}
+	if got := live["pinned"]; got.MigrateBlock != "PVC disk is not shared" || got.Failure != "" || got.RestartPending {
+		t.Errorf("pinned = %+v, want only its migrate block", got)
+	}
+	if got := live["noroom"]; got.Failure != "0/1 nodes are available: insufficient memory" {
+		t.Errorf("noroom = %+v, want the scheduler's reason", got)
+	}
+	if got := live["quota"]; got.Failure != "exceeded quota" {
+		t.Errorf("quota = %+v, want the VM's failure", got)
+	}
+	if got := live["stale"]; got.RestartPending {
+		t.Errorf("stale = %+v, a stopped VM has nothing to restart", got)
+	}
+
+	// A relist rebuilds the same view.
+	_ = s.vmStore().Replace([]any{stuck, testVM("ns", "pinned"), testVM("ns", "noroom"), quota, stale}, "2")
+	if !maps.EqualFunc(live, s.Live()["ns"], func(a, b LiveVM) bool {
+		return a.Failure == b.Failure && a.RestartPending == b.RestartPending && a.MigrateBlock == b.MigrateBlock
+	}) {
+		t.Errorf("rebuild differs: %+v, want %+v", s.Live()["ns"], live)
+	}
+}
+
 // LiveChanged wakes every connected frame, so it must fire only when what a frame
 // shows moved: KubeVirt rewrites VM status and VMI status (probe times, guest
 // agent polls) far more often than that. A view a frame already holds must
