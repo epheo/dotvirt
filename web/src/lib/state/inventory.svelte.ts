@@ -13,7 +13,7 @@ import {
 } from '#lib/api.js';
 import type { Authoring } from '#lib/authoring.js';
 import { friendlyError } from '#lib/format.js';
-import { projectNS, repoGate, repoReadGate, type Gate } from '#lib/gates.js';
+import { projectNS, repoGate, repoReadGate, vmGate, type Gate } from '#lib/gates.js';
 import { deriveIssues, deriveSuggestions } from '#lib/issues.js';
 import { membership, networkProblems } from '#lib/netmap.js';
 import { prKey } from '#lib/review.js';
@@ -99,6 +99,7 @@ class InventoryStore {
 		deriveIssues(this.inventory, {
 			alerts: this.alerts ?? [],
 			canRepair: (p) => repoGate(p).ok,
+			canRestart: (ns) => vmGate.restart(ns).ok,
 			network: this.netProblems,
 			extraTenantKinds: modules.value?.extraTenantKinds === true,
 		}),

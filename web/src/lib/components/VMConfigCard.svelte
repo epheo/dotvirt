@@ -216,7 +216,7 @@
 				text: `${vm.name} ${c.to === 'Off' ? 'stops' : 'starts'} when the PR merges.`,
 			};
 		return c.restart
-			? { tone: 'warn', text: `${vm.name} restarts once when the PR merges.` }
+			? { tone: 'warn', text: `Applies at ${vm.name}'s next restart; it keeps running until then.` }
 			: { tone: 'ok', text: 'Applies without a restart when the PR merges.' };
 	}
 
@@ -413,7 +413,7 @@
 									</span>
 									<span class="text-xs text-ink-muted">
 										{staged.some((c) => c.restart)
-											? 'restarts when it merges'
+											? 'applies at its next restart'
 											: 'applies without restart'}
 									</span>
 								</div>

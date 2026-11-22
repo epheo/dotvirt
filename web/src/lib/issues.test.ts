@@ -254,6 +254,51 @@ describe('next steps', () => {
 		]);
 		expect(deriveIssues(converged, { canRepair: () => true })).toEqual([]);
 	});
+
+	it('says why a VM cannot start, and offers the restart a merged change waits for', () => {
+		const stuck = vm({
+			name: 'stuck',
+			phase: 'Pending',
+			failure: 'failed to locate network attachment definition ns-a/gone',
+			restartPending: true,
+		});
+		const i = inv([{ name: 'p1', namespaces: [{ namespace: 'ns-a', vms: [stuck] }] }]);
+		const [issue] = deriveIssues(i, { canRestart: () => true });
+		expect(issue).toMatchObject({
+			severity: 'danger',
+			label: 'cannot start, restart pending',
+			detail: 'failed to locate network attachment definition ns-a/gone',
+			action: { label: 'Restart', restart: stuck },
+		});
+		// Without the right to restart, the VM's page explains it instead.
+		expect(deriveIssues(i)[0].action).toEqual({ label: 'Open VM', href: '/vm/ns-a/stuck' });
+	});
+
+	it('leaves a start failure a restart cannot fix to the VM page', () => {
+		const full = vm({ phase: 'Scheduling', failure: '0/1 nodes are available' });
+		const [issue] = deriveIssues(
+			inv([{ name: 'p1', namespaces: [{ namespace: 'ns-a', vms: [full] }] }]),
+			{
+				canRestart: () => true,
+			},
+		);
+		expect(issue.action).toEqual({ label: 'Open VM', href: '/vm/ns-a/vm-a' });
+	});
+
+	it('warns of a merged change still waiting for a restart', () => {
+		const waiting = vm({ phase: 'Running', restartPending: true });
+		const [issue] = deriveIssues(
+			inv([{ name: 'p1', namespaces: [{ namespace: 'ns-a', vms: [waiting] }] }]),
+			{
+				canRestart: () => true,
+			},
+		);
+		expect(issue).toMatchObject({
+			severity: 'warn',
+			label: 'restart pending',
+			action: { label: 'Restart' },
+		});
+	});
 });
 
 describe('alerts', () => {

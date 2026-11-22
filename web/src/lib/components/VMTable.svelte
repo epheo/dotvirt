@@ -1,10 +1,8 @@
 <script lang="ts">
 	import { tick, untrack } from 'svelte';
-	import { goto } from '$app/navigation';
 	import { ChevronDown, ChevronUp } from '@lucide/svelte';
 	import { vmKey, type DraftItem, type Options, type VM } from '#lib/api.js';
-	import { openEdit } from '#lib/objects.js';
-	import { adoptVM } from '#lib/actions.js';
+	import { adoptVM, runIssueAction } from '#lib/actions.js';
 	import { quantity, quantityBytes } from '#lib/format.js';
 	import type { Issue } from '#lib/issues.js';
 	import { vmSizing } from '#lib/sizing.js';
@@ -12,7 +10,6 @@
 	import { inventory } from '#lib/state/inventory.svelte.js';
 	import { persisted } from '#lib/state/persisted.svelte.js';
 	import { reviewCache } from '#lib/state/reviewCache.svelte.js';
-	import { ui } from '#lib/state/ui.svelte.js';
 	import { TBODY, THEAD_TR } from '#lib/table.js';
 	import { vmHref } from '#lib/nav.js';
 	import { DEFAULT_PAGE_SIZE, pageFor, pageOf, pageSlice } from '#lib/paging.js';
@@ -85,14 +82,8 @@
 		const i = issueOf.get(vmKey(vm));
 		if (i) {
 			const a = i.action;
-			if ('href' in a)
-				return {
-					label: a.href === vmHref(vm.namespace, vm.name) ? 'See why' : a.label,
-					run: () => goto(a.href),
-				};
-			if ('modal' in a) return { label: a.label, run: () => (ui.modal = a.modal) };
-			if ('edit' in a) return { label: a.label, run: () => void openEdit(a.edit) };
-			return { label: a.label, run: () => void adoptVM(vm) };
+			const own = 'href' in a && a.href === vmHref(vm.namespace, vm.name);
+			return { label: own ? 'See why' : a.label, run: () => runIssueAction(a) };
 		}
 		if (vm.sync === 'NotTracked' && inventory.canAuthorVMs(vm.namespace))
 			return { label: 'Adopt into git', run: () => void adoptVM(vm) };

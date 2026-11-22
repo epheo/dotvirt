@@ -19,6 +19,8 @@ import { drafts } from '#lib/state/drafts.svelte.js';
 import { templateSaveGate, vmGate, type Gate } from '#lib/gates.js';
 import { ui, type AppModal } from '#lib/state/ui.svelte.js';
 import { vmHref } from '#lib/nav.js';
+import type { IssueAction } from '#lib/issues.js';
+import { openEdit } from '#lib/objects.js';
 
 type ActionId =
 	| 'restart'
@@ -174,6 +176,9 @@ export async function adoptNamespaces(namespaces: Iterable<string>): Promise<voi
 }
 
 const running = (vm: VM) => vm.phase === 'Running';
+// A restart re-creates the instance from the current spec: a running VM's, or
+// one stuck on the old spec while a change waits for that restart.
+const restartable = (vm: VM) => running(vm) || (!!vm.phase && !!vm.restartPending);
 const paused = (vm: VM) => !!vm.paused;
 const always = () => true;
 // Git-backed verbs need a manifest on the base branch; a cluster-only VM (e.g.
@@ -199,7 +204,7 @@ const entries: Entry[] = [
 		label: 'Restart',
 		kind: 'runtime',
 		verb: 'Restart',
-		enabled: running,
+		enabled: restartable,
 		gate: vmGate.restart,
 		run: (vm) => api.restart(vm.namespace, vm.name),
 	},
@@ -308,6 +313,16 @@ const entries: Entry[] = [
 ];
 
 export const vmActions: VMAction[] = entries.map(gated);
+const restartAction = vmActions.find((a) => a.id === 'restart')!;
+
+// runIssueAction performs an issue's fix, wherever the issue is listed.
+export function runIssueAction(a: IssueAction): void {
+	if ('href' in a) void goto(a.href);
+	else if ('modal' in a) ui.modal = a.modal;
+	else if ('edit' in a) void openEdit(a.edit);
+	else if ('restart' in a) void runRuntimeAction(restartAction, a.restart);
+	else void adoptVM(a.adopt);
+}
 
 /** The URL of a VM's manifest on the base branch — navigable (cookie-auth'd). */
 export function manifestURL(vm: VM): string {

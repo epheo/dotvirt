@@ -19,7 +19,8 @@ export type IssueAction =
 	| { label: string; href: string }
 	| { label: string; modal: AppModal }
 	| { label: string; adopt: { namespace: string; name: string } }
-	| { label: string; edit: ObjectRef };
+	| { label: string; edit: ObjectRef }
+	| { label: string; restart: VM };
 
 export type Issue = {
 	// info marks a suggestion: worth doing, never counted as a problem.
@@ -48,6 +49,8 @@ export function deriveIssues(
 	opts: {
 		alerts?: Alert[];
 		canRepair?: (p: Project) => boolean;
+		// Whether the caller may restart VMs in a namespace.
+		canRestart?: (namespace: string) => boolean;
 		network?: NetProblem[];
 		// Tenant repos may apply kinds a provider allowed beyond the listed ones.
 		extraTenantKinds?: boolean;
@@ -113,7 +116,7 @@ export function deriveIssues(
 		}
 		for (const ns of p.namespaces)
 			for (const vm of ns.vms) {
-				const issue = vmIssue(p.name, vm);
+				const issue = vmIssue(p.name, vm, opts.canRestart?.(vm.namespace) ?? false);
 				if (issue) out.push(issue);
 			}
 		out.push(...placementIssues(inv, p, opts.extraTenantKinds));
@@ -361,7 +364,7 @@ function projectOf(inv: Inventory, namespace: string): string | undefined {
 
 // One row per VM, highest severity, every reason folded into the label - a
 // broken VM should read as one problem, not three.
-function vmIssue(project: string, vm: VM): Issue | null {
+function vmIssue(project: string, vm: VM, canRestart: boolean): Issue | null {
 	const danger: string[] = [];
 	const warn: string[] = [];
 	let detail: string | undefined;
@@ -369,10 +372,21 @@ function vmIssue(project: string, vm: VM): Issue | null {
 		danger.push('apply failed');
 		detail = vm.syncError;
 	}
+	if (vm.failure) {
+		danger.push('cannot start');
+		detail ??= vm.failure;
+	}
 	if (vm.phase && badPhase.test(vm.phase)) danger.push(vm.phase);
+	if (vm.restartPending) {
+		warn.push('restart pending');
+		detail ??= 'A merged change applies at its next restart.';
+	}
 	if (vm.health === 'Degraded') warn.push('degraded');
 	if (!danger.length && !warn.length) return null;
 	const href = vmHref(vm.namespace, vm.name);
+	// A restart applies the pending change; when the old spec is what cannot
+	// start, the instance is re-created from the new one.
+	const restart = canRestart && vm.restartPending;
 	return {
 		severity: danger.length ? 'danger' : 'warn',
 		scope: vmKey(vm),
@@ -380,7 +394,7 @@ function vmIssue(project: string, vm: VM): Issue | null {
 		detail,
 		href,
 		project,
-		action: open(href),
+		action: restart ? { label: 'Restart', restart: vm } : open(href),
 	};
 }
 

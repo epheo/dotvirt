@@ -124,6 +124,14 @@ describe('vmActions gates', () => {
 		]);
 	});
 
+	it('a VM stuck on its old spec can be restarted into the new one', () => {
+		expect(enabledIds(vm({ phase: 'Pending' }))).not.toContain('restart');
+		expect(enabledIds(vm({ phase: 'Pending', restartPending: true }))).toContain('restart');
+		expect(enabledIds(vm({ phase: undefined, power: 'Off', restartPending: true }))).not.toContain(
+			'restart',
+		);
+	});
+
 	it('a paused VM can be unpaused, not paused again', () => {
 		const ids = enabledIds(vm({ paused: true }));
 		expect(ids).toContain('unpause');
