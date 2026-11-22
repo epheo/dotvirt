@@ -101,6 +101,9 @@ type Disk struct {
 	// Import is where CDI downloaded the disk from; nil unless its
 	// DataVolume template imports from a registry or a URL.
 	Import *DiskImport `json:"import,omitempty"`
+	// OwnedByVM: the VM's own dataVolumeTemplates provisioned it, so KubeVirt
+	// deletes it, and its data, with the VM.
+	OwnedByVM bool `json:"ownedByVM,omitempty"`
 }
 
 // The DataVolume sources an import downloads from.

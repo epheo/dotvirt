@@ -2231,6 +2231,11 @@ export interface Disk {
    * DataVolume template imports from a registry or a URL.
    */
   import?: DiskImport;
+  /**
+   * OwnedByVM: the VM's own dataVolumeTemplates provisioned it, so KubeVirt
+   * deletes it, and its data, with the VM.
+   */
+  ownedByVM?: boolean;
 }
 /**
  * The DataVolume sources an import downloads from.

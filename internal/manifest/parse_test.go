@@ -218,6 +218,7 @@ spec:
             - name: imported
             - name: shared
             - name: signed
+            - name: attached
       volumes:
         - name: rootdisk
           dataVolume:
@@ -234,13 +235,16 @@ spec:
         - name: signed
           dataVolume:
             name: app-signed
+        - name: attached
+          dataVolume:
+            name: team-data
 `)
 	vms, err := ParseVMs("beta/app.yaml", manifest, "beta")
 	if err != nil {
 		t.Fatal(err)
 	}
 	d := vms[0].Disks
-	if len(d) != 5 {
+	if len(d) != 6 {
 		t.Fatalf("disks = %+v", d)
 	}
 	if d[0].Image != "os-images/rhel-9.6" || len(d[0].AccessModes) != 1 || d[0].AccessModes[0] != "ReadWriteMany" {
@@ -264,6 +268,12 @@ spec:
 	}
 	if d[3].Type != "pvc" || d[3].Claim != "team-share" {
 		t.Errorf("pvc disk = %+v", d[3])
+	}
+	// Only the VM's own templates go with it; a claim it references stays.
+	for i, owned := range []bool{true, true, true, false, true, false} {
+		if d[i].OwnedByVM != owned {
+			t.Errorf("disk %s OwnedByVM = %v, want %v", d[i].Name, d[i].OwnedByVM, owned)
+		}
 	}
 }
 

@@ -10,6 +10,7 @@
 	} from '@lucide/svelte';
 	import { api, HttpError, type DraftItem } from '#lib/api.js';
 	import { serverReason } from '#lib/format.js';
+	import { lostWithVM } from '#lib/devices.js';
 	import { memoryHint } from '#lib/headroom.js';
 	import { draftResourceLabel } from '#lib/labels.js';
 	import { action } from '#lib/resource.svelte.js';
@@ -89,8 +90,15 @@
 		text: string;
 	};
 	function consequence(it: DraftItem): Effect {
-		if (it.kind === 'delete')
-			return { tone: 'danger', icon: 'delete', lead: `${it.name} is deleted.`, text: '' };
+		if (it.kind === 'delete') {
+			const vm = isVM(it) ? inventory.findVM(it.namespace, it.name) : null;
+			return {
+				tone: 'danger',
+				icon: 'delete',
+				lead: `${it.name} is deleted.`,
+				text: vm ? lostWithVM(vm) : '',
+			};
+		}
 		if (it.kind === 'create') return { tone: 'ok', icon: 'ok', text: `${it.name} is created.` };
 		const power = it.changes.find((c) => c.field === 'Power');
 		const restart = it.changes.filter((c) => c.restart).map((c) => word(c.field));

@@ -1,5 +1,12 @@
 import { describe, expect, it } from 'vitest';
-import { diskNameError, freeName, interfaceName, networkAdds, RESERVED_DISKS } from './devices';
+import {
+	diskNameError,
+	freeName,
+	interfaceName,
+	lostWithVM,
+	networkAdds,
+	RESERVED_DISKS,
+} from './devices';
 
 describe('freeName', () => {
 	it('takes the first number not already used', () => {
@@ -34,5 +41,32 @@ describe('networkAdds', () => {
 			{ name: 'team-a/lan', interface: 'lan-2' },
 			{ name: 'lan', interface: 'lan-3' },
 		]);
+	});
+});
+
+describe('lostWithVM', () => {
+	it('names the disks the VM provisioned itself, never a claim it only references', () => {
+		expect(
+			lostWithVM({
+				disks: [
+					{ name: 'rootdisk', type: 'dataVolume', size: '30Gi', ownedByVM: true },
+					{ name: 'cloudinitdisk', type: 'cloudInitNoCloud' },
+					{ name: 'shared', type: 'pvc', claim: 'team-share' },
+				],
+			}),
+		).toBe('Its disk rootdisk (30 GiB) is deleted with it, and the data on it.');
+		expect(
+			lostWithVM({
+				disks: [
+					{ name: 'rootdisk', size: '30Gi', ownedByVM: true },
+					{ name: 'data', size: '100Gi', ownedByVM: true },
+					{ name: 'logs', ownedByVM: true },
+				],
+			}),
+		).toBe(
+			'Its disks rootdisk (30 GiB), data (100 GiB) and logs are deleted with it, and the data on them.',
+		);
+		expect(lostWithVM({ disks: [{ name: 'shared', type: 'pvc' }] })).toBe('');
+		expect(lostWithVM({})).toBe('');
 	});
 });
