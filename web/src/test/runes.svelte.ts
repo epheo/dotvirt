@@ -13,6 +13,16 @@ export function effectRoot(fn: () => void): () => void {
 	return stop;
 }
 
+// track records what read returns each time its effect runs, and returns the
+// teardown.
+export function track<T>(read: () => T, seen: T[]): () => void {
+	return effectRoot(() => {
+		$effect(() => {
+			seen.push(read());
+		});
+	});
+}
+
 // box is a reactive cell tests can flip to drive keyed effects.
 export function box<T>(initial: T): { value: T } {
 	let value = $state(initial);
