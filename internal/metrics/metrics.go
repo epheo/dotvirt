@@ -463,7 +463,7 @@ func (c *Client) ScopeMetrics(ctx context.Context, who Caller, namespaces []stri
 		}
 		out := model.VMMetrics{Range: rng, Charts: make([]model.MetricChart, len(charts)), Unavailable: o.gap}
 		for ci, ch := range charts {
-			out.Charts[ci] = buildChart(ch.chartSpec, namedFromLabeled(results[ci]))
+			out.Charts[ci] = buildChart(ch.chartSpec, w, namedFromLabeled(results[ci]))
 		}
 		return out, o
 	})
@@ -612,7 +612,7 @@ func (c *Client) VMMetrics(ctx context.Context, who Caller, ns, name, rng string
 			for _, got := range results[ci] {
 				series = append(series, got...)
 			}
-			out.Charts[ci] = buildChart(cs, series)
+			out.Charts[ci] = buildChart(cs, w, series)
 		}
 		return out, o
 	})
