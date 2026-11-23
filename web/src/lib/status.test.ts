@@ -70,13 +70,13 @@ describe('vmState', () => {
 		expect(vmState(vm({ paused: true })).word).toBe('Paused');
 	});
 
-	it('says Provisioning while its disks are created, whatever its instance waits in', () => {
+	it('says Provisioning while the disks it starts on are created; kept off, Stopped', () => {
 		expect(vmState(vm({ phase: 'Scheduling', provisioning: true }))).toMatchObject({
 			tone: 'info',
 			word: 'Provisioning',
 		});
 		expect(vmState(vm({ power: 'Off', phase: undefined, provisioning: true })).word).toBe(
-			'Provisioning',
+			'Stopped',
 		);
 	});
 

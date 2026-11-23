@@ -49,10 +49,11 @@ export function phaseTone(phase?: string, paused = false): Tone {
 	return 'info'; // Provisioning, Starting, Stopping, Migrating, WaitingFor...
 }
 
-// The phase a VM shows: KubeVirt's Provisioning while a disk it needs is still
-// being created, whatever phase its waiting instance reports.
-export function runPhase(vm: Pick<VM, 'phase' | 'provisioning'>): string | undefined {
-	return vm.provisioning ? 'Provisioning' : vm.phase;
+// The phase a VM shows: KubeVirt's Provisioning while a disk it needs to
+// start is still being created, whatever phase its waiting instance reports.
+// A VM git keeps off stays Stopped; only its disks say provisioning.
+export function runPhase(vm: Pick<VM, 'phase' | 'provisioning' | 'power'>): string | undefined {
+	return vm.provisioning && vm.power !== 'Off' ? 'Provisioning' : vm.phase;
 }
 
 // How a VM is, for the one State cell: its run state as a dot and a word, plus
