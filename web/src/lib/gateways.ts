@@ -53,6 +53,10 @@ export type RouteState = { tone: Tone; label: string; detail: string; live: bool
 
 const WHY: Record<string, { label: string; detail: string }> = {
 	Pending: { label: 'Waiting', detail: 'The Gateway has not picked this up yet.' },
+	NoSuchGateway: {
+		label: 'No such Gateway',
+		detail: 'The Gateway it names does not exist. Fix the name, or ask your platform team for it.',
+	},
 	NotAllowedByListeners: {
 		label: 'Not allowed',
 		detail: 'This Gateway does not take routes from this project. Ask your platform team.',

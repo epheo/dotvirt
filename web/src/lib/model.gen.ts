@@ -1322,6 +1322,11 @@ export interface Route {
 export interface RouteParent {
   namespace: string;
   name: string;
+  /**
+   * Kind is the parent's kind when it is not a Gateway (a ListenerSet, a
+   * mesh Service).
+   */
+  kind?: string;
   section?: string;
   attached: boolean;
   reason?: string;

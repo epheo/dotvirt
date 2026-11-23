@@ -169,9 +169,12 @@ type Route struct {
 type RouteParent struct {
 	Namespace string `json:"namespace"`
 	Name      string `json:"name"`
-	Section   string `json:"section,omitempty"`
-	Attached  bool   `json:"attached"`
-	Reason    string `json:"reason,omitempty"`
+	// Kind is the parent's kind when it is not a Gateway (a ListenerSet, a
+	// mesh Service).
+	Kind     string `json:"kind,omitempty"`
+	Section  string `json:"section,omitempty"`
+	Attached bool   `json:"attached"`
+	Reason   string `json:"reason,omitempty"`
 	// Message is the controller's text, which can name another tenant's route.
 	// Empty on GET /api/networking/routes.
 	Message string `json:"message,omitempty"`

@@ -134,6 +134,14 @@ describe('a route state', () => {
 		expect(routeState(undefined).live).toBe(false);
 	});
 
+	it('says the Gateway it names does not exist', () => {
+		expect(routeState(parent({ attached: false, reason: 'NoSuchGateway' }))).toMatchObject({
+			tone: 'danger',
+			label: 'No such Gateway',
+			live: false,
+		});
+	});
+
 	it('still has a next step for a reason it does not know', () => {
 		expect(routeState(parent({ attached: false, reason: 'Odd' }))).toMatchObject({
 			label: 'Odd',

@@ -159,6 +159,14 @@ describe('the routes tile', () => {
 		expect(t.body).toBe('1 waits for the Gateway to pick it up.');
 	});
 
+	it('does not count a route naming no Gateway as waiting', () => {
+		const t = routesTile([route('shop', true), route('dew', false, 'NoSuchGateway')], false);
+		expect(t).toMatchObject({ value: '1 of 2', tone: 'danger' });
+		expect(t.body).toMatch(
+			/^dew\.example\.com: No such Gateway\. The Gateway it names does not exist\./,
+		);
+	});
+
 	it('claims nothing about no route', () => {
 		expect(routesTile([], false)).toMatchObject({ label: 'No routes yet', tone: 'none' });
 	});
