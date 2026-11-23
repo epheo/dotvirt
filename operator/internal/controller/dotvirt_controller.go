@@ -698,14 +698,15 @@ func (r *DotvirtReconciler) installs(ctx context.Context, _ client.Object) []rec
 const argoSettings = "argocd-cm"
 
 // impersonationChanged passes an argocd-cm update that turns sync
-// impersonation on or off; the rest of its churn says nothing dotvirt renders.
+// impersonation or its enforcement on or off; the rest of its churn says
+// nothing dotvirt renders.
 func impersonationChanged(e event.UpdateEvent) bool {
-	setting := func(o client.Object) string {
+	setting := func(o client.Object) [2]string {
 		cm, _ := o.(*corev1.ConfigMap)
 		if cm == nil {
-			return ""
+			return [2]string{}
 		}
-		return cm.Data[install.SyncImpersonationKey]
+		return [2]string{cm.Data[install.SyncImpersonationKey], cm.Data[install.SyncImpersonationEnforcedKey]}
 	}
 	return setting(e.ObjectOld) != setting(e.ObjectNew)
 }

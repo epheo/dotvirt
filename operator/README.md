@@ -775,6 +775,12 @@ Once on, it stays on while asked: a project whose grants go missing, or an
 Application newly synced with no account mapped, is reported (`Degraded` names
 them) instead of falling back to the controller's rights.
 
+Argo CD 3.6 adds `application.sync.impersonation.enforced` to `argocd-cm`; `"false"`
+syncs an Application with no account mapped as the controller instead of refusing
+it. `SyncImpersonationReady` is then `False` with `NotEnforced`, and dotvirt treats
+the instance as not impersonating: tenant repos keep the listed kinds and the
+controller keeps its apply role until the key is removed.
+
 While off, `SyncImpersonationReady` is `Unknown`, or `False` with `CloneAnywhere`
 when the controller's account may create `datavolumes/source` cluster-wide: a
 DataVolume in any tenant repo could then clone a disk out of any namespace.

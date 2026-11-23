@@ -120,7 +120,7 @@ func (r *DotvirtReconciler) tenantAppProjects(ctx context.Context, dv *dotvirtv1
 	}
 	if len(want) > 0 && allowed == nil {
 		t.notes = append(t.notes, "tenant repos keep the listed kinds until the ArgoCD instance impersonates: argocd-cm sets "+
-			install.SyncImpersonationKey+", its AppProjects keep destinationServiceAccounts (Argo CD 2.13 or later) and its ArgoCD resource pins no image or version")
+			install.SyncImpersonationKey+" and not "+install.SyncImpersonationEnforcedKey+": \"false\", its AppProjects keep destinationServiceAccounts (Argo CD 2.13 or later) and its ArgoCD resource pins no image or version")
 	}
 
 	projects := deriveTenantProjects(nsList.Items, forgeBase)
@@ -310,14 +310,15 @@ func (r *DotvirtReconciler) controllerApplies(ctx context.Context, dv *dotvirtv1
 }
 
 // impersonating reports whether the instance syncs dotvirt's Applications as
-// their projects' own accounts: argocd-cm sets the key, and an AppProject this
+// their projects' own accounts: argocd-cm sets the key without letting an
+// unmapped Application fall back to the controller, and an AppProject this
 // install applied kept destinationServiceAccounts, which an Argo CD older than
 // 2.13 neither knows nor honors (its schema prunes the field). The field proves
 // the CRD, not the controller: an ArgoCD resource pinning its own image or
 // version may run an older one under newer CRDs, so it proves nothing. Read
 // where Argo reads it; unknown is no.
 func (r *DotvirtReconciler) impersonating(ctx context.Context, dv *dotvirtv1alpha1.Dotvirt, argoNS string, held []unstructured.Unstructured) bool {
-	if set, err := r.impersonationConfigured(ctx, argoNS); err != nil || !set {
+	if set, fallback, err := r.impersonationConfigured(ctx, argoNS); err != nil || !set || fallback {
 		return false
 	}
 	inst, _, err := r.argoInstanceState(ctx, argoNS+"/"+argoInstance(argoNS))

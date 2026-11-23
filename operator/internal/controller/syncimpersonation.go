@@ -90,7 +90,7 @@ func (r *DotvirtReconciler) syncImpersonation(ctx context.Context, dv *dotvirtv1
 		}
 		dv.Status.SyncImpersonationInstance = ""
 	}
-	inConfig, err := r.impersonationConfigured(ctx, rc.argoNS)
+	inConfig, fallback, err := r.impersonationConfigured(ctx, rc.argoNS)
 	if err != nil {
 		return failed(err)
 	}
@@ -110,6 +110,9 @@ func (r *DotvirtReconciler) syncImpersonation(ctx context.Context, dv *dotvirtv1
 			}
 			dv.Status.SyncImpersonationInstance = ""
 			return metav1.ConditionUnknown, "Disabled", fmt.Sprintf("removed %s from %s; Applications sync as the ArgoCD controller's ServiceAccount again", install.SyncImpersonationKey, where)
+		}
+		if inConfig && fallback {
+			return metav1.ConditionFalse, "NotEnforced", "set outside dotvirt, but " + fallbackProblem(rc)
 		}
 		if inConfig {
 			return metav1.ConditionTrue, "Enabled", fmt.Sprintf("set outside dotvirt in %s/argocd-cm; dotvirt's Applications sync as their tiers' own ServiceAccounts", rc.argoNS)
@@ -132,6 +135,9 @@ func (r *DotvirtReconciler) syncImpersonation(ctx context.Context, dv *dotvirtv1
 		return failed(err)
 	}
 	unchecked := uncheckedNote(v.unresolved)
+	if inConfig && fallback {
+		return metav1.ConditionFalse, "NotEnforced", "on, but " + fallbackProblem(rc) + unchecked
+	}
 	if inConfig {
 		if problems := slices.Concat(v.missing, v.leaks, foreignProblem(v.foreign)); len(problems) > 0 {
 			return metav1.ConditionFalse, "Degraded", "on; " + strings.Join(problems, "; ") + unchecked
@@ -216,17 +222,24 @@ func (r *DotvirtReconciler) applyShared(ctx context.Context, obj client.Object) 
 }
 
 // impersonationConfigured reports whether argocd-cm, what Argo reads, turns
-// sync impersonation on.
-func (r *DotvirtReconciler) impersonationConfigured(ctx context.Context, argoNS string) (bool, error) {
+// sync impersonation on, and whether it lets an Application with no account
+// mapped fall back to the controller's.
+func (r *DotvirtReconciler) impersonationConfigured(ctx context.Context, argoNS string) (on, fallback bool, err error) {
 	var cm corev1.ConfigMap
-	err := r.Get(ctx, types.NamespacedName{Namespace: argoNS, Name: argoSettings}, &cm)
+	err = r.Get(ctx, types.NamespacedName{Namespace: argoNS, Name: argoSettings}, &cm)
 	if apierrors.IsNotFound(err) {
-		return false, nil
+		return false, false, nil
 	}
 	if err != nil {
-		return false, fmt.Errorf("read %s/argocd-cm: %w", argoNS, err)
+		return false, false, fmt.Errorf("read %s/argocd-cm: %w", argoNS, err)
 	}
-	return cm.Data[install.SyncImpersonationKey] == "true", nil
+	return cm.Data[install.SyncImpersonationKey] == "true", cm.Data[install.SyncImpersonationEnforcedKey] == "false", nil
+}
+
+// fallbackProblem says what argocd-cm's enforced "false" costs.
+func fallbackProblem(rc *reconcileCtx) string {
+	return fmt.Sprintf("%s/argocd-cm sets %s: \"false\", so an Application with no sync account mapped syncs as %s; dotvirt keeps the listed kinds and the controller's apply role until it is removed",
+		rc.argoNS, install.SyncImpersonationEnforcedKey, rc.argoSA)
 }
 
 // argoInstanceState reads the ArgoCD resource instance (namespace/name), nil

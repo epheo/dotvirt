@@ -506,6 +506,29 @@ func TestControllerLosesTheApplyRoleOnceImpersonationIsOn(t *testing.T) {
 		t.Fatalf("on and seen again: apply holders = %v, want %v", got, platformOnly)
 	}
 
+	// Not enforced, Argo syncs an Application with no account mapped as its
+	// controller: said, and the controller holds the role again.
+	cm.Data[install.SyncImpersonationEnforcedKey] = "false"
+	if err := c.Update(context.Background(), cm); err != nil {
+		t.Fatal(err)
+	}
+	reconcileOnce(t, r, getCR(t, c, dv))
+	if got := syncCond(t, c, dv); got.Status != metav1.ConditionFalse || got.Reason != "NotEnforced" || !strings.Contains(got.Message, install.SyncImpersonationEnforcedKey) {
+		t.Errorf("enforcement off: condition = %+v, want NotEnforced naming the key", got)
+	}
+	if got := applyHolders(t, c); !slices.Equal(got, both) {
+		t.Errorf("enforcement off: apply holders = %v, want %v", got, both)
+	}
+	delete(cm.Data, install.SyncImpersonationEnforcedKey)
+	if err := c.Update(context.Background(), cm); err != nil {
+		t.Fatal(err)
+	}
+	reconcileOnce(t, r, getCR(t, c, dv))
+	reconcileOnce(t, r, getCR(t, c, dv))
+	if got := applyHolders(t, c); !slices.Equal(got, platformOnly) {
+		t.Fatalf("enforced again: apply holders = %v, want %v", got, platformOnly)
+	}
+
 	order = nil
 	stored := setSpec(t, c, dv, func(d *dotvirtv1alpha1.Dotvirt) { d.Spec.ArgoCD.SyncImpersonation.Enabled = new(false) })
 	reconcileOnce(t, r, stored)
