@@ -111,7 +111,7 @@ func (r *DotvirtReconciler) syncImpersonation(ctx context.Context, dv *dotvirtv1
 			dv.Status.SyncImpersonationInstance = ""
 			return metav1.ConditionUnknown, "Disabled", fmt.Sprintf("removed %s from %s; Applications sync as the ArgoCD controller's ServiceAccount again", install.SyncImpersonationKey, where)
 		}
-		if inConfig && fallback {
+		if inConfig && fallback && rc.sync.sharedInUse {
 			return metav1.ConditionFalse, "NotEnforced", "set outside dotvirt, but " + fallbackProblem(rc)
 		}
 		if inConfig {
@@ -135,11 +135,16 @@ func (r *DotvirtReconciler) syncImpersonation(ctx context.Context, dv *dotvirtv1
 		return failed(err)
 	}
 	unchecked := uncheckedNote(v.unresolved)
-	if inConfig && fallback {
-		return metav1.ConditionFalse, "NotEnforced", "on, but " + fallbackProblem(rc) + unchecked
-	}
 	if inConfig {
-		if problems := slices.Concat(v.missing, v.leaks, foreignProblem(v.foreign)); len(problems) > 0 {
+		problems := slices.Concat(v.missing, v.leaks, foreignProblem(v.foreign))
+		if fallback && rc.sync.sharedInUse {
+			problems = append([]string{fallbackProblem(rc)}, problems...)
+			if v.cloneAnywhere {
+				problems = append(problems, cloneWarning(rc))
+			}
+			return metav1.ConditionFalse, "NotEnforced", "on, but " + strings.Join(problems, "; ") + unchecked
+		}
+		if len(problems) > 0 {
 			return metav1.ConditionFalse, "Degraded", "on; " + strings.Join(problems, "; ") + unchecked
 		}
 		return metav1.ConditionTrue, "Enabled", fmt.Sprintf("on (%s); each Application syncs as its tier's own ServiceAccount%s", where, unchecked)
@@ -236,10 +241,12 @@ func (r *DotvirtReconciler) impersonationConfigured(ctx context.Context, argoNS 
 	return cm.Data[install.SyncImpersonationKey] == "true", cm.Data[install.SyncImpersonationEnforcedKey] == "false", nil
 }
 
-// fallbackProblem says what argocd-cm's enforced "false" costs.
+// fallbackProblem says what argocd-cm's enforced "false" costs while
+// Applications still use the shared tier: the only dotvirt tier that maps no
+// account, so they sync as the controller instead of stopping.
 func fallbackProblem(rc *reconcileCtx) string {
-	return fmt.Sprintf("%s/argocd-cm sets %s: \"false\", so an Application with no sync account mapped syncs as %s; dotvirt keeps the listed kinds and the controller's apply role until it is removed",
-		rc.argoNS, install.SyncImpersonationEnforcedKey, rc.argoSA)
+	return fmt.Sprintf("%s/argocd-cm sets %s: \"false\", so Applications still in the shared %s AppProject, which names no sync account, sync as %s instead of stopping; remove the key until none does",
+		rc.argoNS, install.SyncImpersonationEnforcedKey, install.TenantsProjectName, rc.argoSA)
 }
 
 // argoInstanceState reads the ArgoCD resource instance (namespace/name), nil

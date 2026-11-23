@@ -33,8 +33,8 @@ const (
 	// impersonation (spec.argocd.syncImpersonation), so ArgoCD syncs each dotvirt
 	// Application as its tier's own ServiceAccount; Unknown while not asked;
 	// False says what holds it back, that it waits for argocd-cm (Pending), that
-	// argocd-cm lets an unmapped Application sync as the controller
-	// (NotEnforced), or that the controller's own rights let a tenant DataVolume
+	// argocd-cm lets Applications still in the shared tier sync as the
+	// controller (NotEnforced), or that the controller's own rights let a tenant DataVolume
 	// clone from any namespace (CloneAnywhere). It never gates Available.
 	ConditionSyncImpersonationReady = "SyncImpersonationReady"
 	// ConditionOperatorGuard is True while the admission policies bounding the

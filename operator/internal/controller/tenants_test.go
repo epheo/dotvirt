@@ -390,7 +390,7 @@ func TestTenantKindsFollowTheImpersonationSetting(t *testing.T) {
 		{"key unset", false, true, false, false},
 		{"key set, old Argo pruned the field", true, false, false, false},
 		{"key set, field kept, the ArgoCD resource pins its version", true, true, true, false},
-		{"key set, field kept, not enforced", true, true, false, true},
+		{"key set, field kept, not enforced: every tier maps an account", true, true, false, true},
 		{"key set, field kept", true, true, false, false},
 	} {
 		t.Run(c.name, func(t *testing.T) {
@@ -424,7 +424,7 @@ func TestTenantKindsFollowTheImpersonationSetting(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			want := c.key && c.field && !c.pinned && !c.fallback
+			want := c.key && c.field && !c.pinned
 			spec := tier.objs[0].(*unstructured.Unstructured).Object["spec"].(map[string]any)
 			list, _ := spec["namespaceResourceWhitelist"].([]any)
 			deploy := map[string]any{"group": "apps", "kind": "Deployment"}
