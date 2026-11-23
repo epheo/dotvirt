@@ -225,7 +225,8 @@ func appSyncFromApps(objs []*unstructured.Unstructured) map[string]model.Project
 		// a Failed operation on an app that has since converged (Synced) is history:
 		// Argo never starts a new operation while live matches git, so the Failed
 		// phase outlives the problem indefinitely.
-		if (ps.Operation == "Failed" || ps.Operation == "Error") && ps.Sync != model.SyncSynced {
+		opStands := (ps.Operation == "Failed" || ps.Operation == "Error") && ps.Sync != model.SyncSynced
+		if opStands {
 			ps.SyncError = scrubSyncMessage(nestedString(app.Object, "status", "operationState", "message"))
 		}
 		// A comparison failure (unclonable repo, forbidden or invalid manifest) runs no
@@ -233,7 +234,7 @@ func appSyncFromApps(objs []*unstructured.Unstructured) map[string]model.Project
 		if ps.SyncError == "" {
 			ps.SyncError = errorCondition(app.Object)
 		}
-		ps.Unhealthy = unhealthyResources(app.Object, ps.Operation == "Failed" || ps.Operation == "Error")
+		ps.Unhealthy = unhealthyResources(app.Object, opStands)
 		if prev, exists := out[repo]; !exists || rollupSeverity(ps) >= rollupSeverity(prev) {
 			out[repo] = ps
 		}
@@ -245,8 +246,9 @@ func appSyncFromApps(objs []*unstructured.Unstructured) map[string]model.Project
 // apply was refused, in a stable order. Suspended is a Halted VM's normal health
 // and Progressing a sync in flight, so neither is listed. Refused applies come
 // from the syncResult, which outlives the operation: they count only while the
-// operation stands (opStands) and the object has not converged since - the same
-// gate the rollup's SyncError and mergeSyncMessages apply.
+// operation stands (the rollup's SyncError gate) and the object is still in the
+// app's tree without having converged. An object that left git leaves the tree,
+// so its old refusal leaves with it.
 func unhealthyResources(app map[string]any, opStands bool) []model.ObjectHealth {
 	byKey := map[resKey]*model.ObjectHealth{}
 	var out []*model.ObjectHealth
@@ -260,15 +262,14 @@ func unhealthyResources(app map[string]any, opStands bool) []model.ObjectHealth 
 		out = append(out, o)
 		return o
 	}
+	// Each tracked object, true once it has converged.
 	synced := map[resKey]bool{}
 	for _, raw := range nestedSlice(app, "status", "resources") {
 		res, ok := raw.(map[string]any)
 		if !ok || asString(res, "name") == "" {
 			continue
 		}
-		if syncStatus(asString(res, "status")) == model.SyncSynced {
-			synced[keyOf(res)] = true
-		}
+		synced[keyOf(res)] = syncStatus(asString(res, "status")) == model.SyncSynced
 		switch h := nestedString(res, "health", "status"); h {
 		case "", "Healthy", "Progressing", "Suspended":
 		default:
@@ -283,7 +284,7 @@ func unhealthyResources(app map[string]any, opStands bool) []model.ObjectHealth 
 				continue
 			}
 			msg := asString(res, "message")
-			if msg == "" || asString(res, "status") == "Synced" || synced[keyOf(res)] {
+			if converged, tracked := synced[keyOf(res)]; msg == "" || asString(res, "status") == "Synced" || !tracked || converged {
 				continue
 			}
 			entry(res).Message = scrubSyncMessage(msg)

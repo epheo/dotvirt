@@ -197,9 +197,7 @@ function open(href: string): IssueAction {
 			? 'Open networking'
 			: href.startsWith('/changes')
 				? 'Open changes'
-				: href === '/compute'
-					? 'Open inventory'
-					: 'Open project';
+				: 'Open project';
 	return { label, href };
 }
 
@@ -209,7 +207,7 @@ function objectIssue(inv: Inventory, project: string, o: ObjectHealth): Issue | 
 	if (o.kind === 'VirtualMachine') return null;
 	// A refused apply carries the apply error and no health of its own.
 	const refused = !o.health;
-	const href = objectHref(inv, o);
+	const href = objectHref(inv, project, o);
 	return {
 		severity: refused || o.health === 'Missing' ? 'danger' : 'warn',
 		scope: o.namespace ? `${o.namespace}/${o.name}` : o.name,
@@ -223,8 +221,12 @@ function objectIssue(inv: Inventory, project: string, o: ObjectHealth): Issue | 
 
 // Where each kind is shown: networks have a route of their own (a NAD by its
 // attach ref), uplinks and policies on the networking root's Uplinks and
-// Firewall tabs, tenancy objects on the project that owns the namespace.
-function objectHref(inv: Inventory, o: ObjectHealth): string {
+// Firewall tabs, tenancy objects on the project that owns the namespace. A
+// tenancy object no project holds (its namespace gone or never adopted) has no
+// row anywhere, so it opens where its Application's merged changes are.
+function objectHref(inv: Inventory, project: string, o: ObjectHealth): string {
+	const owner =
+		project === PLATFORM ? changesHref(PLATFORM) : hrefForScope({ kind: 'project', project });
 	switch (o.kind) {
 		case 'UserDefinedNetwork':
 			return hrefForScope({ kind: 'network', network: `${o.namespace}/${o.name}` });
@@ -243,11 +245,11 @@ function objectHref(inv: Inventory, o: ObjectHealth): string {
 			return '/networking?tab=firewall';
 		case 'Namespace': {
 			const p = projectOf(inv, o.name);
-			return p ? hrefForScope({ kind: 'namespace', project: p, namespace: o.name }) : '/compute';
+			return p ? hrefForScope({ kind: 'namespace', project: p, namespace: o.name }) : owner;
 		}
 		case 'RoleBinding': {
 			const p = projectOf(inv, o.namespace ?? '');
-			return p ? `${hrefForScope({ kind: 'project', project: p })}?tab=permissions` : '/compute';
+			return p ? `${hrefForScope({ kind: 'project', project: p })}?tab=permissions` : owner;
 		}
 		default:
 			return '/changes';
@@ -298,7 +300,7 @@ const EDITABLE: Record<string, string> = {
 function placementIssues(inv: Inventory, p: Project, extraTenantKinds = false): Issue[] {
 	const at = (o: GitObject) => (o.namespace ? `${o.namespace}/${o.name}` : o.name);
 	const view = (o: GitObject) =>
-		objectHref(inv, { kind: o.kind, namespace: o.namespace, name: o.name });
+		objectHref(inv, p.name, { kind: o.kind, namespace: o.namespace, name: o.name });
 	const fixIn = (o: GitObject, label: string): IssueAction =>
 		o.kind === 'VirtualMachine' && o.namespace
 			? { label: 'Open the VM', href: vmHref(o.namespace, o.name) }

@@ -213,11 +213,40 @@ describe('scope helpers', () => {
 		const issues = deriveIssues(i);
 		expect(issues.map((x) => [x.scope, x.label, x.href, x.severity])).toEqual([
 			['platform', 'Sync failed', '/changes', 'danger'],
-			['tenant-a', 'Namespace apply failed', '/compute', 'danger'],
+			['tenant-a', 'Namespace apply failed', '/changes/platform', 'danger'],
 		]);
 		expect(issues[1].detail).toMatch(/forbidden/);
 		// Platform issues never leak into a project's own scope.
 		expect(issuesInScope(issues, { project: 'p1' })).toEqual([]);
+	});
+
+	it('opens a tenancy object no project holds where its Application lives', () => {
+		const refused = (namespace: string, name: string) => ({
+			kind: 'RoleBinding',
+			namespace,
+			name,
+			message: `namespaces "${namespace}" not found`,
+		});
+		const i: Inventory = {
+			projects: [
+				{
+					name: 'p1',
+					namespaces: [{ namespace: 'ns-a', vms: [] }],
+					gitOps: { sync: 'OutOfSync', operation: 'Failed', unhealthy: [refused('gone', 'b')] },
+				},
+			],
+			platform: {
+				sync: 'OutOfSync',
+				operation: 'Failed',
+				unhealthy: [refused('rc-test', 'rc-test-admins'), refused('ns-a', 'ns-a-admins')],
+			},
+		};
+		const rows = deriveIssues(i).filter((x) => x.label === 'RoleBinding apply failed');
+		expect(rows.map((x) => [x.scope, x.action])).toEqual([
+			['gone/b', { label: 'Open project', href: '/compute/p1' }],
+			['ns-a/ns-a-admins', { label: 'Open project', href: '/compute/p1?tab=permissions' }],
+			['rc-test/rc-test-admins', { label: 'Open changes', href: '/changes/platform' }],
+		]);
 	});
 });
 
