@@ -3,6 +3,7 @@ package routes
 import (
 	"context"
 	"encoding/json"
+	"maps"
 	"strings"
 	"sync"
 	"testing"
@@ -16,6 +17,7 @@ import (
 	"k8s.io/client-go/tools/cache"
 
 	"github.com/epheo/dotvirt/internal/eventbus"
+	"github.com/epheo/dotvirt/internal/model"
 )
 
 const leak = "Taken by route billing/api"
@@ -369,5 +371,62 @@ func TestDecodeIsolated(t *testing.T) {
 		if got, keep := decodeIsolated(c.u); got != c.want || !keep {
 			t.Errorf("%s: %v %v, want %v", name, got, keep, c.want)
 		}
+	}
+}
+
+func pendingRoute(ns, name string, parent map[string]any) *unstructured.Unstructured {
+	return obj(ns, name, map[string]any{"spec": map[string]any{"parentRefs": []any{parent}}})
+}
+
+// No controller answers for a Gateway that does not exist, so a route naming
+// one says so instead of waiting. A tenant is told only of its own namespace.
+func TestARouteNamingNoGatewaySaysSo(t *testing.T) {
+	s, _ := newSnapshot(t)
+	mustAdd(t, s.routes[0], pendingRoute("web", "dew", map[string]any{"name": "test"}))
+	mustAdd(t, s.routes[0], pendingRoute("web", "far", map[string]any{"name": "gone", "namespace": "edge"}))
+	mustAdd(t, s.routes[0], pendingRoute("web", "new", map[string]any{"name": "public", "namespace": "edge"}))
+	mustAdd(t, s.routes[0], pendingRoute("web", "set", map[string]any{"name": "extra", "kind": "ListenerSet", "group": group}))
+	reasons := func(rs []model.Route) map[string]string {
+		out := map[string]string{}
+		for _, r := range rs {
+			out[r.Name] = r.Parents[0].Reason
+		}
+		return out
+	}
+	tenant := func() map[string]string { return reasons(s.Routes(map[Held]bool{{"web", "httproutes"}: true})) }
+	operator := func() map[string]string { return reasons(s.Overview(all).Routes) }
+
+	if got := tenant(); got["dew"] != "Pending" {
+		t.Fatalf("before the Gateways are listed: %v", got)
+	}
+	level, total := s.Gen("web", "httproutes"), s.Total()
+	if err := s.gateways.Replace(nil, "1"); err != nil {
+		t.Fatal(err)
+	}
+	if s.Gen("web", "httproutes") == level || s.Total() == total {
+		t.Error("a first Gateway list that found none left the levels")
+	}
+	if err := s.gateways.Replace([]any{gateway()}, "2"); err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]string{"dew": "NoSuchGateway", "far": "Pending", "new": "Pending", "set": "Pending"}
+	if got := tenant(); !maps.Equal(got, want) {
+		t.Errorf("tenant reads %v, want %v", got, want)
+	}
+	want["far"] = "NoSuchGateway"
+	if got := operator(); !maps.Equal(got, want) {
+		t.Errorf("operator reads %v, want %v", got, want)
+	}
+
+	level = s.Gen("web", "httproutes")
+	mustAdd(t, s.gateways, obj("web", "test", map[string]any{"spec": map[string]any{"gatewayClassName": "portail"}}))
+	if s.Gen("web", "httproutes") == level {
+		t.Error("a Gateway created in the namespace left its routes' level")
+	}
+	if got := tenant(); got["dew"] != "Pending" {
+		t.Errorf("once its Gateway exists: %v", got)
+	}
+	if r := s.routes[0].Rows["web/dew"]; r.Parents[0].Reason != "Pending" {
+		t.Errorf("the shared row was changed: %+v", r.Parents[0])
 	}
 }

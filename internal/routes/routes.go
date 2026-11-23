@@ -9,6 +9,7 @@
 package routes
 
 import (
+	"cmp"
 	"context"
 	"log"
 	"slices"
@@ -104,7 +105,16 @@ func genKey(namespace, resource string) string { return namespace + "\x00" + res
 func New(src Source, bus *eventbus.Bus, served func() bool) *Snapshot {
 	s := &Snapshot{src: src, bus: bus, served: served, gens: map[string]uint64{}}
 	s.gateways = &reflect.Table[model.GatewayInfo]{Lock: &s.mu, Decode: decodeGateway, Key: reflect.NamespacedKey, Publish: s.publish,
-		Touch: func(string, *model.GatewayInfo, *model.GatewayInfo) { s.total++ }}
+		Touch: func(_ string, old, now *model.GatewayInfo) {
+			s.total++
+			// A Gateway coming or going changes what a route in its
+			// namespace reads (missingGateways).
+			if g := cmp.Or(old, now); (old == nil) != (now == nil) {
+				for _, k := range RouteKinds {
+					s.gens[genKey(g.Namespace, k.Resource)]++
+				}
+			}
+		}}
 	s.limits = &reflect.Table[rateLimit]{Lock: &s.mu, Decode: decodeRateLimit, Key: reflect.NamespacedKey, Publish: s.publish,
 		Touch: func(string, *rateLimit, *rateLimit) { s.total++ }}
 	s.isolated = &reflect.Table[bool]{Lock: &s.mu, Decode: decodeIsolated, Publish: s.publish,
@@ -225,14 +235,23 @@ func (s *Snapshot) Started() bool { return s.started.Load() }
 func (s *Snapshot) Total() uint64 {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	return s.total
+	return s.listed(s.total)
 }
 
 // Gen is the level of one route kind in one namespace.
 func (s *Snapshot) Gen(namespace, resource string) uint64 {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	return s.gens[genKey(namespace, resource)]
+	return s.listed(s.gens[genKey(namespace, resource)])
+}
+
+// listed folds in whether the Gateways are listed, which is when
+// missingGateways starts answering: a first list that finds none moves no row.
+func (s *Snapshot) listed(level uint64) uint64 {
+	if s.gateways.Synced() {
+		return level<<1 | 1
+	}
+	return level << 1
 }
 
 // Held is one route kind present in one namespace.
@@ -277,11 +296,31 @@ func (s *Snapshot) Routes(readable map[Held]bool) []model.Route {
 			for j := range r.Parents {
 				r.Parents[j].Message = ""
 			}
+			s.missingGateways(&r, true)
 			out = append(out, r)
 		}
 	}
 	sortRoutes(out)
 	return out
+}
+
+// missingGateways says NoSuchGateway for each parent no controller answered
+// whose Gateway does not exist, since none ever will. own limits it to the
+// route's namespace, the only Gateways a project's people are told of. r's
+// Parents must be the caller's copy; runs under s.mu.
+func (s *Snapshot) missingGateways(r *model.Route, own bool) {
+	if !s.gateways.Synced() {
+		return
+	}
+	for j := range r.Parents {
+		p := &r.Parents[j]
+		if p.Kind != "" || p.Attached || p.Reason != "Pending" || (own && p.Namespace != r.Namespace) {
+			continue
+		}
+		if _, ok := s.gateways.Rows[p.Namespace+"/"+p.Name]; !ok {
+			p.Reason = "NoSuchGateway"
+		}
+	}
 }
 
 func sortRoutes(rs []model.Route) {
@@ -327,6 +366,8 @@ func (s *Snapshot) Overview(sees func(group, resource string) bool) model.Gatewa
 			continue
 		}
 		for _, r := range t.Rows {
+			r.Parents = slices.Clone(r.Parents)
+			s.missingGateways(&r, false)
 			out.Routes = append(out.Routes, r)
 		}
 	}
@@ -468,6 +509,7 @@ func decodeRateLimit(u *unstructured.Unstructured) (rateLimit, bool) {
 }
 
 type parentRefDoc struct {
+	Kind        string `json:"kind"`
 	Namespace   string `json:"namespace"`
 	Name        string `json:"name"`
 	SectionName string `json:"sectionName"`
@@ -506,6 +548,9 @@ func decodeRoute(kind string, u *unstructured.Unstructured) model.Route {
 	}
 	for _, ref := range doc.Spec.ParentRefs {
 		p := model.RouteParent{Namespace: orOwn(ref.Namespace), Name: ref.Name, Section: ref.SectionName, Reason: "Pending"}
+		if ref.Kind != "Gateway" {
+			p.Kind = ref.Kind
+		}
 		for _, st := range doc.Status.Parents {
 			if orOwn(st.ParentRef.Namespace) == p.Namespace && st.ParentRef.Name == p.Name && st.ParentRef.SectionName == p.Section {
 				p.Attached, p.Reason, p.Message = verdict(st.Conditions, "Accepted", "ResolvedRefs")
