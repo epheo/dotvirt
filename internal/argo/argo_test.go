@@ -349,3 +349,51 @@ func TestUnhealthyResourcesNamesObjects(t *testing.T) {
 		t.Errorf("without a standing operation only health counts, got %+v", got)
 	}
 }
+
+// withTree sets an Application's tracked objects and its last operation's
+// per-object results.
+func withTree(a *unstructured.Unstructured, resources, syncResult []any) *unstructured.Unstructured {
+	st := a.Object["status"].(map[string]any)
+	st["resources"] = resources
+	st["operationState"].(map[string]any)["syncResult"] = map[string]any{"resources": syncResult}
+	return a
+}
+
+func refusedRoleBinding(ns, name string) any {
+	return map[string]any{"group": "rbac.authorization.k8s.io", "kind": "RoleBinding", "namespace": ns, "name": name,
+		"status": "SyncFailed", "message": `namespaces "` + ns + `" not found`}
+}
+
+// An app back to Synced after a failed operation keeps that operation's
+// syncResult. Its refusals are history, including those of objects that have
+// since left git and so left the tree.
+func TestAppSyncConvergedAppRetiresRefusedObjects(t *testing.T) {
+	a := withTree(appWithSync("dotvirt-platform", "https://forge/o/platform.git", "Synced", "Healthy", "Failed",
+		"one or more synchronization tasks completed unsuccessfully"),
+		[]any{},
+		[]any{refusedRoleBinding("rc-test", "rc-test-admins"), refusedRoleBinding("rc-test", "rc-test-egress")})
+	got := appSyncFromApps([]*unstructured.Unstructured{a})[forge.NormalizeRepoURL("https://forge/o/platform.git")]
+	if got.SyncError != "" || len(got.Unhealthy) != 0 {
+		t.Errorf("converged app must list no refusal, got SyncError %q, Unhealthy %+v", got.SyncError, got.Unhealthy)
+	}
+}
+
+// While a failed operation stands, an object it refused that has since left
+// git is no longer the app's problem; one still tracked is.
+func TestAppSyncStandingFailureListsOnlyTrackedRefusals(t *testing.T) {
+	a := withTree(appWithSync("dotvirt-platform", "https://forge/o/platform.git", "OutOfSync", "Missing", "Failed",
+		"one or more synchronization tasks completed unsuccessfully"),
+		[]any{map[string]any{"group": "", "kind": "Namespace", "name": "tenant-a", "status": "OutOfSync"}},
+		[]any{
+			map[string]any{"group": "", "kind": "Namespace", "name": "tenant-a", "status": "SyncFailed",
+				"message": `namespaces "tenant-a" is forbidden: label cannot be removed`},
+			refusedRoleBinding("rc-test", "rc-test-admins"),
+		})
+	got := appSyncFromApps([]*unstructured.Unstructured{a})[forge.NormalizeRepoURL("https://forge/o/platform.git")]
+	if got.SyncError == "" {
+		t.Error("a standing failure keeps its rollup error")
+	}
+	if len(got.Unhealthy) != 1 || got.Unhealthy[0].Kind != "Namespace" || got.Unhealthy[0].Name != "tenant-a" {
+		t.Errorf("want only the tracked refused namespace, got %+v", got.Unhealthy)
+	}
+}
