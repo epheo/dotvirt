@@ -2174,6 +2174,11 @@ export interface VM {
    */
   migrateBlock?: string;
   /**
+   * Provisioning: a DataVolume the VM needs is still being created, so it
+   * cannot start yet, whatever phase its waiting instance reports.
+   */
+  provisioning?: boolean;
+  /**
    * Migration is the live (or last) node-to-node move and its
    * progress, read from the VMI's migration state. Nil when never migrated.
    */

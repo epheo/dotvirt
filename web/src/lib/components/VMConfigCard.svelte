@@ -11,10 +11,11 @@
 		type InlineField,
 		type InlineValue,
 	} from '#lib/inlineedit.js';
-	import { action } from '#lib/resource.svelte.js';
+	import { action, resource } from '#lib/resource.svelte.js';
+	import { diskProgress } from '#lib/storage.js';
 	import { memoryRoom } from '#lib/state/hosts.svelte.js';
 	import { vmSizing } from '#lib/sizing.js';
-	import { TONE_PILL } from '#lib/status.js';
+	import { TONE_PILL, runPhase } from '#lib/status.js';
 	import { drafts } from '#lib/state/drafts.svelte.js';
 	import { inventory } from '#lib/state/inventory.svelte.js';
 	import { ui } from '#lib/state/ui.svelte.js';
@@ -42,7 +43,34 @@
 	} = $props();
 
 	const sizing = $derived(vmSizing(vm, inventory.options));
-	const status = $derived(vm.paused ? 'Paused' : (vm.phase ?? '-'));
+
+	// While KubeVirt creates the VM's disks, how far each one is: one read per
+	// disk under the caller's token, repeated only while it provisions. Keyed
+	// on "namespace|disk=claim,..." so a live frame never restarts it.
+	const creating = $derived(
+		vm.provisioning
+			? `${vm.namespace}|${(vm.disks ?? [])
+					.filter((d) => d.type === 'dataVolume' && d.claim)
+					.map((d) => `${d.name}=${d.claim}`)
+					.join(',')}`
+			: '',
+	);
+	const progressRes = resource<string>(
+		() => creating,
+		async (k) => {
+			const [ns, list] = k.split('|');
+			if (!list) return '';
+			const reads = await Promise.allSettled(
+				list.split(',').map(async (pair) => {
+					const [disk, claim] = pair.split('=');
+					return `${disk}: ${diskProgress(await api.uploadStatus(ns, claim))}`;
+				}),
+			);
+			return reads.flatMap((r) => (r.status === 'fulfilled' ? [r.value] : [])).join(', ');
+		},
+		{ poll: () => (creating ? 5000 : 0), reset: true },
+	);
+	const status = $derived(vm.paused ? 'Paused' : (runPhase(vm) ?? '-'));
 
 	type Row = {
 		key: string;
@@ -106,6 +134,7 @@
 						.join(', ')
 				: 'None',
 			fields: ['Disk'],
+			live: (creating && progressRes.data) || undefined,
 		},
 		{
 			key: 'networks',

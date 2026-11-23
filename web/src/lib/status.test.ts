@@ -70,6 +70,16 @@ describe('vmState', () => {
 		expect(vmState(vm({ paused: true })).word).toBe('Paused');
 	});
 
+	it('says Provisioning while the disks it starts on are created; kept off, Stopped', () => {
+		expect(vmState(vm({ phase: 'Scheduling', provisioning: true }))).toMatchObject({
+			tone: 'info',
+			word: 'Provisioning',
+		});
+		expect(vmState(vm({ power: 'Off', phase: undefined, provisioning: true })).word).toBe(
+			'Stopped',
+		);
+	});
+
 	it('names the worst exception, with the cluster words as detail', () => {
 		const v = vmState(vm({ syncError: 'denied', health: 'Degraded', sync: 'OutOfSync' }));
 		expect(v.exception).toEqual({ tone: 'danger', label: 'Apply refused', detail: 'denied' });

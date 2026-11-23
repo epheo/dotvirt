@@ -6,6 +6,7 @@ import {
 	classFacts,
 	classTag,
 	defaultClassForbidden,
+	diskProgress,
 	diskRows,
 	diskShared,
 	filtersFromQuery,
@@ -736,6 +737,28 @@ describe('suggestImageName', () => {
 		);
 		expect(suggestImageName('url', 'https://images.example.org/')).toBe('');
 		expect(suggestImageName('url', '')).toBe('');
+	});
+});
+
+describe('a disk being created', () => {
+	const st = (phase: string, more: { progress?: string; error?: string } = {}) => ({
+		phase,
+		ready: false,
+		...more,
+	});
+
+	it('says how far a copy is, and only a known percentage', () => {
+		expect(diskProgress(st('CloneInProgress', { progress: '45.20%' }))).toBe('copying, 45.20%');
+		expect(diskProgress(st('CSICloneInProgress', { progress: 'N/A' }))).toBe('copying');
+		expect(diskProgress(st('ImportInProgress', { progress: '3.00%' }))).toBe('importing, 3.00%');
+		expect(diskProgress(st('Pending'))).toBe('preparing storage');
+		expect(diskProgress(st('Succeeded'))).toBe('ready');
+	});
+
+	it('says failed from the error CDI keeps while it retries', () => {
+		expect(diskProgress(st('ImportInProgress', { error: 'no such host' }))).toBe(
+			'failed: no such host',
+		);
 	});
 });
 

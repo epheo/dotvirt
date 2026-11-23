@@ -263,7 +263,7 @@ func enrich(vm *model.VM, in Inputs) {
 func applyLiveFor(vm *model.VM, s clusterstate.LiveVM, in Inputs) {
 	if in.ListsVMIs != nil && !in.ListsVMIs(vm.Namespace) {
 		// The VM object's own verdict; the rest is read from its instance.
-		vm.Phase, vm.RestartPending = s.Phase, s.RestartPending
+		vm.Phase, vm.RestartPending, vm.Provisioning = s.Phase, s.RestartPending, s.Provisioning
 		return
 	}
 	applyLive(vm, s)
@@ -274,6 +274,7 @@ func applyLive(vm *model.VM, s clusterstate.LiveVM) {
 	vm.Phase, vm.GuestIP, vm.NodeName = s.Phase, s.GuestIP, s.NodeName
 	vm.Paused = s.Paused
 	vm.Failure, vm.RestartPending, vm.MigrateBlock = s.Failure, s.RestartPending, s.MigrateBlock
+	vm.Provisioning = s.Provisioning
 	vm.IPs, vm.OS, vm.MemoryActual = s.IPs, s.OS, s.MemoryActual
 	vm.VCPUs = s.VCPUs
 	// Merge live per-NIC addresses onto the manifest's adapters (by name). Build a

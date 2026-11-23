@@ -1,5 +1,6 @@
 import { vmKey, type VM } from '#lib/api.js';
 import { plural } from '#lib/format.js';
+import { runPhase } from '#lib/status.js';
 
 // The status line a page header says about its scope: how a host stands, which
 // hosts need a person, and what a scope's VMs are doing.
@@ -54,7 +55,7 @@ export function vmStats(
 		const k = vmKey(vm);
 		if (issueKeys.has(k)) issues++;
 		if (inChange(k)) changed++;
-		const p = vm.paused ? 'Paused' : (vm.phase ?? (vm.power === 'Off' ? 'Stopped' : ''));
+		const p = vm.paused ? 'Paused' : (runPhase(vm) ?? (vm.power === 'Off' ? 'Stopped' : ''));
 		if (p) phases.set(p, (phases.get(p) ?? 0) + 1);
 	}
 	return {

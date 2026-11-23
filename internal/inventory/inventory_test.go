@@ -240,6 +240,18 @@ func TestLiveFactsFollowTheInstances(t *testing.T) {
 	}
 }
 
+// Disks still being created are the VM object's own status, read either way.
+func TestProvisioningIsTheVMsOwn(t *testing.T) {
+	live := clusterstate.LiveVM{Phase: "Scheduling", Provisioning: true}
+	for _, in := range []Inputs{{ListsVMIs: func(string) bool { return false }}, {}} {
+		vm := model.VM{Namespace: "a"}
+		applyLiveFor(&vm, live, in)
+		if !vm.Provisioning {
+			t.Errorf("%+v", vm)
+		}
+	}
+}
+
 // The rollup a project shows passes through the caller's view of it.
 func TestBuildScopesProjectGitOps(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())

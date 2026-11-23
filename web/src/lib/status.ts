@@ -49,6 +49,13 @@ export function phaseTone(phase?: string, paused = false): Tone {
 	return 'info'; // Provisioning, Starting, Stopping, Migrating, WaitingFor...
 }
 
+// The phase a VM shows: KubeVirt's Provisioning while a disk it needs to
+// start is still being created, whatever phase its waiting instance reports.
+// A VM git keeps off stays Stopped; only its disks say provisioning.
+export function runPhase(vm: Pick<VM, 'phase' | 'provisioning' | 'power'>): string | undefined {
+	return vm.provisioning && vm.power !== 'Off' ? 'Provisioning' : vm.phase;
+}
+
 // How a VM is, for the one State cell: its run state as a dot and a word, plus
 // at most one exception, the worst that applies. A healthy VM carries none, so
 // only rows that need a person draw color and words.
@@ -61,8 +68,9 @@ export type VMStateView = {
 };
 
 export function vmState(vm: VM): VMStateView {
-	const tone = phaseTone(vm.phase, vm.paused);
-	const word = vm.paused ? 'Paused' : (vm.phase ?? (vm.power === 'Off' ? 'Stopped' : '-'));
+	const phase = runPhase(vm);
+	const tone = phaseTone(phase, vm.paused);
+	const word = vm.paused ? 'Paused' : (phase ?? (vm.power === 'Off' ? 'Stopped' : '-'));
 	const exception = vm.syncError
 		? { tone: 'danger' as const, label: 'Apply refused', detail: vm.syncError }
 		: vm.health === 'Degraded'
