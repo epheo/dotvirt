@@ -298,11 +298,12 @@ func (r *DotvirtReconciler) provision(ctx context.Context, key types.NamespacedN
 // syncWait is when a pass waiting on sync impersonation comes back, since
 // neither argocd-cm nor RBAC is watched: Pending, within recheck, for the
 // argocd-operator to copy the key; held back on something a person fixes, as
-// the verdict ages out; Degraded, with the drift timer like any other drift.
+// the verdict ages out; Degraded or NotEnforced, with the drift timer like any
+// other drift.
 func (r *DotvirtReconciler) syncWait(dv *dotvirtv1alpha1.Dotvirt) time.Duration {
 	c := meta.FindStatusCondition(dv.Status.Conditions, dotvirtv1alpha1.ConditionSyncImpersonationReady)
 	switch {
-	case !dv.Spec.ArgoCD.SyncImpersonation.On() || c == nil || c.Status != metav1.ConditionFalse || c.Reason == "Degraded":
+	case !dv.Spec.ArgoCD.SyncImpersonation.On() || c == nil || c.Status != metav1.ConditionFalse || c.Reason == "Degraded" || c.Reason == "NotEnforced":
 		return driftResync
 	case c.Reason == "Pending":
 		return r.recheck()
@@ -698,14 +699,15 @@ func (r *DotvirtReconciler) installs(ctx context.Context, _ client.Object) []rec
 const argoSettings = "argocd-cm"
 
 // impersonationChanged passes an argocd-cm update that turns sync
-// impersonation on or off; the rest of its churn says nothing dotvirt renders.
+// impersonation or its enforcement on or off; the rest of its churn says
+// nothing dotvirt renders.
 func impersonationChanged(e event.UpdateEvent) bool {
-	setting := func(o client.Object) string {
+	setting := func(o client.Object) [2]string {
 		cm, _ := o.(*corev1.ConfigMap)
 		if cm == nil {
-			return ""
+			return [2]string{}
 		}
-		return cm.Data[install.SyncImpersonationKey]
+		return [2]string{cm.Data[install.SyncImpersonationKey], cm.Data[install.SyncImpersonationEnforcedKey]}
 	}
 	return setting(e.ObjectOld) != setting(e.ObjectNew)
 }

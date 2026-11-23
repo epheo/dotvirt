@@ -506,6 +506,24 @@ func TestControllerLosesTheApplyRoleOnceImpersonationIsOn(t *testing.T) {
 		t.Fatalf("on and seen again: apply holders = %v, want %v", got, platformOnly)
 	}
 
+	// Every tier maps an account for any namespace, so not enforced leaves
+	// them impersonating.
+	cm.Data[install.SyncImpersonationEnforcedKey] = "false"
+	if err := c.Update(context.Background(), cm); err != nil {
+		t.Fatal(err)
+	}
+	reconcileOnce(t, r, getCR(t, c, dv))
+	if got := syncCond(t, c, dv); got.Status != metav1.ConditionTrue {
+		t.Errorf("not enforced, no shared tier: condition = %+v, want on", got)
+	}
+	if got := applyHolders(t, c); !slices.Equal(got, platformOnly) {
+		t.Errorf("not enforced, no shared tier: apply holders = %v, want %v", got, platformOnly)
+	}
+	delete(cm.Data, install.SyncImpersonationEnforcedKey)
+	if err := c.Update(context.Background(), cm); err != nil {
+		t.Fatal(err)
+	}
+
 	order = nil
 	stored := setSpec(t, c, dv, func(d *dotvirtv1alpha1.Dotvirt) { d.Spec.ArgoCD.SyncImpersonation.Enabled = new(false) })
 	reconcileOnce(t, r, stored)
@@ -715,6 +733,30 @@ func TestSyncImpersonationStaysOn(t *testing.T) {
 	}
 	if got := syncCond(t, c, dv); got.Status != metav1.ConditionTrue || !strings.Contains(got.Message, "outside dotvirt") {
 		t.Errorf("condition = %+v, want Enabled outside dotvirt", got)
+	}
+}
+
+// Not enforced, an Application still in the shared tier, which maps no
+// account, syncs as the controller instead of stopping: said, with what else
+// holds, and checked again with the drift timer.
+func TestSyncImpersonationNotEnforced(t *testing.T) {
+	dv := optIn(testCR(), true)
+	cm := argoCM(true)
+	cm.Data[install.SyncImpersonationEnforcedKey] = "false"
+	var n atomic.Int64
+	c := testBuilder(t).WithObjects(dv, argoCDInstance(map[string]any{install.SyncImpersonationKey: "true"}), cm,
+		projectNS("team-a", "team-a", "dotvirt/team-a.git"),
+		application("dotvirt-team-a", install.TenantsProjectName), argoObj("AppProject", "argocd", install.TenantsProjectName, install.Labels(testCR()))).
+		WithInterceptorFuncs(reviews(granted(map[string][]string{"dotvirt-p-team-a": {"team-a"}}), &n)).WithReturnManagedFields().Build()
+	r := newReconciler(c, depsOK)
+	res := reconcileOnce(t, r, dv)
+	got := syncCond(t, c, dv)
+	if got.Status != metav1.ConditionFalse || got.Reason != "NotEnforced" ||
+		!strings.Contains(got.Message, install.SyncImpersonationEnforcedKey) || !strings.Contains(got.Message, "shared dotvirt-tenants AppProject") {
+		t.Errorf("condition = %+v, want NotEnforced naming the key and the shared tier", got)
+	}
+	if res.RequeueAfter != driftResync {
+		t.Errorf("requeue = %v; argocd-cm is watched, so the drift timer is enough", res.RequeueAfter)
 	}
 }
 

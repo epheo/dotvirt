@@ -384,13 +384,14 @@ func erroredAppSet(dv *dotvirtv1alpha1.Dotvirt, msg string) *unstructured.Unstru
 // stay and ArgoReady says why.
 func TestTenantKindsFollowTheImpersonationSetting(t *testing.T) {
 	for _, c := range []struct {
-		name               string
-		key, field, pinned bool
+		name                         string
+		key, field, pinned, fallback bool
 	}{
-		{"key unset", false, true, false},
-		{"key set, old Argo pruned the field", true, false, false},
-		{"key set, field kept, the ArgoCD resource pins its version", true, true, true},
-		{"key set, field kept", true, true, false},
+		{"key unset", false, true, false, false},
+		{"key set, old Argo pruned the field", true, false, false, false},
+		{"key set, field kept, the ArgoCD resource pins its version", true, true, true, false},
+		{"key set, field kept, not enforced: every tier maps an account", true, true, false, true},
+		{"key set, field kept", true, true, false, false},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			dv, creds := byoForgeCR("https://forge.byo.example")
@@ -399,6 +400,9 @@ func TestTenantKindsFollowTheImpersonationSetting(t *testing.T) {
 			cm := &corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Name: "argocd-cm", Namespace: "argocd"}, Data: map[string]string{}}
 			if c.key {
 				cm.Data[install.SyncImpersonationKey] = "true"
+			}
+			if c.fallback {
+				cm.Data[install.SyncImpersonationEnforcedKey] = "false"
 			}
 			applied := install.TenantAppProject(dv, "argocd", "dotvirt-p-team-a", "team-a", []string{"a"}, nil, nil)
 			if !c.field {
@@ -440,7 +444,9 @@ func TestTenantKindsFollowTheImpersonationSetting(t *testing.T) {
 func TestImpersonationChanged(t *testing.T) {
 	cm := func(v string) *corev1.ConfigMap {
 		c := &corev1.ConfigMap{Data: map[string]string{"url": "https://argo.example"}}
-		if v != "" {
+		if on, enforced, ok := strings.Cut(v, "/"); ok {
+			c.Data[install.SyncImpersonationKey], c.Data[install.SyncImpersonationEnforcedKey] = on, enforced
+		} else if v != "" {
 			c.Data[install.SyncImpersonationKey] = v
 		}
 		return c
@@ -448,7 +454,8 @@ func TestImpersonationChanged(t *testing.T) {
 	for _, c := range []struct {
 		old, new string
 		want     bool
-	}{{"", "true", true}, {"true", "", true}, {"true", "false", true}, {"true", "true", false}, {"", "", false}} {
+	}{{"", "true", true}, {"true", "", true}, {"true", "false", true}, {"true", "true", false}, {"", "", false},
+		{"true", "true/false", true}, {"true/false", "true", true}, {"true/false", "true/false", false}} {
 		if got := impersonationChanged(event.UpdateEvent{ObjectOld: cm(c.old), ObjectNew: cm(c.new)}); got != c.want {
 			t.Errorf("%q to %q: %v, want %v", c.old, c.new, got, c.want)
 		}

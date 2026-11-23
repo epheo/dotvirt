@@ -317,7 +317,9 @@ func (r *DotvirtReconciler) controllerApplies(ctx context.Context, dv *dotvirtv1
 // version may run an older one under newer CRDs, so it proves nothing. Read
 // where Argo reads it; unknown is no.
 func (r *DotvirtReconciler) impersonating(ctx context.Context, dv *dotvirtv1alpha1.Dotvirt, argoNS string, held []unstructured.Unstructured) bool {
-	if set, err := r.impersonationConfigured(ctx, argoNS); err != nil || !set {
+	// Not enforced changes nothing here: every tier this install renders maps
+	// an account for any namespace it may reach.
+	if set, _, err := r.impersonationConfigured(ctx, argoNS); err != nil || !set {
 		return false
 	}
 	inst, _, err := r.argoInstanceState(ctx, argoNS+"/"+argoInstance(argoNS))

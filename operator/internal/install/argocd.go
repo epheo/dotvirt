@@ -336,6 +336,11 @@ func PlatformApplication(dv *dotvirtv1alpha1.Dotvirt, argoNS, platformRepo strin
 // Application as the ServiceAccount its AppProject names.
 const SyncImpersonationKey = "application.sync.impersonation.enabled"
 
+// SyncImpersonationEnforcedKey "false" (Argo CD 3.6 and later) syncs an
+// Application whose AppProject maps no account to its destination as the
+// controller's ServiceAccount, instead of refusing it.
+const SyncImpersonationEnforcedKey = "application.sync.impersonation.enforced"
+
 // ArgoCDGVK is the argocd-operator's instance kind; its spec.extraConfig is
 // copied into argocd-cm, which the argocd-operator rewrites from the CR.
 var ArgoCDGVK = schema.GroupVersionKind{Group: argoGroup, Version: "v1beta1", Kind: "ArgoCD"}
