@@ -109,6 +109,12 @@ describe('where a route arrives', () => {
 		expect(parentOn(other, gw())).toBeUndefined();
 	});
 
+	it('does not count a ListenerSet of the same name as the gateway', () => {
+		const set = route('b', { parents: [parent({ kind: 'ListenerSet' })] });
+		expect(routesOn([route('a'), set], gw()).map((r) => r.name)).toEqual(['a']);
+		expect(listenersOf(set, gw())).toEqual([]);
+	});
+
 	it('does not confuse a gateway of the same name in another namespace', () => {
 		const other = route('b', { parents: [parent({ namespace: 'other' })] });
 		expect(routesOn([other], gw())).toEqual([]);

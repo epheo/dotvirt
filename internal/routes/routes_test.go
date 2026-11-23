@@ -399,7 +399,14 @@ func TestARouteNamingNoGatewaySaysSo(t *testing.T) {
 	if got := tenant(); got["dew"] != "Pending" {
 		t.Fatalf("before the Gateways are listed: %v", got)
 	}
-	if err := s.gateways.Replace([]any{gateway()}, "1"); err != nil {
+	level, total := s.Gen("web", "httproutes"), s.Total()
+	if err := s.gateways.Replace(nil, "1"); err != nil {
+		t.Fatal(err)
+	}
+	if s.Gen("web", "httproutes") == level || s.Total() == total {
+		t.Error("a first Gateway list that found none left the levels")
+	}
+	if err := s.gateways.Replace([]any{gateway()}, "2"); err != nil {
 		t.Fatal(err)
 	}
 	want := map[string]string{"dew": "NoSuchGateway", "far": "Pending", "new": "Pending", "set": "Pending"}
@@ -411,7 +418,7 @@ func TestARouteNamingNoGatewaySaysSo(t *testing.T) {
 		t.Errorf("operator reads %v, want %v", got, want)
 	}
 
-	level := s.Gen("web", "httproutes")
+	level = s.Gen("web", "httproutes")
 	mustAdd(t, s.gateways, obj("web", "test", map[string]any{"spec": map[string]any{"gatewayClassName": "portail"}}))
 	if s.Gen("web", "httproutes") == level {
 		t.Error("a Gateway created in the namespace left its routes' level")

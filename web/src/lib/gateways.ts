@@ -16,7 +16,8 @@ const SERVED_ON: Record<string, string[]> = {
 // A route can name several sections of one Gateway: a refused one wins, so
 // the map never reads Live over a refusal.
 export function parentOn(r: Route, g: GatewayInfo): RouteParent | undefined {
-	const on = r.parents?.filter((p) => p.namespace === g.namespace && p.name === g.name) ?? [];
+	const on =
+		r.parents?.filter((p) => !p.kind && p.namespace === g.namespace && p.name === g.name) ?? [];
 	return on.find((p) => !p.attached) ?? on[0];
 }
 
@@ -41,7 +42,8 @@ function hostFits(listener: string | undefined, hosts: string[] | undefined): bo
 // route that names no section; the read model does not carry it, so such a
 // route may be drawn into a listener that does not take it.
 export function listenersOf(r: Route, g: GatewayInfo): GatewayListener[] {
-	const parents = r.parents?.filter((p) => p.namespace === g.namespace && p.name === g.name) ?? [];
+	const parents =
+		r.parents?.filter((p) => !p.kind && p.namespace === g.namespace && p.name === g.name) ?? [];
 	if (parents.some((p) => !p.section))
 		return g.listeners.filter(
 			(l) => (SERVED_ON[r.kind] ?? []).includes(l.protocol) && hostFits(l.hostname, r.hostnames),

@@ -235,14 +235,23 @@ func (s *Snapshot) Started() bool { return s.started.Load() }
 func (s *Snapshot) Total() uint64 {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	return s.total
+	return s.listed(s.total)
 }
 
 // Gen is the level of one route kind in one namespace.
 func (s *Snapshot) Gen(namespace, resource string) uint64 {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	return s.gens[genKey(namespace, resource)]
+	return s.listed(s.gens[genKey(namespace, resource)])
+}
+
+// listed folds in whether the Gateways are listed, which is when
+// missingGateways starts answering: a first list that finds none moves no row.
+func (s *Snapshot) listed(level uint64) uint64 {
+	if s.gateways.Synced() {
+		return level<<1 | 1
+	}
+	return level << 1
 }
 
 // Held is one route kind present in one namespace.
