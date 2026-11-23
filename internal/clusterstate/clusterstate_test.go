@@ -96,7 +96,7 @@ func TestLiveReadsKubeVirtVerdicts(t *testing.T) {
 	_ = s.vmiStore().Add(pending)
 
 	pinned := runningVMI("ns", "pinned", "node-1")
-	pinned.Status.Conditions = append(pinned.Status.Conditions, cond(kubevirtcorev1.VirtualMachineInstanceIsMigratable, corev1.ConditionFalse, "DisksNotLiveMigratable", "PVC disk is not shared"))
+	pinned.Status.Conditions = append(pinned.Status.Conditions, cond(kubevirtcorev1.VirtualMachineInstanceIsMigratable, corev1.ConditionFalse, "DisksNotLiveMigratable", "cannot migrate VMI: PVC disk is not shared"))
 	_ = s.vmStore().Add(testVM("ns", "pinned"))
 	_ = s.vmiStore().Add(pinned)
 
@@ -452,4 +452,20 @@ func TestServedKubeVirtIsWatched(t *testing.T) {
 	s.runReflectors(ctx, answering(true, nil))
 	eventually(t, "the VM watch", func() bool { return src.watcher() != nil })
 	eventually(t, "a LIST to make the snapshot ready", s.VMSnapshotReady)
+}
+
+// Every place the reason shows already says the VM cannot live-migrate.
+func TestMigrateBlockDropsKubeVirtsLead(t *testing.T) {
+	for in, want := range map[string]string{
+		"cannot migrate VMI: PVC disk is not shared, live migration requires that all PVCs must be shared (using ReadWriteMany access mode)": "PVC disk is not shared, live migration requires that all PVCs must be shared (using ReadWriteMany access mode)",
+		"cannot migrate VMI with non-shared HostDisk":                                                           "VM with non-shared HostDisk",
+		"cannot migrate VMI which does not use masquerade or a migratable plugin to connect to the pod network": "VM which does not use masquerade or a migratable plugin to connect to the pod network",
+		"VMI uses SEV":                       "VM uses SEV",
+		"DisksNotLiveMigratable":             "DisksNotLiveMigratable",
+		"VM uses host devices not supported": "VM uses host devices not supported",
+	} {
+		if got := migrateBlock(in); got != want {
+			t.Errorf("migrateBlock(%q) = %q, want %q", in, got, want)
+		}
+	}
 }
