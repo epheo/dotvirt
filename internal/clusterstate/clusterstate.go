@@ -769,7 +769,7 @@ func liveFromVMI(vmi *kubevirtcorev1.VirtualMachineInstance) LiveVM {
 			live.Paused = cond.Status == corev1.ConditionTrue
 		case kubevirtcorev1.VirtualMachineInstanceIsMigratable:
 			if cond.Status == corev1.ConditionFalse {
-				live.MigrateBlock = conditionText(cond.Message, cond.Reason)
+				live.MigrateBlock = migrateBlock(conditionText(cond.Message, cond.Reason))
 			}
 		case kubevirtcorev1.VirtualMachineInstanceSynchronized:
 			if starting && cond.Status == corev1.ConditionFalse && live.Failure == "" {
@@ -813,6 +813,18 @@ func addVMStatus(live *LiveVM, vm *kubevirtcorev1.VirtualMachine) {
 			}
 		}
 	}
+}
+
+// migrateBlock is KubeVirt's reason in the words the console shows after
+// "Cannot live-migrate:": without KubeVirt's own "cannot migrate VMI" lead, and
+// naming the VM, never its instance.
+func migrateBlock(text string) string {
+	text = strings.TrimPrefix(text, "cannot migrate VMI: ")
+	text = strings.TrimPrefix(text, "cannot migrate ")
+	if rest, ok := strings.CutPrefix(text, "VMI "); ok {
+		return "VM " + rest
+	}
+	return text
 }
 
 // conditionText is a condition's message, or its reason when it has none.
