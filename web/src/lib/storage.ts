@@ -961,6 +961,19 @@ export function imageProgress(st: UploadStatus, download: boolean): { tone: Tone
 	}
 }
 
+// Where a disk KubeVirt is still creating stands, from one read of its
+// DataVolume. As for a boot image, the importer's error says it failed.
+export function diskProgress(st: UploadStatus): string {
+	if (st.error) return `failed: ${st.error}`;
+	if (st.phase === 'Failed') return 'failed';
+	if (st.phase === 'Succeeded') return 'ready';
+	const pct = st.progress && st.progress !== 'N/A' ? `, ${st.progress}` : '';
+	if (st.phase.includes('Clone')) return `copying${pct}`;
+	if (st.phase.startsWith('Import')) return `importing${pct}`;
+	if (st.phase.startsWith('Upload')) return 'waiting for its upload';
+	return 'preparing storage';
+}
+
 // What deleting a boot image that is not ready takes, said before it runs;
 // stops names the download or import it cuts short. New VM offers only ready
 // images, so a VM counted from it is one git declares, its disk not cloned

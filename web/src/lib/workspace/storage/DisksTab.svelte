@@ -506,7 +506,7 @@
 								</a>{#if repeated.has(r.vm.name)}<span class="ml-1.5 text-xs text-ink-faint">
 										{r.vm.namespace}
 									</span>{/if}{#if !r.running}<span class="ml-1.5 text-xs text-ink-faint">
-										stopped
+										{r.vm.provisioning ? 'provisioning' : 'stopped'}
 									</span>{/if}
 							</td>
 							<td class="h-10 border-b border-line-soft px-2 whitespace-nowrap">

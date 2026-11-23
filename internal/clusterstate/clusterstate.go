@@ -85,6 +85,9 @@ type LiveVM struct {
 	RestartPending bool
 	// MigrateBlock is KubeVirt's reason the running instance cannot live-migrate.
 	MigrateBlock string
+	// Provisioning: a DataVolume the VM needs is still being created, so the
+	// VM cannot start yet (KubeVirt's Provisioning status).
+	Provisioning bool
 
 	// Interfaces is each VMI interface's runtime address info, merged onto the
 	// VM's manifest-declared NIC of the same name for the detail view's per-NIC
@@ -800,8 +803,10 @@ func liveFromVMI(vmi *kubevirtcorev1.VirtualMachineInstance) LiveVM {
 }
 
 // addVMStatus adds the VM object's own verdicts to live: a change waiting for
-// the next restart, and KubeVirt failing to create the instance at all.
+// the next restart, KubeVirt failing to create the instance at all, and disks
+// still being created.
 func addVMStatus(live *LiveVM, vm *kubevirtcorev1.VirtualMachine) {
+	live.Provisioning = vm.Status.PrintableStatus == kubevirtcorev1.VirtualMachineStatusProvisioning
 	for _, cond := range vm.Status.Conditions {
 		switch cond.Type {
 		case kubevirtcorev1.VirtualMachineRestartRequired:

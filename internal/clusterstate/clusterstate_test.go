@@ -119,7 +119,22 @@ func TestLiveReadsKubeVirtVerdicts(t *testing.T) {
 	stale.Status.Conditions = []kubevirtcorev1.VirtualMachineCondition{{Type: kubevirtcorev1.VirtualMachineRestartRequired, Status: corev1.ConditionTrue}}
 	_ = s.vmStore().Add(stale)
 
+	// Its disk still cloning, the VM cannot start, whatever its instance says.
+	cloning := testVM("ns", "cloning")
+	cloning.Status.PrintableStatus = kubevirtcorev1.VirtualMachineStatusProvisioning
+	_ = s.vmStore().Add(cloning)
+	_ = s.vmiStore().Add(&kubevirtcorev1.VirtualMachineInstance{
+		ObjectMeta: metav1.ObjectMeta{Namespace: "ns", Name: "cloning"},
+		Status:     kubevirtcorev1.VirtualMachineInstanceStatus{Phase: kubevirtcorev1.Scheduling},
+	})
+
 	live := s.Live()["ns"]
+	if got := live["cloning"]; !got.Provisioning || got.Phase != "Scheduling" || got.Failure != "" {
+		t.Errorf("cloning = %+v, want provisioning", got)
+	}
+	if got := live["pinned"]; got.Provisioning {
+		t.Errorf("pinned = %+v, not provisioning", got)
+	}
 	if got := live["stuck"]; got.Failure != "failed to locate network attachment definition ns/gone" || !got.RestartPending {
 		t.Errorf("stuck = %+v, want its pod failure and a pending restart", got)
 	}
@@ -137,9 +152,9 @@ func TestLiveReadsKubeVirtVerdicts(t *testing.T) {
 	}
 
 	// A relist rebuilds the same view.
-	_ = s.vmStore().Replace([]any{stuck, testVM("ns", "pinned"), testVM("ns", "noroom"), quota, stale}, "2")
+	_ = s.vmStore().Replace([]any{stuck, testVM("ns", "pinned"), testVM("ns", "noroom"), quota, stale, cloning}, "2")
 	if !maps.EqualFunc(live, s.Live()["ns"], func(a, b LiveVM) bool {
-		return a.Failure == b.Failure && a.RestartPending == b.RestartPending && a.MigrateBlock == b.MigrateBlock
+		return a.Failure == b.Failure && a.RestartPending == b.RestartPending && a.MigrateBlock == b.MigrateBlock && a.Provisioning == b.Provisioning
 	}) {
 		t.Errorf("rebuild differs: %+v, want %+v", s.Live()["ns"], live)
 	}

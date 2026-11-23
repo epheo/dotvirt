@@ -12,6 +12,7 @@
 	} from '#lib/api.js';
 	import { runIssueAction } from '#lib/actions.js';
 	import { duration, relativeAge } from '#lib/format.js';
+	import { runPhase } from '#lib/status.js';
 	import { resource } from '#lib/resource.svelte.js';
 	import { itemKey } from '#lib/review.js';
 	import CapacityUsage from './CapacityUsage.svelte';
@@ -61,7 +62,7 @@
 	} = $props();
 
 	// A paused VMI keeps phase Running, so the label checks the Paused flag too.
-	const statusText = $derived(vm.paused ? 'Paused' : (vm.phase ?? vm.power));
+	const statusText = $derived(vm.paused ? 'Paused' : (runPhase(vm) ?? vm.power));
 
 	const key = $derived(vmKey(vm));
 

@@ -36,7 +36,7 @@
 	import { inventory } from '#lib/state/inventory.svelte.js';
 	import { ui } from '#lib/state/ui.svelte.js';
 	import { duration } from '#lib/format.js';
-	import { phaseTone, TONE_DOT, TONE_PILL } from '#lib/status.js';
+	import { phaseTone, runPhase, TONE_DOT, TONE_PILL } from '#lib/status.js';
 	import { reviewCache } from '#lib/state/reviewCache.svelte.js';
 	import ActionMenu from './ActionMenu.svelte';
 	import Banner from './Banner.svelte';
@@ -190,7 +190,7 @@
 
 	// What it is doing and for how long; the host is a link in the line.
 	const runState = $derived(
-		vm.paused ? 'Paused' : (vm.phase ?? (vm.power === 'Off' ? 'Stopped' : String(vm.power))),
+		vm.paused ? 'Paused' : (runPhase(vm) ?? (vm.power === 'Off' ? 'Stopped' : String(vm.power))),
 	);
 	const uptime = $derived(
 		vm.phase === 'Running' && !vm.paused && vm.nodeName ? duration(vm.startedAt) : '',
@@ -231,7 +231,7 @@
 			<Server size={20} class="shrink-0 text-ink-muted" />
 			<h2 class="text-xl font-semibold text-ink">{vm.name}</h2>
 			<span class="flex items-center gap-1.5 text-[13px] text-ink-soft">
-				<span class="size-2 shrink-0 rounded-full {TONE_DOT[phaseTone(vm.phase, vm.paused)]}"
+				<span class="size-2 shrink-0 rounded-full {TONE_DOT[phaseTone(runPhase(vm), vm.paused)]}"
 				></span>
 				<span>
 					{`${runState}${vm.nodeName ? ' on ' : ''}`}{#if vm.nodeName}<HostLink

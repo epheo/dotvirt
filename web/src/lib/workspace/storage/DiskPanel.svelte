@@ -52,7 +52,13 @@
 			: null,
 	);
 
-	const runState = $derived(row.running ? `${vm.name} is running.` : `${vm.name} is stopped.`);
+	const runState = $derived(
+		row.running
+			? `${vm.name} is running.`
+			: vm.provisioning
+				? `${vm.name}'s disks are still being created.`
+				: `${vm.name} is stopped.`,
+	);
 	const size = $derived(
 		row.disk.size ? `${quantity(row.disk.size)} in ${row.project}.` : `In ${row.project}.`,
 	);

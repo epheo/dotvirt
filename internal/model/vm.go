@@ -49,6 +49,9 @@ type VM struct {
 	RestartPending bool `json:"restartPending,omitempty"`
 	// MigrateBlock is KubeVirt's reason the running VM cannot live-migrate.
 	MigrateBlock string `json:"migrateBlock,omitempty"`
+	// Provisioning: a DataVolume the VM needs is still being created, so it
+	// cannot start yet, whatever phase its waiting instance reports.
+	Provisioning bool `json:"provisioning,omitempty"`
 
 	// Migration is the live (or last) node-to-node move and its
 	// progress, read from the VMI's migration state. Nil when never migrated.

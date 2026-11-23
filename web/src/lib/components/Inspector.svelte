@@ -6,7 +6,7 @@
 	import { vmHref } from '#lib/nav.js';
 	import { duration } from '#lib/format.js';
 	import { vmSizing } from '#lib/sizing.js';
-	import { phaseTone } from '#lib/status.js';
+	import { phaseTone, runPhase } from '#lib/status.js';
 	import { drafts } from '#lib/state/drafts.svelte.js';
 	import { inventory } from '#lib/state/inventory.svelte.js';
 	import { ui } from '#lib/state/ui.svelte.js';
@@ -64,8 +64,8 @@
 	<div class="flex items-center gap-2 border-b border-line px-3 py-2.5">
 		<span class="min-w-0 truncate text-[15px] font-semibold text-ink">{vm.name}</span>
 		<StatusPill
-			tone={phaseTone(vm.phase, vm.paused)}
-			label={vm.paused ? 'Paused' : (vm.phase ?? '—')}
+			tone={phaseTone(runPhase(vm), vm.paused)}
+			label={vm.paused ? 'Paused' : (runPhase(vm) ?? '—')}
 		/>
 		<span class="ml-auto flex shrink-0 items-center gap-0.5">
 			<button
