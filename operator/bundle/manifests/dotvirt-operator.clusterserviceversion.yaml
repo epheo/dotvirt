@@ -575,7 +575,7 @@ spec:
                       - name: RELATED_IMAGE_DOTVIRT
                         value: quay.io/epheo/dotvirt@sha256:92edea67f8719b5496be34db4e05ce940e2a4f40d65d8abf28c561c313207a39
                       - name: RELATED_IMAGE_FORGEJO
-                        value: codeberg.org/forgejo/forgejo:11-rootless@sha256:5135f11de848bea6d59c0a96688e90c361380ba102bdc08dbd5aa52cca2b179b
+                        value: codeberg.org/forgejo/forgejo:17-rootless@sha256:39362ab93a94c0c9b8b330d2a877ddbb3f02fa8c0cba1b8d686d437b39f36a04
                     image: quay.io/epheo/dotvirt-operator@sha256:68186e3b31d54ed4d97ececce9fe48df89c51bf6fbafc2b8ae07562c014f6e8e
                     livenessProbe:
                       httpGet:
@@ -665,7 +665,7 @@ spec:
       name: dotvirt
     - image: quay.io/epheo/dotvirt-operator@sha256:68186e3b31d54ed4d97ececce9fe48df89c51bf6fbafc2b8ae07562c014f6e8e
       name: dotvirt-operator-68186e3b31d54ed4d97ececce9fe48df89c51bf6fbafc2b8ae07562c014f6e8e-annotation
-    - image: codeberg.org/forgejo/forgejo:11-rootless@sha256:5135f11de848bea6d59c0a96688e90c361380ba102bdc08dbd5aa52cca2b179b
+    - image: codeberg.org/forgejo/forgejo:17-rootless@sha256:39362ab93a94c0c9b8b330d2a877ddbb3f02fa8c0cba1b8d686d437b39f36a04
       name: forgejo
     - image: quay.io/epheo/dotvirt-operator@sha256:68186e3b31d54ed4d97ececce9fe48df89c51bf6fbafc2b8ae07562c014f6e8e
       name: manager

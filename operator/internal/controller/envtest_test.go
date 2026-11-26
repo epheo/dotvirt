@@ -781,7 +781,7 @@ func TestEnvtest(t *testing.T) {
 			}},
 			"a mount inside the token directory": {forge, func(d *appsv1.Deployment) {
 				c := &d.Spec.Template.Spec.Containers[0]
-				c.VolumeMounts = append(c.VolumeMounts, corev1.VolumeMount{Name: "etc", MountPath: "/var/run/secrets/kubernetes.io/serviceaccount/ca.crt"})
+				c.VolumeMounts = append(c.VolumeMounts, corev1.VolumeMount{Name: "data", MountPath: "/var/run/secrets/kubernetes.io/serviceaccount/ca.crt"})
 			}},
 			"a container allowed root": {app, func(d *appsv1.Deployment) { sc(d).RunAsNonRoot = new(false) }},
 			"a pod without seccomp":    {app, func(d *appsv1.Deployment) { d.Spec.Template.Spec.SecurityContext.SeccompProfile = nil }},
