@@ -176,6 +176,13 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: release-v${{ needs.release.outputs.version }}
+      - uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
+        with:
+          go-version-file: go.mod
+      - name: Render the install without OLM
+        # config/default as the pin commit holds it: the CRD, RBAC and the operator,
+        # every image by digest. What an image or GitOps install applies and pins.
+        run: make -C operator --no-print-directory kustomize-build > operator.yaml
       - name: Open digest-pin PR
         run: |
           branch="release-v$REL_VERSION"
@@ -195,13 +202,13 @@ jobs:
         run: |
           if gh release view "v$REL_VERSION" >/dev/null 2>&1; then
             # The asset must pin this run's catalog, which a forced re-run or a changed prev moved.
-            gh release upload "v$REL_VERSION" operator/install/catalogsource.yaml operator/install/guard.yaml --clobber
+            gh release upload "v$REL_VERSION" operator/install/catalogsource.yaml operator/install/guard.yaml operator.yaml --clobber
             exit 0
           fi
           gh release create "v$REL_VERSION" --draft --verify-tag \
             --title "v$REL_VERSION" \
             --generate-notes --notes-start-tag "v$REL_PREV" \
-            operator/install/catalogsource.yaml operator/install/guard.yaml
+            operator/install/catalogsource.yaml operator/install/guard.yaml operator.yaml
 
   # Prove the just-pushed release actually installs from quay before anyone merges the
   # pin PR — the same install the daily canary runs, pointed at the fresh catalog digest.
