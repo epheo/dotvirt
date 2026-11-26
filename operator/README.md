@@ -985,6 +985,10 @@ Each sign-in keeps its own state cookie, so tabs signing in at once do not undo 
 - **`make deploy`**: install the operator in-cluster: `config/default` (CRD + RBAC +
   the manager Deployment) applied with kustomize. Set the image via the `images:`
   block in `config/default/kustomization.yaml`.
+- **`operator.yaml`**, a release asset: `config/default` as the release's pin commit
+  renders it, every image by digest. An install without OLM (an image, GitOps) applies
+  it and pins its sha256; the operator then acts on the Dotvirt in its own namespace,
+  `dotvirt-operator`.
 - **`make bundle`**: generate the OLM bundle for OperatorHub (needs `operator-sdk`
   on PATH; merges the CSV base in `config/manifests/bases/` with the generated CRD +
   RBAC + Deployment). Building/pushing the bundle image to a catalog is a release step.

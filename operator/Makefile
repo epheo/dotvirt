@@ -78,6 +78,10 @@ docker-build: ## Build the operator image (run from the REPO ROOT context).
 deploy: manifests ## Apply the CRD + operator to the current cluster (needs config/default).
 	$(KUSTOMIZE) build config/default | kubectl apply -f -
 
+.PHONY: kustomize-build
+kustomize-build: ## Print config/default rendered: the install without OLM, as released.
+	@$(KUSTOMIZE) build config/default
+
 .PHONY: bundle
 bundle: manifests ## Generate the OLM bundle for OperatorHub (needs operator-sdk on PATH).
 	$(OPERATOR_SDK) generate kustomize manifests -q
