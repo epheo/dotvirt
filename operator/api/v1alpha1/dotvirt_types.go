@@ -85,6 +85,7 @@ const (
 // credential serves the operator (platform repo, webhooks), the app (git over
 // HTTPS and the forge API) and ArgoCD's repo-creds.
 // +kubebuilder:validation:XValidation:rule="!has(self.pullRequests) || self.pullRequests != 'Delegated' || has(self.userAuth)",message="pullRequests Delegated needs userAuth: the OAuth2 application dotvirt acts through"
+// +kubebuilder:validation:XValidation:rule="!has(self.gateway) || (has(self.managed) && self.managed)",message="gateway exposes a managed forge: set managed, or expose your own forge yourself"
 // +kubebuilder:validation:XValidation:rule="!has(self.pullRequests) || self.pullRequests != 'Delegated' || (has(self.url) && size(self.url) > 0)",message="pullRequests Delegated needs url: users' forge tokens go only to the forge the spec names, never to an address from the credential Secret"
 type ForgeSpec struct {
 	// URL is the forge base URL. Leave empty with managed on OpenShift: the operator
@@ -100,6 +101,13 @@ type ForgeSpec struct {
 	// +kubebuilder:validation:Pattern=`^https?://[A-Za-z0-9]([-A-Za-z0-9.]*[A-Za-z0-9])?(:[0-9]{1,5})?(/([^?#@%\s\x00-\x1f\x7f]|%[0-9A-Fa-f]{2})*)?$`
 	// +optional
 	WebURL string `json:"webURL,omitempty"`
+	// Gateway serves a managed forge's pages through an HTTPRoute on the host of
+	// webURL, else of url; never on an in-cluster Service's. Empty:
+	// spec.ingress.gateway. A forge reached by an IP address takes every name of
+	// its listener, so it needs one of its own here (sectionName), never the
+	// console's.
+	// +optional
+	Gateway *GatewayRef `json:"gateway,omitempty"`
 	// PlatformRepo is the cluster-scoped + tenancy repo (CUDN/NNCP/Namespace). The
 	// operator ensures it exists; dotvirt routes platform creates here by kind. Defaults
 	// to <forge URL>/dotvirt/platform.git for a managed forge.

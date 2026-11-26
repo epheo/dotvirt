@@ -67,6 +67,13 @@
 #   CONSOLE_GATEWAY_NAMESPACE="$(spec ingress.gateway.namespace)"
 #   [ -z "$CONSOLE_GATEWAY" ] || CONSOLE_GATEWAY_NAMESPACE="${CONSOLE_GATEWAY_NAMESPACE:-$INSTALL_NAMESPACE}"
 #   export CONSOLE_GATEWAY CONSOLE_GATEWAY_NAMESPACE CONSOLE_GATEWAY_SECTION
+#   # The Gateway a managed forge's HTTPRoute attaches to: spec.forge.gateway,
+#   # else the console's:
+#   FORGE_GATEWAY="$(spec forge.gateway.name)" FORGE_GATEWAY_NAMESPACE="$(spec forge.gateway.namespace)"
+#   FORGE_GATEWAY_SECTION="$(spec forge.gateway.sectionName)"
+#   if [ -z "$FORGE_GATEWAY" ]; then FORGE_GATEWAY="$CONSOLE_GATEWAY" FORGE_GATEWAY_NAMESPACE="$CONSOLE_GATEWAY_NAMESPACE" \
+#     FORGE_GATEWAY_SECTION="$CONSOLE_GATEWAY_SECTION"; else FORGE_GATEWAY_NAMESPACE="${FORGE_GATEWAY_NAMESPACE:-$INSTALL_NAMESPACE}"; fi
+#   export FORGE_GATEWAY FORGE_GATEWAY_NAMESPACE FORGE_GATEWAY_SECTION
 #   # The console's host: spec.ingress.host; for a console on a Route
 #   # (spec.ingress.type route, or unset with no Gateway where routes are
 #   # served), else the router's host for that Route on the cluster's ingress
@@ -102,7 +109,7 @@
 #   # Every value lands inside a quoted string in a YAML document: one holding
 #   # any other character (a quote, a backslash, a line break, a space) is
 #   # refused, never escaped. The console's Install builds the guard in Go.
-#   for v in ARGO_CONTROLLER ARGO_NAMESPACE BRANDING_CONFIGMAP CONSOLE_GATEWAY CONSOLE_GATEWAY_NAMESPACE CONSOLE_GATEWAY_SECTION CONSOLE_HOST FORGE_AUTHORIZE_URL FORGE_CLIENT_ID FORGE_CLIENT_SECRET FORGE_CLIENT_SECRET_KEY FORGE_DELEGATED FORGE_INSECURE_TLS FORGE_MANAGED FORGE_SECRET FORGE_TOKEN_URL FORGE_URL INSTALL_NAMESPACE METRICS_CA METRICS_CA_CONFIGMAP METRICS_TENANCY_URL METRICS_URL OIDC_ISSUER OIDC_SECRET OIDC_SECRET_KEY OPERATOR_USERNAME RELATED_IMAGE_DOTVIRT RELATED_IMAGE_FORGEJO SPEC_IMAGE; do
+#   for v in ARGO_CONTROLLER ARGO_NAMESPACE BRANDING_CONFIGMAP CONSOLE_GATEWAY CONSOLE_GATEWAY_NAMESPACE CONSOLE_GATEWAY_SECTION CONSOLE_HOST FORGE_AUTHORIZE_URL FORGE_CLIENT_ID FORGE_CLIENT_SECRET FORGE_CLIENT_SECRET_KEY FORGE_DELEGATED FORGE_GATEWAY FORGE_GATEWAY_NAMESPACE FORGE_GATEWAY_SECTION FORGE_INSECURE_TLS FORGE_MANAGED FORGE_SECRET FORGE_TOKEN_URL FORGE_URL INSTALL_NAMESPACE METRICS_CA METRICS_CA_CONFIGMAP METRICS_TENANCY_URL METRICS_URL OIDC_ISSUER OIDC_SECRET OIDC_SECRET_KEY OPERATOR_USERNAME RELATED_IMAGE_DOTVIRT RELATED_IMAGE_FORGEJO SPEC_IMAGE; do
 #     eval "x=\${$v-}"
 #     case "$x" in *[!]A-Za-z0-9._:/@%+=~,[-]*)
 #       echo "$v holds a character the template cannot carry: install the guard from the console" >&2; exit 1;; esac
@@ -118,7 +125,8 @@
 #     -e "s|\${METRICS_URL}|$METRICS_URL|g" -e "s|\${METRICS_TENANCY_URL}|$METRICS_TENANCY_URL|g" \
 #     -e "s|\${METRICS_CA}|$METRICS_CA|g" -e "s|\${CONSOLE_HOST}|$CONSOLE_HOST|g" \
 #     -e "s|\${CONSOLE_GATEWAY}|$CONSOLE_GATEWAY|g" -e "s|\${CONSOLE_GATEWAY_NAMESPACE}|$CONSOLE_GATEWAY_NAMESPACE|g" \
-#     -e "s|\${CONSOLE_GATEWAY_SECTION}|$CONSOLE_GATEWAY_SECTION|g" \
+#     -e "s|\${CONSOLE_GATEWAY_SECTION}|$CONSOLE_GATEWAY_SECTION|g" -e "s|\${FORGE_GATEWAY}|$FORGE_GATEWAY|g" \
+#     -e "s|\${FORGE_GATEWAY_NAMESPACE}|$FORGE_GATEWAY_NAMESPACE|g" -e "s|\${FORGE_GATEWAY_SECTION}|$FORGE_GATEWAY_SECTION|g" \
 #     -e "s|\${BRANDING_CONFIGMAP}|$BRANDING_CONFIGMAP|g" -e "s|\${METRICS_CA_CONFIGMAP}|$METRICS_CA_CONFIGMAP|g" \
 #     -e "s|\${FORGE_SECRET}|$FORGE_SECRET|g" -e "s|\${FORGE_MANAGED}|$FORGE_MANAGED|g" \
 #     -e "s|\${OIDC_SECRET}|$OIDC_SECRET|g" -e "s|\${OIDC_SECRET_KEY}|$OIDC_SECRET_KEY|g" \
@@ -268,8 +276,8 @@ spec:
       "${CONSOLE_HOST}") && (!has(object.spec.wildcardPolicy) || object.spec.wildcardPolicy
       == "None"))
     message: the operator exposes nothing else on the console's host, nothing on every
-      host, and nothing through a Gateway beside a console with no host (dotvirt operator
-      guard)
+      host but the forge on a listener of its own, and nothing through a Gateway beside
+      a console with no host (dotvirt operator guard)
     reason: Forbidden
 ---
 # Enforces dotvirt-operator-routes
@@ -332,8 +340,8 @@ spec:
       has(r.host) && r.host != "" && r.host != "${CONSOLE_HOST}" && !(r.host.startsWith("*.")
       && "${CONSOLE_HOST}".endsWith(r.host.substring(1))))))
     message: the operator exposes nothing else on the console's host, nothing on every
-      host, and nothing through a Gateway beside a console with no host (dotvirt operator
-      guard)
+      host but the forge on a listener of its own, and nothing through a Gateway beside
+      a console with no host (dotvirt operator guard)
     reason: Forbidden
 ---
 # Enforces dotvirt-operator-ingresses
@@ -401,13 +409,22 @@ spec:
     message: the operator attaches the console's HTTPRoute only to the Gateway listener
       the install names (dotvirt operator guard)
     reason: Forbidden
-  - expression: (object.metadata.name == "dotvirt" && request.namespace == "${INSTALL_NAMESPACE}")
-      || (size("${CONSOLE_HOST}") > 0 && has(object.spec.hostnames) && size(object.spec.hostnames)
+  - expression: '(object.metadata.name == "dotvirt" && request.namespace == "${INSTALL_NAMESPACE}")
+      || (size("${CONSOLE_HOST}") > 0 && ((has(object.spec.hostnames) && size(object.spec.hostnames)
       > 0 && object.spec.hostnames.all(h, h != "${CONSOLE_HOST}" && !(h.startsWith("*.")
-      && "${CONSOLE_HOST}".endsWith(h.substring(1)))))
+      && "${CONSOLE_HOST}".endsWith(h.substring(1))))) || (object.metadata.name ==
+      "dotvirt-forgejo" && request.namespace == "${INSTALL_NAMESPACE}" && (!has(object.spec.hostnames)
+      || size(object.spec.hostnames) == 0) && (size("${FORGE_GATEWAY_SECTION}") >
+      0 && ["${FORGE_GATEWAY}", "${FORGE_GATEWAY_NAMESPACE}", "${FORGE_GATEWAY_SECTION}"]
+      != ["${CONSOLE_GATEWAY}", "${CONSOLE_GATEWAY_NAMESPACE}", "${CONSOLE_GATEWAY_SECTION}"])
+      && (has(object.spec.parentRefs) && size(object.spec.parentRefs) == 1 && object.spec.parentRefs.all(r,
+      (!has(r.group) || r.group == "gateway.networking.k8s.io") && (!has(r.kind) ||
+      r.kind == "Gateway") && !has(r.port) && r.name == "${FORGE_GATEWAY}" && (has(r.namespace)
+      ? r.namespace : "${INSTALL_NAMESPACE}") == "${FORGE_GATEWAY_NAMESPACE}" && (has(r.sectionName)
+      ? r.sectionName : "") == "${FORGE_GATEWAY_SECTION}")))))'
     message: the operator exposes nothing else on the console's host, nothing on every
-      host, and nothing through a Gateway beside a console with no host (dotvirt operator
-      guard)
+      host but the forge on a listener of its own, and nothing through a Gateway beside
+      a console with no host (dotvirt operator guard)
     reason: Forbidden
 ---
 # Enforces dotvirt-operator-httproutes

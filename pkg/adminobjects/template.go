@@ -20,6 +20,7 @@ var TemplateParams = Params{
 	ForgejoImage:   "${RELATED_IMAGE_FORGEJO}",
 	ConsoleHost:    "${CONSOLE_HOST}",
 	ConsoleGateway: ParentRef{Name: "${CONSOLE_GATEWAY}", Namespace: "${CONSOLE_GATEWAY_NAMESPACE}", Section: "${CONSOLE_GATEWAY_SECTION}"},
+	ForgeGateway:   ParentRef{Name: "${FORGE_GATEWAY}", Namespace: "${FORGE_GATEWAY_NAMESPACE}", Section: "${FORGE_GATEWAY_SECTION}"},
 
 	BrandingConfigMap:  "${BRANDING_CONFIGMAP}",
 	MetricsCAConfigMap: "${METRICS_CA_CONFIGMAP}",
@@ -107,6 +108,13 @@ var templateHeader = `# The dotvirt operator guard: admission policies bounding 
 #   CONSOLE_GATEWAY_NAMESPACE="$(spec ingress.gateway.namespace)"
 #   [ -z "$CONSOLE_GATEWAY" ] || CONSOLE_GATEWAY_NAMESPACE="${CONSOLE_GATEWAY_NAMESPACE:-$INSTALL_NAMESPACE}"
 #   export CONSOLE_GATEWAY CONSOLE_GATEWAY_NAMESPACE CONSOLE_GATEWAY_SECTION
+#   # The Gateway a managed forge's HTTPRoute attaches to: spec.forge.gateway,
+#   # else the console's:
+#   FORGE_GATEWAY="$(spec forge.gateway.name)" FORGE_GATEWAY_NAMESPACE="$(spec forge.gateway.namespace)"
+#   FORGE_GATEWAY_SECTION="$(spec forge.gateway.sectionName)"
+#   if [ -z "$FORGE_GATEWAY" ]; then FORGE_GATEWAY="$CONSOLE_GATEWAY" FORGE_GATEWAY_NAMESPACE="$CONSOLE_GATEWAY_NAMESPACE" \
+#     FORGE_GATEWAY_SECTION="$CONSOLE_GATEWAY_SECTION"; else FORGE_GATEWAY_NAMESPACE="${FORGE_GATEWAY_NAMESPACE:-$INSTALL_NAMESPACE}"; fi
+#   export FORGE_GATEWAY FORGE_GATEWAY_NAMESPACE FORGE_GATEWAY_SECTION
 #   # The console's host: spec.ingress.host; for a console on a Route
 #   # (spec.ingress.type route, or unset with no Gateway where routes are
 #   # served), else the router's host for that Route on the cluster's ingress
@@ -158,7 +166,8 @@ var templateHeader = `# The dotvirt operator guard: admission policies bounding 
 #     -e "s|\${METRICS_URL}|$METRICS_URL|g" -e "s|\${METRICS_TENANCY_URL}|$METRICS_TENANCY_URL|g" \
 #     -e "s|\${METRICS_CA}|$METRICS_CA|g" -e "s|\${CONSOLE_HOST}|$CONSOLE_HOST|g" \
 #     -e "s|\${CONSOLE_GATEWAY}|$CONSOLE_GATEWAY|g" -e "s|\${CONSOLE_GATEWAY_NAMESPACE}|$CONSOLE_GATEWAY_NAMESPACE|g" \
-#     -e "s|\${CONSOLE_GATEWAY_SECTION}|$CONSOLE_GATEWAY_SECTION|g" \
+#     -e "s|\${CONSOLE_GATEWAY_SECTION}|$CONSOLE_GATEWAY_SECTION|g" -e "s|\${FORGE_GATEWAY}|$FORGE_GATEWAY|g" \
+#     -e "s|\${FORGE_GATEWAY_NAMESPACE}|$FORGE_GATEWAY_NAMESPACE|g" -e "s|\${FORGE_GATEWAY_SECTION}|$FORGE_GATEWAY_SECTION|g" \
 #     -e "s|\${BRANDING_CONFIGMAP}|$BRANDING_CONFIGMAP|g" -e "s|\${METRICS_CA_CONFIGMAP}|$METRICS_CA_CONFIGMAP|g" \
 #     -e "s|\${FORGE_SECRET}|$FORGE_SECRET|g" -e "s|\${FORGE_MANAGED}|$FORGE_MANAGED|g" \
 #     -e "s|\${OIDC_SECRET}|$OIDC_SECRET|g" -e "s|\${OIDC_SECRET_KEY}|$OIDC_SECRET_KEY|g" \

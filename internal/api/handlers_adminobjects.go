@@ -117,6 +117,9 @@ func (s *Server) adminParams(ctx context.Context, c *cluster.Client) (adminobjec
 	}
 	p.ArgoNamespace, p.ArgoController = adminobjects.ArgoTarget(spec.ArgoNamespace, spec.ArgoController, openShift)
 	p.ConsoleGateway = adminobjects.GatewayOf(spec.GatewayName, spec.GatewayNamespace, spec.GatewaySectionName, ns)
+	if p.ForgeGateway = adminobjects.GatewayOf(spec.ForgeGatewayName, spec.ForgeGatewayNamespace, spec.ForgeGatewaySectionName, ns); p.ForgeGateway.Name == "" {
+		p.ForgeGateway = p.ConsoleGateway
+	}
 	onRoute := spec.IngressHost == "" && adminobjects.ExposureType(spec.IngressType, spec.GatewayName != "", openShift) == adminobjects.ExposureRoute
 	domain := ""
 	if onRoute {

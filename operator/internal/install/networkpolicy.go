@@ -30,7 +30,7 @@ func nsPeer(match map[string]string) networkingv1.NetworkPolicyPeer {
 // Service), the ArgoCD namespace (plugin generator, repo-server on an
 // in-cluster forge URL), the router and a named Gateway. operatorNS "" omits
 // that peer (an out-of-cluster `make run`).
-func networkPolicy(dv *dotvirtv1alpha1.Dotvirt, name string, selector map[string]string, port int32, argoNS, operatorNS string) *networkingv1.NetworkPolicy {
+func networkPolicy(dv *dotvirtv1alpha1.Dotvirt, gateway *dotvirtv1alpha1.GatewayRef, name string, selector map[string]string, port int32, argoNS, operatorNS string) *networkingv1.NetworkPolicy {
 	from := []networkingv1.NetworkPolicyPeer{
 		{PodSelector: &metav1.LabelSelector{}},
 		nsPeer(map[string]string{corev1.LabelMetadataName: argoNS}),
@@ -41,8 +41,8 @@ func networkPolicy(dv *dotvirtv1alpha1.Dotvirt, name string, selector map[string
 	from = append(from, routerPeers()...)
 	// A Gateway's data plane runs in the Gateway's namespace (portail, and most
 	// implementations that provision one per Gateway).
-	if g := dv.Spec.Ingress.Gateway; g != nil && g.Namespace != "" && g.Namespace != dv.Namespace {
-		from = append(from, nsPeer(map[string]string{corev1.LabelMetadataName: g.Namespace}))
+	if gateway != nil && gateway.Namespace != "" && gateway.Namespace != dv.Namespace {
+		from = append(from, nsPeer(map[string]string{corev1.LabelMetadataName: gateway.Namespace}))
 	}
 	tcp := corev1.ProtocolTCP
 	p := intstr.FromInt32(port)
@@ -64,10 +64,10 @@ func networkPolicy(dv *dotvirtv1alpha1.Dotvirt, name string, selector map[string
 // Kubernetes the ingress controller's namespace is unknowable, and a wrong guess
 // cuts the console off.
 func OperandNetworkPolicy(dv *dotvirtv1alpha1.Dotvirt, argoNS, operatorNS string) *networkingv1.NetworkPolicy {
-	return networkPolicy(dv, AppName, selectorLabels, HTTPPort, argoNS, operatorNS)
+	return networkPolicy(dv, dv.Spec.Ingress.Gateway, AppName, selectorLabels, HTTPPort, argoNS, operatorNS)
 }
 
 // ForgejoNetworkPolicy fences the managed Forgejo pod; OpenShift only, as above.
 func ForgejoNetworkPolicy(dv *dotvirtv1alpha1.Dotvirt, argoNS, operatorNS string) *networkingv1.NetworkPolicy {
-	return networkPolicy(dv, ForgejoServiceName, forgejoSelector, ForgejoHTTPPort, argoNS, operatorNS)
+	return networkPolicy(dv, ForgeGateway(dv), ForgejoServiceName, forgejoSelector, ForgejoHTTPPort, argoNS, operatorNS)
 }

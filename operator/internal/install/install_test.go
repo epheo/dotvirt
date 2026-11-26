@@ -612,7 +612,7 @@ func TestTenantAppProjectsAdmitNoNAD(t *testing.T) {
 func TestHTTPRouteAttachesToTheNamedGateway(t *testing.T) {
 	dv := testDotvirt()
 	dv.Spec.Ingress.Gateway = &dotvirtv1alpha1.GatewayRef{Name: "edge", Namespace: "gateway-system", SectionName: "https"}
-	r := HTTPRoute(dv, AppName, HTTPPort, "dotvirt.example.com")
+	r := HTTPRoute(dv, dv.Spec.Ingress.Gateway, AppName, HTTPPort, "dotvirt.example.com")
 	if r.GetNamespace() != dv.Namespace || r.GetName() != AppName || r.GroupVersionKind() != HTTPRouteGVK {
 		t.Errorf("rendered %s %s/%s", r.GroupVersionKind(), r.GetNamespace(), r.GetName())
 	}
@@ -636,7 +636,7 @@ func TestHTTPRouteAttachesToTheNamedGateway(t *testing.T) {
 func TestHTTPRouteWithoutHostTakesEveryName(t *testing.T) {
 	dv := testDotvirt()
 	dv.Spec.Ingress.Gateway = &dotvirtv1alpha1.GatewayRef{Name: "edge"}
-	r := HTTPRoute(dv, AppName, HTTPPort, "")
+	r := HTTPRoute(dv, dv.Spec.Ingress.Gateway, AppName, HTTPPort, "")
 	if _, found, _ := unstructured.NestedFieldNoCopy(r.Object, "spec", "hostnames"); found {
 		t.Errorf("hostnames set: %v", r.Object["spec"])
 	}
@@ -660,6 +660,19 @@ func TestNetworkPolicyAdmitsTheGatewayNamespace(t *testing.T) {
 	dv.Spec.Ingress.Gateway = &dotvirtv1alpha1.GatewayRef{Name: "edge", Namespace: "gateway-system"}
 	if !admits(dv, "gateway-system") {
 		t.Error("the Gateway's namespace is not admitted")
+	}
+	// The forge's own Gateway reaches the forge alone.
+	dv.Spec.Forge.Gateway = &dotvirtv1alpha1.GatewayRef{Name: "forge", Namespace: "forge-gateway"}
+	forgeAdmits := func(ns string) bool {
+		for _, peer := range ForgejoNetworkPolicy(dv, "argocd", "").Spec.Ingress[0].From {
+			if peer.NamespaceSelector != nil && peer.NamespaceSelector.MatchLabels[corev1.LabelMetadataName] == ns {
+				return true
+			}
+		}
+		return false
+	}
+	if !forgeAdmits("forge-gateway") || admits(dv, "forge-gateway") {
+		t.Errorf("forge Gateway namespace: forge admits %v, console admits %v", forgeAdmits("forge-gateway"), admits(dv, "forge-gateway"))
 	}
 }
 

@@ -65,6 +65,10 @@ type Params struct {
 	// ConsoleGateway is spec.ingress.gateway: the one Gateway, and listener,
 	// the console's HTTPRoute may attach to. Zero when none is named.
 	ConsoleGateway ParentRef
+	// ForgeGateway is spec.forge.gateway, else spec.ingress.gateway: where a
+	// managed forge's HTTPRoute may attach, and with no host only on a
+	// listener other than the console's.
+	ForgeGateway ParentRef
 	// BrandingConfigMap, MetricsCAConfigMap and ForgeSecret are the volumes
 	// an admin chose for the console (spec.branding.configMap,
 	// spec.metrics.ca.name, ForgeSecret).
@@ -129,6 +133,9 @@ func (p Params) Malformed() string {
 		{"console Gateway", optional(p.ConsoleGateway.Name)},
 		{"console Gateway namespace", p.ConsoleGateway.Name == "" && p.ConsoleGateway.Namespace == "" || len(validation.IsDNS1123Label(p.ConsoleGateway.Namespace)) == 0},
 		{"console Gateway listener", optional(p.ConsoleGateway.Section)},
+		{"forge Gateway", optional(p.ForgeGateway.Name)},
+		{"forge Gateway namespace", p.ForgeGateway.Name == "" && p.ForgeGateway.Namespace == "" || len(validation.IsDNS1123Label(p.ForgeGateway.Namespace)) == 0},
+		{"forge Gateway listener", optional(p.ForgeGateway.Section)},
 		{"OIDC client Secret", optional(p.OIDCSecret)},
 		{"OIDC client Secret key", p.OIDCSecretKey == "" || len(validation.IsConfigMapKey(p.OIDCSecretKey)) == 0},
 		{"OIDC issuer", p.OIDCIssuer == "" || httpsURL(p.OIDCIssuer)},

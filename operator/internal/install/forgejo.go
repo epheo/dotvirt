@@ -59,9 +59,36 @@ func forgejoExternalURL(dv *dotvirtv1alpha1.Dotvirt) string {
 	return ForgejoServiceURL(dv)
 }
 
-// ForgejoHost is the hostname to expose the managed Forgejo on, parsed from
-// spec.forge.url. Empty when no URL is set; the caller then creates a hostless Route
-// and the router assigns one.
+// ForgejoWebHost is the host the managed Forgejo's exposure serves:
+// spec.forge.url's, or spec.forge.webURL's when that URL is in-cluster. A
+// webURL beside a public url is an app of the admin's fronting the forge,
+// whose host the forge never claims. "" for an in-cluster host, or none.
+func ForgejoWebHost(dv *dotvirtv1alpha1.Dotvirt) string {
+	for _, raw := range []string{dv.Spec.Forge.URL, dv.Spec.Forge.WebURL} {
+		if u, err := url.Parse(raw); raw != "" && err == nil && !InClusterHost(u.Hostname()) {
+			return u.Hostname()
+		}
+	}
+	return ""
+}
+
+// InClusterHost reports a host only cluster DNS resolves: a bare Service
+// name, or <service>.<namespace>.svc[.<cluster domain>].
+func InClusterHost(host string) bool {
+	labels := strings.Split(host, ".")
+	return len(labels) == 1 || len(labels) >= 3 && labels[2] == "svc"
+}
+
+// ForgeGateway is the Gateway a managed forge's HTTPRoute attaches to:
+// spec.forge.gateway, else spec.ingress.gateway.
+func ForgeGateway(dv *dotvirtv1alpha1.Dotvirt) *dotvirtv1alpha1.GatewayRef {
+	if g := dv.Spec.Forge.Gateway; g != nil {
+		return g
+	}
+	return dv.Spec.Ingress.Gateway
+}
+
+// ForgejoHost is spec.forge.url's hostname, the one ArgoCD clones from.
 func ForgejoHost(dv *dotvirtv1alpha1.Dotvirt) string {
 	if dv.Spec.Forge.URL == "" {
 		return ""

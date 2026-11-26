@@ -1085,6 +1085,8 @@ func TestEnvtest(t *testing.T) {
 		// listener its HTTPRoute attaches to.
 		chosen.ConsoleHost = "console.example"
 		chosen.ConsoleGateway = adminobjects.GatewayOf("public", "gateways", "", dv.Namespace)
+		// A forge reached by address, on a listener of its own.
+		chosen.ForgeGateway = adminobjects.GatewayOf("public", "gateways", "forge", dv.Namespace)
 		ingress := func(name string, edit func(*networkingv1.Ingress)) *networkingv1.Ingress {
 			port := install.HTTPPort
 			if name == install.ForgejoServiceName {
@@ -1099,7 +1101,7 @@ func TestEnvtest(t *testing.T) {
 		httpRoute := func(name string, edit func(map[string]any)) *unstructured.Unstructured {
 			hd := dv.DeepCopy()
 			hd.Spec.Ingress.Gateway = &dotvirtv1alpha1.GatewayRef{Name: "public", Namespace: "gateways"}
-			r := install.HTTPRoute(hd, name, install.HTTPPort, chosen.ConsoleHost)
+			r := install.HTTPRoute(hd, hd.Spec.Ingress.Gateway, name, install.HTTPPort, chosen.ConsoleHost)
 			if edit != nil {
 				edit(r.Object["spec"].(map[string]any))
 			}
@@ -1176,9 +1178,14 @@ func TestEnvtest(t *testing.T) {
 			"the console delegating through the admin's forge application": delegated,
 			"the forge's Ingress on its own host":                          forgeIngress("forge.example", nil),
 			"the forge's HTTPRoute on its own host":                        forgeRoute("forge.example"),
-			"the console's Route on its host":                              route(install.AppName, chosen.ConsoleHost, nil),
-			"the console's Ingress on its host":                            ingress(install.AppName, nil),
-			"the console's HTTPRoute on its host":                          httpRoute(install.AppName, nil),
+			"the forge's HTTPRoute for every host of its own listener": func() *unstructured.Unstructured {
+				r := forgeRoute()
+				r.Object["spec"].(map[string]any)["parentRefs"].([]any)[0].(map[string]any)["sectionName"] = "forge"
+				return r
+			}(),
+			"the console's Route on its host":     route(install.AppName, chosen.ConsoleHost, nil),
+			"the console's Ingress on its host":   ingress(install.AppName, nil),
+			"the console's HTTPRoute on its host": httpRoute(install.AppName, nil),
 		} {
 			if err := dryApply(o); err != nil {
 				t.Errorf("%s: %v", name, err)
@@ -1259,11 +1266,12 @@ func TestEnvtest(t *testing.T) {
 		// none, on the one listener the install names.
 		hostless := pins
 		hostless.ConsoleGateway = adminobjects.GatewayOf("console", "dotvirt-console", "https", dv.Namespace)
+		hostless.ForgeGateway = adminobjects.GatewayOf("console", "dotvirt-console", "forge", dv.Namespace)
 		installGuard(hostless)
 		hostlessRoute := func(name string, hosts ...any) *unstructured.Unstructured {
 			hd := dv.DeepCopy()
 			hd.Spec.Ingress.Gateway = &dotvirtv1alpha1.GatewayRef{Name: "console", Namespace: "dotvirt-console", SectionName: "https"}
-			r := install.HTTPRoute(hd, name, install.HTTPPort, "")
+			r := install.HTTPRoute(hd, hd.Spec.Ingress.Gateway, name, install.HTTPPort, "")
 			if name == install.ForgejoServiceName {
 				r.Object["spec"].(map[string]any)["rules"] = []any{map[string]any{"backendRefs": []any{map[string]any{"name": name, "port": int64(3000)}}}}
 			}
@@ -1280,9 +1288,12 @@ func TestEnvtest(t *testing.T) {
 		}
 		everyListener := hostlessRoute(install.AppName)
 		delete(everyListener.Object["spec"].(map[string]any)["parentRefs"].([]any)[0].(map[string]any), "sectionName")
+		forgeOnItsListener := hostlessRoute(install.ForgejoServiceName)
+		forgeOnItsListener.Object["spec"].(map[string]any)["parentRefs"].([]any)[0].(map[string]any)["sectionName"] = "forge"
 		for name, o := range map[string]client.Object{
-			"the hostless console's HTTPRoute on a host": hostlessRoute(install.AppName, "evil.example"),
-			"the forge's HTTPRoute for every host":       hostlessRoute(install.ForgejoServiceName),
+			"the forge's HTTPRoute on its own listener beside it": forgeOnItsListener,
+			"the hostless console's HTTPRoute on a host":          hostlessRoute(install.AppName, "evil.example"),
+			"the forge's HTTPRoute for every host":                hostlessRoute(install.ForgejoServiceName),
 			// Browsers send the console's cookies to every port of its address.
 			"the forge's HTTPRoute on a host of its own beside it": hostlessRoute(install.ForgejoServiceName, "forge.example"),
 			"the hostless console's HTTPRoute on another listener": onListener("forge"),
@@ -1473,6 +1484,10 @@ func TestEnvtest(t *testing.T) {
 			"a Gateway, no host, every listener": func(dv *dotvirtv1alpha1.Dotvirt) {
 				dv.Spec.Ingress = dotvirtv1alpha1.IngressSpec{Gateway: gw}
 				dv.Spec.Forge.Managed = true
+			},
+			// The operator exposes only a forge it runs.
+			"a forge Gateway for a forge of one's own": func(dv *dotvirtv1alpha1.Dotvirt) {
+				dv.Spec.Forge.Gateway = listener
 			},
 		} {
 			dv := testCR()
