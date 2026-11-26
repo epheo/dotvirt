@@ -60,8 +60,11 @@ type Params struct {
 	// Metrics is the admin's spec.metrics as rendered (MetricsFor).
 	Metrics Metrics
 	// ConsoleHost is the host the console is reached by (ConsoleHost), ""
-	// when nothing exposes it.
+	// when nothing exposes it or a Gateway serves it on every name.
 	ConsoleHost string
+	// ConsoleGateway is spec.ingress.gateway: the one Gateway, and listener,
+	// the console's HTTPRoute may attach to. Zero when none is named.
+	ConsoleGateway ParentRef
 	// BrandingConfigMap, MetricsCAConfigMap and ForgeSecret are the volumes
 	// an admin chose for the console (spec.branding.configMap,
 	// spec.metrics.ca.name, ForgeSecret).
@@ -83,6 +86,22 @@ type Params struct {
 	// is rendered for it alone (CredentialGrant).
 	InstallName string
 	InstallUID  types.UID
+}
+
+// ParentRef is a Gateway an HTTPRoute attaches to: Namespace resolved, never
+// empty once Name is set; Section "" for every listener.
+type ParentRef struct{ Name, Namespace, Section string }
+
+// GatewayOf is spec.ingress.gateway with its namespace resolved against the
+// install's: the zero ParentRef when name is "".
+func GatewayOf(name, namespace, section, installNamespace string) ParentRef {
+	if name == "" {
+		return ParentRef{}
+	}
+	if namespace == "" {
+		namespace = installNamespace
+	}
+	return ParentRef{Name: name, Namespace: namespace, Section: section}
 }
 
 // Valid reports whether every pin is known and well formed: a render missing
@@ -107,6 +126,9 @@ func (p Params) Malformed() string {
 		{"branding ConfigMap", optional(p.BrandingConfigMap)},
 		{"metrics CA ConfigMap", optional(p.MetricsCAConfigMap)},
 		{"console host", optional(p.ConsoleHost)},
+		{"console Gateway", optional(p.ConsoleGateway.Name)},
+		{"console Gateway namespace", p.ConsoleGateway.Name == "" && p.ConsoleGateway.Namespace == "" || len(validation.IsDNS1123Label(p.ConsoleGateway.Namespace)) == 0},
+		{"console Gateway listener", optional(p.ConsoleGateway.Section)},
 		{"OIDC client Secret", optional(p.OIDCSecret)},
 		{"OIDC client Secret key", p.OIDCSecretKey == "" || len(validation.IsConfigMapKey(p.OIDCSecretKey)) == 0},
 		{"OIDC issuer", p.OIDCIssuer == "" || httpsURL(p.OIDCIssuer)},

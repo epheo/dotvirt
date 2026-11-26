@@ -13,6 +13,7 @@ import (
 	dotvirtv1alpha1 "github.com/epheo/dotvirt/operator/api/v1alpha1"
 	"github.com/epheo/dotvirt/operator/internal/install"
 	"github.com/epheo/dotvirt/operator/internal/platform"
+	"github.com/epheo/dotvirt/pkg/adminobjects"
 )
 
 // reconcileWorkload renders + server-side-applies the namespaced workload,
@@ -91,21 +92,11 @@ func (r *DotvirtReconciler) operandReady(ctx context.Context, dv *dotvirtv1alpha
 	return d.Status.ReadyReplicas >= 1, nil
 }
 
-// resolveExposureType picks the exposure kind for the configured/detected ingress type:
-// the explicit spec value, or when auto/unset a named Gateway, else Route on OpenShift /
-// Ingress on vanilla. A named Gateway wins over the platform: MicroShift serves the Route
-// API with no router behind it once its ingress is Removed.
+// resolveExposureType picks the exposure kind (adminobjects.ExposureType): a
+// named Gateway wins over the platform, as MicroShift serves the Route API with
+// no router behind it once its ingress is Removed.
 func (r *DotvirtReconciler) resolveExposureType(dv *dotvirtv1alpha1.Dotvirt) dotvirtv1alpha1.IngressType {
-	if t := dv.Spec.Ingress.Type; t != "" && t != dotvirtv1alpha1.IngressAuto {
-		return t
-	}
-	if dv.Spec.Ingress.Gateway != nil {
-		return dotvirtv1alpha1.IngressGateway
-	}
-	if r.Platform == platform.OpenShift {
-		return dotvirtv1alpha1.IngressRoute
-	}
-	return dotvirtv1alpha1.IngressIngress
+	return dotvirtv1alpha1.IngressType(adminobjects.ExposureType(string(dv.Spec.Ingress.Type), dv.Spec.Ingress.Gateway != nil, r.Platform == platform.OpenShift))
 }
 
 // exposureFor builds the external exposure of the named Service for the resolved
@@ -127,7 +118,12 @@ func (r *DotvirtReconciler) exposureFor(dv *dotvirtv1alpha1.Dotvirt, name string
 	return nil
 }
 
+// exposure is the console's: on a Gateway with no host it takes every name the
+// listener does, for a machine reached by its address. Nothing else goes hostless.
 func (r *DotvirtReconciler) exposure(dv *dotvirtv1alpha1.Dotvirt) client.Object {
+	if r.resolveExposureType(dv) == dotvirtv1alpha1.IngressGateway {
+		return install.HTTPRoute(dv, install.AppName, install.HTTPPort, dv.Spec.Ingress.Host)
+	}
 	return r.exposureFor(dv, install.AppName, install.HTTPPort, dv.Spec.Ingress.Host)
 }
 

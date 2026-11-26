@@ -75,7 +75,20 @@ spec:
               x-kubernetes-preserve-unknown-fields: true
               properties:
                 hostnames: {type: array, items: {type: string}}
-                parentRefs: {type: array, items: {type: object, x-kubernetes-preserve-unknown-fields: true}}
+                # Typed as Gateway API types them: the guard's type check resolves a
+                # field of an object with no properties as undefined, whichever form
+                # of the schema discovery serves it first.
+                parentRefs:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      group: {type: string}
+                      kind: {type: string}
+                      namespace: {type: string}
+                      name: {type: string}
+                      sectionName: {type: string}
+                      port: {type: integer}
                 rules:
                   type: array
                   items:

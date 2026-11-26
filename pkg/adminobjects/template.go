@@ -19,6 +19,7 @@ var TemplateParams = Params{
 	DotvirtImage:   "${RELATED_IMAGE_DOTVIRT}",
 	ForgejoImage:   "${RELATED_IMAGE_FORGEJO}",
 	ConsoleHost:    "${CONSOLE_HOST}",
+	ConsoleGateway: ParentRef{Name: "${CONSOLE_GATEWAY}", Namespace: "${CONSOLE_GATEWAY_NAMESPACE}", Section: "${CONSOLE_GATEWAY_SECTION}"},
 
 	BrandingConfigMap:  "${BRANDING_CONFIGMAP}",
 	MetricsCAConfigMap: "${METRICS_CA_CONFIGMAP}",
@@ -101,14 +102,27 @@ var templateHeader = `# The dotvirt operator guard: admission policies bounding 
 #   [ -n "$ARGO_CONTROLLER" ] || ARGO_CONTROLLER="$( [ "$ARGO_NAMESPACE" = openshift-gitops ] \
 #     && echo openshift-gitops-argocd-application-controller || echo argocd-application-controller)"
 #   export ARGO_NAMESPACE ARGO_CONTROLLER
-#   # The console's host: spec.ingress.host, else the router's host for the
-#   # console's Route on the cluster's ingress domain (OpenShift), else the one
-#   # host routers report serving that Route under (MicroShift), else empty:
-#   CONSOLE_HOST="$(spec ingress.host)"
-#   [ -n "$CONSOLE_HOST" ] || CONSOLE_HOST="$(kubectl get ingresses.config.openshift.io cluster \
-#     -o jsonpath='{.spec.domain}' 2>/dev/null | sed "s|^.|dotvirt-$INSTALL_NAMESPACE.&|")"
-#   [ -n "$CONSOLE_HOST" ] || CONSOLE_HOST="$(kubectl -n "$INSTALL_NAMESPACE" get route.route.openshift.io dotvirt \
-#     -o jsonpath='{range .status.ingress[*]}{.host}{"\n"}{end}' 2>/dev/null | sort -u | awk 'NF { n++; h = $0 } END { if (n == 1) print h }')"
+#   # The Gateway the console's HTTPRoute attaches to, spec.ingress.gateway:
+#   CONSOLE_GATEWAY="$(spec ingress.gateway.name)" CONSOLE_GATEWAY_SECTION="$(spec ingress.gateway.sectionName)"
+#   CONSOLE_GATEWAY_NAMESPACE="$(spec ingress.gateway.namespace)"
+#   [ -z "$CONSOLE_GATEWAY" ] || CONSOLE_GATEWAY_NAMESPACE="${CONSOLE_GATEWAY_NAMESPACE:-$INSTALL_NAMESPACE}"
+#   export CONSOLE_GATEWAY CONSOLE_GATEWAY_NAMESPACE CONSOLE_GATEWAY_SECTION
+#   # The console's host: spec.ingress.host; for a console on a Route
+#   # (spec.ingress.type route, or unset with no Gateway where routes are
+#   # served), else the router's host for that Route on the cluster's ingress
+#   # domain (OpenShift), else the one host routers report serving it under
+#   # (MicroShift); else empty, as for a Gateway serving it on every name:
+#   CONSOLE_HOST="$(spec ingress.host)" ON_ROUTE=false
+#   case "$(spec ingress.type)" in
+#     route) ON_ROUTE=true;;
+#     ""|auto) [ -z "$CONSOLE_GATEWAY" ] && kubectl api-resources --api-group=route.openshift.io -o name | grep -q . && ON_ROUTE=true;;
+#   esac
+#   if [ -z "$CONSOLE_HOST" ] && [ "$ON_ROUTE" = true ]; then
+#     CONSOLE_HOST="$(kubectl get ingresses.config.openshift.io cluster \
+#       -o jsonpath='{.spec.domain}' 2>/dev/null | sed "s|^.|dotvirt-$INSTALL_NAMESPACE.&|")"
+#     [ -n "$CONSOLE_HOST" ] || CONSOLE_HOST="$(kubectl -n "$INSTALL_NAMESPACE" get route.route.openshift.io dotvirt \
+#       -o jsonpath='{range .status.ingress[*]}{.host}{"\n"}{end}' 2>/dev/null | sort -u | awk 'NF { n++; h = $0 } END { if (n == 1) print h }')"
+#   fi
 #   export CONSOLE_HOST
 #   # The console's volumes an admin chose, and the forge credential Secret:
 #   export BRANDING_CONFIGMAP="$(spec branding.configMap)" METRICS_CA_CONFIGMAP="$(spec metrics.ca.name)"
@@ -143,6 +157,8 @@ var templateHeader = `# The dotvirt operator guard: admission policies bounding 
 #     -e "s|\${RELATED_IMAGE_DOTVIRT}|$RELATED_IMAGE_DOTVIRT|g" -e "s|\${RELATED_IMAGE_FORGEJO}|$RELATED_IMAGE_FORGEJO|g" \
 #     -e "s|\${METRICS_URL}|$METRICS_URL|g" -e "s|\${METRICS_TENANCY_URL}|$METRICS_TENANCY_URL|g" \
 #     -e "s|\${METRICS_CA}|$METRICS_CA|g" -e "s|\${CONSOLE_HOST}|$CONSOLE_HOST|g" \
+#     -e "s|\${CONSOLE_GATEWAY}|$CONSOLE_GATEWAY|g" -e "s|\${CONSOLE_GATEWAY_NAMESPACE}|$CONSOLE_GATEWAY_NAMESPACE|g" \
+#     -e "s|\${CONSOLE_GATEWAY_SECTION}|$CONSOLE_GATEWAY_SECTION|g" \
 #     -e "s|\${BRANDING_CONFIGMAP}|$BRANDING_CONFIGMAP|g" -e "s|\${METRICS_CA_CONFIGMAP}|$METRICS_CA_CONFIGMAP|g" \
 #     -e "s|\${FORGE_SECRET}|$FORGE_SECRET|g" -e "s|\${FORGE_MANAGED}|$FORGE_MANAGED|g" \
 #     -e "s|\${OIDC_SECRET}|$OIDC_SECRET|g" -e "s|\${OIDC_SECRET_KEY}|$OIDC_SECRET_KEY|g" \

@@ -406,7 +406,7 @@ func frontDoor(p Params) frontDoorRules {
 	// Every other exposure names its hosts, none the console's: one with none
 	// (an Ingress default backend, an HTTPRoute without hostnames) answers for
 	// every host its gateway or controller serves.
-	const others = "the operator exposes nothing else on the console's host, and nothing on every host"
+	const others = "the operator exposes nothing else on the console's host, nothing on every host, and nothing through a Gateway beside a console with no host"
 	return frontDoorRules{
 		services: []admissionregistrationv1.Validation{
 			// External IPs and load balancers take traffic for addresses the
@@ -445,12 +445,26 @@ func frontDoor(p Params) frontDoorRules {
 				`object.spec.rules.all(r, has(r.host) && r.host != "" && r.host != `+host+` && !`+covers("r.host")+`)))`, others),
 		},
 		httproutes: []admissionregistrationv1.Validation{
+			// A console with no host is reached by address: its route alone
+			// names none, and takes every name of the one listener it names.
 			deny(`!`+console+` || (`+sameAnnotations+` && `+
-				`object.spec.hostnames == [`+host+`] && object.spec.rules.all(r, !has(r.filters) && r.backendRefs.all(b, `+
+				`(size(`+host+`) == 0 ? (size(`+quote(p.ConsoleGateway.Section)+`) > 0 && (!has(object.spec.hostnames) || size(object.spec.hostnames) == 0)) : `+
+				`has(object.spec.hostnames) && object.spec.hostnames == [`+host+`]) && `+
+				`object.spec.rules.all(r, !has(r.filters) && r.backendRefs.all(b, `+
 				`!has(b.filters) && (!has(b.kind) || b.kind == "Service") && (!has(b.group) || b.group == "") && `+
 				`(!has(b.namespace) || b.namespace == `+quote(p.Namespace)+`) && b.name == `+quote(ConsoleDeployment)+` && b.port == 8080)))`,
 				"the operator sends the console's HTTPRoute only to the console's Service, on the console's host, unfiltered"),
-			deny(console+` || (has(object.spec.hostnames) && size(object.spec.hostnames) > 0 && `+
+			// Above all with no host: a route naming none takes every name of
+			// each listener it attaches to.
+			deny(`!`+console+` || (has(object.spec.parentRefs) && size(object.spec.parentRefs) == 1 && object.spec.parentRefs.all(r, `+
+				`(!has(r.group) || r.group == "gateway.networking.k8s.io") && (!has(r.kind) || r.kind == "Gateway") && !has(r.port) && `+
+				`r.name == `+quote(p.ConsoleGateway.Name)+` && (has(r.namespace) ? r.namespace : `+quote(p.Namespace)+`) == `+quote(p.ConsoleGateway.Namespace)+` && `+
+				`(has(r.sectionName) ? r.sectionName : "") == `+quote(p.ConsoleGateway.Section)+`))`,
+				"the operator attaches the console's HTTPRoute only to the Gateway listener the install names"),
+			// A console with no host answers every name of the machine's
+			// address, and browsers send its cookies to every port there:
+			// the operator exposes nothing else through a Gateway then.
+			deny(console+` || (size(`+host+`) > 0 && has(object.spec.hostnames) && size(object.spec.hostnames) > 0 && `+
 				`object.spec.hostnames.all(h, h != `+host+` && !`+covers("h")+`))`, others),
 		},
 	}

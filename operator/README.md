@@ -180,12 +180,14 @@ owns one status condition; a phase that fails or waits records why there, so
      operator writes leaves the cluster: no node port, load balancer or external IP;
    - `dotvirt-operator-routes`, `dotvirt-operator-ingresses`, `dotvirt-operator-httproutes`:
      the console's Route, Ingress or HTTPRoute leads only to its Service, on the console's
-     host (`spec.ingress.host`, else the router's host on the cluster's ingress domain),
-     edge-terminated, with no filter and no annotation the operator adds. Where no
+     host (`spec.ingress.host`, else for a Route the router's host on the cluster's ingress
+     domain), edge-terminated, with no filter and no annotation the operator adds. Where no
      ingress domain can be read (MicroShift), the console's host is the one routers report
-     for its Route. Every other exposure the operator writes names its own hosts: none the
-     console's, no wildcard over it, no Ingress default backend, no HTTPRoute without
-     hostnames. The forge's own exposures are otherwise free: it holds no user token.
+     for its Route. The console's HTTPRoute attaches only to `spec.ingress.gateway`, on its
+     listener; with no host it names none. Every other exposure the operator writes names
+     its own hosts: none the console's, no wildcard over it, no Ingress default backend, no
+     HTTPRoute without hostnames, and no HTTPRoute at all beside a console with no host. The
+     forge's own exposures are otherwise free: it holds no user token.
 
    The Route rules assume the apiserver serving Routes evaluates admission policies,
    and that OpenShift's route API marks a host it generates
@@ -202,8 +204,8 @@ owns one status condition; a phase that fails or waits records why there, so
    An installed guard reads `Outdated`, and until an admin re-installs it refuses the
    operator's writes that need the change, when:
    - the install namespace, `spec.argocd`, `spec.forge.insecureTLS`, `spec.forge.managed`,
-     `spec.forge.credentialsSecret`, `spec.metrics`, `spec.ingress.host` or
-     `spec.branding.configMap` changes;
+     `spec.forge.credentialsSecret`, `spec.metrics`, `spec.ingress.host`,
+     `spec.ingress.gateway` or `spec.branding.configMap` changes;
    - `spec.auth.oidc` (its issuer or client secret) changes;
    - `spec.forge.pullRequests` turns Delegated on or off, or, while Delegated,
      `spec.forge.url` or `spec.forge.userAuth` changes;
@@ -536,6 +538,15 @@ forge to a Gateway someone else runs. Two things stay with whoever runs it:
 - The operator adds no trust for the Gateway's certificate. A managed forge behind a
   private CA fails x509 at ArgoCD: use a publicly trusted certificate, or keep
   `spec.forge.url` on the in-cluster Service.
+
+`spec.ingress.host` names the routes' host. Left empty, the console's route takes every
+name its listener does: a machine with no DNS, reached by its address, as an appliance is.
+Admission then asks for that listener in `spec.ingress.gateway.sectionName`, and the guard
+holds the route to it. Nothing else is exposed through a Gateway then: the console answers
+every name of the machine's address, and browsers send its cookies to every port there,
+so a forge page on another port would receive them. There is no public URL, so admission
+asks for a managed forge, whose webhooks stay in-cluster, and neither OIDC nor OpenShift
+sign-in, which redirect to a named host; sign-in is by token.
 
 ## Publishing
 

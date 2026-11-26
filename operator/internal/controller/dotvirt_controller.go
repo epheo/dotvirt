@@ -346,13 +346,16 @@ func precedes(a, b *dotvirtv1alpha1.Dotvirt) bool {
 // and exposure phases fill their resolved hosts in the same way. Unset follows
 // the cluster: on where OpenShift's OAuth server runs and no oidc flow is set.
 // Off OpenShift even an explicit true is off: the app's flow needs that server.
+// So is a console a Gateway serves with no host: the server has nowhere to
+// send login codes back to.
 func (r *DotvirtReconciler) resolveSSO(dv *dotvirtv1alpha1.Dotvirt, oauthServed bool) {
 	a := &dv.Spec.Auth
 	on := oauthServed && a.OIDC == nil
 	if a.OpenShiftSSO != nil {
 		on = *a.OpenShiftSSO
 	}
-	a.OpenShiftSSO = new(on && r.Platform == platform.OpenShift)
+	hostless := dv.Spec.Ingress.Host == "" && r.resolveExposureType(dv) == dotvirtv1alpha1.IngressGateway
+	a.OpenShiftSSO = new(on && r.Platform == platform.OpenShift && !hostless)
 }
 
 // reconcileCtx is what one pass derives once, before the phases, for every

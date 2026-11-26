@@ -1081,8 +1081,10 @@ func TestEnvtest(t *testing.T) {
 		chosen.SpecImage = custom.Spec.Template.Spec.Containers[0].Image
 		// Where an admin sends metrics queries: as the operator renders it.
 		chosen.Metrics = adminobjects.MetricsFor("https://thanos-querier.openshift-monitoring.svc:9091", "", false)
-		// The console's host, which nothing else may claim.
+		// The console's host, which nothing else may claim, and the Gateway
+		// listener its HTTPRoute attaches to.
 		chosen.ConsoleHost = "console.example"
+		chosen.ConsoleGateway = adminobjects.GatewayOf("public", "gateways", "", dv.Namespace)
 		ingress := func(name string, edit func(*networkingv1.Ingress)) *networkingv1.Ingress {
 			port := install.HTTPPort
 			if name == install.ForgejoServiceName {
@@ -1201,7 +1203,13 @@ func TestEnvtest(t *testing.T) {
 			"the forge's Ingress with a default backend": forgeIngress("forge.example", func(i *networkingv1.Ingress) {
 				i.Spec.DefaultBackend = i.Spec.Rules[0].HTTP.Paths[0].Backend.DeepCopy()
 			}),
-			"the forge's HTTPRoute for every host":                        forgeRoute(),
+			"the forge's HTTPRoute for every host": forgeRoute(),
+			"the console's HTTPRoute on another Gateway": httpRoute(install.AppName, func(spec map[string]any) {
+				spec["parentRefs"] = []any{map[string]any{"name": "internal", "namespace": "gateways"}}
+			}),
+			"the console's HTTPRoute on a second Gateway too": httpRoute(install.AppName, func(spec map[string]any) {
+				spec["parentRefs"] = append(spec["parentRefs"].([]any), map[string]any{"name": "internal", "namespace": "gateways"})
+			}),
 			"the forge's HTTPRoute on a wildcard over the console's host": forgeRoute("*.example"),
 			"the forge's Route claiming the console's host":               route(install.ForgejoServiceName, chosen.ConsoleHost, nil),
 			"the forge's Ingress claiming the console's host":             ingress(install.ForgejoServiceName, nil),
@@ -1219,6 +1227,7 @@ func TestEnvtest(t *testing.T) {
 			"the console's Ingress mirrored": ingress(install.AppName, func(i *networkingv1.Ingress) {
 				i.Annotations = map[string]string{"nginx.ingress.kubernetes.io/mirror-target": "https://evil.example$request_uri"}
 			}),
+			"the console's HTTPRoute for every host": httpRoute(install.AppName, func(spec map[string]any) { delete(spec, "hostnames") }),
 			"the console's HTTPRoute to the forge": httpRoute(install.AppName, func(spec map[string]any) {
 				spec["rules"] = []any{map[string]any{"backendRefs": []any{map[string]any{"name": install.ForgejoServiceName, "port": int64(3000)}}}}
 			}),
@@ -1246,6 +1255,44 @@ func TestEnvtest(t *testing.T) {
 		}
 		// With the guard in place, a pass still reconciles the install.
 		eventually(t, "the custom image refused again", func() bool { return refused(dryApply(custom)) })
+		// A console with no host, reached by address: its route alone names
+		// none, on the one listener the install names.
+		hostless := pins
+		hostless.ConsoleGateway = adminobjects.GatewayOf("console", "dotvirt-console", "https", dv.Namespace)
+		installGuard(hostless)
+		hostlessRoute := func(name string, hosts ...any) *unstructured.Unstructured {
+			hd := dv.DeepCopy()
+			hd.Spec.Ingress.Gateway = &dotvirtv1alpha1.GatewayRef{Name: "console", Namespace: "dotvirt-console", SectionName: "https"}
+			r := install.HTTPRoute(hd, name, install.HTTPPort, "")
+			if name == install.ForgejoServiceName {
+				r.Object["spec"].(map[string]any)["rules"] = []any{map[string]any{"backendRefs": []any{map[string]any{"name": name, "port": int64(3000)}}}}
+			}
+			if hosts != nil {
+				r.Object["spec"].(map[string]any)["hostnames"] = hosts
+			}
+			return r
+		}
+		eventually(t, "the hostless console's HTTPRoute for every host", func() bool { return dryApply(hostlessRoute(install.AppName)) == nil })
+		onListener := func(section string) *unstructured.Unstructured {
+			r := hostlessRoute(install.AppName)
+			r.Object["spec"].(map[string]any)["parentRefs"].([]any)[0].(map[string]any)["sectionName"] = section
+			return r
+		}
+		everyListener := hostlessRoute(install.AppName)
+		delete(everyListener.Object["spec"].(map[string]any)["parentRefs"].([]any)[0].(map[string]any), "sectionName")
+		for name, o := range map[string]client.Object{
+			"the hostless console's HTTPRoute on a host": hostlessRoute(install.AppName, "evil.example"),
+			"the forge's HTTPRoute for every host":       hostlessRoute(install.ForgejoServiceName),
+			// Browsers send the console's cookies to every port of its address.
+			"the forge's HTTPRoute on a host of its own beside it": hostlessRoute(install.ForgejoServiceName, "forge.example"),
+			"the hostless console's HTTPRoute on another listener": onListener("forge"),
+			"the hostless console's HTTPRoute on every listener":   everyListener,
+		} {
+			if err := dryApply(o); !refused(err) {
+				t.Errorf("operator's %s: err=%v, want the guard's Forbidden", name, err)
+			}
+		}
+		installGuard(pins)
 		patchCR()
 		eventually(t, "a pass under the guard", func() bool {
 			got := &dotvirtv1alpha1.Dotvirt{}
@@ -1399,15 +1446,46 @@ func TestEnvtest(t *testing.T) {
 
 	t.Run("admission refuses a Gateway exposure nothing could render", func(t *testing.T) {
 		gw := &dotvirtv1alpha1.GatewayRef{Name: "edge", Namespace: "gateway-system"}
-		for name, ingress := range map[string]dotvirtv1alpha1.IngressSpec{
-			"type gateway, no Gateway": {Type: dotvirtv1alpha1.IngressGateway, Host: "h.example.com"},
-			"a Gateway, no host":       {Gateway: gw},
+		listener := &dotvirtv1alpha1.GatewayRef{Name: "edge", Namespace: "gateway-system", SectionName: "https"}
+		oidc := &dotvirtv1alpha1.OIDCSpec{IssuerURL: "https://idm.example/oauth2/openid/dotvirt", ClientID: "dotvirt"}
+		for name, edit := range map[string]func(*dotvirtv1alpha1.Dotvirt){
+			"type gateway, no Gateway": func(dv *dotvirtv1alpha1.Dotvirt) {
+				dv.Spec.Ingress = dotvirtv1alpha1.IngressSpec{Type: dotvirtv1alpha1.IngressGateway, Host: "h.example.com"}
+			},
+			// No public URL: a forge of one's own gets no webhook target, OIDC and
+			// OpenShift's sign-in no redirect.
+			"a Gateway, no host, a forge of one's own": func(dv *dotvirtv1alpha1.Dotvirt) {
+				dv.Spec.Ingress = dotvirtv1alpha1.IngressSpec{Gateway: listener}
+			},
+			"a Gateway, no host, OIDC": func(dv *dotvirtv1alpha1.Dotvirt) {
+				dv.Spec.Ingress = dotvirtv1alpha1.IngressSpec{Gateway: listener}
+				dv.Spec.Forge.Managed, dv.Spec.Auth.OIDC = true, oidc
+			},
+			"a Gateway, no host, OpenShift's sign-in": func(dv *dotvirtv1alpha1.Dotvirt) {
+				dv.Spec.Ingress = dotvirtv1alpha1.IngressSpec{Gateway: listener}
+				dv.Spec.Forge.Managed, dv.Spec.Auth.OpenShiftSSO = true, new(true)
+			},
+			// Another exposure serves the console: a Gateway beside it serves nothing.
+			"a Route, a Gateway beside it, no host": func(dv *dotvirtv1alpha1.Dotvirt) {
+				dv.Spec.Ingress = dotvirtv1alpha1.IngressSpec{Type: dotvirtv1alpha1.IngressRoute, Gateway: listener}
+			},
+			// Naming no host, the route takes every name of each listener it joins.
+			"a Gateway, no host, every listener": func(dv *dotvirtv1alpha1.Dotvirt) {
+				dv.Spec.Ingress = dotvirtv1alpha1.IngressSpec{Gateway: gw}
+				dv.Spec.Forge.Managed = true
+			},
 		} {
 			dv := testCR()
-			dv.Spec.Ingress = ingress
+			edit(dv)
 			if err := admin.Create(ctx, dv, client.DryRunAll); !apierrors.IsInvalid(err) {
 				t.Errorf("%s: got %v, want Invalid", name, err)
 			}
+		}
+		hostless := testCR()
+		hostless.Spec.Ingress = dotvirtv1alpha1.IngressSpec{Gateway: listener}
+		hostless.Spec.Forge.Managed = true
+		if err := admin.Create(ctx, hostless, client.DryRunAll); client.IgnoreAlreadyExists(err) != nil {
+			t.Errorf("a Gateway listener with no host, a managed forge and no OIDC: %v", err)
 		}
 		// Unstructured: the typed client drops an empty host before it is sent.
 		empty := &unstructured.Unstructured{Object: map[string]any{

@@ -237,12 +237,15 @@ func (s SyncImpersonationSpec) On() bool { return s.Enabled == nil || *s.Enabled
 
 // IngressSpec controls how the UI is exposed.
 // +kubebuilder:validation:XValidation:rule="!has(self.type) || self.type != 'gateway' || has(self.gateway)",message="type gateway needs spec.ingress.gateway"
-// +kubebuilder:validation:XValidation:rule="!has(self.gateway) || (has(self.host) && size(self.host) > 0)",message="a Gateway serves named hosts: set spec.ingress.host"
+// +kubebuilder:validation:XValidation:rule="!has(self.gateway) || (has(self.host) && size(self.host) > 0) || !has(self.type) || self.type == 'auto' || self.type == 'gateway'",message="a Gateway named beside another exposure serves nothing: set spec.ingress.host, or drop the gateway"
 type IngressSpec struct {
 	Type IngressType `json:"type,omitempty"`
 	// Host is the external hostname the UI is served on. Leave empty on OpenShift for a
 	// router-assigned host (reported in status.consoleURL); required for an Ingress on
-	// vanilla Kubernetes and for a Gateway.
+	// vanilla Kubernetes. Empty with a Gateway, the console takes every name its listener
+	// (gateway.sectionName, required then) does, as a machine reached by its address needs.
+	// There is no public URL then: it needs a managed forge, whose webhooks stay in-cluster,
+	// and no OIDC or OpenShift sign-in, which redirect to a named host; sign-in is by token.
 	Host string `json:"host,omitempty"`
 	// Gateway is what serves the UI and a managed forge, through HTTPRoutes. Its
 	// listener terminates TLS: the console URL is https. Name one where no router
@@ -260,7 +263,7 @@ type GatewayRef struct {
 	// hostname with a longer path takes that path, /api/login included.
 	Namespace string `json:"namespace,omitempty"`
 	// SectionName attaches to one listener; empty attaches to every listener
-	// that admits the hostname.
+	// that admits the hostname. Required with no spec.ingress.host.
 	SectionName string `json:"sectionName,omitempty"`
 }
 
@@ -391,6 +394,8 @@ type PublishingSpec struct {
 }
 
 // DotvirtSpec is the desired dotvirt install.
+// +kubebuilder:validation:XValidation:rule="!(has(self.ingress) && has(self.ingress.gateway) && (!has(self.ingress.type) || self.ingress.type == 'auto' || self.ingress.type == 'gateway') && (!has(self.ingress.host) || size(self.ingress.host) == 0)) || (has(self.ingress.gateway.sectionName) && size(self.ingress.gateway.sectionName) > 0)",message="a Gateway with no spec.ingress.host serves the console on every name its listener takes: name that listener in spec.ingress.gateway.sectionName"
+// +kubebuilder:validation:XValidation:rule="!(has(self.ingress) && has(self.ingress.gateway) && (!has(self.ingress.type) || self.ingress.type == 'auto' || self.ingress.type == 'gateway') && (!has(self.ingress.host) || size(self.ingress.host) == 0)) || (has(self.forge) && has(self.forge.managed) && self.forge.managed && !(has(self.auth) && (has(self.auth.oidc) || (has(self.auth.openShiftSSO) && self.auth.openShiftSSO))))",message="a Gateway with no spec.ingress.host has no public URL: it needs spec.forge.managed, and neither spec.auth.oidc nor spec.auth.openShiftSSO"
 type DotvirtSpec struct {
 	// Image is the dotvirt app image to deploy.
 	Image   string      `json:"image,omitempty"`
