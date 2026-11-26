@@ -62,13 +62,19 @@ func TestRenderMatchesTheGuardsVolumes(t *testing.T) {
 	dv.Spec.Metrics.CA = &dotvirtv1alpha1.ConfigMapKeyRef{Name: "metrics-ca", Key: "ca.crt"}
 	dv.Spec.Forge.CredentialsSecret = "creds"
 	want := map[string]adminobjects.ConsoleVolume{}
-	for _, v := range adminobjects.ConsoleVolumes("brand", "metrics-ca", "creds") {
+	for _, v := range adminobjects.ConsoleVolumes("brand", "metrics-ca", "oidc-ca", "creds") {
 		want[v.Name] = v
 	}
 	dv.Spec.Auth.OIDC = &dotvirtv1alpha1.OIDCSpec{IssuerURL: "https://idp.example", ClientID: "dotvirt",
-		ClientSecret: &dotvirtv1alpha1.SecretKeyRef{Name: "oidc", Key: "client-secret"}}
+		ClientSecret: &dotvirtv1alpha1.SecretKeyRef{Name: "oidc", Key: "client-secret"},
+		CA:           &dotvirtv1alpha1.ConfigMapKeyRef{Name: "oidc-ca", Key: "ca.pem"}}
 	pod := Deployment(dv, "argocd", nil).Spec.Template.Spec
 	secretEnv := adminobjects.ConsoleSecretEnv(adminobjects.Params{ForgeSecret: "creds", OIDCSecret: "oidc", OIDCSecretKey: "client-secret"})
+	// The issuer's CA an admin chose, at the one path the guard admits.
+	if i := slices.IndexFunc(pod.Containers[0].Env, func(e corev1.EnvVar) bool { return e.Name == "DOTVIRT_OIDC_CA" }); i < 0 ||
+		pod.Containers[0].Env[i].Value != adminobjects.OIDCCAPath {
+		t.Errorf("console OIDC CA env at %d, want %q", i, adminobjects.OIDCCAPath)
+	}
 	// The guard pins the issuer to spec.auth.oidc.issuerURL.
 	if i := slices.IndexFunc(pod.Containers[0].Env, func(e corev1.EnvVar) bool { return e.Name == "DOTVIRT_OIDC_ISSUER" }); i < 0 ||
 		pod.Containers[0].Env[i].Value != dv.Spec.Auth.OIDC.IssuerURL {

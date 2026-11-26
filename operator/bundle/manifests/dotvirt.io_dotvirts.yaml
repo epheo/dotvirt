@@ -151,6 +151,26 @@ spec:
                       as an audience of that issuer. Register https://<console host>/api/auth/callback
                       as the client's redirect URI.
                     properties:
+                      ca:
+                        description: |-
+                          CA is a PEM bundle in a ConfigMap in dotvirt's namespace the console
+                          trusts for the issuer, beside the system pool: an issuer whose
+                          certificate a private CA signs. The console reads it when it starts.
+                        properties:
+                          key:
+                            description: 'Key is a ConfigMap key: not ".", and not
+                              starting with "..".'
+                            maxLength: 253
+                            pattern: ^\.?[-_a-zA-Z0-9][-._a-zA-Z0-9]*$
+                            type: string
+                          name:
+                            maxLength: 253
+                            pattern: ^[a-z0-9]([-a-z0-9.]*[a-z0-9])?$
+                            type: string
+                        required:
+                        - key
+                        - name
+                        type: object
                       clientID:
                         description: ClientID is the client's ID at the issuer.
                         minLength: 1

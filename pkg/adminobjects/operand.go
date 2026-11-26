@@ -62,6 +62,9 @@ const (
 	ServiceCAPath = "/var/run/dotvirt/tls-service/service-ca.crt"
 )
 
+// OIDCCAPath is where the console reads the admin's spec.auth.oidc.ca.
+const OIDCCAPath = "/var/run/dotvirt/tls-oidc/ca.crt"
+
 // IngressCAPath is the router CA the console trusts for OpenShift's OAuth
 // server, mounted when SSO is on.
 const IngressCAPath = "/var/run/dotvirt/tls-ingress/ca-bundle.crt"
@@ -205,13 +208,14 @@ const (
 
 // ConsoleVolumes are every volume the console may have, each mounted at its
 // path only; an empty source name is a volume the install does not ask for.
-func ConsoleVolumes(brandingConfigMap, metricsCAConfigMap, forgeSecret string) []ConsoleVolume {
+func ConsoleVolumes(brandingConfigMap, metricsCAConfigMap, oidcCAConfigMap, forgeSecret string) []ConsoleVolume {
 	return []ConsoleVolume{
 		{"drafts", "/var/lib/dotvirt/drafts", "persistentVolumeClaim", DraftsClaim},
 		{"ingress-ca", path.Dir(IngressCAPath), "configMap", IngressCAConfigMap},
 		{"service-ca", path.Dir(ServiceCAPath), "configMap", ServiceCAConfigMap},
 		{"branding", BrandingMountPath, "configMap", brandingConfigMap},
 		{"metrics-ca", path.Dir(MetricsCAPath), "configMap", metricsCAConfigMap},
+		{"oidc-ca", path.Dir(OIDCCAPath), "configMap", oidcCAConfigMap},
 		{"forge-token", ForgeMountPath, "secret", forgeSecret},
 	}
 }

@@ -7,6 +7,7 @@ import (
 	"io"
 	"maps"
 	"os"
+	"path"
 	"path/filepath"
 	"slices"
 	"strconv"
@@ -1142,6 +1143,15 @@ func TestEnvtest(t *testing.T) {
 			corev1.EnvVar{Name: "DOTVIRT_OIDC_ISSUER", Value: adminobjects.KubeletLiteral(chosen.OIDCIssuer)})(oidc)
 		oidcIssuerElsewhere := oidc.DeepCopy()
 		withEnv(corev1.EnvVar{Name: "DOTVIRT_OIDC_ISSUER", Value: "https://evil.example"})(oidcIssuerElsewhere)
+		// The issuer's CA an admin chose, and only that one.
+		chosen.OIDCCAConfigMap = "oidc-ca"
+		oidcCA := oidc.DeepCopy()
+		withVolume(configMapVol("oidc-ca", "oidc-ca"), corev1.VolumeMount{Name: "oidc-ca", MountPath: path.Dir(adminobjects.OIDCCAPath)})(oidcCA)
+		withEnv(corev1.EnvVar{Name: "DOTVIRT_OIDC_CA", Value: adminobjects.OIDCCAPath})(oidcCA)
+		oidcCAElsewhere := oidc.DeepCopy()
+		withEnv(corev1.EnvVar{Name: "DOTVIRT_OIDC_CA", Value: adminobjects.IngressCAPath})(oidcCAElsewhere)
+		oidcCAOther := oidc.DeepCopy()
+		withVolume(configMapVol("oidc-ca", "someone-elses-ca"), corev1.VolumeMount{Name: "oidc-ca", MountPath: path.Dir(adminobjects.OIDCCAPath)})(oidcCAOther)
 		oidcElsewhere := app()
 		withEnv(fromSecret("DOTVIRT_FORGE_TOKEN", "admin-oidc", "client-secret"),
 			fromSecret("DOTVIRT_FORGE_URL", adminobjects.DefaultForgeSecret, "url"))(oidcElsewhere)
@@ -1175,6 +1185,7 @@ func TestEnvtest(t *testing.T) {
 		for name, o := range map[string]client.Object{
 			"the console branded from the admin's ConfigMap":               branded,
 			"the console with the admin's OIDC client secret":              oidc,
+			"the console trusting the admin's OIDC CA":                     oidcCA,
 			"the console delegating through the admin's forge application": delegated,
 			"the forge's Ingress on its own host":                          forgeIngress("forge.example", nil),
 			"the forge's HTTPRoute on its own host":                        forgeRoute("forge.example"),
@@ -1204,6 +1215,8 @@ func TestEnvtest(t *testing.T) {
 				return d
 			}(),
 			"the console sending the admin's OIDC client secret to another issuer":  oidcIssuerElsewhere,
+			"the console trusting another CA for the issuer":                        oidcCAElsewhere,
+			"the console mounting another ConfigMap as the issuer's CA":             oidcCAOther,
 			"the console sending the admin's OIDC client secret as its forge token": oidcElsewhere,
 			"the forge's Ingress for every host":                                    forgeIngress("", nil),
 			"the forge's Ingress on a wildcard over the console's host":             forgeIngress("*.example", nil),
