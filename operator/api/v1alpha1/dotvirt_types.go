@@ -237,6 +237,7 @@ func (s SyncImpersonationSpec) On() bool { return s.Enabled == nil || *s.Enabled
 
 // IngressSpec controls how the UI is exposed.
 // +kubebuilder:validation:XValidation:rule="!has(self.type) || self.type != 'gateway' || has(self.gateway)",message="type gateway needs spec.ingress.gateway"
+// +kubebuilder:validation:XValidation:rule="!has(self.gateway) || (has(self.host) && size(self.host) > 0) || !has(self.type) || self.type == 'auto' || self.type == 'gateway'",message="a Gateway named beside another exposure serves nothing: set spec.ingress.host, or drop the gateway"
 type IngressSpec struct {
 	Type IngressType `json:"type,omitempty"`
 	// Host is the external hostname the UI is served on. Leave empty on OpenShift for a

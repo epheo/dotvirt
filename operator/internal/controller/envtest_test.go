@@ -1281,8 +1281,10 @@ func TestEnvtest(t *testing.T) {
 		everyListener := hostlessRoute(install.AppName)
 		delete(everyListener.Object["spec"].(map[string]any)["parentRefs"].([]any)[0].(map[string]any), "sectionName")
 		for name, o := range map[string]client.Object{
-			"the hostless console's HTTPRoute on a host":           hostlessRoute(install.AppName, "evil.example"),
-			"the forge's HTTPRoute for every host":                 hostlessRoute(install.ForgejoServiceName),
+			"the hostless console's HTTPRoute on a host": hostlessRoute(install.AppName, "evil.example"),
+			"the forge's HTTPRoute for every host":       hostlessRoute(install.ForgejoServiceName),
+			// Browsers send the console's cookies to every port of its address.
+			"the forge's HTTPRoute on a host of its own beside it": hostlessRoute(install.ForgejoServiceName, "forge.example"),
 			"the hostless console's HTTPRoute on another listener": onListener("forge"),
 			"the hostless console's HTTPRoute on every listener":   everyListener,
 		} {
@@ -1463,6 +1465,10 @@ func TestEnvtest(t *testing.T) {
 				dv.Spec.Ingress = dotvirtv1alpha1.IngressSpec{Gateway: listener}
 				dv.Spec.Forge.Managed, dv.Spec.Auth.OpenShiftSSO = true, new(true)
 			},
+			// Another exposure serves the console: a Gateway beside it serves nothing.
+			"a Route, a Gateway beside it, no host": func(dv *dotvirtv1alpha1.Dotvirt) {
+				dv.Spec.Ingress = dotvirtv1alpha1.IngressSpec{Type: dotvirtv1alpha1.IngressRoute, Gateway: listener}
+			},
 			// Naming no host, the route takes every name of each listener it joins.
 			"a Gateway, no host, every listener": func(dv *dotvirtv1alpha1.Dotvirt) {
 				dv.Spec.Ingress = dotvirtv1alpha1.IngressSpec{Gateway: gw}
@@ -1480,12 +1486,6 @@ func TestEnvtest(t *testing.T) {
 		hostless.Spec.Forge.Managed = true
 		if err := admin.Create(ctx, hostless, client.DryRunAll); client.IgnoreAlreadyExists(err) != nil {
 			t.Errorf("a Gateway listener with no host, a managed forge and no OIDC: %v", err)
-		}
-		// A Route exposes the console: the Gateway named beside it serves nothing.
-		onRoute := testCR()
-		onRoute.Spec.Ingress = dotvirtv1alpha1.IngressSpec{Type: dotvirtv1alpha1.IngressRoute, Gateway: gw}
-		if err := admin.Create(ctx, onRoute, client.DryRunAll); client.IgnoreAlreadyExists(err) != nil {
-			t.Errorf("a Route with a Gateway named beside it: %v", err)
 		}
 		// Unstructured: the typed client drops an empty host before it is sent.
 		empty := &unstructured.Unstructured{Object: map[string]any{

@@ -449,6 +449,11 @@ spec:
                 x-kubernetes-validations:
                 - message: type gateway needs spec.ingress.gateway
                   rule: '!has(self.type) || self.type != ''gateway'' || has(self.gateway)'
+                - message: 'a Gateway named beside another exposure serves nothing:
+                    set spec.ingress.host, or drop the gateway'
+                  rule: '!has(self.gateway) || (has(self.host) && size(self.host)
+                    > 0) || !has(self.type) || self.type == ''auto'' || self.type
+                    == ''gateway'''
               metrics:
                 description: |-
                   MetricsSpec points the Performance tab at a Prometheus/Thanos query API; empty

@@ -267,8 +267,9 @@ spec:
       || ((!has(object.spec.host) || object.spec.host == "" || object.spec.host !=
       "${CONSOLE_HOST}") && (!has(object.spec.wildcardPolicy) || object.spec.wildcardPolicy
       == "None"))
-    message: the operator exposes nothing else on the console's host, and nothing
-      on every host (dotvirt operator guard)
+    message: the operator exposes nothing else on the console's host, nothing on every
+      host, and nothing through a Gateway beside a console with no host (dotvirt operator
+      guard)
     reason: Forbidden
 ---
 # Enforces dotvirt-operator-routes
@@ -330,8 +331,9 @@ spec:
       || (!has(object.spec.defaultBackend) && (!has(object.spec.rules) || object.spec.rules.all(r,
       has(r.host) && r.host != "" && r.host != "${CONSOLE_HOST}" && !(r.host.startsWith("*.")
       && "${CONSOLE_HOST}".endsWith(r.host.substring(1))))))
-    message: the operator exposes nothing else on the console's host, and nothing
-      on every host (dotvirt operator guard)
+    message: the operator exposes nothing else on the console's host, nothing on every
+      host, and nothing through a Gateway beside a console with no host (dotvirt operator
+      guard)
     reason: Forbidden
 ---
 # Enforces dotvirt-operator-ingresses
@@ -381,12 +383,12 @@ spec:
       object.metadata.annotations[k]))) && (!has(oldObject.metadata.annotations) ||
       oldObject.metadata.annotations.all(k, k == "openshift.io/host.generated" ||
       (has(object.metadata.annotations) && k in object.metadata.annotations))))) &&
-      ("${CONSOLE_HOST}" == "" ? (!has(object.spec.hostnames) || size(object.spec.hostnames)
-      == 0) : has(object.spec.hostnames) && object.spec.hostnames == ["${CONSOLE_HOST}"])
-      && object.spec.rules.all(r, !has(r.filters) && r.backendRefs.all(b, !has(b.filters)
-      && (!has(b.kind) || b.kind == "Service") && (!has(b.group) || b.group == "")
-      && (!has(b.namespace) || b.namespace == "${INSTALL_NAMESPACE}") && b.name ==
-      "dotvirt" && b.port == 8080)))'
+      ("${CONSOLE_HOST}" == "" ? ("${CONSOLE_GATEWAY_SECTION}" != "" && (!has(object.spec.hostnames)
+      || size(object.spec.hostnames) == 0)) : has(object.spec.hostnames) && object.spec.hostnames
+      == ["${CONSOLE_HOST}"]) && object.spec.rules.all(r, !has(r.filters) && r.backendRefs.all(b,
+      !has(b.filters) && (!has(b.kind) || b.kind == "Service") && (!has(b.group) ||
+      b.group == "") && (!has(b.namespace) || b.namespace == "${INSTALL_NAMESPACE}")
+      && b.name == "dotvirt" && b.port == 8080)))'
     message: the operator sends the console's HTTPRoute only to the console's Service,
       on the console's host, unfiltered (dotvirt operator guard)
     reason: Forbidden
@@ -400,10 +402,12 @@ spec:
       the install names (dotvirt operator guard)
     reason: Forbidden
   - expression: (object.metadata.name == "dotvirt" && request.namespace == "${INSTALL_NAMESPACE}")
-      || (has(object.spec.hostnames) && size(object.spec.hostnames) > 0 && object.spec.hostnames.all(h,
-      h != "${CONSOLE_HOST}" && !(h.startsWith("*.") && "${CONSOLE_HOST}".endsWith(h.substring(1)))))
-    message: the operator exposes nothing else on the console's host, and nothing
-      on every host (dotvirt operator guard)
+      || ("${CONSOLE_HOST}" != "" && has(object.spec.hostnames) && size(object.spec.hostnames)
+      > 0 && object.spec.hostnames.all(h, h != "${CONSOLE_HOST}" && !(h.startsWith("*.")
+      && "${CONSOLE_HOST}".endsWith(h.substring(1)))))
+    message: the operator exposes nothing else on the console's host, nothing on every
+      host, and nothing through a Gateway beside a console with no host (dotvirt operator
+      guard)
     reason: Forbidden
 ---
 # Enforces dotvirt-operator-httproutes
