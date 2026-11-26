@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path"
 	"strings"
 
 	appsv1 "k8s.io/api/apps/v1"
@@ -303,6 +304,9 @@ func oidcEnv(o *dotvirtv1alpha1.OIDCSpec) []corev1.EnvVar {
 	if len(o.Scopes) > 0 {
 		env = append(env, corev1.EnvVar{Name: "DOTVIRT_OIDC_SCOPES", Value: strings.Join(o.Scopes, " ")})
 	}
+	if o.CA != nil {
+		env = append(env, corev1.EnvVar{Name: "DOTVIRT_OIDC_CA", Value: adminobjects.OIDCCAPath})
+	}
 	if o.DisplayName != "" {
 		env = append(env, corev1.EnvVar{Name: "DOTVIRT_OIDC_NAME", Value: o.DisplayName})
 	}
@@ -396,6 +400,20 @@ func dotvirtVolumes(dv *dotvirtv1alpha1.Dotvirt) ([]corev1.VolumeMount, []corev1
 			VolumeSource: corev1.VolumeSource{ConfigMap: &corev1.ConfigMapVolumeSource{
 				LocalObjectReference: corev1.LocalObjectReference{Name: m.CA.Name},
 				Items:                []corev1.KeyToPath{{Key: m.CA.Key, Path: metricsCAFile}},
+				Optional:             &optional,
+			}},
+		})
+	}
+	if o := dv.Spec.Auth.OIDC; o != nil && o.CA != nil {
+		// Optional: a missing CA must not keep the console down; its sign-in
+		// then fails verification on the system pool, and a token still signs in.
+		optional := true
+		volumeMounts = append(volumeMounts, corev1.VolumeMount{Name: "oidc-ca", MountPath: path.Dir(adminobjects.OIDCCAPath), ReadOnly: true})
+		volumes = append(volumes, corev1.Volume{
+			Name: "oidc-ca",
+			VolumeSource: corev1.VolumeSource{ConfigMap: &corev1.ConfigMapVolumeSource{
+				LocalObjectReference: corev1.LocalObjectReference{Name: o.CA.Name},
+				Items:                []corev1.KeyToPath{{Key: o.CA.Key, Path: path.Base(adminobjects.OIDCCAPath)}},
 				Optional:             &optional,
 			}},
 		})

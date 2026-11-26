@@ -370,6 +370,11 @@ type OIDCSpec struct {
 	// +kubebuilder:validation:MaxLength=40
 	// +optional
 	DisplayName string `json:"displayName,omitempty"`
+	// CA is a PEM bundle in a ConfigMap in dotvirt's namespace the console
+	// trusts for the issuer, beside the system pool: an issuer whose
+	// certificate a private CA signs. The console reads it when it starts.
+	// +optional
+	CA *ConfigMapKeyRef `json:"ca,omitempty"`
 }
 
 // SecretKeyRef is one key of a Secret in dotvirt's namespace.

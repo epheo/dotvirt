@@ -28,6 +28,7 @@ var TemplateParams = Params{
 	OIDCSecret:         "${OIDC_SECRET}",
 	OIDCSecretKey:      "${OIDC_SECRET_KEY}",
 	OIDCIssuer:         "${OIDC_ISSUER}",
+	OIDCCAConfigMap:    "${OIDC_CA_CONFIGMAP}",
 
 	ForgeURL:             "${FORGE_URL}",
 	ForgeClientID:        "${FORGE_CLIENT_ID}",
@@ -138,7 +139,7 @@ var templateHeader = `# The dotvirt operator guard: admission policies bounding 
 #   export FORGE_MANAGED="$( [ "$(spec forge.managed)" = true ] && echo true || echo false )"
 #   # The OIDC issuer and client secret an admin chose, if any:
 #   export OIDC_SECRET="$(spec auth.oidc.clientSecret.name)" OIDC_SECRET_KEY="$(spec auth.oidc.clientSecret.key)"
-#   export OIDC_ISSUER="$(spec auth.oidc.issuerURL)"
+#   export OIDC_ISSUER="$(spec auth.oidc.issuerURL)" OIDC_CA_CONFIGMAP="$(spec auth.oidc.ca.name)"
 #   # Delegated pull requests: the forge application an admin registered.
 #   export FORGE_DELEGATED="$( [ "$(spec forge.pullRequests)" = Delegated ] && echo true || echo false )"
 #   export FORGE_URL="$(spec forge.url)" FORGE_CLIENT_ID="$(spec forge.userAuth.clientID)"
@@ -171,7 +172,8 @@ var templateHeader = `# The dotvirt operator guard: admission policies bounding 
 #     -e "s|\${BRANDING_CONFIGMAP}|$BRANDING_CONFIGMAP|g" -e "s|\${METRICS_CA_CONFIGMAP}|$METRICS_CA_CONFIGMAP|g" \
 #     -e "s|\${FORGE_SECRET}|$FORGE_SECRET|g" -e "s|\${FORGE_MANAGED}|$FORGE_MANAGED|g" \
 #     -e "s|\${OIDC_SECRET}|$OIDC_SECRET|g" -e "s|\${OIDC_SECRET_KEY}|$OIDC_SECRET_KEY|g" \
-#     -e "s|\${OIDC_ISSUER}|$OIDC_ISSUER|g" -e "s|\${FORGE_DELEGATED}|$FORGE_DELEGATED|g" \
+#     -e "s|\${OIDC_ISSUER}|$OIDC_ISSUER|g" -e "s|\${OIDC_CA_CONFIGMAP}|$OIDC_CA_CONFIGMAP|g" \
+#     -e "s|\${FORGE_DELEGATED}|$FORGE_DELEGATED|g" \
 #     -e "s|\${FORGE_URL}|$FORGE_URL|g" -e "s|\${FORGE_CLIENT_ID}|$FORGE_CLIENT_ID|g" \
 #     -e "s|\${FORGE_AUTHORIZE_URL}|$FORGE_AUTHORIZE_URL|g" -e "s|\${FORGE_TOKEN_URL}|$FORGE_TOKEN_URL|g" \
 #     -e "s|\${FORGE_CLIENT_SECRET}|$FORGE_CLIENT_SECRET|g" -e "s|\${FORGE_CLIENT_SECRET_KEY}|$FORGE_CLIENT_SECRET_KEY|g" guard.yaml | ` + ApplyCommand + ` -

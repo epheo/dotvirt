@@ -97,7 +97,7 @@
 #   export FORGE_MANAGED="$( [ "$(spec forge.managed)" = true ] && echo true || echo false )"
 #   # The OIDC issuer and client secret an admin chose, if any:
 #   export OIDC_SECRET="$(spec auth.oidc.clientSecret.name)" OIDC_SECRET_KEY="$(spec auth.oidc.clientSecret.key)"
-#   export OIDC_ISSUER="$(spec auth.oidc.issuerURL)"
+#   export OIDC_ISSUER="$(spec auth.oidc.issuerURL)" OIDC_CA_CONFIGMAP="$(spec auth.oidc.ca.name)"
 #   # Delegated pull requests: the forge application an admin registered.
 #   export FORGE_DELEGATED="$( [ "$(spec forge.pullRequests)" = Delegated ] && echo true || echo false )"
 #   export FORGE_URL="$(spec forge.url)" FORGE_CLIENT_ID="$(spec forge.userAuth.clientID)"
@@ -109,7 +109,7 @@
 #   # Every value lands inside a quoted string in a YAML document: one holding
 #   # any other character (a quote, a backslash, a line break, a space) is
 #   # refused, never escaped. The console's Install builds the guard in Go.
-#   for v in ARGO_CONTROLLER ARGO_NAMESPACE BRANDING_CONFIGMAP CONSOLE_GATEWAY CONSOLE_GATEWAY_NAMESPACE CONSOLE_GATEWAY_SECTION CONSOLE_HOST FORGE_AUTHORIZE_URL FORGE_CLIENT_ID FORGE_CLIENT_SECRET FORGE_CLIENT_SECRET_KEY FORGE_DELEGATED FORGE_GATEWAY FORGE_GATEWAY_NAMESPACE FORGE_GATEWAY_SECTION FORGE_INSECURE_TLS FORGE_MANAGED FORGE_SECRET FORGE_TOKEN_URL FORGE_URL INSTALL_NAMESPACE METRICS_CA METRICS_CA_CONFIGMAP METRICS_TENANCY_URL METRICS_URL OIDC_ISSUER OIDC_SECRET OIDC_SECRET_KEY OPERATOR_USERNAME RELATED_IMAGE_DOTVIRT RELATED_IMAGE_FORGEJO SPEC_IMAGE; do
+#   for v in ARGO_CONTROLLER ARGO_NAMESPACE BRANDING_CONFIGMAP CONSOLE_GATEWAY CONSOLE_GATEWAY_NAMESPACE CONSOLE_GATEWAY_SECTION CONSOLE_HOST FORGE_AUTHORIZE_URL FORGE_CLIENT_ID FORGE_CLIENT_SECRET FORGE_CLIENT_SECRET_KEY FORGE_DELEGATED FORGE_GATEWAY FORGE_GATEWAY_NAMESPACE FORGE_GATEWAY_SECTION FORGE_INSECURE_TLS FORGE_MANAGED FORGE_SECRET FORGE_TOKEN_URL FORGE_URL INSTALL_NAMESPACE METRICS_CA METRICS_CA_CONFIGMAP METRICS_TENANCY_URL METRICS_URL OIDC_CA_CONFIGMAP OIDC_ISSUER OIDC_SECRET OIDC_SECRET_KEY OPERATOR_USERNAME RELATED_IMAGE_DOTVIRT RELATED_IMAGE_FORGEJO SPEC_IMAGE; do
 #     eval "x=\${$v-}"
 #     case "$x" in *[!]A-Za-z0-9._:/@%+=~,[-]*)
 #       echo "$v holds a character the template cannot carry: install the guard from the console" >&2; exit 1;; esac
@@ -130,7 +130,8 @@
 #     -e "s|\${BRANDING_CONFIGMAP}|$BRANDING_CONFIGMAP|g" -e "s|\${METRICS_CA_CONFIGMAP}|$METRICS_CA_CONFIGMAP|g" \
 #     -e "s|\${FORGE_SECRET}|$FORGE_SECRET|g" -e "s|\${FORGE_MANAGED}|$FORGE_MANAGED|g" \
 #     -e "s|\${OIDC_SECRET}|$OIDC_SECRET|g" -e "s|\${OIDC_SECRET_KEY}|$OIDC_SECRET_KEY|g" \
-#     -e "s|\${OIDC_ISSUER}|$OIDC_ISSUER|g" -e "s|\${FORGE_DELEGATED}|$FORGE_DELEGATED|g" \
+#     -e "s|\${OIDC_ISSUER}|$OIDC_ISSUER|g" -e "s|\${OIDC_CA_CONFIGMAP}|$OIDC_CA_CONFIGMAP|g" \
+#     -e "s|\${FORGE_DELEGATED}|$FORGE_DELEGATED|g" \
 #     -e "s|\${FORGE_URL}|$FORGE_URL|g" -e "s|\${FORGE_CLIENT_ID}|$FORGE_CLIENT_ID|g" \
 #     -e "s|\${FORGE_AUTHORIZE_URL}|$FORGE_AUTHORIZE_URL|g" -e "s|\${FORGE_TOKEN_URL}|$FORGE_TOKEN_URL|g" \
 #     -e "s|\${FORGE_CLIENT_SECRET}|$FORGE_CLIENT_SECRET|g" -e "s|\${FORGE_CLIENT_SECRET_KEY}|$FORGE_CLIENT_SECRET_KEY|g" guard.yaml | kubectl apply --server-side --field-manager=dotvirt -f -
@@ -585,7 +586,12 @@ spec:
       || c.args.all(a, !(a == "-oidc-issuer" || a == "--oidc-issuer" || a.startsWith("-oidc-issuer=")
       || a.startsWith("--oidc-issuer=")) || a in ["-oidc-issuer=${OIDC_ISSUER}", "--oidc-issuer=${OIDC_ISSUER}"]))
       && (!has(c.env) || c.env.all(e, e.name != "DOTVIRT_OIDC_ISSUER" || (!has(e.valueFrom)
-      && (has(e.value) ? e.value : "") in ["${OIDC_ISSUER}"]))) && (${FORGE_DELEGATED}
+      && (has(e.value) ? e.value : "") in ["${OIDC_ISSUER}"]))) && (!has(c.args) ||
+      c.args.all(a, !(a == "-oidc-ca" || a == "--oidc-ca" || a.startsWith("-oidc-ca=")
+      || a.startsWith("--oidc-ca=")) || a in ["-oidc-ca=", "--oidc-ca=", "-oidc-ca=/var/run/dotvirt/tls-oidc/ca.crt",
+      "--oidc-ca=/var/run/dotvirt/tls-oidc/ca.crt"])) && (!has(c.env) || c.env.all(e,
+      e.name != "DOTVIRT_OIDC_CA" || (!has(e.valueFrom) && (has(e.value) ? e.value
+      : "") in ["", "/var/run/dotvirt/tls-oidc/ca.crt"]))) && (${FORGE_DELEGATED}
       ? ((!has(c.args) || c.args.all(a, !(a == "-forge-delegated-url" || a == "--forge-delegated-url"
       || a.startsWith("-forge-delegated-url=") || a.startsWith("--forge-delegated-url="))
       || a in ["-forge-delegated-url=${FORGE_URL}", "--forge-delegated-url=${FORGE_URL}"]))
@@ -686,14 +692,16 @@ spec:
       == "branding" && has(v.configMap) && has(v.configMap.name) && v.configMap.name
       == "${BRANDING_CONFIGMAP}") || (v.name == "metrics-ca" && has(v.configMap) &&
       has(v.configMap.name) && v.configMap.name == "${METRICS_CA_CONFIGMAP}") || (v.name
-      == "forge-token" && has(v.secret) && has(v.secret.secretName) && v.secret.secretName
-      == "${FORGE_SECRET}"))) && object.spec.template.spec.containers.all(c, !has(c.volumeMounts)
-      || c.volumeMounts.all(m, (!has(m.subPath) || m.subPath == "") && (!has(m.subPathExpr)
-      || m.subPathExpr == "") && ((m.name == "drafts" && m.mountPath == "/var/lib/dotvirt/drafts")
-      || (m.name == "ingress-ca" && m.mountPath == "/var/run/dotvirt/tls-ingress")
-      || (m.name == "service-ca" && m.mountPath == "/var/run/dotvirt/tls-service")
-      || (m.name == "branding" && m.mountPath == "/etc/dotvirt/branding") || (m.name
-      == "metrics-ca" && m.mountPath == "/var/run/dotvirt/tls-metrics") || (m.name
+      == "oidc-ca" && has(v.configMap) && has(v.configMap.name) && v.configMap.name
+      == "${OIDC_CA_CONFIGMAP}") || (v.name == "forge-token" && has(v.secret) && has(v.secret.secretName)
+      && v.secret.secretName == "${FORGE_SECRET}"))) && object.spec.template.spec.containers.all(c,
+      !has(c.volumeMounts) || c.volumeMounts.all(m, (!has(m.subPath) || m.subPath
+      == "") && (!has(m.subPathExpr) || m.subPathExpr == "") && ((m.name == "drafts"
+      && m.mountPath == "/var/lib/dotvirt/drafts") || (m.name == "ingress-ca" && m.mountPath
+      == "/var/run/dotvirt/tls-ingress") || (m.name == "service-ca" && m.mountPath
+      == "/var/run/dotvirt/tls-service") || (m.name == "branding" && m.mountPath ==
+      "/etc/dotvirt/branding") || (m.name == "metrics-ca" && m.mountPath == "/var/run/dotvirt/tls-metrics")
+      || (m.name == "oidc-ca" && m.mountPath == "/var/run/dotvirt/tls-oidc") || (m.name
       == "forge-token" && m.mountPath == "/var/run/dotvirt/forge")))))
     message: the operator gives the console only its own volumes, from the claim,
       ConfigMaps and Secret rendered or an admin chose, each mounted whole at its

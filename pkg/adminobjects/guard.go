@@ -323,6 +323,8 @@ func consoleSettings(p Params, m Metrics, insecure, delegated string) string {
 		// The console sends the OIDC client secret an admin chose to the
 		// issuer's token endpoint at every sign-in.
 		pinned("oidc-issuer", "DOTVIRT_OIDC_ISSUER", p.OIDCIssuer),
+		// Trust for that issuer: only the CA an admin chose, mounted.
+		pinned("oidc-ca", "DOTVIRT_OIDC_CA", "", OIDCCAPath),
 		// Delegated: each user's forge token goes to the delegated URL (the
 		// API) and the token URL; the forge application's client secret to
 		// the token URL, and only from the admin's Secret (ConsoleSecretEnv).
@@ -364,7 +366,7 @@ func consoleSettings(p Params, m Metrics, insecure, delegated string) string {
 func consoleVolumes(p Params) (volumes, mounts string) {
 	field := map[string]string{"persistentVolumeClaim": "claimName", "configMap": "name", "secret": "secretName"}
 	var vs, ms []string
-	for _, v := range ConsoleVolumes(p.BrandingConfigMap, p.MetricsCAConfigMap, p.ForgeSecret) {
+	for _, v := range ConsoleVolumes(p.BrandingConfigMap, p.MetricsCAConfigMap, p.OIDCCAConfigMap, p.ForgeSecret) {
 		src := "v." + v.Kind
 		vs = append(vs, `(v.name == `+quote(v.Name)+` && has(`+src+`) && has(`+src+`.`+field[v.Kind]+`) && `+src+`.`+field[v.Kind]+` == `+quote(v.Source)+`)`)
 		ms = append(ms, `(m.name == `+quote(v.Name)+` && m.mountPath == `+quote(v.MountPath)+`)`)

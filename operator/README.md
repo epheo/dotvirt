@@ -159,7 +159,8 @@ owns one status condition; a phase that fails or waits records why there, so
      may add flags, except the settings that send users' tokens or its pages elsewhere,
      by flag or env: the metrics endpoints and CA only as rendered from `spec.metrics`,
      TLS verification off only with `spec.forge.insecureTLS`, the OIDC issuer only as
-     `spec.auth.oidc.issuerURL`, the forge CA only the router CA, and never a kubeconfig or
+     `spec.auth.oidc.issuerURL` and its CA only `spec.auth.oidc.ca`, the forge CA only the
+     router CA, and never a kubeconfig or
      a directory of pages. It keeps its own token mounted where client-go reads it, with
      no `KUBERNETES_SERVICE_*` or `envFrom`. Nothing is mounted at, above or inside the
      token directory. Every container runs non-root with a RuntimeDefault or
@@ -207,7 +208,7 @@ owns one status condition; a phase that fails or waits records why there, so
    - the install namespace, `spec.argocd`, `spec.forge.insecureTLS`, `spec.forge.managed`,
      `spec.forge.credentialsSecret`, `spec.metrics`, `spec.ingress.host`,
      `spec.ingress.gateway`, `spec.forge.gateway` or `spec.branding.configMap` changes;
-   - `spec.auth.oidc` (its issuer or client secret) changes;
+   - `spec.auth.oidc` (its issuer, client secret or CA) changes;
    - `spec.forge.pullRequests` turns Delegated on or off, or, while Delegated,
      `spec.forge.url` or `spec.forge.userAuth` changes;
    - `spec.image` or the operator's `RELATED_IMAGE_*` names an image outside the
@@ -962,11 +963,13 @@ spec:
       clientSecret: {name: dotvirt-oidc, key: secret}
       scopes: [profile, groups]
       displayName: Example ID
+      ca: {name: idm-ca, key: ca.crt}
 ```
 
 - `issuerURL`: exactly as the tokens' `iss` claim names it; dotvirt refuses an issuer whose discovery document names another.
 - `clientSecret`: a Secret key in dotvirt's namespace; unset for a public client, which PKCE alone protects. The console reads it when it starts: restart it after a rotation.
 - `scopes`: asked beside `openid`; those whose claims the apiserver maps to a username and groups.
+- `ca`: a PEM bundle in a ConfigMap in dotvirt's namespace, trusted for the issuer beside the system pool, for an issuer a private CA signs. The console reads it when it starts. A missing ConfigMap leaves the console up, its OIDC sign-in failing verification.
 
 Sign-in uses PKCE (S256) and a nonce.
 The session's tokens stay in dotvirt's memory; the cookie holds a random handle.

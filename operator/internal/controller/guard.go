@@ -51,6 +51,9 @@ func (r *DotvirtReconciler) guardParams(ctx context.Context, dv *dotvirtv1alpha1
 		if o.ClientSecret != nil {
 			p.OIDCSecret, p.OIDCSecretKey = o.ClientSecret.Name, o.ClientSecret.Key
 		}
+		if o.CA != nil {
+			p.OIDCCAConfigMap = o.CA.Name
+		}
 	}
 	p.ForgeManaged = dv.Spec.Forge.Managed
 	p.ForgeDelegated, p.ForgeURL = dv.Spec.Forge.PullRequests == "Delegated", dv.Spec.Forge.URL
