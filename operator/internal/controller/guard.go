@@ -59,10 +59,14 @@ func (r *DotvirtReconciler) guardParams(ctx context.Context, dv *dotvirtv1alpha1
 		p.ForgeClientSecret, p.ForgeClientSecretKey = u.ClientSecret.Name, u.ClientSecret.Key
 	}
 	p.InstallName, p.InstallUID = dv.Name, dv.UID
-	domain := r.appsDomain(ctx, dv)
-	router := ""
-	if dv.Spec.Ingress.Host == "" && domain == "" && r.Platform == platform.OpenShift {
-		router = r.routerHost(ctx, dv)
+	if g := dv.Spec.Ingress.Gateway; g != nil {
+		p.ConsoleGateway = adminobjects.GatewayOf(g.Name, g.Namespace, g.SectionName, dv.Namespace)
+	}
+	domain, router := "", ""
+	if dv.Spec.Ingress.Host == "" && r.resolveExposureType(dv) == dotvirtv1alpha1.IngressRoute {
+		if domain = r.appsDomain(ctx, dv); domain == "" {
+			router = r.routerHost(ctx, dv)
+		}
 	}
 	p.ConsoleHost = adminobjects.ConsoleHost(dv.Spec.Ingress.Host, dv.Namespace, domain, router)
 	return p

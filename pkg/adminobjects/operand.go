@@ -123,11 +123,36 @@ func SSORedirect(specHost, namespace, appsDomain string) string {
 	return "https://" + ConsoleHost(specHost, namespace, appsDomain, "") + "/api/auth/callback"
 }
 
-// ConsoleHost is the console's host: spec.ingress.host, else the host
-// OpenShift's router gives the hostless Route named dotvirt in namespace on
-// appsDomain, else the one host routers report admitting that Route under
-// (routerHost, RouterHost: where no domain can be read, as on MicroShift),
-// else "" (no router, no host: nothing is exposed).
+// The console's exposures (spec.ingress.type).
+const (
+	ExposureRoute   = "route"
+	ExposureIngress = "ingress"
+	ExposureGateway = "gateway"
+)
+
+// ExposureType is what exposes the console: spec.ingress.type when set, else
+// a Gateway when spec.ingress.gateway names one, else a Route where routes are
+// served, else an Ingress. The operator renders by it, and the guard derives
+// the console's host by it.
+func ExposureType(ingressType string, gateway, routesServed bool) string {
+	switch {
+	case ingressType != "" && ingressType != "auto":
+		return ingressType
+	case gateway:
+		return ExposureGateway
+	case routesServed:
+		return ExposureRoute
+	}
+	return ExposureIngress
+}
+
+// ConsoleHost is the console's host: spec.ingress.host, else, for a console
+// on a Route (ExposureType), the host OpenShift's router gives the hostless
+// Route named dotvirt in namespace on appsDomain, else the one host routers
+// report admitting that Route under (routerHost, RouterHost: where no domain
+// can be read, as on MicroShift), else "": a Gateway with no host serves the
+// console on every name its listener takes, and nothing else names one.
+// Callers pass appsDomain and routerHost only for a console on a Route.
 func ConsoleHost(specHost, namespace, appsDomain, routerHost string) string {
 	switch {
 	case specHost != "":

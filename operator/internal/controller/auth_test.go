@@ -139,6 +139,13 @@ func TestResolveSSO(t *testing.T) {
 			t.Errorf("%s: SSO = %v, want %v", c.name, got, c.want)
 		}
 	}
+	// No host for the OAuth server to send login codes back to.
+	dv := testCR()
+	dv.Spec.Ingress = dotvirtv1alpha1.IngressSpec{Gateway: &dotvirtv1alpha1.GatewayRef{Name: "edge", SectionName: "https"}}
+	(&DotvirtReconciler{Platform: platform.OpenShift}).resolveSSO(dv, true)
+	if dv.Spec.Auth.SSOEnabled() {
+		t.Error("a Gateway with no host: SSO on")
+	}
 }
 
 // An install that never named openShiftSSO gets SSO on OpenShift from the

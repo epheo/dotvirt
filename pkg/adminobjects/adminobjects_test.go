@@ -23,6 +23,7 @@ var params = Params{
 	ArgoController: "openshift-gitops-argocd-application-controller",
 	SpecImage:      "registry.example/team/dotvirt:custom",
 	ConsoleHost:    "dotvirt-dotvirt.apps.example",
+	ConsoleGateway: ParentRef{Name: "edge", Namespace: "gateway-system", Section: "https"},
 	ForgeSecret:    DefaultForgeSecret,
 }
 
@@ -132,22 +133,77 @@ func TestGuardShape(t *testing.T) {
 	}
 }
 
+// The console's HTTPRoute names the console's host; it may name none only
+// when the console has none. What that admits is the envtest's.
+func TestConsoleHTTPRouteFollowsTheConsoleHost(t *testing.T) {
+	for _, host := range []string{params.ConsoleHost, ""} {
+		p := params
+		p.ConsoleHost = host
+		objs := Render(p)
+		got := exprs(policyOf(t, objs[index(objs, "ValidatingAdmissionPolicy", GuardHTTPRoutesName)]))
+		q := quote(host)
+		holds(t, "httproutes for "+q, got,
+			`(`+q+` == "" ? (!has(object.spec.hostnames) || size(object.spec.hostnames) == 0) : has(object.spec.hostnames) && object.spec.hostnames == [`+q+`])`)
+		holds(t, "httproutes for "+q, got, `has(object.spec.hostnames) && size(object.spec.hostnames) > 0 && object.spec.hostnames.all(h, h != `+q)
+	}
+}
+
+// A route naming no host takes every name of each listener it attaches to:
+// the console's attaches to the one the install names, and nowhere else.
+func TestConsoleHTTPRouteAttachesToTheNamedListener(t *testing.T) {
+	objs := Render(params)
+	got := exprs(policyOf(t, objs[index(objs, "ValidatingAdmissionPolicy", GuardHTTPRoutesName)]))
+	holds(t, "httproutes", got, `size(object.spec.parentRefs) == 1`)
+	holds(t, "httproutes", got, `r.name == "edge" && (has(r.namespace) ? r.namespace : "dotvirt") == "gateway-system" && `+
+		`(has(r.sectionName) ? r.sectionName : "") == "https"`)
+	holds(t, "httproutes", got, `!has(r.port)`)
+}
+
+func TestExposureType(t *testing.T) {
+	for _, c := range []struct {
+		typ                   string
+		gateway, routesServed bool
+		want                  string
+	}{
+		{"", false, true, ExposureRoute},
+		{"auto", false, false, ExposureIngress},
+		{"", true, true, ExposureGateway},
+		{"route", true, false, ExposureRoute},
+		{"ingress", false, true, ExposureIngress},
+	} {
+		if got := ExposureType(c.typ, c.gateway, c.routesServed); got != c.want {
+			t.Errorf("ExposureType(%q, %v, %v) = %q, want %q", c.typ, c.gateway, c.routesServed, got, c.want)
+		}
+	}
+}
+
+func TestGatewayOf(t *testing.T) {
+	if got := GatewayOf("edge", "", "https", "dotvirt"); got != (ParentRef{"edge", "dotvirt", "https"}) {
+		t.Errorf("namespace not resolved: %+v", got)
+	}
+	if got := GatewayOf("", "ns", "s", "dotvirt"); got != (ParentRef{}) {
+		t.Errorf("no Gateway pins %+v", got)
+	}
+}
+
 func TestParamsValid(t *testing.T) {
 	if !params.Valid() || params.OperatorNamespace() != "dotvirt-operator" {
 		t.Fatalf("%+v: valid %v, operator namespace %q", params, params.Valid(), params.OperatorNamespace())
 	}
 	for name, edit := range map[string]func(*Params){
-		"a user, not an account":  func(p *Params) { p.Operator = "alice" },
-		"an extra colon":          func(p *Params) { p.Operator = "system:serviceaccount:a:b:c" },
-		"a bad namespace":         func(p *Params) { p.Operator = "system:serviceaccount:A_B:op" },
-		"no install namespace":    func(p *Params) { p.Namespace = "" },
-		"a quote in a namespace":  func(p *Params) { p.ArgoNamespace = `argo"cd` },
-		"no controller":           func(p *Params) { p.ArgoController = "" },
-		"a quote in a controller": func(p *Params) { p.ArgoController = `a"b` },
-		"no forge Secret":         func(p *Params) { p.ForgeSecret = "" },
-		"a quote in a ConfigMap":  func(p *Params) { p.BrandingConfigMap = `a"b` },
-		"a wildcard host":         func(p *Params) { p.ConsoleHost = "*.apps.example" },
-		"an http issuer":          func(p *Params) { p.OIDCIssuer = "http://idp.example" },
+		"a user, not an account":    func(p *Params) { p.Operator = "alice" },
+		"an extra colon":            func(p *Params) { p.Operator = "system:serviceaccount:a:b:c" },
+		"a bad namespace":           func(p *Params) { p.Operator = "system:serviceaccount:A_B:op" },
+		"no install namespace":      func(p *Params) { p.Namespace = "" },
+		"a quote in a namespace":    func(p *Params) { p.ArgoNamespace = `argo"cd` },
+		"no controller":             func(p *Params) { p.ArgoController = "" },
+		"a quote in a controller":   func(p *Params) { p.ArgoController = `a"b` },
+		"no forge Secret":           func(p *Params) { p.ForgeSecret = "" },
+		"a quote in a ConfigMap":    func(p *Params) { p.BrandingConfigMap = `a"b` },
+		"a wildcard host":           func(p *Params) { p.ConsoleHost = "*.apps.example" },
+		"a Gateway in no namespace": func(p *Params) { p.ConsoleGateway.Namespace = "" },
+		"a quoted listener":         func(p *Params) { p.ConsoleGateway.Section = `https"` },
+		"an http issuer":            func(p *Params) { p.OIDCIssuer = "http://idp.example" },
 	} {
 		p := params
 		edit(&p)
@@ -288,7 +344,9 @@ func filledTemplate(t *testing.T, template []byte, p Params) []*unstructured.Uns
 		"${FORGE_INSECURE_TLS}": strconv.FormatBool(p.InsecureTLS), "${METRICS_URL}": p.Metrics.URL,
 		"${METRICS_TENANCY_URL}": p.Metrics.TenancyURL, "${METRICS_CA}": p.Metrics.CA,
 		"${CONSOLE_HOST}": p.ConsoleHost, "${BRANDING_CONFIGMAP}": p.BrandingConfigMap,
-		"${METRICS_CA_CONFIGMAP}": p.MetricsCAConfigMap, "${FORGE_SECRET}": p.ForgeSecret,
+		"${CONSOLE_GATEWAY}": p.ConsoleGateway.Name, "${CONSOLE_GATEWAY_NAMESPACE}": p.ConsoleGateway.Namespace,
+		"${CONSOLE_GATEWAY_SECTION}": p.ConsoleGateway.Section,
+		"${METRICS_CA_CONFIGMAP}":    p.MetricsCAConfigMap, "${FORGE_SECRET}": p.ForgeSecret,
 		"${FORGE_MANAGED}": strconv.FormatBool(p.ForgeManaged), "${OIDC_SECRET}": p.OIDCSecret, "${OIDC_SECRET_KEY}": p.OIDCSecretKey,
 		"${OIDC_ISSUER}": p.OIDCIssuer, "${FORGE_DELEGATED}": strconv.FormatBool(p.ForgeDelegated),
 		"${FORGE_URL}": p.ForgeURL, "${FORGE_CLIENT_ID}": p.ForgeClientID, "${FORGE_AUTHORIZE_URL}": p.ForgeAuthorizeURL,

@@ -812,6 +812,25 @@ func TestIngressForgeStillNeedsTheIngressCA(t *testing.T) {
 	}
 }
 
+// On a Gateway with no host the console alone goes hostless: a forge route
+// with no hostnames would answer every name, the console's too.
+func TestHostlessGatewayExposesTheConsoleOnly(t *testing.T) {
+	dv := testCR()
+	dv.Spec.Forge.Managed = true
+	dv.Spec.Ingress = dotvirtv1alpha1.IngressSpec{Gateway: &dotvirtv1alpha1.GatewayRef{Name: "console", Namespace: "dotvirt-console"}}
+	r := &DotvirtReconciler{Platform: platform.OpenShift}
+	got, ok := r.exposure(dv).(*unstructured.Unstructured)
+	if !ok || got.GroupVersionKind() != install.HTTPRouteGVK {
+		t.Fatalf("console exposure = %T %v", r.exposure(dv), got)
+	}
+	if _, found, _ := unstructured.NestedFieldNoCopy(got.Object, "spec", "hostnames"); found {
+		t.Errorf("console route names hosts: %v", got.Object["spec"])
+	}
+	if f := r.forgejoExposure(dv); f != nil {
+		t.Errorf("forge exposure with no forge URL = %v, want none", f)
+	}
+}
+
 func TestGatewayRendersAnHTTPRouteThatPruneSweeps(t *testing.T) {
 	dv := testCR()
 	dv.Spec.Ingress = dotvirtv1alpha1.IngressSpec{Host: "dotvirt.example.com", Gateway: &dotvirtv1alpha1.GatewayRef{Name: "edge", Namespace: "gateway-system"}}

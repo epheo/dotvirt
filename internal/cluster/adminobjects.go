@@ -2,6 +2,7 @@ package cluster
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	authzv1 "k8s.io/api/authorization/v1"
@@ -31,6 +32,10 @@ type InstallSpec struct {
 	MetricsURL, MetricsTenancyURL        string
 	MetricsCA                            bool
 	IngressHost                          string
+	// IngressType and Gateway are spec.ingress.type and spec.ingress.gateway,
+	// its namespace as written.
+	IngressType                                       string
+	GatewayName, GatewayNamespace, GatewaySectionName string
 	// The console's volumes an admin chose: the branding and metrics CA
 	// ConfigMaps, and the forge credential Secret (empty: the default).
 	BrandingConfigMap, MetricsCAConfigMap, ForgeCredentials string
@@ -65,6 +70,10 @@ func (c *Client) InstallIn(ctx context.Context, namespace string) (InstallSpec, 
 	out.MetricsTenancyURL, _, _ = unstructured.NestedString(o, "spec", "metrics", "tenancyURL")
 	_, out.MetricsCA, _ = unstructured.NestedMap(o, "spec", "metrics", "ca")
 	out.IngressHost, _, _ = unstructured.NestedString(o, "spec", "ingress", "host")
+	out.IngressType, _, _ = unstructured.NestedString(o, "spec", "ingress", "type")
+	out.GatewayName, _, _ = unstructured.NestedString(o, "spec", "ingress", "gateway", "name")
+	out.GatewayNamespace, _, _ = unstructured.NestedString(o, "spec", "ingress", "gateway", "namespace")
+	out.GatewaySectionName, _, _ = unstructured.NestedString(o, "spec", "ingress", "gateway", "sectionName")
 	out.BrandingConfigMap, _, _ = unstructured.NestedString(o, "spec", "branding", "configMap")
 	out.MetricsCAConfigMap, _, _ = unstructured.NestedString(o, "spec", "metrics", "ca", "name")
 	out.ForgeCredentials, _, _ = unstructured.NestedString(o, "spec", "forge", "credentialsSecret")
@@ -184,7 +193,8 @@ func (c *Client) AppsDomain(ctx context.Context) (string, error) {
 // SSOClient is the OpenShift OAuthClient the console in namespace registers
 // and signs users in with, as THIS client reads it: named for the namespace,
 // redirecting to the install's spec.ingress.host, else the router's host for
-// the console's Route. Never the env the operator writes.
+// the console's Route. Never the env the operator writes. A console a Gateway
+// serves with no host has no redirect.
 func (c *Client) SSOClient(ctx context.Context, namespace string) (id, redirect string, err error) {
 	spec, err := c.InstallIn(ctx, namespace)
 	if err != nil {
@@ -192,6 +202,9 @@ func (c *Client) SSOClient(ctx context.Context, namespace string) (id, redirect 
 	}
 	domain := ""
 	if spec.IngressHost == "" {
+		if adminobjects.ExposureType(spec.IngressType, spec.GatewayName != "", true) != adminobjects.ExposureRoute {
+			return "", "", errors.New("the console has no host for OpenShift's login codes: set spec.ingress.host")
+		}
 		if domain, err = c.AppsDomain(ctx); err != nil {
 			return "", "", fmt.Errorf("the cluster's ingress domain: %w", err)
 		}

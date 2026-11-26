@@ -116,8 +116,10 @@ func (s *Server) adminParams(ctx context.Context, c *cluster.Client) (adminobjec
 		InstallName: spec.Name, InstallUID: spec.UID,
 	}
 	p.ArgoNamespace, p.ArgoController = adminobjects.ArgoTarget(spec.ArgoNamespace, spec.ArgoController, openShift)
+	p.ConsoleGateway = adminobjects.GatewayOf(spec.GatewayName, spec.GatewayNamespace, spec.GatewaySectionName, ns)
+	onRoute := spec.IngressHost == "" && adminobjects.ExposureType(spec.IngressType, spec.GatewayName != "", openShift) == adminobjects.ExposureRoute
 	domain := ""
-	if spec.IngressHost == "" {
+	if onRoute {
 		switch d, err := c.AppsDomain(ctx); {
 		case err == nil:
 			domain = d
@@ -126,7 +128,7 @@ func (s *Server) adminParams(ctx context.Context, c *cluster.Client) (adminobjec
 		}
 	}
 	router := ""
-	if spec.IngressHost == "" && domain == "" && openShift {
+	if onRoute && domain == "" {
 		switch h, err := c.RouterHost(ctx, ns, adminobjects.ConsoleDeployment); {
 		case err == nil:
 			router = h
