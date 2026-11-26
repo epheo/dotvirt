@@ -143,28 +143,77 @@ func forgejoEnv(dv *dotvirtv1alpha1.Dotvirt, argoWebhookHost string) []corev1.En
 	if argoWebhookHost != "" {
 		allowed += "," + argoWebhookHost
 	}
-	return []corev1.EnvVar{
+	env := []corev1.EnvVar{
 		{Name: "FORGEJO__security__INSTALL_LOCK", Value: "true"},
 		{Name: "FORGEJO__database__DB_TYPE", Value: "sqlite3"},
 		{Name: "FORGEJO__server__ROOT_URL", Value: forgejoExternalURL(dv) + "/"},
 		{Name: "FORGEJO__webhook__ALLOWED_HOST_LIST", Value: allowed},
-		// The one account is the operator-minted bot; a Route-exposed forge must not
-		// mint more.
-		{Name: "FORGEJO__service__DISABLE_REGISTRATION", Value: "true"},
 		// The repos are created public, so without this the Route serves every
 		// manifest anonymously. Every machine reader authenticates: the app and
 		// ArgoCD clone with the bot token, the operator calls the API with it, and
 		// /api/healthz sits outside the sign-in gate.
 		{Name: "FORGEJO__service__REQUIRE_SIGNIN_VIEW", Value: "true"},
-		// Webhook TLS is VERIFIED: the mounted ingress CA joins the system pool via
-		// Go's colon-separated SSL_CERT_DIR (empty dir on vanilla).
-		{Name: "SSL_CERT_DIR", Value: "/etc/ssl/certs:" + forgejoCADir},
+	}
+	// Webhook TLS is VERIFIED: the mounted ingress CA joins the system pool via
+	// Go's colon-separated SSL_CERT_DIR (empty dir on vanilla).
+	certDirs := "/etc/ssl/certs:" + forgejoCADir
+	if o := dv.Spec.Forge.OIDC; o != nil {
+		// People sign in through the issuer alone, each to an account the forge
+		// creates at their first sign-in and links to no existing one. The
+		// password form is off: 17.0 links a new subject to a session already
+		// signed in, whatever ACCOUNT_LINKING says. The bot's password keeps
+		// the API (basic auth), which the operator mints its token through.
+		env = append(env,
+			corev1.EnvVar{Name: "FORGEJO__service__DISABLE_REGISTRATION", Value: "false"},
+			corev1.EnvVar{Name: "FORGEJO__service__ALLOW_ONLY_EXTERNAL_REGISTRATION", Value: "true"},
+			corev1.EnvVar{Name: "FORGEJO__service__ENABLE_INTERNAL_SIGNIN", Value: "false"},
+			corev1.EnvVar{Name: "FORGEJO__oauth2_client__ENABLE_AUTO_REGISTRATION", Value: "true"},
+			corev1.EnvVar{Name: "FORGEJO__oauth2_client__USERNAME", Value: "preferred_username"},
+			corev1.EnvVar{Name: "FORGEJO__oauth2_client__ACCOUNT_LINKING", Value: "disabled"},
+		)
+		if o.CA != nil {
+			certDirs += ":" + forgejoOIDCCADir
+		}
+	} else {
+		// The one account is the operator-minted bot; an exposed forge must not
+		// mint more. Every setting the issuer turns is turned back: app.ini on
+		// the volume keeps a key no env names any more.
+		env = append(env,
+			corev1.EnvVar{Name: "FORGEJO__service__DISABLE_REGISTRATION", Value: "true"},
+			corev1.EnvVar{Name: "FORGEJO__service__ALLOW_ONLY_EXTERNAL_REGISTRATION", Value: "false"},
+			corev1.EnvVar{Name: "FORGEJO__service__ENABLE_INTERNAL_SIGNIN", Value: "true"},
+			corev1.EnvVar{Name: "FORGEJO__oauth2_client__ENABLE_AUTO_REGISTRATION", Value: "false"},
+			corev1.EnvVar{Name: "FORGEJO__oauth2_client__USERNAME", Value: "nickname"},
+			corev1.EnvVar{Name: "FORGEJO__oauth2_client__ACCOUNT_LINKING", Value: "login"},
+		)
+	}
+	return append(env, corev1.EnvVar{Name: "SSL_CERT_DIR", Value: certDirs})
+}
+
+// forgejoOIDCEnv passes spec.forge.oidc to the bootstrap, which registers the
+// issuer; none when unset.
+func forgejoOIDCEnv(o *dotvirtv1alpha1.ForgeOIDCSpec) []corev1.EnvVar {
+	if o == nil {
+		return nil
+	}
+	return []corev1.EnvVar{
+		{Name: "FORGE_OIDC_NAME", Value: o.ForgeOIDCName()},
+		{Name: "FORGE_OIDC_ISSUER", Value: o.IssuerURL},
+		{Name: "FORGE_OIDC_CLIENT_ID", Value: o.ClientID},
+		secretEnv("FORGE_OIDC_SECRET", o.ClientSecret.Name, o.ClientSecret.Key, false),
+		{Name: "FORGE_OIDC_SCOPES", Value: strings.Join(o.Scopes, " ")},
+		{Name: "FORGE_OIDC_GROUP_CLAIM", Value: o.GroupClaimName},
+		{Name: "FORGE_OIDC_ADMIN_GROUP", Value: o.AdminGroup},
 	}
 }
 
-// forgejoCADir is where the ingress-CA ConfigMap mounts into both Forgejo
-// containers, joining the system trust via SSL_CERT_DIR.
-const forgejoCADir = "/var/run/dotvirt/ca"
+// forgejoCADir and forgejoOIDCCADir are where the ingress CA and the forge's
+// issuer CA mount into both Forgejo containers, joining the system trust via
+// SSL_CERT_DIR.
+const (
+	forgejoCADir     = "/var/run/dotvirt/ca"
+	forgejoOIDCCADir = "/var/run/dotvirt/oidc-ca"
+)
 
 // ForgejoDeployment runs the rootless Forgejo with a one-shot bootstrap initContainer
 // that migrates the DB and reconciles the admin service user's password to the current
@@ -197,15 +246,57 @@ func ForgejoDeployment(dv *dotvirtv1alpha1.Dotvirt, setFSGroup bool, argoWebhook
 	// admin secret (a CR delete/recreate over the retained data PVC, or a manual secret
 	// delete) can never leave the operator's basic-auth mint stuck on a stale password.
 	// The initContainer has local DB access, so it needs no prior password to reset it.
-	bootstrap := `set -e
+	//
+	// The issuer (spec.forge.oidc): registering it reads the issuer's discovery
+	// document, so an issuer down would keep the forge from starting. It runs
+	// only when its settings change, which a digest on the volume records;
+	// update-oauth changes only the flags given, so each run passes them all.
+	// Removing spec.forge.oidc deletes the source the digest names, which the
+	// forge refuses once accounts came from it: it then stays, and says so.
+	bootstrap := `set -ef
 mkdir -p "$(dirname "$GITEA_APP_INI")"
 environment-to-ini
 forgejo migrate
 forgejo admin user create --admin --username ` + ForgejoBotUser +
 		` --password "$ADMIN_PW" --email ` + ForgejoBotUser + `@dotvirt.local --must-change-password=false ` +
-		`|| forgejo admin user change-password --username ` + ForgejoBotUser + ` --password "$ADMIN_PW" --must-change-password=false`
+		`|| forgejo admin user change-password --username ` + ForgejoBotUser + ` --password "$ADMIN_PW" --must-change-password=false
+mark=/var/lib/gitea/dotvirt-oidc
+source_id() { forgejo admin auth list | awk -F '\t' -v n="$1" 'NR > 1 && $2 == n { print $1 }'; }
+if [ -n "${FORGE_OIDC_ISSUER:-}" ]; then
+  sum="$(printf '%s\n' "$FORGE_OIDC_NAME" "$FORGE_OIDC_ISSUER" "$FORGE_OIDC_CLIENT_ID" "$FORGE_OIDC_SECRET" "$FORGE_OIDC_SCOPES" \
+    "$FORGE_OIDC_GROUP_CLAIM" "$FORGE_OIDC_ADMIN_GROUP" | sha256sum | cut -d ' ' -f 1)"
+  old=""
+  [ ! -s "$mark" ] || old="$(cat "$mark")"
+  if [ "$old" != "$FORGE_OIDC_NAME $sum" ]; then
+    set -- --name "$FORGE_OIDC_NAME" --provider openidConnect --key "$FORGE_OIDC_CLIENT_ID" --secret "$FORGE_OIDC_SECRET" \
+      --auto-discover-url "${FORGE_OIDC_ISSUER%/}/.well-known/openid-configuration" --scopes openid \
+      --group-claim-name "$FORGE_OIDC_GROUP_CLAIM" --admin-group "$FORGE_OIDC_ADMIN_GROUP" --skip-local-2fa=false
+    for scope in $FORGE_OIDC_SCOPES; do set -- "$@" --scopes "$scope"; done
+    old="${old%% *}"
+    id="$(source_id "${old:-$FORGE_OIDC_NAME}")"
+    if [ -n "$id" ]; then forgejo admin auth update-oauth --id "$id" "$@"; else forgejo admin auth add-oauth "$@"; fi
+    printf '%s %s\n' "$FORGE_OIDC_NAME" "$sum" > "$mark"
+  fi
+elif [ -s "$mark" ]; then
+  id="$(source_id "$(cut -d ' ' -f 1 "$mark")")"
+  if [ -n "$id" ] && ! forgejo admin auth delete --id "$id"; then
+    echo "the forge keeps the issuer: accounts came from it; remove them, or revoke its client at the issuer" >&2
+  fi
+  rm -f "$mark"
+fi`
 
 	caOptional := true
+	mounts := []corev1.VolumeMount{dataMount, caMount}
+	var oidcCA []corev1.Volume
+	if o := dv.Spec.Forge.OIDC; o != nil && o.CA != nil {
+		// Optional: a missing CA leaves the forge up, its issuer failing verification.
+		mounts = append(mounts, corev1.VolumeMount{Name: "oidc-ca", MountPath: forgejoOIDCCADir, ReadOnly: true})
+		oidcCA = append(oidcCA, corev1.Volume{Name: "oidc-ca", VolumeSource: corev1.VolumeSource{ConfigMap: &corev1.ConfigMapVolumeSource{
+			LocalObjectReference: corev1.LocalObjectReference{Name: o.CA.Name},
+			Items:                []corev1.KeyToPath{{Key: o.CA.Key, Path: "ca.crt"}},
+			Optional:             &caOptional,
+		}}})
+	}
 	noAutomount := false
 	return &appsv1.Deployment{
 		TypeMeta:   metav1.TypeMeta{APIVersion: "apps/v1", Kind: "Deployment"},
@@ -231,8 +322,8 @@ forgejo admin user create --admin --username ` + ForgejoBotUser +
 						Name:            "bootstrap",
 						Image:           forgejoImg,
 						Command:         []string{"sh", "-c", bootstrap},
-						Env:             append(forgejoEnv(dv, argoWebhookHost), adminPW),
-						VolumeMounts:    []corev1.VolumeMount{dataMount, caMount},
+						Env:             append(append(forgejoEnv(dv, argoWebhookHost), adminPW), forgejoOIDCEnv(dv.Spec.Forge.OIDC)...),
+						VolumeMounts:    mounts,
 						Resources:       forgejoResources(),
 						SecurityContext: hardenedContainerSecurityContext(),
 					}},
@@ -241,13 +332,13 @@ forgejo admin user create --admin --username ` + ForgejoBotUser +
 						Image:           forgejoImg,
 						Env:             forgejoEnv(dv, argoWebhookHost),
 						Ports:           []corev1.ContainerPort{{Name: "http", ContainerPort: ForgejoHTTPPort}},
-						VolumeMounts:    []corev1.VolumeMount{dataMount, caMount},
+						VolumeMounts:    mounts,
 						ReadinessProbe:  healthProbe(ForgejoHTTPPort, 8, 5, 0),
 						LivenessProbe:   healthProbe(ForgejoHTTPPort, 30, 20, 5),
 						Resources:       forgejoResources(),
 						SecurityContext: hardenedContainerSecurityContext(),
 					}},
-					Volumes: []corev1.Volume{
+					Volumes: append([]corev1.Volume{
 						{
 							Name:         "data",
 							VolumeSource: corev1.VolumeSource{PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{ClaimName: forgejoPVCName}},
@@ -256,7 +347,7 @@ forgejo admin user create --admin --username ` + ForgejoBotUser +
 						{Name: "ingress-ca", VolumeSource: corev1.VolumeSource{ConfigMap: &corev1.ConfigMapVolumeSource{
 							LocalObjectReference: corev1.LocalObjectReference{Name: IngressCAConfigMap}, Optional: &caOptional,
 						}}},
-					},
+					}, oidcCA...),
 				},
 			},
 		},

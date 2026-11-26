@@ -154,8 +154,8 @@ owns one status condition; a phase that fails or waits records why there, so
      the kubelet would read (one before a `$` or a `(`), so an admin's text (a product
      name, a link, an issuer) reaches the console as written.
      The forge's pods never carry the console's `app` label, read no Secret but their
-     admin password, and mount only their own claim, a scratch directory and the router
-     CA: no network or host volume. The console's arguments stay free, so a release
+     admin password and `spec.forge.oidc.clientSecret`, and mount only their own claim, a
+     scratch directory, the router CA and `spec.forge.oidc.ca`: no network or host volume. The console's arguments stay free, so a release
      may add flags, except the settings that send users' tokens or its pages elsewhere,
      by flag or env: the metrics endpoints and CA only as rendered from `spec.metrics`,
      TLS verification off only with `spec.forge.insecureTLS`, the OIDC issuer only as
@@ -209,6 +209,7 @@ owns one status condition; a phase that fails or waits records why there, so
      `spec.forge.credentialsSecret`, `spec.metrics`, `spec.ingress.host`,
      `spec.ingress.gateway`, `spec.forge.gateway` or `spec.branding.configMap` changes;
    - `spec.auth.oidc` (its issuer, client secret or CA) changes;
+   - `spec.forge.oidc` (its client secret or CA) changes;
    - `spec.forge.pullRequests` turns Delegated on or off, or, while Delegated,
      `spec.forge.url` or `spec.forge.userAuth` changes;
    - `spec.image` or the operator's `RELATED_IMAGE_*` names an image outside the
@@ -1180,6 +1181,34 @@ Set `spec.forge.webURL` when browsers must open the forge elsewhere:
 dotvirt's API and git calls still go to `spec.forge.url`.
 Unset, links start with `spec.forge.url`.
 A managed forge also takes `webURL` as its `ROOT_URL`, so its own pages and clone links name it.
+
+## Forge sign-in (optional)
+
+A managed forge can sign people in through an OpenID Connect issuer, each under an account of their own the forge creates at their first sign-in.
+Register it at the issuer as a client of its own, not the console's, redirecting to `<forge web URL>/user/oauth2/<name>/callback`.
+
+```yaml
+spec:
+  forge:
+    managed: true
+    webURL: https://git.example.com
+    oidc:
+      issuerURL: https://idm.example.com/oauth2/openid/forgejo
+      clientID: forgejo
+      clientSecret: {name: forgejo-oidc, key: secret}
+      name: Kanidm
+      scopes: [email, profile, groups]
+      groupClaimName: groups
+      adminGroup: forge_admins
+      ca: {name: idm-ca, key: ca.crt}
+```
+
+- The forge names each account from the `preferred_username` claim and needs an email.
+- Members of `adminGroup`, read from `groupClaimName`, are the forge's administrators.
+- The forge's password form is off, and no account links to an existing one: the operator's account keeps its API access only.
+- Registering the issuer reads its discovery document, so the forge's bootstrap does it only when these settings or the client secret change. An issuer down then keeps the forge from starting until it answers; otherwise its starts never wait on the issuer.
+- The bootstrap reads the client secret when the forge starts: restart it after a rotation.
+- Removing `oidc` turns the password form back on and removes the issuer from the forge. Once accounts came from it, the forge refuses to remove it: they keep signing in through it until you remove them, or revoke the forge's client at the issuer.
 
 ## Metrics
 
