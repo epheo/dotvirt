@@ -340,6 +340,88 @@ spec:
                     description: Managed deploys a self-hosted Forgejo for evaluation;
                       false = bring your own.
                     type: boolean
+                  oidc:
+                    description: |-
+                      OIDC signs people in to a managed forge through an OpenID Connect
+                      issuer, each under an account of their own the forge creates at first
+                      sign-in. The forge's own sign-in form is off then; the operator's
+                      account keeps its API access.
+                    properties:
+                      adminGroup:
+                        maxLength: 256
+                        pattern: ^[^\x00-\x1f\x7f]+$
+                        type: string
+                      ca:
+                        description: |-
+                          CA is a PEM bundle in a ConfigMap in dotvirt's namespace the forge
+                          trusts for the issuer beside the system pool.
+                        properties:
+                          key:
+                            description: 'Key is a ConfigMap key: not ".", and not
+                              starting with "..".'
+                            maxLength: 253
+                            pattern: ^\.?[-_a-zA-Z0-9][-._a-zA-Z0-9]*$
+                            type: string
+                          name:
+                            maxLength: 253
+                            pattern: ^[a-z0-9]([-a-z0-9.]*[a-z0-9])?$
+                            type: string
+                        required:
+                        - key
+                        - name
+                        type: object
+                      clientID:
+                        minLength: 1
+                        type: string
+                      clientSecret:
+                        description: SecretKeyRef is one key of a Secret in dotvirt's
+                          namespace.
+                        properties:
+                          key:
+                            minLength: 1
+                            type: string
+                          name:
+                            minLength: 1
+                            type: string
+                        required:
+                        - key
+                        - name
+                        type: object
+                      groupClaimName:
+                        description: |-
+                          GroupClaimName is the claim listing a person's groups; members of
+                          AdminGroup are the forge's administrators.
+                        pattern: ^[!#-\[\]-~]+$
+                        type: string
+                      issuerURL:
+                        description: |-
+                          IssuerURL is the issuer exactly as its tokens name it; the forge reads
+                          <issuerURL>/.well-known/openid-configuration.
+                        pattern: ^https://[^\s?#]+$
+                        type: string
+                      name:
+                        description: |-
+                          Name names the issuer on the forge's sign-in button and in its callback
+                          path. Unset: SSO.
+                        pattern: ^[A-Za-z0-9][-A-Za-z0-9._]{0,39}$
+                        type: string
+                      scopes:
+                        description: |-
+                          Scopes are asked beside openid. The forge names each account from the
+                          preferred_username claim and needs an email: ask for what carries them.
+                        items:
+                          pattern: ^[!#-\[\]-~]+$
+                          type: string
+                        type: array
+                    required:
+                    - clientID
+                    - clientSecret
+                    - issuerURL
+                    type: object
+                    x-kubernetes-validations:
+                    - message: 'adminGroup needs groupClaimName: the claim that group
+                        is read from'
+                      rule: '!has(self.adminGroup) || has(self.groupClaimName)'
                   platformRepo:
                     description: |-
                       PlatformRepo is the cluster-scoped + tenancy repo (CUDN/NNCP/Namespace). The
@@ -439,6 +521,9 @@ spec:
                 - message: 'gateway exposes a managed forge: set managed, or expose
                     your own forge yourself'
                   rule: '!has(self.gateway) || (has(self.managed) && self.managed)'
+                - message: 'oidc configures a managed forge''s sign-in: set managed,
+                    or configure your own forge yourself'
+                  rule: '!has(self.oidc) || (has(self.managed) && self.managed)'
                 - message: 'pullRequests Delegated needs url: users'' forge tokens
                     go only to the forge the spec names, never to an address from
                     the credential Secret'

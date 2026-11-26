@@ -30,6 +30,10 @@ var TemplateParams = Params{
 	OIDCIssuer:         "${OIDC_ISSUER}",
 	OIDCCAConfigMap:    "${OIDC_CA_CONFIGMAP}",
 
+	ForgeOIDCSecret:      "${FORGE_OIDC_SECRET}",
+	ForgeOIDCSecretKey:   "${FORGE_OIDC_SECRET_KEY}",
+	ForgeOIDCCAConfigMap: "${FORGE_OIDC_CA_CONFIGMAP}",
+
 	ForgeURL:             "${FORGE_URL}",
 	ForgeClientID:        "${FORGE_CLIENT_ID}",
 	ForgeAuthorizeURL:    "${FORGE_AUTHORIZE_URL}",
@@ -140,6 +144,9 @@ var templateHeader = `# The dotvirt operator guard: admission policies bounding 
 #   # The OIDC issuer and client secret an admin chose, if any:
 #   export OIDC_SECRET="$(spec auth.oidc.clientSecret.name)" OIDC_SECRET_KEY="$(spec auth.oidc.clientSecret.key)"
 #   export OIDC_ISSUER="$(spec auth.oidc.issuerURL)" OIDC_CA_CONFIGMAP="$(spec auth.oidc.ca.name)"
+#   # The managed forge's issuer client secret and CA an admin chose, if any:
+#   export FORGE_OIDC_SECRET="$(spec forge.oidc.clientSecret.name)" FORGE_OIDC_SECRET_KEY="$(spec forge.oidc.clientSecret.key)"
+#   export FORGE_OIDC_CA_CONFIGMAP="$(spec forge.oidc.ca.name)"
 #   # Delegated pull requests: the forge application an admin registered.
 #   export FORGE_DELEGATED="$( [ "$(spec forge.pullRequests)" = Delegated ] && echo true || echo false )"
 #   export FORGE_URL="$(spec forge.url)" FORGE_CLIENT_ID="$(spec forge.userAuth.clientID)"
@@ -173,6 +180,8 @@ var templateHeader = `# The dotvirt operator guard: admission policies bounding 
 #     -e "s|\${FORGE_SECRET}|$FORGE_SECRET|g" -e "s|\${FORGE_MANAGED}|$FORGE_MANAGED|g" \
 #     -e "s|\${OIDC_SECRET}|$OIDC_SECRET|g" -e "s|\${OIDC_SECRET_KEY}|$OIDC_SECRET_KEY|g" \
 #     -e "s|\${OIDC_ISSUER}|$OIDC_ISSUER|g" -e "s|\${OIDC_CA_CONFIGMAP}|$OIDC_CA_CONFIGMAP|g" \
+#     -e "s|\${FORGE_OIDC_SECRET}|$FORGE_OIDC_SECRET|g" -e "s|\${FORGE_OIDC_SECRET_KEY}|$FORGE_OIDC_SECRET_KEY|g" \
+#     -e "s|\${FORGE_OIDC_CA_CONFIGMAP}|$FORGE_OIDC_CA_CONFIGMAP|g" \
 #     -e "s|\${FORGE_DELEGATED}|$FORGE_DELEGATED|g" \
 #     -e "s|\${FORGE_URL}|$FORGE_URL|g" -e "s|\${FORGE_CLIENT_ID}|$FORGE_CLIENT_ID|g" \
 #     -e "s|\${FORGE_AUTHORIZE_URL}|$FORGE_AUTHORIZE_URL|g" -e "s|\${FORGE_TOKEN_URL}|$FORGE_TOKEN_URL|g" \

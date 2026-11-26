@@ -98,6 +98,9 @@
 #   # The OIDC issuer and client secret an admin chose, if any:
 #   export OIDC_SECRET="$(spec auth.oidc.clientSecret.name)" OIDC_SECRET_KEY="$(spec auth.oidc.clientSecret.key)"
 #   export OIDC_ISSUER="$(spec auth.oidc.issuerURL)" OIDC_CA_CONFIGMAP="$(spec auth.oidc.ca.name)"
+#   # The managed forge's issuer client secret and CA an admin chose, if any:
+#   export FORGE_OIDC_SECRET="$(spec forge.oidc.clientSecret.name)" FORGE_OIDC_SECRET_KEY="$(spec forge.oidc.clientSecret.key)"
+#   export FORGE_OIDC_CA_CONFIGMAP="$(spec forge.oidc.ca.name)"
 #   # Delegated pull requests: the forge application an admin registered.
 #   export FORGE_DELEGATED="$( [ "$(spec forge.pullRequests)" = Delegated ] && echo true || echo false )"
 #   export FORGE_URL="$(spec forge.url)" FORGE_CLIENT_ID="$(spec forge.userAuth.clientID)"
@@ -109,7 +112,7 @@
 #   # Every value lands inside a quoted string in a YAML document: one holding
 #   # any other character (a quote, a backslash, a line break, a space) is
 #   # refused, never escaped. The console's Install builds the guard in Go.
-#   for v in ARGO_CONTROLLER ARGO_NAMESPACE BRANDING_CONFIGMAP CONSOLE_GATEWAY CONSOLE_GATEWAY_NAMESPACE CONSOLE_GATEWAY_SECTION CONSOLE_HOST FORGE_AUTHORIZE_URL FORGE_CLIENT_ID FORGE_CLIENT_SECRET FORGE_CLIENT_SECRET_KEY FORGE_DELEGATED FORGE_GATEWAY FORGE_GATEWAY_NAMESPACE FORGE_GATEWAY_SECTION FORGE_INSECURE_TLS FORGE_MANAGED FORGE_SECRET FORGE_TOKEN_URL FORGE_URL INSTALL_NAMESPACE METRICS_CA METRICS_CA_CONFIGMAP METRICS_TENANCY_URL METRICS_URL OIDC_CA_CONFIGMAP OIDC_ISSUER OIDC_SECRET OIDC_SECRET_KEY OPERATOR_USERNAME RELATED_IMAGE_DOTVIRT RELATED_IMAGE_FORGEJO SPEC_IMAGE; do
+#   for v in ARGO_CONTROLLER ARGO_NAMESPACE BRANDING_CONFIGMAP CONSOLE_GATEWAY CONSOLE_GATEWAY_NAMESPACE CONSOLE_GATEWAY_SECTION CONSOLE_HOST FORGE_AUTHORIZE_URL FORGE_CLIENT_ID FORGE_CLIENT_SECRET FORGE_CLIENT_SECRET_KEY FORGE_DELEGATED FORGE_GATEWAY FORGE_GATEWAY_NAMESPACE FORGE_GATEWAY_SECTION FORGE_INSECURE_TLS FORGE_MANAGED FORGE_OIDC_CA_CONFIGMAP FORGE_OIDC_SECRET FORGE_OIDC_SECRET_KEY FORGE_SECRET FORGE_TOKEN_URL FORGE_URL INSTALL_NAMESPACE METRICS_CA METRICS_CA_CONFIGMAP METRICS_TENANCY_URL METRICS_URL OIDC_CA_CONFIGMAP OIDC_ISSUER OIDC_SECRET OIDC_SECRET_KEY OPERATOR_USERNAME RELATED_IMAGE_DOTVIRT RELATED_IMAGE_FORGEJO SPEC_IMAGE; do
 #     eval "x=\${$v-}"
 #     case "$x" in *[!]A-Za-z0-9._:/@%+=~,[-]*)
 #       echo "$v holds a character the template cannot carry: install the guard from the console" >&2; exit 1;; esac
@@ -131,6 +134,8 @@
 #     -e "s|\${FORGE_SECRET}|$FORGE_SECRET|g" -e "s|\${FORGE_MANAGED}|$FORGE_MANAGED|g" \
 #     -e "s|\${OIDC_SECRET}|$OIDC_SECRET|g" -e "s|\${OIDC_SECRET_KEY}|$OIDC_SECRET_KEY|g" \
 #     -e "s|\${OIDC_ISSUER}|$OIDC_ISSUER|g" -e "s|\${OIDC_CA_CONFIGMAP}|$OIDC_CA_CONFIGMAP|g" \
+#     -e "s|\${FORGE_OIDC_SECRET}|$FORGE_OIDC_SECRET|g" -e "s|\${FORGE_OIDC_SECRET_KEY}|$FORGE_OIDC_SECRET_KEY|g" \
+#     -e "s|\${FORGE_OIDC_CA_CONFIGMAP}|$FORGE_OIDC_CA_CONFIGMAP|g" \
 #     -e "s|\${FORGE_DELEGATED}|$FORGE_DELEGATED|g" \
 #     -e "s|\${FORGE_URL}|$FORGE_URL|g" -e "s|\${FORGE_CLIENT_ID}|$FORGE_CLIENT_ID|g" \
 #     -e "s|\${FORGE_AUTHORIZE_URL}|$FORGE_AUTHORIZE_URL|g" -e "s|\${FORGE_TOKEN_URL}|$FORGE_TOKEN_URL|g" \
@@ -710,19 +715,25 @@ spec:
   - expression: object.metadata.name != "dotvirt-forgejo" || ((object.spec.template.spec.containers.all(c,
       (!has(c.envFrom) || c.envFrom.all(e, !has(e.secretRef))) && (!has(c.env) ||
       c.env.all(e, !has(e.valueFrom) || !has(e.valueFrom.secretKeyRef) || (has(e.valueFrom.secretKeyRef.name)
-      && e.valueFrom.secretKeyRef.name == "dotvirt-forgejo-admin")))) && (!has(object.spec.template.spec.initContainers)
+      && (e.valueFrom.secretKeyRef.name == "dotvirt-forgejo-admin" || (size("${FORGE_OIDC_SECRET}")
+      > 0 && e.valueFrom.secretKeyRef.name == "${FORGE_OIDC_SECRET}" && has(e.valueFrom.secretKeyRef.key)
+      && e.valueFrom.secretKeyRef.key == "${FORGE_OIDC_SECRET_KEY}")))))) && (!has(object.spec.template.spec.initContainers)
       || object.spec.template.spec.initContainers.all(c, (!has(c.envFrom) || c.envFrom.all(e,
       !has(e.secretRef))) && (!has(c.env) || c.env.all(e, !has(e.valueFrom) || !has(e.valueFrom.secretKeyRef)
-      || (has(e.valueFrom.secretKeyRef.name) && e.valueFrom.secretKeyRef.name == "dotvirt-forgejo-admin")))))))
-    message: the operator gives the forge no Secret but its own admin password (dotvirt
-      operator guard)
+      || (has(e.valueFrom.secretKeyRef.name) && (e.valueFrom.secretKeyRef.name ==
+      "dotvirt-forgejo-admin" || (size("${FORGE_OIDC_SECRET}") > 0 && e.valueFrom.secretKeyRef.name
+      == "${FORGE_OIDC_SECRET}" && has(e.valueFrom.secretKeyRef.key) && e.valueFrom.secretKeyRef.key
+      == "${FORGE_OIDC_SECRET_KEY}")))))))))
+    message: the operator gives the forge no Secret but its own admin password and
+      the issuer client secret an admin chose (dotvirt operator guard)
     reason: Forbidden
   - expression: object.metadata.name != "dotvirt-forgejo" || !has(object.spec.template.spec.volumes)
       || object.spec.template.spec.volumes.all(v, (has(v.persistentVolumeClaim) &&
       v.persistentVolumeClaim.claimName == "dotvirt-forgejo-data") || has(v.emptyDir)
-      || (has(v.configMap) && has(v.configMap.name) && v.configMap.name == "dotvirt-ingress-ca"))
-    message: the operator gives the forge only its own claim, a scratch directory
-      and the router CA (dotvirt operator guard)
+      || (has(v.configMap) && has(v.configMap.name) && (v.configMap.name == "dotvirt-ingress-ca"
+      || (size("${FORGE_OIDC_CA_CONFIGMAP}") > 0 && v.configMap.name == "${FORGE_OIDC_CA_CONFIGMAP}"))))
+    message: the operator gives the forge only its own claim, a scratch directory,
+      the router CA and the issuer CA an admin chose (dotvirt operator guard)
     reason: Forbidden
   - expression: object.metadata.name != "dotvirt" || object.spec.template.spec.containers.all(c,
       !has(c.env) || c.env.all(e, !has(e.valueFrom) || !has(e.valueFrom.secretKeyRef)

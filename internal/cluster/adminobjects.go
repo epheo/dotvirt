@@ -46,6 +46,8 @@ type InstallSpec struct {
 	OIDCSecret, OIDCSecretKey, OIDCIssuer string
 	// OIDCCAConfigMap holds the issuer's CA an admin chose.
 	OIDCCAConfigMap string
+	// The managed forge's issuer client secret and CA (spec.forge.oidc).
+	ForgeOIDCSecret, ForgeOIDCSecretKey, ForgeOIDCCAConfigMap string
 	// The forge application users connect their own forge accounts through
 	// (spec.forge.userAuth), when pull requests are Delegated.
 	ForgeDelegated                                            bool
@@ -88,6 +90,9 @@ func (c *Client) InstallIn(ctx context.Context, namespace string) (InstallSpec, 
 	out.OIDCSecretKey, _, _ = unstructured.NestedString(o, "spec", "auth", "oidc", "clientSecret", "key")
 	out.OIDCIssuer, _, _ = unstructured.NestedString(o, "spec", "auth", "oidc", "issuerURL")
 	out.OIDCCAConfigMap, _, _ = unstructured.NestedString(o, "spec", "auth", "oidc", "ca", "name")
+	out.ForgeOIDCSecret, _, _ = unstructured.NestedString(o, "spec", "forge", "oidc", "clientSecret", "name")
+	out.ForgeOIDCSecretKey, _, _ = unstructured.NestedString(o, "spec", "forge", "oidc", "clientSecret", "key")
+	out.ForgeOIDCCAConfigMap, _, _ = unstructured.NestedString(o, "spec", "forge", "oidc", "ca", "name")
 	pullRequests, _, _ := unstructured.NestedString(o, "spec", "forge", "pullRequests")
 	out.ForgeDelegated = pullRequests == "Delegated"
 	out.ForgeURL, _, _ = unstructured.NestedString(o, "spec", "forge", "url")

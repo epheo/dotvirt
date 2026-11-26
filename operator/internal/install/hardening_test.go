@@ -1,9 +1,13 @@
 package install
 
 import (
+	"slices"
 	"testing"
 
+	corev1 "k8s.io/api/core/v1"
 	networkingv1 "k8s.io/api/networking/v1"
+
+	dotvirtv1alpha1 "github.com/epheo/dotvirt/operator/api/v1alpha1"
 )
 
 // The managed forge is Route-exposed: no self-registration, no anonymous read,
@@ -12,7 +16,9 @@ func TestForgejoLockedDown(t *testing.T) {
 	d := ForgejoDeployment(testDotvirt(), false, "", "")
 	spec := d.Spec.Template.Spec
 	for _, c := range append(spec.InitContainers, spec.Containers...) {
-		for _, name := range []string{"FORGEJO__service__DISABLE_REGISTRATION", "FORGEJO__service__REQUIRE_SIGNIN_VIEW"} {
+		// The sign-in form back, should an issuer have turned it off: app.ini
+		// on the volume keeps every key.
+		for _, name := range []string{"FORGEJO__service__DISABLE_REGISTRATION", "FORGEJO__service__REQUIRE_SIGNIN_VIEW", "FORGEJO__service__ENABLE_INTERNAL_SIGNIN"} {
 			if v, ok := envValue(c.Env, name); !ok || v != "true" {
 				t.Errorf("%s: %s = (%q, %v), want true", c.Name, name, v, ok)
 			}
@@ -20,6 +26,41 @@ func TestForgejoLockedDown(t *testing.T) {
 	}
 	if spec.AutomountServiceAccountToken == nil || *spec.AutomountServiceAccountToken {
 		t.Error("Forgejo pod mounts a ServiceAccount token")
+	}
+}
+
+// Signing in through an issuer: accounts only from it, none linked to an
+// existing one, no password form; the bootstrap alone holds the client secret.
+func TestForgejoSignsInThroughTheIssuer(t *testing.T) {
+	dv := testDotvirt()
+	dv.Spec.Forge.Managed = true
+	dv.Spec.Forge.OIDC = &dotvirtv1alpha1.ForgeOIDCSpec{IssuerURL: "https://idm.example/oauth2/openid/forgejo", ClientID: "forgejo",
+		ClientSecret: dotvirtv1alpha1.SecretKeyRef{Name: "forge-oidc", Key: "client-secret"}, Scopes: []string{"email", "profile"},
+		CA: &dotvirtv1alpha1.ConfigMapKeyRef{Name: "idm-ca", Key: "ca.crt"}}
+	spec := ForgejoDeployment(dv, false, "", "").Spec.Template.Spec
+	for _, c := range append(spec.InitContainers, spec.Containers...) {
+		for name, want := range map[string]string{
+			"FORGEJO__service__DISABLE_REGISTRATION":             "false",
+			"FORGEJO__service__ALLOW_ONLY_EXTERNAL_REGISTRATION": "true",
+			"FORGEJO__service__ENABLE_INTERNAL_SIGNIN":           "false",
+			"FORGEJO__service__REQUIRE_SIGNIN_VIEW":              "true",
+			"FORGEJO__oauth2_client__ACCOUNT_LINKING":            "disabled",
+			"SSL_CERT_DIR": "/etc/ssl/certs:" + forgejoCADir + ":" + forgejoOIDCCADir,
+		} {
+			if v, _ := envValue(c.Env, name); v != want {
+				t.Errorf("%s: %s = %q, want %q", c.Name, name, v, want)
+			}
+		}
+		_, holds := envValue(c.Env, "FORGE_OIDC_ISSUER")
+		if secret := slices.ContainsFunc(c.Env, func(e corev1.EnvVar) bool { return e.Name == "FORGE_OIDC_SECRET" }); holds != (c.Name == "bootstrap") || secret != holds {
+			t.Errorf("%s: issuer env %v, secret %v; want both in the bootstrap only", c.Name, holds, secret)
+		}
+	}
+	if v, _ := envValue(spec.InitContainers[0].Env, "FORGE_OIDC_SCOPES"); v != "email profile" {
+		t.Errorf("scopes %q", v)
+	}
+	if !slices.ContainsFunc(spec.Volumes, func(v corev1.Volume) bool { return v.ConfigMap != nil && v.ConfigMap.Name == "idm-ca" }) {
+		t.Error("the issuer's CA is not mounted")
 	}
 }
 

@@ -159,16 +159,19 @@ func guard(p Params, insecure, managed, delegated string, metrics Metrics) []Obj
 			// the install namespace and serve it.
 			deny(`object.metadata.name != `+quote(ForgeDeployment)+` || (`+eachContainer(`(!has(c.envFrom) || c.envFrom.all(e, !has(e.secretRef))) && `+
 				`(!has(c.env) || c.env.all(e, !has(e.valueFrom) || !has(e.valueFrom.secretKeyRef) || `+
-				`(has(e.valueFrom.secretKeyRef.name) && e.valueFrom.secretKeyRef.name == `+quote(ForgeAdminSecret)+`)))`)+`)`,
-				"the operator gives the forge no Secret but its own admin password"),
+				`(has(e.valueFrom.secretKeyRef.name) && (e.valueFrom.secretKeyRef.name == `+quote(ForgeAdminSecret)+` || `+
+				`(size(`+quote(p.ForgeOIDCSecret)+`) > 0 && e.valueFrom.secretKeyRef.name == `+quote(p.ForgeOIDCSecret)+` && `+
+				`has(e.valueFrom.secretKeyRef.key) && e.valueFrom.secretKeyRef.key == `+quote(p.ForgeOIDCSecretKey)+`)))))`)+`)`,
+				"the operator gives the forge no Secret but its own admin password and the issuer client secret an admin chose"),
 			// The volume kinds the forge renders, and no other: it runs its own
 			// commands, so a network volume (nfs, iscsi, rbd, ...) would reach
 			// any export the nodes can, and a Secret, projected, CSI or
 			// ephemeral one data it was never given.
 			deny(`object.metadata.name != `+quote(ForgeDeployment)+` || !has(`+pod+`.volumes) || `+pod+`.volumes.all(v, `+
 				`(has(v.persistentVolumeClaim) && v.persistentVolumeClaim.claimName == `+quote(ForgeClaim)+`) || has(v.emptyDir) || `+
-				`(has(v.configMap) && has(v.configMap.name) && v.configMap.name == `+quote(IngressCAConfigMap)+`))`,
-				"the operator gives the forge only its own claim, a scratch directory and the router CA"),
+				`(has(v.configMap) && has(v.configMap.name) && (v.configMap.name == `+quote(IngressCAConfigMap)+` || `+
+				`(size(`+quote(p.ForgeOIDCCAConfigMap)+`) > 0 && v.configMap.name == `+quote(p.ForgeOIDCCAConfigMap)+`))))`,
+				"the operator gives the forge only its own claim, a scratch directory, the router CA and the issuer CA an admin chose"),
 			// The kubelet resolves any Secret in the namespace a pod names,
 			// whatever the operator may read: an env the console sends out
 			// (the forge token, to the forge URL) could carry another Secret.

@@ -86,6 +86,7 @@ const (
 // HTTPS and the forge API) and ArgoCD's repo-creds.
 // +kubebuilder:validation:XValidation:rule="!has(self.pullRequests) || self.pullRequests != 'Delegated' || has(self.userAuth)",message="pullRequests Delegated needs userAuth: the OAuth2 application dotvirt acts through"
 // +kubebuilder:validation:XValidation:rule="!has(self.gateway) || (has(self.managed) && self.managed)",message="gateway exposes a managed forge: set managed, or expose your own forge yourself"
+// +kubebuilder:validation:XValidation:rule="!has(self.oidc) || (has(self.managed) && self.managed)",message="oidc configures a managed forge's sign-in: set managed, or configure your own forge yourself"
 // +kubebuilder:validation:XValidation:rule="!has(self.pullRequests) || self.pullRequests != 'Delegated' || (has(self.url) && size(self.url) > 0)",message="pullRequests Delegated needs url: users' forge tokens go only to the forge the spec names, never to an address from the credential Secret"
 type ForgeSpec struct {
 	// URL is the forge base URL. Leave empty with managed on OpenShift: the operator
@@ -108,6 +109,12 @@ type ForgeSpec struct {
 	// console's.
 	// +optional
 	Gateway *GatewayRef `json:"gateway,omitempty"`
+	// OIDC signs people in to a managed forge through an OpenID Connect
+	// issuer, each under an account of their own the forge creates at first
+	// sign-in. The forge's own sign-in form is off then; the operator's
+	// account keeps its API access.
+	// +optional
+	OIDC *ForgeOIDCSpec `json:"oidc,omitempty"`
 	// PlatformRepo is the cluster-scoped + tenancy repo (CUDN/NNCP/Namespace). The
 	// operator ensures it exists; dotvirt routes platform creates here by kind. Defaults
 	// to <forge URL>/dotvirt/platform.git for a managed forge.
@@ -149,6 +156,51 @@ type ForgeSpec struct {
 	// redirect URI https://<console host>/api/forge/callback.
 	// +optional
 	UserAuth *ForgeUserAuthSpec `json:"userAuth,omitempty"`
+}
+
+// ForgeOIDCSpec is the client a managed forge is registered as at an OpenID
+// Connect issuer: one of its own, not the console's. Register
+// <forge web URL>/user/oauth2/<name>/callback as its redirect URI.
+// +kubebuilder:validation:XValidation:rule="!has(self.adminGroup) || has(self.groupClaimName)",message="adminGroup needs groupClaimName: the claim that group is read from"
+type ForgeOIDCSpec struct {
+	// IssuerURL is the issuer exactly as its tokens name it; the forge reads
+	// <issuerURL>/.well-known/openid-configuration.
+	// +kubebuilder:validation:Pattern=`^https://[^\s?#]+$`
+	IssuerURL string `json:"issuerURL"`
+	// +kubebuilder:validation:MinLength=1
+	ClientID     string       `json:"clientID"`
+	ClientSecret SecretKeyRef `json:"clientSecret"`
+	// Name names the issuer on the forge's sign-in button and in its callback
+	// path. Unset: SSO.
+	// +kubebuilder:validation:Pattern=`^[A-Za-z0-9][-A-Za-z0-9._]{0,39}$`
+	// +optional
+	Name string `json:"name,omitempty"`
+	// Scopes are asked beside openid. The forge names each account from the
+	// preferred_username claim and needs an email: ask for what carries them.
+	// +kubebuilder:validation:items:Pattern=`^[!#-\[\]-~]+$`
+	// +optional
+	Scopes []string `json:"scopes,omitempty"`
+	// GroupClaimName is the claim listing a person's groups; members of
+	// AdminGroup are the forge's administrators.
+	// +kubebuilder:validation:Pattern=`^[!#-\[\]-~]+$`
+	// +optional
+	GroupClaimName string `json:"groupClaimName,omitempty"`
+	// +kubebuilder:validation:MaxLength=256
+	// +kubebuilder:validation:Pattern=`^[^\x00-\x1f\x7f]+$`
+	// +optional
+	AdminGroup string `json:"adminGroup,omitempty"`
+	// CA is a PEM bundle in a ConfigMap in dotvirt's namespace the forge
+	// trusts for the issuer beside the system pool.
+	// +optional
+	CA *ConfigMapKeyRef `json:"ca,omitempty"`
+}
+
+// ForgeOIDCName is the forge's name for its issuer: spec.forge.oidc.name, else SSO.
+func (o ForgeOIDCSpec) ForgeOIDCName() string {
+	if o.Name != "" {
+		return o.Name
+	}
+	return "SSO"
 }
 
 // ForgeUserAuthSpec is the forge's OAuth2 application dotvirt acts through for

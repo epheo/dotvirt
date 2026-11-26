@@ -79,6 +79,10 @@ type Params struct {
 	// OIDCCAConfigMap is spec.auth.oidc.ca's ConfigMap: the issuer's CA,
 	// a volume the admin chose for the console.
 	OIDCCAConfigMap string
+	// ForgeOIDCSecret and ForgeOIDCSecretKey are spec.forge.oidc.clientSecret,
+	// and ForgeOIDCCAConfigMap spec.forge.oidc.ca's ConfigMap: what a managed
+	// forge reads beside its own, as an admin chose them.
+	ForgeOIDCSecret, ForgeOIDCSecretKey, ForgeOIDCCAConfigMap string
 	// ForgeManaged is spec.forge.managed: a forge the operator runs, whose
 	// credential it mints. Otherwise the credential is an admin's, and the
 	// console sends it only to the URL its Secret names.
@@ -141,6 +145,9 @@ func (p Params) Malformed() string {
 		{"forge Gateway listener", optional(p.ForgeGateway.Section)},
 		{"OIDC client Secret", optional(p.OIDCSecret)},
 		{"OIDC CA ConfigMap", optional(p.OIDCCAConfigMap)},
+		{"forge OIDC client Secret", optional(p.ForgeOIDCSecret)},
+		{"forge OIDC client Secret key", p.ForgeOIDCSecretKey == "" || len(validation.IsConfigMapKey(p.ForgeOIDCSecretKey)) == 0},
+		{"forge OIDC CA ConfigMap", optional(p.ForgeOIDCCAConfigMap)},
 		{"OIDC client Secret key", p.OIDCSecretKey == "" || len(validation.IsConfigMapKey(p.OIDCSecretKey)) == 0},
 		{"OIDC issuer", p.OIDCIssuer == "" || httpsURL(p.OIDCIssuer)},
 		{"forge URL", p.ForgeURL == "" || webURL(p.ForgeURL)},

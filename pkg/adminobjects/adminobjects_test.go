@@ -362,6 +362,7 @@ func filledTemplate(t *testing.T, template []byte, p Params) []*unstructured.Uns
 		"${METRICS_CA_CONFIGMAP}": p.MetricsCAConfigMap, "${FORGE_SECRET}": p.ForgeSecret,
 		"${FORGE_MANAGED}": strconv.FormatBool(p.ForgeManaged), "${OIDC_SECRET}": p.OIDCSecret, "${OIDC_SECRET_KEY}": p.OIDCSecretKey,
 		"${OIDC_ISSUER}": p.OIDCIssuer, "${OIDC_CA_CONFIGMAP}": p.OIDCCAConfigMap, "${FORGE_DELEGATED}": strconv.FormatBool(p.ForgeDelegated),
+		"${FORGE_OIDC_SECRET}": p.ForgeOIDCSecret, "${FORGE_OIDC_SECRET_KEY}": p.ForgeOIDCSecretKey, "${FORGE_OIDC_CA_CONFIGMAP}": p.ForgeOIDCCAConfigMap,
 		"${FORGE_URL}": p.ForgeURL, "${FORGE_CLIENT_ID}": p.ForgeClientID, "${FORGE_AUTHORIZE_URL}": p.ForgeAuthorizeURL,
 		"${FORGE_TOKEN_URL}": p.ForgeTokenURL, "${FORGE_CLIENT_SECRET}": p.ForgeClientSecret, "${FORGE_CLIENT_SECRET_KEY}": p.ForgeClientSecretKey,
 	} {

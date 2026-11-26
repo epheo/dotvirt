@@ -1150,6 +1150,20 @@ func TestEnvtest(t *testing.T) {
 		withEnv(corev1.EnvVar{Name: "DOTVIRT_OIDC_CA", Value: adminobjects.OIDCCAPath})(oidcCA)
 		oidcCAElsewhere := oidc.DeepCopy()
 		withEnv(corev1.EnvVar{Name: "DOTVIRT_OIDC_CA", Value: adminobjects.IngressCAPath})(oidcCAElsewhere)
+		// The forge's own issuer client: its secret and CA as an admin chose them.
+		chosen.ForgeOIDCSecret, chosen.ForgeOIDCSecretKey, chosen.ForgeOIDCCAConfigMap = "forge-oidc", "client-secret", "forge-idm-ca"
+		forgeOIDCDV := dv.DeepCopy()
+		forgeOIDCDV.Spec.Forge.Managed = true
+		forgeOIDCDV.Spec.Forge.OIDC = &dotvirtv1alpha1.ForgeOIDCSpec{IssuerURL: "https://idm.example/oauth2/openid/forgejo", ClientID: "forgejo",
+			ClientSecret: dotvirtv1alpha1.SecretKeyRef{Name: "forge-oidc", Key: "client-secret"},
+			CA:           &dotvirtv1alpha1.ConfigMapKeyRef{Name: "forge-idm-ca", Key: "ca.crt"}}
+		forgeOIDC := install.ForgejoDeployment(forgeOIDCDV, false, "", "")
+		forgeOIDCOtherKey := forgeOIDC.DeepCopy()
+		for i, e := range forgeOIDCOtherKey.Spec.Template.Spec.InitContainers[0].Env {
+			if e.Name == "FORGE_OIDC_SECRET" {
+				forgeOIDCOtherKey.Spec.Template.Spec.InitContainers[0].Env[i].ValueFrom.SecretKeyRef.Key = "other"
+			}
+		}
 		oidcCAOther := oidc.DeepCopy()
 		withVolume(configMapVol("oidc-ca", "someone-elses-ca"), corev1.VolumeMount{Name: "oidc-ca", MountPath: path.Dir(adminobjects.OIDCCAPath)})(oidcCAOther)
 		oidcElsewhere := app()
@@ -1186,6 +1200,7 @@ func TestEnvtest(t *testing.T) {
 			"the console branded from the admin's ConfigMap":               branded,
 			"the console with the admin's OIDC client secret":              oidc,
 			"the console trusting the admin's OIDC CA":                     oidcCA,
+			"the forge signing people in through the admin's issuer":       forgeOIDC,
 			"the console delegating through the admin's forge application": delegated,
 			"the forge's Ingress on its own host":                          forgeIngress("forge.example", nil),
 			"the forge's HTTPRoute on its own host":                        forgeRoute("forge.example"),
@@ -1216,6 +1231,7 @@ func TestEnvtest(t *testing.T) {
 			}(),
 			"the console sending the admin's OIDC client secret to another issuer":  oidcIssuerElsewhere,
 			"the console trusting another CA for the issuer":                        oidcCAElsewhere,
+			"the forge reading another key of the issuer's Secret":                  forgeOIDCOtherKey,
 			"the console mounting another ConfigMap as the issuer's CA":             oidcCAOther,
 			"the console sending the admin's OIDC client secret as its forge token": oidcElsewhere,
 			"the forge's Ingress for every host":                                    forgeIngress("", nil),
@@ -1498,9 +1514,18 @@ func TestEnvtest(t *testing.T) {
 				dv.Spec.Ingress = dotvirtv1alpha1.IngressSpec{Gateway: gw}
 				dv.Spec.Forge.Managed = true
 			},
-			// The operator exposes only a forge it runs.
+			// The operator exposes only a forge it runs, and signs people in to it.
 			"a forge Gateway for a forge of one's own": func(dv *dotvirtv1alpha1.Dotvirt) {
 				dv.Spec.Forge.Gateway = listener
+			},
+			"forge sign-in for a forge of one's own": func(dv *dotvirtv1alpha1.Dotvirt) {
+				dv.Spec.Forge.OIDC = &dotvirtv1alpha1.ForgeOIDCSpec{IssuerURL: "https://idm.example", ClientID: "forgejo",
+					ClientSecret: dotvirtv1alpha1.SecretKeyRef{Name: "s", Key: "k"}}
+			},
+			"forge admins from no group claim": func(dv *dotvirtv1alpha1.Dotvirt) {
+				dv.Spec.Forge.Managed = true
+				dv.Spec.Forge.OIDC = &dotvirtv1alpha1.ForgeOIDCSpec{IssuerURL: "https://idm.example", ClientID: "forgejo",
+					ClientSecret: dotvirtv1alpha1.SecretKeyRef{Name: "s", Key: "k"}, AdminGroup: "admins"}
 			},
 		} {
 			dv := testCR()
