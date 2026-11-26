@@ -143,9 +143,9 @@ func TestConsoleHTTPRouteFollowsTheConsoleHost(t *testing.T) {
 		got := exprs(policyOf(t, objs[index(objs, "ValidatingAdmissionPolicy", GuardHTTPRoutesName)]))
 		q := quote(host)
 		holds(t, "httproutes for "+q, got,
-			`(`+q+` == "" ? ("https" != "" && (!has(object.spec.hostnames) || size(object.spec.hostnames) == 0)) : `+
+			`(size(`+q+`) == 0 ? (size("https") > 0 && (!has(object.spec.hostnames) || size(object.spec.hostnames) == 0)) : `+
 				`has(object.spec.hostnames) && object.spec.hostnames == [`+q+`])`)
-		holds(t, "httproutes for "+q, got, `(`+q+` != "" && has(object.spec.hostnames) && size(object.spec.hostnames) > 0 && object.spec.hostnames.all(h, h != `+q)
+		holds(t, "httproutes for "+q, got, `(size(`+q+`) > 0 && has(object.spec.hostnames) && size(object.spec.hostnames) > 0 && object.spec.hostnames.all(h, h != `+q)
 	}
 }
 

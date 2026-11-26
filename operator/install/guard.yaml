@@ -383,7 +383,7 @@ spec:
       object.metadata.annotations[k]))) && (!has(oldObject.metadata.annotations) ||
       oldObject.metadata.annotations.all(k, k == "openshift.io/host.generated" ||
       (has(object.metadata.annotations) && k in object.metadata.annotations))))) &&
-      ("${CONSOLE_HOST}" == "" ? ("${CONSOLE_GATEWAY_SECTION}" != "" && (!has(object.spec.hostnames)
+      (size("${CONSOLE_HOST}") == 0 ? (size("${CONSOLE_GATEWAY_SECTION}") > 0 && (!has(object.spec.hostnames)
       || size(object.spec.hostnames) == 0)) : has(object.spec.hostnames) && object.spec.hostnames
       == ["${CONSOLE_HOST}"]) && object.spec.rules.all(r, !has(r.filters) && r.backendRefs.all(b,
       !has(b.filters) && (!has(b.kind) || b.kind == "Service") && (!has(b.group) ||
@@ -402,7 +402,7 @@ spec:
       the install names (dotvirt operator guard)
     reason: Forbidden
   - expression: (object.metadata.name == "dotvirt" && request.namespace == "${INSTALL_NAMESPACE}")
-      || ("${CONSOLE_HOST}" != "" && has(object.spec.hostnames) && size(object.spec.hostnames)
+      || (size("${CONSOLE_HOST}") > 0 && has(object.spec.hostnames) && size(object.spec.hostnames)
       > 0 && object.spec.hostnames.all(h, h != "${CONSOLE_HOST}" && !(h.startsWith("*.")
       && "${CONSOLE_HOST}".endsWith(h.substring(1)))))
     message: the operator exposes nothing else on the console's host, nothing on every

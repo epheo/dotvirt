@@ -448,7 +448,7 @@ func frontDoor(p Params) frontDoorRules {
 			// A console with no host is reached by address: its route alone
 			// names none, and takes every name of the one listener it names.
 			deny(`!`+console+` || (`+sameAnnotations+` && `+
-				`(`+host+` == "" ? (`+quote(p.ConsoleGateway.Section)+` != "" && (!has(object.spec.hostnames) || size(object.spec.hostnames) == 0)) : `+
+				`(size(`+host+`) == 0 ? (size(`+quote(p.ConsoleGateway.Section)+`) > 0 && (!has(object.spec.hostnames) || size(object.spec.hostnames) == 0)) : `+
 				`has(object.spec.hostnames) && object.spec.hostnames == [`+host+`]) && `+
 				`object.spec.rules.all(r, !has(r.filters) && r.backendRefs.all(b, `+
 				`!has(b.filters) && (!has(b.kind) || b.kind == "Service") && (!has(b.group) || b.group == "") && `+
@@ -464,7 +464,7 @@ func frontDoor(p Params) frontDoorRules {
 			// A console with no host answers every name of the machine's
 			// address, and browsers send its cookies to every port there:
 			// the operator exposes nothing else through a Gateway then.
-			deny(console+` || (`+host+` != "" && has(object.spec.hostnames) && size(object.spec.hostnames) > 0 && `+
+			deny(console+` || (size(`+host+`) > 0 && has(object.spec.hostnames) && size(object.spec.hostnames) > 0 && `+
 				`object.spec.hostnames.all(h, h != `+host+` && !`+covers("h")+`))`, others),
 		},
 	}
