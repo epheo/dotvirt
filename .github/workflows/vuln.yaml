@@ -42,6 +42,9 @@ jobs:
           section app govulncheck ./...
           section operator govulncheck -C operator ./...
           section web npm audit --prefix web --audit-level=moderate
+          # An upstream release is no commit's doing: only the nightly checks pins,
+          # so a stale one opens the issue instead of failing PRs or main.
+          case $GITHUB_EVENT_NAME in schedule | workflow_dispatch) section pins hack/check-pins.sh ;; esac
           exit $rc
       - name: Open or update the tracking issue
         if: failure() && github.event_name == 'schedule'

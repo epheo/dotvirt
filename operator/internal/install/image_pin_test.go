@@ -31,17 +31,22 @@ func relatedImageValue(t *testing.T, path, name string) string {
 	return ""
 }
 
-// The release script (hack/release.sh) re-pins the operand digest in three
-// places: this package's defaultImage, the CSV's RELATED_IMAGE_DOTVIRT, and the
-// manager manifest. A missed pin makes OLM installs and `make run` deploy
-// DIFFERENT operands for the same operator version: assert all three agree.
-func TestDefaultImagePinConsistency(t *testing.T) {
-	for _, path := range []string{
-		"../../bundle/manifests/dotvirt-operator.clusterserviceversion.yaml",
-		"../../config/manager/manager.yaml",
+// Each operand image is pinned in three places: this package's constant, the
+// CSV's RELATED_IMAGE_*, and the manager manifest. A missed pin makes OLM installs
+// and `make run` deploy DIFFERENT operands for the same operator version: assert
+// all three agree.
+func TestImagePinConsistency(t *testing.T) {
+	for env, want := range map[string]string{
+		"RELATED_IMAGE_DOTVIRT": defaultImage,
+		"RELATED_IMAGE_FORGEJO": forgejoImage,
 	} {
-		if got := relatedImageValue(t, path, "RELATED_IMAGE_DOTVIRT"); got != defaultImage {
-			t.Errorf("%s: RELATED_IMAGE_DOTVIRT = %q, want defaultImage %q", path, got, defaultImage)
+		for _, path := range []string{
+			"../../bundle/manifests/dotvirt-operator.clusterserviceversion.yaml",
+			"../../config/manager/manager.yaml",
+		} {
+			if got := relatedImageValue(t, path, env); got != want {
+				t.Errorf("%s: %s = %q, want %q", path, env, got, want)
+			}
 		}
 	}
 }

@@ -18,13 +18,13 @@ import (
 // so its UI and PRs are reviewable off-cluster. The bootstrap was verified live against a
 // real Forgejo (see the initContainer below). For production, bring your own forge instead.
 const (
-	// Pinned by digest (the codeberg.org/forgejo/forgejo:11-rootless tag) so the eval
-	// forge is reproducible and declarable in the CSV's relatedImages. Re-pin manually
-	// when the upstream :11-rootless tag moves. The ROOTLESS image runs non-root and
+	// Pinned by digest so the eval forge is reproducible and declarable in the CSV's
+	// relatedImages. No bot re-pins it: hack/check-pins.sh fails the nightly scan when
+	// the tag moves or a newer major ships. The ROOTLESS image runs non-root and
 	// admits to OpenShift's restricted-v2 SCC with no anyuid grant (verified live: an
 	// arbitrary injected UID with gid 0 completes migrate + admin-create + serve), so
 	// it carries dotvirt's standard hardened securityContext like the operand does.
-	forgejoImage       = "codeberg.org/forgejo/forgejo:11-rootless@sha256:5135f11de848bea6d59c0a96688e90c361380ba102bdc08dbd5aa52cca2b179b"
+	forgejoImage       = "codeberg.org/forgejo/forgejo:17-rootless@sha256:39362ab93a94c0c9b8b330d2a877ddbb3f02fa8c0cba1b8d686d437b39f36a04"
 	forgejoSAName      = "dotvirt-forgejo"
 	ForgejoAdminSecret = "dotvirt-forgejo-admin" // generated admin password, under ForgejoAdminKey
 	ForgejoAdminKey    = "password"
@@ -148,13 +148,12 @@ const forgejoCADir = "/var/run/dotvirt/ca"
 //
 // No chown/su-exec: the container already runs as the unprivileged user, and the data
 // dir is group-writable (gid 0 on OpenShift via the SCC; fsGroup on vanilla K8s). The
-// PVC mounts at the image's default GITEA_WORK_DIR (/var/lib/gitea); /etc/gitea is the
-// image's other declared volume, backed by an emptyDir.
+// PVC mounts at the image's default GITEA_WORK_DIR (/var/lib/gitea), its one declared
+// volume, which holds app.ini too.
 func ForgejoDeployment(dv *dotvirtv1alpha1.Dotvirt, setFSGroup bool, argoWebhookHost, adminSecretHash string) *appsv1.Deployment {
 	replicas := int32(1)
 	forgejoImg := imageFromEnv("RELATED_IMAGE_FORGEJO", forgejoImage)
 	dataMount := corev1.VolumeMount{Name: "data", MountPath: "/var/lib/gitea"}
-	etcMount := corev1.VolumeMount{Name: "etc", MountPath: "/etc/gitea"}
 	caMount := corev1.VolumeMount{Name: "ingress-ca", MountPath: forgejoCADir, ReadOnly: true}
 	adminPW := corev1.EnvVar{Name: "ADMIN_PW", ValueFrom: &corev1.EnvVarSource{
 		SecretKeyRef: &corev1.SecretKeySelector{
@@ -206,7 +205,7 @@ forgejo admin user create --admin --username ` + ForgejoBotUser +
 						Image:           forgejoImg,
 						Command:         []string{"sh", "-c", bootstrap},
 						Env:             append(forgejoEnv(dv, argoWebhookHost), adminPW),
-						VolumeMounts:    []corev1.VolumeMount{dataMount, etcMount, caMount},
+						VolumeMounts:    []corev1.VolumeMount{dataMount, caMount},
 						Resources:       forgejoResources(),
 						SecurityContext: hardenedContainerSecurityContext(),
 					}},
@@ -215,7 +214,7 @@ forgejo admin user create --admin --username ` + ForgejoBotUser +
 						Image:           forgejoImg,
 						Env:             forgejoEnv(dv, argoWebhookHost),
 						Ports:           []corev1.ContainerPort{{Name: "http", ContainerPort: ForgejoHTTPPort}},
-						VolumeMounts:    []corev1.VolumeMount{dataMount, etcMount, caMount},
+						VolumeMounts:    []corev1.VolumeMount{dataMount, caMount},
 						ReadinessProbe:  healthProbe(ForgejoHTTPPort, 8, 5, 0),
 						LivenessProbe:   healthProbe(ForgejoHTTPPort, 30, 20, 5),
 						Resources:       forgejoResources(),
@@ -226,7 +225,6 @@ forgejo admin user create --admin --username ` + ForgejoBotUser +
 							Name:         "data",
 							VolumeSource: corev1.VolumeSource{PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{ClaimName: forgejoPVCName}},
 						},
-						{Name: "etc", VolumeSource: corev1.VolumeSource{EmptyDir: &corev1.EmptyDirVolumeSource{}}},
 						// Optional: absent on vanilla; the trust dir is then just empty.
 						{Name: "ingress-ca", VolumeSource: corev1.VolumeSource{ConfigMap: &corev1.ConfigMapVolumeSource{
 							LocalObjectReference: corev1.LocalObjectReference{Name: IngressCAConfigMap}, Optional: &caOptional,
