@@ -29,6 +29,28 @@ func TestForgejoHostStripsPort(t *testing.T) {
 	}
 }
 
+// The forge is exposed where browsers reach it: never on an in-cluster host.
+func TestForgejoWebHost(t *testing.T) {
+	svc := "http://dotvirt-forgejo.dotvirt.svc.cluster.local:3000"
+	for _, c := range []struct{ url, webURL, want string }{
+		{svc, "", ""},
+		{"http://dotvirt-forgejo:3000", "", ""},
+		{"http://dotvirt-forgejo.dotvirt.svc:3000", "", ""},
+		{svc, "https://git.example", "git.example"},
+		{svc, "https://192.0.2.10:3000", "192.0.2.10"},
+		{"https://forgejo.apps.example.com", "", "forgejo.apps.example.com"},
+		// An app of the admin's fronts the forge there: its host is not the forge's.
+		{"https://forgejo.apps.example.com", "https://portal.example", "forgejo.apps.example.com"},
+		{"https://git.svc.example.org", "", "git.svc.example.org"},
+		{"", "", ""},
+	} {
+		dv := &dotvirtv1alpha1.Dotvirt{Spec: dotvirtv1alpha1.DotvirtSpec{Forge: dotvirtv1alpha1.ForgeSpec{URL: c.url, WebURL: c.webURL}}}
+		if got := ForgejoWebHost(dv); got != c.want {
+			t.Errorf("ForgejoWebHost(%q, %q) = %q, want %q", c.url, c.webURL, got, c.want)
+		}
+	}
+}
+
 // Forgejo's ROOT_URL is where browsers open it: webURL when set, so the pages
 // served at that host carry no wrong-ROOT_URL banner and clone links name it.
 func TestForgejoRootURLFollowsTheWebURL(t *testing.T) {

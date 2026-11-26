@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -826,8 +827,94 @@ func TestHostlessGatewayExposesTheConsoleOnly(t *testing.T) {
 	if _, found, _ := unstructured.NestedFieldNoCopy(got.Object, "spec", "hostnames"); found {
 		t.Errorf("console route names hosts: %v", got.Object["spec"])
 	}
-	if f := r.forgejoExposure(dv); f != nil {
+	if f, _ := r.forgejoExposure(dv); f != nil {
 		t.Errorf("forge exposure with no forge URL = %v, want none", f)
+	}
+}
+
+// The forge is exposed on the host browsers reach it by, never an in-cluster
+// one; an address only through a Gateway listener of its own.
+func TestForgeExposure(t *testing.T) {
+	svc := "http://dotvirt-forgejo.dotvirt.svc.cluster.local:3000"
+	console := &dotvirtv1alpha1.GatewayRef{Name: "edge", Namespace: "edge-system", SectionName: "https"}
+	for _, c := range []struct {
+		name            string
+		plat            platform.Platform
+		url, webURL     string
+		console, forge  *dotvirtv1alpha1.GatewayRef
+		hostlessConsole bool
+		wantGVK         schema.GroupVersionKind
+		wantHosts       []any
+		wantSection     string
+		wantUnreachable bool
+	}{
+		{name: "no URL, routes served: the router names it", plat: platform.OpenShift, wantGVK: install.RouteGVK},
+		{name: "no URL, a forge Gateway: nothing to discover", plat: platform.OpenShift, forge: console},
+		{name: "in-cluster URL only", plat: platform.OpenShift, url: svc, wantUnreachable: true},
+		{name: "in-cluster URL, a web host", plat: platform.OpenShift, url: svc, webURL: "https://git.example", console: console,
+			wantGVK: install.HTTPRouteGVK, wantHosts: []any{"git.example"}, wantSection: "https"},
+		{name: "an address on its own listener", plat: platform.OpenShift, url: svc, webURL: "https://192.0.2.10:3000", console: console,
+			forge:   &dotvirtv1alpha1.GatewayRef{Name: "edge", Namespace: "edge-system", SectionName: "forge"},
+			wantGVK: install.HTTPRouteGVK, wantSection: "forge"},
+		{name: "an address on the console's listener", plat: platform.OpenShift, url: svc, webURL: "https://192.0.2.10:3000", console: console,
+			wantUnreachable: true},
+		{name: "an address on every listener", plat: platform.OpenShift, url: svc, webURL: "https://192.0.2.10:3000", console: console,
+			forge: &dotvirtv1alpha1.GatewayRef{Name: "edge", Namespace: "edge-system"}, wantUnreachable: true},
+		{name: "an address with no Gateway", plat: platform.OpenShift, url: svc, webURL: "https://192.0.2.10", wantUnreachable: true},
+		// Browsers send a console's cookies to every port of its address.
+		{name: "an address beside a console reached by address", plat: platform.OpenShift, url: svc, webURL: "https://192.0.2.10:3000",
+			console: console, hostlessConsole: true,
+			forge: &dotvirtv1alpha1.GatewayRef{Name: "edge", Namespace: "edge-system", SectionName: "forge"}, wantUnreachable: true},
+		{name: "a name beside a console reached by address", plat: platform.OpenShift, url: svc, webURL: "https://git.example",
+			console: console, hostlessConsole: true, wantUnreachable: true},
+	} {
+		dv := testCR()
+		dv.Spec.Forge.Managed, dv.Spec.Forge.URL, dv.Spec.Forge.WebURL, dv.Spec.Forge.Gateway = true, c.url, c.webURL, c.forge
+		dv.Spec.Ingress = dotvirtv1alpha1.IngressSpec{Host: "console.example", Gateway: c.console}
+		if c.hostlessConsole {
+			dv.Spec.Ingress.Host = ""
+		}
+		r := &DotvirtReconciler{Platform: c.plat}
+		got, why := r.forgejoExposure(dv)
+		if c.wantGVK.Kind == "" && !c.wantUnreachable {
+			if got != nil || why != "" {
+				t.Errorf("%s: exposure %v, why %q; want none", c.name, got, why)
+			}
+			continue
+		}
+		if c.wantUnreachable {
+			if got != nil || why == "" {
+				t.Errorf("%s: exposure %v, why %q; want none, with why", c.name, got, why)
+			}
+			continue
+		}
+		u, ok := got.(*unstructured.Unstructured)
+		if !ok || u.GroupVersionKind() != c.wantGVK || why != "" {
+			t.Errorf("%s: exposure %T %v, why %q; want a %s", c.name, got, got, why, c.wantGVK.Kind)
+			continue
+		}
+		if c.wantGVK != install.HTTPRouteGVK {
+			continue
+		}
+		hosts, _, _ := unstructured.NestedSlice(u.Object, "spec", "hostnames")
+		parents, _, _ := unstructured.NestedSlice(u.Object, "spec", "parentRefs")
+		if !reflect.DeepEqual(hosts, c.wantHosts) || len(parents) != 1 || parents[0].(map[string]any)["sectionName"] != c.wantSection {
+			t.Errorf("%s: hostnames %v, parents %v; want %v on listener %q", c.name, hosts, parents, c.wantHosts, c.wantSection)
+		}
+	}
+}
+
+// A forge whose Gateway the spec names gets no Route to read a host back
+// from: its URL is the admin's to give, whatever exposes the console.
+func TestForgeURLOnAForgeGatewayIsRequired(t *testing.T) {
+	dv := testCR()
+	dv.Spec.Forge.Managed = true
+	dv.Spec.Forge.Gateway = &dotvirtv1alpha1.GatewayRef{Name: "edge", SectionName: "forge"}
+	r := &DotvirtReconciler{Platform: platform.OpenShift}
+	url, res, err := r.resolveForgeURL(t.Context(), dv)
+	c := apimeta.FindStatusCondition(dv.Status.Conditions, dotvirtv1alpha1.ConditionForgeReady)
+	if url != "" || err != nil || res == nil || c == nil || c.Reason != "ForgeURLRequired" {
+		t.Errorf("url %q, result %v, err %v, condition %+v; want ForgeURLRequired", url, res, err, c)
 	}
 }
 

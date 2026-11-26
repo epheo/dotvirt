@@ -99,11 +99,11 @@ func (r *DotvirtReconciler) resolveExposureType(dv *dotvirtv1alpha1.Dotvirt) dot
 	return dotvirtv1alpha1.IngressType(adminobjects.ExposureType(string(dv.Spec.Ingress.Type), dv.Spec.Ingress.Gateway != nil, r.Platform == platform.OpenShift))
 }
 
-// exposureFor builds the external exposure of the named Service for the resolved
-// type: a Route on OpenShift (host may be empty - the router then assigns one), an
-// Ingress on vanilla Kubernetes or an HTTPRoute on a Gateway (host required).
-func (r *DotvirtReconciler) exposureFor(dv *dotvirtv1alpha1.Dotvirt, name string, port int32, host string) client.Object {
-	switch r.resolveExposureType(dv) {
+// exposureFor builds the external exposure of the named Service as kind: a
+// Route on OpenShift (host may be empty - the router then assigns one), an
+// Ingress on vanilla Kubernetes or an HTTPRoute on gateway (host required).
+func (r *DotvirtReconciler) exposureFor(dv *dotvirtv1alpha1.Dotvirt, name string, port int32, host string, gateway *dotvirtv1alpha1.GatewayRef, kind dotvirtv1alpha1.IngressType) client.Object {
+	switch kind {
 	case dotvirtv1alpha1.IngressRoute:
 		return install.Route(dv, name, host)
 	case dotvirtv1alpha1.IngressIngress:
@@ -112,7 +112,7 @@ func (r *DotvirtReconciler) exposureFor(dv *dotvirtv1alpha1.Dotvirt, name string
 		}
 	case dotvirtv1alpha1.IngressGateway:
 		if host != "" {
-			return install.HTTPRoute(dv, name, port, host)
+			return install.HTTPRoute(dv, gateway, name, port, host)
 		}
 	}
 	return nil
@@ -122,9 +122,9 @@ func (r *DotvirtReconciler) exposureFor(dv *dotvirtv1alpha1.Dotvirt, name string
 // listener does, for a machine reached by its address. Nothing else goes hostless.
 func (r *DotvirtReconciler) exposure(dv *dotvirtv1alpha1.Dotvirt) client.Object {
 	if r.resolveExposureType(dv) == dotvirtv1alpha1.IngressGateway {
-		return install.HTTPRoute(dv, install.AppName, install.HTTPPort, dv.Spec.Ingress.Host)
+		return install.HTTPRoute(dv, dv.Spec.Ingress.Gateway, install.AppName, install.HTTPPort, dv.Spec.Ingress.Host)
 	}
-	return r.exposureFor(dv, install.AppName, install.HTTPPort, dv.Spec.Ingress.Host)
+	return r.exposureFor(dv, install.AppName, install.HTTPPort, dv.Spec.Ingress.Host, dv.Spec.Ingress.Gateway, r.resolveExposureType(dv))
 }
 
 // ssoApplyCommand is the one command an admin runs to register the cluster-scoped

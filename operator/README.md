@@ -186,8 +186,9 @@ owns one status condition; a phase that fails or waits records why there, so
      for its Route. The console's HTTPRoute attaches only to `spec.ingress.gateway`, on its
      listener; with no host it names none. Every other exposure the operator writes names
      its own hosts: none the console's, no wildcard over it, no Ingress default backend, no
-     HTTPRoute without hostnames, and no HTTPRoute at all beside a console with no host. The
-     forge's own exposures are otherwise free: it holds no user token.
+     HTTPRoute without hostnames but the forge's, on a listener of its own, and no HTTPRoute
+     at all beside a console with no host. The forge's own exposures are otherwise free: it
+     holds no user token.
 
    The Route rules assume the apiserver serving Routes evaluates admission policies,
    and that OpenShift's route API marks a host it generates
@@ -205,7 +206,7 @@ owns one status condition; a phase that fails or waits records why there, so
    operator's writes that need the change, when:
    - the install namespace, `spec.argocd`, `spec.forge.insecureTLS`, `spec.forge.managed`,
      `spec.forge.credentialsSecret`, `spec.metrics`, `spec.ingress.host`,
-     `spec.ingress.gateway` or `spec.branding.configMap` changes;
+     `spec.ingress.gateway`, `spec.forge.gateway` or `spec.branding.configMap` changes;
    - `spec.auth.oidc` (its issuer or client secret) changes;
    - `spec.forge.pullRequests` turns Delegated on or off, or, while Delegated,
      `spec.forge.url` or `spec.forge.userAuth` changes;
@@ -547,6 +548,15 @@ every name of the machine's address, and browsers send its cookies to every port
 so a forge page on another port would receive them. There is no public URL, so admission
 asks for a managed forge, whose webhooks stay in-cluster, and neither OIDC nor OpenShift
 sign-in, which redirect to a named host; sign-in is by token.
+
+A managed forge is served on the host browsers reach it by: `spec.forge.url`'s, or
+`spec.forge.webURL`'s when that URL is in-cluster; never an in-cluster Service's. With an
+in-cluster `spec.forge.url` and no `webURL`, nothing exposes it, and `ForgeReady` says so.
+`spec.forge.gateway` attaches its route elsewhere than `spec.ingress.gateway`: another
+Gateway, or another listener. A forge reached by an IP address takes every name of its
+listener, so it needs one of its own there (`spec.forge.gateway.sectionName`), never the
+console's; the guard holds it to that. Beside a console with no host, the forge is
+in-cluster only, for the cookies above.
 
 ## Publishing
 

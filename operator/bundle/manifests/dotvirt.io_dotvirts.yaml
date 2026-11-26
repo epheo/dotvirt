@@ -284,6 +284,32 @@ spec:
                       RoleBinding to install (ForgeCredentialReady). A name the operator gives one
                       of its own Secrets (dotvirt-session, ...) is refused there too.
                     type: string
+                  gateway:
+                    description: |-
+                      Gateway serves a managed forge's pages through an HTTPRoute on the host of
+                      webURL, else of url; never on an in-cluster Service's. Empty:
+                      spec.ingress.gateway. A forge reached by an IP address takes every name of
+                      its listener, so it needs one of its own here (sectionName), never the
+                      console's.
+                    properties:
+                      name:
+                        minLength: 1
+                        type: string
+                      namespace:
+                        description: |-
+                          Namespace of the Gateway; empty is this Dotvirt's. Its listener must allow
+                          routes from the Dotvirt's namespace and no other: dotvirt's HTTPRoute
+                          matches every path, so a route another namespace attaches on the same
+                          hostname with a longer path takes that path, /api/login included.
+                        type: string
+                      sectionName:
+                        description: |-
+                          SectionName attaches to one listener; empty attaches to every listener
+                          that admits the hostname. Required with no spec.ingress.host.
+                        type: string
+                    required:
+                    - name
+                    type: object
                   insecureTLS:
                     description: |-
                       InsecureTLS skips TLS verification when calling the forge API (a self-signed forge
@@ -390,6 +416,9 @@ spec:
                     dotvirt acts through'
                   rule: '!has(self.pullRequests) || self.pullRequests != ''Delegated''
                     || has(self.userAuth)'
+                - message: 'gateway exposes a managed forge: set managed, or expose
+                    your own forge yourself'
+                  rule: '!has(self.gateway) || (has(self.managed) && self.managed)'
                 - message: 'pullRequests Delegated needs url: users'' forge tokens
                     go only to the forge the spec names, never to an address from
                     the credential Secret'

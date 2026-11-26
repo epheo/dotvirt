@@ -33,10 +33,9 @@ func Route(dv *dotvirtv1alpha1.Dotvirt, name, host string) *unstructured.Unstruc
 	return unstructuredObject(RouteGVK, name, dv.Namespace, dv, spec)
 }
 
-// HTTPRoute exposes the named Service through the Gateway spec.ingress.gateway
-// names, as an HTTPRoute of the same name; with no host, for every name.
-func HTTPRoute(dv *dotvirtv1alpha1.Dotvirt, name string, port int32, host string) *unstructured.Unstructured {
-	ref := dv.Spec.Ingress.Gateway
+// HTTPRoute exposes the named Service through the Gateway ref names, as an
+// HTTPRoute of the same name; with no host, for every name of its listener.
+func HTTPRoute(dv *dotvirtv1alpha1.Dotvirt, ref *dotvirtv1alpha1.GatewayRef, name string, port int32, host string) *unstructured.Unstructured {
 	parent := map[string]any{"name": ref.Name}
 	if ref.Namespace != "" {
 		parent["namespace"] = ref.Namespace

@@ -33,9 +33,10 @@ type InstallSpec struct {
 	MetricsCA                            bool
 	IngressHost                          string
 	// IngressType and Gateway are spec.ingress.type and spec.ingress.gateway,
-	// its namespace as written.
-	IngressType                                       string
-	GatewayName, GatewayNamespace, GatewaySectionName string
+	// ForgeGateway spec.forge.gateway, their namespaces as written.
+	IngressType                                                      string
+	GatewayName, GatewayNamespace, GatewaySectionName                string
+	ForgeGatewayName, ForgeGatewayNamespace, ForgeGatewaySectionName string
 	// The console's volumes an admin chose: the branding and metrics CA
 	// ConfigMaps, and the forge credential Secret (empty: the default).
 	BrandingConfigMap, MetricsCAConfigMap, ForgeCredentials string
@@ -74,6 +75,9 @@ func (c *Client) InstallIn(ctx context.Context, namespace string) (InstallSpec, 
 	out.GatewayName, _, _ = unstructured.NestedString(o, "spec", "ingress", "gateway", "name")
 	out.GatewayNamespace, _, _ = unstructured.NestedString(o, "spec", "ingress", "gateway", "namespace")
 	out.GatewaySectionName, _, _ = unstructured.NestedString(o, "spec", "ingress", "gateway", "sectionName")
+	out.ForgeGatewayName, _, _ = unstructured.NestedString(o, "spec", "forge", "gateway", "name")
+	out.ForgeGatewayNamespace, _, _ = unstructured.NestedString(o, "spec", "forge", "gateway", "namespace")
+	out.ForgeGatewaySectionName, _, _ = unstructured.NestedString(o, "spec", "forge", "gateway", "sectionName")
 	out.BrandingConfigMap, _, _ = unstructured.NestedString(o, "spec", "branding", "configMap")
 	out.MetricsCAConfigMap, _, _ = unstructured.NestedString(o, "spec", "metrics", "ca", "name")
 	out.ForgeCredentials, _, _ = unstructured.NestedString(o, "spec", "forge", "credentialsSecret")

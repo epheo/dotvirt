@@ -24,6 +24,7 @@ var params = Params{
 	SpecImage:      "registry.example/team/dotvirt:custom",
 	ConsoleHost:    "dotvirt-dotvirt.apps.example",
 	ConsoleGateway: ParentRef{Name: "edge", Namespace: "gateway-system", Section: "https"},
+	ForgeGateway:   ParentRef{Name: "edge", Namespace: "gateway-system", Section: "forge"},
 	ForgeSecret:    DefaultForgeSecret,
 }
 
@@ -145,7 +146,7 @@ func TestConsoleHTTPRouteFollowsTheConsoleHost(t *testing.T) {
 		holds(t, "httproutes for "+q, got,
 			`(size(`+q+`) == 0 ? (size("https") > 0 && (!has(object.spec.hostnames) || size(object.spec.hostnames) == 0)) : `+
 				`has(object.spec.hostnames) && object.spec.hostnames == [`+q+`])`)
-		holds(t, "httproutes for "+q, got, `(size(`+q+`) > 0 && has(object.spec.hostnames) && size(object.spec.hostnames) > 0 && object.spec.hostnames.all(h, h != `+q)
+		holds(t, "httproutes for "+q, got, `(size(`+q+`) > 0 && ((has(object.spec.hostnames) && size(object.spec.hostnames) > 0 && object.spec.hostnames.all(h, h != `+q)
 	}
 }
 
@@ -158,6 +159,16 @@ func TestConsoleHTTPRouteAttachesToTheNamedListener(t *testing.T) {
 	holds(t, "httproutes", got, `r.name == "edge" && (has(r.namespace) ? r.namespace : "dotvirt") == "gateway-system" && `+
 		`(has(r.sectionName) ? r.sectionName : "") == "https"`)
 	holds(t, "httproutes", got, `!has(r.port)`)
+}
+
+// A forge reached by address names no host: only on a listener of its own,
+// never the console's, which a template fill decides at admission.
+func TestHostlessForgeRouteOnItsOwnListener(t *testing.T) {
+	objs := Render(params)
+	got := exprs(policyOf(t, objs[index(objs, "ValidatingAdmissionPolicy", GuardHTTPRoutesName)]))
+	holds(t, "httproutes", got, `object.metadata.name == "dotvirt-forgejo"`)
+	holds(t, "httproutes", got, `(size("forge") > 0 && ["edge", "gateway-system", "forge"] != ["edge", "gateway-system", "https"])`)
+	holds(t, "httproutes", got, `(has(r.sectionName) ? r.sectionName : "") == "forge"`)
 }
 
 func TestExposureType(t *testing.T) {
@@ -346,8 +357,9 @@ func filledTemplate(t *testing.T, template []byte, p Params) []*unstructured.Uns
 		"${METRICS_TENANCY_URL}": p.Metrics.TenancyURL, "${METRICS_CA}": p.Metrics.CA,
 		"${CONSOLE_HOST}": p.ConsoleHost, "${BRANDING_CONFIGMAP}": p.BrandingConfigMap,
 		"${CONSOLE_GATEWAY}": p.ConsoleGateway.Name, "${CONSOLE_GATEWAY_NAMESPACE}": p.ConsoleGateway.Namespace,
-		"${CONSOLE_GATEWAY_SECTION}": p.ConsoleGateway.Section,
-		"${METRICS_CA_CONFIGMAP}":    p.MetricsCAConfigMap, "${FORGE_SECRET}": p.ForgeSecret,
+		"${CONSOLE_GATEWAY_SECTION}": p.ConsoleGateway.Section, "${FORGE_GATEWAY}": p.ForgeGateway.Name,
+		"${FORGE_GATEWAY_NAMESPACE}": p.ForgeGateway.Namespace, "${FORGE_GATEWAY_SECTION}": p.ForgeGateway.Section,
+		"${METRICS_CA_CONFIGMAP}": p.MetricsCAConfigMap, "${FORGE_SECRET}": p.ForgeSecret,
 		"${FORGE_MANAGED}": strconv.FormatBool(p.ForgeManaged), "${OIDC_SECRET}": p.OIDCSecret, "${OIDC_SECRET_KEY}": p.OIDCSecretKey,
 		"${OIDC_ISSUER}": p.OIDCIssuer, "${FORGE_DELEGATED}": strconv.FormatBool(p.ForgeDelegated),
 		"${FORGE_URL}": p.ForgeURL, "${FORGE_CLIENT_ID}": p.ForgeClientID, "${FORGE_AUTHORIZE_URL}": p.ForgeAuthorizeURL,

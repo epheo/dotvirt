@@ -62,6 +62,9 @@ func (r *DotvirtReconciler) guardParams(ctx context.Context, dv *dotvirtv1alpha1
 	if g := dv.Spec.Ingress.Gateway; g != nil {
 		p.ConsoleGateway = adminobjects.GatewayOf(g.Name, g.Namespace, g.SectionName, dv.Namespace)
 	}
+	if g := install.ForgeGateway(dv); g != nil {
+		p.ForgeGateway = adminobjects.GatewayOf(g.Name, g.Namespace, g.SectionName, dv.Namespace)
+	}
 	domain, router := "", ""
 	if dv.Spec.Ingress.Host == "" && r.resolveExposureType(dv) == dotvirtv1alpha1.IngressRoute {
 		if domain = r.appsDomain(ctx, dv); domain == "" {
