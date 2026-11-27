@@ -59,11 +59,15 @@ export function sizeTally(vms: VM[], options: Options | null): Map<string, numbe
 	return tally;
 }
 
-// The instancetype most of vms run at; ties go to the larger size.
+// The instancetype most of vms run at; ties go to the larger size. A VM no
+// node would take is not a size worth repeating.
 export function mostCommonSize(vms: VM[], options: Options | null): Size | null {
 	const its = options?.instancetypes ?? [];
 	let best: Size | null = null;
-	for (const [name, count] of sizeTally(vms, options)) {
+	for (const [name, count] of sizeTally(
+		vms.filter((vm) => !vm.unschedulable),
+		options,
+	)) {
 		const it = its.find((i) => i.name === name)!;
 		if (
 			!best ||

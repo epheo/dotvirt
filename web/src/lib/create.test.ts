@@ -15,6 +15,7 @@ import {
 	searchNetworks,
 	sharedClass,
 	sizeLabel,
+	sizeTally,
 	usualNetworks,
 	usualPreference,
 	vmCountByNetwork,
@@ -79,6 +80,24 @@ describe('sizeLabel', () => {
 	it('reads the size word and the numbers', () => {
 		expect(sizeLabel({ name: 'u1.medium', cpu: 2, memory: '4Gi' })).toBe('Medium, 2 vCPU 4 GiB');
 		expect(sizeLabel({ name: 'big', cpu: 16, memory: '64Gi' })).toBe('Big, 16 vCPU 64 GiB');
+	});
+});
+
+describe('mostCommonSize', () => {
+	it('never repeats the size of a VM no node would take', () => {
+		const its = {
+			instancetypes: [
+				{ name: 'o1.small', cpu: 1, memory: '2Gi' },
+				{ name: 'n1.medium', cpu: 4, memory: '4Gi' },
+			],
+		} as Options;
+		const fleet = [
+			vm('a', { instancetype: 'o1.small' }),
+			vm('b', { instancetype: 'n1.medium', phase: 'Scheduling', unschedulable: true }),
+		];
+		// It still uses the size, so the picker's counts keep it.
+		expect(sizeTally(fleet, its).get('n1.medium')).toBe(1);
+		expect(mostCommonSize(fleet, its)?.it.name).toBe('o1.small');
 	});
 });
 

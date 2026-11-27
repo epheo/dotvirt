@@ -80,6 +80,8 @@ type LiveVM struct {
 	// Failure is KubeVirt's reason an instance that should start cannot: its
 	// pod refused or unschedulable, or the instance not created at all.
 	Failure string
+	// Unschedulable: Failure is the scheduler finding no node for its pod.
+	Unschedulable bool
 	// RestartPending: a change applied to the VM takes effect only at its next
 	// restart (KubeVirt's RestartRequired); the instance runs the old spec.
 	RestartPending bool
@@ -781,6 +783,7 @@ func liveFromVMI(vmi *kubevirtcorev1.VirtualMachineInstance) LiveVM {
 		case kubevirtcorev1.VirtualMachineInstanceConditionType(corev1.PodScheduled):
 			if starting && cond.Status == corev1.ConditionFalse && cond.Reason == corev1.PodReasonUnschedulable && live.Failure == "" {
 				live.Failure = conditionText(cond.Message, cond.Reason)
+				live.Unschedulable = true
 			}
 		}
 	}

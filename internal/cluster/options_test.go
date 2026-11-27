@@ -92,6 +92,7 @@ func TestNoHostNamesWhatNoHostOffers(t *testing.T) {
 		{"no host known", it(true, "1Gi", "4Gi"), nil, ""},
 		{"dedicated CPUs", it(true, "", "4Gi"), []corev1.Node{plain}, "needs dedicated CPUs, which no host offers"},
 		{"a pinned host", it(true, "", "4Gi"), []corev1.Node{plain, pinned}, ""},
+		{"a host whose CPU manager is unknown", it(true, "", "4Gi"), []corev1.Node{plain, {}}, ""},
 		{"hugepages", it(false, "1Gi", "4Gi"), []corev1.Node{plain}, "needs 4Gi of 1Gi hugepages, which no host offers"},
 		{"enough hugepages", it(false, "1Gi", "4Gi"), []corev1.Node{huge}, ""},
 		{"too few hugepages", it(false, "1Gi", "16Gi"), []corev1.Node{huge}, "needs 16Gi of 1Gi hugepages, which no host offers"},

@@ -135,13 +135,13 @@ func TestLiveReadsKubeVirtVerdicts(t *testing.T) {
 	if got := live["pinned"]; got.Provisioning {
 		t.Errorf("pinned = %+v, not provisioning", got)
 	}
-	if got := live["stuck"]; got.Failure != "failed to locate network attachment definition ns/gone" || !got.RestartPending {
+	if got := live["stuck"]; got.Failure != "failed to locate network attachment definition ns/gone" || !got.RestartPending || got.Unschedulable {
 		t.Errorf("stuck = %+v, want its pod failure and a pending restart", got)
 	}
 	if got := live["pinned"]; got.MigrateBlock != "PVC disk is not shared" || got.Failure != "" || got.RestartPending {
 		t.Errorf("pinned = %+v, want only its migrate block", got)
 	}
-	if got := live["noroom"]; got.Failure != "0/1 nodes are available: insufficient memory" {
+	if got := live["noroom"]; got.Failure != "0/1 nodes are available: insufficient memory" || !got.Unschedulable {
 		t.Errorf("noroom = %+v, want the scheduler's reason", got)
 	}
 	if got := live["quota"]; got.Failure != "exceeded quota" {

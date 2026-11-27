@@ -2171,6 +2171,10 @@ export interface VM {
    */
   failure?: string;
   /**
+   * Unschedulable: Failure is the scheduler finding no node for its pod.
+   */
+  unschedulable?: boolean;
+  /**
    * RestartPending: a merged change takes effect only at the next restart
    * (KubeVirt's RestartRequired); the VM runs the old spec until then.
    */

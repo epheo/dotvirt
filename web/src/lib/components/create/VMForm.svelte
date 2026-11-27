@@ -137,8 +137,15 @@
 					: 'The default size',
 	);
 	let sizeQuery = $state('');
+	// Sizes no host can run stay out of the list behind one line, unless asked
+	// for or searched: a stock catalog holds more of them than runnable ones.
+	let showNoHost = $state(false);
+	const noHostCount = $derived(
+		(options?.instancetypes ?? []).filter((i) => i.noHost && i.name !== instancetype).length,
+	);
 	const sizes = $derived(
 		(options?.instancetypes ?? [])
+			.filter((i) => !i.noHost || showNoHost || !!sizeQuery.trim() || i.name === instancetype)
 			.filter(
 				(i) =>
 					!sizeQuery ||
@@ -598,7 +605,7 @@
 										instancetype = i.name;
 									}}
 									{done}
-									note={sizeQuery
+									note={sizeQuery.trim()
 										? `${sizes.length} of ${options?.instancetypes.length} sizes match.`
 										: `${project}'s most used come first.`}
 								>
@@ -613,6 +620,21 @@
 										{#if i.noHost}<span class="block text-xs text-warn-ink">
 												{noHostNote(i)}
 											</span>{/if}
+									{/snippet}
+									{#snippet after()}
+										{#if noHostCount && !sizeQuery.trim()}
+											<label class="flex items-center gap-2 text-xs text-ink-soft">
+												<input
+													type="checkbox"
+													class="size-4 accent-accent"
+													bind:checked={showNoHost}
+												/>
+												{noHostCount === 1
+													? 'Show the size that needs'
+													: `Show the ${noHostCount} sizes that need`} dedicated CPUs or hugepages, which
+												no host offers
+											</label>
+										{/if}
 									{/snippet}
 								</PickList>
 							{/snippet}
