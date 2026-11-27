@@ -814,7 +814,7 @@ func TestIngressForgeStillNeedsTheIngressCA(t *testing.T) {
 }
 
 // The forge is exposed on the host browsers reach it by, never an in-cluster
-// one, nor an address on a Gateway, which serves names only.
+// one, nor an address on a Gateway or an Ingress, which serve names only.
 func TestForgeExposure(t *testing.T) {
 	svc := "http://dotvirt-forgejo.dotvirt.svc.cluster.local:3000"
 	console := &dotvirtv1alpha1.GatewayRef{Name: "edge", Namespace: "edge-system", SectionName: "https"}
@@ -827,6 +827,7 @@ func TestForgeExposure(t *testing.T) {
 		wantHosts       []any
 		wantSection     string
 		wantUnreachable bool
+		wantWhy         string
 	}{
 		{name: "no URL, routes served: the router names it", plat: platform.OpenShift, wantGVK: install.RouteGVK},
 		{name: "no URL, a forge Gateway: nothing to discover", plat: platform.OpenShift, forge: console},
@@ -837,7 +838,12 @@ func TestForgeExposure(t *testing.T) {
 			forge:   &dotvirtv1alpha1.GatewayRef{Name: "edge", Namespace: "edge-system", SectionName: "git"},
 			wantGVK: install.HTTPRouteGVK, wantHosts: []any{"git.example"}, wantSection: "git"},
 		{name: "an address on a Gateway", plat: platform.OpenShift, url: svc, webURL: "https://192.0.2.10:3000", console: console,
-			forge: &dotvirtv1alpha1.GatewayRef{Name: "edge", Namespace: "edge-system", SectionName: "git"}, wantUnreachable: true},
+			forge: &dotvirtv1alpha1.GatewayRef{Name: "edge", Namespace: "edge-system", SectionName: "git"}, wantUnreachable: true,
+			wantWhy: "a Gateway serves names, not addresses; give spec.forge.webURL a host name"},
+		{name: "an address on an Ingress", plat: platform.Kubernetes, url: svc, webURL: "https://192.0.2.10", wantUnreachable: true,
+			wantWhy: "an Ingress serves names, not addresses; give spec.forge.webURL a host name"},
+		{name: "a public address on an Ingress", plat: platform.Kubernetes, url: "https://192.0.2.10", webURL: "https://git.example",
+			wantUnreachable: true, wantWhy: "an Ingress serves names, not addresses; give spec.forge.url a host name"},
 		{name: "an address on a Route", plat: platform.OpenShift, url: "https://192.0.2.10", wantGVK: install.RouteGVK},
 	} {
 		dv := testCR()
@@ -852,8 +858,8 @@ func TestForgeExposure(t *testing.T) {
 			continue
 		}
 		if c.wantUnreachable {
-			if got != nil || why == "" {
-				t.Errorf("%s: exposure %v, why %q; want none, with why", c.name, got, why)
+			if got != nil || why == "" || !strings.Contains(why, c.wantWhy) {
+				t.Errorf("%s: exposure %v, why %q; want none, with why %q", c.name, got, why, c.wantWhy)
 			}
 			continue
 		}

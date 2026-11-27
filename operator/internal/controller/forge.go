@@ -306,10 +306,11 @@ func (r *DotvirtReconciler) privatizeOnce(ctx context.Context, dv *dotvirtv1alph
 }
 
 // forgejoExposure exposes the managed Forgejo to browsers, on the host of
-// spec.forge.webURL, else of spec.forge.url (ForgejoWebHost). With neither URL,
-// a hostless Route for the router to name (resolveForgeURL reads it back).
-// nil, with why browsers reach no forge page, for an in-cluster host, or an
-// address on a Gateway, which serves names only.
+// spec.forge.url, or of spec.forge.webURL when url is in-cluster
+// (ForgejoWebHost). With no URL, a hostless Route for the router to name
+// (resolveForgeURL reads it back). nil, with why browsers reach no forge page,
+// for an in-cluster host, or an address on a Gateway or an Ingress, which
+// serve names only.
 func (r *DotvirtReconciler) forgejoExposure(dv *dotvirtv1alpha1.Dotvirt) (client.Object, string) {
 	kind := r.forgeExposureType(dv)
 	if dv.Spec.Forge.URL == "" {
@@ -322,8 +323,15 @@ func (r *DotvirtReconciler) forgejoExposure(dv *dotvirtv1alpha1.Dotvirt) (client
 	if host == "" {
 		return nil, "browsers reach none of its pages: its URL is in-cluster; set spec.forge.webURL to the URL they reach it by"
 	}
-	if kind == dotvirtv1alpha1.IngressGateway && net.ParseIP(host) != nil {
-		return nil, "browsers reach none of its pages: a Gateway serves names, not addresses; give spec.forge.webURL a host name"
+	if kind != dotvirtv1alpha1.IngressRoute && net.ParseIP(host) != nil {
+		served, field := "an Ingress", "spec.forge.url"
+		if kind == dotvirtv1alpha1.IngressGateway {
+			served = "a Gateway"
+		}
+		if u, err := url.Parse(dv.Spec.Forge.URL); err != nil || install.InClusterHost(u.Hostname()) {
+			field = "spec.forge.webURL"
+		}
+		return nil, fmt.Sprintf("browsers reach none of its pages: %s serves names, not addresses; give %s a host name", served, field)
 	}
 	return r.exposureFor(dv, install.ForgejoServiceName, install.ForgejoHTTPPort, host, install.ForgeGateway(dv), kind), ""
 }
