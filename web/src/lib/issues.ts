@@ -385,7 +385,7 @@ function vmIssue(
 		danger.push('cannot start');
 		// The scheduler's words for a size no host runs name a node selector,
 		// not the size behind it.
-		const why = vm.phase === 'ErrorUnschedulable' ? noHost?.(vm) : undefined;
+		const why = vm.unschedulable ? noHost?.(vm) : undefined;
 		detail ??= why
 			? `Its size, ${vm.instancetype}, ${why}. Edit its settings to give it another.`
 			: vm.failure;

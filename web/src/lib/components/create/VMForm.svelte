@@ -140,10 +140,12 @@
 	// Sizes no host can run stay out of the list behind one line, unless asked
 	// for or searched: a stock catalog holds more of them than runnable ones.
 	let showNoHost = $state(false);
-	const noHostCount = $derived((options?.instancetypes ?? []).filter((i) => i.noHost).length);
+	const noHostCount = $derived(
+		(options?.instancetypes ?? []).filter((i) => i.noHost && i.name !== instancetype).length,
+	);
 	const sizes = $derived(
 		(options?.instancetypes ?? [])
-			.filter((i) => !i.noHost || showNoHost || !!sizeQuery || i.name === instancetype)
+			.filter((i) => !i.noHost || showNoHost || !!sizeQuery.trim() || i.name === instancetype)
 			.filter(
 				(i) =>
 					!sizeQuery ||
@@ -620,7 +622,7 @@
 											</span>{/if}
 									{/snippet}
 									{#snippet after()}
-										{#if noHostCount && !sizeQuery}
+										{#if noHostCount && !sizeQuery.trim()}
 											<label class="flex items-center gap-2 text-xs text-ink-soft">
 												<input
 													type="checkbox"

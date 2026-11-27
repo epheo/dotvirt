@@ -316,7 +316,8 @@ describe('next steps', () => {
 
 	it('names the size no host runs instead of the node selector it fails on', () => {
 		const pinned = vm({
-			phase: 'ErrorUnschedulable',
+			phase: 'Scheduling',
+			unschedulable: true,
 			instancetype: 'n1.medium',
 			failure: "0/1 nodes are available: 1 node(s) didn't match Pod's node affinity/selector.",
 		});
@@ -326,7 +327,7 @@ describe('next steps', () => {
 				v.instancetype === 'n1.medium' ? 'needs dedicated CPUs, which no host offers' : undefined,
 		});
 		expect(issue).toMatchObject({
-			label: 'cannot start, ErrorUnschedulable',
+			label: 'cannot start',
 			detail:
 				'Its size, n1.medium, needs dedicated CPUs, which no host offers. Edit its settings to give it another.',
 			action: { label: 'Open VM', href: '/vm/ns-a/vm-a' },
@@ -334,7 +335,7 @@ describe('next steps', () => {
 		expect(deriveIssues(fleet)[0].detail).toBe(pinned.failure);
 		// A failure of another kind keeps its own words.
 		const unbound = vm({
-			phase: 'Starting',
+			phase: 'Pending',
 			instancetype: 'n1.medium',
 			failure: 'PVC ns-a/data does not exist',
 		});

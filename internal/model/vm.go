@@ -44,6 +44,8 @@ type VM struct {
 	// Failure is KubeVirt's reason the VM's instance cannot start: its pod
 	// refused or unschedulable, or the instance not created at all.
 	Failure string `json:"failure,omitempty"`
+	// Unschedulable: Failure is the scheduler finding no node for its pod.
+	Unschedulable bool `json:"unschedulable,omitempty"`
 	// RestartPending: a merged change takes effect only at the next restart
 	// (KubeVirt's RestartRequired); the VM runs the old spec until then.
 	RestartPending bool `json:"restartPending,omitempty"`

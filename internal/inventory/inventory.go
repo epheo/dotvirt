@@ -274,6 +274,7 @@ func applyLive(vm *model.VM, s clusterstate.LiveVM) {
 	vm.Phase, vm.GuestIP, vm.NodeName = s.Phase, s.GuestIP, s.NodeName
 	vm.Paused = s.Paused
 	vm.Failure, vm.RestartPending, vm.MigrateBlock = s.Failure, s.RestartPending, s.MigrateBlock
+	vm.Unschedulable = s.Unschedulable
 	vm.Provisioning = s.Provisioning
 	vm.IPs, vm.OS, vm.MemoryActual = s.IPs, s.OS, s.MemoryActual
 	vm.VCPUs = s.VCPUs

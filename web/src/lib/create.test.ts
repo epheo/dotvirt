@@ -83,8 +83,8 @@ describe('sizeLabel', () => {
 	});
 });
 
-describe('sizeTally', () => {
-	it('leaves out a VM no host would take', () => {
+describe('mostCommonSize', () => {
+	it('never repeats the size of a VM no node would take', () => {
 		const its = {
 			instancetypes: [
 				{ name: 'o1.small', cpu: 1, memory: '2Gi' },
@@ -93,9 +93,10 @@ describe('sizeTally', () => {
 		} as Options;
 		const fleet = [
 			vm('a', { instancetype: 'o1.small' }),
-			vm('b', { instancetype: 'n1.medium', phase: 'ErrorUnschedulable' }),
+			vm('b', { instancetype: 'n1.medium', phase: 'Scheduling', unschedulable: true }),
 		];
-		expect([...sizeTally(fleet, its)]).toEqual([['o1.small', 1]]);
+		// It still uses the size, so the picker's counts keep it.
+		expect(sizeTally(fleet, its).get('n1.medium')).toBe(1);
 		expect(mostCommonSize(fleet, its)?.it.name).toBe('o1.small');
 	});
 });
