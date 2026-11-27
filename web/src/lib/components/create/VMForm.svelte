@@ -605,7 +605,7 @@
 										instancetype = i.name;
 									}}
 									{done}
-									note={sizeQuery.trim().trim()
+									note={sizeQuery.trim()
 										? `${sizes.length} of ${options?.instancetypes.length} sizes match.`
 										: `${project}'s most used come first.`}
 								>
