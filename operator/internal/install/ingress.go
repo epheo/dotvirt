@@ -34,7 +34,7 @@ func Route(dv *dotvirtv1alpha1.Dotvirt, name, host string) *unstructured.Unstruc
 }
 
 // HTTPRoute exposes the named Service through the Gateway ref names, as an
-// HTTPRoute of the same name; with no host, for every name of its listener.
+// HTTPRoute of the same name.
 func HTTPRoute(dv *dotvirtv1alpha1.Dotvirt, ref *dotvirtv1alpha1.GatewayRef, name string, port int32, host string) *unstructured.Unstructured {
 	parent := map[string]any{"name": ref.Name}
 	if ref.Namespace != "" {
@@ -43,16 +43,13 @@ func HTTPRoute(dv *dotvirtv1alpha1.Dotvirt, ref *dotvirtv1alpha1.GatewayRef, nam
 	if ref.SectionName != "" {
 		parent["sectionName"] = ref.SectionName
 	}
-	spec := map[string]any{
+	return unstructuredObject(HTTPRouteGVK, name, dv.Namespace, dv, map[string]any{
 		"parentRefs": []any{parent},
+		"hostnames":  []any{host},
 		"rules": []any{map[string]any{
 			"backendRefs": []any{map[string]any{"name": name, "port": int64(port)}},
 		}},
-	}
-	if host != "" {
-		spec["hostnames"] = []any{host}
-	}
-	return unstructuredObject(HTTPRouteGVK, name, dv.Namespace, dv, spec)
+	})
 }
 
 // Ingress exposes the named Service on vanilla Kubernetes, as an Ingress of the

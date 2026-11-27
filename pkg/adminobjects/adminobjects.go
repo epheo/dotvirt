@@ -60,15 +60,8 @@ type Params struct {
 	// Metrics is the admin's spec.metrics as rendered (MetricsFor).
 	Metrics Metrics
 	// ConsoleHost is the host the console is reached by (ConsoleHost), ""
-	// when nothing exposes it or a Gateway serves it on every name.
+	// when nothing exposes it.
 	ConsoleHost string
-	// ConsoleGateway is spec.ingress.gateway: the one Gateway, and listener,
-	// the console's HTTPRoute may attach to. Zero when none is named.
-	ConsoleGateway ParentRef
-	// ForgeGateway is spec.forge.gateway, else spec.ingress.gateway: where a
-	// managed forge's HTTPRoute may attach, and with no host only on a
-	// listener other than the console's.
-	ForgeGateway ParentRef
 	// BrandingConfigMap, MetricsCAConfigMap and ForgeSecret are the volumes
 	// an admin chose for the console (spec.branding.configMap,
 	// spec.metrics.ca.name, ForgeSecret).
@@ -99,22 +92,6 @@ type Params struct {
 	InstallUID  types.UID
 }
 
-// ParentRef is a Gateway an HTTPRoute attaches to: Namespace resolved, never
-// empty once Name is set; Section "" for every listener.
-type ParentRef struct{ Name, Namespace, Section string }
-
-// GatewayOf is spec.ingress.gateway with its namespace resolved against the
-// install's: the zero ParentRef when name is "".
-func GatewayOf(name, namespace, section, installNamespace string) ParentRef {
-	if name == "" {
-		return ParentRef{}
-	}
-	if namespace == "" {
-		namespace = installNamespace
-	}
-	return ParentRef{Name: name, Namespace: namespace, Section: section}
-}
-
 // Valid reports whether every pin is known and well formed: a render missing
 // one would pin nothing.
 func (p Params) Valid() bool { return p.Malformed() == "" }
@@ -137,12 +114,6 @@ func (p Params) Malformed() string {
 		{"branding ConfigMap", optional(p.BrandingConfigMap)},
 		{"metrics CA ConfigMap", optional(p.MetricsCAConfigMap)},
 		{"console host", optional(p.ConsoleHost)},
-		{"console Gateway", optional(p.ConsoleGateway.Name)},
-		{"console Gateway namespace", p.ConsoleGateway.Name == "" && p.ConsoleGateway.Namespace == "" || len(validation.IsDNS1123Label(p.ConsoleGateway.Namespace)) == 0},
-		{"console Gateway listener", optional(p.ConsoleGateway.Section)},
-		{"forge Gateway", optional(p.ForgeGateway.Name)},
-		{"forge Gateway namespace", p.ForgeGateway.Name == "" && p.ForgeGateway.Namespace == "" || len(validation.IsDNS1123Label(p.ForgeGateway.Namespace)) == 0},
-		{"forge Gateway listener", optional(p.ForgeGateway.Section)},
 		{"OIDC client Secret", optional(p.OIDCSecret)},
 		{"OIDC CA ConfigMap", optional(p.OIDCCAConfigMap)},
 		{"forge OIDC client Secret", optional(p.ForgeOIDCSecret)},

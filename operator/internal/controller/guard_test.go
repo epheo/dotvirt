@@ -157,14 +157,6 @@ func TestOperatorGuardFollowsTheAdminImage(t *testing.T) {
 	if p := r.guardParams(t.Context(), dv, guardRC); p.ConsoleHost != "console.example" {
 		t.Errorf("an admin's host: %q", p.ConsoleHost)
 	}
-	// A Gateway with no host serves the console on every name: the ingress
-	// domain names no host of its, and the listener is pinned instead.
-	hostless := dv.DeepCopy()
-	hostless.Spec.Ingress = dotvirtv1alpha1.IngressSpec{Gateway: &dotvirtv1alpha1.GatewayRef{Name: "edge", SectionName: "https"}}
-	if p := r.guardParams(t.Context(), hostless, guardRC); p.ConsoleHost != "" ||
-		p.ConsoleGateway != (adminobjects.ParentRef{Name: "edge", Namespace: "dotvirt", Section: "https"}) {
-		t.Errorf("hostless Gateway: host %q, Gateway %+v", p.ConsoleHost, p.ConsoleGateway)
-	}
 
 	// Delegated: the forge application the spec names.
 	delegated := dv.DeepCopy()

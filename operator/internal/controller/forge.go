@@ -24,7 +24,6 @@ import (
 	dotvirtv1alpha1 "github.com/epheo/dotvirt/operator/api/v1alpha1"
 	"github.com/epheo/dotvirt/operator/internal/install"
 	"github.com/epheo/dotvirt/operator/internal/platform"
-	"github.com/epheo/dotvirt/pkg/adminobjects"
 	"github.com/epheo/dotvirt/pkg/forge"
 )
 
@@ -309,9 +308,8 @@ func (r *DotvirtReconciler) privatizeOnce(ctx context.Context, dv *dotvirtv1alph
 // forgejoExposure exposes the managed Forgejo to browsers, on the host of
 // spec.forge.webURL, else of spec.forge.url (ForgejoWebHost). With neither URL,
 // a hostless Route for the router to name (resolveForgeURL reads it back).
-// nil, with why browsers reach no forge page, for an in-cluster host or an
-// address nothing here can serve: only a Gateway serves one, on a listener of
-// the forge's own, as a route naming no host takes every name of its listener.
+// nil, with why browsers reach no forge page, for an in-cluster host, or an
+// address on a Gateway, which serves names only.
 func (r *DotvirtReconciler) forgejoExposure(dv *dotvirtv1alpha1.Dotvirt) (client.Object, string) {
 	kind := r.forgeExposureType(dv)
 	if dv.Spec.Forge.URL == "" {
@@ -320,23 +318,14 @@ func (r *DotvirtReconciler) forgejoExposure(dv *dotvirtv1alpha1.Dotvirt) (client
 		}
 		return nil, ""
 	}
-	if dv.Spec.Ingress.Host == "" && r.resolveExposureType(dv) == dotvirtv1alpha1.IngressGateway {
-		return nil, "browsers reach none of its pages: the console, reached by address, answers every name there, and browsers would send its cookies to the forge; give the console a host (spec.ingress.host)"
-	}
 	host := install.ForgejoWebHost(dv)
 	if host == "" {
-		return nil, "browsers reach none of its pages: its URL is in-cluster; set spec.forge.webURL to the address they reach it by"
+		return nil, "browsers reach none of its pages: its URL is in-cluster; set spec.forge.webURL to the URL they reach it by"
 	}
-	if net.ParseIP(host) == nil {
-		return r.exposureFor(dv, install.ForgejoServiceName, install.ForgejoHTTPPort, host, install.ForgeGateway(dv), kind), ""
+	if kind == dotvirtv1alpha1.IngressGateway && net.ParseIP(host) != nil {
+		return nil, "browsers reach none of its pages: a Gateway serves names, not addresses; give spec.forge.webURL a host name"
 	}
-	switch {
-	case kind != dotvirtv1alpha1.IngressGateway:
-		return nil, "browsers reach none of its pages: only a Gateway serves an address; set spec.forge.gateway"
-	case !forgeListenerOwn(dv):
-		return nil, "browsers reach none of its pages: a forge reached by address takes every name of its listener; give it its own in spec.forge.gateway.sectionName"
-	}
-	return install.HTTPRoute(dv, install.ForgeGateway(dv), install.ForgejoServiceName, install.ForgejoHTTPPort, ""), ""
+	return r.exposureFor(dv, install.ForgejoServiceName, install.ForgejoHTTPPort, host, install.ForgeGateway(dv), kind), ""
 }
 
 // forgeExposureType is what exposes a managed forge: a Gateway when
@@ -346,19 +335,6 @@ func (r *DotvirtReconciler) forgeExposureType(dv *dotvirtv1alpha1.Dotvirt) dotvi
 		return dotvirtv1alpha1.IngressGateway
 	}
 	return r.resolveExposureType(dv)
-}
-
-// forgeListenerOwn reports whether the forge's Gateway listener is one the
-// console's route does not attach to.
-func forgeListenerOwn(dv *dotvirtv1alpha1.Dotvirt) bool {
-	ref := func(g *dotvirtv1alpha1.GatewayRef) adminobjects.ParentRef {
-		if g == nil {
-			return adminobjects.ParentRef{}
-		}
-		return adminobjects.GatewayOf(g.Name, g.Namespace, g.SectionName, dv.Namespace)
-	}
-	forge := ref(install.ForgeGateway(dv))
-	return forge.Section != "" && forge != ref(dv.Spec.Ingress.Gateway)
 }
 
 // applyForgejoBase renders everything the managed Forgejo needs BEFORE its URL is known:

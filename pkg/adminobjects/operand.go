@@ -153,9 +153,8 @@ func ExposureType(ingressType string, gateway, routesServed bool) string {
 // on a Route (ExposureType), the host OpenShift's router gives the hostless
 // Route named dotvirt in namespace on appsDomain, else the one host routers
 // report admitting that Route under (routerHost, RouterHost: where no domain
-// can be read, as on MicroShift), else "": a Gateway with no host serves the
-// console on every name its listener takes, and nothing else names one.
-// Callers pass appsDomain and routerHost only for a console on a Route.
+// can be read, as on MicroShift), else "": nothing exposes it. Callers pass
+// appsDomain and routerHost only for a console on a Route.
 func ConsoleHost(specHost, namespace, appsDomain, routerHost string) string {
 	switch {
 	case specHost != "":

@@ -368,34 +368,6 @@ func TestAdminObjectsPinTheRoutersHost(t *testing.T) {
 	}
 }
 
-// A Gateway serving the console with no host pins its listener, never a host:
-// not even one routers still report for a Route left from another exposure.
-func TestAdminObjectsPinTheHostlessConsolesListener(t *testing.T) {
-	s, fc, seen := adminObjectsServer(t)
-	fc.on(http.MethodGet, installPath, func(w http.ResponseWriter, r *http.Request) {
-		writeObj(w, dotvirtList(map[string]any{"apiVersion": "dotvirt.io/v1alpha1", "kind": "Dotvirt",
-			"metadata": map[string]any{"name": "x", "namespace": "dotvirt"}, "spec": map[string]any{"image": adminWant.SpecImage,
-				"ingress": map[string]any{"gateway": map[string]any{"name": "edge", "sectionName": "https"}}}}))
-	})
-	fc.on(http.MethodGet, "/apis/route.openshift.io/v1", func(w http.ResponseWriter, r *http.Request) {
-		writeObj(w, metav1.APIResourceList{TypeMeta: metav1.TypeMeta{Kind: "APIResourceList", APIVersion: "v1"}, GroupVersion: "route.openshift.io/v1",
-			APIResources: []metav1.APIResource{{Name: "routes", Kind: "Route", Namespaced: true}}})
-	})
-	fc.on(http.MethodGet, "/apis/route.openshift.io/v1/namespaces/dotvirt/routes/dotvirt", func(w http.ResponseWriter, r *http.Request) {
-		writeObj(w, map[string]any{"apiVersion": "route.openshift.io/v1", "kind": "Route", "metadata": map[string]any{"name": "dotvirt", "namespace": "dotvirt"},
-			"status": map[string]any{"ingress": []any{map[string]any{"host": "dotvirt-dotvirt.apps.micro"}}}})
-	})
-	wantStatus(t, do(s, adminToken, http.MethodPost, "/api/admin-objects", ""), http.StatusOK)
-	routes, _ := json.Marshal(seen()["ValidatingAdmissionPolicy/"+adminobjects.GuardRoutesName].body)
-	if strings.Contains(string(routes), "apps.micro") {
-		t.Errorf("a leftover Route's host is pinned:\n%s", routes)
-	}
-	httproutes, _ := json.Marshal(seen()["ValidatingAdmissionPolicy/"+adminobjects.GuardHTTPRoutesName].body)
-	if !strings.Contains(string(httproutes), `r.name == \"edge\"`) || !strings.Contains(string(httproutes), `r.sectionName : \"\") == \"https\"`) {
-		t.Errorf("the HTTPRoute rules do not pin the listener:\n%s", httproutes)
-	}
-}
-
 // The forge credential's grant is the console's render from the install's
 // spec.forge, read as the admin: listed for an admin's Secret, with write verbs
 // for a managed forge, and never for the default credential or a Secret the
