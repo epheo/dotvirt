@@ -34,7 +34,7 @@ spec:
           # FORGEJO is static (bumped only when the upstream :11-rootless tag moves).
           env:
             - name: RELATED_IMAGE_DOTVIRT
-              value: quay.io/epheo/dotvirt@sha256:f2d380c61f19e53b9b8d6ab02803011bd0dd6d167594cc54becb5540f0569f4d
+              value: quay.io/epheo/dotvirt@sha256:fea7bc5daacbf860c7e21eff888c7e91ff5d5186db4d39a9a1cef34cfc32ec90
             - name: RELATED_IMAGE_FORGEJO
               value: codeberg.org/forgejo/forgejo:17-rootless@sha256:39362ab93a94c0c9b8b330d2a877ddbb3f02fa8c0cba1b8d686d437b39f36a04
           securityContext:
