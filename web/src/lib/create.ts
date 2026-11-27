@@ -47,6 +47,8 @@ export function sizeTally(vms: VM[], options: Options | null): Map<string, numbe
 	const its = options?.instancetypes ?? [];
 	const tally = new Map<string, number>();
 	for (const vm of vms) {
+		// A VM no host would take is not a size worth repeating.
+		if (vm.phase === 'ErrorUnschedulable') continue;
 		let name =
 			vm.instancetype && its.some((i) => i.name === vm.instancetype) ? vm.instancetype : '';
 		if (!name) {

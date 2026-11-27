@@ -161,8 +161,10 @@ func needs(instancetype map[string]any) (dedicated bool, pageSize, guest string)
 
 // noHost is why none of hosts can run instancetype, or "" when one can or no
 // host is known. KubeVirt places dedicated CPUs only on a host whose CPU
-// manager it labeled, and hugepages only where the host has the guest's
-// memory of that page size allocatable.
+// manager it labeled "true", and hugepages only where the host has the
+// guest's memory of that page size allocatable. Only a host labeled "false"
+// lacks dedicated CPUs: one without the label is unknown, so a KubeVirt that
+// stops writing it leaves every size offered.
 func noHost(instancetype map[string]any, hosts []corev1.Node) string {
 	dedicated, pageSize, guest := needs(instancetype)
 	if len(hosts) == 0 || (!dedicated && pageSize == "") {
@@ -170,7 +172,7 @@ func noHost(instancetype map[string]any, hosts []corev1.Node) string {
 	}
 	want, _ := resource.ParseQuantity(guest)
 	for _, n := range hosts {
-		if dedicated && n.Labels["kubevirt.io/cpumanager"] != "true" {
+		if dedicated && n.Labels["kubevirt.io/cpumanager"] == "false" {
 			continue
 		}
 		if pageSize != "" {
