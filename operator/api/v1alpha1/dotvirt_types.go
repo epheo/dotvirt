@@ -103,7 +103,8 @@ type ForgeSpec struct {
 	// +optional
 	WebURL string `json:"webURL,omitempty"`
 	// Gateway serves a managed forge's pages through an HTTPRoute on the host of
-	// webURL, else of url; never on an in-cluster Service's or an address.
+	// url, or of webURL when url is in-cluster; never on an in-cluster Service's
+	// or an address.
 	// Empty: spec.ingress.gateway.
 	// +optional
 	Gateway *GatewayRef `json:"gateway,omitempty"`
