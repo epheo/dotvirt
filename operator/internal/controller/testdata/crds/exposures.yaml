@@ -75,7 +75,6 @@ spec:
               x-kubernetes-preserve-unknown-fields: true
               properties:
                 hostnames: {type: array, items: {type: string}}
-                # Typed as Gateway API types them.
                 parentRefs:
                   type: array
                   items:
