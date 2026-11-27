@@ -316,7 +316,7 @@ describe('next steps', () => {
 
 	it('names the size no host runs instead of the node selector it fails on', () => {
 		const pinned = vm({
-			phase: 'Scheduling',
+			phase: 'ErrorUnschedulable',
 			instancetype: 'n1.medium',
 			failure: "0/1 nodes are available: 1 node(s) didn't match Pod's node affinity/selector.",
 		});
@@ -326,12 +326,22 @@ describe('next steps', () => {
 				v.instancetype === 'n1.medium' ? 'needs dedicated CPUs, which no host offers' : undefined,
 		});
 		expect(issue).toMatchObject({
-			label: 'cannot start',
+			label: 'cannot start, ErrorUnschedulable',
 			detail:
 				'Its size, n1.medium, needs dedicated CPUs, which no host offers. Edit its settings to give it another.',
 			action: { label: 'Open VM', href: '/vm/ns-a/vm-a' },
 		});
 		expect(deriveIssues(fleet)[0].detail).toBe(pinned.failure);
+		// A failure of another kind keeps its own words.
+		const unbound = vm({
+			phase: 'Starting',
+			instancetype: 'n1.medium',
+			failure: 'PVC ns-a/data does not exist',
+		});
+		const other = inv([{ name: 'p1', namespaces: [{ namespace: 'ns-a', vms: [unbound] }] }]);
+		expect(
+			deriveIssues(other, { noHost: () => 'needs dedicated CPUs, which no host offers' })[0].detail,
+		).toBe(unbound.failure);
 	});
 
 	it('warns of a merged change still waiting for a restart', () => {

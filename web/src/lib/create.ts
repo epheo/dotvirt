@@ -121,13 +121,11 @@ export function generatePassword(): string {
 // The size a new VM starts at: the project's usual one, else u1.medium,
 // else the first; never one no host can run while another can.
 export function defaultSize(its: Instancetype[], common: Size | null): string | undefined {
-	const runs = its.filter((i) => !i.noHost);
-	return (
-		runs.find((i) => i.name === common?.it.name)?.name ??
-		runs.find((i) => i.name === 'u1.medium')?.name ??
-		runs[0]?.name ??
-		its[0]?.name
-	);
+	const pick = (from: Instancetype[]) =>
+		from.find((i) => i.name === common?.it.name) ??
+		from.find((i) => i.name === 'u1.medium') ??
+		from[0];
+	return (pick(its.filter((i) => !i.noHost)) ?? pick(its))?.name;
 }
 
 // "Needs dedicated CPUs, which no host offers.", or '' for a size a host runs.

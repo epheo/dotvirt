@@ -96,6 +96,8 @@ func TestNoHostNamesWhatNoHostOffers(t *testing.T) {
 		{"enough hugepages", it(false, "1Gi", "4Gi"), []corev1.Node{huge}, ""},
 		{"too few hugepages", it(false, "1Gi", "16Gi"), []corev1.Node{huge}, "needs 16Gi of 1Gi hugepages, which no host offers"},
 		{"both, never on one host", it(true, "1Gi", "4Gi"), []corev1.Node{pinned, huge}, "needs dedicated CPUs and 4Gi of 1Gi hugepages, which no host offers"},
+		{"hugepages of no stated amount", it(false, "1Gi", ""), []corev1.Node{plain}, "needs 1Gi hugepages, which no host offers"},
+		{"any amount of them", it(false, "1Gi", ""), []corev1.Node{huge}, ""},
 	} {
 		if got := noHost(c.it, c.hosts); got != c.want {
 			t.Errorf("%s: %q, want %q", c.name, got, c.want)
@@ -103,7 +105,8 @@ func TestNoHostNamesWhatNoHostOffers(t *testing.T) {
 	}
 }
 
-// The catalog reads the hosts KubeVirt schedules on, and marks sizes by them.
+// The catalog reads the hosts KubeVirt runs VMs on, a restarting one too, and
+// reads none when no size needs a host's capability.
 func TestListOptionsMarksSizesNoHostRuns(t *testing.T) {
 	obj := func(name string, dedicated bool) *unstructured.Unstructured {
 		return &unstructured.Unstructured{Object: map[string]any{
@@ -115,29 +118,50 @@ func TestListOptionsMarksSizesNoHostRuns(t *testing.T) {
 			},
 		}}
 	}
-	dyn := dynamicfake.NewSimpleDynamicClientWithCustomListKinds(runtime.NewScheme(), map[schema.GroupVersionResource]string{
-		gvrInstancetypes: "VirtualMachineClusterInstancetypeList", gvrPreferences: "VirtualMachineClusterPreferenceList",
-		gvrDataSources: "DataSourceList", gvrStorageClasses: "StorageClassList",
-	})
-	ctx := context.Background()
-	for _, o := range []*unstructured.Unstructured{obj("u1.medium", false), obj("n1.medium", true)} {
-		if _, err := dyn.Resource(gvrInstancetypes).Create(ctx, o, metav1.CreateOptions{}); err != nil {
+	node := func(name, schedulable, cpumanager string) *corev1.Node {
+		labels := map[string]string{"kubevirt.io/cpumanager": cpumanager}
+		if schedulable != "" {
+			labels["kubevirt.io/schedulable"] = schedulable
+		}
+		return &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: name, Labels: labels}}
+	}
+	marks := func(sizes []*unstructured.Unstructured, nodes ...*corev1.Node) (map[string]string, int) {
+		t.Helper()
+		dyn := dynamicfake.NewSimpleDynamicClientWithCustomListKinds(runtime.NewScheme(), map[schema.GroupVersionResource]string{
+			gvrInstancetypes: "VirtualMachineClusterInstancetypeList", gvrPreferences: "VirtualMachineClusterPreferenceList",
+			gvrDataSources: "DataSourceList", gvrStorageClasses: "StorageClassList",
+		})
+		ctx := context.Background()
+		for _, o := range sizes {
+			if _, err := dyn.Resource(gvrInstancetypes).Create(ctx, o, metav1.CreateOptions{}); err != nil {
+				t.Fatal(err)
+			}
+		}
+		objs := make([]runtime.Object, len(nodes))
+		for i, n := range nodes {
+			objs[i] = n
+		}
+		kube := kubefake.NewClientset(objs...)
+		opts, err := NewClient(kube, nil, dyn).ListOptions(ctx)
+		if err != nil {
 			t.Fatal(err)
 		}
+		got := map[string]string{}
+		for _, i := range opts.Instancetypes {
+			got[i.Name] = i.NoHost
+		}
+		return got, len(kube.Actions())
 	}
-	kube := kubefake.NewClientset(
-		&corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "host", Labels: map[string]string{"kubevirt.io/schedulable": "true", "kubevirt.io/cpumanager": "false"}}},
-		&corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "control", Labels: map[string]string{"kubevirt.io/cpumanager": "true"}}},
-	)
-	opts, err := NewClient(kube, nil, dyn).ListOptions(ctx)
-	if err != nil {
-		t.Fatal(err)
-	}
-	got := map[string]string{}
-	for _, i := range opts.Instancetypes {
-		got[i.Name] = i.NoHost
-	}
+	shared, pinned := obj("u1.medium", false), obj("n1.medium", true)
+	got, _ := marks([]*unstructured.Unstructured{shared, pinned}, node("host", "true", "false"), node("control", "", "true"))
 	if got["u1.medium"] != "" || got["n1.medium"] != "needs dedicated CPUs, which no host offers" {
 		t.Errorf("marks %q", got)
+	}
+	got, _ = marks([]*unstructured.Unstructured{pinned}, node("host", "true", "false"), node("restarting", "false", "true"))
+	if got["n1.medium"] != "" {
+		t.Errorf("a host whose virt-handler restarts left n1.medium marked %q", got["n1.medium"])
+	}
+	if _, reads := marks([]*unstructured.Unstructured{shared}, node("host", "true", "false")); reads != 0 {
+		t.Errorf("read the nodes %d times for sizes any host runs", reads)
 	}
 }

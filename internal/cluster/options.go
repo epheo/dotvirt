@@ -3,6 +3,7 @@ package cluster
 import (
 	"context"
 	"fmt"
+	"slices"
 	"strings"
 
 	corev1 "k8s.io/api/core/v1"
@@ -52,7 +53,7 @@ func (c *Client) ListOptions(ctx context.Context) (model.Options, error) {
 	}
 
 	if items, err := listAll(ctx, dyn, gvrInstancetypes); err == nil {
-		hosts := c.hosts(ctx)
+		hosts := c.hosts(ctx, items)
 		for i := range items {
 			cpu, _, _ := unstructured.NestedInt64(items[i].Object, "spec", "cpu", "guest")
 			mem, _, _ := unstructured.NestedString(items[i].Object, "spec", "memory", "guest")
@@ -129,16 +130,33 @@ func (c *Client) Instancetype(ctx context.Context, namespace, kind, name string)
 	return u.Object, nil
 }
 
-// hosts are the nodes KubeVirt places VMs on; none when they cannot be read.
-func (c *Client) hosts(ctx context.Context) []corev1.Node {
-	if c.kube == nil {
+// hosts are the nodes KubeVirt runs VMs on, whatever their heartbeat says
+// now: a mark claims no host offers a capability, so a host restarting its
+// virt-handler still counts. None when no instancetype needs a capability
+// or the nodes cannot be read.
+func (c *Client) hosts(ctx context.Context, instancetypes []unstructured.Unstructured) []corev1.Node {
+	needed := slices.ContainsFunc(instancetypes, func(u unstructured.Unstructured) bool {
+		dedicated, pageSize, _ := needs(u.Object)
+		return dedicated || pageSize != ""
+	})
+	if !needed || c.kube == nil {
 		return nil
 	}
-	list, err := c.kube.CoreV1().Nodes().List(ctx, metav1.ListOptions{LabelSelector: "kubevirt.io/schedulable=true"})
+	// From the watch cache: a capability changes far slower than the catalog's TTL.
+	list, err := c.kube.CoreV1().Nodes().List(ctx, metav1.ListOptions{LabelSelector: "kubevirt.io/schedulable", ResourceVersion: "0"})
 	if err != nil {
 		return nil
 	}
 	return list.Items
+}
+
+// needs is what of a host an instancetype asks for: dedicated CPUs, and
+// hugepages of pageSize for guest memory.
+func needs(instancetype map[string]any) (dedicated bool, pageSize, guest string) {
+	dedicated, _, _ = unstructured.NestedBool(instancetype, "spec", "cpu", "dedicatedCPUPlacement")
+	pageSize, _, _ = unstructured.NestedString(instancetype, "spec", "memory", "hugepages", "pageSize")
+	guest, _, _ = unstructured.NestedString(instancetype, "spec", "memory", "guest")
+	return dedicated, pageSize, guest
 }
 
 // noHost is why none of hosts can run instancetype, or "" when one can or no
@@ -146,13 +164,8 @@ func (c *Client) hosts(ctx context.Context) []corev1.Node {
 // manager it labeled, and hugepages only where the host has the guest's
 // memory of that page size allocatable.
 func noHost(instancetype map[string]any, hosts []corev1.Node) string {
-	if len(hosts) == 0 {
-		return ""
-	}
-	dedicated, _, _ := unstructured.NestedBool(instancetype, "spec", "cpu", "dedicatedCPUPlacement")
-	pageSize, _, _ := unstructured.NestedString(instancetype, "spec", "memory", "hugepages", "pageSize")
-	guest, _, _ := unstructured.NestedString(instancetype, "spec", "memory", "guest")
-	if !dedicated && pageSize == "" {
+	dedicated, pageSize, guest := needs(instancetype)
+	if len(hosts) == 0 || (!dedicated && pageSize == "") {
 		return ""
 	}
 	want, _ := resource.ParseQuantity(guest)
@@ -168,18 +181,18 @@ func noHost(instancetype map[string]any, hosts []corev1.Node) string {
 		}
 		return ""
 	}
-	var needs []string
+	var what []string
 	if dedicated {
-		needs = append(needs, "dedicated CPUs")
+		what = append(what, "dedicated CPUs")
 	}
 	if pageSize != "" {
 		if guest != "" {
-			needs = append(needs, guest+" of "+pageSize+" hugepages")
+			what = append(what, guest+" of "+pageSize+" hugepages")
 		} else {
-			needs = append(needs, pageSize+" hugepages")
+			what = append(what, pageSize+" hugepages")
 		}
 	}
-	return "needs " + strings.Join(needs, " and ") + ", which no host offers"
+	return "needs " + strings.Join(what, " and ") + ", which no host offers"
 }
 
 func listAll(ctx context.Context, dyn dynamic.Interface, gvr schema.GroupVersionResource) ([]unstructured.Unstructured, error) {

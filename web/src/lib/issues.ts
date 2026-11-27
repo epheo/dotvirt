@@ -118,12 +118,7 @@ export function deriveIssues(
 		}
 		for (const ns of p.namespaces)
 			for (const vm of ns.vms) {
-				const issue = vmIssue(
-					p.name,
-					vm,
-					opts.canRestart?.(vm.namespace) ?? false,
-					opts.noHost?.(vm),
-				);
+				const issue = vmIssue(p.name, vm, opts.canRestart?.(vm.namespace) ?? false, opts.noHost);
 				if (issue) out.push(issue);
 			}
 		out.push(...placementIssues(inv, p, opts.extraTenantKinds));
@@ -373,7 +368,12 @@ function projectOf(inv: Inventory, namespace: string): string | undefined {
 
 // One row per VM, highest severity, every reason folded into the label - a
 // broken VM should read as one problem, not three.
-function vmIssue(project: string, vm: VM, canRestart: boolean, noHost?: string): Issue | null {
+function vmIssue(
+	project: string,
+	vm: VM,
+	canRestart: boolean,
+	noHost?: (vm: VM) => string | undefined,
+): Issue | null {
 	const danger: string[] = [];
 	const warn: string[] = [];
 	let detail: string | undefined;
@@ -383,9 +383,11 @@ function vmIssue(project: string, vm: VM, canRestart: boolean, noHost?: string):
 	}
 	if (vm.failure) {
 		danger.push('cannot start');
-		// The scheduler's own words name a node selector, not the size behind it.
-		detail ??= noHost
-			? `Its size, ${vm.instancetype}, ${noHost}. Edit its settings to give it another.`
+		// The scheduler's words for a size no host runs name a node selector,
+		// not the size behind it.
+		const why = vm.phase === 'ErrorUnschedulable' ? noHost?.(vm) : undefined;
+		detail ??= why
+			? `Its size, ${vm.instancetype}, ${why}. Edit its settings to give it another.`
 			: vm.failure;
 	}
 	if (vm.phase && badPhase.test(vm.phase)) danger.push(vm.phase);

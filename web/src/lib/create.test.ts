@@ -98,7 +98,9 @@ describe('defaultSize', () => {
 	});
 	it('never starts at a size no host runs while another runs', () => {
 		expect(defaultSize([pinned, small], { it: pinned, count: 2 })).toBe('o1.small');
-		expect(defaultSize([pinned], null)).toBe('n1.medium');
+		expect(defaultSize([small, pinned], { it: pinned, count: 2 })).toBe('o1.small');
+		const pinnedSmall = { ...small, noHost: pinned.noHost };
+		expect(defaultSize([pinnedSmall, pinned], { it: pinned, count: 2 })).toBe('n1.medium');
 		expect(noHostNote(pinned)).toBe('Needs dedicated CPUs, which no host offers.');
 		expect(noHostNote(usual)).toBe('');
 	});
