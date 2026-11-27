@@ -1,5 +1,6 @@
 <script lang="ts">
 	import type { Instancetype, Options, VM } from '#lib/api.js';
+	import { noHostNote } from '#lib/create.js';
 	import type { EditForm } from '#lib/editform.js';
 	import FormField from '../FormField.svelte';
 	import Note from '../Note.svelte';
@@ -105,7 +106,9 @@
 					</option>
 				{/if}
 				{#each options?.instancetypes ?? [] as it (it.name)}
-					<option value={it.name}>{it.name} ({it.cpu} CPU / {it.memory})</option>
+					<option value={it.name} disabled={!!it.noHost && it.name !== form.instancetype}>
+						{it.name} ({it.cpu} CPU / {it.memory}){it.noHost ? ', no host can run it' : ''}
+					</option>
 				{/each}
 			</SelectInput>
 		</FormField>
@@ -115,6 +118,9 @@
 				? `: ${selectedIT.cpu} CPU / ${selectedIT.memory}`
 				: ''}.
 		</p>
+		{#if selectedIT?.noHost}
+			<p class="col-span-2 text-xs text-warn-ink">{noHostNote(selectedIT)} Pick another size.</p>
+		{/if}
 	{:else}
 		<FormField label="vCPUs">
 			<TextInput type="number" min="1" bind:value={form.cpuCores} />

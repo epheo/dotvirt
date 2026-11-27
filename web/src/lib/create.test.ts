@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { Network, Options, StorageClassInfo, VM } from '#lib/api.js';
 import {
+	defaultSize,
 	defaultUser,
 	generatePassword,
 	imageTally,
@@ -9,6 +10,7 @@ import {
 	mostCommonSize,
 	nextFreeName,
 	networkLine,
+	noHostNote,
 	preferenceFor,
 	searchNetworks,
 	sharedClass,
@@ -77,6 +79,30 @@ describe('sizeLabel', () => {
 	it('reads the size word and the numbers', () => {
 		expect(sizeLabel({ name: 'u1.medium', cpu: 2, memory: '4Gi' })).toBe('Medium, 2 vCPU 4 GiB');
 		expect(sizeLabel({ name: 'big', cpu: 16, memory: '64Gi' })).toBe('Big, 16 vCPU 64 GiB');
+	});
+});
+
+describe('defaultSize', () => {
+	const pinned = {
+		name: 'n1.medium',
+		cpu: 4,
+		memory: '4Gi',
+		noHost: 'needs dedicated CPUs, which no host offers',
+	};
+	const usual = { name: 'u1.medium', cpu: 1, memory: '4Gi' };
+	const small = { name: 'o1.small', cpu: 1, memory: '2Gi' };
+	it("starts at the project's usual size, else u1.medium, else the first", () => {
+		expect(defaultSize([small, usual], { it: small, count: 3 })).toBe('o1.small');
+		expect(defaultSize([small, usual], null)).toBe('u1.medium');
+		expect(defaultSize([small], null)).toBe('o1.small');
+	});
+	it('never starts at a size no host runs while another runs', () => {
+		expect(defaultSize([pinned, small], { it: pinned, count: 2 })).toBe('o1.small');
+		expect(defaultSize([small, pinned], { it: pinned, count: 2 })).toBe('o1.small');
+		const pinnedSmall = { ...small, noHost: pinned.noHost };
+		expect(defaultSize([pinnedSmall, pinned], { it: pinned, count: 2 })).toBe('n1.medium');
+		expect(noHostNote(pinned)).toBe('Needs dedicated CPUs, which no host offers.');
+		expect(noHostNote(usual)).toBe('');
 	});
 });
 

@@ -3,6 +3,7 @@
 	import { Check, CircleCheck, Copy, TriangleAlert, X } from '@lucide/svelte';
 	import { api, type CreateVMRequest, type Network } from '#lib/api.js';
 	import {
+		defaultSize,
 		defaultUser,
 		generatePassword,
 		imageTally,
@@ -11,6 +12,7 @@
 		mostCommonSize,
 		networkLine,
 		nextFreeName,
+		noHostNote,
 		preferenceFor,
 		searchNetworks,
 		sharedClass,
@@ -119,8 +121,7 @@
 	let instancetype = $state('');
 	let sizeTouched = false;
 	$effect(() => {
-		const its = options?.instancetypes ?? [];
-		const pick = common?.it.name ?? its.find((i) => i.name === 'u1.medium')?.name ?? its[0]?.name;
+		const pick = defaultSize(options?.instancetypes ?? [], common);
 		untrack(() => {
 			if (!sizeTouched && pick) instancetype = pick;
 		});
@@ -143,7 +144,11 @@
 					!sizeQuery ||
 					`${i.name} ${sizeLabel(i)}`.toLowerCase().includes(sizeQuery.trim().toLowerCase()),
 			)
-			.sort((a, b) => (tally.get(b.name) ?? 0) - (tally.get(a.name) ?? 0)),
+			.sort(
+				(a, b) =>
+					Number(!!a.noHost) - Number(!!b.noHost) ||
+					(tally.get(b.name) ?? 0) - (tally.get(a.name) ?? 0),
+			),
 	);
 
 	// ── boot image and OS tuning ───────────────────────────────────────────
@@ -578,7 +583,7 @@
 							onclose={close}
 						>
 							{#snippet value()}{it ? sizeLabel(it) : 'Pick a size'}{/snippet}
-							{#snippet sub()}{sizeWhy}{/snippet}
+							{#snippet sub()}{it?.noHost ? noHostNote(it) : sizeWhy}{/snippet}
 							{#snippet editor(done)}
 								<PickList
 									label="Sizes"
@@ -587,6 +592,7 @@
 									items={sizes}
 									key={(i) => i.name}
 									selected={(i) => i.name === instancetype}
+									disabled={(i) => !!i.noHost}
 									ontoggle={(i) => {
 										sizeTouched = true;
 										instancetype = i.name;
@@ -604,6 +610,9 @@
 												</span>{/if}
 										</span>
 										<span class="font-mono text-xs text-ink-muted">{i.name}</span>
+										{#if i.noHost}<span class="block text-xs text-warn-ink">
+												{noHostNote(i)}
+											</span>{/if}
 									{/snippet}
 								</PickList>
 							{/snippet}

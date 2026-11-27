@@ -102,6 +102,10 @@ class InventoryStore {
 			canRestart: (ns) => vmGate.restart(ns).ok,
 			network: this.netProblems,
 			extraTenantKinds: modules.value?.extraTenantKinds === true,
+			noHost: (vm) =>
+				vm.instancetype
+					? this.options?.instancetypes.find((i) => i.name === vm.instancetype)?.noHost
+					: undefined,
 		}),
 	);
 	// What is worth doing but not wrong: adoptable namespaces and VMs.
