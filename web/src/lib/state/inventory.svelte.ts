@@ -102,6 +102,10 @@ class InventoryStore {
 			canRestart: (ns) => vmGate.restart(ns).ok,
 			network: this.netProblems,
 			extraTenantKinds: modules.value?.extraTenantKinds === true,
+			noHost: (vm) =>
+				vm.instancetype
+					? this.options?.instancetypes.find((i) => i.name === vm.instancetype)?.noHost
+					: undefined,
 		}),
 	);
 	// What is worth doing but not wrong: adoptable namespaces and VMs.
@@ -198,6 +202,9 @@ class InventoryStore {
 	apply(inv: Inventory) {
 		this.inventory = share(this.inventory, inv);
 		this.error = '';
+		// A VM that cannot start may be sized for no host; the catalog says.
+		if (!this.options && !this.optionsError && this.allVMs.some((vm) => vm.failure))
+			void this.loadOptions();
 	}
 
 	// The catalog is fetched once per session: a call with it loaded is a no-op.

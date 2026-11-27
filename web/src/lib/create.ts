@@ -118,6 +118,24 @@ export function generatePassword(): string {
 	return Array.from(buf, (n) => chars[n % chars.length]).join('');
 }
 
+// The size a new VM starts at: the project's usual one, else u1.medium,
+// else the first; never one no host can run while another can.
+export function defaultSize(its: Instancetype[], common: Size | null): string | undefined {
+	const runs = its.filter((i) => !i.noHost);
+	return (
+		runs.find((i) => i.name === common?.it.name)?.name ??
+		runs.find((i) => i.name === 'u1.medium')?.name ??
+		runs[0]?.name ??
+		its[0]?.name
+	);
+}
+
+// "Needs dedicated CPUs, which no host offers.", or '' for a size a host runs.
+export function noHostNote(it: Instancetype | undefined): string {
+	const why = it?.noHost ?? '';
+	return why && `${why.charAt(0).toUpperCase()}${why.slice(1)}.`;
+}
+
 // "Medium, 2 vCPU 4 GiB": the size word an instancetype name carries after
 // its series ("u1.medium"), then the numbers.
 export function sizeLabel(it: Instancetype): string {

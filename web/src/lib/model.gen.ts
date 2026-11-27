@@ -1525,6 +1525,12 @@ export interface Instancetype {
   name: string;
   cpu: number /* int64 */;
   memory: string;
+  /**
+   * Why no virtualization host can run it, "needs ..., which no host
+   * offers"; empty when one can or the hosts could not be read. KubeVirt
+   * admits such a VM, which then never leaves scheduling.
+   */
+  noHost?: string;
 }
 export interface Preference {
   name: string;

@@ -54,6 +54,8 @@ export function deriveIssues(
 		network?: NetProblem[];
 		// Tenant repos may apply kinds a provider allowed beyond the listed ones.
 		extraTenantKinds?: boolean;
+		// Why no host can run a VM's size, when none can.
+		noHost?: (vm: VM) => string | undefined;
 	} = {},
 ): Issue[] {
 	if (!inv) return [];
@@ -116,7 +118,12 @@ export function deriveIssues(
 		}
 		for (const ns of p.namespaces)
 			for (const vm of ns.vms) {
-				const issue = vmIssue(p.name, vm, opts.canRestart?.(vm.namespace) ?? false);
+				const issue = vmIssue(
+					p.name,
+					vm,
+					opts.canRestart?.(vm.namespace) ?? false,
+					opts.noHost?.(vm),
+				);
 				if (issue) out.push(issue);
 			}
 		out.push(...placementIssues(inv, p, opts.extraTenantKinds));
@@ -366,7 +373,7 @@ function projectOf(inv: Inventory, namespace: string): string | undefined {
 
 // One row per VM, highest severity, every reason folded into the label - a
 // broken VM should read as one problem, not three.
-function vmIssue(project: string, vm: VM, canRestart: boolean): Issue | null {
+function vmIssue(project: string, vm: VM, canRestart: boolean, noHost?: string): Issue | null {
 	const danger: string[] = [];
 	const warn: string[] = [];
 	let detail: string | undefined;
@@ -376,7 +383,10 @@ function vmIssue(project: string, vm: VM, canRestart: boolean): Issue | null {
 	}
 	if (vm.failure) {
 		danger.push('cannot start');
-		detail ??= vm.failure;
+		// The scheduler's own words name a node selector, not the size behind it.
+		detail ??= noHost
+			? `Its size, ${vm.instancetype}, ${noHost}. Edit its settings to give it another.`
+			: vm.failure;
 	}
 	if (vm.phase && badPhase.test(vm.phase)) danger.push(vm.phase);
 	if (vm.restartPending) {

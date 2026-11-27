@@ -160,6 +160,10 @@ type Instancetype struct {
 	Name   string `json:"name"`
 	CPU    int64  `json:"cpu"`
 	Memory string `json:"memory"`
+	// Why no virtualization host can run it, "needs ..., which no host
+	// offers"; empty when one can or the hosts could not be read. KubeVirt
+	// admits such a VM, which then never leaves scheduling.
+	NoHost string `json:"noHost,omitempty"`
 }
 
 type Preference struct {
