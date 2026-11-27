@@ -632,16 +632,6 @@ func TestHTTPRouteAttachesToTheNamedGateway(t *testing.T) {
 	}
 }
 
-// With no host, the route takes every name: a machine reached by its address.
-func TestHTTPRouteWithoutHostTakesEveryName(t *testing.T) {
-	dv := testDotvirt()
-	dv.Spec.Ingress.Gateway = &dotvirtv1alpha1.GatewayRef{Name: "edge"}
-	r := HTTPRoute(dv, dv.Spec.Ingress.Gateway, AppName, HTTPPort, "")
-	if _, found, _ := unstructured.NestedFieldNoCopy(r.Object, "spec", "hostnames"); found {
-		t.Errorf("hostnames set: %v", r.Object["spec"])
-	}
-}
-
 // Without this peer the fence the operator draws on OpenShift-like clusters
 // would cut the console off from the Gateway that serves it.
 func TestNetworkPolicyAdmitsTheGatewayNamespace(t *testing.T) {

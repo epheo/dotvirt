@@ -32,11 +32,9 @@ type InstallSpec struct {
 	MetricsURL, MetricsTenancyURL        string
 	MetricsCA                            bool
 	IngressHost                          string
-	// IngressType and Gateway are spec.ingress.type and spec.ingress.gateway,
-	// ForgeGateway spec.forge.gateway, their namespaces as written.
-	IngressType                                                      string
-	GatewayName, GatewayNamespace, GatewaySectionName                string
-	ForgeGatewayName, ForgeGatewayNamespace, ForgeGatewaySectionName string
+	// IngressType and GatewayName are spec.ingress.type and
+	// spec.ingress.gateway.name: what exposes the console.
+	IngressType, GatewayName string
 	// The console's volumes an admin chose: the branding and metrics CA
 	// ConfigMaps, and the forge credential Secret (empty: the default).
 	BrandingConfigMap, MetricsCAConfigMap, ForgeCredentials string
@@ -77,11 +75,6 @@ func (c *Client) InstallIn(ctx context.Context, namespace string) (InstallSpec, 
 	out.IngressHost, _, _ = unstructured.NestedString(o, "spec", "ingress", "host")
 	out.IngressType, _, _ = unstructured.NestedString(o, "spec", "ingress", "type")
 	out.GatewayName, _, _ = unstructured.NestedString(o, "spec", "ingress", "gateway", "name")
-	out.GatewayNamespace, _, _ = unstructured.NestedString(o, "spec", "ingress", "gateway", "namespace")
-	out.GatewaySectionName, _, _ = unstructured.NestedString(o, "spec", "ingress", "gateway", "sectionName")
-	out.ForgeGatewayName, _, _ = unstructured.NestedString(o, "spec", "forge", "gateway", "name")
-	out.ForgeGatewayNamespace, _, _ = unstructured.NestedString(o, "spec", "forge", "gateway", "namespace")
-	out.ForgeGatewaySectionName, _, _ = unstructured.NestedString(o, "spec", "forge", "gateway", "sectionName")
 	out.BrandingConfigMap, _, _ = unstructured.NestedString(o, "spec", "branding", "configMap")
 	out.MetricsCAConfigMap, _, _ = unstructured.NestedString(o, "spec", "metrics", "ca", "name")
 	out.ForgeCredentials, _, _ = unstructured.NestedString(o, "spec", "forge", "credentialsSecret")
@@ -205,8 +198,8 @@ func (c *Client) AppsDomain(ctx context.Context) (string, error) {
 // SSOClient is the OpenShift OAuthClient the console in namespace registers
 // and signs users in with, as THIS client reads it: named for the namespace,
 // redirecting to the install's spec.ingress.host, else the router's host for
-// the console's Route. Never the env the operator writes. A console a Gateway
-// serves with no host has no redirect.
+// the console's Route. Never the env the operator writes. A console on no
+// Route has no redirect without spec.ingress.host.
 func (c *Client) SSOClient(ctx context.Context, namespace string) (id, redirect string, err error) {
 	spec, err := c.InstallIn(ctx, namespace)
 	if err != nil {

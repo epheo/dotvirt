@@ -118,12 +118,7 @@ func (r *DotvirtReconciler) exposureFor(dv *dotvirtv1alpha1.Dotvirt, name string
 	return nil
 }
 
-// exposure is the console's: on a Gateway with no host it takes every name the
-// listener does, for a machine reached by its address. Nothing else goes hostless.
 func (r *DotvirtReconciler) exposure(dv *dotvirtv1alpha1.Dotvirt) client.Object {
-	if r.resolveExposureType(dv) == dotvirtv1alpha1.IngressGateway {
-		return install.HTTPRoute(dv, dv.Spec.Ingress.Gateway, install.AppName, install.HTTPPort, dv.Spec.Ingress.Host)
-	}
 	return r.exposureFor(dv, install.AppName, install.HTTPPort, dv.Spec.Ingress.Host, dv.Spec.Ingress.Gateway, r.resolveExposureType(dv))
 }
 

@@ -813,27 +813,8 @@ func TestIngressForgeStillNeedsTheIngressCA(t *testing.T) {
 	}
 }
 
-// On a Gateway with no host the console alone goes hostless: a forge route
-// with no hostnames would answer every name, the console's too.
-func TestHostlessGatewayExposesTheConsoleOnly(t *testing.T) {
-	dv := testCR()
-	dv.Spec.Forge.Managed = true
-	dv.Spec.Ingress = dotvirtv1alpha1.IngressSpec{Gateway: &dotvirtv1alpha1.GatewayRef{Name: "console", Namespace: "dotvirt-console"}}
-	r := &DotvirtReconciler{Platform: platform.OpenShift}
-	got, ok := r.exposure(dv).(*unstructured.Unstructured)
-	if !ok || got.GroupVersionKind() != install.HTTPRouteGVK {
-		t.Fatalf("console exposure = %T %v", r.exposure(dv), got)
-	}
-	if _, found, _ := unstructured.NestedFieldNoCopy(got.Object, "spec", "hostnames"); found {
-		t.Errorf("console route names hosts: %v", got.Object["spec"])
-	}
-	if f, _ := r.forgejoExposure(dv); f != nil {
-		t.Errorf("forge exposure with no forge URL = %v, want none", f)
-	}
-}
-
 // The forge is exposed on the host browsers reach it by, never an in-cluster
-// one; an address only through a Gateway listener of its own.
+// one, nor an address on a Gateway, which serves names only.
 func TestForgeExposure(t *testing.T) {
 	svc := "http://dotvirt-forgejo.dotvirt.svc.cluster.local:3000"
 	console := &dotvirtv1alpha1.GatewayRef{Name: "edge", Namespace: "edge-system", SectionName: "https"}
@@ -842,7 +823,6 @@ func TestForgeExposure(t *testing.T) {
 		plat            platform.Platform
 		url, webURL     string
 		console, forge  *dotvirtv1alpha1.GatewayRef
-		hostlessConsole bool
 		wantGVK         schema.GroupVersionKind
 		wantHosts       []any
 		wantSection     string
@@ -853,27 +833,16 @@ func TestForgeExposure(t *testing.T) {
 		{name: "in-cluster URL only", plat: platform.OpenShift, url: svc, wantUnreachable: true},
 		{name: "in-cluster URL, a web host", plat: platform.OpenShift, url: svc, webURL: "https://git.example", console: console,
 			wantGVK: install.HTTPRouteGVK, wantHosts: []any{"git.example"}, wantSection: "https"},
-		{name: "an address on its own listener", plat: platform.OpenShift, url: svc, webURL: "https://192.0.2.10:3000", console: console,
-			forge:   &dotvirtv1alpha1.GatewayRef{Name: "edge", Namespace: "edge-system", SectionName: "forge"},
-			wantGVK: install.HTTPRouteGVK, wantSection: "forge"},
-		{name: "an address on the console's listener", plat: platform.OpenShift, url: svc, webURL: "https://192.0.2.10:3000", console: console,
-			wantUnreachable: true},
-		{name: "an address on every listener", plat: platform.OpenShift, url: svc, webURL: "https://192.0.2.10:3000", console: console,
-			forge: &dotvirtv1alpha1.GatewayRef{Name: "edge", Namespace: "edge-system"}, wantUnreachable: true},
-		{name: "an address with no Gateway", plat: platform.OpenShift, url: svc, webURL: "https://192.0.2.10", wantUnreachable: true},
-		// Browsers send a console's cookies to every port of its address.
-		{name: "an address beside a console reached by address", plat: platform.OpenShift, url: svc, webURL: "https://192.0.2.10:3000",
-			console: console, hostlessConsole: true,
-			forge: &dotvirtv1alpha1.GatewayRef{Name: "edge", Namespace: "edge-system", SectionName: "forge"}, wantUnreachable: true},
-		{name: "a name beside a console reached by address", plat: platform.OpenShift, url: svc, webURL: "https://git.example",
-			console: console, hostlessConsole: true, wantUnreachable: true},
+		{name: "a name on its own listener", plat: platform.OpenShift, url: svc, webURL: "https://git.example", console: console,
+			forge:   &dotvirtv1alpha1.GatewayRef{Name: "edge", Namespace: "edge-system", SectionName: "git"},
+			wantGVK: install.HTTPRouteGVK, wantHosts: []any{"git.example"}, wantSection: "git"},
+		{name: "an address on a Gateway", plat: platform.OpenShift, url: svc, webURL: "https://192.0.2.10:3000", console: console,
+			forge: &dotvirtv1alpha1.GatewayRef{Name: "edge", Namespace: "edge-system", SectionName: "git"}, wantUnreachable: true},
+		{name: "an address on a Route", plat: platform.OpenShift, url: "https://192.0.2.10", wantGVK: install.RouteGVK},
 	} {
 		dv := testCR()
 		dv.Spec.Forge.Managed, dv.Spec.Forge.URL, dv.Spec.Forge.WebURL, dv.Spec.Forge.Gateway = true, c.url, c.webURL, c.forge
 		dv.Spec.Ingress = dotvirtv1alpha1.IngressSpec{Host: "console.example", Gateway: c.console}
-		if c.hostlessConsole {
-			dv.Spec.Ingress.Host = ""
-		}
 		r := &DotvirtReconciler{Platform: c.plat}
 		got, why := r.forgejoExposure(dv)
 		if c.wantGVK.Kind == "" && !c.wantUnreachable {
