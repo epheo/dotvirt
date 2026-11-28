@@ -16,6 +16,7 @@
 //   POST /__fixture/proxy-down/{0|1}   the upload proxy drops connections, as one the browser cannot reach or trust
 //   POST /__fixture/desktops-rollout   DeskuBe rolls out every desktop restart asked for
 //   POST /__fixture/vm/{ns}/{name}     merge the JSON body into a VM, as the reflector sees it move: one frame
+//   POST /__fixture/inventory          merge the JSON body into the frame's top level (a watermark moves): one frame
 //   POST /__fixture/project/{name}     merge the JSON body into a project row (a merge moves its head): one frame
 //   POST /__fixture/namespace/{ns}     merge the JSON body into a project namespace (its verdicts, its VMs): one frame
 //   POST /__fixture/caps/{ns}          merge the JSON body into the namespace's capabilities; the tasks watermark moves: one frame
@@ -1617,6 +1618,13 @@ function handleControl(req, res, url) {
 			Object.assign(vm, fields);
 			broadcastInventory();
 			sendJSON(res, 200, vm);
+		});
+	}
+	if (path === '/__fixture/inventory' && req.method === 'POST') {
+		return void readBody(req).then((fields) => {
+			Object.assign(state.scenario.inventory, fields);
+			broadcastInventory();
+			sendJSON(res, 200, { ok: true });
 		});
 	}
 	m = path.match(/^\/__fixture\/project\/([^/]+)$/);

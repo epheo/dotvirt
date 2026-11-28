@@ -110,10 +110,12 @@
 	const scopeRefused = $derived(!!scopeReads && !scopeReads.ok && scopeReads.why !== CHECKING);
 	// A lane's content is a function of the namespace scope, the project's
 	// applied revision (a merge that reaches the cluster moves it) and whether
-	// the caller may read it.
+	// the caller may read it. A caller who sees part of the project gets no
+	// revision: their tasks watermark moves on the merges they may see.
 	const laneKey = (project: string) => {
 		const g = readGate(project);
-		return `${scopeNS}|${syncOf(project)?.revision ?? ''}|${g.ok ? '' : g.why}`;
+		const moved = syncOf(project)?.revision || `tasks:${inventory.inventory?.tasksVersion ?? 0}`;
+		return `${scopeNS}|${moved}|${g.ok ? '' : g.why}`;
 	};
 	// Open lanes only: a closed one asks nothing, its gate included.
 	const historyKeys = $derived(

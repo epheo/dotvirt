@@ -155,3 +155,24 @@ test("a network's recent changes ask again once the caller no longer reads the r
 	await post(page, 'caps/web-prod', { project: { repoRead: false } });
 	await expect.poll(() => fetches(history)).toBe(2);
 });
+
+for (const revision of [true, false])
+	test(`a namespace's history lane re-reads on ${revision ? 'the revision alone' : 'the tasks watermark without one'}`, async ({
+		page,
+	}) => {
+		// A caller who sees part of the project gets no applied revision: the
+		// merges they may see move their tasks watermark instead.
+		const fetches = await fetchCounter(page);
+		const history = '/api/projects/team-web/history';
+		await setScenario(page, 'base');
+		await login(page);
+		if (!revision)
+			await post(page, 'project/team-web', { gitOps: { sync: 'Synced', health: 'Healthy' } });
+		await page.goto('/changes/team-web/web-prod');
+		await expect.poll(() => fetches(history)).toBe(1);
+		const tasks = await fetches('/api/tasks');
+		await post(page, 'inventory', { tasksVersion: 99 });
+		await expect.poll(() => fetches('/api/tasks')).toBeGreaterThan(tasks);
+		if (revision) expect(await fetches(history)).toBe(1);
+		else await expect.poll(() => fetches(history)).toBe(2);
+	});
