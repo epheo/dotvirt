@@ -33,19 +33,26 @@
 	// /changes, which is the full view of the same pipeline.
 	// A merge is placed against its project's whole history. A caller refused
 	// it (a platform stager without platform read, a viewer of part of a
-	// project) gets no verdict here, and no read is sent: their merge cannot
-	// be followed past git. Until the answer lands nothing is read either.
+	// project) is sent no read: a viewer of part of a project is followed on
+	// the merge feed's applied answer instead, the project's sync beside it.
+	// The platform shows such a stager no sync: their merge cannot be followed
+	// past git. Until the answer lands nothing is read either.
 	const reads = (p: string) => inventory.repoRead(p).ok;
 	const unfollowable = (p: string) => {
 		const g = inventory.repoRead(p);
 		return !g.ok && g.why !== CHECKING && g.why !== ACCESS_UNKNOWN;
 	};
-	const syncOf = (p: string) =>
-		unfollowable(p)
-			? undefined
-			: p === PLATFORM_PROJECT
-				? inventory.inventory?.platform
+	const syncOf = (p: string, known: boolean) =>
+		p === PLATFORM_PROJECT
+			? unfollowable(p)
+				? undefined
+				: inventory.inventory?.platform
+			: unfollowable(p) && !known
+				? undefined
 				: inventory.projects.find((x) => x.name === p)?.gitOps;
+	const appliedOf = (p: string, n: number) =>
+		inventory.taskFeed.find((t) => t.kind === 'merge' && t.project === p && t.prNumber === n)
+			?.applied;
 	const lanes = $derived(
 		trayLanes({
 			drafts: drafts.drafts,
@@ -53,6 +60,7 @@
 			followed: tray.followed,
 			sync: syncOf,
 			commits: (p) => tray.commits(p),
+			applied: appliedOf,
 		}),
 	);
 
@@ -62,7 +70,7 @@
 		lanes
 			.flatMap((l) =>
 				l.kind === 'applying' && !l.picked && reads(l.project)
-					? [`${l.project}@${syncOf(l.project)?.revision ?? ''}`]
+					? [`${l.project}@${syncOf(l.project, false)?.revision ?? ''}`]
 					: [],
 			)
 			.sort()

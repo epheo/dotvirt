@@ -208,7 +208,16 @@ func scrubSyncMessage(msg string) string {
 // collision the more severe status wins, so a rollup never hides a degraded app behind
 // a healthy one. Always returns a non-nil map.
 func appSyncFromApps(objs []*unstructured.Unstructured) map[string]model.ProjectSync {
-	out := map[string]model.ProjectSync{}
+	out, _ := appSyncAndRevisions(objs)
+	return out
+}
+
+// appSyncAndRevisions is appSyncFromApps with each rollup's full applied
+// revision beside it, picked by the same collision rule. The full revision
+// stays server-side: it answers whether a merge is applied without a caller
+// learning the revision.
+func appSyncAndRevisions(objs []*unstructured.Unstructured) (map[string]model.ProjectSync, map[string]string) {
+	out, revs := map[string]model.ProjectSync{}, map[string]string{}
 	for _, app := range objs {
 		repo := appRepo(app.Object)
 		if repo == "" {
@@ -237,9 +246,10 @@ func appSyncFromApps(objs []*unstructured.Unstructured) map[string]model.Project
 		ps.Unhealthy = unhealthyResources(app.Object, opStands)
 		if prev, exists := out[repo]; !exists || rollupSeverity(ps) >= rollupSeverity(prev) {
 			out[repo] = ps
+			revs[repo] = nestedString(app.Object, "status", "sync", "revision")
 		}
 	}
-	return out
+	return out, revs
 }
 
 // unhealthyResources lists the Application's objects that are degraded or whose

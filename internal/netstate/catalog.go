@@ -8,6 +8,7 @@ import (
 
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 
+	"github.com/epheo/dotvirt/internal/cluster"
 	"github.com/epheo/dotvirt/internal/model"
 	"github.com/epheo/dotvirt/internal/netgen"
 	"github.com/epheo/dotvirt/internal/reflect"
@@ -166,6 +167,25 @@ func (s *Snapshot) failures(policy string) []model.UplinkFailure {
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Node < out[j].Node })
 	return out
+}
+
+// HostNodes is GET /api/nodes off the node cache: the nodes KubeVirt may
+// schedule on, with their state, as of the last refresh. ok is false until the
+// first one lands.
+func (s *Snapshot) HostNodes() (out []model.Node, ok bool) {
+	s.nodesMu.RLock()
+	defer s.nodesMu.RUnlock()
+	if s.nodes == nil {
+		return nil, false
+	}
+	out = []model.Node{}
+	for _, n := range s.nodes {
+		if n.Labels[cluster.SchedulableLabel] == "true" {
+			out = append(out, model.Node{Name: n.Name, Ready: n.Ready, Unschedulable: n.Unschedulable, Maintenance: n.Maintenance})
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
+	return out, true
 }
 
 // nodesMatching returns the names of cached nodes matching sel (all nodes when sel is

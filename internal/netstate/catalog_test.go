@@ -2,6 +2,7 @@ package netstate
 
 import (
 	"encoding/json"
+	"slices"
 	"sort"
 	"strings"
 	"testing"
@@ -355,5 +356,35 @@ func TestUplinkFailures(t *testing.T) {
 		if dc.Failures[i] != want[i] {
 			t.Errorf("failure[%d] = %+v, want %+v", i, dc.Failures[i], want[i])
 		}
+	}
+}
+
+// The host roster off the node cache: KubeVirt's nodes alone, by name, with
+// their state; nothing until the first LIST lands, and a state move alone
+// signals no network change.
+func TestHostNodesFromTheNodeCache(t *testing.T) {
+	s := New(nil, nil)
+	if _, ok := s.HostNodes(); ok {
+		t.Fatal("hosts before the first node LIST")
+	}
+	kv := map[string]string{cluster.SchedulableLabel: "true"}
+	nodes := []cluster.NodeLabels{
+		{Name: "worker-b", Labels: kv, Ready: true, Unschedulable: true, Maintenance: true},
+		{Name: "infra-0", Labels: map[string]string{}, Ready: true},
+		{Name: "worker-a", Labels: kv},
+	}
+	s.setNodes(nodes)
+	got, ok := s.HostNodes()
+	want := []model.Node{{Name: "worker-a"}, {Name: "worker-b", Ready: true, Unschedulable: true, Maintenance: true}}
+	if !ok || len(got) != 2 || got[0] != want[0] || got[1] != want[1] {
+		t.Errorf("hosts = %+v, want %+v", got, want)
+	}
+	moved := slices.Clone(nodes)
+	moved[2].Ready = true
+	if s.setNodes(moved) {
+		t.Error("a readiness move alone moved the node set")
+	}
+	if got, _ := s.HostNodes(); !got[0].Ready {
+		t.Errorf("worker-a's readiness did not land: %+v", got[0])
 	}
 }

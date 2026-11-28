@@ -638,6 +638,9 @@ export const api = {
 	branding: () => get<gen.Branding>('/api/branding'),
 	// Node maintenance (cluster-scoped; the user's token is the gate).
 	nodes: () => get<gen.Node[]>('/api/nodes'),
+	// The same roster off the server's node cache, minutes old at most: for a
+	// view that polls, never a LIST per viewer per tick.
+	nodeStates: () => get<gen.Node[]>('/api/nodes?snapshot'),
 	capacity: () => get<gen.HostCapacity>('/api/metrics/capacity'),
 	nodeInfo: (node: string) => get<gen.NodeInfo>(`/api/nodes/${enc(node)}`),
 	setNodeCordon: (node: string, unschedulable: boolean) =>
@@ -741,6 +744,21 @@ export const api = {
 // retry is the 1-based attempt count since the last successful open.
 export function retryDelay(retry: number): number {
 	return 500 * 2 ** (Math.min(Math.max(retry, 1), 6) - 1);
+}
+
+// transient is a read failure worth asking again unprompted: a server error,
+// a rate limit, or no answer at all. A refusal stands until something moves.
+export const transient = (e: unknown) =>
+	!(e instanceof HttpError) || e.status >= 500 || e.status === 429;
+
+// The wait before re-asking a read that failed transiently, failures being
+// the 1-based count in a row: 15s doubling to 60s, spread by 30% so clients
+// an outage knocked over together come back apart.
+export const READ_RETRY_MS = 15_000;
+export const READ_RETRY_MAX_MS = 60_000;
+export function readRetryDelay(failures: number): number {
+	const base = Math.min(READ_RETRY_MS * 2 ** (Math.max(failures, 1) - 1), READ_RETRY_MAX_MS);
+	return Math.round(base * (0.7 + Math.random() * 0.6));
 }
 
 // withRetry re-runs fn on failure with backoff (1s doubling, `retries` more

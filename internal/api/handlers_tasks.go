@@ -3,6 +3,7 @@ package api
 import (
 	"net/http"
 	"sort"
+	"sync"
 	"time"
 
 	"github.com/epheo/dotvirt/internal/auth"
@@ -43,6 +44,65 @@ func (s *Server) handleTasks(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, scopeTasks(s.tasks.Ops(), s.tasks.Merges(), s.taskScope(id, projects, v, platform, canNodes)))
 }
 
+// mergeApplied is whether Argo runs merge m: the revision the Application
+// sourcing its repo last synced holds the commit the forge merged m with.
+// Only the answer leaves the server, never the revision, which moves with
+// every merge a partial viewer's feed does not show them.
+func (s *Server) mergeApplied(m tasks.Merge) *bool {
+	holds, known := false, false
+	if s.drift != nil {
+		if rev := s.drift.AppliedRevision(m.RepoURL); rev != "" {
+			if read, ok := s.repos.Peek(m.RepoURL); ok {
+				holds, known = read.Holds(s.cfg.BaseBranch, m.Commit, rev)
+			}
+		}
+	}
+	return s.applied.answer(m, holds, known)
+}
+
+// appliedMemory keeps each merge's last known answer. Argo can sync a
+// revision before the mirror fetches it (the webhook pokes both at once):
+// unknown then, the answer would go yes, absent, yes and move a partial
+// viewer's watermark exactly when another tenant's merge applied. An answer
+// stands until a revision the mirror knows says otherwise; it is dropped with
+// its merge from the feed.
+type appliedMemory struct {
+	mu   sync.Mutex
+	seen map[appliedKey]appliedSeen
+}
+
+type appliedKey struct{ repo, commit string }
+
+type appliedSeen struct {
+	applied bool
+	at      time.Time
+}
+
+// answer is the verdict to send for m: holds when known, else the last known
+// one, else nil.
+func (a *appliedMemory) answer(m tasks.Merge, holds, known bool) *bool {
+	k := appliedKey{m.RepoURL, m.Commit}
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if known && m.Commit != "" {
+		if a.seen == nil {
+			a.seen = map[appliedKey]appliedSeen{}
+		}
+		cutoff := time.Now().Add(-tasks.MergeRetention)
+		for old, v := range a.seen {
+			if v.at.Before(cutoff) {
+				delete(a.seen, old)
+			}
+		}
+		a.seen[k] = appliedSeen{holds, m.At}
+		return &holds
+	}
+	if v, ok := a.seen[k]; ok {
+		return &v.applied
+	}
+	return nil
+}
+
 // recordTask logs one imperative act on a VM or a node into the feed.
 func (s *Server) recordTask(verb, namespace, name, by string, ok bool) {
 	s.recordOp(tasks.Op{Verb: verb, Namespace: namespace, Name: name, By: by, OK: ok})
@@ -72,6 +132,16 @@ type taskScope struct {
 	// lists reports whether the caller may list ref where an op ran: VMs, or
 	// desktops for an op on one. nil is yes.
 	lists func(ref ssarRef, namespace string) bool
+	// applied is whether Argo runs a merge, nil while unknown (mergeApplied);
+	// a nil func knows none.
+	applied func(tasks.Merge) *bool
+}
+
+func (sc taskScope) appliedOf(m tasks.Merge) *bool {
+	if sc.applied == nil {
+		return nil
+	}
+	return sc.applied(m)
 }
 
 // taskScope is id's view of the feed over their projects: every platform
@@ -83,6 +153,7 @@ func (s *Server) taskScope(id auth.Identity, projects []project.ProjectInfo, v c
 	}
 	sc := newTaskScope(projects, canNodes)
 	sc.lists = v.lists
+	sc.applied = s.mergeApplied
 	if !readsPlatform && platform.Repo != "" {
 		sc.own[forge.NormalizeRepoURL(platform.Repo)] = ownLane{platform.Name, s.reader.ProposedBranch(id, platform)}
 	}
@@ -158,6 +229,7 @@ func scopeTasks(ops []tasks.Op, merges []tasks.Merge, sc taskScope) []model.Task
 		out = append(out, model.TaskEntry{
 			Kind: "merge", Verb: "Merged", Project: proj, PRNumber: m.Number,
 			PRURL: m.URL, Title: m.Title, By: m.By, OK: true, At: m.At.UTC().Format(time.RFC3339),
+			Applied: sc.appliedOf(m),
 		})
 	}
 	// All timestamps are self-formatted RFC3339 UTC, so lexicographic order is

@@ -31,6 +31,7 @@
 	} from '#lib/actions.js';
 	import { vmEditGate, vmGate } from '#lib/gates.js';
 	import { type EditSection } from '#lib/editform.js';
+	import { declaredShape } from '#lib/gitops.js';
 	import { VM_TABS, type VMTab } from '#lib/nav.js';
 	import { action, resource } from '#lib/resource.svelte.js';
 	import { inventory } from '#lib/state/inventory.svelte.js';
@@ -177,8 +178,13 @@
 		inventory.projects.find((p) => p.namespaces.some((n) => n.namespace === vm.namespace))?.gitOps
 			?.revision ?? '',
 	);
+	// Also when git moves a field the diff compares: a merge re-reads a drift
+	// that is already OutOfSync before Argo applies it. Run state never does.
+	// The caller's authoring verdict too: the answer carries the resync one.
+	// Reading the drift at all is listing the VM, which keeps it on the frame.
+	const declared = $derived(declaredShape(vm));
 	const driftRes = resource<DriftResult>(
-		() => `${key}|${vm.sync}|${revision}`,
+		() => `${key}|${vm.sync}|${revision}|${declared}|${inventory.canAuthorVMs(vm.namespace)}`,
 		() => api.drift(vm.namespace, vm.name),
 		{ reset: true },
 	);

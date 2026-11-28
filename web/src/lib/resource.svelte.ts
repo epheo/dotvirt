@@ -1,19 +1,28 @@
 import { untrack } from 'svelte';
-import { HttpError, Unauthorized, type NextStep } from './api';
+import { HttpError, readRetryDelay, transient, Unauthorized, type NextStep } from './api';
 import { friendlyError } from './format';
 import { pollWhileVisible } from './poll';
 
 // resource owns the keyed-fetch idiom shared by the detail and metrics panels:
-// a load keyed on a STABLE identity string (never a per-frame object - the live
-// stream hands down fresh objects every frame), a stale-response guard for fast
-// key switches, the central-401 swallow, and an optional poll paused while the
-// tab is backgrounded. Call during component init (it registers $effects).
+// a load keyed on the identity string key() returns, a stale-response guard for
+// fast key switches, the central-401 swallow, and an optional poll paused while
+// the tab is backgrounded. Call during component init (it registers $effects).
+//
+// Only a new string loads again. key() may read a per-frame object (the live
+// stream hands down a fresh VM object whenever any of its fields moves), so
+// whatever must reload, a sync verdict or a revision, belongs in the string.
 //
 // loading is true only before the first data for the current key, so a poll
 // refresh never blanks the view. reset controls what a key change shows while
 // the new load is in flight: true blanks (detail panels - the old object is
 // another identity's), false keeps the old data (scope dashboards avoid a
 // flash).
+//
+// A load that failed transiently is tried again after readRetryDelay, as the
+// caps store does: no frame re-runs it, and reading key() while failed would
+// ask once per frame per client through an outage. A refusal stands until the
+// key moves; a poll is its own retry.
+
 export interface Resource<T> {
 	readonly data: T | null;
 	readonly loading: boolean;
@@ -34,33 +43,50 @@ export function resource<T>(
 	// Only the newest run writes: a poll and a manual refresh on the same key
 	// overlap, and the older response landing last would paint stale data.
 	let seq = 0;
+	// A derived string notifies only when it changes, not when what key() read did.
+	const id = $derived(key());
+	let retry: ReturnType<typeof setTimeout> | undefined;
+	let failures = 0;
+	let gone = false;
+	const pollMs = () => (typeof opts.poll === 'function' ? untrack(opts.poll) : (opts.poll ?? 0));
 
 	async function run() {
-		const k = untrack(key);
+		clearTimeout(retry);
+		const k = untrack(() => id);
 		const mine = ++seq;
-		const current = () => mine === seq && key() === k;
+		const current = () => mine === seq && id === k;
 		if (data === null) loading = true;
 		try {
 			const v = await load(k);
 			if (!current()) return;
 			data = v;
 			error = '';
+			failures = 0;
 		} catch (e) {
 			if (e instanceof Unauthorized) return; // signs out centrally via the api layer
 			if (!current()) return;
 			error = friendlyError(e);
+			failures++;
+			if (!gone && transient(e) && !pollMs())
+				retry = setTimeout(() => void run(), readRetryDelay(failures));
 		} finally {
 			if (current()) loading = false;
 		}
 	}
 
 	$effect(() => {
-		key();
+		id;
+		failures = 0;
 		if (opts.reset) {
 			data = null;
 			error = '';
 		}
 		untrack(run);
+	});
+	// A load in flight at unmount must not leave a retry behind.
+	$effect(() => () => {
+		gone = true;
+		clearTimeout(retry);
 	});
 	const poll = opts.poll;
 	if (poll) {

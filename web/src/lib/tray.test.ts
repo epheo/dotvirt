@@ -75,6 +75,38 @@ describe('trayLanes', () => {
 		expect(at({ sync: 'Synced', revision: 'base000' }, history)).toEqual(['applying']);
 	});
 
+	it("follows a merge on the feed's applied answer where no revision or history reaches", () => {
+		// A viewer of part of a project: no revision, no hash, only the answer.
+		const own: Followed = { ...merged, hash: undefined };
+		const asked: boolean[] = [];
+		const at = (applied: boolean | undefined, g: ProjectSync) =>
+			trayLanes({
+				drafts: [],
+				proposals: [],
+				followed: [own],
+				sync: (_, known) => {
+					asked.push(known);
+					return known ? g : undefined;
+				},
+				applied: () => applied,
+			}).map((l) => (l.kind === 'applying' ? `applying:${l.picked}` : l.kind));
+		expect(at(undefined, { sync: 'Synced' })).toEqual(['merged']);
+		expect(at(false, { sync: 'OutOfSync' })).toEqual(['applying:false']);
+		expect(at(true, { sync: 'OutOfSync' })).toEqual(['applying:true']);
+		expect(at(true, { sync: 'Synced' })).toEqual(['live']);
+		expect(asked).toEqual([false, true, true, true]);
+		// The server's answer stands over a revision the history cannot place.
+		expect(
+			trayLanes({
+				drafts: [],
+				proposals: [],
+				followed: [merged],
+				sync: () => ({ sync: 'Synced', revision: '9999999' }),
+				applied: () => true,
+			}).map((l) => l.kind),
+		).toEqual(['live']);
+	});
+
 	it('marks an applying merge picked up once Argo runs its commit', () => {
 		const at = (g: ProjectSync) =>
 			trayLanes({ drafts: [], proposals: [], followed: [merged], sync: () => g }).map((l) =>

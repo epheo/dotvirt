@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { HttpError, Unauthorized } from './api';
+import { HttpError, READ_RETRY_MAX_MS, READ_RETRY_MS, Unauthorized } from './api';
 import { action, resource, type Resource } from './resource.svelte';
 import { box, effectRoot, flushSync } from '../test/runes.svelte';
 
@@ -91,6 +91,106 @@ describe('resource', () => {
 		expect(r.data).toBe('new');
 		expect(r.loading).toBe(false);
 		stop();
+	});
+
+	it('loads again on a new string, never on a fresh object that keys the same', async () => {
+		// The live stream hands down a fresh VM whenever its run state moves: a
+		// key read off it must not reload, nor blank a reset:true panel.
+		const vm = box({ name: 'vm-a', phase: 'Starting' });
+		const loads: string[] = [];
+		let r!: Resource<string>;
+		const stop = effectRoot(() => {
+			r = resource(
+				() => vm.value.name,
+				async (k) => {
+					loads.push(k);
+					return `data-${k}`;
+				},
+				{ reset: true },
+			);
+		});
+		await tick();
+		vm.value = { name: 'vm-a', phase: 'Running' };
+		flushSync();
+		await tick();
+		expect(loads).toEqual(['vm-a']);
+		expect(r.data).toBe('data-vm-a');
+		vm.value = { name: 'vm-b', phase: 'Running' };
+		flushSync();
+		await tick();
+		expect(loads).toEqual(['vm-a', 'vm-b']);
+		expect(r.data).toBe('data-vm-b');
+		stop();
+	});
+
+	it('tries a load that may pass again, backing off, and never once unmounted', async () => {
+		// A 503 while the server warms up: no frame re-runs the load, so the
+		// panel would otherwise show the failure for good. No jitter: 15s, 30s.
+		vi.useFakeTimers();
+		vi.spyOn(Math, 'random').mockReturnValue(0.5);
+		try {
+			let n = 0;
+			let r!: Resource<string>;
+			const stop = effectRoot(() => {
+				r = resource(
+					() => 'k',
+					async () => {
+						if (++n <= 2) throw new HttpError('live cluster state still loading', 503);
+						return 'ok';
+					},
+				);
+			});
+			await vi.advanceTimersByTimeAsync(0);
+			expect(r.failed).toBe(true);
+			await vi.advanceTimersByTimeAsync(READ_RETRY_MS);
+			expect(n).toBe(2);
+			await vi.advanceTimersByTimeAsync(READ_RETRY_MS * 2 - 1);
+			expect(n).toBe(2);
+			await vi.advanceTimersByTimeAsync(1);
+			expect(r.data).toBe('ok');
+			expect(r.failed).toBe(false);
+			await vi.advanceTimersByTimeAsync(READ_RETRY_MAX_MS * 3);
+			expect(n).toBe(3);
+			stop();
+
+			let m = 0;
+			const stop2 = effectRoot(() => {
+				resource(
+					() => 'k',
+					async () => {
+						m++;
+						throw new HttpError('down', 503);
+					},
+				);
+			});
+			stop2();
+			await vi.advanceTimersByTimeAsync(READ_RETRY_MAX_MS * 3);
+			expect(m).toBe(1);
+		} finally {
+			vi.useRealTimers();
+			vi.restoreAllMocks();
+		}
+	});
+
+	it('never retries a refusal: it stands until the key moves', async () => {
+		vi.useFakeTimers();
+		try {
+			let n = 0;
+			const stop = effectRoot(() => {
+				resource(
+					() => 'k',
+					async () => {
+						n++;
+						throw new HttpError('you may not list events', 403);
+					},
+				);
+			});
+			await vi.advanceTimersByTimeAsync(READ_RETRY_MAX_MS * 3);
+			expect(n).toBe(1);
+			stop();
+		} finally {
+			vi.useRealTimers();
+		}
 	});
 
 	it('reset:true blanks on a key change, reset:false keeps the old view', async () => {

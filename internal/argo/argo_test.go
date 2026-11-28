@@ -142,6 +142,13 @@ func TestAppSyncFromApps(t *testing.T) {
 	if got.Revision != "a360db7" {
 		t.Errorf("revision not shortened: got %q", got.Revision)
 	}
+	// The full one stays beside it, for the server's own answers.
+	_, revs := appSyncAndRevisions([]*unstructured.Unstructured{
+		appWithSync("drs-lab", "https://forge.example/dotvirt/drs-lab.git", "Synced", "Healthy", "Succeeded", ""),
+	})
+	if full := revs[forge.NormalizeRepoURL("https://forge.example/dotvirt/drs-lab.git")]; full != "a360db7e0559187412d6ae17d7b149434de01e6c" {
+		t.Errorf("full revision = %q", full)
+	}
 
 	bad := sync[forge.NormalizeRepoURL("https://forge.example/dotvirt/fewa.git")]
 	if bad.Sync != model.SyncOutOfSync || bad.Health != "Degraded" || bad.Operation != "Failed" {

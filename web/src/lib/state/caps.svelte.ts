@@ -1,6 +1,8 @@
 import { untrack } from 'svelte';
 import {
 	api,
+	readRetryDelay,
+	transient,
 	Unauthorized,
 	type ClusterCaps,
 	type DesktopCaps,
@@ -24,12 +26,12 @@ export type Gate = { ok: boolean; why: string };
 export const CHECKING = 'Checking your access...';
 const OPEN: Gate = { ok: true, why: '' };
 
-// gen is the invalidation the answer was read under.
+// gen is the invalidation the answer was read under. A failed read is asked
+// again from retryAt, once readRetryDelay has passed for the failures in a
+// row; a refusal never is (Infinity) until an invalidate moves gen.
 type Read<T> =
-	{ state: 'ok'; value: T; gen: number } | { state: 'failed'; at: number; gen: number };
-
-// A failed read is asked again after this long.
-const RETRY_MS = 15_000;
+	| { state: 'ok'; value: T; gen: number }
+	| { state: 'failed'; retryAt: number; failures: number; gen: number };
 
 // The desktop acts are keyed apart from the namespaces: no namespace, desktop
 // or claim name holds a ':' or a '/'.
@@ -112,7 +114,7 @@ class CapsStore {
 		void this.#retry;
 		const have = !key ? this.#cluster : key.startsWith(DESK) ? this.#desk[key] : this.#ns[key];
 		const stale =
-			!have || have.gen !== gen || (have.state === 'failed' && Date.now() - have.at >= RETRY_MS);
+			!have || have.gen !== gen || (have.state === 'failed' && Date.now() >= have.retryAt);
 		if (!stale || this.#asking.has(key)) return;
 		this.#asking.set(
 			key,
@@ -134,11 +136,8 @@ class CapsStore {
 
 	async #read(key: string, gen: number) {
 		const desk = key.startsWith(DESK);
-		let r: Read<ClusterCaps | NamespaceCaps | DesktopCaps> = {
-			state: 'failed',
-			at: Date.now(),
-			gen,
-		};
+		let r: Read<ClusterCaps | NamespaceCaps | DesktopCaps> | null = null;
+		let failure: unknown;
 		try {
 			let value;
 			if (desk) {
@@ -151,10 +150,17 @@ class CapsStore {
 			if (value) r = { state: 'ok', value, gen };
 		} catch (e) {
 			if (e instanceof Unauthorized) return; // signs out centrally
+			failure = e;
 		}
 		if (gen !== this.#gen) return;
 		this.#asking.delete(key);
-		if (r.state === 'failed') setTimeout(() => this.#retry++, RETRY_MS);
+		if (!r) {
+			const prev = untrack(() => (!key ? this.#cluster : desk ? this.#desk[key] : this.#ns[key]));
+			const failures = prev?.state === 'failed' ? prev.failures + 1 : 1;
+			const wait = transient(failure) ? readRetryDelay(failures) : Infinity;
+			r = { state: 'failed', retryAt: Date.now() + wait, failures, gen };
+			if (wait !== Infinity) setTimeout(() => this.#retry++, wait);
+		}
 		if (desk) this.#desk = { ...this.#desk, [key]: r as Read<DesktopCaps> };
 		else if (key) this.#ns = { ...this.#ns, [key]: r as Read<NamespaceCaps> };
 		else this.#cluster = r as Read<ClusterCaps>;

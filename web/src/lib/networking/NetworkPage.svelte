@@ -41,9 +41,10 @@
 	const owner = $derived(net ? networking.ownerOf(net) : '');
 	const project = $derived(net?.scope === 'shared' ? 'platform' : owner);
 
-	// Rules ride the catalog's version: a merged rule change moves it.
+	// Rules ride the catalog's version: a merged rule change moves it. Asked
+	// once the first frame says which version that is.
 	const rulesRes = resource<NetworkRules | null>(
-		() => (net ? `${nkey}|${inventory.networksVersion}` : ''),
+		() => (net && inventory.inventory ? `${nkey}|${inventory.networksVersion}` : ''),
 		(k) => (k ? api.networkRules(k.slice(0, k.lastIndexOf('|'))) : Promise.resolve(null)),
 	);
 	const lines = $derived(rulesRes.data ? networkRuleLines(rulesRes.data) : []);
@@ -234,6 +235,7 @@
 				<FileHistory
 					{project}
 					name={net.name}
+					version={String(inventory.networksVersion)}
 					load={() => api.objectHistory(ref.resource, ref.namespace, ref.name)}
 					restore={canAuthorNetwork(net)
 						? (hash) => api.restoreObjectVersion(ref.resource, ref.namespace, ref.name, hash)

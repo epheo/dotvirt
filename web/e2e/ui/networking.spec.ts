@@ -151,16 +151,19 @@ test('a rule on another project reads its subject in the words the caller may se
 	// says what the server's applies line says, never the target.
 	// Read once, outside the route: the page asks again as it settles, and a
 	// handler still awaiting the server when the test ends fails its teardown.
-	const res = await page.request.get('/api/networks/rules', {
-		params: { network: 'web-prod/web-net' },
-	});
+	const network = 'web-prod/web-net';
+	const res = await page.request.get('/api/networks/rules', { params: { network } });
 	const body = await res.json();
 	for (const r of body.reaches ?? [])
 		if (r.policy.namespace === 'db-prod') {
 			r.policy.target = 'tenant-a, other namespaces';
 			r.policy.applies = 'other namespaces';
 		}
-	await page.route('**/api/networks/rules?*', (route) => route.fulfill({ json: body }));
+	// Only this network's answer is redacted; any other network's reaches the server.
+	await page.route(
+		(url) => url.pathname === '/api/networks/rules' && url.searchParams.get('network') === network,
+		(route) => route.fulfill({ json: body }),
+	);
 	await page.reload();
 	await expect(main.getByText('TCP 5432 to other namespaces')).toBeVisible();
 	await expect(main.getByText(/VMs labeled tenant-a/)).toHaveCount(0);

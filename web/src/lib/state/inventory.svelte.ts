@@ -18,6 +18,7 @@ import { deriveIssues, deriveSuggestions } from '#lib/issues.js';
 import { membership, networkProblems } from '#lib/netmap.js';
 import { prKey } from '#lib/review.js';
 import { share } from '#lib/share.js';
+import { CHECKING } from './caps.svelte';
 import { modules } from './modules.svelte';
 
 // Only the server's yes authors: an absent verdict (the review failed this
@@ -305,6 +306,21 @@ class InventoryStore {
 	repoRead(project: string, namespace = ''): Gate {
 		const p = namespace ? null : this.projects.find((x) => x.name === project);
 		return repoReadGate(project, namespace || (p ? projectNS(p) : ''));
+	}
+
+	// What a read of project's history keys on, '' until the first frame: a
+	// merge, which moves its base head whether or not Argo applied it (the
+	// platform tier has no project row; the tasks watermark moves on its
+	// merges), and the caller's read of the repo, so a panel asks again once
+	// that right goes. A check in flight reads as yes: a mount loads once.
+	historyMark(project: string): string {
+		if (!this.inventory) return '';
+		const merges =
+			project === 'platform'
+				? `tasks:${this.inventory.tasksVersion ?? 0}`
+				: (this.projects.find((p) => p.name === project)?.head ?? '');
+		const g = this.repoRead(project);
+		return `${merges}|${g.ok || g.why === CHECKING ? 'reads' : 'denied'}`;
 	}
 
 	// Revert reads the whole repo and rewrites any file of it, so the backend

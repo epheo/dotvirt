@@ -299,6 +299,84 @@ func TestCommitDiffSides(t *testing.T) {
 	}
 }
 
+// A revision holds a merge once the commit the forge merged it with is that
+// revision or an ancestor, whatever later subjects claim the PR: a follow-up
+// "(#12)" on top moves nothing. A rebase merge's last commit counts the same.
+// A commit off the first-parent line, or one the mirror lacks, has no answer.
+func TestHoldsFollowsTheForgesMergeCommit(t *testing.T) {
+	h := seedMerge(t)
+	before, merge := revParse(t, h.bare, "main~1"), revParse(t, h.bare, "main")
+	prHead := revParse(t, h.bare, "main^2")
+	h.write("tenant-a/db.yaml", "kind: VirtualMachine\nmetadata: {name: db, namespace: tenant-a}\nspec: {}\n")
+	h.run("carol", h.work, "commit", "-qam", "follow-up on the disk (#12)")
+	h.run("carol", h.work, "push", "-q", "origin", "main")
+	followUp := revParse(t, h.bare, "main")
+	// A rebase merge: the PR's commit lands on main as is, no merge commit.
+	h.run("dave", h.work, "checkout", "-qb", "rebased")
+	h.write("tenant-a/web.yaml", webYAML(16))
+	h.run("dave", h.work, "commit", "-qam", "web to 16 cpu")
+	h.run("admin", h.work, "checkout", "-q", "main")
+	h.run("admin", h.work, "merge", "-q", "--ff-only", "rebased")
+	h.run("admin", h.work, "push", "-q", "origin", "main")
+	rebased := revParse(t, h.bare, "main")
+	r := openAt(t, h.bare, "")
+
+	for _, c := range []struct {
+		what, commit, rev string
+		holds, known      bool
+	}{
+		{"#12 before its merge", merge, before, false, true},
+		{"#12 at its merge", merge, merge, true, true},
+		{"#12 under a follow-up claiming it", merge, followUp, true, true},
+		{"the follow-up, Argo at #12", followUp, merge, false, true},
+		{"a rebase merge before it", rebased, followUp, false, true},
+		{"a rebase merge at it", rebased, rebased, true, true},
+		{"a PR head off the first-parent line", prHead, rebased, false, false},
+		{"a revision the mirror lacks", merge, strings.Repeat("f", 40), false, false},
+		{"no merge commit recorded", "", rebased, false, false},
+	} {
+		holds, known := r.Holds("main", c.commit, c.rev)
+		if holds != c.holds || known != c.known {
+			t.Errorf("%s: Holds = %v, %v; want %v, %v", c.what, holds, known, c.holds, c.known)
+		}
+	}
+	// Asked again, the answer comes from the memo, the same.
+	if holds, known := r.Holds("main", merge, before); holds || !known {
+		t.Errorf("memoized answer = %v, %v", holds, known)
+	}
+}
+
+// A folder's head is the last commit that touched it: a merge elsewhere in
+// the repo moves the repo's head and leaves the folder's where it was.
+func TestFolderHeadMovesWithItsFolderAlone(t *testing.T) {
+	h := seedHistoryRepo(t)
+	h.write("tenant-b/db.yaml", "kind: VirtualMachine\nmetadata: {name: db, namespace: tenant-b}\n")
+	h.run("bob", h.work, "add", "-A")
+	h.run("bob", h.work, "commit", "-qm", "add tenant-b")
+	h.run("bob", h.work, "push", "-q", "origin", "main")
+
+	folder, whole := openAt(t, h.bare, "tenant-a"), openAt(t, h.bare, "")
+	if got, want := folder.FolderHead("main"), revParse(t, h.bare, "main~1"); got != want {
+		t.Errorf("tenant-a head = %q, want its last commit %q", got, want)
+	}
+	if got, want := whole.FolderHead("main"), revParse(t, h.bare, "main"); got != want {
+		t.Errorf("repo head = %q, want main %q", got, want)
+	}
+	if got := folder.FolderHead("nope"); got != "" {
+		t.Errorf("a missing branch has head %q", got)
+	}
+
+	h.write("tenant-a/web.yaml", webYAML(8))
+	h.run("alice", h.work, "commit", "-qam", "bump web to 8 cpu")
+	h.run("alice", h.work, "push", "-q", "origin", "main")
+	if err := folder.refresh(); err != nil {
+		t.Fatal(err)
+	}
+	if got, want := folder.FolderHead("main"), revParse(t, h.bare, "main"); got != want {
+		t.Errorf("after a tenant-a merge, head = %q, want %q", got, want)
+	}
+}
+
 // A file's history is the first-parent commits that changed it: the merge
 // counts once for the PR, a sibling file's commits do not appear, and a file
 // that never existed has none.

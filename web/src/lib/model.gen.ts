@@ -954,6 +954,12 @@ export interface TaskEntry {
   by?: string;
   ok: boolean;
   at: string; // RFC3339
+  /**
+   * Applied says, for a merge, whether Argo runs it: the revision it last
+   * synced holds the merge commit. Absent while unknown. The revision itself
+   * is never sent: it moves with merges this caller may not see.
+   */
+  applied?: boolean;
 }
 /**
  * Permissions is the caller's effective capability set in one namespace - the
@@ -2563,6 +2569,14 @@ export interface Project {
    * base, which may differ from the base git and the API reach it at.
    */
   repoPage?: string;
+  /**
+   * Head is the last base branch commit on dotvirt's mirror of Repo that
+   * touched the project's folder: it moves with each merge into it dotvirt
+   * fetches, whether or not Argo has applied it, so the console re-reads the
+   * project's history on it. Sent only to a caller who sees all of the
+   * project; empty otherwise and while unreadable.
+   */
+  head?: string;
   namespaces: ProjectNamespace[];
   error?: string;
   /**

@@ -44,7 +44,8 @@
 	// the poll re-reads, so a merge missing from the first read still lands.
 	// Only a project with a GitOps row can place one: the platform has none
 	// here. History is the whole repo's, so it is asked only of a project the
-	// caller may read whole; any other merge shows without a state.
+	// caller may read whole; any other merge is placed by the feed's applied
+	// answer, or shows without a state.
 	const gitOpsOf = (project?: string) => inventory.projects.find((p) => p.name === project)?.gitOps;
 	const historyKey = $derived(
 		[
@@ -92,13 +93,15 @@
 			const g = gitOpsOf(t.project);
 			const commits = history.data?.[t.project ?? ''];
 			const hash = commits?.find((c) => c.prNumber === t.prNumber)?.hash;
-			const m = hash
-				? mergeState(
-						g,
-						hash,
-						commits!.map((c) => c.hash),
-					).kind
-				: 'merged';
+			const m =
+				hash || t.applied !== undefined
+					? mergeState(
+							g,
+							hash,
+							commits?.map((c) => c.hash),
+							t.applied,
+						).kind
+					: 'merged';
 			return { t, state: m === 'merged' ? null : STATE[m], busy: placing(t.project) };
 		}),
 	);

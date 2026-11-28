@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -12,6 +13,8 @@ import (
 	"time"
 
 	authzv1 "k8s.io/api/authorization/v1"
+	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 
 	"github.com/epheo/dotvirt/internal/argo"
@@ -181,6 +184,44 @@ func TestPlatformRollupNamesWhatTheCallerMayList(t *testing.T) {
 	}
 	if body := frame(platform); !strings.Contains(body, "acme-lockdown") {
 		t.Errorf("a caller listing cluster rules must still read the row: %s", body)
+	}
+}
+
+// A project's head times every merge into it: it goes only to who sees all
+// of the project, never to a caller whose task feed shows their own alone.
+func TestInventorySendsTheHeadToWholeViewersAlone(t *testing.T) {
+	path := seedPlatformRepo(t, map[string]string{"team-a-dev/README.md": "x"})
+	fc := newFakeCluster(t)
+	fc.namespaces[0].Annotations["dotvirt.io/repo"] = "file://" + path
+	fc.namespaces = append(fc.namespaces, corev1.Namespace{ObjectMeta: metav1.ObjectMeta{
+		Name: "team-a-prod", Labels: fc.namespaces[0].Labels, Annotations: fc.namespaces[0].Annotations,
+	}})
+	fc.readsVMs = tenantReadsTeamA
+	s := fc.server(nil, Config{BaseBranch: "main"})
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	s.repos = git.NewRepoSet(ctx, "", "", nil, false, nil, time.Hour)
+	head := func(token string) string {
+		t.Helper()
+		inv, err := s.InventoryForIdentity(context.Background(), auth.Identity{Token: token, Username: token})
+		if err != nil {
+			t.Fatal(err)
+		}
+		i := slices.IndexFunc(inv.Projects, func(p model.Project) bool { return p.Name == "team-a" })
+		if i < 0 {
+			t.Fatalf("team-a missing: %+v", inv.Projects)
+		}
+		return inv.Projects[i].Head
+	}
+	out, err := exec.Command("git", "--git-dir", path, "rev-parse", "main").Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := head(adminToken), strings.TrimSpace(string(out)); got != want {
+		t.Errorf("whole viewer's head = %q, want %q", got, want)
+	}
+	if got := head(tenantToken); got != "" {
+		t.Errorf("a viewer of team-a-dev alone got head %q", got)
 	}
 }
 

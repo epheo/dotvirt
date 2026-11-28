@@ -65,6 +65,14 @@ describe('resource in a component', () => {
 		expect(screen.queryByRole('alert')).toBeNull();
 	});
 
+	it('lets a failing poll be its own retry', async () => {
+		vi.useFakeTimers();
+		const load = vi.fn().mockRejectedValue(new HttpError('metrics not configured', 503));
+		render(ResourceProbe, { id: 'vm-a', load, poll: 30000 });
+		await vi.advanceTimersByTimeAsync(30000);
+		expect(load).toHaveBeenCalledTimes(2);
+	});
+
 	it('polls while mounted and stops on unmount', async () => {
 		vi.useFakeTimers();
 		const load = vi.fn().mockResolvedValue('tick');

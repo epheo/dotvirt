@@ -1,4 +1,26 @@
-import type { ProjectSync } from './api';
+import type { ProjectSync, VM } from './api';
+
+// declaredShape is what a frame says git declares of a VM, as one string: the
+// fields drift compares (manifest.DiffVMs) and the file that holds them. The
+// frame reads them from git, so it moves when a merge does, with or without
+// Argo, and for a caller who sees only part of the project. Run state is not
+// in it.
+export const declaredShape = (vm: VM): string =>
+	JSON.stringify([
+		vm.sourceFile,
+		vm.power,
+		vm.cpuCores,
+		vm.memory,
+		vm.instancetype,
+		vm.preference,
+		vm.drsExclude,
+		vm.evictionStrategy,
+		vm.labels,
+		vm.scheduling?.pin,
+		vm.scheduling?.groups,
+		vm.disks?.map((d) => [d.name, d.size]),
+		vm.networks?.map((n) => n.name),
+	]);
 
 // The gitOps rollup carries two error planes in one syncError field: comparison
 // errors (unreachable or lost repo - no operation ran) and apply failures (the

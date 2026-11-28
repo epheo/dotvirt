@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/go-git/go-git/v5"
@@ -24,6 +25,55 @@ func (r *Repo) History(branch string, limit int) ([]model.Commit, error) {
 		return r.walkHistory(branch, limit, func(c *object.Commit) (bool, error) { return touches(c, r.root) })
 	}
 	return r.walkHistory(branch, limit, func(*object.Commit) (bool, error) { return true, nil })
+}
+
+// FolderHead is the last commit on branch that touched the folder this mirror
+// is scoped to, branch's head when it is the whole repo: what a merge moves for
+// one project and not for another sharing its repo. "" when branch is
+// unreadable or the folder untouched within historyScan. Walked once per head
+// move.
+func (r *Repo) FolderHead(branch string) string {
+	hash, err := Memoized(r, "folder-head", branch, func() (string, error) {
+		cs, err := r.History(branch, 1)
+		if err != nil || len(cs) == 0 {
+			return "", err
+		}
+		return cs[0].Hash, nil
+	})
+	if err != nil {
+		return ""
+	}
+	return hash
+}
+
+// Holds reports whether revision, a state branch held, carries merge, the
+// commit the forge says merged a pull request: merge is on branch's
+// first-parent line and is revision or one of its ancestors. known is false
+// while the mirror holds either not yet, or merge is not on that line. Answers,
+// unknown ones included, are kept until the head moves: one head fixes them,
+// and the walk would otherwise run on every frame.
+func (r *Repo) Holds(branch, merge, revision string) (holds, known bool) {
+	if merge == "" || revision == "" {
+		return false, false
+	}
+	memo, err := Memoized(r, "holds", branch, func() (*sync.Map, error) { return &sync.Map{}, nil })
+	if err != nil {
+		return false, false
+	}
+	key := merge + " " + revision
+	if v, ok := memo.Load(key); ok {
+		a := v.([2]bool)
+		return a[0], a[1]
+	}
+	if on, err := r.OnBranch(branch, merge); err == nil && on {
+		var err error
+		if holds, known, err = r.Descends(branch, revision, merge); err != nil {
+			return false, false
+		}
+		holds = holds && known
+	}
+	memo.Store(key, [2]bool{holds, known})
+	return holds, known
 }
 
 // FileHistory is History narrowed to the commits that changed path: on the base

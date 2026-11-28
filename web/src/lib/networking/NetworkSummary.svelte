@@ -150,8 +150,14 @@
 	// --- recent changes ---
 	const ref = $derived(net?.sourceFile ? networkRef(net) : null);
 	const histRes = resource<Commit[] | null>(
-		() => (ref ? `${ref.resource}/${ref.namespace}/${ref.name}|${inventory.networksVersion}` : ''),
-		() => (ref ? api.objectHistory(ref.resource, ref.namespace, ref.name) : Promise.resolve(null)),
+		() => {
+			const mark = inventory.historyMark(project);
+			return ref && mark
+				? `${ref.resource}/${ref.namespace}/${ref.name}|${inventory.networksVersion}|${mark}`
+				: '';
+		},
+		(k) =>
+			k && ref ? api.objectHistory(ref.resource, ref.namespace, ref.name) : Promise.resolve(null),
 	);
 
 	// "3 days ago" for the last week, then the date: how a merge reads in a list.

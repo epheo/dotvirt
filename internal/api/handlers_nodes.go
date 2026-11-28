@@ -2,6 +2,8 @@ package api
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"net/http"
 	"sort"
 
@@ -18,15 +20,46 @@ import (
 // handleNodes lists the virtualization hosts (KubeVirt-schedulable nodes) as
 // live-migration target candidates. A caller without node-list RBAC gets 403,
 // and the migrate dialog offers only scheduler-picked placement.
+//
+// ?snapshot answers off the SA's node cache, minutes old at most, behind the
+// caller's own list verdict: for a view that polls, where a LIST per viewer
+// per tick would put megabytes of Node objects on the apiserver. A dialog
+// asks live.
 func (s *Server) handleNodes(w http.ResponseWriter, r *http.Request) {
-	_, c, err := s.userCluster(r)
+	id, c, err := s.userCluster(r)
 	if err != nil {
 		fail(w, unavailable(err))
+		return
+	}
+	if r.URL.Query().Has("snapshot") {
+		s.serveHostNodes(w, r, id, c)
 		return
 	}
 	nodes, err := c.ListNodes(r.Context())
 	if err != nil {
 		fail(w, err)
+		return
+	}
+	writeJSON(w, nodes)
+}
+
+func (s *Server) serveHostNodes(w http.ResponseWriter, r *http.Request, id auth.Identity, c *cluster.Client) {
+	ok, err := s.can(r.Context(), id, c, refQ(verbList, ssarNodes, ""))
+	if err != nil {
+		fail(w, unavailable(err))
+		return
+	}
+	if !ok {
+		fail(w, fmt.Errorf("%w: you may not list nodes", model.ErrForbidden))
+		return
+	}
+	if s.netstate == nil {
+		fail(w, unavailable(errors.New("no node cache")))
+		return
+	}
+	nodes, ready := s.netstate.HostNodes()
+	if !ready {
+		fail(w, unavailable(errors.New("the node cache is still loading")))
 		return
 	}
 	writeJSON(w, nodes)

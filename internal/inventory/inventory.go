@@ -61,6 +61,10 @@ type Inputs struct {
 	ScopeSync func(project.ProjectInfo, model.ProjectSync) *model.ProjectSync
 	// RepoPage is the browser URL of a project's repo; nil leaves it unset.
 	RepoPage func(repoURL string) string
+	// Whole reports whether the caller sees every namespace of a project; nil
+	// is yes. Only such a caller gets its Head: a partial viewer's task feed
+	// shows them their own merges alone, and Head would time every other.
+	Whole func(project.ProjectInfo) bool
 }
 
 // Build produces the inventory. A project whose repo can't be read (or that has
@@ -124,6 +128,9 @@ func buildProject(in Inputs, p project.ProjectInfo) model.Project {
 		} else if err = placementIssues(&out, in, read); err != nil {
 			out.Error = "repo unreadable"
 			err = fmt.Errorf("read repo: %w", err)
+		}
+		if read != nil && (in.Whole == nil || in.Whole(p)) {
+			out.Head = read.FolderHead(in.Branch)
 		}
 		logRepoErr(p.Name, err)
 	}

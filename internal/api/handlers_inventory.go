@@ -60,6 +60,7 @@ func (s *Server) InventoryForIdentity(ctx context.Context, id auth.Identity) (mo
 	visible := v.names
 	all := s.state.Namespaces()
 	projects := s.resolver.Resolve(all, visible)
+	partial := s.partialProjects(projects)
 
 	// Live state + topology come from the SA-owned snapshot: the hot path reads
 	// in-memory state, never the cluster, however many subscribers a broadcast
@@ -79,6 +80,7 @@ func (s *Server) InventoryForIdentity(ctx context.Context, id auth.Identity) (mo
 			return s.projectSyncView(ctx, v, p, ps)
 		},
 		RepoPage: s.forge.RepoPage,
+		Whole:    func(p project.ProjectInfo) bool { return !partial[p.Name] },
 	}
 	// Drift comes from the SA-owned Application snapshot (lock-free, watch-fed).
 	// Three states the inventory must NOT conflate: Argo off (s.drift nil: no
@@ -257,13 +259,20 @@ const projectErrorForPartialViewers = "this project's repo failed to apply; some
 
 // projectSyncView is a tenant project's rollup for one caller: the rows it is
 // shown (shownRows). The apply error can name what it may not, so it turns
-// generic once a row is dropped or the caller sees part of the project.
+// generic once a row is dropped or the caller sees part of the project, who
+// gets no applied revision either.
 func (s *Server) projectSyncView(ctx context.Context, v callerView, p project.ProjectInfo, ps model.ProjectSync) *model.ProjectSync {
 	out := ps
 	out.Unhealthy = s.shownRows(ctx, v, ps.Unhealthy)
 	out.Hold = s.EmptyHold(p)
-	if out.SyncError != "" && (len(out.Unhealthy) < len(ps.Unhealthy) || s.seesPartOf(p)) {
+	partial := s.seesPartOf(p)
+	if out.SyncError != "" && (len(out.Unhealthy) < len(ps.Unhealthy) || partial) {
 		out.SyncError = projectErrorForPartialViewers
+	}
+	// The revision moves with every merge Argo applies; a partial viewer's
+	// task feed shows them their own alone.
+	if partial {
+		out.Revision = ""
 	}
 	return &out
 }

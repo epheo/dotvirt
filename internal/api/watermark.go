@@ -228,10 +228,18 @@ func (s *Server) tasksWatermark(sc taskScope) uint64 {
 		}
 	}, func(m tasks.Merge) {
 		if proj, ok := sc.merge(m); ok {
-			sum += t.start("merge").str(proj, m.RepoURL, m.URL, m.Title, m.By).num(uint64(m.Number)).num(uint64(m.At.UnixNano())).sum()
+			sum += t.start("merge").str(proj, m.RepoURL, m.URL, m.Title, m.By).num(uint64(m.Number)).num(uint64(m.At.UnixNano())).num(verdict(sc.appliedOf(m))).sum()
 		}
 	})
 	return sum & wireMask
+}
+
+// verdict is a tri-state answer as a term: unknown, no, yes.
+func verdict(b *bool) uint64 {
+	if b == nil {
+		return 0
+	}
+	return 1 + bit(*b)
 }
 
 func bit(b bool) uint64 {
