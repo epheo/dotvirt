@@ -268,9 +268,9 @@ func (s *Snapshot) HeldIn(namespaces []string) []Held {
 
 // Overview is what readable shows: each kind in the namespaces it names, and
 // the classes when it holds them at "". A pool-made desktop sits under its
-// pool where the pool is shown, else with the others. hidden are the kinds
-// held where the caller may not list them, said so that a pool's count beside
-// no desktop does not read as none.
+// pool where the pool is shown, else with the others. hidden are the
+// namespaced kinds held where the caller may not list them, said so that a
+// pool's count beside no desktop does not read as none.
 func (s *Snapshot) Overview(readable map[Held]bool, hidden []Held) model.Desktops {
 	s.mu.RLock()
 	defer s.mu.RUnlock()

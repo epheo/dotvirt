@@ -357,12 +357,12 @@ func TestAWriteDuringClearNeverHidesANamespace(t *testing.T) {
 
 func TestHiddenKindsAreSaidByNamespaceAndKind(t *testing.T) {
 	s, _ := newSnapshot(t)
-	got := s.Overview(nil, []Held{{"team-b", GVRInstance.Resource}, {"", GVRClass.Resource}, {"team-a", GVRPool.Resource}})
+	got := s.Overview(nil, []Held{{"team-b", GVRInstance.Resource}, {"team-a", GVRClaim.Resource}, {"team-a", GVRPool.Resource}})
 	body, err := json.Marshal(got.Hidden)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if want := `[{"resource":"vdiclasses"},{"namespace":"team-a","resource":"vdipools"},{"namespace":"team-b","resource":"vdiinstances"}]`; string(body) != want {
+	if want := `[{"namespace":"team-a","resource":"vdiclaims"},{"namespace":"team-a","resource":"vdipools"},{"namespace":"team-b","resource":"vdiinstances"}]`; string(body) != want {
 		t.Fatalf("hidden = %s, want %s", body, want)
 	}
 	if got := s.Overview(nil, nil).Hidden; got == nil {

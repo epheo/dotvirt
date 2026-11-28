@@ -24,9 +24,9 @@ func (s *Server) handleDesktops(w http.ResponseWriter, r *http.Request) {
 }
 
 // desktopsReadable reviews each kind held in namespaces, and the classes
-// cluster-wide: those the caller may list, and those it may not. Not
-// readKinds: the view would then review them for every token, on clusters
-// with no desktops too.
+// cluster-wide: those the caller may list, and the namespaced ones it may
+// not. Not readKinds: the view would then review them for every token, on
+// clusters with no desktops too.
 func (s *Server) desktopsReadable(v callerView, namespaces []string) (readable map[desktops.Held]bool, hidden []desktops.Held) {
 	// "" is where the classes are held: listsIn grants it only on the
 	// cluster-wide review.
@@ -41,8 +41,10 @@ func (s *Server) desktopsReadable(v callerView, namespaces []string) (readable m
 			readable[desktops.Held{Namespace: ns, Resource: resource}] = true
 		}
 	}
+	// The classes are the platform's: a caller who may not list them learns
+	// nothing of them.
 	for _, h := range held {
-		if !readable[h] {
+		if !readable[h] && h.Namespace != "" {
 			hidden = append(hidden, h)
 		}
 	}

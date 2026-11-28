@@ -201,8 +201,7 @@ func TestDesktopsShowWhatTheCallerMayList(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := `[{"resource":"vdiclasses"},` +
-		`{"namespace":"team-b-dev","resource":"vdiclaims"},` +
+	want := `[{"namespace":"team-b-dev","resource":"vdiclaims"},` +
 		`{"namespace":"team-b-dev","resource":"vdiinstances"},` +
 		`{"namespace":"team-b-dev","resource":"vdipools"}]`
 	if string(hidden) != want {
@@ -216,6 +215,9 @@ func TestDesktopsShowWhatTheCallerMayList(t *testing.T) {
 	wantStatus(t, rec, http.StatusOK)
 	if strings.Contains(rec.Body.String(), "team-") {
 		t.Fatalf("a caller seeing no namespace read %s", rec.Body)
+	}
+	if strings.Contains(rec.Body.String(), "vdiclasses") {
+		t.Fatalf("a caller who may not list classes learned of them: %s", rec.Body)
 	}
 }
 

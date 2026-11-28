@@ -16,15 +16,16 @@ type Desktops struct {
 	// not shown.
 	Desktops []Desktop      `json:"desktops"`
 	Claims   []DesktopClaim `json:"claims"`
-	// Hidden are the kinds held where the caller may not list them: a pool's
-	// count beside no desktop means desktops it may not see, not none.
+	// Hidden are the namespaced kinds held where the caller may not list
+	// them: a pool's count beside no desktop means desktops it may not see,
+	// not none.
 	Hidden []DesktopKind `json:"hidden"`
 }
 
-// DesktopKind is one kind in one namespace, none for the classes.
+// DesktopKind is one namespaced kind in one namespace.
 type DesktopKind struct {
-	Namespace string `json:"namespace,omitempty"`
-	Resource  string `json:"resource"` // vdiclasses | vdipools | vdiinstances | vdiclaims
+	Namespace string `json:"namespace"`
+	Resource  string `json:"resource"` // vdipools | vdiinstances | vdiclaims
 }
 
 // DesktopClass is a kind of desktop an admin offers.
