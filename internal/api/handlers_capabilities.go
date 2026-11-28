@@ -20,19 +20,20 @@ import (
 
 // handleCapabilities answers GET /api/capabilities (see model.Capabilities):
 // the cluster scope, or with ?namespace= that namespace and its project, or
-// with ?desktops= the desktop acts there, on a desktop of ?pool=. The UI
-// asks on demand, never per frame. A field asks its route's questions, and for
-// a tenancy or DRS change exactly what the coordinator's gate would ask of it
-// (the Needs), weighed on the gate's one path; every review is cached, at
-// most authConcurrency at once. A namespace outside the caller's projects is a
-// 404 like every VM route.
+// with ?desktops= the acts there on desktop ?desktop=, and on its pool's claim
+// ?claim=. The UI asks on demand, never per frame. A field asks its route's
+// questions, and for a tenancy or DRS change exactly what the coordinator's
+// gate would ask of it (the Needs), weighed on the gate's one path; every
+// review is cached, at most authConcurrency at once. A namespace outside the
+// caller's projects is a 404 like every VM route.
 func (s *Server) handleCapabilities(w http.ResponseWriter, r *http.Request) {
 	if ns := r.URL.Query().Get("desktops"); ns != "" {
 		sc, ok := s.resolveProject(w, r, byNamespace(ns))
 		if !ok {
 			return
 		}
-		caps, err := s.desktopCaps(r.Context(), sc, ns, r.URL.Query().Get("pool"))
+		q := r.URL.Query()
+		caps, err := s.desktopCaps(r.Context(), sc, ns, q.Get("desktop"), q.Get("claim"))
 		if err != nil {
 			fail(w, err)
 			return
@@ -368,33 +369,43 @@ func (s *Server) projectCaps(ctx context.Context, sc scope, full project.Project
 	out.Release = (len(patches) == 0 || s.capable(ctx, id, c, patches)) && s.needsAllowed(ctx, id, c, need, err) && (len(need) > 0 || len(patches) > 0)
 }
 
-// desktopCaps answers the acts on the claims of pool's desktops in namespace
-// ns of sc's project: what desktopScope reads, then what each act's route and
-// DeskuBe's admission ask of any claim there. A caller who may list the
-// desktops and claims there is answered only for a pool one of those desktops
-// is of, so each answer is one the caller can see a reason to ask, and the
-// verdicts cached stay as many as the pools.
-func (s *Server) desktopCaps(ctx context.Context, sc scope, ns, pool string) (model.DesktopCaps, error) {
-	out := model.DesktopCaps{Namespace: ns, Pool: pool}
-	if pool == "" {
-		return out, invalid(errors.New("name the pool"))
+// desktopCaps answers the acts on desktop name in namespace ns of sc's
+// project, and on a pool's desktop those on claim, the claim holding it: what
+// desktopScope reads, then what each act's route and DeskuBe's admission ask
+// of that desktop and that claim, by name, as RBAC may grant either by name.
+// A caller who may list the desktops there is answered for a desktop it is
+// shown, and on the claim only where it also lists the claims: for another,
+// claim is never read, so no answer tells which claims exist.
+func (s *Server) desktopCaps(ctx context.Context, sc scope, ns, name, claim string) (model.DesktopCaps, error) {
+	out := model.DesktopCaps{Namespace: ns, Desktop: name}
+	if name == "" {
+		return out, invalid(errors.New("name the desktop"))
 	}
 	if s.desktops == nil || !s.desktops.Started() || sc.proj.Repo == "" {
 		return out, nil
 	}
 	v, err := s.viewFor(ctx, sc.id, sc.cluster)
-	if err != nil || !v.lists(ssarDesktops, ns) || !v.lists(ssarDesktopClaims, ns) {
+	if err != nil || !v.lists(ssarDesktops, ns) {
 		return out, nil
 	}
-	if !s.desktops.HoldsDesktopOf(ns, pool) {
-		return out, fmt.Errorf("%w: no desktop of pool %s in %s", model.ErrNotFound, pool, ns)
+	if _, ok := s.desktops.Instance(ns, name); !ok {
+		return out, fmt.Errorf("%w: desktop %s/%s", model.ErrNotFound, ns, name)
 	}
-	opens := func(verb string, own bool) bool {
-		ok, _ := s.anyAllowed(ctx, sc.id, sc.cluster, claimActions(verb, ns, pool, "", own))
+	out.Restart = s.capable(ctx, sc.id, sc.cluster, desktopRestartAction(ns, name))
+	if claim == "" || !v.lists(ssarDesktopClaims, ns) {
+		return out, nil
+	}
+	d, c, _ := s.desktops.Desktop(ns, name)
+	if d.Pool == "" || c.Name != claim || c.Pool != d.Pool {
+		return out, fmt.Errorf("%w: claim %s does not hold desktop %s/%s", model.ErrNotFound, claim, ns, name)
+	}
+	out.Claim = claim
+	own := c.User == sc.id.Username
+	opens := func(verb string) bool {
+		ok, _ := s.anyAllowed(ctx, sc.id, sc.cluster, claimActions(verb, ns, c.Pool, c.Name, own))
 		return ok
 	}
-	out.Power, out.PowerOwn = opens(verbPatch, false), opens(verbPatch, true)
-	out.Release, out.ReleaseOwn = opens(verbDelete, false), opens(verbDelete, true)
+	out.Power, out.Release = opens(verbPatch), opens(verbDelete)
 	return out, nil
 }
 

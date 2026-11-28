@@ -21,6 +21,7 @@ import (
 	"k8s.io/client-go/tools/cache"
 
 	"github.com/epheo/dotvirt/internal/eventbus"
+	"github.com/epheo/dotvirt/internal/model"
 )
 
 const (
@@ -337,7 +338,7 @@ func TestACallerReadingNoKindIsToldNothing(t *testing.T) {
 	off := New(nil, nil, func() bool { return false }).Overview(everything("team-a"), nil)
 	mustAdd(t, s.instances, desktop("team-a", "alice", nil))
 	s.healthy[0].Store(false)
-	if got := s.Overview(everything("team-a"), nil); got.Synced || !got.Stale || len(got.Desktops) != 1 {
+	if got := s.Overview(everything("team-a"), nil); got.Synced || len(got.Stale) == 0 || len(got.Desktops) != 1 {
 		t.Fatalf("a reader reads %+v", got)
 	}
 	got, err := json.Marshal(s.Overview(map[Kind]bool{}, nil))
@@ -460,8 +461,8 @@ func TestSyncedWaitsForTheServedKindsOnly(t *testing.T) {
 	s.Run(t.Context())
 	eventually(t, "the served kinds watched", src.watching(3))
 	eventually(t, "synced", func() bool { return s.Overview(everything("team-a"), nil).Synced })
-	if got := s.Overview(everything("team-a"), nil); got.Stale {
-		t.Fatal("an absent kind reads as stale")
+	if got := s.Overview(everything("team-a"), nil); got.Stale != nil {
+		t.Fatalf("an absent kind reads as stale: %q", got.Stale)
 	}
 }
 
@@ -614,16 +615,30 @@ func TestAClaimAndItsDesktopCarryTheClaimsUID(t *testing.T) {
 	if strings.Count(string(b), "uid-alice") != 1 || !strings.Contains(string(b), `"uid":"uid-alice"`) {
 		t.Fatalf("the pull shows %s, want the claim's UID once, on the claim", b)
 	}
-	if !s.HoldsDesktopOf("team-a", "lab") || s.HoldsDesktopOf("team-a", "other") || s.HoldsDesktopOf("team-b", "lab") {
-		t.Fatal("HoldsDesktopOf answers for a pool no desktop there is of")
+	// Read alone, the desktop names no claim.
+	if alone, ok := s.Instance("team-a", "lab-1"); !ok || alone.Claim != "" || alone.Pool != "lab" {
+		t.Fatalf("instance = %+v (%v)", alone, ok)
+	}
+	if _, ok := s.Instance("team-b", "lab-1"); ok {
+		t.Fatal("a desktop of another namespace was found")
 	}
 }
 
-// An act trusts who holds a desktop only while the desktops and the claims
-// are both synced and watched.
-func TestAnActsReadIsFreshOnlyWhileBothKindsAreWatched(t *testing.T) {
+// A desktop waiting for its class is told apart from one not ready for
+// another reason.
+func TestAMissingClassIsToldApart(t *testing.T) {
+	missing := model.Desktop{Conditions: []model.DesktopCondition{{Type: "Ready", Status: "False", Reason: "ClassNotFound"}}}
+	other := model.Desktop{Conditions: []model.DesktopCondition{{Type: "Ready", Status: "False", Reason: "PodNotReady"}}}
+	if !ClassMissing(missing) || ClassMissing(other) || ClassMissing(model.Desktop{}) {
+		t.Fatal("ClassMissing reads another condition as a missing class")
+	}
+}
+
+// An act trusts what it reads of a kind only while that kind is synced and
+// watched; a kind it does not read holds it back never.
+func TestAnActsReadIsFreshOnlyWhileItsKindsAreWatched(t *testing.T) {
 	s, _ := newSnapshot(t)
-	if s.Fresh() {
+	if s.Fresh(GVRInstance) {
 		t.Fatal("fresh before any list landed")
 	}
 	for _, tb := range []cache.Store{s.instances, s.claims} {
@@ -631,16 +646,75 @@ func TestAnActsReadIsFreshOnlyWhileBothKindsAreWatched(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if !s.Fresh() {
+	if !s.Fresh(GVRInstance, GVRClaim) {
 		t.Fatal("not fresh once both kinds synced")
 	}
 	s.healthy[3].Store(false)
-	if s.Fresh() {
+	if s.Fresh(GVRInstance, GVRClaim) {
 		t.Fatal("fresh while the claims watch is down")
+	}
+	if !s.Fresh(GVRInstance) {
+		t.Fatal("the claims watch holds back what reads the desktops alone")
 	}
 	s.healthy[3].Store(true)
 	s.healthy[2].Store(false)
-	if s.Fresh() {
+	if s.Fresh(GVRInstance) || s.Fresh(GVRInstance, GVRClaim) {
 		t.Fatal("fresh while the desktops watch is down")
+	}
+}
+
+// Each kind whose watch is down is named, of those the caller reads alone.
+func TestStaleNamesEachKindDown(t *testing.T) {
+	s, _ := newSnapshot(t)
+	s.healthy[1].Store(false)
+	s.healthy[3].Store(false)
+	if got := s.Overview(everything("team-a"), nil).Stale; !slices.Equal(got, []string{"vdipools", "vdiclaims"}) {
+		t.Fatalf("stale = %q, want the pools and the claims", got)
+	}
+	desktopsOnly := map[Kind]bool{{"team-a", GVRInstance.Resource}: true}
+	if got := s.Overview(desktopsOnly, nil).Stale; got != nil {
+		t.Fatalf("a desktops reader is told %q", got)
+	}
+}
+
+// A restart asked for shows until DeskuBe rolled that very value out; one
+// DeskuBe never rolls out, longer than 64 bytes, shows none.
+func TestARestartShowsUntilRolledOut(t *testing.T) {
+	for _, c := range []struct {
+		name          string
+		asked, rolled string
+		want          bool
+	}{
+		{"none asked", "", "", false},
+		{"asked", "2026-11-28T10:00:00Z", "", true},
+		{"rolled out", "2026-11-28T10:00:00Z", "2026-11-28T10:00:00Z", false},
+		{"asked again", "2026-11-28T11:00:00Z", "2026-11-28T10:00:00Z", true},
+		{"too long to roll out", strings.Repeat("x", 65), "", false},
+		{"as long as rolls out", strings.Repeat("x", 64), "", true},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			s, _ := newSnapshot(t)
+			d := desktop("team-a", "alice", map[string]any{"restart": c.rolled})
+			d.SetUID("uid-alice-desk")
+			if c.asked != "" {
+				d.SetAnnotations(map[string]string{RestartAnnotation: c.asked})
+			}
+			mustAdd(t, s.instances, d)
+			got, _, _ := s.Desktop("team-a", "alice")
+			if got.Restarting != c.want || got.UID != "uid-alice-desk" {
+				t.Fatalf("desktop = %+v, want restarting %v", got, c.want)
+			}
+		})
+	}
+}
+
+func TestOnlyAPhaseShowingAPodRestarts(t *testing.T) {
+	for phase, want := range map[string]bool{
+		"Ready": true, "Starting": true,
+		"Provisioning": false, "Stopping": false, "Stopped": false, "Failed": false, "": false,
+	} {
+		if HasPod(phase) != want {
+			t.Errorf("HasPod(%q) = %v", phase, !want)
+		}
 	}
 }

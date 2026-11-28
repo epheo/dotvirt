@@ -138,6 +138,8 @@ func (s *Server) routes(mux *http.ServeMux) {
 		mux.HandleFunc("POST /api/desktops/{namespace}/{name}/start", s.handleDesktopStart)
 		mux.HandleFunc("POST /api/desktops/{namespace}/{name}/stop", s.handleDesktopStop)
 		mux.HandleFunc("POST /api/desktops/{namespace}/{name}/release", s.handleDesktopRelease)
+		// Names the desktop the caller saw, by its UID.
+		mux.HandleFunc("POST /api/desktops/{namespace}/{name}/restart", s.handleDesktopRestart)
 	}
 	if s.replication != nil {
 		mux.HandleFunc("GET /api/storage/replication", s.handleReplication)

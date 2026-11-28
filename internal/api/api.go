@@ -650,8 +650,9 @@ func (s *Server) reviewFailed(ctx context.Context, id auth.Identity, err error) 
 // statusFor maps an error to an HTTP status by the kind it wraps: a model.Err*
 // kind, or an apiserver status from an operation run under the caller's token
 // (Forbidden is the caller's RBAC verdict; Conflict and BadRequest both mean
-// the object's state refuses the act, e.g. pausing a stopped VM; throttling,
-// timeouts and a bare Unauthorized are transient). Only errSessionRejected is
+// the object's state refuses the act, e.g. pausing a stopped VM; Invalid is
+// its validation refusing the caller's write; throttling, timeouts and a bare
+// Unauthorized are transient). Only errSessionRejected is
 // a 401: an apiserver 401 alone can be a subresource's or an authenticator
 // outage, and must not sign a valid session out. Anything unclassified is a
 // 500. An apiserver status from dotvirt's own identity must never reach here
@@ -668,6 +669,8 @@ func statusFor(err error) int {
 		return http.StatusForbidden
 	case errors.Is(err, model.ErrConflict), apierrors.IsConflict(err), apierrors.IsBadRequest(err):
 		return http.StatusConflict
+	case apierrors.IsInvalid(err):
+		return http.StatusUnprocessableEntity
 	case errors.Is(err, model.ErrUnavailable), apierrors.IsUnauthorized(err), apierrors.IsTooManyRequests(err),
 		apierrors.IsTimeout(err), apierrors.IsServiceUnavailable(err):
 		return http.StatusServiceUnavailable

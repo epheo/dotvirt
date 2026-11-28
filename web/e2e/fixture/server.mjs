@@ -14,6 +14,7 @@
 //   POST /__fixture/logout-status/{s}  next POST /api/logout answers status s
 //   POST /__fixture/fail/{plane}/{n}   the next n calls of a plane answer 503 (events, logout)
 //   POST /__fixture/proxy-down/{0|1}   the upload proxy drops connections, as one the browser cannot reach or trust
+//   POST /__fixture/desktops-rollout   DeskuBe rolls out every desktop restart asked for
 //   GET  /__fixture/scenario           current scenario name
 //   GET  /__fixture/provider-starts    sign-in provider starts since the scenario switch
 //   GET  /__fixture/forge-connects     forge connects started since the scenario switch
@@ -1130,24 +1131,41 @@ async function handleRepair(req, res, path, url, s) {
 }
 
 // A desktop act (POST /api/desktops/{namespace}/{name}/{act}), refused as the
-// server refuses it: while the watch is down, on another claim than the one
-// the caller saw (by name and UID), and on the field the UI gates it by. What
-// it changes reaches the page as DeskuBe's write does: on the pull the
-// frame's watermark starts.
+// server refuses it: while a watch it reads is down, on another desktop or
+// claim than the one the caller saw (by name and UID), on a desktop for
+// another person than the caller saw, with no pod to restart or no class, and
+// on the field the UI gates it by. What it changes reaches the page as
+// DeskuBe's write does: on the pull the frame's watermark starts. A restart
+// stays requested until POST /__fixture/desktops-rollout.
 async function handleDesktopAct(req, res, path, s) {
-	const m = path.match(/^\/api\/desktops\/([^/]+)\/([^/]+)\/(start|stop|release)$/);
+	const m = path.match(/^\/api\/desktops\/([^/]+)\/([^/]+)\/(start|stop|release|restart)$/);
 	if (!m) return false;
 	const [, ns, name, act] = m;
 	const body = (await readBody(req)) ?? {};
 	const refuse = (code, why) => (sendText(res, code, why), true);
 	const d = s.desktops;
-	const pool = d?.pools.find((p) => p.namespace === ns && p.desktops.some((x) => x.name === name));
-	const desk = (pool?.desktops ?? d?.desktops ?? []).find(
-		(x) => x.namespace === ns && x.name === name,
-	);
+	const desk = findDesktop(s, ns, name);
 	if (!desk) return refuse(404, `not found: desktop ${ns}/${name}`);
-	if (d.stale)
+	const stale = new Set(d.stale);
+	if (stale.has('vdiinstances') || (act !== 'restart' && stale.has('vdiclaims')))
 		return refuse(503, `temporarily unavailable: the console's watch on ${name} is down`);
+	if (act === 'restart') {
+		if (desk.uid !== body.uid)
+			return refuse(409, `conflict: desktop ${name} is not the one you saw: look at it again`);
+		if ((desk.owner ?? '') !== (body.owner ?? ''))
+			return refuse(
+				409,
+				`conflict: desktop ${name} changed hands since you saw it: look at it again`,
+			);
+		if (desk.conditions?.some((c) => c.reason === 'ClassNotFound'))
+			return refuse(409, `conflict: class ${desk.class} of ${name} does not exist`);
+		if (desk.phase !== 'Ready' && desk.phase !== 'Starting')
+			return refuse(409, `conflict: ${name} has no pod to restart`);
+		if (!desktopCaps(s, ns, name, '').restart)
+			return refuse(403, `forbidden: you may not restart ${name}`);
+		desk.restarting = true;
+		return desktopActed(res, s, 'Restart', ns, name);
+	}
 	if (!desk.pool)
 		return refuse(
 			409,
@@ -1156,11 +1174,10 @@ async function handleDesktopAct(req, res, path, s) {
 	const claim = d.claims.find((c) => c.namespace === ns && c.name === desk.claim);
 	if (!claim || claim.name !== body.claim || claim.uid !== body.uid)
 		return refuse(409, `conflict: claim ${body.claim} no longer holds ${name}: look at it again`);
-	const caps = desktopCaps(s, ns, desk.pool);
-	const own = claim.user === s.user?.username;
-	const ok =
-		act === 'release' ? caps[own ? 'releaseOwn' : 'release'] : caps[own ? 'powerOwn' : 'power'];
-	if (!ok) return refuse(403, `forbidden: you may not ${act} ${claim.user}'s desktop`);
+	const caps = desktopCaps(s, ns, name, claim.name);
+	if (!(act === 'release' ? caps.release : caps.power))
+		return refuse(403, `forbidden: you may not ${act} ${claim.user}'s desktop`);
+	const pool = d.pools.find((p) => p.namespace === ns && p.desktops.includes(desk));
 	if (act === 'release') {
 		pool.desktops = pool.desktops.filter((x) => x !== desk);
 		d.claims = d.claims.filter((c) => c !== claim);
@@ -1173,7 +1190,12 @@ async function handleDesktopAct(req, res, path, s) {
 				: { running: false, phase: 'Stopped', session: undefined },
 		);
 	}
-	const verb = act[0].toUpperCase() + act.slice(1);
+	return desktopActed(res, s, act[0].toUpperCase() + act.slice(1), ns, name);
+}
+
+// desktopActed records an act that went through in the feed, moves the
+// desktops' and the feed's watermarks, and answers it.
+function desktopActed(res, s, verb, ns, name) {
 	const by = s.user?.username;
 	const op = { kind: 'op', verb, namespace: ns, name, desktop: true, by, ok: true };
 	s.tasks = [
@@ -1187,23 +1209,35 @@ async function handleDesktopAct(req, res, path, s) {
 	return true;
 }
 
-// The acts on the claims of pool's desktops (GET /api/capabilities?desktops=
-// &pool=), as the server weighs them: none where the caller may not list the
-// desktops and the claims, and every other allowed unless the scenario's
-// desktopCapabilities narrows one, by "namespace/pool".
-function desktopCaps(s, ns, pool) {
+// The desktop namespace/name, a pool's or one made one by one.
+function findDesktop(s, ns, name) {
+	const d = s.desktops;
+	return [...(d?.pools ?? []).flatMap((p) => p.desktops), ...(d?.desktops ?? [])].find(
+		(x) => x.namespace === ns && x.name === name,
+	);
+}
+
+// The acts on one desktop, and on claim holding it (GET /api/capabilities?
+// desktops=&desktop=&claim=), as the server weighs them: none where the
+// caller may not list the desktops, the claim's none where it may not list
+// the claims or names none, and every other allowed unless the scenario's
+// desktopCapabilities narrows one, by "namespace/pool" or "namespace/desktop".
+function desktopCaps(s, ns, desktop, claim) {
 	const not = new Set(
 		(s.desktops?.unlisted ?? []).filter((u) => u.namespace === ns).map((u) => u.resource),
 	);
-	const claims = !not.has('vdiinstances') && !not.has('vdiclaims');
+	const desktops = !not.has('vdiinstances');
+	const weighed = desktops && !not.has('vdiclaims') && claim ? claim : '';
+	const pool = findDesktop(s, ns, desktop)?.pool;
 	return {
 		namespace: ns,
-		pool,
-		power: claims,
-		powerOwn: claims,
-		release: claims,
-		releaseOwn: claims,
-		...s.desktopCapabilities?.[`${ns}/${pool}`],
+		desktop,
+		claim: weighed || undefined,
+		restart: desktops,
+		power: !!weighed,
+		release: !!weighed,
+		...(pool && s.desktopCapabilities?.[`${ns}/${pool}`]),
+		...s.desktopCapabilities?.[`${ns}/${desktop}`],
 	};
 }
 
@@ -1324,18 +1358,19 @@ async function handleStorage(req, res, url) {
 		v === null ? sendText(res, 503, 'cluster read failed') : sendJSON(res, 200, v ?? []);
 	if (path === '/api/storage/snapshots') return listing(s.storageSnapshots);
 	if (path === '/api/capabilities') {
-		const desk = url.searchParams.get('desktops');
-		if (desk) {
-			const pool = url.searchParams.get('pool');
-			if (!projectOf(desk)) return sendText(res, 404, 'namespace not found in any visible project');
-			if (!pool) return sendText(res, 400, 'invalid request: name the pool');
-			const made = [
-				...(s.desktops?.pools ?? []).flatMap((p) => p.desktops),
-				...(s.desktops?.desktops ?? []),
-			];
-			if (!made.some((x) => x.namespace === desk && x.pool === pool))
-				return sendText(res, 404, `not found: no desktop of pool ${pool} in ${desk}`);
-			return sendJSON(res, 200, { desktops: desktopCaps(s, desk, pool) });
+		const deskNs = url.searchParams.get('desktops');
+		if (deskNs) {
+			const name = url.searchParams.get('desktop');
+			const claim = url.searchParams.get('claim') ?? '';
+			if (!projectOf(deskNs))
+				return sendText(res, 404, 'namespace not found in any visible project');
+			if (!name) return sendText(res, 400, 'invalid request: name the desktop');
+			const desk = findDesktop(s, deskNs, name);
+			if (!desk) return sendText(res, 404, `not found: desktop ${deskNs}/${name}`);
+			const caps = desktopCaps(s, deskNs, name, claim);
+			if (caps.claim && (!desk.pool || desk.claim !== claim))
+				return sendText(res, 404, `not found: claim ${claim} does not hold ${name}`);
+			return sendJSON(res, 200, { desktops: caps });
 		}
 		const ns = url.searchParams.get('namespace');
 		if (!ns) return sendJSON(res, 200, { cluster: clusterCaps(s) });
@@ -1576,6 +1611,19 @@ function handleControl(req, res, url) {
 	if (path === '/__fixture/ws-drop' && req.method === 'POST') {
 		for (const ws of state.sockets) ws.terminate();
 		return sendJSON(res, 200, { dropped: true });
+	}
+	// DeskuBe rolls out every restart asked for: each desktop's status.restart
+	// meets its request.
+	if (path === '/__fixture/desktops-rollout' && req.method === 'POST') {
+		const s = state.scenario;
+		for (const desk of [
+			...(s.desktops?.pools ?? []).flatMap((p) => p.desktops),
+			...(s.desktops?.desktops ?? []),
+		])
+			delete desk.restarting;
+		s.inventory.desktopsVersion = (s.inventory.desktopsVersion ?? 0) + 1;
+		broadcastInventory();
+		return sendJSON(res, 200, { rolledOut: true });
 	}
 	m = path.match(/^\/__fixture\/ws-refuse\/(\d+)$/);
 	if (m && req.method === 'POST') {
