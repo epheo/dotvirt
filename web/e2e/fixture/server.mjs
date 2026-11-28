@@ -14,6 +14,7 @@
 //   POST /__fixture/logout-status/{s}  next POST /api/logout answers status s
 //   POST /__fixture/fail/{plane}/{n}   the next n calls of a plane answer 503 (events, logout)
 //   POST /__fixture/proxy-down/{0|1}   the upload proxy drops connections, as one the browser cannot reach or trust
+//   POST /__fixture/vm/{ns}/{name}     merge the JSON body into a VM, as the reflector sees it move: one frame
 //   GET  /__fixture/scenario           current scenario name
 //   GET  /__fixture/provider-starts    sign-in provider starts since the scenario switch
 //   GET  /__fixture/forge-connects     forge connects started since the scenario switch
@@ -1555,6 +1556,16 @@ function handleControl(req, res, url) {
 	if (path === '/__fixture/ws-drop' && req.method === 'POST') {
 		for (const ws of state.sockets) ws.terminate();
 		return sendJSON(res, 200, { dropped: true });
+	}
+	m = path.match(/^\/__fixture\/vm\/([^/]+)\/([^/]+)$/);
+	if (m && req.method === 'POST') {
+		const vm = findVM(m[1], m[2]);
+		if (!vm) return sendText(res, 404, 'vm not found');
+		return void readBody(req).then((fields) => {
+			Object.assign(vm, fields);
+			broadcastInventory();
+			sendJSON(res, 200, vm);
+		});
 	}
 	m = path.match(/^\/__fixture\/ws-refuse\/(\d+)$/);
 	if (m && req.method === 'POST') {

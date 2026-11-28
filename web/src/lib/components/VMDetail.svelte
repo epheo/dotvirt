@@ -177,8 +177,27 @@
 		inventory.projects.find((p) => p.namespaces.some((n) => n.namespace === vm.namespace))?.gitOps
 			?.revision ?? '',
 	);
+	// Also when a field the diff compares (manifest.DiffVMs) moves on the
+	// running VM: a second edit outside git leaves the verdict OutOfSync.
+	// Run state (phase, IPs, host) is not compared, so it never re-reads.
+	const compared = $derived(
+		JSON.stringify([
+			vm.power,
+			vm.cpuCores,
+			vm.memory,
+			vm.instancetype,
+			vm.preference,
+			vm.drsExclude,
+			vm.evictionStrategy,
+			vm.labels,
+			vm.scheduling?.pin,
+			vm.scheduling?.groups,
+			vm.disks?.map((d) => [d.name, d.size]),
+			vm.networks?.map((n) => n.name),
+		]),
+	);
 	const driftRes = resource<DriftResult>(
-		() => `${key}|${vm.sync}|${revision}`,
+		() => `${key}|${vm.sync}|${revision}|${compared}`,
 		() => api.drift(vm.namespace, vm.name),
 		{ reset: true },
 	);

@@ -93,6 +93,36 @@ describe('resource', () => {
 		stop();
 	});
 
+	it('loads again on a new string, never on a fresh object that keys the same', async () => {
+		// The live stream hands down a fresh VM whenever its run state moves: a
+		// key read off it must not reload, nor blank a reset:true panel.
+		const vm = box({ name: 'vm-a', phase: 'Starting' });
+		const loads: string[] = [];
+		let r!: Resource<string>;
+		const stop = effectRoot(() => {
+			r = resource(
+				() => vm.value.name,
+				async (k) => {
+					loads.push(k);
+					return `data-${k}`;
+				},
+				{ reset: true },
+			);
+		});
+		await tick();
+		vm.value = { name: 'vm-a', phase: 'Running' };
+		flushSync();
+		await tick();
+		expect(loads).toEqual(['vm-a']);
+		expect(r.data).toBe('data-vm-a');
+		vm.value = { name: 'vm-b', phase: 'Running' };
+		flushSync();
+		await tick();
+		expect(loads).toEqual(['vm-a', 'vm-b']);
+		expect(r.data).toBe('data-vm-b');
+		stop();
+	});
+
 	it('reset:true blanks on a key change, reset:false keeps the old view', async () => {
 		for (const reset of [true, false]) {
 			const key = box('a');

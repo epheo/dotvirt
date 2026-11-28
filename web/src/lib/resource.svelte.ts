@@ -4,10 +4,13 @@ import { friendlyError } from './format';
 import { pollWhileVisible } from './poll';
 
 // resource owns the keyed-fetch idiom shared by the detail and metrics panels:
-// a load keyed on a STABLE identity string (never a per-frame object - the live
-// stream hands down fresh objects every frame), a stale-response guard for fast
-// key switches, the central-401 swallow, and an optional poll paused while the
-// tab is backgrounded. Call during component init (it registers $effects).
+// a load keyed on the identity string key() returns, a stale-response guard for
+// fast key switches, the central-401 swallow, and an optional poll paused while
+// the tab is backgrounded. Call during component init (it registers $effects).
+//
+// Only a new string loads again. key() may read a per-frame object (the live
+// stream hands down a fresh VM object whenever any of its fields moves), so
+// whatever must reload, a sync verdict or a revision, belongs in the string.
 //
 // loading is true only before the first data for the current key, so a poll
 // refresh never blanks the view. reset controls what a key change shows while
@@ -34,11 +37,13 @@ export function resource<T>(
 	// Only the newest run writes: a poll and a manual refresh on the same key
 	// overlap, and the older response landing last would paint stale data.
 	let seq = 0;
+	// A derived string notifies only when it changes, not when what key() read did.
+	const id = $derived(key());
 
 	async function run() {
-		const k = untrack(key);
+		const k = untrack(() => id);
 		const mine = ++seq;
-		const current = () => mine === seq && key() === k;
+		const current = () => mine === seq && id === k;
 		if (data === null) loading = true;
 		try {
 			const v = await load(k);
@@ -55,7 +60,7 @@ export function resource<T>(
 	}
 
 	$effect(() => {
-		key();
+		id;
 		if (opts.reset) {
 			data = null;
 			error = '';
