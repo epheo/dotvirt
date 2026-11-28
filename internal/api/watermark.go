@@ -193,8 +193,8 @@ func (s *Server) routesWatermark(ctx context.Context, id auth.Identity, c *clust
 
 // desktopsWatermark covers what the caller's desktops pull reads, from its
 // own rights: each kind where it may list it, the kinds it may not list
-// beside those, and whether the pull is synced or stale. 0 for a caller who
-// may list none, as on a cluster without DeskuBe.
+// beside those, and whether the kinds it reads are synced or stale. 0 for a
+// caller who may list none, as on a cluster without DeskuBe.
 func (s *Server) desktopsWatermark(v callerView, namespaces []string) uint64 {
 	if s.desktops == nil {
 		return 0
@@ -204,7 +204,7 @@ func (s *Server) desktopsWatermark(v callerView, namespaces []string) uint64 {
 		return 0
 	}
 	var t term
-	sum := t.start("desktops").num(s.desktops.Base()).sum()
+	sum := t.start("desktops").num(s.desktops.Base(readable)).sum()
 	for k := range readable {
 		sum += t.start("desktops").str(k.Namespace, k.Resource).num(s.desktops.Gen(k)).sum()
 	}

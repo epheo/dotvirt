@@ -438,7 +438,7 @@ func TestTheModuleGoingOffStopsTheWatchesAndForgets(t *testing.T) {
 	s := New(src, eventbus.New(), on.Load)
 	s.Run(t.Context())
 	eventually(t, "every watch started", src.watching(4))
-	eventually(t, "synced", func() bool { return s.Overview(everything(), nil).Synced })
+	eventually(t, "synced", func() bool { return s.Overview(everything("team-a"), nil).Synced })
 	if len(s.Overview(everything("team-a"), nil).Desktops) != 1 {
 		t.Fatal("the desktop never landed")
 	}
@@ -459,7 +459,7 @@ func TestSyncedWaitsForTheServedKindsOnly(t *testing.T) {
 	s := New(src, eventbus.New(), func() bool { return true })
 	s.Run(t.Context())
 	eventually(t, "the served kinds watched", src.watching(3))
-	eventually(t, "synced", func() bool { return s.Overview(everything(), nil).Synced })
+	eventually(t, "synced", func() bool { return s.Overview(everything("team-a"), nil).Synced })
 	if got := s.Overview(everything("team-a"), nil); got.Stale {
 		t.Fatal("an absent kind reads as stale")
 	}
@@ -487,7 +487,7 @@ func TestADiscoveryErrorKeepsThePullUnsynced(t *testing.T) {
 	eventually(t, "the served kinds listed", func() bool {
 		return s.classes.Synced() && s.pools.Synced() && s.instances.Synced()
 	})
-	if s.Overview(everything(), nil).Synced {
+	if s.Overview(everything("team-a"), nil).Synced {
 		t.Fatal("a kind discovery could not read reads as absent")
 	}
 
@@ -496,7 +496,7 @@ func TestADiscoveryErrorKeepsThePullUnsynced(t *testing.T) {
 	claims := slices.IndexFunc(s.kinds(), func(k watched) bool { return k.gvr == GVRClaim })
 	// The probe the next discovery tick makes.
 	s.probe(claims)(GVRClaim)
-	if !s.Overview(everything(), nil).Synced {
+	if !s.Overview(everything("team-a"), nil).Synced {
 		t.Fatal("a kind discovery says is absent still holds the pull back")
 	}
 	if bus.Version(eventbus.DesktopsChanged) == before {

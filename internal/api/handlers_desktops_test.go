@@ -137,9 +137,12 @@ func desktopsServer(t *testing.T, fc *fakeCluster, src *desktopsSource) *Server 
 	s := fc.server(nil, Config{})
 	s.desktops = desktops.New(src, s.bus, func() bool { return true })
 	s.desktops.Run(t.Context())
-	classes := map[desktops.Kind]bool{{Resource: desktops.GVRClass.Resource}: true}
+	every := map[desktops.Kind]bool{{Resource: desktops.GVRClass.Resource}: true}
+	for _, gvr := range desktops.Namespaced {
+		every[desktops.Kind{Namespace: "team-a-dev", Resource: gvr.Resource}] = true
+	}
 	for deadline := time.Now().Add(5 * time.Second); ; time.Sleep(time.Millisecond) {
-		if o := s.desktops.Overview(classes, nil); o.Synced || o.Stale {
+		if o := s.desktops.Overview(every, nil); o.Synced || o.Stale {
 			return s
 		}
 		if time.Now().After(deadline) {
@@ -313,6 +316,40 @@ func TestACallerWhoListsNoDesktopKindIsToldNothing(t *testing.T) {
 				t.Fatalf("version = %d, want 0", v)
 			}
 		})
+	}
+}
+
+// Synced and stale speak of the kinds the caller reads only: a pools-only
+// caller is not told the claims watch fails.
+func TestAKindsHealthIsToldOnlyToItsReaders(t *testing.T) {
+	read := func(failClaims bool) (model.Desktops, uint64) {
+		fc := newFakeCluster(t)
+		fc.readsVMs = tenantSeesTeams
+		fc.ssar = listsKinds([]string{"vdipools"}, "team-b-dev")
+		s := desktopsServer(t, fc, &desktopsSource{failClaims: failClaims})
+		pools := map[desktops.Kind]bool{{Namespace: "team-b-dev", Resource: desktops.GVRPool.Resource}: true}
+		for deadline := time.Now().Add(5 * time.Second); !s.desktops.Overview(pools, nil).Synced; time.Sleep(time.Millisecond) {
+			if time.Now().After(deadline) {
+				t.Fatalf("a pools-only pull never synced (claims failing: %v)", failClaims)
+			}
+		}
+		if failClaims {
+			if all := getDesktops(t, s, adminToken, "/api/desktops"); !all.Stale || all.Synced {
+				t.Fatalf("an admin reads %+v while the claims watch fails", all)
+			}
+		}
+		return getDesktops(t, s, tenantToken, "/api/desktops"), desktopsVersion(t, s, tenantToken, teams...)
+	}
+	healthy, healthyVersion := read(false)
+	failing, failingVersion := read(true)
+	if !failing.Synced || failing.Stale {
+		t.Fatalf("a pools-only caller reads synced=%v stale=%v while only the claims watch fails", failing.Synced, failing.Stale)
+	}
+	if failingVersion != healthyVersion {
+		t.Fatalf("the claims watch failing moved a pools-only caller's version: %d then %d", healthyVersion, failingVersion)
+	}
+	if len(healthy.Pools) != 1 || len(failing.Pools) != 1 {
+		t.Fatalf("pools read %+v and %+v", healthy.Pools, failing.Pools)
 	}
 }
 

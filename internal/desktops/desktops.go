@@ -84,13 +84,13 @@ type Snapshot struct {
 	// gens counts each kind's moves per namespace, so a caller's watermark
 	// moves with what it may list only.
 	gens map[Kind]uint64
-	// flips counts what every caller's pull shows besides rows: whether it is
-	// synced, a watch's health, and the module stopping.
-	flips uint64
+	// flips counts, per kind, what a pull reading it shows besides rows:
+	// whether it is synced, its watch's health, and the module stopping.
+	flips [4]uint64
 
 	started atomic.Bool
-	// healthy and absent follow the order of kinds. absent is set only on
-	// discovery's definite no: a failed read leaves a kind unknown.
+	// healthy, absent and flips follow the order of kinds. absent is set only
+	// on discovery's definite no: a failed read leaves a kind unknown.
 	healthy [4]atomic.Bool
 	absent  [4]atomic.Bool
 }
@@ -138,7 +138,7 @@ func (s *Snapshot) start(ctx context.Context) {
 	s.started.Store(true)
 	s.publish()
 	for i, k := range s.kinds() {
-		reflect.RunWhenServed(ctx, s.probe(i), k.gvr, s.src.DynamicListWatch(k.gvr), k.table, &s.healthy[i], s.flipped)
+		reflect.RunWhenServed(ctx, s.probe(i), k.gvr, s.src.DynamicListWatch(k.gvr), k.table, &s.healthy[i], s.flipped(i))
 	}
 }
 
@@ -153,7 +153,7 @@ func (s *Snapshot) probe(i int) func(schema.GroupVersionResource) bool {
 			return false
 		}
 		if s.absent[i].Swap(!served) != !served {
-			s.flipped()
+			s.flipped(i)()
 		}
 		return served
 	}
@@ -167,7 +167,12 @@ func (s *Snapshot) clear() {
 		s.absent[i].Store(false)
 		s.healthy[i].Store(true)
 	}
-	s.flipped()
+	s.mu.Lock()
+	for i := range s.flips {
+		s.flips[i]++
+	}
+	s.mu.Unlock()
+	s.publish()
 }
 
 func (s *Snapshot) ready(ctx context.Context) bool {
@@ -197,36 +202,59 @@ func (s *Snapshot) publish() {
 	}
 }
 
-// flipped moves every caller's watermark: each pull says whether it is synced
-// and whether it is stale.
-func (s *Snapshot) flipped() {
-	s.mu.Lock()
-	s.flips++
-	s.mu.Unlock()
-	s.publish()
+// flipped moves the watermark of each caller reading kind i: its pull says
+// whether the kind is synced and whether it is stale.
+func (s *Snapshot) flipped(i int) func() {
+	return func() {
+		s.mu.Lock()
+		s.flips[i]++
+		s.mu.Unlock()
+		s.publish()
+	}
 }
 
-func (s *Snapshot) synced() bool {
-	if !s.started.Load() || !s.instances.Synced() {
-		return false
+// reads is which of kinds readable names.
+func (s *Snapshot) reads(readable map[Kind]bool) (out [4]bool) {
+	resources := map[string]bool{}
+	for k := range readable {
+		resources[k.Resource] = true
 	}
 	for i, k := range s.kinds() {
-		if !s.absent[i].Load() && !k.table.Synced() {
-			return false
-		}
+		out[i] = resources[k.gvr.Resource]
 	}
-	return true
+	return out
 }
 
-// Base is the level of what every caller's pull reads besides rows: whether
-// it is synced, and whether it is stale.
-func (s *Snapshot) Base() uint64 {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	level := s.flips << 1
-	if s.synced() {
+// status is what the kinds in read say, and no other: whether they are
+// synced, whether one is stale, and their level. A caller is never told of a
+// kind it may not list. Runs under mu.
+func (s *Snapshot) status(read [4]bool) (synced, stale bool, level uint64) {
+	synced = s.started.Load()
+	for i, k := range s.kinds() {
+		if !read[i] {
+			continue
+		}
+		if !s.absent[i].Load() && !k.table.Synced() {
+			synced = false
+		}
+		if !s.healthy[i].Load() {
+			stale = true
+		}
+		level += s.flips[i]
+	}
+	level <<= 1
+	if synced {
 		level |= 1
 	}
+	return synced, stale, level
+}
+
+// Base is the level of what a pull reading readable shows besides rows:
+// whether its kinds are synced, and whether one is stale.
+func (s *Snapshot) Base(readable map[Kind]bool) uint64 {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	_, _, level := s.status(s.reads(readable))
 	return level
 }
 
@@ -268,8 +296,7 @@ func (s *Snapshot) Overview(readable map[Kind]bool, unlisted []Kind) model.Deskt
 	})
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	out.Synced = s.synced()
-	out.Stale = !reflect.AllHealthy(s.healthy[:])
+	out.Synced, out.Stale, _ = s.status(s.reads(readable))
 	if readable[Kind{Resource: GVRClass.Resource}] {
 		for _, c := range s.classes.Rows {
 			out.Classes = append(out.Classes, c)
