@@ -92,7 +92,11 @@ type Desktop struct {
 	// Pool is the pool that made it, empty for a desktop made one by one.
 	Pool string `json:"pool,omitempty"`
 	// Claim is the Bound claim holding it, where the caller may list claims.
-	Claim      string             `json:"claim,omitempty"`
+	Claim string `json:"claim,omitempty"`
+	// ClaimUID is the UID of the claim its pool holds it for, which an act
+	// on that claim checks. Never sent: only a caller who may list the claims
+	// reads one.
+	ClaimUID   string             `json:"-"`
 	Conditions []DesktopCondition `json:"conditions,omitempty"`
 }
 
@@ -101,7 +105,10 @@ type Desktop struct {
 type DesktopClaim struct {
 	Namespace string `json:"namespace"`
 	Name      string `json:"name"`
-	User      string `json:"user"`
+	// UID tells this claim from a later one under its name: an act on it
+	// names it.
+	UID  string `json:"uid"`
+	User string `json:"user"`
 	// Pool is empty on a claim that names its desktop.
 	Pool string `json:"pool,omitempty"`
 	// Desktop is the one the claim holds, or names.

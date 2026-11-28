@@ -6,26 +6,24 @@ package model
 // weighed as the gate weighs them, so the UI offers only what the server
 // allows. A review that failed reads as false:
 // unknown never offers an action. Without ?namespace= it answers Cluster; with
-// it, Namespace; with ?desktops= (and ?pool=), Desktops.
+// it, Namespace; with ?desktops= and ?pool=, Desktops.
 type Capabilities struct {
 	Cluster   *ClusterCaps   `json:"cluster,omitempty"`
 	Namespace *NamespaceCaps `json:"namespace,omitempty"`
 	Desktops  *DesktopCaps   `json:"desktops,omitempty"`
 }
 
-// DesktopCaps are the acts on the desktops of one namespace: on one of Pool's,
-// or on one made one by one when Pool is empty. Each needs the desktops listed
-// there, and a claim act the claims too: the route acts on nothing else.
+// DesktopCaps are the acts on the claims holding Pool's desktops in one
+// namespace. Each needs the desktops and the claims listed there: the route
+// acts on nothing else.
 type DesktopCaps struct {
 	Namespace string `json:"namespace"`
-	Pool      string `json:"pool,omitempty"`
-	// Restart deletes a desktop's pod: list and delete on pods.
-	Restart bool `json:"restart"`
+	Pool      string `json:"pool"`
 	// Power starts and stops another's claim of the pool (patch on claims),
 	// Release deletes it (delete on claims), each with assign or delete on
 	// the pool. PowerOwn and ReleaseOwn are the caller's own claim: use on
 	// the pool also opens a start or stop, and a release asks nothing of the
-	// pool. All four are false when Pool is empty.
+	// pool.
 	Power      bool `json:"power"`
 	PowerOwn   bool `json:"powerOwn"`
 	Release    bool `json:"release"`

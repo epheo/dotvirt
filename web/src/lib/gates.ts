@@ -176,10 +176,9 @@ export const clusterGate = {
 	forgeAdmin: () => cluster((c) => c.forgeAdmin, "read the forge's admin password"),
 };
 
-// A desktop's acts, as DeskuBe's admission weighs them: a pool's desktop acts
-// on the claim holding it, and the caller's own claim asks less of the pool.
-// Each reads the answer for the pool the desktop is of ('' for one made one by
-// one), so a pool's rows ask once.
+// A pool's desktop's acts, on the claim holding it, as DeskuBe's admission
+// weighs them: the caller's own claim asks less of the pool. Each reads the
+// answer for the pool the desktop is of, so a pool's rows ask once.
 const desk = (namespace: string, pool: string, pick: (d: DesktopCaps) => boolean, what: string) =>
 	caps.desktopGate(namespace, pool, pick, `You may not ${what}.`);
 
@@ -192,8 +191,6 @@ export const desktopGate = {
 		own
 			? desk(namespace, pool, (c) => c.releaseOwn, `release your desktop of pool ${pool}`)
 			: desk(namespace, pool, (c) => c.release, `release others' desktops of pool ${pool}`),
-	restart: (namespace: string, pool = '') =>
-		desk(namespace, pool, (c) => c.restart, `restart desktops in ${namespace}`),
 };
 
 // A host's maintenance verbs: the host's own read carries the server's answer

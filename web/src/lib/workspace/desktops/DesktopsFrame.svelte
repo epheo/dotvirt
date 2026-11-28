@@ -21,7 +21,6 @@
 		context,
 		tabs,
 		tab = '',
-		actions,
 		children,
 	}: {
 		trail: { label: string; href?: string }[];
@@ -30,8 +29,6 @@
 		context?: string;
 		tabs?: { id: string; label: string; count?: number }[];
 		tab?: string;
-		// The page's verbs, beside its title.
-		actions?: Snippet;
 		children: Snippet<[Desktops]>;
 	} = $props();
 
@@ -48,7 +45,7 @@
 	<div class="flex min-h-full flex-col gap-[18px] px-7 pt-5 pb-8">
 		<div class="flex flex-col gap-2">
 			<Breadcrumb {trail} />
-			<PageHeader {title} status={header} {context} {actions} />
+			<PageHeader {title} status={header} {context} />
 			{#if tabs}<TabBar class="mt-1" {tabs} active={tab} href={(id) => `?tab=${id}`} />{/if}
 		</div>
 

@@ -591,3 +591,56 @@ func TestOneDesktopComesWithItsHolder(t *testing.T) {
 		t.Fatal("a stopped module found a desktop")
 	}
 }
+
+// What tells a claim from a later one under its name rides along: the
+// claim's UID, and the one its desktop is held for, never sent.
+func TestAClaimAndItsDesktopCarryTheClaimsUID(t *testing.T) {
+	s, _ := newSnapshot(t)
+	d := controlled(desktop("team-a", "lab-1", nil), "vdi.desku.be/v1alpha1", "VdiPool", "lab", true)
+	d.SetLabels(map[string]string{"vdi.desku.be/claim-uid": "uid-alice"})
+	mustAdd(t, s.instances, d)
+	c := claim("team-a", "alice", map[string]any{"poolName": "lab", "user": "alice"},
+		map[string]any{"phase": "Bound", "desktopName": "lab-1"})
+	c.SetUID("uid-alice")
+	mustAdd(t, s.claims, c)
+	got, holder, ok := s.Desktop("team-a", "lab-1")
+	if !ok || got.ClaimUID != "uid-alice" || holder.UID != "uid-alice" {
+		t.Fatalf("desktop = %+v held by %+v", got, holder)
+	}
+	b, err := json.Marshal(s.Overview(everything("team-a"), nil))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Count(string(b), "uid-alice") != 1 || !strings.Contains(string(b), `"uid":"uid-alice"`) {
+		t.Fatalf("the pull shows %s, want the claim's UID once, on the claim", b)
+	}
+	if !s.HoldsDesktopOf("team-a", "lab") || s.HoldsDesktopOf("team-a", "other") || s.HoldsDesktopOf("team-b", "lab") {
+		t.Fatal("HoldsDesktopOf answers for a pool no desktop there is of")
+	}
+}
+
+// An act trusts who holds a desktop only while the desktops and the claims
+// are both synced and watched.
+func TestAnActsReadIsFreshOnlyWhileBothKindsAreWatched(t *testing.T) {
+	s, _ := newSnapshot(t)
+	if s.Fresh() {
+		t.Fatal("fresh before any list landed")
+	}
+	for _, tb := range []cache.Store{s.instances, s.claims} {
+		if err := tb.Replace(nil, ""); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if !s.Fresh() {
+		t.Fatal("not fresh once both kinds synced")
+	}
+	s.healthy[3].Store(false)
+	if s.Fresh() {
+		t.Fatal("fresh while the claims watch is down")
+	}
+	s.healthy[3].Store(true)
+	s.healthy[2].Store(false)
+	if s.Fresh() {
+		t.Fatal("fresh while the desktops watch is down")
+	}
+}

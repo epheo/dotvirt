@@ -176,7 +176,6 @@ describe('desktopGate', () => {
 			desktops: {
 				namespace: 'web',
 				pool: 'eng',
-				restart: true,
 				power: false,
 				powerOwn: true,
 				release: false,
@@ -196,18 +195,21 @@ describe('desktopGate', () => {
 			"You may not release others' desktops of pool eng.",
 		);
 		expect(desktopGate.release('web', 'eng', true).ok).toBe(true);
-		expect(desktopGate.restart('web', 'eng').ok).toBe(true);
+		expect(api.api.capabilities).not.toHaveBeenCalled();
 	});
 
-	it('asks a desktop made one by one apart from any pool, and apart from the namespace', async () => {
-		api.api.desktopCapabilities.mockResolvedValue({
-			desktops: { namespace: 'web', restart: false },
-		});
-		desktopGate.restart('web');
+	it('asks each pool apart', async () => {
+		api.api.desktopCapabilities.mockImplementation((namespace: string, pool: string) =>
+			Promise.resolve({ desktops: { namespace, pool, power: pool === 'eng' } }),
+		);
+		desktopGate.power('web', 'eng', false);
+		desktopGate.power('web', 'lab', false);
 		await flush();
-		expect(api.api.desktopCapabilities).toHaveBeenCalledWith('web', '');
-		expect(api.api.capabilities).not.toHaveBeenCalled();
-		expect(desktopGate.restart('web').why).toBe('You may not restart desktops in web.');
+		expect(api.api.desktopCapabilities).toHaveBeenCalledTimes(2);
+		expect(desktopGate.power('web', 'eng', false).ok).toBe(true);
+		expect(desktopGate.power('web', 'lab', false).why).toBe(
+			"You may not start or stop others' desktops of pool lab.",
+		);
 	});
 });
 

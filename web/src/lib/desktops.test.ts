@@ -21,6 +21,7 @@ const desktop = (name: string, over: Partial<Desktop> = {}): Desktop => ({
 const claim = (name: string, over: Partial<DesktopClaim> = {}): DesktopClaim => ({
 	namespace: 'web-prod',
 	name,
+	uid: `uid-${name}`,
 	user: name,
 	running: true,
 	...over,

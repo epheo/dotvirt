@@ -44,7 +44,7 @@ export interface BrandingLink {
  * weighed as the gate weighs them, so the UI offers only what the server
  * allows. A review that failed reads as false:
  * unknown never offers an action. Without ?namespace= it answers Cluster; with
- * it, Namespace; with ?desktops= (and ?pool=), Desktops.
+ * it, Namespace; with ?desktops= and ?pool=, Desktops.
  */
 export interface Capabilities {
   cluster?: ClusterCaps;
@@ -52,23 +52,19 @@ export interface Capabilities {
   desktops?: DesktopCaps;
 }
 /**
- * DesktopCaps are the acts on the desktops of one namespace: on one of Pool's,
- * or on one made one by one when Pool is empty. Each needs the desktops listed
- * there, and a claim act the claims too: the route acts on nothing else.
+ * DesktopCaps are the acts on the claims holding Pool's desktops in one
+ * namespace. Each needs the desktops and the claims listed there: the route
+ * acts on nothing else.
  */
 export interface DesktopCaps {
   namespace: string;
-  pool?: string;
-  /**
-   * Restart deletes a desktop's pod: list and delete on pods.
-   */
-  restart: boolean;
+  pool: string;
   /**
    * Power starts and stops another's claim of the pool (patch on claims),
    * Release deletes it (delete on claims), each with assign or delete on
    * the pool. PowerOwn and ReleaseOwn are the caller's own claim: use on
    * the pool also opens a start or stop, and a release asks nothing of the
-   * pool. All four are false when Pool is empty.
+   * pool.
    */
   power: boolean;
   powerOwn: boolean;
@@ -523,6 +519,11 @@ export interface Desktop {
 export interface DesktopClaim {
   namespace: string;
   name: string;
+  /**
+   * UID tells this claim from a later one under its name: an act on it
+   * names it.
+   */
+  uid: string;
   user: string;
   /**
    * Pool is empty on a claim that names its desktop.

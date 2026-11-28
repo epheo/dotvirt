@@ -2283,6 +2283,7 @@ const deskube = {
 		{
 			namespace: 'batch-prod',
 			name: 'render-frank',
+			uid: 'uid-render-frank',
 			user: 'frank',
 			pool: 'render',
 			running: true,
@@ -2291,6 +2292,7 @@ const deskube = {
 		{
 			namespace: 'batch-prod',
 			name: 'render-gina',
+			uid: 'uid-render-gina',
 			user: 'gina',
 			pool: 'render',
 			running: true,
@@ -2300,6 +2302,7 @@ const deskube = {
 		{
 			namespace: 'web-prod',
 			name: 'eng-alice',
+			uid: 'uid-eng-alice',
 			user: 'alice',
 			pool: 'eng',
 			desktop: 'eng-7hq2k',
@@ -2310,6 +2313,7 @@ const deskube = {
 		{
 			namespace: 'web-prod',
 			name: 'eng-bob',
+			uid: 'uid-eng-bob',
 			user: 'bob',
 			pool: 'eng',
 			desktop: 'eng-p4x9m',
@@ -2320,6 +2324,7 @@ const deskube = {
 		{
 			namespace: 'web-prod',
 			name: 'lab-erin',
+			uid: 'uid-lab-erin',
 			user: 'erin',
 			pool: 'lab',
 			running: true,
@@ -2368,20 +2373,28 @@ const desktopsunread = {
 	modules: { desktops: true },
 	desktops: { synced: false, classes: [], pools: [], desktops: [], claims: [], unlisted: [] },
 };
-// A caller who reads the desktops and may act on none of eng's, nor restart
-// one made one by one in web-prod.
-const refused = {
-	restart: false,
-	power: false,
-	powerOwn: false,
-	release: false,
-	releaseOwn: false,
-};
+// A caller who reads the desktops and may act on none of eng's.
 const desktopsrefused = {
 	...desktops,
 	name: 'desktopsrefused',
-	desktopCapabilities: { 'web-prod/eng': refused, 'web-prod/': refused },
+	desktopCapabilities: {
+		'web-prod/eng': { power: false, powerOwn: false, release: false, releaseOwn: false },
+	},
 };
+// bob deleted his claim eng-bob and someone made another under that name,
+// which the console has not heard of: the same name, another UID.
+const desktopsreclaimed = {
+	...desktops,
+	name: 'desktopsreclaimed',
+	desktops: {
+		...deskube,
+		claims: deskube.claims.map((c) =>
+			c.name === 'eng-bob' ? { ...c, uid: 'uid-eng-bob-anew' } : c,
+		),
+	},
+};
+// The console lost its watch: what it shows may be out of date.
+const desktopsstale = { ...desktops, name: 'desktopsstale', desktops: { ...deskube, stale: true } };
 const desktopsnovms = {
 	...novms,
 	name: 'desktopsnovms',
@@ -2529,6 +2542,8 @@ export const scenarios = {
 	desktopsviewer,
 	desktopsunread,
 	desktopsrefused,
+	desktopsreclaimed,
+	desktopsstale,
 	desktopsnovms,
 	classquota,
 	replicatedquota,

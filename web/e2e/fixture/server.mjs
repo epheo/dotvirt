@@ -1109,10 +1109,12 @@ async function handleRepair(req, res, path, url, s) {
 }
 
 // A desktop act (POST /api/desktops/{namespace}/{name}/{act}), refused as the
-// server refuses it, on the field the UI gates it by. What it changes reaches
-// the page as DeskuBe's write does: on the pull the frame's watermark starts.
+// server refuses it: while the watch is down, on another claim than the one
+// the caller saw (by name and UID), and on the field the UI gates it by. What
+// it changes reaches the page as DeskuBe's write does: on the pull the
+// frame's watermark starts.
 async function handleDesktopAct(req, res, path, s) {
-	const m = path.match(/^\/api\/desktops\/([^/]+)\/([^/]+)\/(start|stop|release|restart)$/);
+	const m = path.match(/^\/api\/desktops\/([^/]+)\/([^/]+)\/(start|stop|release)$/);
 	if (!m) return false;
 	const [, ns, name, act] = m;
 	const body = (await readBody(req)) ?? {};
@@ -1123,32 +1125,32 @@ async function handleDesktopAct(req, res, path, s) {
 		(x) => x.namespace === ns && x.name === name,
 	);
 	if (!desk) return refuse(404, `not found: desktop ${ns}/${name}`);
-	const caps = desktopCaps(s, ns, desk.pool ?? '');
-	if (act === 'restart') {
-		if (!caps.restart) return refuse(403, `forbidden: you may not delete pods in ${ns}`);
-		if (!desk.running) return refuse(409, `conflict: ${name} runs no pod to restart`);
-		desk.session = 'free';
+	if (d.stale)
+		return refuse(503, `temporarily unavailable: the console's watch on ${name} is down`);
+	if (!desk.pool)
+		return refuse(
+			409,
+			`conflict: ${name} starts and stops on its owner's claim; not acted on here yet`,
+		);
+	const claim = d.claims.find((c) => c.namespace === ns && c.name === desk.claim);
+	if (!claim || claim.name !== body.claim || claim.uid !== body.uid)
+		return refuse(409, `conflict: claim ${body.claim} no longer holds ${name}: look at it again`);
+	const caps = desktopCaps(s, ns, desk.pool);
+	const own = claim.user === s.user?.username;
+	const ok =
+		act === 'release' ? caps[own ? 'releaseOwn' : 'release'] : caps[own ? 'powerOwn' : 'power'];
+	if (!ok) return refuse(403, `forbidden: you may not ${act} ${claim.user}'s desktop`);
+	if (act === 'release') {
+		pool.desktops = pool.desktops.filter((x) => x !== desk);
+		d.claims = d.claims.filter((c) => c !== claim);
 	} else {
-		const claim = d.claims.find((c) => c.namespace === ns && c.name === desk.claim);
-		if (!desk.pool) return refuse(409, `conflict: ${name} is made one by one`);
-		if (!claim || claim.name !== body.claim)
-			return refuse(409, `conflict: claim ${body.claim} no longer holds ${name}`);
-		const own = claim.user === s.user?.username;
-		const ok =
-			act === 'release' ? caps[own ? 'releaseOwn' : 'release'] : caps[own ? 'powerOwn' : 'power'];
-		if (!ok) return refuse(403, `forbidden: you may not ${act} ${claim.user}'s desktop`);
-		if (act === 'release') {
-			pool.desktops = pool.desktops.filter((x) => x !== desk);
-			d.claims = d.claims.filter((c) => c !== claim);
-		} else {
-			claim.running = act === 'start';
-			Object.assign(
-				desk,
-				claim.running
-					? { running: true, phase: 'Ready', session: 'free' }
-					: { running: false, phase: 'Stopped', session: undefined },
-			);
-		}
+		claim.running = act === 'start';
+		Object.assign(
+			desk,
+			claim.running
+				? { running: true, phase: 'Ready', session: 'free' }
+				: { running: false, phase: 'Stopped', session: undefined },
+		);
 	}
 	const verb = act[0].toUpperCase() + act.slice(1);
 	const by = s.user?.username;
@@ -1164,21 +1166,18 @@ async function handleDesktopAct(req, res, path, s) {
 	return true;
 }
 
-// The desktop acts (GET /api/capabilities?desktops=&pool=), as the server
-// weighs them: none where the caller may not list the desktops, no claim act
-// where it may not list the claims nor on a desktop made one by one, and
-// every other allowed unless the scenario's desktopCapabilities narrows one,
-// by "namespace/pool".
+// The acts on the claims of pool's desktops (GET /api/capabilities?desktops=
+// &pool=), as the server weighs them: none where the caller may not list the
+// desktops and the claims, and every other allowed unless the scenario's
+// desktopCapabilities narrows one, by "namespace/pool".
 function desktopCaps(s, ns, pool) {
 	const not = new Set(
 		(s.desktops?.unlisted ?? []).filter((u) => u.namespace === ns).map((u) => u.resource),
 	);
-	const shown = !not.has('vdiinstances');
-	const claims = shown && !!pool && !not.has('vdiclaims');
+	const claims = !not.has('vdiinstances') && !not.has('vdiclaims');
 	return {
 		namespace: ns,
-		...(pool ? { pool } : {}),
-		restart: shown,
+		pool,
 		power: claims,
 		powerOwn: claims,
 		release: claims,
@@ -1306,10 +1305,16 @@ async function handleStorage(req, res, url) {
 	if (path === '/api/capabilities') {
 		const desk = url.searchParams.get('desktops');
 		if (desk) {
+			const pool = url.searchParams.get('pool');
 			if (!projectOf(desk)) return sendText(res, 404, 'namespace not found in any visible project');
-			return sendJSON(res, 200, {
-				desktops: desktopCaps(s, desk, url.searchParams.get('pool') ?? ''),
-			});
+			if (!pool) return sendText(res, 400, 'invalid request: name the pool');
+			const made = [
+				...(s.desktops?.pools ?? []).flatMap((p) => p.desktops),
+				...(s.desktops?.desktops ?? []),
+			];
+			if (!made.some((x) => x.namespace === desk && x.pool === pool))
+				return sendText(res, 404, `not found: no desktop of pool ${pool} in ${desk}`);
+			return sendJSON(res, 200, { desktops: desktopCaps(s, desk, pool) });
 		}
 		const ns = url.searchParams.get('namespace');
 		if (!ns) return sendJSON(res, 200, { cluster: clusterCaps(s) });

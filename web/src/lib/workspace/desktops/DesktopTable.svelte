@@ -10,8 +10,8 @@
 	import DesktopActions from './DesktopActions.svelte';
 
 	// Desktops with the claims holding them. A desktop made one by one opens
-	// its page, where it is acted on; a pool's desktop is a row only, its pool
-	// the page, and its acts are the row's.
+	// its page; a pool's desktop is a row only, its pool the page, and its acts
+	// are the row's.
 	let {
 		rows,
 		data,

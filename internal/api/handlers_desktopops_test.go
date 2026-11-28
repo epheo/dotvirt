@@ -6,12 +6,12 @@ import (
 	"net/http"
 	"slices"
 	"strings"
+	"sync"
 	"testing"
 
 	authzv1 "k8s.io/api/authorization/v1"
-	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/client-go/kubernetes/scheme"
+	"k8s.io/apimachinery/pkg/watch"
 
 	"github.com/epheo/dotvirt/internal/desktops"
 	"github.com/epheo/dotvirt/internal/model"
@@ -30,16 +30,10 @@ func tenantMay(rules ...rule) func(string, *authzv1.ResourceAttributes) bool {
 		if token == adminToken {
 			return true
 		}
-		if token != tenantToken || a.Namespace != "team-a-dev" {
-			return false
-		}
-		group := desktops.Group
-		if a.Resource == "pods" {
-			group = ""
-		}
-		return a.Group == group && slices.ContainsFunc(rules, func(r rule) bool {
-			return r.verb == a.Verb && r.resource == a.Resource && (r.name == "" || r.name == a.Name)
-		})
+		return token == tenantToken && a.Namespace == "team-a-dev" && a.Group == desktops.Group &&
+			slices.ContainsFunc(rules, func(r rule) bool {
+				return r.verb == a.Verb && r.resource == a.Resource && (r.name == "" || r.name == a.Name)
+			})
 	}
 }
 
@@ -49,53 +43,98 @@ var (
 	assignLab    = rule{"assign", "vdipools", "lab"}
 	deleteLab    = rule{"delete", "vdipools", "lab"}
 	useLab       = rule{"use", "vdipools", "lab"}
-	listPods     = rule{"list", "pods", ""}
-	deletePods   = rule{"delete", "pods", ""}
 )
 
 const claimsPath = "/apis/vdi.desku.be/v1alpha1/namespaces/team-a-dev/vdiclaims/"
 
-// writes records each write the fake apiserver took on the claims and pods,
-// failing the test on any made under a token other than the tenant's.
-type writes struct {
-	t     *testing.T
-	calls []string
+// claimsAPI is the fake apiserver's claims: the UID each name holds now, and
+// each write it took, failing the test on any made under a token other than
+// the tenant's. It refuses a write held to another UID as the apiserver does:
+// a JSON patch's failed test with a 422, a delete's failed precondition with
+// a 409.
+type claimsAPI struct {
+	t *testing.T
+
+	mu     sync.Mutex
+	uids   map[string]string
+	writes []string
 }
 
-func (wr *writes) record(r *http.Request, what string) {
+func (c *claimsAPI) record(r *http.Request, what string) {
 	if got := bearer(r); got != tenantToken {
-		wr.t.Errorf("%s %s ran as %q, want the caller's token", r.Method, r.URL.Path, got)
+		c.t.Errorf("%s %s ran as %q, want the caller's token", r.Method, r.URL.Path, got)
 	}
-	wr.calls = append(wr.calls, what)
+	c.mu.Lock()
+	c.writes = append(c.writes, what)
+	c.mu.Unlock()
 }
 
-// actsServer serves the held desktops of desktopsSource, with the claim
-// writes and the pod reads and deletes a desktop act makes routed.
-func actsServer(t *testing.T, may func(string, *authzv1.ResourceAttributes) bool) (*Server, *fakeCluster, *writes) {
+func (c *claimsAPI) seen() []string {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return slices.Clone(c.writes)
+}
+
+func (c *claimsAPI) now(claim string) string {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.uids[claim]
+}
+
+func (c *claimsAPI) serve(fc *fakeCluster, claim string) {
+	fc.on(http.MethodPatch, claimsPath+claim, func(w http.ResponseWriter, r *http.Request) {
+		if ct := r.Header.Get("Content-Type"); ct != "application/json-patch+json" {
+			c.t.Errorf("patch of %s as %q, want a JSON patch", claim, ct)
+		}
+		body, _ := io.ReadAll(r.Body)
+		c.record(r, "patch "+claim+" "+string(body))
+		var ops []struct {
+			Op, Path string
+			Value    any
+		}
+		_ = json.Unmarshal(body, &ops)
+		if len(ops) == 0 || ops[0].Op != "test" || ops[0].Path != "/metadata/uid" || ops[0].Value != c.now(claim) {
+			writeStatus(w, http.StatusUnprocessableEntity, metav1.StatusReasonInvalid)
+			return
+		}
+		writeObj(w, deskObject("VdiClaim", "team-a-dev", claim, map[string]any{"poolName": "lab"}, nil).Object)
+	})
+	fc.on(http.MethodDelete, claimsPath+claim, func(w http.ResponseWriter, r *http.Request) {
+		var opts metav1.DeleteOptions
+		_ = json.NewDecoder(r.Body).Decode(&opts)
+		uid := ""
+		if opts.Preconditions != nil && opts.Preconditions.UID != nil {
+			uid = string(*opts.Preconditions.UID)
+		}
+		c.record(r, "delete "+claim+" if "+uid)
+		if uid != c.now(claim) {
+			writeStatus(w, http.StatusConflict, metav1.StatusReasonConflict)
+			return
+		}
+		writeObj(w, metav1.Status{TypeMeta: metav1.TypeMeta{Kind: "Status", APIVersion: "v1"}, Status: metav1.StatusSuccess})
+	})
+}
+
+// actsServer serves the held desktops of src, its claims routed on a fake
+// apiserver holding the UIDs the snapshot saw.
+func actsServer(t *testing.T, may func(string, *authzv1.ResourceAttributes) bool, src *desktopsSource) (*Server, *fakeCluster, *claimsAPI) {
 	t.Helper()
 	fc := newFakeCluster(t)
 	fc.readsVMs = tenantSeesTeams
 	fc.ssar = may
-	wr := &writes{t: t}
-	for _, claim := range []string{"lab-u", "lab-bob"} {
-		fc.on(http.MethodPatch, claimsPath+claim, func(w http.ResponseWriter, r *http.Request) {
-			body, _ := io.ReadAll(r.Body)
-			wr.record(r, "patch "+claim+" "+string(body))
-			writeObj(w, deskObject("VdiClaim", "team-a-dev", claim, map[string]any{"poolName": "lab"}, nil).Object)
-		})
-		fc.on(http.MethodDelete, claimsPath+claim, func(w http.ResponseWriter, r *http.Request) {
-			wr.record(r, "delete "+claim)
-			writeObj(w, metav1.Status{TypeMeta: metav1.TypeMeta{Kind: "Status", APIVersion: "v1"}, Status: metav1.StatusSuccess})
-		})
+	api := &claimsAPI{t: t, uids: map[string]string{"lab-u": "uid-lab-u", "lab-bob": "uid-lab-bob"}}
+	for claim := range api.uids {
+		api.serve(fc, claim)
 	}
-	s := desktopsServer(t, fc, &desktopsSource{held: true})
+	src.held = true
+	s := desktopsServer(t, fc, src)
 	s.tasks = tasks.New(s.bus)
-	return s, fc, wr
+	return s, fc, api
 }
 
-func act(s *Server, what, desktop, claim string) *http.Response {
-	body := `{"claim":"` + claim + `"}`
-	return do(s, tenantToken, http.MethodPost, "/api/desktops/team-a-dev/"+desktop+"/"+what, body).Result()
+func act(s *Server, what, desktop, claim, uid string) *http.Response {
+	body, _ := json.Marshal(claimRef{Claim: claim, UID: uid})
+	return do(s, tenantToken, http.MethodPost, "/api/desktops/team-a-dev/"+desktop+"/"+what, string(body)).Result()
 }
 
 func wantAct(t *testing.T, res *http.Response, code int, says string) {
@@ -107,15 +146,20 @@ func wantAct(t *testing.T, res *http.Response, code int, says string) {
 }
 
 // Start and stop patch the holding claim's spec.running under the caller's
-// token, never the desktop's; release deletes the claim.
+// token, never the desktop's, and release deletes the claim: each held to
+// the claim's UID.
 func TestClaimActsWriteTheClaimAsTheCaller(t *testing.T) {
-	s, _, wr := actsServer(t, tenantMay(patchClaims, deleteClaims, assignLab))
-	wantAct(t, act(s, "stop", "lab-2", "lab-bob"), http.StatusNoContent, "")
-	wantAct(t, act(s, "start", "lab-2", "lab-bob"), http.StatusNoContent, "")
-	wantAct(t, act(s, "release", "lab-2", "lab-bob"), http.StatusNoContent, "")
-	want := []string{`patch lab-bob {"spec":{"running":false}}`, `patch lab-bob {"spec":{"running":true}}`, "delete lab-bob"}
-	if !slices.Equal(wr.calls, want) {
-		t.Fatalf("writes = %q, want %q", wr.calls, want)
+	s, _, api := actsServer(t, tenantMay(patchClaims, deleteClaims, assignLab), &desktopsSource{})
+	wantAct(t, act(s, "stop", "lab-2", "lab-bob", "uid-lab-bob"), http.StatusNoContent, "")
+	wantAct(t, act(s, "start", "lab-2", "lab-bob", "uid-lab-bob"), http.StatusNoContent, "")
+	wantAct(t, act(s, "release", "lab-2", "lab-bob", "uid-lab-bob"), http.StatusNoContent, "")
+	want := []string{
+		`patch lab-bob [{"op":"test","path":"/metadata/uid","value":"uid-lab-bob"},{"op":"add","path":"/spec/running","value":false}]`,
+		`patch lab-bob [{"op":"test","path":"/metadata/uid","value":"uid-lab-bob"},{"op":"add","path":"/spec/running","value":true}]`,
+		"delete lab-bob if uid-lab-bob",
+	}
+	if got := api.seen(); !slices.Equal(got, want) {
+		t.Fatalf("writes = %q, want %q", got, want)
 	}
 }
 
@@ -132,17 +176,19 @@ func TestAnothersClaimTakesThePoolsRight(t *testing.T) {
 		{"assign opens a stop", []rule{patchClaims, assignLab}, "stop", http.StatusNoContent, ""},
 		{"delete on the pool opens a stop", []rule{patchClaims, deleteLab}, "stop", http.StatusNoContent, ""},
 		{"delete on the pool opens a release", []rule{deleteClaims, deleteLab}, "release", http.StatusNoContent, ""},
-		{"no right on claims", []rule{assignLab}, "stop", http.StatusForbidden, "you may not stop bob's desktop: that takes patch vdiclaims in team-a-dev, and assign or delete on vdipool lab"},
+		{"the claim verb granted by name", []rule{{"patch", "vdiclaims", "lab-bob"}, assignLab}, "stop", http.StatusNoContent, ""},
+		{"the claim verb granted on another claim", []rule{{"patch", "vdiclaims", "lab-u"}, assignLab}, "stop", http.StatusForbidden, "patch vdiclaims lab-bob in team-a-dev"},
+		{"no right on claims", []rule{assignLab}, "stop", http.StatusForbidden, "you may not stop bob's desktop: that takes patch vdiclaims lab-bob in team-a-dev, and assign or delete on vdipool lab"},
 		{"no right on the pool", []rule{patchClaims}, "start", http.StatusForbidden, "and assign or delete on vdipool lab"},
 		{"use is not enough on another's", []rule{patchClaims, useLab}, "stop", http.StatusForbidden, "assign or delete"},
 		{"a release without the pool", []rule{deleteClaims}, "release", http.StatusForbidden, "you may not release bob's desktop"},
 		{"assign on another pool", []rule{patchClaims, {"assign", "vdipools", "other"}}, "stop", http.StatusForbidden, "vdipool lab"},
 	} {
 		t.Run(c.name, func(t *testing.T) {
-			s, _, wr := actsServer(t, tenantMay(c.rules...))
-			wantAct(t, act(s, c.what, "lab-2", "lab-bob"), c.code, c.says)
-			if c.code != http.StatusNoContent && len(wr.calls) > 0 {
-				t.Fatalf("a refused act wrote %q", wr.calls)
+			s, _, api := actsServer(t, tenantMay(c.rules...), &desktopsSource{})
+			wantAct(t, act(s, c.what, "lab-2", "lab-bob", "uid-lab-bob"), c.code, c.says)
+			if c.code != http.StatusNoContent && len(api.seen()) > 0 {
+				t.Fatalf("a refused act wrote %q", api.seen())
 			}
 		})
 	}
@@ -164,47 +210,95 @@ func TestOwnClaimTakesWhatThePolicyAsksOfItsUser(t *testing.T) {
 		{"a release takes delete on claims", []rule{patchClaims, useLab, assignLab}, "release", http.StatusForbidden},
 	} {
 		t.Run(c.name, func(t *testing.T) {
-			s, _, _ := actsServer(t, tenantMay(c.rules...))
+			s, _, _ := actsServer(t, tenantMay(c.rules...), &desktopsSource{})
 			says := ""
 			if c.code == http.StatusForbidden {
 				says = "your desktop"
 			}
-			wantAct(t, act(s, c.what, "lab-1", "lab-u"), c.code, says)
+			wantAct(t, act(s, c.what, "lab-1", "lab-u", "uid-lab-u"), c.code, says)
 		})
 	}
 }
 
-// An act names the claim the caller saw: a desktop now held by another, or
-// made one by one, is refused; one the caller may not list is not found.
-func TestClaimActsAddressOnlyWhatTheCallerSaw(t *testing.T) {
-	s, _, wr := actsServer(t, tenantMay(patchClaims, deleteClaims, assignLab))
-	wantAct(t, act(s, "release", "lab-2", "lab-u"), http.StatusConflict, "claim lab-u no longer holds lab-2")
-	wantAct(t, act(s, "stop", "solo", "someone"), http.StatusConflict, "solo is made one by one")
-	wantAct(t, act(s, "stop", "lab-2", ""), http.StatusBadRequest, "name the claim")
-	wantAct(t, act(s, "stop", "gone", "lab-bob"), http.StatusNotFound, "desktop team-a-dev/gone")
+// An act names the claim the caller saw, by name and UID: another claim, or
+// a desktop made one by one, is refused; one the caller may not list is not
+// found.
+func TestClaimActsAddressOnlyTheClaimTheCallerSaw(t *testing.T) {
+	s, _, api := actsServer(t, tenantMay(patchClaims, deleteClaims, assignLab), &desktopsSource{})
+	wantAct(t, act(s, "release", "lab-2", "lab-u", "uid-lab-u"), http.StatusConflict, "claim lab-u no longer holds lab-2")
+	wantAct(t, act(s, "release", "lab-2", "lab-bob", "uid-earlier"), http.StatusConflict, "claim lab-bob no longer holds lab-2")
+	wantAct(t, act(s, "stop", "solo", "someone", "uid-someone"), http.StatusConflict, "solo starts and stops on its owner's claim; not acted on here yet")
+	wantAct(t, act(s, "stop", "lab-2", "lab-bob", ""), http.StatusBadRequest, "its uid")
+	wantAct(t, act(s, "stop", "gone", "lab-bob", "uid-lab-bob"), http.StatusNotFound, "desktop team-a-dev/gone")
 	// The desktops and claims of team-b-dev are not listed to the tenant.
-	res := do(s, tenantToken, http.MethodPost, "/api/desktops/team-b-dev/lab-2/stop", `{"claim":"lab-bob"}`).Result()
+	res := do(s, tenantToken, http.MethodPost, "/api/desktops/team-b-dev/lab-2/stop", `{"claim":"lab-bob","uid":"uid-lab-bob"}`).Result()
 	wantAct(t, res, http.StatusNotFound, "desktop team-b-dev/lab-2")
-	if len(wr.calls) > 0 {
-		t.Fatalf("a refused act wrote %q", wr.calls)
+	if len(api.seen()) > 0 {
+		t.Fatalf("a refused act wrote %q", api.seen())
+	}
+}
+
+// A desktop its pool now holds for another claim is refused, though the
+// claim the caller names is still there by that name and UID.
+func TestADesktopHeldForAnotherClaimIsRefused(t *testing.T) {
+	src := &desktopsSource{}
+	s, _, api := actsServer(t, tenantMay(patchClaims, deleteClaims, assignLab), src)
+	src.write(t, s, watch.Modified, heldDesktop("team-a-dev", "lab-2", "uid-someone-else"))
+	wantAct(t, act(s, "release", "lab-2", "lab-bob", "uid-lab-bob"), http.StatusConflict, "claim lab-bob no longer holds lab-2")
+	if len(api.seen()) > 0 {
+		t.Fatalf("a refused act wrote %q", api.seen())
+	}
+}
+
+// bob deleted his claim lab-bob and someone made a new one under that name,
+// which the snapshot has not heard of yet: the snapshot passes the act, and
+// the apiserver refuses each write held to the UID the caller saw. The
+// caller reads a conflict, never an internal error.
+func TestAClaimNameReusedIsNeverActedOn(t *testing.T) {
+	s, _, api := actsServer(t, tenantMay(patchClaims, deleteClaims, assignLab), &desktopsSource{})
+	api.mu.Lock()
+	api.uids["lab-bob"] = "uid-lab-bob-anew"
+	api.mu.Unlock()
+	for _, what := range []string{"release", "stop", "start"} {
+		wantAct(t, act(s, what, "lab-2", "lab-bob", "uid-lab-bob"), http.StatusConflict,
+			"claim lab-bob is not the one you saw: it was deleted, and its name may be another person's now")
+	}
+	for _, w := range api.seen() {
+		if !strings.Contains(w, `"value":"uid-lab-bob"}`) && !strings.HasSuffix(w, " if uid-lab-bob") {
+			t.Errorf("a write not held to the claim seen: %s", w)
+		}
+	}
+	if ops := s.tasks.Ops(); len(ops) != 3 || ops[0].OK {
+		t.Fatalf("feed = %+v, want three failed acts", ops)
+	}
+}
+
+// While the claims watch is down the snapshot may hold a claim since
+// deleted: the act waits, saying why, and writes nothing.
+func TestActsWaitWhileTheClaimsWatchIsDown(t *testing.T) {
+	s, _, api := actsServer(t, tenantMay(patchClaims, deleteClaims, assignLab), &desktopsSource{failClaims: true})
+	wantAct(t, act(s, "release", "lab-2", "lab-bob", "uid-lab-bob"), http.StatusServiceUnavailable,
+		"the console's watch on the desktops or their claims is down")
+	if len(api.seen()) > 0 {
+		t.Fatalf("an act on a stale snapshot wrote %q", api.seen())
 	}
 }
 
 // Listing the desktops without the claims shows no claim to act on.
 func TestClaimActsNeedTheClaimsListed(t *testing.T) {
-	s, _, wr := actsServer(t, func(token string, a *authzv1.ResourceAttributes) bool {
+	s, _, api := actsServer(t, func(token string, a *authzv1.ResourceAttributes) bool {
 		return token == tenantToken && a.Namespace == "team-a-dev" && (a.Verb != "list" || a.Resource == "vdiinstances")
-	})
-	wantAct(t, act(s, "stop", "lab-2", "lab-bob"), http.StatusNotFound, "desktop team-a-dev/lab-2")
-	if len(wr.calls) > 0 {
-		t.Fatalf("an act on an unlisted claim wrote %q", wr.calls)
+	}, &desktopsSource{})
+	wantAct(t, act(s, "stop", "lab-2", "lab-bob", "uid-lab-bob"), http.StatusNotFound, "no claim you may list holds desktop team-a-dev/lab-2")
+	if len(api.seen()) > 0 {
+		t.Fatalf("an act on an unlisted claim wrote %q", api.seen())
 	}
 }
 
 // The apiserver's answer is final: a policy's denial reaches the caller as
 // it said it.
 func TestTheAdmissionDenialIsTheCallers(t *testing.T) {
-	s, fc, _ := actsServer(t, tenantMay(deleteClaims, assignLab))
+	s, fc, _ := actsServer(t, tenantMay(deleteClaims, assignLab), &desktopsSource{})
 	const denied = `vdiclaims.vdi.desku.be "lab-bob" is forbidden: ValidatingAdmissionPolicy 'vdiclaim-entitlement' with binding 'vdiclaim-entitlement' denied request: only its user may delete a claim`
 	fc.on(http.MethodDelete, claimsPath+"lab-bob", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -212,73 +306,18 @@ func TestTheAdmissionDenialIsTheCallers(t *testing.T) {
 		_ = json.NewEncoder(w).Encode(metav1.Status{TypeMeta: metav1.TypeMeta{Kind: "Status", APIVersion: "v1"},
 			Status: metav1.StatusFailure, Code: http.StatusForbidden, Reason: metav1.StatusReasonForbidden, Message: denied})
 	})
-	wantAct(t, act(s, "release", "lab-2", "lab-bob"), http.StatusForbidden, "only its user may delete a claim")
+	wantAct(t, act(s, "release", "lab-2", "lab-bob", "uid-lab-bob"), http.StatusForbidden, "only its user may delete a claim")
 	ops := s.tasks.Ops()
 	if len(ops) != 1 || ops[0].OK {
 		t.Fatalf("feed = %+v, want the failed release", ops)
 	}
 }
 
-// A restart lists the desktop's pods by its label in its namespace, under
-// the caller's token, and deletes only those.
-func TestRestartDeletesOnlyTheDesktopsPods(t *testing.T) {
-	s, fc, wr := actsServer(t, tenantMay(listPods, deletePods))
-	pods := map[string]string{"lab-1-7d9f": "lab-1"}
-	fc.on(http.MethodGet, "/api/v1/namespaces/team-a-dev/pods", func(w http.ResponseWriter, r *http.Request) {
-		sel := r.URL.Query().Get("labelSelector")
-		wr.record(r, "list "+sel)
-		var items []corev1.Pod
-		for name, desk := range pods {
-			if sel == desktops.InstanceLabel+"="+desk {
-				items = append(items, corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: "team-a-dev", UID: "uid-pod", Labels: map[string]string{desktops.InstanceLabel: desk}}})
-			}
-		}
-		writeObj(w, corev1.PodList{TypeMeta: metav1.TypeMeta{Kind: "PodList", APIVersion: "v1"}, Items: items})
-	})
-	fc.on(http.MethodDelete, "/api/v1/namespaces/team-a-dev/pods/lab-1-7d9f", func(w http.ResponseWriter, r *http.Request) {
-		body, _ := io.ReadAll(r.Body)
-		var opts metav1.DeleteOptions
-		if _, _, err := scheme.Codecs.UniversalDeserializer().Decode(body, nil, &opts); err != nil {
-			t.Errorf("delete options %q: %v", body, err)
-		}
-		if opts.Preconditions == nil || opts.Preconditions.UID == nil || *opts.Preconditions.UID != "uid-pod" {
-			t.Errorf("the delete is not held to the pod listed: %+v", opts.Preconditions)
-		}
-		wr.record(r, "delete lab-1-7d9f")
-		writeObj(w, metav1.Status{TypeMeta: metav1.TypeMeta{Kind: "Status", APIVersion: "v1"}, Status: metav1.StatusSuccess})
-	})
-
-	wantAct(t, act(s, "restart", "lab-1", ""), http.StatusNoContent, "")
-	// A desktop made one by one restarts the same way; this one runs no pod.
-	wantAct(t, act(s, "restart", "solo", ""), http.StatusConflict, "solo runs no pod to restart")
-	want := []string{"list vdi.desku.be/instance=lab-1", "delete lab-1-7d9f", "list vdi.desku.be/instance=solo"}
-	if !slices.Equal(wr.calls, want) {
-		t.Fatalf("calls = %q, want %q", wr.calls, want)
-	}
-	for _, c := range fc.seen() {
-		if strings.Contains(c, "/pods") && !strings.Contains(c, "/namespaces/team-a-dev/") || strings.Contains(c, "deployments") {
-			t.Errorf("a restart reached %s", c)
-		}
-	}
-}
-
-func TestRestartTakesListAndDeleteOnPods(t *testing.T) {
-	for _, rules := range [][]rule{{listPods}, {deletePods}} {
-		s, fc, _ := actsServer(t, tenantMay(rules...))
-		wantAct(t, act(s, "restart", "lab-1", ""), http.StatusForbidden, "you may not")
-		for _, c := range fc.seen() {
-			if strings.Contains(c, "/pods") {
-				t.Errorf("a refused restart reached %s", c)
-			}
-		}
-	}
-}
-
 // Each act lands in the feed under the desktop's name, marked a desktop's,
 // shown to whoever may list desktops there.
 func TestDesktopActsLandInTheFeed(t *testing.T) {
-	s, _, _ := actsServer(t, tenantMay(patchClaims, assignLab))
-	wantAct(t, act(s, "stop", "lab-2", "lab-bob"), http.StatusNoContent, "")
+	s, _, _ := actsServer(t, tenantMay(patchClaims, assignLab), &desktopsSource{})
+	wantAct(t, act(s, "stop", "lab-2", "lab-bob", "uid-lab-bob"), http.StatusNoContent, "")
 	rec := do(s, tenantToken, http.MethodGet, "/api/tasks", "")
 	wantStatus(t, rec, http.StatusOK)
 	got := decodeBody[[]model.TaskEntry](t, rec)
@@ -287,42 +326,42 @@ func TestDesktopActsLandInTheFeed(t *testing.T) {
 	}
 }
 
-// The capability fields ask what the routes ask, the reads included.
+// The capability fields ask what the routes ask, the reads included, and
+// answer only for a pool whose desktop the caller may see.
 func TestDesktopCapsMirrorTheActs(t *testing.T) {
 	for _, c := range []struct {
 		name  string
 		rules []rule
-		pool  string
 		want  model.DesktopCaps
 	}{
-		{"everything", []rule{patchClaims, deleteClaims, assignLab, listPods, deletePods}, "lab",
-			model.DesktopCaps{Restart: true, Power: true, PowerOwn: true, Release: true, ReleaseOwn: true}},
-		{"a pool's user", []rule{patchClaims, deleteClaims, useLab}, "lab",
-			model.DesktopCaps{PowerOwn: true, ReleaseOwn: true}},
-		{"the pool's deleter", []rule{patchClaims, deleteClaims, deleteLab}, "lab",
+		{"everything", []rule{patchClaims, deleteClaims, assignLab},
 			model.DesktopCaps{Power: true, PowerOwn: true, Release: true, ReleaseOwn: true}},
-		{"claims alone", []rule{patchClaims, deleteClaims}, "lab",
+		{"a pool's user", []rule{patchClaims, deleteClaims, useLab},
+			model.DesktopCaps{PowerOwn: true, ReleaseOwn: true}},
+		{"the pool's deleter", []rule{patchClaims, deleteClaims, deleteLab},
+			model.DesktopCaps{Power: true, PowerOwn: true, Release: true, ReleaseOwn: true}},
+		{"claims alone", []rule{patchClaims, deleteClaims},
 			model.DesktopCaps{ReleaseOwn: true}},
-		{"restart without delete", []rule{listPods}, "lab", model.DesktopCaps{}},
-		{"made one by one", []rule{patchClaims, deleteClaims, assignLab, listPods, deletePods}, "",
-			model.DesktopCaps{Restart: true}},
 	} {
 		t.Run(c.name, func(t *testing.T) {
-			s, _, _ := actsServer(t, tenantMay(c.rules...))
-			rec := do(s, tenantToken, http.MethodGet, "/api/capabilities?desktops=team-a-dev&pool="+c.pool, "")
+			s, _, _ := actsServer(t, tenantMay(c.rules...), &desktopsSource{})
+			rec := do(s, tenantToken, http.MethodGet, "/api/capabilities?desktops=team-a-dev&pool=lab", "")
 			wantStatus(t, rec, http.StatusOK)
 			got := decodeBody[model.Capabilities](t, rec).Desktops
-			c.want.Namespace, c.want.Pool = "team-a-dev", c.pool
+			c.want.Namespace, c.want.Pool = "team-a-dev", "lab"
 			if got == nil || *got != c.want {
 				t.Fatalf("caps = %+v, want %+v", got, c.want)
 			}
 		})
 	}
+	s, _, _ := actsServer(t, tenantMay(patchClaims, deleteClaims, assignLab), &desktopsSource{})
 	// A namespace whose desktops the caller may not list offers nothing.
-	s, _, _ := actsServer(t, tenantMay(patchClaims, deleteClaims, assignLab, listPods, deletePods))
 	rec := do(s, tenantToken, http.MethodGet, "/api/capabilities?desktops=team-b-dev&pool=lab", "")
 	wantStatus(t, rec, http.StatusOK)
 	if got := decodeBody[model.Capabilities](t, rec).Desktops; *got != (model.DesktopCaps{Namespace: "team-b-dev", Pool: "lab"}) {
 		t.Fatalf("caps where nothing is listed = %+v", got)
 	}
+	// A pool no desktop there is of is not answered, nor is no pool.
+	wantStatus(t, do(s, tenantToken, http.MethodGet, "/api/capabilities?desktops=team-a-dev&pool=other", ""), http.StatusNotFound)
+	wantStatus(t, do(s, tenantToken, http.MethodGet, "/api/capabilities?desktops=team-a-dev", ""), http.StatusBadRequest)
 }

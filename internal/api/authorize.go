@@ -283,7 +283,6 @@ var (
 	ssarDesktops      = ssarRef{desktops.Group, desktops.GVRInstance.Resource}
 	ssarDesktopClaims = ssarRef{desktops.Group, desktops.GVRClaim.Resource}
 	ssarDesktopPools  = ssarRef{desktops.Group, desktops.GVRPool.Resource}
-	ssarPods          = ssarRef{resource: "pods"}
 )
 
 // claimPoolVerbs are the verbs on a claim's pool, any one of which lets verb
@@ -301,27 +300,23 @@ func claimPoolVerbs(verb string, own bool) []string {
 	return []string{"use", "assign", verbDelete}
 }
 
-// claimActions open verb on a claim of pool in ns, any one allowed: verb on
-// the claims there, beside each of the pool verbs on the pool by name.
-func claimActions(verb, ns, pool string, own bool) []action {
-	claim := refQ(verb, ssarDesktopClaims, ns)
+// claimActions open verb on claim, or on any claim when it is "", of pool in
+// ns, any one allowed: verb on the claim, beside each of the pool verbs on the
+// pool by name.
+func claimActions(verb, ns, pool, claim string, own bool) []action {
+	on := refQ(verb, ssarDesktopClaims, ns)
+	on.Name = claim
 	poolVerbs := claimPoolVerbs(verb, own)
 	if len(poolVerbs) == 0 {
-		return []action{{claim}}
+		return []action{{on}}
 	}
 	acts := make([]action, len(poolVerbs))
 	for i, v := range poolVerbs {
 		q := refQ(v, ssarDesktopPools, ns)
 		q.Name = pool
-		acts[i] = action{claim, q}
+		acts[i] = action{on, q}
 	}
 	return acts
-}
-
-// restartDesktopAction is a desktop's restart: its pods listed by their label,
-// each deleted.
-func restartDesktopAction(ns string) action {
-	return action{refQ(verbList, ssarPods, ns), refQ(verbDelete, ssarPods, ns)}
 }
 
 // claimAction is relabelling the existing namespace ns: what joining it to a

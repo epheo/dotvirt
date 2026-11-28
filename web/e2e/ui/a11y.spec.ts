@@ -80,11 +80,6 @@ test('desktops surfaces are accessible', async ({ page }) => {
 	await page.getByRole('button', { name: 'Release...' }).click();
 	await expect(page.getByRole('dialog')).toBeVisible();
 	await checkA11y(page, 'release confirm');
-	await page.getByRole('dialog').getByRole('button', { name: 'Cancel' }).click();
-	await page.getByRole('button', { name: 'Actions for eng-7hq2k' }).click();
-	await page.getByRole('button', { name: 'Restart...' }).click();
-	await expect(page.getByRole('dialog')).toContainText('The home, and the files in it, stay.');
-	await checkA11y(page, 'restart confirm');
 });
 
 test('a VM opens by keyboard alone', async ({ page }) => {
