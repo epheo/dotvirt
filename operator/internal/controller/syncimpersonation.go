@@ -548,8 +548,11 @@ func syncChecks(rc *reconcileCtx, declared map[string][]declaredKind) []accessCh
 				continue
 			}
 			fix := "widen the project's grant there, or drop them from its repo"
-			if d.kind.Resource == "egressfirewalls" {
+			switch {
+			case d.kind.Resource == "egressfirewalls":
 				fix = "an admin grant there carries them (sync-access pairs it with " + tenancy.EgressBinding(d.namespace) + "), or drop them from its repo"
+			case d.kind.Group == "vdi.desku.be":
+				fix = "turn desktops on there (POST /api/projects/" + project + "/namespaces/" + d.namespace + "/desktops stages " + tenancy.DesktopsBinding(d.namespace) + ") and merge it, or drop them from its repo"
 			}
 			checks = append(checks, accessCheck{account: account, attrs: createAttrs(d.kind.Group, d.kind.Resource, d.namespace), want: true,
 				problem: fmt.Sprintf("project %s's repo declares %s in %s, which its grant there does not let it write: %s", project, d.kind.Resource, d.namespace, fix)})

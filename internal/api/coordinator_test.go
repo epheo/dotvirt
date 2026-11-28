@@ -141,6 +141,8 @@ func TestCapabilitiesEqualTheCoordinatorsGate(t *testing.T) {
 		{verb: verbBind, group: rbac, resource: "clusterroles", name: tenancy.TenantEgressRole},
 		{verb: verbBind, group: rbac, resource: "clusterroles", name: tenancy.TenantRoutesRole},
 		{verb: verbBind, group: rbac, resource: "clusterroles", name: tenancy.TenantGatewayViewRole},
+		{verb: verbBind, group: rbac, resource: "clusterroles", name: tenancy.TenantDesktopsRole},
+		{verb: verbBind, group: rbac, resource: "clusterroles", name: tenancy.TenantDesktopsAdminRole},
 		kind(verbCreate, model.KindUDN, ""),
 		kind(verbCreate, model.KindCUDN, ""),
 		kind(verbCreate, model.KindGateway, ""),
@@ -187,6 +189,10 @@ func TestCapabilitiesEqualTheCoordinatorsGate(t *testing.T) {
 		// team-a-dev's admin-grant subjects.
 		{"publishing", "team-a-dev", http.MethodPost, "/api/projects/team-a/publishing", ``,
 			pr(func(p model.ProjectCaps) bool { return p.Publishing })},
+		// DeskuBe's writes to team-a-dev's admin-grant subjects and the sync
+		// account, and the claim acts to alice.
+		{"desktops", "team-a-dev", http.MethodPost, "/api/projects/team-a/namespaces/team-a-dev/desktops", ``,
+			pr(func(p model.ProjectCaps) bool { return slices.Contains(p.Desktops, "team-a-dev") })},
 		// orphans has no publish namespace: its Namespace alone.
 		{"publish namespace", "orphans-ns", http.MethodPost, "/api/projects/orphans/publish-namespace", ``,
 			pr(func(p model.ProjectCaps) bool { return p.PublishNamespaceCreate })},

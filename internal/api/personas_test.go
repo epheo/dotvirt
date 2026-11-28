@@ -123,26 +123,47 @@ const (
 )
 
 // personaGrants is what each persona holds besides signedIn, as
-// docs/personas.md binds it: the project personas in team-a-dev.
-func personaGrants() map[string]map[string][]string {
+// docs/personas.md binds it: the project personas in team-a-dev, with what
+// turning desktops on there binds.
+func personaGrants(desktops bool) map[string]map[string][]string {
 	inTeamA := func(roles ...string) map[string][]string { return map[string][]string{"team-a-dev": roles} }
+	viewer := inTeamA("view", tenancy.TenantEgressViewRole)
+	author := inTeamA("edit", tenancy.TenantEgressViewRole)
+	admin := inTeamA("admin", tenancy.TenantEgressRole)
+	if desktops {
+		author["team-a-dev"] = append(author["team-a-dev"], tenancy.TenantDesktopsViewRole)
+		admin["team-a-dev"] = append(admin["team-a-dev"], tenancy.TenantDesktopsRole, tenancy.TenantDesktopsAdminRole)
+	}
 	return map[string]map[string][]string{
-		pViewerToken:       inTeamA("view", tenancy.TenantEgressViewRole),
-		pAuthorToken:       inTeamA("edit", tenancy.TenantEgressViewRole),
-		pProjectAdminToken: inTeamA("admin", tenancy.TenantEgressRole),
+		pViewerToken:       viewer,
+		pAuthorToken:       author,
+		pProjectAdminToken: admin,
 		pNetworkAdminToken: {"": {"dotvirt-platform-network-admin"}},
 		pClusterAdminToken: {"": {"cluster-admin"}},
 		pSignedInToken:     {},
 	}
 }
 
+// deskubeAggregated are the rules DeskuBe aggregates into view, and so into
+// edit and admin: its pool and claim viewer roles, never its desktop viewer.
+var deskubeAggregated = []rbacv1.PolicyRule{
+	{Verbs: []string{"get", "list", "watch"}, APIGroups: []string{"vdi.desku.be"}, Resources: []string{"vdipools", "vdiclaims"}},
+	{Verbs: []string{"get"}, APIGroups: []string{"vdi.desku.be"}, Resources: []string{"vdipools/status", "vdiclaims/status"}},
+}
+
 // personaServer is the fake apiserver weighing each persona's rules, serving
 // the kinds platform serves, behind a tenant repo declaring every tenant kind.
-func personaServer(t *testing.T, platform string) *Server {
+// desktops: the cluster serves DeskuBe too, and team-a-dev has desktops on.
+func personaServer(t *testing.T, platform string, desktops bool) *Server {
 	t.Helper()
 	roles := personaRoles(t, platform)
+	if desktops {
+		for _, r := range []string{"view", "edit", "admin"} {
+			roles[r] = append(slices.Clone(roles[r]), deskubeAggregated...)
+		}
+	}
 	byToken := map[string][]personaGrant{}
-	for token, bound := range personaGrants() {
+	for token, bound := range personaGrants(desktops) {
 		var gs []personaGrant
 		for _, name := range signedIn[platform] {
 			gs = append(gs, personaGrant{rules: roles[name]})
@@ -167,6 +188,9 @@ func personaServer(t *testing.T, platform string) *Server {
 	served := []model.Kind{model.KindNetpol, model.KindDV, model.KindNAD, model.KindEgressFW}
 	if platform == "openshift" {
 		served = append(served, model.KindUDN)
+	}
+	if desktops {
+		served = append(served, model.KindVdiPool, model.KindVdiInstance)
 	}
 	fc.serveKinds(served...)
 	fc.on(http.MethodGet, "/apis/storage.k8s.io/v1/storageclasses", unstructuredList("storage.k8s.io/v1", "StorageClass",
@@ -249,10 +273,25 @@ func TestPersonas(t *testing.T) {
 		want["microshift"][token] = fp
 	}
 	for platform, personas := range want {
-		s := personaServer(t, platform)
+		s := personaServer(t, platform, false)
 		for token, w := range personas {
 			if got := personaFingerprint(t, s, token); got != w {
 				t.Errorf("%s %s:\n got %+v\nwant %+v", platform, token, got, w)
+			}
+		}
+	}
+
+	// With desktops on, each persona keeps its answers but the viewer: it may
+	// not list the desktops the repo declares one by one, so it loses the
+	// repo read (docs/personas.md names this gap).
+	for platform, personas := range want {
+		s := personaServer(t, platform, true)
+		for token, w := range personas {
+			if token == pViewerToken {
+				w.RepoRead = false
+			}
+			if got := personaFingerprint(t, s, token); got != w {
+				t.Errorf("%s with desktops %s:\n got %+v\nwant %+v", platform, token, got, w)
 			}
 		}
 	}

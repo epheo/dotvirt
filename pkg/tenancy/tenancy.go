@@ -50,12 +50,33 @@ const TenantRoutesRole = "dotvirt-tenant-routes"
 // (GatewayViewBinding), or by a provider's onboarding to its own groups.
 const TenantGatewayViewRole = "dotvirt-tenant-gateway-view"
 
+// TenantDesktopsRole is DeskuBe's writes in a namespace with desktops on: its
+// pools, desktops made one by one, and the claim verbs, which DeskuBe asks of
+// whoever entitles a pool's subjects or names a desktop's owner. Bound there
+// to the subjects of the namespace's admin grant, its project's sync account
+// among them (DesktopsBinding). dotvirt ships it so no binding names the
+// prefix a DeskuBe install gives its own roles.
+const TenantDesktopsRole = "dotvirt-tenant-desktops"
+
+// TenantDesktopsAdminRole acts on anyone's claim in a namespace with desktops
+// on: start, stop and release another person's desktop. Bound there to the
+// admin grant's people, never a sync account (DesktopsAdminBinding): no repo
+// holds claims.
+const TenantDesktopsAdminRole = "dotvirt-tenant-desktops-admin"
+
+// TenantDesktopsViewRole reads a namespace's desktops, which DeskuBe keeps out
+// of view: a desktop carries a pending pairing PIN, and whoever reads it may
+// pair first. Bound there to the project's authors (DesktopsViewBinding),
+// never its viewers; its admins read them through TenantDesktopsRole.
+const TenantDesktopsViewRole = "dotvirt-tenant-desktops-view"
+
 // ProjectGrantRoles are the ClusterRoles a project grant in the platform repo
 // binds, the parts of the project personas: admin with TenantEgressRole,
-// view or edit with TenantEgressViewRole, and TenantRoutesRole and
-// TenantGatewayViewRole where publishing is on. The platform sync account may
-// bind these and no other.
-var ProjectGrantRoles = []string{"admin", TenantEgressRole, "view", "edit", TenantEgressViewRole, TenantRoutesRole, TenantGatewayViewRole}
+// view or edit with TenantEgressViewRole, TenantRoutesRole and
+// TenantGatewayViewRole where publishing is on, and the desktop roles where
+// desktops are on. The platform sync account may bind these and no other.
+var ProjectGrantRoles = []string{"admin", TenantEgressRole, "view", "edit", TenantEgressViewRole, TenantRoutesRole, TenantGatewayViewRole,
+	TenantDesktopsRole, TenantDesktopsAdminRole, TenantDesktopsViewRole}
 
 // PublishLabel marks a project's publish namespace, its value the project.
 // That namespace holds the project's Gateway and nothing of the tenant's: it
@@ -147,6 +168,19 @@ func EgressBinding(ns string) string { return ns + "-egress" }
 // RoutesBinding is the platform repo's RoleBinding granting the admin-grant
 // subjects of a namespace its project's Gateway reaches TenantRoutesRole.
 func RoutesBinding(ns string) string { return ns + "-routes" }
+
+// DesktopsBinding is the platform repo's RoleBinding granting a namespace's
+// admin-grant subjects, owners and sync account alike, TenantDesktopsRole: what
+// turning desktops on there stages, with DesktopsAdminBinding and
+// DesktopsViewBinding.
+func DesktopsBinding(ns string) string { return ns + "-desktops" }
+
+// DesktopsAdminBinding grants a namespace's admin-grant people
+// TenantDesktopsAdminRole.
+func DesktopsAdminBinding(ns string) string { return ns + "-desktops-admin" }
+
+// DesktopsViewBinding grants a namespace's authors TenantDesktopsViewRole.
+func DesktopsViewBinding(ns string) string { return ns + "-desktops-view" }
 
 // Reserved reports whether ns is platform space no tenant Application may
 // target: the openshift-* and kube-* system namespaces, and platform, the

@@ -329,6 +329,50 @@ func TestSyncOperandRoles(t *testing.T) {
 			}
 		}
 	}
+	// The desktop roles grant DeskuBe's kinds alone, by explicit verbs: `*`
+	// on vdipools holds seat, which only DeskuBe's manager may. Only the
+	// admins' role assigns, and the authors' reads desktops alone.
+	verbs := func(r *rbacv1.ClusterRole, resource string) []string {
+		var out []string
+		for _, rule := range r.Rules {
+			if slices.Contains(rule.Resources, resource) {
+				out = append(out, rule.Verbs...)
+			}
+		}
+		slices.Sort(out)
+		return out
+	}
+	for name, want := range map[string]map[string][]string{
+		tenancy.TenantDesktopsRole: {
+			"vdipools":     {"create", "delete", "get", "list", "patch", "update", "use", "watch"},
+			"vdiinstances": {"create", "delete", "get", "list", "patch", "update", "watch"},
+			"vdiclaims":    {"create", "delete", "get", "list", "patch", "update", "watch"},
+		},
+		tenancy.TenantDesktopsAdminRole: {
+			"vdipools":  {"assign"},
+			"vdiclaims": {"create", "delete", "get", "list", "patch", "update", "watch"},
+		},
+		tenancy.TenantDesktopsViewRole: {
+			"vdiinstances": {"get", "list", "watch"},
+			"vdipools":     nil,
+		},
+	} {
+		r := roles[name]
+		if r == nil {
+			t.Errorf("no %s role", name)
+			continue
+		}
+		for _, rule := range r.Rules {
+			if !slices.Equal(rule.APIGroups, []string{"vdi.desku.be"}) || slices.Contains(rule.Verbs, "*") || slices.Contains(rule.Verbs, "seat") || slices.Contains(rule.Resources, "*") {
+				t.Errorf("%s grants %+v", name, rule)
+			}
+		}
+		for resource, v := range want {
+			if got := verbs(r, resource); !slices.Equal(got, v) {
+				t.Errorf("%s on %s = %v, want %v", name, resource, got, v)
+			}
+		}
+	}
 	platformSync := roles[tenancy.PlatformSyncAccount]
 	if platformSync == nil {
 		t.Fatalf("no %s role", tenancy.PlatformSyncAccount)
@@ -564,6 +608,11 @@ func TestSyncImpersonationRefusals(t *testing.T) {
 			return granted(own)(account, a) && a.Resource != "egressfirewalls"
 		}, []client.Object{tenantApp("team-a", "EgressFirewall", "team-a")}, nil,
 			"project team-a's repo declares egressfirewalls in team-a, which its grant there does not let it write: an admin grant there carries them"},
+		// The admin role holds no DeskuBe write: desktops off.
+		{"declared pools, desktops off", func(account string, a *authzv1.ResourceAttributes) bool {
+			return granted(own)(account, a) && a.Group != "vdi.desku.be"
+		}, []client.Object{tenantApp("team-a", "VdiPool", "team-a")}, nil,
+			"project team-a's repo declares vdipools in team-a, which its grant there does not let it write: turn desktops on there (POST /api/projects/team-a/namespaces/team-a/desktops stages team-a-desktops)"},
 		{"every account writes a tenant kind cluster-wide", or(func(account string, a *authzv1.ResourceAttributes) bool {
 			return account == syncProbeAccount && a.Resource == "networkpolicies" && a.Namespace == ""
 		}), nil, nil, "every ServiceAccount of argocd may create networkpolicies in every namespace, every project's sync account included (allowed by the test's grant)"},
@@ -641,6 +690,7 @@ func TestSyncImpersonationRefusals(t *testing.T) {
 			appProject("default", map[string]any{"server": "*", "namespace": "edge", "defaultServiceAccount": "argocd:edge-sync"})},
 			granted(own), ""},
 		"edit grant, nothing beyond":  {[]client.Object{tenantApp("team-a", "VirtualMachine", "team-a")}, noEgress, ""},
+		"declared pools, desktops on": {[]client.Object{tenantApp("team-a", "VdiPool", "team-a")}, granted(own), ""},
 	} {
 		dv := optIn(testCR(), false)
 		var n atomic.Int64

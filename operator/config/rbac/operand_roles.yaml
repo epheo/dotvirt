@@ -384,6 +384,74 @@ rules:
     resources: ["certificates"]
     verbs: ["get", "list", "watch"]
 ---
+# DeskuBe's writes in a namespace with desktops on: its pools, the desktops made one by
+# one, and the claim verbs. The same rules as DeskuBe's vdipool editor, vdiinstance
+# editor and vdiclaim user roles, which carry a prefix each DeskuBe install chooses. Its
+# admission asks whoever sets a pool's subjects for use on the pool and every claim verb,
+# and whoever names a desktop's owner for get, update and patch on it and the claim
+# verbs: a verb DeskuBe adds to its claim user role goes here too. Never `*` nor seat.
+# The platform repo binds it per namespace to the subjects of that namespace's admin
+# grant, its project's Argo sync account among them (<ns>-desktops). The operator never
+# binds it.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: dotvirt-tenant-desktops
+  labels:
+    app.kubernetes.io/name: dotvirt
+    app.kubernetes.io/managed-by: dotvirt-operator
+rules:
+  - apiGroups: ["vdi.desku.be"]
+    resources: ["vdipools"]
+    verbs: ["create", "delete", "get", "list", "patch", "update", "use", "watch"]
+  - apiGroups: ["vdi.desku.be"]
+    resources: ["vdiinstances", "vdiclaims"]
+    verbs: ["create", "delete", "get", "list", "patch", "update", "watch"]
+  - apiGroups: ["vdi.desku.be"]
+    resources: ["vdipools/status", "vdiinstances/status"]
+    verbs: ["get"]
+---
+# Acting on anyone's claim: start, stop and release another person's desktop. DeskuBe's
+# vdiclaim editor role; assign is what its admission asks to act for another. The
+# platform repo binds it per namespace to its admin grant's people, never a sync
+# account: no repo holds claims (<ns>-desktops-admin). The operator never binds it.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: dotvirt-tenant-desktops-admin
+  labels:
+    app.kubernetes.io/name: dotvirt
+    app.kubernetes.io/managed-by: dotvirt-operator
+rules:
+  - apiGroups: ["vdi.desku.be"]
+    resources: ["vdiclaims"]
+    verbs: ["create", "delete", "get", "list", "patch", "update", "watch"]
+  - apiGroups: ["vdi.desku.be"]
+    resources: ["vdiclaims/status"]
+    verbs: ["get"]
+  - apiGroups: ["vdi.desku.be"]
+    resources: ["vdipools"]
+    verbs: ["assign"]
+---
+# Reads of a namespace's desktops: DeskuBe's vdiinstance viewer role, which it keeps out
+# of view, as a desktop carries a pending pairing PIN whoever reads it may pair with
+# first. The platform repo binds it per namespace to the project's authors, who open
+# consoles, never its viewers (<ns>-desktops-view). The operator never binds it.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: dotvirt-tenant-desktops-view
+  labels:
+    app.kubernetes.io/name: dotvirt
+    app.kubernetes.io/managed-by: dotvirt-operator
+rules:
+  - apiGroups: ["vdi.desku.be"]
+    resources: ["vdiinstances"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["vdi.desku.be"]
+    resources: ["vdiinstances/status"]
+    verbs: ["get"]
+---
 # What the platform tier's Argo sync account needs beyond dotvirt-argocd-apply once
 # Argo syncs the platform repo as it: the Namespaces that repo declares, and `bind` on
 # the roles its project grants name, which is what lets it apply those RoleBindings
@@ -401,7 +469,8 @@ rules:
     verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
   - apiGroups: ["rbac.authorization.k8s.io"]
     resources: ["clusterroles"]
-    resourceNames: ["admin", "dotvirt-tenant-egress", "view", "edit", "dotvirt-tenant-egress-view", "dotvirt-tenant-routes", "dotvirt-tenant-gateway-view"]
+    resourceNames: ["admin", "dotvirt-tenant-egress", "view", "edit", "dotvirt-tenant-egress-view", "dotvirt-tenant-routes", "dotvirt-tenant-gateway-view",
+      "dotvirt-tenant-desktops", "dotvirt-tenant-desktops-admin", "dotvirt-tenant-desktops-view"]
     verbs: ["bind"]
   # A Gateway on a VM Network polls portail's controller through the apiserver:
   # its pods' account is bound to portail's Role there, which grants

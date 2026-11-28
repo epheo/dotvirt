@@ -645,6 +645,9 @@ type grantSource struct {
 	// none does. sole refuses a file holding anything else, as one to rewrite.
 	// nil reads none.
 	declared func(ref model.ObjectRef, sole bool) (path string, content []byte, err error)
+	// bindings names the RoleBindings the base branch declares in a
+	// namespace, in name order. nil reads none.
+	bindings func(ns string) []string
 }
 
 // grantSource reads commitProj's declared grants.
@@ -671,6 +674,16 @@ func (c *Coordinator) grantSource(commitProj project.ProjectInfo) (grantSource, 
 		}
 		content, err := read.FileOnBranch(c.baseBranch, path)
 		return path, content, err
+	}
+	g.bindings = func(ns string) []string {
+		var out []string
+		for ref := range idx.Files {
+			if ref.Kind == model.KindRB.Kind && ref.Namespace == ns {
+				out = append(out, ref.Name)
+			}
+		}
+		slices.Sort(out)
+		return out
 	}
 	return g, nil
 }
@@ -728,6 +741,7 @@ func (g grantSource) released(proj project.ProjectInfo) ([]draft.Entry, error) {
 			{tenancy.AdminBinding(ns), netgen.RoleBindingManifest},
 			{tenancy.EgressBinding(ns), netgen.EgressManifest},
 			{tenancy.RoutesBinding(ns), netgen.RoutesManifest},
+			{tenancy.DesktopsBinding(ns), netgen.DesktopsManifest},
 		} {
 			path, content, err := g.declared(model.ObjectRef{Kind: model.KindRB.Kind, Namespace: ns, Name: grant.name}, true)
 			if err != nil {
@@ -767,10 +781,11 @@ func (g grantSource) syncAccount(sub netgen.Subject) bool {
 // already declares, inherit, the owners and the project's sync account
 // (netgen.RoleBindingManifest), and, while that grant is the admin role, the
 // EgressFirewall grant to those same subjects plus any it already declares
-// (netgen.EgressManifest), and the HTTPRoute grant likewise where publishing
-// declared one (netgen.RoutesManifest). Each rewrites the file declaring it,
-// if any; the admin grant keeps its role. A grant git already states is left
-// out, and none at all with nobody to grant.
+// (netgen.EgressManifest), and the HTTPRoute grant and the desktop grants
+// likewise where publishing or desktops declared them (netgen.RoutesManifest,
+// netgen.DesktopsManifest, netgen.DesktopsAdminManifest). Each rewrites the
+// file declaring it, if any; the admin grant keeps its role. A grant git
+// already states is left out, and none at all with nobody to grant.
 func (g grantSource) entries(ns, proj string, owners []string, inherit []netgen.Subject) ([]draft.Entry, error) {
 	spec := netgen.RoleBindingSpec{Namespace: ns, Project: proj, Owners: owners, Kept: inherit}
 	if name, ok := tenancy.SyncAccount(proj); ok && g.syncNS != "" {
@@ -806,7 +821,15 @@ func (g grantSource) entries(ns, proj string, owners []string, inherit []netgen.
 	if err != nil {
 		return nil, err
 	}
-	return slices.Concat(admin, egress, routes), nil
+	desktops, err := g.follow(ns, tenancy.DesktopsBinding(ns), spec, netgen.DesktopsManifest, false)
+	if err != nil {
+		return nil, err
+	}
+	claims, err := g.desktopsAdmin(spec, false)
+	if err != nil {
+		return nil, err
+	}
+	return slices.Concat(admin, egress, routes, desktops, claims), nil
 }
 
 // follow stages RoleBinding name in ns, rendered by render for the admin
@@ -839,26 +862,37 @@ func (g grantSource) follow(ns, name string, spec netgen.RoleBindingSpec, render
 // the project's sync account: nothing while ns has no admin-role grant in
 // git, as egress writes go to admins only.
 func (g grantSource) routes(ns, proj string) ([]draft.Entry, error) {
+	spec, ok, err := g.adminGrant(ns, proj)
+	if err != nil || !ok {
+		return nil, err
+	}
+	return g.follow(ns, tenancy.RoutesBinding(ns), spec, netgen.RoutesManifest, true)
+}
+
+// adminGrant is what a grant following ns's admin grant renders from: that
+// grant's subjects, and proj's sync account. ok=false while git holds no
+// admin-role grant for ns.
+func (g grantSource) adminGrant(ns, proj string) (spec netgen.RoleBindingSpec, ok bool, err error) {
 	if g.declared == nil {
-		return nil, nil
+		return spec, false, nil
 	}
 	name := tenancy.AdminBinding(ns)
 	path, content, err := g.declared(model.ObjectRef{Kind: model.KindRB.Kind, Namespace: ns, Name: name}, false)
 	if err != nil || path == "" {
-		return nil, err
+		return spec, false, err
 	}
 	role, subjects, _, err := netgen.DeclaredGrant(content, name)
 	if err != nil {
-		return nil, invalid(err)
+		return spec, false, invalid(err)
 	}
 	if role != "admin" {
-		return nil, nil
+		return spec, false, nil
 	}
-	spec := netgen.RoleBindingSpec{Namespace: ns, Project: proj, Kept: subjects}
+	spec = netgen.RoleBindingSpec{Namespace: ns, Project: proj, Kept: subjects}
 	if account, ok := tenancy.SyncAccount(proj); ok && g.syncNS != "" {
 		spec.SyncAccount = netgen.ServiceAccountSubject(g.syncNS, account)
 	}
-	return g.follow(ns, tenancy.RoutesBinding(ns), spec, netgen.RoutesManifest, true)
+	return spec, true, nil
 }
 
 // gatewayView stages the read of a project's Gateway, in its publish

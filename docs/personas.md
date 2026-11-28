@@ -82,8 +82,31 @@ subjects:
 An author is the same pair with `edit` in place of `view`.
 Bind every namespace of the project: a person who sees part of a project does not read its repo.
 
+## Desktops
+
+Where the cluster serves DeskuBe, a platform admin turns desktops on per project namespace, from the project's Configure tab.
+It stages three RoleBindings in the platform repo, beside the namespace's admin grant, which re-renders them:
+
+| RoleBinding | Role | Subjects |
+| --- | --- | --- |
+| `<ns>-desktops` | `dotvirt-tenant-desktops` | the admin grant's subjects, the project's sync account among them |
+| `<ns>-desktops-admin` | `dotvirt-tenant-desktops-admin` | the admin grant's people, never a sync account |
+| `<ns>-desktops-view` | `dotvirt-tenant-desktops-view` | the namespace's authors: the subjects of its `edit` grants |
+
+- `dotvirt-tenant-desktops`: pools, desktops made one by one, and the claim verbs, with `use` on pools. DeskuBe's admission asks these of whoever sets a pool's subjects or a desktop's owner, the sync account included.
+- `dotvirt-tenant-desktops-admin`: acting on anyone's claim (`assign` on pools).
+- `dotvirt-tenant-desktops-view`: reading the desktops. DeskuBe keeps this out of `view`: a desktop carries a pending pairing PIN, and whoever reads it may pair first.
+
+dotvirt ships these roles with DeskuBe's rules, so no binding depends on the name prefix a DeskuBe install chooses.
+None grants `*` or `seat`.
+DeskuBe aggregates its pool and claim viewer roles into `view`, so every project persona reads pools and claims.
+
+The gap: viewers get no desktop read.
+A viewer of a repo that declares desktops one by one cannot list its VdiInstances, so loses that repo's read.
+A repo declaring pools alone stays readable to viewers.
+
 ## What the platform sync account may bind
 
 With sync impersonation on, Argo applies the platform repo as `dotvirt-platform-sync`.
-That account may bind exactly the project personas' roles: `admin`, `dotvirt-tenant-egress`, `view`, `edit` and `dotvirt-tenant-egress-view` (`pkg/tenancy.ProjectGrantRoles`).
+That account may bind exactly the project personas' roles: `admin`, `dotvirt-tenant-egress`, `view`, `edit`, `dotvirt-tenant-egress-view`, the publishing roles `dotvirt-tenant-routes` and `dotvirt-tenant-gateway-view`, and the three desktop roles (`pkg/tenancy.ProjectGrantRoles`).
 A RoleBinding naming any other role holds the impersonation switch back, and the operator names it.

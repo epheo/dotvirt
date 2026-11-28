@@ -29,6 +29,9 @@ rules:
   - dotvirt-tenant-egress-view
   - dotvirt-tenant-routes
   - dotvirt-tenant-gateway-view
+  - dotvirt-tenant-desktops
+  - dotvirt-tenant-desktops-admin
+  - dotvirt-tenant-desktops-view
   resources:
   - clusterroles
   verbs:
