@@ -390,6 +390,18 @@ export interface Desktops {
    */
   desktops: Desktop[];
   claims: DesktopClaim[];
+  /**
+   * Hidden are the kinds held where the caller may not list them: a pool's
+   * count beside no desktop means desktops it may not see, not none.
+   */
+  hidden: DesktopKind[];
+}
+/**
+ * DesktopKind is one kind in one namespace, none for the classes.
+ */
+export interface DesktopKind {
+  namespace?: string;
+  resource: string; // vdiclasses | vdipools | vdiinstances | vdiclaims
 }
 /**
  * DesktopClass is a kind of desktop an admin offers.
@@ -454,7 +466,7 @@ export interface Desktop {
    */
   pool?: string;
   /**
-   * Claim is the claim naming it, where the caller may list claims.
+   * Claim is the Bound claim holding it, where the caller may list claims.
    */
   claim?: string;
   conditions?: DesktopCondition[];

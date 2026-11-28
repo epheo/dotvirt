@@ -30,7 +30,9 @@ type desktopsSource struct {
 	instances *watch.FakeWatcher
 }
 
-func (*desktopsSource) HasAPIResource(schema.GroupVersionResource) bool { return true }
+func (*desktopsSource) ServesAPIResource(schema.GroupVersionResource) (bool, error) {
+	return true, nil
+}
 
 func (*desktopsSource) Can(context.Context, string, string, string, string) (bool, error) {
 	return true, nil
@@ -121,7 +123,7 @@ func desktopsServer(t *testing.T, fc *fakeCluster, src *desktopsSource) *Server 
 	s := fc.server(nil, Config{})
 	s.desktops = desktops.New(src, s.bus, func() bool { return true })
 	s.desktops.Run(t.Context())
-	for deadline := time.Now().Add(5 * time.Second); !s.desktops.Overview(nil).Synced; time.Sleep(time.Millisecond) {
+	for deadline := time.Now().Add(5 * time.Second); !s.desktops.Overview(nil, nil).Synced; time.Sleep(time.Millisecond) {
 		if time.Now().After(deadline) {
 			t.Fatal("the snapshot never synced")
 		}
@@ -129,15 +131,15 @@ func desktopsServer(t *testing.T, fc *fakeCluster, src *desktopsSource) *Server 
 	return s
 }
 
-func desktopsVersion(t *testing.T, s *Server, token string) uint64 {
+func desktopsVersion(t *testing.T, s *Server, token string, namespaces ...string) uint64 {
 	t.Helper()
 	r := asUser(httptest.NewRequest(http.MethodGet, "/", nil), token)
 	id, c, err := s.userCluster(r)
 	if err != nil {
 		t.Fatal(err)
 	}
-	v := callerView{names: map[string]bool{"team-a-dev": true, "team-b-dev": true}, s: s, ctx: r.Context(), id: id, c: c}
-	return s.desktopsWatermark(v, []string{"team-a-dev", "team-b-dev"})
+	v := callerView{s: s, ctx: r.Context(), id: id, c: c}
+	return s.desktopsWatermark(v, namespaces)
 }
 
 func getDesktops(t *testing.T, s *Server, token string) model.Desktops {
@@ -193,6 +195,22 @@ func TestDesktopsShowWhatTheCallerMayList(t *testing.T) {
 	if len(got.Classes) != 0 {
 		t.Fatalf("a tenant without a cluster-wide list read classes: %+v", got.Classes)
 	}
+	// A project viewer sees a pool's counts: the desktops behind them are
+	// said to be hidden, not read as none.
+	hidden, err := json.Marshal(got.Hidden)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := `[{"resource":"vdiclasses"},` +
+		`{"namespace":"team-b-dev","resource":"vdiclaims"},` +
+		`{"namespace":"team-b-dev","resource":"vdiinstances"},` +
+		`{"namespace":"team-b-dev","resource":"vdipools"}]`
+	if string(hidden) != want {
+		t.Fatalf("hidden = %s, want %s", hidden, want)
+	}
+	if len(all.Hidden) != 0 {
+		t.Fatalf("an admin is told of hidden kinds: %+v", all.Hidden)
+	}
 
 	rec := do(s, viewerToken, http.MethodGet, "/api/desktops", "")
 	wantStatus(t, rec, http.StatusOK)
@@ -219,13 +237,13 @@ func TestDesktopsVersionMovesWithWhatTheCallerReads(t *testing.T) {
 			src := &desktopsSource{}
 			s := desktopsServer(t, fc, src)
 
-			before := desktopsVersion(t, s, tenantToken)
+			before := desktopsVersion(t, s, tenantToken, "team-a-dev", "team-b-dev")
 			src.write(t, s, deskInstance("team-b-dev", "solo", "Stopping"))
-			if after := desktopsVersion(t, s, tenantToken); after != before {
+			if after := desktopsVersion(t, s, tenantToken, "team-a-dev", "team-b-dev"); after != before {
 				t.Fatalf("another namespace's desktop moved the version: %d then %d", before, after)
 			}
 			src.write(t, s, deskInstance("team-a-dev", "solo", "Stopping"))
-			if after := desktopsVersion(t, s, tenantToken); (after != before) != c.moves {
+			if after := desktopsVersion(t, s, tenantToken, "team-a-dev", "team-b-dev"); (after != before) != c.moves {
 				t.Fatalf("version %d then %d, want moved=%v", before, after, c.moves)
 			}
 		})
@@ -235,7 +253,28 @@ func TestDesktopsVersionMovesWithWhatTheCallerReads(t *testing.T) {
 func TestDesktopsVersionIsAbsentWithoutTheModule(t *testing.T) {
 	s := newFakeCluster(t).server(nil, Config{})
 	s.desktops = desktops.New(nil, s.bus, func() bool { return false })
-	if v := desktopsVersion(t, s, adminToken); v != 0 {
+	if v := desktopsVersion(t, s, adminToken, "team-a-dev"); v != 0 {
 		t.Fatalf("version = %d, want 0", v)
+	}
+}
+
+// A kind held where the caller may not list it moves the version as it comes
+// and goes, never as its objects move.
+func TestDesktopsVersionSaysAHiddenKindByItsPresenceOnly(t *testing.T) {
+	fc := newFakeCluster(t)
+	fc.readsVMs = tenantSeesTeams
+	fc.ssar = func(token string, _ *authzv1.ResourceAttributes) bool { return token == adminToken }
+	src := &desktopsSource{}
+	s := desktopsServer(t, fc, src)
+
+	before := desktopsVersion(t, s, tenantToken, "team-a-dev", "team-c-dev")
+	src.write(t, s, deskInstance("team-c-dev", "solo", "Ready"))
+	appeared := desktopsVersion(t, s, tenantToken, "team-a-dev", "team-c-dev")
+	if appeared == before {
+		t.Fatal("a desktop the caller may not list appearing left the version")
+	}
+	src.write(t, s, deskInstance("team-c-dev", "solo", "Stopping"))
+	if desktopsVersion(t, s, tenantToken, "team-a-dev", "team-c-dev") != appeared {
+		t.Fatal("a hidden desktop's move moved the version")
 	}
 }

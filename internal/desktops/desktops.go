@@ -3,13 +3,15 @@
 // and no request reaches the cluster.
 //
 // One read leaves here, Overview: each namespaced kind where the caller may
-// list it, and the classes for a caller who may list them cluster-wide.
+// list it, the classes for a caller who may list them cluster-wide, and which
+// of the kinds held it may not list.
 package desktops
 
 import (
 	"cmp"
 	"context"
 	"log"
+	"maps"
 	"slices"
 	"strings"
 	"sync"
@@ -42,7 +44,7 @@ var (
 
 // Source is the cluster as the snapshot reads it; *cluster.Client in production.
 type Source interface {
-	HasAPIResource(schema.GroupVersionResource) bool
+	ServesAPIResource(schema.GroupVersionResource) (bool, error)
 	DynamicListWatch(schema.GroupVersionResource) *cache.ListWatch
 	Can(ctx context.Context, verb, group, resource, namespace string) (bool, error)
 }
@@ -78,20 +80,20 @@ type Snapshot struct {
 	instances *reflect.Table[model.Desktop]
 	claims    *reflect.Table[model.DesktopClaim]
 	// gens counts each kind's moves per namespace, so a caller's watermark
-	// moves with what it may list only. held counts the rows behind each.
+	// moves with what it may list only.
 	gens map[Held]uint64
-	held map[Held]int
-	// flips counts what every caller's pull shows besides rows: a watch's
-	// health, and the module stopping.
+	// flips counts what every caller's pull shows besides rows: whether it is
+	// synced, a watch's health, and the module stopping.
 	flips uint64
 
 	started atomic.Bool
-	// healthy and present follow the order of kinds.
+	// healthy and absent follow the order of kinds. absent is set only on
+	// discovery's definite no: a failed read leaves a kind unknown.
 	healthy [4]atomic.Bool
-	present [4]atomic.Bool
+	absent  [4]atomic.Bool
 }
 
-// kinds are the watched kinds, in the order of healthy and present.
+// kinds are the watched kinds, in the order of healthy and absent.
 func (s *Snapshot) kinds() []kind {
 	return []kind{{GVRClass, s.classes}, {GVRPool, s.pools}, {GVRInstance, s.instances}, {GVRClaim, s.claims}}
 }
@@ -99,7 +101,7 @@ func (s *Snapshot) kinds() []kind {
 // New builds the snapshot. served is the module flag, which already reads
 // discovery, so a cluster without DeskuBe pays no API call here.
 func New(src Source, bus *eventbus.Bus, served func() bool) *Snapshot {
-	s := &Snapshot{src: src, bus: bus, served: served, gens: map[Held]uint64{}, held: map[Held]int{}}
+	s := &Snapshot{src: src, bus: bus, served: served, gens: map[Held]uint64{}}
 	s.classes = newTable(s, GVRClass.Resource, decodeClass, nil)
 	s.pools = newTable(s, GVRPool.Resource, decodePool, reflect.NamespacedKey)
 	s.instances = newTable(s, GVRInstance.Resource, decodeInstance, reflect.NamespacedKey)
@@ -112,20 +114,12 @@ func New(src Source, bus *eventbus.Bus, served func() bool) *Snapshot {
 
 func newTable[V any](s *Snapshot, resource string, decode func(*unstructured.Unstructured) (V, bool), key func(*unstructured.Unstructured) string) *reflect.Table[V] {
 	return &reflect.Table[V]{Lock: &s.mu, Decode: decode, Key: key, Publish: s.publish,
-		Touch: func(k string, old, now *V) {
+		Touch: func(k string, _, _ *V) {
 			h := Held{Resource: resource}
 			if key != nil {
 				h.Namespace, _, _ = strings.Cut(k, "/")
 			}
 			s.gens[h]++
-			switch {
-			case old == nil:
-				s.held[h]++
-			case now == nil:
-				if s.held[h]--; s.held[h] == 0 {
-					delete(s.held, h)
-				}
-			}
 		}}
 }
 
@@ -135,18 +129,31 @@ func (s *Snapshot) Run(ctx context.Context) {
 	reflect.RunWhile(ctx, pace, func() bool { return s.ready(ctx) }, s.served, s.start, s.clear)
 }
 
-// start reads which kinds are served before any list lands, as Synced waits
-// for those only: a DeskuBe release missing a kind leaves no failing watch,
-// and no pull that never syncs. One served later is watched from then on.
+// start watches each kind once discovery serves it, so a DeskuBe release
+// missing one leaves no failing watch. One served later is watched from then
+// on.
 func (s *Snapshot) start(ctx context.Context) {
-	kinds := s.kinds()
-	for i, k := range kinds {
-		s.present[i].Store(s.src.HasAPIResource(k.gvr))
-	}
 	s.started.Store(true)
 	s.publish()
-	for i, k := range kinds {
-		reflect.RunWhenServed(ctx, reflect.Served(s.src.HasAPIResource, &s.present[i]), k.gvr, s.src.DynamicListWatch(k.gvr), k.table, &s.healthy[i], s.flipped)
+	for i, k := range s.kinds() {
+		reflect.RunWhenServed(ctx, s.probe(i), k.gvr, s.src.DynamicListWatch(k.gvr), k.table, &s.healthy[i], s.flipped)
+	}
+}
+
+// probe is discovery's answer for kind i. Only a definite no lets Synced stop
+// waiting for the kind, and that answer moving publishes, as no list follows
+// it.
+func (s *Snapshot) probe(i int) func(schema.GroupVersionResource) bool {
+	return func(gvr schema.GroupVersionResource) bool {
+		served, err := s.src.ServesAPIResource(gvr)
+		if err != nil {
+			log.Printf("desktops: discover %s: %v", gvr.Resource, err)
+			return false
+		}
+		if s.absent[i].Swap(!served) != !served {
+			s.flipped()
+		}
+		return served
 	}
 }
 
@@ -155,14 +162,10 @@ func (s *Snapshot) clear() {
 	s.started.Store(false)
 	for i, k := range s.kinds() {
 		k.table.Clear()
-		s.present[i].Store(false)
+		s.absent[i].Store(false)
 		s.healthy[i].Store(true)
 	}
-	s.mu.Lock()
-	s.held = map[Held]int{}
-	s.flips++
-	s.mu.Unlock()
-	s.publish()
+	s.flipped()
 }
 
 func (s *Snapshot) ready(ctx context.Context) bool {
@@ -192,7 +195,8 @@ func (s *Snapshot) publish() {
 	}
 }
 
-// flipped moves every caller's watermark: each pull says whether it is stale.
+// flipped moves every caller's watermark: each pull says whether it is synced
+// and whether it is stale.
 func (s *Snapshot) flipped() {
 	s.mu.Lock()
 	s.flips++
@@ -205,7 +209,7 @@ func (s *Snapshot) synced() bool {
 		return false
 	}
 	for i, k := range s.kinds() {
-		if s.present[i].Load() && !k.table.Synced() {
+		if !s.absent[i].Load() && !k.table.Synced() {
 			return false
 		}
 	}
@@ -232,25 +236,42 @@ func (s *Snapshot) Gen(h Held) uint64 {
 }
 
 // HeldIn lists the kinds that have rows in namespaces ("" for the classes),
-// so a caller is reviewed only for what it could be shown.
+// so a caller is reviewed only for what it could be shown. It reads the rows
+// themselves: a reflector a stopped module left running may still write.
 func (s *Snapshot) HeldIn(namespaces []string) []Held {
+	wanted := make(map[string]bool, len(namespaces))
+	for _, ns := range namespaces {
+		wanted[ns] = true
+	}
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	var out []Held
-	for _, ns := range namespaces {
-		for _, k := range s.kinds() {
-			if h := (Held{ns, k.gvr.Resource}); s.held[h] > 0 {
-				out = append(out, h)
-			}
+	found := map[Held]bool{}
+	if wanted[""] && len(s.classes.Rows) > 0 {
+		found[Held{Resource: GVRClass.Resource}] = true
+	}
+	note := func(ns, resource string) {
+		if wanted[ns] {
+			found[Held{ns, resource}] = true
 		}
 	}
-	return out
+	for _, p := range s.pools.Rows {
+		note(p.Namespace, GVRPool.Resource)
+	}
+	for _, d := range s.instances.Rows {
+		note(d.Namespace, GVRInstance.Resource)
+	}
+	for _, c := range s.claims.Rows {
+		note(c.Namespace, GVRClaim.Resource)
+	}
+	return slices.Collect(maps.Keys(found))
 }
 
 // Overview is what readable shows: each kind in the namespaces it names, and
 // the classes when it holds them at "". A pool-made desktop sits under its
-// pool where the pool is shown, else with the others.
-func (s *Snapshot) Overview(readable map[Held]bool) model.Desktops {
+// pool where the pool is shown, else with the others. hidden are the kinds
+// held where the caller may not list them, said so that a pool's count beside
+// no desktop does not read as none.
+func (s *Snapshot) Overview(readable map[Held]bool, hidden []Held) model.Desktops {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	out := model.Desktops{
@@ -260,7 +281,14 @@ func (s *Snapshot) Overview(readable map[Held]bool) model.Desktops {
 		Pools:    []model.DesktopPool{},
 		Desktops: []model.Desktop{},
 		Claims:   []model.DesktopClaim{},
+		Hidden:   make([]model.DesktopKind, 0, len(hidden)),
 	}
+	for _, h := range hidden {
+		out.Hidden = append(out.Hidden, model.DesktopKind{Namespace: h.Namespace, Resource: h.Resource})
+	}
+	slices.SortFunc(out.Hidden, func(a, b model.DesktopKind) int {
+		return cmp.Or(strings.Compare(a.Namespace, b.Namespace), strings.Compare(a.Resource, b.Resource))
+	})
 	if readable[Held{Resource: GVRClass.Resource}] {
 		for _, c := range s.classes.Rows {
 			out.Classes = append(out.Classes, c)
@@ -272,11 +300,13 @@ func (s *Snapshot) Overview(readable map[Held]bool) model.Desktops {
 			continue
 		}
 		out.Claims = append(out.Claims, c)
-		if c.Desktop == "" {
+		// A claim naming a desktop it does not hold is no claim of the
+		// desktop's: a stranger's is refused.
+		if c.Desktop == "" || c.Phase != "Bound" {
 			continue
 		}
 		key := c.Namespace + "/" + c.Desktop
-		if held, ok := claimed[key]; !ok || claimFirst(c, held) < 0 {
+		if held, ok := claimed[key]; !ok || c.Name < held.Name {
 			claimed[key] = c
 		}
 	}
@@ -316,18 +346,6 @@ func (s *Snapshot) Overview(readable map[Held]bool) model.Desktops {
 
 func byDesktop(a, b model.Desktop) int {
 	return cmp.Or(strings.Compare(a.Namespace, b.Namespace), strings.Compare(a.Name, b.Name))
-}
-
-// claimFirst orders two claims on one desktop: the one holding it, then by
-// name, so the desktop names one claim whatever the map order.
-func claimFirst(a, b model.DesktopClaim) int {
-	bound := func(c model.DesktopClaim) int {
-		if c.Phase == "Bound" {
-			return 0
-		}
-		return 1
-	}
-	return cmp.Or(bound(a)-bound(b), strings.Compare(a.Name, b.Name))
 }
 
 func decode[T any](u *unstructured.Unstructured) T {

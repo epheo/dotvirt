@@ -3,7 +3,9 @@ package desktops
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -104,7 +106,7 @@ func TestThePINAndTheAdminSecretAreNeverHeld(t *testing.T) {
 	s, _ := newSnapshot(t)
 	mustAdd(t, s.instances, desktop("team-a", "alice", nil))
 	held := fmt.Sprintf("%+v", s.instances.Rows)
-	body, err := json.Marshal(s.Overview(everything("team-a")))
+	body, err := json.Marshal(s.Overview(everything("team-a"), nil))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -116,7 +118,7 @@ func TestThePINAndTheAdminSecretAreNeverHeld(t *testing.T) {
 			t.Errorf("the overview carries %q: %s", leak, body)
 		}
 	}
-	got := s.Overview(everything("team-a")).Desktops
+	got := s.Overview(everything("team-a"), nil).Desktops
 	if len(got) != 1 || got[0].Address != "10.0.0.5:47989" || got[0].Session != "busy" || !got[0].Running {
 		t.Fatalf("desktops = %+v", got)
 	}
@@ -150,7 +152,7 @@ func TestMissingCountsReadAsZero(t *testing.T) {
 		"held": int64(2), "warm": int64(1), "free": int64(1), "inSession": int64(1),
 		"conditions": []any{map[string]any{"type": "Ready", "status": "True", "reason": "ClassFound"}},
 	}))
-	got := s.Overview(everything("team-a")).Pools
+	got := s.Overview(everything("team-a"), nil).Pools
 	if len(got) != 2 || got[0].Name != "busy" || got[1].Name != "fresh" {
 		t.Fatalf("pools = %+v", got)
 	}
@@ -186,7 +188,7 @@ func TestAPoolsDesktopsAreThoseItControls(t *testing.T) {
 	mustAdd(t, s.instances, controlled(desktop("team-a", "other-group", nil), "other.example/v1", "VdiPool", "lab", true))
 	mustAdd(t, s.instances, desktop("team-a", "solo", nil))
 
-	got := s.Overview(everything("team-a"))
+	got := s.Overview(everything("team-a"), nil)
 	if len(got.Pools) != 1 || len(got.Pools[0].Desktops) != 1 || got.Pools[0].Desktops[0].Name != "lab-alice" || got.Pools[0].Desktops[0].Pool != "lab" {
 		t.Fatalf("pools = %+v", got.Pools)
 	}
@@ -207,7 +209,7 @@ func TestAPoolsDesktopNeverHidesWithItsPool(t *testing.T) {
 	s, _ := newSnapshot(t)
 	mustAdd(t, s.pools, pool("team-a", "lab", nil))
 	mustAdd(t, s.instances, controlled(desktop("team-a", "lab-alice", nil), "vdi.desku.be/v1alpha1", "VdiPool", "lab", true))
-	got := s.Overview(map[Held]bool{{"team-a", GVRInstance.Resource}: true})
+	got := s.Overview(map[Held]bool{{"team-a", GVRInstance.Resource}: true}, nil)
 	if len(got.Pools) != 0 || len(got.Desktops) != 1 || got.Desktops[0].Pool != "lab" {
 		t.Fatalf("overview = %+v", got)
 	}
@@ -218,18 +220,21 @@ func TestClaimsJoinTheirDesktopByName(t *testing.T) {
 	mustAdd(t, s.pools, pool("team-a", "lab", nil))
 	mustAdd(t, s.instances, controlled(desktop("team-a", "lab-alice", nil), "vdi.desku.be/v1alpha1", "VdiPool", "lab", true))
 	mustAdd(t, s.instances, desktop("team-a", "bench", nil))
+	mustAdd(t, s.instances, desktop("team-a", "studio", nil))
 	mustAdd(t, s.claims, claim("team-a", "alice", map[string]any{"poolName": "lab", "user": "alice"},
 		map[string]any{"phase": "Bound", "desktopName": "lab-alice", "lastUsed": "2026-11-27T08:00:00Z"}))
 	mustAdd(t, s.claims, claim("team-a", "carol", map[string]any{"poolName": "lab", "user": "carol"},
 		map[string]any{"phase": "Waiting", "position": int64(1)}))
 	mustAdd(t, s.claims, claim("team-a", "dave", map[string]any{"desktopName": "bench", "user": "dave", "running": false},
 		map[string]any{"phase": "Waiting"}))
+	mustAdd(t, s.claims, claim("team-a", "erin", map[string]any{"desktopName": "studio", "user": "erin"},
+		map[string]any{"phase": "Bound", "desktopName": "studio"}))
 
-	got := s.Overview(everything("team-a"))
-	if len(got.Claims) != 3 {
+	got := s.Overview(everything("team-a"), nil)
+	if len(got.Claims) != 4 {
 		t.Fatalf("claims = %+v", got.Claims)
 	}
-	alice, carol, dave := got.Claims[0], got.Claims[1], got.Claims[2]
+	alice, carol, dave, erin := got.Claims[0], got.Claims[1], got.Claims[2], got.Claims[3]
 	if alice.Pool != "lab" || alice.Desktop != "lab-alice" || alice.LastUsed != "2026-11-27T08:00:00Z" || !alice.Running {
 		t.Errorf("alice = %+v", alice)
 	}
@@ -239,21 +244,47 @@ func TestClaimsJoinTheirDesktopByName(t *testing.T) {
 	if dave.Pool != "" || dave.Desktop != "bench" || dave.Running {
 		t.Errorf("dave = %+v", dave)
 	}
+	if erin.Pool != "" || erin.Desktop != "studio" {
+		t.Errorf("erin = %+v", erin)
+	}
 	if d := got.Pools[0].Desktops[0]; d.Claim != "alice" {
 		t.Errorf("the pool's desktop names claim %q", d.Claim)
 	}
-	if len(got.Desktops) != 1 || got.Desktops[0].Claim != "dave" {
-		t.Errorf("desktops = %+v", got.Desktops)
+	claims := map[string]string{}
+	for _, d := range got.Desktops {
+		claims[d.Name] = d.Claim
+	}
+	if claims["bench"] != "" || claims["studio"] != "erin" {
+		t.Errorf("claims by desktop = %v, want only studio held, by erin", claims)
+	}
+}
+
+// A desktop's claim is the one holding it: a stranger's claim naming it is
+// refused, a waiting one holds nothing yet.
+func TestOnlyABoundClaimIsTheDesktops(t *testing.T) {
+	s, _ := newSnapshot(t)
+	mustAdd(t, s.instances, desktop("team-a", "studio", nil))
+	mustAdd(t, s.claims, claim("team-a", "mallory", map[string]any{"desktopName": "studio", "user": "mallory"},
+		map[string]any{"phase": "Refused", "message": "studio is not yours"}))
+	mustAdd(t, s.claims, claim("team-a", "aaron", map[string]any{"desktopName": "studio", "user": "aaron"},
+		map[string]any{"phase": "Waiting"}))
+	if got := s.Overview(everything("team-a"), nil).Desktops; len(got) != 1 || got[0].Claim != "" {
+		t.Fatalf("a claim that holds nothing names the desktop: %+v", got)
+	}
+	mustAdd(t, s.claims, claim("team-a", "erin", map[string]any{"desktopName": "studio", "user": "erin"},
+		map[string]any{"phase": "Bound", "desktopName": "studio"}))
+	if got := s.Overview(everything("team-a"), nil).Desktops; got[0].Claim != "erin" {
+		t.Fatalf("the desktop names claim %q, want erin", got[0].Claim)
 	}
 }
 
 func TestClassesNeedTheirOwnRead(t *testing.T) {
 	s, _ := newSnapshot(t)
 	mustAdd(t, s.classes, obj("", "workstation", map[string]any{"spec": map[string]any{"image": "quay.io/deskube/desktop:1"}}))
-	if got := s.Overview(map[Held]bool{{"team-a", GVRPool.Resource}: true}).Classes; len(got) != 0 {
+	if got := s.Overview(map[Held]bool{{"team-a", GVRPool.Resource}: true}, nil).Classes; len(got) != 0 {
 		t.Fatalf("classes without their read = %+v", got)
 	}
-	got := s.Overview(everything()).Classes
+	got := s.Overview(everything(), nil).Classes
 	if len(got) != 1 || got[0].Image != "quay.io/deskube/desktop:1" {
 		t.Fatalf("classes = %+v", got)
 	}
@@ -292,19 +323,68 @@ func TestANamespacesLevelMovesWithItsOwnObjectsOnly(t *testing.T) {
 	}
 }
 
+// A stopped module's reflector is not waited for: a write it lands while the
+// snapshot forgets must not hide that namespace's desktops afterwards.
+func TestAWriteDuringClearNeverHidesANamespace(t *testing.T) {
+	s, _ := newSnapshot(t)
+	held := func() bool {
+		return slices.Contains(s.HeldIn([]string{"team-a"}), Held{"team-a", GVRInstance.Resource})
+	}
+	for range 200 {
+		var wg sync.WaitGroup
+		wg.Go(s.clear)
+		wg.Go(func() { _ = s.instances.Add(desktop("team-a", "alice", nil)) })
+		wg.Wait()
+		_, row := s.instances.Rows["team-a/alice"]
+		if held() != row {
+			t.Fatalf("held = %v beside a row = %v", held(), row)
+		}
+		if err := s.instances.Delete(desktop("team-a", "alice", nil)); err != nil {
+			t.Fatal(err)
+		}
+		if held() {
+			t.Fatal("a deleted desktop is still held")
+		}
+		mustAdd(t, s.instances, desktop("team-a", "alice", nil))
+		if !held() {
+			t.Fatal("a desktop made again is hidden")
+		}
+		if err := s.instances.Delete(desktop("team-a", "alice", nil)); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+func TestHiddenKindsAreSaidByNamespaceAndKind(t *testing.T) {
+	s, _ := newSnapshot(t)
+	got := s.Overview(nil, []Held{{"team-b", GVRInstance.Resource}, {"", GVRClass.Resource}, {"team-a", GVRPool.Resource}})
+	body, err := json.Marshal(got.Hidden)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := `[{"resource":"vdiclasses"},{"namespace":"team-a","resource":"vdipools"},{"namespace":"team-b","resource":"vdiinstances"}]`; string(body) != want {
+		t.Fatalf("hidden = %s, want %s", body, want)
+	}
+	if got := s.Overview(nil, nil).Hidden; got == nil {
+		t.Fatal("hidden answered null, want an empty list")
+	}
+}
+
 type fakeSource struct {
-	served func(schema.GroupVersionResource) bool
+	serves func(schema.GroupVersionResource) (bool, error)
 	mu     sync.Mutex
 	starts map[string]int
 	ended  map[string]int
 	lists  map[string][]unstructured.Unstructured
 }
 
-func newSource(served func(schema.GroupVersionResource) bool) *fakeSource {
-	return &fakeSource{served: served, starts: map[string]int{}, ended: map[string]int{}, lists: map[string][]unstructured.Unstructured{}}
+func newSource(serves func(schema.GroupVersionResource) (bool, error)) *fakeSource {
+	return &fakeSource{serves: serves, starts: map[string]int{}, ended: map[string]int{}, lists: map[string][]unstructured.Unstructured{}}
 }
 
-func (f *fakeSource) HasAPIResource(gvr schema.GroupVersionResource) bool { return f.served(gvr) }
+func (f *fakeSource) ServesAPIResource(gvr schema.GroupVersionResource) (bool, error) {
+	return f.serves(gvr)
+}
 
 func (f *fakeSource) Can(context.Context, string, string, string, string) (bool, error) {
 	return true, nil
@@ -368,22 +448,22 @@ func fastPace(t *testing.T) {
 
 func TestTheModuleGoingOffStopsTheWatchesAndForgets(t *testing.T) {
 	fastPace(t)
-	src := newSource(func(schema.GroupVersionResource) bool { return true })
+	src := newSource(func(schema.GroupVersionResource) (bool, error) { return true, nil })
 	src.lists[GVRInstance.Resource] = []unstructured.Unstructured{*desktop("team-a", "alice", nil)}
 	var on atomic.Bool
 	on.Store(true)
 	s := New(src, eventbus.New(), on.Load)
 	s.Run(t.Context())
 	eventually(t, "every watch started", src.watching(4))
-	eventually(t, "synced", func() bool { return s.Overview(nil).Synced })
-	if len(s.HeldIn([]string{"team-a"})) != 1 || len(s.Overview(everything("team-a")).Desktops) != 1 {
+	eventually(t, "synced", func() bool { return s.Overview(nil, nil).Synced })
+	if len(s.HeldIn([]string{"team-a"})) != 1 || len(s.Overview(everything("team-a"), nil).Desktops) != 1 {
 		t.Fatal("the desktop never landed")
 	}
 
 	on.Store(false)
 	eventually(t, "every watch ended", src.stopped(4))
 	eventually(t, "not started", func() bool { return !s.Started() })
-	got := s.Overview(everything("team-a"))
+	got := s.Overview(everything("team-a"), nil)
 	if got.Synced || len(got.Desktops) != 0 || len(s.HeldIn([]string{"team-a"})) != 0 {
 		t.Fatalf("a stopped module still reads %+v", got)
 	}
@@ -392,12 +472,51 @@ func TestTheModuleGoingOffStopsTheWatchesAndForgets(t *testing.T) {
 // A DeskuBe release without claims must not hold the pull back.
 func TestSyncedWaitsForTheServedKindsOnly(t *testing.T) {
 	fastPace(t)
-	src := newSource(func(gvr schema.GroupVersionResource) bool { return gvr != GVRClaim })
+	src := newSource(func(gvr schema.GroupVersionResource) (bool, error) { return gvr != GVRClaim, nil })
 	s := New(src, eventbus.New(), func() bool { return true })
 	s.Run(t.Context())
 	eventually(t, "the served kinds watched", src.watching(3))
-	eventually(t, "synced", func() bool { return s.Overview(nil).Synced })
-	if got := s.Overview(everything("team-a")); got.Stale {
+	eventually(t, "synced", func() bool { return s.Overview(nil, nil).Synced })
+	if got := s.Overview(everything("team-a"), nil); got.Stale {
 		t.Fatal("an absent kind reads as stale")
+	}
+}
+
+// A failed discovery read is unknown, not absent: the pull stays unsynced
+// until the kind answers.
+func TestADiscoveryErrorKeepsThePullUnsynced(t *testing.T) {
+	fastPace(t)
+	var down atomic.Bool
+	down.Store(true)
+	src := newSource(func(gvr schema.GroupVersionResource) (bool, error) {
+		if gvr != GVRClaim {
+			return true, nil
+		}
+		if down.Load() {
+			return false, errors.New("discovery unavailable")
+		}
+		return false, nil
+	})
+	bus := eventbus.New()
+	s := New(src, bus, func() bool { return true })
+	s.Run(t.Context())
+	eventually(t, "the served kinds watched", src.watching(3))
+	eventually(t, "the served kinds listed", func() bool {
+		return s.classes.Synced() && s.pools.Synced() && s.instances.Synced()
+	})
+	if s.Overview(nil, nil).Synced {
+		t.Fatal("a kind discovery could not read reads as absent")
+	}
+
+	down.Store(false)
+	before := bus.Version(eventbus.DesktopsChanged)
+	claims := slices.IndexFunc(s.kinds(), func(k kind) bool { return k.gvr == GVRClaim })
+	// The probe the next discovery tick makes.
+	s.probe(claims)(GVRClaim)
+	if !s.Overview(nil, nil).Synced {
+		t.Fatal("a kind discovery says is absent still holds the pull back")
+	}
+	if bus.Version(eventbus.DesktopsChanged) == before {
+		t.Fatal("the answer published nothing")
 	}
 }

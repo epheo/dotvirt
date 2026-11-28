@@ -16,6 +16,15 @@ type Desktops struct {
 	// not shown.
 	Desktops []Desktop      `json:"desktops"`
 	Claims   []DesktopClaim `json:"claims"`
+	// Hidden are the kinds held where the caller may not list them: a pool's
+	// count beside no desktop means desktops it may not see, not none.
+	Hidden []DesktopKind `json:"hidden"`
+}
+
+// DesktopKind is one kind in one namespace, none for the classes.
+type DesktopKind struct {
+	Namespace string `json:"namespace,omitempty"`
+	Resource  string `json:"resource"` // vdiclasses | vdipools | vdiinstances | vdiclaims
 }
 
 // DesktopClass is a kind of desktop an admin offers.
@@ -67,7 +76,7 @@ type Desktop struct {
 	Session string `json:"session,omitempty"` // free | busy
 	// Pool is the pool that made it, empty for a desktop made one by one.
 	Pool string `json:"pool,omitempty"`
-	// Claim is the claim naming it, where the caller may list claims.
+	// Claim is the Bound claim holding it, where the caller may list claims.
 	Claim      string             `json:"claim,omitempty"`
 	Conditions []DesktopCondition `json:"conditions,omitempty"`
 }
