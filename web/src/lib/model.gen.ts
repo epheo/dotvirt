@@ -2545,6 +2545,12 @@ export interface Project {
    * base, which may differ from the base git and the API reach it at.
    */
   repoPage?: string;
+  /**
+   * Head is the base branch's commit on dotvirt's mirror of Repo: it moves
+   * with each merge dotvirt fetches, whether or not Argo has applied it, so
+   * the console re-reads the repo's history on it. Empty while unreadable.
+   */
+  head?: string;
   namespaces: ProjectNamespace[];
   error?: string;
   /**

@@ -140,6 +140,32 @@ func TestBuildFiltersAndEnriches(t *testing.T) {
 	}
 }
 
+// The project carries its base branch's commit, the merge signal the console
+// keys history on when Argo is off or behind; a repo that cannot open has none.
+func TestBuildCarriesTheBaseHead(t *testing.T) {
+	bare := seedRepo(t)
+	out, err := exec.Command("git", "--git-dir", bare, "rev-parse", "main").Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	inv := Build(Inputs{
+		Branch: "main",
+		Repos:  git.NewRepoSet(ctx, "", "", nil, false, nil, time.Hour),
+		Projects: []project.ProjectInfo{
+			{Name: "team-a", Repo: bare, Namespaces: []string{"tenant-a"}},
+			{Name: "gone", Repo: filepath.Join(t.TempDir(), "missing.git"), Namespaces: []string{"tenant-b"}},
+		},
+	})
+	if got, want := inv.Projects[0].Head, string(out[:len(out)-1]); got != want {
+		t.Errorf("head = %q, want main's %q", got, want)
+	}
+	if inv.Projects[1].Head != "" {
+		t.Errorf("an unopened repo has a head: %q", inv.Projects[1].Head)
+	}
+}
+
 // A file Argo CD reads as the project's source settings rides the project as
 // an issue, wherever the repo holds it.
 func TestBuildSurfacesArgoSourceSettings(t *testing.T) {

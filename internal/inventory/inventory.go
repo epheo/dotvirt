@@ -125,6 +125,9 @@ func buildProject(in Inputs, p project.ProjectInfo) model.Project {
 			out.Error = "repo unreadable"
 			err = fmt.Errorf("read repo: %w", err)
 		}
+		if read != nil {
+			out.Head = read.BranchHash(in.Branch)
+		}
 		logRepoErr(p.Name, err)
 	}
 
