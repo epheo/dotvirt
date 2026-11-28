@@ -43,3 +43,18 @@ func TestClassifyOpenShiftOAuth(t *testing.T) {
 		}
 	}
 }
+
+// DeskuBe is served only where discovery lists its pools; a failing group
+// is not served, so nothing is offered on it.
+func TestClassifyDesktops(t *testing.T) {
+	argo := list("argoproj.io/v1alpha1", "applications")
+	if !classify([]*metav1.APIResourceList{argo, list("vdi.desku.be/v1alpha1", "vdipools")}, nil).Desktops {
+		t.Error("pools served, Desktops false")
+	}
+	down := &discovery.ErrGroupDiscoveryFailed{Groups: map[schema.GroupVersion]error{
+		{Group: "vdi.desku.be", Version: "v1alpha1"}: errors.New("the server is currently unable to handle the request"),
+	}}
+	if classify([]*metav1.APIResourceList{argo}, down).Desktops || classify([]*metav1.APIResourceList{argo}, nil).Desktops {
+		t.Error("pools not served, Desktops true")
+	}
+}

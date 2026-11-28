@@ -26,6 +26,7 @@ import (
 	"github.com/epheo/dotvirt/internal/model"
 	"github.com/epheo/dotvirt/internal/netgen"
 	"github.com/epheo/dotvirt/internal/netstate"
+	"github.com/epheo/dotvirt/internal/project"
 	"github.com/epheo/dotvirt/internal/publish"
 	"github.com/epheo/dotvirt/pkg/forge"
 	"github.com/epheo/dotvirt/pkg/tenancy"
@@ -141,6 +142,7 @@ func TestCapabilitiesEqualTheCoordinatorsGate(t *testing.T) {
 		{verb: verbBind, group: rbac, resource: "clusterroles", name: tenancy.TenantEgressRole},
 		{verb: verbBind, group: rbac, resource: "clusterroles", name: tenancy.TenantRoutesRole},
 		{verb: verbBind, group: rbac, resource: "clusterroles", name: tenancy.TenantGatewayViewRole},
+		{verb: verbBind, group: rbac, resource: "clusterroles", name: tenancy.TenantDesktopsRole},
 		kind(verbCreate, model.KindUDN, ""),
 		kind(verbCreate, model.KindCUDN, ""),
 		kind(verbCreate, model.KindGateway, ""),
@@ -187,6 +189,10 @@ func TestCapabilitiesEqualTheCoordinatorsGate(t *testing.T) {
 		// team-a-dev's admin-grant subjects.
 		{"publishing", "team-a-dev", http.MethodPost, "/api/projects/team-a/publishing", ``,
 			pr(func(p model.ProjectCaps) bool { return p.Publishing })},
+		// DeskuBe's writes to team-a-dev's admin-grant subjects and the sync
+		// account, and the claim acts to alice.
+		{"desktops", "team-a-dev", http.MethodPost, "/api/projects/team-a/namespaces/team-a-dev/desktops", ``,
+			pr(func(p model.ProjectCaps) bool { return slices.Contains(p.Desktops, "team-a-dev") })},
 		// orphans has no publish namespace: its Namespace alone.
 		{"publish namespace", "orphans-ns", http.MethodPost, "/api/projects/orphans/publish-namespace", ``,
 			pr(func(p model.ProjectCaps) bool { return p.PublishNamespaceCreate })},
@@ -362,6 +368,65 @@ func TestPublishingOnFollowsGatewayReads(t *testing.T) {
 	}
 }
 
+// "On" is what Kubernetes shows the caller: only one who may list rolebindings
+// in the namespace is told its desktop grant is there; the others are told
+// they may not see it, whatever git holds.
+func TestDesktopsOnFollowsBindingReads(t *testing.T) {
+	path, binding, err := netgen.DesktopsManifest(netgen.RoleBindingSpec{
+		Namespace: "team-a-dev", Project: "team-a", Kept: []netgen.Subject{{Kind: "User", APIGroup: "rbac.authorization.k8s.io", Name: "alice"}},
+		SyncAccount: netgen.ServiceAccountSubject("dotvirt-sync", "dotvirt-p-team-a"),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, files := range []map[string]string{nil, {path: string(binding)}} {
+		g := newCoordinatorRig(t, files)
+		if _, nc := g.caps(g.token(nil), "team-a-dev"); !slices.Equal(nc.Project.DesktopsUnseen, []string{"team-a-dev"}) || len(nc.Project.DesktopsOn) != 0 {
+			t.Errorf("git holds %d files: unseen %v, on %v, want unseen alone", len(files), nc.Project.DesktopsUnseen, nc.Project.DesktopsOn)
+		}
+		_, nc := g.caps(g.token([]grant{kind(verbList, model.KindRB, "team-a-dev")}), "team-a-dev")
+		if on := slices.Contains(nc.Project.DesktopsOn, "team-a-dev"); on != (files != nil) || len(nc.Project.DesktopsUnseen) != 0 || len(nc.Project.Desktops) != 0 {
+			t.Errorf("git holds %d files: on %v, unseen %v, offered %v", len(files), nc.Project.DesktopsOn, nc.Project.DesktopsUnseen, nc.Project.Desktops)
+		}
+	}
+}
+
+// Adopting a pool into a namespace without desktops on warns that its
+// project's account may not apply it: whether they are on only to a caller
+// who may list rolebindings there, the same words to every other.
+func TestAdoptingAPoolWarnsWhereDesktopsAreOff(t *testing.T) {
+	pool := model.DraftView{Items: []model.DraftItem{{Resource: string(draft.ResourceDesktopPool), Namespace: "team-a-dev", Name: "design"}}}
+	path, binding, err := netgen.DesktopsManifest(netgen.RoleBindingSpec{Namespace: "team-a-dev", Kept: []netgen.Subject{{Kind: "User", Name: "alice"}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	const neutral = "team-a-dev: a desktop pool applies only where a platform admin has turned desktops on."
+	for _, on := range []bool{false, true} {
+		files := map[string]string{}
+		if on {
+			files[path] = string(binding)
+		}
+		g := newCoordinatorRig(t, files)
+		warning := func(grants []grant, v model.DraftView) string {
+			t.Helper()
+			id, c, err := g.s.userCluster(asUser(httptest.NewRequest(http.MethodGet, "/", nil), g.token(grants)))
+			if err != nil {
+				t.Fatal(err)
+			}
+			return g.s.desktopsWarning(t.Context(), scope{id: id, cluster: c, proj: project.ProjectInfo{Name: "team-a"}}, "team-a-dev", v)
+		}
+		lister := []grant{kind(verbList, model.KindRB, "team-a-dev")}
+		if got := warning(lister, pool); on && got != "" || !on && !strings.Contains(got, "desktops are not on there") {
+			t.Errorf("on=%v, told: %q", on, got)
+		}
+		if got := warning(nil, pool); got != neutral {
+			t.Errorf("on=%v, not told: %q, want the same words either way", on, got)
+		}
+		if got := warning(lister, model.DraftView{}); got != "" {
+			t.Errorf("on=%v, no pool staged: %q", on, got)
+		}
+	}
+}
 // A project the cluster holds no publish namespace for is told so, naming it,
 // and only to a caller who could otherwise stage its publishing or the
 // namespace; the route refuses it and stages nothing.

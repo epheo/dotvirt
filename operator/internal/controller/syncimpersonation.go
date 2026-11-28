@@ -134,7 +134,7 @@ func (r *DotvirtReconciler) syncImpersonation(ctx context.Context, dv *dotvirtv1
 	if err != nil {
 		return failed(err)
 	}
-	unchecked := uncheckedNote(v.unresolved)
+	unchecked := uncheckedNote(v.unresolved) + refusedNote(v.refused, impersonatedWaits(dv, rc))
 	if inConfig {
 		problems := slices.Concat(v.missing, v.leaks, foreignProblem(v.foreign))
 		if fallback && rc.sync.sharedInUse {
@@ -189,6 +189,20 @@ func (r *DotvirtReconciler) syncImpersonation(ctx context.Context, dv *dotvirtv1
 
 func cloneWarning(rc *reconcileCtx) string {
 	return fmt.Sprintf("Applications sync as %s, which may create datavolumes/source in every namespace: a DataVolume a tenant repo declares can clone a disk out of any namespace; spec.argocd.syncImpersonation.enabled confines each repo to its project's rights", rc.argoSA)
+}
+
+// refusedNote says what the tenant AppProjects refuse until they whitelist
+// the impersonated kinds, and what they wait on (impersonatedWaits), never a
+// reason to hold the setting back: before it they sync as no project's
+// account, and after it each project's own grants decide.
+func refusedNote(refused []string, waits string) string {
+	if len(refused) == 0 {
+		return ""
+	}
+	if waits == "" {
+		waits = "sync impersonation is in effect"
+	}
+	return fmt.Sprintf("; Argo CD refuses %s: tenant repos apply those kinds only as their projects' own accounts, once %s", listSome(refused), waits)
 }
 
 func uncheckedNote(unresolved []string) string {
@@ -311,6 +325,10 @@ type syncVerdict struct {
 	// cloneAnywhere says the controller's own account may create
 	// datavolumes/source cluster-wide.
 	cloneAnywhere bool
+	// refused are the impersonated kinds a project's repo declares while the
+	// tenant AppProjects whitelist none (install.TenantAllowed): Argo refuses
+	// them, said, never counted.
+	refused []string
 }
 
 // syncCache memoizes the verdict: it costs SubjectAccessReviews and reads in
@@ -378,6 +396,7 @@ func syncInputs(generation int64, rc *reconcileCtx, scope syncScope) string {
 		fmt.Fprintf(&b, "%s=%s\n", account, strings.Join(rc.sync.accounts[account], ","))
 	}
 	fmt.Fprintf(&b, "%s\n%s\n", strings.Join(slices.Sorted(maps.Keys(rc.sync.appProjects)), ","), strings.Join(rc.sync.appNamespaces, ","))
+	fmt.Fprintf(&b, "%s\n", tenancy.FormatGroupKinds(rc.tenantAllowed))
 	sum := sha256.Sum256([]byte(b.String()))
 	return hex.EncodeToString(sum[:])
 }
@@ -403,6 +422,29 @@ type declaredKind struct {
 	namespace string
 }
 
+// repoKinds are the kinds a tenant repo may declare whatever a provider
+// allowed: the listed ones, and the impersonated ones once whitelisted.
+var repoKinds = slices.Concat(tenancy.TenantKinds, tenancy.ImpersonatedKinds)
+
+// whitelisted reports whether this pass's tenant AppProjects admit k.
+func whitelisted(rc *reconcileCtx, k tenancy.Kind) bool {
+	return k.Tenant || slices.Contains(rc.tenantAllowed, tenancy.GroupKind{Group: k.Group, Kind: k.Kind})
+}
+
+// refusedKinds are the kinds declared that the tenant AppProjects do not
+// admit yet, as "resource in namespace (project p)", in account order.
+func refusedKinds(rc *reconcileCtx, declared map[string][]declaredKind) []string {
+	var out []string
+	for _, account := range slices.Sorted(maps.Keys(declared)) {
+		for _, d := range declared[account] {
+			if !whitelisted(rc, d.kind) {
+				out = append(out, fmt.Sprintf("%s in %s (project %s)", d.kind.Resource, d.namespace, strings.TrimPrefix(account, tenancy.AppProjectPrefix)))
+			}
+		}
+	}
+	return out
+}
+
 // declaredKinds are, per sync account, the tenant kinds its project's
 // Application reports managing, by namespace, as Argo read them off the repo.
 func declaredKinds(rc *reconcileCtx, apps []unstructured.Unstructured) map[string][]declaredKind {
@@ -416,11 +458,11 @@ func declaredKinds(rc *reconcileCtx, apps []unstructured.Unstructured) map[strin
 		for _, res := range resources {
 			m, _ := res.(map[string]any)
 			ns, _ := m["namespace"].(string)
-			i := slices.IndexFunc(tenancy.TenantKinds, func(k tenancy.Kind) bool { return m["group"] == k.Group && m["kind"] == k.Kind })
+			i := slices.IndexFunc(repoKinds, func(k tenancy.Kind) bool { return m["group"] == k.Group && m["kind"] == k.Kind })
 			if i < 0 {
 				continue
 			}
-			if d := (declaredKind{tenancy.TenantKinds[i], ns}); !slices.Contains(out[account], d) {
+			if d := (declaredKind{repoKinds[i], ns}); !slices.Contains(out[account], d) {
 				out[account] = append(out[account], d)
 			}
 		}
@@ -447,7 +489,8 @@ var cloneSource = authzv1.ResourceAttributes{Verb: "create", Group: "cdi.kubevir
 
 // evaluateSync runs the checks (syncChecks, platformRoleChecks) and, for the
 // full scope, finds the unmapped foreign Applications: 2 reviews per project
-// namespace and one per kind a project declares in it, 2 per project, 8 more,
+// namespace and one per kind a project declares in it that Argo admits, 2 per
+// project, 3 more and one per kind a tenant repo may declare (repoKinds),
 // 5 for the platform tier and one per further role its RoleBindings bind, at
 // most accessProbeLimit in flight, plus a list of the Applications and
 // AppProjects and a read of each platform RoleBinding. While not asked, the
@@ -465,7 +508,9 @@ func (r *DotvirtReconciler) evaluateSync(ctx context.Context, rc *reconcileCtx, 
 			return v, err
 		}
 		v.foreign, v.unresolved = foreign, unresolved
-		checks = append(checks, syncChecks(rc, declaredKinds(rc, apps.Items))...)
+		declared := declaredKinds(rc, apps.Items)
+		v.refused = refusedKinds(rc, declared)
+		checks = append(checks, syncChecks(rc, declared)...)
 		if rc.sync.platform {
 			roles, absent, err := r.platformRoleChecks(ctx, rc, apps.Items)
 			if err != nil {
@@ -529,7 +574,7 @@ func syncChecks(rc *reconcileCtx, declared map[string][]declaredKind) []accessCh
 	}
 	// A kind every account may write cluster-wide is one a project's repo
 	// writes wherever its people may not.
-	for _, k := range tenancy.TenantKinds {
+	for _, k := range repoKinds {
 		checks = append(checks, accessCheck{account: syncProbeAccount, attrs: createAttrs(k.Group, k.Resource, ""),
 			problem: fmt.Sprintf("every ServiceAccount of %s may create %s in every namespace, every project's sync account included", rc.argoNS, k.Resource)})
 	}
@@ -544,12 +589,15 @@ func syncChecks(rc *reconcileCtx, declared map[string][]declaredKind) []accessCh
 				problem: fmt.Sprintf("project %s's sync account holds no grant in %s: stage its grants (POST /api/projects/%s/sync-access) and merge them", project, ns, project)})
 		}
 		for _, d := range declared[account] {
-			if !slices.Contains(rc.sync.accounts[account], d.namespace) {
+			if !slices.Contains(rc.sync.accounts[account], d.namespace) || !whitelisted(rc, d.kind) {
 				continue
 			}
 			fix := "widen the project's grant there, or drop them from its repo"
-			if d.kind.Resource == "egressfirewalls" {
+			switch {
+			case d.kind.Resource == "egressfirewalls":
 				fix = "an admin grant there carries them (sync-access pairs it with " + tenancy.EgressBinding(d.namespace) + "), or drop them from its repo"
+			case d.kind.Group == "vdi.desku.be":
+				fix = "turn desktops on there (POST /api/projects/" + project + "/namespaces/" + d.namespace + "/desktops stages " + tenancy.DesktopsBinding(d.namespace) + ") and merge it, or drop them from its repo"
 			}
 			checks = append(checks, accessCheck{account: account, attrs: createAttrs(d.kind.Group, d.kind.Resource, d.namespace), want: true,
 				problem: fmt.Sprintf("project %s's repo declares %s in %s, which its grant there does not let it write: %s", project, d.kind.Resource, d.namespace, fix)})

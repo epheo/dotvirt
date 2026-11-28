@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 
-	"k8s.io/apimachinery/pkg/runtime/schema"
 
 	"github.com/epheo/dotvirt/internal/auth"
 	"github.com/epheo/dotvirt/internal/draft"
@@ -99,9 +98,9 @@ func (r *Reader) DeclaredFiles(proj project.ProjectInfo) (map[model.ObjectRef]st
 	return idx.Files, nil
 }
 
-// DeclaredKinds lists every kind proj's base branch declares, in sorted
-// order; none while the branch does not exist yet (an empty repo).
-func (r *Reader) DeclaredKinds(proj project.ProjectInfo) ([]schema.GroupKind, error) {
+// DeclaredKinds lists every kind proj's base branch declares, and where, in
+// sorted order; none while the branch does not exist yet (an empty repo).
+func (r *Reader) DeclaredKinds(proj project.ProjectInfo) ([]DeclaredKind, error) {
 	read, err := r.read(proj)
 	if err != nil {
 		return nil, err

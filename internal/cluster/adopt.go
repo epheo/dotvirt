@@ -27,25 +27,25 @@ func GVR(k model.Kind) schema.GroupVersionResource {
 const trackingIDAnnotation = "argocd.argoproj.io/tracking-id"
 
 // adoptableKinds are the namespace-scoped kinds captured for adoption: the VM,
-// its DataVolumes and the network family's namespaced backings, which is
-// tenancy.TenantKinds plus the raw NetworkAttachmentDefinition. The coordinator
-// leaves that one out of a tenant repo, naming the platform tier, rather than
-// the capture going silent about it.
+// its DataVolumes and the namespaced backings model.AdoptedKinds names, which
+// is tenancy.TenantKinds plus the raw NetworkAttachmentDefinition. The
+// coordinator leaves that one out of a tenant repo, naming the platform tier,
+// rather than the capture going silent about it.
 var adoptableKinds = append([]schema.GroupVersionResource{
 	GVR(model.KindVM),
 	{Group: "cdi.kubevirt.io", Version: "v1beta1", Resource: "datavolumes"},
-}, networkFamilyGVRs(false)...)
+}, adoptedGVRs(false)...)
 
 // clusterAdoptableKinds are the cluster-scoped kinds adoption captures. Opt-in
-// through the network family, not every platform kind: a capture takes each
-// object of a kind the caller can read, which a MachineConfig or the next
-// module's kind must not get by default. A Namespace joins through AdoptProject
-// with its tenancy labels.
-var clusterAdoptableKinds = networkFamilyGVRs(true)
+// per resource row, not every platform kind: a capture takes each object of a
+// kind the caller can read, which a MachineConfig or the next module's kind
+// must not get by default. A Namespace joins through AdoptProject with its
+// tenancy labels.
+var clusterAdoptableKinds = adoptedGVRs(true)
 
-func networkFamilyGVRs(clusterScoped bool) []schema.GroupVersionResource {
+func adoptedGVRs(clusterScoped bool) []schema.GroupVersionResource {
 	var out []schema.GroupVersionResource
-	for _, k := range model.NetworkFamilyKinds() {
+	for _, k := range model.AdoptedKinds() {
 		if k.ClusterScoped == clusterScoped {
 			out = append(out, GVR(k))
 		}

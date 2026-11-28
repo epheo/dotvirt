@@ -44,6 +44,40 @@ func TestKindTableRoundTrips(t *testing.T) {
 	}
 }
 
+// Moving a path orphans every file committed under the old one: these are
+// fixed, as adoption and the generators place them.
+func TestDesktopRepoPaths(t *testing.T) {
+	for _, c := range []struct {
+		kind Kind
+		ns   string
+		want string
+	}{
+		{KindVdiPool, "team-a", "team-a/desktop-pools/design.yaml"},
+		{KindVdiClass, "", "desktop-classes/design.yaml"},
+	} {
+		if got := c.kind.RepoPath(c.ns, "design"); got != c.want {
+			t.Errorf("%s: %s, want %s", c.kind.Kind, got, c.want)
+		}
+	}
+	adopted := map[string]bool{}
+	for _, k := range AdoptedKinds() {
+		adopted[k.Kind] = true
+	}
+	for _, k := range []Kind{KindVdiPool, KindVdiClass, KindUDN} {
+		if !adopted[k.Kind] {
+			t.Errorf("adoption does not capture %s", k.Kind)
+		}
+	}
+	// A capture lists every desktop the caller may read, pending PINs
+	// included.
+	if adopted["VdiInstance"] {
+		t.Error("adoption captures desktops")
+	}
+	if r, _, _ := LookupKind(KindVdiPool.Kind); r.NetworkFamily {
+		t.Error("pools ride the network family's object routes, which read back a network form")
+	}
+}
+
 func TestKindAPIVersion(t *testing.T) {
 	if got := KindNS.APIVersion(); got != "v1" {
 		t.Errorf("core group: got %q", got)

@@ -20,6 +20,13 @@ func (p Policy) Allows(group, kind string) bool {
 	return slices.Contains(p.Allowed, GroupKind{group, kind})
 }
 
+// Extra reports whether a provider allowed kinds beyond the listed and the
+// impersonated ones: a kind a tenant repo may not apply is then this
+// install's rule, not the platform repo's alone.
+func (p Policy) Extra() bool {
+	return slices.ContainsFunc(p.Allowed, func(g GroupKind) bool { return !Impersonated(g.Group, g.Kind) })
+}
+
 // FormatGroupKinds spells gks as "group/kind" entries joined by commas, the
 // core group's as "/kind": the form the operator hands dotvirt.
 func FormatGroupKinds(gks []GroupKind) string {

@@ -84,6 +84,7 @@ func TestAdoptPathMatchesGeneratorLayout(t *testing.T) {
 		{"k8s.ovn.org/v1", "UserDefinedNetwork", "team-a/networks/web.yaml"},
 		{"networking.k8s.io/v1", "NetworkPolicy", "team-a/networkpolicies/web.yaml"},
 		{"k8s.ovn.org/v1", "EgressFirewall", "team-a/egressfirewalls/default.yaml"},
+		{"vdi.desku.be/v1alpha1", "VdiPool", "team-a/desktop-pools/web.yaml"},
 	} {
 		if got := adoptPath(liveObj(tc.apiVersion, tc.kind, "team-a", "web", nil)); got != tc.want {
 			t.Errorf("%s: got %s, want %s", tc.kind, got, tc.want)
@@ -195,6 +196,25 @@ func TestAdoptManifestStripsRevisionName(t *testing.T) {
 	}
 	if !strings.Contains(s, "name: u1.medium") || !strings.Contains(s, "name: fedora") {
 		t.Errorf("matcher names lost while stripping:\n%s", s)
+	}
+}
+
+// A pool comes under git, its desktops never: a capture never lists them, as
+// each carries its pending pairing PIN.
+func TestAdoptableDesktopPools(t *testing.T) {
+	dc := dynamicfake.NewSimpleDynamicClientWithCustomListKinds(runtime.NewScheme(), adoptableListKinds(),
+		liveObj("vdi.desku.be/v1alpha1", "VdiPool", "team-a", "design", nil),
+	)
+	dc.PrependReactor("list", "vdiinstances", func(clienttesting.Action) (bool, runtime.Object, error) {
+		t.Error("the capture listed desktops")
+		return true, nil, nil
+	})
+	got, _, err := NewClient(nil, nil, dc).AdoptableObjects(context.Background(), []string{"team-a"}, nil)
+	if err != nil {
+		t.Fatalf("AdoptableObjects: %v", err)
+	}
+	if len(got) != 1 || got[0].Path != "team-a/desktop-pools/design.yaml" {
+		t.Fatalf("want the pool alone, got %v", got)
 	}
 }
 

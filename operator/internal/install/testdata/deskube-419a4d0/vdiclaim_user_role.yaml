@@ -1,0 +1,30 @@
+# What a pool's users hold on claims, in the pool's namespace. A pool
+# binds its subjects to this role, the manager the owner of a desktop no
+# pool controls, and a platform that entitles its own users may bind
+# them to it too. The manager holds bind on it and, of these verbs, only
+# those it uses.
+# kustomize prefixes this name, and not the one in the manager's rule:
+# TestClaimUserRole in internal/controller holds the two together.
+# config/policy/vdipool_subjects.yaml asks each of these verbs of
+# whoever writes a pool's subjects: a verb added here goes there too,
+# and TestSubjectsPolicyAsksWhatTheClaimUserRoleGrants fails until then.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  labels:
+    app.kubernetes.io/name: deskube
+    app.kubernetes.io/managed-by: kustomize
+  name: vdiclaim-user-role
+rules:
+- apiGroups:
+  - vdi.desku.be
+  resources:
+  - vdiclaims
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch

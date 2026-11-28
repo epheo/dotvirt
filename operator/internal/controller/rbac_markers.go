@@ -112,4 +112,4 @@ package controller
 // +kubebuilder:rbac:groups=config.openshift.io,resources=ingresses,resourceNames=cluster,verbs=get
 // The operator guard (guard.go) is read by name to report it, never written: a
 // cluster admin installs it, so the operator cannot loosen what bounds it.
-// +kubebuilder:rbac:groups=admissionregistration.k8s.io,resources=validatingadmissionpolicies;validatingadmissionpolicybindings,resourceNames=dotvirt-operator-secrets;dotvirt-operator-accounts;dotvirt-operator-deployments;dotvirt-operator-claims;dotvirt-operator-bindings;dotvirt-operator-install;dotvirt-operator-frontdoor;dotvirt-operator-routes;dotvirt-operator-ingresses;dotvirt-operator-httproutes,verbs=get
+// +kubebuilder:rbac:groups=admissionregistration.k8s.io,resources=validatingadmissionpolicies;validatingadmissionpolicybindings,resourceNames=dotvirt-operator-secrets;dotvirt-operator-accounts;dotvirt-operator-deployments;dotvirt-operator-claims;dotvirt-operator-bindings;dotvirt-operator-install;dotvirt-operator-frontdoor;dotvirt-operator-routes;dotvirt-operator-ingresses;dotvirt-operator-httproutes;dotvirt-argo-desktops,verbs=get

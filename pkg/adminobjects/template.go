@@ -43,7 +43,8 @@ var TemplateParams = Params{
 // templateHeader says how to fill and apply the template, each value derived
 // from the cluster: never from the operator's status, which it writes.
 var templateHeader = `# The dotvirt operator guard: admission policies bounding the operator's own
-# account. A cluster admin installs it from the console (Install). Without the
+# account, and Argo CD's controllers' writes of desktop pools, desktops and
+# claims. A cluster admin installs it from the console (Install). Without the
 # console, derive each value from the cluster yourself (never copy one from the
 # operator's status or conditions, which the operator writes), fill the
 # placeholders and apply it. Run the lines below as a script: it stops when it

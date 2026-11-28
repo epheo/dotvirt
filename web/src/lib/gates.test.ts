@@ -10,6 +10,7 @@ import { ACCESS_UNKNOWN, NOT_IN_GIT } from './authoring';
 import {
 	clusterGate,
 	desktopGate,
+	desktopsGate,
 	hostGate,
 	imageGate,
 	namespaceHistoryGate,
@@ -52,6 +53,16 @@ describe('imageGate', () => {
 		expect(imageGate.delete('web').why).toBe('You may not delete boot images in web.');
 		await answer({ namespace: { namespace: 'web', bootImageDelete: true } });
 		expect(imageGate.delete('web').ok).toBe(true);
+	});
+});
+
+describe('desktopsGate', () => {
+	it('offers turning desktops on in the namespaces its project answer lists', async () => {
+		await answer({
+			namespace: { namespace: 'web', project: { name: 'shop', desktops: ['web'] } },
+		});
+		expect(desktopsGate.on('web', 'web').ok).toBe(true);
+		expect(desktopsGate.on('web', 'db').why).toBe('You may not turn desktops on in db.');
 	});
 });
 

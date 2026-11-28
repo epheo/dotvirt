@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"net/http"
@@ -219,7 +220,38 @@ func (s *Server) handleAdoptNamespace(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	result, err := s.draft.AdoptObjects(sc.id, sc.proj, ns, objs)
+	if err == nil {
+		result.Warning = changeset.JoinWarning(result.Warning, s.desktopsWarning(r.Context(), sc, ns, result))
+	}
 	respond(w, withUnreadable(result, ns, unreadable, denied), err)
+}
+
+// desktopsWarning is what v staging a desktop pool into ns says of desktops
+// there, "" when it stages none. Whether they are on is what Kubernetes shows
+// the caller, as the capabilities tell it: only to one who may list
+// rolebindings in ns, the others reading the same words whatever git holds.
+func (s *Server) desktopsWarning(ctx context.Context, sc scope, ns string, v model.DraftView) string {
+	if !slices.ContainsFunc(v.Items, func(it model.DraftItem) bool {
+		return it.Resource == string(draft.ResourceDesktopPool) && it.Namespace == ns
+	}) {
+		return ""
+	}
+	neutral := ns + ": a desktop pool applies only where a platform admin has turned desktops on."
+	if !s.capable(ctx, sc.id, sc.cluster, kindAction(verbList, model.KindRB, ns)) {
+		return neutral
+	}
+	full, ok := s.projectByName(sc.proj.Name)
+	if s.cfg.PlatformRepo == "" || !ok {
+		return neutral
+	}
+	on, _, err := s.draft.DesktopsNeeds(s.platformProject(), full, ns)
+	switch {
+	case err != nil && !errors.Is(err, changeset.ErrDesktopsOn) && !errors.Is(err, changeset.ErrDesktopsUngranted):
+		return neutral
+	case !on:
+		return ns + ": desktops are not on there, so the project's account may not apply the desktop pools staged until a platform admin turns them on."
+	}
+	return ""
 }
 
 // captureAdoptable runs the caller-token capture for one namespace ("" = the

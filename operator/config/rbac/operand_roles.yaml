@@ -193,11 +193,18 @@ rules:
   - apiGroups: ["portail.epheo.eu"]
     resources: ["gatewayparameters"]
     verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  # The kinds of desktop, from the platform repo. Never a project's pools: tenant repos
+  # declare those only once sync impersonation is in effect, and apply them as their
+  # projects' own accounts (dotvirt-tenant-desktops).
+  - apiGroups: ["vdi.desku.be"]
+    resources: ["vdiclasses"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
 ---
 # What the shared Argo controller keeps of dotvirt-argocd-apply once sync impersonation
 # is in effect: Argo diffs and health-checks with its own account and only applies as
 # the tiers' accounts, so it still reads every kind dotvirt's repos declare. The same
-# resources as dotvirt-argocd-apply, read verbs only.
+# resources as dotvirt-argocd-apply, and the kinds tenant repos apply only as their
+# own accounts, read verbs only.
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
@@ -247,6 +254,11 @@ rules:
     verbs: ["get", "list", "watch"]
   - apiGroups: ["portail.epheo.eu"]
     resources: ["gatewayparameters"]
+    verbs: ["get", "list", "watch"]
+  # Never vdiinstances: Argo shows a pool's desktops as its children, each with its
+  # pending pairing PIN, to whoever may read the Application.
+  - apiGroups: ["vdi.desku.be"]
+    resources: ["vdiclasses", "vdipools"]
     verbs: ["get", "list", "watch"]
 ---
 # The authoring SIGNAL the UI's SSAR-gate reads (create cudn/nncp/namespaces), and list,
@@ -366,6 +378,32 @@ rules:
     resources: ["certificates"]
     verbs: ["get", "list", "watch"]
 ---
+# DeskuBe's pool writes and claim verbs in a namespace with desktops on: the rules of
+# DeskuBe's vdipool editor and vdiclaim user roles, whose names carry a prefix each
+# DeskuBe install chooses (internal/install/testdata holds the copies they match). Its
+# admission asks whoever sets a pool's subjects for use on the pool and every claim verb.
+# Delete on pools lets its holders start, stop and release anyone's desktop of them.
+# Never `*` nor seat, nor desktops: each carries its pending pairing PIN. The platform
+# repo binds it per namespace to the subjects of that namespace's admin grant, its
+# project's Argo sync account among them (<ns>-desktops). The operator never binds it.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: dotvirt-tenant-desktops
+  labels:
+    app.kubernetes.io/name: dotvirt
+    app.kubernetes.io/managed-by: dotvirt-operator
+rules:
+  - apiGroups: ["vdi.desku.be"]
+    resources: ["vdipools"]
+    verbs: ["create", "delete", "get", "list", "patch", "update", "use", "watch"]
+  - apiGroups: ["vdi.desku.be"]
+    resources: ["vdipools/status"]
+    verbs: ["get"]
+  - apiGroups: ["vdi.desku.be"]
+    resources: ["vdiclaims"]
+    verbs: ["create", "delete", "get", "list", "patch", "update", "watch"]
+---
 # What the platform tier's Argo sync account needs beyond dotvirt-argocd-apply once
 # Argo syncs the platform repo as it: the Namespaces that repo declares, and `bind` on
 # the roles its project grants name, which is what lets it apply those RoleBindings
@@ -383,7 +421,8 @@ rules:
     verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
   - apiGroups: ["rbac.authorization.k8s.io"]
     resources: ["clusterroles"]
-    resourceNames: ["admin", "dotvirt-tenant-egress", "view", "edit", "dotvirt-tenant-egress-view", "dotvirt-tenant-routes", "dotvirt-tenant-gateway-view"]
+    resourceNames: ["admin", "dotvirt-tenant-egress", "view", "edit", "dotvirt-tenant-egress-view", "dotvirt-tenant-routes", "dotvirt-tenant-gateway-view",
+      "dotvirt-tenant-desktops"]
     verbs: ["bind"]
   # A Gateway on a VM Network polls portail's controller through the apiserver:
   # its pods' account is bound to portail's Role there, which grants

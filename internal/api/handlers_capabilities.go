@@ -236,8 +236,48 @@ func (s *Server) namespaceCaps(ctx context.Context, sc scope, ns string) model.N
 	if full, ok := s.projectByName(sc.proj.Name); ok && s.cfg.PlatformRepo != "" {
 		s.projectCaps(ctx, sc, full, &out.Project)
 		s.publishingCaps(ctx, sc, full, &out.Project)
+		s.desktopsCaps(ctx, sc, full, &out.Project)
 	}
 	return out
+}
+
+// desktopsCaps answers the desktops route over each namespace of project full
+// as handleDesktopsOn weighs it: DeskuBe served, the whole project in view or
+// any namespace claimable, and the gate's accesses allowed. DesktopsOn is
+// what Kubernetes shows the caller: the namespace's desktop grant, told only
+// to one who may list rolebindings there, the others' namespaces being
+// DesktopsUnseen. Run after projectCaps, whose SyncAccess it reads.
+func (s *Server) desktopsCaps(ctx context.Context, sc scope, full project.ProjectInfo, out *model.ProjectCaps) {
+	if s.unserved(ctx, model.KindVdiPool)[model.KindVdiPool] {
+		return
+	}
+	id, c := sc.id, sc.cluster
+	whole := len(sc.proj.Namespaces) == len(full.Namespaces) || s.capable(ctx, id, c, claimAction(""))
+	for _, ns := range full.Namespaces {
+		on, need, err := s.draft.DesktopsNeeds(s.platformProject(), full, ns)
+		switch {
+		case !s.capable(ctx, id, c, kindAction(verbList, model.KindRB, ns)):
+			out.DesktopsUnseen = append(out.DesktopsUnseen, ns)
+		case on:
+			out.DesktopsOn = append(out.DesktopsOn, ns)
+		}
+		if !whole {
+			continue
+		}
+		// Every grant is a RoleBinding there, which the gate dry-runs as the
+		// caller: without either verb none passes, so none is sent.
+		if ok, _ := s.anyAllowed(ctx, id, c, []action{kindAction(verbCreate, model.KindRB, ns), kindAction(verbUpdate, model.KindRB, ns)}); !ok {
+			continue
+		}
+		switch {
+		case errors.Is(err, changeset.ErrDesktopsUngranted):
+			if out.SyncAccess {
+				out.DesktopsUngranted = append(out.DesktopsUngranted, ns)
+			}
+		case s.needsAllowed(ctx, id, c, need, err):
+			out.Desktops = append(out.Desktops, ns)
+		}
+	}
 }
 
 // publishingCaps answers the publishing route over project full as
@@ -394,7 +434,7 @@ func (s *Server) handleModules(w http.ResponseWriter, r *http.Request) {
 	un := s.unserved(r.Context(), model.KindSub, model.KindOpGroup, model.KindMachCfg)
 	m.OLM = !un[model.KindSub] && !un[model.KindOpGroup]
 	m.MachineConfig = !un[model.KindMachCfg]
-	m.ExtraTenantKinds = len(s.cfg.TenantKinds.Allowed) > 0
+	m.ExtraTenantKinds = s.cfg.TenantKinds.Extra()
 	if s.cfg.Publish.On() && len(s.unserved(r.Context(), s.publishingKinds()...)) == 0 {
 		m.PublishDomain = s.cfg.Publish.Domain
 	}

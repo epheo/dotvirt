@@ -125,3 +125,12 @@ rules:
   - get
   - list
   - watch
+- apiGroups:
+  - vdi.desku.be
+  resources:
+  - vdiclasses
+  - vdipools
+  verbs:
+  - get
+  - list
+  - watch

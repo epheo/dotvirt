@@ -122,6 +122,7 @@ func (r *DotvirtReconciler) operatorGuard(ctx context.Context, dv *dotvirtv1alph
 	case err != nil:
 		return metav1.ConditionUnknown, "Unreadable", "could not read the operator guard: " + err.Error()
 	}
+	rc.argoGuarded = argoGuarded(want, states)
 	// What the install no longer asks for but is still there: reported to remove.
 	for _, ref := range adminobjects.Leftovers(p) {
 		left := &unstructured.Unstructured{}
@@ -141,6 +142,22 @@ func (r *DotvirtReconciler) operatorGuard(ctx context.Context, dv *dotvirtv1alph
 		}
 	}
 	return metav1.ConditionTrue, string(adminobjects.Installed), "the admission policies bounding " + p.Operator + " are installed as rendered"
+}
+
+// argoGuarded reports whether the guard's Argo policy and its binding are
+// installed as rendered: what the rest of the guard is does not change it.
+func argoGuarded(want []adminobjects.Object, states []adminobjects.State) bool {
+	found := 0
+	for i, w := range want {
+		if w.Object.GetName() != adminobjects.GuardArgoName {
+			continue
+		}
+		if states[i] != adminobjects.Installed {
+			return false
+		}
+		found++
+	}
+	return found == 2
 }
 
 // appsDomain is the cluster's ingress domain, read as the console reads it

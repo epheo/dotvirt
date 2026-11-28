@@ -342,6 +342,25 @@ export interface ProjectCaps {
    * them. Set with PublishingOn or an allowed stage.
    */
   publishingReach?: string[];
+  /**
+   * Desktops are the project's namespaces where the caller may stage
+   * turning desktops on: DeskuBe's pool writes and claim verbs there, to the
+   * namespace's admins and its repo, or what that grant lacks. Empty where
+   * the cluster serves no DeskuBe.
+   */
+  desktops?: string[];
+  /**
+   * DesktopsOn are the namespaces whose desktop grant git holds, told only
+   * to a caller who may list rolebindings there; DesktopsUnseen are those
+   * where the caller may not.
+   */
+  desktopsOn?: string[];
+  desktopsUnseen?: string[];
+  /**
+   * DesktopsUngranted are the namespaces where desktops wait on an admin
+   * grant in git, which SyncAccess stages: told only to a caller who may.
+   */
+  desktopsUngranted?: string[];
 }
 /**
  * ForgeAdminCredential is a managed forge's admin sign-in.

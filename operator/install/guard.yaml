@@ -1,5 +1,6 @@
 # The dotvirt operator guard: admission policies bounding the operator's own
-# account. A cluster admin installs it from the console (Install). Without the
+# account, and Argo CD's controllers' writes of desktop pools, desktops and
+# claims. A cluster admin installs it from the console (Install). Without the
 # console, derive each value from the cluster yourself (never copy one from the
 # operator's status or conditions, which the operator writes), fill the
 # placeholders and apply it. Run the lines below as a script: it stops when it
@@ -978,5 +979,69 @@ metadata:
   name: dotvirt-operator-frontdoor
 spec:
   policyName: dotvirt-operator-frontdoor
+  validationActions:
+  - Deny
+---
+# Bounds Argo CD's application controllers: none writes a desktop pool, desktop or claim as itself, so a project's pools apply only as the project's own account
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  labels:
+    app.kubernetes.io/name: dotvirt
+    app.kubernetes.io/part-of: dotvirt-operator-guard
+  name: dotvirt-argo-desktops
+spec:
+  failurePolicy: Fail
+  matchConditions:
+  - expression: request.userInfo.username == "system:serviceaccount:${ARGO_NAMESPACE}:${ARGO_CONTROLLER}"
+      || (request.userInfo.username.startsWith("system:serviceaccount:") && (request.userInfo.username.endsWith(":argocd-application-controller")
+      || request.userInfo.username.endsWith("-argocd-application-controller")))
+    name: argo-controller
+  matchConstraints:
+    resourceRules:
+    - apiGroups:
+      - vdi.desku.be
+      apiVersions:
+      - '*'
+      operations:
+      - CREATE
+      - UPDATE
+      resources:
+      - vdipools
+    - apiGroups:
+      - vdi.desku.be
+      apiVersions:
+      - '*'
+      operations:
+      - CREATE
+      - UPDATE
+      resources:
+      - vdiinstances
+    - apiGroups:
+      - vdi.desku.be
+      apiVersions:
+      - '*'
+      operations:
+      - CREATE
+      - UPDATE
+      resources:
+      - vdiclaims
+  validations:
+  - expression: "false"
+    message: 'Argo CD''s application controller writes no desktop pool, desktop or
+      claim as itself: a project''s repo applies its pools as the project''s own account,
+      under sync impersonation (dotvirt operator guard)'
+    reason: Forbidden
+---
+# Enforces dotvirt-argo-desktops
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  labels:
+    app.kubernetes.io/name: dotvirt
+    app.kubernetes.io/part-of: dotvirt-operator-guard
+  name: dotvirt-argo-desktops
+spec:
+  policyName: dotvirt-argo-desktops
   validationActions:
   - Deny

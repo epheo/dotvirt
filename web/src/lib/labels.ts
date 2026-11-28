@@ -42,6 +42,8 @@ export const DRAFT_RESOURCE_LABEL: Record<string, string> = {
 	drs: 'Rebalancing',
 	template: 'Template',
 	publishing: 'Publishing',
+	desktopclass: 'Desktop class',
+	desktoppool: 'Desktop pool',
 };
 
 const own = (m: Record<string, string>, k: string) =>

@@ -82,8 +82,37 @@ subjects:
 An author is the same pair with `edit` in place of `view`.
 Bind every namespace of the project: a person who sees part of a project does not read its repo.
 
+## Desktops
+
+Where the cluster serves DeskuBe, a platform admin turns desktops on per project namespace, from the project's Configure tab.
+It stages one RoleBinding in the platform repo, beside the namespace's admin grant, which re-renders it:
+
+| RoleBinding | Role | Subjects |
+| --- | --- | --- |
+| `<ns>-desktops` | `dotvirt-tenant-desktops` | the admin grant's subjects, the project's sync account among them |
+
+`dotvirt-tenant-desktops` holds the rules of DeskuBe's pool editor and claim user roles: pool writes, `use` on pools, and the claim verbs.
+DeskuBe's admission asks these of whoever sets a pool's subjects, the sync account included.
+Delete on pools lets a project admin start, stop and release anyone's desktop of them with `oc`.
+The console does so once it reads desktops, which comes with DeskuBe's VdiPairing.
+dotvirt ships the role, so no binding depends on the name prefix a DeskuBe install chooses.
+It grants no `*`, no `seat`, no `assign`, and nothing on desktops.
+
+A project repo declares desktop pools only once Argo CD applies them as the project's own account for sure:
+- the cluster serves DeskuBe;
+- sync impersonation is in effect, as an earlier operator pass saw;
+- the installed operator guard holds `dotvirt-argo-desktops`, which refuses every Argo CD controller's own writes of pools, desktops and claims.
+
+The guard closes what impersonation alone leaves open: an AppProject or `argocd-cm` edited by hand, or a controller older than its CRDs, falls back to the controller's account, which on community Argo CD holds `seat`.
+A cluster admin installs it from the console's Install action, or from the release's `install/guard.yaml`.
+Until all three hold, dotvirt refuses to stage a pool, and Argo CD refuses one a repo declares.
+No repo declares desktops, claims or pairings: a desktop carries its pending pairing PIN.
+
+DeskuBe aggregates its pool and claim viewer roles into `view`, so every project persona reads pools and claims.
+No persona reads desktops through dotvirt's grants.
+
 ## What the platform sync account may bind
 
 With sync impersonation on, Argo applies the platform repo as `dotvirt-platform-sync`.
-That account may bind exactly the project personas' roles: `admin`, `dotvirt-tenant-egress`, `view`, `edit` and `dotvirt-tenant-egress-view` (`pkg/tenancy.ProjectGrantRoles`).
+That account may bind exactly the project personas' roles: `admin`, `dotvirt-tenant-egress`, `view`, `edit`, `dotvirt-tenant-egress-view`, the publishing roles `dotvirt-tenant-routes` and `dotvirt-tenant-gateway-view`, and `dotvirt-tenant-desktops` (`pkg/tenancy.ProjectGrantRoles`).
 A RoleBinding naming any other role holds the impersonation switch back, and the operator names it.

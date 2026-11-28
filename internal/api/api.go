@@ -23,7 +23,6 @@ import (
 	"time"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
-	"k8s.io/apimachinery/pkg/runtime/schema"
 
 	"github.com/epheo/dotvirt/internal/argo"
 	"github.com/epheo/dotvirt/internal/auth"
@@ -84,8 +83,8 @@ type Reader interface {
 	Templates(proj project.ProjectInfo) []model.Template
 	// DeclaredFiles maps every object proj's base branch declares to its file.
 	DeclaredFiles(proj project.ProjectInfo) (map[model.ObjectRef]string, error)
-	// DeclaredKinds lists every kind proj's base branch declares.
-	DeclaredKinds(proj project.ProjectInfo) ([]schema.GroupKind, error)
+	// DeclaredKinds lists every kind proj's base branch declares, and where.
+	DeclaredKinds(proj project.ProjectInfo) ([]changeset.DeclaredKind, error)
 	// ObjectSpec reads a declared object back as the spec its create form accepts.
 	ObjectSpec(proj project.ProjectInfo, resource, namespace, name string) (model.ObjectSpec, error)
 	DRSState(proj project.ProjectInfo) (model.DRSGitState, error)
@@ -156,6 +155,9 @@ type Draft interface {
 	// StagePublishNamespace stages target's publish namespace into the
 	// platform draft, for a project the cluster holds none for.
 	StagePublishNamespace(id auth.Identity, commitProj, target project.ProjectInfo, pt changeset.PublishTarget, live changeset.LiveNamespaces) (model.DraftView, error)
+	// StageDesktops stages what turning desktops on in target's namespace ns
+	// lacks into the platform draft.
+	StageDesktops(id auth.Identity, commitProj, target project.ProjectInfo, ns string) (model.DraftView, error)
 	// Resync runs with dotvirt's SA (Argo operations carry no user context);
 	// the implementation weighs what the sync applies under id's own token
 	// before escalating, so no future caller can reach the SA-privileged patch
@@ -169,6 +171,7 @@ type Draft interface {
 	SyncAccessNeeds(commitProj, target project.ProjectInfo) ([]changeset.Access, error)
 	PublishingNeeds(commitProj, target project.ProjectInfo, pt changeset.PublishTarget) (changeset.PublishPlan, []changeset.Access, error)
 	PublishNamespaceNeeds(commitProj, target project.ProjectInfo, pt changeset.PublishTarget) ([]changeset.Access, error)
+	DesktopsNeeds(commitProj, target project.ProjectInfo, ns string) (on bool, need []changeset.Access, err error)
 	ReleaseNeeds(commitProj, target project.ProjectInfo) (need []changeset.Access, residue []string, err error)
 	EnableDRSNeeds(proj project.ProjectInfo, spec json.RawMessage) ([]changeset.Access, error)
 	DisableDRSNeeds(proj project.ProjectInfo) ([]changeset.Access, error)

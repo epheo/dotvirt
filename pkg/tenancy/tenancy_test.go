@@ -137,6 +137,7 @@ func TestWhatEachRepoMayDeclare(t *testing.T) {
 		{"policy.networking.k8s.io", "BaselineAdminNetworkPolicy"},
 		{"nmstate.io", "NodeNetworkConfigurationPolicy"},
 		{"machineconfiguration.openshift.io", "MachineConfig"},
+		{"vdi.desku.be", "VdiClass"},
 	}
 	platformNamespaced := []gk{
 		{"k8s.ovn.org", "UserDefinedNetwork"},
@@ -151,6 +152,7 @@ func TestWhatEachRepoMayDeclare(t *testing.T) {
 	}
 	for name, c := range map[string]struct{ got, want []gk }{
 		"tenant":              {gks(TenantKinds), tenant},
+		"impersonated":        {gks(ImpersonatedKinds), []gk{{"vdi.desku.be", "VdiPool"}}},
 		"platform cluster":    {gks(PlatformKinds(true)), platformCluster},
 		"platform namespaced": {gks(PlatformKinds(false)), platformNamespaced},
 	} {

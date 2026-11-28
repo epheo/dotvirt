@@ -283,6 +283,13 @@ func RoutesManifest(s RoleBindingSpec) (path string, content []byte, err error) 
 	return grantManifest(s, tenancy.RoutesBinding(s.Namespace), tenancy.TenantRoutesRole)
 }
 
+// DesktopsManifest renders a namespace's desktop pool writes
+// (tenancy.TenantDesktopsRole) to the same subjects as its
+// RoleBindingManifest, its sync account among them. s.Role does not apply.
+func DesktopsManifest(s RoleBindingSpec) (path string, content []byte, err error) {
+	return grantManifest(s, tenancy.DesktopsBinding(s.Namespace), tenancy.TenantDesktopsRole)
+}
+
 // GatewayViewManifest renders the read of a project's Gateway in its publish
 // namespace s.Namespace (tenancy.TenantGatewayViewRole) for s's kept
 // subjects. s.Role does not apply.

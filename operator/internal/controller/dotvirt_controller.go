@@ -381,6 +381,11 @@ type reconcileCtx struct {
 	tenantKindsRead bool
 	// impersonation is impersonating's answer for this pass, nil until asked.
 	impersonation *bool
+	// desktopsServed: discovery served DeskuBe's pools this pass.
+	desktopsServed bool
+	// argoGuarded: the guard's Argo policy and its binding are installed as
+	// rendered, so no Argo controller writes DeskuBe's kinds as itself.
+	argoGuarded bool
 	// grantLanding: the forge credential is refused though its grant's
 	// RoleBinding exists, which the apiserver's RBAC caches may still lag.
 	grantLanding bool
@@ -399,7 +404,7 @@ func (r *DotvirtReconciler) newReconcileCtx(ctx context.Context, dv *dotvirtv1al
 // reconcileDependencies gates on the hard prerequisite: ArgoCD is a PREREQUISITE
 // we never install; if absent, record why and requeue (the admin may install the
 // prereq operator). KubeVirt/OVN-K/NMState/CDI are soft - note them and proceed.
-func (r *DotvirtReconciler) reconcileDependencies(ctx context.Context, dv *dotvirtv1alpha1.Dotvirt, _ *reconcileCtx) (*ctrl.Result, error) {
+func (r *DotvirtReconciler) reconcileDependencies(ctx context.Context, dv *dotvirtv1alpha1.Dotvirt, rc *reconcileCtx) (*ctrl.Result, error) {
 	probe := r.probe
 	if probe == nil {
 		probe = deps.Probe
@@ -419,6 +424,7 @@ func (r *DotvirtReconciler) reconcileDependencies(ctx context.Context, dv *dotvi
 			depRes.Summary(), dotvirtv1alpha1.PhaseBlockedOnDependencies, time.Minute), nil
 	}
 	r.resolveSSO(dv, depRes.OpenShiftOAuth)
+	rc.desktopsServed = depRes.Desktops
 	r.setCondition(dv, dotvirtv1alpha1.ConditionDependenciesReady, metav1.ConditionTrue, "Satisfied", depRes.Summary())
 	return nil, nil
 }

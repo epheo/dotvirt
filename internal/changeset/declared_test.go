@@ -70,15 +70,19 @@ func TestPlacementOnBranch(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := []schema.GroupKind{
-		{Group: "cdi.kubevirt.io", Kind: "DataVolume"},
-		{Group: "k8s.cni.cncf.io", Kind: "NetworkAttachmentDefinition"},
-		{Group: "k8s.ovn.org", Kind: "ClusterUserDefinedNetwork"},
-		{Group: "kubevirt.io", Kind: "VirtualMachine"},
-		{Group: "networking.k8s.io", Kind: "NetworkPolicy"},
+	// Each kind where its objects name a namespace; one left to the
+	// directory, or cluster-scoped, is unplaced.
+	want := []DeclaredKind{
+		{GroupKind: schema.GroupKind{Group: "cdi.kubevirt.io", Kind: "DataVolume"}, Unplaced: true},
+		{GroupKind: schema.GroupKind{Group: "k8s.cni.cncf.io", Kind: "NetworkAttachmentDefinition"}, Namespaces: []string{"alpha"}},
+		{GroupKind: schema.GroupKind{Group: "k8s.ovn.org", Kind: "ClusterUserDefinedNetwork"}, Unplaced: true},
+		{GroupKind: schema.GroupKind{Group: "kubevirt.io", Kind: "VirtualMachine"}, Namespaces: []string{"alpha"}, Unplaced: true},
+		{GroupKind: schema.GroupKind{Group: "networking.k8s.io", Kind: "NetworkPolicy"}, Namespaces: []string{"beta"}, Unplaced: true},
 	}
-	if !slices.Equal(kinds, want) {
-		t.Errorf("declared kinds = %v, want %v", kinds, want)
+	if !slices.EqualFunc(kinds, want, func(a, b DeclaredKind) bool {
+		return a.GroupKind == b.GroupKind && slices.Equal(a.Namespaces, b.Namespaces) && a.Unplaced == b.Unplaced
+	}) {
+		t.Errorf("declared kinds = %+v, want %+v", kinds, want)
 	}
 }
 

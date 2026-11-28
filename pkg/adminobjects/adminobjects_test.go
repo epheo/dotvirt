@@ -68,6 +68,7 @@ func TestGuardShape(t *testing.T) {
 		GuardRoutesName:      {{"route.openshift.io", "routes"}},
 		GuardIngressesName:   {{"networking.k8s.io", "ingresses"}},
 		GuardHTTPRoutesName:  {{"gateway.networking.k8s.io", "httproutes"}},
+		GuardArgoName:        {{"vdi.desku.be", "vdipools"}, {"vdi.desku.be", "vdiinstances"}, {"vdi.desku.be", "vdiclaims"}},
 	}
 	for _, name := range GuardNames {
 		i := index(objs, "ValidatingAdmissionPolicy", name)
@@ -92,8 +93,14 @@ func TestGuardShape(t *testing.T) {
 		if !slices.Equal(got, match[name]) {
 			t.Errorf("%s matches %v, want %v", name, got, match[name])
 		}
-		if len(p.Spec.MatchConditions) != 1 || p.Spec.MatchConditions[0].Expression != `request.userInfo.username == "`+params.Operator+`"` {
-			t.Errorf("%s condition = %+v, want the exact username", name, p.Spec.MatchConditions)
+		want := `request.userInfo.username == "` + params.Operator + `"`
+		if name == GuardArgoName {
+			want = `request.userInfo.username == "system:serviceaccount:openshift-gitops:openshift-gitops-argocd-application-controller" || ` +
+				`(request.userInfo.username.startsWith("system:serviceaccount:") && (request.userInfo.username.endsWith(":argocd-application-controller") || ` +
+				`request.userInfo.username.endsWith("-argocd-application-controller")))`
+		}
+		if len(p.Spec.MatchConditions) != 1 || p.Spec.MatchConditions[0].Expression != want {
+			t.Errorf("%s condition = %+v, want %s", name, p.Spec.MatchConditions, want)
 		}
 	}
 	named := func(name string) []string {

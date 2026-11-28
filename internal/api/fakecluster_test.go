@@ -508,7 +508,8 @@ type planeDraft struct {
 	releaseStaged, releaseResidue []string
 
 	declared map[model.ObjectRef]string // what DeclaredFiles answers
-	kinds    []schema.GroupKind         // what DeclaredKinds answers
+	kinds    []schema.GroupKind         // what DeclaredKinds answers, each unplaced
+	placed   []changeset.DeclaredKind   // and these, where they say
 	staged   bool                       // a call staged something: Get shows a draft
 }
 
@@ -666,6 +667,11 @@ func (d *planeDraft) StagePublishNamespace(_ auth.Identity, commit, target proje
 	return stagedView, nil
 }
 
+func (d *planeDraft) StageDesktops(_ auth.Identity, commit, target project.ProjectInfo, ns string) (model.DraftView, error) {
+	d.record("StageDesktops "+commit.Name+","+target.Name+" "+ns, nil)
+	return stagedView, nil
+}
+
 func (d *planeDraft) ReleaseDeclared(_ auth.Identity, commit, target project.ProjectInfo) ([]string, []string, error) {
 	d.record("ReleaseDeclared "+commit.Name+","+target.Name, nil)
 	return d.releaseStaged, d.releaseResidue, nil
@@ -690,8 +696,12 @@ func (d *planeDraft) ProposedBranch(id auth.Identity, _ project.ProjectInfo) str
 	return id.Username
 }
 
-func (d *planeDraft) DeclaredKinds(project.ProjectInfo) ([]schema.GroupKind, error) {
-	return d.kinds, nil
+func (d *planeDraft) DeclaredKinds(project.ProjectInfo) ([]changeset.DeclaredKind, error) {
+	out := slices.Clone(d.placed)
+	for _, k := range d.kinds {
+		out = append(out, changeset.DeclaredKind{GroupKind: k, Unplaced: true})
+	}
+	return out, nil
 }
 
 // The Needs answer nothing: a test of what the gate asks runs a real
@@ -713,6 +723,9 @@ func (d *planeDraft) PublishingNeeds(project.ProjectInfo, project.ProjectInfo, c
 }
 func (d *planeDraft) PublishNamespaceNeeds(project.ProjectInfo, project.ProjectInfo, changeset.PublishTarget) ([]changeset.Access, error) {
 	return nil, nil
+}
+func (d *planeDraft) DesktopsNeeds(project.ProjectInfo, project.ProjectInfo, string) (bool, []changeset.Access, error) {
+	return false, nil, nil
 }
 func (d *planeDraft) ReleaseNeeds(project.ProjectInfo, project.ProjectInfo) ([]changeset.Access, []string, error) {
 	return nil, d.releaseResidue, nil

@@ -269,6 +269,25 @@ func (s *Server) handlePublishNamespace(w http.ResponseWriter, r *http.Request) 
 	respond(w, view, err)
 }
 
+// handleDesktopsOn stages what turning desktops on in one of a project's
+// namespaces lacks: DeskuBe's grant there lands in the platform repo, weighed
+// by the coordinator as the caller.
+func (s *Server) handleDesktopsOn(w http.ResponseWriter, r *http.Request) {
+	if !s.gateServed(w, r, model.KindVdiPool) {
+		return
+	}
+	plat, ok := s.platformScopeGated(w, r)
+	if !ok {
+		return
+	}
+	target, ok := s.tenancyTarget(w, r, plat)
+	if !ok {
+		return
+	}
+	view, err := s.draft.StageDesktops(plat.id, plat.proj, target, r.PathValue("namespace"))
+	respond(w, view, err)
+}
+
 // publishingKinds are the kinds publishing stages, each of which the cluster
 // must serve: a Certificate only with an issuer.
 func (s *Server) publishingKinds() []model.Kind {
