@@ -2278,7 +2278,7 @@ const deskube = {
 			phase: 'Stopped',
 			session: undefined,
 		}),
-		desk('web-prod', 'carol-dev', { owner: 'carol' }),
+		desk('web-prod', 'carol-dev', { owner: 'carol', claim: 'carol' }),
 	],
 	claims: [
 		{
@@ -2321,6 +2321,16 @@ const deskube = {
 			running: false,
 			phase: 'Bound',
 			lastUsed: iso(26 * 60),
+		},
+		// carol starts and stops her desktop on a claim naming it.
+		{
+			namespace: 'web-prod',
+			name: 'carol',
+			uid: 'uid-carol',
+			user: 'carol',
+			desktop: 'carol-dev',
+			running: true,
+			phase: 'Bound',
 		},
 		{
 			namespace: 'web-prod',

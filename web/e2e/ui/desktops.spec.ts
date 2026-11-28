@@ -566,7 +566,16 @@ test('a desktop made one by one restarts from its page', async ({ page }) => {
 	await login(page);
 	await page.goto('/desktops/team-web/web-prod/desktop/carol-dev');
 	const main = page.locator('main');
+	await expect(main.getByRole('region', { name: 'Desktop', exact: true })).toContainText(
+		/Claimed by\s*carol/,
+	);
+	// carol's claim on it is no claim of a pool: the rights are asked without it.
+	const asked = page.waitForRequest((r) => {
+		const u = new URL(r.url());
+		return u.pathname === '/api/capabilities' && u.searchParams.has('desktops');
+	});
 	await main.getByRole('button', { name: 'Actions for carol-dev' }).click();
+	expect(new URL((await asked).url()).search).toBe('?desktops=web-prod&desktop=carol-dev');
 	await page.getByRole('button', { name: 'Restart...' }).click();
 	const dialog = page.getByRole('dialog');
 	await expect(dialog).toContainText("carol's session, if one is open, ends.");

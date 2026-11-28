@@ -212,7 +212,8 @@ describe('desktopGate', () => {
 			(namespace: string, desktop: string, claim: string) =>
 				Promise.resolve({ desktops: { namespace, desktop, claim, restart: desktop === 'solo' } }),
 		);
-		const solo = { namespace: 'web', name: 'solo', pool: '', own: false };
+		// Its owner's claim is no claim of a pool: the answer is asked without it.
+		const solo = { namespace: 'web', name: 'solo', pool: '', claim: { name: 'solo' }, own: true };
 		desktopGate.restart(solo);
 		desktopGate.restart(bobs);
 		desktopGate.restart({ ...bobs, claim: { name: 'eng-carol' } });

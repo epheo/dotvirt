@@ -188,8 +188,16 @@ type DesktopAct = {
 	own: boolean;
 };
 
+// The owner's claim on a desktop made one by one is never acted on here: the
+// server answers only a claim of the desktop's pool.
 const desk = (t: DesktopAct, pick: (d: DesktopCaps) => boolean, what: string) =>
-	caps.desktopGate(t.namespace, t.name, t.claim?.name ?? '', pick, `You may not ${what}.`);
+	caps.desktopGate(
+		t.namespace,
+		t.name,
+		(t.pool && t.claim?.name) || '',
+		pick,
+		`You may not ${what}.`,
+	);
 
 export const desktopGate = {
 	restart: (t: DesktopAct) => desk(t, (c) => c.restart, `restart ${t.name}`),
