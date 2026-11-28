@@ -689,6 +689,10 @@ export const api = {
 	// Stage the project's publish namespace, which the cluster lacks.
 	publishNamespace: (project: string) =>
 		post<DraftView>(`/api/projects/${enc(project)}/publish-namespace`, {}),
+	// Stage what turning desktops on in one of the project's namespaces lacks:
+	// DeskuBe's grants there, in the platform repo.
+	desktopsOn: (project: string, namespace: string) =>
+		post<DraftView>(`/api/projects/${enc(project)}/namespaces/${enc(namespace)}/desktops`, {}),
 
 	// The template library. Deploy renders server-side
 	// and stages the VM into the draft; save derives a template from a VM's git

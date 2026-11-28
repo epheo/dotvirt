@@ -1,7 +1,7 @@
 <script lang="ts">
 	import type { Project } from '#lib/api.js';
 	import { plural } from '#lib/format.js';
-	import { projectGate, projectNS, publishGate } from '#lib/gates.js';
+	import { desktopsGate, projectGate, projectNS, publishGate } from '#lib/gates.js';
 	import { caps } from '#lib/state/caps.svelte.js';
 	import { modules } from '#lib/state/modules.svelte.js';
 	import { ui } from '#lib/state/ui.svelte.js';
@@ -26,6 +26,7 @@
 	} = $props();
 
 	const domain = $derived(modules.value?.publishDomain ?? '');
+	const desktops = $derived(!!modules.value?.desktops);
 </script>
 
 <div class="grid items-start gap-4 lg:grid-cols-2">
@@ -162,6 +163,42 @@
 								: 'their'} own.
 						</span>
 					{/if}
+				</div>
+			{/if}
+			{#if desktops && p.repo && p.namespaces.length}
+				{@const first = projectNS(p)}
+				{@const c = caps.ns(first)?.project}
+				<div class="flex flex-col gap-1.5 border-t border-line-soft px-card py-3 text-[13px]">
+					<div class="flex items-center gap-2">
+						<span class="text-xs font-semibold text-ink-soft">Desktops</span>
+						<StageChip kind="pr" />
+					</div>
+					{#each p.namespaces as n (n.namespace)}
+						{@const on = !!c?.desktopsOn?.includes(n.namespace)}
+						{@const gate = desktopsGate.on(first, n.namespace)}
+						<div class="flex flex-wrap items-center gap-2">
+							<span class="font-mono text-xs">{n.namespace}</span>
+							{#if on}
+								<span class="text-ink-soft">On</span>
+							{/if}
+							{#if c?.desktopsUngranted?.includes(n.namespace)}
+								<span class="text-ink-muted">
+									Not yet: desktops follow its admin grant, which Grant sync access stages.
+								</span>
+							{:else if !on || gate.ok}
+								<Button
+									variant="outline"
+									size="sm"
+									disabled={!gate.ok}
+									title={gate.why}
+									onclick={() =>
+										(ui.modal = { kind: 'desktopsOn', project: p.name, namespace: n.namespace })}
+								>
+									{on ? 'Update desktops' : 'Turn desktops on'}
+								</Button>
+							{/if}
+						</div>
+					{/each}
 				</div>
 			{/if}
 			<!-- Quota-aware capacity: the project's ResourceQuotas. -->

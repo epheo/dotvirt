@@ -822,6 +822,27 @@ async function handleAPI(req, res, url) {
 		return sendJSON(res, 200, draftFor('platform'));
 	}
 
+	// Desktops in one project namespace: DeskuBe's writes and the claim acts,
+	// staged in the platform draft; refused on the capability the UI gates it
+	// by.
+	m = path.match(/^\/api\/projects\/([^/]+)\/namespaces\/([^/]+)\/desktops$/);
+	if (m && req.method === 'POST') {
+		const p = state.scenario.inventory.projects.find((x) => x.name === m[1]);
+		if (!p?.namespaces.length) return sendText(res, 404, 'project not found');
+		const caps = namespaceCaps(s, p, p.namespaces[0].namespace).project;
+		if (!caps.desktops?.includes(m[2]))
+			return sendText(res, 403, `you may not bind dotvirt-tenant-desktops in ${m[2]}`);
+		for (const name of [`${m[2]}-desktops`, `${m[2]}-desktops-admin`])
+			stageInto('platform', {
+				kind: 'create',
+				resource: 'rolebinding',
+				namespace: m[2],
+				name,
+				changes: [],
+			});
+		return sendJSON(res, 200, draftFor('platform'));
+	}
+
 	m = path.match(/^\/api\/projects\/([^/]+)\/(history(\/|$)|revert$|proposals\/(\d+)$)/);
 	if (m && m[1] === 'platform' && !m[4] && !clusterCaps(s).platformRead)
 		return sendText(res, 403, 'forbidden: not authorized to read the platform repo');

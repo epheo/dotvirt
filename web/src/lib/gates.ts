@@ -68,6 +68,13 @@ export const publishGate = {
 		proj(n, (c) => !!c.project.publishNamespaceCreate, "create this project's publish namespace"),
 };
 
+// Desktops: DeskuBe's grants in one project namespace, staged by a platform
+// admin. n is any namespace of the project, whose answer covers them all.
+export const desktopsGate = {
+	on: (n: string, namespace: string) =>
+		proj(n, (c) => !!c.project.desktops?.includes(namespace), `turn desktops on in ${namespace}`),
+};
+
 // templateGate is writing one template library: the shared one ('platform'),
 // or the project's that namespace belongs to.
 export function templateGate(library: string, namespace: string): Gate {

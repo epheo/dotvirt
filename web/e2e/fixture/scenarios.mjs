@@ -2403,6 +2403,26 @@ const desktopsnovms = {
 	desktops: deskube,
 };
 
+// The caller may turn desktops on in web-prod and not in db-prod; batch-prod
+// has them on in git.
+const desktopsgrants = {
+	...desktops,
+	name: 'desktopsgrants',
+	capabilities: {
+		'web-prod': { project: { desktops: ['web-prod'] } },
+		'batch-prod': { project: { desktopsOn: ['batch-prod'] } },
+	},
+};
+// web-prod has no admin grant in git for its desktop grants to follow.
+const desktopsungranted = {
+	...desktopsgrants,
+	name: 'desktopsungranted',
+	capabilities: {
+		...desktopsgrants.capabilities,
+		'web-prod': { project: { syncAccess: true, desktopsUngranted: ['web-prod'] } },
+	},
+};
+
 // --- publishing ---
 // The install publishes under apps.example.com. team-web may be turned on and
 // its web-edge namespace, on a VM Network of its own, is not reached; this
@@ -2545,6 +2565,8 @@ export const scenarios = {
 	desktopsreclaimed,
 	desktopsstale,
 	desktopsnovms,
+	desktopsgrants,
+	desktopsungranted,
 	classquota,
 	replicatedquota,
 	publishing,
