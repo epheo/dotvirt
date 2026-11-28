@@ -1,7 +1,12 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { Inventory } from '#lib/api.js';
 
-vi.mock('#lib/api.js', () => ({ api: {}, Unauthorized: class {}, withRetry: vi.fn() }));
+vi.mock('#lib/api.js', async (actual) => ({
+	...(await actual<object>()),
+	api: {},
+	Unauthorized: class {},
+	withRetry: vi.fn(),
+}));
 
 import { inventory } from '#lib/state/inventory.svelte.js';
 

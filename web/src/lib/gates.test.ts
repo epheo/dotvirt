@@ -4,7 +4,7 @@ const api = vi.hoisted(() => ({
 	api: { capabilities: vi.fn(), desktopCapabilities: vi.fn() },
 	Unauthorized: class extends Error {},
 }));
-vi.mock('#lib/api.js', () => api);
+vi.mock('#lib/api.js', async (actual) => ({ ...(await actual<object>()), ...api }));
 
 import { ACCESS_UNKNOWN, NOT_IN_GIT } from './authoring';
 import {
