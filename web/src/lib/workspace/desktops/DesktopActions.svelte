@@ -1,74 +1,98 @@
 <script lang="ts">
 	import { ChevronDown } from '@lucide/svelte';
 	import { api, type DesktopClaim } from '#lib/api.js';
-	import { person, type DesktopRow } from '#lib/desktops.js';
+	import { person, restartHeld, type DesktopRow } from '#lib/desktops.js';
 	import { desktopGate } from '#lib/gates.js';
 	import { action } from '#lib/resource.svelte.js';
 	import { desktops } from '#lib/state/desktops.svelte.js';
 	import { session } from '#lib/state/session.svelte.js';
 	import { ui } from '#lib/state/ui.svelte.js';
+	import Button from '#lib/components/Button.svelte';
 	import ConfirmDelete from '#lib/components/ConfirmDelete.svelte';
 	import Consequence from '#lib/components/Consequence.svelte';
 	import ContextMenu from '#lib/components/ContextMenu.svelte';
+	import ErrorNote from '#lib/components/ErrorNote.svelte';
 	import MenuItem from '#lib/components/MenuItem.svelte';
+	import Modal from '#lib/components/Modal.svelte';
 
-	// The acts on a pool's desktop, run now under the caller's account on the
-	// claim holding it. The menu, and the dialog it opens, act on the claim
-	// shown when the menu opened, named by its UID: a claim deleted since, and
-	// another made under its name, is never acted on. The rights are asked when
-	// the menu first opens, and what an act changes arrives on the live stream
-	// once DeskuBe writes it.
+	// The acts on one desktop, run now under the caller's account: a restart of
+	// any desktop, and on a pool's desktop a start, stop or release on the
+	// claim holding it. The menu, and the dialog it opens, act on the desktop
+	// and the claim shown when the menu opened, each named by its UID: one
+	// deleted since, and another made under its name, is never acted on. The
+	// rights are asked when the menu first opens, and what an act changes
+	// arrives on the live stream once DeskuBe writes it.
 	let { row }: { row: DesktopRow } = $props();
 
 	type Target = {
 		namespace: string;
 		name: string;
+		uid: string;
+		phase?: string;
+		restarting?: boolean;
 		pool: string;
 		claim?: DesktopClaim;
 		who: string;
 		own: boolean;
 	};
 	let target = $state.raw<Target | null>(null);
-	let menu = $state<{ x: number; y: number } | null>(null);
-	let releasing = $state(false);
+	let menu = $state<{ x: number; y: number; height: number } | null>(null);
+	let confirming = $state<'release' | 'restart' | null>(null);
 	const run = action({ toast: ui.toastError });
 	const confirm = action();
 
 	// The menu's footprint: under its button, or over it near the bottom.
 	const MENU_W = 192;
-	const MENU_H = 80;
 	function open(e: MouseEvent) {
 		const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
-		const below = r.bottom + 4 + MENU_H <= window.innerHeight;
+		const d = row.desktop;
 		const claim = row.claim;
+		const height = d.pool ? 110 : 36;
+		const below = r.bottom + 4 + height <= window.innerHeight;
 		target = {
-			namespace: row.desktop.namespace,
-			name: row.desktop.name,
-			pool: row.desktop.pool ?? '',
+			namespace: d.namespace,
+			name: d.name,
+			uid: d.uid,
+			phase: d.phase,
+			restarting: d.restarting,
+			pool: d.pool ?? '',
 			claim,
 			who: person(row),
 			own: !!claim && claim.user === session.user?.username,
 		};
-		menu = { x: r.right - MENU_W, y: below ? r.bottom + 4 : r.top - 4 - MENU_H };
+		menu = { x: r.right - MENU_W, y: below ? r.bottom + 4 : r.top - 4 - height, height };
 	}
 
-	// What holds an act back before the caller's rights.
-	const held = $derived.by(() => {
+	// What holds an act back before the caller's rights: a watch it reads
+	// lost, or no claim to read.
+	const stale = $derived(new Set(desktops.value?.stale));
+	const lost = (what: string) =>
+		`The console lost its watch on the ${what}: acts wait until it is back.`;
+	const unread = $derived(
+		target && !desktops.may?.lists(target.namespace, 'vdiclaims')
+			? 'Claims here are not shown to you.'
+			: '',
+	);
+	const claimHeld = $derived.by(() => {
 		if (!target) return '';
-		if (desktops.value?.stale)
-			return 'The console lost its watch on the desktops: acts wait until it is back.';
+		if (stale.has('vdiinstances')) return lost('desktops');
+		if (stale.has('vdiclaims')) return lost('claims');
 		if (target.claim) return '';
-		return desktops.may?.lists(target.namespace, 'vdiclaims')
-			? 'No one holds this desktop: its pool keeps it warm.'
-			: 'Claims here are not shown to you.';
+		return unread || 'No one holds this desktop: its pool keeps it warm.';
 	});
-	const power = $derived(
-		target && (held || desktopGate.power(target.namespace, target.pool, target.own).why),
-	);
-	const release = $derived(
-		target && (held || desktopGate.release(target.namespace, target.pool, target.own).why),
-	);
+	const power = $derived(target && (claimHeld || desktopGate.power(target).why));
+	const release = $derived(target && (claimHeld || desktopGate.release(target).why));
+	const restart = $derived.by(() => {
+		if (!target) return '';
+		if (stale.has('vdiinstances')) return lost('desktops');
+		return unread || restartHeld(target) || desktopGate.restart(target).why;
+	});
 	const stopping = $derived(target?.claim?.running !== false);
+
+	function pick(fn: () => void) {
+		menu = null;
+		fn();
+	}
 
 	async function setPower(t: Target, start: boolean) {
 		if (!t.claim) return;
@@ -87,14 +111,21 @@
 			api.desktopAct('release', t.namespace, t.name, claim, uid),
 		);
 		if (!done) return;
-		releasing = false;
+		confirming = null;
 		ui.showToast(`Released ${t.name}: ${t.who}'s desktop and home are being deleted.`, {
 			kind: 'success',
 		});
 	}
 
+	async function restarted(t: Target) {
+		const done = await confirm.run(() => api.desktopRestart(t.namespace, t.name, t.uid));
+		if (!done) return;
+		confirming = null;
+		ui.showToast(`Restart requested for ${t.name}.`, { kind: 'success' });
+	}
+
 	function close() {
-		releasing = false;
+		confirming = null;
 		confirm.clear();
 	}
 </script>
@@ -111,35 +142,40 @@
 
 {#if menu && target}
 	{@const t = target}
-	<ContextMenu x={menu.x} y={menu.y} height={MENU_H} onclose={() => (menu = null)}>
+	<ContextMenu x={menu.x} y={menu.y} height={menu.height} onclose={() => (menu = null)}>
 		<div class="w-48 rounded border border-line bg-panel py-1 text-xs shadow-lg">
+			{#if t.pool}
+				<MenuItem
+					disabled={!!power}
+					title={power || undefined}
+					onclick={() => pick(() => setPower(t, !stopping))}
+				>
+					{stopping ? 'Stop' : 'Start'}
+				</MenuItem>
+			{/if}
 			<MenuItem
-				disabled={!!power}
-				title={power || undefined}
-				onclick={() => {
-					menu = null;
-					setPower(t, !stopping);
-				}}
+				disabled={!!restart}
+				title={restart || undefined}
+				onclick={() => pick(() => (confirming = 'restart'))}
 			>
-				{stopping ? 'Stop' : 'Start'}
+				Restart...
 			</MenuItem>
-			<div class="my-1 border-t border-line-soft"></div>
-			<MenuItem
-				danger
-				disabled={!!release}
-				title={release || undefined}
-				onclick={() => {
-					menu = null;
-					releasing = true;
-				}}
-			>
-				Release...
-			</MenuItem>
+			{#if t.pool}
+				<div class="my-1 border-t border-line-soft"></div>
+				<MenuItem
+					danger
+					disabled={!!release}
+					title={release || undefined}
+					onclick={() => pick(() => (confirming = 'release'))}
+				>
+					Release...
+				</MenuItem>
+			{/if}
 		</div>
 	</ContextMenu>
 {/if}
 
-{#if releasing && target?.claim}
+{#if confirming === 'release' && target?.claim}
 	{@const t = target}
 	<ConfirmDelete
 		title="Release {t.name}"
@@ -163,4 +199,22 @@
 			</div>
 		</div>
 	</ConfirmDelete>
+{:else if confirming === 'restart' && target}
+	{@const t = target}
+	<Modal title="Restart {t.name}?" onclose={close}>
+		<div class="flex flex-col gap-1.5 px-5 py-4">
+			<Consequence tone="warn">
+				{t.who ? `${t.who}'s session` : 'Its session'}, if one is open, ends.
+			</Consequence>
+			<Consequence tone="info">A new pod starts. The home, and the files in it, stay.</Consequence>
+			<Consequence>Runs now, under your account. It is not a pull request.</Consequence>
+			<ErrorNote error={confirm.error} />
+		</div>
+		{#snippet footer()}
+			<Button variant="secondary" class="ml-auto" onclick={close}>Cancel</Button>
+			<Button onclick={() => restarted(t)} disabled={confirm.busy}>
+				{confirm.busy ? 'Restarting...' : 'Restart'}
+			</Button>
+		{/snippet}
+	</Modal>
 {/if}

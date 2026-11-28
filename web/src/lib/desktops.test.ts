@@ -3,10 +3,12 @@ import type { Desktop, DesktopClaim, DesktopPool, Desktops, Project } from './ap
 import {
 	byProject,
 	count,
+	desktopState,
 	duration,
 	joinClaims,
 	person,
 	poolState,
+	restartHeld,
 	rights,
 	seatParts,
 	unlistedLines,
@@ -15,6 +17,7 @@ import {
 const desktop = (name: string, over: Partial<Desktop> = {}): Desktop => ({
 	namespace: 'web-prod',
 	name,
+	uid: `uid-${name}`,
 	running: true,
 	...over,
 });
@@ -102,6 +105,40 @@ describe('pools', () => {
 		expect(duration('720h0m0s')).toBe('30 d');
 		expect(duration('0s')).toBe('0 s');
 		expect(duration('1.5s')).toBe('1.5s');
+	});
+});
+
+describe('restart', () => {
+	it('reads requested until DeskuBe rolls it out, then the phase', () => {
+		expect(desktopState(desktop('a', { phase: 'Ready', restarting: true }))).toEqual({
+			tone: 'info',
+			label: 'Restart requested',
+		});
+		expect(desktopState(desktop('a', { phase: 'Ready' })).label).toBe('Ready');
+		// A missing class still says so first.
+		const missing = desktop('a', {
+			class: 'gpu',
+			restarting: true,
+			conditions: [{ type: 'Ready', status: 'False', reason: 'ClassNotFound' }],
+		});
+		expect(desktopState(missing).label).toBe('Class missing');
+	});
+	it('is offered only on a phase that shows a pod, and once until rolled out', () => {
+		expect(restartHeld({ phase: 'Ready' })).toBe('');
+		expect(restartHeld({ phase: 'Starting' })).toBe('');
+		expect(restartHeld({ phase: 'Stopped' })).toBe(
+			'Only a starting or ready desktop restarts: this one is stopped.',
+		);
+		for (const phase of ['Stopping', 'Provisioning', 'Failed'])
+			expect(restartHeld({ phase })).toBe(
+				`Only a starting or ready desktop restarts: this one is ${phase.toLowerCase()}.`,
+			);
+		expect(restartHeld({})).toBe(
+			'Only a starting or ready desktop restarts: DeskuBe has not reported this one yet.',
+		);
+		expect(restartHeld({ phase: 'Ready', restarting: true })).toBe(
+			'A restart is on its way: DeskuBe has not rolled it out yet.',
+		);
 	});
 });
 

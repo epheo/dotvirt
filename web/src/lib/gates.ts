@@ -176,21 +176,39 @@ export const clusterGate = {
 	forgeAdmin: () => cluster((c) => c.forgeAdmin, "read the forge's admin password"),
 };
 
-// A pool's desktop's acts, on the claim holding it, as DeskuBe's admission
-// weighs them: the caller's own claim asks less of the pool. Each reads the
-// answer for the pool the desktop is of, so a pool's rows ask once.
-const desk = (namespace: string, pool: string, pick: (d: DesktopCaps) => boolean, what: string) =>
-	caps.desktopGate(namespace, pool, pick, `You may not ${what}.`);
+// A desktop's acts, as the server and DeskuBe's admission weigh them: its
+// restart, and on a pool's desktop those on the claim holding it, the
+// caller's own claim asking less of the pool. All three read one answer, for
+// the desktop and the claim by name, as RBAC may grant either by name.
+type DesktopAct = {
+	namespace: string;
+	name: string;
+	pool: string;
+	claim?: { name: string };
+	own: boolean;
+};
+
+const desk = (t: DesktopAct, pick: (d: DesktopCaps) => boolean, what: string) =>
+	caps.desktopGate(t.namespace, t.name, t.claim?.name ?? '', pick, `You may not ${what}.`);
 
 export const desktopGate = {
-	power: (namespace: string, pool: string, own: boolean) =>
-		own
-			? desk(namespace, pool, (c) => c.powerOwn, `start or stop your desktop of pool ${pool}`)
-			: desk(namespace, pool, (c) => c.power, `start or stop others' desktops of pool ${pool}`),
-	release: (namespace: string, pool: string, own: boolean) =>
-		own
-			? desk(namespace, pool, (c) => c.releaseOwn, `release your desktop of pool ${pool}`)
-			: desk(namespace, pool, (c) => c.release, `release others' desktops of pool ${pool}`),
+	restart: (t: DesktopAct) => desk(t, (c) => c.restart, `restart ${t.name}`),
+	power: (t: DesktopAct) =>
+		desk(
+			t,
+			(c) => c.power,
+			t.own
+				? `start or stop your desktop of pool ${t.pool}`
+				: `start or stop others' desktops of pool ${t.pool}`,
+		),
+	release: (t: DesktopAct) =>
+		desk(
+			t,
+			(c) => c.release,
+			t.own
+				? `release your desktop of pool ${t.pool}`
+				: `release others' desktops of pool ${t.pool}`,
+		),
 };
 
 // A host's maintenance verbs: the host's own read carries the server's answer

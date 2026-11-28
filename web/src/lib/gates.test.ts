@@ -171,45 +171,56 @@ describe('templateSaveGate', () => {
 });
 
 describe('desktopGate', () => {
-	it("reads a pool's answer once, the caller's own claim on its own fields", async () => {
+	const bobs = {
+		namespace: 'web',
+		name: 'eng-1',
+		pool: 'eng',
+		claim: { name: 'eng-bob' },
+		own: false,
+	};
+
+	it('reads one answer for a desktop and its claim, by name, for its three acts', async () => {
 		api.api.desktopCapabilities.mockResolvedValue({
 			desktops: {
 				namespace: 'web',
-				pool: 'eng',
+				desktop: 'eng-1',
+				claim: 'eng-bob',
+				restart: true,
 				power: false,
-				powerOwn: true,
-				release: false,
-				releaseOwn: true,
+				release: true,
 			},
 		});
-		desktopGate.power('web', 'eng', false);
-		desktopGate.release('web', 'eng', true);
+		desktopGate.restart(bobs);
+		desktopGate.power(bobs);
+		desktopGate.release(bobs);
 		await flush();
 		expect(api.api.desktopCapabilities).toHaveBeenCalledTimes(1);
-		expect(api.api.desktopCapabilities).toHaveBeenCalledWith('web', 'eng');
-		expect(desktopGate.power('web', 'eng', false).why).toBe(
+		expect(api.api.desktopCapabilities).toHaveBeenCalledWith('web', 'eng-1', 'eng-bob');
+		expect(desktopGate.restart(bobs).ok).toBe(true);
+		expect(desktopGate.power(bobs).why).toBe(
 			"You may not start or stop others' desktops of pool eng.",
 		);
-		expect(desktopGate.power('web', 'eng', true).ok).toBe(true);
-		expect(desktopGate.release('web', 'eng', false).why).toBe(
-			"You may not release others' desktops of pool eng.",
+		expect(desktopGate.power({ ...bobs, own: true }).why).toBe(
+			'You may not start or stop your desktop of pool eng.',
 		);
-		expect(desktopGate.release('web', 'eng', true).ok).toBe(true);
+		expect(desktopGate.release(bobs).ok).toBe(true);
 		expect(api.api.capabilities).not.toHaveBeenCalled();
 	});
 
-	it('asks each pool apart', async () => {
-		api.api.desktopCapabilities.mockImplementation((namespace: string, pool: string) =>
-			Promise.resolve({ desktops: { namespace, pool, power: pool === 'eng' } }),
+	it('asks each desktop, and each claim of it, apart', async () => {
+		api.api.desktopCapabilities.mockImplementation(
+			(namespace: string, desktop: string, claim: string) =>
+				Promise.resolve({ desktops: { namespace, desktop, claim, restart: desktop === 'solo' } }),
 		);
-		desktopGate.power('web', 'eng', false);
-		desktopGate.power('web', 'lab', false);
+		const solo = { namespace: 'web', name: 'solo', pool: '', own: false };
+		desktopGate.restart(solo);
+		desktopGate.restart(bobs);
+		desktopGate.restart({ ...bobs, claim: { name: 'eng-carol' } });
 		await flush();
-		expect(api.api.desktopCapabilities).toHaveBeenCalledTimes(2);
-		expect(desktopGate.power('web', 'eng', false).ok).toBe(true);
-		expect(desktopGate.power('web', 'lab', false).why).toBe(
-			"You may not start or stop others' desktops of pool lab.",
-		);
+		expect(api.api.desktopCapabilities).toHaveBeenCalledTimes(3);
+		expect(api.api.desktopCapabilities).toHaveBeenCalledWith('web', 'solo', '');
+		expect(desktopGate.restart(solo).ok).toBe(true);
+		expect(desktopGate.restart(bobs).why).toBe('You may not restart eng-1.');
 	});
 });
 

@@ -438,9 +438,13 @@ export const api = {
 		claim: string,
 		uid: string,
 	) => post<void>(`/api/desktops/${enc(namespace)}/${enc(name)}/${act}`, { claim, uid }),
-	// The acts on the claims holding pool's desktops in namespace.
-	desktopCapabilities: (namespace: string, pool: string) =>
-		get<gen.Capabilities>(`/api/capabilities${qs({ desktops: namespace, pool })}`),
+	// Asks DeskuBe to restart a desktop, under the caller's token. uid is the
+	// desktop the caller saw: the server refuses any other under that name.
+	desktopRestart: (namespace: string, name: string, uid: string) =>
+		post<void>(`/api/desktops/${enc(namespace)}/${enc(name)}/restart`, { uid }),
+	// The acts on one desktop in namespace, and on claim, a claim of its pool.
+	desktopCapabilities: (namespace: string, desktop: string, claim = '') =>
+		get<gen.Capabilities>(`/api/capabilities${qs({ desktops: namespace, desktop, claim })}`),
 	// Where every copy lives: answers only a caller who may list r-drbd's kinds.
 	replication: () => get<gen.Replication>('/api/storage/replication'),
 	// The standing of the caller's replicated disks, with no host named.

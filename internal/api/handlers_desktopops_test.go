@@ -8,6 +8,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	authzv1 "k8s.io/api/authorization/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -38,29 +39,34 @@ func tenantMay(rules ...rule) func(string, *authzv1.ResourceAttributes) bool {
 }
 
 var (
-	patchClaims  = rule{"patch", "vdiclaims", ""}
-	deleteClaims = rule{"delete", "vdiclaims", ""}
-	assignLab    = rule{"assign", "vdipools", "lab"}
-	deleteLab    = rule{"delete", "vdipools", "lab"}
-	useLab       = rule{"use", "vdipools", "lab"}
+	patchClaims   = rule{"patch", "vdiclaims", ""}
+	deleteClaims  = rule{"delete", "vdiclaims", ""}
+	patchDesktops = rule{"patch", "vdiinstances", ""}
+	assignLab     = rule{"assign", "vdipools", "lab"}
+	deleteLab     = rule{"delete", "vdipools", "lab"}
+	useLab        = rule{"use", "vdipools", "lab"}
 )
 
-const claimsPath = "/apis/vdi.desku.be/v1alpha1/namespaces/team-a-dev/vdiclaims/"
+const (
+	claimsPath   = "/apis/vdi.desku.be/v1alpha1/namespaces/team-a-dev/vdiclaims/"
+	desktopsPath = "/apis/vdi.desku.be/v1alpha1/namespaces/team-a-dev/vdiinstances/"
+)
 
-// claimsAPI is the fake apiserver's claims: the UID each name holds now, and
-// each write it took, failing the test on any made under a token other than
-// the tenant's. It refuses a write held to another UID as the apiserver does:
-// a JSON patch's failed test with a 422, a delete's failed precondition with
-// a 409.
-type claimsAPI struct {
+// deskubeAPI is the fake apiserver's claims and desktops: the UID each name
+// holds now, and each write it took, failing the test on any made under a
+// token other than the tenant's. It refuses a write held to another UID as
+// the apiserver does: a patch carrying another metadata.uid with a 422 naming
+// that field, a delete's failed precondition with a 409.
+type deskubeAPI struct {
 	t *testing.T
 
 	mu     sync.Mutex
-	uids   map[string]string
+	uids   map[string]string // claims
+	desks  map[string]string // desktops
 	writes []string
 }
 
-func (c *claimsAPI) record(r *http.Request, what string) {
+func (c *deskubeAPI) record(r *http.Request, what string) {
 	if got := bearer(r); got != tenantToken {
 		c.t.Errorf("%s %s ran as %q, want the caller's token", r.Method, r.URL.Path, got)
 	}
@@ -69,35 +75,60 @@ func (c *claimsAPI) record(r *http.Request, what string) {
 	c.mu.Unlock()
 }
 
-func (c *claimsAPI) seen() []string {
+func (c *deskubeAPI) seen() []string {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	return slices.Clone(c.writes)
 }
 
-func (c *claimsAPI) now(claim string) string {
+func (c *deskubeAPI) now(uids map[string]string, name string) string {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	return c.uids[claim]
+	return uids[name]
 }
 
-func (c *claimsAPI) serve(fc *fakeCluster, claim string) {
+// writeInvalid answers a 422 as the apiserver's update validation does, its
+// one cause on field.
+func writeInvalid(w http.ResponseWriter, kind, name, field, why string) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusUnprocessableEntity)
+	_ = json.NewEncoder(w).Encode(metav1.Status{
+		TypeMeta: metav1.TypeMeta{Kind: "Status", APIVersion: "v1"},
+		Status:   metav1.StatusFailure, Code: http.StatusUnprocessableEntity, Reason: metav1.StatusReasonInvalid,
+		Message: kind + `.vdi.desku.be "` + name + `" is invalid: ` + field + ": " + why,
+		Details: &metav1.StatusDetails{Name: name, Group: desktops.Group, Kind: kind, Causes: []metav1.StatusCause{
+			{Type: metav1.CauseTypeFieldValueInvalid, Field: field, Message: why},
+		}},
+	})
+}
+
+// mergePatch reads a merge patch of r, recorded as what, and answers the 422
+// of a metadata.uid other than the one name holds now. ok=false means it
+// answered.
+func (c *deskubeAPI) mergePatch(w http.ResponseWriter, r *http.Request, kind, name, what string, uids map[string]string) bool {
+	if ct := r.Header.Get("Content-Type"); ct != "application/merge-patch+json" {
+		c.t.Errorf("patch of %s as %q, want a merge patch", name, ct)
+	}
+	body, _ := io.ReadAll(r.Body)
+	c.record(r, what+" "+name+" "+string(body))
+	var patch struct {
+		Metadata struct {
+			UID string `json:"uid"`
+		} `json:"metadata"`
+	}
+	_ = json.Unmarshal(body, &patch)
+	if now := c.now(uids, name); patch.Metadata.UID != now {
+		writeInvalid(w, kind, name, "metadata.uid", `Invalid value: "`+patch.Metadata.UID+`": field is immutable`)
+		return false
+	}
+	return true
+}
+
+func (c *deskubeAPI) serve(fc *fakeCluster, claim string) {
 	fc.on(http.MethodPatch, claimsPath+claim, func(w http.ResponseWriter, r *http.Request) {
-		if ct := r.Header.Get("Content-Type"); ct != "application/json-patch+json" {
-			c.t.Errorf("patch of %s as %q, want a JSON patch", claim, ct)
+		if c.mergePatch(w, r, "VdiClaim", claim, "patch", c.uids) {
+			writeObj(w, deskObject("VdiClaim", "team-a-dev", claim, map[string]any{"poolName": "lab"}, nil).Object)
 		}
-		body, _ := io.ReadAll(r.Body)
-		c.record(r, "patch "+claim+" "+string(body))
-		var ops []struct {
-			Op, Path string
-			Value    any
-		}
-		_ = json.Unmarshal(body, &ops)
-		if len(ops) == 0 || ops[0].Op != "test" || ops[0].Path != "/metadata/uid" || ops[0].Value != c.now(claim) {
-			writeStatus(w, http.StatusUnprocessableEntity, metav1.StatusReasonInvalid)
-			return
-		}
-		writeObj(w, deskObject("VdiClaim", "team-a-dev", claim, map[string]any{"poolName": "lab"}, nil).Object)
 	})
 	fc.on(http.MethodDelete, claimsPath+claim, func(w http.ResponseWriter, r *http.Request) {
 		var opts metav1.DeleteOptions
@@ -107,7 +138,7 @@ func (c *claimsAPI) serve(fc *fakeCluster, claim string) {
 			uid = string(*opts.Preconditions.UID)
 		}
 		c.record(r, "delete "+claim+" if "+uid)
-		if uid != c.now(claim) {
+		if uid != c.now(c.uids, claim) {
 			writeStatus(w, http.StatusConflict, metav1.StatusReasonConflict)
 			return
 		}
@@ -115,16 +146,30 @@ func (c *claimsAPI) serve(fc *fakeCluster, claim string) {
 	})
 }
 
-// actsServer serves the held desktops of src, its claims routed on a fake
-// apiserver holding the UIDs the snapshot saw.
-func actsServer(t *testing.T, may func(string, *authzv1.ResourceAttributes) bool, src *desktopsSource) (*Server, *fakeCluster, *claimsAPI) {
+func (c *deskubeAPI) serveDesktop(fc *fakeCluster, desktop string) {
+	fc.on(http.MethodPatch, desktopsPath+desktop, func(w http.ResponseWriter, r *http.Request) {
+		if c.mergePatch(w, r, "VdiInstance", desktop, "restart", c.desks) {
+			writeObj(w, deskInstance("team-a-dev", desktop, "Ready").Object)
+		}
+	})
+}
+
+// actsServer serves the held desktops of src, its claims and desktops routed
+// on a fake apiserver holding the UIDs the snapshot saw.
+func actsServer(t *testing.T, may func(string, *authzv1.ResourceAttributes) bool, src *desktopsSource) (*Server, *fakeCluster, *deskubeAPI) {
 	t.Helper()
 	fc := newFakeCluster(t)
 	fc.readsVMs = tenantSeesTeams
 	fc.ssar = may
-	api := &claimsAPI{t: t, uids: map[string]string{"lab-u": "uid-lab-u", "lab-bob": "uid-lab-bob"}}
+	api := &deskubeAPI{t: t,
+		uids:  map[string]string{"lab-u": "uid-lab-u", "lab-bob": "uid-lab-bob"},
+		desks: map[string]string{"lab-1": "uid-desk-lab-1", "lab-2": "uid-desk-lab-2", "solo": "uid-desk-solo"},
+	}
 	for claim := range api.uids {
 		api.serve(fc, claim)
+	}
+	for desk := range api.desks {
+		api.serveDesktop(fc, desk)
 	}
 	src.held = true
 	s := desktopsServer(t, fc, src)
@@ -135,6 +180,11 @@ func actsServer(t *testing.T, may func(string, *authzv1.ResourceAttributes) bool
 func act(s *Server, what, desktop, claim, uid string) *http.Response {
 	body, _ := json.Marshal(claimRef{Claim: claim, UID: uid})
 	return do(s, tenantToken, http.MethodPost, "/api/desktops/team-a-dev/"+desktop+"/"+what, string(body)).Result()
+}
+
+func restart(s *Server, desktop, uid string) *http.Response {
+	body, _ := json.Marshal(desktopRef{UID: uid})
+	return do(s, tenantToken, http.MethodPost, "/api/desktops/team-a-dev/"+desktop+"/restart", string(body)).Result()
 }
 
 func wantAct(t *testing.T, res *http.Response, code int, says string) {
@@ -154,8 +204,8 @@ func TestClaimActsWriteTheClaimAsTheCaller(t *testing.T) {
 	wantAct(t, act(s, "start", "lab-2", "lab-bob", "uid-lab-bob"), http.StatusNoContent, "")
 	wantAct(t, act(s, "release", "lab-2", "lab-bob", "uid-lab-bob"), http.StatusNoContent, "")
 	want := []string{
-		`patch lab-bob [{"op":"test","path":"/metadata/uid","value":"uid-lab-bob"},{"op":"add","path":"/spec/running","value":false}]`,
-		`patch lab-bob [{"op":"test","path":"/metadata/uid","value":"uid-lab-bob"},{"op":"add","path":"/spec/running","value":true}]`,
+		`patch lab-bob {"metadata":{"uid":"uid-lab-bob"},"spec":{"running":false}}`,
+		`patch lab-bob {"metadata":{"uid":"uid-lab-bob"},"spec":{"running":true}}`,
 		"delete lab-bob if uid-lab-bob",
 	}
 	if got := api.seen(); !slices.Equal(got, want) {
@@ -264,12 +314,27 @@ func TestAClaimNameReusedIsNeverActedOn(t *testing.T) {
 			"claim lab-bob is not the one you saw: it was deleted, and its name may be another person's now")
 	}
 	for _, w := range api.seen() {
-		if !strings.Contains(w, `"value":"uid-lab-bob"}`) && !strings.HasSuffix(w, " if uid-lab-bob") {
+		if !strings.Contains(w, `{"uid":"uid-lab-bob"}`) && !strings.HasSuffix(w, " if uid-lab-bob") {
 			t.Errorf("a write not held to the claim seen: %s", w)
 		}
 	}
 	if ops := s.tasks.Ops(); len(ops) != 3 || ops[0].OK {
 		t.Fatalf("feed = %+v, want three failed acts", ops)
+	}
+}
+
+// A patch the apiserver refuses as invalid on another field is no other
+// claim: the caller reads what the apiserver said of it.
+func TestAnInvalidPatchIsNotAnotherClaim(t *testing.T) {
+	s, fc, _ := actsServer(t, tenantMay(patchClaims, assignLab), &desktopsSource{})
+	fc.on(http.MethodPatch, claimsPath+"lab-bob", func(w http.ResponseWriter, _ *http.Request) {
+		writeInvalid(w, "VdiClaim", "lab-bob", "spec.running", "Invalid value: \"string\": spec.running in body must be of type boolean")
+	})
+	res := act(s, "stop", "lab-2", "lab-bob", "uid-lab-bob")
+	body, _ := io.ReadAll(res.Body)
+	if res.StatusCode != http.StatusBadRequest || !strings.Contains(string(body), "spec.running in body must be of type boolean") ||
+		strings.Contains(string(body), "another person's") {
+		t.Fatalf("= %d %q, want the apiserver's own words", res.StatusCode, body)
 	}
 }
 
@@ -289,7 +354,8 @@ func TestClaimActsNeedTheClaimsListed(t *testing.T) {
 	s, _, api := actsServer(t, func(token string, a *authzv1.ResourceAttributes) bool {
 		return token == tenantToken && a.Namespace == "team-a-dev" && (a.Verb != "list" || a.Resource == "vdiinstances")
 	}, &desktopsSource{})
-	wantAct(t, act(s, "stop", "lab-2", "lab-bob", "uid-lab-bob"), http.StatusNotFound, "no claim you may list holds desktop team-a-dev/lab-2")
+	wantAct(t, act(s, "stop", "lab-2", "lab-bob", "uid-lab-bob"), http.StatusNotFound, "desktop team-a-dev/lab-2: the claims there, which its acts read, are not listed to you")
+	wantAct(t, restart(s, "solo", "uid-desk-solo"), http.StatusNotFound, "the claims there, which its acts read, are not listed to you")
 	if len(api.seen()) > 0 {
 		t.Fatalf("an act on an unlisted claim wrote %q", api.seen())
 	}
@@ -316,52 +382,200 @@ func TestTheAdmissionDenialIsTheCallers(t *testing.T) {
 // Each act lands in the feed under the desktop's name, marked a desktop's,
 // shown to whoever may list desktops there.
 func TestDesktopActsLandInTheFeed(t *testing.T) {
-	s, _, _ := actsServer(t, tenantMay(patchClaims, assignLab), &desktopsSource{})
+	s, _, _ := actsServer(t, tenantMay(patchClaims, assignLab, patchDesktops), &desktopsSource{})
 	wantAct(t, act(s, "stop", "lab-2", "lab-bob", "uid-lab-bob"), http.StatusNoContent, "")
+	wantAct(t, restart(s, "solo", "uid-desk-solo"), http.StatusNoContent, "")
 	rec := do(s, tenantToken, http.MethodGet, "/api/tasks", "")
 	wantStatus(t, rec, http.StatusOK)
 	got := decodeBody[[]model.TaskEntry](t, rec)
-	if len(got) != 1 || got[0].Verb != "Stop" || got[0].Name != "lab-2" || !got[0].Desktop || got[0].By != "u" || !got[0].OK || got[0].Project != "team-a" {
+	if len(got) != 2 {
 		t.Fatalf("feed = %+v", got)
+	}
+	slices.SortFunc(got, func(a, b model.TaskEntry) int { return strings.Compare(a.Verb, b.Verb) })
+	for i, want := range []struct{ verb, name string }{{"Restart", "solo"}, {"Stop", "lab-2"}} {
+		e := got[i]
+		if e.Verb != want.verb || e.Name != want.name || !e.Desktop || e.By != "u" || !e.OK || e.Project != "team-a" {
+			t.Fatalf("feed = %+v", got)
+		}
 	}
 }
 
-// The capability fields ask what the routes ask, the reads included, and
-// answer only for a pool whose desktop the caller may see.
-func TestDesktopCapsMirrorTheActs(t *testing.T) {
+// A restart is one merge patch of the desktop's restart annotation under the
+// caller's token, held to the desktop's UID: a pool's desktop and one made
+// one by one alike. Its value is the time, RFC 3339, within the 64 bytes
+// DeskuBe rolls out. Nothing else is written: no pod, no Deployment.
+func TestRestartAsksDeskuBeAsTheCaller(t *testing.T) {
+	s, fc, api := actsServer(t, tenantMay(patchDesktops), &desktopsSource{})
+	before := time.Now().UTC().Add(-time.Second)
+	wantAct(t, restart(s, "lab-2", "uid-desk-lab-2"), http.StatusNoContent, "")
+	wantAct(t, restart(s, "solo", "uid-desk-solo"), http.StatusNoContent, "")
+	writes := api.seen()
+	if len(writes) != 2 {
+		t.Fatalf("writes = %q, want one patch per restart", writes)
+	}
+	for i, desk := range []string{"lab-2", "solo"} {
+		body, ok := strings.CutPrefix(writes[i], "restart "+desk+" ")
+		var patch struct {
+			Metadata struct {
+				UID         string            `json:"uid"`
+				Annotations map[string]string `json:"annotations"`
+			} `json:"metadata"`
+		}
+		if !ok || json.Unmarshal([]byte(body), &patch) != nil {
+			t.Fatalf("write %d = %q", i, writes[i])
+		}
+		asked := patch.Metadata.Annotations["vdi.desku.be/restart"]
+		at, err := time.Parse(time.RFC3339, asked)
+		if patch.Metadata.UID != "uid-desk-"+desk || len(patch.Metadata.Annotations) != 1 || err != nil || len(asked) > 64 ||
+			at.Location() != time.UTC || at.Before(before) || at.After(time.Now().Add(time.Second)) {
+			t.Fatalf("restart of %s patched %s", desk, body)
+		}
+		if strings.Contains(body, `"spec"`) || strings.Contains(body, `"status"`) {
+			t.Fatalf("restart of %s wrote more than its request: %s", desk, body)
+		}
+	}
+	for _, call := range fc.seen() {
+		if !strings.HasPrefix(call, "GET ") && !strings.HasSuffix(call, "/selfsubjectaccessreviews") &&
+			call != "PATCH "+desktopsPath+"lab-2" && call != "PATCH "+desktopsPath+"solo" {
+			t.Fatalf("a restart also sent %s", call)
+		}
+	}
+}
+
+// What a restart takes: patch on that desktop, granted on every one or on it
+// by name. Each refusal names it and writes nothing.
+func TestRestartTakesPatchOnTheDesktop(t *testing.T) {
 	for _, c := range []struct {
 		name  string
 		rules []rule
-		want  model.DesktopCaps
+		code  int
+		says  string
 	}{
-		{"everything", []rule{patchClaims, deleteClaims, assignLab},
-			model.DesktopCaps{Power: true, PowerOwn: true, Release: true, ReleaseOwn: true}},
-		{"a pool's user", []rule{patchClaims, deleteClaims, useLab},
-			model.DesktopCaps{PowerOwn: true, ReleaseOwn: true}},
-		{"the pool's deleter", []rule{patchClaims, deleteClaims, deleteLab},
-			model.DesktopCaps{Power: true, PowerOwn: true, Release: true, ReleaseOwn: true}},
-		{"claims alone", []rule{patchClaims, deleteClaims},
-			model.DesktopCaps{ReleaseOwn: true}},
+		{"patch on desktops", []rule{patchDesktops}, http.StatusNoContent, ""},
+		{"patch granted by name", []rule{{"patch", "vdiinstances", "lab-2"}}, http.StatusNoContent, ""},
+		{"patch on another desktop", []rule{{"patch", "vdiinstances", "lab-1"}}, http.StatusForbidden, "you may not restart lab-2: that takes patch vdiinstances lab-2 in team-a-dev"},
+		{"the claim's rights are no desktop's", []rule{patchClaims, assignLab}, http.StatusForbidden, "you may not restart lab-2"},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			s, _, api := actsServer(t, tenantMay(c.rules...), &desktopsSource{})
+			wantAct(t, restart(s, "lab-2", "uid-desk-lab-2"), c.code, c.says)
+			if c.code != http.StatusNoContent && len(api.seen()) > 0 {
+				t.Fatalf("a refused restart wrote %q", api.seen())
+			}
+		})
+	}
+}
+
+// A restart names the desktop the caller saw, by its UID, and only one whose
+// phase shows a pod: a stopped desktop is refused, never started.
+func TestRestartAddressesOnlyARunningDesktopTheCallerSaw(t *testing.T) {
+	src := &desktopsSource{}
+	s, _, api := actsServer(t, tenantMay(patchDesktops), src)
+	wantAct(t, restart(s, "lab-2", ""), http.StatusBadRequest, "uid")
+	wantAct(t, restart(s, "lab-2", "uid-desk-earlier"), http.StatusConflict, "desktop lab-2 is not the one you saw")
+	wantAct(t, restart(s, "gone", "uid-desk-gone"), http.StatusNotFound, "desktop team-a-dev/gone")
+	for _, phase := range []string{"Stopped", "Stopping", "Provisioning", "Failed"} {
+		src.write(t, s, watch.Modified, deskInstance("team-a-dev", "solo", phase))
+		wantAct(t, restart(s, "solo", "uid-desk-solo"), http.StatusConflict, "solo has no pod to restart: it is "+strings.ToLower(phase))
+	}
+	if len(api.seen()) > 0 {
+		t.Fatalf("a refused restart wrote %q", api.seen())
+	}
+	src.write(t, s, watch.Modified, deskInstance("team-a-dev", "solo", "Starting"))
+	wantAct(t, restart(s, "solo", "uid-desk-solo"), http.StatusNoContent, "")
+}
+
+// The desktop was deleted and another made under its name, which the snapshot
+// has not heard of yet: the apiserver refuses the UID the patch carries, and
+// the caller reads a conflict.
+func TestADesktopMadeAgainIsNeverRestarted(t *testing.T) {
+	s, _, api := actsServer(t, tenantMay(patchDesktops), &desktopsSource{})
+	api.mu.Lock()
+	api.desks["solo"] = "uid-desk-solo-anew"
+	api.mu.Unlock()
+	wantAct(t, restart(s, "solo", "uid-desk-solo"), http.StatusConflict,
+		"desktop solo is not the one you saw: it was deleted, and another made under its name")
+	if ops := s.tasks.Ops(); len(ops) != 1 || ops[0].OK || ops[0].Verb != "Restart" {
+		t.Fatalf("feed = %+v, want the failed restart", ops)
+	}
+}
+
+// A restart reads the desktops alone: it waits while their watch is down,
+// never on the claims'.
+func TestRestartWaitsOnTheDesktopsWatchAlone(t *testing.T) {
+	s, _, _ := actsServer(t, tenantMay(patchDesktops), &desktopsSource{failClaims: true})
+	wantAct(t, restart(s, "solo", "uid-desk-solo"), http.StatusNoContent, "")
+
+	src := &desktopsSource{}
+	s, _, api := actsServer(t, tenantMay(patchDesktops), src)
+	src.dropDesktops(t, s)
+	wantAct(t, restart(s, "solo", "uid-desk-solo"), http.StatusServiceUnavailable, "the console's watch on the desktops is down")
+	if len(api.seen()) > 0 {
+		t.Fatalf("a restart on a stale snapshot wrote %q", api.seen())
+	}
+}
+
+func desktopCaps(t *testing.T, s *Server, query string) *model.DesktopCaps {
+	t.Helper()
+	rec := do(s, tenantToken, http.MethodGet, "/api/capabilities?"+query, "")
+	wantStatus(t, rec, http.StatusOK)
+	return decodeBody[model.Capabilities](t, rec).Desktops
+}
+
+// The capability fields ask what the routes ask, the reads included, of the
+// desktop and the claim by name, and answer only for a desktop and a claim
+// of its pool the caller may see.
+func TestDesktopCapsMirrorTheActs(t *testing.T) {
+	for _, c := range []struct {
+		name    string
+		rules   []rule
+		desktop string
+		claim   string
+		want    model.DesktopCaps
+	}{
+		{"everything on another's", []rule{patchClaims, deleteClaims, assignLab, patchDesktops}, "lab-2", "lab-bob",
+			model.DesktopCaps{Restart: true, Power: true, Release: true}},
+		{"a pool's user on another's", []rule{patchClaims, deleteClaims, useLab}, "lab-2", "lab-bob",
+			model.DesktopCaps{}},
+		{"a pool's user on its own", []rule{patchClaims, deleteClaims, useLab}, "lab-1", "lab-u",
+			model.DesktopCaps{Power: true, Release: true}},
+		{"the pool's deleter", []rule{patchClaims, deleteClaims, deleteLab}, "lab-2", "lab-bob",
+			model.DesktopCaps{Power: true, Release: true}},
+		{"claims alone, its own", []rule{patchClaims, deleteClaims}, "lab-1", "lab-u",
+			model.DesktopCaps{Release: true}},
+		{"the claim verbs granted by name", []rule{{"patch", "vdiclaims", "lab-bob"}, {"delete", "vdiclaims", "lab-bob"}, assignLab}, "lab-2", "lab-bob",
+			model.DesktopCaps{Power: true, Release: true}},
+		{"the claim verbs granted on another claim", []rule{{"patch", "vdiclaims", "lab-u"}, assignLab}, "lab-2", "lab-bob",
+			model.DesktopCaps{}},
+		{"restart granted by name", []rule{{"patch", "vdiinstances", "lab-2"}}, "lab-2", "",
+			model.DesktopCaps{Restart: true}},
+		{"restart on another desktop", []rule{{"patch", "vdiinstances", "lab-1"}}, "lab-2", "",
+			model.DesktopCaps{}},
+		{"one made one by one", []rule{patchClaims, deleteClaims, assignLab, patchDesktops}, "solo", "",
+			model.DesktopCaps{Restart: true}},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			s, _, _ := actsServer(t, tenantMay(c.rules...), &desktopsSource{})
-			rec := do(s, tenantToken, http.MethodGet, "/api/capabilities?desktops=team-a-dev&pool=lab", "")
-			wantStatus(t, rec, http.StatusOK)
-			got := decodeBody[model.Capabilities](t, rec).Desktops
-			c.want.Namespace, c.want.Pool = "team-a-dev", "lab"
+			got := desktopCaps(t, s, "desktops=team-a-dev&desktop="+c.desktop+"&claim="+c.claim)
+			c.want.Namespace, c.want.Desktop, c.want.Claim = "team-a-dev", c.desktop, c.claim
 			if got == nil || *got != c.want {
 				t.Fatalf("caps = %+v, want %+v", got, c.want)
 			}
 		})
 	}
-	s, _, _ := actsServer(t, tenantMay(patchClaims, deleteClaims, assignLab), &desktopsSource{})
+	s, _, _ := actsServer(t, tenantMay(patchClaims, deleteClaims, assignLab, patchDesktops), &desktopsSource{})
 	// A namespace whose desktops the caller may not list offers nothing.
-	rec := do(s, tenantToken, http.MethodGet, "/api/capabilities?desktops=team-b-dev&pool=lab", "")
-	wantStatus(t, rec, http.StatusOK)
-	if got := decodeBody[model.Capabilities](t, rec).Desktops; *got != (model.DesktopCaps{Namespace: "team-b-dev", Pool: "lab"}) {
+	if got := desktopCaps(t, s, "desktops=team-b-dev&desktop=lab-2&claim=lab-bob"); *got != (model.DesktopCaps{Namespace: "team-b-dev", Desktop: "lab-2", Claim: "lab-bob"}) {
 		t.Fatalf("caps where nothing is listed = %+v", got)
 	}
-	// A pool no desktop there is of is not answered, nor is no pool.
-	wantStatus(t, do(s, tenantToken, http.MethodGet, "/api/capabilities?desktops=team-a-dev&pool=other", ""), http.StatusNotFound)
-	wantStatus(t, do(s, tenantToken, http.MethodGet, "/api/capabilities?desktops=team-a-dev", ""), http.StatusBadRequest)
+	// A desktop not there, a claim not there, a claim on one made one by one,
+	// and no desktop at all, are not answered.
+	for query, code := range map[string]int{
+		"desktops=team-a-dev&desktop=gone":               http.StatusNotFound,
+		"desktops=team-a-dev&desktop=lab-2&claim=gone":   http.StatusNotFound,
+		"desktops=team-a-dev&desktop=solo&claim=lab-bob": http.StatusNotFound,
+		"desktops=team-a-dev":                            http.StatusBadRequest,
+	} {
+		wantStatus(t, do(s, tenantToken, http.MethodGet, "/api/capabilities?"+query, ""), code)
+	}
 }

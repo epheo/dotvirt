@@ -2199,6 +2199,7 @@ const frontedtenant = {
 const desk = (namespace, name, over = {}) => ({
 	namespace,
 	name,
+	uid: `uid-${name}`,
 	class: 'office',
 	running: true,
 	phase: 'Ready',
@@ -2378,23 +2379,30 @@ const desktopsrefused = {
 	...desktops,
 	name: 'desktopsrefused',
 	desktopCapabilities: {
-		'web-prod/eng': { power: false, powerOwn: false, release: false, releaseOwn: false },
+		'web-prod/eng': { restart: false, power: false, release: false },
 	},
 };
-// bob deleted his claim eng-bob and someone made another under that name,
-// which the console has not heard of: the same name, another UID.
+// bob deleted his claim eng-bob and someone made another under that name, and
+// carol-dev was deleted and made again, which the console has not heard of:
+// the same names, other UIDs.
 const desktopsreclaimed = {
 	...desktops,
 	name: 'desktopsreclaimed',
 	desktops: {
 		...deskube,
+		desktops: deskube.desktops.map((d) =>
+			d.name === 'carol-dev' ? { ...d, uid: 'uid-carol-dev-anew' } : d,
+		),
 		claims: deskube.claims.map((c) =>
 			c.name === 'eng-bob' ? { ...c, uid: 'uid-eng-bob-anew' } : c,
 		),
 	},
 };
-// The console lost its watch: what it shows may be out of date.
-const desktopsstale = { ...desktops, name: 'desktopsstale', desktops: { ...deskube, stale: true } };
+// The console lost its watch on a kind: what it shows of it may be out of date.
+const stale = (name, ...kinds) => ({ ...desktops, name, desktops: { ...deskube, stale: kinds } });
+const desktopsstale = stale('desktopsstale', 'vdiinstances');
+const desktopsclaimsstale = stale('desktopsclaimsstale', 'vdiclaims');
+const desktopspoolsstale = stale('desktopspoolsstale', 'vdipools');
 const desktopsnovms = {
 	...novms,
 	name: 'desktopsnovms',
@@ -2544,6 +2552,8 @@ export const scenarios = {
 	desktopsrefused,
 	desktopsreclaimed,
 	desktopsstale,
+	desktopsclaimsstale,
+	desktopspoolsstale,
 	desktopsnovms,
 	classquota,
 	replicatedquota,

@@ -44,7 +44,7 @@ export interface BrandingLink {
  * weighed as the gate weighs them, so the UI offers only what the server
  * allows. A review that failed reads as false:
  * unknown never offers an action. Without ?namespace= it answers Cluster; with
- * it, Namespace; with ?desktops= and ?pool=, Desktops.
+ * it, Namespace; with ?desktops=, ?desktop= and ?claim=, Desktops.
  */
 export interface Capabilities {
   cluster?: ClusterCaps;
@@ -52,24 +52,27 @@ export interface Capabilities {
   desktops?: DesktopCaps;
 }
 /**
- * DesktopCaps are the acts on the claims holding Pool's desktops in one
- * namespace. Each needs the desktops and the claims listed there: the route
- * acts on nothing else.
+ * DesktopCaps are the acts on one desktop, and on a pool's desktop those on
+ * Claim, a claim of its pool. Each needs the desktops and the claims listed
+ * in Namespace: the routes act on nothing else.
  */
 export interface DesktopCaps {
   namespace: string;
-  pool: string;
+  desktop: string;
+  claim?: string;
   /**
-   * Power starts and stops another's claim of the pool (patch on claims),
-   * Release deletes it (delete on claims), each with assign or delete on
-   * the pool. PowerOwn and ReleaseOwn are the caller's own claim: use on
-   * the pool also opens a start or stop, and a release asks nothing of the
-   * pool.
+   * Restart is patch on the desktop, by its name.
+   */
+  restart: boolean;
+  /**
+   * Power starts and stops the desktop on Claim (patch on it), Release
+   * deletes Claim (delete on it), each beside what DeskuBe's policy asks of
+   * the pool: assign or delete on another's claim; on the caller's own, use
+   * also opens a start or stop, and a release asks nothing of the pool.
+   * Both false without a Claim.
    */
   power: boolean;
-  powerOwn: boolean;
   release: boolean;
-  releaseOwn: boolean;
 }
 /**
  * ObjectCaps are creating, updating and deleting one kind through git: the
@@ -397,9 +400,10 @@ export interface Desktops {
    */
   synced: boolean;
   /**
-   * Stale: a watch is down and this is its last known state.
+   * Stale are the kinds read, by resource, whose watch is down: their rows
+   * are the last known state. An act waits on the kinds it reads alone.
    */
-  stale?: boolean;
+  stale?: string[];
   /**
    * Classes are shown to a caller who may list them cluster-wide.
    */
@@ -492,6 +496,11 @@ export interface DesktopPoolCounts {
 export interface Desktop {
   namespace: string;
   name: string;
+  /**
+   * UID tells this desktop from a later one under its name: a restart
+   * names it.
+   */
+  uid: string;
   class?: string;
   /**
    * Image is the desktop's own, empty when its class's applies.
@@ -502,6 +511,11 @@ export interface Desktop {
   phase?: string; // Provisioning | Starting | Ready | Stopping | Stopped | Failed
   address?: string;
   session?: string; // free | busy
+  /**
+   * Restarting: a restart was asked for that DeskuBe has not rolled out
+   * yet, its status.restart not the request's value.
+   */
+  restarting?: boolean;
   /**
    * Pool is the pool that made it, empty for a desktop made one by one.
    */

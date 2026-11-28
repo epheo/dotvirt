@@ -12,7 +12,7 @@ import { ACCESS_UNKNOWN } from '#lib/authoring.js';
 // server gate asks, so a control offered here is one the server accepts.
 // Missing data reads as false. The cluster answer is read once per session and
 // again whenever the networks or tasks fingerprint moves; a namespace's, and
-// the desktop acts of a pool there, are read the first time a control asks for
+// the acts on a desktop there, are read the first time a control asks for
 // them, kept, and read again on the same signals. A re-read keeps serving the
 // answer it replaces: dropping it would flip every control to checking, and
 // remount a console, on each merge.
@@ -31,10 +31,11 @@ type Read<T> =
 // A failed read is asked again after this long.
 const RETRY_MS = 15_000;
 
-// The desktop acts are keyed apart from the namespaces: no namespace or pool
-// name holds a ':' or a '/'.
+// The desktop acts are keyed apart from the namespaces: no namespace, desktop
+// or claim name holds a ':' or a '/'.
 const DESK = 'desktops:';
-const deskKey = (namespace: string, pool: string) => `${DESK}${namespace}/${pool}`;
+const deskKey = (namespace: string, desktop: string, claim: string) =>
+	`${DESK}${namespace}/${desktop}/${claim}`;
 
 class CapsStore {
 	#cluster = $state<Read<ClusterCaps> | null>(null);
@@ -73,16 +74,17 @@ class CapsStore {
 		return gate(this.#ns[namespace], pick, denied);
 	}
 
-	// desktopGate offers what pick says the desktop acts in namespace allow, on
-	// a desktop of pool ('' for one made one by one).
+	// desktopGate offers what pick says the acts on desktop in namespace allow,
+	// and on claim, a claim of its pool ('' for none).
 	desktopGate(
 		namespace: string,
-		pool: string,
+		desktop: string,
+		claim: string,
 		pick: (d: DesktopCaps) => boolean,
 		denied: string,
 	): Gate {
-		if (!namespace) return { ok: false, why: denied };
-		const key = deskKey(namespace, pool);
+		if (!namespace || !desktop) return { ok: false, why: denied };
+		const key = deskKey(namespace, desktop, claim);
 		this.#want(key);
 		return gate(this.#desk[key], pick, denied);
 	}
@@ -140,8 +142,8 @@ class CapsStore {
 		try {
 			let value;
 			if (desk) {
-				const [namespace, pool] = key.slice(DESK.length).split('/');
-				value = (await api.desktopCapabilities(namespace, pool)).desktops;
+				const [namespace, desktop, claim] = key.slice(DESK.length).split('/');
+				value = (await api.desktopCapabilities(namespace, desktop, claim)).desktops;
 			} else {
 				const caps = await api.capabilities(key || undefined);
 				value = key ? caps.namespace : caps.cluster;

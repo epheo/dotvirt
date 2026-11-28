@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"slices"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -31,12 +32,15 @@ import (
 // and stale. held adds two of the pool's desktops in each: lab-1 held by the
 // claim lab-u of u, every test caller's username, and lab-2 by bob's lab-bob,
 // each claim's UID uid-<its name>, as its desktop's claim-uid label says.
+// Each desktop's UID is uid-desk-<its name>.
 type desktopsSource struct {
 	failClaims bool
 	held       bool
 
 	mu        sync.Mutex
 	instances *watch.FakeWatcher
+	// desktopsDown fails every desktops watch from dropDesktops on.
+	desktopsDown atomic.Bool
 }
 
 func (*desktopsSource) ServesAPIResource(schema.GroupVersionResource) (bool, error) {
@@ -56,6 +60,7 @@ func deskObject(kind, ns, name string, spec, status map[string]any) unstructured
 
 func deskInstance(ns, name, phase string) *unstructured.Unstructured {
 	u := deskObject("VdiInstance", ns, name, map[string]any{"className": "workstation", "owner": name}, map[string]any{"phase": phase})
+	u.SetUID(types.UID("uid-desk-" + name))
 	return &u
 }
 
@@ -105,6 +110,9 @@ func (f *desktopsSource) DynamicListWatch(gvr schema.GroupVersionResource) *cach
 			return &unstructured.UnstructuredList{Object: map[string]any{"apiVersion": "v1", "kind": "List"}, Items: items}, nil
 		},
 		WatchFuncWithContext: func(context.Context, metav1.ListOptions) (watch.Interface, error) {
+			if gvr == desktops.GVRInstance && f.desktopsDown.Load() {
+				return nil, errors.New("desktops unavailable")
+			}
 			w := watch.NewFake()
 			if gvr == desktops.GVRInstance {
 				f.mu.Lock()
@@ -113,6 +121,25 @@ func (f *desktopsSource) DynamicListWatch(gvr schema.GroupVersionResource) *cach
 			}
 			return w, nil
 		},
+	}
+}
+
+// dropDesktops ends the desktops watch and fails every one after it, and waits
+// until the snapshot reads the desktops stale.
+func (f *desktopsSource) dropDesktops(t *testing.T, s *Server) {
+	t.Helper()
+	f.desktopsDown.Store(true)
+	f.mu.Lock()
+	w := f.instances
+	f.mu.Unlock()
+	if w == nil {
+		t.Fatal("no watch on desktops")
+	}
+	w.Stop()
+	for deadline := time.Now().Add(5 * time.Second); s.desktops.Fresh(desktops.GVRInstance); time.Sleep(time.Millisecond) {
+		if time.Now().After(deadline) {
+			t.Fatal("the desktops never read stale")
+		}
 	}
 }
 
@@ -169,7 +196,7 @@ func desktopsServer(t *testing.T, fc *fakeCluster, src *desktopsSource) *Server 
 		every[desktops.Kind{Namespace: "team-a-dev", Resource: gvr.Resource}] = true
 	}
 	for deadline := time.Now().Add(5 * time.Second); ; time.Sleep(time.Millisecond) {
-		if o := s.desktops.Overview(every, nil); o.Synced || o.Stale {
+		if o := s.desktops.Overview(every, nil); o.Synced || o.Stale != nil {
 			return s
 		}
 		if time.Now().After(deadline) {
@@ -404,7 +431,7 @@ func TestACallerWhoListsNoDesktopKindIsToldNothing(t *testing.T) {
 			fc.ssar = listsKinds(nil)
 			s := desktopsServer(t, fc, &desktopsSource{failClaims: c.failClaims})
 
-			if all := getDesktops(t, s, adminToken, "/api/desktops"); all.Stale != c.failClaims || all.Synced == c.failClaims {
+			if all := getDesktops(t, s, adminToken, "/api/desktops"); (all.Stale != nil) != c.failClaims || all.Synced == c.failClaims {
 				t.Fatalf("an admin reads %+v", all)
 			}
 			if got := desktopsBody(t, s, tenantToken, "/api/desktops"); got != offBody {
@@ -432,7 +459,7 @@ func TestAKindsHealthIsToldOnlyToItsReaders(t *testing.T) {
 			}
 		}
 		if failClaims {
-			if all := getDesktops(t, s, adminToken, "/api/desktops"); !all.Stale || all.Synced {
+			if all := getDesktops(t, s, adminToken, "/api/desktops"); !slices.Equal(all.Stale, []string{"vdiclaims"}) || all.Synced {
 				t.Fatalf("an admin reads %+v while the claims watch fails", all)
 			}
 		}
@@ -440,7 +467,7 @@ func TestAKindsHealthIsToldOnlyToItsReaders(t *testing.T) {
 	}
 	healthy, healthyVersion := read(false)
 	failing, failingVersion := read(true)
-	if !failing.Synced || failing.Stale {
+	if !failing.Synced || failing.Stale != nil {
 		t.Fatalf("a pools-only caller reads synced=%v stale=%v while only the claims watch fails", failing.Synced, failing.Stale)
 	}
 	if failingVersion != healthyVersion {
