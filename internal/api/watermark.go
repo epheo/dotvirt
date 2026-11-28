@@ -191,23 +191,25 @@ func (s *Server) routesWatermark(ctx context.Context, id auth.Identity, c *clust
 	return sum & wireMask
 }
 
-// desktopsWatermark covers what the caller's desktops pull reads: each kind
-// in the project namespaces where it may list it, the classes where it may
-// list them cluster-wide, whether the pull is synced or stale, and which
-// kinds are hidden. A hidden kind counts by its presence alone: its moves are
-// not the caller's to see.
+// desktopsWatermark covers what the caller's desktops pull reads, from its
+// own rights: each kind where it may list it, the kinds it may not list
+// beside those, and whether the pull is synced or stale. 0 for a caller who
+// may list none, as on a cluster without DeskuBe.
 func (s *Server) desktopsWatermark(v callerView, namespaces []string) uint64 {
-	if s.desktops == nil || !s.desktops.Started() {
+	if s.desktops == nil {
+		return 0
+	}
+	readable, unlisted := s.desktopsReadable(v, namespaces)
+	if len(readable) == 0 {
 		return 0
 	}
 	var t term
 	sum := t.start("desktops").num(s.desktops.Base()).sum()
-	readable, hidden := s.desktopsReadable(v, namespaces)
-	for h := range readable {
-		sum += t.start("desktops").str(h.Namespace, h.Resource).num(s.desktops.Gen(h)).sum()
+	for k := range readable {
+		sum += t.start("desktops").str(k.Namespace, k.Resource).num(s.desktops.Gen(k)).sum()
 	}
-	for _, h := range hidden {
-		sum += t.start("desktops-hidden").str(h.Namespace, h.Resource).sum()
+	for _, k := range unlisted {
+		sum += t.start("desktops-unlisted").str(k.Namespace, k.Resource).sum()
 	}
 	return sum & wireMask
 }

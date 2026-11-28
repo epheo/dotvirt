@@ -3,9 +3,10 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
-	"strings"
+	"slices"
 	"sync"
 	"testing"
 	"time"
@@ -23,10 +24,13 @@ import (
 	"github.com/epheo/dotvirt/internal/model"
 )
 
-// desktopsSource serves a class, a pool, a desktop and a claim in each of
-// team-a-dev and team-b-dev, a pool alone in team-c-dev, which is no project,
-// and a watch on desktops a test can write through.
+// desktopsSource serves a class, and a pool, a desktop and a claim in each of
+// team-a-dev and team-b-dev, with a watch on desktops a test can write
+// through. failClaims fails every claims list, so that watch stays unsynced
+// and stale.
 type desktopsSource struct {
+	failClaims bool
+
 	mu        sync.Mutex
 	instances *watch.FakeWatcher
 }
@@ -63,14 +67,14 @@ func (f *desktopsSource) DynamicListWatch(gvr schema.GroupVersionResource) *cach
 			items = append(items, deskObject("VdiClaim", ns, "someone", map[string]any{"poolName": "lab", "user": "someone"}, map[string]any{"phase": "Waiting"}))
 		}
 	}
-	switch gvr {
-	case desktops.GVRClass:
+	if gvr == desktops.GVRClass {
 		items = append(items, deskObject("VdiClass", "", "workstation", map[string]any{"image": "quay.io/deskube/desktop:1"}, nil))
-	case desktops.GVRPool:
-		items = append(items, deskObject("VdiPool", "team-c-dev", "lab", map[string]any{"className": "workstation", "seats": int64(2)}, nil))
 	}
 	return &cache.ListWatch{
 		ListWithContextFunc: func(context.Context, metav1.ListOptions) (runtime.Object, error) {
+			if f.failClaims && gvr == desktops.GVRClaim {
+				return nil, errors.New("claims unavailable")
+			}
 			return &unstructured.UnstructuredList{Object: map[string]any{"apiVersion": "v1", "kind": "List"}, Items: items}, nil
 		},
 		WatchFuncWithContext: func(context.Context, metav1.ListOptions) (watch.Interface, error) {
@@ -85,17 +89,18 @@ func (f *desktopsSource) DynamicListWatch(gvr schema.GroupVersionResource) *cach
 	}
 }
 
-func (f *desktopsSource) write(t *testing.T, s *Server, o *unstructured.Unstructured) {
+// write sends one event on the desktops watch and waits until it landed.
+func (f *desktopsSource) write(t *testing.T, s *Server, event watch.EventType, o *unstructured.Unstructured) {
 	t.Helper()
-	h := desktops.Held{Namespace: o.GetNamespace(), Resource: desktops.GVRInstance.Resource}
-	gen := s.desktops.Gen(h)
+	k := desktops.Kind{Namespace: o.GetNamespace(), Resource: desktops.GVRInstance.Resource}
+	gen := s.desktops.Gen(k)
 	deadline := time.Now().Add(5 * time.Second)
 	for {
 		f.mu.Lock()
 		w := f.instances
 		f.mu.Unlock()
 		if w != nil {
-			w.Modify(o)
+			w.Action(event, o)
 			break
 		}
 		if time.Now().After(deadline) {
@@ -103,7 +108,7 @@ func (f *desktopsSource) write(t *testing.T, s *Server, o *unstructured.Unstruct
 		}
 		time.Sleep(time.Millisecond)
 	}
-	for s.desktops.Gen(h) == gen {
+	for s.desktops.Gen(k) == gen {
 		if time.Now().After(deadline) {
 			t.Fatal("the write never reached the snapshot")
 		}
@@ -111,27 +116,45 @@ func (f *desktopsSource) write(t *testing.T, s *Server, o *unstructured.Unstruct
 	}
 }
 
-// tenantSeesTeams lets the tenant see team-a-dev and team-b-dev, whatever it
-// may list there.
+// tenantSeesTeams lets the tenant see team-a-dev, team-b-dev and team-d-dev,
+// whatever it may list there.
 func tenantSeesTeams(token, ns string) bool {
-	return token == tenantToken && (ns == "team-a-dev" || ns == "team-b-dev")
+	return token == tenantToken && (ns == "team-a-dev" || ns == "team-b-dev" || ns == "team-d-dev")
 }
 
-// desktopsServer runs the snapshot over src, with team-b as a second project,
-// and waits until it synced.
+var teams = []string{"team-a-dev", "team-b-dev", "team-d-dev"}
+
+// desktopsServer runs the snapshot over src, with team-b and team-d as more
+// projects, team-d holding nothing, and waits until it synced or a watch
+// failed.
 func desktopsServer(t *testing.T, fc *fakeCluster, src *desktopsSource) *Server {
 	t.Helper()
-	fc.namespaces = append(fc.namespaces, corev1.Namespace{ObjectMeta: metav1.ObjectMeta{
-		Name: "team-b-dev", Labels: map[string]string{"dotvirt.io/project": "team-b"}, Annotations: map[string]string{"dotvirt.io/repo": "https://forge/team-b.git"},
-	}})
+	for _, p := range []string{"team-b", "team-d"} {
+		fc.namespaces = append(fc.namespaces, corev1.Namespace{ObjectMeta: metav1.ObjectMeta{
+			Name: p + "-dev", Labels: map[string]string{"dotvirt.io/project": p}, Annotations: map[string]string{"dotvirt.io/repo": "https://forge/" + p + ".git"},
+		}})
+	}
 	s := fc.server(nil, Config{})
 	s.desktops = desktops.New(src, s.bus, func() bool { return true })
 	s.desktops.Run(t.Context())
-	for deadline := time.Now().Add(5 * time.Second); !s.desktops.Overview(nil, nil).Synced; time.Sleep(time.Millisecond) {
+	classes := map[desktops.Kind]bool{{Resource: desktops.GVRClass.Resource}: true}
+	for deadline := time.Now().Add(5 * time.Second); ; time.Sleep(time.Millisecond) {
+		if o := s.desktops.Overview(classes, nil); o.Synced || o.Stale {
+			return s
+		}
 		if time.Now().After(deadline) {
 			t.Fatal("the snapshot never synced")
 		}
 	}
+}
+
+// offServer is a cluster without DeskuBe.
+func offServer(t *testing.T) *Server {
+	t.Helper()
+	fc := newFakeCluster(t)
+	fc.readsVMs = tenantSeesTeams
+	s := fc.server(nil, Config{})
+	s.desktops = desktops.New(nil, s.bus, func() bool { return false })
 	return s
 }
 
@@ -146,12 +169,17 @@ func desktopsVersion(t *testing.T, s *Server, token string, namespaces ...string
 	return s.desktopsWatermark(v, namespaces)
 }
 
-func getDesktops(t *testing.T, s *Server, token string) model.Desktops {
+func desktopsBody(t *testing.T, s *Server, token, target string) string {
 	t.Helper()
-	rec := do(s, token, http.MethodGet, "/api/desktops", "")
+	rec := do(s, token, http.MethodGet, target, "")
 	wantStatus(t, rec, http.StatusOK)
+	return rec.Body.String()
+}
+
+func getDesktops(t *testing.T, s *Server, token, target string) model.Desktops {
+	t.Helper()
 	var got model.Desktops
-	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+	if err := json.Unmarshal([]byte(desktopsBody(t, s, token, target)), &got); err != nil {
 		t.Fatal(err)
 	}
 	return got
@@ -176,84 +204,113 @@ func namespaces(d model.Desktops) []string {
 	return out
 }
 
+// listsKinds lets the tenant list the given vdi kinds in the given namespaces.
+func listsKinds(resources []string, nss ...string) func(string, *authzv1.ResourceAttributes) bool {
+	return func(token string, a *authzv1.ResourceAttributes) bool {
+		if token == adminToken {
+			return true
+		}
+		return token == tenantToken && a.Verb == "list" && a.Group == desktops.Group &&
+			slices.Contains(resources, a.Resource) && slices.Contains(nss, a.Namespace)
+	}
+}
+
+var allKinds = []string{"vdipools", "vdiinstances", "vdiclaims"}
+
 func TestDesktopsShowWhatTheCallerMayList(t *testing.T) {
 	fc := newFakeCluster(t)
 	fc.readsVMs = tenantSeesTeams
-	fc.ssar = func(token string, a *authzv1.ResourceAttributes) bool {
-		return token == adminToken || token == tenantToken && a.Verb == "list" && a.Group == desktops.Group && a.Namespace == "team-a-dev"
-	}
+	fc.ssar = listsKinds(allKinds, "team-a-dev")
 	s := desktopsServer(t, fc, &desktopsSource{})
 
-	all := getDesktops(t, s, adminToken)
-	if !all.Synced || len(all.Classes) != 1 || len(all.Pools) != 2 || len(all.Desktops) != 2 || len(all.Claims) != 2 {
+	all := getDesktops(t, s, adminToken, "/api/desktops")
+	if !all.Synced || len(all.Classes) != 1 || len(all.Pools) != 2 || len(all.Desktops) != 2 || len(all.Claims) != 2 || len(all.Unlisted) != 0 {
 		t.Fatalf("an admin reads %+v", all)
 	}
 
-	got := getDesktops(t, s, tenantToken)
+	got := getDesktops(t, s, tenantToken, "/api/desktops")
 	if nss := namespaces(got); len(nss) != 1 || nss[0] != "team-a-dev" {
 		t.Fatalf("the tenant reads namespaces %v: %+v", nss, got)
 	}
-	if len(got.Pools) != 1 || len(got.Desktops) != 1 || len(got.Claims) != 1 {
+	if len(got.Pools) != 1 || len(got.Desktops) != 1 || len(got.Claims) != 1 || len(got.Unlisted) != 0 {
 		t.Fatalf("the tenant reads %+v", got)
 	}
 	if len(got.Classes) != 0 {
 		t.Fatalf("a tenant without a cluster-wide list read classes: %+v", got.Classes)
 	}
-	if len(all.Hidden) != 0 {
-		t.Fatalf("an admin is told of hidden kinds: %+v", all.Hidden)
-	}
-
-	rec := do(s, viewerToken, http.MethodGet, "/api/desktops", "")
-	wantStatus(t, rec, http.StatusOK)
-	if strings.Contains(rec.Body.String(), "team-") {
-		t.Fatalf("a caller seeing no namespace read %s", rec.Body)
-	}
-	if strings.Contains(rec.Body.String(), "vdiclasses") {
-		t.Fatalf("a caller who may not list classes learned of them: %s", rec.Body)
-	}
 }
 
 // A project viewer sees a pool's counts: the desktops behind them are said to
-// be hidden, not read as none. A caller who may list nothing in a namespace
-// is told nothing of it.
-func TestHiddenIsSaidOnlyBesideWhatTheCallerLists(t *testing.T) {
+// be unlisted, not read as none. It is the caller's own rights, said where no
+// claim and no desktop exist too, and nothing else moves with the rows.
+func TestUnlistedIsTheCallersOwnRights(t *testing.T) {
+	fc := newFakeCluster(t)
+	fc.readsVMs = tenantSeesTeams
+	fc.ssar = listsKinds([]string{"vdipools"}, "team-b-dev", "team-d-dev")
+	src := &desktopsSource{}
+	s := desktopsServer(t, fc, src)
+
+	empty := getDesktops(t, s, tenantToken, "/api/desktops?namespace=team-d-dev")
+	unlisted, err := json.Marshal(empty.Unlisted)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := `[{"namespace":"team-d-dev","resource":"vdiclaims"},{"namespace":"team-d-dev","resource":"vdiinstances"}]`; string(unlisted) != want {
+		t.Fatalf("unlisted = %s, want %s", unlisted, want)
+	}
+
+	body := desktopsBody(t, s, tenantToken, "/api/desktops")
+	version := desktopsVersion(t, s, tenantToken, teams...)
+	if got := getDesktops(t, s, tenantToken, "/api/desktops"); len(got.Pools) != 1 || len(got.Desktops) != 0 || len(got.Unlisted) != 4 {
+		t.Fatalf("the tenant reads %+v", got)
+	}
 	for _, c := range []struct {
-		name  string
-		pools bool
-		want  string
+		what  string
+		event watch.EventType
+		obj   *unstructured.Unstructured
 	}{
-		{"lists pools", true, `[{"namespace":"team-b-dev","resource":"vdiclaims"},{"namespace":"team-b-dev","resource":"vdiinstances"}]`},
-		{"lists nothing", false, `[]`},
+		{"a desktop made where none was", watch.Added, deskInstance("team-d-dev", "fresh", "Ready")},
+		{"a desktop deleted", watch.Deleted, deskInstance("team-b-dev", "solo", "Ready")},
+	} {
+		src.write(t, s, c.event, c.obj)
+		if got := desktopsBody(t, s, tenantToken, "/api/desktops"); got != body {
+			t.Fatalf("%s moved the answer: %s then %s", c.what, body, got)
+		}
+		if got := desktopsVersion(t, s, tenantToken, teams...); got != version {
+			t.Fatalf("%s moved the version: %d then %d", c.what, version, got)
+		}
+	}
+}
+
+// A caller who may list no vdi kind is told what a cluster without DeskuBe
+// tells it, even while a watch is unsynced and stale.
+func TestACallerWhoListsNoDesktopKindIsToldNothing(t *testing.T) {
+	off := offServer(t)
+	offBody := desktopsBody(t, off, tenantToken, "/api/desktops")
+	if v := desktopsVersion(t, off, tenantToken, teams...); v != 0 {
+		t.Fatalf("a cluster without DeskuBe gives version %d", v)
+	}
+	for _, c := range []struct {
+		name       string
+		failClaims bool
+	}{
+		{"synced", false},
+		{"a watch unsynced and stale", true},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			fc := newFakeCluster(t)
 			fc.readsVMs = tenantSeesTeams
-			fc.ssar = func(token string, a *authzv1.ResourceAttributes) bool {
-				return token == adminToken || token == tenantToken && c.pools && a.Verb == "list" &&
-					a.Group == desktops.Group && a.Resource == "vdipools" && a.Namespace == "team-b-dev"
-			}
-			s := desktopsServer(t, fc, &desktopsSource{})
+			fc.ssar = listsKinds(nil)
+			s := desktopsServer(t, fc, &desktopsSource{failClaims: c.failClaims})
 
-			rec := do(s, tenantToken, http.MethodGet, "/api/desktops?namespace=team-b-dev", "")
-			wantStatus(t, rec, http.StatusOK)
-			var got model.Desktops
-			if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
-				t.Fatal(err)
+			if all := getDesktops(t, s, adminToken, "/api/desktops"); all.Stale != c.failClaims || all.Synced == c.failClaims {
+				t.Fatalf("an admin reads %+v", all)
 			}
-			hidden, err := json.Marshal(got.Hidden)
-			if err != nil {
-				t.Fatal(err)
+			if got := desktopsBody(t, s, tenantToken, "/api/desktops"); got != offBody {
+				t.Fatalf("the tenant reads %s, a cluster without DeskuBe %s", got, offBody)
 			}
-			if string(hidden) != c.want {
-				t.Fatalf("hidden = %s, want %s", hidden, c.want)
-			}
-			if c.pools && (len(got.Pools) != 1 || len(got.Desktops) != 0) {
-				t.Fatalf("the tenant reads %+v", got)
-			}
-			// Nor does the version: it moves as for a namespace with none.
-			held := desktopsVersion(t, s, tenantToken, "team-b-dev")
-			if none := desktopsVersion(t, s, tenantToken, "empty-dev"); (held == none) == c.pools {
-				t.Fatalf("version %d beside %d for a namespace without desktops, want equal=%v", held, none, !c.pools)
+			if v := desktopsVersion(t, s, tenantToken, teams...); v != 0 {
+				t.Fatalf("version = %d, want 0", v)
 			}
 		})
 	}
@@ -271,19 +328,20 @@ func TestDesktopsVersionMovesWithWhatTheCallerReads(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) {
 			fc := newFakeCluster(t)
 			fc.readsVMs = tenantSeesTeams
-			fc.ssar = func(token string, a *authzv1.ResourceAttributes) bool {
-				return token == tenantToken && c.lists && a.Verb == "list" && a.Group == desktops.Group && a.Namespace == "team-a-dev"
+			fc.ssar = listsKinds(nil)
+			if c.lists {
+				fc.ssar = listsKinds(allKinds, "team-a-dev")
 			}
 			src := &desktopsSource{}
 			s := desktopsServer(t, fc, src)
 
-			before := desktopsVersion(t, s, tenantToken, "team-a-dev", "team-b-dev")
-			src.write(t, s, deskInstance("team-b-dev", "solo", "Stopping"))
-			if after := desktopsVersion(t, s, tenantToken, "team-a-dev", "team-b-dev"); after != before {
+			before := desktopsVersion(t, s, tenantToken, teams...)
+			src.write(t, s, watch.Modified, deskInstance("team-b-dev", "solo", "Stopping"))
+			if after := desktopsVersion(t, s, tenantToken, teams...); after != before {
 				t.Fatalf("another namespace's desktop moved the version: %d then %d", before, after)
 			}
-			src.write(t, s, deskInstance("team-a-dev", "solo", "Stopping"))
-			if after := desktopsVersion(t, s, tenantToken, "team-a-dev", "team-b-dev"); (after != before) != c.moves {
+			src.write(t, s, watch.Modified, deskInstance("team-a-dev", "solo", "Stopping"))
+			if after := desktopsVersion(t, s, tenantToken, teams...); (after != before) != c.moves {
 				t.Fatalf("version %d then %d, want moved=%v", before, after, c.moves)
 			}
 		})
@@ -295,29 +353,5 @@ func TestDesktopsVersionIsAbsentWithoutTheModule(t *testing.T) {
 	s.desktops = desktops.New(nil, s.bus, func() bool { return false })
 	if v := desktopsVersion(t, s, adminToken, "team-a-dev"); v != 0 {
 		t.Fatalf("version = %d, want 0", v)
-	}
-}
-
-// A kind held where the caller may not list it moves the version as it comes
-// and goes, never as its objects move.
-func TestDesktopsVersionSaysAHiddenKindByItsPresenceOnly(t *testing.T) {
-	fc := newFakeCluster(t)
-	fc.readsVMs = tenantSeesTeams
-	fc.ssar = func(token string, a *authzv1.ResourceAttributes) bool {
-		return token == adminToken || token == tenantToken && a.Verb == "list" &&
-			a.Resource == "vdipools" && a.Namespace == "team-c-dev"
-	}
-	src := &desktopsSource{}
-	s := desktopsServer(t, fc, src)
-
-	before := desktopsVersion(t, s, tenantToken, "team-a-dev", "team-c-dev")
-	src.write(t, s, deskInstance("team-c-dev", "solo", "Ready"))
-	appeared := desktopsVersion(t, s, tenantToken, "team-a-dev", "team-c-dev")
-	if appeared == before {
-		t.Fatal("a desktop the caller may not list appearing left the version")
-	}
-	src.write(t, s, deskInstance("team-c-dev", "solo", "Stopping"))
-	if desktopsVersion(t, s, tenantToken, "team-a-dev", "team-c-dev") != appeared {
-		t.Fatal("a hidden desktop's move moved the version")
 	}
 }

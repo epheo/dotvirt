@@ -3,8 +3,8 @@
 // and no request reaches the cluster.
 //
 // One read leaves here, Overview: each namespaced kind where the caller may
-// list it, the classes for a caller who may list them cluster-wide, and which
-// of the kinds held it may not list.
+// list it, the classes for a caller who may list them cluster-wide, and the
+// kinds it may not list beside those, from its own rights alone.
 package desktops
 
 import (
@@ -53,11 +53,14 @@ type Source interface {
 // release has not granted them yet.
 var pace = 10 * time.Second
 
-// Held is one kind present in one namespace. The classes are held at "".
-type Held struct{ Namespace, Resource string }
+// Kind is one kind in one namespace. The classes are at "".
+type Kind struct{ Namespace, Resource string }
 
-// kind is one watched kind and its projection.
-type kind struct {
+// Namespaced are the kinds read per namespace; the classes are cluster-scoped.
+var Namespaced = []schema.GroupVersionResource{GVRPool, GVRInstance, GVRClaim}
+
+// watched is one watched kind and its projection.
+type watched struct {
 	gvr   schema.GroupVersionResource
 	table interface {
 		cache.Store
@@ -79,10 +82,8 @@ type Snapshot struct {
 	instances *reflect.Table[model.Desktop]
 	claims    *reflect.Table[model.DesktopClaim]
 	// gens counts each kind's moves per namespace, so a caller's watermark
-	// moves with what it may list only. held counts each kind's rows per
-	// namespace, written with the rows under mu, and reset with them.
-	gens map[Held]uint64
-	held map[Held]int
+	// moves with what it may list only.
+	gens map[Kind]uint64
 	// flips counts what every caller's pull shows besides rows: whether it is
 	// synced, a watch's health, and the module stopping.
 	flips uint64
@@ -95,14 +96,14 @@ type Snapshot struct {
 }
 
 // kinds are the watched kinds, in the order of healthy and absent.
-func (s *Snapshot) kinds() []kind {
-	return []kind{{GVRClass, s.classes}, {GVRPool, s.pools}, {GVRInstance, s.instances}, {GVRClaim, s.claims}}
+func (s *Snapshot) kinds() []watched {
+	return []watched{{GVRClass, s.classes}, {GVRPool, s.pools}, {GVRInstance, s.instances}, {GVRClaim, s.claims}}
 }
 
 // New builds the snapshot. served is the module flag, which already reads
 // discovery, so a cluster without DeskuBe pays no API call here.
 func New(src Source, bus *eventbus.Bus, served func() bool) *Snapshot {
-	s := &Snapshot{src: src, bus: bus, served: served, gens: map[Held]uint64{}, held: map[Held]int{}}
+	s := &Snapshot{src: src, bus: bus, served: served, gens: map[Kind]uint64{}}
 	s.classes = newTable(s, GVRClass.Resource, decodeClass, nil)
 	s.pools = newTable(s, GVRPool.Resource, decodePool, reflect.NamespacedKey)
 	s.instances = newTable(s, GVRInstance.Resource, decodeInstance, reflect.NamespacedKey)
@@ -115,27 +116,12 @@ func New(src Source, bus *eventbus.Bus, served func() bool) *Snapshot {
 
 func newTable[V any](s *Snapshot, resource string, decode func(*unstructured.Unstructured) (V, bool), key func(*unstructured.Unstructured) string) *reflect.Table[V] {
 	return &reflect.Table[V]{Lock: &s.mu, Decode: decode, Key: key, Publish: s.publish,
-		Touch: func(k string, old, now *V) {
-			h := Held{Resource: resource}
+		Touch: func(k string, _, _ *V) {
+			at := Kind{Resource: resource}
 			if key != nil {
-				h.Namespace, _, _ = strings.Cut(k, "/")
+				at.Namespace, _, _ = strings.Cut(k, "/")
 			}
-			s.gens[h]++
-			switch {
-			case old == nil:
-				s.held[h]++
-			case now == nil:
-				if s.held[h]--; s.held[h] == 0 {
-					delete(s.held, h)
-				}
-			}
-		},
-		Cleared: func() {
-			for h := range s.held {
-				if h.Resource == resource {
-					delete(s.held, h)
-				}
-			}
+			s.gens[at]++
 		}}
 }
 
@@ -245,68 +231,53 @@ func (s *Snapshot) Base() uint64 {
 }
 
 // Gen is the level of one kind in one namespace.
-func (s *Snapshot) Gen(h Held) uint64 {
+func (s *Snapshot) Gen(k Kind) uint64 {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	return s.gens[h]
+	return s.gens[k]
 }
 
-// HeldIn lists the kinds that have rows in namespaces ("" for the classes),
-// so a caller is reviewed only for what it could be shown. Nothing while the
-// module is off: a reflector it left running may still write.
-func (s *Snapshot) HeldIn(namespaces []string) []Held {
-	if !s.started.Load() {
-		return nil
-	}
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	var out []Held
-	kinds := s.kinds()
-	for _, ns := range namespaces {
-		for _, k := range kinds {
-			if h := (Held{ns, k.gvr.Resource}); s.held[h] > 0 {
-				out = append(out, h)
-			}
-		}
-	}
-	return out
-}
-
-// Overview is what readable shows: each kind in the namespaces it names, and
-// the classes when it holds them at "". A pool-made desktop sits under its
-// pool where the pool is shown, else with the others. hidden are the
-// namespaced kinds held where the caller may not list them, said so that a
-// pool's count beside no desktop does not read as none. Nothing while the
-// module is off.
-func (s *Snapshot) Overview(readable map[Held]bool, hidden []Held) model.Desktops {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	out := model.Desktops{
-		Synced:   s.synced(),
-		Stale:    !reflect.AllHealthy(s.healthy[:]),
+// none is the answer of a cluster without DeskuBe.
+func none() model.Desktops {
+	return model.Desktops{
 		Classes:  []model.DesktopClass{},
 		Pools:    []model.DesktopPool{},
 		Desktops: []model.Desktop{},
 		Claims:   []model.DesktopClaim{},
-		Hidden:   make([]model.DesktopKind, 0, len(hidden)),
+		Unlisted: []model.DesktopKind{},
 	}
-	if !s.started.Load() {
+}
+
+// Overview is what readable shows: each kind in the namespaces it names, and
+// the classes when it holds them at "". A pool-made desktop sits under its
+// pool where the pool is shown, else with the others. unlisted are the
+// caller's own rights, said so that a pool's count beside no desktop does not
+// read as none. A caller who may list no kind gets what a cluster without
+// DeskuBe answers, as does every caller while the module is off: not even
+// whether the pull is synced.
+func (s *Snapshot) Overview(readable map[Kind]bool, unlisted []Kind) model.Desktops {
+	out := none()
+	if len(readable) == 0 || !s.started.Load() {
 		return out
 	}
-	for _, h := range hidden {
-		out.Hidden = append(out.Hidden, model.DesktopKind{Namespace: h.Namespace, Resource: h.Resource})
+	for _, k := range unlisted {
+		out.Unlisted = append(out.Unlisted, model.DesktopKind{Namespace: k.Namespace, Resource: k.Resource})
 	}
-	slices.SortFunc(out.Hidden, func(a, b model.DesktopKind) int {
+	slices.SortFunc(out.Unlisted, func(a, b model.DesktopKind) int {
 		return cmp.Or(strings.Compare(a.Namespace, b.Namespace), strings.Compare(a.Resource, b.Resource))
 	})
-	if readable[Held{Resource: GVRClass.Resource}] {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	out.Synced = s.synced()
+	out.Stale = !reflect.AllHealthy(s.healthy[:])
+	if readable[Kind{Resource: GVRClass.Resource}] {
 		for _, c := range s.classes.Rows {
 			out.Classes = append(out.Classes, c)
 		}
 	}
 	claimed := map[string]model.DesktopClaim{}
 	for _, c := range s.claims.Rows {
-		if !readable[Held{c.Namespace, GVRClaim.Resource}] {
+		if !readable[Kind{c.Namespace, GVRClaim.Resource}] {
 			continue
 		}
 		out.Claims = append(out.Claims, c)
@@ -322,7 +293,7 @@ func (s *Snapshot) Overview(readable map[Held]bool, hidden []Held) model.Desktop
 	}
 	pools := map[string]int{}
 	for key, p := range s.pools.Rows {
-		if !readable[Held{p.Namespace, GVRPool.Resource}] {
+		if !readable[Kind{p.Namespace, GVRPool.Resource}] {
 			continue
 		}
 		pools[key] = len(out.Pools)
@@ -330,7 +301,7 @@ func (s *Snapshot) Overview(readable map[Held]bool, hidden []Held) model.Desktop
 		out.Pools = append(out.Pools, p)
 	}
 	for key, d := range s.instances.Rows {
-		if !readable[Held{d.Namespace, GVRInstance.Resource}] {
+		if !readable[Kind{d.Namespace, GVRInstance.Resource}] {
 			continue
 		}
 		d.Claim = claimed[key].Name

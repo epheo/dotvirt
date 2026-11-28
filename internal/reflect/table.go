@@ -26,9 +26,6 @@ type Table[V any] struct {
 	Key func(*unstructured.Unstructured) string
 	// Publish runs after Lock is released, when something moved.
 	Publish func()
-	// Cleared, when set, runs under Lock as Clear empties Rows, so what is
-	// kept beside the rows is reset in the same moment.
-	Cleared func()
 	// Rows is read under Lock.
 	Rows   map[string]V
 	synced atomic.Bool
@@ -149,9 +146,6 @@ func (t *Table[V]) Synced() bool { return t.synced.Load() }
 func (t *Table[V]) Clear() {
 	t.Lock.Lock()
 	t.Rows = nil
-	if t.Cleared != nil {
-		t.Cleared()
-	}
 	t.Lock.Unlock()
 	t.synced.Store(false)
 }
