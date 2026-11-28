@@ -83,14 +83,10 @@
 	const usageFailed = $derived(usageRes.failed);
 
 	// The VM's latest merged change, for the GitOps card's one-line summary;
-	// the Changes tab carries the full history. The project's applied revision
-	// is in the key: a merge that reaches the cluster moves it.
+	// the Changes tab carries the full history.
 	const project = $derived(inventory.projectOf(vm.namespace));
-	const revision = $derived(
-		inventory.projects.find((p) => p.name === project)?.gitOps?.revision ?? '',
-	);
 	const historyRes = resource<Commit[]>(
-		() => `${key}|${vm.sourceFile ?? ''}|${revision}`,
+		() => `${key}|${vm.sourceFile ?? ''}|${inventory.historyMark(project)}`,
 		() => (vm.sourceFile ? api.vmHistory(vm.namespace, vm.name) : Promise.resolve([])),
 		{ reset: true },
 	);

@@ -177,10 +177,12 @@
 		inventory.projects.find((p) => p.namespaces.some((n) => n.namespace === vm.namespace))?.gitOps
 			?.revision ?? '',
 	);
-	// Also when a field the diff compares (manifest.DiffVMs) moves on the
-	// running VM: a second edit outside git leaves the verdict OutOfSync.
-	// Run state (phase, IPs, host) is not compared, so it never re-reads.
-	const compared = $derived(
+	// Also when git moves a field the diff compares (manifest.DiffVMs): the
+	// frame's declared fields are git's, so a merge re-reads a drift that is
+	// already OutOfSync before Argo applies it. Run state never re-reads.
+	// The caller's authoring verdict too: the answer carries the resync one.
+	// Reading the drift at all is listing the VM, which keeps it on the frame.
+	const declared = $derived(
 		JSON.stringify([
 			vm.power,
 			vm.cpuCores,
@@ -197,7 +199,7 @@
 		]),
 	);
 	const driftRes = resource<DriftResult>(
-		() => `${key}|${vm.sync}|${revision}|${compared}`,
+		() => `${key}|${vm.sync}|${revision}|${declared}|${inventory.canAuthorVMs(vm.namespace)}`,
 		() => api.drift(vm.namespace, vm.name),
 		{ reset: true },
 	);

@@ -36,14 +36,12 @@
 		mine: (it: DraftItem) => boolean; // a commit's items that belong to this object
 	} = $props();
 
-	// History keys on the project's applied revision: a merge that reaches the
-	// cluster moves it, which is when a new version exists to show.
-	const revision = $derived(
-		inventory.projects.find((p) => p.name === project)?.gitOps?.revision ?? '',
-	);
-	const historyRes = resource<Commit[]>(
-		() => `${project}/${name}|${revision}`,
-		() => load(),
+	const historyRes = resource<Commit[] | null>(
+		() => {
+			const mark = inventory.historyMark(project);
+			return mark && `${project}/${name}|${mark}`;
+		},
+		(k) => (k ? load() : Promise.resolve(null)),
 		{
 			reset: true,
 		},
@@ -85,7 +83,7 @@
 		<span class="text-xs text-ink-faint">every version of {name} in git, newest first</span>
 	{/snippet}
 	<ErrorNote error={restoreOp.error} class="m-3" />
-	{#if historyRes.loading}
+	{#if historyRes.loading || (!historyRes.data && !historyRes.failed)}
 		<p class="px-card py-2 text-xs text-ink-faint">loading…</p>
 	{:else if historyRes.failed}
 		<p class="px-card py-2 text-xs text-danger-ink">{historyRes.error}</p>

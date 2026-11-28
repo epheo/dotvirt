@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { HttpError, Unauthorized } from './api';
-import { action, resource, type Resource } from './resource.svelte';
+import { action, resource, RETRY_MS, type Resource } from './resource.svelte';
 import { box, effectRoot, flushSync } from '../test/runes.svelte';
 
 // resource()/action() carry the async idioms 15+ components lean on: the
@@ -121,6 +121,49 @@ describe('resource', () => {
 		expect(loads).toEqual(['vm-a', 'vm-b']);
 		expect(r.data).toBe('data-vm-b');
 		stop();
+	});
+
+	it('tries a failed load again after RETRY_MS, and never once unmounted', async () => {
+		// A 503 while the server warms up: no frame re-runs the load, so the
+		// panel would otherwise show the failure for good.
+		vi.useFakeTimers();
+		try {
+			let n = 0;
+			let r!: Resource<string>;
+			const stop = effectRoot(() => {
+				r = resource(
+					() => 'k',
+					async () => {
+						if (++n === 1) throw new HttpError('live cluster state still loading', 503);
+						return 'ok';
+					},
+				);
+			});
+			await vi.advanceTimersByTimeAsync(0);
+			expect(r.failed).toBe(true);
+			await vi.advanceTimersByTimeAsync(RETRY_MS);
+			expect(r.data).toBe('ok');
+			expect(r.failed).toBe(false);
+			await vi.advanceTimersByTimeAsync(RETRY_MS * 3);
+			expect(n).toBe(2);
+			stop();
+
+			let m = 0;
+			const stop2 = effectRoot(() => {
+				resource(
+					() => 'k',
+					async () => {
+						m++;
+						throw new HttpError('down', 503);
+					},
+				);
+			});
+			stop2();
+			await vi.advanceTimersByTimeAsync(RETRY_MS * 3);
+			expect(m).toBe(1);
+		} finally {
+			vi.useRealTimers();
+		}
 	});
 
 	it('reset:true blanks on a key change, reset:false keeps the old view', async () => {

@@ -12,9 +12,12 @@
 //   POST /__fixture/ws-refuse/{n}      destroy the next n WS handshakes pre-open
 //   POST /__fixture/login-status/{s}   next POST /api/login answers status s
 //   POST /__fixture/logout-status/{s}  next POST /api/logout answers status s
-//   POST /__fixture/fail/{plane}/{n}   the next n calls of a plane answer 503 (events, logout)
+//   POST /__fixture/fail/{plane}/{n}   the next n calls of a plane answer 503 (events, logout, drift)
 //   POST /__fixture/proxy-down/{0|1}   the upload proxy drops connections, as one the browser cannot reach or trust
 //   POST /__fixture/vm/{ns}/{name}     merge the JSON body into a VM, as the reflector sees it move: one frame
+//   POST /__fixture/project/{name}     merge the JSON body into a project row (a merge moves its head): one frame
+//   POST /__fixture/namespace/{ns}     merge the JSON body into a project namespace (its verdicts, its VMs): one frame
+//   POST /__fixture/caps/{ns}          merge the JSON body into the namespace's capabilities; the tasks watermark moves: one frame
 //   GET  /__fixture/scenario           current scenario name
 //   GET  /__fixture/provider-starts    sign-in provider starts since the scenario switch
 //   GET  /__fixture/forge-connects     forge connects started since the scenario switch
@@ -993,6 +996,7 @@ async function handleAPI(req, res, url) {
 			return res.end();
 		}
 		if (sub === 'drift') {
+			if (failing('drift')) return sendText(res, 503, 'live cluster state still loading');
 			return sendJSON(res, 200, s.vmDrift?.[`${ns}/${name}`] ?? { drift: false, changes: [] });
 		}
 		if (sub === 'history') {
@@ -1565,6 +1569,38 @@ function handleControl(req, res, url) {
 			Object.assign(vm, fields);
 			broadcastInventory();
 			sendJSON(res, 200, vm);
+		});
+	}
+	m = path.match(/^\/__fixture\/project\/([^/]+)$/);
+	if (m && req.method === 'POST') {
+		const p = state.scenario.inventory.projects.find((x) => x.name === m[1]);
+		if (!p) return sendText(res, 404, 'project not found');
+		return void readBody(req).then((fields) => {
+			Object.assign(p, fields);
+			broadcastInventory();
+			sendJSON(res, 200, { name: p.name });
+		});
+	}
+	m = path.match(/^\/__fixture\/namespace\/([^/]+)$/);
+	if (m && req.method === 'POST') {
+		const n = state.scenario.inventory.projects
+			.flatMap((p) => p.namespaces)
+			.find((x) => x.namespace === m[1]);
+		if (!n) return sendText(res, 404, 'namespace not found');
+		return void readBody(req).then((fields) => {
+			Object.assign(n, fields);
+			broadcastInventory();
+			sendJSON(res, 200, n);
+		});
+	}
+	m = path.match(/^\/__fixture\/caps\/([^/]+)$/);
+	if (m && req.method === 'POST') {
+		const s = state.scenario;
+		return void readBody(req).then((fields) => {
+			s.capabilities = { ...s.capabilities, [m[1]]: { ...s.capabilities?.[m[1]], ...fields } };
+			s.inventory.tasksVersion = (s.inventory.tasksVersion ?? 0) + 1;
+			broadcastInventory();
+			sendJSON(res, 200, s.capabilities[m[1]]);
 		});
 	}
 	m = path.match(/^\/__fixture\/ws-refuse\/(\d+)$/);

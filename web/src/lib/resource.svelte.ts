@@ -17,6 +17,12 @@ import { pollWhileVisible } from './poll';
 // the new load is in flight: true blanks (detail panels - the old object is
 // another identity's), false keeps the old data (scope dashboards avoid a
 // flash).
+//
+// A failed load is tried again after RETRY_MS, as the caps store does: no
+// frame re-runs it, and reading key() while failed would ask once per frame
+// per client through an outage.
+export const RETRY_MS = 15_000;
+
 export interface Resource<T> {
 	readonly data: T | null;
 	readonly loading: boolean;
@@ -39,8 +45,11 @@ export function resource<T>(
 	let seq = 0;
 	// A derived string notifies only when it changes, not when what key() read did.
 	const id = $derived(key());
+	let retry: ReturnType<typeof setTimeout> | undefined;
+	let gone = false;
 
 	async function run() {
+		clearTimeout(retry);
 		const k = untrack(() => id);
 		const mine = ++seq;
 		const current = () => mine === seq && id === k;
@@ -54,6 +63,7 @@ export function resource<T>(
 			if (e instanceof Unauthorized) return; // signs out centrally via the api layer
 			if (!current()) return;
 			error = friendlyError(e);
+			if (!gone) retry = setTimeout(() => void run(), RETRY_MS);
 		} finally {
 			if (current()) loading = false;
 		}
@@ -66,6 +76,11 @@ export function resource<T>(
 			error = '';
 		}
 		untrack(run);
+	});
+	// A load in flight at unmount must not leave a retry behind.
+	$effect(() => () => {
+		gone = true;
+		clearTimeout(retry);
 	});
 	const poll = opts.poll;
 	if (poll) {
