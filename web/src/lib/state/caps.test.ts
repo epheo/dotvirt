@@ -4,8 +4,9 @@ const api = vi.hoisted(() => ({
 	api: { capabilities: vi.fn() },
 	Unauthorized: class extends Error {},
 }));
-vi.mock('#lib/api.js', () => api);
+vi.mock('#lib/api.js', async (actual) => ({ ...(await actual<object>()), ...api }));
 
+import { HttpError, READ_RETRY_MAX_MS, READ_RETRY_MS } from '#lib/api.js';
 import { caps, CHECKING } from './caps.svelte';
 import { ACCESS_UNKNOWN } from '#lib/authoring.js';
 
@@ -64,6 +65,40 @@ describe('caps', () => {
 		await flush();
 		expect(api.api.capabilities).toHaveBeenCalledTimes(2);
 		expect(caps.nsGate('web', (n) => n.restart, 'no')).toEqual({ ok: false, why: 'no' });
+	});
+
+	it('asks again after a failure that may pass, backing off, but never after a refusal', async () => {
+		vi.useFakeTimers();
+		try {
+			const gate = (ns: string) => caps.nsGate(ns, (n) => n.restart, 'x');
+			api.api.capabilities.mockRejectedValue(new HttpError('unavailable', 503));
+			gate('web');
+			await vi.advanceTimersByTimeAsync(0);
+			expect(api.api.capabilities).toHaveBeenCalledTimes(1);
+			// A gate asked before the wait is up asks nothing.
+			gate('web');
+			await vi.advanceTimersByTimeAsync(0);
+			expect(api.api.capabilities).toHaveBeenCalledTimes(1);
+			await vi.advanceTimersByTimeAsync(READ_RETRY_MS * 1.3);
+			gate('web');
+			await vi.advanceTimersByTimeAsync(0);
+			expect(api.api.capabilities).toHaveBeenCalledTimes(2);
+			// The second wait is twice the first, at least 0.7 of 30s.
+			await vi.advanceTimersByTimeAsync(READ_RETRY_MS * 1.3);
+			gate('web');
+			await vi.advanceTimersByTimeAsync(0);
+			expect(api.api.capabilities).toHaveBeenCalledTimes(2);
+
+			api.api.capabilities.mockReset();
+			api.api.capabilities.mockRejectedValue(new HttpError('not found', 404));
+			gate('db');
+			await vi.advanceTimersByTimeAsync(READ_RETRY_MAX_MS * 3);
+			gate('db');
+			await vi.advanceTimersByTimeAsync(0);
+			expect(api.api.capabilities).toHaveBeenCalledTimes(1);
+		} finally {
+			vi.useRealTimers();
+		}
 	});
 
 	it('forgets every answer on reset', async () => {

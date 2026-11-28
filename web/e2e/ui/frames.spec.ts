@@ -25,8 +25,9 @@ async function fetchCounter(page: Page) {
 		);
 }
 
-// resource()'s RETRY_MS: the specs never import app code.
-const RETRY_MS = 15_000;
+// The longest first wait before a failed read is asked again (api.ts
+// readRetryDelay: 15s, spread by 30%); the specs never import app code.
+const FIRST_RETRY_MAX_MS = 19_500;
 
 const vmPath = (name: string) => `/api/vms/web-prod/${name}`;
 const VM = vmPath('web-1');
@@ -83,7 +84,7 @@ test('a drift read that failed is tried again on its own', async ({ page }) => {
 	await page.goto('/vm/web-prod/web-1');
 	const liveVsGit = page.locator('main').getByText('Live vs git').locator('..');
 	await expect(liveVsGit).toContainText('—');
-	await page.clock.fastForward(RETRY_MS);
+	await page.clock.fastForward(FIRST_RETRY_MAX_MS);
 	await expect(liveVsGit).toContainText('Identical');
 });
 

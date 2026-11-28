@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { HttpError, Unauthorized } from './api';
-import { action, resource, RETRY_MS, type Resource } from './resource.svelte';
+import { HttpError, READ_RETRY_MAX_MS, READ_RETRY_MS, Unauthorized } from './api';
+import { action, resource, type Resource } from './resource.svelte';
 import { box, effectRoot, flushSync } from '../test/runes.svelte';
 
 // resource()/action() carry the async idioms 15+ components lean on: the
@@ -123,10 +123,11 @@ describe('resource', () => {
 		stop();
 	});
 
-	it('tries a failed load again after RETRY_MS, and never once unmounted', async () => {
+	it('tries a load that may pass again, backing off, and never once unmounted', async () => {
 		// A 503 while the server warms up: no frame re-runs the load, so the
-		// panel would otherwise show the failure for good.
+		// panel would otherwise show the failure for good. No jitter: 15s, 30s.
 		vi.useFakeTimers();
+		vi.spyOn(Math, 'random').mockReturnValue(0.5);
 		try {
 			let n = 0;
 			let r!: Resource<string>;
@@ -134,18 +135,22 @@ describe('resource', () => {
 				r = resource(
 					() => 'k',
 					async () => {
-						if (++n === 1) throw new HttpError('live cluster state still loading', 503);
+						if (++n <= 2) throw new HttpError('live cluster state still loading', 503);
 						return 'ok';
 					},
 				);
 			});
 			await vi.advanceTimersByTimeAsync(0);
 			expect(r.failed).toBe(true);
-			await vi.advanceTimersByTimeAsync(RETRY_MS);
+			await vi.advanceTimersByTimeAsync(READ_RETRY_MS);
+			expect(n).toBe(2);
+			await vi.advanceTimersByTimeAsync(READ_RETRY_MS * 2 - 1);
+			expect(n).toBe(2);
+			await vi.advanceTimersByTimeAsync(1);
 			expect(r.data).toBe('ok');
 			expect(r.failed).toBe(false);
-			await vi.advanceTimersByTimeAsync(RETRY_MS * 3);
-			expect(n).toBe(2);
+			await vi.advanceTimersByTimeAsync(READ_RETRY_MAX_MS * 3);
+			expect(n).toBe(3);
 			stop();
 
 			let m = 0;
@@ -159,8 +164,30 @@ describe('resource', () => {
 				);
 			});
 			stop2();
-			await vi.advanceTimersByTimeAsync(RETRY_MS * 3);
+			await vi.advanceTimersByTimeAsync(READ_RETRY_MAX_MS * 3);
 			expect(m).toBe(1);
+		} finally {
+			vi.useRealTimers();
+			vi.restoreAllMocks();
+		}
+	});
+
+	it('never retries a refusal: it stands until the key moves', async () => {
+		vi.useFakeTimers();
+		try {
+			let n = 0;
+			const stop = effectRoot(() => {
+				resource(
+					() => 'k',
+					async () => {
+						n++;
+						throw new HttpError('you may not list events', 403);
+					},
+				);
+			});
+			await vi.advanceTimersByTimeAsync(READ_RETRY_MAX_MS * 3);
+			expect(n).toBe(1);
+			stop();
 		} finally {
 			vi.useRealTimers();
 		}

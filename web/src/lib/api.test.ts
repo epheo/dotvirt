@@ -2,12 +2,38 @@ import { describe, expect, it, vi } from 'vitest';
 import {
 	api,
 	HttpError,
+	readRetryDelay,
 	retryDelay,
 	streamInventory,
+	transient,
 	Unauthorized,
 	withRetry,
 	type StreamStatus,
 } from '#lib/api.js';
+
+describe('readRetryDelay', () => {
+	it('doubles from 15s to a 60s cap, spread by 30% either way', () => {
+		const at = (r: number) => {
+			vi.spyOn(Math, 'random').mockReturnValue(r);
+			const out = [1, 2, 3, 4, 9].map(readRetryDelay);
+			vi.restoreAllMocks();
+			return out;
+		};
+		expect(at(0.5)).toEqual([15000, 30000, 60000, 60000, 60000]);
+		expect(at(0)).toEqual([10500, 21000, 42000, 42000, 42000]);
+		expect(at(1)).toEqual([19500, 39000, 78000, 78000, 78000]);
+	});
+});
+
+describe('transient', () => {
+	it('asks again after a server error, a rate limit or no answer, never a refusal', () => {
+		expect(transient(new HttpError('unavailable', 503))).toBe(true);
+		expect(transient(new HttpError('slow down', 429))).toBe(true);
+		expect(transient(new TypeError('Failed to fetch'))).toBe(true);
+		expect(transient(new HttpError('forbidden', 403))).toBe(false);
+		expect(transient(new HttpError('not found', 404))).toBe(false);
+	});
+});
 
 describe('retryDelay', () => {
 	it('starts at 0.5s and doubles per attempt', () => {

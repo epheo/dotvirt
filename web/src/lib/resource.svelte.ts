@@ -1,5 +1,5 @@
 import { untrack } from 'svelte';
-import { HttpError, Unauthorized, type NextStep } from './api';
+import { HttpError, readRetryDelay, transient, Unauthorized, type NextStep } from './api';
 import { friendlyError } from './format';
 import { pollWhileVisible } from './poll';
 
@@ -18,10 +18,10 @@ import { pollWhileVisible } from './poll';
 // another identity's), false keeps the old data (scope dashboards avoid a
 // flash).
 //
-// A failed load is tried again after RETRY_MS, as the caps store does: no
-// frame re-runs it, and reading key() while failed would ask once per frame
-// per client through an outage.
-export const RETRY_MS = 15_000;
+// A load that failed transiently is tried again after readRetryDelay, as the
+// caps store does: no frame re-runs it, and reading key() while failed would
+// ask once per frame per client through an outage. A refusal stands until the
+// key moves; a poll is its own retry.
 
 export interface Resource<T> {
 	readonly data: T | null;
@@ -46,7 +46,9 @@ export function resource<T>(
 	// A derived string notifies only when it changes, not when what key() read did.
 	const id = $derived(key());
 	let retry: ReturnType<typeof setTimeout> | undefined;
+	let failures = 0;
 	let gone = false;
+	const pollMs = () => (typeof opts.poll === 'function' ? untrack(opts.poll) : (opts.poll ?? 0));
 
 	async function run() {
 		clearTimeout(retry);
@@ -59,11 +61,14 @@ export function resource<T>(
 			if (!current()) return;
 			data = v;
 			error = '';
+			failures = 0;
 		} catch (e) {
 			if (e instanceof Unauthorized) return; // signs out centrally via the api layer
 			if (!current()) return;
 			error = friendlyError(e);
-			if (!gone) retry = setTimeout(() => void run(), RETRY_MS);
+			failures++;
+			if (!gone && transient(e) && !pollMs())
+				retry = setTimeout(() => void run(), readRetryDelay(failures));
 		} finally {
 			if (current()) loading = false;
 		}
@@ -71,6 +76,7 @@ export function resource<T>(
 
 	$effect(() => {
 		id;
+		failures = 0;
 		if (opts.reset) {
 			data = null;
 			error = '';
