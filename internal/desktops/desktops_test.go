@@ -321,6 +321,12 @@ func TestANamespacesLevelMovesWithItsOwnObjectsOnly(t *testing.T) {
 	if h := s.HeldIn([]string{"team-a", "team-b"}); len(h) != 2 {
 		t.Fatalf("held = %+v", h)
 	}
+	if err := s.instances.Replace([]any{desktop("team-b", "bob", nil)}, "9"); err != nil {
+		t.Fatal(err)
+	}
+	if h := s.HeldIn([]string{"team-a", "team-b"}); len(h) != 2 || !slices.Contains(h, Held{"team-b", GVRInstance.Resource}) {
+		t.Fatalf("held after a relist = %+v", h)
+	}
 }
 
 // A stopped module's reflector is not waited for: a write it lands while the
@@ -335,6 +341,8 @@ func TestAWriteDuringClearNeverHidesANamespace(t *testing.T) {
 		wg.Go(s.clear)
 		wg.Go(func() { _ = s.instances.Add(desktop("team-a", "alice", nil)) })
 		wg.Wait()
+		// The module starting again, whose first list has not landed yet.
+		s.started.Store(true)
 		_, row := s.instances.Rows["team-a/alice"]
 		if held() != row {
 			t.Fatalf("held = %v beside a row = %v", held(), row)
@@ -518,5 +526,21 @@ func TestADiscoveryErrorKeepsThePullUnsynced(t *testing.T) {
 	}
 	if bus.Version(eventbus.DesktopsChanged) == before {
 		t.Fatal("the answer published nothing")
+	}
+}
+
+// A write a stopped module's reflector lands after clear is no row of a
+// module that is off.
+func TestAStoppedModuleShowsNothing(t *testing.T) {
+	s, _ := newSnapshot(t)
+	mustAdd(t, s.instances, desktop("team-a", "alice", nil))
+	s.clear()
+	mustAdd(t, s.instances, desktop("team-a", "bob", nil))
+	if h := s.HeldIn([]string{"team-a"}); len(h) != 0 {
+		t.Fatalf("held = %+v", h)
+	}
+	got := s.Overview(everything("team-a"), []Held{{"team-a", GVRPool.Resource}})
+	if got.Synced || len(got.Desktops) != 0 || len(got.Hidden) != 0 {
+		t.Fatalf("a stopped module reads %+v", got)
 	}
 }

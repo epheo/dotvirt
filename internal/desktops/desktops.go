@@ -11,7 +11,6 @@ import (
 	"cmp"
 	"context"
 	"log"
-	"maps"
 	"slices"
 	"strings"
 	"sync"
@@ -80,8 +79,10 @@ type Snapshot struct {
 	instances *reflect.Table[model.Desktop]
 	claims    *reflect.Table[model.DesktopClaim]
 	// gens counts each kind's moves per namespace, so a caller's watermark
-	// moves with what it may list only.
+	// moves with what it may list only. held counts each kind's rows per
+	// namespace, written with the rows under mu, and reset with them.
 	gens map[Held]uint64
+	held map[Held]int
 	// flips counts what every caller's pull shows besides rows: whether it is
 	// synced, a watch's health, and the module stopping.
 	flips uint64
@@ -101,7 +102,7 @@ func (s *Snapshot) kinds() []kind {
 // New builds the snapshot. served is the module flag, which already reads
 // discovery, so a cluster without DeskuBe pays no API call here.
 func New(src Source, bus *eventbus.Bus, served func() bool) *Snapshot {
-	s := &Snapshot{src: src, bus: bus, served: served, gens: map[Held]uint64{}}
+	s := &Snapshot{src: src, bus: bus, served: served, gens: map[Held]uint64{}, held: map[Held]int{}}
 	s.classes = newTable(s, GVRClass.Resource, decodeClass, nil)
 	s.pools = newTable(s, GVRPool.Resource, decodePool, reflect.NamespacedKey)
 	s.instances = newTable(s, GVRInstance.Resource, decodeInstance, reflect.NamespacedKey)
@@ -114,12 +115,27 @@ func New(src Source, bus *eventbus.Bus, served func() bool) *Snapshot {
 
 func newTable[V any](s *Snapshot, resource string, decode func(*unstructured.Unstructured) (V, bool), key func(*unstructured.Unstructured) string) *reflect.Table[V] {
 	return &reflect.Table[V]{Lock: &s.mu, Decode: decode, Key: key, Publish: s.publish,
-		Touch: func(k string, _, _ *V) {
+		Touch: func(k string, old, now *V) {
 			h := Held{Resource: resource}
 			if key != nil {
 				h.Namespace, _, _ = strings.Cut(k, "/")
 			}
 			s.gens[h]++
+			switch {
+			case old == nil:
+				s.held[h]++
+			case now == nil:
+				if s.held[h]--; s.held[h] == 0 {
+					delete(s.held, h)
+				}
+			}
+		},
+		Cleared: func() {
+			for h := range s.held {
+				if h.Resource == resource {
+					delete(s.held, h)
+				}
+			}
 		}}
 }
 
@@ -236,41 +252,32 @@ func (s *Snapshot) Gen(h Held) uint64 {
 }
 
 // HeldIn lists the kinds that have rows in namespaces ("" for the classes),
-// so a caller is reviewed only for what it could be shown. It reads the rows
-// themselves: a reflector a stopped module left running may still write.
+// so a caller is reviewed only for what it could be shown. Nothing while the
+// module is off: a reflector it left running may still write.
 func (s *Snapshot) HeldIn(namespaces []string) []Held {
-	wanted := make(map[string]bool, len(namespaces))
-	for _, ns := range namespaces {
-		wanted[ns] = true
+	if !s.started.Load() {
+		return nil
 	}
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	found := map[Held]bool{}
-	if wanted[""] && len(s.classes.Rows) > 0 {
-		found[Held{Resource: GVRClass.Resource}] = true
-	}
-	note := func(ns, resource string) {
-		if wanted[ns] {
-			found[Held{ns, resource}] = true
+	var out []Held
+	kinds := s.kinds()
+	for _, ns := range namespaces {
+		for _, k := range kinds {
+			if h := (Held{ns, k.gvr.Resource}); s.held[h] > 0 {
+				out = append(out, h)
+			}
 		}
 	}
-	for _, p := range s.pools.Rows {
-		note(p.Namespace, GVRPool.Resource)
-	}
-	for _, d := range s.instances.Rows {
-		note(d.Namespace, GVRInstance.Resource)
-	}
-	for _, c := range s.claims.Rows {
-		note(c.Namespace, GVRClaim.Resource)
-	}
-	return slices.Collect(maps.Keys(found))
+	return out
 }
 
 // Overview is what readable shows: each kind in the namespaces it names, and
 // the classes when it holds them at "". A pool-made desktop sits under its
 // pool where the pool is shown, else with the others. hidden are the
 // namespaced kinds held where the caller may not list them, said so that a
-// pool's count beside no desktop does not read as none.
+// pool's count beside no desktop does not read as none. Nothing while the
+// module is off.
 func (s *Snapshot) Overview(readable map[Held]bool, hidden []Held) model.Desktops {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -282,6 +289,9 @@ func (s *Snapshot) Overview(readable map[Held]bool, hidden []Held) model.Desktop
 		Desktops: []model.Desktop{},
 		Claims:   []model.DesktopClaim{},
 		Hidden:   make([]model.DesktopKind, 0, len(hidden)),
+	}
+	if !s.started.Load() {
+		return out
 	}
 	for _, h := range hidden {
 		out.Hidden = append(out.Hidden, model.DesktopKind{Namespace: h.Namespace, Resource: h.Resource})

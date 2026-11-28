@@ -23,8 +23,9 @@ import (
 	"github.com/epheo/dotvirt/internal/model"
 )
 
-// desktopsSource serves a class, and a pool, a desktop and a claim in each of
-// team-a-dev and team-b-dev, with a watch on desktops a test can write through.
+// desktopsSource serves a class, a pool, a desktop and a claim in each of
+// team-a-dev and team-b-dev, a pool alone in team-c-dev, which is no project,
+// and a watch on desktops a test can write through.
 type desktopsSource struct {
 	mu        sync.Mutex
 	instances *watch.FakeWatcher
@@ -62,8 +63,11 @@ func (f *desktopsSource) DynamicListWatch(gvr schema.GroupVersionResource) *cach
 			items = append(items, deskObject("VdiClaim", ns, "someone", map[string]any{"poolName": "lab", "user": "someone"}, map[string]any{"phase": "Waiting"}))
 		}
 	}
-	if gvr == desktops.GVRClass {
+	switch gvr {
+	case desktops.GVRClass:
 		items = append(items, deskObject("VdiClass", "", "workstation", map[string]any{"image": "quay.io/deskube/desktop:1"}, nil))
+	case desktops.GVRPool:
+		items = append(items, deskObject("VdiPool", "team-c-dev", "lab", map[string]any{"className": "workstation", "seats": int64(2)}, nil))
 	}
 	return &cache.ListWatch{
 		ListWithContextFunc: func(context.Context, metav1.ListOptions) (runtime.Object, error) {
@@ -195,18 +199,6 @@ func TestDesktopsShowWhatTheCallerMayList(t *testing.T) {
 	if len(got.Classes) != 0 {
 		t.Fatalf("a tenant without a cluster-wide list read classes: %+v", got.Classes)
 	}
-	// A project viewer sees a pool's counts: the desktops behind them are
-	// said to be hidden, not read as none.
-	hidden, err := json.Marshal(got.Hidden)
-	if err != nil {
-		t.Fatal(err)
-	}
-	want := `[{"namespace":"team-b-dev","resource":"vdiclaims"},` +
-		`{"namespace":"team-b-dev","resource":"vdiinstances"},` +
-		`{"namespace":"team-b-dev","resource":"vdipools"}]`
-	if string(hidden) != want {
-		t.Fatalf("hidden = %s, want %s", hidden, want)
-	}
 	if len(all.Hidden) != 0 {
 		t.Fatalf("an admin is told of hidden kinds: %+v", all.Hidden)
 	}
@@ -218,6 +210,52 @@ func TestDesktopsShowWhatTheCallerMayList(t *testing.T) {
 	}
 	if strings.Contains(rec.Body.String(), "vdiclasses") {
 		t.Fatalf("a caller who may not list classes learned of them: %s", rec.Body)
+	}
+}
+
+// A project viewer sees a pool's counts: the desktops behind them are said to
+// be hidden, not read as none. A caller who may list nothing in a namespace
+// is told nothing of it.
+func TestHiddenIsSaidOnlyBesideWhatTheCallerLists(t *testing.T) {
+	for _, c := range []struct {
+		name  string
+		pools bool
+		want  string
+	}{
+		{"lists pools", true, `[{"namespace":"team-b-dev","resource":"vdiclaims"},{"namespace":"team-b-dev","resource":"vdiinstances"}]`},
+		{"lists nothing", false, `[]`},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			fc := newFakeCluster(t)
+			fc.readsVMs = tenantSeesTeams
+			fc.ssar = func(token string, a *authzv1.ResourceAttributes) bool {
+				return token == adminToken || token == tenantToken && c.pools && a.Verb == "list" &&
+					a.Group == desktops.Group && a.Resource == "vdipools" && a.Namespace == "team-b-dev"
+			}
+			s := desktopsServer(t, fc, &desktopsSource{})
+
+			rec := do(s, tenantToken, http.MethodGet, "/api/desktops?namespace=team-b-dev", "")
+			wantStatus(t, rec, http.StatusOK)
+			var got model.Desktops
+			if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+				t.Fatal(err)
+			}
+			hidden, err := json.Marshal(got.Hidden)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if string(hidden) != c.want {
+				t.Fatalf("hidden = %s, want %s", hidden, c.want)
+			}
+			if c.pools && (len(got.Pools) != 1 || len(got.Desktops) != 0) {
+				t.Fatalf("the tenant reads %+v", got)
+			}
+			// Nor does the version: it moves as for a namespace with none.
+			held := desktopsVersion(t, s, tenantToken, "team-b-dev")
+			if none := desktopsVersion(t, s, tenantToken, "empty-dev"); (held == none) == c.pools {
+				t.Fatalf("version %d beside %d for a namespace without desktops, want equal=%v", held, none, !c.pools)
+			}
+		})
 	}
 }
 
@@ -265,7 +303,10 @@ func TestDesktopsVersionIsAbsentWithoutTheModule(t *testing.T) {
 func TestDesktopsVersionSaysAHiddenKindByItsPresenceOnly(t *testing.T) {
 	fc := newFakeCluster(t)
 	fc.readsVMs = tenantSeesTeams
-	fc.ssar = func(token string, _ *authzv1.ResourceAttributes) bool { return token == adminToken }
+	fc.ssar = func(token string, a *authzv1.ResourceAttributes) bool {
+		return token == adminToken || token == tenantToken && a.Verb == "list" &&
+			a.Resource == "vdipools" && a.Namespace == "team-c-dev"
+	}
 	src := &desktopsSource{}
 	s := desktopsServer(t, fc, src)
 
