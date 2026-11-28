@@ -391,24 +391,42 @@ func TestDesktopsOnFollowsBindingReads(t *testing.T) {
 	}
 }
 
-// Adopting a pool into a namespace without desktops on warns: its project's
-// account may not apply it.
+// Adopting a pool into a namespace without desktops on warns that its
+// project's account may not apply it: whether they are on only to a caller
+// who may list rolebindings there, the same words to every other.
 func TestAdoptingAPoolWarnsWhereDesktopsAreOff(t *testing.T) {
 	pool := model.DraftView{Items: []model.DraftItem{{Resource: string(draft.ResourceDesktopPool), Namespace: "team-a-dev", Name: "design"}}}
-	sc := scope{proj: project.ProjectInfo{Name: "team-a"}}
-	if !newCoordinatorRig(t).s.desktopsOff(sc, "team-a-dev", pool) {
-		t.Error("no warning where desktops are off")
-	}
 	path, binding, err := netgen.DesktopsManifest(netgen.RoleBindingSpec{Namespace: "team-a-dev", Kept: []netgen.Subject{{Kind: "User", Name: "alice"}}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	g := newCoordinatorRig(t, map[string]string{path: string(binding)})
-	if g.s.desktopsOff(sc, "team-a-dev", pool) || g.s.desktopsOff(sc, "team-a-dev", model.DraftView{}) {
-		t.Error("a warning where desktops are on, or no pool is staged")
+	const neutral = "team-a-dev: a desktop pool applies only where a platform admin has turned desktops on."
+	for _, on := range []bool{false, true} {
+		files := map[string]string{}
+		if on {
+			files[path] = string(binding)
+		}
+		g := newCoordinatorRig(t, files)
+		warning := func(grants []grant, v model.DraftView) string {
+			t.Helper()
+			id, c, err := g.s.userCluster(asUser(httptest.NewRequest(http.MethodGet, "/", nil), g.token(grants)))
+			if err != nil {
+				t.Fatal(err)
+			}
+			return g.s.desktopsWarning(t.Context(), scope{id: id, cluster: c, proj: project.ProjectInfo{Name: "team-a"}}, "team-a-dev", v)
+		}
+		lister := []grant{kind(verbList, model.KindRB, "team-a-dev")}
+		if got := warning(lister, pool); on && got != "" || !on && !strings.Contains(got, "desktops are not on there") {
+			t.Errorf("on=%v, told: %q", on, got)
+		}
+		if got := warning(nil, pool); got != neutral {
+			t.Errorf("on=%v, not told: %q, want the same words either way", on, got)
+		}
+		if got := warning(lister, model.DraftView{}); got != "" {
+			t.Errorf("on=%v, no pool staged: %q", on, got)
+		}
 	}
 }
-
 // A project the cluster holds no publish namespace for is told so, naming it,
 // and only to a caller who could otherwise stage its publishing or the
 // namespace; the route refuses it and stages nothing.
