@@ -316,6 +316,7 @@ spec:
             - apiGroups:
                 - admissionregistration.k8s.io
               resourceNames:
+                - dotvirt-argo-desktops
                 - dotvirt-operator-accounts
                 - dotvirt-operator-bindings
                 - dotvirt-operator-claims

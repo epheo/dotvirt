@@ -29,6 +29,9 @@ const (
 	GuardRoutesName      = "dotvirt-operator-routes"
 	GuardIngressesName   = "dotvirt-operator-ingresses"
 	GuardHTTPRoutesName  = "dotvirt-operator-httproutes"
+	// GuardArgoName bounds Argo CD's application controllers, not the
+	// operator (argoDesktops).
+	GuardArgoName = "dotvirt-argo-desktops"
 )
 
 // GuardNames are the guard's policy and binding names, in apply order: each
@@ -36,7 +39,7 @@ const (
 // guard's policies first, so narrowing those never leaves a kind unguarded,
 // even when an install stops partway.
 var GuardNames = []string{GuardAccountsName, GuardClaimsName, GuardRoutesName, GuardIngressesName, GuardHTTPRoutesName,
-	GuardSecretsName, GuardDeploymentsName, GuardBindingsName, GuardInstallName, GuardFrontDoorName}
+	GuardSecretsName, GuardDeploymentsName, GuardBindingsName, GuardInstallName, GuardFrontDoorName, GuardArgoName}
 
 // OperandAccounts are the ServiceAccounts the operator's Deployments run as:
 // the console's and the managed forge's.
@@ -244,6 +247,7 @@ func guard(p Params, insecure, managed, delegated string, metrics Metrics) []Obj
 		policy(GuardRoutesName, rules("route.openshift.io", "routes"), operator, front.routes),
 		policy(GuardIngressesName, rules("networking.k8s.io", "ingresses"), operator, front.ingresses),
 		policy(GuardHTTPRoutesName, rules("gateway.networking.k8s.io", "httproutes"), operator, front.httproutes),
+		argoDesktops(p),
 	}
 	purpose := map[string]string{
 		GuardSecretsName:     "Bounds the operator's Secrets: none outside " + p.Namespace + " and " + p.ArgoNamespace + ", never a ServiceAccount token",
@@ -256,6 +260,7 @@ func guard(p Params, insecure, managed, delegated string, metrics Metrics) []Obj
 		GuardRoutesName:      "Bounds the operator's Routes: the console's leads only to the console on its host, no other claims that host",
 		GuardIngressesName:   "Bounds the operator's Ingresses: the console's leads only to the console on its host, no other claims that host or every host",
 		GuardHTTPRoutesName:  "Bounds the operator's HTTPRoutes: the console's leads only to the console on its host, unfiltered, no other claims that host or every host",
+		GuardArgoName:        "Bounds Argo CD's application controllers: none writes a desktop pool, desktop or claim as itself, so a project's pools apply only as the project's own account",
 	}
 	byName := map[string]*admissionregistrationv1.ValidatingAdmissionPolicy{}
 	for _, pol := range policies {
@@ -554,6 +559,31 @@ func mapKeys(m map[string][]string) func(func(string) bool) {
 			}
 		}
 	}
+}
+
+// argoDesktops refuses every Argo CD application controller's own writes of
+// DeskuBe's pools, desktops and claims. A tenant repo applies its pools as its
+// project's own account (sync impersonation): one written as a controller is a
+// sync that fell back to it, through an AppProject edited by hand, a
+// controller older than its CRDs, or the setting removed, and a controller
+// holding every verb holds seat on pools. The accounts: the install's
+// controller, and every ServiceAccount named as Argo CD names its controllers,
+// those the argocd-operator runs for namespaces it manages included.
+// Impersonated syncs, which write as a project's account, pass.
+func argoDesktops(p Params) *admissionregistrationv1.ValidatingAdmissionPolicy {
+	u := `request.userInfo.username`
+	controller := u + ` == ` + quote("system:serviceaccount:"+p.ArgoNamespace+":"+p.ArgoController) + ` || (` +
+		u + `.startsWith("system:serviceaccount:") && (` + u + `.endsWith(":argocd-application-controller") || ` +
+		u + `.endsWith("-argocd-application-controller")))`
+	var match []admissionregistrationv1.NamedRuleWithOperations
+	for _, resource := range []string{"vdipools", "vdiinstances", "vdiclaims"} {
+		match = append(match, rule("vdi.desku.be", "*", resource, admissionregistrationv1.Create, admissionregistrationv1.Update)...)
+	}
+	pol := policy(GuardArgoName, match, controller, []admissionregistrationv1.Validation{
+		deny(`false`, "Argo CD's application controller writes no desktop pool, desktop or claim as itself: a project's repo applies its pools as the project's own account, under sync impersonation"),
+	})
+	pol.Spec.MatchConditions[0].Name = "argo-controller"
+	return pol
 }
 
 func rules(group, resource string) []admissionregistrationv1.NamedRuleWithOperations {

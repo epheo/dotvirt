@@ -367,6 +367,31 @@ func TestEnvtest(t *testing.T) {
 				objs = append(objs, o.Object)
 			}
 		}
+		// A desktop pool written as each account, run dry: the controller of
+		// this install, one the argocd-operator runs for a namespace it
+		// manages, and a project's own sync account. Masters, so only
+		// admission stands in the way.
+		poolAs := map[string]func() error{}
+		for _, name := range []string{"system:serviceaccount:argocd:argocd-application-controller",
+			"system:serviceaccount:team-gitops:team-argocd-application-controller", "system:serviceaccount:argocd:dotvirt-p-team-a"} {
+			u, err := env.AddUser(envtest.User{Name: name, Groups: []string{"system:masters"}}, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			c, err := client.New(u.Config(), client.Options{Scheme: scheme})
+			if err != nil {
+				t.Fatal(err)
+			}
+			poolAs[name] = func() error {
+				return c.Create(ctx, &unstructured.Unstructured{Object: map[string]any{
+					"apiVersion": "vdi.desku.be/v1alpha1", "kind": "VdiPool",
+					"metadata": map[string]any{"name": "design", "namespace": "team-a"}, "spec": map[string]any{"className": "desktop"},
+				}}, client.DryRunAll)
+			}
+		}
+		if err := poolAs["system:serviceaccount:argocd:argocd-application-controller"](); err != nil {
+			t.Errorf("before the guard, the controller's pool: %v", err)
+		}
 		installGuard(pins)
 		// Later subtests write as the operator into other ArgoCD namespaces,
 		// which this guard rightly refuses: an admin removes it, as uninstall
@@ -443,6 +468,13 @@ func TestEnvtest(t *testing.T) {
 		eventually(t, "the guard enforced", func() bool {
 			return refused(dryApply(secret("dotvirt", install.OAuthSecretName, asToken)))
 		})
+		eventually(t, "the controllers' pools refused", func() bool {
+			return refused(poolAs["system:serviceaccount:argocd:argocd-application-controller"]()) &&
+				refused(poolAs["system:serviceaccount:team-gitops:team-argocd-application-controller"]())
+		})
+		if err := poolAs["system:serviceaccount:argocd:dotvirt-p-team-a"](); err != nil {
+			t.Errorf("a project's sync account's pool: %v, want admitted", err)
+		}
 		annotated := secret("dotvirt", install.OAuthSecretName, func(s *corev1.Secret) {
 			s.Annotations = map[string]string{corev1.ServiceAccountNameKey: "default"}
 		})

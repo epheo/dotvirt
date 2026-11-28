@@ -1,0 +1,46 @@
+# DeskuBe's pools, desktops and claims, served so the guard's Argo policy has
+# requests to judge as on a cluster running DeskuBe. Every object stays open.
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: vdipools.vdi.desku.be
+spec:
+  group: vdi.desku.be
+  names: {kind: VdiPool, listKind: VdiPoolList, plural: vdipools, singular: vdipool}
+  scope: Namespaced
+  versions:
+    - name: v1alpha1
+      served: true
+      storage: true
+      schema:
+        openAPIV3Schema: {type: object, x-kubernetes-preserve-unknown-fields: true}
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: vdiinstances.vdi.desku.be
+spec:
+  group: vdi.desku.be
+  names: {kind: VdiInstance, listKind: VdiInstanceList, plural: vdiinstances, singular: vdiinstance}
+  scope: Namespaced
+  versions:
+    - name: v1alpha1
+      served: true
+      storage: true
+      schema:
+        openAPIV3Schema: {type: object, x-kubernetes-preserve-unknown-fields: true}
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: vdiclaims.vdi.desku.be
+spec:
+  group: vdi.desku.be
+  names: {kind: VdiClaim, listKind: VdiClaimList, plural: vdiclaims, singular: vdiclaim}
+  scope: Namespaced
+  versions:
+    - name: v1alpha1
+      served: true
+      storage: true
+      schema:
+        openAPIV3Schema: {type: object, x-kubernetes-preserve-unknown-fields: true}
