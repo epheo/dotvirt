@@ -589,7 +589,8 @@ async function handleAPI(req, res, url) {
 	if (path === '/api/networking/routes') return sendJSON(res, 200, s.tenantRoutes ?? []);
 	if (path === '/api/desktops') {
 		const none = { synced: true, classes: [], pools: [], desktops: [], claims: [], unlisted: [] };
-		return sendJSON(res, 200, s.desktops ?? none);
+		const d = typeof s.desktops === 'function' ? s.desktops() : s.desktops;
+		return sendJSON(res, 200, d ?? none);
 	}
 	if (path === '/api/storage/replication') return sendJSON(res, 200, s.replication);
 	if (path === '/api/storage/protection') return sendJSON(res, 200, s.protection ?? []);

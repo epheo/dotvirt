@@ -2205,7 +2205,9 @@ const desk = (namespace, name, over = {}) => ({
 	...over,
 });
 const poolReady = [{ type: 'Ready', status: 'True', reason: 'ClassFound' }];
-const deskube = {
+// Built on each request: a last-used age read early in the suite and late in
+// it must say the same.
+const deskube = () => ({
 	synced: true,
 	classes: [
 		{ name: 'cad', image: 'quay.io/example/desktop-cad:2.1' },
@@ -2314,7 +2316,7 @@ const deskube = {
 		},
 	],
 	unlisted: [{ namespace: 'batch-prod', resource: 'vdiinstances' }],
-};
+});
 const desktops = {
 	...base,
 	name: 'desktops',
