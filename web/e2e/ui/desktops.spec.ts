@@ -348,29 +348,38 @@ test('release asks first, naming the person and saying the home goes', async ({ 
 	await expect(poolRows(page).filter({ hasText: 'bob' })).toHaveCount(0);
 });
 
-test('restart asks first, saying the session ends and the home stays', async ({ page }) => {
+test('restart asks once, saying the session ends and the home stays', async ({ page }) => {
 	await setScenario(page, 'desktops');
 	await login(page);
 	await page.goto('/desktops/team-web/web-prod/pool/eng');
+	let restarts = 0;
+	page.on('request', (r) => {
+		if (new URL(r.url()).pathname.endsWith('/restart')) restarts++;
+	});
 	await actions(page, 'eng-7hq2k').click();
 	await page.getByRole('button', { name: 'Restart...' }).click();
 	const dialog = page.getByRole('dialog');
-	await expect(dialog.getByText('Restart eng-7hq2k')).toBeVisible();
-	await expect(dialog).toContainText("alice's session ends: what is not saved in it is lost.");
+	await expect(dialog.getByText('Restart eng-7hq2k?')).toBeVisible();
+	await expect(dialog).toContainText("alice's session ends.");
 	await expect(dialog).toContainText('The home, and the files in it, stay.');
-	const confirm = dialog.getByRole('button', { name: 'Restart', exact: true });
-	await expect(confirm).toBeDisabled();
-	await dialog.getByRole('textbox').fill('eng-7hq2k');
-	await confirm.click();
+	await expect(dialog.getByRole('textbox')).toHaveCount(0);
+	// Cancel restarts nothing.
+	await dialog.getByRole('button', { name: 'Cancel' }).click();
+	await expect(dialog).toHaveCount(0);
+	expect(restarts).toBe(0);
+
+	await actions(page, 'eng-7hq2k').click();
+	await page.getByRole('button', { name: 'Restart...' }).click();
+	await dialog.getByRole('button', { name: 'Restart', exact: true }).click();
 	await expect(dialog).toHaveCount(0);
 	await expect(page.getByText('Restart requested for eng-7hq2k.')).toBeVisible();
+	expect(restarts).toBe(1);
 
 	// A desktop made one by one restarts from its page.
 	await page.goto('/desktops/team-web/web-prod/desktop/carol-dev');
 	await actions(page, 'carol-dev').click();
 	await page.getByRole('button', { name: 'Restart...' }).click();
-	await expect(dialog).toContainText("carol's session ends");
-	await dialog.getByRole('textbox').fill('carol-dev');
+	await expect(dialog).toContainText("carol's session ends.");
 	await dialog.getByRole('button', { name: 'Restart', exact: true }).click();
 	await expect(page.getByText('Restart requested for carol-dev.')).toBeVisible();
 });

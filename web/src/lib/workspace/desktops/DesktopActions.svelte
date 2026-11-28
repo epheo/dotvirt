@@ -7,10 +7,13 @@
 	import { desktops } from '#lib/state/desktops.svelte.js';
 	import { session } from '#lib/state/session.svelte.js';
 	import { ui } from '#lib/state/ui.svelte.js';
+	import Button from '#lib/components/Button.svelte';
 	import ConfirmDelete from '#lib/components/ConfirmDelete.svelte';
 	import Consequence from '#lib/components/Consequence.svelte';
 	import ContextMenu from '#lib/components/ContextMenu.svelte';
+	import ErrorNote from '#lib/components/ErrorNote.svelte';
 	import MenuItem from '#lib/components/MenuItem.svelte';
+	import Modal from '#lib/components/Modal.svelte';
 
 	// The acts on one desktop, run now under the caller's account. A pool's
 	// desktop starts, stops and is released on the claim holding it; one made
@@ -158,21 +161,18 @@
 		</div>
 	</ConfirmDelete>
 {:else if confirming === 'restart'}
-	<ConfirmDelete
-		title="Restart {d.name}"
-		confirmWord={d.name}
-		verb="Restart"
-		busy={confirm.busy}
-		error={confirm.error}
-		onconfirm={confirmed}
-		onclose={close}
-	>
-		<div class="flex flex-col gap-1.5">
-			<Consequence tone="warn">
-				{who ? `${who}'s session` : 'Its session'} ends: what is not saved in it is lost.
-			</Consequence>
+	<Modal title="Restart {d.name}?" onclose={close}>
+		<div class="flex flex-col gap-1.5 px-5 py-4">
+			<Consequence tone="warn">{who ? `${who}'s session` : 'Its session'} ends.</Consequence>
 			<Consequence tone="info">A new pod starts. The home, and the files in it, stay.</Consequence>
 			<Consequence>Runs now, under your account. It is not a pull request.</Consequence>
+			<ErrorNote error={confirm.error} />
 		</div>
-	</ConfirmDelete>
+		{#snippet footer()}
+			<Button variant="secondary" class="ml-auto" onclick={close}>Cancel</Button>
+			<Button onclick={confirmed} disabled={confirm.busy}>
+				{confirm.busy ? 'Restarting...' : 'Restart'}
+			</Button>
+		{/snippet}
+	</Modal>
 {/if}
