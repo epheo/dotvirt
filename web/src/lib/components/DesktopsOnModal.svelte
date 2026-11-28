@@ -37,7 +37,8 @@
 			<span class="font-mono">{namespace}</span>.
 		</Consequence>
 		<Consequence tone="info">
-			Its admins may start, stop and release anyone's desktop of those pools.
+			Its admins may start, stop and release anyone's desktop of those pools with oc. The console
+			does so once it reads desktops, which comes with DeskuBe's VdiPairing.
 		</Consequence>
 		<Consequence>
 			Its repo applies pools only once Argo CD syncs it as the project's own account.
