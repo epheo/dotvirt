@@ -92,11 +92,11 @@ func mustAdd(t *testing.T, s cache.Store, o any) {
 }
 
 // everything is a view that reads every kind in namespaces, and the classes.
-func everything(namespaces ...string) map[Held]bool {
-	out := map[Held]bool{{Resource: GVRClass.Resource}: true}
+func everything(namespaces ...string) map[Kind]bool {
+	out := map[Kind]bool{{Resource: GVRClass.Resource}: true}
 	for _, ns := range namespaces {
-		for _, gvr := range []schema.GroupVersionResource{GVRPool, GVRInstance, GVRClaim} {
-			out[Held{ns, gvr.Resource}] = true
+		for _, gvr := range Namespaced {
+			out[Kind{ns, gvr.Resource}] = true
 		}
 	}
 	return out
@@ -128,13 +128,13 @@ func TestThePINAndTheAdminSecretAreNeverHeld(t *testing.T) {
 func TestASessionsHeartbeatPublishesNothing(t *testing.T) {
 	s, bus := newSnapshot(t)
 	mustAdd(t, s.instances, desktop("team-a", "alice", nil))
-	before, gen := bus.Version(eventbus.DesktopsChanged), s.Gen(Held{"team-a", GVRInstance.Resource})
+	before, gen := bus.Version(eventbus.DesktopsChanged), s.Gen(Kind{"team-a", GVRInstance.Resource})
 	beat := desktop("team-a", "alice", map[string]any{"lastActive": "2026-11-28T10:00:30Z"})
 	beat.SetResourceVersion("2")
 	if err := s.instances.Update(beat); err != nil {
 		t.Fatal(err)
 	}
-	if bus.Version(eventbus.DesktopsChanged) != before || s.Gen(Held{"team-a", GVRInstance.Resource}) != gen {
+	if bus.Version(eventbus.DesktopsChanged) != before || s.Gen(Kind{"team-a", GVRInstance.Resource}) != gen {
 		t.Fatal("a heartbeat published")
 	}
 	if err := s.instances.Update(desktop("team-a", "alice", map[string]any{"sessionState": "free"})); err != nil {
@@ -209,7 +209,7 @@ func TestAPoolsDesktopNeverHidesWithItsPool(t *testing.T) {
 	s, _ := newSnapshot(t)
 	mustAdd(t, s.pools, pool("team-a", "lab", nil))
 	mustAdd(t, s.instances, controlled(desktop("team-a", "lab-alice", nil), "vdi.desku.be/v1alpha1", "VdiPool", "lab", true))
-	got := s.Overview(map[Held]bool{{"team-a", GVRInstance.Resource}: true}, nil)
+	got := s.Overview(map[Kind]bool{{"team-a", GVRInstance.Resource}: true}, nil)
 	if len(got.Pools) != 0 || len(got.Desktops) != 1 || got.Desktops[0].Pool != "lab" {
 		t.Fatalf("overview = %+v", got)
 	}
@@ -281,15 +281,12 @@ func TestOnlyABoundClaimIsTheDesktops(t *testing.T) {
 func TestClassesNeedTheirOwnRead(t *testing.T) {
 	s, _ := newSnapshot(t)
 	mustAdd(t, s.classes, obj("", "workstation", map[string]any{"spec": map[string]any{"image": "quay.io/deskube/desktop:1"}}))
-	if got := s.Overview(map[Held]bool{{"team-a", GVRPool.Resource}: true}, nil).Classes; len(got) != 0 {
+	if got := s.Overview(map[Kind]bool{{"team-a", GVRPool.Resource}: true}, nil).Classes; len(got) != 0 {
 		t.Fatalf("classes without their read = %+v", got)
 	}
 	got := s.Overview(everything(), nil).Classes
 	if len(got) != 1 || got[0].Image != "quay.io/deskube/desktop:1" {
 		t.Fatalf("classes = %+v", got)
-	}
-	if h := s.HeldIn([]string{"team-a", ""}); len(h) != 1 || h[0] != (Held{Resource: GVRClass.Resource}) {
-		t.Fatalf("held = %+v", h)
 	}
 }
 
@@ -298,75 +295,61 @@ func TestANamespacesLevelMovesWithItsOwnObjectsOnly(t *testing.T) {
 	mustAdd(t, s.instances, desktop("team-a", "alice", nil))
 	mustAdd(t, s.instances, desktop("team-b", "bob", nil))
 	mustAdd(t, s.pools, pool("team-a", "lab", nil))
-	a, aPools := s.Gen(Held{"team-a", GVRInstance.Resource}), s.Gen(Held{"team-a", GVRPool.Resource})
+	a, aPools := s.Gen(Kind{"team-a", GVRInstance.Resource}), s.Gen(Kind{"team-a", GVRPool.Resource})
 
 	if err := s.instances.Update(desktop("team-b", "bob", map[string]any{"phase": "Stopping"})); err != nil {
 		t.Fatal(err)
 	}
-	if s.Gen(Held{"team-a", GVRInstance.Resource}) != a {
+	if s.Gen(Kind{"team-a", GVRInstance.Resource}) != a {
 		t.Fatal("another namespace's desktop moved this one's level")
 	}
 	if err := s.instances.Update(desktop("team-a", "alice", map[string]any{"phase": "Stopping"})); err != nil {
 		t.Fatal(err)
 	}
-	if s.Gen(Held{"team-a", GVRInstance.Resource}) == a {
+	if s.Gen(Kind{"team-a", GVRInstance.Resource}) == a {
 		t.Fatal("a desktop's move left its level")
 	}
-	if s.Gen(Held{"team-a", GVRPool.Resource}) != aPools {
+	if s.Gen(Kind{"team-a", GVRPool.Resource}) != aPools {
 		t.Fatal("a desktop's move moved its namespace's pools")
 	}
-	if err := s.instances.Delete(desktop("team-b", "bob", nil)); err != nil {
-		t.Fatal(err)
-	}
-	if h := s.HeldIn([]string{"team-a", "team-b"}); len(h) != 2 {
-		t.Fatalf("held = %+v", h)
-	}
 }
 
-// A stopped module's reflector is not waited for: a write it lands while the
-// snapshot forgets must not hide that namespace's desktops afterwards.
-func TestAWriteDuringClearNeverHidesANamespace(t *testing.T) {
+func TestUnlistedKindsAreSaidByNamespaceAndKind(t *testing.T) {
 	s, _ := newSnapshot(t)
-	held := func() bool {
-		return slices.Contains(s.HeldIn([]string{"team-a"}), Held{"team-a", GVRInstance.Resource})
-	}
-	for range 200 {
-		var wg sync.WaitGroup
-		wg.Go(s.clear)
-		wg.Go(func() { _ = s.instances.Add(desktop("team-a", "alice", nil)) })
-		wg.Wait()
-		_, row := s.instances.Rows["team-a/alice"]
-		if held() != row {
-			t.Fatalf("held = %v beside a row = %v", held(), row)
-		}
-		if err := s.instances.Delete(desktop("team-a", "alice", nil)); err != nil {
-			t.Fatal(err)
-		}
-		if held() {
-			t.Fatal("a deleted desktop is still held")
-		}
-		mustAdd(t, s.instances, desktop("team-a", "alice", nil))
-		if !held() {
-			t.Fatal("a desktop made again is hidden")
-		}
-		if err := s.instances.Delete(desktop("team-a", "alice", nil)); err != nil {
-			t.Fatal(err)
-		}
-	}
-}
-
-func TestHiddenKindsAreSaidByNamespaceAndKind(t *testing.T) {
-	s, _ := newSnapshot(t)
-	got := s.Overview(nil, []Held{{"team-b", GVRInstance.Resource}, {"team-a", GVRClaim.Resource}, {"team-a", GVRPool.Resource}})
-	body, err := json.Marshal(got.Hidden)
+	got := s.Overview(map[Kind]bool{{"team-a", GVRInstance.Resource}: true, {"team-b", GVRPool.Resource}: true},
+		[]Kind{{"team-b", GVRInstance.Resource}, {"team-a", GVRClaim.Resource}, {"team-a", GVRPool.Resource}})
+	body, err := json.Marshal(got.Unlisted)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if want := `[{"namespace":"team-a","resource":"vdiclaims"},{"namespace":"team-a","resource":"vdipools"},{"namespace":"team-b","resource":"vdiinstances"}]`; string(body) != want {
-		t.Fatalf("hidden = %s, want %s", body, want)
+		t.Fatalf("unlisted = %s, want %s", body, want)
 	}
-	if got := s.Overview(nil, nil).Hidden; got == nil {
-		t.Fatal("hidden answered null, want an empty list")
+	if got := s.Overview(everything("team-a"), nil).Unlisted; got == nil {
+		t.Fatal("unlisted answered null, want an empty list")
+	}
+}
+
+// A caller who may list no kind is told what a cluster without DeskuBe says,
+// even of a pull not synced and stale.
+func TestACallerReadingNoKindIsToldNothing(t *testing.T) {
+	s, _ := newSnapshot(t)
+	off := New(nil, nil, func() bool { return false }).Overview(everything("team-a"), nil)
+	mustAdd(t, s.instances, desktop("team-a", "alice", nil))
+	s.healthy[0].Store(false)
+	if got := s.Overview(everything("team-a"), nil); got.Synced || !got.Stale || len(got.Desktops) != 1 {
+		t.Fatalf("a reader reads %+v", got)
+	}
+	got, err := json.Marshal(s.Overview(map[Kind]bool{}, []Kind{{"team-a", GVRPool.Resource}}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	want, err := json.Marshal(off)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != string(want) {
+		t.Fatalf("a caller reading no kind reads %s, a cluster without DeskuBe %s", got, want)
 	}
 }
 
@@ -455,8 +438,8 @@ func TestTheModuleGoingOffStopsTheWatchesAndForgets(t *testing.T) {
 	s := New(src, eventbus.New(), on.Load)
 	s.Run(t.Context())
 	eventually(t, "every watch started", src.watching(4))
-	eventually(t, "synced", func() bool { return s.Overview(nil, nil).Synced })
-	if len(s.HeldIn([]string{"team-a"})) != 1 || len(s.Overview(everything("team-a"), nil).Desktops) != 1 {
+	eventually(t, "synced", func() bool { return s.Overview(everything("team-a"), nil).Synced })
+	if len(s.Overview(everything("team-a"), nil).Desktops) != 1 {
 		t.Fatal("the desktop never landed")
 	}
 
@@ -464,7 +447,7 @@ func TestTheModuleGoingOffStopsTheWatchesAndForgets(t *testing.T) {
 	eventually(t, "every watch ended", src.stopped(4))
 	eventually(t, "not started", func() bool { return !s.Started() })
 	got := s.Overview(everything("team-a"), nil)
-	if got.Synced || len(got.Desktops) != 0 || len(s.HeldIn([]string{"team-a"})) != 0 {
+	if got.Synced || len(got.Desktops) != 0 {
 		t.Fatalf("a stopped module still reads %+v", got)
 	}
 }
@@ -476,7 +459,7 @@ func TestSyncedWaitsForTheServedKindsOnly(t *testing.T) {
 	s := New(src, eventbus.New(), func() bool { return true })
 	s.Run(t.Context())
 	eventually(t, "the served kinds watched", src.watching(3))
-	eventually(t, "synced", func() bool { return s.Overview(nil, nil).Synced })
+	eventually(t, "synced", func() bool { return s.Overview(everything("team-a"), nil).Synced })
 	if got := s.Overview(everything("team-a"), nil); got.Stale {
 		t.Fatal("an absent kind reads as stale")
 	}
@@ -504,19 +487,32 @@ func TestADiscoveryErrorKeepsThePullUnsynced(t *testing.T) {
 	eventually(t, "the served kinds listed", func() bool {
 		return s.classes.Synced() && s.pools.Synced() && s.instances.Synced()
 	})
-	if s.Overview(nil, nil).Synced {
+	if s.Overview(everything("team-a"), nil).Synced {
 		t.Fatal("a kind discovery could not read reads as absent")
 	}
 
 	down.Store(false)
 	before := bus.Version(eventbus.DesktopsChanged)
-	claims := slices.IndexFunc(s.kinds(), func(k kind) bool { return k.gvr == GVRClaim })
+	claims := slices.IndexFunc(s.kinds(), func(k watched) bool { return k.gvr == GVRClaim })
 	// The probe the next discovery tick makes.
 	s.probe(claims)(GVRClaim)
-	if !s.Overview(nil, nil).Synced {
+	if !s.Overview(everything("team-a"), nil).Synced {
 		t.Fatal("a kind discovery says is absent still holds the pull back")
 	}
 	if bus.Version(eventbus.DesktopsChanged) == before {
 		t.Fatal("the answer published nothing")
+	}
+}
+
+// A write a stopped module's reflector lands after clear is no row of a
+// module that is off.
+func TestAStoppedModuleShowsNothing(t *testing.T) {
+	s, _ := newSnapshot(t)
+	mustAdd(t, s.instances, desktop("team-a", "alice", nil))
+	s.clear()
+	mustAdd(t, s.instances, desktop("team-a", "bob", nil))
+	got := s.Overview(everything("team-a"), []Kind{{"team-a", GVRPool.Resource}})
+	if got.Synced || len(got.Desktops) != 0 || len(got.Unlisted) != 0 {
+		t.Fatalf("a stopped module reads %+v", got)
 	}
 }

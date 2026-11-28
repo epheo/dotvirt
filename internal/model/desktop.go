@@ -16,10 +16,10 @@ type Desktops struct {
 	// not shown.
 	Desktops []Desktop      `json:"desktops"`
 	Claims   []DesktopClaim `json:"claims"`
-	// Hidden are the namespaced kinds held where the caller may not list
-	// them: a pool's count beside no desktop means desktops it may not see,
-	// not none.
-	Hidden []DesktopKind `json:"hidden"`
+	// Unlisted are the kinds the caller may not list in each namespace where
+	// it may list another: its own rights, never what exists. A pool's count
+	// beside no desktop then reads as desktops it may not see, not none.
+	Unlisted []DesktopKind `json:"unlisted"`
 }
 
 // DesktopKind is one namespaced kind in one namespace.
