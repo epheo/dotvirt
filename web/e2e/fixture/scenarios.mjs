@@ -2398,6 +2398,24 @@ const desktopsreclaimed = {
 		),
 	},
 };
+// team-batch before it has a repo: the answer covers none of batch-prod.
+const desktopsnorepo = {
+	...desktops,
+	name: 'desktopsnorepo',
+	inventory: {
+		...base.inventory,
+		desktopsVersion: 3,
+		projects: base.inventory.projects.map((p) =>
+			p.name === 'team-batch' ? { ...p, repo: '' } : p,
+		),
+	},
+	desktops: {
+		...deskube,
+		pools: deskube.pools.filter((p) => p.namespace !== 'batch-prod'),
+		claims: deskube.claims.filter((c) => c.namespace !== 'batch-prod'),
+		unlisted: deskube.unlisted.filter((u) => u.namespace !== 'batch-prod'),
+	},
+};
 // The console lost its watch on a kind: what it shows of it may be out of date.
 const stale = (name, ...kinds) => ({ ...desktops, name, desktops: { ...deskube, stale: kinds } });
 const desktopsstale = stale('desktopsstale', 'vdiinstances');
@@ -2551,6 +2569,7 @@ export const scenarios = {
 	desktopsunread,
 	desktopsrefused,
 	desktopsreclaimed,
+	desktopsnorepo,
 	desktopsstale,
 	desktopsclaimsstale,
 	desktopspoolsstale,

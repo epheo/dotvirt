@@ -87,8 +87,10 @@ test("a pool's seats never overlap, and its rules read in words", async ({ page 
 	const seats = main.getByRole('region', { name: 'Seats' });
 	const part = (title: string) => seats.getByTitle(title, { exact: true });
 	// held 2 = 1 in session + 0 held without one + 1 stopped; with warm 1 and free 1, the 4 seats.
-	await expect(part('Held desktops a client streams from')).toContainText('1');
-	await expect(part('Held desktops running without a session')).toContainText('0');
+	await expect(part('Desktops a client streams from, a warm one included')).toContainText('1');
+	await expect(
+		part('Held seats without a session: running, starting, or with no desktop yet'),
+	).toContainText('0');
 	await expect(part('Held desktops their claim stopped')).toContainText('1');
 	await expect(part('Running desktops no claim holds yet')).toContainText('1');
 	await expect(part('Seats without a desktop')).toContainText('1');
@@ -97,7 +99,7 @@ test("a pool's seats never overlap, and its rules read in words", async ({ page 
 	const rules = main.getByRole('region', { name: 'Pool', exact: true });
 	await expect(rules).toContainText('Group engineers');
 	await expect(rules).toContainText('Stopped after 1 h without a session');
-	await expect(rules).toContainText('Desktop and home deleted after 30 d without a session');
+	await expect(rules).toContainText('Claim, desktop and home deleted after 30 d without a session');
 	await expect(rules).toContainText(/Ready\s*Yes$/);
 	await expect(rules).not.toContainText('ClassFound');
 });
@@ -158,17 +160,23 @@ test('a project persona reads its pools; desktops and classes are not shown, nev
 	await expect(tree.nth(0)).toHaveText('All desktops');
 	await expect(tree.nth(1)).toHaveText('Desktop classes');
 	await expect(main.getByRole('link', { name: 'All desktops', exact: true })).toBeVisible();
-	await expect(main.getByText('3 pools', { exact: true })).toBeVisible();
+	// The page's context, and its pools in place of the desktops.
+	await expect(main.getByText('3 pools', { exact: true })).toHaveCount(2);
 	await expect(main.getByText(/\d+ desktops?/)).toHaveCount(0);
 	await expect(
 		main.getByText(/^Desktops in batch-prod, db-prod, web-prod are not shown to you: a platform/),
 	).toBeVisible();
 	await expect(main.getByRole('table', { name: 'All desktops' })).toHaveCount(0);
+	await expect(main.getByRole('table', { name: 'Pools' }).locator('tbody tr')).toHaveText([
+		/^render\s*batch-prod/,
+		/^eng\s*web-prod/,
+		/^lab\s*web-prod/,
+	]);
 	await expect(main.getByText(/yet/)).toHaveCount(0);
 
 	await main.getByRole('link', { name: 'Desktop classes', exact: true }).click();
 	await expect(
-		main.getByText('Desktop classes are not shown to you: a cluster admin can let you read them.'),
+		main.getByText('Desktop classes are not shown to you: a platform admin can let you read them.'),
 	).toBeVisible();
 	await expect(main.getByText(/No desktop class/)).toHaveCount(0);
 
@@ -184,6 +192,57 @@ test('a project persona reads its pools; desktops and classes are not shown, nev
 	}
 });
 
+test("none shown is none in the caller's projects only where it lists every one", async ({
+	page,
+}) => {
+	await setScenario(page, 'desktops');
+	// Nothing made yet; the caller lists no desktop in batch-prod, until it does.
+	let listsAll = false;
+	await page.route('**/api/desktops', async (route) => {
+		const body = await (await route.fetch()).json();
+		const unlisted = listsAll ? [] : body.unlisted;
+		await route.fulfill({ json: { ...body, pools: [], desktops: [], claims: [], unlisted } });
+	});
+	await login(page);
+	await page.goto('/desktops');
+	const main = page.locator('main');
+	await expect(main.getByText('No desktop shown to you yet.')).toBeVisible();
+	await expect(rail(page).getByText('No desktop shown to you yet.')).toBeVisible();
+	await expect(page.getByText('No desktop in your projects yet.')).toHaveCount(0);
+
+	listsAll = true;
+	await page.reload();
+	await expect(main.getByText('No desktop in your projects yet.')).toBeVisible();
+	await expect(rail(page).getByText('No desktop in your projects yet.')).toBeVisible();
+	await expect(page.getByText('No desktop shown to you yet.')).toHaveCount(0);
+});
+
+test('a project gaining a repo reads as it did until its desktops are read', async ({ page }) => {
+	await setScenario(page, 'desktopsnorepo');
+	await login(page);
+	await page.goto('/desktops/team-batch/batch-prod');
+	const main = page.locator('main');
+	const none = main.getByText(
+		/^Desktops are read in projects with a repo, and team-batch has none/,
+	);
+	await expect(none).toBeVisible();
+	let land!: () => void;
+	const landed = new Promise<void>((r) => (land = r));
+	await page.route('**/api/desktops', async (route) => {
+		await landed;
+		await route.continue();
+	});
+	const asked = page.waitForRequest((r) => new URL(r.url()).pathname === '/api/desktops');
+	// The frame says team-batch has a repo; the answer read before does not cover it.
+	await setScenario(page, 'desktops');
+	await asked;
+	await expect(main.getByText(/No desktop here yet|0 pools/)).toHaveCount(0);
+	await expect(none).toBeVisible();
+	land();
+	await expect(main.getByText('1 pool in team-batch', { exact: true })).toBeVisible();
+	await expect(none).toHaveCount(0);
+});
+
 test('a pool whose class is missing says so and what to do', async ({ page }) => {
 	await setScenario(page, 'desktops');
 	await login(page);
@@ -197,11 +256,11 @@ test('a pool whose class is missing says so and what to do', async ({ page }) =>
 			'Class gpu-lab does not exist, so this pool makes no desktop and its claims wait.',
 		),
 	).toBeVisible();
-	await expect(main.getByText(/ask a cluster admin to add gpu-lab/)).toBeVisible();
+	await expect(main.getByText(/ask a platform admin to add gpu-lab/)).toBeVisible();
 	await expect(main.getByText('Classes on the cluster: cad, office.')).toBeVisible();
 	// Its status leaves every other count out: each reads 0.
 	const seats = main.getByRole('region', { name: 'Seats' });
-	await expect(seats.getByTitle('Held desktops a client streams from')).toContainText('0');
+	await expect(seats.getByTitle(/^Desktops a client streams from/)).toContainText('0');
 	await expect(seats.getByTitle('Claims with no seat yet')).toContainText('1');
 	await expect(main.getByRole('region', { name: 'Pool', exact: true })).toContainText(
 		'No: class gpu-lab does not exist',

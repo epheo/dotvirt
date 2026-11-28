@@ -31,12 +31,10 @@ class DesktopsStore {
 		return untrack(() => inventory.projects);
 	});
 	readonly owners = $derived(projectOf(this.projects));
-	// The namespaces the answer covers: those of the projects with a repo.
-	readonly covered = $derived(
-		new Set(
-			this.projects.filter((p) => p.repo).flatMap((p) => p.namespaces.map((n) => n.namespace)),
-		),
-	);
+	// The namespaces the answer covers: those of the projects with a repo when
+	// it was asked for. Taken from the frame instead, a project gaining a repo
+	// would read empty until the pull it starts lands.
+	covered = $state.raw<ReadonlySet<string>>(new Set());
 	readonly may = $derived(this.value ? rights(this.value, this.covered) : null);
 
 	title(project: string): string {
@@ -45,10 +43,16 @@ class DesktopsStore {
 
 	async pull() {
 		const gen = ++this.#gen;
+		const covered = new Set(
+			untrack(() => this.projects)
+				.filter((p) => p.repo)
+				.flatMap((p) => p.namespaces.map((n) => n.namespace)),
+		);
 		try {
 			const v = await api.desktops();
 			if (gen !== this.#gen) return;
 			this.value = v;
+			this.covered = covered;
 			this.error = '';
 		} catch (e) {
 			if (gen !== this.#gen || e instanceof Unauthorized) return; // 401 signs out centrally
@@ -59,6 +63,7 @@ class DesktopsStore {
 	reset() {
 		this.#gen++;
 		this.value = null;
+		this.covered = new Set();
 		this.error = '';
 	}
 }

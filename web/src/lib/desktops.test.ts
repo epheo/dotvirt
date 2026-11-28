@@ -169,6 +169,10 @@ describe('unlisted kinds', () => {
 		expect(may.classes).toBe(false);
 		expect(may.anywhere('vdiinstances', ['db-prod', 'batch-prod'])).toBe(false);
 		expect(may.anywhere('vdiinstances')).toBe(true);
+		// None shown is none in the caller's projects only where every one lists it.
+		expect(may.everywhere('vdiinstances')).toBe(false);
+		expect(may.everywhere('vdipools')).toBe(true);
+		expect(rights(data, new Set()).everywhere('vdipools')).toBe(false);
 	});
 	it('lists no namespace for a kind not listed alone, and counts none it cannot', () => {
 		const data: Desktops = {

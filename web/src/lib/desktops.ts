@@ -47,6 +47,9 @@ export interface Rights {
 	// Whether some namespace among namespaces (all those covered by default)
 	// lists resource.
 	anywhere(resource: string, namespaces?: Iterable<string>): boolean;
+	// Whether every namespace covered lists resource: only then does none
+	// shown mean none in the caller's projects.
+	everywhere(resource: string): boolean;
 	classes: boolean;
 }
 
@@ -56,6 +59,7 @@ export function rights(d: Desktops, covered: ReadonlySet<string>): Rights {
 	return {
 		lists,
 		anywhere: (r, nss = covered) => [...nss].some((ns) => lists(ns, r)),
+		everywhere: (r) => covered.size > 0 && [...covered].every((ns) => lists(ns, r)),
 		classes: !not.has(key('', 'vdiclasses')),
 	};
 }

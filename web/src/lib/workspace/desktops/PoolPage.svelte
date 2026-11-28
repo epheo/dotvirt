@@ -43,8 +43,16 @@
 	);
 
 	const PARTS = [
-		{ key: 'inSession', label: 'In session', title: 'Held desktops a client streams from' },
-		{ key: 'idle', label: 'Held, no session', title: 'Held desktops running without a session' },
+		{
+			key: 'inSession',
+			label: 'In session',
+			title: 'Desktops a client streams from, a warm one included',
+		},
+		{
+			key: 'idle',
+			label: 'Held, no session',
+			title: 'Held seats without a session: running, starting, or with no desktop yet',
+		},
 		{ key: 'stopped', label: 'Stopped', title: 'Held desktops their claim stopped' },
 		{ key: 'warm', label: 'Warm', title: 'Running desktops no claim holds yet' },
 		{ key: 'free', label: 'Free', title: 'Seats without a desktop' },
@@ -188,7 +196,7 @@
 								<dd>
 									{#if !pool.releaseAfter || pool.releaseAfter === '0s'}Never
 									{:else}
-										Desktop and home deleted after {duration(pool.releaseAfter)} without a session
+										Claim, desktop and home deleted after {duration(pool.releaseAfter)} without a session
 									{/if}
 								</dd>
 							</div>
