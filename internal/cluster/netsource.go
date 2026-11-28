@@ -86,13 +86,16 @@ type NodeLabels struct {
 	// PodSubnets is the node's OVN-Kubernetes node-subnets annotation: JSON, per
 	// network name.
 	PodSubnets string
+	// The node's state as model.Node shows it, so a host view polls this cache
+	// rather than LIST nodes per viewer.
+	Ready, Unschedulable, Maintenance bool
 }
 
 // nodeSubnetsAnnotation is where OVN-Kubernetes records each node's pod subnets.
 const nodeSubnetsAnnotation = "k8s.ovn.org/node-subnets"
 
-// ListNodeLabels lists every node's name+labels under this client (nodes:list - no
-// watch). netstate refreshes a cache from this off the request path, so uplink node
+// ListNodeLabels lists every node's name, labels and state under this client
+// (nodes:list - no watch). netstate refreshes a cache from this off the request path, so uplink node
 // membership needs neither a per-request node LIST nor a nodes:watch grant.
 func (c *Client) ListNodeLabels(ctx context.Context) ([]NodeLabels, error) {
 	list, err := c.kube.CoreV1().Nodes().List(ctx, metav1.ListOptions{})
@@ -102,7 +105,10 @@ func (c *Client) ListNodeLabels(ctx context.Context) ([]NodeLabels, error) {
 	out := make([]NodeLabels, 0, len(list.Items))
 	for i := range list.Items {
 		n := &list.Items[i]
-		out = append(out, NodeLabels{Name: n.Name, Labels: n.Labels, PodSubnets: n.Annotations[nodeSubnetsAnnotation]})
+		out = append(out, NodeLabels{
+			Name: n.Name, Labels: n.Labels, PodSubnets: n.Annotations[nodeSubnetsAnnotation],
+			Ready: nodeReady(*n), Unschedulable: n.Spec.Unschedulable, Maintenance: n.Annotations[maintenanceAnnotation] != "",
+		})
 	}
 	return out, nil
 }

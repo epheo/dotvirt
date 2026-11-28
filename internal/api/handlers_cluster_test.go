@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -9,6 +10,7 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	authzv1 "k8s.io/api/authorization/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -18,6 +20,7 @@ import (
 
 	"github.com/epheo/dotvirt/internal/auth"
 	"github.com/epheo/dotvirt/internal/model"
+	"github.com/epheo/dotvirt/internal/netstate"
 )
 
 func node(name string, unschedulable, maintenance, ready bool) corev1.Node {
@@ -70,6 +73,54 @@ func TestNodes(t *testing.T) {
 		t.Errorf("tenant may cordon: %+v", info)
 	}
 	wantStatus(t, do(s, adminToken, http.MethodGet, "/api/nodes/ghost", ""), http.StatusNotFound)
+}
+
+// A polling host view reads node state off the SA's node cache, behind the
+// caller's own list verdict: no LIST under the caller's token, however often.
+func TestNodesSnapshotServesTheCache(t *testing.T) {
+	fc := newFakeCluster(t)
+	var userLists atomic.Int32
+	schedulable := func(n corev1.Node) corev1.Node {
+		n.Labels = map[string]string{"kubevirt.io/schedulable": "true"}
+		return n
+	}
+	fc.on(http.MethodGet, "/api/v1/nodes", func(w http.ResponseWriter, r *http.Request) {
+		if bearer(r) != "sa-token" {
+			userLists.Add(1)
+		}
+		writeObj(w, corev1.NodeList{TypeMeta: metav1.TypeMeta{Kind: "NodeList", APIVersion: "v1"}, Items: []corev1.Node{
+			schedulable(node("worker-b", true, true, true)), schedulable(node("worker-a", false, false, false)),
+			node("infra-0", false, false, true),
+		}})
+	})
+	s := fc.server(nil, Config{})
+	ns := netstate.New(fc.sa, nil)
+	s.netstate = ns
+	wantStatus(t, do(s, adminToken, http.MethodGet, "/api/nodes?snapshot", ""), http.StatusServiceUnavailable)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	ns.Run(ctx)
+	for deadline := time.Now().Add(10 * time.Second); ; time.Sleep(10 * time.Millisecond) {
+		if _, ok := ns.HostNodes(); ok {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("the node cache never filled")
+		}
+	}
+	for range 3 {
+		rec := do(s, adminToken, http.MethodGet, "/api/nodes?snapshot", "")
+		wantStatus(t, rec, http.StatusOK)
+		got := decodeBody[[]model.Node](t, rec)
+		if len(got) != 2 || got[0].Name != "worker-a" || got[0].Ready || !got[1].Maintenance || !got[1].Unschedulable || !got[1].Ready {
+			t.Errorf("nodes = %+v", got)
+		}
+	}
+	wantStatus(t, do(s, tenantToken, http.MethodGet, "/api/nodes?snapshot", ""), http.StatusForbidden)
+	if n := userLists.Load(); n != 0 {
+		t.Errorf("%d node LISTs under a caller's token", n)
+	}
 }
 
 func TestNodesForbidden(t *testing.T) {

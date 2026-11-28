@@ -399,7 +399,7 @@ func (c *Client) SetNodeMaintenance(ctx context.Context, name string, enter bool
 // dialog falls back to scheduler-picked placement. Ready + cordon state ride
 // along so the picker can gray out hosts a migration could not land on.
 func (c *Client) ListNodes(ctx context.Context) ([]model.Node, error) {
-	list, err := c.kube.CoreV1().Nodes().List(ctx, metav1.ListOptions{LabelSelector: "kubevirt.io/schedulable=true"})
+	list, err := c.kube.CoreV1().Nodes().List(ctx, metav1.ListOptions{LabelSelector: SchedulableLabel + "=true"})
 	if err != nil {
 		return nil, err
 	}
@@ -415,6 +415,9 @@ func (c *Client) ListNodes(ctx context.Context) ([]model.Node, error) {
 	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
 	return out, nil
 }
+
+// SchedulableLabel is KubeVirt's mark on the nodes it may run VMs on.
+const SchedulableLabel = "kubevirt.io/schedulable"
 
 func nodeReady(n corev1.Node) bool {
 	for _, cond := range n.Status.Conditions {

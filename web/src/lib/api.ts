@@ -638,6 +638,9 @@ export const api = {
 	branding: () => get<gen.Branding>('/api/branding'),
 	// Node maintenance (cluster-scoped; the user's token is the gate).
 	nodes: () => get<gen.Node[]>('/api/nodes'),
+	// The same roster off the server's node cache, minutes old at most: for a
+	// view that polls, never a LIST per viewer per tick.
+	nodeStates: () => get<gen.Node[]>('/api/nodes?snapshot'),
 	capacity: () => get<gen.HostCapacity>('/api/metrics/capacity'),
 	nodeInfo: (node: string) => get<gen.NodeInfo>(`/api/nodes/${enc(node)}`),
 	setNodeCordon: (node: string, unschedulable: boolean) =>

@@ -62,7 +62,7 @@
 	);
 	const ownNodes = resource<Node[] | null>(
 		() => (hosts || !vmMetrics || !clusterGate.hosts().ok ? '' : 'nodes'),
-		(k) => (k ? api.nodes() : Promise.resolve(null)),
+		(k) => (k ? api.nodeStates() : Promise.resolve(null)),
 		{ poll: () => (hosts || !vmMetrics || !clusterGate.hosts().ok ? 0 : 30000) },
 	);
 	const capRes = $derived(hosts?.cap ?? ownCap);
