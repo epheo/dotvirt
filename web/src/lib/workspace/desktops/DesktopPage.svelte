@@ -4,6 +4,7 @@
 		joinClaims,
 		person,
 		sessionLabel,
+		stateLine,
 		unlistedLines,
 		why,
 	} from '#lib/desktops.js';
@@ -13,10 +14,12 @@
 	import { desktops } from '#lib/state/desktops.svelte.js';
 	import Card from '#lib/components/Card.svelte';
 	import ClassMissing from './ClassMissing.svelte';
+	import DesktopActions from './DesktopActions.svelte';
 	import DesktopsFrame from './DesktopsFrame.svelte';
 	import UnlistedNote from './UnlistedNote.svelte';
 
-	// A desktop made one by one: who it is for, what it runs, how it stands.
+	// A desktop made one by one: who it is for, what it runs, how it stands,
+	// and its acts.
 	let { scope }: { scope: Extract<Scope, { kind: 'desktop' }> } = $props();
 
 	const data = $derived(desktops.value?.synced ? desktops.value : null);
@@ -61,11 +64,16 @@
 		'grid grid-cols-[minmax(0,2fr)_minmax(0,3fr)] gap-3 border-t border-line-soft py-2 first:border-t-0';
 </script>
 
+{#snippet acts()}
+	{#if row}<DesktopActions {row} />{/if}
+{/snippet}
+
 <DesktopsFrame
 	trail={trailForScope(scope, 'Desktops', (p) => desktops.title(p), 'desktops')}
 	title={scope.desktop}
 	status={st && { tone: st.tone, text: st.label }}
 	{context}
+	actions={row ? acts : undefined}
 >
 	{#snippet children(d)}
 		{#if ofPool}
@@ -140,7 +148,7 @@
 						</div>
 						<div class={ROW}>
 							<dt class="text-ink-muted">Phase</dt>
-							<dd>{desktop.phase || 'Not read yet'}</dd>
+							<dd>{stateLine({ label: desktop.phase || 'Not read yet', note: st?.note })}</dd>
 						</div>
 						<div class={ROW}>
 							<dt class="text-ink-muted">Session</dt>

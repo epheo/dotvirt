@@ -10,8 +10,8 @@
 	import DesktopActions from './DesktopActions.svelte';
 
 	// Desktops with the claims holding them. A desktop made one by one opens
-	// its page; a pool's desktop is a row only, its pool the page, and its acts
-	// are the row's.
+	// its page, where it is acted on; a pool's desktop is a row only, its pool
+	// the page, and its acts are the row's.
 	let {
 		rows,
 		data,
@@ -124,6 +124,7 @@
 							<span class="inline-flex items-center gap-1.5 {TONE_TEXT[st.tone]}">
 								<StatusDot tone={st.tone} />{st.label}
 							</span>
+							{#if st.note}<span class="text-ink-muted">({st.note})</span>{/if}
 						</td>
 						<td class={TD}>{sessionLabel(d.session)}</td>
 						<td class={TD}>{d.running ? 'Yes' : 'No'}</td>

@@ -36,6 +36,7 @@ func TestStatusFor(t *testing.T) {
 		{fmt.Errorf("restart: %w", apierrors.NewNotFound(vmiResource, "web-1")), http.StatusNotFound},
 		{apierrors.NewConflict(vmiResource, "web-1", errors.New("migrating")), http.StatusConflict},
 		{apierrors.NewBadRequest("VM is not running"), http.StatusConflict},
+		{fmt.Errorf("patch: %w", apierrors.NewInvalid(schema.GroupKind{Kind: "VdiClaim"}, "lab", nil)), http.StatusUnprocessableEntity},
 		{errors.New("a kubeconfig path leaked here"), http.StatusInternalServerError},
 		{errSessionRejected, http.StatusUnauthorized},
 		// A bare apiserver 401 is not a verdict on the session.

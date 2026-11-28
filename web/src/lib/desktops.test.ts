@@ -3,18 +3,22 @@ import type { Desktop, DesktopClaim, DesktopPool, Desktops, Project } from './ap
 import {
 	byProject,
 	count,
+	desktopState,
 	duration,
 	joinClaims,
 	person,
 	poolState,
+	restartHeld,
 	rights,
 	seatParts,
+	stateLine,
 	unlistedLines,
 } from './desktops';
 
 const desktop = (name: string, over: Partial<Desktop> = {}): Desktop => ({
 	namespace: 'web-prod',
 	name,
+	uid: `uid-${name}`,
 	running: true,
 	...over,
 });
@@ -105,6 +109,50 @@ describe('pools', () => {
 	});
 });
 
+describe('restart', () => {
+	const noClass = [{ type: 'Ready', status: 'False', reason: 'ClassNotFound' }];
+	it('is said beside the phase, never in its place', () => {
+		const asked = desktopState(desktop('a', { phase: 'Ready', restarting: true }));
+		expect(asked).toMatchObject({ tone: 'ok', label: 'Ready', note: 'restart requested' });
+		expect(stateLine(asked)).toBe('Ready (restart requested)');
+		expect(stateLine(desktopState(desktop('a', { phase: 'Ready' })))).toBe('Ready');
+		// A failure DeskuBe reports, and a missing class, stay the state.
+		const failed = desktop('a', {
+			phase: 'Failed',
+			restarting: true,
+			conditions: [{ type: 'PodReady', status: 'False', message: 'image pull failed' }],
+		});
+		expect(desktopState(failed)).toMatchObject({
+			tone: 'danger',
+			label: 'Failed',
+			message: 'image pull failed',
+			note: 'restart requested',
+		});
+		const missing = desktop('a', { class: 'gpu', restarting: true, conditions: noClass });
+		expect(desktopState(missing)).toMatchObject({
+			label: 'Class missing',
+			note: 'restart requested',
+		});
+	});
+	it('is offered on a phase that shows a pod and a class that exists, asked before or not', () => {
+		expect(restartHeld({ phase: 'Ready' })).toBe('');
+		expect(restartHeld({ phase: 'Starting' })).toBe('');
+		expect(restartHeld({ phase: 'Stopped' })).toBe(
+			'Only a starting or ready desktop restarts: this one is stopped.',
+		);
+		for (const phase of ['Stopping', 'Provisioning', 'Failed'])
+			expect(restartHeld({ phase })).toBe(
+				`Only a starting or ready desktop restarts: this one is ${phase.toLowerCase()}.`,
+			);
+		expect(restartHeld({})).toBe(
+			'Only a starting or ready desktop restarts: DeskuBe has not reported this one yet.',
+		);
+		expect(restartHeld({ phase: 'Ready', class: 'gpu', conditions: noClass })).toBe(
+			'Class gpu does not exist: DeskuBe rolls out no restart until it does.',
+		);
+	});
+});
+
 describe('unlisted kinds', () => {
 	const unlisted = [
 		{ namespace: '', resource: 'vdiclasses' },
@@ -132,6 +180,10 @@ describe('unlisted kinds', () => {
 		expect(may.classes).toBe(false);
 		expect(may.anywhere('vdiinstances', ['db-prod', 'batch-prod'])).toBe(false);
 		expect(may.anywhere('vdiinstances')).toBe(true);
+		// None shown is none in the caller's projects only where every one lists it.
+		expect(may.everywhere('vdiinstances')).toBe(false);
+		expect(may.everywhere('vdipools')).toBe(true);
+		expect(rights(data, new Set()).everywhere('vdipools')).toBe(false);
 	});
 	it('lists no namespace for a kind not listed alone, and counts none it cannot', () => {
 		const data: Desktops = {
