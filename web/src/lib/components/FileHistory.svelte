@@ -24,12 +24,17 @@
 	let {
 		project,
 		name,
+		version = '',
 		load,
 		restore: restoreVersion,
 		mine,
 	}: {
 		project: string;
 		name: string; // the object, for copy
+		// What else moves the object's history where no head does, for a
+		// caller who sees part of the project: its declared shape, or the
+		// network catalog's version.
+		version?: string;
 		load: () => Promise<Commit[]>;
 		// Absent when the caller may not stage here: the history stays readable.
 		restore?: (hash: string) => Promise<unknown>;
@@ -39,7 +44,7 @@
 	const historyRes = resource<Commit[] | null>(
 		() => {
 			const mark = inventory.historyMark(project);
-			return mark && `${project}/${name}|${mark}`;
+			return mark && `${project}/${name}|${mark}|${version}`;
 		},
 		(k) => (k ? load() : Promise.resolve(null)),
 		{

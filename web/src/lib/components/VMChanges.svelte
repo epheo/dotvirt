@@ -2,6 +2,7 @@
 	import { untrack } from 'svelte';
 	import { GitPullRequest, Pencil } from '@lucide/svelte';
 	import { api, type DraftItem, type VM } from '#lib/api.js';
+	import { declaredShape } from '#lib/gitops.js';
 	import { approvalLine, checksPill, itemKey, reviewURL } from '#lib/review.js';
 	import { drafts } from '#lib/state/drafts.svelte.js';
 	import { inventory } from '#lib/state/inventory.svelte.js';
@@ -136,6 +137,7 @@
 		<FileHistory
 			{project}
 			name={vm.name}
+			version={declaredShape(vm)}
 			load={() => api.vmHistory(vm.namespace, vm.name)}
 			restore={inventory.canAuthorVMs(vm.namespace)
 				? (hash) => api.restoreVersion(vm.namespace, vm.name, hash)

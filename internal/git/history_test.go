@@ -302,6 +302,37 @@ func TestCommitDiffSides(t *testing.T) {
 // A file's history is the first-parent commits that changed it: the merge
 // counts once for the PR, a sibling file's commits do not appear, and a file
 // that never existed has none.
+// A folder's head is the last commit that touched it: a merge elsewhere in
+// the repo moves the repo's head and leaves the folder's where it was.
+func TestFolderHeadMovesWithItsFolderAlone(t *testing.T) {
+	h := seedHistoryRepo(t)
+	h.write("tenant-b/db.yaml", "kind: VirtualMachine\nmetadata: {name: db, namespace: tenant-b}\n")
+	h.run("bob", h.work, "add", "-A")
+	h.run("bob", h.work, "commit", "-qm", "add tenant-b")
+	h.run("bob", h.work, "push", "-q", "origin", "main")
+
+	folder, whole := openAt(t, h.bare, "tenant-a"), openAt(t, h.bare, "")
+	if got, want := folder.FolderHead("main"), revParse(t, h.bare, "main~1"); got != want {
+		t.Errorf("tenant-a head = %q, want its last commit %q", got, want)
+	}
+	if got, want := whole.FolderHead("main"), revParse(t, h.bare, "main"); got != want {
+		t.Errorf("repo head = %q, want main %q", got, want)
+	}
+	if got := folder.FolderHead("nope"); got != "" {
+		t.Errorf("a missing branch has head %q", got)
+	}
+
+	h.write("tenant-a/web.yaml", webYAML(8))
+	h.run("alice", h.work, "commit", "-qam", "bump web to 8 cpu")
+	h.run("alice", h.work, "push", "-q", "origin", "main")
+	if err := folder.refresh(); err != nil {
+		t.Fatal(err)
+	}
+	if got, want := folder.FolderHead("main"), revParse(t, h.bare, "main"); got != want {
+		t.Errorf("after a tenant-a merge, head = %q, want %q", got, want)
+	}
+}
+
 func TestFileHistoryFollowsOneFile(t *testing.T) {
 	r, err := Open(seedMerge(t).bare, "", nil)
 	if err != nil {

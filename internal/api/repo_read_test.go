@@ -168,6 +168,16 @@ func TestProjectSyncViewKeepsWhatTheCallerLists(t *testing.T) {
 	if got = view(listsInDev, partial, quiet); got.SyncError != projectErrorForPartialViewers {
 		t.Errorf("partial viewer read %q", got.SyncError)
 	}
+
+	// The applied revision moves with every merge: a partial viewer's feed
+	// shows their own alone.
+	applied := model.ProjectSync{Sync: "Synced", Revision: "ab12cd3"}
+	if got = view(listsInDev, partial, applied); got.Revision != "" {
+		t.Errorf("partial viewer read revision %q", got.Revision)
+	}
+	if got = view(listsInDev, proj, applied); got.Revision != applied.Revision {
+		t.Errorf("whole viewer read revision %q, want %q", got.Revision, applied.Revision)
+	}
 }
 
 func teamALane(rows ...model.Proposal) []model.Proposal {

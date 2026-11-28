@@ -223,9 +223,11 @@ type Project struct {
 	// RepoPage is where a browser opens Repo: its page under the forge's web
 	// base, which may differ from the base git and the API reach it at.
 	RepoPage string `json:"repoPage,omitempty"`
-	// Head is the base branch's commit on dotvirt's mirror of Repo: it moves
-	// with each merge dotvirt fetches, whether or not Argo has applied it, so
-	// the console re-reads the repo's history on it. Empty while unreadable.
+	// Head is the last base branch commit on dotvirt's mirror of Repo that
+	// touched the project's folder: it moves with each merge into it dotvirt
+	// fetches, whether or not Argo has applied it, so the console re-reads the
+	// project's history on it. Sent only to a caller who sees all of the
+	// project; empty otherwise and while unreadable.
 	Head       string             `json:"head,omitempty"`
 	Namespaces []ProjectNamespace `json:"namespaces"`
 	Error      string             `json:"error,omitempty"`

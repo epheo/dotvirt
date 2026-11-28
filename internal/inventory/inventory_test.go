@@ -6,6 +6,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -140,29 +141,56 @@ func TestBuildFiltersAndEnriches(t *testing.T) {
 	}
 }
 
-// The project carries its base branch's commit, the merge signal the console
-// keys history on when Argo is off or behind; a repo that cannot open has none.
-func TestBuildCarriesTheBaseHead(t *testing.T) {
+// The project carries the last commit into its folder, the merge signal the
+// console keys history on when Argo is off or behind: a merge into another
+// project's folder of the same repo moves nothing, a caller who sees part of
+// the project gets none, and a repo that cannot open has none.
+func TestBuildCarriesTheFolderHead(t *testing.T) {
 	bare := seedRepo(t)
-	out, err := exec.Command("git", "--git-dir", bare, "rev-parse", "main").Output()
-	if err != nil {
+	work := filepath.Join(t.TempDir(), "work")
+	sh := func(args ...string) string {
+		t.Helper()
+		cmd := exec.Command("git", args...)
+		cmd.Env = append(os.Environ(), "GIT_AUTHOR_NAME=t", "GIT_AUTHOR_EMAIL=t@x", "GIT_COMMITTER_NAME=t", "GIT_COMMITTER_EMAIL=t@x")
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+		return strings.TrimSpace(string(out))
+	}
+	seeded := sh("--git-dir", bare, "rev-parse", "main")
+	sh("clone", "-q", bare, work)
+	if err := os.WriteFile(filepath.Join(work, "tenant-b", "db.yaml"), []byte(vmYAML("db2", "tenant-b")), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	inv := Build(Inputs{
-		Branch: "main",
-		Repos:  git.NewRepoSet(ctx, "", "", nil, false, nil, time.Hour),
-		Projects: []project.ProjectInfo{
-			{Name: "team-a", Repo: bare, Namespaces: []string{"tenant-a"}},
-			{Name: "gone", Repo: filepath.Join(t.TempDir(), "missing.git"), Namespaces: []string{"tenant-b"}},
-		},
-	})
-	if got, want := inv.Projects[0].Head, string(out[:len(out)-1]); got != want {
-		t.Errorf("head = %q, want main's %q", got, want)
+	sh("-C", work, "commit", "-qam", "tenant-b only")
+	sh("-C", work, "push", "-q", "origin", "main")
+	merged := sh("--git-dir", bare, "rev-parse", "main")
+
+	build := func(p project.ProjectInfo, whole bool) string {
+		t.Helper()
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		return Build(Inputs{
+			Branch:   "main",
+			Repos:    git.NewRepoSet(ctx, "", "", nil, false, nil, time.Hour),
+			Projects: []project.ProjectInfo{p},
+			Whole:    func(project.ProjectInfo) bool { return whole },
+		}).Projects[0].Head
 	}
-	if inv.Projects[1].Head != "" {
-		t.Errorf("an unopened repo has a head: %q", inv.Projects[1].Head)
+	teamA := project.ProjectInfo{Name: "team-a", Repo: bare, Path: "tenant-a", Namespaces: []string{"tenant-a"}}
+	if got := build(teamA, true); got != seeded {
+		t.Errorf("tenant-a folder head = %q, want the seed %q", got, seeded)
+	}
+	if got := build(project.ProjectInfo{Name: "all", Repo: bare, Namespaces: []string{"tenant-a"}}, true); got != merged {
+		t.Errorf("whole-repo head = %q, want main %q", got, merged)
+	}
+	if got := build(teamA, false); got != "" {
+		t.Errorf("a partial viewer got head %q", got)
+	}
+	missing := project.ProjectInfo{Name: "gone", Repo: filepath.Join(t.TempDir(), "missing.git"), Namespaces: []string{"tenant-b"}}
+	if got := build(missing, true); got != "" {
+		t.Errorf("an unopened repo has a head: %q", got)
 	}
 }
 

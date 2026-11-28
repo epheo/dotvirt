@@ -12,6 +12,7 @@
 	} from '#lib/api.js';
 	import { runIssueAction } from '#lib/actions.js';
 	import { duration, relativeAge } from '#lib/format.js';
+	import { declaredShape } from '#lib/gitops.js';
 	import { runPhase } from '#lib/status.js';
 	import { resource } from '#lib/resource.svelte.js';
 	import { itemKey } from '#lib/review.js';
@@ -83,10 +84,11 @@
 	const usageFailed = $derived(usageRes.failed);
 
 	// The VM's latest merged change, for the GitOps card's one-line summary;
-	// the Changes tab carries the full history.
+	// the Changes tab carries the full history. What git declares of the VM
+	// moves it too: a caller who sees part of the project gets no head.
 	const project = $derived(inventory.projectOf(vm.namespace));
 	const historyRes = resource<Commit[]>(
-		() => `${key}|${vm.sourceFile ?? ''}|${inventory.historyMark(project)}`,
+		() => `${key}|${declaredShape(vm)}|${inventory.historyMark(project)}`,
 		() => (vm.sourceFile ? api.vmHistory(vm.namespace, vm.name) : Promise.resolve([])),
 		{ reset: true },
 	);

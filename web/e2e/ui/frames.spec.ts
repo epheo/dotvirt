@@ -60,21 +60,22 @@ for (const tab of ['summary', 'changes'])
 		expect(await fetches(`${VM}/history`)).toBe(1);
 	});
 
-test("a frame where git moves the VM's declared fields re-reads the drift alone", async ({
-	page,
-}) => {
-	// The frame's declared fields are git's: a merge moves them while the VM is
-	// already OutOfSync and before Argo applies it, so the verdict alone would
-	// not.
-	const fetches = await fetchCounter(page);
-	await setScenario(page, 'base');
-	await login(page);
-	await page.goto('/vm/web-prod/web-1');
-	await expect.poll(() => fetches(`${VM}/history`)).toBe(1);
-	await post(page, 'vm/web-prod/web-1', { labels: { app: 'web-1', tier: 'edge' } });
-	await expect.poll(() => fetches(`${VM}/drift`)).toBe(2);
-	expect(await fetches(`${VM}/history`)).toBe(1);
-});
+for (const tab of ['summary', 'changes'])
+	test(`a frame where git moves the VM's declared fields re-reads drift and history (${tab})`, async ({
+		page,
+	}) => {
+		// The frame's declared fields are git's: a merge moves them while the VM
+		// is already OutOfSync and before Argo applies it, and for a caller who
+		// sees part of the project, who gets no head. The fixture sends none.
+		const fetches = await fetchCounter(page);
+		await setScenario(page, 'base');
+		await login(page);
+		await page.goto(`/vm/web-prod/web-1?tab=${tab}`);
+		await expect.poll(() => fetches(`${VM}/history`)).toBe(1);
+		await post(page, 'vm/web-prod/web-1', { labels: { app: 'web-1', tier: 'edge' } });
+		await expect.poll(() => fetches(`${VM}/drift`)).toBe(2);
+		await expect.poll(() => fetches(`${VM}/history`)).toBe(2);
+	});
 
 test('a drift read that failed is tried again on its own', async ({ page }) => {
 	await page.clock.install();

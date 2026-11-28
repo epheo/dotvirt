@@ -26,6 +26,25 @@ func (r *Repo) History(branch string, limit int) ([]model.Commit, error) {
 	return r.walkHistory(branch, limit, func(*object.Commit) (bool, error) { return true, nil })
 }
 
+// FolderHead is the last commit on branch that touched the folder this mirror
+// is scoped to, branch's head when it is the whole repo: what a merge moves for
+// one project and not for another sharing its repo. "" when branch is
+// unreadable or the folder untouched within historyScan. Walked once per head
+// move.
+func (r *Repo) FolderHead(branch string) string {
+	hash, err := Memoized(r, "folder-head", branch, func() (string, error) {
+		cs, err := r.History(branch, 1)
+		if err != nil || len(cs) == 0 {
+			return "", err
+		}
+		return cs[0].Hash, nil
+	})
+	if err != nil {
+		return ""
+	}
+	return hash
+}
+
 // FileHistory is History narrowed to the commits that changed path: on the base
 // branch, the merged PRs that touched one manifest. A rename reads as a new
 // file, and a multi-document file's history includes its siblings' changes.

@@ -235,6 +235,7 @@
 				<FileHistory
 					{project}
 					name={net.name}
+					version={String(inventory.networksVersion)}
 					load={() => api.objectHistory(ref.resource, ref.namespace, ref.name)}
 					restore={canAuthorNetwork(net)
 						? (hash) => api.restoreObjectVersion(ref.resource, ref.namespace, ref.name, hash)
