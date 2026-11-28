@@ -2,14 +2,11 @@
 	import type { DesktopPool } from '#lib/api.js';
 	import { assignment, count, poolState } from '#lib/desktops.js';
 	import { hrefForScope } from '#lib/nav.js';
+	import { desktops } from '#lib/state/desktops.svelte.js';
 	import StatusPill from '#lib/components/StatusPill.svelte';
 
 	// Pools and how their seats stand, each opening its page.
-	let {
-		pools,
-		projectOf,
-		namespace = false,
-	}: { pools: DesktopPool[]; projectOf: Map<string, string>; namespace?: boolean } = $props();
+	let { pools, namespace = false }: { pools: DesktopPool[]; namespace?: boolean } = $props();
 
 	const COUNTS = [
 		['held', 'Held'],
@@ -40,7 +37,7 @@
 		</thead>
 		<tbody>
 			{#each pools as p (`${p.namespace}/${p.name}`)}
-				{@const project = projectOf.get(p.namespace)}
+				{@const project = desktops.owners.get(p.namespace)}
 				{@const st = poolState(p)}
 				<tr class="hover:bg-select-soft">
 					<td class="{TD} pl-card font-mono text-xs font-medium">
@@ -60,7 +57,12 @@
 					{#each COUNTS as [k] (k)}
 						<td class="{TD} text-right">{count(p, k)}</td>
 					{/each}
-					<td class="{TD} pr-card"><StatusPill tone={st.tone} label={st.label} /></td>
+					<td class="{TD} pr-card">
+						<span class="inline-flex gap-1.5">
+							<StatusPill tone={st.tone} label={st.label} />
+							{#if p.closed}<StatusPill tone="neutral" label="Closed" />{/if}
+						</span>
+					</td>
 				</tr>
 			{/each}
 		</tbody>

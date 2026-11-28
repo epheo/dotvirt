@@ -2,16 +2,15 @@
 	import {
 		desktopState,
 		joinClaims,
-		listed,
 		person,
 		sessionLabel,
 		unlistedLines,
+		why,
 	} from '#lib/desktops.js';
 	import { relativeAge } from '#lib/format.js';
 	import type { Scope } from '#lib/lenses.js';
 	import { hrefForScope, trailForScope } from '#lib/nav.js';
 	import { desktops } from '#lib/state/desktops.svelte.js';
-	import { inventory } from '#lib/state/inventory.svelte.js';
 	import Card from '#lib/components/Card.svelte';
 	import ClassMissing from './ClassMissing.svelte';
 	import DesktopsFrame from './DesktopsFrame.svelte';
@@ -21,11 +20,20 @@
 	let { scope }: { scope: Extract<Scope, { kind: 'desktop' }> } = $props();
 
 	const data = $derived(desktops.value?.synced ? desktops.value : null);
+	const may = $derived(data ? desktops.may : null);
 	const mine = (d: { namespace: string; name: string }) =>
 		d.namespace === scope.namespace && d.name === scope.desktop;
-	const desktop = $derived(data?.desktops.find(mine));
-	// A pool's desktop is a row of its pool, never a page of its own.
-	const ofPool = $derived(desktop ? undefined : data?.pools.find((p) => p.desktops.some(mine)));
+	// A pool's desktop is a row of its pool, never a page of its own, even
+	// where its pool is not shown.
+	const desktop = $derived(data?.desktops.find((d) => mine(d) && !d.pool));
+	const ofPool = $derived(
+		desktop
+			? undefined
+			: (data?.desktops.find(mine)?.pool ?? data?.pools.find((p) => p.desktops.some(mine))?.name),
+	);
+	const poolShown = $derived(
+		!!ofPool && !!data?.pools.some((p) => p.namespace === scope.namespace && p.name === ofPool),
+	);
 	const row = $derived(desktop && data ? joinClaims([desktop], data.claims)[0] : undefined);
 	const st = $derived(desktop && desktopState(desktop));
 	const cls = $derived(desktop?.class && data?.classes.find((c) => c.name === desktop.class));
@@ -42,12 +50,19 @@
 		const of = desktop.owner ? `Desktop of ${desktop.owner}` : 'Desktop';
 		return desktop.class ? `${of}, class ${desktop.class}` : of;
 	});
+	const claimedBy = $derived(
+		row?.claim
+			? [person(row), row.claim.lastUsed ? `last used ${relativeAge(row.claim.lastUsed)}` : '']
+					.filter(Boolean)
+					.join(', ')
+			: '',
+	);
 	const ROW =
 		'grid grid-cols-[minmax(0,2fr)_minmax(0,3fr)] gap-3 border-t border-line-soft py-2 first:border-t-0';
 </script>
 
 <DesktopsFrame
-	trail={trailForScope(scope, 'Desktops', (p) => inventory.title(p), 'desktops')}
+	trail={trailForScope(scope, 'Desktops', (p) => desktops.title(p), 'desktops')}
 	title={scope.desktop}
 	status={st && { tone: st.tone, text: st.label }}
 	{context}
@@ -56,25 +71,35 @@
 		{#if ofPool}
 			<p class="text-[13px] text-ink-muted">
 				{scope.desktop} is a desktop of pool
-				<a
-					class="text-accent-ink hover:underline"
-					href={hrefForScope({
-						kind: 'pool',
-						project: scope.project,
-						namespace: ofPool.namespace,
-						pool: ofPool.name,
-					})}
-				>
-					{ofPool.name}
-				</a>: it shows in that pool's table.
+				{#if poolShown}
+					<a
+						class="text-accent-ink hover:underline"
+						href={hrefForScope({
+							kind: 'pool',
+							project: scope.project,
+							namespace: scope.namespace,
+							pool: ofPool,
+						})}
+					>
+						{ofPool}
+					</a>: it shows in that pool's table.
+				{:else}
+					{ofPool}, which is not shown to you.
+				{/if}
 			</p>
 		{:else if !desktop}
-			{#if !listed(d, scope.namespace, 'vdiinstances')}
-				<UnlistedNote lines={unlistedLines(d.unlisted, here, true)} />
-			{:else}
+			{@const lines = unlistedLines(d.unlisted, here, true)}
+			{#if may?.lists(scope.namespace, 'vdiinstances')}
 				<p class="text-[13px] text-ink-muted">
 					No desktop {scope.desktop} in {scope.namespace}: it was deleted, or is not applied yet.
 					<a class="text-accent-ink hover:underline" href={nsHref}>See {scope.namespace}</a>
+				</p>
+			{:else if lines.length}
+				<UnlistedNote {lines} />
+			{:else}
+				<p class="text-[13px] text-ink-muted">
+					{scope.namespace} is not a namespace of your projects with a repo.
+					<a class="text-accent-ink hover:underline" href="/desktops">See all desktops</a>
 				</p>
 			{/if}
 		{:else}
@@ -125,17 +150,10 @@
 							<dt class="text-ink-muted">Running</dt>
 							<dd>{desktop.running ? 'Yes' : 'No'}</dd>
 						</div>
-						{#if row?.claim}
+						{#if claimedBy}
 							<div class={ROW}>
 								<dt class="text-ink-muted">Claimed by</dt>
-								<dd>
-									{person(row)}
-									{#if row.claim.lastUsed}
-										<span class="text-ink-muted">
-											, last used {relativeAge(row.claim.lastUsed)}
-										</span>
-									{/if}
-								</dd>
+								<dd>{claimedBy}</dd>
 							</div>
 						{/if}
 					</dl>
@@ -143,21 +161,20 @@
 
 				{#if desktop.conditions?.length}
 					<Card title="Conditions">
-						<ul class="flex flex-col text-[13px]">
+						<dl class="text-[13px]">
 							{#each desktop.conditions as c (c.type)}
-								<li class="border-t border-line-soft py-2 first:border-t-0">
-									<span class="font-medium {c.status === 'False' ? 'text-warn-ink' : 'text-ink'}">
-										{c.type}
-									</span>
-									<span class="text-ink-muted">
-										{c.status === 'True' ? 'Yes' : c.status === 'False' ? 'No' : 'Unknown'}{c.reason
-											? `, ${c.reason}`
-											: ''}
-									</span>
-									{#if c.message}<p class="text-xs text-ink-muted">{c.message}</p>{/if}
-								</li>
+								<div class={ROW}>
+									<dt class="text-ink-muted">{c.type}</dt>
+									<dd class={c.status === 'False' ? 'text-warn-ink' : ''}>
+										{c.status === 'True'
+											? 'Yes'
+											: c.status === 'False'
+												? `No: ${why(c, desktop.class)}`
+												: 'Unknown'}
+									</dd>
+								</div>
 							{/each}
-						</ul>
+						</dl>
 					</Card>
 				{/if}
 			</div>

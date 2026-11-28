@@ -1,6 +1,16 @@
 import { describe, expect, it } from 'vitest';
 import type { Desktop, DesktopClaim, DesktopPool, Desktops, Project } from './api';
-import { byProject, count, joinClaims, person, poolState, unlistedLines } from './desktops';
+import {
+	byProject,
+	count,
+	duration,
+	joinClaims,
+	person,
+	poolState,
+	rights,
+	seatParts,
+	unlistedLines,
+} from './desktops';
 
 const desktop = (name: string, over: Partial<Desktop> = {}): Desktop => ({
 	namespace: 'web-prod',
@@ -57,7 +67,7 @@ describe('pools', () => {
 		expect(count(p, 'waiting')).toBe(2);
 		expect(count(p, 'held')).toBe(0);
 	});
-	it('names the missing class, and never a closed pool as a fault', () => {
+	it('names the missing class; closed is no state of Ready', () => {
 		const missing = pool({
 			class: 'gpu',
 			conditions: [{ type: 'Ready', status: 'False', reason: 'ClassNotFound' }],
@@ -67,25 +77,60 @@ describe('pools', () => {
 			closed: true,
 			conditions: [{ type: 'Ready', status: 'True', reason: 'ClassFound' }],
 		});
-		expect(poolState(closed)).toEqual({ tone: 'neutral', label: 'Closed' });
+		expect(poolState(closed)).toEqual({ tone: 'ok', label: 'Ready' });
 		expect(poolState(pool()).label).toBe('Not read yet');
+	});
+	it('splits the seats into parts that never overlap', () => {
+		const p = pool({
+			seats: 6,
+			counts: { held: 4, inSession: 1, ready: 3, stopped: 1, warm: 1, free: 1, waiting: 2 },
+		});
+		const parts = seatParts(p);
+		expect(parts).toEqual({ inSession: 1, idle: 2, stopped: 1, warm: 1, free: 1 });
+		expect(Object.values(parts).reduce((n, v) => n + v, 0)).toBe(4 + 1 + 1);
+		// Counts read mid-update never make a part negative.
+		expect(
+			seatParts(pool({ counts: { held: 1, inSession: 1, stopped: 1 } as DesktopPool['counts'] }))
+				.idle,
+		).toBe(0);
+	});
+	it('says a duration for people', () => {
+		expect(duration('30m0s')).toBe('30 min');
+		expect(duration('12h0m0s')).toBe('12 h');
+		expect(duration('1h30m0s')).toBe('1 h 30 min');
+		expect(duration('720h0m0s')).toBe('30 d');
+		expect(duration('0s')).toBe('0 s');
+		expect(duration('1.5s')).toBe('1.5s');
 	});
 });
 
 describe('unlisted kinds', () => {
 	const unlisted = [
+		{ namespace: '', resource: 'vdiclasses' },
 		{ namespace: 'batch-prod', resource: 'vdiinstances' },
-		{ namespace: 'db-prod', resource: 'vdiinstances' },
 		{ namespace: 'db-prod', resource: 'vdiclaims' },
+		{ namespace: 'db-prod', resource: 'vdiinstances' },
 	];
-	it('says each kind once, where it is not shown', () => {
+	it('says each kind once, where it is not shown, and who may let the caller read it', () => {
 		expect(unlistedLines(unlisted, null)).toEqual([
-			'Desktops in batch-prod, db-prod are not shown to you.',
-			'Claims in db-prod are not shown to you.',
+			'Desktops in batch-prod, db-prod are not shown to you: a platform admin can let you read them.',
+			'Claims in db-prod are not shown to you: a project admin can let you read them.',
 		]);
 		expect(unlistedLines(unlisted, new Set(['batch-prod']), true)).toEqual([
-			'Desktops here are not shown to you.',
+			'Desktops here are not shown to you: a platform admin can let you read them.',
 		]);
+	});
+	it('lists only what the answer covers and does not name', () => {
+		const data = { unlisted } as Desktops;
+		const may = rights(data, new Set(['web-prod', 'db-prod', 'batch-prod']));
+		expect(may.lists('web-prod', 'vdiinstances')).toBe(true);
+		expect(may.lists('db-prod', 'vdiinstances')).toBe(false);
+		expect(may.lists('db-prod', 'vdipools')).toBe(true);
+		// A namespace the answer does not cover is listed nowhere.
+		expect(may.lists('qa', 'vdipools')).toBe(false);
+		expect(may.classes).toBe(false);
+		expect(may.anywhere('vdiinstances', ['db-prod', 'batch-prod'])).toBe(false);
+		expect(may.anywhere('vdiinstances')).toBe(true);
 	});
 	it('lists no namespace for a kind not listed alone, and counts none it cannot', () => {
 		const data: Desktops = {
@@ -96,19 +141,16 @@ describe('unlisted kinds', () => {
 			claims: [],
 			unlisted: [
 				{ namespace: 'batch-prod', resource: 'vdiinstances' },
+				{ namespace: 'qa', resource: 'vdiclaims' },
 				{ namespace: 'qa', resource: 'vdiinstances' },
+				{ namespace: 'qa', resource: 'vdipools' },
 			],
 		};
+		const namespaces = ['web-prod', 'db-prod', 'batch-prod', 'qa'];
 		const projects: Project[] = [
-			{
-				name: 'team',
-				namespaces: ['web-prod', 'db-prod', 'batch-prod', 'qa'].map((namespace) => ({
-					namespace,
-					vms: [],
-				})),
-			},
+			{ name: 'team', namespaces: namespaces.map((namespace) => ({ namespace, vms: [] })) },
 		];
-		const [team] = byProject(data, projects);
+		const [team] = byProject(data, projects, rights(data, new Set(namespaces)));
 		expect(team.namespaces.map((n) => [n.namespace, n.count])).toEqual([
 			['web-prod', 0],
 			['db-prod', 1],

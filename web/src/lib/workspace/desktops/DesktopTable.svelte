@@ -1,9 +1,10 @@
 <script lang="ts">
 	import type { Snippet } from 'svelte';
 	import type { Desktops } from '#lib/api.js';
-	import { desktopState, listed, person, sessionLabel, type DesktopRow } from '#lib/desktops.js';
+	import { desktopState, person, sessionLabel, type DesktopRow } from '#lib/desktops.js';
 	import { relativeAge } from '#lib/format.js';
 	import { hrefForScope } from '#lib/nav.js';
+	import { desktops } from '#lib/state/desktops.svelte.js';
 	import { TONE_TEXT } from '#lib/status.js';
 	import StatusDot from '#lib/components/StatusDot.svelte';
 
@@ -12,7 +13,6 @@
 	let {
 		rows,
 		data,
-		projectOf,
 		namespace = false,
 		pool = false,
 		label,
@@ -20,13 +20,14 @@
 	}: {
 		rows: DesktopRow[];
 		data: Desktops;
-		projectOf: Map<string, string>;
 		namespace?: boolean;
 		pool?: boolean;
 		label: string;
 		empty?: Snippet;
 	} = $props();
 
+	const projectOf = $derived(desktops.owners);
+	const may = $derived(desktops.may);
 	const pools = $derived(new Set(data.pools.map((p) => `${p.namespace}/${p.name}`)));
 	const TH =
 		'border-b border-line px-3 py-2 text-left text-xs font-bold whitespace-nowrap text-ink-muted';
@@ -109,8 +110,8 @@
 						{/if}
 						<td class={TD}>
 							{#if who}{who}
-							{:else if d.pool && listed(data, d.namespace, 'vdiclaims')}
-								<span class="text-ink-faint">Unclaimed</span>
+							{:else if d.pool && may?.lists(d.namespace, 'vdiclaims')}
+								<span class="text-ink-faint">Warm</span>
 							{:else}<span class="text-ink-faint">-</span>{/if}
 						</td>
 						<td class={TD} title={st.message}>

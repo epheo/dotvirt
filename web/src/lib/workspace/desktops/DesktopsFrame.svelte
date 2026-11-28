@@ -71,9 +71,8 @@
 		{:else if nothingReadable()}
 			<div class="rounded-lg border border-line bg-panel px-card py-6 text-center text-[13px]">
 				<p class="text-ink-muted">No desktop is shown to you.</p>
-				<p class="text-ink-faint">
-					A project admin can let you read the pools and desktops in a project.
-				</p>
+				<p class="text-ink-faint">A project admin can let you read a project's pools.</p>
+				<p class="text-ink-faint">A platform admin can let you read its desktops.</p>
 			</div>
 		{:else if data}
 			<p class="text-[13px] text-ink-muted">Reading the desktops.</p>

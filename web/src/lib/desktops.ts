@@ -1,6 +1,6 @@
 // The Desktops section's read model over GET /api/desktops: desktops joined to
-// the claims holding them, the tree's grouping, and how a pool or desktop
-// stands.
+// the claims holding them, what the caller may list, the tree's grouping, and
+// how a pool or desktop stands.
 import type {
 	Desktop,
 	DesktopClaim,
@@ -40,11 +40,57 @@ export const allDesktops = (d: Desktops): Desktop[] =>
 		(a, b) => a.namespace.localeCompare(b.namespace) || a.name.localeCompare(b.name),
 	);
 
+// What the caller may list. In each namespace it covers, the answer names
+// every kind the caller may not list there, and the classes at "".
+export interface Rights {
+	lists(namespace: string, resource: string): boolean;
+	// Whether some namespace among namespaces (all those covered by default)
+	// lists resource.
+	anywhere(resource: string, namespaces?: Iterable<string>): boolean;
+	classes: boolean;
+}
+
+export function rights(d: Desktops, covered: ReadonlySet<string>): Rights {
+	const not = new Set(d.unlisted.map((u) => key(u.namespace, u.resource)));
+	const lists = (ns: string, r: string) => covered.has(ns) && !not.has(key(ns, r));
+	return {
+		lists,
+		anywhere: (r, nss = covered) => [...nss].some((ns) => lists(ns, r)),
+		classes: !not.has(key('', 'vdiclasses')),
+	};
+}
+
 // DeskuBe leaves a count of 0 out of a pool's status.
 export const count = (p: DesktopPool, k: keyof DesktopPoolCounts): number => p.counts?.[k] ?? 0;
 
 // An unset assignment is DeskuBe's default.
 export const assignment = (p: DesktopPool): string => p.assignment || 'Personal';
+
+// The pool's seats in parts that never overlap: Held counts the stopped and
+// those in session, Ready the warm. They add up to held + warm + free.
+export function seatParts(p: DesktopPool) {
+	const held = count(p, 'held');
+	const inSession = count(p, 'inSession');
+	const stopped = count(p, 'stopped');
+	return {
+		inSession,
+		idle: Math.max(0, held - inSession - stopped),
+		stopped,
+		warm: count(p, 'warm'),
+		free: count(p, 'free'),
+	};
+}
+
+// A Go duration for people: 30m0s reads 30 min, 720h0m0s 30 d. One it cannot
+// read stays as written.
+export function duration(d: string): string {
+	const m = /^(?:(\d+)h)?(?:(\d+)m)?(?:(\d+)s)?$/.exec(d);
+	if (!m || !d) return d;
+	const [h, min, s] = m.slice(1).map((v) => Number(v ?? 0));
+	if (h >= 24 && h % 24 === 0 && !min && !s) return `${h / 24} d`;
+	const parts = [h && `${h} h`, min && `${min} min`, s && `${s} s`].filter(Boolean);
+	return parts.length ? parts.join(' ') : '0 s';
+}
 
 export interface State {
 	tone: Tone;
@@ -57,17 +103,19 @@ export interface State {
 
 export const readyOf = (conditions?: DesktopCondition[]) =>
 	conditions?.find((c) => c.type === 'Ready');
-const said = (c: DesktopCondition) => [c.reason, c.message].filter(Boolean).join(': ');
+
+// Why a condition is False, in words.
+export const why = (c: DesktopCondition, cls?: string): string =>
+	c.reason === 'ClassNotFound' && cls ? `class ${cls} does not exist` : c.message || c.reason || '';
 
 // poolState reads the pool's Ready condition: its class is the only thing
-// DeskuBe waits on today. A closed pool is a choice, not a fault.
+// DeskuBe waits on today. Closed is a choice, said apart.
 export function poolState(p: DesktopPool): State {
 	const ready = readyOf(p.conditions);
 	if (ready?.status === 'False' && ready.reason === 'ClassNotFound')
 		return { tone: 'danger', label: 'Class missing', missingClass: p.class };
-	if (ready?.status === 'False') return { tone: 'warn', label: 'Not ready', message: said(ready) };
+	if (ready?.status === 'False') return { tone: 'warn', label: 'Not ready', message: why(ready) };
 	if (ready?.status !== 'True') return { tone: 'neutral', label: 'Not read yet' };
-	if (p.closed) return { tone: 'neutral', label: 'Closed' };
 	return { tone: 'ok', label: 'Ready' };
 }
 
@@ -82,7 +130,7 @@ export function desktopState(d: Desktop): State {
 	return {
 		tone: desktopTone(d.phase),
 		label: d.phase || 'Not read yet',
-		message: failing && said(failing),
+		message: failing && why(failing),
 	};
 }
 
@@ -96,10 +144,12 @@ function desktopTone(phase?: string): Tone {
 export const sessionLabel = (s?: string): string =>
 	s === 'busy' ? 'In session' : s === 'free' ? 'No session' : '-';
 
-const KIND_NAME: Record<string, string> = {
-	vdipools: 'Pools',
-	vdiinstances: 'Desktops',
-	vdiclaims: 'Claims',
+// Each namespaced kind, and who may let the caller read it: desktops carry a
+// pairing PIN, so the platform grants them, not the project.
+const KINDS: Record<string, { name: string; who: string }> = {
+	vdipools: { name: 'Pools', who: 'a project admin' },
+	vdiinstances: { name: 'Desktops', who: 'a platform admin' },
+	vdiclaims: { name: 'Claims', who: 'a project admin' },
 };
 
 // unlistedLines says which kinds the caller may not list, one line per kind:
@@ -112,19 +162,18 @@ export function unlistedLines(
 ): string[] {
 	const by = new Map<string, string[]>();
 	for (const u of unlisted) {
-		if (namespaces && !namespaces.has(u.namespace)) continue;
+		if (!u.namespace || (namespaces && !namespaces.has(u.namespace))) continue;
 		by.set(u.resource, [...(by.get(u.resource) ?? []), u.namespace]);
 	}
 	const where = (nss: string[]) =>
 		here ? 'here' : nss.length > 3 ? `in ${nss.length} namespaces` : `in ${nss.join(', ')}`;
-	return Object.keys(KIND_NAME)
+	return Object.keys(KINDS)
 		.filter((r) => by.has(r))
-		.map((r) => `${KIND_NAME[r]} ${where(by.get(r)!)} are not shown to you.`);
+		.map(
+			(r) =>
+				`${KINDS[r].name} ${where(by.get(r)!)} are not shown to you: ${KINDS[r].who} can let you read them.`,
+		);
 }
-
-// Whether the caller may list resource in namespace.
-export const listed = (d: Desktops, namespace: string, resource: string): boolean =>
-	!d.unlisted.some((u) => u.namespace === namespace && u.resource === resource);
 
 export interface DesktopsNamespace {
 	namespace: string;
@@ -144,11 +193,14 @@ export interface DesktopsProject {
 	missingClass: boolean;
 }
 
-// byProject groups what the caller may see under the inventory's projects, in
-// their order, keeping only the namespaces that hold a pool or a desktop: a
-// kind the caller may not list says nothing of what a namespace holds.
-export function byProject(d: Desktops, projects: readonly Project[]): DesktopsProject[] {
-	// Indexed once: the inventory's projects arrive fresh with every frame.
+// byProject groups what the caller may see under the projects, in their order,
+// keeping only the namespaces that hold a pool or a desktop: a kind the caller
+// may not list says nothing of what a namespace holds.
+export function byProject(
+	d: Desktops,
+	projects: readonly Project[],
+	may: Rights,
+): DesktopsProject[] {
 	const pick = <T extends { namespace: string }>(rows: readonly T[]) => {
 		const m = new Map<string, T[]>();
 		for (const r of rows) {
@@ -169,15 +221,14 @@ export function byProject(d: Desktops, projects: readonly Project[]): DesktopsPr
 			// Besides those made one by one, the desktops of pools not shown.
 			const loose = desktopsIn(namespace);
 			if (!pools.length && !loose.length) continue;
-			const unlisted = unlistedIn(namespace).map((u) => u.resource);
 			namespaces.push({
 				namespace,
 				pools,
 				desktops: loose.filter((x) => !x.pool),
-				unlisted,
-				count: unlisted.includes('vdiinstances')
-					? null
-					: pools.reduce((n, x) => n + x.desktops.length, 0) + loose.length,
+				unlisted: unlistedIn(namespace).map((u) => u.resource),
+				count: may.lists(namespace, 'vdiinstances')
+					? pools.reduce((n, x) => n + x.desktops.length, 0) + loose.length
+					: null,
 				missingClass: pools.some((x) => poolState(x).missingClass),
 			});
 		}

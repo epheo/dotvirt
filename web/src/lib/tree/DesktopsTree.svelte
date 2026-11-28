@@ -13,7 +13,6 @@
 	import { hrefForScope, scopeFromPath } from '#lib/nav.js';
 	import { LEAF_LIMIT, leafWindow, matches, SMALL_FLEET } from '#lib/rail.js';
 	import { desktops, nothingReadable } from '#lib/state/desktops.svelte.js';
-	import { inventory } from '#lib/state/inventory.svelte.js';
 	import { persisted } from '#lib/state/persisted.svelte.js';
 	import Skeleton from '#lib/components/Skeleton.svelte';
 	import StatusDot from '#lib/components/StatusDot.svelte';
@@ -27,8 +26,12 @@
 	// from the URL.
 	const scope = $derived(scopeFromPath(page.url.pathname));
 	const data = $derived(desktops.value?.synced ? desktops.value : null);
-	const groups = $derived(data ? byProject(data, inventory.projects) : []);
+	const may = $derived(data ? desktops.may : null);
+	// Keyed on the projects' layout, not the inventory's frames.
+	const groups = $derived(data && may ? byProject(data, desktops.projects, may) : []);
 	const total = $derived(data ? allDesktops(data).length : 0);
+	// A count only where some namespace lists the kind: a 0 would read as none.
+	const counted = $derived(may?.anywhere('vdiinstances') ?? false);
 	const small = $derived(total <= SMALL_FLEET);
 	const fmt = (n: number) => n.toLocaleString('en-US');
 	const onClasses = $derived(
@@ -41,7 +44,7 @@
 	const shown = $derived(
 		groups
 			.map((g) =>
-				matches(query, g.project, inventory.title(g.project))
+				matches(query, g.project, desktops.title(g.project))
 					? g
 					: { ...g, namespaces: g.namespaces.filter(nsShown) },
 			)
@@ -92,13 +95,13 @@
 		href={onClasses ? '/desktops?tab=desktops' : '/desktops'}
 	>
 		<span class="truncate text-side-ink">All desktops</span>
-		{#snippet trailing()}{#if data}<span class="text-xs text-side-dim">
+		{#snippet trailing()}{#if counted}<span class="text-xs text-side-dim">
 					{fmt(total)}
 				</span>{/if}{/snippet}
 	</TreeRow>
 	<TreeRow active={onClasses} href="/desktops?tab=classes">
 		<span class="truncate text-side-ink">Desktop classes</span>
-		{#snippet trailing()}{#if data}<span class="text-xs text-side-dim">
+		{#snippet trailing()}{#if data && may?.classes}<span class="text-xs text-side-dim">
 					{fmt(data.classes.length)}
 				</span>{/if}{/snippet}
 	</TreeRow>
@@ -120,7 +123,7 @@
 			href={hrefForScope({ kind: 'project', project: g.project }, 'desktops')}
 		>
 			{#snippet icon()}<Folder size={14} class="shrink-0 text-side-dim" />{/snippet}
-			<span class="truncate {open ? 'text-side-ink' : ''}">{inventory.title(g.project)}</span>
+			<span class="truncate {open ? 'text-side-ink' : ''}">{desktops.title(g.project)}</span>
 			{#snippet trailing()}
 				{#if g.missingClass}
 					<StatusDot
@@ -185,6 +188,11 @@
 								{#if st.tone === 'danger' || st.tone === 'warn'}
 									<StatusDot tone={st.tone} size="xs" title={st.label} />
 								{/if}
+								{#if p.closed}
+									<span class="text-[11px] text-side-dim" title="Claims without a desktop wait">
+										closed
+									</span>
+								{/if}
 								<span class="text-xs text-side-dim" title="Seats held">
 									{fmt(count(p, 'held'))}/{fmt(p.seats)}
 								</span>
@@ -202,7 +210,10 @@
 								desktop: d.name,
 							})}
 						>
-							{#snippet icon()}<StatusDot tone={desktopState(d).tone} />{/snippet}
+							{#snippet icon()}
+								{@const st = desktopState(d)}
+								<StatusDot tone={st.tone} title={st.label} />
+							{/snippet}
 							<span class="truncate text-side-ink">{d.name}</span>
 						</TreeRow>
 					{/each}
@@ -219,7 +230,7 @@
 
 	{#if query.trim() && data && shown.length === 0}
 		<div class="px-2 py-3 text-xs text-side-dim">No project, pool or desktop matches.</div>
-	{:else if data && groups.length === 0}
+	{:else if data && groups.length === 0 && counted && may?.anywhere('vdipools')}
 		<div class="px-2 py-4 text-center text-xs text-side-dim">No desktop in your projects yet.</div>
 	{:else if nothingReadable()}
 		<div class="px-2 py-4 text-center text-xs text-side-dim">No desktop is shown to you.</div>

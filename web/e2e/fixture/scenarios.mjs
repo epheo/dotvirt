@@ -2194,7 +2194,8 @@ const frontedtenant = {
 // web-prod: pool eng with a held, a stopped and a warm desktop; pool lab names
 // a class that does not exist and leaves its counts out; carol's desktop is
 // made one by one. db-prod holds one stopped desktop. In batch-prod the caller
-// lists pools but not desktops, and render's seats read short of a release.
+// lists pools but not desktops; render is closed, with one claim waiting, and
+// its seats read short of a release.
 const desk = (namespace, name, over = {}) => ({
 	namespace,
 	name,
@@ -2205,9 +2206,7 @@ const desk = (namespace, name, over = {}) => ({
 	...over,
 });
 const poolReady = [{ type: 'Ready', status: 'True', reason: 'ClassFound' }];
-// Built on each request: a last-used age read early in the suite and late in
-// it must say the same.
-const deskube = () => ({
+const deskube = {
 	synced: true,
 	classes: [
 		{ name: 'cad', image: 'quay.io/example/desktop-cad:2.1' },
@@ -2221,7 +2220,9 @@ const deskube = () => ({
 			seats: 3,
 			keepWarm: 0,
 			assignment: 'Shared',
-			counts: { held: 1, inSession: 1, ready: 1, stopped: 0, warm: 0, free: 1, waiting: 0 },
+			closed: true,
+			subjects: [{ kind: 'User', name: 'frank' }],
+			counts: { held: 1, inSession: 1, ready: 1, stopped: 0, warm: 0, free: 1, waiting: 1 },
 			conditions: poolReady,
 			desktops: [],
 		},
@@ -2232,6 +2233,9 @@ const deskube = () => ({
 			seats: 4,
 			keepWarm: 1,
 			assignment: 'Personal',
+			subjects: [{ kind: 'Group', name: 'engineers' }],
+			idleTimeout: '1h0m0s',
+			releaseAfter: '720h0m0s',
 			counts: { held: 2, inSession: 1, ready: 2, stopped: 1, warm: 1, free: 1, waiting: 0 },
 			conditions: poolReady,
 			desktops: [
@@ -2285,6 +2289,15 @@ const deskube = () => ({
 			phase: 'Bound',
 		},
 		{
+			namespace: 'batch-prod',
+			name: 'render-gina',
+			user: 'gina',
+			pool: 'render',
+			running: true,
+			phase: 'Waiting',
+			position: 1,
+		},
+		{
 			namespace: 'web-prod',
 			name: 'eng-alice',
 			user: 'alice',
@@ -2316,13 +2329,36 @@ const deskube = () => ({
 		},
 	],
 	unlisted: [{ namespace: 'batch-prod', resource: 'vdiinstances' }],
-});
+};
 const desktops = {
 	...base,
 	name: 'desktops',
 	modules: { desktops: true },
 	inventory: { ...base.inventory, desktopsVersion: 1 },
 	desktops: deskube,
+};
+// A project persona: pools and claims where it may list them, never desktops
+// nor classes; in db-prod it may list nothing.
+const unlisted = (namespace, ...resources) =>
+	resources.map((resource) => ({ namespace, resource }));
+const desktopsviewer = {
+	...desktops,
+	name: 'desktopsviewer',
+	// Another watermark: switching from desktops reads as a move.
+	inventory: { ...base.inventory, desktopsVersion: 2 },
+	desktops: {
+		...deskube,
+		classes: [],
+		pools: deskube.pools.map((p) => ({ ...p, desktops: [] })),
+		desktops: [],
+		claims: deskube.claims.filter((c) => c.namespace !== 'db-prod'),
+		unlisted: [
+			...unlisted('', 'vdiclasses'),
+			...unlisted('batch-prod', 'vdiinstances'),
+			...unlisted('db-prod', 'vdiclaims', 'vdiinstances', 'vdipools'),
+			...unlisted('web-prod', 'vdiinstances'),
+		],
+	},
 };
 // A caller who may list no DeskuBe kind: an answer that never syncs and no
 // watermark, as on a cluster without DeskuBe.
@@ -2476,6 +2512,7 @@ const replicatedquota = {
 
 export const scenarios = {
 	desktops,
+	desktopsviewer,
 	desktopsunread,
 	desktopsnovms,
 	classquota,

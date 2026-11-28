@@ -340,7 +340,7 @@ func TestACallerReadingNoKindIsToldNothing(t *testing.T) {
 	if got := s.Overview(everything("team-a"), nil); got.Synced || !got.Stale || len(got.Desktops) != 1 {
 		t.Fatalf("a reader reads %+v", got)
 	}
-	got, err := json.Marshal(s.Overview(map[Kind]bool{}, []Kind{{"team-a", GVRPool.Resource}}))
+	got, err := json.Marshal(s.Overview(map[Kind]bool{}, nil))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -514,5 +514,51 @@ func TestAStoppedModuleShowsNothing(t *testing.T) {
 	got := s.Overview(everything("team-a"), []Kind{{"team-a", GVRPool.Resource}})
 	if got.Synced || len(got.Desktops) != 0 || len(got.Unlisted) != 0 {
 		t.Fatalf("a stopped module reads %+v", got)
+	}
+}
+
+// A caller who lists elsewhere is told what it may not list here, though it
+// reads nothing here.
+func TestACallerListingElsewhereIsToldItsRightsHere(t *testing.T) {
+	s, _ := newSnapshot(t)
+	mustAdd(t, s.instances, desktop("team-a", "alice", nil))
+	got := s.Overview(map[Kind]bool{}, []Kind{{"team-a", GVRPool.Resource}, {"team-a", GVRInstance.Resource}})
+	if len(got.Unlisted) != 2 || len(got.Desktops) != 0 {
+		t.Fatalf("overview = %+v", got)
+	}
+}
+
+func TestAPoolsSpecIsRead(t *testing.T) {
+	s, _ := newSnapshot(t)
+	mustAdd(t, s.pools, obj("team-a", "lab", map[string]any{"spec": map[string]any{
+		"className": "workstation", "seats": int64(4), "assignment": "Shared",
+		"subjects": []any{
+			map[string]any{"kind": "Group", "name": "students", "apiGroup": "rbac.authorization.k8s.io"},
+			map[string]any{"kind": "User", "name": "alice"},
+		},
+		"idleTimeout":  "30m",
+		"releaseAfter": "0s",
+	}}))
+	mustAdd(t, s.pools, pool("team-a", "plain", nil))
+	got := s.Overview(everything("team-a"), nil).Pools
+	if len(got) != 2 {
+		t.Fatalf("pools = %+v", got)
+	}
+	lab, plain := got[0], got[1]
+	body, err := json.Marshal(struct {
+		Assignment   string `json:"assignment"`
+		Subjects     any    `json:"subjects"`
+		IdleTimeout  string `json:"idleTimeout"`
+		ReleaseAfter string `json:"releaseAfter"`
+	}{lab.Assignment, lab.Subjects, lab.IdleTimeout, lab.ReleaseAfter})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := `{"assignment":"Shared","subjects":[{"kind":"Group","name":"students"},{"kind":"User","name":"alice"}],"idleTimeout":"30m0s","releaseAfter":"0s"}`
+	if string(body) != want {
+		t.Fatalf("lab = %s, want %s", body, want)
+	}
+	if plain.Subjects != nil || plain.IdleTimeout != "" || plain.ReleaseAfter != "" || plain.Assignment != "Personal" {
+		t.Fatalf("an unset spec reads %+v", plain)
 	}
 }

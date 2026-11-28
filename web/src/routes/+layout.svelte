@@ -233,6 +233,18 @@
 		void clusterGate.platform().ok; // platform stagers also carry a platform draft
 		if (session.user && streamed) untrack(() => drafts.refresh());
 	});
+
+	// The desktops pull: one per watermark move while the Desktops tree shows,
+	// its pages and a VM page it stays beside alike. From the first frame on:
+	// before it the watermark reads 0, and its landing would pull twice. A
+	// bool, so the module read's minute poll pulls nothing.
+	const desktopsLive = $derived(
+		!!session.user && streamed && treeSection === 'desktops' && desktopsOn(),
+	);
+	$effect(() => {
+		void inventory.desktopsVersion;
+		if (desktopsLive) untrack(() => desktops.pull());
+	});
 </script>
 
 <svelte:head>

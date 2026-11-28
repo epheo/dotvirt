@@ -70,7 +70,7 @@ test('desktops surfaces are accessible', async ({ page }) => {
 	await checkA11y(page, 'pool without its class');
 
 	await page.goto('/desktops/team-batch/batch-prod/pool/render');
-	await expect(page.getByText('Desktops here are not shown to you.')).toBeVisible();
+	await expect(page.getByText(/^Desktops here are not shown to you/)).toBeVisible();
 	await checkA11y(page, 'pool with desktops not shown');
 });
 

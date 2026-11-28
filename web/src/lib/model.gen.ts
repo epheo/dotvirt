@@ -391,18 +391,20 @@ export interface Desktops {
   desktops: Desktop[];
   claims: DesktopClaim[];
   /**
-   * Unlisted are the kinds the caller may not list in each namespace where
-   * it may list another: its own rights, never what exists. A pool's count
-   * beside no desktop then reads as desktops it may not see, not none.
+   * Unlisted are, for a caller who may list some kind, the kinds it may
+   * not list in each namespace of the request, and the classes when it may
+   * not list them cluster-wide: its own rights, never what exists. A pool's
+   * count beside no desktop then reads as desktops it may not see, not
+   * none.
    */
   unlisted: DesktopKind[];
 }
 /**
- * DesktopKind is one namespaced kind in one namespace.
+ * DesktopKind is one kind in one namespace, "" for the classes.
  */
 export interface DesktopKind {
   namespace: string;
-  resource: string; // vdipools | vdiinstances | vdiclaims
+  resource: string; // vdiclasses | vdipools | vdiinstances | vdiclaims
 }
 /**
  * DesktopClass is a kind of desktop an admin offers.
@@ -425,12 +427,29 @@ export interface DesktopPool {
   keepWarm: number /* int32 */;
   assignment: string; // Personal | Shared
   closed?: boolean;
+  /**
+   * Subjects may claim a desktop of the pool.
+   */
+  subjects?: DesktopSubject[];
+  /**
+   * IdleTimeout and ReleaseAfter are Go durations ("30m0s"), empty when
+   * unset. An unset IdleTimeout leaves the class's; "0s" is a setting.
+   */
+  idleTimeout?: string;
+  releaseAfter?: string;
   counts: DesktopPoolCounts;
   conditions?: DesktopCondition[];
   /**
    * Desktops are the ones the pool made, where the caller may list them.
    */
   desktops: Desktop[];
+}
+/**
+ * DesktopSubject is one User or Group a pool lets claim.
+ */
+export interface DesktopSubject {
+  kind: string; // User | Group
+  name: string;
 }
 /**
  * DesktopPoolCounts is how the pool's seats stand. Held, Warm and Free add
