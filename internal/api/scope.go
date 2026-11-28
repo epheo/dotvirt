@@ -824,13 +824,18 @@ func (s *Server) containerScope(w http.ResponseWriter, r *http.Request) (scope, 
 		}
 		return sc, []string{ns}, true
 	}
+	return sc, repoNamespaces(projects), true
+}
+
+// repoNamespaces is the namespaces of the repo-backed projects among projects.
+func repoNamespaces(projects []project.ProjectInfo) []string {
 	var nss []string
 	for _, p := range projects {
 		if p.Repo != "" {
 			nss = append(nss, p.Namespaces...)
 		}
 	}
-	return sc, nss, true
+	return nss
 }
 
 // projectPicker selects the target project from the caller's visible projects,

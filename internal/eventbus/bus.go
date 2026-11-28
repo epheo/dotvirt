@@ -75,6 +75,9 @@ const (
 	// RoutesChanged: what the Gateway and route pulls read moved, or one of
 	// their watches' health flipped.
 	RoutesChanged
+	// DesktopsChanged: what the desktops pull reads moved, or one of its
+	// watches' health flipped.
+	DesktopsChanged
 	// TTLBackstop: TTL-cached authorization no RBAC watch observes (see
 	// api.RunTTLBackstop) may have expired - published on a fixed cadence while a
 	// stream is open so frames re-evaluate it. Keep it out of every cache's

@@ -178,6 +178,7 @@ func (s *Server) InventoryForIdentity(ctx context.Context, id auth.Identity) (mo
 	inv.TasksVersion = s.tasksWatermark(s.taskScope(id, projects, v, platformAuthor, grants.nodes))
 	inv.ReplicationVersion = s.replicationWatermark(ctx, id, userCluster, v)
 	inv.RoutesVersion = s.routesWatermark(ctx, id, userCluster, visible)
+	inv.DesktopsVersion = s.desktopsWatermark(v, repoNamespaces(projects))
 	return inv, nil
 }
 

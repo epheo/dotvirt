@@ -362,6 +362,153 @@ export interface AdminObject {
 }
 
 //////////
+// source: desktop.go
+
+/**
+ * Desktops is GET /api/desktops: the desktops' live state in the caller's
+ * project namespaces, each kind where the caller may list it. None of it is
+ * read from git.
+ */
+export interface Desktops {
+  /**
+   * Synced is false until every served kind's first list landed, while an
+   * empty list means unknown rather than none.
+   */
+  synced: boolean;
+  /**
+   * Stale: a watch is down and this is its last known state.
+   */
+  stale?: boolean;
+  /**
+   * Classes are shown to a caller who may list them cluster-wide.
+   */
+  classes: DesktopClass[];
+  pools: DesktopPool[];
+  /**
+   * Desktops are the ones no pool made, and those whose pool the caller is
+   * not shown.
+   */
+  desktops: Desktop[];
+  claims: DesktopClaim[];
+  /**
+   * Hidden are the namespaced kinds held where the caller may not list
+   * them: a pool's count beside no desktop means desktops it may not see,
+   * not none.
+   */
+  hidden: DesktopKind[];
+}
+/**
+ * DesktopKind is one namespaced kind in one namespace.
+ */
+export interface DesktopKind {
+  namespace: string;
+  resource: string; // vdipools | vdiinstances | vdiclaims
+}
+/**
+ * DesktopClass is a kind of desktop an admin offers.
+ */
+export interface DesktopClass {
+  name: string;
+  image: string;
+}
+/**
+ * DesktopPool is a set of desktops of one class that people claim.
+ */
+export interface DesktopPool {
+  namespace: string;
+  name: string;
+  class: string;
+  seats: number /* int32 */;
+  /**
+   * KeepWarm is how many running desktops the pool keeps ahead of claims.
+   */
+  keepWarm: number /* int32 */;
+  assignment: string; // Personal | Shared
+  closed?: boolean;
+  counts: DesktopPoolCounts;
+  conditions?: DesktopCondition[];
+  /**
+   * Desktops are the ones the pool made, where the caller may list them.
+   */
+  desktops: Desktop[];
+}
+/**
+ * DesktopPoolCounts is how the pool's seats stand. Held, Warm and Free add
+ * up to the seats, less the desktops being deleted, unless the seats were
+ * lowered below what is held.
+ */
+export interface DesktopPoolCounts {
+  held: number /* int32 */;
+  inSession: number /* int32 */;
+  ready: number /* int32 */;
+  stopped: number /* int32 */;
+  warm: number /* int32 */;
+  free: number /* int32 */;
+  waiting: number /* int32 */;
+}
+/**
+ * Desktop is one streamed desktop.
+ */
+export interface Desktop {
+  namespace: string;
+  name: string;
+  class?: string;
+  /**
+   * Image is the desktop's own, empty when its class's applies.
+   */
+  image?: string;
+  owner?: string;
+  running: boolean;
+  phase?: string; // Provisioning | Starting | Ready | Stopping | Stopped | Failed
+  address?: string;
+  session?: string; // free | busy
+  /**
+   * Pool is the pool that made it, empty for a desktop made one by one.
+   */
+  pool?: string;
+  /**
+   * Claim is the Bound claim holding it, where the caller may list claims.
+   */
+  claim?: string;
+  conditions?: DesktopCondition[];
+}
+/**
+ * DesktopClaim is a person's claim on a desktop: through a pool, or on one
+ * desktop by name.
+ */
+export interface DesktopClaim {
+  namespace: string;
+  name: string;
+  user: string;
+  /**
+   * Pool is empty on a claim that names its desktop.
+   */
+  pool?: string;
+  /**
+   * Desktop is the one the claim holds, or names.
+   */
+  desktop?: string;
+  running: boolean;
+  phase?: string; // Waiting | Bound | Refused
+  position?: number /* int32 */;
+  message?: string;
+  /**
+   * LastUsed is when the claim got its desktop, or was last started or
+   * stopped: where a pool's release counts from.
+   */
+  lastUsed?: string;
+}
+/**
+ * DesktopCondition is one status condition, as its controller wrote it.
+ */
+export interface DesktopCondition {
+  type: string;
+  status: string;
+  reason?: string;
+  message?: string;
+}
+
+//////////
 // source: draft.go
 
 /**
@@ -2494,6 +2641,11 @@ export interface Inventory {
    * /api/networking/routes. Absent while no GatewayClass exists.
    */
   routesVersion?: number /* uint64 */;
+  /**
+   * DesktopsVersion is the same contract for GET /api/desktops. Absent
+   * while the cluster serves no DeskuBe.
+   */
+  desktopsVersion?: number /* uint64 */;
   /**
    * Adoptable proposes existing tenants: namespaces with VMs but no project
    * label. Present only for callers with namespace-create authority (the

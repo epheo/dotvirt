@@ -191,6 +191,27 @@ func (s *Server) routesWatermark(ctx context.Context, id auth.Identity, c *clust
 	return sum & wireMask
 }
 
+// desktopsWatermark covers what the caller's desktops pull reads: each kind
+// in the project namespaces where it may list it, the classes where it may
+// list them cluster-wide, whether the pull is synced or stale, and which
+// kinds are hidden. A hidden kind counts by its presence alone: its moves are
+// not the caller's to see.
+func (s *Server) desktopsWatermark(v callerView, namespaces []string) uint64 {
+	if s.desktops == nil || !s.desktops.Started() {
+		return 0
+	}
+	var t term
+	sum := t.start("desktops").num(s.desktops.Base()).sum()
+	readable, hidden := s.desktopsReadable(v, namespaces)
+	for h := range readable {
+		sum += t.start("desktops").str(h.Namespace, h.Resource).num(s.desktops.Gen(h)).sum()
+	}
+	for _, h := range hidden {
+		sum += t.start("desktops-hidden").str(h.Namespace, h.Resource).sum()
+	}
+	return sum & wireMask
+}
+
 // tasksWatermark covers the entries the caller's tasks pull returns (the
 // same taskScope), each with the project it shows under.
 func (s *Server) tasksWatermark(sc taskScope) uint64 {

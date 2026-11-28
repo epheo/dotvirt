@@ -11,6 +11,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime/schema"
 
 	"github.com/epheo/dotvirt/internal/cluster"
+	"github.com/epheo/dotvirt/internal/desktops"
 	"github.com/epheo/dotvirt/internal/drs"
 	"github.com/epheo/dotvirt/internal/model"
 	"github.com/epheo/dotvirt/internal/replication"
@@ -32,7 +33,7 @@ var served = []struct {
 	field func(*model.Modules) *bool
 }{
 	{cluster.GVR(model.KindVM), func(m *model.Modules) *bool { return &m.VMs }},
-	{schema.GroupVersionResource{Group: "vdi.desku.be", Version: "v1alpha1", Resource: "vdiinstances"}, func(m *model.Modules) *bool { return &m.Desktops }},
+	{desktops.GVRInstance, func(m *model.Modules) *bool { return &m.Desktops }},
 	{cluster.GVR(model.KindUDN), func(m *model.Modules) *bool { return &m.Networks }},
 	{drs.GVR, func(m *model.Modules) *bool { return &m.Rebalancing }},
 	{replication.GVRVolume, func(m *model.Modules) *bool { return &m.ReplicatedStorage }},

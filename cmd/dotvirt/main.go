@@ -25,6 +25,7 @@ import (
 	"github.com/epheo/dotvirt/internal/cluster"
 	"github.com/epheo/dotvirt/internal/clusterstate"
 	"github.com/epheo/dotvirt/internal/config"
+	"github.com/epheo/dotvirt/internal/desktops"
 	"github.com/epheo/dotvirt/internal/draft"
 	"github.com/epheo/dotvirt/internal/drs"
 	"github.com/epheo/dotvirt/internal/eventbus"
@@ -148,6 +149,13 @@ func run() error {
 		return ok && m.ReplicatedStorage
 	})
 	replicationSnapshot.Run(ctx)
+
+	// DeskuBe's read plane: nothing runs until the module is on.
+	desktopsSnapshot := desktops.New(saCluster, bus, func() bool {
+		m, ok := moduleSnapshot.Get()
+		return ok && m.Desktops
+	})
+	desktopsSnapshot.Run(ctx)
 
 	// Gateways' read plane: nothing runs until a GatewayClass exists.
 	routesSnapshot := routes.New(saCluster, bus, func() bool {
@@ -304,6 +312,7 @@ func run() error {
 		IndexBindings:  true,
 		Replication:    replicationSnapshot,
 		Gateways:       routesSnapshot,
+		Desktops:       desktopsSnapshot,
 		Bus:            bus,
 		Resolver:       resolver,
 		Repos:          repos,
@@ -348,7 +357,8 @@ func run() error {
 	inventoryKinds := []eventbus.Kind{
 		eventbus.LiveChanged, eventbus.NamespaceChanged,
 		eventbus.RBACChanged, eventbus.DriftChanged, eventbus.GitChanged, eventbus.ProposalsChanged,
-		eventbus.NetworkChanged, eventbus.TaskChanged, eventbus.ReplicationChanged, eventbus.RoutesChanged, eventbus.TTLBackstop,
+		eventbus.NetworkChanged, eventbus.TaskChanged, eventbus.ReplicationChanged, eventbus.RoutesChanged, eventbus.DesktopsChanged,
+		eventbus.TTLBackstop,
 	}
 	// SessionEnded only wakes the hub to close ended sessions' streams; no frame
 	// depends on it, so it stays out of the levels.
