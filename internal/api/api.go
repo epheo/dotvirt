@@ -32,6 +32,7 @@ import (
 	"github.com/epheo/dotvirt/internal/cluster"
 	"github.com/epheo/dotvirt/internal/clusterstate"
 	"github.com/epheo/dotvirt/internal/config"
+	"github.com/epheo/dotvirt/internal/desktops"
 	"github.com/epheo/dotvirt/internal/draft"
 	"github.com/epheo/dotvirt/internal/drs"
 	"github.com/epheo/dotvirt/internal/eventbus"
@@ -255,6 +256,7 @@ type Server struct {
 	indexBindings bool
 	replication   *replication.Snapshot // r-drbd's SA-held read model; nil leaves its routes unmounted
 	gateways      *routes.Snapshot      // Gateways and routes, SA-held; nil leaves their routes unmounted
+	desktops      *desktops.Snapshot    // DeskuBe's SA-held read model; nil leaves its route unmounted
 	bus           *eventbus.Bus         // change-version source for the version-stamped auth caches
 	resolver      *project.Resolver
 	repos         *git.RepoSet
@@ -316,6 +318,7 @@ type Deps struct {
 	IndexBindings  bool                  // ask only the namespaces a RoleBinding names the caller in (Server.boundOnly)
 	Replication    *replication.Snapshot // r-drbd's SA-held read model; nil leaves its routes unmounted
 	Gateways       *routes.Snapshot      // Gateways and routes, SA-held; nil leaves their routes unmounted
+	Desktops       *desktops.Snapshot    // DeskuBe's SA-held read model; nil leaves its route unmounted
 	Bus            *eventbus.Bus         // change-version source for version-stamped caches
 	Resolver       *project.Resolver
 	Repos          *git.RepoSet
@@ -348,6 +351,7 @@ func NewServer(d Deps) *Server {
 		indexBindings: d.IndexBindings,
 		replication:   d.Replication,
 		gateways:      d.Gateways,
+		desktops:      d.Desktops,
 		bus:           d.Bus,
 		resolver:      d.Resolver,
 		repos:         d.Repos,

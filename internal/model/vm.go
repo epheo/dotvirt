@@ -336,6 +336,9 @@ type Inventory struct {
 	// RoutesVersion is the same contract for GET /api/networking/gateways and
 	// /api/networking/routes. Absent while no GatewayClass exists.
 	RoutesVersion uint64 `json:"routesVersion,omitempty"`
+	// DesktopsVersion is the same contract for GET /api/desktops. Absent
+	// while the cluster serves no DeskuBe.
+	DesktopsVersion uint64 `json:"desktopsVersion,omitempty"`
 	// Adoptable proposes existing tenants: namespaces with VMs but no project
 	// label. Present only for callers with namespace-create authority (the
 	// adoption gate) - the candidate scan is cluster-wide, so the SSAR is what
