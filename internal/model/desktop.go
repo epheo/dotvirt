@@ -7,8 +7,9 @@ type Desktops struct {
 	// Synced is false until every served kind's first list landed, while an
 	// empty list means unknown rather than none.
 	Synced bool `json:"synced"`
-	// Stale: a watch is down and this is its last known state.
-	Stale bool `json:"stale,omitempty"`
+	// Stale are the kinds read, by resource, whose watch is down: their rows
+	// are the last known state. An act waits on the kinds it reads alone.
+	Stale []string `json:"stale,omitempty"`
 	// Classes are shown to a caller who may list them cluster-wide.
 	Classes []DesktopClass `json:"classes"`
 	Pools   []DesktopPool  `json:"pools"`
@@ -81,7 +82,10 @@ type DesktopPoolCounts struct {
 type Desktop struct {
 	Namespace string `json:"namespace"`
 	Name      string `json:"name"`
-	Class     string `json:"class,omitempty"`
+	// UID tells this desktop from a later one under its name: a restart
+	// names it.
+	UID   string `json:"uid"`
+	Class string `json:"class,omitempty"`
 	// Image is the desktop's own, empty when its class's applies.
 	Image   string `json:"image,omitempty"`
 	Owner   string `json:"owner,omitempty"`
@@ -89,6 +93,9 @@ type Desktop struct {
 	Phase   string `json:"phase,omitempty"` // Provisioning | Starting | Ready | Stopping | Stopped | Failed
 	Address string `json:"address,omitempty"`
 	Session string `json:"session,omitempty"` // free | busy
+	// Restarting: a restart was asked for that DeskuBe has not rolled out
+	// yet, its status.restart not the request's value.
+	Restarting bool `json:"restarting,omitempty"`
 	// Pool is the pool that made it, empty for a desktop made one by one.
 	Pool string `json:"pool,omitempty"`
 	// Claim is the Bound claim holding it, where the caller may list claims.

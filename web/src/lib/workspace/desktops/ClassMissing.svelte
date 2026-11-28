@@ -17,7 +17,7 @@
 >
 	<p class="font-medium">Class {name} does not exist, so {outcome}.</p>
 	<p>
-		Point it at a class that exists, in <RepoLink {project} />, or ask a cluster admin to add {name}.
+		Point it at a class that exists, in <RepoLink {project} />, or ask a platform admin to add {name}.
 	</p>
 	{#if classes.length}
 		<p>Classes on the cluster: {classes.map((c) => c.name).join(', ')}.</p>

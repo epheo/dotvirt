@@ -7,6 +7,7 @@
 		count,
 		desktopState,
 		poolState,
+		stateLine,
 		type DesktopsNamespace,
 		type DesktopsProject,
 	} from '#lib/desktops.js';
@@ -212,7 +213,7 @@
 						>
 							{#snippet icon()}
 								{@const st = desktopState(d)}
-								<StatusDot tone={st.tone} title={st.label} />
+								<StatusDot tone={st.tone} title={stateLine(st)} />
 							{/snippet}
 							<span class="truncate text-side-ink">{d.name}</span>
 						</TreeRow>
@@ -231,7 +232,11 @@
 	{#if query.trim() && data && shown.length === 0}
 		<div class="px-2 py-3 text-xs text-side-dim">No project, pool or desktop matches.</div>
 	{:else if data && groups.length === 0 && counted && may?.anywhere('vdipools')}
-		<div class="px-2 py-4 text-center text-xs text-side-dim">No desktop in your projects yet.</div>
+		<div class="px-2 py-4 text-center text-xs text-side-dim">
+			{may.everywhere('vdiinstances')
+				? 'No desktop in your projects yet.'
+				: 'No desktop shown to you yet.'}
+		</div>
 	{:else if nothingReadable()}
 		<div class="px-2 py-4 text-center text-xs text-side-dim">No desktop is shown to you.</div>
 	{/if}

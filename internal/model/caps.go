@@ -6,28 +6,31 @@ package model
 // weighed as the gate weighs them, so the UI offers only what the server
 // allows. A review that failed reads as false:
 // unknown never offers an action. Without ?namespace= it answers Cluster; with
-// it, Namespace; with ?desktops= and ?pool=, Desktops.
+// it, Namespace; with ?desktops=, ?desktop= and ?claim=, Desktops.
 type Capabilities struct {
 	Cluster   *ClusterCaps   `json:"cluster,omitempty"`
 	Namespace *NamespaceCaps `json:"namespace,omitempty"`
 	Desktops  *DesktopCaps   `json:"desktops,omitempty"`
 }
 
-// DesktopCaps are the acts on the claims holding Pool's desktops in one
-// namespace. Each needs the desktops and the claims listed there: the route
-// acts on nothing else.
+// DesktopCaps are the acts on one desktop, and on a pool's desktop those on
+// Claim, the claim holding it. Each needs the desktops listed in Namespace,
+// and those on the claim the claims too: the routes act on nothing else.
 type DesktopCaps struct {
 	Namespace string `json:"namespace"`
-	Pool      string `json:"pool"`
-	// Power starts and stops another's claim of the pool (patch on claims),
-	// Release deletes it (delete on claims), each with assign or delete on
-	// the pool. PowerOwn and ReleaseOwn are the caller's own claim: use on
-	// the pool also opens a start or stop, and a release asks nothing of the
-	// pool.
-	Power      bool `json:"power"`
-	PowerOwn   bool `json:"powerOwn"`
-	Release    bool `json:"release"`
-	ReleaseOwn bool `json:"releaseOwn"`
+	Desktop   string `json:"desktop"`
+	// Claim is the claim weighed, empty when none was: none asked, or the
+	// claims not listed to the caller.
+	Claim string `json:"claim,omitempty"`
+	// Restart is get and patch on the desktop, by its name.
+	Restart bool `json:"restart"`
+	// Power starts and stops the desktop on Claim (patch on it), Release
+	// deletes Claim (delete on it), each beside what DeskuBe's policy asks of
+	// the pool: assign or delete on another's claim; on the caller's own, use
+	// also opens a start or stop, and a release asks nothing of the pool.
+	// Both false without a Claim.
+	Power   bool `json:"power"`
+	Release bool `json:"release"`
 }
 
 // ObjectCaps are creating, updating and deleting one kind through git: the

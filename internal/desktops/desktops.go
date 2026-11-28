@@ -4,9 +4,9 @@
 //
 // Two reads leave here. Overview: each namespaced kind where the caller may
 // list it, the classes for a caller who may list them cluster-wide, and the
-// kinds it may not list beside those, from its own rights alone. Desktop: one
-// desktop and the claim holding it, which an admin act addresses, trusted only
-// while Fresh.
+// kinds it may not list beside those, from its own rights alone. Desktop and
+// Instance: one desktop and the claim holding it, or the desktop alone, which
+// an act addresses, trusted only while Fresh.
 package desktops
 
 import (
@@ -39,6 +39,16 @@ const version = "v1alpha1"
 // name is free once its claim is deleted: the UID is what tells a new claim
 // under that name from the old one.
 const claimUIDLabel = Group + "/claim-uid"
+
+// RestartAnnotation asks DeskuBe to restart a desktop, a new value per
+// request. DeskuBe never removes it, and writes the last value it rolled out
+// to status.restart.
+const RestartAnnotation = Group + "/restart"
+
+// maxRestartBytes is the longest request DeskuBe rolls out: it copies the
+// value into the Deployment, its ReplicaSets and the pod, and only logs a
+// longer one.
+const maxRestartBytes = 64
 
 // The kinds the snapshot watches. Instance is the one whose presence turns the
 // module on.
@@ -234,9 +244,9 @@ func (s *Snapshot) reads(readable map[Kind]bool) (out [4]bool) {
 }
 
 // status is what the kinds in read say, and no other: whether they are
-// synced, whether one is stale, and their level. A caller is never told of a
-// kind it may not list. Runs under mu.
-func (s *Snapshot) status(read [4]bool) (synced, stale bool, level uint64) {
+// synced, which are stale, and their level. A caller is never told of a kind
+// it may not list. Runs under mu.
+func (s *Snapshot) status(read [4]bool) (synced bool, stale []string, level uint64) {
 	synced = s.started.Load()
 	for i, k := range s.kinds() {
 		if !read[i] {
@@ -246,7 +256,7 @@ func (s *Snapshot) status(read [4]bool) (synced, stale bool, level uint64) {
 			synced = false
 		}
 		if !s.healthy[i].Load() {
-			stale = true
+			stale = append(stale, k.gvr.Resource)
 		}
 		level += s.flips[i]
 	}
@@ -362,33 +372,45 @@ func (s *Snapshot) Overview(readable map[Kind]bool, unlisted []Kind) model.Deskt
 // it does not hold is no claim of the desktop's: a stranger's is refused.
 func holds(c model.DesktopClaim) bool { return c.Desktop != "" && c.Phase == "Bound" }
 
-// Fresh reports whether the desktops and the claims are each watched, synced
-// and healthy: what an act on a claim reads of them is the cluster's latest.
-func (s *Snapshot) Fresh() bool {
+// Fresh reports whether each of kinds is watched, synced and healthy: what an
+// act reads of them is the cluster's latest.
+func (s *Snapshot) Fresh(kinds ...schema.GroupVersionResource) bool {
 	if !s.started.Load() {
 		return false
 	}
 	for i, k := range s.kinds() {
-		if (k.gvr == GVRInstance || k.gvr == GVRClaim) && (!s.healthy[i].Load() || !k.table.Synced()) {
+		if slices.Contains(kinds, k.gvr) && (!s.healthy[i].Load() || !k.table.Synced()) {
 			return false
 		}
 	}
 	return true
 }
 
-// HoldsDesktopOf reports whether a desktop pool made is held in namespace.
-func (s *Snapshot) HoldsDesktopOf(namespace, pool string) bool {
-	if !s.started.Load() || pool == "" {
-		return false
+// Instance is the desktop namespace/name alone, never paired with a claim:
+// for an act a caller who may not list the claims there makes.
+func (s *Snapshot) Instance(namespace, name string) (model.Desktop, bool) {
+	if !s.started.Load() {
+		return model.Desktop{}, false
 	}
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	for _, d := range s.instances.Rows {
-		if d.Namespace == namespace && d.Pool == pool {
-			return true
-		}
-	}
-	return false
+	d, ok := s.instances.Rows[namespace+"/"+name]
+	return d, ok
+}
+
+// HasPod reports whether a desktop's phase shows its pod: Ready, or Starting
+// on a node. Any other has no session a restart would end: a Stopping or
+// Stopped one stays stopped, a Provisioning one has no pod yet, a Failed one
+// may have none.
+func HasPod(phase string) bool { return phase == "Ready" || phase == "Starting" }
+
+// ClassMissing reports whether DeskuBe holds d back for want of its class. It
+// rolls out no restart then: one asked would wait for the class, and end
+// whatever session runs when it comes.
+func ClassMissing(d model.Desktop) bool {
+	return slices.ContainsFunc(d.Conditions, func(c model.DesktopCondition) bool {
+		return c.Type == "Ready" && c.Status == "False" && c.Reason == "ClassNotFound"
+	})
 }
 
 // Desktop is the desktop namespace/name and the claim holding it, as Overview
@@ -500,15 +522,18 @@ type instanceDoc struct {
 		Phase        string                   `json:"phase"`
 		Address      string                   `json:"address"`
 		SessionState string                   `json:"sessionState"`
+		Restart      string                   `json:"restart"`
 		Conditions   []model.DesktopCondition `json:"conditions"`
 	} `json:"status"`
 }
 
 func decodeInstance(u *unstructured.Unstructured) (model.Desktop, bool) {
 	doc := decode[instanceDoc](u)
+	asked := u.GetAnnotations()[RestartAnnotation]
 	return model.Desktop{
 		Namespace:  u.GetNamespace(),
 		Name:       u.GetName(),
+		UID:        string(u.GetUID()),
 		Class:      doc.Spec.ClassName,
 		Image:      doc.Spec.Image,
 		Owner:      doc.Spec.Owner,
@@ -516,6 +541,7 @@ func decodeInstance(u *unstructured.Unstructured) (model.Desktop, bool) {
 		Phase:      doc.Status.Phase,
 		Address:    doc.Status.Address,
 		Session:    doc.Status.SessionState,
+		Restarting: asked != "" && asked != doc.Status.Restart && len(asked) <= maxRestartBytes,
 		Pool:       madeBy(u),
 		ClaimUID:   u.GetLabels()[claimUIDLabel],
 		Conditions: doc.Status.Conditions,

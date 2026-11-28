@@ -47,6 +47,9 @@ export interface Rights {
 	// Whether some namespace among namespaces (all those covered by default)
 	// lists resource.
 	anywhere(resource: string, namespaces?: Iterable<string>): boolean;
+	// Whether every namespace covered lists resource: only then does none
+	// shown mean none in the caller's projects.
+	everywhere(resource: string): boolean;
 	classes: boolean;
 }
 
@@ -56,6 +59,7 @@ export function rights(d: Desktops, covered: ReadonlySet<string>): Rights {
 	return {
 		lists,
 		anywhere: (r, nss = covered) => [...nss].some((ns) => lists(ns, r)),
+		everywhere: (r) => covered.size > 0 && [...covered].every((ns) => lists(ns, r)),
 		classes: !not.has(key('', 'vdiclasses')),
 	};
 }
@@ -99,6 +103,8 @@ export interface State {
 	missingClass?: string;
 	// What DeskuBe said of one not ready for another reason.
 	message?: string;
+	// Said beside the label: a restart asked for and not rolled out yet.
+	note?: string;
 }
 
 export const readyOf = (conditions?: DesktopCondition[]) =>
@@ -121,24 +127,50 @@ export function poolState(p: DesktopPool): State {
 
 // desktopState is the desktop's phase, unless its class is missing: then a
 // stopped one does not start, and a running one keeps its pod until stopped.
+// A restart asked for is said beside it, never in its place: a DeskuBe that
+// rolls none out, or a pass that ends before the pod, would hide the phase
+// for good.
 export function desktopState(d: Desktop): State {
+	const note = d.restarting ? 'restart requested' : undefined;
 	const ready = readyOf(d.conditions);
 	if (ready?.status === 'False' && ready.reason === 'ClassNotFound')
-		return { tone: 'danger', label: 'Class missing', missingClass: d.class };
+		return { tone: 'danger', label: 'Class missing', missingClass: d.class, note };
 	const failing =
 		d.phase === 'Failed' ? d.conditions?.find((c) => c.status === 'False') : undefined;
 	return {
 		tone: desktopTone(d.phase),
 		label: d.phase || 'Not read yet',
 		message: failing && why(failing),
+		note,
 	};
 }
+
+// The state in one line, its note beside its label.
+export const stateLine = (s: Pick<State, 'label' | 'note'>): string =>
+	s.note ? `${s.label} (${s.note})` : s.label;
 
 function desktopTone(phase?: string): Tone {
 	if (phase === 'Ready') return 'ok';
 	if (phase === 'Failed') return 'danger';
 	if (!phase || phase === 'Stopped') return 'neutral';
 	return 'info'; // Provisioning, Starting, Stopping
+}
+
+// restartHeld is why the desktop is not restarted, '' when it may be. Without
+// its class DeskuBe rolls out no restart: one asked would wait for the class
+// and end whatever session runs when it comes. Only a phase that shows its pod
+// has a session a restart ends, and a restart never starts a stopped desktop.
+// A restart already asked for holds nothing: DeskuBe rolls out the latest
+// request, once.
+export function restartHeld(d: Pick<Desktop, 'phase' | 'class' | 'conditions'>): string {
+	const ready = readyOf(d.conditions);
+	if (ready?.status === 'False' && ready.reason === 'ClassNotFound')
+		return `Class ${d.class} does not exist: DeskuBe rolls out no restart until it does.`;
+	if (d.phase === 'Ready' || d.phase === 'Starting') return '';
+	const now = d.phase
+		? `this one is ${d.phase.toLowerCase()}`
+		: 'DeskuBe has not reported this one yet';
+	return `Only a starting or ready desktop restarts: ${now}.`;
 }
 
 export const sessionLabel = (s?: string): string =>

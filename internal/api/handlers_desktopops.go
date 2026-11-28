@@ -1,6 +1,7 @@
 package api
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -8,16 +9,20 @@ import (
 	"strings"
 
 	"github.com/epheo/dotvirt/internal/cluster"
+	"github.com/epheo/dotvirt/internal/desktops"
 	"github.com/epheo/dotvirt/internal/model"
 	"github.com/epheo/dotvirt/internal/tasks"
 )
 
-// The admin acts on a pool's desktop, each under the caller's token, on the
-// claim holding it: never on the desktop's own spec.running, which DeskuBe's
-// policy refuses on a pool's desktop. A desktop made one by one starts and
-// stops on its owner's claim; it is not acted on here yet. Each act is asked
-// here first, so a refusal names what the caller lacks; the apiserver and
-// DeskuBe's admission then decide, and their answer is the caller's.
+// The admin acts on a desktop, each under the caller's token. A pool's
+// desktop starts, stops and is released on the claim holding it: never on the
+// desktop's own spec.running, which DeskuBe's policy refuses on a pool's
+// desktop. A desktop made one by one starts and stops on its owner's claim;
+// it is not powered here yet. Any desktop restarts through DeskuBe's restart
+// request: its pod and Deployment are DeskuBe's, never touched here. Each act
+// is asked here first, so a refusal names what the caller lacks; the
+// apiserver and DeskuBe's admission then decide, and their answer is the
+// caller's.
 
 // claimAct is one act on the claim holding a pool's desktop.
 type claimAct struct {
@@ -50,11 +55,13 @@ func (s *Server) handleDesktopRelease(w http.ResponseWriter, r *http.Request) {
 	s.handleClaimAct(w, r, releaseDesktop)
 }
 
-// desktopScope resolves the desktop the path names, and the claim holding it,
-// for a caller who may list the desktops and the claims in its namespace, in
-// a project with a repo: what GET /api/desktops would show them. Anything
-// else is a 404, so no answer says what exists beyond that.
-func (s *Server) desktopScope(w http.ResponseWriter, r *http.Request) (scope, model.Desktop, model.DesktopClaim, bool) {
+// desktopScope resolves the desktop the path names for a caller who may list
+// the desktops in its namespace, in a project with a repo: what GET
+// /api/desktops would show them. With claims, the act reads the claim holding
+// the desktop too, and the caller must list the claims there. Without, the
+// desktop is read alone, so no claim reaches the answer. Anything else is a
+// 404, so no answer says what exists beyond that.
+func (s *Server) desktopScope(w http.ResponseWriter, r *http.Request, claims bool) (scope, model.Desktop, model.DesktopClaim, bool) {
 	ns, name := r.PathValue("namespace"), r.PathValue("name")
 	sc, ok := s.resolveProject(w, r, byNamespace(ns))
 	if !ok {
@@ -67,16 +74,19 @@ func (s *Server) desktopScope(w http.ResponseWriter, r *http.Request) (scope, mo
 	}
 	var d model.Desktop
 	var holder model.DesktopClaim
-	if sc.proj.Repo != "" && v.lists(ssarDesktops, ns) {
-		d, holder, ok = s.desktops.Desktop(ns, name)
-	} else {
+	switch {
+	case sc.proj.Repo == "" || !v.lists(ssarDesktops, ns):
 		ok = false
+	case claims:
+		d, holder, ok = s.desktops.Desktop(ns, name)
+	default:
+		d, ok = s.desktops.Instance(ns, name)
 	}
 	switch {
 	case !ok:
 		fail(w, fmt.Errorf("%w: desktop %s/%s", model.ErrNotFound, ns, name))
-	case !v.lists(ssarDesktopClaims, ns):
-		fail(w, fmt.Errorf("%w: no claim you may list holds desktop %s/%s", model.ErrNotFound, ns, name))
+	case claims && !v.lists(ssarDesktopClaims, ns):
+		fail(w, fmt.Errorf("%w: desktop %s/%s: the claims there, which this act reads, are not listed to you", model.ErrNotFound, ns, name))
 		ok = false
 	}
 	return sc, d, holder, ok
@@ -96,7 +106,7 @@ type claimRef struct {
 // the write itself is held to the claim's UID, so a claim replaced since the
 // snapshot last heard is refused by the apiserver.
 func (s *Server) handleClaimAct(w http.ResponseWriter, r *http.Request, act claimAct) {
-	sc, d, holder, ok := s.desktopScope(w, r)
+	sc, d, holder, ok := s.desktopScope(w, r, true)
 	if !ok {
 		return
 	}
@@ -108,7 +118,7 @@ func (s *Server) handleClaimAct(w http.ResponseWriter, r *http.Request, act clai
 	case req.Claim == "" || req.UID == "":
 		fail(w, invalid(errors.New("name the claim holding the desktop, and its uid")))
 		return
-	case !s.desktops.Fresh():
+	case !s.desktops.Fresh(desktops.GVRInstance, desktops.GVRClaim):
 		fail(w, fmt.Errorf("%w: the console's watch on the desktops or their claims is down, so who holds %s may have changed; acts wait until it is back", model.ErrUnavailable, d.Name))
 		return
 	case d.Pool == "":
@@ -153,4 +163,66 @@ func (s *Server) gateClaimAct(w http.ResponseWriter, r *http.Request, sc scope, 
 	}
 	fail(w, fmt.Errorf("%w: you may not %s %s: that takes %s", model.ErrForbidden, strings.ToLower(act.verb), whose, needs))
 	return false
+}
+
+// desktopRef is the desktop an act names: the one the caller saw, by its UID,
+// and the person it was for then, its spec.owner ("" for a warm desktop).
+type desktopRef struct {
+	UID   string `json:"uid"`
+	Owner string `json:"owner"`
+}
+
+// handleDesktopRestart asks DeskuBe to restart the desktop the path names,
+// which must be the very desktop the caller saw, still for the person it was
+// for: a restart ends their session, and a pool gives a warm desktop to a
+// claim under the same UID. It must show a pod, as a restart never starts a
+// stopped desktop, and have its class, without which DeskuBe rolls out no
+// restart until the class comes. The snapshot is trusted for that only while
+// the desktops are fresh; the write itself reads the desktop again and is
+// held to that read.
+func (s *Server) handleDesktopRestart(w http.ResponseWriter, r *http.Request) {
+	sc, d, _, ok := s.desktopScope(w, r, false)
+	if !ok {
+		return
+	}
+	req, ok := decode[desktopRef](w, r)
+	if !ok {
+		return
+	}
+	switch {
+	case req.UID == "":
+		fail(w, invalid(errors.New("name the desktop's uid")))
+		return
+	case !s.desktops.Fresh(desktops.GVRInstance):
+		fail(w, fmt.Errorf("%w: the console's watch on the desktops is down, so %s may have changed; acts wait until it is back", model.ErrUnavailable, d.Name))
+		return
+	case d.UID != req.UID:
+		fail(w, fmt.Errorf("%w: desktop %s is not the one you saw: look at it again", model.ErrConflict, d.Name))
+		return
+	case d.Owner != req.Owner:
+		fail(w, cluster.ChangedHands(d.Name))
+		return
+	case desktops.ClassMissing(d):
+		fail(w, fmt.Errorf("%w: class %s of %s does not exist: DeskuBe rolls out no restart until it does", model.ErrConflict, d.Class, d.Name))
+		return
+	case !desktops.HasPod(d.Phase):
+		fail(w, fmt.Errorf("%w: %s has no pod to restart: it is %s", model.ErrConflict, d.Name, cmp.Or(strings.ToLower(d.Phase), "not read by DeskuBe yet")))
+		return
+	}
+	_, ok, err := s.allowed(r.Context(), sc.id, sc.cluster, desktopRestartAction(d.Namespace, d.Name))
+	switch {
+	case err != nil:
+		fail(w, s.reviewFailed(r.Context(), sc.id, err))
+		return
+	case !ok:
+		fail(w, fmt.Errorf("%w: you may not restart %s: that takes get and patch on vdiinstances %s in %s", model.ErrForbidden, d.Name, d.Name, d.Namespace))
+		return
+	}
+	err = sc.cluster.RestartDesktop(r.Context(), d.Namespace, d.Name, d.UID, d.Owner)
+	s.recordOp(tasks.Op{Verb: "Restart", Namespace: d.Namespace, Name: d.Name, Desktop: true, By: sc.id.Username, OK: err == nil})
+	if err != nil {
+		fail(w, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }

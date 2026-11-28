@@ -87,8 +87,10 @@ test("a pool's seats never overlap, and its rules read in words", async ({ page 
 	const seats = main.getByRole('region', { name: 'Seats' });
 	const part = (title: string) => seats.getByTitle(title, { exact: true });
 	// held 2 = 1 in session + 0 held without one + 1 stopped; with warm 1 and free 1, the 4 seats.
-	await expect(part('Held desktops a client streams from')).toContainText('1');
-	await expect(part('Held desktops running without a session')).toContainText('0');
+	await expect(part('Desktops a client streams from, a warm one included')).toContainText('1');
+	await expect(
+		part('Held seats without a session: running, starting, or with no desktop yet'),
+	).toContainText('0');
 	await expect(part('Held desktops their claim stopped')).toContainText('1');
 	await expect(part('Running desktops no claim holds yet')).toContainText('1');
 	await expect(part('Seats without a desktop')).toContainText('1');
@@ -97,7 +99,7 @@ test("a pool's seats never overlap, and its rules read in words", async ({ page 
 	const rules = main.getByRole('region', { name: 'Pool', exact: true });
 	await expect(rules).toContainText('Group engineers');
 	await expect(rules).toContainText('Stopped after 1 h without a session');
-	await expect(rules).toContainText('Desktop and home deleted after 30 d without a session');
+	await expect(rules).toContainText('Claim, desktop and home deleted after 30 d without a session');
 	await expect(rules).toContainText(/Ready\s*Yes$/);
 	await expect(rules).not.toContainText('ClassFound');
 });
@@ -158,17 +160,23 @@ test('a project persona reads its pools; desktops and classes are not shown, nev
 	await expect(tree.nth(0)).toHaveText('All desktops');
 	await expect(tree.nth(1)).toHaveText('Desktop classes');
 	await expect(main.getByRole('link', { name: 'All desktops', exact: true })).toBeVisible();
-	await expect(main.getByText('3 pools', { exact: true })).toBeVisible();
+	// The page's context, and its pools in place of the desktops.
+	await expect(main.getByText('3 pools', { exact: true })).toHaveCount(2);
 	await expect(main.getByText(/\d+ desktops?/)).toHaveCount(0);
 	await expect(
 		main.getByText(/^Desktops in batch-prod, db-prod, web-prod are not shown to you: a platform/),
 	).toBeVisible();
 	await expect(main.getByRole('table', { name: 'All desktops' })).toHaveCount(0);
+	await expect(main.getByRole('table', { name: 'Pools' }).locator('tbody tr')).toHaveText([
+		/^render\s*batch-prod/,
+		/^eng\s*web-prod/,
+		/^lab\s*web-prod/,
+	]);
 	await expect(main.getByText(/yet/)).toHaveCount(0);
 
 	await main.getByRole('link', { name: 'Desktop classes', exact: true }).click();
 	await expect(
-		main.getByText('Desktop classes are not shown to you: a cluster admin can let you read them.'),
+		main.getByText('Desktop classes are not shown to you: a platform admin can let you read them.'),
 	).toBeVisible();
 	await expect(main.getByText(/No desktop class/)).toHaveCount(0);
 
@@ -184,6 +192,57 @@ test('a project persona reads its pools; desktops and classes are not shown, nev
 	}
 });
 
+test("none shown is none in the caller's projects only where it lists every one", async ({
+	page,
+}) => {
+	await setScenario(page, 'desktops');
+	// Nothing made yet; the caller lists no desktop in batch-prod, until it does.
+	let listsAll = false;
+	await page.route('**/api/desktops', async (route) => {
+		const body = await (await route.fetch()).json();
+		const unlisted = listsAll ? [] : body.unlisted;
+		await route.fulfill({ json: { ...body, pools: [], desktops: [], claims: [], unlisted } });
+	});
+	await login(page);
+	await page.goto('/desktops');
+	const main = page.locator('main');
+	await expect(main.getByText('No desktop shown to you yet.')).toBeVisible();
+	await expect(rail(page).getByText('No desktop shown to you yet.')).toBeVisible();
+	await expect(page.getByText('No desktop in your projects yet.')).toHaveCount(0);
+
+	listsAll = true;
+	await page.reload();
+	await expect(main.getByText('No desktop in your projects yet.')).toBeVisible();
+	await expect(rail(page).getByText('No desktop in your projects yet.')).toBeVisible();
+	await expect(page.getByText('No desktop shown to you yet.')).toHaveCount(0);
+});
+
+test('a project gaining a repo reads as it did until its desktops are read', async ({ page }) => {
+	await setScenario(page, 'desktopsnorepo');
+	await login(page);
+	await page.goto('/desktops/team-batch/batch-prod');
+	const main = page.locator('main');
+	const none = main.getByText(
+		/^Desktops are read in projects with a repo, and team-batch has none/,
+	);
+	await expect(none).toBeVisible();
+	let land!: () => void;
+	const landed = new Promise<void>((r) => (land = r));
+	await page.route('**/api/desktops', async (route) => {
+		await landed;
+		await route.continue();
+	});
+	const asked = page.waitForRequest((r) => new URL(r.url()).pathname === '/api/desktops');
+	// The frame says team-batch has a repo; the answer read before does not cover it.
+	await setScenario(page, 'desktops');
+	await asked;
+	await expect(main.getByText(/No desktop here yet|0 pools/)).toHaveCount(0);
+	await expect(none).toBeVisible();
+	land();
+	await expect(main.getByText('1 pool in team-batch', { exact: true })).toBeVisible();
+	await expect(none).toHaveCount(0);
+});
+
 test('a pool whose class is missing says so and what to do', async ({ page }) => {
 	await setScenario(page, 'desktops');
 	await login(page);
@@ -197,11 +256,11 @@ test('a pool whose class is missing says so and what to do', async ({ page }) =>
 			'Class gpu-lab does not exist, so this pool makes no desktop and its claims wait.',
 		),
 	).toBeVisible();
-	await expect(main.getByText(/ask a cluster admin to add gpu-lab/)).toBeVisible();
+	await expect(main.getByText(/ask a platform admin to add gpu-lab/)).toBeVisible();
 	await expect(main.getByText('Classes on the cluster: cad, office.')).toBeVisible();
 	// Its status leaves every other count out: each reads 0.
 	const seats = main.getByRole('region', { name: 'Seats' });
-	await expect(seats.getByTitle('Held desktops a client streams from')).toContainText('0');
+	await expect(seats.getByTitle(/^Desktops a client streams from/)).toContainText('0');
 	await expect(seats.getByTitle('Claims with no seat yet')).toContainText('1');
 	await expect(main.getByRole('region', { name: 'Pool', exact: true })).toContainText(
 		'No: class gpu-lab does not exist',
@@ -371,12 +430,15 @@ test('a release is held to the claim seen when its menu opened', async ({ page }
 	await expect(poolRows(page)).toHaveCount(3);
 });
 
-test('a desktop made one by one is not acted on here', async ({ page }) => {
+test('a desktop made one by one is acted on from its page, by restart alone', async ({ page }) => {
 	await setScenario(page, 'desktops');
 	await login(page);
 	await page.goto('/desktops/team-web/web-prod/desktop/carol-dev');
 	await expect(page.locator('main').getByRole('heading', { level: 1 })).toHaveText('carol-dev');
-	await expect(page.locator('main').getByRole('button', { name: /^Actions/ })).toHaveCount(0);
+	await page.locator('main').getByRole('button', { name: 'Actions for carol-dev' }).click();
+	await expect(page.getByRole('button', { name: 'Restart...' })).toBeEnabled();
+	await expect(page.getByRole('button', { name: /^(Stop|Start|Release\.\.\.)$/ })).toHaveCount(0);
+	await page.keyboard.press('Escape');
 	await page.goto('/desktops/team-web/web-prod');
 	const byOne = page.locator('main').getByRole('table', { name: 'Desktops made one by one' });
 	await expect(byOne.locator('tbody tr')).toHaveCount(1);
@@ -394,6 +456,9 @@ test('an act the caller may not make is disabled and says why', async ({ page })
 		'title',
 		"You may not start or stop others' desktops of pool eng.",
 	);
+	const restart = page.getByRole('button', { name: 'Restart...' });
+	await expect(restart).toBeDisabled();
+	await expect(restart).toHaveAttribute('title', 'You may not restart eng-7hq2k.');
 	const release = page.getByRole('button', { name: 'Release...' });
 	await expect(release).toBeDisabled();
 	await expect(release).toHaveAttribute(
@@ -409,17 +474,230 @@ test('an act the caller may not make is disabled and says why', async ({ page })
 	);
 });
 
-test('no act while the console has lost its watch', async ({ page }) => {
+test("the rights are asked of the row's desktop and claim, by name", async ({ page }) => {
+	await setScenario(page, 'desktops');
+	await login(page);
+	await page.goto('/desktops/team-web/web-prod/pool/eng');
+	const asked: string[] = [];
+	page.on('request', (r) => {
+		const u = new URL(r.url());
+		if (u.pathname === '/api/capabilities' && u.searchParams.has('desktops')) asked.push(u.search);
+	});
+	await actions(page, 'eng-7hq2k').click();
+	await expect(page.getByRole('button', { name: 'Stop', exact: true })).toBeEnabled();
+	await page.keyboard.press('Escape');
+	await actions(page, 'eng-w2c8d').click();
+	await expect(page.getByRole('button', { name: 'Restart...' })).toBeEnabled();
+	expect(asked).toEqual([
+		'?desktops=web-prod&desktop=eng-7hq2k&claim=eng-alice',
+		'?desktops=web-prod&desktop=eng-w2c8d',
+	]);
+});
+
+test('no act waits on a watch it does not read', async ({ page }) => {
 	await setScenario(page, 'desktopsstale');
+	await login(page);
+	const item = (name: string) => page.getByRole('button', { name, exact: true });
+	const lost = (what: string) =>
+		`The console lost its watch on the ${what}: acts wait until it is back.`;
+	for (const [scenario, stop, restart] of [
+		['desktopsstale', lost('desktops'), lost('desktops')],
+		['desktopsclaimsstale', lost('claims'), ''],
+		['desktopspoolsstale', '', ''],
+	]) {
+		await setScenario(page, scenario);
+		await page.goto('/desktops/team-web/web-prod/pool/eng');
+		await expect(page.locator('main').getByText(/^These may be out of date/)).toBeVisible();
+		await actions(page, 'eng-7hq2k').click();
+		for (const [name, why] of [
+			['Stop', stop],
+			['Release...', stop],
+			['Restart...', restart],
+		]) {
+			if (why) await expect(item(name)).toHaveAttribute('title', why);
+			else await expect(item(name)).toBeEnabled();
+		}
+	}
+});
+
+// A restart asks DeskuBe for one, on the desktop the menu opened on, named by
+// its UID: DeskuBe ends the pod, and the home stays.
+
+test('a restart asks once, and reads requested beside the phase until rolled out', async ({
+	page,
+}) => {
+	await setScenario(page, 'desktops');
+	await login(page);
+	await page.goto('/desktops/team-web/web-prod/pool/eng');
+	const sent: unknown[] = [];
+	page.on('request', (r) => {
+		if (new URL(r.url()).pathname === '/api/desktops/web-prod/eng-7hq2k/restart')
+			sent.push(r.postDataJSON());
+	});
+	await expect(poolRows(page).nth(0)).toContainText('Ready');
+	await actions(page, 'eng-7hq2k').click();
+	await page.getByRole('button', { name: 'Restart...' }).click();
+	const dialog = page.getByRole('dialog');
+	await expect(dialog.getByText('Restart eng-7hq2k?')).toBeVisible();
+	await expect(dialog).toContainText("alice's session, if one is open, ends.");
+	await expect(dialog).toContainText('A new pod starts. The home, and the files in it, stay.');
+	await expect(dialog.getByRole('textbox')).toHaveCount(0);
+	await dialog.getByRole('button', { name: 'Restart', exact: true }).click();
+	await expect(dialog).toHaveCount(0);
+	await expect(page.getByText('Restart requested for eng-7hq2k.')).toBeVisible();
+	// The desktop it was for rides along: the restart lands on no one else's.
+	expect(sent).toEqual([{ uid: 'uid-eng-7hq2k', owner: 'alice' }]);
+	await expect(poolRows(page).nth(0)).toContainText(/Ready\s*\(restart requested\)/);
+	// Asked again before DeskuBe rolled it out: a new request, rolled out once.
+	await actions(page, 'eng-7hq2k').click();
+	await page.getByRole('button', { name: 'Restart...' }).click();
+	await dialog.getByRole('button', { name: 'Restart', exact: true }).click();
+	await expect(dialog).toHaveCount(0);
+	expect(sent).toHaveLength(2);
+	await page.request.post('/__fixture/desktops-rollout');
+	await expect(poolRows(page).nth(0)).not.toContainText('restart requested');
+	await expect(poolRows(page).nth(0)).toContainText('Ready');
+	await page.getByRole('button', { name: /^Recent tasks/ }).click();
+	const feed = page.locator('section').getByRole('row').filter({ hasText: 'eng-7hq2k · web-prod' });
+	await expect(feed).toHaveCount(2);
+	for (const row of await feed.all())
+		await expect(row).toContainText(/^Restart\s*eng-7hq2k · web-prod\s*Requested/);
+});
+
+test('a desktop made one by one restarts from its page', async ({ page }) => {
+	await setScenario(page, 'desktops');
+	await login(page);
+	await page.goto('/desktops/team-web/web-prod/desktop/carol-dev');
+	const main = page.locator('main');
+	await expect(main.getByRole('region', { name: 'Desktop', exact: true })).toContainText(
+		/Claimed by\s*carol/,
+	);
+	// carol's claim on it is no claim of a pool: the rights are asked without it.
+	const asked = page.waitForRequest((r) => {
+		const u = new URL(r.url());
+		return u.pathname === '/api/capabilities' && u.searchParams.has('desktops');
+	});
+	await main.getByRole('button', { name: 'Actions for carol-dev' }).click();
+	expect(new URL((await asked).url()).search).toBe('?desktops=web-prod&desktop=carol-dev');
+	await page.getByRole('button', { name: 'Restart...' }).click();
+	const dialog = page.getByRole('dialog');
+	await expect(dialog).toContainText("carol's session, if one is open, ends.");
+	await dialog.getByRole('button', { name: 'Restart', exact: true }).click();
+	await expect(page.getByText('Restart requested for carol-dev.')).toBeVisible();
+	await expect(main.getByRole('region', { name: 'Desktop', exact: true })).toContainText(
+		/Phase\s*Ready \(restart requested\)/,
+	);
+});
+
+test('a restart lands only on the person seen when its menu opened', async ({ page }) => {
+	await setScenario(page, 'desktops');
+	await login(page);
+	await page.goto('/desktops/team-web/web-prod/pool/eng');
+	let sent: unknown;
+	page.on('request', (r) => {
+		if (new URL(r.url()).pathname.endsWith('/eng-w2c8d/restart')) sent = r.postDataJSON();
+	});
+	await actions(page, 'eng-w2c8d').click();
+	await page.getByRole('button', { name: 'Restart...' }).click();
+	const dialog = page.getByRole('dialog');
+	await expect(dialog).toContainText('Its session, if one is open, ends.');
+	// Meanwhile dan claimed the warm desktop, which keeps its UID.
+	await setScenario(page, 'desktopsreclaimed');
+	await dialog.getByRole('button', { name: 'Restart', exact: true }).click();
+	await expect(dialog).toContainText(
+		'desktop eng-w2c8d changed hands since you saw it: look at it again',
+	);
+	expect(sent).toEqual({ uid: 'uid-eng-w2c8d', owner: '' });
+});
+
+test('a restart reads no claim: a desktop lister restarts without them', async ({ page }) => {
+	await setScenario(page, 'desktops');
+	await page.route('**/api/desktops', async (route) => {
+		const body = await (await route.fetch()).json();
+		await route.fulfill({
+			json: {
+				...body,
+				claims: body.claims.filter((c: { namespace: string }) => c.namespace !== 'web-prod'),
+				unlisted: [...body.unlisted, { namespace: 'web-prod', resource: 'vdiclaims' }],
+			},
+		});
+	});
 	await login(page);
 	await page.goto('/desktops/team-web/web-prod/pool/eng');
 	await actions(page, 'eng-7hq2k').click();
-	for (const name of ['Stop', 'Release...']) {
-		const item = page.getByRole('button', { name, exact: true });
-		await expect(item).toBeDisabled();
-		await expect(item).toHaveAttribute(
-			'title',
-			'The console lost its watch on the desktops: acts wait until it is back.',
-		);
-	}
+	await expect(page.getByRole('button', { name: 'Stop', exact: true })).toHaveAttribute(
+		'title',
+		'Claims here are not shown to you.',
+	);
+	await page.getByRole('button', { name: 'Restart...' }).click();
+	await page.getByRole('dialog').getByRole('button', { name: 'Restart', exact: true }).click();
+	await expect(page.getByText('Restart requested for eng-7hq2k.')).toBeVisible();
+});
+
+test('a desktop waiting for its class is not restarted, and its state stays', async ({ page }) => {
+	await setScenario(page, 'desktops');
+	await page.route('**/api/desktops', async (route) => {
+		const body = await (await route.fetch()).json();
+		const missing = [{ type: 'Ready', status: 'False', reason: 'ClassNotFound' }];
+		await route.fulfill({
+			json: {
+				...body,
+				desktops: body.desktops.map((d: { name: string }) =>
+					d.name === 'carol-dev' ? { ...d, restarting: true, conditions: missing } : d,
+				),
+			},
+		});
+	});
+	await login(page);
+	await page.goto('/desktops/team-web/web-prod/desktop/carol-dev');
+	const main = page.locator('main');
+	await expect(
+		main.getByText(/^Class office does not exist, so this desktop does not start/),
+	).toBeVisible();
+	await expect(main.getByRole('region', { name: 'Desktop', exact: true })).toContainText(
+		/Phase\s*Ready \(restart requested\)/,
+	);
+	await main.getByRole('button', { name: 'Actions for carol-dev' }).click();
+	const restart = page.getByRole('button', { name: 'Restart...' });
+	await expect(restart).toBeDisabled();
+	await expect(restart).toHaveAttribute(
+		'title',
+		'Class office does not exist: DeskuBe rolls out no restart until it does.',
+	);
+});
+
+test('a stopped desktop, or one with no pod yet, is never restarted', async ({ page }) => {
+	await setScenario(page, 'desktops');
+	await login(page);
+	const restart = page.getByRole('button', { name: 'Restart...' });
+	await page.goto('/desktops/team-web/web-prod/pool/eng');
+	await actions(page, 'eng-p4x9m').click();
+	await expect(page.getByRole('button', { name: 'Start', exact: true })).toBeEnabled();
+	await expect(restart).toBeDisabled();
+	await expect(restart).toHaveAttribute(
+		'title',
+		'Only a starting or ready desktop restarts: this one is stopped.',
+	);
+	await page.keyboard.press('Escape');
+	await page.goto('/desktops/team-db/db-prod/desktop/ops-desk');
+	await page.locator('main').getByRole('button', { name: 'Actions for ops-desk' }).click();
+	await expect(restart).toHaveAttribute(
+		'title',
+		'Only a starting or ready desktop restarts: this one is stopped.',
+	);
+});
+
+test('a restart is held to the desktop seen when its menu opened', async ({ page }) => {
+	await setScenario(page, 'desktops');
+	await login(page);
+	await page.goto('/desktops/team-web/web-prod/desktop/carol-dev');
+	await page.locator('main').getByRole('button', { name: 'Actions for carol-dev' }).click();
+	await page.getByRole('button', { name: 'Restart...' }).click();
+	const dialog = page.getByRole('dialog');
+	// Meanwhile carol-dev was deleted and made again under its name.
+	await setScenario(page, 'desktopsreclaimed');
+	await dialog.getByRole('button', { name: 'Restart', exact: true }).click();
+	await expect(dialog).toContainText('desktop carol-dev is not the one you saw: look at it again');
+	await dialog.getByRole('button', { name: 'Cancel' }).click();
+	await expect(page.locator('main').getByText(/restart requested/)).toHaveCount(0);
 });
