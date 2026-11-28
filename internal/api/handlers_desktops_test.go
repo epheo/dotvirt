@@ -17,6 +17,7 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/watch"
 	"k8s.io/client-go/tools/cache"
 
@@ -27,9 +28,12 @@ import (
 // desktopsSource serves a class, and a pool, a desktop and a claim in each of
 // team-a-dev and team-b-dev, with a watch on desktops a test can write
 // through. failClaims fails every claims list, so that watch stays unsynced
-// and stale.
+// and stale. held adds two of the pool's desktops in each: lab-1 held by the
+// claim lab-u of u, every test caller's username, and lab-2 by bob's lab-bob,
+// each claim's UID uid-<its name>, as its desktop's claim-uid label says.
 type desktopsSource struct {
 	failClaims bool
+	held       bool
 
 	mu        sync.Mutex
 	instances *watch.FakeWatcher
@@ -55,6 +59,15 @@ func deskInstance(ns, name, phase string) *unstructured.Unstructured {
 	return &u
 }
 
+// heldDesktop is a desktop of pool lab, held for the claim of UID claimUID.
+func heldDesktop(ns, name, claimUID string) *unstructured.Unstructured {
+	d := deskInstance(ns, name, "Ready")
+	controller := true
+	d.SetOwnerReferences([]metav1.OwnerReference{{APIVersion: "vdi.desku.be/v1alpha1", Kind: "VdiPool", Name: "lab", UID: "uid-lab", Controller: &controller}})
+	d.SetLabels(map[string]string{"vdi.desku.be/claim-uid": claimUID})
+	return d
+}
+
 func (f *desktopsSource) DynamicListWatch(gvr schema.GroupVersionResource) *cache.ListWatch {
 	var items []unstructured.Unstructured
 	for _, ns := range []string{"team-a-dev", "team-b-dev"} {
@@ -65,6 +78,20 @@ func (f *desktopsSource) DynamicListWatch(gvr schema.GroupVersionResource) *cach
 			items = append(items, *deskInstance(ns, "solo", "Ready"))
 		case desktops.GVRClaim:
 			items = append(items, deskObject("VdiClaim", ns, "someone", map[string]any{"poolName": "lab", "user": "someone"}, map[string]any{"phase": "Waiting"}))
+		}
+		if !f.held {
+			continue
+		}
+		for desk, user := range map[string]string{"lab-1": "u", "lab-2": "bob"} {
+			switch gvr {
+			case desktops.GVRInstance:
+				items = append(items, *heldDesktop(ns, desk, "uid-lab-"+user))
+			case desktops.GVRClaim:
+				c := deskObject("VdiClaim", ns, "lab-"+user, map[string]any{"poolName": "lab", "user": user},
+					map[string]any{"phase": "Bound", "desktopName": desk})
+				c.SetUID(types.UID("uid-lab-" + user))
+				items = append(items, c)
+			}
 		}
 	}
 	if gvr == desktops.GVRClass {

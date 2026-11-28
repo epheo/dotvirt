@@ -2,9 +2,11 @@
 // classes, pools, desktops and claims, so a caller's pull filters in memory
 // and no request reaches the cluster.
 //
-// One read leaves here, Overview: each namespaced kind where the caller may
+// Two reads leave here. Overview: each namespaced kind where the caller may
 // list it, the classes for a caller who may list them cluster-wide, and the
-// kinds it may not list beside those, from its own rights alone.
+// kinds it may not list beside those, from its own rights alone. Desktop: one
+// desktop and the claim holding it, which an admin act addresses, trusted only
+// while Fresh.
 package desktops
 
 import (
@@ -32,6 +34,11 @@ import (
 const Group = "vdi.desku.be"
 
 const version = "v1alpha1"
+
+// claimUIDLabel names, on a pool's desktop, the claim it is held for. A claim
+// name is free once its claim is deleted: the UID is what tells a new claim
+// under that name from the old one.
+const claimUIDLabel = Group + "/claim-uid"
 
 // The kinds the snapshot watches. Instance is the one whose presence turns the
 // module on.
@@ -309,9 +316,7 @@ func (s *Snapshot) Overview(readable map[Kind]bool, unlisted []Kind) model.Deskt
 			continue
 		}
 		out.Claims = append(out.Claims, c)
-		// A claim naming a desktop it does not hold is no claim of the
-		// desktop's: a stranger's is refused.
-		if c.Desktop == "" || c.Phase != "Bound" {
+		if !holds(c) {
 			continue
 		}
 		key := c.Namespace + "/" + c.Desktop
@@ -351,6 +356,60 @@ func (s *Snapshot) Overview(readable map[Kind]bool, unlisted []Kind) model.Deskt
 		return cmp.Or(strings.Compare(a.Namespace, b.Namespace), strings.Compare(a.Name, b.Name))
 	})
 	return out
+}
+
+// holds reports whether c holds the desktop it names. A claim naming a desktop
+// it does not hold is no claim of the desktop's: a stranger's is refused.
+func holds(c model.DesktopClaim) bool { return c.Desktop != "" && c.Phase == "Bound" }
+
+// Fresh reports whether the desktops and the claims are each watched, synced
+// and healthy: what an act on a claim reads of them is the cluster's latest.
+func (s *Snapshot) Fresh() bool {
+	if !s.started.Load() {
+		return false
+	}
+	for i, k := range s.kinds() {
+		if (k.gvr == GVRInstance || k.gvr == GVRClaim) && (!s.healthy[i].Load() || !k.table.Synced()) {
+			return false
+		}
+	}
+	return true
+}
+
+// HoldsDesktopOf reports whether a desktop pool made is held in namespace.
+func (s *Snapshot) HoldsDesktopOf(namespace, pool string) bool {
+	if !s.started.Load() || pool == "" {
+		return false
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	for _, d := range s.instances.Rows {
+		if d.Namespace == namespace && d.Pool == pool {
+			return true
+		}
+	}
+	return false
+}
+
+// Desktop is the desktop namespace/name and the claim holding it, as Overview
+// pairs them, for a caller who may list both kinds there.
+func (s *Snapshot) Desktop(namespace, name string) (d model.Desktop, holder model.DesktopClaim, ok bool) {
+	if !s.started.Load() {
+		return d, holder, false
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	d, ok = s.instances.Rows[namespace+"/"+name]
+	if !ok {
+		return d, holder, false
+	}
+	for _, c := range s.claims.Rows {
+		if c.Namespace == namespace && c.Desktop == name && holds(c) && (holder.Name == "" || c.Name < holder.Name) {
+			holder = c
+		}
+	}
+	d.Claim = holder.Name
+	return d, holder, true
 }
 
 func byDesktop(a, b model.Desktop) int {
@@ -458,6 +517,7 @@ func decodeInstance(u *unstructured.Unstructured) (model.Desktop, bool) {
 		Address:    doc.Status.Address,
 		Session:    doc.Status.SessionState,
 		Pool:       madeBy(u),
+		ClaimUID:   u.GetLabels()[claimUIDLabel],
 		Conditions: doc.Status.Conditions,
 	}, true
 }
@@ -497,6 +557,7 @@ func decodeClaim(u *unstructured.Unstructured) (model.DesktopClaim, bool) {
 	return model.DesktopClaim{
 		Namespace: u.GetNamespace(),
 		Name:      u.GetName(),
+		UID:       string(u.GetUID()),
 		User:      doc.Spec.User,
 		Pool:      doc.Spec.PoolName,
 		Desktop:   cmp.Or(doc.Status.DesktopName, doc.Spec.DesktopName),

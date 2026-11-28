@@ -13,6 +13,7 @@ export type Task = {
 	project: string;
 	url: string;
 	ok?: boolean; // for 'action'/'migration' rows: success
+	desktop?: boolean; // for 'action' rows: name is a desktop, not a VM
 	at?: number; // for 'action' rows: timestamp (keeps keys unique)
 	active?: boolean; // for 'migration' rows: still moving
 };
@@ -87,6 +88,7 @@ export function buildTasks(
 			project: t.project ?? '',
 			url: '',
 			ok: t.ok,
+			desktop: t.desktop,
 			at: Date.parse(t.at),
 		});
 	}

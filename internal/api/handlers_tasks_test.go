@@ -190,14 +190,23 @@ func TestOwnPlatformMergesInTheFeed(t *testing.T) {
 	}
 }
 
-// Every op acts on a VM: it shows where the caller may list them.
-func TestOpsFollowTheVMRight(t *testing.T) {
+// An op acts on a VM, or on a desktop: it shows where the caller may list
+// what it acted on.
+func TestOpsFollowTheRightOnWhatTheyActOn(t *testing.T) {
 	sc := newTaskScope([]project.ProjectInfo{{Name: "p", Namespaces: []string{"a", "b"}}}, false)
-	sc.listsVMs = func(ns string) bool { return ns == "a" }
+	sc.lists = func(ref ssarRef, ns string) bool {
+		return ref == ssarVM && ns == "a" || ref == ssarDesktops && ns == "b"
+	}
 	if _, ok := sc.op(tasks.Op{Namespace: "a"}); !ok {
 		t.Error("an op where the caller lists VMs is hidden")
 	}
 	if _, ok := sc.op(tasks.Op{Namespace: "b"}); ok {
 		t.Error("an op where the caller does not list VMs shows")
+	}
+	if _, ok := sc.op(tasks.Op{Namespace: "b", Desktop: true}); !ok {
+		t.Error("an op on a desktop where the caller lists desktops is hidden")
+	}
+	if _, ok := sc.op(tasks.Op{Namespace: "a", Desktop: true}); ok {
+		t.Error("an op on a desktop where the caller lists only VMs shows")
 	}
 }

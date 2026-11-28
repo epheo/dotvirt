@@ -334,14 +334,16 @@ type TaskEntry struct {
 	Kind      string `json:"kind"` // "op" | "merge"
 	Verb      string `json:"verb"`
 	Namespace string `json:"namespace,omitempty"` // empty for node-scoped ops
-	Name      string `json:"name,omitempty"`      // VM or node name
-	Project   string `json:"project,omitempty"`
-	PRNumber  int    `json:"prNumber,omitempty"`
-	PRURL     string `json:"prURL,omitempty"`
-	Title     string `json:"title,omitempty"`
-	By        string `json:"by,omitempty"`
-	OK        bool   `json:"ok"`
-	At        string `json:"at"` // RFC3339
+	Name      string `json:"name,omitempty"`      // VM, desktop or node name
+	// Desktop marks an op on a desktop; any other op in a namespace acts on a VM.
+	Desktop  bool   `json:"desktop,omitempty"`
+	Project  string `json:"project,omitempty"`
+	PRNumber int    `json:"prNumber,omitempty"`
+	PRURL    string `json:"prURL,omitempty"`
+	Title    string `json:"title,omitempty"`
+	By       string `json:"by,omitempty"`
+	OK       bool   `json:"ok"`
+	At       string `json:"at"` // RFC3339
 }
 
 // Permissions is the caller's effective capability set in one namespace - the

@@ -44,11 +44,32 @@ export interface BrandingLink {
  * weighed as the gate weighs them, so the UI offers only what the server
  * allows. A review that failed reads as false:
  * unknown never offers an action. Without ?namespace= it answers Cluster; with
- * it, Namespace.
+ * it, Namespace; with ?desktops= and ?pool=, Desktops.
  */
 export interface Capabilities {
   cluster?: ClusterCaps;
   namespace?: NamespaceCaps;
+  desktops?: DesktopCaps;
+}
+/**
+ * DesktopCaps are the acts on the claims holding Pool's desktops in one
+ * namespace. Each needs the desktops and the claims listed there: the route
+ * acts on nothing else.
+ */
+export interface DesktopCaps {
+  namespace: string;
+  pool: string;
+  /**
+   * Power starts and stops another's claim of the pool (patch on claims),
+   * Release deletes it (delete on claims), each with assign or delete on
+   * the pool. PowerOwn and ReleaseOwn are the caller's own claim: use on
+   * the pool also opens a start or stop, and a release asks nothing of the
+   * pool.
+   */
+  power: boolean;
+  powerOwn: boolean;
+  release: boolean;
+  releaseOwn: boolean;
 }
 /**
  * ObjectCaps are creating, updating and deleting one kind through git: the
@@ -498,6 +519,11 @@ export interface Desktop {
 export interface DesktopClaim {
   namespace: string;
   name: string;
+  /**
+   * UID tells this claim from a later one under its name: an act on it
+   * names it.
+   */
+  uid: string;
   user: string;
   /**
    * Pool is empty on a claim that names its desktop.
@@ -898,7 +924,11 @@ export interface TaskEntry {
   kind: string; // "op" | "merge"
   verb: string;
   namespace?: string; // empty for node-scoped ops
-  name?: string; // VM or node name
+  name?: string; // VM, desktop or node name
+  /**
+   * Desktop marks an op on a desktop; any other op in a namespace acts on a VM.
+   */
+  desktop?: boolean;
   project?: string;
   prNumber?: number /* int */;
   prURL?: string;

@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"strings"
 
@@ -18,13 +19,27 @@ import (
 )
 
 // handleCapabilities answers GET /api/capabilities (see model.Capabilities):
-// the cluster scope, or with ?namespace= that namespace and its project. The UI
+// the cluster scope, or with ?namespace= that namespace and its project, or
+// with ?desktops= the desktop acts there, on a desktop of ?pool=. The UI
 // asks on demand, never per frame. A field asks its route's questions, and for
 // a tenancy or DRS change exactly what the coordinator's gate would ask of it
 // (the Needs), weighed on the gate's one path; every review is cached, at
 // most authConcurrency at once. A namespace outside the caller's projects is a
 // 404 like every VM route.
 func (s *Server) handleCapabilities(w http.ResponseWriter, r *http.Request) {
+	if ns := r.URL.Query().Get("desktops"); ns != "" {
+		sc, ok := s.resolveProject(w, r, byNamespace(ns))
+		if !ok {
+			return
+		}
+		caps, err := s.desktopCaps(r.Context(), sc, ns, r.URL.Query().Get("pool"))
+		if err != nil {
+			fail(w, err)
+			return
+		}
+		writeJSON(w, model.Capabilities{Desktops: &caps})
+		return
+	}
 	if ns := r.URL.Query().Get("namespace"); ns != "" {
 		sc, ok := s.resolveProject(w, r, byNamespace(ns))
 		if !ok {
@@ -314,6 +329,36 @@ func (s *Server) projectCaps(ctx context.Context, sc scope, full project.Project
 		patches = append(patches, question{Verb: verbPatch, Group: ssarNamespace.group, Resource: ssarNamespace.resource, Name: ns})
 	}
 	out.Release = (len(patches) == 0 || s.capable(ctx, id, c, patches)) && s.needsAllowed(ctx, id, c, need, err) && (len(need) > 0 || len(patches) > 0)
+}
+
+// desktopCaps answers the acts on the claims of pool's desktops in namespace
+// ns of sc's project: what desktopScope reads, then what each act's route and
+// DeskuBe's admission ask of any claim there. A caller who may list the
+// desktops and claims there is answered only for a pool one of those desktops
+// is of, so each answer is one the caller can see a reason to ask, and the
+// verdicts cached stay as many as the pools.
+func (s *Server) desktopCaps(ctx context.Context, sc scope, ns, pool string) (model.DesktopCaps, error) {
+	out := model.DesktopCaps{Namespace: ns, Pool: pool}
+	if pool == "" {
+		return out, invalid(errors.New("name the pool"))
+	}
+	if s.desktops == nil || !s.desktops.Started() || sc.proj.Repo == "" {
+		return out, nil
+	}
+	v, err := s.viewFor(ctx, sc.id, sc.cluster)
+	if err != nil || !v.lists(ssarDesktops, ns) || !v.lists(ssarDesktopClaims, ns) {
+		return out, nil
+	}
+	if !s.desktops.HoldsDesktopOf(ns, pool) {
+		return out, fmt.Errorf("%w: no desktop of pool %s in %s", model.ErrNotFound, pool, ns)
+	}
+	opens := func(verb string, own bool) bool {
+		ok, _ := s.anyAllowed(ctx, sc.id, sc.cluster, claimActions(verb, ns, pool, "", own))
+		return ok
+	}
+	out.Power, out.PowerOwn = opens(verbPatch, false), opens(verbPatch, true)
+	out.Release, out.ReleaseOwn = opens(verbDelete, false), opens(verbDelete, true)
+	return out, nil
 }
 
 // noVMs is a known no for KubeVirt: the modules snapshot, as the UI reads

@@ -9,11 +9,14 @@
 	let {
 		x,
 		y,
+		height = 340,
 		onclose,
 		children,
 	}: {
 		x: number;
 		y: number;
+		// The panel's estimated height: a short one is not lifted as far.
+		height?: number;
 		onclose: () => void;
 		children: Snippet;
 	} = $props();
@@ -21,7 +24,7 @@
 	// Clamp so the panel never opens off-screen (estimate its footprint; exact
 	// measurement isn't worth a double render).
 	const px = $derived(Math.max(4, Math.min(x, window.innerWidth - 208)));
-	const py = $derived(Math.max(4, Math.min(y, window.innerHeight - 340)));
+	const py = $derived(Math.max(4, Math.min(y, window.innerHeight - height)));
 </script>
 
 <div class="fixed z-50" style="left: {px}px; top: {py}px" {@attach dismiss(onclose)}>

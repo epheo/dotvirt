@@ -292,3 +292,134 @@ test('without desktops the section leaves for Compute', async ({ page }) => {
 	await expect(page).toHaveURL(/\/compute$/);
 	await expect(rail(page).locator('nav a', { hasText: 'Desktops' })).toHaveCount(0);
 });
+
+// The acts on a pool's desktop run now, under the caller's account, on the
+// claim holding it: the one shown when its menu opened, named by its UID.
+// What they change arrives as DeskuBe writes it, on the next pull.
+
+const poolRows = (page: import('@playwright/test').Page) =>
+	page.locator('main').getByRole('table', { name: 'Desktops of eng' }).locator('tbody tr');
+const actions = (page: import('@playwright/test').Page, desktop: string) =>
+	page.locator('main').getByRole('button', { name: `Actions for ${desktop}` });
+
+test("a pool's desktop stops and starts on its claim", async ({ page }) => {
+	await setScenario(page, 'desktops');
+	await login(page);
+	await page.goto('/desktops/team-web/web-prod/pool/eng');
+	const bodies: unknown[] = [];
+	page.on('request', (r) => {
+		if (/\/api\/desktops\/web-prod\/eng-7hq2k\/(start|stop)$/.test(new URL(r.url()).pathname))
+			bodies.push(r.postDataJSON());
+	});
+	await expect(poolRows(page).nth(0)).toContainText('In session');
+	await actions(page, 'eng-7hq2k').click();
+	await page.getByRole('button', { name: 'Stop', exact: true }).click();
+	await expect(page.getByText('Stop requested for eng-7hq2k.')).toBeVisible();
+	await expect(poolRows(page).nth(0)).toContainText('Stopped');
+	await actions(page, 'eng-7hq2k').click();
+	await page.getByRole('button', { name: 'Start', exact: true }).click();
+	await expect(page.getByText('Start requested for eng-7hq2k.')).toBeVisible();
+	await expect(poolRows(page).nth(0)).toContainText('Ready');
+	const sent = { claim: 'eng-alice', uid: 'uid-eng-alice' };
+	expect(bodies).toEqual([sent, sent]);
+	// The feed names the desktop, and opens its page.
+	await page.getByRole('button', { name: /^Recent tasks/ }).click();
+	await page.locator('section').getByRole('button', { name: 'Start', exact: true }).click();
+	await expect(page).toHaveURL(/\/desktops\/team-web\/web-prod\/desktop\/eng-7hq2k$/);
+});
+
+test('release asks first, naming the person and saying the home goes', async ({ page }) => {
+	await setScenario(page, 'desktops');
+	await login(page);
+	await page.goto('/desktops/team-web/web-prod/pool/eng');
+	await expect(poolRows(page)).toHaveCount(3);
+	await actions(page, 'eng-p4x9m').click();
+	await page.getByRole('button', { name: 'Release...' }).click();
+	const dialog = page.getByRole('dialog');
+	await expect(dialog.getByText('Release eng-p4x9m')).toBeVisible();
+	await expect(dialog).toContainText("Deletes bob's claim eng-bob on pool eng.");
+	await expect(dialog).toContainText("eng-p4x9m and its home, bob's files, are deleted for good.");
+	const confirm = dialog.getByRole('button', { name: 'Release', exact: true });
+	await expect(confirm).toBeDisabled();
+	await dialog.getByRole('textbox').fill('eng-p4x9m');
+	await confirm.click();
+	await expect(dialog).toHaveCount(0);
+	await expect(page.getByText(/^Released eng-p4x9m: bob's desktop and home/)).toBeVisible();
+	await expect(poolRows(page)).toHaveCount(2);
+	await expect(poolRows(page).filter({ hasText: 'bob' })).toHaveCount(0);
+});
+
+test('a release is held to the claim seen when its menu opened', async ({ page }) => {
+	await setScenario(page, 'desktops');
+	await login(page);
+	await page.goto('/desktops/team-web/web-prod/pool/eng');
+	let sent: unknown;
+	page.on('request', (r) => {
+		if (new URL(r.url()).pathname.endsWith('/eng-p4x9m/release')) sent = r.postDataJSON();
+	});
+	await actions(page, 'eng-p4x9m').click();
+	await page.getByRole('button', { name: 'Release...' }).click();
+	const dialog = page.getByRole('dialog');
+	await expect(dialog).toContainText("Deletes bob's claim eng-bob on pool eng.");
+	// Meanwhile bob's claim is gone and another took its name.
+	await setScenario(page, 'desktopsreclaimed');
+	await dialog.getByRole('textbox').fill('eng-p4x9m');
+	await dialog.getByRole('button', { name: 'Release', exact: true }).click();
+	await expect(dialog).toContainText('claim eng-bob no longer holds eng-p4x9m: look at it again');
+	expect(sent).toEqual({ claim: 'eng-bob', uid: 'uid-eng-bob' });
+	await dialog.getByRole('button', { name: 'Cancel' }).click();
+	await expect(poolRows(page)).toHaveCount(3);
+});
+
+test('a desktop made one by one is not acted on here', async ({ page }) => {
+	await setScenario(page, 'desktops');
+	await login(page);
+	await page.goto('/desktops/team-web/web-prod/desktop/carol-dev');
+	await expect(page.locator('main').getByRole('heading', { level: 1 })).toHaveText('carol-dev');
+	await expect(page.locator('main').getByRole('button', { name: /^Actions/ })).toHaveCount(0);
+	await page.goto('/desktops/team-web/web-prod');
+	const byOne = page.locator('main').getByRole('table', { name: 'Desktops made one by one' });
+	await expect(byOne.locator('tbody tr')).toHaveCount(1);
+	await expect(byOne.getByRole('button')).toHaveCount(0);
+});
+
+test('an act the caller may not make is disabled and says why', async ({ page }) => {
+	await setScenario(page, 'desktopsrefused');
+	await login(page);
+	await page.goto('/desktops/team-web/web-prod/pool/eng');
+	await actions(page, 'eng-7hq2k').click();
+	const stop = page.getByRole('button', { name: 'Stop', exact: true });
+	await expect(stop).toBeDisabled();
+	await expect(stop).toHaveAttribute(
+		'title',
+		"You may not start or stop others' desktops of pool eng.",
+	);
+	const release = page.getByRole('button', { name: 'Release...' });
+	await expect(release).toBeDisabled();
+	await expect(release).toHaveAttribute(
+		'title',
+		"You may not release others' desktops of pool eng.",
+	);
+	await page.keyboard.press('Escape');
+	// A warm desktop has no claim to act on, whatever the caller may do.
+	await actions(page, 'eng-w2c8d').click();
+	await expect(page.getByRole('button', { name: 'Stop', exact: true })).toHaveAttribute(
+		'title',
+		'No one holds this desktop: its pool keeps it warm.',
+	);
+});
+
+test('no act while the console has lost its watch', async ({ page }) => {
+	await setScenario(page, 'desktopsstale');
+	await login(page);
+	await page.goto('/desktops/team-web/web-prod/pool/eng');
+	await actions(page, 'eng-7hq2k').click();
+	for (const name of ['Stop', 'Release...']) {
+		const item = page.getByRole('button', { name, exact: true });
+		await expect(item).toBeDisabled();
+		await expect(item).toHaveAttribute(
+			'title',
+			'The console lost its watch on the desktops: acts wait until it is back.',
+		);
+	}
+});

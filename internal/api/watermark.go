@@ -224,7 +224,7 @@ func (s *Server) tasksWatermark(sc taskScope) uint64 {
 	var t term
 	s.tasks.Visit(func(o tasks.Op) {
 		if proj, ok := sc.op(o); ok {
-			sum += t.start("op").str(proj, o.Verb, o.Namespace, o.Name, o.By).num(okBit(o.OK)).num(uint64(o.At.UnixNano())).sum()
+			sum += t.start("op").str(proj, o.Verb, o.Namespace, o.Name, o.By).num(bit(o.OK)).num(bit(o.Desktop)).num(uint64(o.At.UnixNano())).sum()
 		}
 	}, func(m tasks.Merge) {
 		if proj, ok := sc.merge(m); ok {
@@ -234,8 +234,8 @@ func (s *Server) tasksWatermark(sc taskScope) uint64 {
 	return sum & wireMask
 }
 
-func okBit(ok bool) uint64 {
-	if ok {
+func bit(b bool) uint64 {
+	if b {
 		return 1
 	}
 	return 0

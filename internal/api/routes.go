@@ -134,6 +134,10 @@ func (s *Server) routes(mux *http.ServeMux) {
 	}
 	if s.desktops != nil {
 		mux.HandleFunc("GET /api/desktops", s.handleDesktops)
+		// Each names the claim the caller saw holding the desktop, by its UID.
+		mux.HandleFunc("POST /api/desktops/{namespace}/{name}/start", s.handleDesktopStart)
+		mux.HandleFunc("POST /api/desktops/{namespace}/{name}/stop", s.handleDesktopStop)
+		mux.HandleFunc("POST /api/desktops/{namespace}/{name}/release", s.handleDesktopRelease)
 	}
 	if s.replication != nil {
 		mux.HandleFunc("GET /api/storage/replication", s.handleReplication)
