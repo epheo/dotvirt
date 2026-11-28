@@ -153,6 +153,22 @@ test('a desktop made one by one has its page; the classes are a root tab', async
 	);
 });
 
+test('New makes nothing in Desktops, and says why', async ({ page }) => {
+	await setScenario(page, 'desktops');
+	await login(page);
+	const create = page.getByRole('button', { name: 'New', exact: true });
+	for (const path of ['/desktops', '/desktops/team-web/web-prod/pool/eng']) {
+		await page.goto(path);
+		await expect(create).toBeDisabled();
+		await expect(create).toHaveAttribute(
+			'title',
+			"Desktops are not made here yet: declare pools and desktops in a project's repo",
+		);
+	}
+	await page.goto('/compute');
+	await expect(create).toBeEnabled();
+});
+
 test('a caller who may read no desktop is told so, never left reading', async ({ page }) => {
 	await setScenario(page, 'desktopsunread');
 	await login(page);
