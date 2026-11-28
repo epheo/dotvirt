@@ -609,6 +609,33 @@ func TestTenantAppProjectsAdmitNoNAD(t *testing.T) {
 	}
 }
 
+// A project's repo declares its desktop pools and its desktops made one by
+// one, never a claim, even named allowed; the platform repo the classes.
+func TestAppProjectsAdmitDesktops(t *testing.T) {
+	dv := testDotvirt()
+	dv.Spec.ArgoCD.TenantKindsAllowed = []dotvirtv1alpha1.GroupKind{{Group: "vdi.desku.be", Kind: "VdiClaim"}}
+	admits := func(ap *unstructured.Unstructured, list, kind string) bool {
+		kinds, _, _ := unstructured.NestedSlice(ap.Object, "spec", list)
+		return slices.ContainsFunc(kinds, func(k any) bool {
+			m := k.(map[string]any)
+			return m["group"] == "vdi.desku.be" && m["kind"] == kind
+		})
+	}
+	tenant := TenantAppProject(dv, "argocd", "dotvirt-p-a", "a", []string{"a"}, nil, TenantAllowed(dv, true))
+	for _, kind := range []string{"VdiPool", "VdiInstance"} {
+		if !admits(tenant, "namespaceResourceWhitelist", kind) {
+			t.Errorf("a tenant AppProject refuses %s", kind)
+		}
+	}
+	if admits(tenant, "namespaceResourceWhitelist", "VdiClaim") || admits(tenant, "namespaceResourceWhitelist", "VdiClass") {
+		t.Error("a tenant AppProject admits claims or classes")
+	}
+	platform := PlatformAppProject(dv, "argocd", "https://forge/dotvirt/platform.git")
+	if !admits(platform, "clusterResourceWhitelist", "VdiClass") || admits(platform, "namespaceResourceWhitelist", "VdiClaim") {
+		t.Error("the platform AppProject refuses classes or admits claims")
+	}
+}
+
 func TestHTTPRouteAttachesToTheNamedGateway(t *testing.T) {
 	dv := testDotvirt()
 	dv.Spec.Ingress.Gateway = &dotvirtv1alpha1.GatewayRef{Name: "edge", Namespace: "gateway-system", SectionName: "https"}

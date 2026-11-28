@@ -378,8 +378,9 @@ func TestSyncImpersonationFlipAndRollback(t *testing.T) {
 	// 2 per project namespace (no repo declares anything yet), 2 per
 	// project, the controller's clone and impersonation rights, and every
 	// account's clone and tenant-kind rights.
-	if got := n.Load(); got != 2*3+2*2+8 {
-		t.Errorf("%d reviews, want 18", got)
+	reviewsPerPass := int64(2*3 + 2*2 + 3 + len(tenancy.TenantKinds))
+	if got := n.Load(); got != reviewsPerPass {
+		t.Errorf("%d reviews, want %d", got, reviewsPerPass)
 	}
 	// The argocd-operator copies the key into argocd-cm: on.
 	if err := c.Create(context.Background(), argoCM(true)); err != nil {
@@ -393,14 +394,14 @@ func TestSyncImpersonationFlipAndRollback(t *testing.T) {
 		t.Errorf("requeue = %v once on", res.RequeueAfter)
 	}
 	// A clean verdict serves the passes that follow until its inputs change.
-	if got := n.Load(); got != 18 {
-		t.Errorf("%d reviews after a second pass, want the cached 18", got)
+	if got := n.Load(); got != reviewsPerPass {
+		t.Errorf("%d reviews after a second pass, want the cached %d", got, reviewsPerPass)
 	}
 	// RBAC moves are not watched: an aged verdict is asked again.
 	now = now.Add(driftResync / 2)
 	reconcileOnce(t, r, dv)
-	if got := n.Load(); got != 36 {
-		t.Errorf("%d reviews once the verdict aged out, want 36", got)
+	if got := n.Load(); got != 2*reviewsPerPass {
+		t.Errorf("%d reviews once the verdict aged out, want %d", got, 2*reviewsPerPass)
 	}
 
 	stored := setSpec(t, c, dv, func(d *dotvirtv1alpha1.Dotvirt) { d.Spec.ArgoCD.SyncImpersonation.Enabled = new(false) })
@@ -639,7 +640,7 @@ func TestSyncImpersonationRefusals(t *testing.T) {
 		"cluster named by name, mapped on every server": {[]client.Object{remote("default"),
 			appProject("default", map[string]any{"server": "*", "namespace": "edge", "defaultServiceAccount": "argocd:edge-sync"})},
 			granted(own), ""},
-		"edit grant, nothing beyond": {[]client.Object{tenantApp("team-a", "VirtualMachine", "team-a")}, noEgress, ""},
+		"edit grant, nothing beyond":  {[]client.Object{tenantApp("team-a", "VirtualMachine", "team-a")}, noEgress, ""},
 	} {
 		dv := optIn(testCR(), false)
 		var n atomic.Int64

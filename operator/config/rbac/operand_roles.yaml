@@ -193,6 +193,21 @@ rules:
   - apiGroups: ["portail.epheo.eu"]
     resources: ["gatewayparameters"]
     verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  # Desktops: classes from the platform repo, pools and desktops made one by one from
+  # project repos. Explicit verbs, never `*`: on vdipools that holds seat, DeskuBe's
+  # manager's alone. DeskuBe's admission asks whoever sets a pool's subjects for use
+  # on it and the claim verbs, and whoever names a desktop's owner for the claim
+  # verbs and get on its admin Secret. This role grants no Secret: a desktop with an
+  # owner syncs as its project's account, or as a controller holding that read.
+  - apiGroups: ["vdi.desku.be"]
+    resources: ["vdiclasses", "vdipools", "vdiinstances"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: ["vdi.desku.be"]
+    resources: ["vdipools"]
+    verbs: ["use"]
+  - apiGroups: ["vdi.desku.be"]
+    resources: ["vdiclaims"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
 ---
 # What the shared Argo controller keeps of dotvirt-argocd-apply once sync impersonation
 # is in effect: Argo diffs and health-checks with its own account and only applies as
@@ -247,6 +262,9 @@ rules:
     verbs: ["get", "list", "watch"]
   - apiGroups: ["portail.epheo.eu"]
     resources: ["gatewayparameters"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["vdi.desku.be"]
+    resources: ["vdiclasses", "vdipools", "vdiinstances", "vdiclaims"]
     verbs: ["get", "list", "watch"]
 ---
 # The authoring SIGNAL the UI's SSAR-gate reads (create cudn/nncp/namespaces), and list,

@@ -27,25 +27,25 @@ func GVR(k model.Kind) schema.GroupVersionResource {
 const trackingIDAnnotation = "argocd.argoproj.io/tracking-id"
 
 // adoptableKinds are the namespace-scoped kinds captured for adoption: the VM,
-// its DataVolumes and the network family's namespaced backings, which is
-// tenancy.TenantKinds plus the raw NetworkAttachmentDefinition. The coordinator
-// leaves that one out of a tenant repo, naming the platform tier, rather than
-// the capture going silent about it.
+// its DataVolumes and the namespaced backings model.AdoptedKinds names, which
+// is tenancy.TenantKinds plus the raw NetworkAttachmentDefinition. The
+// coordinator leaves that one out of a tenant repo, naming the platform tier,
+// rather than the capture going silent about it.
 var adoptableKinds = append([]schema.GroupVersionResource{
 	GVR(model.KindVM),
 	{Group: "cdi.kubevirt.io", Version: "v1beta1", Resource: "datavolumes"},
-}, networkFamilyGVRs(false)...)
+}, adoptedGVRs(false)...)
 
 // clusterAdoptableKinds are the cluster-scoped kinds adoption captures. Opt-in
-// through the network family, not every platform kind: a capture takes each
-// object of a kind the caller can read, which a MachineConfig or the next
-// module's kind must not get by default. A Namespace joins through AdoptProject
-// with its tenancy labels.
-var clusterAdoptableKinds = networkFamilyGVRs(true)
+// per resource row, not every platform kind: a capture takes each object of a
+// kind the caller can read, which a MachineConfig or the next module's kind
+// must not get by default. A Namespace joins through AdoptProject with its
+// tenancy labels.
+var clusterAdoptableKinds = adoptedGVRs(true)
 
-func networkFamilyGVRs(clusterScoped bool) []schema.GroupVersionResource {
+func adoptedGVRs(clusterScoped bool) []schema.GroupVersionResource {
 	var out []schema.GroupVersionResource
-	for _, k := range model.NetworkFamilyKinds() {
+	for _, k := range model.AdoptedKinds() {
 		if k.ClusterScoped == clusterScoped {
 			out = append(out, GVR(k))
 		}
@@ -106,7 +106,7 @@ func (c *Client) LiveNamespace(ctx context.Context, name string) (*netgen.LiveNa
 // residue; skipping on it would strand the object.
 //
 // Skips ownerReferences: derived objects (dataVolumeTemplates DVs, UDN-rendered
-// NADs) must not be declared beside their owner.
+// NADs, a pool's desktops) must not be declared beside their owner.
 //
 // Forbidden kinds are named in unreadable, never an error: capture runs under the
 // caller's token and standard admin roles miss some kinds; failing hard would put
@@ -154,7 +154,7 @@ func (c *Client) capture(ctx context.Context, kinds []schema.GroupVersionResourc
 		}
 		for i := range list.Items {
 			obj := &list.Items[i]
-			if claimedByForeignApp(obj, foreignApps) || len(obj.GetOwnerReferences()) > 0 {
+			if claimedByForeignApp(obj, foreignApps) || len(obj.GetOwnerReferences()) > 0 || pooled(obj) {
 				continue
 			}
 			// A terminating object still LISTs while a finalizer runs. adoptManifest
@@ -178,6 +178,17 @@ func (c *Client) capture(ctx context.Context, kinds []schema.GroupVersionResourc
 	}
 	return objs, unreadable, nil
 }
+
+// pooled reports a desktop a pool made, which keeps its pool label once the
+// pool's reference is gone. DeskuBe admits that label from the pool's manager
+// alone, so a sync declaring it would be refused.
+func pooled(obj *unstructured.Unstructured) bool {
+	_, ok := obj.GetLabels()[poolLabel]
+	return ok && obj.GetKind() == model.KindVdiInstance.Kind && obj.GroupVersionKind().Group == model.KindVdiInstance.Group
+}
+
+// poolLabel names, on a desktop, the DeskuBe pool that made it.
+const poolLabel = "vdi.desku.be/pool"
 
 // claimedByForeignApp: the tracking-id names a live app on another source. The
 // bare annotation proves only that some app once declared the object.
@@ -219,6 +230,12 @@ func adoptManifest(obj *unstructured.Unstructured) ([]byte, error) {
 	// without updating RevisionName"). KubeVirt's own GitOps guidance is to strip it.
 	unstructured.RemoveNestedField(u.Object, "spec", "instancetype", "revisionName")
 	unstructured.RemoveNestedField(u.Object, "spec", "preference", "revisionName")
+	// A desktop's spec.pairing is its owner's live write: a pending PIN that
+	// whoever reads the repo could pair with first, and that each sync would
+	// write back after DeskuBe removes it.
+	if gvk := u.GroupVersionKind(); gvk.Group == model.KindVdiInstance.Group && gvk.Kind == model.KindVdiInstance.Kind {
+		unstructured.RemoveNestedField(u.Object, "spec", "pairing")
+	}
 	return yaml.Marshal(u.Object)
 }
 

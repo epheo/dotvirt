@@ -20,7 +20,8 @@ type Kind struct {
 
 // Kinds is every kind dotvirt's repos declare, spelled once. The app's
 // vocabulary and the AppProject whitelists derive from it. Adoption is opt-in:
-// a kind it should capture also needs a network-family row in model's resources.
+// a kind it should capture also needs a network-family or Adopted row in model's
+// resources.
 // Order is the whitelists'.
 var Kinds = []Kind{
 	{Group: "kubevirt.io", Version: "v1", Kind: "VirtualMachine", Resource: "virtualmachines", Tenant: true},
@@ -30,6 +31,12 @@ var Kinds = []Kind{
 	{Group: "k8s.ovn.org", Version: "v1", Kind: "EgressFirewall", Resource: "egressfirewalls", Tenant: true},
 	// Project rules.
 	{Group: "networking.k8s.io", Version: "v1", Kind: "NetworkPolicy", Resource: "networkpolicies", Tenant: true},
+	// Desktops: DeskuBe's pools, and desktops made one by one. Its admission
+	// asks whoever sets a pool's subjects or a desktop's owner to hold what
+	// those grant, so a repo entitles nobody beyond its own rights. A pool's
+	// own desktops carry its owner reference and are never in git.
+	{Group: "vdi.desku.be", Version: "v1alpha1", Kind: "VdiPool", Resource: "vdipools", Tenant: true},
+	{Group: "vdi.desku.be", Version: "v1alpha1", Kind: "VdiInstance", Resource: "vdiinstances", Tenant: true},
 
 	// Not a tenant kind: a project's admin role may only read them, and a raw
 	// one joins another project's VLAN, reaches the underlay past
@@ -61,6 +68,8 @@ var Kinds = []Kind{
 	{Group: "nmstate.io", Version: "v1", Kind: "NodeNetworkConfigurationPolicy", Resource: "nodenetworkconfigurationpolicies", ClusterScoped: true, Platform: true},
 	// Rebalancing: the worker PSI kernel argument its load-aware profile needs.
 	{Group: "machineconfiguration.openshift.io", Version: "v1", Kind: "MachineConfig", Resource: "machineconfigs", ClusterScoped: true, Platform: true},
+	// The kinds of desktop the platform offers every project.
+	{Group: "vdi.desku.be", Version: "v1alpha1", Kind: "VdiClass", Resource: "vdiclasses", ClusterScoped: true, Platform: true},
 
 	// In a repo, never in a whitelist: Argo's source excludes templates/.
 	{Group: "template.kubevirt.io", Version: "v1beta1", Kind: "VirtualMachineTemplate", Resource: "virtualmachinetemplates"},
@@ -123,7 +132,9 @@ func (g GroupKind) Covers(group, kind string) bool {
 //   - controllers that act with their own cluster rights on a namespaced
 //     request that can name elsewhere: external secrets against a cluster
 //     store, Forklift plans with a target namespace, Velero restores, template
-//     instances.
+//     instances;
+//   - DeskuBe's claims: a person's live hold on a desktop, never declared. A
+//     merge removing one would give the desktop back and delete its home.
 var deniedBase = []GroupKind{
 	{"rbac.authorization.k8s.io", "*"},
 	{"authorization.openshift.io", "*"},
@@ -138,6 +149,7 @@ var deniedBase = []GroupKind{
 	{"forklift.konveyor.io", "*"},
 	{"velero.io", "*"},
 	{"template.openshift.io", "TemplateInstance"},
+	{"vdi.desku.be", "VdiClaim"},
 }
 
 // AllowTenantKinds splits the kinds a provider names into those a tenant repo

@@ -127,6 +127,8 @@ func TestWhatEachRepoMayDeclare(t *testing.T) {
 		{"k8s.ovn.org", "UserDefinedNetwork"},
 		{"k8s.ovn.org", "EgressFirewall"},
 		{"networking.k8s.io", "NetworkPolicy"},
+		{"vdi.desku.be", "VdiPool"},
+		{"vdi.desku.be", "VdiInstance"},
 	}
 	platformCluster := []gk{
 		{"", "Namespace"},
@@ -137,6 +139,7 @@ func TestWhatEachRepoMayDeclare(t *testing.T) {
 		{"policy.networking.k8s.io", "BaselineAdminNetworkPolicy"},
 		{"nmstate.io", "NodeNetworkConfigurationPolicy"},
 		{"machineconfiguration.openshift.io", "MachineConfig"},
+		{"vdi.desku.be", "VdiClass"},
 	}
 	platformNamespaced := []gk{
 		{"k8s.ovn.org", "UserDefinedNetwork"},

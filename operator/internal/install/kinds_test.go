@@ -75,6 +75,30 @@ func TestApplyRolesCoverEveryDeclarableKind(t *testing.T) {
 			t.Errorf("dotvirt-argocd-read grants %v on %v %v, want read verbs only", r.Verbs, r.APIGroups, r.Resources)
 		}
 	}
+	// `*` on vdipools holds seat, which lets its holder relabel a pool's
+	// desktop to another claim or plant one of any image: DeskuBe's manager's
+	// alone. Neither account Argo applies with may hold it.
+	for _, name := range []string{"dotvirt-argocd-apply", "dotvirt-argocd-read", "dotvirt-platform-sync"} {
+		for _, r := range roles[name] {
+			if (slices.Contains(r.APIGroups, "vdi.desku.be") || slices.Contains(r.APIGroups, "*")) &&
+				(slices.Contains(r.Verbs, "*") || slices.Contains(r.Verbs, "seat") || slices.Contains(r.Resources, "*")) {
+				t.Errorf("%s grants %v on %v %v: seat is DeskuBe's manager's alone", name, r.Verbs, r.APIGroups, r.Resources)
+			}
+		}
+	}
+	// DeskuBe's admission asks whoever writes a pool's subjects for use on the
+	// pool and every claim verb: the shared controller syncs them until
+	// impersonation is on.
+	for _, need := range []struct{ resource, verb string }{
+		{"vdipools", "use"}, {"vdiclaims", "create"}, {"vdiclaims", "delete"}, {"vdiclaims", "get"},
+		{"vdiclaims", "list"}, {"vdiclaims", "patch"}, {"vdiclaims", "update"}, {"vdiclaims", "watch"},
+	} {
+		if !slices.ContainsFunc(apply, func(r rbacv1.PolicyRule) bool {
+			return slices.Contains(r.APIGroups, "vdi.desku.be") && slices.Contains(r.Resources, need.resource) && slices.Contains(r.Verbs, need.verb)
+		}) {
+			t.Errorf("dotvirt-argocd-apply lacks %s on %s, which a pool's subjects ask", need.verb, need.resource)
+		}
+	}
 	// CDI authorizes a clone as the DataVolume's creator. The shared controller
 	// holding datavolumes/source would let any tenant repo clone a disk out of
 	// any namespace, so a clone is authorized only as a project's own account.

@@ -33,14 +33,41 @@ func TestAllowTenantKinds(t *testing.T) {
 		GroupKind{"operator.openshift.io", "KubeDescheduler"},
 		GroupKind{"template.kubevirt.io", "VirtualMachineTemplate"},
 		GroupKind{"", "ResourceQuota"},
+		GroupKind{"vdi.desku.be", "VdiPool"},
+		GroupKind{"vdi.desku.be", "VdiClaim"},
+		GroupKind{"vdi.desku.be", "VdiClass"},
 	)
 	if want := []GroupKind{{"apps", "Deployment"}, {"", "Service"}}; !slices.Equal(allowed, want) {
 		t.Errorf("allowed = %v, want %v", allowed, want)
 	}
-	if len(refused) != 18 {
-		t.Errorf("refused %d kinds, want 18 (each once): %v", len(refused), refused)
+	if len(refused) != 20 {
+		t.Errorf("refused %d kinds, want 20 (each once): %v", len(refused), refused)
 	}
 	if a, r := AllowTenantKinds(); a != nil || r != nil {
 		t.Errorf("none named: %v, %v", a, r)
+	}
+}
+
+// A project's repo declares its pools and the desktops made one by one; the
+// platform repo the classes; no repo a claim, a person's live hold.
+func TestDesktopKinds(t *testing.T) {
+	for _, c := range []struct {
+		kind             string
+		tenant, platform bool
+	}{
+		{"VdiPool", true, false},
+		{"VdiInstance", true, false},
+		{"VdiClass", false, true},
+	} {
+		k, ok := LookupKind(c.kind)
+		if !ok || k.Group != "vdi.desku.be" || k.Tenant != c.tenant || k.Platform != c.platform || k.ClusterScoped != (c.kind == "VdiClass") {
+			t.Errorf("%s = %+v, %v", c.kind, k, ok)
+		}
+	}
+	if _, ok := LookupKind("VdiClaim"); ok {
+		t.Error("VdiClaim is in the kinds table: no repo declares a claim")
+	}
+	if _, refused := AllowTenantKinds(GroupKind{"vdi.desku.be", "VdiClaim"}); len(refused) != 1 {
+		t.Error("a provider may allow claims into tenant repos")
 	}
 }

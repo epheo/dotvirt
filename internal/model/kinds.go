@@ -74,6 +74,12 @@ func (k Kind) RepoPath(namespace, name string) string {
 			return "rbac/" + namespace + ".yaml"
 		}
 		return "rbac/" + namespace + "/" + name + ".yaml"
+	case KindVdiPool.Kind:
+		return namespace + "/desktop-pools/" + name + ".yaml"
+	case KindVdiInstance.Kind:
+		return namespace + "/desktops/" + name + ".yaml"
+	case KindVdiClass.Kind:
+		return "desktop-classes/" + name + ".yaml"
 	case KindGateway.Kind, KindCert.Kind, KindGWParams.Kind:
 		return "publishing/" + namespace + "/" + name + ".yaml"
 	case KindNS.Kind:
@@ -115,6 +121,9 @@ type Resource struct {
 	// The others (VM, namespace, role binding, template, rebalancing) have routes of
 	// their own.
 	NetworkFamily bool
+	// Adopted marks a resource adoption captures outside the network family,
+	// whose kinds no form reads back yet.
+	Adopted bool
 }
 
 // ClusterKind is the resource's cluster-scoped backing, when it has one.
@@ -170,6 +179,10 @@ var (
 	KindGateway  = kindOf("Gateway")
 	KindCert     = kindOf("Certificate")
 	KindGWParams = kindOf("GatewayParameters")
+
+	KindVdiClass    = kindOf("VdiClass")
+	KindVdiPool     = kindOf("VdiPool")
+	KindVdiInstance = kindOf("VdiInstance")
 )
 
 // KindDV is a VM's disk, declared beside it in a tenant repo. It has no row:
@@ -216,6 +229,11 @@ var resources = []Resource{
 	// A namespace's Gateway and its certificate; the route grant beside them
 	// is the rolebinding resource.
 	{Name: "publishing", Kinds: []Kind{KindGateway, KindCert, KindGWParams}, CreateLabel: "Turn publishing on", EditLabel: "Edit publishing", Noun: "publishing"},
+	// DeskuBe's: what desktops a project runs, and of which class. The grants
+	// turning desktops on stages are the rolebinding resource.
+	{Name: "desktopclass", Kinds: []Kind{KindVdiClass}, CreateLabel: "Create desktop class", EditLabel: "Edit desktop class", Noun: "a desktop class", Adopted: true},
+	{Name: "desktoppool", Kinds: []Kind{KindVdiPool}, CreateLabel: "Create desktop pool", EditLabel: "Edit desktop pool", Noun: "a desktop pool", Adopted: true},
+	{Name: "desktop", Kinds: []Kind{KindVdiInstance}, CreateLabel: "Create desktop", EditLabel: "Edit desktop", Noun: "a desktop", Adopted: true},
 }
 
 // ResourceNoun names a draft resource in a message: the persisted name is
@@ -256,11 +274,12 @@ func LookupKind(kind string) (Resource, Kind, bool) {
 	return Resource{}, Kind{}, false
 }
 
-// NetworkFamilyKinds lists every backing of the network family, in table order.
-func NetworkFamilyKinds() []Kind {
+// AdoptedKinds lists every backing adoption captures besides the VM's: the
+// network family and the Adopted resources, in table order.
+func AdoptedKinds() []Kind {
 	var out []Kind
 	for _, r := range resources {
-		if r.NetworkFamily {
+		if r.NetworkFamily || r.Adopted {
 			out = append(out, r.Kinds...)
 		}
 	}
