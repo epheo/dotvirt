@@ -71,7 +71,7 @@ func newGrantCluster(t *testing.T) *gateRig {
 	g.fc.serveKinds(model.KindVM, model.KindUDN, model.KindCUDN, model.KindNAD, model.KindNNCP, model.KindNS, model.KindRB,
 		model.KindEgressFW, model.KindEgressIP, model.KindExtRoute, model.KindNetpol, model.KindANP, model.KindBANP,
 		model.KindOpGroup, model.KindSub, model.KindDesched, model.KindMachCfg, model.KindGateway, model.KindCert, model.KindGWParams,
-		model.KindVdiClass, model.KindVdiPool, model.KindVdiInstance)
+		model.KindVdiClass, model.KindVdiPool)
 	return g
 }
 

@@ -245,17 +245,20 @@ func (s *Server) namespaceCaps(ctx context.Context, sc scope, ns string) model.N
 // as handleDesktopsOn weighs it: DeskuBe served, the whole project in view or
 // any namespace claimable, and the gate's accesses allowed. DesktopsOn is
 // what Kubernetes shows the caller: the namespace's desktop grant, told only
-// to one who may list rolebindings there. Run after projectCaps, whose
-// SyncAccess it reads.
+// to one who may list rolebindings there, the others' namespaces being
+// DesktopsUnseen. Run after projectCaps, whose SyncAccess it reads.
 func (s *Server) desktopsCaps(ctx context.Context, sc scope, full project.ProjectInfo, out *model.ProjectCaps) {
-	if len(s.unserved(ctx, desktopKinds...)) == len(desktopKinds) {
+	if s.unserved(ctx, model.KindVdiPool)[model.KindVdiPool] {
 		return
 	}
 	id, c := sc.id, sc.cluster
 	whole := len(sc.proj.Namespaces) == len(full.Namespaces) || s.capable(ctx, id, c, claimAction(""))
 	for _, ns := range full.Namespaces {
 		on, need, err := s.draft.DesktopsNeeds(s.platformProject(), full, ns)
-		if on && s.capable(ctx, id, c, kindAction(verbList, model.KindRB, ns)) {
+		switch {
+		case !s.capable(ctx, id, c, kindAction(verbList, model.KindRB, ns)):
+			out.DesktopsUnseen = append(out.DesktopsUnseen, ns)
+		case on:
 			out.DesktopsOn = append(out.DesktopsOn, ns)
 		}
 		if !whole {
@@ -431,7 +434,7 @@ func (s *Server) handleModules(w http.ResponseWriter, r *http.Request) {
 	un := s.unserved(r.Context(), model.KindSub, model.KindOpGroup, model.KindMachCfg)
 	m.OLM = !un[model.KindSub] && !un[model.KindOpGroup]
 	m.MachineConfig = !un[model.KindMachCfg]
-	m.ExtraTenantKinds = len(s.cfg.TenantKinds.Allowed) > 0
+	m.ExtraTenantKinds = s.cfg.TenantKinds.Extra()
 	if s.cfg.Publish.On() && len(s.unserved(r.Context(), s.publishingKinds()...)) == 0 {
 		m.PublishDomain = s.cfg.Publish.Domain
 	}

@@ -645,9 +645,6 @@ type grantSource struct {
 	// none does. sole refuses a file holding anything else, as one to rewrite.
 	// nil reads none.
 	declared func(ref model.ObjectRef, sole bool) (path string, content []byte, err error)
-	// bindings names the RoleBindings the base branch declares in a
-	// namespace, in name order. nil reads none.
-	bindings func(ns string) []string
 }
 
 // grantSource reads commitProj's declared grants.
@@ -674,16 +671,6 @@ func (c *Coordinator) grantSource(commitProj project.ProjectInfo) (grantSource, 
 		}
 		content, err := read.FileOnBranch(c.baseBranch, path)
 		return path, content, err
-	}
-	g.bindings = func(ns string) []string {
-		var out []string
-		for ref := range idx.Files {
-			if ref.Kind == model.KindRB.Kind && ref.Namespace == ns {
-				out = append(out, ref.Name)
-			}
-		}
-		slices.Sort(out)
-		return out
 	}
 	return g, nil
 }
@@ -781,11 +768,11 @@ func (g grantSource) syncAccount(sub netgen.Subject) bool {
 // already declares, inherit, the owners and the project's sync account
 // (netgen.RoleBindingManifest), and, while that grant is the admin role, the
 // EgressFirewall grant to those same subjects plus any it already declares
-// (netgen.EgressManifest), and the HTTPRoute grant and the desktop grants
+// (netgen.EgressManifest), and the HTTPRoute grant and the desktop grant
 // likewise where publishing or desktops declared them (netgen.RoutesManifest,
-// netgen.DesktopsManifest, netgen.DesktopsAdminManifest). Each rewrites the
-// file declaring it, if any; the admin grant keeps its role. A grant git
-// already states is left out, and none at all with nobody to grant.
+// netgen.DesktopsManifest). Each rewrites the file declaring it, if any; the
+// admin grant keeps its role. A grant git already states is left out, and
+// none at all with nobody to grant.
 func (g grantSource) entries(ns, proj string, owners []string, inherit []netgen.Subject) ([]draft.Entry, error) {
 	spec := netgen.RoleBindingSpec{Namespace: ns, Project: proj, Owners: owners, Kept: inherit}
 	if name, ok := tenancy.SyncAccount(proj); ok && g.syncNS != "" {
@@ -825,11 +812,7 @@ func (g grantSource) entries(ns, proj string, owners []string, inherit []netgen.
 	if err != nil {
 		return nil, err
 	}
-	claims, err := g.desktopsAdmin(spec, false)
-	if err != nil {
-		return nil, err
-	}
-	return slices.Concat(admin, egress, routes, desktops, claims), nil
+	return slices.Concat(admin, egress, routes, desktops), nil
 }
 
 // follow stages RoleBinding name in ns, rendered by render for the admin

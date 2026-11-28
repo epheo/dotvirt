@@ -85,7 +85,6 @@ func TestAdoptPathMatchesGeneratorLayout(t *testing.T) {
 		{"networking.k8s.io/v1", "NetworkPolicy", "team-a/networkpolicies/web.yaml"},
 		{"k8s.ovn.org/v1", "EgressFirewall", "team-a/egressfirewalls/default.yaml"},
 		{"vdi.desku.be/v1alpha1", "VdiPool", "team-a/desktop-pools/web.yaml"},
-		{"vdi.desku.be/v1alpha1", "VdiInstance", "team-a/desktops/web.yaml"},
 	} {
 		if got := adoptPath(liveObj(tc.apiVersion, tc.kind, "team-a", "web", nil)); got != tc.want {
 			t.Errorf("%s: got %s, want %s", tc.kind, got, tc.want)
@@ -200,38 +199,22 @@ func TestAdoptManifestStripsRevisionName(t *testing.T) {
 	}
 }
 
-// A pool's desktops are its own, made and handed out by DeskuBe: never
-// declared beside the pool, nor once its reference is gone and its label
-// stays. A desktop made one by one comes in without its pairing, a pending
-// PIN its owner wrote live.
-func TestAdoptableDesktops(t *testing.T) {
-	desk := func(name string, meta map[string]any) *unstructured.Unstructured {
-		u := liveObj("vdi.desku.be/v1alpha1", "VdiInstance", "team-a", name, meta)
-		u.Object["spec"] = map[string]any{"className": "desktop", "owner": "bob", "pairing": map[string]any{"pin": "4821"}}
-		return u
-	}
+// A pool comes under git, its desktops never: a capture never lists them, as
+// each carries its pending pairing PIN.
+func TestAdoptableDesktopPools(t *testing.T) {
 	dc := dynamicfake.NewSimpleDynamicClientWithCustomListKinds(runtime.NewScheme(), adoptableListKinds(),
 		liveObj("vdi.desku.be/v1alpha1", "VdiPool", "team-a", "design", nil),
-		desk("bob-desk", nil),
-		desk("design-alice", map[string]any{
-			"labels":          map[string]any{"vdi.desku.be/pool": "design"},
-			"ownerReferences": []any{map[string]any{"apiVersion": "vdi.desku.be/v1alpha1", "kind": "VdiPool", "name": "design", "controller": true}},
-		}),
-		desk("design-carol", map[string]any{"labels": map[string]any{"vdi.desku.be/pool": "design"}}),
 	)
+	dc.PrependReactor("list", "vdiinstances", func(clienttesting.Action) (bool, runtime.Object, error) {
+		t.Error("the capture listed desktops")
+		return true, nil, nil
+	})
 	got, _, err := NewClient(nil, nil, dc).AdoptableObjects(context.Background(), []string{"team-a"}, nil)
 	if err != nil {
 		t.Fatalf("AdoptableObjects: %v", err)
 	}
-	byPath := map[string]string{}
-	for _, o := range got {
-		byPath[o.Path] = string(o.Manifest)
-	}
-	if len(got) != 2 || byPath["team-a/desktop-pools/design.yaml"] == "" || byPath["team-a/desktops/bob-desk.yaml"] == "" {
-		t.Fatalf("want the pool and the desktop made one by one, got %v", byPath)
-	}
-	if m := byPath["team-a/desktops/bob-desk.yaml"]; strings.Contains(m, "pairing") || strings.Contains(m, "4821") || !strings.Contains(m, "owner: bob") {
-		t.Errorf("adopted desktop:\n%s", m)
+	if len(got) != 1 || got[0].Path != "team-a/desktop-pools/design.yaml" {
+		t.Fatalf("want the pool alone, got %v", got)
 	}
 }
 

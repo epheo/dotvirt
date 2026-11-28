@@ -609,8 +609,8 @@ func TestTenantAppProjectsAdmitNoNAD(t *testing.T) {
 	}
 }
 
-// A project's repo declares its desktop pools and its desktops made one by
-// one, never a claim, even named allowed; the platform repo the classes.
+// A project's repo declares its desktop pools while Argo impersonates, never
+// a desktop or a claim, even named allowed; the platform repo the classes.
 func TestAppProjectsAdmitDesktops(t *testing.T) {
 	dv := testDotvirt()
 	dv.Spec.ArgoCD.TenantKindsAllowed = []dotvirtv1alpha1.GroupKind{{Group: "vdi.desku.be", Kind: "VdiClaim"}}
@@ -622,17 +622,33 @@ func TestAppProjectsAdmitDesktops(t *testing.T) {
 		})
 	}
 	tenant := TenantAppProject(dv, "argocd", "dotvirt-p-a", "a", []string{"a"}, nil, TenantAllowed(dv, true))
-	for _, kind := range []string{"VdiPool", "VdiInstance"} {
-		if !admits(tenant, "namespaceResourceWhitelist", kind) {
-			t.Errorf("a tenant AppProject refuses %s", kind)
+	if !admits(tenant, "namespaceResourceWhitelist", "VdiPool") {
+		t.Error("impersonating: a tenant AppProject refuses pools")
+	}
+	for _, kind := range []string{"VdiInstance", "VdiClaim", "VdiPairing", "VdiClass"} {
+		if admits(tenant, "namespaceResourceWhitelist", kind) {
+			t.Errorf("a tenant AppProject admits %s", kind)
 		}
 	}
-	if admits(tenant, "namespaceResourceWhitelist", "VdiClaim") || admits(tenant, "namespaceResourceWhitelist", "VdiClass") {
-		t.Error("a tenant AppProject admits claims or classes")
+	// Not in effect, whatever the reason: the shared controller would apply
+	// the pool, with rights over it no project holds.
+	off := false
+	asked := testDotvirt()
+	asked.Spec.ArgoCD.SyncImpersonation.Enabled = &off
+	for name, allowed := range map[string][]tenancy.GroupKind{
+		"not impersonating yet": TenantAllowed(dv, false),
+		"asked off":             TenantAllowed(asked, true),
+	} {
+		if admits(TenantAppProject(dv, "argocd", "dotvirt-p-a", "a", []string{"a"}, nil, allowed), "namespaceResourceWhitelist", "VdiPool") {
+			t.Errorf("%s: a tenant AppProject admits pools", name)
+		}
+	}
+	if admits(TenantsAppProject(dv, "argocd", "https://forge/dotvirt/platform.git", "ns"), "namespaceResourceWhitelist", "VdiPool") {
+		t.Error("the shared tier, which names no sync account, admits pools")
 	}
 	platform := PlatformAppProject(dv, "argocd", "https://forge/dotvirt/platform.git")
-	if !admits(platform, "clusterResourceWhitelist", "VdiClass") || admits(platform, "namespaceResourceWhitelist", "VdiClaim") {
-		t.Error("the platform AppProject refuses classes or admits claims")
+	if !admits(platform, "clusterResourceWhitelist", "VdiClass") || admits(platform, "namespaceResourceWhitelist", "VdiPool") || admits(platform, "namespaceResourceWhitelist", "VdiClaim") {
+		t.Error("the platform AppProject refuses classes, or admits pools or claims")
 	}
 }
 
@@ -767,7 +783,8 @@ func TestTenantKindsAllowedNeedImpersonation(t *testing.T) {
 }
 
 // dotvirt reads what tenant repos may apply beyond the listed kinds from its
-// env: nothing while they keep the listed kinds, the allowed ones else.
+// env: nothing while they keep the listed kinds, the allowed and the
+// impersonated ones else.
 func TestDeploymentCarriesTheTenantKinds(t *testing.T) {
 	dv := testDotvirt()
 	env := func(allowed []tenancy.GroupKind) (string, bool) {
@@ -777,7 +794,7 @@ func TestDeploymentCarriesTheTenantKinds(t *testing.T) {
 		t.Errorf("listed: %q", v)
 	}
 	dv.Spec.ArgoCD.TenantKindsAllowed = []dotvirtv1alpha1.GroupKind{{Group: "apps", Kind: "Deployment"}, {Kind: "Service"}, {Group: "rbac.authorization.k8s.io", Kind: "Role"}}
-	if v, _ := env(TenantAllowed(dv, true)); v != "apps/Deployment,/Service" {
+	if v, _ := env(TenantAllowed(dv, true)); v != "apps/Deployment,/Service,vdi.desku.be/VdiPool" {
 		t.Errorf("allowed: %q", v)
 	}
 }

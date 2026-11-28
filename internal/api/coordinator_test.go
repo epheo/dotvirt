@@ -26,6 +26,7 @@ import (
 	"github.com/epheo/dotvirt/internal/model"
 	"github.com/epheo/dotvirt/internal/netgen"
 	"github.com/epheo/dotvirt/internal/netstate"
+	"github.com/epheo/dotvirt/internal/project"
 	"github.com/epheo/dotvirt/internal/publish"
 	"github.com/epheo/dotvirt/pkg/forge"
 	"github.com/epheo/dotvirt/pkg/tenancy"
@@ -142,7 +143,6 @@ func TestCapabilitiesEqualTheCoordinatorsGate(t *testing.T) {
 		{verb: verbBind, group: rbac, resource: "clusterroles", name: tenancy.TenantRoutesRole},
 		{verb: verbBind, group: rbac, resource: "clusterroles", name: tenancy.TenantGatewayViewRole},
 		{verb: verbBind, group: rbac, resource: "clusterroles", name: tenancy.TenantDesktopsRole},
-		{verb: verbBind, group: rbac, resource: "clusterroles", name: tenancy.TenantDesktopsAdminRole},
 		kind(verbCreate, model.KindUDN, ""),
 		kind(verbCreate, model.KindCUDN, ""),
 		kind(verbCreate, model.KindGateway, ""),
@@ -365,6 +365,47 @@ func TestPublishingOnFollowsGatewayReads(t *testing.T) {
 	_, nc := g.caps(g.token([]grant{kind(verbList, model.KindGateway, "team-a-publish")}), "team-a-dev")
 	if !nc.Project.PublishingOn || nc.Project.Publishing || nc.Project.PublishNamespace != "team-a-publish" {
 		t.Errorf("publishingOn %v, publishing %v, in %q: want on in team-a-publish, nothing to stage", nc.Project.PublishingOn, nc.Project.Publishing, nc.Project.PublishNamespace)
+	}
+}
+
+// "On" is what Kubernetes shows the caller: only one who may list rolebindings
+// in the namespace is told its desktop grant is there; the others are told
+// they may not see it, whatever git holds.
+func TestDesktopsOnFollowsBindingReads(t *testing.T) {
+	path, binding, err := netgen.DesktopsManifest(netgen.RoleBindingSpec{
+		Namespace: "team-a-dev", Project: "team-a", Kept: []netgen.Subject{{Kind: "User", APIGroup: "rbac.authorization.k8s.io", Name: "alice"}},
+		SyncAccount: netgen.ServiceAccountSubject("dotvirt-sync", "dotvirt-p-team-a"),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, files := range []map[string]string{nil, {path: string(binding)}} {
+		g := newCoordinatorRig(t, files)
+		if _, nc := g.caps(g.token(nil), "team-a-dev"); !slices.Equal(nc.Project.DesktopsUnseen, []string{"team-a-dev"}) || len(nc.Project.DesktopsOn) != 0 {
+			t.Errorf("git holds %d files: unseen %v, on %v, want unseen alone", len(files), nc.Project.DesktopsUnseen, nc.Project.DesktopsOn)
+		}
+		_, nc := g.caps(g.token([]grant{kind(verbList, model.KindRB, "team-a-dev")}), "team-a-dev")
+		if on := slices.Contains(nc.Project.DesktopsOn, "team-a-dev"); on != (files != nil) || len(nc.Project.DesktopsUnseen) != 0 || len(nc.Project.Desktops) != 0 {
+			t.Errorf("git holds %d files: on %v, unseen %v, offered %v", len(files), nc.Project.DesktopsOn, nc.Project.DesktopsUnseen, nc.Project.Desktops)
+		}
+	}
+}
+
+// Adopting a pool into a namespace without desktops on warns: its project's
+// account may not apply it.
+func TestAdoptingAPoolWarnsWhereDesktopsAreOff(t *testing.T) {
+	pool := model.DraftView{Items: []model.DraftItem{{Resource: string(draft.ResourceDesktopPool), Namespace: "team-a-dev", Name: "design"}}}
+	sc := scope{proj: project.ProjectInfo{Name: "team-a"}}
+	if !newCoordinatorRig(t).s.desktopsOff(sc, "team-a-dev", pool) {
+		t.Error("no warning where desktops are off")
+	}
+	path, binding, err := netgen.DesktopsManifest(netgen.RoleBindingSpec{Namespace: "team-a-dev", Kept: []netgen.Subject{{Kind: "User", Name: "alice"}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	g := newCoordinatorRig(t, map[string]string{path: string(binding)})
+	if g.s.desktopsOff(sc, "team-a-dev", pool) || g.s.desktopsOff(sc, "team-a-dev", model.DraftView{}) {
+		t.Error("a warning where desktops are on, or no pool is staged")
 	}
 }
 

@@ -823,9 +823,9 @@ async function handleAPI(req, res, url) {
 		return sendJSON(res, 200, draftFor('platform'));
 	}
 
-	// Desktops in one project namespace: DeskuBe's writes and the claim acts,
-	// staged in the platform draft; refused on the capability the UI gates it
-	// by.
+	// Desktops in one project namespace: DeskuBe's pool writes and claim
+	// verbs, staged in the platform draft; refused on the capability the UI
+	// gates it by.
 	m = path.match(/^\/api\/projects\/([^/]+)\/namespaces\/([^/]+)\/desktops$/);
 	if (m && req.method === 'POST') {
 		const p = state.scenario.inventory.projects.find((x) => x.name === m[1]);
@@ -833,14 +833,13 @@ async function handleAPI(req, res, url) {
 		const caps = namespaceCaps(s, p, p.namespaces[0].namespace).project;
 		if (!caps.desktops?.includes(m[2]))
 			return sendText(res, 403, `you may not bind dotvirt-tenant-desktops in ${m[2]}`);
-		for (const name of [`${m[2]}-desktops`, `${m[2]}-desktops-admin`])
-			stageInto('platform', {
-				kind: 'create',
-				resource: 'rolebinding',
-				namespace: m[2],
-				name,
-				changes: [],
-			});
+		stageInto('platform', {
+			kind: 'create',
+			resource: 'rolebinding',
+			namespace: m[2],
+			name: `${m[2]}-desktops`,
+			changes: [],
+		});
 		return sendJSON(res, 200, draftFor('platform'));
 	}
 

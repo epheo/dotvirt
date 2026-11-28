@@ -23,7 +23,12 @@ rules:
 - apiGroups:
   - vdi.desku.be
   resources:
-  - vdiinstances
+  - vdipools/status
+  verbs:
+  - get
+- apiGroups:
+  - vdi.desku.be
+  resources:
   - vdiclaims
   verbs:
   - create
@@ -33,10 +38,3 @@ rules:
   - patch
   - update
   - watch
-- apiGroups:
-  - vdi.desku.be
-  resources:
-  - vdipools/status
-  - vdiinstances/status
-  verbs:
-  - get

@@ -130,8 +130,6 @@ rules:
   resources:
   - vdiclasses
   - vdipools
-  - vdiinstances
-  - vdiclaims
   verbs:
   - get
   - list

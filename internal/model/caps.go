@@ -213,13 +213,15 @@ type ProjectCaps struct {
 	// them. Set with PublishingOn or an allowed stage.
 	PublishingReach []string `json:"publishingReach,omitempty"`
 	// Desktops are the project's namespaces where the caller may stage
-	// turning desktops on: DeskuBe's grants there, to the namespace's admins,
-	// its authors and its repo, or what those grants lack. Empty where the
-	// cluster serves no DeskuBe.
+	// turning desktops on: DeskuBe's pool writes and claim verbs there, to the
+	// namespace's admins and its repo, or what that grant lacks. Empty where
+	// the cluster serves no DeskuBe.
 	Desktops []string `json:"desktops,omitempty"`
 	// DesktopsOn are the namespaces whose desktop grant git holds, told only
-	// to a caller who may list rolebindings there.
-	DesktopsOn []string `json:"desktopsOn,omitempty"`
+	// to a caller who may list rolebindings there; DesktopsUnseen are those
+	// where the caller may not.
+	DesktopsOn     []string `json:"desktopsOn,omitempty"`
+	DesktopsUnseen []string `json:"desktopsUnseen,omitempty"`
 	// DesktopsUngranted are the namespaces where desktops wait on an admin
 	// grant in git, which SyncAccess stages: told only to a caller who may.
 	DesktopsUngranted []string `json:"desktopsUngranted,omitempty"`

@@ -175,17 +175,23 @@
 					</div>
 					{#each p.namespaces as n (n.namespace)}
 						{@const on = !!c?.desktopsOn?.includes(n.namespace)}
+						{@const unseen = !!c?.desktopsUnseen?.includes(n.namespace)}
 						{@const gate = desktopsGate.on(first, n.namespace)}
 						<div class="flex flex-wrap items-center gap-2">
 							<span class="font-mono text-xs">{n.namespace}</span>
 							{#if on}
 								<span class="text-ink-soft">On</span>
+							{:else if unseen}
+								<span class="text-ink-muted">
+									You may not see whether desktops are on here: that needs listing its role
+									bindings.
+								</span>
 							{/if}
 							{#if c?.desktopsUngranted?.includes(n.namespace)}
 								<span class="text-ink-muted">
 									Not yet: desktops follow its admin grant, which Grant sync access stages.
 								</span>
-							{:else if !on || gate.ok}
+							{:else if gate.ok || (!on && !unseen)}
 								<Button
 									variant="outline"
 									size="sm"

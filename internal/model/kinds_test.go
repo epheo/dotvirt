@@ -53,7 +53,6 @@ func TestDesktopRepoPaths(t *testing.T) {
 		want string
 	}{
 		{KindVdiPool, "team-a", "team-a/desktop-pools/design.yaml"},
-		{KindVdiInstance, "team-a", "team-a/desktops/design.yaml"},
 		{KindVdiClass, "", "desktop-classes/design.yaml"},
 	} {
 		if got := c.kind.RepoPath(c.ns, "design"); got != c.want {
@@ -64,13 +63,18 @@ func TestDesktopRepoPaths(t *testing.T) {
 	for _, k := range AdoptedKinds() {
 		adopted[k.Kind] = true
 	}
-	for _, k := range []Kind{KindVdiPool, KindVdiInstance, KindVdiClass, KindUDN} {
+	for _, k := range []Kind{KindVdiPool, KindVdiClass, KindUDN} {
 		if !adopted[k.Kind] {
 			t.Errorf("adoption does not capture %s", k.Kind)
 		}
 	}
-	if r, _, _ := LookupKind(KindVdiInstance.Kind); r.NetworkFamily {
-		t.Error("desktops ride the network family's object routes, which read back a network form")
+	// A capture lists every desktop the caller may read, pending PINs
+	// included.
+	if adopted["VdiInstance"] {
+		t.Error("adoption captures desktops")
+	}
+	if r, _, _ := LookupKind(KindVdiPool.Kind); r.NetworkFamily {
+		t.Error("pools ride the network family's object routes, which read back a network form")
 	}
 }
 

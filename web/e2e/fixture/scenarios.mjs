@@ -2469,6 +2469,16 @@ const desktopsungranted = {
 		'web-prod': { project: { syncAccess: true, desktopsUngranted: ['web-prod'] } },
 	},
 };
+// This caller may not list db-prod's role bindings: whether desktops are on
+// there is not its to see.
+const desktopsunseen = {
+	...desktopsgrants,
+	name: 'desktopsunseen',
+	capabilities: {
+		...desktopsgrants.capabilities,
+		'db-prod': { project: { desktopsUnseen: ['db-prod'] } },
+	},
+};
 
 // --- publishing ---
 // The install publishes under apps.example.com. team-web may be turned on and
@@ -2617,6 +2627,7 @@ export const scenarios = {
 	desktopsnovms,
 	desktopsgrants,
 	desktopsungranted,
+	desktopsunseen,
 	classquota,
 	replicatedquota,
 	publishing,

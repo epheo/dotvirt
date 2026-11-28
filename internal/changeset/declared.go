@@ -278,13 +278,19 @@ func requirePlacement(rule KindRule, proj project.ProjectInfo, path string, cont
 }
 
 // tenantDeclarable refuses a kind a tenant repo may not declare, saying why:
-// under the listed kinds alone it belongs in the platform repo; with kinds
-// allowed beyond them it is one this install's tenant repos may not apply.
+// an impersonated kind waits on sync impersonation; under the listed kinds
+// alone it belongs in the platform repo; with kinds allowed beyond them it is
+// one this install's tenant repos may not apply.
 func tenantDeclarable(rule KindRule, proj project.ProjectInfo, group, kind, name string) error {
 	if proj.Name == project.PlatformName || rule.Declarable(group, kind) {
 		return nil
 	}
-	if len(rule.Policy.Allowed) > 0 {
+	if tenancy.Impersonated(group, kind) {
+		return fmt.Errorf("%w: %s %s syncs only as project %s's own account, and Argo CD does not sync this install's tenant repos as their own accounts yet: "+
+			"a cluster admin turns sync impersonation on (spec.argocd.syncImpersonation in the Dotvirt resource), then declare it",
+			model.ErrInvalid, kind, name, proj.Name)
+	}
+	if rule.Policy.Extra() {
 		return fmt.Errorf("%w: %s %s is a kind this install's tenant repos may not apply, so project %s may not declare it",
 			model.ErrInvalid, kind, name, proj.Name)
 	}

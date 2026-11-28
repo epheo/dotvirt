@@ -268,7 +268,13 @@ func (r *DotvirtReconciler) tenantKinds(ctx context.Context, dv *dotvirtv1alpha1
 		return rc.tenantAllowed
 	}
 	rc.tenantKindsRead = true
-	if allowed, _ := install.NamedTenantKinds(dv); len(allowed) == 0 {
+	if !dv.Spec.ArgoCD.SyncImpersonation.On() {
+		return nil
+	}
+	// Until argocd-cm carries the setting nothing impersonates: the
+	// AppProjects need no read.
+	if set, _, err := r.impersonationConfigured(ctx, rc.argoNS); err != nil || !set {
+		rc.impersonation = new(false)
 		return nil
 	}
 	if held == nil {

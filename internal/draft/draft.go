@@ -55,7 +55,6 @@ const (
 	ResourcePublishing                 Resource = "publishing"                 // a namespace's Gateway and its certificate
 	ResourceDesktopClass               Resource = "desktopclass"               // a kind of desktop the platform offers (DeskuBe VdiClass)
 	ResourceDesktopPool                Resource = "desktoppool"                // a project's pool of desktops (VdiPool)
-	ResourceDesktop                    Resource = "desktop"                    // a desktop made one by one (VdiInstance)
 )
 
 // Atomic reports whether entries of this resource form one logical change that

@@ -14,7 +14,7 @@ func TestEveryResourceHasATableRow(t *testing.T) {
 		ResourceVM, ResourceNetwork, ResourceUplink, ResourceNamespace, ResourceRoleBinding,
 		ResourceEgressFirewall, ResourceEgressIP, ResourceExternalRoute, ResourceNetworkPolicy,
 		ResourceAdminNetworkPolicy, ResourceBaselineAdminNetworkPolicy, ResourceDRS, ResourceTemplate,
-		ResourcePublishing, ResourceDesktopClass, ResourceDesktopPool, ResourceDesktop,
+		ResourcePublishing, ResourceDesktopClass, ResourceDesktopPool,
 	}
 	if len(consts) != len(model.Resources()) {
 		t.Errorf("%d draft resources, %d table rows", len(consts), len(model.Resources()))

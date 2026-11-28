@@ -219,7 +219,28 @@ func (s *Server) handleAdoptNamespace(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	result, err := s.draft.AdoptObjects(sc.id, sc.proj, ns, objs)
+	if err == nil && s.desktopsOff(sc, ns, result) {
+		result.Warning = changeset.JoinWarning(result.Warning, fmt.Sprintf(
+			"%s: desktops are not on there, so the project's account may not apply the desktop pools staged until a platform admin turns them on.", ns))
+	}
 	respond(w, withUnreadable(result, ns, unreadable, denied), err)
+}
+
+// desktopsOff reports whether v stages a desktop pool into ns while the
+// platform repo holds no desktop grant there. Unknown is not off.
+func (s *Server) desktopsOff(sc scope, ns string, v model.DraftView) bool {
+	if s.cfg.PlatformRepo == "" || !slices.ContainsFunc(v.Items, func(it model.DraftItem) bool {
+		return it.Resource == string(draft.ResourceDesktopPool) && it.Namespace == ns
+	}) {
+		return false
+	}
+	full, ok := s.projectByName(sc.proj.Name)
+	if !ok {
+		return false
+	}
+	on, _, err := s.draft.DesktopsNeeds(s.platformProject(), full, ns)
+	known := err == nil || errors.Is(err, changeset.ErrDesktopsOn) || errors.Is(err, changeset.ErrDesktopsUngranted)
+	return known && !on
 }
 
 // captureAdoptable runs the caller-token capture for one namespace ("" = the

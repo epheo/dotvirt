@@ -211,9 +211,9 @@ func remote(project string) *unstructured.Unstructured {
 // in ns.
 func tenantApp(project, kind, ns string) *unstructured.Unstructured {
 	app := application("dotvirt-"+project, tenancy.AppProjectPrefix+project)
-	i := slices.IndexFunc(tenancy.TenantKinds, func(k tenancy.Kind) bool { return k.Kind == kind })
+	i := slices.IndexFunc(repoKinds, func(k tenancy.Kind) bool { return k.Kind == kind })
 	app.Object["status"] = map[string]any{"resources": []any{
-		map[string]any{"group": tenancy.TenantKinds[i].Group, "kind": kind, "namespace": ns, "name": "x"},
+		map[string]any{"group": repoKinds[i].Group, "kind": kind, "namespace": ns, "name": "x"},
 	}}
 	return app
 }
@@ -329,48 +329,17 @@ func TestSyncOperandRoles(t *testing.T) {
 			}
 		}
 	}
-	// The desktop roles grant DeskuBe's kinds alone, by explicit verbs: `*`
-	// on vdipools holds seat, which only DeskuBe's manager may. Only the
-	// admins' role assigns, and the authors' reads desktops alone.
-	verbs := func(r *rbacv1.ClusterRole, resource string) []string {
-		var out []string
-		for _, rule := range r.Rules {
-			if slices.Contains(rule.Resources, resource) {
-				out = append(out, rule.Verbs...)
-			}
-		}
-		slices.Sort(out)
-		return out
+	// The desktop role grants pools and claims alone, by explicit verbs: `*`
+	// on vdipools holds seat, which only DeskuBe's manager may; assign claims
+	// in anyone's name; a desktop carries its pending pairing PIN.
+	desktops := roles[tenancy.TenantDesktopsRole]
+	if desktops == nil {
+		t.Fatalf("no %s role", tenancy.TenantDesktopsRole)
 	}
-	for name, want := range map[string]map[string][]string{
-		tenancy.TenantDesktopsRole: {
-			"vdipools":     {"create", "delete", "get", "list", "patch", "update", "use", "watch"},
-			"vdiinstances": {"create", "delete", "get", "list", "patch", "update", "watch"},
-			"vdiclaims":    {"create", "delete", "get", "list", "patch", "update", "watch"},
-		},
-		tenancy.TenantDesktopsAdminRole: {
-			"vdipools":  {"assign"},
-			"vdiclaims": {"create", "delete", "get", "list", "patch", "update", "watch"},
-		},
-		tenancy.TenantDesktopsViewRole: {
-			"vdiinstances": {"get", "list", "watch"},
-			"vdipools":     nil,
-		},
-	} {
-		r := roles[name]
-		if r == nil {
-			t.Errorf("no %s role", name)
-			continue
-		}
-		for _, rule := range r.Rules {
-			if !slices.Equal(rule.APIGroups, []string{"vdi.desku.be"}) || slices.Contains(rule.Verbs, "*") || slices.Contains(rule.Verbs, "seat") || slices.Contains(rule.Resources, "*") {
-				t.Errorf("%s grants %+v", name, rule)
-			}
-		}
-		for resource, v := range want {
-			if got := verbs(r, resource); !slices.Equal(got, v) {
-				t.Errorf("%s on %s = %v, want %v", name, resource, got, v)
-			}
+	for _, rule := range desktops.Rules {
+		if !slices.Equal(rule.APIGroups, []string{"vdi.desku.be"}) || slices.ContainsFunc(rule.Verbs, func(v string) bool { return v == "*" || v == "seat" || v == "assign" }) ||
+			slices.ContainsFunc(rule.Resources, func(r string) bool { return r == "*" || strings.HasPrefix(r, "vdiinstances") || strings.HasPrefix(r, "vdipairings") }) {
+			t.Errorf("%s grants %+v", tenancy.TenantDesktopsRole, rule)
 		}
 	}
 	platformSync := roles[tenancy.PlatformSyncAccount]
@@ -422,7 +391,7 @@ func TestSyncImpersonationFlipAndRollback(t *testing.T) {
 	// 2 per project namespace (no repo declares anything yet), 2 per
 	// project, the controller's clone and impersonation rights, and every
 	// account's clone and tenant-kind rights.
-	reviewsPerPass := int64(2*3 + 2*2 + 3 + len(tenancy.TenantKinds))
+	reviewsPerPass := int64(2*3 + 2*2 + 3 + len(repoKinds))
 	if got := n.Load(); got != reviewsPerPass {
 		t.Errorf("%d reviews, want %d", got, reviewsPerPass)
 	}
@@ -437,15 +406,21 @@ func TestSyncImpersonationFlipAndRollback(t *testing.T) {
 	if res.RequeueAfter != driftResync {
 		t.Errorf("requeue = %v once on", res.RequeueAfter)
 	}
-	// A clean verdict serves the passes that follow until its inputs change.
-	if got := n.Load(); got != reviewsPerPass {
-		t.Errorf("%d reviews after a second pass, want the cached %d", got, reviewsPerPass)
+	// The flip widens what the tenant AppProjects admit, an input: asked
+	// again once. A clean verdict then serves the passes that follow until
+	// its inputs change.
+	if got := n.Load(); got != 2*reviewsPerPass {
+		t.Errorf("%d reviews after the flip, want %d", got, 2*reviewsPerPass)
+	}
+	reconcileOnce(t, r, dv)
+	if got := n.Load(); got != 2*reviewsPerPass {
+		t.Errorf("%d reviews after a third pass, want the cached %d", got, 2*reviewsPerPass)
 	}
 	// RBAC moves are not watched: an aged verdict is asked again.
 	now = now.Add(driftResync / 2)
 	reconcileOnce(t, r, dv)
-	if got := n.Load(); got != 2*reviewsPerPass {
-		t.Errorf("%d reviews once the verdict aged out, want %d", got, 2*reviewsPerPass)
+	if got := n.Load(); got != 3*reviewsPerPass {
+		t.Errorf("%d reviews once the verdict aged out, want %d", got, 3*reviewsPerPass)
 	}
 
 	stored := setSpec(t, c, dv, func(d *dotvirtv1alpha1.Dotvirt) { d.Spec.ArgoCD.SyncImpersonation.Enabled = new(false) })
@@ -608,11 +583,9 @@ func TestSyncImpersonationRefusals(t *testing.T) {
 			return granted(own)(account, a) && a.Resource != "egressfirewalls"
 		}, []client.Object{tenantApp("team-a", "EgressFirewall", "team-a")}, nil,
 			"project team-a's repo declares egressfirewalls in team-a, which its grant there does not let it write: an admin grant there carries them"},
-		// The admin role holds no DeskuBe write: desktops off.
-		{"declared pools, desktops off", func(account string, a *authzv1.ResourceAttributes) bool {
-			return granted(own)(account, a) && a.Group != "vdi.desku.be"
-		}, []client.Object{tenantApp("team-a", "VdiPool", "team-a")}, nil,
-			"project team-a's repo declares vdipools in team-a, which its grant there does not let it write: turn desktops on there (POST /api/projects/team-a/namespaces/team-a/desktops stages team-a-desktops)"},
+		{"every account writes desktop pools cluster-wide", or(func(account string, a *authzv1.ResourceAttributes) bool {
+			return account == syncProbeAccount && a.Resource == "vdipools" && a.Namespace == ""
+		}), nil, nil, "every ServiceAccount of argocd may create vdipools in every namespace"},
 		{"every account writes a tenant kind cluster-wide", or(func(account string, a *authzv1.ResourceAttributes) bool {
 			return account == syncProbeAccount && a.Resource == "networkpolicies" && a.Namespace == ""
 		}), nil, nil, "every ServiceAccount of argocd may create networkpolicies in every namespace, every project's sync account included (allowed by the test's grant)"},
@@ -690,7 +663,10 @@ func TestSyncImpersonationRefusals(t *testing.T) {
 			appProject("default", map[string]any{"server": "*", "namespace": "edge", "defaultServiceAccount": "argocd:edge-sync"})},
 			granted(own), ""},
 		"edit grant, nothing beyond":  {[]client.Object{tenantApp("team-a", "VirtualMachine", "team-a")}, noEgress, ""},
-		"declared pools, desktops on": {[]client.Object{tenantApp("team-a", "VdiPool", "team-a")}, granted(own), ""},
+		// Before the flip a pool syncs as nobody: refused, said, never a blocker.
+		"declared pools, desktops off": {[]client.Object{tenantApp("team-a", "VdiPool", "team-a")}, func(account string, a *authzv1.ResourceAttributes) bool {
+			return granted(own)(account, a) && a.Group != "vdi.desku.be"
+		}, "Argo CD refuses vdipools in team-a (project team-a)"},
 	} {
 		dv := optIn(testCR(), false)
 		var n atomic.Int64
@@ -1013,13 +989,61 @@ func TestArgoMatch(t *testing.T) {
 // Deployments.
 func allowsDeploy(t *testing.T, c client.Client) bool {
 	t.Helper()
+	return whitelists(t, c, "apps", "Deployment")
+}
+
+// whitelists reports whether team-a's AppProject admits group/kind.
+func whitelists(t *testing.T, c client.Client, group, kind string) bool {
+	t.Helper()
 	ap := argoObj("AppProject", "", "", nil)
 	if !exists(t, c, ap, "argocd", "dotvirt-p-team-a") {
 		t.Fatal("AppProject missing")
 	}
 	list, _, _ := unstructured.NestedSlice(ap.Object, "spec", "namespaceResourceWhitelist")
-	want := map[string]any{"group": "apps", "kind": "Deployment"}
+	want := map[string]any{"group": group, "kind": kind}
 	return slices.ContainsFunc(list, func(e any) bool { return reflect.DeepEqual(e, want) })
+}
+
+// Desktop pools reach a tenant AppProject only while Argo impersonates. Before,
+// a repo declaring one holds nothing back and is told Argo refuses it; once
+// on, the project's own grant decides, and turning desktops on is the fix.
+func TestDesktopPoolsWaitOnImpersonation(t *testing.T) {
+	dv := optIn(testCR(), false)
+	own := granted(map[string][]string{"dotvirt-p-team-a": {"team-a"}})
+	var desktops atomic.Bool
+	var n atomic.Int64
+	c := testBuilder(t).WithObjects(dv, argoCDInstance(nil), projectNS("team-a", "team-a", "dotvirt/team-a.git"), tenantApp("team-a", "VdiPool", "team-a")).
+		WithInterceptorFuncs(reviews(func(account string, a *authzv1.ResourceAttributes) bool {
+			return own(account, a) && (desktops.Load() || a.Group != "vdi.desku.be")
+		}, &n)).WithReturnManagedFields().Build()
+	r := newReconciler(c, depsOK)
+	now := time.Now()
+	r.now = func() time.Time { return now }
+	reconcileOnce(t, r, dv)
+	if got := syncCond(t, c, dv); got.Reason != "Pending" || !strings.Contains(got.Message, "Argo CD refuses vdipools in team-a (project team-a)") {
+		t.Errorf("before impersonation: %+v, want Pending, saying Argo refuses the pool", got)
+	}
+	if whitelists(t, c, "vdi.desku.be", "VdiPool") {
+		t.Error("whitelisted before impersonation")
+	}
+
+	if err := c.Create(context.Background(), argoCM(true)); err != nil {
+		t.Fatal(err)
+	}
+	reconcileOnce(t, r, getCR(t, c, dv))
+	if !whitelists(t, c, "vdi.desku.be", "VdiPool") || whitelists(t, c, "vdi.desku.be", "VdiInstance") {
+		t.Error("impersonating: pools not whitelisted, or desktops are")
+	}
+	if got := syncCond(t, c, dv); got.Reason != "Degraded" || !strings.Contains(got.Message, "turn desktops on there (POST /api/projects/team-a/namespaces/team-a/desktops stages team-a-desktops)") {
+		t.Errorf("desktops off: %+v, want Degraded naming the fix", got)
+	}
+
+	desktops.Store(true)
+	now = now.Add(driftResync / 2)
+	reconcileOnce(t, r, getCR(t, c, dv))
+	if got := syncCond(t, c, dv); got.Reason != "Enabled" {
+		t.Errorf("desktops on: %+v, want Enabled", got)
+	}
 }
 
 // Asking impersonation off with kinds allowed closes the window: the pass
@@ -1099,7 +1123,7 @@ func TestTenantKindsEnvFollowsTheAppProjects(t *testing.T) {
 		t.Fatal(err)
 	}
 	reconcileOnce(t, r, getCR(t, c, dv))
-	if e := env(); e != "apps/Deployment" || !allowsDeploy(t, c) {
+	if e := env(); e != "apps/Deployment,vdi.desku.be/VdiPool" || !allowsDeploy(t, c) {
 		t.Errorf("impersonating: env %q, whitelisted %v", e, allowsDeploy(t, c))
 	}
 	argo := meta.FindStatusCondition(getCR(t, c, dv).Status.Conditions, dotvirtv1alpha1.ConditionArgoReady)

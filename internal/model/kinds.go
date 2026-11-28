@@ -76,8 +76,6 @@ func (k Kind) RepoPath(namespace, name string) string {
 		return "rbac/" + namespace + "/" + name + ".yaml"
 	case KindVdiPool.Kind:
 		return namespace + "/desktop-pools/" + name + ".yaml"
-	case KindVdiInstance.Kind:
-		return namespace + "/desktops/" + name + ".yaml"
 	case KindVdiClass.Kind:
 		return "desktop-classes/" + name + ".yaml"
 	case KindGateway.Kind, KindCert.Kind, KindGWParams.Kind:
@@ -180,9 +178,8 @@ var (
 	KindCert     = kindOf("Certificate")
 	KindGWParams = kindOf("GatewayParameters")
 
-	KindVdiClass    = kindOf("VdiClass")
-	KindVdiPool     = kindOf("VdiPool")
-	KindVdiInstance = kindOf("VdiInstance")
+	KindVdiClass = kindOf("VdiClass")
+	KindVdiPool  = kindOf("VdiPool")
 )
 
 // KindDV is a VM's disk, declared beside it in a tenant repo. It has no row:
@@ -229,11 +226,10 @@ var resources = []Resource{
 	// A namespace's Gateway and its certificate; the route grant beside them
 	// is the rolebinding resource.
 	{Name: "publishing", Kinds: []Kind{KindGateway, KindCert, KindGWParams}, CreateLabel: "Turn publishing on", EditLabel: "Edit publishing", Noun: "publishing"},
-	// DeskuBe's: what desktops a project runs, and of which class. The grants
-	// turning desktops on stages are the rolebinding resource.
+	// DeskuBe's: what desktops a project offers, and of which class. The grant
+	// turning desktops on stages is the rolebinding resource.
 	{Name: "desktopclass", Kinds: []Kind{KindVdiClass}, CreateLabel: "Create desktop class", EditLabel: "Edit desktop class", Noun: "a desktop class", Adopted: true},
 	{Name: "desktoppool", Kinds: []Kind{KindVdiPool}, CreateLabel: "Create desktop pool", EditLabel: "Edit desktop pool", Noun: "a desktop pool", Adopted: true},
-	{Name: "desktop", Kinds: []Kind{KindVdiInstance}, CreateLabel: "Create desktop", EditLabel: "Edit desktop", Noun: "a desktop", Adopted: true},
 }
 
 // ResourceNoun names a draft resource in a message: the persisted name is

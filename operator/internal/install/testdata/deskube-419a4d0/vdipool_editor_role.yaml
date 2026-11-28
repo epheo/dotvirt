@@ -1,0 +1,33 @@
+# permissions for admins to edit vdipools.
+# use, because whoever may edit pools may use them: config/policy asks
+# it of whoever sets a pool's subjects, on a pool that may not exist
+# yet, which only a rule without a name can grant.
+# It lets its holder claim a desktop of their own, once they also hold
+# the claim verbs. Not in another's name: that takes assign.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  labels:
+    app.kubernetes.io/name: deskube
+    app.kubernetes.io/managed-by: kustomize
+  name: vdipool-editor-role
+rules:
+- apiGroups:
+  - vdi.desku.be
+  resources:
+  - vdipools
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - use
+  - watch
+- apiGroups:
+  - vdi.desku.be
+  resources:
+  - vdipools/status
+  verbs:
+  - get

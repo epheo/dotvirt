@@ -85,7 +85,13 @@ func TestLoadReadsTheTenantKinds(t *testing.T) {
 		c.TenantKinds.Allows("apps", "StatefulSet") {
 		t.Errorf("allowed: %+v, %v", c.TenantKinds, err)
 	}
-	for _, bad := range []string{"Deployment", "apps/*", "rbac.authorization.k8s.io/Role"} {
+	// The operator adds the impersonated kinds while Argo syncs as the
+	// projects' own accounts.
+	c, err = Load([]string{"-session-secret", "s", "-tenant-kinds-allowed", "vdi.desku.be/VdiPool"})
+	if err != nil || !c.TenantKinds.Allows("vdi.desku.be", "VdiPool") || c.TenantKinds.Extra() {
+		t.Errorf("impersonated: %+v, %v", c.TenantKinds, err)
+	}
+	for _, bad := range []string{"Deployment", "apps/*", "rbac.authorization.k8s.io/Role", "vdi.desku.be/VdiInstance", "vdi.desku.be/VdiPairing"} {
 		if _, err := Load([]string{"-session-secret", "s", "-tenant-kinds-allowed", bad}); err == nil || !strings.Contains(err.Error(), "-tenant-kinds-allowed") {
 			t.Errorf("%q: err %v, want one naming the flag", bad, err)
 		}

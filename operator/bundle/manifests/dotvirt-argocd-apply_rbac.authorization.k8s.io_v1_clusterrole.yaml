@@ -185,26 +185,6 @@ rules:
   - vdi.desku.be
   resources:
   - vdiclasses
-  - vdipools
-  - vdiinstances
-  verbs:
-  - get
-  - list
-  - watch
-  - create
-  - update
-  - patch
-  - delete
-- apiGroups:
-  - vdi.desku.be
-  resources:
-  - vdipools
-  verbs:
-  - use
-- apiGroups:
-  - vdi.desku.be
-  resources:
-  - vdiclaims
   verbs:
   - get
   - list

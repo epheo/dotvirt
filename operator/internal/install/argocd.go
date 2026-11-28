@@ -181,8 +181,9 @@ func NamedTenantKinds(dv *dotvirtv1alpha1.Dotvirt) (allowed, refused []tenancy.G
 }
 
 // TenantAllowed is what a project's repo may apply beyond the listed kinds,
-// nil while it keeps them. The allowed kinds need sync impersonation asked
-// for and impersonating: the instance syncing dotvirt's Applications as their
+// nil while it keeps them: the kinds a provider allowed, and
+// tenancy.ImpersonatedKinds. Both need sync impersonation asked for and
+// impersonating: the instance syncing dotvirt's Applications as their
 // projects' own accounts, so the project's sync account, never the
 // controller's, applies what a merge declares. It gates on impersonation
 // being in effect, not on SyncImpersonationReady: one project's missing grant
@@ -194,6 +195,11 @@ func TenantAllowed(dv *dotvirtv1alpha1.Dotvirt, impersonating bool) []tenancy.Gr
 		return nil
 	}
 	allowed, _ := NamedTenantKinds(dv)
+	for _, k := range tenancy.ImpersonatedKinds {
+		if g := (tenancy.GroupKind{Group: k.Group, Kind: k.Kind}); !slices.Contains(allowed, g) {
+			allowed = append(allowed, g)
+		}
+	}
 	return allowed
 }
 

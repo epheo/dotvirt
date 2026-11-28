@@ -14,6 +14,11 @@ type Kind struct {
 	// RBAC allows. Never widen this for one deployment's convenience: it
 	// applies to every tenant.
 	Tenant bool
+	// Impersonated: a project's repo may declare it only while Argo applies
+	// tenant repos as their projects' own accounts (sync impersonation in
+	// effect), never as the shared controller, which may hold rights over it
+	// no project does. The tenant AppProjects whitelist it then alone.
+	Impersonated bool
 	// Platform: the platform repo may declare it.
 	Platform bool
 }
@@ -31,12 +36,15 @@ var Kinds = []Kind{
 	{Group: "k8s.ovn.org", Version: "v1", Kind: "EgressFirewall", Resource: "egressfirewalls", Tenant: true},
 	// Project rules.
 	{Group: "networking.k8s.io", Version: "v1", Kind: "NetworkPolicy", Resource: "networkpolicies", Tenant: true},
-	// Desktops: DeskuBe's pools, and desktops made one by one. Its admission
-	// asks whoever sets a pool's subjects or a desktop's owner to hold what
-	// those grant, so a repo entitles nobody beyond its own rights. A pool's
-	// own desktops carry its owner reference and are never in git.
-	{Group: "vdi.desku.be", Version: "v1alpha1", Kind: "VdiPool", Resource: "vdipools", Tenant: true},
-	{Group: "vdi.desku.be", Version: "v1alpha1", Kind: "VdiInstance", Resource: "vdiinstances", Tenant: true},
+	// Desktop pools. DeskuBe's admission asks whoever sets a pool's subjects
+	// to hold what they grant, so a repo entitles nobody beyond its own
+	// rights. Impersonated: an account holding seat on pools, as a controller
+	// holding every verb does, could plant or relabel a pool's desktops.
+	{Group: "vdi.desku.be", Version: "v1alpha1", Kind: "VdiPool", Resource: "vdipools", Impersonated: true},
+	// In no repo: a desktop carries its pending pairing PIN, which every
+	// reader of its kind may pair with first, and a pool's own desktops are
+	// DeskuBe's to make.
+	{Group: "vdi.desku.be", Version: "v1alpha1", Kind: "VdiInstance", Resource: "vdiinstances"},
 
 	// Not a tenant kind: a project's admin role may only read them, and a raw
 	// one joins another project's VLAN, reaches the underlay past
@@ -75,9 +83,19 @@ var Kinds = []Kind{
 	{Group: "template.kubevirt.io", Version: "v1beta1", Kind: "VirtualMachineTemplate", Resource: "virtualmachinetemplates"},
 }
 
-// TenantKinds are the only kinds a tenant repo may declare, all namespaced:
-// its AppProject's whitelist and what dotvirt stages into a tenant repo.
+// TenantKinds are the listed kinds, which every tenant repo may declare, all
+// namespaced: its AppProject's whitelist and what dotvirt stages into a
+// tenant repo, beside the allowed ones (Policy).
 var TenantKinds = kindsWhere(func(k Kind) bool { return k.Tenant })
+
+// ImpersonatedKinds are the kinds a tenant repo may declare beside the listed
+// ones while sync impersonation is in effect, all namespaced.
+var ImpersonatedKinds = kindsWhere(func(k Kind) bool { return k.Impersonated })
+
+// Impersonated reports whether group/kind is one of ImpersonatedKinds.
+func Impersonated(group, kind string) bool {
+	return slices.ContainsFunc(ImpersonatedKinds, func(k Kind) bool { return k.Group == group && k.Kind == kind })
+}
 
 // PlatformKinds are the kinds the platform repo may declare at the given
 // scope: its AppProject's whitelists.
@@ -135,6 +153,8 @@ func (g GroupKind) Covers(group, kind string) bool {
 //     instances;
 //   - DeskuBe's claims: a person's live hold on a desktop, never declared. A
 //     merge removing one would give the desktop back and delete its home.
+//     And its pairings: a pending PIN, which whoever reads it may pair with
+//     first.
 var deniedBase = []GroupKind{
 	{"rbac.authorization.k8s.io", "*"},
 	{"authorization.openshift.io", "*"},
@@ -150,6 +170,7 @@ var deniedBase = []GroupKind{
 	{"velero.io", "*"},
 	{"template.openshift.io", "TemplateInstance"},
 	{"vdi.desku.be", "VdiClaim"},
+	{"vdi.desku.be", "VdiPairing"},
 }
 
 // AllowTenantKinds splits the kinds a provider names into those a tenant repo
@@ -171,5 +192,5 @@ func AllowTenantKinds(named ...GroupKind) (allowed, refused []GroupKind) {
 
 func neverTenant(g GroupKind) bool {
 	return slices.ContainsFunc(deniedBase, func(d GroupKind) bool { return d.Covers(g.Group, g.Kind) }) ||
-		slices.ContainsFunc(Kinds, func(k Kind) bool { return !k.Tenant && k.Group == g.Group && k.Kind == g.Kind })
+		slices.ContainsFunc(Kinds, func(k Kind) bool { return !k.Tenant && !k.Impersonated && k.Group == g.Group && k.Kind == g.Kind })
 }

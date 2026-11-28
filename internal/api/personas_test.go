@@ -13,10 +13,13 @@ import (
 	"testing"
 
 	authzv1 "k8s.io/api/authorization/v1"
+	corev1 "k8s.io/api/core/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	utilyaml "k8s.io/apimachinery/pkg/util/yaml"
 
+	"github.com/epheo/dotvirt/internal/changeset"
 	"github.com/epheo/dotvirt/internal/model"
 	"github.com/epheo/dotvirt/pkg/tenancy"
 )
@@ -123,20 +126,19 @@ const (
 )
 
 // personaGrants is what each persona holds besides signedIn, as
-// docs/personas.md binds it: the project personas in team-a-dev, with what
-// turning desktops on there binds.
+// docs/personas.md binds it: the project personas in both namespaces of
+// team-a, and what turning desktops on in team-a-dev binds there.
 func personaGrants(desktops bool) map[string]map[string][]string {
-	inTeamA := func(roles ...string) map[string][]string { return map[string][]string{"team-a-dev": roles} }
-	viewer := inTeamA("view", tenancy.TenantEgressViewRole)
-	author := inTeamA("edit", tenancy.TenantEgressViewRole)
+	inTeamA := func(roles ...string) map[string][]string {
+		return map[string][]string{"team-a-dev": roles, "team-a-prod": slices.Clone(roles)}
+	}
 	admin := inTeamA("admin", tenancy.TenantEgressRole)
 	if desktops {
-		author["team-a-dev"] = append(author["team-a-dev"], tenancy.TenantDesktopsViewRole)
-		admin["team-a-dev"] = append(admin["team-a-dev"], tenancy.TenantDesktopsRole, tenancy.TenantDesktopsAdminRole)
+		admin["team-a-dev"] = append(admin["team-a-dev"], tenancy.TenantDesktopsRole)
 	}
 	return map[string]map[string][]string{
-		pViewerToken:       viewer,
-		pAuthorToken:       author,
+		pViewerToken:       inTeamA("view", tenancy.TenantEgressViewRole),
+		pAuthorToken:       inTeamA("edit", tenancy.TenantEgressViewRole),
 		pProjectAdminToken: admin,
 		pNetworkAdminToken: {"": {"dotvirt-platform-network-admin"}},
 		pClusterAdminToken: {"": {"cluster-admin"}},
@@ -152,8 +154,9 @@ var deskubeAggregated = []rbacv1.PolicyRule{
 }
 
 // personaServer is the fake apiserver weighing each persona's rules, serving
-// the kinds platform serves, behind a tenant repo declaring every tenant kind.
-// desktops: the cluster serves DeskuBe too, and team-a-dev has desktops on.
+// the kinds platform serves, behind a tenant repo declaring every tenant kind
+// in team-a-dev and VMs alone in team-a-prod. desktops: the cluster serves
+// DeskuBe too, and team-a-dev has desktops on and declares a pool.
 func personaServer(t *testing.T, platform string, desktops bool) *Server {
 	t.Helper()
 	roles := personaRoles(t, platform)
@@ -184,28 +187,39 @@ func personaServer(t *testing.T, platform string, desktops bool) *Server {
 		byToken[token] = gs
 	}
 	fc := newFakeCluster(t)
+	fc.namespaces = append(fc.namespaces, corev1.Namespace{ObjectMeta: metav1.ObjectMeta{
+		Name: "team-a-prod", Labels: fc.namespaces[0].Labels, Annotations: fc.namespaces[0].Annotations,
+	}})
 	fc.ssar = func(token string, a *authzv1.ResourceAttributes) bool { return allows(byToken[token], a) }
 	served := []model.Kind{model.KindNetpol, model.KindDV, model.KindNAD, model.KindEgressFW}
 	if platform == "openshift" {
 		served = append(served, model.KindUDN)
 	}
+	kinds := tenancy.TenantKinds
 	if desktops {
-		served = append(served, model.KindVdiPool, model.KindVdiInstance)
+		served = append(served, model.KindVdiPool)
+		kinds = slices.Concat(kinds, tenancy.ImpersonatedKinds)
 	}
 	fc.serveKinds(served...)
 	fc.on(http.MethodGet, "/apis/storage.k8s.io/v1/storageclasses", unstructuredList("storage.k8s.io/v1", "StorageClass",
 		map[string]any{"apiVersion": "storage.k8s.io/v1", "kind": "StorageClass", "metadata": map[string]any{"name": "fast"}, "provisioner": "csi.example"}))
-	var declares []schema.GroupKind
-	for _, k := range tenancy.TenantKinds {
-		declares = append(declares, schema.GroupKind{Group: k.Group, Kind: k.Kind})
+	var declares []changeset.DeclaredKind
+	for _, k := range kinds {
+		at := []string{"team-a-dev"}
+		if k.Kind == model.KindVM.Kind {
+			at = append(at, "team-a-prod")
+		}
+		declares = append(declares, changeset.DeclaredKind{GroupKind: schema.GroupKind{Group: k.Group, Kind: k.Kind}, Namespaces: at})
 	}
-	return fc.server(gitReads{&planeDraft{kinds: declares}}, Config{PlatformRepo: platformRepo, BaseBranch: "main"})
+	return fc.server(gitReads{&planeDraft{placed: declares}}, Config{PlatformRepo: platformRepo, BaseBranch: "main"})
 }
 
 // fingerprint is what one persona is shown and offered.
 type fingerprint struct {
 	Projects       string // the projects the caller sees
 	RepoRead       bool   // team-a's whole repo
+	ProdRepoRead   bool   // team-a-prod's history, which declares VMs alone
+	PoolCreate     bool   // a desktop pool in team-a-dev, as its RBAC answers
 	VMCreate       bool
 	Console        bool
 	EgressFWCreate bool
@@ -238,6 +252,10 @@ func personaFingerprint(t *testing.T, s *Server, token string) fingerprint {
 		fp.RepoRead, fp.VMCreate, fp.Console = c.Project.RepoRead, c.VM.Create, c.Console
 		fp.EgressFWCreate, fp.NetworkCreate = c.EgressFirewall.Create, c.Network.Create
 	}
+	if rec := do(s, token, http.MethodGet, "/api/capabilities?namespace=team-a-prod", ""); rec.Code == http.StatusOK {
+		fp.ProdRepoRead = decodeBody[model.Capabilities](t, rec).Namespace.RepoRead
+	}
+	fp.PoolCreate = s.capable(t.Context(), id, c, kindAction(verbCreate, model.KindVdiPool, "team-a-dev"))
 	if c := decodeBody[model.Capabilities](t, do(s, token, http.MethodGet, "/api/capabilities", "")).Cluster; c != nil {
 		fp.Hosts, fp.PlatformRead, fp.Platform = c.Hosts, c.PlatformRead, c.Platform
 	}
@@ -248,13 +266,13 @@ func personaFingerprint(t *testing.T, s *Server, token string) fingerprint {
 // Each persona gets exactly its answers on each platform. A change here is a
 // change to what docs/personas.md promises.
 func TestPersonas(t *testing.T) {
-	project := fingerprint{Projects: "team-a", RepoRead: true, StorageClasses: true}
+	project := fingerprint{Projects: "team-a", RepoRead: true, ProdRepoRead: true, StorageClasses: true}
 	author := project
 	author.VMCreate, author.Console, author.NetworkCreate = true, true, true
 	admin := author
 	admin.EgressFWCreate = true
-	all := fingerprint{Projects: "orphans,team-a", RepoRead: true, VMCreate: true, Console: true, EgressFWCreate: true,
-		NetworkCreate: true, StorageClasses: true, Hosts: true, PlatformRead: true, Platform: true}
+	all := fingerprint{Projects: "orphans,team-a", RepoRead: true, ProdRepoRead: true, PoolCreate: true, VMCreate: true, Console: true,
+		EgressFWCreate: true, NetworkCreate: true, StorageClasses: true, Hosts: true, PlatformRead: true, Platform: true}
 	// Stages platform changes; reading the platform repo would need list on
 	// every kind it declares, which no shipped role grants.
 	network := fingerprint{StorageClasses: true, Platform: true}
@@ -281,14 +299,15 @@ func TestPersonas(t *testing.T) {
 		}
 	}
 
-	// With desktops on, each persona keeps its answers but the viewer: it may
-	// not list the desktops the repo declares one by one, so it loses the
-	// repo read (docs/personas.md names this gap).
+	// With desktops on in team-a-dev, and a pool declared there, every persona
+	// keeps its reads, team-a-prod's included: DeskuBe aggregates its pool
+	// reads into view, and a kind is asked only where it is declared. The
+	// project admin writes pools there.
 	for platform, personas := range want {
 		s := personaServer(t, platform, true)
 		for token, w := range personas {
-			if token == pViewerToken {
-				w.RepoRead = false
+			if token == pProjectAdminToken {
+				w.PoolCreate = true
 			}
 			if got := personaFingerprint(t, s, token); got != w {
 				t.Errorf("%s with desktops %s:\n got %+v\nwant %+v", platform, token, got, w)

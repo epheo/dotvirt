@@ -36,38 +36,56 @@ func TestAllowTenantKinds(t *testing.T) {
 		GroupKind{"vdi.desku.be", "VdiPool"},
 		GroupKind{"vdi.desku.be", "VdiClaim"},
 		GroupKind{"vdi.desku.be", "VdiClass"},
+		GroupKind{"vdi.desku.be", "VdiInstance"},
+		GroupKind{"vdi.desku.be", "VdiPairing"},
 	)
-	if want := []GroupKind{{"apps", "Deployment"}, {"", "Service"}}; !slices.Equal(allowed, want) {
+	if want := []GroupKind{{"apps", "Deployment"}, {"", "Service"}, {"vdi.desku.be", "VdiPool"}}; !slices.Equal(allowed, want) {
 		t.Errorf("allowed = %v, want %v", allowed, want)
 	}
-	if len(refused) != 20 {
-		t.Errorf("refused %d kinds, want 20 (each once): %v", len(refused), refused)
+	if len(refused) != 22 {
+		t.Errorf("refused %d kinds, want 22 (each once): %v", len(refused), refused)
 	}
 	if a, r := AllowTenantKinds(); a != nil || r != nil {
 		t.Errorf("none named: %v, %v", a, r)
 	}
+	if p := (Policy{Allowed: allowed}); !p.Extra() || (Policy{Allowed: []GroupKind{{"vdi.desku.be", "VdiPool"}}}).Extra() {
+		t.Error("Extra counts the impersonated kinds as a provider's")
+	}
 }
 
-// A project's repo declares its pools and the desktops made one by one; the
-// platform repo the classes; no repo a claim, a person's live hold.
+// A project's repo declares its desktop pools only while Argo applies it as
+// the project's own account; the platform repo the classes; no repo a desktop,
+// a claim or a pairing, each a pending PIN or a person's live hold.
 func TestDesktopKinds(t *testing.T) {
 	for _, c := range []struct {
-		kind             string
-		tenant, platform bool
+		kind                           string
+		tenant, impersonated, platform bool
 	}{
-		{"VdiPool", true, false},
-		{"VdiInstance", true, false},
-		{"VdiClass", false, true},
+		{"VdiPool", false, true, false},
+		{"VdiInstance", false, false, false},
+		{"VdiClass", false, false, true},
 	} {
 		k, ok := LookupKind(c.kind)
-		if !ok || k.Group != "vdi.desku.be" || k.Tenant != c.tenant || k.Platform != c.platform || k.ClusterScoped != (c.kind == "VdiClass") {
+		if !ok || k.Group != "vdi.desku.be" || k.Tenant != c.tenant || k.Impersonated != c.impersonated || k.Platform != c.platform || k.ClusterScoped != (c.kind == "VdiClass") {
 			t.Errorf("%s = %+v, %v", c.kind, k, ok)
 		}
 	}
-	if _, ok := LookupKind("VdiClaim"); ok {
-		t.Error("VdiClaim is in the kinds table: no repo declares a claim")
+	if Listed("vdi.desku.be", "VdiPool") || !Impersonated("vdi.desku.be", "VdiPool") {
+		t.Error("desktop pools are listed, or not impersonated")
 	}
-	if _, refused := AllowTenantKinds(GroupKind{"vdi.desku.be", "VdiClaim"}); len(refused) != 1 {
-		t.Error("a provider may allow claims into tenant repos")
+	for _, kind := range []string{"VdiClaim", "VdiPairing"} {
+		if _, ok := LookupKind(kind); ok {
+			t.Errorf("%s is in the kinds table", kind)
+		}
+	}
+}
+
+// No impersonated kind is also listed or cluster-scoped: a tenant AppProject
+// admits no cluster-scoped kind.
+func TestImpersonatedKinds(t *testing.T) {
+	for _, k := range ImpersonatedKinds {
+		if k.Tenant || k.ClusterScoped || k.Platform {
+			t.Errorf("%s = %+v", k.Kind, k)
+		}
 	}
 }

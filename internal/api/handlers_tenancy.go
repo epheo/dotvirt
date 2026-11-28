@@ -270,10 +270,10 @@ func (s *Server) handlePublishNamespace(w http.ResponseWriter, r *http.Request) 
 }
 
 // handleDesktopsOn stages what turning desktops on in one of a project's
-// namespaces lacks: DeskuBe's grants there land in the platform repo, each
-// weighed by the coordinator as the caller.
+// namespaces lacks: DeskuBe's grant there lands in the platform repo, weighed
+// by the coordinator as the caller.
 func (s *Server) handleDesktopsOn(w http.ResponseWriter, r *http.Request) {
-	if !s.gateServed(w, r, desktopKinds...) {
+	if !s.gateServed(w, r, model.KindVdiPool) {
 		return
 	}
 	plat, ok := s.platformScopeGated(w, r)
@@ -287,10 +287,6 @@ func (s *Server) handleDesktopsOn(w http.ResponseWriter, r *http.Request) {
 	view, err := s.draft.StageDesktops(plat.id, plat.proj, target, r.PathValue("namespace"))
 	respond(w, view, err)
 }
-
-// desktopKinds are what a project repo declares where desktops are on: one
-// served is DeskuBe served.
-var desktopKinds = []model.Kind{model.KindVdiPool, model.KindVdiInstance}
 
 // publishingKinds are the kinds publishing stages, each of which the cluster
 // must serve: a Certificate only with an issuer.

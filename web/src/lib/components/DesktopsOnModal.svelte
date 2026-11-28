@@ -33,15 +33,14 @@
 	</div>
 	<div class="flex flex-col gap-1.5">
 		<Consequence tone="info">
-			{project}'s admins and its repo may declare desktop pools and desktops in
+			{project}'s admins and its repo may declare desktop pools in
 			<span class="font-mono">{namespace}</span>.
 		</Consequence>
 		<Consequence tone="info">
-			Its admins may start, stop and release anyone's desktop there.
+			Its admins may start, stop and release anyone's desktop of those pools.
 		</Consequence>
-		<Consequence tone="info">
-			Its authors may read the desktops there. Its viewers may not: a desktop carries a pending
-			pairing PIN.
+		<Consequence>
+			Its repo applies pools only once Argo CD syncs it as the project's own account.
 		</Consequence>
 		<Consequence>Nothing changes until the platform pull request merges.</Consequence>
 	</div>
