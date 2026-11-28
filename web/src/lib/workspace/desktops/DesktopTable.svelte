@@ -124,6 +124,7 @@
 							<span class="inline-flex items-center gap-1.5 {TONE_TEXT[st.tone]}">
 								<StatusDot tone={st.tone} />{st.label}
 							</span>
+							{#if st.note}<span class="text-ink-muted">({st.note})</span>{/if}
 						</td>
 						<td class={TD}>{sessionLabel(d.session)}</td>
 						<td class={TD}>{d.running ? 'Yes' : 'No'}</td>

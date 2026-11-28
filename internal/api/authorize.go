@@ -300,13 +300,13 @@ func claimPoolVerbs(verb string, own bool) []string {
 	return []string{"use", "assign", verbDelete}
 }
 
-// desktopRestartAction is restarting the desktop name in ns: a patch of its
-// restart annotation, which DeskuBe's policies leave free to whoever may patch
-// the desktop.
+// desktopRestartAction is restarting the desktop name in ns: a read of it, then
+// a patch of its restart annotation, which DeskuBe's policies leave free to
+// whoever may patch the desktop.
 func desktopRestartAction(ns, name string) action {
-	q := refQ(verbPatch, ssarDesktops, ns)
-	q.Name = name
-	return action{q}
+	get, patch := refQ(verbGet, ssarDesktops, ns), refQ(verbPatch, ssarDesktops, ns)
+	get.Name, patch.Name = name, name
+	return action{get, patch}
 }
 
 // claimActions open verb on claim of pool in ns, any one allowed: verb on the

@@ -103,6 +103,8 @@ export interface State {
 	missingClass?: string;
 	// What DeskuBe said of one not ready for another reason.
 	message?: string;
+	// Said beside the label: a restart asked for and not rolled out yet.
+	note?: string;
 }
 
 export const readyOf = (conditions?: DesktopCondition[]) =>
@@ -125,20 +127,27 @@ export function poolState(p: DesktopPool): State {
 
 // desktopState is the desktop's phase, unless its class is missing: then a
 // stopped one does not start, and a running one keeps its pod until stopped.
-// A restart asked for shows until DeskuBe rolled it out.
+// A restart asked for is said beside it, never in its place: a DeskuBe that
+// rolls none out, or a pass that ends before the pod, would hide the phase
+// for good.
 export function desktopState(d: Desktop): State {
+	const note = d.restarting ? 'restart requested' : undefined;
 	const ready = readyOf(d.conditions);
 	if (ready?.status === 'False' && ready.reason === 'ClassNotFound')
-		return { tone: 'danger', label: 'Class missing', missingClass: d.class };
-	if (d.restarting) return { tone: 'info', label: 'Restart requested' };
+		return { tone: 'danger', label: 'Class missing', missingClass: d.class, note };
 	const failing =
 		d.phase === 'Failed' ? d.conditions?.find((c) => c.status === 'False') : undefined;
 	return {
 		tone: desktopTone(d.phase),
 		label: d.phase || 'Not read yet',
 		message: failing && why(failing),
+		note,
 	};
 }
+
+// The state in one line, its note beside its label.
+export const stateLine = (s: Pick<State, 'label' | 'note'>): string =>
+	s.note ? `${s.label} (${s.note})` : s.label;
 
 function desktopTone(phase?: string): Tone {
 	if (phase === 'Ready') return 'ok';
@@ -147,11 +156,16 @@ function desktopTone(phase?: string): Tone {
 	return 'info'; // Provisioning, Starting, Stopping
 }
 
-// restartHeld is why the desktop is not restarted, '' when it may be: only a
-// phase that shows its pod has a session a restart ends, and a restart never
-// starts a stopped desktop.
-export function restartHeld(d: Pick<Desktop, 'phase' | 'restarting'>): string {
-	if (d.restarting) return 'A restart is on its way: DeskuBe has not rolled it out yet.';
+// restartHeld is why the desktop is not restarted, '' when it may be. Without
+// its class DeskuBe rolls out no restart: one asked would wait for the class
+// and end whatever session runs when it comes. Only a phase that shows its pod
+// has a session a restart ends, and a restart never starts a stopped desktop.
+// A restart already asked for holds nothing: DeskuBe rolls out the latest
+// request, once.
+export function restartHeld(d: Pick<Desktop, 'phase' | 'class' | 'conditions'>): string {
+	const ready = readyOf(d.conditions);
+	if (ready?.status === 'False' && ready.reason === 'ClassNotFound')
+		return `Class ${d.class} does not exist: DeskuBe rolls out no restart until it does.`;
 	if (d.phase === 'Ready' || d.phase === 'Starting') return '';
 	const now = d.phase
 		? `this one is ${d.phase.toLowerCase()}`

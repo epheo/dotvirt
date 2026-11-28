@@ -5,8 +5,8 @@
 // Two reads leave here. Overview: each namespaced kind where the caller may
 // list it, the classes for a caller who may list them cluster-wide, and the
 // kinds it may not list beside those, from its own rights alone. Desktop and
-// Claim: one desktop and the claim holding it, or one claim, which an act
-// addresses, trusted only while Fresh.
+// Instance: one desktop and the claim holding it, or the desktop alone, which
+// an act addresses, trusted only while Fresh.
 package desktops
 
 import (
@@ -386,15 +386,16 @@ func (s *Snapshot) Fresh(kinds ...schema.GroupVersionResource) bool {
 	return true
 }
 
-// Claim is the claim namespace/name.
-func (s *Snapshot) Claim(namespace, name string) (model.DesktopClaim, bool) {
+// Instance is the desktop namespace/name alone, never paired with a claim:
+// for an act a caller who may not list the claims there makes.
+func (s *Snapshot) Instance(namespace, name string) (model.Desktop, bool) {
 	if !s.started.Load() {
-		return model.DesktopClaim{}, false
+		return model.Desktop{}, false
 	}
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	c, ok := s.claims.Rows[namespace+"/"+name]
-	return c, ok
+	d, ok := s.instances.Rows[namespace+"/"+name]
+	return d, ok
 }
 
 // HasPod reports whether a desktop's phase shows its pod: Ready, or Starting
@@ -402,6 +403,15 @@ func (s *Snapshot) Claim(namespace, name string) (model.DesktopClaim, bool) {
 // Stopped one stays stopped, a Provisioning one has no pod yet, a Failed one
 // may have none.
 func HasPod(phase string) bool { return phase == "Ready" || phase == "Starting" }
+
+// ClassMissing reports whether DeskuBe holds d back for want of its class. It
+// rolls out no restart then: one asked would wait for the class, and end
+// whatever session runs when it comes.
+func ClassMissing(d model.Desktop) bool {
+	return slices.ContainsFunc(d.Conditions, func(c model.DesktopCondition) bool {
+		return c.Type == "Ready" && c.Status == "False" && c.Reason == "ClassNotFound"
+	})
+}
 
 // Desktop is the desktop namespace/name and the claim holding it, as Overview
 // pairs them, for a caller who may list both kinds there.

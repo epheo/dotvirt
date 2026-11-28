@@ -1111,10 +1111,11 @@ async function handleRepair(req, res, path, url, s) {
 
 // A desktop act (POST /api/desktops/{namespace}/{name}/{act}), refused as the
 // server refuses it: while a watch it reads is down, on another desktop or
-// claim than the one the caller saw (by name and UID), on a desktop with no
-// pod to restart, and on the field the UI gates it by. What it changes
-// reaches the page as DeskuBe's write does: on the pull the frame's watermark
-// starts. A restart stays requested until POST /__fixture/desktops-rollout.
+// claim than the one the caller saw (by name and UID), on a desktop for
+// another person than the caller saw, with no pod to restart or no class, and
+// on the field the UI gates it by. What it changes reaches the page as
+// DeskuBe's write does: on the pull the frame's watermark starts. A restart
+// stays requested until POST /__fixture/desktops-rollout.
 async function handleDesktopAct(req, res, path, s) {
 	const m = path.match(/^\/api\/desktops\/([^/]+)\/([^/]+)\/(start|stop|release|restart)$/);
 	if (!m) return false;
@@ -1130,6 +1131,13 @@ async function handleDesktopAct(req, res, path, s) {
 	if (act === 'restart') {
 		if (desk.uid !== body.uid)
 			return refuse(409, `conflict: desktop ${name} is not the one you saw: look at it again`);
+		if ((desk.owner ?? '') !== (body.owner ?? ''))
+			return refuse(
+				409,
+				`conflict: desktop ${name} changed hands since you saw it: look at it again`,
+			);
+		if (desk.conditions?.some((c) => c.reason === 'ClassNotFound'))
+			return refuse(409, `conflict: class ${desk.class} of ${name} does not exist`);
 		if (desk.phase !== 'Ready' && desk.phase !== 'Starting')
 			return refuse(409, `conflict: ${name} has no pod to restart`);
 		if (!desktopCaps(s, ns, name, '').restart)
@@ -1188,24 +1196,25 @@ function findDesktop(s, ns, name) {
 	);
 }
 
-// The acts on one desktop, and on claim of its pool (GET /api/capabilities?
+// The acts on one desktop, and on claim holding it (GET /api/capabilities?
 // desktops=&desktop=&claim=), as the server weighs them: none where the
-// caller may not list the desktops and the claims, the claim's none without
-// a claim, and every other allowed unless the scenario's desktopCapabilities
-// narrows one, by "namespace/pool" or "namespace/desktop".
+// caller may not list the desktops, the claim's none where it may not list
+// the claims or names none, and every other allowed unless the scenario's
+// desktopCapabilities narrows one, by "namespace/pool" or "namespace/desktop".
 function desktopCaps(s, ns, desktop, claim) {
 	const not = new Set(
 		(s.desktops?.unlisted ?? []).filter((u) => u.namespace === ns).map((u) => u.resource),
 	);
-	const reads = !not.has('vdiinstances') && !not.has('vdiclaims');
+	const desktops = !not.has('vdiinstances');
+	const weighed = desktops && !not.has('vdiclaims') && claim ? claim : '';
 	const pool = findDesktop(s, ns, desktop)?.pool;
 	return {
 		namespace: ns,
 		desktop,
-		claim: claim || undefined,
-		restart: reads,
-		power: reads && !!claim,
-		release: reads && !!claim,
+		claim: weighed || undefined,
+		restart: desktops,
+		power: !!weighed,
+		release: !!weighed,
 		...(pool && s.desktopCapabilities?.[`${ns}/${pool}`]),
 		...s.desktopCapabilities?.[`${ns}/${desktop}`],
 	};
@@ -1337,10 +1346,10 @@ async function handleStorage(req, res, url) {
 			if (!name) return sendText(res, 400, 'invalid request: name the desktop');
 			const desk = findDesktop(s, deskNs, name);
 			if (!desk) return sendText(res, 404, `not found: desktop ${deskNs}/${name}`);
-			const c = claim && s.desktops.claims.find((x) => x.namespace === deskNs && x.name === claim);
-			if (claim && (!c || !desk.pool || c.pool !== desk.pool))
-				return sendText(res, 404, `not found: no claim ${claim} on the pool of ${name}`);
-			return sendJSON(res, 200, { desktops: desktopCaps(s, deskNs, name, claim) });
+			const caps = desktopCaps(s, deskNs, name, claim);
+			if (caps.claim && (!desk.pool || desk.claim !== claim))
+				return sendText(res, 404, `not found: claim ${claim} does not hold ${name}`);
+			return sendJSON(res, 200, { desktops: caps });
 		}
 		const ns = url.searchParams.get('namespace');
 		if (!ns) return sendJSON(res, 200, { cluster: clusterCaps(s) });

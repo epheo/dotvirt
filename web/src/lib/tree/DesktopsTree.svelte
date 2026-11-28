@@ -7,6 +7,7 @@
 		count,
 		desktopState,
 		poolState,
+		stateLine,
 		type DesktopsNamespace,
 		type DesktopsProject,
 	} from '#lib/desktops.js';
@@ -212,7 +213,7 @@
 						>
 							{#snippet icon()}
 								{@const st = desktopState(d)}
-								<StatusDot tone={st.tone} title={st.label} />
+								<StatusDot tone={st.tone} title={stateLine(st)} />
 							{/snippet}
 							<span class="truncate text-side-ink">{d.name}</span>
 						</TreeRow>

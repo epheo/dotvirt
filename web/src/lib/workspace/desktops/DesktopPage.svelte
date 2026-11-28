@@ -4,6 +4,7 @@
 		joinClaims,
 		person,
 		sessionLabel,
+		stateLine,
 		unlistedLines,
 		why,
 	} from '#lib/desktops.js';
@@ -147,7 +148,7 @@
 						</div>
 						<div class={ROW}>
 							<dt class="text-ink-muted">Phase</dt>
-							<dd>{desktop.phase || 'Not read yet'}</dd>
+							<dd>{stateLine({ label: desktop.phase || 'Not read yet', note: st?.note })}</dd>
 						</div>
 						<div class={ROW}>
 							<dt class="text-ink-muted">Session</dt>

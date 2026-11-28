@@ -438,10 +438,12 @@ export const api = {
 		claim: string,
 		uid: string,
 	) => post<void>(`/api/desktops/${enc(namespace)}/${enc(name)}/${act}`, { claim, uid }),
-	// Asks DeskuBe to restart a desktop, under the caller's token. uid is the
-	// desktop the caller saw: the server refuses any other under that name.
-	desktopRestart: (namespace: string, name: string, uid: string) =>
-		post<void>(`/api/desktops/${enc(namespace)}/${enc(name)}/restart`, { uid }),
+	// Asks DeskuBe to restart a desktop, under the caller's token. uid and owner
+	// are the desktop the caller saw and the person it was for ('' when warm):
+	// the server refuses another desktop under that name, or one that changed
+	// hands since.
+	desktopRestart: (namespace: string, name: string, uid: string, owner: string) =>
+		post<void>(`/api/desktops/${enc(namespace)}/${enc(name)}/restart`, { uid, owner }),
 	// The acts on one desktop in namespace, and on claim, a claim of its pool.
 	desktopCapabilities: (namespace: string, desktop: string, claim = '') =>
 		get<gen.Capabilities>(`/api/capabilities${qs({ desktops: namespace, desktop, claim })}`),

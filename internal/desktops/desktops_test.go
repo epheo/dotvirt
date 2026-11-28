@@ -21,6 +21,7 @@ import (
 	"k8s.io/client-go/tools/cache"
 
 	"github.com/epheo/dotvirt/internal/eventbus"
+	"github.com/epheo/dotvirt/internal/model"
 )
 
 const (
@@ -614,11 +615,22 @@ func TestAClaimAndItsDesktopCarryTheClaimsUID(t *testing.T) {
 	if strings.Count(string(b), "uid-alice") != 1 || !strings.Contains(string(b), `"uid":"uid-alice"`) {
 		t.Fatalf("the pull shows %s, want the claim's UID once, on the claim", b)
 	}
-	if got, ok := s.Claim("team-a", "alice"); !ok || got.UID != "uid-alice" || got.Pool != "lab" {
-		t.Fatalf("claim = %+v (%v)", got, ok)
+	// Read alone, the desktop names no claim.
+	if alone, ok := s.Instance("team-a", "lab-1"); !ok || alone.Claim != "" || alone.Pool != "lab" {
+		t.Fatalf("instance = %+v (%v)", alone, ok)
 	}
-	if _, ok := s.Claim("team-b", "alice"); ok {
-		t.Fatal("a claim of another namespace was found")
+	if _, ok := s.Instance("team-b", "lab-1"); ok {
+		t.Fatal("a desktop of another namespace was found")
+	}
+}
+
+// A desktop waiting for its class is told apart from one not ready for
+// another reason.
+func TestAMissingClassIsToldApart(t *testing.T) {
+	missing := model.Desktop{Conditions: []model.DesktopCondition{{Type: "Ready", Status: "False", Reason: "ClassNotFound"}}}
+	other := model.Desktop{Conditions: []model.DesktopCondition{{Type: "Ready", Status: "False", Reason: "PodNotReady"}}}
+	if !ClassMissing(missing) || ClassMissing(other) || ClassMissing(model.Desktop{}) {
+		t.Fatal("ClassMissing reads another condition as a missing class")
 	}
 }
 

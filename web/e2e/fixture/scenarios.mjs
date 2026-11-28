@@ -2240,9 +2240,16 @@ const deskube = {
 			counts: { held: 2, inSession: 1, ready: 2, stopped: 1, warm: 1, free: 1, waiting: 0 },
 			conditions: poolReady,
 			desktops: [
-				desk('web-prod', 'eng-7hq2k', { pool: 'eng', session: 'busy', claim: 'eng-alice' }),
+				// A held desktop is its claim's person's; a warm one no one's.
+				desk('web-prod', 'eng-7hq2k', {
+					pool: 'eng',
+					owner: 'alice',
+					session: 'busy',
+					claim: 'eng-alice',
+				}),
 				desk('web-prod', 'eng-p4x9m', {
 					pool: 'eng',
+					owner: 'bob',
 					running: false,
 					phase: 'Stopped',
 					session: undefined,
@@ -2392,14 +2399,18 @@ const desktopsrefused = {
 		'web-prod/eng': { restart: false, power: false, release: false },
 	},
 };
-// bob deleted his claim eng-bob and someone made another under that name, and
+// bob deleted his claim eng-bob and someone made another under that name,
 // carol-dev was deleted and made again, which the console has not heard of:
-// the same names, other UIDs.
+// the same names, other UIDs. And dan took the warm eng-w2c8d, under its UID.
 const desktopsreclaimed = {
 	...desktops,
 	name: 'desktopsreclaimed',
 	desktops: {
 		...deskube,
+		pools: deskube.pools.map((p) => ({
+			...p,
+			desktops: p.desktops.map((d) => (d.name === 'eng-w2c8d' ? { ...d, owner: 'dan' } : d)),
+		})),
 		desktops: deskube.desktops.map((d) =>
 			d.name === 'carol-dev' ? { ...d, uid: 'uid-carol-dev-anew' } : d,
 		),

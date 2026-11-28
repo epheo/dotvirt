@@ -11,6 +11,7 @@ import {
 	restartHeld,
 	rights,
 	seatParts,
+	stateLine,
 	unlistedLines,
 } from './desktops';
 
@@ -109,21 +110,31 @@ describe('pools', () => {
 });
 
 describe('restart', () => {
-	it('reads requested until DeskuBe rolls it out, then the phase', () => {
-		expect(desktopState(desktop('a', { phase: 'Ready', restarting: true }))).toEqual({
-			tone: 'info',
-			label: 'Restart requested',
-		});
-		expect(desktopState(desktop('a', { phase: 'Ready' })).label).toBe('Ready');
-		// A missing class still says so first.
-		const missing = desktop('a', {
-			class: 'gpu',
+	const noClass = [{ type: 'Ready', status: 'False', reason: 'ClassNotFound' }];
+	it('is said beside the phase, never in its place', () => {
+		const asked = desktopState(desktop('a', { phase: 'Ready', restarting: true }));
+		expect(asked).toMatchObject({ tone: 'ok', label: 'Ready', note: 'restart requested' });
+		expect(stateLine(asked)).toBe('Ready (restart requested)');
+		expect(stateLine(desktopState(desktop('a', { phase: 'Ready' })))).toBe('Ready');
+		// A failure DeskuBe reports, and a missing class, stay the state.
+		const failed = desktop('a', {
+			phase: 'Failed',
 			restarting: true,
-			conditions: [{ type: 'Ready', status: 'False', reason: 'ClassNotFound' }],
+			conditions: [{ type: 'PodReady', status: 'False', message: 'image pull failed' }],
 		});
-		expect(desktopState(missing).label).toBe('Class missing');
+		expect(desktopState(failed)).toMatchObject({
+			tone: 'danger',
+			label: 'Failed',
+			message: 'image pull failed',
+			note: 'restart requested',
+		});
+		const missing = desktop('a', { class: 'gpu', restarting: true, conditions: noClass });
+		expect(desktopState(missing)).toMatchObject({
+			label: 'Class missing',
+			note: 'restart requested',
+		});
 	});
-	it('is offered only on a phase that shows a pod, and once until rolled out', () => {
+	it('is offered on a phase that shows a pod and a class that exists, asked before or not', () => {
 		expect(restartHeld({ phase: 'Ready' })).toBe('');
 		expect(restartHeld({ phase: 'Starting' })).toBe('');
 		expect(restartHeld({ phase: 'Stopped' })).toBe(
@@ -136,8 +147,8 @@ describe('restart', () => {
 		expect(restartHeld({})).toBe(
 			'Only a starting or ready desktop restarts: DeskuBe has not reported this one yet.',
 		);
-		expect(restartHeld({ phase: 'Ready', restarting: true })).toBe(
-			'A restart is on its way: DeskuBe has not rolled it out yet.',
+		expect(restartHeld({ phase: 'Ready', class: 'gpu', conditions: noClass })).toBe(
+			'Class gpu does not exist: DeskuBe rolls out no restart until it does.',
 		);
 	});
 });

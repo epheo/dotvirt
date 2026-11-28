@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { ChevronDown } from '@lucide/svelte';
-	import { api, type DesktopClaim } from '#lib/api.js';
+	import { api, type Desktop, type DesktopClaim } from '#lib/api.js';
 	import { person, restartHeld, type DesktopRow } from '#lib/desktops.js';
 	import { desktopGate } from '#lib/gates.js';
 	import { action } from '#lib/resource.svelte.js';
@@ -18,18 +18,17 @@
 	// The acts on one desktop, run now under the caller's account: a restart of
 	// any desktop, and on a pool's desktop a start, stop or release on the
 	// claim holding it. The menu, and the dialog it opens, act on the desktop
-	// and the claim shown when the menu opened, each named by its UID: one
-	// deleted since, and another made under its name, is never acted on. The
-	// rights are asked when the menu first opens, and what an act changes
+	// and the claim shown when the menu opened, each named by its UID, and the
+	// desktop by the person it was for: one deleted since, another made under
+	// its name, or a warm desktop a claim took meanwhile, is never acted on.
+	// The rights are asked when the menu first opens, and what an act changes
 	// arrives on the live stream once DeskuBe writes it.
 	let { row }: { row: DesktopRow } = $props();
 
 	type Target = {
 		namespace: string;
 		name: string;
-		uid: string;
-		phase?: string;
-		restarting?: boolean;
+		desktop: Desktop;
 		pool: string;
 		claim?: DesktopClaim;
 		who: string;
@@ -52,9 +51,7 @@
 		target = {
 			namespace: d.namespace,
 			name: d.name,
-			uid: d.uid,
-			phase: d.phase,
-			restarting: d.restarting,
+			desktop: d,
 			pool: d.pool ?? '',
 			claim,
 			who: person(row),
@@ -64,28 +61,25 @@
 	}
 
 	// What holds an act back before the caller's rights: a watch it reads
-	// lost, or no claim to read.
+	// lost, or no claim to read. A restart reads no claim.
 	const stale = $derived(new Set(desktops.value?.stale));
 	const lost = (what: string) =>
 		`The console lost its watch on the ${what}: acts wait until it is back.`;
-	const unread = $derived(
-		target && !desktops.may?.lists(target.namespace, 'vdiclaims')
-			? 'Claims here are not shown to you.'
-			: '',
-	);
 	const claimHeld = $derived.by(() => {
 		if (!target) return '';
 		if (stale.has('vdiinstances')) return lost('desktops');
 		if (stale.has('vdiclaims')) return lost('claims');
 		if (target.claim) return '';
-		return unread || 'No one holds this desktop: its pool keeps it warm.';
+		return desktops.may?.lists(target.namespace, 'vdiclaims')
+			? 'No one holds this desktop: its pool keeps it warm.'
+			: 'Claims here are not shown to you.';
 	});
 	const power = $derived(target && (claimHeld || desktopGate.power(target).why));
 	const release = $derived(target && (claimHeld || desktopGate.release(target).why));
 	const restart = $derived.by(() => {
 		if (!target) return '';
 		if (stale.has('vdiinstances')) return lost('desktops');
-		return unread || restartHeld(target) || desktopGate.restart(target).why;
+		return restartHeld(target.desktop) || desktopGate.restart(target).why;
 	});
 	const stopping = $derived(target?.claim?.running !== false);
 
@@ -118,7 +112,8 @@
 	}
 
 	async function restarted(t: Target) {
-		const done = await confirm.run(() => api.desktopRestart(t.namespace, t.name, t.uid));
+		const { uid, owner = '' } = t.desktop;
+		const done = await confirm.run(() => api.desktopRestart(t.namespace, t.name, uid, owner));
 		if (!done) return;
 		confirming = null;
 		ui.showToast(`Restart requested for ${t.name}.`, { kind: 'success' });

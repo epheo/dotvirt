@@ -14,13 +14,15 @@ type Capabilities struct {
 }
 
 // DesktopCaps are the acts on one desktop, and on a pool's desktop those on
-// Claim, a claim of its pool. Each needs the desktops and the claims listed
-// in Namespace: the routes act on nothing else.
+// Claim, the claim holding it. Each needs the desktops listed in Namespace,
+// and those on the claim the claims too: the routes act on nothing else.
 type DesktopCaps struct {
 	Namespace string `json:"namespace"`
 	Desktop   string `json:"desktop"`
-	Claim     string `json:"claim,omitempty"`
-	// Restart is patch on the desktop, by its name.
+	// Claim is the claim weighed, empty when none was: none asked, or the
+	// claims not listed to the caller.
+	Claim string `json:"claim,omitempty"`
+	// Restart is get and patch on the desktop, by its name.
 	Restart bool `json:"restart"`
 	// Power starts and stops the desktop on Claim (patch on it), Release
 	// deletes Claim (delete on it), each beside what DeskuBe's policy asks of

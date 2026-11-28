@@ -10,6 +10,7 @@ import (
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/types"
 
 	"github.com/epheo/dotvirt/internal/desktops"
@@ -57,25 +58,49 @@ func (c *Client) DeleteClaim(ctx context.Context, namespace, claim, uid string) 
 }
 
 // RestartDesktop asks DeskuBe to restart a desktop: a new value of its restart
-// annotation, which DeskuBe rolls out to the desktop's pod. Called on the
-// caller's client.
-func (c *Client) RestartDesktop(ctx context.Context, namespace, name, uid string) error {
+// annotation, which DeskuBe rolls out to the desktop's pod, ending the session
+// of whoever owns it. A pool gives a warm desktop to a claim in place, under
+// the same UID, so the UID alone does not hold the write to the person the
+// caller saw: the desktop is read first, its UID and owner checked, and the
+// patch sent at that read's resourceVersion. Called on the caller's client.
+func (c *Client) RestartDesktop(ctx context.Context, namespace, name, uid, owner string) error {
 	dyn, err := c.dynamic()
 	if err != nil {
 		return err
+	}
+	res := dyn.Resource(desktops.GVRInstance).Namespace(namespace)
+	live, err := res.Get(ctx, name, metav1.GetOptions{})
+	if err != nil {
+		return err
+	}
+	madeAgain := fmt.Errorf("%w: desktop %s is not the one you saw: it was deleted, and another made under its name; look at it again", model.ErrConflict, name)
+	if string(live.GetUID()) != uid {
+		return madeAgain
+	}
+	if now, _, _ := unstructured.NestedString(live.Object, "spec", "owner"); now != owner {
+		return ChangedHands(name)
 	}
 	// The same value again restarts nothing, and DeskuBe rolls out none over
 	// 64 bytes: the time to the nanosecond is new per request, and 30 at most.
 	asked := time.Now().UTC().Format(time.RFC3339Nano)
 	patch, err := json.Marshal(map[string]any{"metadata": map[string]any{
-		"uid":         uid,
-		"annotations": map[string]string{desktops.RestartAnnotation: asked},
+		"uid":             uid,
+		"resourceVersion": live.GetResourceVersion(),
+		"annotations":     map[string]string{desktops.RestartAnnotation: asked},
 	}})
 	if err != nil {
 		return err
 	}
-	_, err = dyn.Resource(desktops.GVRInstance).Namespace(namespace).Patch(ctx, name, types.MergePatchType, patch, metav1.PatchOptions{})
-	return patchRefusal(err, fmt.Errorf("%w: desktop %s is not the one you saw: it was deleted, and another made under its name; look at it again", model.ErrConflict, name))
+	_, err = res.Patch(ctx, name, types.MergePatchType, patch, metav1.PatchOptions{})
+	if apierrors.IsConflict(err) {
+		return fmt.Errorf("%w: desktop %s changed since you saw it: look at it again", model.ErrConflict, name)
+	}
+	return patchRefusal(err, madeAgain)
+}
+
+// ChangedHands says the desktop name has another owner than the caller saw.
+func ChangedHands(name string) error {
+	return fmt.Errorf("%w: desktop %s changed hands since you saw it: look at it again", model.ErrConflict, name)
 }
 
 // anotherClaim says the claim under that name is not the one the caller saw.
@@ -84,8 +109,7 @@ func anotherClaim(claim string) error {
 }
 
 // patchRefusal is err, a patch's answer, as the caller reads it: other when
-// the apiserver refused the metadata.uid it carries, and the apiserver's own
-// words when it refused the patch as invalid for any other reason.
+// the apiserver refused the metadata.uid it carries, else the apiserver's own.
 func patchRefusal(err, other error) error {
 	var status apierrors.APIStatus
 	if !apierrors.IsInvalid(err) || !errors.As(err, &status) {
@@ -96,5 +120,5 @@ func patchRefusal(err, other error) error {
 	}) {
 		return other
 	}
-	return fmt.Errorf("%w: %s", model.ErrInvalid, status.Status().Message)
+	return err
 }

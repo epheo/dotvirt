@@ -333,14 +333,14 @@ func (s *Server) projectCaps(ctx context.Context, sc scope, full project.Project
 }
 
 // desktopCaps answers the acts on desktop name in namespace ns of sc's
-// project, and on a pool's desktop those on claim, a claim of its pool: what
+// project, and on a pool's desktop those on claim, the claim holding it: what
 // desktopScope reads, then what each act's route and DeskuBe's admission ask
 // of that desktop and that claim, by name, as RBAC may grant either by name.
-// A caller who may list the desktops and claims there is answered only for a
-// desktop and a claim it is shown, so each answer is one it can see a reason
-// to ask.
+// A caller who may list the desktops there is answered for a desktop it is
+// shown, and on the claim only where it also lists the claims: for another,
+// claim is never read, so no answer tells which claims exist.
 func (s *Server) desktopCaps(ctx context.Context, sc scope, ns, name, claim string) (model.DesktopCaps, error) {
-	out := model.DesktopCaps{Namespace: ns, Desktop: name, Claim: claim}
+	out := model.DesktopCaps{Namespace: ns, Desktop: name}
 	if name == "" {
 		return out, invalid(errors.New("name the desktop"))
 	}
@@ -348,23 +348,21 @@ func (s *Server) desktopCaps(ctx context.Context, sc scope, ns, name, claim stri
 		return out, nil
 	}
 	v, err := s.viewFor(ctx, sc.id, sc.cluster)
-	if err != nil || !v.lists(ssarDesktops, ns) || !v.lists(ssarDesktopClaims, ns) {
+	if err != nil || !v.lists(ssarDesktops, ns) {
 		return out, nil
 	}
-	d, _, ok := s.desktops.Desktop(ns, name)
-	if !ok {
+	if _, ok := s.desktops.Instance(ns, name); !ok {
 		return out, fmt.Errorf("%w: desktop %s/%s", model.ErrNotFound, ns, name)
 	}
-	var c model.DesktopClaim
-	if claim != "" {
-		if c, ok = s.desktops.Claim(ns, claim); !ok || d.Pool == "" || c.Pool != d.Pool {
-			return out, fmt.Errorf("%w: no claim %s on the pool of desktop %s/%s", model.ErrNotFound, claim, ns, name)
-		}
-	}
 	out.Restart = s.capable(ctx, sc.id, sc.cluster, desktopRestartAction(ns, name))
-	if claim == "" {
+	if claim == "" || !v.lists(ssarDesktopClaims, ns) {
 		return out, nil
 	}
+	d, c, _ := s.desktops.Desktop(ns, name)
+	if d.Pool == "" || c.Name != claim || c.Pool != d.Pool {
+		return out, fmt.Errorf("%w: claim %s does not hold desktop %s/%s", model.ErrNotFound, claim, ns, name)
+	}
+	out.Claim = claim
 	own := c.User == sc.id.Username
 	opens := func(verb string) bool {
 		ok, _ := s.anyAllowed(ctx, sc.id, sc.cluster, claimActions(verb, ns, c.Pool, c.Name, own))
