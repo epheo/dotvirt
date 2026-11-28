@@ -8,7 +8,10 @@ class ModulesStore {
 export const modules = new ModulesStore();
 
 export const vmsOff = () => modules.value !== null && !modules.value.vms;
-export const computeOff = () => vmsOff() && !modules.value?.desktops;
+// Desktops is a section of its own: its tile waits for a yes, its pages leave
+// on a no.
+export const desktopsOn = () => modules.value?.desktops === true;
+export const desktopsOff = () => modules.value !== null && !modules.value.desktops;
 export const networksOff = () => modules.value !== null && !modules.value.networks;
 // What the cluster can install, a fact about it, never a missing right:
 // rebalancing's operator comes through OLM, its PSI option is a MachineConfig.

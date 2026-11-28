@@ -1,30 +1,34 @@
 <script lang="ts">
-	import { Database, Folder, GitBranch, Monitor, Network, Server } from '@lucide/svelte';
+	import { Database, Folder, GitBranch, Laptop, Monitor, Network, Server } from '@lucide/svelte';
 	import { clusterGate } from '#lib/gates.js';
 	import type { Section } from '#lib/nav.js';
-	import { computeOff } from '#lib/state/modules.svelte.js';
+	import { desktopsOn, vmsOff } from '#lib/state/modules.svelte.js';
 
 	// The section switcher: each section has its own tree below, all rendering
 	// into the same center workspace. Work in flight lives in the change tray,
-	// not on the switcher. Hosts shows on a known yes only: an unread or failed
-	// capability answer offers no tile. Compute is named for what it holds: a
-	// cluster with neither VMs nor desktops still has its projects there.
+	// not on the switcher. Hosts and Desktops show on a known yes only: an
+	// unread or failed answer offers no tile. Compute is named for what it
+	// holds: a cluster without VMs still has its projects there.
 	let { active }: { active: Section } = $props();
 
 	const tiles = $derived(
 		(
 			[
-				{ id: 'compute', label: computeOff() ? 'Projects' : 'Compute', href: '/compute' },
+				{ id: 'compute', label: vmsOff() ? 'Projects' : 'Compute', href: '/compute' },
+				{ id: 'desktops', label: 'Desktops', href: '/desktops' },
 				{ id: 'hosts', label: 'Hosts', href: '/hosts' },
 				{ id: 'networking', label: 'Networking', href: '/networking' },
 				{ id: 'storage', label: 'Storage', href: '/storage' },
 				{ id: 'changes', label: 'Changes', href: '/changes' },
 			] as { id: Section; label: string; href: string }[]
-		).filter((s) => s.id !== 'hosts' || clusterGate.hosts().ok),
+		).filter(
+			(s) => (s.id !== 'hosts' || clusterGate.hosts().ok) && (s.id !== 'desktops' || desktopsOn()),
+		),
 	);
-	// Five tiles read three over two, four read two over two: every row fills
-	// the rail.
-	const span = (i: number) => (tiles.length === 5 && i < 3 ? 'col-span-2' : 'col-span-3');
+	// Six tiles read three over three, five three over two, four two over
+	// two: every row fills the rail.
+	const span = (i: number) =>
+		tiles.length === 6 || (tiles.length === 5 && i < 3) ? 'col-span-2' : 'col-span-3';
 </script>
 
 <!-- The label under its icon: every name reads whole at the rail's width. -->
@@ -38,12 +42,9 @@
 				? 'bg-side-active text-side-ink'
 				: 'text-side-dim hover:bg-side-hover hover:text-side-ink'}"
 		>
-			{#if s.id === 'compute' && computeOff()}<Folder
-					size={22}
-					strokeWidth={1.75}
-					class="shrink-0"
-				/>
+			{#if s.id === 'compute' && vmsOff()}<Folder size={22} strokeWidth={1.75} class="shrink-0" />
 			{:else if s.id === 'compute'}<Monitor size={22} strokeWidth={1.75} class="shrink-0" />
+			{:else if s.id === 'desktops'}<Laptop size={22} strokeWidth={1.75} class="shrink-0" />
 			{:else if s.id === 'hosts'}<Server size={22} strokeWidth={1.75} class="shrink-0" />
 			{:else if s.id === 'networking'}<Network size={22} strokeWidth={1.75} class="shrink-0" />
 			{:else if s.id === 'storage'}<Database size={22} strokeWidth={1.75} class="shrink-0" />

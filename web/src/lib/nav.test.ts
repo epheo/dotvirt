@@ -1,5 +1,77 @@
 import { describe, expect, it } from 'vitest';
-import { keepTab, networkingTab, storageHref, storageTab, trailForScope } from './nav';
+import {
+	hrefForScope,
+	keepTab,
+	networkingTab,
+	scopeFromPath,
+	sectionOf,
+	storageHref,
+	storageTab,
+	trailForScope,
+} from './nav';
+
+describe('desktops routes', () => {
+	it('puts every desktops path in its section, and only those', () => {
+		expect(sectionOf('/desktops')).toBe('desktops');
+		expect(sectionOf('/desktops/team-web/web-prod/pool/eng')).toBe('desktops');
+		expect(sectionOf('/desktopsx')).toBeNull();
+		expect(sectionOf('/compute/desktops')).toBe('compute');
+		expect(sectionOf('/vm/web-prod/web-1')).toBeNull();
+	});
+	it('reads a pool and a desktop of the same name apart', () => {
+		expect(scopeFromPath('/desktops/team-web/web-prod/pool/eng')).toEqual({
+			kind: 'pool',
+			project: 'team-web',
+			namespace: 'web-prod',
+			pool: 'eng',
+		});
+		expect(scopeFromPath('/desktops/team-web/web-prod/desktop/eng')).toEqual({
+			kind: 'desktop',
+			project: 'team-web',
+			namespace: 'web-prod',
+			desktop: 'eng',
+		});
+		expect(scopeFromPath('/desktops/team-web/web-prod')).toEqual({
+			kind: 'namespace',
+			project: 'team-web',
+			namespace: 'web-prod',
+		});
+		expect(scopeFromPath('/desktops/team-web')).toEqual({ kind: 'project', project: 'team-web' });
+		expect(scopeFromPath('/desktops')).toEqual({ kind: 'all' });
+	});
+	it('links scopes back to the paths they came from', () => {
+		for (const path of [
+			'/desktops/team-web',
+			'/desktops/team-web/web-prod',
+			'/desktops/team-web/web-prod/pool/eng',
+			'/desktops/team-web/web-prod/desktop/carol-dev',
+		])
+			expect(hrefForScope(scopeFromPath(path), 'desktops')).toBe(path);
+		expect(hrefForScope({ kind: 'project', project: 'team-web' })).toBe('/compute/team-web');
+	});
+	it('trails a pool under its project and namespace in Desktops', () => {
+		expect(
+			trailForScope(
+				{ kind: 'pool', project: 'team-web', namespace: 'web-prod', pool: 'eng' },
+				'Desktops',
+				(p) => (p === 'team-web' ? 'Team web' : p),
+				'desktops',
+			),
+		).toEqual([
+			{ label: 'Desktops', href: '/desktops' },
+			{ label: 'Team web', href: '/desktops/team-web' },
+			{ label: 'web-prod', href: '/desktops/team-web/web-prod' },
+			{ label: 'eng' },
+		]);
+	});
+	it('keeps a root tab on the root only', () => {
+		expect(keepTab('/desktops', 'classes')).toBe('/desktops?tab=classes');
+		expect(keepTab('/desktops/team-web', 'classes')).toBe('/desktops/team-web');
+		expect(keepTab('/desktops/team-web/web-prod/pool/eng', 'vms')).toBe(
+			'/desktops/team-web/web-prod/pool/eng',
+		);
+	});
+});
 
 describe('keepTab', () => {
 	it('carries the tab to an object that has it', () => {

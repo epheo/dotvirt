@@ -1,7 +1,7 @@
 import { getContext, setContext } from 'svelte';
 import type { CreateBodies, CreateKind } from '#lib/api.js';
 import { clusterGate } from '#lib/gates.js';
-import { computeOff, networksOff, vmsOff } from '#lib/state/modules.svelte.js';
+import { networksOff, vmsOff } from '#lib/state/modules.svelte.js';
 import type { AppModal } from '#lib/state/ui.svelte.js';
 
 export type SheetType = 'vm' | 'template' | 'image' | 'network' | 'rule' | 'outbound' | 'project';
@@ -85,7 +85,7 @@ export function newFromHere(
 	}
 	if (vmsOff()) {
 		// New opens on what the section in view makes most.
-		const onProjects = path.split('?')[0] === '/compute' && computeOff();
+		const onProjects = path.split('?')[0] === '/compute';
 		return onProjects && clusterGate.namespaceCreate().ok ? { kind: 'newProject' } : network;
 	}
 	if (path.startsWith('/storage')) return { kind: 'upload', namespace: ns };

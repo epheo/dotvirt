@@ -11,6 +11,8 @@ export type Scope =
 	| { kind: 'all' }
 	| { kind: 'project'; project: string }
 	| { kind: 'namespace'; project: string; namespace: string }
+	| { kind: 'pool'; project: string; namespace: string; pool: string }
+	| { kind: 'desktop'; project: string; namespace: string; desktop: string }
 	| { kind: 'node'; node: string }
 	| { kind: 'network'; network: string }
 	| { kind: 'storage'; storageClass: string };

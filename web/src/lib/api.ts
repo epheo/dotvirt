@@ -426,6 +426,8 @@ export const api = {
 	gateways: () => get<gen.Gateways>('/api/networking/gateways'),
 	// The routes the caller may list, without the controllers' messages.
 	routes: () => get<gen.Route[]>('/api/networking/routes'),
+	// DeskuBe's live state in the caller's projects, each kind where it may list it.
+	desktops: () => get<gen.Desktops>('/api/desktops'),
 	// Where every copy lives: answers only a caller who may list r-drbd's kinds.
 	replication: () => get<gen.Replication>('/api/storage/replication'),
 	// The standing of the caller's replicated disks, with no host named.
