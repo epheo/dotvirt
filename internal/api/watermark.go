@@ -199,8 +199,8 @@ func (s *Server) desktopsWatermark(v callerView, namespaces []string) uint64 {
 	if s.desktops == nil {
 		return 0
 	}
-	readable, unlisted := s.desktopsReadable(v, namespaces)
-	if len(readable) == 0 {
+	readable, unlisted := s.desktopsReadable(v, namespaces, namespaces)
+	if len(readable) == 0 && len(unlisted) == 0 {
 		return 0
 	}
 	var t term
