@@ -85,7 +85,6 @@ rules:
   - vdiinstances
   - vdiclaims
   verbs:
-  - get
   - list
   - watch
 - apiGroups:
