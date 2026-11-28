@@ -3,22 +3,37 @@
 // tab flips). The VM route is section-agnostic - every section's tree opens VMs.
 import type { Scope } from './lenses';
 
-export type Section = 'compute' | 'hosts' | 'networking' | 'storage' | 'changes';
+export type Section = 'compute' | 'desktops' | 'hosts' | 'networking' | 'storage' | 'changes';
 
 // The inventory sections: where "/" may land, and what carries an object tree
 // of its own. Changes is a section too, but never a home.
-export const INVENTORY_SECTIONS: Section[] = ['compute', 'hosts', 'networking', 'storage'];
+export const INVENTORY_SECTIONS: Section[] = [
+	'compute',
+	'desktops',
+	'hosts',
+	'networking',
+	'storage',
+];
+
+// The sections whose tree walks projects and namespaces: the same scope opens
+// a different page in each.
+type ProjectSection = 'compute' | 'desktops';
 
 const enc = encodeURIComponent;
 
-export function hrefForScope(s: Scope): string {
+export function hrefForScope(s: Scope, section: ProjectSection = 'compute'): string {
 	switch (s.kind) {
 		case 'all':
-			return '/compute';
+			return `/${section}`;
 		case 'project':
-			return `/compute/${enc(s.project)}`;
+			return `/${section}/${enc(s.project)}`;
 		case 'namespace':
-			return `/compute/${enc(s.project)}/${enc(s.namespace)}`;
+			return `/${section}/${enc(s.project)}/${enc(s.namespace)}`;
+		// A pool and a desktop may share a name: the kind is a segment of its own.
+		case 'pool':
+			return `/desktops/${enc(s.project)}/${enc(s.namespace)}/pool/${enc(s.pool)}`;
+		case 'desktop':
+			return `/desktops/${enc(s.project)}/${enc(s.namespace)}/desktop/${enc(s.desktop)}`;
 		case 'node':
 			return `/hosts/${enc(s.node)}`;
 		case 'network':
@@ -45,6 +60,7 @@ export function sectionOf(pathname: string): Section | null {
 	const head = pathname.split('/')[1];
 	switch (head) {
 		case 'compute':
+		case 'desktops':
 		case 'hosts':
 		case 'networking':
 		case 'storage':
@@ -149,6 +165,12 @@ export function storageHref(
 	return `/storage?${q}`;
 }
 
+// The Desktops root's tabs; its other pages are one view each.
+export const DESKTOPS_TABS = [
+	{ id: 'desktops', label: 'All desktops' },
+	{ id: 'classes', label: 'Desktop classes' },
+];
+
 const CONTAINER_TABS = [
 	{ id: 'summary', label: 'Summary' },
 	{ id: 'vms', label: 'VMs' },
@@ -170,6 +192,8 @@ export function containerTabs(scope: Scope, section: Section): typeof CONTAINER_
 			return only('summary', 'vms', 'monitor', 'configure');
 		case 'networking':
 			return scope.kind === 'all' ? NETWORKING_TABS : NETWORK_TABS;
+		case 'desktops':
+			return scope.kind === 'all' ? DESKTOPS_TABS : [];
 	}
 	// Effective policy evaluates against exactly one namespace; a template
 	// library belongs to a project.
@@ -205,18 +229,29 @@ export function trailForScope(
 	s: Scope,
 	root = 'All VMs',
 	title: (project: string) => string = (p) => p,
+	section: ProjectSection = 'compute',
 ): { label: string; href?: string }[] {
 	switch (s.kind) {
 		case 'all':
 			return [{ label: root }];
 		case 'project':
-			return [{ label: root, href: '/compute' }, { label: title(s.project) }];
+			return [{ label: root, href: `/${section}` }, { label: title(s.project) }];
 		case 'namespace':
 			return [
-				{ label: root, href: '/compute' },
-				{ label: title(s.project), href: hrefForScope({ kind: 'project', project: s.project }) },
+				{ label: root, href: `/${section}` },
+				{
+					label: title(s.project),
+					href: hrefForScope({ kind: 'project', project: s.project }, section),
+				},
 				{ label: s.namespace },
 			];
+		case 'pool':
+		case 'desktop': {
+			const ns: Scope = { kind: 'namespace', project: s.project, namespace: s.namespace };
+			const up = trailForScope(ns, root, title, 'desktops');
+			up[up.length - 1].href = hrefForScope(ns, 'desktops');
+			return [...up, { label: s.kind === 'pool' ? s.pool : s.desktop }];
+		}
 		case 'node':
 			return [{ label: 'Hosts', href: '/hosts' }, { label: s.node }];
 		case 'network':
@@ -247,6 +282,14 @@ export function scopeFromPath(pathname: string): Scope {
 				: { kind: 'all' };
 		case 'storage':
 			return parts.length >= 2 ? { kind: 'storage', storageClass: parts[1] } : { kind: 'all' };
+		case 'desktops': {
+			const [, project, namespace, kind, name] = parts;
+			if (name && kind === 'pool') return { kind: 'pool', project, namespace, pool: name };
+			if (name && kind === 'desktop') return { kind: 'desktop', project, namespace, desktop: name };
+			if (namespace) return { kind: 'namespace', project, namespace };
+			if (project) return { kind: 'project', project };
+			return { kind: 'all' };
+		}
 	}
 	return { kind: 'all' };
 }

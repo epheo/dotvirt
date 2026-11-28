@@ -3,7 +3,7 @@
 	import { Plus } from '@lucide/svelte';
 	import { ACCESS_UNKNOWN } from '#lib/authoring.js';
 	import { clusterGate } from '#lib/gates.js';
-	import { scopeFromPath } from '#lib/nav.js';
+	import { scopeFromPath, sectionOf } from '#lib/nav.js';
 	import { inventory } from '#lib/state/inventory.svelte.js';
 	import { vmsOff } from '#lib/state/modules.svelte.js';
 	import { ui } from '#lib/state/ui.svelte.js';
@@ -37,19 +37,24 @@
 	// change (cluster.platform is the union of the platform-tier fields).
 	const platform = $derived(clusterGate.platform());
 	const canCreate = $derived(inventory.namespaces.length > 0 || platform.ok);
+	// The console makes no desktop yet: New there would open on another
+	// section's kind.
+	const inDesktops = $derived(sectionOf(page.url.pathname) === 'desktops');
 </script>
 
 <Button
 	onclick={() =>
 		(ui.modal = newFromHere(page.url.pathname + page.url.search, scopeNamespace, scopeNamespaces))}
-	disabled={!canCreate}
-	title={canCreate
-		? vmsOff()
-			? 'Create a network, rule or project'
-			: 'Create a VM, network, rule or project'
-		: inventory.accessUnknown || platform.why === ACCESS_UNKNOWN
-			? ACCESS_UNKNOWN
-			: 'No project you may change yet'}
+	disabled={!canCreate || inDesktops}
+	title={inDesktops
+		? "Desktops are not made here yet: declare pools and desktops in a project's repo"
+		: canCreate
+			? vmsOff()
+				? 'Create a network, rule or project'
+				: 'Create a VM, network, rule or project'
+			: inventory.accessUnknown || platform.why === ACCESS_UNKNOWN
+				? ACCESS_UNKNOWN
+				: 'No project you may change yet'}
 >
 	<Plus size={14} /> New
 </Button>

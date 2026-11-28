@@ -159,6 +159,8 @@ class InventoryStore {
 	readonly replicationVersion = $derived(this.inventory?.replicationVersion ?? 0);
 	// The Gateway pulls' watermark; absent while no GatewayClass exists.
 	readonly routesVersion = $derived(this.inventory?.routesVersion ?? 0);
+	// The desktops pull's watermark; absent while the cluster serves no DeskuBe.
+	readonly desktopsVersion = $derived(this.inventory?.desktopsVersion ?? 0);
 	// Namespaces in projects that have a repo, whether or not the caller may author there.
 	readonly repoNamespaces = $derived(
 		this.projects.filter((p) => p.repo).flatMap((p) => p.namespaces.map((n) => n.namespace)),

@@ -55,6 +55,25 @@ test('networking and security surfaces are accessible', async ({ page }) => {
 	await checkA11y(page, 'network page');
 });
 
+test('desktops surfaces are accessible', async ({ page }) => {
+	await setScenario(page, 'desktops');
+	await login(page);
+	await page.goto('/desktops');
+	await expect(page.getByRole('table', { name: 'All desktops' })).toBeVisible();
+	await checkA11y(page, 'all desktops');
+	await page.emulateMedia({ colorScheme: 'dark' });
+	await checkA11y(page, 'all desktops (dark)');
+	await page.emulateMedia({ colorScheme: 'light' });
+
+	await page.goto('/desktops/team-web/web-prod/pool/lab');
+	await expect(page.getByText(/^Class gpu-lab does not exist/)).toBeVisible();
+	await checkA11y(page, 'pool without its class');
+
+	await page.goto('/desktops/team-batch/batch-prod/pool/render');
+	await expect(page.getByText(/^Desktops here are not shown to you/)).toBeVisible();
+	await checkA11y(page, 'pool with desktops not shown');
+});
+
 test('a VM opens by keyboard alone', async ({ page }) => {
 	await setScenario(page, 'base');
 	await login(page);

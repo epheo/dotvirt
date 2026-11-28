@@ -21,13 +21,14 @@
 	import { templates } from '#lib/state/templates.svelte.js';
 	import { inventory } from '#lib/state/inventory.svelte.js';
 	import { reviewCache } from '#lib/state/reviewCache.svelte.js';
+	import { desktops } from '#lib/state/desktops.svelte.js';
 	import { gateways } from '#lib/state/gateways.svelte.js';
 	import { replication } from '#lib/state/replication.svelte.js';
 	import { storage } from '#lib/state/storage.svelte.js';
 	import { clusterGate } from '#lib/gates.js';
 	import { caps } from '#lib/state/caps.svelte.js';
 	import { branding } from '#lib/state/branding.svelte.js';
-	import { modules } from '#lib/state/modules.svelte.js';
+	import { desktopsOn, modules } from '#lib/state/modules.svelte.js';
 	import { lastSection } from '#lib/state/nav.svelte.js';
 	import { session } from '#lib/state/session.svelte.js';
 	import { forge } from '#lib/state/forge.svelte.js';
@@ -49,6 +50,7 @@
 	import ToastHost from '#lib/components/ToastHost.svelte';
 	import ChangesTree from '#lib/tree/ChangesTree.svelte';
 	import ComputeTree from '#lib/tree/ComputeTree.svelte';
+	import DesktopsTree from '#lib/tree/DesktopsTree.svelte';
 	import HostsTree from '#lib/tree/HostsTree.svelte';
 	import NetworkingTree from '#lib/tree/NetworkingTree.svelte';
 	import StorageTree from '#lib/tree/StorageTree.svelte';
@@ -89,6 +91,7 @@
 			storage.reset();
 			replication.reset();
 			gateways.reset();
+			desktops.reset();
 			caps.reset();
 			modules.value = null;
 			tray.reset();
@@ -230,6 +233,18 @@
 		void clusterGate.platform().ok; // platform stagers also carry a platform draft
 		if (session.user && streamed) untrack(() => drafts.refresh());
 	});
+
+	// The desktops pull: one per watermark move while the Desktops tree shows,
+	// its pages and a VM page it stays beside alike. From the first frame on:
+	// before it the watermark reads 0, and its landing would pull twice. A
+	// bool, so the module read's minute poll pulls nothing.
+	const desktopsLive = $derived(
+		!!session.user && streamed && treeSection === 'desktops' && desktopsOn(),
+	);
+	$effect(() => {
+		void inventory.desktopsVersion;
+		if (desktopsLive) untrack(() => desktops.pull());
+	});
 </script>
 
 <svelte:head>
@@ -329,6 +344,8 @@
 						</div>
 					{:else if treeSection === 'compute'}
 						<ComputeTree />
+					{:else if treeSection === 'desktops'}
+						{#if desktopsOn()}<DesktopsTree />{/if}
 					{:else if treeSection === 'hosts'}
 						{#if clusterGate.hosts().ok}<HostsTree />{/if}
 					{:else if treeSection === 'networking'}

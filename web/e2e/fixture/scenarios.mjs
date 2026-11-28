@@ -2190,6 +2190,192 @@ const frontedtenant = {
 	],
 };
 
+// --- desktops ---
+// web-prod: pool eng with a held, a stopped and a warm desktop; pool lab names
+// a class that does not exist and leaves its counts out; carol's desktop is
+// made one by one. db-prod holds one stopped desktop. In batch-prod the caller
+// lists pools but not desktops; render is closed, with one claim waiting, and
+// its seats read short of a release.
+const desk = (namespace, name, over = {}) => ({
+	namespace,
+	name,
+	class: 'office',
+	running: true,
+	phase: 'Ready',
+	session: 'free',
+	...over,
+});
+const poolReady = [{ type: 'Ready', status: 'True', reason: 'ClassFound' }];
+const deskube = {
+	synced: true,
+	classes: [
+		{ name: 'cad', image: 'quay.io/example/desktop-cad:2.1' },
+		{ name: 'office', image: 'quay.io/example/desktop-office:1.4' },
+	],
+	pools: [
+		{
+			namespace: 'batch-prod',
+			name: 'render',
+			class: 'cad',
+			seats: 3,
+			keepWarm: 0,
+			assignment: 'Shared',
+			closed: true,
+			subjects: [{ kind: 'User', name: 'frank' }],
+			counts: { held: 1, inSession: 1, ready: 1, stopped: 0, warm: 0, free: 1, waiting: 1 },
+			conditions: poolReady,
+			desktops: [],
+		},
+		{
+			namespace: 'web-prod',
+			name: 'eng',
+			class: 'office',
+			seats: 4,
+			keepWarm: 1,
+			assignment: 'Personal',
+			subjects: [{ kind: 'Group', name: 'engineers' }],
+			idleTimeout: '1h0m0s',
+			releaseAfter: '720h0m0s',
+			counts: { held: 2, inSession: 1, ready: 2, stopped: 1, warm: 1, free: 1, waiting: 0 },
+			conditions: poolReady,
+			desktops: [
+				desk('web-prod', 'eng-7hq2k', { pool: 'eng', session: 'busy', claim: 'eng-alice' }),
+				desk('web-prod', 'eng-p4x9m', {
+					pool: 'eng',
+					running: false,
+					phase: 'Stopped',
+					session: undefined,
+					claim: 'eng-bob',
+				}),
+				desk('web-prod', 'eng-w2c8d', { pool: 'eng' }),
+			],
+		},
+		{
+			namespace: 'web-prod',
+			name: 'lab',
+			class: 'gpu-lab',
+			seats: 2,
+			keepWarm: 0,
+			assignment: 'Shared',
+			counts: { waiting: 1 },
+			conditions: [
+				{
+					type: 'Ready',
+					status: 'False',
+					reason: 'ClassNotFound',
+					message: 'VdiClass gpu-lab does not exist',
+				},
+			],
+			desktops: [],
+		},
+	],
+	desktops: [
+		desk('db-prod', 'ops-desk', {
+			class: 'cad',
+			owner: 'dave',
+			running: false,
+			phase: 'Stopped',
+			session: undefined,
+		}),
+		desk('web-prod', 'carol-dev', { owner: 'carol' }),
+	],
+	claims: [
+		{
+			namespace: 'batch-prod',
+			name: 'render-frank',
+			user: 'frank',
+			pool: 'render',
+			running: true,
+			phase: 'Bound',
+		},
+		{
+			namespace: 'batch-prod',
+			name: 'render-gina',
+			user: 'gina',
+			pool: 'render',
+			running: true,
+			phase: 'Waiting',
+			position: 1,
+		},
+		{
+			namespace: 'web-prod',
+			name: 'eng-alice',
+			user: 'alice',
+			pool: 'eng',
+			desktop: 'eng-7hq2k',
+			running: true,
+			phase: 'Bound',
+			lastUsed: iso(30),
+		},
+		{
+			namespace: 'web-prod',
+			name: 'eng-bob',
+			user: 'bob',
+			pool: 'eng',
+			desktop: 'eng-p4x9m',
+			running: false,
+			phase: 'Bound',
+			lastUsed: iso(26 * 60),
+		},
+		{
+			namespace: 'web-prod',
+			name: 'lab-erin',
+			user: 'erin',
+			pool: 'lab',
+			running: true,
+			phase: 'Waiting',
+			position: 1,
+			message: 'VdiClass gpu-lab does not exist',
+		},
+	],
+	unlisted: [{ namespace: 'batch-prod', resource: 'vdiinstances' }],
+};
+const desktops = {
+	...base,
+	name: 'desktops',
+	modules: { desktops: true },
+	inventory: { ...base.inventory, desktopsVersion: 1 },
+	desktops: deskube,
+};
+// A project persona: pools and claims where it may list them, never desktops
+// nor classes; in db-prod it may list nothing.
+const unlisted = (namespace, ...resources) =>
+	resources.map((resource) => ({ namespace, resource }));
+const desktopsviewer = {
+	...desktops,
+	name: 'desktopsviewer',
+	// Another watermark: switching from desktops reads as a move.
+	inventory: { ...base.inventory, desktopsVersion: 2 },
+	desktops: {
+		...deskube,
+		classes: [],
+		pools: deskube.pools.map((p) => ({ ...p, desktops: [] })),
+		desktops: [],
+		claims: deskube.claims.filter((c) => c.namespace !== 'db-prod'),
+		unlisted: [
+			...unlisted('', 'vdiclasses'),
+			...unlisted('batch-prod', 'vdiinstances'),
+			...unlisted('db-prod', 'vdiclaims', 'vdiinstances', 'vdipools'),
+			...unlisted('web-prod', 'vdiinstances'),
+		],
+	},
+};
+// A caller who may list no DeskuBe kind: an answer that never syncs and no
+// watermark, as on a cluster without DeskuBe.
+const desktopsunread = {
+	...base,
+	name: 'desktopsunread',
+	modules: { desktops: true },
+	desktops: { synced: false, classes: [], pools: [], desktops: [], claims: [], unlisted: [] },
+};
+const desktopsnovms = {
+	...novms,
+	name: 'desktopsnovms',
+	modules: { vms: false, desktops: true },
+	inventory: { ...novms.inventory, desktopsVersion: 1 },
+	desktops: deskube,
+};
+
 // --- publishing ---
 // The install publishes under apps.example.com. team-web may be turned on and
 // its web-edge namespace, on a VM Network of its own, is not reached; this
@@ -2325,6 +2511,10 @@ const replicatedquota = {
 };
 
 export const scenarios = {
+	desktops,
+	desktopsviewer,
+	desktopsunread,
+	desktopsnovms,
 	classquota,
 	replicatedquota,
 	publishing,

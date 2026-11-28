@@ -20,6 +20,21 @@ test('without VMs the first tile is Projects and home lists them', async ({ page
 	await expect(page).toHaveURL(/\/compute\/team-web$/);
 });
 
+test('without VMs but with desktops the first tile is still Projects', async ({ page }) => {
+	await setScenario(page, 'desktopsnovms');
+	await login(page);
+	await page.goto('/');
+	await expect(tiles(page)).toHaveText([
+		'Projects',
+		'Desktops',
+		'Hosts',
+		'Networking',
+		'Storage',
+		'Changes',
+	]);
+	await expect(page).toHaveURL(/\/compute$/);
+});
+
 test('a project keeps its page without VMs, under All projects', async ({ page }) => {
 	await setScenario(page, 'novms');
 	await login(page);
