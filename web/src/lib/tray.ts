@@ -41,13 +41,17 @@ export const followKey = (project: string, prNumber: number) => `${project}#${pr
 // first, orders the two. Without it only the merge commit itself counts.
 export type MergeState = { kind: 'merged' | 'refused' | 'live' | 'applying'; picked: boolean };
 
+// applied is the server's own answer, from the merge feed: whether the
+// revision Argo runs holds the merge commit. It stands where the revision and
+// the history do not reach the caller.
 export function mergeState(
 	g: ProjectSync | undefined,
 	hash: string | undefined,
 	commits?: readonly string[],
+	applied?: boolean,
 ): MergeState {
 	if (!g) return { kind: 'merged', picked: false };
-	const picked = !!hash && !!g.revision && holds(g.revision, hash, commits);
+	const picked = applied ?? (!!hash && !!g.revision && holds(g.revision, hash, commits));
 	if (picked && g.sync === 'Synced') return { kind: 'live', picked };
 	if (opStands(g)) return { kind: 'refused', picked };
 	return { kind: 'applying', picked };
@@ -66,8 +70,11 @@ export function trayLanes(src: {
 	drafts: { project: string; draft: DraftView }[];
 	proposals: Proposal[];
 	followed: Followed[];
-	sync: (project: string) => ProjectSync | undefined;
+	// known says whether the merge feed answers for the lane's merge: a caller
+	// who may not read the whole project is followed on that answer alone.
+	sync: (project: string, known: boolean) => ProjectSync | undefined;
 	commits?: (project: string) => readonly string[] | undefined;
+	applied?: (project: string, prNumber: number) => boolean | undefined;
 }): TrayLane[] {
 	const out: TrayLane[] = [];
 	for (const { project, draft } of src.drafts)
@@ -90,9 +97,10 @@ export function trayLanes(src: {
 	for (const f of src.followed) {
 		const key = followKey(f.project, f.prNumber);
 		if (!f.mergedAt) continue;
-		const g = src.sync(f.project);
+		const applied = src.applied?.(f.project, f.prNumber);
+		const g = src.sync(f.project, applied !== undefined);
 		const lane = { key, project: f.project, pr: f };
-		const m = mergeState(g, f.hash, src.commits?.(f.project));
+		const m = mergeState(g, f.hash, src.commits?.(f.project), applied);
 		if (m.kind === 'refused') out.push({ kind: 'refused', ...lane, error: g?.syncError });
 		else if (m.kind === 'applying') out.push({ kind: 'applying', ...lane, picked: m.picked });
 		else out.push({ kind: m.kind, ...lane });

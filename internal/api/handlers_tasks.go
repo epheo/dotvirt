@@ -43,6 +43,30 @@ func (s *Server) handleTasks(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, scopeTasks(s.tasks.Ops(), s.tasks.Merges(), s.taskScope(id, projects, v, platform, canNodes)))
 }
 
+// mergeApplied is whether Argo runs merge m: the revision the Application
+// sourcing its repo last synced holds m's merge commit. nil while unknown:
+// Argo off or not synced yet, no Application, or the mirror not holding
+// either. Only the answer leaves the server, never the revision, which moves
+// with every merge a partial viewer's feed does not show them.
+func (s *Server) mergeApplied(m tasks.Merge) *bool {
+	if s.drift == nil {
+		return nil
+	}
+	rev := s.drift.AppliedRevision(m.RepoURL)
+	if rev == "" {
+		return nil
+	}
+	read, ok := s.repos.Peek(m.RepoURL)
+	if !ok {
+		return nil
+	}
+	holds, known := read.Holds(s.cfg.BaseBranch, m.Number, rev)
+	if !known {
+		return nil
+	}
+	return &holds
+}
+
 // recordTask logs one imperative act on a VM or a node into the feed.
 func (s *Server) recordTask(verb, namespace, name, by string, ok bool) {
 	s.recordOp(tasks.Op{Verb: verb, Namespace: namespace, Name: name, By: by, OK: ok})
@@ -72,6 +96,16 @@ type taskScope struct {
 	// lists reports whether the caller may list ref where an op ran: VMs, or
 	// desktops for an op on one. nil is yes.
 	lists func(ref ssarRef, namespace string) bool
+	// applied is whether Argo runs a merge, nil while unknown (mergeApplied);
+	// a nil func knows none.
+	applied func(tasks.Merge) *bool
+}
+
+func (sc taskScope) appliedOf(m tasks.Merge) *bool {
+	if sc.applied == nil {
+		return nil
+	}
+	return sc.applied(m)
 }
 
 // taskScope is id's view of the feed over their projects: every platform
@@ -83,6 +117,7 @@ func (s *Server) taskScope(id auth.Identity, projects []project.ProjectInfo, v c
 	}
 	sc := newTaskScope(projects, canNodes)
 	sc.lists = v.lists
+	sc.applied = s.mergeApplied
 	if !readsPlatform && platform.Repo != "" {
 		sc.own[forge.NormalizeRepoURL(platform.Repo)] = ownLane{platform.Name, s.reader.ProposedBranch(id, platform)}
 	}
@@ -158,6 +193,7 @@ func scopeTasks(ops []tasks.Op, merges []tasks.Merge, sc taskScope) []model.Task
 		out = append(out, model.TaskEntry{
 			Kind: "merge", Verb: "Merged", Project: proj, PRNumber: m.Number,
 			PRURL: m.URL, Title: m.Title, By: m.By, OK: true, At: m.At.UTC().Format(time.RFC3339),
+			Applied: sc.appliedOf(m),
 		})
 	}
 	// All timestamps are self-formatted RFC3339 UTC, so lexicographic order is

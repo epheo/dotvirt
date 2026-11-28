@@ -56,6 +56,35 @@ func TestScopeTasks(t *testing.T) {
 	}
 }
 
+// A merge carries whether Argo runs it, never the revision; the watermark
+// moves when that answer does, so the console pulls the feed again.
+func TestMergesCarryTheirAppliedVerdict(t *testing.T) {
+	s := &Server{tasks: tasks.New(nil)}
+	mine := []project.ProjectInfo{{Name: "team-a", Namespaces: []string{"team-a-dev"}, Repo: "https://forge/team-a.git"}}
+	var answer *bool
+	scope := func() taskScope {
+		sc := newTaskScope(mine, false)
+		sc.applied = func(tasks.Merge) *bool { return answer }
+		return sc
+	}
+	s.tasks.RecordMerge(tasks.Merge{RepoURL: "https://forge/team-a", Number: 2, Title: "ours", At: time.Now()})
+	unknown := s.tasksWatermark(scope())
+	if got := scopeTasks(nil, s.tasks.Merges(), scope()); len(got) != 1 || got[0].Applied != nil {
+		t.Fatalf("unknown verdict: %+v", got)
+	}
+	no, yes := false, true
+	answer = &no
+	pending := s.tasksWatermark(scope())
+	answer = &yes
+	live := s.tasksWatermark(scope())
+	if unknown == pending || pending == live || unknown == live {
+		t.Errorf("watermark did not follow the verdict: %d, %d, %d", unknown, pending, live)
+	}
+	if got := scopeTasks(nil, s.tasks.Merges(), scope()); got[0].Applied == nil || !*got[0].Applied {
+		t.Errorf("applied merge row = %+v", got[0])
+	}
+}
+
 // A merged-PR webhook delivery must land in the feed instantly, attributed to
 // the proposing user parsed from the dotvirt head branch (the poster is the bot).
 func TestWebhookRecordsMerge(t *testing.T) {

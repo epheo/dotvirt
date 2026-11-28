@@ -954,6 +954,12 @@ export interface TaskEntry {
   by?: string;
   ok: boolean;
   at: string; // RFC3339
+  /**
+   * Applied says, for a merge, whether Argo runs it: the revision it last
+   * synced holds the merge commit. Absent while unknown. The revision itself
+   * is never sent: it moves with merges this caller may not see.
+   */
+  applied?: boolean;
 }
 /**
  * Permissions is the caller's effective capability set in one namespace - the

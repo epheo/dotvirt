@@ -52,6 +52,8 @@ type driftView struct {
 	resources map[resKey]Drift
 	vms       map[string]Drift
 	projects  map[string]model.ProjectSync
+	// revisions is each project rollup's full applied revision, by repo.
+	revisions map[string]string
 	// holds keys each held generated app's EmptyHold by its project: the
 	// generator and every frame ask per project.
 	holds map[string]EmptyHold
@@ -214,12 +216,13 @@ func (s *Snapshot) derive() {
 		seen = prev.syncedAt
 	}
 	syncedAt := syncedFromApps(objs, s.writeNS, seen)
-	next := &driftView{resources: resourceDriftFromApps(objs), projects: appSyncFromApps(objs), holds: holdsFromApps(objs, s.writeNS, syncedAt), syncedAt: syncedAt}
+	projects, revisions := appSyncAndRevisions(objs)
+	next := &driftView{resources: resourceDriftFromApps(objs), projects: projects, revisions: revisions, holds: holdsFromApps(objs, s.writeNS, syncedAt), syncedAt: syncedAt}
 	var prevRes map[resKey]Drift
 	var gens map[string]uint64
 	if prev != nil {
 		if maps.Equal(prev.resources, next.resources) && equality.Semantic.DeepEqual(prev.projects, next.projects) &&
-			maps.Equal(prev.holds, next.holds) && maps.Equal(prev.syncedAt, next.syncedAt) {
+			maps.Equal(prev.revisions, next.revisions) && maps.Equal(prev.holds, next.holds) && maps.Equal(prev.syncedAt, next.syncedAt) {
 			return
 		}
 		prevRes, gens = prev.resources, prev.objGens
@@ -270,6 +273,16 @@ func (s *Snapshot) ProjectDrift() map[string]model.ProjectSync {
 		return v.projects
 	}
 	return nil
+}
+
+// AppliedRevision is the full revision the Application sourcing repo (canonical
+// URL) last synced, "" before the initial LIST or when none sources it. For
+// the server's own answers only: a caller is never sent it whole.
+func (s *Snapshot) AppliedRevision(repo string) string {
+	if v := s.current(); v != nil {
+		return v.revisions[repo]
+	}
+	return ""
 }
 
 // ForeignApps: live apps except those sourcing ownRepo, under every tracking-id
