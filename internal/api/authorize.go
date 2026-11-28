@@ -20,6 +20,7 @@ import (
 	"github.com/epheo/dotvirt/internal/auth"
 	"github.com/epheo/dotvirt/internal/changeset"
 	"github.com/epheo/dotvirt/internal/cluster"
+	"github.com/epheo/dotvirt/internal/desktops"
 	"github.com/epheo/dotvirt/internal/drs"
 	"github.com/epheo/dotvirt/internal/model"
 	"github.com/epheo/dotvirt/pkg/tenancy"
@@ -275,6 +276,53 @@ var (
 		return action{refQ(verbDelete, ssarDataSources, ns), refQ(verbDelete, ssarDataVolumes, ns)}
 	}
 )
+
+// The desktop acts run under the caller's token, weighed by DeskuBe's RBAC and
+// its claim entitlement policy.
+var (
+	ssarDesktops      = ssarRef{desktops.Group, desktops.GVRInstance.Resource}
+	ssarDesktopClaims = ssarRef{desktops.Group, desktops.GVRClaim.Resource}
+	ssarDesktopPools  = ssarRef{desktops.Group, desktops.GVRPool.Resource}
+	ssarPods          = ssarRef{resource: "pods"}
+)
+
+// claimPoolVerbs are the verbs on a claim's pool, any one of which lets verb
+// (patch: a start or stop, delete: a release) act on the claim, as DeskuBe's
+// policy weighs them. On another's claim it is assign or delete. On the
+// caller's own, use stands in for both on a start or stop, and a release asks
+// nothing of the pool.
+func claimPoolVerbs(verb string, own bool) []string {
+	switch {
+	case !own:
+		return []string{"assign", verbDelete}
+	case verb == verbDelete:
+		return nil
+	}
+	return []string{"use", "assign", verbDelete}
+}
+
+// claimActions open verb on a claim of pool in ns, any one allowed: verb on
+// the claims there, beside each of the pool verbs on the pool by name.
+func claimActions(verb, ns, pool string, own bool) []action {
+	claim := refQ(verb, ssarDesktopClaims, ns)
+	poolVerbs := claimPoolVerbs(verb, own)
+	if len(poolVerbs) == 0 {
+		return []action{{claim}}
+	}
+	acts := make([]action, len(poolVerbs))
+	for i, v := range poolVerbs {
+		q := refQ(v, ssarDesktopPools, ns)
+		q.Name = pool
+		acts[i] = action{claim, q}
+	}
+	return acts
+}
+
+// restartDesktopAction is a desktop's restart: its pods listed by their label,
+// each deleted.
+func restartDesktopAction(ns string) action {
+	return action{refQ(verbList, ssarPods, ns), refQ(verbDelete, ssarPods, ns)}
+}
 
 // claimAction is relabelling the existing namespace ns: what joining it to a
 // project asks of the route. ns "" asks it of every namespace.

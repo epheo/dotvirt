@@ -32,9 +32,12 @@ type Op struct {
 	Verb      string
 	Namespace string
 	Name      string
-	By        string
-	OK        bool
-	At        time.Time
+	// Desktop marks an act on the DeskuBe desktop Name; any other op in a
+	// namespace acts on a VM.
+	Desktop bool
+	By      string
+	OK      bool
+	At      time.Time
 }
 
 // Merge is one PR merged into a project's base branch. RepoURL is the normalized

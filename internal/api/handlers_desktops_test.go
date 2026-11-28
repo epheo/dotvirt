@@ -27,9 +27,11 @@ import (
 // desktopsSource serves a class, and a pool, a desktop and a claim in each of
 // team-a-dev and team-b-dev, with a watch on desktops a test can write
 // through. failClaims fails every claims list, so that watch stays unsynced
-// and stale.
+// and stale. held adds two of the pool's desktops in each: lab-1 held by the
+// claim lab-u of u, every test caller's username, and lab-2 by bob's lab-bob.
 type desktopsSource struct {
 	failClaims bool
+	held       bool
 
 	mu        sync.Mutex
 	instances *watch.FakeWatcher
@@ -65,6 +67,21 @@ func (f *desktopsSource) DynamicListWatch(gvr schema.GroupVersionResource) *cach
 			items = append(items, *deskInstance(ns, "solo", "Ready"))
 		case desktops.GVRClaim:
 			items = append(items, deskObject("VdiClaim", ns, "someone", map[string]any{"poolName": "lab", "user": "someone"}, map[string]any{"phase": "Waiting"}))
+		}
+		if !f.held {
+			continue
+		}
+		for desk, user := range map[string]string{"lab-1": "u", "lab-2": "bob"} {
+			switch gvr {
+			case desktops.GVRInstance:
+				d := deskInstance(ns, desk, "Ready")
+				controller := true
+				d.SetOwnerReferences([]metav1.OwnerReference{{APIVersion: "vdi.desku.be/v1alpha1", Kind: "VdiPool", Name: "lab", UID: "uid-lab", Controller: &controller}})
+				items = append(items, *d)
+			case desktops.GVRClaim:
+				items = append(items, deskObject("VdiClaim", ns, "lab-"+user, map[string]any{"poolName": "lab", "user": user},
+					map[string]any{"phase": "Bound", "desktopName": desk}))
+			}
 		}
 	}
 	if gvr == desktops.GVRClass {

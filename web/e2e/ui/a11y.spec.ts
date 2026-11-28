@@ -72,6 +72,14 @@ test('desktops surfaces are accessible', async ({ page }) => {
 	await page.goto('/desktops/team-batch/batch-prod/pool/render');
 	await expect(page.getByText(/^Desktops here are not shown to you/)).toBeVisible();
 	await checkA11y(page, 'pool with desktops not shown');
+
+	await page.goto('/desktops/team-web/web-prod/pool/eng');
+	await page.getByRole('button', { name: 'Actions for eng-7hq2k' }).click();
+	await expect(page.getByRole('button', { name: 'Release...' })).toBeEnabled();
+	await checkA11y(page, "a desktop's actions");
+	await page.getByRole('button', { name: 'Release...' }).click();
+	await expect(page.getByRole('dialog')).toBeVisible();
+	await checkA11y(page, 'release confirm');
 });
 
 test('a VM opens by keyboard alone', async ({ page }) => {

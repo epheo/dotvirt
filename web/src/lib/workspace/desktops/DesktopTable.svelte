@@ -7,9 +7,11 @@
 	import { desktops } from '#lib/state/desktops.svelte.js';
 	import { TONE_TEXT } from '#lib/status.js';
 	import StatusDot from '#lib/components/StatusDot.svelte';
+	import DesktopActions from './DesktopActions.svelte';
 
 	// Desktops with the claims holding them. A desktop made one by one opens
-	// its page; a pool's desktop is a row only, its pool the page.
+	// its page, where it is acted on; a pool's desktop is a row only, its pool
+	// the page, and its acts are the row's.
 	let {
 		rows,
 		data,
@@ -29,6 +31,7 @@
 	const projectOf = $derived(desktops.owners);
 	const may = $derived(desktops.may);
 	const pools = $derived(new Set(data.pools.map((p) => `${p.namespace}/${p.name}`)));
+	const acts = $derived(rows.some((r) => r.desktop.pool));
 	const TH =
 		'border-b border-line px-3 py-2 text-left text-xs font-bold whitespace-nowrap text-ink-muted';
 	const TD = 'border-b border-line-soft px-3 py-2.5 whitespace-nowrap';
@@ -49,7 +52,10 @@
 					<th scope="col" class={TH}>Phase</th>
 					<th scope="col" class={TH}>Session</th>
 					<th scope="col" class={TH}>Running</th>
-					<th scope="col" class="{TH} pr-card">Last used</th>
+					<th scope="col" class="{TH} {acts ? '' : 'pr-card'}">Last used</th>
+					{#if acts}
+						<th scope="col" class="{TH} w-px pr-card"><span class="sr-only">Actions</span></th>
+					{/if}
 				</tr>
 			</thead>
 			<tbody>
@@ -121,10 +127,15 @@
 						</td>
 						<td class={TD}>{sessionLabel(d.session)}</td>
 						<td class={TD}>{d.running ? 'Yes' : 'No'}</td>
-						<td class="{TD} pr-card">
+						<td class="{TD} {acts ? '' : 'pr-card'}">
 							{#if r.claim?.lastUsed}{relativeAge(r.claim.lastUsed)}
 							{:else}<span class="text-ink-faint">-</span>{/if}
 						</td>
+						{#if acts}
+							<td class="{TD} py-1 pr-card">
+								{#if d.pool}<DesktopActions row={r} />{/if}
+							</td>
+						{/if}
 					</tr>
 				{/each}
 			</tbody>

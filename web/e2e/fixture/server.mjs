@@ -584,6 +584,7 @@ async function handleAPI(req, res, url) {
 	if (req.method === 'POST') {
 		const repair = await handleRepair(req, res, path, url, s);
 		if (repair) return;
+		if (await handleDesktopAct(req, res, path, s)) return;
 	}
 	if (path === '/api/networking/gateways') return sendJSON(res, 200, s.gateways);
 	if (path === '/api/networking/routes') return sendJSON(res, 200, s.tenantRoutes ?? []);
@@ -1107,6 +1108,85 @@ async function handleRepair(req, res, path, url, s) {
 	return false;
 }
 
+// A desktop act (POST /api/desktops/{namespace}/{name}/{act}), refused as the
+// server refuses it, on the field the UI gates it by. What it changes reaches
+// the page as DeskuBe's write does: on the pull the frame's watermark starts.
+async function handleDesktopAct(req, res, path, s) {
+	const m = path.match(/^\/api\/desktops\/([^/]+)\/([^/]+)\/(start|stop|release|restart)$/);
+	if (!m) return false;
+	const [, ns, name, act] = m;
+	const body = (await readBody(req)) ?? {};
+	const refuse = (code, why) => (sendText(res, code, why), true);
+	const d = s.desktops;
+	const pool = d?.pools.find((p) => p.namespace === ns && p.desktops.some((x) => x.name === name));
+	const desk = (pool?.desktops ?? d?.desktops ?? []).find(
+		(x) => x.namespace === ns && x.name === name,
+	);
+	if (!desk) return refuse(404, `not found: desktop ${ns}/${name}`);
+	const caps = desktopCaps(s, ns, desk.pool ?? '');
+	if (act === 'restart') {
+		if (!caps.restart) return refuse(403, `forbidden: you may not delete pods in ${ns}`);
+		if (!desk.running) return refuse(409, `conflict: ${name} runs no pod to restart`);
+		desk.session = 'free';
+	} else {
+		const claim = d.claims.find((c) => c.namespace === ns && c.name === desk.claim);
+		if (!desk.pool) return refuse(409, `conflict: ${name} is made one by one`);
+		if (!claim || claim.name !== body.claim)
+			return refuse(409, `conflict: claim ${body.claim} no longer holds ${name}`);
+		const own = claim.user === s.user?.username;
+		const ok =
+			act === 'release' ? caps[own ? 'releaseOwn' : 'release'] : caps[own ? 'powerOwn' : 'power'];
+		if (!ok) return refuse(403, `forbidden: you may not ${act} ${claim.user}'s desktop`);
+		if (act === 'release') {
+			pool.desktops = pool.desktops.filter((x) => x !== desk);
+			d.claims = d.claims.filter((c) => c !== claim);
+		} else {
+			claim.running = act === 'start';
+			Object.assign(
+				desk,
+				claim.running
+					? { running: true, phase: 'Ready', session: 'free' }
+					: { running: false, phase: 'Stopped', session: undefined },
+			);
+		}
+	}
+	const verb = act[0].toUpperCase() + act.slice(1);
+	const by = s.user?.username;
+	const op = { kind: 'op', verb, namespace: ns, name, desktop: true, by, ok: true };
+	s.tasks = [
+		{ ...op, project: projectOf(ns)?.name, at: new Date().toISOString() },
+		...(s.tasks ?? []),
+	];
+	s.inventory.desktopsVersion = (s.inventory.desktopsVersion ?? 0) + 1;
+	s.inventory.tasksVersion = (s.inventory.tasksVersion ?? 0) + 1;
+	broadcastInventory();
+	sendText(res, 204, '');
+	return true;
+}
+
+// The desktop acts (GET /api/capabilities?desktops=&pool=), as the server
+// weighs them: none where the caller may not list the desktops, no claim act
+// where it may not list the claims nor on a desktop made one by one, and
+// every other allowed unless the scenario's desktopCapabilities narrows one,
+// by "namespace/pool".
+function desktopCaps(s, ns, pool) {
+	const not = new Set(
+		(s.desktops?.unlisted ?? []).filter((u) => u.namespace === ns).map((u) => u.resource),
+	);
+	const shown = !not.has('vdiinstances');
+	const claims = shown && !!pool && !not.has('vdiclaims');
+	return {
+		namespace: ns,
+		...(pool ? { pool } : {}),
+		restart: shown,
+		power: claims,
+		powerOwn: claims,
+		release: claims,
+		releaseOwn: claims,
+		...s.desktopCapabilities?.[`${ns}/${pool}`],
+	};
+}
+
 const newestFirst = (a, b) => (b.created ?? '').localeCompare(a.created ?? '');
 
 // The caller's verdicts (GET /api/capabilities): everything allowed, unless
@@ -1224,6 +1304,13 @@ async function handleStorage(req, res, url) {
 		v === null ? sendText(res, 503, 'cluster read failed') : sendJSON(res, 200, v ?? []);
 	if (path === '/api/storage/snapshots') return listing(s.storageSnapshots);
 	if (path === '/api/capabilities') {
+		const desk = url.searchParams.get('desktops');
+		if (desk) {
+			if (!projectOf(desk)) return sendText(res, 404, 'namespace not found in any visible project');
+			return sendJSON(res, 200, {
+				desktops: desktopCaps(s, desk, url.searchParams.get('pool') ?? ''),
+			});
+		}
 		const ns = url.searchParams.get('namespace');
 		if (!ns) return sendJSON(res, 200, { cluster: clusterCaps(s) });
 		const p = projectOf(ns);

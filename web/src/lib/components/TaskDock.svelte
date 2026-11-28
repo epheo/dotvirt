@@ -37,7 +37,13 @@
 		tasksError?: string; // the feed pull failed; onrefresh retries it
 		inventory: Inventory | null;
 		username: string;
-		onselect: (namespace: string, name: string) => void;
+		// What a row names: a VM, a node, or the desktop of project.
+		onselect: (target: {
+			namespace: string;
+			name: string;
+			desktop?: boolean;
+			project?: string;
+		}) => void;
 		onrefresh?: () => void;
 		// Sits at the bar's right end: the change tray's pill.
 		trailing?: Snippet;
@@ -102,10 +108,10 @@
 					? 'bg-ok-soft/30'
 					: '';
 
-	// Row click: open the PR for proposed rows, else focus the target VM's detail.
+	// Row click: open the PR for proposed rows, else focus the target's page.
 	function activate(t: Task) {
 		if (t.url) window.open(t.url, '_blank', 'noopener');
-		else onselect(t.namespace, t.name);
+		else onselect(t);
 	}
 </script>
 
@@ -259,7 +265,7 @@
 						error={eventsRes.error}
 						onretry={eventsRes.refresh}
 						showVM
-						{onselect}
+						onselect={(namespace, name) => onselect({ namespace, name })}
 					/>
 				</div>
 			{/if}

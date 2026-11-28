@@ -16,7 +16,7 @@
 	} from '#lib/api.js';
 	import { friendlyError } from '#lib/format.js';
 	import { resource } from '#lib/resource.svelte.js';
-	import { INVENTORY_SECTIONS, sectionOf, vmHref, type Section } from '#lib/nav.js';
+	import { hrefForScope, INVENTORY_SECTIONS, sectionOf, vmHref, type Section } from '#lib/nav.js';
 	import { drafts } from '#lib/state/drafts.svelte.js';
 	import { templates } from '#lib/state/templates.svelte.js';
 	import { inventory } from '#lib/state/inventory.svelte.js';
@@ -369,7 +369,17 @@
 			tasksError={inventory.tasksError}
 			inventory={inventory.inventory}
 			username={session.user.username}
-			onselect={(namespace, name) => goto(vmHref(namespace, name))}
+			onselect={(t) =>
+				goto(
+					t.desktop && t.project
+						? hrefForScope({
+								kind: 'desktop',
+								project: t.project,
+								namespace: t.namespace,
+								desktop: t.name,
+							})
+						: vmHref(t.namespace, t.name),
+				)}
 			onrefresh={() => {
 				drafts.refresh();
 				tasksRetry++;

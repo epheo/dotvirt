@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 const api = vi.hoisted(() => ({
-	api: { capabilities: vi.fn() },
+	api: { capabilities: vi.fn(), desktopCapabilities: vi.fn() },
 	Unauthorized: class extends Error {},
 }));
 vi.mock('#lib/api.js', () => api);
@@ -9,6 +9,7 @@ vi.mock('#lib/api.js', () => api);
 import { ACCESS_UNKNOWN, NOT_IN_GIT } from './authoring';
 import {
 	clusterGate,
+	desktopGate,
 	hostGate,
 	imageGate,
 	namespaceHistoryGate,
@@ -31,6 +32,7 @@ const own = (v: boolean) => ({ create: v, update: v, delete: v });
 afterEach(() => {
 	caps.reset();
 	api.api.capabilities.mockReset();
+	api.api.desktopCapabilities.mockReset();
 });
 
 async function answer(body: unknown) {
@@ -165,6 +167,47 @@ describe('templateSaveGate', () => {
 			namespace: { namespace: 'web', project: { name: 'p', templateEdit: false } },
 		});
 		expect(templateSaveGate('web').why).toBe("You may not change this project's templates.");
+	});
+});
+
+describe('desktopGate', () => {
+	it("reads a pool's answer once, the caller's own claim on its own fields", async () => {
+		api.api.desktopCapabilities.mockResolvedValue({
+			desktops: {
+				namespace: 'web',
+				pool: 'eng',
+				restart: true,
+				power: false,
+				powerOwn: true,
+				release: false,
+				releaseOwn: true,
+			},
+		});
+		desktopGate.power('web', 'eng', false);
+		desktopGate.release('web', 'eng', true);
+		await flush();
+		expect(api.api.desktopCapabilities).toHaveBeenCalledTimes(1);
+		expect(api.api.desktopCapabilities).toHaveBeenCalledWith('web', 'eng');
+		expect(desktopGate.power('web', 'eng', false).why).toBe(
+			"You may not start or stop others' desktops of pool eng.",
+		);
+		expect(desktopGate.power('web', 'eng', true).ok).toBe(true);
+		expect(desktopGate.release('web', 'eng', false).why).toBe(
+			"You may not release others' desktops of pool eng.",
+		);
+		expect(desktopGate.release('web', 'eng', true).ok).toBe(true);
+		expect(desktopGate.restart('web', 'eng').ok).toBe(true);
+	});
+
+	it('asks a desktop made one by one apart from any pool, and apart from the namespace', async () => {
+		api.api.desktopCapabilities.mockResolvedValue({
+			desktops: { namespace: 'web', restart: false },
+		});
+		desktopGate.restart('web');
+		await flush();
+		expect(api.api.desktopCapabilities).toHaveBeenCalledWith('web', '');
+		expect(api.api.capabilities).not.toHaveBeenCalled();
+		expect(desktopGate.restart('web').why).toBe('You may not restart desktops in web.');
 	});
 });
 

@@ -562,3 +562,32 @@ func TestAPoolsSpecIsRead(t *testing.T) {
 		t.Fatalf("an unset spec reads %+v", plain)
 	}
 }
+
+// An act addresses one desktop and its holder as Overview pairs them: the
+// first-named Bound claim, never one waiting.
+func TestOneDesktopComesWithItsHolder(t *testing.T) {
+	s, _ := newSnapshot(t)
+	mustAdd(t, s.instances, controlled(desktop("team-a", "lab-1", nil), "vdi.desku.be/v1alpha1", "VdiPool", "lab", true))
+	mustAdd(t, s.claims, claim("team-a", "zed", map[string]any{"poolName": "lab", "user": "zed"},
+		map[string]any{"phase": "Bound", "desktopName": "lab-1"}))
+	mustAdd(t, s.claims, claim("team-a", "alice", map[string]any{"poolName": "lab", "user": "alice"},
+		map[string]any{"phase": "Bound", "desktopName": "lab-1"}))
+	mustAdd(t, s.claims, claim("team-a", "aaron", map[string]any{"poolName": "lab", "user": "aaron"},
+		map[string]any{"phase": "Waiting"}))
+	mustAdd(t, s.claims, claim("team-b", "bob", map[string]any{"poolName": "lab", "user": "bob"},
+		map[string]any{"phase": "Bound", "desktopName": "lab-1"}))
+	d, holder, ok := s.Desktop("team-a", "lab-1")
+	if !ok || d.Pool != "lab" || d.Claim != "alice" || holder.User != "alice" || holder.Pool != "lab" {
+		t.Fatalf("desktop = %+v held by %+v (%v)", d, holder, ok)
+	}
+	if over := s.Overview(everything("team-a"), nil); len(over.Desktops) != 1 || over.Desktops[0].Claim != d.Claim {
+		t.Fatalf("Overview pairs %+v, Desktop %q", over.Desktops, d.Claim)
+	}
+	if _, _, ok := s.Desktop("team-b", "lab-1"); ok {
+		t.Fatal("a desktop of another namespace was found")
+	}
+	s.started.Store(false)
+	if _, _, ok := s.Desktop("team-a", "lab-1"); ok {
+		t.Fatal("a stopped module found a desktop")
+	}
+}

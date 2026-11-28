@@ -2368,6 +2368,20 @@ const desktopsunread = {
 	modules: { desktops: true },
 	desktops: { synced: false, classes: [], pools: [], desktops: [], claims: [], unlisted: [] },
 };
+// A caller who reads the desktops and may act on none of eng's, nor restart
+// one made one by one in web-prod.
+const refused = {
+	restart: false,
+	power: false,
+	powerOwn: false,
+	release: false,
+	releaseOwn: false,
+};
+const desktopsrefused = {
+	...desktops,
+	name: 'desktopsrefused',
+	desktopCapabilities: { 'web-prod/eng': refused, 'web-prod/': refused },
+};
 const desktopsnovms = {
 	...novms,
 	name: 'desktopsnovms',
@@ -2514,6 +2528,7 @@ export const scenarios = {
 	desktops,
 	desktopsviewer,
 	desktopsunread,
+	desktopsrefused,
 	desktopsnovms,
 	classquota,
 	replicatedquota,

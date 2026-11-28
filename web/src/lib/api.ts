@@ -428,6 +428,17 @@ export const api = {
 	routes: () => get<gen.Route[]>('/api/networking/routes'),
 	// DeskuBe's live state in the caller's projects, each kind where it may list it.
 	desktops: () => get<gen.Desktops>('/api/desktops'),
+	// The acts on a desktop, under the caller's token. claim is the one the
+	// caller saw holding it: the server refuses when another holds it now.
+	desktopAct: (
+		act: 'start' | 'stop' | 'release' | 'restart',
+		namespace: string,
+		name: string,
+		claim = '',
+	) => post<void>(`/api/desktops/${enc(namespace)}/${enc(name)}/${act}`, { claim }),
+	// The desktop acts in namespace, on a desktop of pool ('' for one made one by one).
+	desktopCapabilities: (namespace: string, pool: string) =>
+		get<gen.Capabilities>(`/api/capabilities${qs({ desktops: namespace, pool })}`),
 	// Where every copy lives: answers only a caller who may list r-drbd's kinds.
 	replication: () => get<gen.Replication>('/api/storage/replication'),
 	// The standing of the caller's replicated disks, with no host named.

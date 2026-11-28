@@ -43,13 +43,19 @@ func (s *Server) handleTasks(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, scopeTasks(s.tasks.Ops(), s.tasks.Merges(), s.taskScope(id, projects, v, platform, canNodes)))
 }
 
-// recordTask logs one imperative act into the feed. Nil-safe so handlers need no
-// guard (tests and degraded wiring construct the Server without a feed).
+// recordTask logs one imperative act on a VM or a node into the feed.
 func (s *Server) recordTask(verb, namespace, name, by string, ok bool) {
+	s.recordOp(tasks.Op{Verb: verb, Namespace: namespace, Name: name, By: by, OK: ok})
+}
+
+// recordOp logs op, stamped now. Nil-safe so handlers need no guard (tests and
+// degraded wiring construct the Server without a feed).
+func (s *Server) recordOp(op tasks.Op) {
 	if s.tasks == nil {
 		return
 	}
-	s.tasks.RecordOp(tasks.Op{Verb: verb, Namespace: namespace, Name: name, By: by, OK: ok, At: time.Now()})
+	op.At = time.Now()
+	s.tasks.RecordOp(op)
 }
 
 // taskScope is one caller's view of the feed: ops in a namespace they can read
@@ -63,9 +69,9 @@ type taskScope struct {
 	nsProject, repoProject map[string]string
 	canNodes               bool
 	own                    map[string]ownLane
-	// listsVMs reports whether the caller may list VMs where an op ran; every
-	// op acts on a VM. nil is yes.
-	listsVMs func(namespace string) bool
+	// lists reports whether the caller may list ref where an op ran: VMs, or
+	// desktops for an op on one. nil is yes.
+	lists func(ref ssarRef, namespace string) bool
 }
 
 // taskScope is id's view of the feed over their projects: every platform
@@ -76,7 +82,7 @@ func (s *Server) taskScope(id auth.Identity, projects []project.ProjectInfo, v c
 		projects = append(projects[:len(projects):len(projects)], platform)
 	}
 	sc := newTaskScope(projects, canNodes)
-	sc.listsVMs = func(ns string) bool { return v.lists(ssarVM, ns) }
+	sc.lists = v.lists
 	if !readsPlatform && platform.Repo != "" {
 		sc.own[forge.NormalizeRepoURL(platform.Repo)] = ownLane{platform.Name, s.reader.ProposedBranch(id, platform)}
 	}
@@ -112,7 +118,11 @@ func (sc taskScope) op(o tasks.Op) (project string, ok bool) {
 		return "", sc.canNodes
 	}
 	project = sc.nsProject[o.Namespace]
-	return project, project != "" && (sc.listsVMs == nil || sc.listsVMs(o.Namespace))
+	ref := ssarVM
+	if o.Desktop {
+		ref = ssarDesktops
+	}
+	return project, project != "" && (sc.lists == nil || sc.lists(ref, o.Namespace))
 }
 
 // merge reports whether the caller sees m, and the project it shows under.
@@ -136,7 +146,7 @@ func scopeTasks(ops []tasks.Op, merges []tasks.Merge, sc taskScope) []model.Task
 			continue
 		}
 		out = append(out, model.TaskEntry{
-			Kind: "op", Verb: o.Verb, Namespace: o.Namespace, Name: o.Name,
+			Kind: "op", Verb: o.Verb, Namespace: o.Namespace, Name: o.Name, Desktop: o.Desktop,
 			Project: proj, By: o.By, OK: o.OK, At: o.At.UTC().Format(time.RFC3339),
 		})
 	}

@@ -2,7 +2,7 @@
 // capability field its server gate asks (GET /api/capabilities), so labels and
 // reasons are said one way everywhere. A gate offers the control or names in
 // one line why not: still checking, the check failed, or the server's no.
-import type { ClusterCaps, NamespaceCaps, ObjectCaps } from '#lib/api.js';
+import type { ClusterCaps, DesktopCaps, NamespaceCaps, ObjectCaps } from '#lib/api.js';
 import { NOT_IN_GIT } from '#lib/authoring.js';
 import { caps, type Gate } from '#lib/state/caps.svelte.js';
 import { PLATFORM_PROJECT } from '#lib/state/drafts.svelte.js';
@@ -174,6 +174,26 @@ export const clusterGate = {
 	oauthClient: () => cluster((c) => c.oauthClient, 'finish single sign-on'),
 	adminObjects: () => cluster((c) => c.adminObjects, 'install what the install needs'),
 	forgeAdmin: () => cluster((c) => c.forgeAdmin, "read the forge's admin password"),
+};
+
+// A desktop's acts, as DeskuBe's admission weighs them: a pool's desktop acts
+// on the claim holding it, and the caller's own claim asks less of the pool.
+// Each reads the answer for the pool the desktop is of ('' for one made one by
+// one), so a pool's rows ask once.
+const desk = (namespace: string, pool: string, pick: (d: DesktopCaps) => boolean, what: string) =>
+	caps.desktopGate(namespace, pool, pick, `You may not ${what}.`);
+
+export const desktopGate = {
+	power: (namespace: string, pool: string, own: boolean) =>
+		own
+			? desk(namespace, pool, (c) => c.powerOwn, `start or stop your desktop of pool ${pool}`)
+			: desk(namespace, pool, (c) => c.power, `start or stop others' desktops of pool ${pool}`),
+	release: (namespace: string, pool: string, own: boolean) =>
+		own
+			? desk(namespace, pool, (c) => c.releaseOwn, `release your desktop of pool ${pool}`)
+			: desk(namespace, pool, (c) => c.release, `release others' desktops of pool ${pool}`),
+	restart: (namespace: string, pool = '') =>
+		desk(namespace, pool, (c) => c.restart, `restart desktops in ${namespace}`),
 };
 
 // A host's maintenance verbs: the host's own read carries the server's answer

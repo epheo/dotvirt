@@ -13,6 +13,7 @@
 	import { desktops } from '#lib/state/desktops.svelte.js';
 	import Card from '#lib/components/Card.svelte';
 	import ClassMissing from './ClassMissing.svelte';
+	import DesktopActions from './DesktopActions.svelte';
 	import DesktopsFrame from './DesktopsFrame.svelte';
 	import UnlistedNote from './UnlistedNote.svelte';
 
@@ -61,11 +62,16 @@
 		'grid grid-cols-[minmax(0,2fr)_minmax(0,3fr)] gap-3 border-t border-line-soft py-2 first:border-t-0';
 </script>
 
+{#snippet acts()}
+	{#if row}<DesktopActions {row} />{/if}
+{/snippet}
+
 <DesktopsFrame
 	trail={trailForScope(scope, 'Desktops', (p) => desktops.title(p), 'desktops')}
 	title={scope.desktop}
 	status={st && { tone: st.tone, text: st.label }}
 	{context}
+	actions={row ? acts : undefined}
 >
 	{#snippet children(d)}
 		{#if ofPool}
