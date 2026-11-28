@@ -220,6 +220,23 @@ func listsKinds(resources []string, nss ...string) func(string, *authzv1.Resourc
 
 var allKinds = []string{"vdipools", "vdiinstances", "vdiclaims"}
 
+// andClasses also lets the tenant list the classes cluster-wide.
+func andClasses(f func(string, *authzv1.ResourceAttributes) bool) func(string, *authzv1.ResourceAttributes) bool {
+	return func(token string, a *authzv1.ResourceAttributes) bool {
+		return f(token, a) || token == tenantToken && a.Verb == "list" && a.Group == desktops.Group &&
+			a.Resource == "vdiclasses" && a.Namespace == ""
+	}
+}
+
+func unlistedJSON(t *testing.T, d model.Desktops) string {
+	t.Helper()
+	b, err := json.Marshal(d.Unlisted)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(b)
+}
+
 func TestDesktopsShowWhatTheCallerMayList(t *testing.T) {
 	fc := newFakeCluster(t)
 	fc.readsVMs = tenantSeesTeams
@@ -235,11 +252,68 @@ func TestDesktopsShowWhatTheCallerMayList(t *testing.T) {
 	if nss := namespaces(got); len(nss) != 1 || nss[0] != "team-a-dev" {
 		t.Fatalf("the tenant reads namespaces %v: %+v", nss, got)
 	}
-	if len(got.Pools) != 1 || len(got.Desktops) != 1 || len(got.Claims) != 1 || len(got.Unlisted) != 0 {
+	if len(got.Pools) != 1 || len(got.Desktops) != 1 || len(got.Claims) != 1 {
 		t.Fatalf("the tenant reads %+v", got)
 	}
 	if len(got.Classes) != 0 {
 		t.Fatalf("a tenant without a cluster-wide list read classes: %+v", got.Classes)
+	}
+	// Each namespace of the scope says what the tenant may not list there,
+	// those it lists nothing in too.
+	want := `[{"namespace":"","resource":"vdiclasses"},` +
+		`{"namespace":"team-b-dev","resource":"vdiclaims"},{"namespace":"team-b-dev","resource":"vdiinstances"},{"namespace":"team-b-dev","resource":"vdipools"},` +
+		`{"namespace":"team-d-dev","resource":"vdiclaims"},{"namespace":"team-d-dev","resource":"vdiinstances"},{"namespace":"team-d-dev","resource":"vdipools"}]`
+	if got := unlistedJSON(t, got); got != want {
+		t.Fatalf("unlisted = %s, want %s", got, want)
+	}
+}
+
+// The classes are cluster-scoped: a project persona never lists them, and is
+// told so beside what it does list.
+func TestClassesAreUnlistedBesideOtherReads(t *testing.T) {
+	for _, c := range []struct {
+		name     string
+		classes  bool
+		unlisted string
+	}{
+		{"pools only", false, `[{"namespace":"","resource":"vdiclasses"},{"namespace":"team-b-dev","resource":"vdiclaims"},{"namespace":"team-b-dev","resource":"vdiinstances"}]`},
+		{"pools and classes", true, `[{"namespace":"team-b-dev","resource":"vdiclaims"},{"namespace":"team-b-dev","resource":"vdiinstances"}]`},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			fc := newFakeCluster(t)
+			fc.readsVMs = tenantSeesTeams
+			fc.ssar = listsKinds([]string{"vdipools"}, "team-b-dev")
+			if c.classes {
+				fc.ssar = andClasses(fc.ssar)
+			}
+			s := desktopsServer(t, fc, &desktopsSource{})
+			got := getDesktops(t, s, tenantToken, "/api/desktops?namespace=team-b-dev")
+			if u := unlistedJSON(t, got); u != c.unlisted {
+				t.Fatalf("unlisted = %s, want %s", u, c.unlisted)
+			}
+			if c.classes != (len(got.Classes) == 1) {
+				t.Fatalf("classes = %+v", got.Classes)
+			}
+		})
+	}
+}
+
+// A page narrowed to a namespace the caller lists nothing in still says what
+// it may not list there, when it lists something elsewhere.
+func TestUnlistedNamesANamespaceTheCallerListsNothingIn(t *testing.T) {
+	fc := newFakeCluster(t)
+	fc.readsVMs = tenantSeesTeams
+	fc.ssar = listsKinds([]string{"vdipools"}, "team-b-dev")
+	s := desktopsServer(t, fc, &desktopsSource{})
+
+	got := getDesktops(t, s, tenantToken, "/api/desktops?namespace=team-d-dev")
+	want := `[{"namespace":"","resource":"vdiclasses"},` +
+		`{"namespace":"team-d-dev","resource":"vdiclaims"},{"namespace":"team-d-dev","resource":"vdiinstances"},{"namespace":"team-d-dev","resource":"vdipools"}]`
+	if u := unlistedJSON(t, got); u != want {
+		t.Fatalf("unlisted = %s, want %s", u, want)
+	}
+	if !got.Synced || len(got.Pools) != 0 {
+		t.Fatalf("the tenant reads %+v", got)
 	}
 }
 
@@ -254,17 +328,14 @@ func TestUnlistedIsTheCallersOwnRights(t *testing.T) {
 	s := desktopsServer(t, fc, src)
 
 	empty := getDesktops(t, s, tenantToken, "/api/desktops?namespace=team-d-dev")
-	unlisted, err := json.Marshal(empty.Unlisted)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if want := `[{"namespace":"team-d-dev","resource":"vdiclaims"},{"namespace":"team-d-dev","resource":"vdiinstances"}]`; string(unlisted) != want {
-		t.Fatalf("unlisted = %s, want %s", unlisted, want)
+	want := `[{"namespace":"","resource":"vdiclasses"},{"namespace":"team-d-dev","resource":"vdiclaims"},{"namespace":"team-d-dev","resource":"vdiinstances"}]`
+	if u := unlistedJSON(t, empty); u != want {
+		t.Fatalf("unlisted = %s, want %s", u, want)
 	}
 
 	body := desktopsBody(t, s, tenantToken, "/api/desktops")
 	version := desktopsVersion(t, s, tenantToken, teams...)
-	if got := getDesktops(t, s, tenantToken, "/api/desktops"); len(got.Pools) != 1 || len(got.Desktops) != 0 || len(got.Unlisted) != 4 {
+	if got := getDesktops(t, s, tenantToken, "/api/desktops"); len(got.Pools) != 1 || len(got.Desktops) != 0 || len(got.Unlisted) != 8 {
 		t.Fatalf("the tenant reads %+v", got)
 	}
 	for _, c := range []struct {

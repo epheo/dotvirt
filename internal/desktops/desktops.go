@@ -17,6 +17,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -280,12 +281,12 @@ func none() model.Desktops {
 // the classes when it holds them at "". A pool-made desktop sits under its
 // pool where the pool is shown, else with the others. unlisted are the
 // caller's own rights, said so that a pool's count beside no desktop does not
-// read as none. A caller who may list no kind gets what a cluster without
-// DeskuBe answers, as does every caller while the module is off: not even
-// whether the pull is synced.
+// read as none. A caller with neither, who may list no kind, gets what a
+// cluster without DeskuBe answers, as does every caller while the module is
+// off: not even whether the pull is synced.
 func (s *Snapshot) Overview(readable map[Kind]bool, unlisted []Kind) model.Desktops {
 	out := none()
-	if len(readable) == 0 || !s.started.Load() {
+	if len(readable) == 0 && len(unlisted) == 0 || !s.started.Load() {
 		return out
 	}
 	for _, k := range unlisted {
@@ -382,6 +383,12 @@ type poolDoc struct {
 		Warm       int32  `json:"warm"`
 		Assignment string `json:"assignment"`
 		Closed     bool   `json:"closed"`
+		Subjects   []struct {
+			Kind string `json:"kind"`
+			Name string `json:"name"`
+		} `json:"subjects"`
+		IdleTimeout  *metav1.Duration `json:"idleTimeout"`
+		ReleaseAfter *metav1.Duration `json:"releaseAfter"`
 	} `json:"spec"`
 	Status struct {
 		model.DesktopPoolCounts `json:",inline"`
@@ -391,17 +398,32 @@ type poolDoc struct {
 
 func decodePool(u *unstructured.Unstructured) (model.DesktopPool, bool) {
 	doc := decode[poolDoc](u)
-	return model.DesktopPool{
-		Namespace:  u.GetNamespace(),
-		Name:       u.GetName(),
-		Class:      doc.Spec.ClassName,
-		Seats:      doc.Spec.Seats,
-		KeepWarm:   doc.Spec.Warm,
-		Assignment: doc.Spec.Assignment,
-		Closed:     doc.Spec.Closed,
-		Counts:     doc.Status.DesktopPoolCounts,
-		Conditions: doc.Status.Conditions,
-	}, true
+	p := model.DesktopPool{
+		Namespace:    u.GetNamespace(),
+		Name:         u.GetName(),
+		Class:        doc.Spec.ClassName,
+		Seats:        doc.Spec.Seats,
+		KeepWarm:     doc.Spec.Warm,
+		Assignment:   doc.Spec.Assignment,
+		Closed:       doc.Spec.Closed,
+		IdleTimeout:  duration(doc.Spec.IdleTimeout),
+		ReleaseAfter: duration(doc.Spec.ReleaseAfter),
+		Counts:       doc.Status.DesktopPoolCounts,
+		Conditions:   doc.Status.Conditions,
+	}
+	for _, sub := range doc.Spec.Subjects {
+		p.Subjects = append(p.Subjects, model.DesktopSubject{Kind: sub.Kind, Name: sub.Name})
+	}
+	return p, true
+}
+
+// duration writes a set duration as Go prints it, so one written as 30m and
+// one written as 1800s read the same. Unset is empty: 0s is a setting.
+func duration(d *metav1.Duration) string {
+	if d == nil {
+		return ""
+	}
+	return d.Duration.String()
 }
 
 // instanceDoc names the fields the console shows. Not spec.pairing nor

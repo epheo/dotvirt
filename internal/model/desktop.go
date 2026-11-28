@@ -16,16 +16,18 @@ type Desktops struct {
 	// not shown.
 	Desktops []Desktop      `json:"desktops"`
 	Claims   []DesktopClaim `json:"claims"`
-	// Unlisted are the kinds the caller may not list in each namespace where
-	// it may list another: its own rights, never what exists. A pool's count
-	// beside no desktop then reads as desktops it may not see, not none.
+	// Unlisted are, for a caller who may list some kind, the kinds it may
+	// not list in each namespace of the request, and the classes when it may
+	// not list them cluster-wide: its own rights, never what exists. A pool's
+	// count beside no desktop then reads as desktops it may not see, not
+	// none.
 	Unlisted []DesktopKind `json:"unlisted"`
 }
 
-// DesktopKind is one namespaced kind in one namespace.
+// DesktopKind is one kind in one namespace, "" for the classes.
 type DesktopKind struct {
 	Namespace string `json:"namespace"`
-	Resource  string `json:"resource"` // vdipools | vdiinstances | vdiclaims
+	Resource  string `json:"resource"` // vdiclasses | vdipools | vdiinstances | vdiclaims
 }
 
 // DesktopClass is a kind of desktop an admin offers.
@@ -41,13 +43,25 @@ type DesktopPool struct {
 	Class     string `json:"class"`
 	Seats     int32  `json:"seats"`
 	// KeepWarm is how many running desktops the pool keeps ahead of claims.
-	KeepWarm   int32              `json:"keepWarm"`
-	Assignment string             `json:"assignment"` // Personal | Shared
-	Closed     bool               `json:"closed,omitempty"`
-	Counts     DesktopPoolCounts  `json:"counts"`
-	Conditions []DesktopCondition `json:"conditions,omitempty"`
+	KeepWarm   int32  `json:"keepWarm"`
+	Assignment string `json:"assignment"` // Personal | Shared
+	Closed     bool   `json:"closed,omitempty"`
+	// Subjects may claim a desktop of the pool.
+	Subjects []DesktopSubject `json:"subjects,omitempty"`
+	// IdleTimeout and ReleaseAfter are Go durations ("30m0s"), empty when
+	// unset. An unset IdleTimeout leaves the class's; "0s" is a setting.
+	IdleTimeout  string             `json:"idleTimeout,omitempty"`
+	ReleaseAfter string             `json:"releaseAfter,omitempty"`
+	Counts       DesktopPoolCounts  `json:"counts"`
+	Conditions   []DesktopCondition `json:"conditions,omitempty"`
 	// Desktops are the ones the pool made, where the caller may list them.
 	Desktops []Desktop `json:"desktops"`
+}
+
+// DesktopSubject is one User or Group a pool lets claim.
+type DesktopSubject struct {
+	Kind string `json:"kind"` // User | Group
+	Name string `json:"name"`
 }
 
 // DesktopPoolCounts is how the pool's seats stand. Held, Warm and Free add
