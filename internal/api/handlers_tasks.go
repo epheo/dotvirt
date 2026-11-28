@@ -3,6 +3,7 @@ package api
 import (
 	"net/http"
 	"sort"
+	"sync"
 	"time"
 
 	"github.com/epheo/dotvirt/internal/auth"
@@ -44,27 +45,62 @@ func (s *Server) handleTasks(w http.ResponseWriter, r *http.Request) {
 }
 
 // mergeApplied is whether Argo runs merge m: the revision the Application
-// sourcing its repo last synced holds m's merge commit. nil while unknown:
-// Argo off or not synced yet, no Application, or the mirror not holding
-// either. Only the answer leaves the server, never the revision, which moves
-// with every merge a partial viewer's feed does not show them.
+// sourcing its repo last synced holds the commit the forge merged m with.
+// Only the answer leaves the server, never the revision, which moves with
+// every merge a partial viewer's feed does not show them.
 func (s *Server) mergeApplied(m tasks.Merge) *bool {
-	if s.drift == nil {
-		return nil
+	holds, known := false, false
+	if s.drift != nil {
+		if rev := s.drift.AppliedRevision(m.RepoURL); rev != "" {
+			if read, ok := s.repos.Peek(m.RepoURL); ok {
+				holds, known = read.Holds(s.cfg.BaseBranch, m.Commit, rev)
+			}
+		}
 	}
-	rev := s.drift.AppliedRevision(m.RepoURL)
-	if rev == "" {
-		return nil
+	return s.applied.answer(m, holds, known)
+}
+
+// appliedMemory keeps each merge's last known answer. Argo can sync a
+// revision before the mirror fetches it (the webhook pokes both at once):
+// unknown then, the answer would go yes, absent, yes and move a partial
+// viewer's watermark exactly when another tenant's merge applied. An answer
+// stands until a revision the mirror knows says otherwise; it is dropped with
+// its merge from the feed.
+type appliedMemory struct {
+	mu   sync.Mutex
+	seen map[appliedKey]appliedSeen
+}
+
+type appliedKey struct{ repo, commit string }
+
+type appliedSeen struct {
+	applied bool
+	at      time.Time
+}
+
+// answer is the verdict to send for m: holds when known, else the last known
+// one, else nil.
+func (a *appliedMemory) answer(m tasks.Merge, holds, known bool) *bool {
+	k := appliedKey{m.RepoURL, m.Commit}
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if known && m.Commit != "" {
+		if a.seen == nil {
+			a.seen = map[appliedKey]appliedSeen{}
+		}
+		cutoff := time.Now().Add(-tasks.MergeRetention)
+		for old, v := range a.seen {
+			if v.at.Before(cutoff) {
+				delete(a.seen, old)
+			}
+		}
+		a.seen[k] = appliedSeen{holds, m.At}
+		return &holds
 	}
-	read, ok := s.repos.Peek(m.RepoURL)
-	if !ok {
-		return nil
+	if v, ok := a.seen[k]; ok {
+		return &v.applied
 	}
-	holds, known := read.Holds(s.cfg.BaseBranch, m.Number, rev)
-	if !known {
-		return nil
-	}
-	return &holds
+	return nil
 }
 
 // recordTask logs one imperative act on a VM or a node into the feed.

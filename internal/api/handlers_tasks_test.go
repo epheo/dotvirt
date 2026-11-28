@@ -56,6 +56,45 @@ func TestScopeTasks(t *testing.T) {
 	}
 }
 
+// An answer the mirror cannot give yet keeps the last known one: Argo ahead
+// of the mirror must not read yes, absent, yes, which would move a partial
+// viewer's watermark when another tenant's merge applied. A known no stands
+// until a known yes, and nothing is known before the first answer.
+func TestAppliedKeepsTheLastKnownAnswer(t *testing.T) {
+	s := &Server{tasks: tasks.New(nil)}
+	mine := []project.ProjectInfo{{Name: "team-a", Namespaces: []string{"team-a-dev"}, Repo: "https://forge/team-a.git"}}
+	var holds, known bool
+	scope := func() taskScope {
+		sc := newTaskScope(mine, false)
+		sc.applied = func(m tasks.Merge) *bool { return s.applied.answer(m, holds, known) }
+		return sc
+	}
+	s.tasks.RecordMerge(tasks.Merge{RepoURL: "https://forge/team-a", Number: 2, Commit: "c0ffee", Title: "ours", At: time.Now()})
+	none := s.tasksWatermark(scope())
+	if got := scopeTasks(nil, s.tasks.Merges(), scope()); got[0].Applied != nil {
+		t.Fatalf("an answer before any was known: %v", *got[0].Applied)
+	}
+	var marks []uint64
+	for _, step := range []struct{ holds, known bool }{{true, true}, {false, false}, {true, true}, {false, false}} {
+		holds, known = step.holds, step.known
+		marks = append(marks, s.tasksWatermark(scope()))
+		if got := scopeTasks(nil, s.tasks.Merges(), scope()); got[0].Applied == nil || !*got[0].Applied {
+			t.Fatalf("step %+v: applied = %v", step, got[0].Applied)
+		}
+	}
+	if marks[0] == none || marks[1] != marks[0] || marks[2] != marks[0] || marks[3] != marks[0] {
+		t.Errorf("watermarks %d then %v: want one move", none, marks)
+	}
+	holds, known = false, true
+	if no := s.tasksWatermark(scope()); no == marks[0] {
+		t.Error("a known no did not move the watermark")
+	}
+	holds, known = false, false
+	if got := scopeTasks(nil, s.tasks.Merges(), scope()); got[0].Applied == nil || *got[0].Applied {
+		t.Errorf("the known no did not stand: %v", got[0].Applied)
+	}
+}
+
 // A merge carries whether Argo runs it, never the revision; the watermark
 // moves when that answer does, so the console pulls the feed again.
 func TestMergesCarryTheirAppliedVerdict(t *testing.T) {
@@ -102,6 +141,7 @@ func TestWebhookRecordsMerge(t *testing.T) {
 		"pull_request": {
 			"number": 12, "title": "resize web", "html_url": "https://forge/o/r/pulls/12",
 			"merged": true, "merged_at": "` + time.Now().UTC().Format(time.RFC3339) + `",
+			"merge_commit_sha": "c0ffee0000000000000000000000000000000012",
 			"user": {"login": "dotvirt-bot"},
 			"head": {"ref": "dotvirt/proposed/alice/team-a-1a2b3c"},
 			"base": {"ref": "main"}
@@ -122,6 +162,11 @@ func TestWebhookRecordsMerge(t *testing.T) {
 	}
 	if m.RepoURL != "https://forge/o/r" || m.Number != 12 || m.By != "alice" || m.Title != "resize web" || m.Branch != "dotvirt/proposed/alice/team-a-1a2b3c" {
 		t.Fatalf("merge = %+v", m)
+	}
+	// The forge's own merge commit, the one Argo must run, whatever subject
+	// later commits claim the PR with.
+	if m.Commit != "c0ffee0000000000000000000000000000000012" {
+		t.Errorf("merge commit = %q", m.Commit)
 	}
 
 	// Merged with its branch deleted: Forgejo reports the PR's own ref, and

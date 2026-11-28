@@ -54,7 +54,10 @@ type Merge struct {
 	// Head is the PR's head commit: it settles a draft dotvirt pushed there
 	// with no PR (changeset.SettlePushed).
 	Head string
-	At   time.Time
+	// Commit is the commit the forge says merged the PR into the base branch,
+	// whatever its subject reads: the one Argo must run for it to be applied.
+	Commit string
+	At     time.Time
 }
 
 // Feed is the process-wide recent-tasks store. Safe for concurrent use.

@@ -24,7 +24,10 @@ type PR struct {
 	UpdatedAt time.Time `json:"updated_at"`
 	Title     string    `json:"title"`
 	Body      string    `json:"body"`
-	Head      struct {
+	// MergeCommitSha is the commit that put the PR on its base: the merge, the
+	// squash or the last rebased commit. Empty while unmerged.
+	MergeCommitSha string `json:"merge_commit_sha"`
+	Head           struct {
 		// Label is the head branch's name even after the branch is deleted,
 		// when Ref turns into the PR's own refs/pull/<n>/head.
 		Label  string `json:"label"`

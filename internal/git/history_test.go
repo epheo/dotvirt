@@ -299,37 +299,49 @@ func TestCommitDiffSides(t *testing.T) {
 	}
 }
 
-// A file's history is the first-parent commits that changed it: the merge
-// counts once for the PR, a sibling file's commits do not appear, and a file
-// that never existed has none.
-// A revision holds a PR once its merge commit is that revision or an ancestor:
-// the revision before the merge does not, the merge and anything on top do,
-// and a PR or a revision the mirror does not know has no answer.
-func TestHoldsFollowsTheMergeCommit(t *testing.T) {
+// A revision holds a merge once the commit the forge merged it with is that
+// revision or an ancestor, whatever later subjects claim the PR: a follow-up
+// "(#12)" on top moves nothing. A rebase merge's last commit counts the same.
+// A commit off the first-parent line, or one the mirror lacks, has no answer.
+func TestHoldsFollowsTheForgesMergeCommit(t *testing.T) {
 	h := seedMerge(t)
 	before, merge := revParse(t, h.bare, "main~1"), revParse(t, h.bare, "main")
+	prHead := revParse(t, h.bare, "main^2")
 	h.write("tenant-a/db.yaml", "kind: VirtualMachine\nmetadata: {name: db, namespace: tenant-a}\nspec: {}\n")
-	h.run("admin", h.work, "commit", "-qam", "Merge pull request 'Touch db' (#13) from x into main")
+	h.run("carol", h.work, "commit", "-qam", "follow-up on the disk (#12)")
+	h.run("carol", h.work, "push", "-q", "origin", "main")
+	followUp := revParse(t, h.bare, "main")
+	// A rebase merge: the PR's commit lands on main as is, no merge commit.
+	h.run("dave", h.work, "checkout", "-qb", "rebased")
+	h.write("tenant-a/web.yaml", webYAML(16))
+	h.run("dave", h.work, "commit", "-qam", "web to 16 cpu")
+	h.run("admin", h.work, "checkout", "-q", "main")
+	h.run("admin", h.work, "merge", "-q", "--ff-only", "rebased")
 	h.run("admin", h.work, "push", "-q", "origin", "main")
-	after := revParse(t, h.bare, "main")
+	rebased := revParse(t, h.bare, "main")
 	r := openAt(t, h.bare, "")
-	if got := r.MergeOf("main", 12); got != merge {
-		t.Fatalf("merge of #12 = %q, want %q", got, merge)
-	}
+
 	for _, c := range []struct {
-		rev         string
-		holds, know bool
-	}{{before, false, true}, {merge, true, true}, {after, true, true}, {strings.Repeat("f", 40), false, false}} {
-		holds, known := r.Holds("main", 12, c.rev)
-		if holds != c.holds || known != c.know {
-			t.Errorf("Holds(#12, %s) = %v, %v; want %v, %v", c.rev[:8], holds, known, c.holds, c.know)
+		what, commit, rev string
+		holds, known      bool
+	}{
+		{"#12 before its merge", merge, before, false, true},
+		{"#12 at its merge", merge, merge, true, true},
+		{"#12 under a follow-up claiming it", merge, followUp, true, true},
+		{"the follow-up, Argo at #12", followUp, merge, false, true},
+		{"a rebase merge before it", rebased, followUp, false, true},
+		{"a rebase merge at it", rebased, rebased, true, true},
+		{"a PR head off the first-parent line", prHead, rebased, false, false},
+		{"a revision the mirror lacks", merge, strings.Repeat("f", 40), false, false},
+		{"no merge commit recorded", "", rebased, false, false},
+	} {
+		holds, known := r.Holds("main", c.commit, c.rev)
+		if holds != c.holds || known != c.known {
+			t.Errorf("%s: Holds = %v, %v; want %v, %v", c.what, holds, known, c.holds, c.known)
 		}
 	}
-	if _, known := r.Holds("main", 99, after); known {
-		t.Error("a PR never merged has an answer")
-	}
 	// Asked again, the answer comes from the memo, the same.
-	if holds, known := r.Holds("main", 12, before); holds || !known {
+	if holds, known := r.Holds("main", merge, before); holds || !known {
 		t.Errorf("memoized answer = %v, %v", holds, known)
 	}
 }
@@ -365,6 +377,9 @@ func TestFolderHeadMovesWithItsFolderAlone(t *testing.T) {
 	}
 }
 
+// A file's history is the first-parent commits that changed it: the merge
+// counts once for the PR, a sibling file's commits do not appear, and a file
+// that never existed has none.
 func TestFileHistoryFollowsOneFile(t *testing.T) {
 	r, err := Open(seedMerge(t).bare, "", nil)
 	if err != nil {

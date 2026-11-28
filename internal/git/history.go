@@ -14,7 +14,6 @@ import (
 
 	"github.com/epheo/dotvirt/internal/manifest"
 	"github.com/epheo/dotvirt/internal/model"
-	"github.com/epheo/dotvirt/pkg/forge"
 )
 
 // History returns up to limit recent commits on branch, newest first, following
@@ -47,34 +46,13 @@ func (r *Repo) FolderHead(branch string) string {
 	return hash
 }
 
-// MergeOf is the commit on branch's first-parent line that merged pull
-// request pr, by the subject the forge writes; "" when none within
-// historyScan. One walk per head move.
-func (r *Repo) MergeOf(branch string, pr int) string {
-	merges, err := Memoized(r, "pr-merges", branch, func() (map[int]string, error) {
-		out := map[int]string{}
-		_, err := r.walkHistory(branch, historyScan, func(c *object.Commit) (bool, error) {
-			if _, n, ok := forge.MergeSubject(firstLine(c.Message)); ok {
-				if _, seen := out[n]; !seen {
-					out[n] = c.Hash.String()
-				}
-			}
-			return false, nil
-		})
-		return out, err
-	})
-	if err != nil {
-		return ""
-	}
-	return merges[pr]
-}
-
-// Holds reports whether revision, a state branch held, carries the merge of
-// pull request pr: that merge commit is revision or one of its ancestors.
-// known is false while the mirror holds either not yet. Answers are kept until
-// the head moves: ancestry never changes, but the walk runs on every frame.
-func (r *Repo) Holds(branch string, pr int, revision string) (holds, known bool) {
-	merge := r.MergeOf(branch, pr)
+// Holds reports whether revision, a state branch held, carries merge, the
+// commit the forge says merged a pull request: merge is on branch's
+// first-parent line and is revision or one of its ancestors. known is false
+// while the mirror holds either not yet, or merge is not on that line. Answers,
+// unknown ones included, are kept until the head moves: one head fixes them,
+// and the walk would otherwise run on every frame.
+func (r *Repo) Holds(branch, merge, revision string) (holds, known bool) {
 	if merge == "" || revision == "" {
 		return false, false
 	}
@@ -84,14 +62,18 @@ func (r *Repo) Holds(branch string, pr int, revision string) (holds, known bool)
 	}
 	key := merge + " " + revision
 	if v, ok := memo.Load(key); ok {
-		return v.(bool), true
+		a := v.([2]bool)
+		return a[0], a[1]
 	}
-	follows, known, err := r.Descends(branch, revision, merge)
-	if err != nil || !known {
-		return false, false
+	if on, err := r.OnBranch(branch, merge); err == nil && on {
+		var err error
+		if holds, known, err = r.Descends(branch, revision, merge); err != nil {
+			return false, false
+		}
+		holds = holds && known
 	}
-	memo.Store(key, follows)
-	return follows, true
+	memo.Store(key, [2]bool{holds, known})
+	return holds, known
 }
 
 // FileHistory is History narrowed to the commits that changed path: on the base

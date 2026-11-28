@@ -697,14 +697,14 @@ func TestRecentlyMergedKeepsADeletedBranch(t *testing.T) {
 	at := time.Now().UTC().Format(time.RFC3339)
 	f := newProposeFixture(t,
 		when("GET", "/pulls", http.StatusOK, `[{"number":9,"state":"closed","merged":true,"merged_at":"`+at+
-			`","html_url":"http://forge/pulls/9","title":"edit web","user":{"login":"dotvirt-bot"},`+
+			`","merge_commit_sha":"c0ffee09","html_url":"http://forge/pulls/9","title":"edit web","user":{"login":"dotvirt-bot"},`+
 			`"base":{"ref":"main"},"head":{"ref":"refs/pull/9/head","label":"`+head+`"}}]`))
 	ms, err := f.c.RecentlyMerged(f.proj, time.Now().Add(-time.Hour))
 	if err != nil || len(ms) != 1 {
 		t.Fatalf("RecentlyMerged: %v %+v", err, ms)
 	}
-	if ms[0].Branch != head || ms[0].By != "alice" {
-		t.Fatalf("merge = %+v, want branch %s by alice", ms[0], head)
+	if ms[0].Branch != head || ms[0].By != "alice" || ms[0].Commit != "c0ffee09" {
+		t.Fatalf("merge = %+v, want branch %s by alice, merged with c0ffee09", ms[0], head)
 	}
 }
 

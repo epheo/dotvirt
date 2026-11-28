@@ -46,6 +46,7 @@ func (r *Reader) RecentlyMerged(proj project.ProjectInfo, since time.Time) ([]ta
 			By:      tasks.MergeAuthor(pr.HeadBranch(), r.proposed, pr.User.Login),
 			Branch:  pr.HeadBranch(),
 			Head:    pr.Head.Sha,
+			Commit:  pr.MergeCommitSha,
 			At:      pr.MergedAt,
 		})
 	}

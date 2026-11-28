@@ -80,6 +80,7 @@ func (s *Server) handleForgeWebhook(w http.ResponseWriter, r *http.Request) {
 				By:      tasks.MergeAuthor(pr.HeadBranch(), s.cfg.ProposedBranch, pr.User.Login),
 				Branch:  pr.HeadBranch(),
 				Head:    pr.Head.Sha,
+				Commit:  pr.MergeCommitSha,
 				At:      pr.MergedAt,
 			})
 		}

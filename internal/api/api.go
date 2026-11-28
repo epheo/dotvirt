@@ -270,6 +270,7 @@ type Server struct {
 	storage       *ttlcache.Cache[[]cluster.SheetClass]
 	metrics       *metrics.Client // Prometheus/Thanos for the Performance tab; nil disables it
 	tasks         *tasks.Feed     // recent-activity feed (ops + merged PRs); nil disables it
+	applied       appliedMemory   // each merge's last known applied answer (mergeApplied)
 	forge         *forge.Factory  // forge links; nil-safe
 	reader        Reader
 	draft         Draft
