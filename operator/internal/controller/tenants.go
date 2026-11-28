@@ -17,6 +17,7 @@ import (
 
 	dotvirtv1alpha1 "github.com/epheo/dotvirt/operator/api/v1alpha1"
 	"github.com/epheo/dotvirt/operator/internal/install"
+	"github.com/epheo/dotvirt/pkg/adminobjects"
 	"github.com/epheo/dotvirt/pkg/forge"
 	"github.com/epheo/dotvirt/pkg/tenancy"
 )
@@ -284,8 +285,35 @@ func (r *DotvirtReconciler) tenantKinds(ctx context.Context, dv *dotvirtv1alpha1
 		}
 		held = list.Items
 	}
-	rc.tenantAllowed = install.TenantAllowed(dv, r.impersonatingOnce(ctx, dv, rc, held))
+	impersonating := r.impersonatingOnce(ctx, dv, rc, held)
+	rc.tenantAllowed = install.TenantAllowed(dv, impersonating, impersonating && impersonatedWaits(dv, rc) == "")
 	return rc.tenantAllowed
+}
+
+// impersonatedWaits is what keeps the impersonated kinds out of the tenant
+// AppProjects beside impersonating, "" for nothing: the cluster serving them,
+// an earlier pass seeing impersonation in effect (Enabled, Degraded or
+// NotEnforced), so Argo read argocd-cm before they are offered, and the
+// installed guard refusing every Argo controller's own writes of them, the
+// one closure for a fallback to the controller's account: an AppProject or
+// argocd-cm edited by hand, a controller older than its CRDs.
+func impersonatedWaits(dv *dotvirtv1alpha1.Dotvirt, rc *reconcileCtx) string {
+	switch {
+	case !rc.desktopsServed:
+		return "the cluster serves DeskuBe"
+	case !rc.argoGuarded:
+		return "the operator guard's " + adminobjects.GuardArgoName + " policy is installed, which keeps Argo CD's controllers from writing them: " + guardNextAction
+	case !seenInEffect(dv, "Enabled", "Degraded", "NotEnforced"):
+		return "sync impersonation is in effect"
+	}
+	return ""
+}
+
+// seenInEffect reports whether an earlier pass recorded SyncImpersonationReady
+// with one of reasons.
+func seenInEffect(dv *dotvirtv1alpha1.Dotvirt, reasons ...string) bool {
+	seen := meta.FindStatusCondition(dv.Status.Conditions, dotvirtv1alpha1.ConditionSyncImpersonationReady)
+	return seen != nil && slices.Contains(reasons, seen.Reason)
 }
 
 // impersonatingOnce is impersonating, asked once per pass.
@@ -308,8 +336,7 @@ func (r *DotvirtReconciler) controllerApplies(ctx context.Context, dv *dotvirtv1
 	if !dv.Spec.ArgoCD.SyncImpersonation.On() {
 		return true
 	}
-	seen := meta.FindStatusCondition(dv.Status.Conditions, dotvirtv1alpha1.ConditionSyncImpersonationReady)
-	if seen == nil || (seen.Reason != "Enabled" && seen.Reason != "Degraded") {
+	if !seenInEffect(dv, "Enabled", "Degraded") {
 		return true
 	}
 	return !r.impersonatingOnce(ctx, dv, rc, held)

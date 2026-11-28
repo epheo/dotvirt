@@ -286,8 +286,9 @@ func tenantDeclarable(rule KindRule, proj project.ProjectInfo, group, kind, name
 		return nil
 	}
 	if tenancy.Impersonated(group, kind) {
-		return fmt.Errorf("%w: %s %s syncs only as project %s's own account, and Argo CD does not sync this install's tenant repos as their own accounts yet: "+
-			"a cluster admin turns sync impersonation on (spec.argocd.syncImpersonation in the Dotvirt resource), then declare it",
+		return fmt.Errorf("%w: %s %s syncs only as project %s's own account, which this install's Argo CD does not offer yet. "+
+			"A cluster admin turns sync impersonation on (spec.argocd.syncImpersonation in the Dotvirt resource) and reinstalls the operator guard, "+
+			"whose dotvirt-argo-desktops policy keeps Argo CD's controllers from writing it, from the console's Install action or the release's install/guard.yaml; then declare it",
 			model.ErrInvalid, kind, name, proj.Name)
 	}
 	if rule.Policy.Extra() {

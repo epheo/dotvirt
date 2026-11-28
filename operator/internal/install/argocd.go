@@ -181,7 +181,7 @@ func NamedTenantKinds(dv *dotvirtv1alpha1.Dotvirt) (allowed, refused []tenancy.G
 }
 
 // TenantAllowed is what a project's repo may apply beyond the listed kinds,
-// nil while it keeps them: the kinds a provider allowed, and
+// nil while it keeps them: the kinds a provider allowed, and with impersonated
 // tenancy.ImpersonatedKinds. Both need sync impersonation asked for and
 // impersonating: the instance syncing dotvirt's Applications as their
 // projects' own accounts, so the project's sync account, never the
@@ -189,12 +189,17 @@ func NamedTenantKinds(dv *dotvirtv1alpha1.Dotvirt) (allowed, refused []tenancy.G
 // being in effect, not on SyncImpersonationReady: one project's missing grant
 // degrades that condition, and must fail that project's sync, not flip every
 // project back to the listed kinds. Asking for impersonation off flips back
-// in the pass that removes the setting, before it does.
-func TenantAllowed(dv *dotvirtv1alpha1.Dotvirt, impersonating bool) []tenancy.GroupKind {
+// in the pass that removes the setting, before it does. impersonated is the
+// caller's stricter answer for the impersonated kinds, which a fallback to
+// the controller must never apply.
+func TenantAllowed(dv *dotvirtv1alpha1.Dotvirt, impersonating, impersonated bool) []tenancy.GroupKind {
 	if !dv.Spec.ArgoCD.SyncImpersonation.On() || !impersonating {
 		return nil
 	}
 	allowed, _ := NamedTenantKinds(dv)
+	if !impersonated {
+		return allowed
+	}
 	for _, k := range tenancy.ImpersonatedKinds {
 		if g := (tenancy.GroupKind{Group: k.Group, Kind: k.Kind}); !slices.Contains(allowed, g) {
 			allowed = append(allowed, g)

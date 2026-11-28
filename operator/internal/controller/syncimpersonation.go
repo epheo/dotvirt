@@ -134,7 +134,7 @@ func (r *DotvirtReconciler) syncImpersonation(ctx context.Context, dv *dotvirtv1
 	if err != nil {
 		return failed(err)
 	}
-	unchecked := uncheckedNote(v.unresolved) + refusedNote(v.refused)
+	unchecked := uncheckedNote(v.unresolved) + refusedNote(v.refused, impersonatedWaits(dv, rc))
 	if inConfig {
 		problems := slices.Concat(v.missing, v.leaks, foreignProblem(v.foreign))
 		if fallback && rc.sync.sharedInUse {
@@ -192,14 +192,17 @@ func cloneWarning(rc *reconcileCtx) string {
 }
 
 // refusedNote says what the tenant AppProjects refuse until they whitelist
-// the impersonated kinds, never a reason to hold the setting back: before it
-// they sync as no project's account, and after it each project's own grants
-// decide.
-func refusedNote(refused []string) string {
+// the impersonated kinds, and what they wait on (impersonatedWaits), never a
+// reason to hold the setting back: before it they sync as no project's
+// account, and after it each project's own grants decide.
+func refusedNote(refused []string, waits string) string {
 	if len(refused) == 0 {
 		return ""
 	}
-	return fmt.Sprintf("; Argo CD refuses %s: tenant repos apply those kinds only as their projects' own accounts, once sync impersonation is in effect", listSome(refused))
+	if waits == "" {
+		waits = "sync impersonation is in effect"
+	}
+	return fmt.Sprintf("; Argo CD refuses %s: tenant repos apply those kinds only as their projects' own accounts, once %s", listSome(refused), waits)
 }
 
 func uncheckedNote(unresolved []string) string {

@@ -45,6 +45,9 @@ type Result struct {
 	// or failing discovery: OpenShift's own OAuth server runs, which MicroShift
 	// and an OpenShift signing in through an external OIDC issuer lack.
 	OpenShiftOAuth bool
+	// Desktops says the cluster serves DeskuBe's pools: tenant repos may then
+	// declare them, once Argo applies them as each project's own account.
+	Desktops bool
 }
 
 // Probe reports which dependencies' CRDs the cluster currently serves. A partial
@@ -77,7 +80,7 @@ func classify(lists []*metav1.APIResourceList, err error) Result {
 		}
 	}
 
-	res := Result{OpenShiftOAuth: served["oauth.openshift.io/oauthclients"] || failed(err, "oauth.openshift.io")}
+	res := Result{OpenShiftOAuth: served["oauth.openshift.io/oauthclients"] || failed(err, "oauth.openshift.io"), Desktops: served["vdi.desku.be/vdipools"]}
 	for _, d := range Required {
 		ok := served[d.Group+"/"+d.Resource]
 		switch {

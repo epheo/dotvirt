@@ -93,12 +93,19 @@ It stages one RoleBinding in the platform repo, beside the namespace's admin gra
 
 `dotvirt-tenant-desktops` holds the rules of DeskuBe's pool editor and claim user roles: pool writes, `use` on pools, and the claim verbs.
 DeskuBe's admission asks these of whoever sets a pool's subjects, the sync account included.
-Delete on pools lets a project admin start, stop and release anyone's desktop of them.
+Delete on pools lets a project admin start, stop and release anyone's desktop of them with `oc`.
+The console does so once it reads desktops, which comes with DeskuBe's VdiPairing.
 dotvirt ships the role, so no binding depends on the name prefix a DeskuBe install chooses.
 It grants no `*`, no `seat`, no `assign`, and nothing on desktops.
 
-A project repo declares desktop pools only while sync impersonation is in effect: the shared Argo controller may hold rights over pools no project does.
-Until then dotvirt refuses to stage one, and Argo CD refuses one a repo declares.
+A project repo declares desktop pools only once Argo CD applies them as the project's own account for sure:
+- the cluster serves DeskuBe;
+- sync impersonation is in effect, as an earlier operator pass saw;
+- the installed operator guard holds `dotvirt-argo-desktops`, which refuses every Argo CD controller's own writes of pools, desktops and claims.
+
+The guard closes what impersonation alone leaves open: an AppProject or `argocd-cm` edited by hand, or a controller older than its CRDs, falls back to the controller's account, which on community Argo CD holds `seat`.
+A cluster admin installs it from the console's Install action, or from the release's `install/guard.yaml`.
+Until all three hold, dotvirt refuses to stage a pool, and Argo CD refuses one a repo declares.
 No repo declares desktops, claims or pairings: a desktop carries its pending pairing PIN.
 
 DeskuBe aggregates its pool and claim viewer roles into `view`, so every project persona reads pools and claims.

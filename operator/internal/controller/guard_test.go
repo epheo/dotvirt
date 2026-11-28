@@ -56,7 +56,8 @@ func guardPassOn(t *testing.T, operator string, dv *dotvirtv1alpha1.Dotvirt, obj
 		},
 	}).Build()
 	r := &DotvirtReconciler{Client: c, Scheme: c.Scheme(), OperatorUsername: operator}
-	if res, err := r.reconcileOperatorGuard(t.Context(), dv, guardRC); res != nil || err != nil {
+	rc := *guardRC
+	if res, err := r.reconcileOperatorGuard(t.Context(), dv, &rc); res != nil || err != nil {
 		t.Fatalf("the guard phase never halts: %v %v", res, err)
 	}
 	cond := meta.FindStatusCondition(dv.Status.Conditions, dotvirtv1alpha1.ConditionOperatorGuard)
@@ -89,6 +90,37 @@ func TestOperatorGuardStaysInstalledAcrossReleases(t *testing.T) {
 	t.Setenv("RELATED_IMAGE_FORGEJO", adminobjects.Repositories[1]+":12-rootless@sha256:"+strings.Repeat("b", 64))
 	if cond, _ := guardPass(t, guardOperator, nil, live(adminobjects.Render(previous))...); cond.Reason != string(adminobjects.Installed) {
 		t.Errorf("after an upgrade: %s %s", cond.Reason, cond.Message)
+	}
+}
+
+// The pass records whether the guard's Argo policy and its binding are in
+// place as rendered, whatever the rest of the guard is: desktop pools wait on
+// them alone.
+func TestArgoGuardedFollowsItsPolicy(t *testing.T) {
+	rendered := adminobjects.Render(guardHere)
+	argo := slices.DeleteFunc(slices.Clone(rendered), func(o adminobjects.Object) bool { return o.Object.GetName() != adminobjects.GuardArgoName })
+	elsewhere := guardHere
+	elsewhere.ArgoController = "other-argocd-application-controller"
+	for name, c := range map[string]struct {
+		objs []client.Object
+		want bool
+	}{
+		"none":                           {nil, false},
+		"the Argo policy alone":          {live(argo), true},
+		"the whole guard":                {live(rendered), true},
+		"for another controller":         {live(adminobjects.Render(elsewhere)), false},
+		"the binding without its policy": {live(argo[1:]), false},
+	} {
+		cl := fake.NewClientBuilder().WithScheme(testScheme(t)).WithObjects(c.objs...).Build()
+		r := &DotvirtReconciler{Client: cl, Scheme: cl.Scheme(), OperatorUsername: guardOperator}
+		rc := *guardRC
+		dv := &dotvirtv1alpha1.Dotvirt{ObjectMeta: metav1.ObjectMeta{Name: "x", Namespace: "dotvirt"}}
+		if _, err := r.reconcileOperatorGuard(t.Context(), dv, &rc); err != nil {
+			t.Fatal(err)
+		}
+		if rc.argoGuarded != c.want {
+			t.Errorf("%s: argoGuarded = %v, want %v", name, rc.argoGuarded, c.want)
+		}
 	}
 }
 

@@ -160,7 +160,8 @@ func TestReleaseRevokesDesktopWrites(t *testing.T) {
 func TestDesktopPoolsWaitOnImpersonation(t *testing.T) {
 	proj := project.ProjectInfo{Name: "shop"}
 	err := tenantDeclarable(KindRule{}, proj, "vdi.desku.be", "VdiPool", "design")
-	if !errors.Is(err, model.ErrInvalid) || !strings.Contains(err.Error(), "spec.argocd.syncImpersonation") {
+	if !errors.Is(err, model.ErrInvalid) || !strings.Contains(err.Error(), "spec.argocd.syncImpersonation") ||
+		!strings.Contains(err.Error(), "A cluster admin") || !strings.Contains(err.Error(), "reinstalls the operator guard") || !strings.Contains(err.Error(), "install/guard.yaml") {
 		t.Errorf("not impersonating: %v", err)
 	}
 	on := KindRule{Policy: tenancy.Policy{Allowed: []tenancy.GroupKind{{Group: "vdi.desku.be", Kind: "VdiPool"}}}}

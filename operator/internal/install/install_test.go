@@ -621,7 +621,7 @@ func TestAppProjectsAdmitDesktops(t *testing.T) {
 			return m["group"] == "vdi.desku.be" && m["kind"] == kind
 		})
 	}
-	tenant := TenantAppProject(dv, "argocd", "dotvirt-p-a", "a", []string{"a"}, nil, TenantAllowed(dv, true))
+	tenant := TenantAppProject(dv, "argocd", "dotvirt-p-a", "a", []string{"a"}, nil, TenantAllowed(dv, true, true))
 	if !admits(tenant, "namespaceResourceWhitelist", "VdiPool") {
 		t.Error("impersonating: a tenant AppProject refuses pools")
 	}
@@ -636,8 +636,9 @@ func TestAppProjectsAdmitDesktops(t *testing.T) {
 	asked := testDotvirt()
 	asked.Spec.ArgoCD.SyncImpersonation.Enabled = &off
 	for name, allowed := range map[string][]tenancy.GroupKind{
-		"not impersonating yet": TenantAllowed(dv, false),
-		"asked off":             TenantAllowed(asked, true),
+		"not impersonating yet":             TenantAllowed(dv, false, true),
+		"asked off":                         TenantAllowed(asked, true, true),
+		"impersonating, pools not admitted": TenantAllowed(dv, true, false),
 	} {
 		if admits(TenantAppProject(dv, "argocd", "dotvirt-p-a", "a", []string{"a"}, nil, allowed), "namespaceResourceWhitelist", "VdiPool") {
 			t.Errorf("%s: a tenant AppProject admits pools", name)
@@ -759,7 +760,7 @@ func TestTenantKindsAllowedNeedImpersonation(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) {
 			dv := testDotvirt()
 			c.set(dv)
-			ap := TenantAppProject(dv, "argocd", "dotvirt-p-a", "a", []string{"a"}, nil, TenantAllowed(dv, c.impersonating))
+			ap := TenantAppProject(dv, "argocd", "dotvirt-p-a", "a", []string{"a"}, nil, TenantAllowed(dv, c.impersonating, false))
 			if got := whitelisted(ap, "apps", "Deployment"); got != c.allowed {
 				t.Errorf("Deployment whitelisted = %v, want %v", got, c.allowed)
 			}
@@ -794,7 +795,10 @@ func TestDeploymentCarriesTheTenantKinds(t *testing.T) {
 		t.Errorf("listed: %q", v)
 	}
 	dv.Spec.ArgoCD.TenantKindsAllowed = []dotvirtv1alpha1.GroupKind{{Group: "apps", Kind: "Deployment"}, {Kind: "Service"}, {Group: "rbac.authorization.k8s.io", Kind: "Role"}}
-	if v, _ := env(TenantAllowed(dv, true)); v != "apps/Deployment,/Service,vdi.desku.be/VdiPool" {
+	if v, _ := env(TenantAllowed(dv, true, false)); v != "apps/Deployment,/Service" {
+		t.Errorf("allowed: %q", v)
+	}
+	if v, _ := env(TenantAllowed(dv, true, true)); v != "apps/Deployment,/Service,vdi.desku.be/VdiPool" {
 		t.Errorf("allowed: %q", v)
 	}
 }
