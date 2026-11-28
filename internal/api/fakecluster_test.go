@@ -508,7 +508,8 @@ type planeDraft struct {
 	releaseStaged, releaseResidue []string
 
 	declared map[model.ObjectRef]string // what DeclaredFiles answers
-	kinds    []schema.GroupKind         // what DeclaredKinds answers
+	kinds    []schema.GroupKind         // what DeclaredKinds answers, each unplaced
+	placed   []changeset.DeclaredKind   // and these, where they say
 	staged   bool                       // a call staged something: Get shows a draft
 }
 
@@ -695,8 +696,12 @@ func (d *planeDraft) ProposedBranch(id auth.Identity, _ project.ProjectInfo) str
 	return id.Username
 }
 
-func (d *planeDraft) DeclaredKinds(project.ProjectInfo) ([]schema.GroupKind, error) {
-	return d.kinds, nil
+func (d *planeDraft) DeclaredKinds(project.ProjectInfo) ([]changeset.DeclaredKind, error) {
+	out := slices.Clone(d.placed)
+	for _, k := range d.kinds {
+		out = append(out, changeset.DeclaredKind{GroupKind: k, Unplaced: true})
+	}
+	return out, nil
 }
 
 // The Needs answer nothing: a test of what the gate asks runs a real

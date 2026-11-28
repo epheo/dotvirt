@@ -15,6 +15,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime/schema"
 
 	"github.com/epheo/dotvirt/internal/auth"
+	"github.com/epheo/dotvirt/internal/changeset"
 	"github.com/epheo/dotvirt/internal/eventbus"
 	"github.com/epheo/dotvirt/internal/model"
 	"github.com/epheo/dotvirt/internal/project"
@@ -97,6 +98,38 @@ func TestRepoReadsFollowTheNamespacesSeen(t *testing.T) {
 	wantStatus(t, do(s, tenantToken, http.MethodGet, historyPath+"/"+someCommit, ""), http.StatusForbidden)
 	wantStatus(t, do(s, tenantToken, http.MethodGet, historyPath+"?namespace=team-a-prod", ""), http.StatusNotFound)
 	wantStatus(t, do(s, tenantToken, http.MethodGet, historyPath+"?namespace=orphans-ns", ""), http.StatusNotFound)
+}
+
+// A kind is asked only where the repo declares it: a reader of one namespace
+// is never refused for what another holds. A document Argo places, or one
+// naming a namespace outside the project, asks its kind everywhere.
+func TestRepoReadsAskEachKindWhereDeclared(t *testing.T) {
+	fc := newFakeCluster(t)
+	fc.namespaces = append(fc.namespaces, corev1.Namespace{ObjectMeta: metav1.ObjectMeta{
+		Name: "team-a-prod", Labels: fc.namespaces[0].Labels, Annotations: fc.namespaces[0].Annotations,
+	}})
+	fc.readsVMs = func(token, ns string) bool { return token == tenantToken && (ns == "team-a-dev" || ns == "team-a-prod") }
+	fc.ssar = func(token string, a *authzv1.ResourceAttributes) bool {
+		return token == tenantToken && a.Verb == verbList && a.Resource == "datavolumes" && a.Namespace == "team-a-dev"
+	}
+	fc.serveKinds(model.KindNetpol, model.KindDV)
+	d := &planeDraft{placed: []changeset.DeclaredKind{
+		{GroupKind: declaresNP, Namespaces: []string{"team-a-prod"}},
+		{GroupKind: declaresDV, Namespaces: []string{"team-a-dev"}},
+	}}
+	s := fc.server(gitReads{d}, Config{BaseBranch: "main"})
+	for _, path := range []string{historyPath, historyPath + "?namespace=team-a-prod", historyPath + "?namespace=team-a-dev"} {
+		if rec := do(s, tenantToken, http.MethodGet, path, ""); rec.Code == http.StatusForbidden {
+			t.Errorf("%s: refused for a kind declared elsewhere: %s", path, rec.Body.String())
+		}
+	}
+	for _, dv := range []changeset.DeclaredKind{
+		{GroupKind: declaresDV, Namespaces: []string{"team-a-dev"}, Unplaced: true},
+		{GroupKind: declaresDV, Namespaces: []string{"team-a-dev", "elsewhere"}},
+	} {
+		d.placed[1] = dv
+		wantStatus(t, do(s, tenantToken, http.MethodGet, historyPath+"?namespace=team-a-prod", ""), http.StatusForbidden)
+	}
 }
 
 // A declared object's spec is that kind's to read, namespace visible or not.

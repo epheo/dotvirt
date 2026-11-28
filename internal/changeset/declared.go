@@ -99,7 +99,16 @@ type declaredIndex struct {
 	// Files keeps the last of them.
 	Repeated map[model.ObjectRef][]string
 	// Kinds is every kind a document declares, named or not, in sorted order.
-	Kinds []schema.GroupKind
+	Kinds []DeclaredKind
+}
+
+// DeclaredKind is one kind a branch declares, and where: the namespaces its
+// objects name, in order, and Unplaced when one of its documents names no
+// namespace, is cluster-scoped, or is one the index cannot name.
+type DeclaredKind struct {
+	schema.GroupKind
+	Namespaces []string
+	Unplaced   bool
 }
 
 // Placement is where a branch's objects are declared, each list in tree order:
@@ -170,17 +179,32 @@ func indexDeclared(read *git.Repo, branch string) (declaredIndex, error) {
 	return git.Memoized(read, "declared", branch, func() (declaredIndex, error) {
 		idx := declaredIndex{Files: map[model.ObjectRef]string{}, Opaque: map[string]bool{}, Repeated: map[model.ObjectRef][]string{}}
 		named := map[string][]model.ObjectRef{}
-		kinds := map[schema.GroupKind]bool{}
+		kinds := map[schema.GroupKind]*DeclaredKind{}
 		err := read.WalkYAML(branch,
 			func(path string) bool { return !git.InTemplatesDir(path) },
 			func(path string, content []byte) error {
 				if git.ArgoSourceOverride(path) {
 					idx.Placement.SourceOverrides = append(idx.Placement.SourceOverrides, path)
 				}
-				for _, k := range manifest.Kinds(content) {
-					kinds[k] = true
-				}
 				objs, implied, docs := declared(path, content)
+				for _, k := range manifest.Kinds(content) {
+					if kinds[k] == nil {
+						kinds[k] = &DeclaredKind{GroupKind: k}
+					}
+					// A document the index cannot name is placed nowhere it knows.
+					if docs != len(objs) {
+						kinds[k].Unplaced = true
+					}
+				}
+				for _, o := range objs {
+					if k := kinds[schema.GroupKind{Group: o.Group, Kind: o.Kind}]; k != nil {
+						if o.Namespace == "" || slices.Contains(implied, o.ObjectRef) {
+							k.Unplaced = true
+						} else if !slices.Contains(k.Namespaces, o.Namespace) {
+							k.Namespaces = append(k.Namespaces, o.Namespace)
+						}
+					}
+				}
 				for _, o := range objs {
 					ref := o.ObjectRef
 					if prev, ok := idx.Files[ref]; ok && prev != path {
@@ -206,9 +230,13 @@ func indexDeclared(read *git.Repo, branch string) (declaredIndex, error) {
 		}
 		idx.Placement.Named = named
 		idx.Placement.Namespaces = slices.Sorted(maps.Keys(named))
-		idx.Kinds = slices.SortedFunc(maps.Keys(kinds), func(a, b schema.GroupKind) int {
+		for _, gk := range slices.SortedFunc(maps.Keys(kinds), func(a, b schema.GroupKind) int {
 			return cmp.Or(strings.Compare(a.Group, b.Group), strings.Compare(a.Kind, b.Kind))
-		})
+		}) {
+			k := kinds[gk]
+			slices.Sort(k.Namespaces)
+			idx.Kinds = append(idx.Kinds, *k)
+		}
 		return idx, nil
 	})
 }

@@ -23,7 +23,6 @@ import (
 	"time"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
-	"k8s.io/apimachinery/pkg/runtime/schema"
 
 	"github.com/epheo/dotvirt/internal/argo"
 	"github.com/epheo/dotvirt/internal/auth"
@@ -84,8 +83,8 @@ type Reader interface {
 	Templates(proj project.ProjectInfo) []model.Template
 	// DeclaredFiles maps every object proj's base branch declares to its file.
 	DeclaredFiles(proj project.ProjectInfo) (map[model.ObjectRef]string, error)
-	// DeclaredKinds lists every kind proj's base branch declares.
-	DeclaredKinds(proj project.ProjectInfo) ([]schema.GroupKind, error)
+	// DeclaredKinds lists every kind proj's base branch declares, and where.
+	DeclaredKinds(proj project.ProjectInfo) ([]changeset.DeclaredKind, error)
 	// ObjectSpec reads a declared object back as the spec its create form accepts.
 	ObjectSpec(proj project.ProjectInfo, resource, namespace, name string) (model.ObjectSpec, error)
 	DRSState(proj project.ProjectInfo) (model.DRSGitState, error)

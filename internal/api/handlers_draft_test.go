@@ -13,10 +13,10 @@ import (
 	authzv1 "k8s.io/api/authorization/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/client-go/kubernetes/fake"
 
 	"github.com/epheo/dotvirt/internal/auth"
+	"github.com/epheo/dotvirt/internal/changeset"
 	"github.com/epheo/dotvirt/internal/cluster"
 	"github.com/epheo/dotvirt/internal/clusterstate"
 	"github.com/epheo/dotvirt/internal/eventbus"
@@ -57,7 +57,7 @@ func (d *stagingDraft) Get(id auth.Identity, proj project.ProjectInfo) (model.Dr
 
 func (d *stagingDraft) Holds(auth.Identity, project.ProjectInfo) (bool, error) { return false, nil }
 
-func (d *stagingDraft) DeclaredKinds(project.ProjectInfo) ([]schema.GroupKind, error) {
+func (d *stagingDraft) DeclaredKinds(project.ProjectInfo) ([]changeset.DeclaredKind, error) {
 	return nil, nil
 }
 

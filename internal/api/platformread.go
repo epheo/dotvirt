@@ -58,24 +58,35 @@ func (s *Server) platformListing(ctx context.Context) (action, error) {
 }
 
 // repoListing is listing every kind proj's repo declares in each of
-// namespaces, "" being cluster-wide.
+// namespaces, "" being cluster-wide. A kind is asked in a namespace only where
+// the repo declares it, so a kind one namespace holds never locks the others'
+// readers out; anywhere when the repo leaves one of its documents to Argo's
+// placement, or names a namespace outside proj.
 func (s *Server) repoListing(ctx context.Context, proj project.ProjectInfo, namespaces []string) (action, error) {
 	kinds, err := s.reader.DeclaredKinds(proj)
 	if err != nil || len(kinds) == 0 {
 		return nil, err
 	}
-	x, err := s.servedKinds(ctx, kinds)
+	gks := make([]schema.GroupKind, len(kinds))
+	for i, k := range kinds {
+		gks[i] = k.GroupKind
+	}
+	x, err := s.servedKinds(ctx, gks)
 	if err != nil {
 		return nil, err
 	}
 	var act action
 	for _, k := range kinds {
-		ref, served, err := x.ref(k)
+		ref, served, err := x.ref(k.GroupKind)
 		if err != nil {
 			return nil, err
 		}
-		if served {
-			for _, ns := range namespaces {
+		if !served {
+			continue
+		}
+		anywhere := k.Unplaced || slices.ContainsFunc(k.Namespaces, func(ns string) bool { return !slices.Contains(proj.Namespaces, ns) })
+		for _, ns := range namespaces {
+			if ns == "" || anywhere || slices.Contains(k.Namespaces, ns) {
 				act = append(act, refQ(verbList, ref, ns))
 			}
 		}
